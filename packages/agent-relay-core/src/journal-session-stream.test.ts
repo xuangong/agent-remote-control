@@ -9,6 +9,8 @@ import { BROKER_MAX_FRAME_BYTES } from './transport.js';
 import { sequentialEpochs } from '@orchardworks/agent-remote-journal/testing';
 
 type Wire = Record<string, any>;
+/** The stream answers within a few microtask turns, so the check repeats every millisecond instead of vitest's 50 ms. */
+const settle = (check: () => void) => vi.waitFor(check, { interval: 1 });
 const DIGEST = 'a'.repeat(64);
 const OPERATION = '00000000-0000-4000-8000-000000000001';
 const row = (itemKey: string, text: string) => ({
@@ -122,16 +124,16 @@ function fixture(options: FixtureOptions = {}) {
       journal.setHead(at(), { snapshot: snapshot(status), observedAt: 6 });
       return published([{ kind: 'head', head: journal.head! }]);
     },
-    async negotiated(raw = negotiate) { this.stream.receive(raw); await vi.waitFor(() => expect(this.sent.length).toBeGreaterThanOrEqual(2)); },
+    async negotiated(raw = negotiate) { this.stream.receive(raw); await settle(() => expect(this.sent.length).toBeGreaterThanOrEqual(2)); },
     /** The control state the Relay last sent. */
     control: () => sent.filter(frame => frame.type === 'session_control').at(-1)!.payload as Wire,
     /** The Controller accepts the stream the Relay opened. */
-    async accepted() { await vi.waitFor(() => expect(hostWrites.length).toBeGreaterThanOrEqual(1)); sink!.ready(); },
+    async accepted() { await settle(() => expect(hostWrites.length).toBeGreaterThanOrEqual(1)); sink!.ready(); },
     /** Negotiates and acquires control; the token that grants it. */
     async controlled(): Promise<string> {
       await this.negotiated();
       this.stream.receive(acquireRequest(this.control().revision));
-      await vi.waitFor(() => expect(this.control().token).toBeDefined());
+      await settle(() => expect(this.control().token).toBeDefined());
       return this.control().token;
     },
   };
@@ -141,7 +143,7 @@ describe('a journal-served session stream', () => {
   it('answers negotiation and control from the Relay, and opens no Controller stream until something is sent', async () => {
     const f = fixture();
     f.stream.receive(negotiate);
-    await vi.waitFor(() => expect(f.types()).toEqual(['negotiated', 'agent_snapshot', 'session_control']));
+    await settle(() => expect(f.types()).toEqual(['negotiated', 'agent_snapshot', 'session_control']));
     expect(f.sent[0]).toMatchObject({ sessionControl: true });
     expect(f.sent[1]!.payload).toMatchObject({ id: 'agent', status: 'idle' });
     expect(f.sent[1]!.payload.runtimeInfo.connection).toBeUndefined();
@@ -161,7 +163,7 @@ describe('a journal-served session stream', () => {
     expect(f.calls.hostOpens).toBe(0);
     const headless = fixture({ head: false });
     headless.stream.receive(negotiate);
-    await vi.waitFor(() => expect(headless.closed).toEqual([[1012, 'Session journal unavailable']]));
+    await settle(() => expect(headless.closed).toEqual([[1012, 'Session journal unavailable']]));
     expect(headless.sent).toEqual([]);
   });
 
@@ -203,7 +205,7 @@ describe('a journal-served session stream', () => {
     const f = fixture();
     await f.negotiated();
     f.stream.receive(pageRequest('tail'));
-    await vi.waitFor(() => expect(f.sent.at(-1)?.type).toBe('timeline_page'));
+    await settle(() => expect(f.sent.at(-1)?.type).toBe('timeline_page'));
     const { payload } = f.sent.at(-1)!;
     expect(payload).toMatchObject({ agentId: 'agent', epoch: f.journal.epoch, direction: 'tail', hasOlder: true, hasNewer: false, window: { minSeq: 1, maxSeq: 2, nextSeq: 3 } });
     expect(payload.entries.map((entry: Wire) => entry.item.text)).toEqual(['Hello', 'World']);
@@ -214,7 +216,7 @@ describe('a journal-served session stream', () => {
     const f = fixture({ evictBodies: true });
     await f.negotiated();
     f.stream.receive(pageRequest('tail'));
-    await vi.waitFor(() => expect(f.sent.at(-1)?.type).toBe('timeline_page'));
+    await settle(() => expect(f.sent.at(-1)?.type).toBe('timeline_page'));
     expect(f.calls.fill).toEqual([['m1', 'm2']]);
     expect(f.sent.at(-1)!.payload.entries.map((entry: Wire) => entry.item.text)).toEqual(['Hello', 'World']);
   });
@@ -223,7 +225,7 @@ describe('a journal-served session stream', () => {
     const f = fixture();
     await f.negotiated();
     f.stream.receive(pageRequest('before', { epoch: f.journal.epoch, seq: 1 }));
-    await vi.waitFor(() => expect(f.sent.at(-1)?.type).toBe('timeline_page'));
+    await settle(() => expect(f.sent.at(-1)?.type).toBe('timeline_page'));
     expect(f.calls.older).toEqual([100]);
     expect(f.sent.at(-1)!.payload).toMatchObject({ direction: 'before', hasOlder: false });
     expect(f.sent.at(-1)!.payload.entries.map((entry: Wire) => entry.item.text)).toEqual(['Before']);
@@ -233,7 +235,7 @@ describe('a journal-served session stream', () => {
     const f = fixture({ olderFails: true });
     await f.negotiated();
     f.stream.receive(pageRequest('before', { epoch: f.journal.epoch, seq: 1 }));
-    await vi.waitFor(() => expect(f.sent.at(-1)?.type).toBe('timeline_page'));
+    await settle(() => expect(f.sent.at(-1)?.type).toBe('timeline_page'));
     expect(f.sent.at(-1)!.payload).toMatchObject({ entries: [], hasOlder: true });
   });
 
@@ -242,7 +244,7 @@ describe('a journal-served session stream', () => {
     const token = await f.controlled();
     f.stream.receive(sendMessage(token));
     await f.accepted();
-    await vi.waitFor(() => expect(f.hostWrites).toHaveLength(2));
+    await settle(() => expect(f.hostWrites).toHaveLength(2));
     const fromController = (fields: Wire) => f.sink().frame(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, ...fields }));
     const before = f.sent.length;
     fromController({ type: 'negotiated', sessionControl: true });
@@ -271,7 +273,7 @@ describe('a journal-served session stream', () => {
     const token = await f.controlled();
     f.stream.receive(sendMessage(token));
     await f.accepted();
-    await vi.waitFor(() => expect(f.hostWrites.map(frame => frame.type)).toEqual(['negotiate', 'send_message']));
+    await settle(() => expect(f.hostWrites.map(frame => frame.type)).toEqual(['negotiate', 'send_message']));
     expect(f.hostWrites[1]).toMatchObject({ payload: { requestId: 'send-1', agentId: 'agent', text: 'Hi' } });
     expect(f.types().filter(type => type === 'agent_snapshot')).toHaveLength(1);
   });
@@ -282,14 +284,14 @@ describe('a journal-served session stream', () => {
     const f = fixture({ hostOpen: offline() });
     const token = await f.controlled();
     f.stream.receive(sendMessage(token));
-    await vi.waitFor(() => expect(f.sent.at(-1)).toEqual({ protocolVersion: PROTOCOL_VERSION, type: 'protocol_error',
+    await settle(() => expect(f.sent.at(-1)).toEqual({ protocolVersion: PROTOCOL_VERSION, type: 'protocol_error',
       payload: { requestId: 'send-1', code: 'host_offline', message: 'The Remote Host is offline.', recoverable: true } }));
     expect(f.control()).toMatchObject({ access: 'control', token });
     f.stream.receive(pageRequest('tail'));
-    await vi.waitFor(() => expect(f.sent.at(-1)?.type).toBe('timeline_page'));
+    await settle(() => expect(f.sent.at(-1)?.type).toBe('timeline_page'));
     expect(f.closed).toEqual([]);
     f.stream.receive(sendMessage(token));
-    await vi.waitFor(() => expect(f.calls.hostOpens).toBe(2));
+    await settle(() => expect(f.calls.hostOpens).toBe(2));
     expect(f.closed).toEqual([]);
   });
 
@@ -298,7 +300,7 @@ describe('a journal-served session stream', () => {
     const f = fixture({ hostOpen: Object.assign(new Error('A terminal holds it.'), { code: 'native_session_owned', status: 409, nativeOwner }) });
     const token = await f.controlled();
     f.stream.receive(sendMessage(token));
-    await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'session_control', payload: { access: 'read_only', available: false, nativeOwner } }));
+    await settle(() => expect(f.sent.at(-1)).toMatchObject({ type: 'session_control', payload: { access: 'read_only', available: false, nativeOwner } }));
     expect(f.sent.at(-2)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'native_session_owned', recoverable: false } });
     expect(f.control().token).toBeUndefined();
   });
@@ -309,10 +311,10 @@ describe('a journal-served session stream', () => {
     const token = await f.controlled();
     f.stream.receive(sendMessage(token));
     await f.accepted();
-    await vi.waitFor(() => expect(f.hostWrites).toHaveLength(2));
+    await settle(() => expect(f.hostWrites).toHaveLength(2));
     f.sink().frame(message({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'native_session_owned', message: 'A terminal holds it.', recoverable: true } }));
     expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'native_session_owned' } });
-    await vi.waitFor(() => expect(f.control()).toMatchObject({ access: 'read_only', available: false, nativeOwner }));
+    await settle(() => expect(f.control()).toMatchObject({ access: 'read_only', available: false, nativeOwner }));
     expect(f.calls.ownerReads).toBe(1);
   });
 
@@ -321,17 +323,17 @@ describe('a journal-served session stream', () => {
     const owned = fixture({ nativeOwner });
     const token = await owned.controlled();
     owned.stream.receive(sendMessage(token));
-    await vi.waitFor(() => expect(owned.hostWrites).toHaveLength(1));
+    await settle(() => expect(owned.hostWrites).toHaveLength(1));
     owned.sink().ended(1011, 'Remote Session restoration failed.');
-    await vi.waitFor(() => expect(owned.control()).toMatchObject({ access: 'read_only', available: false, nativeOwner }));
+    await settle(() => expect(owned.control()).toMatchObject({ access: 'read_only', available: false, nativeOwner }));
     expect(owned.sent.find(frame => frame.type === 'protocol_error')).toMatchObject({ payload: { requestId: 'send-1', code: 'native_session_owned', recoverable: false } });
     expect(owned.closed).toEqual([]);
     const unknown = fixture();
     const unknownToken = await unknown.controlled();
     unknown.stream.receive(sendMessage(unknownToken));
-    await vi.waitFor(() => expect(unknown.hostWrites).toHaveLength(1));
+    await settle(() => expect(unknown.hostWrites).toHaveLength(1));
     unknown.sink().ended(1011, 'Remote Session restoration failed.');
-    await vi.waitFor(() => expect(unknown.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'host_unavailable', recoverable: true } }));
+    await settle(() => expect(unknown.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'host_unavailable', recoverable: true } }));
     expect(unknown.control().access).toBe('control');
     expect(unknown.closed).toEqual([]);
   });
@@ -341,28 +343,28 @@ describe('a journal-served session stream', () => {
     const f = fixture({ ownerGate: new Promise<void>(resolve => { answer = resolve; }) });
     const token = await f.controlled();
     f.stream.receive(sendMessage(token));
-    await vi.waitFor(() => expect(f.calls.hostOpens).toBe(1));
-    await vi.waitFor(() => expect(f.hostWrites).toHaveLength(1));
+    await settle(() => expect(f.calls.hostOpens).toBe(1));
+    await settle(() => expect(f.hostWrites).toHaveLength(1));
     const first = f.sink();
     first.ended(1011, 'Remote Session restoration failed.');
     // A newer send arrives while the Controller is still being asked who holds the session.
     f.stream.receive(message({ type: 'send_message', controlToken: token, payload: { requestId: 'send-2', operationId: OPERATION, agentId: 'agent', text: 'Newer' } }));
-    await vi.waitFor(() => expect(f.calls.hostOpens).toBe(2));
+    await settle(() => expect(f.calls.hostOpens).toBe(2));
     answer();
-    await vi.waitFor(() => expect(f.sent.some(frame => frame.type === 'protocol_error' && frame.payload.requestId === 'send-1')).toBe(true));
+    await settle(() => expect(f.sent.some(frame => frame.type === 'protocol_error' && frame.payload.requestId === 'send-1')).toBe(true));
     expect(f.sent.some(frame => frame.type === 'protocol_error' && frame.payload.requestId === 'send-2')).toBe(false);
     expect(f.hostClosed()).toBe(false);
     f.sink().ready();
-    await vi.waitFor(() => expect(f.hostWrites.some(frame => frame.type === 'send_message' && frame.payload.requestId === 'send-2')).toBe(true));
+    await settle(() => expect(f.hostWrites.some(frame => frame.type === 'send_message' && frame.payload.requestId === 'send-2')).toBe(true));
   });
 
   it('answers with the Host being offline when the Host goes away before the Controller accepted the stream', async () => {
     const f = fixture({ ownerFails: Object.assign(new Error('The Remote Host is offline.'), { code: 'host_offline' }) });
     const token = await f.controlled();
     f.stream.receive(sendMessage(token));
-    await vi.waitFor(() => expect(f.hostWrites).toHaveLength(1));
+    await settle(() => expect(f.hostWrites).toHaveLength(1));
     f.sink().ended(1012, 'Remote Host disconnected');
-    await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'host_offline', recoverable: true } }));
+    await settle(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'host_offline', recoverable: true } }));
   });
 
   it('keeps the stream open when the Host goes away and comes back with nothing in flight', async () => {
@@ -378,14 +380,14 @@ describe('a journal-served session stream', () => {
     const endedToken = await ended.controlled();
     ended.stream.receive(sendMessage(endedToken));
     await ended.accepted();
-    await vi.waitFor(() => expect(ended.hostWrites).toHaveLength(2));
+    await settle(() => expect(ended.hostWrites).toHaveLength(2));
     ended.sink().ended(1012, 'Remote Host disconnected');
     expect(ended.closed).toEqual([[1012, 'Remote Host disconnected']]);
     const left = fixture();
     const leftToken = await left.controlled();
     left.stream.receive(sendMessage(leftToken));
     await left.accepted();
-    await vi.waitFor(() => expect(left.hostWrites).toHaveLength(2));
+    await settle(() => expect(left.hostWrites).toHaveLength(2));
     left.stream.close();
     expect(left.hostClosed()).toBe(true);
     expect(left.closed).toEqual([]);
@@ -397,7 +399,7 @@ describe('a journal-served session stream', () => {
   it('serves an activity observer from the head and the journal cursor, without a Controller stream', async () => {
     const f = fixture();
     f.stream.receive(message({ type: 'negotiate', observation: 'activity' }));
-    await vi.waitFor(() => expect(f.types()).toEqual(['negotiated', 'agent_activity']));
+    await settle(() => expect(f.types()).toEqual(['negotiated', 'agent_activity']));
     expect(f.sent[1]!.payload).toEqual({ agentId: 'agent', status: 'idle', cursor: { epoch: f.journal.epoch, seq: 2 } });
     f.stream.deliver(f.appendLive('m3', 'next'));
     expect(f.types()).toHaveLength(2);
@@ -418,7 +420,7 @@ describe('the reasons a Controller stream cannot open', () => {
     const f = fixture({ hostOpen: refusal('session_stream_capacity', 429) });
     const token = await f.controlled();
     f.stream.receive(sendMessage(token));
-    await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'session_stream_capacity', recoverable: true } }));
+    await settle(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'session_stream_capacity', recoverable: true } }));
     expect(f.closed).toEqual([]);
   });
 
@@ -427,7 +429,7 @@ describe('the reasons a Controller stream cannot open', () => {
     const longToken = await long.controlled();
     long.stream.receive(sendMessage(longToken));
     await long.accepted();
-    await vi.waitFor(() => expect(long.hostWrites).toHaveLength(2));
+    await settle(() => expect(long.hostWrites).toHaveLength(2));
     long.sink().ended(1012, '\u754c'.repeat(100));
     expect(long.closed).toHaveLength(1);
     expect(Buffer.byteLength(long.closed[0]![1]!)).toBe(123);
@@ -436,7 +438,7 @@ describe('the reasons a Controller stream cannot open', () => {
     const brokenToken = await broken.controlled();
     broken.stream.receive(sendMessage(brokenToken));
     await broken.accepted();
-    await vi.waitFor(() => expect(broken.hostWrites).toHaveLength(2));
+    await settle(() => expect(broken.hostWrites).toHaveLength(2));
     expect(() => broken.sink().ended(1012, 'Remote Host disconnected')).not.toThrow();
   });
 
@@ -445,7 +447,7 @@ describe('the reasons a Controller stream cannot open', () => {
       const f = fixture({ hostOpen: refusal('session_attach_failed', status) });
       const token = await f.controlled();
       f.stream.receive(sendMessage(token));
-      await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', recoverable } }));
+      await settle(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', recoverable } }));
       expect(f.closed).toEqual([]);
     }
   });
@@ -455,7 +457,7 @@ describe('the activity of an observer', () => {
   const observer = async () => {
     const f = fixture();
     f.stream.receive(message({ type: 'negotiate', observation: 'activity' }));
-    await vi.waitFor(() => expect(f.types()).toEqual(['negotiated', 'agent_activity']));
+    await settle(() => expect(f.types()).toEqual(['negotiated', 'agent_activity']));
     return f;
   };
 
@@ -509,7 +511,7 @@ describe('a journal-served stream under load', () => {
       const f = fixture({ pageFails: Object.assign(new Error(`internal ${code}`), { code }) });
       await f.negotiated();
       f.stream.receive(pageRequest('tail'));
-      await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { code: 'timeline_unavailable', recoverable: true } }));
+      await settle(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { code: 'timeline_unavailable', recoverable: true } }));
       expect(JSON.stringify(f.sent.at(-1))).not.toContain('internal');
       expect(f.sent.at(-1)!.payload.code).not.toBe(code);
     }
@@ -519,7 +521,7 @@ describe('a journal-served stream under load', () => {
     const f = fixture({ evictBodies: true, extraRows: 298 });
     await f.negotiated();
     f.stream.receive(pageRequest('tail', undefined, 300));
-    await vi.waitFor(() => expect(f.sent.at(-1)?.type).toBe('timeline_page'));
+    await settle(() => expect(f.sent.at(-1)?.type).toBe('timeline_page'));
     expect(f.sent.at(-1)!.payload.entries).toHaveLength(300);
     expect(f.calls.fill.map(keys => keys.length)).toEqual([64, 64, 64, 64, 44]);
   });
@@ -528,7 +530,7 @@ describe('a journal-served stream under load', () => {
     const f = fixture({ evictBodies: true, fillBringsNothing: true });
     await f.negotiated();
     f.stream.receive(pageRequest('tail'));
-    await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { code: 'timeline_unavailable' } }));
+    await settle(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { code: 'timeline_unavailable' } }));
     expect(f.calls.fill).toHaveLength(1);
   });
 
@@ -537,7 +539,7 @@ describe('a journal-served stream under load', () => {
     const f = fixture({ evictBodies: true, extraRows: 298, fillGate: new Promise<void>(resolve => { release = resolve; }) });
     await f.negotiated();
     f.stream.receive(pageRequest('tail', undefined, 300));
-    await vi.waitFor(() => expect(f.calls.fill).toHaveLength(1));
+    await settle(() => expect(f.calls.fill).toHaveLength(1));
     f.stream.close();
     release();
     await new Promise(resolve => setTimeout(resolve, 20));
@@ -550,7 +552,7 @@ describe('a journal-served stream under load', () => {
     const f = fixture();
     await f.negotiated();
     f.stream.receive(pageRequest('tail', undefined, 1000));
-    await vi.waitFor(() => expect(f.sent.at(-1)?.type).toBe('timeline_page'));
+    await settle(() => expect(f.sent.at(-1)?.type).toBe('timeline_page'));
     expect(f.calls.pages[0]).toEqual({ limit: 500 });
   });
 
@@ -559,7 +561,7 @@ describe('a journal-served stream under load', () => {
     f.stream.receive(negotiate);
     f.stream.receive(message({ type: 'timeline_subscription', payload: { requestId: 'sub-1', agentIds: ['agent'] } }));
     f.stream.receive(pageRequest('tail'));
-    await vi.waitFor(() => expect(f.types()).toContain('timeline_page'));
+    await settle(() => expect(f.types()).toContain('timeline_page'));
     expect(f.types().slice(0, 4)).toEqual(['negotiated', 'agent_snapshot', 'session_control', 'timeline_subscribed']);
     expect(f.types()).not.toContain('protocol_error');
   });
@@ -579,7 +581,7 @@ describe('a journal-served stream under load', () => {
     f.stream.receive(negotiate);
     f.stream.deliver(f.setHead('running'));
     release();
-    await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'agent_update', payload: { status: 'running' } }));
+    await settle(() => expect(f.sent.at(-1)).toMatchObject({ type: 'agent_update', payload: { status: 'running' } }));
     expect(f.types().slice(0, 3)).toEqual(['negotiated', 'agent_snapshot', 'session_control']);
   });
 

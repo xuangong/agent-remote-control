@@ -171,11 +171,10 @@ test('fits the exact shared aggregate and refuses the next byte with complete re
   const associations: any = state.tenants[0]!.broker.associations!; associations.padding = '';
   let size = deriveSuccessionCapacity(state, costs).featureCharge;
   associations.padding = 'x'.repeat(8388608 - size);
-  for (let adjustment = 0; adjustment < 3; adjustment++) {
-    size = deriveSuccessionCapacity(state, costs).featureCharge;
+  for (let adjustment = 0; adjustment < 3 && (size = deriveSuccessionCapacity(state, costs).featureCharge) !== 8388608; adjustment++) {
     associations.padding = associations.padding.slice(0, associations.padding.length - Math.max(0, size - 8388608));
   }
-  expect(deriveSuccessionCapacity(state, costs).featureCharge).toBe(8388608);
+  expect(size).toBe(8388608);
   expect(() => createRelayState(auth, { initial: state, async commit() {} }, () => {}, () => {}, costs)).not.toThrow();
   associations.padding += 'x';
   expect(deriveSuccessionCapacity(state, costs).featureCharge).toBe(8388609);

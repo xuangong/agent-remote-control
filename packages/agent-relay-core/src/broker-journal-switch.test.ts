@@ -2,7 +2,7 @@ import { MemoryJournalStore, SessionJournal, type JournalStore } from '@orchardw
 import { afterEach, expect, it } from 'vitest';
 
 import { createHostBroker, type RemoteHostBrokerState } from './index.js';
-import { DIGEST, HOST_ID, PUBLIC_ID, row, SESSION_KEY, seedJournal, sleep, snapshot, socketPair, startRelay, STORE_KEY, type Wire } from './test-utils/journal-session-fixture.js';
+import { DIGEST, HOST_ID, PUBLIC_ID, row, SESSION_KEY, seedJournal, sleep, snapshot, until, socketPair, startRelay, STORE_KEY, type Wire } from './test-utils/journal-session-fixture.js';
 import { sequentialEpochs } from '@orchardworks/agent-remote-journal/testing';
 
 const started: Array<{ dispose(): Promise<void> }> = [];
@@ -366,11 +366,10 @@ it('waits only for its own deletion before registering a returning Host, not for
       } } }) });
   let registered = false;
   const connecting = r.connectController().then(controller => { registered = true; return controller; });
-  await sleep(100);
+  await sleep(20);
   expect(registered).toBe(false);
   release();
-  await sleep(300);
-  expect(registered).toBe(true);
+  await until(() => registered || undefined, 'the Host registering');
   expect(registeredOf(await connecting)).toMatchObject({ journal: 1 });
 });
 
@@ -428,6 +427,10 @@ it('does not hold a returning Host back for its pending deletion when its Contro
 });
 
 /** A store that counts how many deletions run at once, overall and per Host, and which Hosts it was asked to delete. */
+/** Waits until a read of the store lists nothing, which a pass deleting in the background reaches without a fixed delay. */
+async function untilEmpty(list: () => Promise<readonly unknown[]>) {
+  for (let attempt = 0; attempt < 400 && (await list()).length; attempt++) await sleep(5);
+}
 function countingStore(memory: MemoryJournalStore, decide: (prefix: string, call: number) => Promise<void>) {
   const calls: string[] = [];
   const state = { running: 0, peak: 0 };
@@ -451,12 +454,12 @@ it('deletes the other pending Hosts and keeps the one whose store call never ans
     hosts: [{ id: HOST_ID, installationId: 'restored-installation', name: 'Restored Host', providers: [{ providerId: 'codex', displayName: 'Codex' }], legacyDsh: false }],
     bindings: [{ hostId: HOST_ID, providerId: 'codex', nativeSessionId: 'native-session', agentId: PUBLIC_ID }] }, 50);
   try {
-    await sleep(200);
+    await until(() => states.at(-1)?.journalDeletions?.length === 1 || undefined, 'the pass ending');
     expect((await memory.catalog.list('')).map(({ sessionKey }) => sessionKey).sort()).toEqual(['gone-0:codex:native-session', `${HOST_ID}:${SESSION_KEY}`].sort());
     expect(states.at(-1)!.journalDeletions).toEqual(['gone-0']);
     // The pass ended: a revoke after it starts the next pass, which deletes the Host while gone-0 stays pending.
     expect((await revoke(broker))!.status).toBe(200);
-    await sleep(150);
+    await untilEmpty(() => memory.catalog.list(`${HOST_ID}:`));
     expect(await memory.catalog.list(`${HOST_ID}:`)).toEqual([]);
     expect(states.at(-1)!.journalDeletions).toEqual(['gone-0']);
   } finally { broker.close(); }
@@ -464,13 +467,13 @@ it('deletes the other pending Hosts and keeps the one whose store call never ans
 
 it('deletes 40 pending Hosts one after another in one pass, with one commit for each', async () => {
   const ids = Array.from({ length: 40 }, (_, at) => `gone-${at}`);
-  const { store, calls, state } = countingStore(new MemoryJournalStore(), () => sleep(2));
+  const { store, calls, state } = countingStore(new MemoryJournalStore(), () => new Promise<void>(resolve => setImmediate(resolve)));
   const states: RemoteHostBrokerState[] = [];
   const broker = createHostBroker({ origin: 'https://relay.example', accountBacked: true, journals: store, now: () => 10_000,
     onStateChange: async next => { states.push(structuredClone(next)); },
     initialState: { keys: [], creations: [], hosts: [], bindings: [], journalDeletions: ids } });
   try {
-    await sleep(600);
+    await until(() => states.length === 40 || undefined, 'forty commits');
     expect(state.peak).toBe(1);
     expect(calls).toEqual(ids.map(id => `${id}:`));
     expect(states).toHaveLength(40);
@@ -621,7 +624,7 @@ it('deletes a Host revoked later while another Host\'s deletion hangs, and keeps
   try {
     await sleep(20);
     expect((await revoke(broker))!.status).toBe(200);
-    await sleep(150);
+    await untilEmpty(() => memory.catalog.list(`${HOST_ID}:`));
     expect(await memory.catalog.list(`${HOST_ID}:`)).toEqual([]);
     expect(states.at(-1)!.journalDeletions).toEqual(['gone-0']);
   } finally { broker.close(); }

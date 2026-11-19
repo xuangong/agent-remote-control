@@ -66,11 +66,11 @@ it("keeps an account's drafts within its limit, letting cleared ones go first", 
 
 it('refuses a new draft once the Relay keeps its most', async () => {
   const subjects = Array.from({ length: Math.ceil(MAX_SESSION_DRAFTS / SESSION_DRAFT_LIMIT) + 1 }, (_, index) => `account-${index}`);
-  const f = fixture(initialState(subjects));
-  let saved = 0;
-  for (const subject of subjects) for (let index = 0; index < SESSION_DRAFT_LIMIT && saved < MAX_SESSION_DRAFTS; index++, saved++) {
-    await f.drafts.save(subject, { ...ref(`thread-${index}`), text: 'Draft' });
-  }
+  const initial = initialState(subjects);
+  // The Relay already holds its most, spread over the accounts at their own limit.
+  initial.sessionDrafts = Array.from({ length: MAX_SESSION_DRAFTS }, (_, at) => ({ subject: subjects[Math.floor(at / SESSION_DRAFT_LIMIT)]!,
+    ...ref(`thread-${at % SESSION_DRAFT_LIMIT}`), text: 'Draft', revision: 1_000 }));
+  const f = fixture(initial);
   const last = subjects.at(-1)!;
   await expect(f.drafts.save(last, { ...ref('one-more'), text: 'Draft' })).rejects.toMatchObject({ status: 409, code: 'drafts_limit' });
   // Changing a draft that exists still works.

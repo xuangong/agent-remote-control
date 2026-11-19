@@ -7,7 +7,7 @@ import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardwo
 import { isTeam, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { isLegacyTeam, decodeLegacyRemoteHostUplinkMessage as decodeLegacy } from '@orchardworks/agent-remote-protocol/testing';
 import { createHostBroker, type RemoteHostBrokerState } from './broker.js';
-import { relaySocket } from './test-utils/ws-relay-socket.js';
+import { memoryHostClient, relaySocket } from './test-utils/ws-relay-socket.js';
 import { deliveryFingerprint, type SavedTeam } from './team-delivery.js';
 
 const close: Array<() => void | Promise<void>> = [];
@@ -95,13 +95,7 @@ async function currentRelay(team: SavedTeam | SavedTeam[] = savedTeam(), success
     keys: [[createHash('sha256').update('key').digest('hex'), { kind: 'device', installationId: 'controller', expires: Number.MAX_SAFE_INTEGER }]],
     hosts: [{ id: 'host', installationId: 'controller', name: 'Host', legacyDsh: false, teamManagement: true, providers: [{ providerId: 'codex', displayName: 'Codex' }] }], bindings: [], creations: [], teams: Array.isArray(team) ? team : [team],
   };
-  const http = createServer((incoming, response) => { void (async () => {
-    let body = ''; for await (const chunk of incoming) body += chunk;
-    const result = await broker.handleRequest(new Request(origin + incoming.url, { method: incoming.method, headers: incoming.headers as Record<string, string>, ...(body ? { body } : {}) }));
-    response.writeHead(result!.status, Object.fromEntries(result!.headers)); response.end(await result!.text());
-  })().catch(error => { response.writeHead(500); response.end(String(error)); }); });
-  http.listen(0, '127.0.0.1'); await once(http, 'listening', { signal: AbortSignal.timeout(3000) });
-  const origin = `http://127.0.0.1:${(http.address() as { port: number }).port}`;
+  const origin = 'https://relay.example';
   if (successor) {
     const request = { roleId: 'role', operationId: 'prefix', expectedRevision: 1, from: ref('A'), preparation: { kind: 'native_prefix' as const, turnId: 'turn', messageId: 'prompt' } };
     const workspace = { controllerId: 'controller', canonicalCwd: '/fixture' };
@@ -110,30 +104,42 @@ async function currentRelay(team: SavedTeam | SavedTeam[] = savedTeam(), success
       projection: { version: 1, role: { id: 'role', revision: 2, origin: ref('A'), current: ref('B'), workspace }, receipt: { ...request, to: ref('B'), phase: 'committed', committedRevision: 2, startedAt: 'now', updatedAt: 'now', prepared: { ...request, to: ref('B'), workspace, participants: [], associationRevision: 0, capture: { epoch: 'e', seq: 1, capturedAt: 'now' } } } } }] };
   }
   const make = () => createHostBroker({ origin, initialState: saved, heartbeatIntervalMs: 200, heartbeatTimeoutMs: 100, onStateChange(state) { saved = structuredClone(state); } }); broker = make();
-  const ws = new WebSocketServer({ server: http });
-  ws.on('connection', async (socket, incoming) => {
-    const upgrade = await broker.prepareUpgrade(new Request(origin + incoming.url, { headers: { authorization: 'Bearer key' } }));
-    if (!upgrade || upgrade instanceof Response) { socket.close(); return; }
-    upgrade.accept(relaySocket(socket));
-  });
-  close.push(async () => { broker.close(); for (const socket of ws.clients) socket.terminate(); await new Promise<void>(done => ws.close(() => done())); http.closeAllConnections(); await new Promise<void>(done => http.close(() => done())); });
-  const request = async (path = '', input?: unknown, recipientAware = false) => fetch(`${origin}/v1/remote/teams${path}`, { signal: AbortSignal.timeout(3000), headers: { ...(recipientAware ? { 'x-arc-team-recipients': '1' } : {}), 'content-type': 'application/json' }, ...(input ? { method: 'POST', body: JSON.stringify(input) } : {}) });
+  const prepare = (url: string, headers: Record<string, string>) => broker.prepareUpgrade(new Request(url, { headers }));
+  /** A real loopback listener in front of the Relay, for the one test whose subject is a Controller's own uplink client. */
+  async function listen() {
+    const http = createServer((incoming, response) => { void (async () => {
+      let body = ''; for await (const chunk of incoming) body += chunk;
+      const result = await broker.handleRequest(new Request(origin + incoming.url, { method: incoming.method, headers: incoming.headers as Record<string, string>, ...(body ? { body } : {}) }));
+      response.writeHead(result!.status, Object.fromEntries(result!.headers)); response.end(await result!.text());
+    })().catch(error => { response.writeHead(500); response.end(String(error)); }); });
+    http.listen(0, '127.0.0.1'); await once(http, 'listening', { signal: AbortSignal.timeout(3000) });
+    const ws = new WebSocketServer({ server: http });
+    ws.on('connection', async (socket, incoming) => {
+      const upgrade = await prepare(origin + incoming.url, { authorization: 'Bearer key' });
+      if (!upgrade || upgrade instanceof Response) { socket.close(); return; }
+      upgrade.accept(relaySocket(socket));
+    });
+    close.push(async () => { for (const socket of ws.clients) socket.terminate(); await new Promise<void>(done => ws.close(() => done())); http.closeAllConnections(); await new Promise<void>(done => http.close(() => done())); });
+    return `ws://127.0.0.1:${(http.address() as { port: number }).port}/ws/remote-host`;
+  }
+  close.push(() => { broker.close(); });
+  const request = async (path = '', input?: unknown, recipientAware = false) => (await broker.handleRequest(new Request(`${origin}/v1/remote/teams${path}`, { headers: { ...(recipientAware ? { 'x-arc-team-recipients': '1' } : {}), 'content-type': 'application/json' }, ...(input ? { method: 'POST', body: JSON.stringify(input) } : {}) })))!;
   async function connect(recipientAware = false, inbox = false, succession = false) {
-    const socket = new WebSocket(`${origin.replace('http:', 'ws:')}/ws/remote-host?team=1${recipientAware ? '&teamRecipients=1' : ''}${inbox ? '&teamInbox=1' : ''}${succession ? '&teamSuccession=1' : ''}`);
+    const socket = memoryHostClient({ prepareUpgrade: request => broker.prepareUpgrade(request) }, `${origin}/ws/remote-host?team=1${recipientAware ? '&teamRecipients=1' : ''}${inbox ? '&teamInbox=1' : ''}${succession ? '&teamSuccession=1' : ''}`);
     close.push(() => { socket.terminate(); });
     const packets: any[] = []; socket.on('message', data => { const packet = JSON.parse(data.toString()); packets.push(packet); if (packet.type === 'heartbeat') socket.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat_ack', nonce: packet.nonce })); });
     await once(socket, 'open', { signal: AbortSignal.timeout(3000) });
     socket.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'controller', name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
-    await expect.poll(() => packets.find(p => p.type === 'registered')).toBeTruthy();
+    await expect.poll(() => packets.find(p => p.type === 'registered'), { interval: 1 }).toBeTruthy();
     let requestId = 0;
     const call = async (call: TeamHostCall) => {
       const id = String(++requestId); socket.send(JSON.stringify({ uplinkVersion: 2, type: 'team_request', requestId: id, call }));
-      await expect.poll(() => packets.find(p => p.type === 'team_response' && p.requestId === id)).toBeTruthy();
+      await expect.poll(() => packets.find(p => p.type === 'team_response' && p.requestId === id), { interval: 1 }).toBeTruthy();
       const packet = packets.find(p => p.type === 'team_response' && p.requestId === id); return { status: packet.status, value: JSON.parse(packet.body) };
     };
     return { socket, packets, call };
   }
-  return { origin, request, connect, snapshot: () => saved, restart() { broker.close(); broker = make(); } };
+  return { listen, request, connect, snapshot: () => saved, restart() { broker.close(); broker = make(); } };
 }
 
 test('current Relay acknowledges inbox support only when offered and persists the exact receipt', async () => {
@@ -158,7 +164,7 @@ test('the Controller offers Team succession and learns from each registration wh
   const f = await legacyRelay(); f.acknowledge(true);
   const host = await client(f.url);
   expect(host.teamSuccession).toBe(false);
-  const current = await currentRelay(), modern = createRemoteHostUplinkClient({ relay: createAgentRemoteRelay({ providers: [] }), url: `${current.origin.replace('http:', 'ws:')}/ws/remote-host`, installationId: 'controller', name: 'Host', remoteKey: 'key',
+  const current = await currentRelay(), modern = createRemoteHostUplinkClient({ relay: createAgentRemoteRelay({ providers: [] }), url: await current.listen(), installationId: 'controller', name: 'Host', remoteKey: 'key',
     teamManagement: true, providers: [], resolveSession: () => undefined, control: () => ({ status: 200, body: '{}' }) });
   close.push(() => modern.close()); await modern.ready;
   expect(modern.teamSuccession).toBe(true);

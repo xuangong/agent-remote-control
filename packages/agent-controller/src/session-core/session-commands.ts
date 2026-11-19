@@ -77,7 +77,7 @@ export function createSessionCommands(ctx: SessionCoreContext, options: AgentHos
       return renamed.title;
     },
     async release(ref) {
-      const binding = ctx.bindings.getByNative(ref.providerId, ref.nativeSessionId), agent = binding && ctx.liveAgent(binding.agentId);
+      const binding = ctx.sessions.byNative(ref.providerId, ref.nativeSessionId), agent = binding && ctx.liveAgent(binding.agentId);
       if (!binding || !agent) return true;
       if (ctx.idle.hasDemand(binding.agentId) || !ctx.providers.require(ref.providerId).directory.canReleaseSession?.(ref.nativeSessionId) || !agent.canReleaseIdle()) return false;
       await ctx.terminalRefresh.releaseJournal(binding);

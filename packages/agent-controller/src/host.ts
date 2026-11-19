@@ -11,7 +11,7 @@ import type { SessionSuccessionContextStore } from './session-succession-context
 import type { SessionSuccessionCoordinator } from './session-succession.js';
 import { nativeSessionRefKey, type NativeSessionRef, type TrustedSuccessionContext } from '@orchardworks/agent-remote-protocol';
 import { TpmCoordinator, type TpmSessionAccess } from './tpm.js';
-import { SessionBindings } from '@orchardworks/agent-session-runtime';
+import { createBoundSessions } from './session-core/bound-sessions.js';
 import type { HostProviderDiscovery } from './provider-discovery.js';
 import { createCodexDaemonControl } from './codex-daemon-control.js';
 import { RELAY_DIAGNOSTIC_PATH, parseRelayDiagnosticBatch, type RelayDiagnostic } from '@orchardworks/agent-remote-protocol/model';
@@ -38,7 +38,7 @@ import { SessionOutbox } from './session-outbox.js';
 import { createTerminalRefresh } from './publisher/terminal-refresh.js';
 import { createAdmission } from './session-core/admission.js';
 import { createSessionCatalog, catalogSessionStates } from './session-core/catalog.js';
-import { handoffRefusal, nativeFamily as familyOf } from './session-core/family.js';
+import { handoffRefusal } from './session-core/family.js';
 import * as lineage from './session-core/lineage.js';
 import { bounded, json, positiveTimeout } from './session-core/requests.js';
 import type { AgentHostProviderRegistration, AgentHostRuntime, AgentHostRuntimeOptions, SessionBinding as Binding } from './session-core/types.js';
@@ -299,14 +299,14 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   const resourceIdKey = options.resourceIdKeyFile ? loadResourceIdKey(options.resourceIdKeyFile) : undefined;
   const resourceIdIndex = resourceIdKey !== undefined && options.resourceIdIndexFile ? new FileResourceIdIndex(options.resourceIdIndexFile) : undefined;
   const relay = createAgentRemoteRelay({ providers: relayAdapters, ...(resourceIdKey === undefined ? {} : { resourceIdKey }), ...(resourceIdIndex ? { resourceIdIndex } : {}), operationCache, operationLifecycle: {
-    settingIntent: (agent, accept) => successionBoundary ? successionBoundary.settingIntent(nativeRef(bindingFor(agent)), accept) : accept(),
-    target: agent => { const binding = bindingFor(agent); return JSON.stringify([binding.providerId, binding.nativeSessionId]); },
+    settingIntent: (agent, accept) => successionBoundary ? successionBoundary.settingIntent(nativeRef(sessions.bindingOf(agent)), accept) : accept(),
+    target: agent => { const binding = sessions.bindingOf(agent); return JSON.stringify([binding.providerId, binding.nativeSessionId]); },
     admit: () => { if (admission.draining) throw new OperationCacheError('controller_updating', 'Controller is updating. Reconnect before retrying.'); },
-    beforeDispatch: agent => { if (succession) succession.coordinator.assertAdmission(nativeRef(bindingFor(agent))); },
-    mutationTargets: agent => succession ? [nativeSessionRefKey(nativeRef(bindingFor(agent)))] : [],
+    beforeDispatch: agent => { if (succession) succession.coordinator.assertAdmission(nativeRef(sessions.bindingOf(agent))); },
+    mutationTargets: agent => succession ? [nativeSessionRefKey(nativeRef(sessions.bindingOf(agent)))] : [],
     admission: (agent, _operation, _scope, entry) => {
       if (!successionBoundary || !succession) return () => {};
-      const target = nativeRef(bindingFor(agent));
+      const target = nativeRef(sessions.bindingOf(agent));
       try { succession.coordinator.assertAdmission(target); }
       catch (error) { throw new OperationCacheError('operation_rejected', error instanceof Error ? error.message : 'Session handoff admission is closed.'); }
       return successionBoundary.admit([target], entry.key);
@@ -314,22 +314,22 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     run: (_agent, operation, scope, entry, work) => successionBoundary ? successionBoundary.run(operation, scope, work, entry) : work(),
     dispatch: async (agent, operation, scope, work) => {
       const result = await work();
-      return successionBoundary ? successionBoundary.inputResult(nativeRef(bindingFor(agent)), operation, scope, result) : result;
+      return successionBoundary ? successionBoundary.inputResult(nativeRef(sessions.bindingOf(agent)), operation, scope, result) : result;
     },
-    retain: agent => idle.retain(bindingFor(agent).agentId),
-    uncertain: agent => { ledger.markUncertain(bindingFor(agent).agentId); },
+    retain: agent => idle.retain(sessions.bindingOf(agent).agentId),
+    uncertain: agent => { ledger.markUncertain(sessions.bindingOf(agent).agentId); },
   }, ...(options.inputImages ? { inputImageStore: new InputImageStore(options.inputImages) } : {}),
     ...(options.inputResources ? { inputResourceStore: new InputResourceStore(options.inputResources) } : {}) });
-  const bindings = new SessionBindings();
-  const liveSessionStates = () => [...bindings.values()].flatMap(binding => {
-    const live = liveAgent(binding.agentId), state = live && liveSessionState(live.handoffAdmissionState());
+  const sessions = createBoundSessions(liveAgent);
+  const liveSessionStates = () => sessions.live().flatMap(({ binding, agent }) => {
+    const state = liveSessionState(agent.handoffAdmissionState());
     return state ? [{ providerId: binding.providerId, nativeSessionId: binding.nativeSessionId, state }] : [];
   });
   // Each open session's latest reply is read when its timeline moves, and remembered after it is released.
   const sessionReplies = createSessionReplies(options.sessionRepliesFile ? { file: options.sessionRepliesFile } : {});
   const sessionStates = createSessionStatePublisher({
     live: () => {
-      for (const binding of bindings.values()) { const live = liveAgent(binding.agentId); if (live) sessionReplies.observe(binding, binding.agentId, live); }
+      for (const { binding, agent } of sessions.live()) sessionReplies.observe(binding, binding.agentId, agent);
       return liveSessionStates();
     },
     replies: session => sessionReplies.facts(session),
@@ -348,8 +348,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   const terminalRefresh = createTerminalRefresh({
     now: () => Date.now(),
     directory: providerId => providers.get(providerId)?.directory,
-    bindings: () => bindings.values(),
-    bindingOf: (providerId, nativeSessionId) => bindings.getByNative(providerId, nativeSessionId),
+    bindings: () => sessions.all(),
+    bindingOf: (providerId, nativeSessionId) => sessions.byNative(providerId, nativeSessionId),
     isLive: agentId => !!liveAgent(agentId),
     hasDemand: agentId => idle.hasDemand(agentId),
     expire: agentId => idle.expire(agentId),
@@ -360,7 +360,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   });
 
   function assertHandoffState(target: NativeSessionRef, captured?: { epoch: string; seq: number }, allowMissing = false): void {
-    const family = nativeFamily(target.providerId, target.nativeSessionId);
+    const family = sessions.family(target.providerId, target.nativeSessionId);
     const own = family.find(binding => binding.nativeSessionId === target.nativeSessionId);
     const live = own && liveAgent(own.agentId);
     const refusal = handoffRefusal({ bound: !!own, own: live?.handoffAdmissionState(), ownCursor: live?.timelineCursor(), ...(captured ? { captured } : {}), allowMissing,
@@ -368,11 +368,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       unsettledRecipient: !!(tpm?.hasUnsettledRecipient(target) || team?.hasUnsettledRecipient(target)) });
     if (refusal) throw new SuccessionPreparationRejected(refusal.code, refusal.message);
   }
-  function nativeFamily(providerId: string, nativeSessionId: string): Binding[] {
-    return familyOf(bindings.values(), providerId, nativeSessionId);
-  }
   function mutationFamily(targets: readonly NativeSessionRef[]): NativeSessionRef[] {
-    return [...new Map(targets.flatMap(target => [target, ...nativeFamily(target.providerId, target.nativeSessionId).map(nativeRef)])
+    return [...new Map(targets.flatMap(target => [target, ...sessions.family(target.providerId, target.nativeSessionId).map(nativeRef)])
       .map(target => [nativeSessionRefKey(target), target] as const)).values()];
   }
   function directoryOperation<T>(scope: string, operationId: string, kind: string, targets: readonly NativeSessionRef[], parameters: unknown,
@@ -394,13 +391,6 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     pending.add(operation);
     void operation.finally(() => pending.delete(operation)).catch(() => undefined);
     return operation;
-  }
-  function bindingFor(agent: SessionWireAgent): Binding {
-    for (const binding of bindings.values()) {
-      const agentId = binding.agentId;
-      if (liveAgent(agentId) === agent) return binding;
-    }
-    throw new OperationCacheError('invalid_operation_target', 'The native session binding is unavailable.');
   }
   function liveAgent(agentId: string) {
     try { return relay.requireAgent(agentId); } catch { return undefined; }
@@ -433,7 +423,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     directory: providerId => providers.get(providerId)?.directory,
     adapter: providerId => providers.require(providerId).adapter,
     runtimeState: (providerId, nativeSessionId) => {
-      const binding = bindings.getByNative(providerId, nativeSessionId), live = binding && liveAgent(binding.agentId);
+      const binding = sessions.byNative(providerId, nativeSessionId), live = binding && liveAgent(binding.agentId);
       return live?.handoffAdmissionState();
     },
   });
@@ -459,8 +449,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     },
     async recover(providerId, nativeSessionId, extensions) {
       if (admission.stopped || options.providerEnabled?.(providerId) === false) throw new Error('TPM provider is unavailable.');
-      const existing = bindings.getByNative(providerId, nativeSessionId);
-      if (existing && (liveAgent(existing.agentId) || bindings.isPending(providerId, nativeSessionId))) throw new Error('Close the recovered session before binding it as a TPM.');
+      const existing = sessions.byNative(providerId, nativeSessionId);
+      if (existing && (liveAgent(existing.agentId) || sessions.isPending(providerId, nativeSessionId))) throw new Error('Close the recovered session before binding it as a TPM.');
       const session = await directoryNativeEffect(successionBoundary?.currentEntry(), successionBoundary?.currentEntry()?.targets ?? [], async () => providers.require(providerId).directory.open(nativeSessionId, { extensions }));
       const info = await session.runtimeInfo();
       if (info.sessionId !== nativeSessionId) throw new Error('Recovered native session identity does not match.');
@@ -505,12 +495,12 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     return enrollment.control(request, context);
   };
   Object.assign(ctx, {
-    options, admission, relay, bindings, idle, operationCache, hostStatus, cancelTimeoutMs, successionReady, successionService, succession, successionBoundary,
+    options, admission, relay, sessions, idle, operationCache, hostStatus, cancelTimeoutMs, successionReady, successionService, succession, successionBoundary,
     tpm, team, enrollment, sessionRefs, roles, workerSupport, ledger, successionConfig, nativeSuccession,
     providers, journals, terminalRefresh, automationAccess, sessionCatalog, create, controlRequest, genericSuccessionSource,
     nativePrefixExtensions: successionWiring.nativePrefixExtensions,
     liveAgent, nativeRef, mutationFamily, directoryOperation, tracked, project, callSession, authorizeSuccessionRead: successionWiring.authorizeSuccessionRead,
-    workerExtensions: successionWiring.workerExtensions, markShared: successionWiring.markShared, nativeFamily, originalCreation, originalNativePrefix, assertHandoffState, acquireSession,
+    workerExtensions: successionWiring.workerExtensions, markShared: successionWiring.markShared, originalCreation, originalNativePrefix, assertHandoffState, acquireSession,
   } satisfies SessionCoreContext);
   for (const value of providers.all()) successionWiring.bindProvider(value);
   return { relay, sessionStates, journals, sessionCatalog, callSession, callRole, ...(sessionRefs ? { sessionRefs } : {}), ...(outbox ? { outbox } : {}), executionRouting: successionService?.executionRouting, roleRouting: successionService?.roleRouting, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
@@ -532,7 +522,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       } finally {
         successionBoundary?.retireCoverageEvidence();
         sessionReplies.close();
-        bindings.close();
+        sessions.close();
         const releasing = idle.close();
         providers.dispose();
         const cleanup = Promise.allSettled([releasing, relay.close(), ...providers.all().map(({ directory }) => Promise.resolve(directory.close())), ...pending]);

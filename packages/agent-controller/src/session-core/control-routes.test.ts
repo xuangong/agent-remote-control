@@ -19,10 +19,10 @@ function routes(overrides: Partial<SessionCoreContext> = {}, options: Partial<Se
   const ctx = {
     options: { registrations: [], onRequestDiagnostic: (entry: AgentHostRequestDiagnostic) => { diagnostics.push(entry); }, ...options },
     admission, operationCache: createOperationCache(), successionReady: Promise.resolve(), cancelTimeoutMs: 50,
-    hostStatus: { read: async () => ({ sessions: 0 }) }, catalogs: new Map(), bindings: { values: () => [], getByAgent: () => undefined },
+    hostStatus: { read: async () => ({ sessions: 0 }) }, providers: { require: () => { throw new Error('No registration.'); }, catalog: () => undefined }, sessions: { live: () => [], byAgent: () => undefined },
     liveAgent: () => undefined, tracked: <T,>(operation: Promise<T>) => operation, mutationFamily: () => [],
     nativeRef: (binding: Pick<SessionBinding, 'providerId' | 'nativeSessionId'>) => ({ controllerId: 'controller', ...binding }),
-    markShared: async () => undefined, registration: () => { throw new Error('No registration.'); },
+    markShared: async () => undefined,
     project: async (...args: unknown[]) => { projected.push(args); return { agentId: String(args[1]), providerId: String(args[0]), nativeSessionId: String(args[2]) }; },
     ...overrides,
   } as unknown as SessionCoreContext;
@@ -99,7 +99,7 @@ describe('control routes: attach', () => {
     const refused = routes({}, disabled);
     expect(parse(await refused.control(request('/remote/attach', attach, { sessionId: 'agent-1' }))).body.code).toBe('provider_disabled');
     const recovering = routes({
-      bindings: { getByAgent: () => ({ agentId: 'agent-1', ...attach }), values: () => [] } as never, liveAgent: () => ({}) as never,
+      sessions: { byAgent: () => ({ agentId: 'agent-1', ...attach }), live: () => [] } as never, liveAgent: () => ({}) as never,
     }, disabled);
     expect(parse(await recovering.control(request('/remote/attach', attach, { sessionId: 'agent-1' }))).status).toBe(200);
   });
@@ -111,7 +111,7 @@ describe('control routes: stop', () => {
       ok: { cancel: async () => undefined }, broken: { cancel: async () => { throw new Error('boom'); } }, hung: { cancel: () => new Promise<void>(() => undefined) },
     };
     const run = routes({
-      bindings: { values: () => Object.keys(live).map(agentId => ({ agentId, providerId: 'codex', nativeSessionId: agentId })), getByAgent: () => undefined } as never,
+      sessions: { live: () => Object.keys(live).map(agentId => ({ binding: { agentId, providerId: 'codex', nativeSessionId: agentId }, agent: live[agentId] })), byAgent: () => undefined } as never,
       liveAgent: agentId => live[agentId] as never,
       idle: { retain: () => () => undefined } as never,
       relay: { requireAgent: (agentId: string) => live[agentId] } as never,

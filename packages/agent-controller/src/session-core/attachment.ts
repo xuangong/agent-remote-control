@@ -35,10 +35,10 @@ export function createAttachment(ctx: SessionCoreContext) {
     catch { /* Diagnostics cannot change session lifetime. */ }
   }
   function watch(binding: Binding) {
-    const { admission, bindings, idle, liveAgent, ledger, providers, relay, terminalRefresh } = ctx;
-    const childHeld = () => hasHeldChild(bindings.values(), binding, child => !!liveAgent(child.agentId) || idle.hasDemand(child.agentId));
+    const { admission, sessions, idle, liveAgent, ledger, providers, relay, terminalRefresh } = ctx;
+    const childHeld = () => hasHeldChild(sessions.all(), binding, child => !!liveAgent(child.agentId) || idle.hasDemand(child.agentId));
     idle.watch(binding.agentId, () => mayReleaseIdle({
-      closed: admission.closed, uncertain: ledger.isUncertain(binding.agentId), pending: bindings.isPending(binding.providerId, binding.nativeSessionId),
+      closed: admission.closed, uncertain: ledger.isUncertain(binding.agentId), pending: sessions.isPending(binding.providerId, binding.nativeSessionId),
       directoryCanRelease: !!providers.require(binding.providerId).directory.canReleaseSession?.(binding.nativeSessionId), runtimeCanReleaseIdle: !!liveAgent(binding.agentId)?.canReleaseIdle(),
       childHeld: childHeld(),
     }), async () => {
@@ -73,14 +73,14 @@ export function createAttachment(ctx: SessionCoreContext) {
     await directory.sessionReleased?.(binding.nativeSessionId);
   }
   async function acquireSession(agentId: string): Promise<RemoteHostSessionLease | undefined> {
-    const { admission, bindings, idle, liveAgent, tracked } = ctx;
-    const binding = bindings.getByAgent(agentId);
+    const { admission, sessions, idle, liveAgent, tracked } = ctx;
+    const binding = sessions.byAgent(agentId);
     if (admission.closed || !binding) return undefined;
     const release = idle.retain(agentId);
     let parent: RemoteHostSessionLease | undefined;
     try {
       if (binding.parentNativeSessionId) {
-        const parentBinding = bindings.getByNative(binding.providerId, binding.parentNativeSessionId);
+        const parentBinding = sessions.byNative(binding.providerId, binding.parentNativeSessionId);
         if (parentBinding) {
           parent = await acquireSession(parentBinding.agentId);
           if (!parent) throw new Error('Native parent session is unavailable.');
@@ -97,7 +97,7 @@ export function createAttachment(ctx: SessionCoreContext) {
     } catch (error) { release(); parent?.release(); throw error; }
   }
   async function project(providerId: string, proposedAgentId: string, nativeSessionId: string, parentNativeSessionId?: string, takeOver?: string, takeoverAdmitted = false, takeoverScope = 'host:takeover', qualifiedResult = false): Promise<Binding> {
-    const { admission, bindings, directoryOperation, genericSuccessionSource, nativePrefixExtensions, workerExtensions, idle, journals, liveAgent, ledger, nativeFamily, nativeRef, originalCreation, originalNativePrefix, providers, relay, roles, sessionRefs, succession, successionBoundary, successionReady, tpm } = ctx;
+    const { admission, sessions, directoryOperation, genericSuccessionSource, nativePrefixExtensions, workerExtensions, idle, journals, liveAgent, ledger, nativeRef, originalCreation, originalNativePrefix, providers, relay, roles, sessionRefs, succession, successionBoundary, successionReady, tpm } = ctx;
     await successionReady;
     const nativeCreation = originalCreation(nativeRef({ providerId, nativeSessionId }));
     const creationIdentity = nativeCreation ? serializeAgentEmptyCreationResult(nativeCreation) : undefined;
@@ -107,13 +107,13 @@ export function createAttachment(ctx: SessionCoreContext) {
       if (prefixIdentity && (!agent || ledger.attachmentOf(agent)?.nativePrefix !== prefixIdentity)) throw new Error('Existing Host attachment does not match the original native prefix handle.');
       if (creationIdentity && (!agent || ledger.attachmentOf(agent)?.nativeCreation !== creationIdentity)) throw new Error('Existing Host attachment does not match the original native creation evidence.');
     };
-    const existing = bindings.getByNative(providerId, nativeSessionId);
+    const existing = sessions.byNative(providerId, nativeSessionId);
     if (takeOver && !takeoverAdmitted) {
       const target = nativeRef({ providerId, nativeSessionId });
       return directoryOperation(takeoverScope, JSON.stringify([proposedAgentId, takeOver]), 'native_owner_takeover', [target], { takeOver },
         () => project(providerId, proposedAgentId, nativeSessionId, parentNativeSessionId, takeOver, true, takeoverScope));
     }
-    const bound = await bindings.bind({ providerId, agentId: proposedAgentId, nativeSessionId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}) }, {
+    const bound = await sessions.bind({ providerId, agentId: proposedAgentId, nativeSessionId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}) }, {
       ...(qualifiedResult ? { validateResult(binding: Binding) {
         if (![binding.agentId, binding.nativeSessionId].every(boundedSourceIdentity)) throw new Error('Qualified source projection selected an unbounded canonical identity after native creation; the full Host witness remains available for reconciliation.');
       } } : {}),
@@ -129,7 +129,7 @@ export function createAttachment(ctx: SessionCoreContext) {
       let parent: RemoteHostSessionLease | undefined;
       try {
         if (parentNativeSessionId) {
-          const parentBinding = bindings.getByNative(providerId, parentNativeSessionId);
+          const parentBinding = sessions.byNative(providerId, parentNativeSessionId);
           if (parentBinding?.agentId === proposedAgentId) throw new Error('Native parent binding is invalid.');
           if (parentBinding) {
             parent = await acquireSession(parentBinding.agentId);
@@ -170,7 +170,7 @@ export function createAttachment(ctx: SessionCoreContext) {
         });
         if (response.payload.sessionId !== nativeSessionId) { await relay.closeAgent(proposedAgentId); throw new Error('Provider returned a different native session identity.'); }
         ledger.recordAttachment(relay.requireAgent(proposedAgentId), { session: nativeSession, ...(creationIdentity ? { nativeCreation: creationIdentity } : {}), ...(prefixIdentity ? { nativePrefix: prefixIdentity } : {}) });
-        for (const relative of nativeFamily(providerId, nativeSessionId)) relay.sessionControls?.setNativeOwner(relative.agentId, undefined);
+        for (const relative of sessions.family(providerId, nativeSessionId)) relay.sessionControls?.setNativeOwner(relative.agentId, undefined);
         watch(binding);
         journals.attach({ agentId: proposedAgentId, providerId, nativeSessionId, source: relay.requireAgent(proposedAgentId) });
         if (existing) lifecycle('session_idle_restored', binding);

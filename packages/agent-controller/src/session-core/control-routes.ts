@@ -33,7 +33,7 @@ import { boundedSourceIdentity, failureResponse, HostRequestError, json, parseAt
 export function createControlRoutes(ctx: SessionCoreContext) {
   const operationScope = (request: RemoteHostControlRequest): string => request.operationScope ?? 'local';
   async function create(request: RemoteHostControlRequest, payload: Record<string, unknown>, context?: TrustedSuccessionContext): Promise<AgentRemoteHttpResult> {
-    const { authorizeSuccessionRead, bindings, enrollment, markShared, mutationFamily, nativeRef, operationCache, options, project, providers, sessionRefs, successionBoundary, tracked, workerExtensions } = ctx;
+    const { authorizeSuccessionRead, sessions, enrollment, markShared, mutationFamily, nativeRef, operationCache, options, project, providers, sessionRefs, successionBoundary, tracked, workerExtensions } = ctx;
     const { providerId, operationId, proposedAgentId, editing, provenance, settings } = parseCreateRequest(request, payload);
     const source = provenance ? nativeRef(provenance) : undefined;
     const targets = source ? mutationFamily([source]) : [];
@@ -73,7 +73,7 @@ export function createControlRoutes(ctx: SessionCoreContext) {
             throw new OperationCacheError('operation_rejected', error instanceof Error ? error.message : 'The selected prompt could not be verified.');
           }
         }
-        if (bindings.isReserved(proposedAgentId)) {
+        if (sessions.isReserved(proposedAgentId)) {
           throw new HostRequestError(409, 'session_binding_conflict', 'The proposed Agent identity is already reserved.');
         }
         if (qualified && !savedCreation) {
@@ -126,7 +126,7 @@ export function createControlRoutes(ctx: SessionCoreContext) {
     return result.status >= 400 ? { ...result, body: JSON.stringify({ ...data, requestId }) } : result;
   }
   async function controlRequest(request: RemoteHostControlRequest, context?: TrustedSuccessionContext): Promise<AgentRemoteHttpResult> {
-    const { admission, authorizeSuccessionRead, bindings, callSession, directoryOperation, enrollment, hostStatus, liveAgent, markShared, mutationFamily, nativeRef, operationCache, options, project, providers, sessionRefs, succession, successionBoundary, successionReady, successionService, team, tpm, tracked } = ctx;
+    const { admission, authorizeSuccessionRead, sessions, callSession, directoryOperation, enrollment, hostStatus, liveAgent, markShared, mutationFamily, nativeRef, operationCache, options, project, providers, sessionRefs, succession, successionBoundary, successionReady, successionService, team, tpm, tracked } = ctx;
     try {
       await successionReady;
       const refusal = admission.refuse(request.method);
@@ -247,7 +247,7 @@ export function createControlRoutes(ctx: SessionCoreContext) {
           ? `TPM operation remains unresolved. ${error.message}` : error instanceof Error ? error.message : 'TPM request failed.' }); }
       }
       const selectedProvider = request.method === 'GET' ? url.searchParams.get('providerId') : payload?.providerId;
-      const existing = request.sessionId ? bindings.getByAgent(request.sessionId) : undefined;
+      const existing = request.sessionId ? sessions.byAgent(request.sessionId) : undefined;
       // Uplink recovery may rebind a still-live session after its provider is disabled.
       // It must not open another native session or revive an idle released session.
       const recovering = request.method === 'POST' && (url.pathname === '/remote/attach' || url.pathname === '/remote/child/attach')
@@ -344,7 +344,7 @@ export function createControlRoutes(ctx: SessionCoreContext) {
         }
         if (url.pathname === '/remote/stop') {
           const operationId = parseStopRequest(request, payload);
-          const targetBindings = [...bindings.values()].filter(binding => liveAgent(binding.agentId));
+          const targetBindings = sessions.live().map(({ binding }) => binding);
           const targets = targetBindings.map(binding => binding.agentId);
           const mutationTargets = succession ? [...new Map(targetBindings.map(binding => { const target = nativeRef(binding); return [nativeSessionRefKey(target), target] as const; })).values()] : [];
           const results = await operationCache.execute({

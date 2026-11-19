@@ -21,6 +21,7 @@ import type { SessionCallerCatalog } from '../session-callers.js';
 import type { SessionCaller, SessionCallResult } from '../session-routes.js';
 import type { Admission } from './admission.js';
 import type { AttachmentLedger } from './attachment-ledger.js';
+import type { BoundSessions } from './bound-sessions.js';
 import type { ProviderRegistry } from './provider-registry.js';
 import type { AgentHostProviderRegistration, AgentHostRuntimeOptions, SessionBinding } from './types.js';
 
@@ -35,20 +36,24 @@ export interface SuccessionHandle {
   coordinator: SessionSuccessionCoordinator;
 }
 
+/** The part of the idle sessions the session core uses: it holds, waits on, watches and touches sessions; the host alone expires, connects and closes them. */
+export type IdleLeases = Pick<ReturnType<typeof createIdleSessions>, 'retain' | 'hasDemand' | 'watch' | 'wait' | 'touch'>;
+
 /**
  * What the modules of the session core share. The host runtime builds one context and hands it to each module's factory; a module reads
  * what it needs from it when it runs, never when it is created, so the order in which the runtime builds its parts does not matter.
  *
- * Contract. The context holds no behaviour of its own: its state is owned where it is created (the registrations, the bindings, the operation cache, the
- * idle sessions), and its functions are the ones the modules call across concerns. A member that is optional configuration (`tpm`, `team`, `enrollment`,
+ * Contract. The context holds no state of its own. Each piece of shared state has one owner module that is the only place assigning it, and the context
+ * carries that owner's interface: `providers` (registrations and their catalogs), `sessions` (bindings and families), `ledger` (prepared sessions, native
+ * attachments, worker tools, idle uncertainty), `operationCache` and `idle` (owned by their own modules). Its functions are the ones the modules call across concerns. A member that is optional configuration (`tpm`, `team`, `enrollment`,
  * `succession`) is undefined when the Controller was not configured with it.
  */
 export interface SessionCoreContext {
   readonly options: AgentHostRuntimeOptions;
   readonly admission: Admission;
   readonly relay: AgentRemoteRelay;
-  readonly bindings: SessionBindings;
-  readonly idle: ReturnType<typeof createIdleSessions>;
+  readonly sessions: BoundSessions<ReturnType<AgentRemoteRelay['requireAgent']>>;
+  readonly idle: IdleLeases;
   readonly operationCache: OperationCache;
   readonly hostStatus: ReturnType<typeof createHostStatusReader>;
   readonly cancelTimeoutMs: number;
@@ -75,7 +80,6 @@ export interface SessionCoreContext {
   mutationFamily(targets: readonly NativeSessionRef[]): NativeSessionRef[];
   directoryOperation<T>(scope: string, operationId: string, kind: string, targets: readonly NativeSessionRef[], parameters: unknown,
     dispatch: () => Promise<T>, validate?: () => Promise<void>): Promise<T>;
-  nativeFamily(providerId: string, nativeSessionId: string): SessionBinding[];
   originalCreation(target: NativeSessionRef): AgentEmptyCreationResult | undefined;
   originalNativePrefix(target: NativeSessionRef): { handle: AgentPersistenceHandle; source: NativeSessionRef } | undefined;
   assertHandoffState(target: NativeSessionRef, captured?: { epoch: string; seq: number }, allowMissing?: boolean): void;

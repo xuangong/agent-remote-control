@@ -50,58 +50,6 @@
    "reason": "Runs the Controller runtime over real state directories with fsync; moves to the StateFiles port once AgentHostOptions passes it through."
   },
   {
-   "test": "packages/agent-provider-claude/src/catalog-history.native.test.ts > projects isolated public SDK history in the real worker without opening or resuming a session",
-   "reason": "Starts the real Claude catalog worker process; a native-tier test in the unit project, to move to a .local test."
-  },
-  {
-   "test": "packages/agent-provider-claude/src/catalog.native.test.ts > persists one native custom title in the configured Claude home without spawning a session",
-   "reason": "Starts the real Claude catalog worker process; a native-tier test in the unit project, to move to a .local test."
-  },
-  {
-   "test": "packages/agent-provider-copilot/tests/native.test.ts > native MCP form roundtrip uses the normalized interaction contract",
-   "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
-  },
-  {
-   "test": "packages/agent-provider-copilot/tests/native-evidence.test.ts > retains a zero-input descriptor across native server lifetimes and resumes materialized history without replay",
-   "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
-  },
-  {
-   "test": "packages/agent-provider-copilot/tests/usage-native.test.ts > reads native session totals across turns and saved resume without counting cache tokens twice",
-   "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
-  },
-  {
-   "test": "packages/agent-provider-copilot/tests/journal-recording.test.ts > the recordings of the real Copilot CLI > partial-tool: a tool that streams output before it completes",
-   "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
-  },
-  {
-   "test": "packages/agent-provider-copilot/tests/journal-recording.test.ts > the recordings of the real Copilot CLI > settled: streamed text, a tool call with its result and a second turn, released and reopened",
-   "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
-  },
-  {
-   "test": "packages/agent-provider-copilot/tests/worker-tools.test.ts > native resume gives a session started without them the tools of a namespace, which the model calls without a prompt",
-   "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
-  },
-  {
-   "test": "packages/agent-provider-copilot/tests/session-rename.test.ts > persists a native Copilot rename during a turn without adding prompts or interrupting it",
-   "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
-  },
-  {
-   "test": "packages/agent-provider-copilot/tests/reference-history.test.ts > reads actual native history through the loaded SDK and a cold profile without resuming or changing ownership",
-   "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
-  },
-  {
-   "test": "packages/agent-provider-copilot/tests/handoff-capabilities.test.ts > cannot prevent native prompt admission by rejecting the submitted-prompt hook",
-   "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
-  },
-  {
-   "test": "packages/agent-provider-copilot/tests/native.test.ts > native apply_patch retains file diffs through Relay projection and saved resume",
-   "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
-  },
-  {
-   "test": "packages/agent-provider-copilot/tests/journal-recording.test.ts > the recordings of the real Copilot CLI > restart: the same session read again by a new CLI process",
-   "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
-  },
-  {
    "test": "packages/agent-relay-cloudflare/test/storage-incremental.test.ts > every commit of L stores exactly its complete encoding, and the caches agree with complete accounting",
    "reason": "Encodes and stores a Relay of 1,000s of records to prove commit cost; CPU bound by the size under test."
   },
@@ -216,18 +164,6 @@
   {
    "test": "packages/agent-relay-node/src/connection-diagnostics.test.ts > delivers bounded business timeout metadata without request payloads or query strings",
    "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
-  },
-  {
-   "test": "packages/agent-remote-debugger/src/cli-process.test.ts > built ardb against the recorded Relay > resolves Question, Plan Approval, Tool allow, and Tool deny in order",
-   "reason": "Starts the built debugger CLI as a child process against the recorded Relay; a process-tier test."
-  },
-  {
-   "test": "packages/agent-remote-debugger/src/cli-process.test.ts > built ardb against the recorded Relay > maps malformed JSON, stale requests, unavailable Agents, and timeout to stable categories",
-   "reason": "Starts the built debugger CLI as a child process against the recorded Relay; a process-tier test."
-  },
-  {
-   "test": "packages/agent-remote-debugger/src/cli-process.test.ts > built ardb against the recorded Relay > drives steer, cancel, and idle, interaction, and failed waits through Replica state",
-   "reason": "Starts the built debugger CLI as a child process against the recorded Relay; a process-tier test."
   },
   {
    "test": "packages/agent-remote-journal/src/session-journal.test.ts > SessionJournal > prepends 200,000 items and keeps the sequence contiguous",

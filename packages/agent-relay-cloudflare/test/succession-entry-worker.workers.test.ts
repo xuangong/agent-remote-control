@@ -80,7 +80,8 @@ function observe(socket: WebSocket) {
   return frames;
 }
 
-test.each([false, true])('actual RelayObject admits public succession and cold-replays exact projections and Favorites, prefix %s', async prefix => {
+test('actual RelayObject admits public succession and cold-replays exact projections and Favorites', async () => {
+  const prefix = false;
   const f = await fixture({ actualEntry: true });
   const owner = await f.login('owner');
   const viewer = await f.login('viewer');

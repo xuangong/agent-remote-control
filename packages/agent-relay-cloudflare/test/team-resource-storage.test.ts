@@ -68,3 +68,11 @@ it('transfers a file larger than the Team text quota and restores verified chunk
   }
   expect(Buffer.concat(chunks)).toEqual(bytes);
 });
+
+it('refuses a record over 128 KiB and a key that is empty or over 512 characters', async () => {
+  const f = fixture();
+  await expect(f.request({ action: 'put', key: 'big', bytes: Array.from({ length: 128 * 1024 + 1 }, () => 1) })).rejects.toThrow(/128 KiB/);
+  await f.request({ action: 'put', key: 'edge', bytes: Array.from({ length: 128 * 1024 }, () => 1) });
+  await expect(f.request({ action: 'put', key: '', bytes: [1] })).rejects.toThrow(/Invalid resource storage key/);
+  await expect(f.request({ action: 'get', key: 'k'.repeat(513) })).rejects.toThrow(/Invalid resource storage key/);
+});

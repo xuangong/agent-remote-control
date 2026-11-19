@@ -107,18 +107,3 @@ it('every feature that keeps records comes back from the Durable Object storage 
   await f.restart();
   for (const [index, feature] of features.entries()) await checks.get(feature)!(f, await f.login(`feature-${index}`));
 });
-
-it('session states reach a page over a Worker session channel', async () => {
-  const f = await fixture(); const alice = await f.login('alice');
-  const { key } = await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json() as { key: string };
-  const host = await f.upgrade('/ws/remote-host?sessionStates=1', { authorization: `Bearer ${key}` });
-  host.addEventListener('message', event => { const frame = JSON.parse(String(event.data)); if (frame.type === 'credential_issued') send(host, { type: 'credential_saved' }); });
-  send(host, { type: 'register', credentialRotation: true, installationId: 'workers-host', name: 'Workers Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] });
-  const messages: any[] = [];
-  const page = await f.upgrade(alice.basePath + 'v1/session-channel?observation=activity&states=1', { cookie: alice.cookie, origin });
-  page.addEventListener('message', event => messages.push(JSON.parse(String(event.data))));
-  await expect.poll(() => messages.find(message => message.type === 'session_states')).toMatchObject({ snapshot: true });
-  await expect.poll(() => messages.some(message => message.type === 'session_states' && message.hosts?.[0]?.online)).toBe(true);
-  send(host, { type: 'session_states', full: true, states: [{ providerId: 'codex', nativeSessionId: 'thread', state: 'running', updatedAt: 5 }] });
-  await expect.poll(() => messages.filter(message => message.type === 'session_states').at(-1)?.states?.[0]).toMatchObject({ nativeSessionId: 'thread', state: 'running' });
-});

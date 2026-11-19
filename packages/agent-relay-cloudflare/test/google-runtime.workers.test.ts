@@ -29,12 +29,8 @@ it('actual Google Worker persists pending OAuth, sessions, pairings and Host cre
   expect((await f.request(pending.callback, { headers: { cookie: pending.cookie } })).status).toBe(401);
   restored.socket.close();
   f.setGoogleConfig('other-client'); await f.restart(); expect((await f.request('/health')).status).toBe(503);
-}, 30000);
-
-it('Google Worker rejects removed allowlist accounts after a persisted restart', async () => {
-  const f = await fixture({ actualEntry: true, authProvider: 'google' });
-  const owner = await f.finishGoogleLogin(await f.beginGoogleLogin());
+  // An account removed from the allowlist loses its session after a persisted restart.
   f.setGoogleConfig('workers-client', 'other@example.com'); await f.restart();
   expect((await f.json('/auth/status', owner.cookie)).status).toBe(401);
   expect((await f.request(owner.basePath + 'v1/session-channel?observation=session', { headers: { upgrade: 'websocket', origin, cookie: owner.cookie } })).status).toBe(401);
-}, 15000);
+}, 30000);

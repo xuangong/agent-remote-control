@@ -751,6 +751,7 @@ Every shortfall of a finished step is tracked here with the step that owns it an
 | O37 | `App.succession.owners-and-attachment` 'retains independent B stores and selected Track through an Ask draft edit before publishing the role' fails (5.2 s, then 5.2 s alone): it expects 'needs synchronization' after a local edit, which O28's automatic re-discovery no longer shows. It fails the same at 21d08d6a | open-items sweep | owner, with O35 | closed (O35 slice): the draft-edit variant now expects the page to discover again and apply the edited document with no Retry (binding B, the edited draft in the composer, independent B text, image and Ask owners kept, Track layouts unchanged); 5.1 s failing to 0.36 s passing. With the narrowing it fails again (5.1 s, the Retry never comes) |
 | O38 | The 30-minute M8 soak fails `memory-flat`: the page heap after a collection rose from 12.8 MB (first sample; first-quarter median 18.0 MB) to 38.1 MB (last-quarter median 35.8 MB, limit 32.3 MB) while the three panes grew by 1,086 rows; extra rows and sockets stayed flat. The 10-minute run at the open-items sweep grew 12.7 to 24.3 MB for about 360 rows, so the growth per row is not larger than before this sweep, but the invariant cannot tell a leak from retained conversation: it compares a growing page with a fixed 1.5 times plus 5 MB | sweep end gate | owner | closed (final slice, 2026-11-19): no leak. The invariant now judges the heap per retained row: samples carry the rendered rows, and after the soak a fresh page opens the same Window and loads older history until it holds the soaked page's rows; the soaked heap may be at most 1.25 times the fresh page's heap per row plus 5 MiB, and growing rows with no fresh page are not judged (3 invariant tests). 30-minute run, seed 8210: 1,086 rows; soaked page 38.1 MB (35.1 KB per row), fresh page holding the same 1,086 rows 36.3 MB (33.4 KB per row), so 1.85 MB (5 percent) after 180 cycles is all the soak adds. M8 passed. The page keeps every row of an open conversation at about 33 KB each (10,000 rows would be about 330 MB); bounding retained rows is a product decision, not a leak |
 | O39 | The debugger's `./testing/*` exports point at `e2e/` and `web/`, which the published package does not contain, so an external consumer sees broken entries | O19 | final slice | closed (dc6c1b44, 496b077a): `publishConfig.exports` lists `./server` and `./dist/*` only; the testing entries stay workspace-only (`pnpm pack`: before 3 entries, 2 missing targets; after, every target present). Running the installed-package test found two packaging defects that had kept it red: the public `agent-session-runtime` depends on `agent-timeline`, which was private (npm E404 on install), and the O19 exports map hid `dist/server.js` and `dist/local-session-succession.js`, which published consumers import (TS2307). `agent-timeline` is publishable now (nothing is published) and `./dist/*` stays exported; `scripts/agent-remote-debugger-package.test.mjs` 0 of 1 to 1 of 1 |
+| O40 | The E3 flow 'the reader keeps their line when a Controller restart replaces the journal...' fails intermittently: after the restart and a send, the reader's row moves 6,119 px, to the newest row | final end gate | owner, before deployment | open: 2 of 4 runs failed (the gate and 1 of 3 reruns), the same distance each time; no product source changed since the sweep gate, where it passed. Whether the page or the flow's timing moves the reader is not yet known: the next step is the flow's trace on a failing run, then a unit test of `useTimelineScroll` for the order it shows |
 
 **Skipped tests per tier at the M15 end gate** (2026-11-19, HEAD after O33 and the gate repairs). Before is the final gate of 57027f03.
 
@@ -764,3 +765,138 @@ Every shortfall of a finished step is tracked here with the step that owns it an
 
 
 **Gate of the structure, redundancy and product sweep** (2026-11-19, HEAD a09d8fff for tests and the instance build). `pnpm test` exit 0 with slow-test enforcement on (Controller 1,970 passed and 10 skipped, Workbench 3,235 and 6, relay-core 1,162, seams 327 and 9, Node Relay 286 and 6; one test over 1 s passed its re-measurement alone); `test:conformance` 31; `test:cloudflare` 155; `test:preview-browser` 73 (a first run failed 1: `session-recovery` on WebKit logged an aborted `/v1/remote/hosts` fetch 'due to access control checks' during a page lifecycle; 4 reruns of the file and the whole tier passed); `test:e2e:flows` 31; `test:components` 460 passed, 70 skipped; `test:e2e` 283 passed, 67 skipped (2 fewer skips: O34); `arch:check` 0 failing findings, 22 documented exceptions (55 before); `typecheck`; `fixtures:check`; `smoke:quick` seed 9101 (M1, M2, M4, M7) passed, M1 first rows on revisit 93 ms Claude and 120 ms Codex, M4 `refused-window-not-resent` checked 6; M5 seed 5103 passed; M8 30 minutes seed 8109 failed `memory-flat` only (O38); `compatibility:update` then `check`.
+
+## 11. Final comparison (completion criterion 7)
+
+Measured 2026-11-19 on one machine (10 cores, 16 GB, Node 22.23.2): the baseline tag `baseline/im-session-2026-11-18` (53bd3d04) in a temporary worktree (`pnpm install --frozen-lockfile`, `pnpm -r run build`, removed afterwards) and HEAD of `design/im-session-service`, the same commands in sequence with nothing else running. Test counts come from each run's Vitest summary; slow tests from a JSON reporter on every package; static counts from `vitest list --json` by file suffix and `playwright test --list`.
+
+**Noise.** The HEAD per-change selections ran three times: every command within 0.5 s of its median (under 5 percent). The baseline Workbench selection ran twice: 108.4 s and 106.3 s (2 percent); the Cloudflare package took 215.7 s in both baseline runs. The baseline selections fail 9 or 10 tests in every run (the Workbench suite, and one `test:preview-browser` test); HEAD fails none.
+
+### 11.1 Per-change test scope
+
+Baseline: what `verify:changed` selects, the changed package and every dependent (tests only; its build and typecheck come on top). HEAD: `pnpm test:unit` of the module's files plus the seam suites section 5.9 names for it (median of three).
+
+| Change | Baseline home, selection | Tests | Wall | HEAD module, selection | Tests | Wall | Change |
+|---|---|---:|---:|---|---:|---:|---|
+| Journal window rule | relay `journal-session-stream.ts`: hosted, Cloudflare, Controller, Workbench, debugger | 6,009 | 431 s | `window-decision` and its vector consumers (journal, Controller contract, client absorb); S2, S4 | 230 | 8.0 s | 26 times fewer tests, 54 times faster |
+| Session-control rule | hosted `control.ts`: same | 6,009 | 431 s | `domain/session-control`, `stream-control`, `lease-view`; S3 | 215 | 12.4 s | 28x, 35x |
+| Succession rule | Workbench `useSessionSuccession.ts`: Workbench, debugger | 2,994 | 108 s | `agent-client/src/succession`, the two hook test files; S3, S6 | 368 | 13.5 s | 8x, 8x |
+| Workbench state rule | Workbench `App.tsx`: same | 2,994 | 108 s | `state/draft-ownership`; S6 | 13 | 3.1 s | 230x, 35x |
+| Controller session-core rule | Controller `host.ts`: Controller, Workbench, debugger | 4,789 | 209 s | `session-core/`; S1, S2 | 244 | 6.2 s | 20x, 34x |
+| Relay host-session rule | hosted `broker.ts`: as the first row | 6,009 | 431 s | `host-session`, `broker-heartbeat`; S2, S3, S4 | 281 | 11.9 s | 21x, 36x |
+| Renderer component | web `react/AgentTimeline`: web, Workbench, debugger | 3,950 | 145 s | client-web `AgentTimeline*`; S6 | 95 | 4.8 s | 42x, 30x |
+| Protocol schema | protocol: every package but the providers and the tunnel | 8,143 | 468 s | protocol, fixtures, S2, S3, `fixtures:check` | 704 | 14.4 s | 12x, 33x |
+
+Against the target of 5.10 (2 to 10 s, worst 40 s): no change over 15 s, four under 10 s. The S3 seam suite is 10 s of every selection that includes it (four of eight); it is the next file to make faster.
+
+### 11.2 Total test time
+
+| Run | Baseline | HEAD | Change |
+|---|---|---|---|
+| `pnpm test` (every package's suite, serially; the Cloudflare package included) | 516.6 s, 9,610 tests, 9 failed | 315.4 s, 11,362 tests, 0 failed | -39 percent, +1,752 tests |
+| `pnpm test` with slow-test enforcement (gate) | n/a | 339.1 s, 11,362 tests (22 skipped), 0 failed; the reporter counted 336 over 300 ms and 16 over 1 s (11 allowlisted, 5 passed their re-measurement alone) | |
+| Workbench package | 86.3 s, 2,853 tests (9 failed) | 67.6 s, 3,281 tests | -22 percent |
+| Controller package | 75.1 s, 1,795 | 58.6 s, 1,980 | -22 percent |
+| Cloudflare (`test:cloudflare`) | 215.7 s, 239 | 48.3 s, 155 (31 in `workerd`) | |
+| `test:preview-browser` | 137.2 s, 73 (1 failed) | 141.8 s, 73, 1 failed (the same WebKit `session-recovery` test as at the baseline; it fails alone too) | |
+| `test:conformance` | 3.1 s, 31 | 6.4 s, 31 | |
+| E2E flows (`test:e2e:flows`) | none | 73.9 s, 31, 1 failed (E3 replacement; see O40) | |
+| Playwright e2e (`test:e2e`; at the baseline the Workbench's 93 files) | stopped at its 480 s global deadline after 266 of 1,330 runs: 187 passed, 24 failed, 55 skipped, 1,064 did not run | 540.3 s (9.0 min), 283 passed, 67 skipped, 0 failed | the baseline never finished |
+| Workbench e2e (`test:e2e:lab`) | (part of the row above) | 527.4 s (8.8 min), 250 passed, 20 skipped, 0 failed | |
+| Component tier (`test:components`) | none | 483.2 s (8.0 min), 459 passed, 70 skipped, 1 failed (`session-view-responsive` in the loaded run; 3 of 3 reruns pass) | |
+| `smoke:quick` | none (no harness) | 359.4 s, seed 9201: M1, M2, M4 and M7 passed (M1 first rows on revisit 100 ms Claude and 109 ms Codex at 300 ms and 2 percent loss) | |
+| The full gate, summed | not completable (the e2e deadline) | 2,556 s (42.6 min) with 3 single failures, each triaged in 11.8 | |
+
+### 11.3 Test counts per tier
+
+Static counts. Vitest tests by file suffix; at the baseline no suffix tiers existed, so its "unit" holds the process and real-socket tests that M0 counted (about 141 process, about 1,500 real-stack).
+
+| Tier | Baseline | HEAD |
+|---|---:|---:|
+| Unit (Vitest, mock data) | 9,289 | 10,624 |
+| Contract and seams (`*.contract`, `*.integration`, seams package) | 9 | 425 |
+| Transport (real socket) | 51 | 31 |
+| Process | 0 (in unit) | 33 |
+| Workers (`workerd`) | 239 (the whole Cloudflare package) | 31 workers and 124 Cloudflare tests in Node |
+| Component (jsdom preview tier) | 73 | 73 |
+| Component (Playwright, distinct tests) | 0 | 187 (530 runs over 8 projects, 44 files) |
+| E2E flows | 0 | 31 |
+| E2E specs (Playwright, distinct) | 498 (1,330 runs, 93 files) | 273: `agent-e2e/specs` 183 (350 runs, 38 files), Workbench 90 (270 runs, 14 files) |
+| Smoke scenarios | 0 | 7 (M1, M2, M3, M4, M5, M7, M8; M6 deferred), 4 in `smoke:quick`; 72 harness unit tests |
+| Local/native | 134 | 114 |
+
+### 11.4 Slow tests
+
+Measured in the same full serial runs (each package's Vitest with all its workers), counting the mock-data tiers only (process, transport, workers and local excluded).
+
+| Package (baseline name to HEAD name) | Over 300 ms | Over 1 s |
+|---|---|---|
+| Controller | 225 to 165 | 50 to 25 |
+| Workbench | 171 to 152 | 37 to 8 |
+| Cloudflare | 150 to 3 | 31 to 3 |
+| Copilot provider | 30 to 30 | 7 to 8 |
+| hosted to relay-core | 27 to 7 | 4 to 0 |
+| web to client and client-web | 20 to 2 | 8 to 0 |
+| relay to session-runtime | 16 to 4 | 3 to 0 |
+| debugger | 11 to 2 | 4 to 0 |
+| journal | 2 to 2 | 2 to 2 |
+| others | 14 to 48 (Node Relay 29, seams 12) | 6 to 2 |
+| **All** | **666 to 415** (7.0 to 3.7 percent) | **152 to 48** |
+
+The slow-test reporter, which re-measures a test over 1 s alone before failing, passed the gate run (0 failures; 16 over 1 s by its own count, 11 of them allowlisted). Allowlist: none at the baseline (no reporter; M0 counted 119 over 1 s), 71 at its peak, 11 now.
+
+### 11.5 Module sizes and architecture
+
+| Measure | Baseline | HEAD |
+|---|---:|---:|
+| `broker.ts` | 2,737 | 423 |
+| `host.ts` | 1,807 | 551 |
+| `App.tsx` | 3,765 | 90 |
+| `replica/reducer.ts` | 725 | 5 (a re-export of four modules) |
+| `gateway.ts` | 1,222 | 1,228 |
+| `useSessionSuccession.ts` | 1,152 | 1,072 |
+| Source files over 800 lines (tests, fixtures and `dist` excluded) | 13 | 10 |
+| Source files over 1,000 lines | 9 | 6 |
+| Upward (`layer`) imports | 86 | 2 |
+| Cross-package relative imports | 225 | 10 |
+| `dist` imports | 36 | 8 |
+| Adapter imports adapter | 13 | 0 |
+| Controller knows Relay (rule added in M2) | not checked | 2 |
+| Documented exceptions; failing findings | none (report only); 360 | 22; 0 (blocking) |
+| Inline wire messages in tests | 3,877 in 415 files | 3,687 in 435 files |
+
+The baseline architecture counts are the M0 rules (`scripts/arch-check.mjs` and `architecture/modules.json` of 7ddd94f8) run on the baseline tree; HEAD runs its own, stricter rules. The files still over 1,000 lines: Codex `session.ts` (1,874, unchanged), `gateway.ts`, the session runtime's `agent-manager.ts` (1,124), `useSessionSuccession.ts`, the client's `remote-session-client.ts` (1,066) and the performance baseline script (1,011).
+
+### 11.6 Product defects found and fixed during the restructuring
+
+13, each found by a smoke run, an e2e or component run, or a package test, and pinned at the lowest tier that holds it.
+
+| # | Defect | Found by | Pin |
+|---|---|---|---|
+| 1 | First paint waited for the Relay's lease: 3.3 s at 300 ms, 16 s at 1,500 ms round trip | smoke M1 (M4) | S7 'a restored record paints before any frame arrives', client `display-lease.test.ts`, E3 reload flow (fixed in M8; 80 to 114 ms now) |
+| 2 | A Controller restart moved the reader to the first row on the legacy read path (row keys carried the journal epoch); also at the baseline | E3 flow (O24) | `timeline-entry-key.test.ts`, the reducer's unkeyed replacement test, E3 with smart reading off |
+| 3 | One failed fetch of the code-split `App` chunk left the page blank for good | smoke M1 full profile (O27) | `chunk-recovery` 5 unit tests (3 mutations), E3 flow |
+| 4 | 'Session composition needs synchronization (retired)' with no rows when a local edit overtook an application | e2e (O28) | 13 `reduceRefresh` tests (3 mutations), the un-skipped spec |
+| 5 | On a phone the floating controls covered the header controls | e2e phone project (O30) | unit tests, component spec `floating-controls-clearance` |
+| 6 | iOS with a hardware keyboard: Shift+Enter sent the draft | component tier on WebKit (O31) | 2 `ComposerEditor` unit tests (3 mutations), the WebKit component test |
+| 7 | A full-screen Ask or TPM window had its controls under the floating column | phone project (O32) | 2 `useTrackingPosition` unit tests |
+| 8 | The Interrupt button was 30 px high under a coarse pointer | phone project (O32) | component spec `touch-targets` |
+| 9 | The folder picker returned focus to nothing in Safari | WebKit project (O32) | `WorkspaceFolderPicker` unit test |
+| 10 | With the keyboard open (340 px visible), the floating Window control covered 'Hide message input' | phone project (O34) | 3 `useTrackingPosition` unit tests, both `mobile.spec` variants |
+| 11 | After a quota refusal the publisher re-sent the identical window on every backoff (5 sends of about 4 MB in 13 s) | smoke M4 (O36) | 5 publisher tests, S2 transcript `quota-refuses-window`, M4 invariant `refused-window-not-resent` |
+| 12 | The public `agent-session-runtime` depended on the private `agent-timeline`, so the published packages could not be installed | the installed-package test (O39) | `scripts/agent-remote-debugger-package.test.mjs` |
+| 13 | The debugger's exports map (O19) hid `dist/server.js` and `dist/local-session-succession.js` from published consumers, and named two testing entries the package does not ship | the installed-package test, `pnpm pack` (O39) | the same test; `publishConfig.exports` |
+
+Not counted: O22 and O26 (stack and harness faults), O29 and O33 (not defects), O38 (no leak).
+
+### 11.7 Against section 7
+
+Met: per-change scope (every measured change under 15 s, a rule change never selects another layer's package); module sizes (roots under 900, `App.tsx` 90); layer violations blocking with 22 documented exceptions; every smoke finding has its pin. Short: tests over 300 ms are 3.7 percent, not under 1 percent, and 48 are over 1 s in a full parallel run (the reporter's re-measurement passes them all but the allowlisted 11); the unit count grew instead of shrinking (new tables and hook tests outnumber the deletions); inline wire literals in tests are 3,687, not zero; six source files are still over 1,000 lines.
+
+### 11.8 The end gate
+
+HEAD after the final slice (24c9ca76 for the tests, the instance built from it): `pnpm test` with enforcement exit 0 (11,362 tests, 22 skipped); `test:conformance` 31; `test:cloudflare` 155; `test:e2e` 283 passed, 67 skipped; `test:e2e:lab` 250 passed, 20 skipped; `arch:check` 0 failing findings, 22 documented exceptions; `fixtures:check`; `typecheck`; `smoke:quick` seed 9201, 4 of 4; the installed debugger package test 1 of 1; `compatibility:update`, then `check`. Three single failures, each rerun:
+
+- `test:preview-browser`, `session-recovery` on WebKit: WebKit logs an aborted `/v1/remote/hosts` fetch 'due to access control checks' during a page lifecycle. It fails the same at the baseline tag and fails alone now; it passed on reruns at the sweep gate. Not a regression; open as before.
+- `test:components`, `session-view-responsive` on `chromium-desktop`: 'Open chat commands' not found within 5 s in the loaded run; 3 of 3 reruns pass (11 s each). A load flake.
+- `test:e2e:flows`, E3 'the reader keeps their line when a Controller restart replaces the journal...': the reader's row moved 6,119 px (to the newest row) after the send that follows the restart. It failed in the gate and in 1 of 3 reruns, with the same number; no product source changed since the sweep gate, where it passed. Open as O40.

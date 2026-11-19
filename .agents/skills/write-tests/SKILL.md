@@ -6,14 +6,17 @@ description: Use when writing, changing, moving or deleting tests in this reposi
 # Writing tests here
 
 Every rule below comes from the 2026-11 test restructuring. Before it, a one-line
-change ran about 9,400 tests in 8 minutes, flaky tests came and went with machine
-load, and the same rule was asserted in four packages. After the first ten
-migration steps:
-- a window-rule change selects 207 tests (about 1.5 s), down from about 6,100;
-- a session-control rule change selects 61 tests (under 1 s);
-- a succession rule change selects 231 tests (about 6 s), down from about 3,300 (81 s);
-- `agent-client` unit runs 524 tests in 1.3 s with none over 300 ms (it was 13.6 s);
-- first paint under a 1,500 ms round trip went from 16 s to 114 ms, found by a smoke test and pinned by a seam test.
+change ran the changed package and every dependent: 3,000 to 8,100 tests in 2 to
+8 minutes with about ten failing, and the same rule was
+asserted in four packages. Measured at the end, same machine, baseline tag against
+HEAD (section 11 of `docs/superpowers/specs/2026-11-18-target-architecture-and-tests.md`):
+- a rule change runs its module and its seams: 13 to 370 tests in 3 to 14 s
+  (window rule 230 tests, 8 s, was 6,009 in 431 s; Workbench state 13 tests, 3 s,
+  was 2,994 in 108 s; protocol schema 704 tests, 14 s, was 8,143 in 468 s);
+- `pnpm test` runs 11,362 tests in 315 s with none failing (9,610 in 517 s, 9 failing);
+- tests over 1 s: 152 to 48 in a full parallel run (allowlist 11); over 300 ms: 666 to 415;
+- the largest files: `broker.ts` 2,737 to 423 lines, `host.ts` 1,807 to 551, `App.tsx` 3,765 to 90;
+- 13 product defects were found by smoke, e2e and package tests and pinned at the lowest tier.
 
 ## 1. Design the module first; the tests follow
 
@@ -87,6 +90,8 @@ Never delete a test because it looks redundant. For each rule that moves into a 
 
 Mutation checks also show where the old suite was blind. Several succession rules (for example "a restored source always settles") had no old test that failed when they broke. The new module covers them, so the change added coverage while it removed redundancy.
 
+A wiring test that catches mutations only in a module with no unit test of its own is that module's only coverage, not a duplicate. Write the owner's unit tests first, then judge the wiring test again. The final census of the Relay's gateway and broker tests found no deletable test for this reason: 152 of 265 were the only coverage of route and composition modules.
+
 Expect fewer deletions than a size estimate predicts. Old whole-app tests often check composition (layout, wiring, several features together) rather than the rule. They stay until the composition itself becomes a module.
 
 ## 6. Test what you touched
@@ -126,4 +131,7 @@ Examples:
 - **Raising a timeout or `waitFor` to make a flake pass.**
 - **A test that reads `process.cwd()` or the repository's compatibility manifest.**
 - **Importing the same module by path and by package name.** You get two copies, and `instanceof` checks fail. Import by package name.
+- **A resource invariant against a fixed limit while the content grows.** The soak's heap check could not tell a leak from a longer conversation. Normalize by what is retained: compare with a fresh page holding the same rows.
+- **A package `test` script that chains two runs.** File arguments reach only the last run. Give the package a `test:unit` script that `pnpm test:unit` prefers.
+- **Trusting the workspace for packaging.** Workspace resolution hides a private dependency under a public package and an `exports` map that drops a published path. Run the installed-package test (`scripts/*-package.test.mjs`) after changing a manifest.
 - **Measuring through a harness that changes what it measures.** The first-paint probe closed the page inside the store's write-behind window. Check the probe before blaming the product.

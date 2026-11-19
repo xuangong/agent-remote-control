@@ -27,6 +27,8 @@ export type GatewayRelayOptions = HostedAuthOptions & {
   windowChangesWaitMs?: HostedRelayOptions['windowChangesWaitMs'];
   controllerReleases?: HostedRelayOptions['controllerReleases'];
   authorityOutageGraceMs?: HostedRelayOptions['authorityOutageGraceMs'];
+  /** The largest durable Relay state, in bytes. Defaults to 64 MiB; a test sets a small one to reach the ceiling cheaply. */
+  maxStateBytes?: number;
   /** Trusted equivalent transport origins; production entrypoints do not configure aliases. */
   originAliases?: readonly string[];
 }
@@ -109,7 +111,7 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
       let journalService: HostJournals | undefined;
       let listening = false;
       const openDurableParts = async () => {
-        if (options.stateFile) storage = openGatewayState(options.stateFile, auth.secret, hostedAuthStorageIdentity(auth));
+        if (options.stateFile) storage = openGatewayState(options.stateFile, auth.secret, hostedAuthStorageIdentity(auth), options.maxStateBytes);
         if (!options.journalFile) return;
         journalDatabase = await openNodeJournalDatabase(options.journalFile);
         journalService = createHostJournals({ store: new SqlJournalStore(journalDatabase) });

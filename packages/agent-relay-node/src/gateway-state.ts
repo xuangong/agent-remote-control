@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 const MAX_STATE_BYTES = 64 * 1024 * 1024;
 
 /** One writer, atomic authenticated snapshots; no transcript or raw device keys. */
-export function openGatewayState<T>(file: string, secret: string, scope: string) {
+export function openGatewayState<T>(file: string, secret: string, scope: string, maxStateBytes = MAX_STATE_BYTES) {
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   const lockFd = openSync(file + '.lock', 'a+', 0o600);
   try { acquireStateLock(lockFd); } catch (error) { closeSync(lockFd); throw error; }
@@ -18,13 +18,13 @@ export function openGatewayState<T>(file: string, secret: string, scope: string)
   const encode = (value: T) => {
     const payload = JSON.stringify(value);
     const content = JSON.stringify({ payload, signature: sign(payload) });
-    if (Buffer.byteLength(content) > MAX_STATE_BYTES) throw new Error('Relay state is too large.');
+    if (Buffer.byteLength(content) > maxStateBytes) throw new Error('Relay state is too large.');
     return content;
   };
   try {
     let initial: T | undefined;
     if (existsSync(file)) {
-      if (statSync(file).size > MAX_STATE_BYTES) throw new Error('Relay state is too large.');
+      if (statSync(file).size > maxStateBytes) throw new Error('Relay state is too large.');
       const record: unknown = JSON.parse(readFileSync(file, 'utf8'));
       if (!record || typeof record !== 'object' || !('payload' in record) || !('signature' in record) || typeof record.payload !== 'string' || typeof record.signature !== 'string') throw new Error('Invalid Relay state.');
       const actual = Buffer.from(record.signature, 'hex'); const expected = Buffer.from(sign(record.payload), 'hex');
@@ -36,7 +36,7 @@ export function openGatewayState<T>(file: string, secret: string, scope: string)
       acceptsSnapshot(value: T, remainingSnapshotBytes: number) {
         if (!Number.isSafeInteger(remainingSnapshotBytes) || remainingSnapshotBytes < 0) return false;
         const bytes = Buffer.byteLength(JSON.stringify({ payload: JSON.stringify(value), signature: '0'.repeat(64) }));
-        return bytes <= MAX_STATE_BYTES - remainingSnapshotBytes;
+        return bytes <= maxStateBytes - remainingSnapshotBytes;
       },
       save(value: T) {
         if (closed) throw new Error('Relay state is closed.');

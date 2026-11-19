@@ -14,18 +14,6 @@
    "reason": "Encodes and stores a Relay of 1,000s of records to prove commit cost; CPU bound by the size under test."
   },
   {
-   "test": "packages/agent-relay-node/src/devbox-preview.test.ts > opens Devbox through a root preview and retains its browser identity, Window writes and session channel",
-   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
-  },
-  {
-   "test": "packages/agent-relay-node/src/hosted-runtime.test.ts > refuses a near-ceiling handoff before the native effect while keeping the Relay readable",
-   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
-  },
-  {
-   "test": "packages/agent-relay-node/src/hosted-runtime.test.ts > protects an admitted near-ceiling reserve from ordinary writes and completes durable replay",
-   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
-  },
-  {
    "test": "packages/agent-relay-node/src/preview-tunnel.test.ts > renews on upload traffic without an iframe and expires after traffic stops",
    "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
   },

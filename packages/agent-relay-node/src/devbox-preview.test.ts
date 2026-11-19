@@ -21,7 +21,7 @@ async function fixture() {
   const port = (probe.address() as { port: number }).port;
   await new Promise<void>(resolve => probe.close(() => resolve()));
   const canonicalOrigin = `http://localhost:${port}`;
-  const devbox = await createDevboxServer({ origin: canonicalOrigin, stateDir: join(directory, 'state'), webDist });
+  const devbox = await createDevboxServer({ origin: canonicalOrigin, stateDir: join(directory, 'state'), webDist, windowChangesWaitMs: 20 });
   await devbox.listen(port, '127.0.0.1'); onPreviewCleanup(() => devbox.close());
   const preview = await previewFixture({ previewDomain: 'arc.test', target: canonicalOrigin });
   const origin = new URL(await preview.entryUrl('/')).origin;
@@ -77,7 +77,7 @@ it('opens Devbox through a root preview and retains its browser identity, Window
   expect(await listed.json()).toMatchObject({ windows: [{ id: 'devbox-preview-window', title: 'Preview transport' }] });
 
   const unchanged = await f.fetch(windows + '/devbox-preview-window/changes?afterRevision=0', {
-    headers, signal: AbortSignal.timeout(17000),
+    headers, signal: AbortSignal.timeout(5000),
   });
   expect(unchanged.status, await unchanged.clone().text()).toBe(200);
   expect(await unchanged.json()).toMatchObject({ window: { id: 'devbox-preview-window', revision: 0 } });

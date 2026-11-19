@@ -30,7 +30,7 @@ async function assets() {
   await writeFile(join(directory, 'assets/main.js'), 'window.controller = true;');
   return directory;
 }
-async function fixture(provider: 'google' | 'mainsite' | 'gateway', requestTimeout = 5000) {
+async function fixture(provider: 'google' | 'mainsite' | 'gateway', requestTimeout = 5000, maxStateBytes?: number) {
   const keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
   const grants = new Map<string, { nonce: string; challenge: string; redirect: string }>();
   const identity = createServer(async (request, response) => {
@@ -64,7 +64,7 @@ async function fixture(provider: 'google' | 'mainsite' | 'gateway', requestTimeo
   let url = 'http://127.0.0.1:0'; let relay: ReturnType<typeof createGatewayRelay> | undefined;
   const start = async () => {
     relay = createGatewayRelay({ ...(provider === 'google' ? { provider, google: { clientId: 'runtime-client', clientSecret: 'runtime-client-secret', allowedEmails: ['owner@example.com'], endpoints: { authorization: issuer + '/authorize', token: issuer + '/token', jwks: issuer + '/jwks' } } } : { provider, issuer }),
-      origin: url, secret, stateFile: join(directory, 'state.json'), servePage: await createGatewayStaticPages(directory, { origin: url }) });
+      origin: url, secret, stateFile: join(directory, 'state.json'), maxStateBytes, servePage: await createGatewayStaticPages(directory, { origin: url }) });
     url = (await relay.listen(Number(new URL(url).port))).url;
   };
   const stop = async () => { const active = relay; relay = undefined; await active?.close(); };
@@ -191,11 +191,13 @@ it.each(['google', 'mainsite', 'gateway'] as const)('Node %s keeps login, pairin
   }
 }, 20000);
 
+/** A small durable-state ceiling: the rules near it do not depend on its size, and filling the default 64 MiB costs seconds. */
+const STATE_CEILING = 5 * 1024 * 1024;
 const envelopeBytes = (state: HostedRelayState) => Buffer.byteLength(JSON.stringify({ payload: JSON.stringify(state), signature: '0'.repeat(64) }));
 function fillOrdinaryReceipts(state: HostedRelayState, targetBytes: number) {
   const broker = state.tenants[0]!.broker;
   broker.bindings.push({ agentId: 'ordinary-agent', hostId: broker.hosts[0]!.id, providerId: 'fixture', nativeSessionId: 'ordinary' });
-  broker.creations = Array.from({ length: 1024 }, (_, index) => ['ordinary-' + index, { fingerprint: '"'.repeat(16384), agentId: 'ordinary-agent' }]);
+  broker.creations = Array.from({ length: 128 }, (_, index) => ['ordinary-' + index, { fingerprint: '"'.repeat(16384), agentId: 'ordinary-agent' }]);
   let excess = envelopeBytes(state) - targetBytes;
   for (const [, receipt] of [...broker.creations].reverse()) {
     const remove = Math.min(Math.ceil(excess / 4), receipt.fingerprint.length - 1);
@@ -205,7 +207,7 @@ function fillOrdinaryReceipts(state: HostedRelayState, targetBytes: number) {
   expect(envelopeBytes(state)).toBe(targetBytes);
 }
 async function pairedRuntime() {
-  const f = await fixture('gateway', 20000), cookie = await f.finish(await f.begin());
+  const f = await fixture('gateway', 20000, STATE_CEILING), cookie = await f.finish(await f.begin());
   const info = await (await f.request('/auth/status', cookie)).json();
   const { key } = await (await f.request(info.basePath + 'v1/remote/pairings', cookie, { purpose: 'host-only' })).json();
   const host = await f.upgrade('/ws/remote-host?successionEnrollment=2', { authorization: `Bearer ${key}` });
@@ -225,7 +227,7 @@ async function pairedRuntime() {
 it('refuses a near-ceiling handoff before the native effect while keeping the Relay readable', async () => {
   const { f, cookie, basePath, hostId, host, emulator, reconnect } = await pairedRuntime();
   const closed = once(host, 'close'); host.close(); await closed;
-  await f.seedState(state => fillOrdinaryReceipts(state, 64 * 1024 * 1024 - 1500));
+  await f.seedState(state => fillOrdinaryReceipts(state, STATE_CEILING - 1500));
   await reconnect();
   const prepared = await f.request(basePath + `v1/remote/hosts/${hostId}/succession/prepare`, cookie,
     { operationId: 'near-ceiling', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1 });
@@ -248,7 +250,7 @@ it('protects an admitted near-ceiling reserve from ordinary writes and completes
     state.favoritesTrees = [{ subject: 'owner', revision: 1, folders: [{ id: 'ordinary', title: 'Folder', parentId: null, order: 0 }] }];
     const reserve = deriveSuccessionCapacity(state, hostedRecordEncodingCosts({ origin: f.url, issuer: f.issuer, secret })).remainingSnapshotBytes;
     expect(reserve).toBeGreaterThan(2 * 1024 * 1024);
-    fillOrdinaryReceipts(state, 64 * 1024 * 1024 - reserve - 180);
+    fillOrdinaryReceipts(state, STATE_CEILING - reserve - 180);
   });
   const reconnected = await reconnect();
   const refused = await f.request(basePath + 'v1/favorites', cookie, { type: 'rename-folder', revision: 1, id: 'ordinary', title: '"'.repeat(128) });

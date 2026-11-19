@@ -27,6 +27,9 @@ export default defineConfig({
     { name: 'webkit-ask-desktop', testMatch: ['dock-title-interactions.spec.ts', 'session-family-resize.spec.ts', 'tpm-dock.spec.ts', 'session-title-rename.spec.ts', 'ask-timeline-layout.spec.ts', 'session-view-responsive.spec.ts', 'composer-overflow.spec.ts'], use: { ...devices['Desktop Safari'] } },
     { name: 'webkit-ask-mobile', testMatch: ['dock-title-interactions.spec.ts', 'session-family-resize.spec.ts', 'tpm-dock.spec.ts', 'ask-timeline-layout.spec.ts', 'session-view-responsive.spec.ts', 'composer-overflow.spec.ts'], use: { ...devices['iPhone 13'] } },
     { name: 'webkit-desktop', testMatch: ['image-input.spec.ts', 'image-viewer.spec.ts', 'markdown-reading.spec.ts'], use: { ...devices['Desktop Safari'] } },
+    // The Orchard primitives at exactly 390 x 844, in Chromium and in mobile WebKit.
+    { name: 'orchard-phone-chromium', testMatch: ['orchard-primitives.spec.ts'], use: { ...devices['Desktop Chrome'], viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } },
+    { name: 'orchard-phone-webkit', testMatch: ['orchard-primitives.spec.ts'], use: { ...devices['iPhone 13'], viewport: { width: 390, height: 844 } } },
     { name: 'webkit-mobile', testMatch: ['image-input.spec.ts', 'image-viewer.spec.ts', 'markdown-reading.spec.ts'], use: { ...devices['iPhone 13'] } },
   ],
   webServer: {

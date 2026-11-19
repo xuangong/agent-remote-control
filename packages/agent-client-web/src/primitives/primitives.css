@@ -191,6 +191,10 @@
   outline: 2px solid var(--orchard-focus); outline-offset: 2px;
 }
 
+/* `:is(.lab-shell, .lab-session-view) .agent-remote-surface button` (0,2,1) colours every button's border: the element type
+   lifts these to (0,2,1) and source order keeps the primitive's own. */
+button.orchard-pill.orchard-pill, button.orchard-toggle.orchard-toggle, button.orchard-work-summary-button.orchard-work-summary-button { border-color: currentColor; }
+
 @media (pointer: coarse) {
   .orchard-pill.orchard-pill { min-width: 44px; min-height: 44px; }
   .orchard-toggle.orchard-toggle, .orchard-work-summary-button.orchard-work-summary-button { min-height: 44px; }

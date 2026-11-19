@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
+import { workspaceSourceEsbuild } from '../../../scripts/lib/workspace-source.mjs';
 import { chromium, type Browser, type Page } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 
@@ -16,7 +17,8 @@ beforeAll(async () => {
     import React from 'react'; import { createRoot } from 'react-dom/client';
     import './session-view-styles.ts';
     import { Button } from './ui/Button.tsx'; import { IconButton } from './ui/IconButton.tsx';
-    import { SegmentedControl } from './ui/SegmentedControl.tsx'; import { ListRow } from './ui/ListRow.tsx';
+    import { ListRow } from './ui/ListRow.tsx';
+    import { Pill, SegmentedControl, Toggle } from '@orchardworks/agent-client-web/primitives';
     import { StatusBadge } from './ui/StatusBadge.tsx';
     // A fixed-width box, so full-width rows and segments measure the same in both places.
     const set = <div style={{ width: 400 }}>
@@ -25,13 +27,16 @@ beforeAll(async () => {
       <SegmentedControl label="Mode" value="a" onChange={() => {}} options={[{ value: 'a', label: 'One' }, { value: 'b', label: 'Two' }]} />
       <ListRow data-test="row" title="Current" selected /><ListRow data-test="other-row" title="Other" />
       <StatusBadge status={{ kind: 'unread' }} />
+      <Pill data-test="pill">Plain</Pill><Pill data-test="pill-primary" variant="primary">Primary</Pill>
+      <Pill data-test="sheet-close" className="orchard-sheet-close" aria-label="Close">×</Pill>
+      <Toggle checked label="Notifications" onChange={() => {}} />
     </div>;
     createRoot(document.getElementById('root')).render(<>
       <div id="plain">{set}</div>
       <main className="lab-shell" style={{ display: 'block' }}><div className="agent-remote-surface"><div className="agent-composer" id="contained">{set}</div></div></main>
     </>);`;
   const bundle = await build({ stdin: { contents: source, loader: 'tsx', resolveDir: fileURLToPath(new URL('../src/', import.meta.url)) }, bundle: true, write: false,
-    outfile: 'fixture.js', loader: { '.woff2': 'dataurl' }, format: 'iife', platform: 'browser', define: { 'process.env.NODE_ENV': '"production"' } });
+    outfile: 'fixture.js', plugins: [workspaceSourceEsbuild()], loader: { '.woff2': 'dataurl' }, format: 'iife', platform: 'browser', define: { 'process.env.NODE_ENV': '"production"' } });
   script = bundle.outputFiles.find(file => file.path.endsWith('.js'))!.text;
   css = bundle.outputFiles.find(file => file.path.endsWith('.css'))!.text;
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -42,7 +47,8 @@ afterAll(async () => { await browser?.close(); await new Promise<void>(resolve =
 
 const PRIMITIVES = {
   secondary: '[data-test="secondary"]', primary: '[data-test="primary"]', small: '[data-test="small"]', icon: '[data-test="icon"]',
-  pressed: '.ui-segmented > [aria-pressed="true"]', unpressed: '.ui-segmented > [aria-pressed="false"]', segmented: '.ui-segmented',
+  pressed: '.orchard-segmented > [aria-pressed="true"]', unpressed: '.orchard-segmented > [aria-pressed="false"]', segmented: '.orchard-segmented',
+  pill: '[data-test="pill"]', 'pill-primary': '[data-test="pill-primary"]', 'sheet-close': '[data-test="sheet-close"]', toggle: '[role="switch"]',
   row: '[data-test="row"]', 'other-row': '[data-test="other-row"]', unread: '.ui-status[data-kind="unread"]',
 } as const;
 type Primitive = keyof typeof PRIMITIVES;
@@ -76,19 +82,21 @@ it('renders the primitives the same inside the Lab containers as on their own', 
   await page.close();
 });
 
-it('draws a 3px focus ring with a 1px offset on the buttons inside and outside the containers', async () => {
+it('draws each primitive\'s one focus ring on the buttons inside and outside the containers', async () => {
   const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
   await open(page);
   // A key press first, so a programmatic focus is shown as keyboard focus.
   await page.keyboard.press('Tab');
-  for (const primitive of ['secondary', 'primary', 'small', 'icon', 'pressed'] as const) {
+  // The Lab's primitives draw a 3 px ring at 1 px; the Orchard primitives their own 2 px ring at 2 px.
+  for (const [primitive, width, offset] of [['secondary', '3px', '1px'], ['primary', '3px', '1px'], ['small', '3px', '1px'], ['icon', '3px', '1px'],
+    ['pressed', '2px', '2px'], ['pill', '2px', '2px'], ['pill-primary', '2px', '2px'], ['sheet-close', '2px', '2px'], ['toggle', '2px', '2px']] as const) {
     const rings = [];
     for (const scope of ['#plain', '#contained']) {
       const selector = `${scope} ${PRIMITIVES[primitive]}`;
       await page.locator(selector).focus();
       rings.push(await ring(page, selector));
     }
-    expect(rings[0], primitive).toEqual({ focused: true, width: '3px', style: 'solid', offset: '1px', color: rings[0]!.color });
+    expect(rings[0], primitive).toEqual({ focused: true, width, style: 'solid', offset, color: rings[0]!.color });
     expect(rings[0]!.color, `${primitive} ring color`).not.toBe('rgba(0, 0, 0, 0)');
     expect(rings[1], primitive).toEqual(rings[0]);
   }
@@ -104,10 +112,10 @@ it('keeps 44px touch targets in the containers on a coarse pointer', async () =>
     expect.soft(await styles(page, '#contained', primitive), `coarse ${primitive}`).toEqual(await styles(page, '#plain', primitive));
   }
   for (const scope of ['#plain', '#contained']) {
-    for (const primitive of ['secondary', 'primary', 'small', 'icon', 'pressed', 'unpressed', 'row'] as const) {
+    for (const primitive of ['secondary', 'primary', 'small', 'icon', 'pressed', 'unpressed', 'row', 'pill', 'pill-primary', 'sheet-close', 'toggle'] as const) {
       const box = await page.locator(`${scope} ${PRIMITIVES[primitive]}`).boundingBox();
       expect(box!.height, `${scope} ${primitive} height`).toBeGreaterThanOrEqual(44);
-      if (primitive === 'icon') expect(box!.width, `${scope} icon width`).toBeGreaterThanOrEqual(44);
+      if (['icon', 'pill', 'pill-primary', 'sheet-close', 'toggle'].includes(primitive)) expect(box!.width, `${scope} ${primitive} width`).toBeGreaterThanOrEqual(44);
     }
   }
   await context.close();

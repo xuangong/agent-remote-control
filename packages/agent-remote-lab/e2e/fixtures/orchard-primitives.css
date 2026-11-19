@@ -1,0 +1,23 @@
+/* Layout of the fixture page only: Orchard tokens, no literal colour. */
+html, body { margin: 0; background: var(--orchard-ground); color: var(--orchard-text); font-family: var(--orchard-font-text); }
+.fixture-page { display: flex; flex-direction: column; gap: var(--orchard-space-4xl); max-width: 900px; margin: 0 auto; padding: var(--orchard-space-3xl) 0; }
+html[data-width="phone"] .fixture-page { max-width: 390px; }
+.fixture-title { margin: 0 var(--orchard-space-2xl); color: var(--orchard-text-strong); font-size: var(--orchard-type-large-title-size); }
+.fixture-section > h2, .fixture-section h3 { margin: 0 var(--orchard-space-2xl) var(--orchard-space-m); color: var(--orchard-text-strong); }
+.fixture-section > h2 { font-size: var(--orchard-type-title-size); }
+.fixture-section h3 { margin-left: 0; font-size: var(--orchard-type-headline-size); }
+.fixture-section > .fixture-stack { padding: 0 var(--orchard-space-2xl); }
+.fixture-column { display: flex; flex-direction: column; gap: var(--orchard-space-xl); max-width: var(--orchard-space-column); margin: 0 auto; }
+.fixture-stack { display: flex; flex-direction: column; gap: var(--orchard-space-xl); }
+.fixture-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--orchard-space-l); }
+.fixture-grid { display: grid; grid-template-columns: repeat(8, 40px); gap: var(--orchard-space-l); }
+.fixture-group { display: flex; flex-direction: column; padding: var(--orchard-space-xs) var(--orchard-space-xl); border-radius: var(--orchard-radius-group); background: var(--orchard-surface); }
+.fixture-caption { width: 80px; color: var(--orchard-text-secondary); font-size: var(--orchard-type-caption-size); }
+.fixture-on-surface, .fixture-on-ground { padding: var(--orchard-space-l) var(--orchard-space-xl); border-radius: var(--orchard-radius-card); }
+.fixture-on-surface { background: var(--orchard-surface); }
+.fixture-on-ground { background: var(--orchard-ground); }
+.fixture-text { margin: 0; }
+.fixture-legacy { margin: 0; padding: var(--orchard-space-l); color: var(--ui-label); background: var(--ui-background); }
+@media (max-width: 760px) {
+  .fixture-grid { grid-template-columns: repeat(6, 40px); }
+}

@@ -189,6 +189,17 @@ it('starts a default placement below an app bar of several rows, and below a one
   } finally { again(); }
 });
 
+it('measures the app bar against the visible area, so a keyboard that pans it out of view adds no clearance', async () => {
+  const remove = stylesheetDefault(114);
+  try {
+    // The app bar is fixed in the layout viewport; with the visible area panned 160 px down, its bottom (140) is above it.
+    stubAppBar(140);
+    Object.assign(viewport, { offsetTop: 160, height: 420 });
+    const panned = await render(<AppBarAndEntry name="a" />);
+    expect(top(panned, 'a')).toBe(160 + 114);
+  } finally { remove(); }
+});
+
 it('does not move an entry the owner placed', async () => {
   const remove = stylesheetDefault(114);
   try {

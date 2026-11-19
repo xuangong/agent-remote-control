@@ -38,16 +38,19 @@ for (const visualClientRects of [false, true]) {
       return { x: parseFloat(style.left) - window.visualViewport!.offsetLeft, y: parseFloat(style.top) - window.visualViewport!.offsetTop, width: parseFloat(style.width) };
     });
     const initial = await position();
-    // The default is right-aligned, with no saved left coordinate.
+    // The default is right-aligned, with no saved left coordinate. Its column (first top 60 in the visible area) moves down
+    // below the timeline toolbar that the visible area shows; the toolbar's rect is in the layout viewport, so the pan is taken off.
     expect(initial.x + initial.width).toBeCloseTo(378, 1);
-    expect(initial.y).toBe(276);
+    const toolbarBottom = await page.locator('.lab-primary-conversation .lab-timeline-tools').evaluate(element => element.getBoundingClientRect().bottom - window.visualViewport!.offsetTop);
+    expect(initial.y).toBe(276 + Math.max(0, Math.round(toolbarBottom + 8 - 60)));
+    // Dragged up and left: the column now starts low enough in the panned visible area that a drag down would reach its bottom edge.
     const bounds = (await trigger.boundingBox())!;
     await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
     await page.mouse.down();
-    await page.mouse.move(bounds.x + bounds.width / 2 - 75, bounds.y + bounds.height / 2 + 35, { steps: 4 });
+    await page.mouse.move(bounds.x + bounds.width / 2 - 75, bounds.y + bounds.height / 2 - 35, { steps: 4 });
     await page.mouse.up();
     await expect.poll(async () => (await position()).x).toBeCloseTo(initial.x - 75, 2);
-    await expect.poll(async () => (await position()).y).toBeCloseTo(initial.y + 35, 2);
+    await expect.poll(async () => (await position()).y).toBeCloseTo(initial.y - 35, 2);
     await expect(page.getByRole('dialog', { name: 'Ask', exact: true })).toHaveCount(0);
     await page.evaluate(() => {
       Object.assign(window.visualViewport!, { height: 844, offsetTop: 0 });
@@ -56,7 +59,7 @@ for (const visualClientRects of [false, true]) {
     await expect(page.locator('.lab-shell')).toHaveAttribute('data-viewport-occluded', 'false');
     const settled = await position();
     expect(settled.x).toBeCloseTo(initial.x - 75, 2);
-    expect(settled.y).toBeCloseTo(initial.y + 35, 2);
+    expect(settled.y).toBeCloseTo(initial.y - 35, 2);
     await trigger.click();
     await expect(page.getByRole('dialog', { name: 'Ask', exact: true })).toBeVisible();
   });

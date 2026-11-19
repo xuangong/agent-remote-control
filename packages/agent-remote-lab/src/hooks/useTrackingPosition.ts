@@ -56,13 +56,15 @@ const keepClearSelector = '.lab-app-bar, .lab-timeline-tools, .lab-ask-viewport[
  * account controls; the timeline toolbar below it holds the session actions. Every entry of the column moves by the same amount, so
  * the column keeps its order and spacing. An entry the owner placed is not moved.
  */
-function defaultClearance(horizontal: { left: number; right: number }): number {
+function defaultClearance(horizontal: { left: number; right: number }, view: View): number {
   let bottom = 0;
   for (const element of document.querySelectorAll(keepClearSelector)) {
     const rect = element.getBoundingClientRect();
     if (rect.width > 0 && rect.height > 0 && rect.right > horizontal.left && rect.left < horizontal.right) bottom = Math.max(bottom, rect.bottom);
   }
-  return Math.max(0, Math.round(bottom + gap - defaultColumnTop));
+  // A default placement is relative to the visible area; the keep-clear elements stay in the layout viewport, which the
+  // keyboard pans, so what the pan has moved out of view no longer needs clearing.
+  return Math.max(0, Math.round(bottom - view.y + gap - defaultColumnTop));
 }
 
 /**
@@ -108,7 +110,7 @@ export function arrangeFloatingEntries() {
       const base = entry.stylesheet ??= stylesheetPlacement(entry.element);
       if (!base) return [];
       const { left, right } = entry.element.getBoundingClientRect();
-      placement = { x: base.x, y: base.y + defaultClearance({ left, right }) };
+      placement = { x: base.x, y: base.y + defaultClearance({ left, right }, view) };
     }
     const { width, height } = entry.element.getBoundingClientRect(), size = { width, height };
     const held = entry.held();

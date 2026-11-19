@@ -230,10 +230,15 @@ it('evicts a Team\'s oldest retry receipts when it reaches its bound, without di
   for(const member of reserved)delete member.nativeSessionId;
   padded.members.push(...reserved);
   const memberIds=padded.members.map(member=>member.id);
-  for(let index=0;Buffer.byteLength(JSON.stringify(padded))<TEAM_RECORD_BYTES-4000;index++){
+  // The size grows by each entry's own encoding, so the fill is linear rather than re-encoding the whole Team per entry.
+  let size=Buffer.byteLength(JSON.stringify(padded));
+  for(let index=0;size<TEAM_RECORD_BYTES-4000;index++){
     const resourceId=`${index}-`.padEnd(200,'r');
-    padded.resourceUploads!.push({ownerMemberId:leader.id,expiresAt:Number.MAX_SAFE_INTEGER,resource:{resourceId,name:'n'.repeat(250),mediaType:'text/plain',byteLength:1,sha256:'a'.repeat(64)}});
-    padded.resourceGrants!.push({resourceId,memberIds});
+    const upload={ownerMemberId:leader.id,expiresAt:Number.MAX_SAFE_INTEGER,resource:{resourceId,name:'n'.repeat(250),mediaType:'text/plain',byteLength:1,sha256:'a'.repeat(64)}};
+    const grant={resourceId,memberIds};
+    padded.resourceUploads!.push(upload);
+    padded.resourceGrants!.push(grant);
+    size+=Buffer.byteLength(JSON.stringify(upload))+Buffer.byteLength(JSON.stringify(grant))+2;
   }
   padded.messages[0]!.text+='x'.repeat(TEAM_RECORD_BYTES-100-Buffer.byteLength(JSON.stringify(padded)));
   expect(validSavedTeam(padded)).toBe(true);

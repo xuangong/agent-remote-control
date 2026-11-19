@@ -72,10 +72,15 @@ function largeTeam(id: string, bytes: number): SavedTeam {
   const team = fullGroup(id, true), ids = Array.from({ length: 12 }, (_, index) => `${index}-`.padEnd(200, 'm'));
   team.members = ids.map((memberId, index) => ({ ...team.members[0]!, id: memberId, role: index ? 'member' as const : 'leader' as const, name: `member ${index}`, nativeSessionId: `${id}-${index}` }));
   team.resourceUploads = []; team.resourceGrants = [];
-  for (let index = 0; Buffer.byteLength(JSON.stringify(team)) < bytes - 8000; index++) {
+  const encoded = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
+  // The size grows by each entry's own encoding, so the fill is linear rather than re-encoding the whole Team per entry.
+  let size = encoded(team);
+  for (let index = 0; size < bytes - 8000; index++) {
     const resourceId = `${index}-`.padEnd(200, 'r');
-    team.resourceUploads.push({ ownerMemberId: ids[0]!, expiresAt: Number.MAX_SAFE_INTEGER, resource: { resourceId, name: 'n'.repeat(250), mediaType: 'text/plain', byteLength: 1, sha256: 'a'.repeat(64) } });
-    team.resourceGrants.push({ resourceId, memberIds: ids });
+    const upload = { ownerMemberId: ids[0]!, expiresAt: Number.MAX_SAFE_INTEGER, resource: { resourceId, name: 'n'.repeat(250), mediaType: 'text/plain', byteLength: 1, sha256: 'a'.repeat(64) } };
+    const grant = { resourceId, memberIds: ids };
+    team.resourceUploads.push(upload); team.resourceGrants.push(grant);
+    size += encoded(upload) + encoded(grant) + 2;
   }
   // Responsibilities fill the rest, to 2000 bytes under the requested size.
   for (const member of team.members) {
@@ -88,7 +93,7 @@ function largeTeam(id: string, bytes: number): SavedTeam {
 
 test('lets an account\'s Teams exceed what one Team may hold, while no change grows a Team beyond its own bound', async () => {
   const teams: SavedTeam[] = [];
-  while (Buffer.byteLength(JSON.stringify(teams)) <= 3 * 1024 * 1024) teams.push(fullGroup(`group-${teams.length}`));
+  for (let size = 0; size <= 3 * 1024 * 1024;) { const group = fullGroup(`group-${teams.length}`); teams.push(group); size += Buffer.byteLength(JSON.stringify(group)) + 1; }
   const large = largeTeam('large', TEAM_RECORD_BYTES); teams.push(large);
   expect(teams.every(validSavedTeam)).toBe(true);
   expect(TEAM_RECORD_BYTES - Buffer.byteLength(JSON.stringify(large))).toBe(2000);

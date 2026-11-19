@@ -14,10 +14,6 @@
    "reason": "Encodes and stores a Relay of 1,000s of records to prove commit cost; CPU bound by the size under test."
   },
   {
-   "test": "packages/agent-relay-core/src/call-for-support-capacity.test.ts > lets an account's Teams exceed what one Team may hold, while no change grows a Team beyond its own bound",
-   "reason": "Builds and validates a Relay state at its byte ceiling through the whole broker; CPU bound by serializing the ceiling state."
-  },
-  {
    "test": "packages/agent-relay-node/src/devbox-preview.test.ts > opens Devbox through a root preview and retains its browser identity, Window writes and session channel",
    "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
   },

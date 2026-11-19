@@ -531,8 +531,6 @@ describe('session channel transport', () => {
     for (const socket of harness.sockets) socket.on('message', data => {
       if (JSON.parse(String(data)).type === 'ping') socket.send(JSON.stringify({ protocolVersion: version, type: 'pong' }));
     });
-    // The slow pong arrives 1.5 s after the probe, inside the client's 4 s foreground probe deadline: fake timers stand for the wait.
-    if (outcome === 'slow_resume_then_acknowledge') { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); cleanups.push(() => { vi.useRealTimers(); }); }
     const hiddenAt = Date.now();
     const now = vi.spyOn(Date, 'now').mockReturnValue(hiddenAt);
     cleanups.push(() => now.mockRestore());

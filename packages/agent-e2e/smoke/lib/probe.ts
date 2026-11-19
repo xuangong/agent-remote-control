@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import type { PageReport } from '../invariants/types.js';
+import type { PageReport, ResourceSample } from '../invariants/types.js';
 import { observerSource, toPageRows, toPageSamples, type RawSample } from './observer.js';
 
 /** Playwright of the Lab package, with its bundled Chromium: the checkout's headless browser, never the user's own. */
@@ -114,7 +114,37 @@ export class PageProbe {
     await this.cdp.send('HeapProfiler.collectGarbage').catch(() => {});
     const { metrics } = await this.cdp.send('Performance.getMetrics') as { metrics: Array<{ name: string; value: number }> };
     const rows: number = await this.page.evaluate(() => document.querySelectorAll('.agent-timeline-entry, .lab-bot-row').length);
-    this.resources.push({ t: Date.now() - this.clockOrigin, heapBytes: metrics.find(metric => metric.name === 'JSHeapUsedSize')?.value ?? 0, rows: Math.max(0, rows - expectedRows), sockets });
+    const retainedRows: number = await this.page.evaluate(() => document.querySelectorAll('.agent-timeline-entry').length);
+    this.resources.push({ t: Date.now() - this.clockOrigin, heapBytes: metrics.find(metric => metric.name === 'JSHeapUsedSize')?.value ?? 0, rows: Math.max(0, rows - expectedRows), retainedRows, sockets });
+  }
+
+  /** The latest resource sample, if any. */
+  lastResources(): ResourceSample | undefined { return this.resources.at(-1); }
+
+  /**
+   * Scrolls every conversation to its top until the page renders `rows` conversation rows, so older history loads page by page. Returns the
+   * rows rendered when it stopped: at the target, after eight rounds without growth, or at the deadline.
+   */
+  async loadOlderUntil(rows: number, deadlineMs: number): Promise<number> {
+    const until = Date.now() + deadlineMs;
+    let shown = 0, idle = 0;
+    while (Date.now() < until && idle < 8) {
+      const now: number = await this.page.evaluate(() => {
+        const scrollers = new Set<Element>();
+        for (const entry of document.querySelectorAll('.agent-timeline-entry')) {
+          let node = entry.parentElement;
+          while (node && !(node.scrollHeight > node.clientHeight && /auto|scroll/.test(getComputedStyle(node).overflowY))) node = node.parentElement;
+          if (node) scrollers.add(node);
+        }
+        for (const scroller of scrollers) { scroller.scrollTop = 0; scroller.dispatchEvent(new Event('scroll')); }
+        return document.querySelectorAll('.agent-timeline-entry').length;
+      });
+      if (now >= rows) return now;
+      idle = now > shown ? 0 : idle + 1;
+      shown = now;
+      await this.page.waitForTimeout(500);
+    }
+    return shown;
   }
 
   async report(extra: Partial<PageReport> = {}): Promise<PageReport> {

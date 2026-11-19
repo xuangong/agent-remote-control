@@ -42,9 +42,34 @@ export function stableSeries(name: string, values: number[], { growth = 1.5, flo
   return result(name, values.length, late > limit ? [{ message: `${name} grew from ${early} to ${late} (limit ${Math.round(limit)})` }] : []);
 }
 
-/** M5 and M8: the page's heap does not grow past 1.5 times its early level, with a 5 MiB floor for noise. */
-export const memoryFlat = (page: PageReport): InvariantResult =>
-  stableSeries('memory-flat', (page.resources ?? []).map(sample => sample.heapBytes), { growth: 1.5, floor: 5 * 1024 * 1024 });
+const PER_ROW_GROWTH = 1.25;
+const HEAP_FLOOR = 5 * 1024 * 1024;
+
+/**
+ * M5 and M8: the page's heap holds no more than its conversations need. A page whose retained rows grow (M8) is compared per retained row
+ * with a fresh page that loaded the same rows: the run's heap may be at most 1.25 times the fresh page's heap per row, plus a 5 MiB floor.
+ * A page whose rows stay put (M5) keeps the stable heap series. Growing rows with no fresh page cannot tell a leak from a longer
+ * conversation, so they are not judged; neither is a fresh page that holds more than a tenth more or fewer rows.
+ */
+export function memoryFlat(page: PageReport): InvariantResult {
+  const resources = page.resources ?? [];
+  const reference = page.memoryReference;
+  const last = resources.at(-1);
+  if (reference && last) {
+    const soakedRows = last.retainedRows ?? 0, freshRows = reference.retainedRows ?? 0;
+    if (soakedRows === 0 || freshRows === 0 || Math.abs(freshRows - soakedRows) > soakedRows * 0.1)
+      return result('memory-flat', 0, []);
+    const freshPerRow = reference.heapBytes / freshRows;
+    const limit = freshPerRow * soakedRows * PER_ROW_GROWTH + HEAP_FLOOR;
+    return result('memory-flat', 1, last.heapBytes > limit
+      ? [{ message: `heap ${last.heapBytes} for ${soakedRows} rows against a fresh page's ${reference.heapBytes} for ${freshRows} rows (limit ${Math.round(limit)})`, detail: { soakedPerRow: Math.round(last.heapBytes / soakedRows), freshPerRow: Math.round(freshPerRow) } }]
+      : []);
+  }
+  const rows = resources.map(sample => sample.retainedRows).filter((value): value is number => value !== undefined);
+  if (rows.length >= 2 && rows.at(-1)! > rows[0]! * 1.5 + 20)
+    return result('memory-flat', 0, []);
+  return stableSeries('memory-flat', resources.map(sample => sample.heapBytes), { growth: 1.5, floor: HEAP_FLOOR });
+}
 /** M8: the number of rows held does not keep growing while the sessions stream a fixed amount. */
 export const rowCountsStable = (page: PageReport): InvariantResult =>
   stableSeries('row-counts-stable', (page.resources ?? []).map(sample => sample.rows), { growth: 1.5, floor: 20 });

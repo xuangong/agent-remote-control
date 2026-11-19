@@ -45,6 +45,18 @@ describe('memory, row and socket counts are flat', () => {
     const report = page({ resources: growing });
     expect([memoryFlat(report), rowCountsStable(report), socketCountsStable(report)].map(v => v.status)).toEqual(['failed', 'failed', 'failed']);
   });
+  const soaked = (heapBytes: number, retainedRows: number) => Array.from({ length: 16 }, (_, at) => ({ t: at, heapBytes: 12e6 + (heapBytes - 12e6) * at / 15, rows: 0, retainedRows: Math.round(10 + (retainedRows - 10) * at / 15), sockets: 3 }));
+  it('passes a page whose heap grows with its retained rows as a fresh page holding those rows does', () => {
+    expect(memoryFlat(page({ resources: soaked(38e6, 1100), memoryReference: { t: 99, heapBytes: 34e6, rows: 0, retainedRows: 1080, sockets: 3 } })).status).toBe('passed');
+  });
+  it('fails a page whose heap per retained row exceeds a fresh page holding the same rows', () => {
+    const verdict = memoryFlat(page({ resources: soaked(80e6, 1100), memoryReference: { t: 99, heapBytes: 34e6, rows: 0, retainedRows: 1100, sockets: 3 } }));
+    expect(verdict.violations[0]?.message).toMatch(/against a fresh page/);
+  });
+  it('does not judge growing rows without a fresh page, or a fresh page that holds other rows', () => {
+    expect(memoryFlat(page({ resources: soaked(38e6, 1100) })).status).toBe('not_exercised');
+    expect(memoryFlat(page({ resources: soaked(38e6, 1100), memoryReference: { t: 99, heapBytes: 14e6, rows: 0, retainedRows: 200, sockets: 3 } })).status).toBe('not_exercised');
+  });
   it('needs enough samples to judge', () => {
     expect(stableSeries('x', [1, 2, 3]).status).toBe('not_exercised');
   });

@@ -1,5 +1,5 @@
 import { startLatencyProxy } from '../../faults/latency-proxy.mjs';
-import { journalSequencesContiguous, memoryFlat, noBlankFrame, noDuplicateItemKey, noStaleLabel, rowCountsStable, socketCountsStable, type InvariantResult } from '../invariants/index.js';
+import { journalSequencesContiguous, memoryFlat, noBlankFrame, noDuplicateItemKey, noStaleLabel, rowCountsStable, socketCountsStable, type InvariantResult, type PageReport, type ResourceSample } from '../invariants/index.js';
 import { positiveInteger } from '../lib/arguments.js';
 import { createBotGroup } from '../lib/bot-group.js';
 import { PageProbe, withContext } from '../lib/probe.js';
@@ -12,10 +12,12 @@ import { setTimeout as delay } from 'node:timers/promises';
 const SESSIONS = ['soak-a', 'soak-b', 'soak-c'];
 const CYCLE_MS = 10_000;
 const SAMPLE_MS = 10_000;
+const perRow = (sample: ResourceSample | undefined) => sample?.retainedRows ? Math.round(sample.heapBytes / sample.retainedRows) : undefined;
 
 /**
  * M8: three scripted sessions, the panes of one Window in one page, stream a reply every ten seconds (a message in, an answer in two pieces). `--duration` is the number of minutes (the plan says 30; the default is 30). Row counts beyond what the sessions wrote, the
- * heap after a collection and the open sockets are sampled every ten seconds and must not drift.
+ * heap after a collection and the open sockets are sampled every ten seconds and must not drift. The heap is judged per retained row
+ * against a fresh page that loaded the same rows after the run (`memory-flat`), because the conversations grow for the whole run.
  */
 export const soak: Scenario = {
   id: 'M8',
@@ -60,8 +62,20 @@ export const soak: Scenario = {
         await probe.page.waitForTimeout(2000);
         await probe.sampleResources(proxy.openWebSockets(), written);
         await probe.snapshotKeys();
-        const page = await probe.report();
+        const soaked = probe.lastResources();
+        const report = await probe.report();
         await probe.close();
+        // A fresh page opens the same Window and loads the rows the soaked page held: the heap those rows cost without thirty minutes of history.
+        const fresh = await PageProbe.create(browserContext, recorder.origin);
+        await fresh.page.setViewportSize({ width: 1800, height: 900 });
+        await fresh.open(`${proxy.origin}/?window=${encodeURIComponent(group.id)}`, 'fresh page', { rowsDeadlineMs: 90_000 });
+        const loaded = await fresh.loadOlderUntil(soaked?.retainedRows ?? 0, 180_000);
+        await fresh.page.waitForTimeout(2000);
+        await fresh.sampleResources(proxy.openWebSockets(), 0);
+        const memoryReference = fresh.lastResources();
+        await fresh.close();
+        schedule.push({ t: recorder.clock(), action: 'fresh-page', detail: { soakedRows: soaked?.retainedRows, loaded } });
+        const page: PageReport = { ...report, ...(memoryReference ? { memoryReference } : {}) };
         return { page, cycles, shown, lastReplies, written };
       });
       const wire = recorder.transcript();
@@ -70,6 +84,8 @@ export const soak: Scenario = {
       measurements.rowsWritten = outcome.written;
       measurements.lastRepliesShown = { panes: outcome.lastReplies, sessions: SESSIONS.length };
       measurements.series = { samples: resources.length, heapBytes: { first: resources[0]?.heapBytes, last: resources.at(-1)?.heapBytes, max: Math.max(...resources.map(sample => sample.heapBytes)) },
+        retainedRows: { first: resources[0]?.retainedRows, last: resources.at(-1)?.retainedRows },
+        heapPerRetainedRow: { soaked: perRow(resources.at(-1)), fresh: perRow(outcome.page.memoryReference) }, freshPage: outcome.page.memoryReference,
         extraRows: { first: resources[0]?.rows, last: resources.at(-1)?.rows, max: Math.max(...resources.map(sample => sample.rows)) }, sockets: { min: Math.min(...resources.map(sample => sample.sockets)), max: Math.max(...resources.map(sample => sample.sockets)) } };
       const delivery: InvariantResult = { invariant: 'streamed-replies-shown', checked: SESSIONS.length, status: outcome.lastReplies >= SESSIONS.length ? 'passed' : 'failed',
         violations: outcome.lastReplies >= SESSIONS.length ? [] : [{ message: `the last streamed reply is shown in ${outcome.lastReplies} of ${SESSIONS.length} panes` }] };

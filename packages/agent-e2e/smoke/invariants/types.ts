@@ -64,8 +64,13 @@ export interface PageReport {
   composer?: { before: { text: string; focused: boolean }; after: { text: string; focused: boolean } };
   anchor?: { before: { key: string; offset: number } | null; after: { key: string; offset: number } | null };
   /** Resource series of one page, one entry per sampling tick. */
-  resources?: Array<{ t: number; heapBytes: number; rows: number; sockets: number }>;
+  resources?: Array<ResourceSample>;
+  /** A fresh page that opened the same conversations after the run and loaded the rows the run's page held: what those rows cost without the run's history. */
+  memoryReference?: ResourceSample;
 }
+
+/** One sampling tick: the heap after a collection, the rows beyond what the run wrote, every conversation row rendered, and the open sockets. */
+export interface ResourceSample { t: number; heapBytes: number; rows: number; retainedRows?: number; sockets: number }
 
 export type InvariantStatus = 'passed' | 'failed' | 'not_exercised';
 

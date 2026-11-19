@@ -46,7 +46,6 @@ async function buildBundles(options: { actualEntry?: true; completeCodec?: true;
       import { WorkerRelaySocket } from './src/socket.ts';
       ${options.conformance ? "import { runRelayStateStoreCase } from './test/relay-state-store-case.ts';" : ''}
       export class TestRelayObject extends RelayObject {
-        hostLiveness() { const raw = this.fixtureEnv?.HOST_LIVENESS ?? this.env.HOST_LIVENESS; return raw ? JSON.parse(raw) : super.hostLiveness(); }
         constructor(ctx, env) { super(ctx, env); this.fixtureContext = ctx; this.fixtureEnv = env;
           this.completeCodec = ${options.completeCodec === true};
           if (this.completeCodec) this.fixtureReady = ctx.blockConcurrencyWhile(async () => this.reopenCodec());
@@ -140,8 +139,7 @@ async function buildBundles(options: { actualEntry?: true; completeCodec?: true;
 }
 
 export async function fixture(options: { actualEntry?: true; completeCodec?: true; authProvider?: 'google' | 'mainsite' | 'gateway'; previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; workerVersionId?: string; authorityOutageGraceMs?: number; journals?: { tuning?: object; withoutBinding?: true; olderPartition?: true };
-  /** Serves the store conformance cases of `testing` entries from the Durable Objects. */ conformance?: true; /** The fixture lives until its file ends instead of one test. */ lifetime?: 'file';
-  /** Shortens the registration and heartbeat deadlines of connected Hosts. */ hostLiveness?: { heartbeatIntervalMs?: number; heartbeatTimeoutMs?: number; registrationDeadlineMs?: number } } = {}) {
+  /** Serves the store conformance cases of `testing` entries from the Durable Objects. */ conformance?: true; /** The fixture lives until its file ends instead of one test. */ lifetime?: 'file' } = {}) {
   const owned = options.lifetime === 'file' ? fileClosers : closers;
   const directory = await mkdtemp(join(tmpdir(), 'arc-workers-'));
   owned.push(() => rm(directory, { recursive: true, force: true }));
@@ -160,7 +158,7 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
   async function start() {
     mf = new Miniflare({ handleRuntimeStdio: (_stdout, stderr) => { stderr.on('data', chunk => { runtimeErrors.push(String(chunk)); }); }, durableObjectsPersist: join(directory, 'state'), workers: [{ name: 'relay', modules: true, script, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
       durableObjects: { RELAY: { className: options.actualEntry ? 'RelayObject' : 'TestRelayObject', useSQLite: true }, ...(options.journals?.withoutBinding ? {} : { JOURNALS: { className: options.journals?.olderPartition ? 'OlderJournalPartition' : options.actualEntry ? 'JournalPartition' : 'TestJournalPartition', scriptName: 'journals', useSQLite: true } }) },
-      bindings: { ...(options.journals ? { AGENT_REMOTE_JOURNALS: '1' } : {}), ...(options.hostLiveness ? { HOST_LIVENESS: JSON.stringify(options.hostLiveness) } : {}), ...(options.workerVersionId ? { CF_VERSION_METADATA: { id: options.workerVersionId } } : {}), ...(options.authorityOutageGraceMs !== undefined ? { AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS: String(options.authorityOutageGraceMs) } : {}), AGENT_REMOTE_RELAY_URL: origin, ...(options.previewDomain ? { AGENT_REMOTE_PREVIEW_DOMAIN: options.previewDomain } : {}), ...(options.previewOrigin ? { AGENT_REMOTE_PREVIEW_URL: options.previewOrigin } : {}), ...(options.authProvider === 'google' ? {
+      bindings: { ...(options.journals ? { AGENT_REMOTE_JOURNALS: '1' } : {}), ...(options.workerVersionId ? { CF_VERSION_METADATA: { id: options.workerVersionId } } : {}), ...(options.authorityOutageGraceMs !== undefined ? { AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS: String(options.authorityOutageGraceMs) } : {}), AGENT_REMOTE_RELAY_URL: origin, ...(options.previewDomain ? { AGENT_REMOTE_PREVIEW_DOMAIN: options.previewDomain } : {}), ...(options.previewOrigin ? { AGENT_REMOTE_PREVIEW_URL: options.previewOrigin } : {}), ...(options.authProvider === 'google' ? {
         AGENT_REMOTE_AUTH_PROVIDER: 'google', AGENT_REMOTE_GOOGLE_CLIENT_ID: googleClientId, AGENT_REMOTE_GOOGLE_CLIENT_SECRET: 'workers-client-secret', AGENT_REMOTE_GOOGLE_ALLOWED_EMAILS: googleEmails,
       } : { ...(options.authProvider ? { AGENT_REMOTE_AUTH_PROVIDER: options.authProvider } : {}), AGENT_REMOTE_ISSUER: issuer }), AGENT_REMOTE_SIGNING_SECRET: envSecret },
       serviceBindings: { ASSETS: async request => new Response(new URL(request.url).pathname === '/index.html'

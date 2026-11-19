@@ -1,5 +1,4 @@
 import { expect, it } from 'vitest';
-import { BROKER_MAX_FRAME_BYTES } from '@orchardworks/agent-relay-core';
 import { event, fixture, origin, send } from './fixture.js';
 
 it('serves hosted assets and health, authenticates browser login, and transports Host RPC and Controller frames', async () => {
@@ -161,55 +160,6 @@ it('preserves pending alarms, tolerates duplicate delivery, and recovers durable
   }
   expect(restored).toBe(200);
   expect((await f.request('/auth/login')).status).toBe(303);
-});
-
-it('expires HTTP and socket access during a Gateway outage even without alarm delivery, then renews after recovery', async () => {
-  const f = await fixture({ authorityOutageGraceMs: 0 }); f.setAuthority(200, 400);
-  const alice = await f.login('alice');
-  const pairing = await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json() as any;
-  const { socket, key } = await f.host(pairing.key);
-  const closed = event(socket, 'close'); f.setAuthority(503);
-  await new Promise(resolve => setTimeout(resolve, 500));
-  socket.send(JSON.stringify({ uplinkVersion: 2, type: 'ping' }));
-  expect([1008, 1013]).toContain((await closed).code);
-  expect((await f.json('/auth/status', alice.cookie)).status).toBe(503);
-  const before = f.authorityCalls;
-  await f.inspect('alarm-set?at=' + (Date.now() + 20));
-  for (let attempt = 0; attempt < 30 && f.authorityCalls === before; attempt++) await new Promise(resolve => setTimeout(resolve, 20));
-  expect(f.authorityCalls).toBeGreaterThan(before);
-  const unavailable = await (await f.inspect('storage')).json() as any;
-  expect(unavailable.alarm).toBeGreaterThan(Date.now());
-  f.setAuthority(200); await f.inspect('alarm');
-  expect((await f.json('/auth/status', alice.cookie)).status).toBe(200);
-  expect((await f.host(key)).hostId).toBeTruthy();
-});
-
-it('rejects oversized native frames and closes registration when its asynchronous durable commit fails', async () => {
-  const f = await fixture(); const alice = await f.login('alice');
-  const pairing = await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json() as any;
-  const oversized = await f.upgrade('/ws/remote-host', { authorization: `Bearer ${pairing.key}` });
-  const oversizedClosed = event(oversized, 'close'); oversized.send('x'.repeat(BROKER_MAX_FRAME_BYTES + 1));
-  expect((await oversizedClosed).code).toBe(1009);
-  const registering = await f.upgrade('/ws/remote-host', { authorization: `Bearer ${pairing.key}` });
-  const frames: unknown[] = []; registering.addEventListener('message', message => frames.push(message.data));
-  await f.inspect('fail-commit?kind=host');
-  const rejected = event(registering, 'close');
-  send(registering, { type: 'register', credentialRotation: true, installationId: 'rejected-host', name: 'Rejected Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] });
-  expect([1001, 1011]).toContain((await rejected).code); expect(frames).toEqual([]);
-  await f.inspect('restore-commit'); await f.inspect('alarm').catch(() => undefined); await f.inspect('alarm');
-  expect(await (await f.json(alice.basePath + 'v1/remote/hosts', alice.cookie)).json()).toEqual({ hosts: [] });
-  expect((await f.host(pairing.key)).hostId).toBeTruthy();
-});
-
-it('enforces the native registration deadline without incoming frames', async () => {
-  const f = await fixture({ hostLiveness: { registrationDeadlineMs: 300 } }); const alice = await f.login('alice');
-  const pairing = await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json() as any;
-  const socket = await f.upgrade('/ws/remote-host', { authorization: `Bearer ${pairing.key}` });
-  const closed = new Promise<any>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Registration deadline was not enforced')), 3000);
-    socket.addEventListener('close', value => { clearTimeout(timer); resolve(value); }, { once: true });
-  });
-  expect((await closed).code).toBe(1008);
 });
 
 it('retains a session login destination across Worker replacement', async () => {

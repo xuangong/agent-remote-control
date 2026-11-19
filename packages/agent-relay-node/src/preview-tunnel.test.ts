@@ -1,8 +1,14 @@
 // @vitest-environment node
 import { once } from 'node:events';
 import { WebSocket } from 'ws';
-import { expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { previewFixture, onPreviewCleanup } from './testing/preview-tunnel-fixture.js';
+import { manualClock } from './testing/manual-clock.js';
+
+/** The lease tests move this clock by hand; real sockets carry the traffic. */
+let clock: ReturnType<typeof manualClock> | undefined;
+afterEach(() => { clock?.restore(); clock = undefined; });
+
 
 it.each([false, true])('serves authenticated binary HTTP, streaming uploads and early SSE through the real outbound Controller tunnel (separate origin: %s)', async (separateOrigin) => {
   const f = await previewFixture({ separateOrigin }); const cookie = await f.enter('/bytes');
@@ -63,7 +69,8 @@ it.each([false, true])('preserves HTTP ranges, conditional responses, separate c
 
 
 it('renews through owner authentication and preserves the mapped URL and tunnel while refusing removal revival', async () => {
-  const f = await previewFixture({ ttlMs: 1000 });
+  clock = manualClock();
+  const f = await previewFixture({ ttlMs: 1000, clock });
   const list = async () => (await (await f.alice.request(`v1/remote/hosts/${f.hostId}/previews`)).json()).registrations;
   expect(await list()).toEqual([expect.objectContaining({ id: f.registration.id, status: 'active' })]);
   const cookie = await f.enter('/bytes');
@@ -79,6 +86,7 @@ it('renews through owner authentication and preserves the mapped URL and tunnel 
   expect(renewed.status).toBe(200);
   expect(renewed.headers.getSetCookie()[0]).toContain(cookie.split(';')[0]!);
   expect((await fetch(url + '/bytes', { headers: { cookie } })).status).toBe(200);
+  await clock.advance(3000);
   await vi.waitFor(async () => {
     const snapshot = await (await f.alice.request(`v1/remote/hosts/${f.hostId}/previews`)).json();
     expect(snapshot.registrations).toEqual([]);
@@ -94,37 +102,37 @@ it('renews through owner authentication and preserves the mapped URL and tunnel 
 }, 20000);
 
 it.each(['http', 'sse', 'websocket', 'upload'] as const)('renews on %s traffic without an iframe and expires after traffic stops', async mode => {
-  const f = await previewFixture({ ttlMs: 1000 });
+  clock = manualClock();
+  const f = await previewFixture({ ttlMs: 1000, clock });
   const cookie = await f.enter('/bytes');
   const base = f.previewOrigin + '/p/' + f.registration.id;
-  const until = f.registration.expiresAt + 600;
+  const until = f.registration.expiresAt + 600, step = 150;
+  const traffic = async (send: () => Promise<void>) => { while (Date.now() < until) { await send(); await clock!.advance(step); } };
   if (mode === 'http') {
-    while (Date.now() < until) {
+    await traffic(async () => {
       const response = await fetch(base + '/bytes', { headers: { cookie } });
       expect(response.status).toBe(200); await response.arrayBuffer();
-      await new Promise(resolve => setTimeout(resolve, 150));
-    }
+    });
   } else if (mode === 'sse') {
     const response = await fetch(base + '/streaming-events', { headers: { cookie } });
     expect(response.status).toBe(200);
     const reader = response.body!.getReader();
-    try { while (Date.now() < until) { const part = await reader.read(); expect(part.done).toBe(false); } }
+    try { await traffic(async () => { const part = await reader.read(); expect(part.done).toBe(false); }); }
     finally { await reader.cancel(); }
   } else if (mode === 'websocket') {
     const socket = new WebSocket(base.replace('http:', 'ws:') + '/socket', ['echo-v1'], { headers: { cookie, origin: f.previewOrigin }, handshakeTimeout: 5000 });
     onPreviewCleanup(async () => { socket.terminate(); });
     await once(socket, 'open');
-    while (Date.now() < until) {
+    await traffic(async () => {
       const received = once(socket, 'message'); socket.send('activity');
       expect((await received)[0].toString()).toBe('activity');
-      await new Promise(resolve => setTimeout(resolve, 150));
-    }
+    });
     socket.close(); await once(socket, 'close');
   } else {
     const body = new ReadableStream<Uint8Array>({
       async pull(controller) {
         if (Date.now() >= until) { controller.close(); return; }
-        await new Promise(resolve => setTimeout(resolve, 100)); controller.enqueue(new Uint8Array([1, 2, 3]));
+        await clock!.advance(step); controller.enqueue(new Uint8Array([1, 2, 3]));
       },
     });
     const response = await fetch(base + '/echo', { method: 'POST', headers: { cookie, origin: f.previewOrigin }, body, duplex: 'half' } as RequestInit);
@@ -133,12 +141,14 @@ it.each(['http', 'sse', 'websocket', 'upload'] as const)('renews on %s traffic w
   const list = async () => (await (await f.alice.request('v1/remote/hosts/' + f.hostId + '/previews')).json()).registrations;
   await vi.waitFor(async () => expect(await list()).toEqual([expect.objectContaining({ id: f.registration.id, expiresAt: expect.any(Number) })]), { timeout: 1000 });
   expect((await list())[0].expiresAt).toBeGreaterThan(until);
+  await clock.advance(4000);
   await vi.waitFor(async () => expect(await list()).toEqual([]), { timeout: 4000 });
   expect((await fetch(base + '/bytes', { headers: { cookie } })).status).toBe(401);
 }, 20000);
 
 it('does not renew for unauthorized traffic, list polling, or an idle WebSocket', async () => {
-  const f = await previewFixture({ ttlMs: 1000 });
+  clock = manualClock();
+  const f = await previewFixture({ ttlMs: 1000, clock });
   const cookie = await f.enter('/socket');
   const base = f.previewOrigin + '/p/' + f.registration.id;
   const socket = new WebSocket(base.replace('http:', 'ws:') + '/socket', { headers: { cookie, origin: f.previewOrigin }, handshakeTimeout: 5000 });
@@ -148,7 +158,7 @@ it('does not renew for unauthorized traffic, list polling, or an idle WebSocket'
   while (Date.now() < f.registration.expiresAt + 1500) {
     expect((await fetch(base + '/bytes')).status).toBe(401);
     await f.alice.request('v1/remote/hosts/' + f.hostId + '/previews');
-    await new Promise(resolve => setTimeout(resolve, 150));
+    await clock.advance(400);
   }
   await closed;
   expect((await fetch(base + '/bytes', { headers: { cookie } })).status).toBe(401);

@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { WebSocket, WebSocketServer } from 'ws';
 import { afterEach, expect, vi } from 'vitest';
 import { createGatewayRelay } from '../gateway-relay.js';
+import type { manualClock } from './manual-clock.js';
 import { createAgentHost, type AgentHostOptions } from '@orchardworks/agent-remote-controller';
 
 type VscodeTunnelOptions = NonNullable<AgentHostOptions['vscodeTunnel']>;
@@ -33,7 +34,7 @@ class LocalSession implements AgentSession {
   async runtimeInfo() { return { providerId: this.providerId, sessionId: this.nativeSessionId, status: 'idle' as const, cwd: this.cwd, persistence: { providerId: this.providerId, sessionId: this.nativeSessionId, opaque: '{}' } }; }
   async sendMessage() {} async respondToInteraction() {} async dispose() { this.release(); }
 }
-export async function previewFixture(options: { controlOrigin?: string; previewDomain?: string; vscodeTunnel?: Omit<VscodeTunnelOptions, 'installationId' | 'stateDirectory'>; ttlMs?: number; separateOrigin?: boolean; target?: string; pathMode?: 'strip' | 'preserve'; workspace?: string; servePage?: Parameters<typeof createGatewayRelay>[0]['servePage'] } = {}) {
+export async function previewFixture(options: { clock?: ReturnType<typeof manualClock>; controlOrigin?: string; previewDomain?: string; vscodeTunnel?: Omit<VscodeTunnelOptions, 'installationId' | 'stateDirectory'>; ttlMs?: number; separateOrigin?: boolean; target?: string; pathMode?: 'strip' | 'preserve'; workspace?: string; servePage?: Parameters<typeof createGatewayRelay>[0]['servePage'] } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-preview-'));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const observed = { cancelledEvents: 0, cookies: [] as string[] };
@@ -48,7 +49,7 @@ export async function previewFixture(options: { controlOrigin?: string; previewD
     }
     if (request.url === '/streaming-events') {
       response.writeHead(200, { 'content-type': 'text/event-stream' });
-      const timer = setInterval(() => response.write('data: activity\n\n'), 100);
+      const timer = setInterval(() => response.write('data: activity\n\n'), 5);
       response.once('close', () => clearInterval(timer)); return;
     }
     if (request.url === '/events') {
@@ -63,7 +64,8 @@ export async function previewFixture(options: { controlOrigin?: string; previewD
   await new Promise<void>(resolve => local.listen(0, '127.0.0.1', resolve));
   cleanups.push(async () => { for (const socket of appWs.clients) socket.terminate(); await new Promise<void>(resolve => appWs.close(() => resolve())); local.closeAllConnections(); await new Promise<void>(resolve => local.close(() => resolve())); });
   const target = options.target ?? `http://127.0.0.1:${(local.address() as import('node:net').AddressInfo).port}`;
-  const relay = createGatewayRelay({ origin: options.controlOrigin ?? 'http://127.0.0.1:0', previewDomain: options.previewDomain, previewOrigin: options.separateOrigin ? 'http://localhost:0' : undefined, issuer, secret, servePage: options.servePage });
+  const relay = createGatewayRelay({ origin: options.controlOrigin ?? 'http://127.0.0.1:0', previewDomain: options.previewDomain, previewOrigin: options.separateOrigin ? 'http://localhost:0' : undefined, issuer, secret, servePage: options.servePage,
+    ...(options.clock ? { scheduler: options.clock.scheduler, brokerScheduler: options.clock.brokerScheduler } : {}) });
   const { url, port } = await relay.listen(0); cleanups.push(() => relay.close());
   const transportUrl = `http://127.0.0.1:${port}`;
   const fetch = (input: string, init?: RequestInit): Promise<Response> => {

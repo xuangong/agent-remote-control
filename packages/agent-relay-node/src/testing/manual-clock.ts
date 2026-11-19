@@ -7,6 +7,9 @@ import type { GatewayRelayOptions } from '../gateway-relay.js';
  * grant or challenge expiry) and each account Broker's timers (credential expiry, heartbeats, deadlines). `advance` moves
  * the clock and runs whatever falls due on the way, earliest first. Sockets stay real. Call `restore` when the test ends.
  */
+/** Lets the real sockets carry what a wake-up started (a renewal, a close) before time moves on. */
+const settle = () => new Promise<void>(resolve => setTimeout(resolve, 20));
+
 export function manualClock(start = Date.now()) {
   vi.useFakeTimers({ toFake: ['Date'], now: start });
   let wake: { deadline: number; refresh: () => Promise<void> } | undefined;
@@ -16,7 +19,7 @@ export function manualClock(start = Date.now()) {
     cancel() { wake = undefined; },
   };
   const brokerScheduler: NonNullable<GatewayRelayOptions['brokerScheduler']> = {
-    setTimeout(run, delayMs) { const timer = {}; timers.set(timer, { at: Date.now() + delayMs, run }); return timer; },
+    setTimeout(run, delayMs) { const timer = {}; timers.set(timer, { at: Math.ceil(Date.now() + delayMs), run }); return timer; },
     clearTimeout(timer) { if (timer) timers.delete(timer as object); },
   };
   const next = () => {
@@ -29,8 +32,12 @@ export function manualClock(start = Date.now()) {
     /** Moves the clock forward and runs every wake-up that falls due on the way. */
     async advance(ms: number) {
       const end = Date.now() + ms;
-      for (let step = next(); step && step.at <= end; step = next()) { vi.setSystemTime(Math.max(Date.now(), step.at)); await step.fire(); }
+      for (let step = next(), fired = 0; step && step.at <= end; step = next()) {
+        if (++fired > 5000) throw new Error('The manual clock keeps waking: a timer reschedules itself without moving forward.');
+        vi.setSystemTime(Math.max(Date.now(), step.at)); await step.fire(); await settle();
+      }
       vi.setSystemTime(end);
+      await settle();
     },
     restore: () => vi.useRealTimers(),
   };

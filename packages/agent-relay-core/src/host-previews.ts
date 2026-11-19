@@ -1,6 +1,7 @@
 import { createPreviewRelayBridge, createTunnelPeer, type PreviewSnapshot, type PreviewRegistration, type TunnelSocket } from '@orchardworks/agent-remote-tunnel';
 
 import { createPreviewActivity } from './preview-activity.js';
+import type { BrokerScheduler } from './transport.js';
 import { PreviewNameError, previewNameId, previewTargetKey, reconcilePreviewNames, type PreviewNames } from './preview-names.js';
 
 export interface HostPreviewState extends PreviewNames { hostId: string; snapshot: PreviewSnapshot; pendingRemovals: string[] }
@@ -9,6 +10,8 @@ interface Options {
   save(state: HostPreviewState[], publish: () => void): Promise<void>;
   remove(hostId: string, id: string): Promise<void>;
   renew?(hostId: string, id: string): Promise<{ expiresAt: number }>;
+  scheduler?: BrokerScheduler;
+  now?(): number;
 }
 export function createHostPreviews(options: Options) {
   let records = structuredClone(options.initial ?? []);
@@ -36,6 +39,7 @@ export function createHostPreviews(options: Options) {
   const activity = createPreviewActivity({
     available: (hostId, id) => !closed && !!lookup(hostId, id) && peers.has(hostId),
     renew: (hostId, id) => options.renew ? options.renew(hostId, id) : Promise.reject(new Error('Preview renewal unavailable.')),
+    scheduler: options.scheduler, now: options.now,
   });
   function disconnect(hostId: string) {
     activity.forget(hostId);

@@ -61,7 +61,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     keepsAssociations: !!options.successionEnrollment || !!options.initialState?.associations, keepsSharing: !!options.ownerSubject });
   for (const host of brokerState.hosts.values()) options.diagnostics?.record(host.id, { event: 'relay_started' });
   const activeStreamCount = (subject: string) => [...brokerState.hosts.values()].reduce((sum, host) => sum + [...host.streams.values()].filter(stream => stream.subject === subject).length, 0);
-  const previews = createHostPreviews({ initial: options.initialState?.previews,
+  const previews = createHostPreviews({ initial: options.initialState?.previews, scheduler, now,
     save: (value, publish) => {
       const owners = value.map(item => brokerState.hosts.get(item.hostId));
       return brokerState.commit(draft => {

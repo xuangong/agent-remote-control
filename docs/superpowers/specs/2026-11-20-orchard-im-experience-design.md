@@ -46,6 +46,25 @@ The owner asked for an IM-grade experience, and for the UI and UX work to be par
 5. **One connection indicator.** The device's own link to the Relay is the only connection signal, and it sits in the sidebar. Host and runtime state are said in words on the assistant: "Mac mini 离线，消息会在它上线后送达", or "在休息，需要时自动醒来" for a released runtime.
 6. **Product name: Orchard.** It follows the organisation name `orchardworks`. Assistants are the fruit of the orchard, and the logo is its farmer. The rename touches only what users see: the wordmark, the page title, the icons, and the login and about pages. Package names, the CLI command, the protocol names and the Controller product name stay as they are.
 
+## Two views of the same assistants
+
+Bot mode and Window mode both stay, and are designed together (owner, 2026-11-20).
+
+| | Bot mode: the assistant view | Window mode: the workbench |
+|---|---|---|
+| What it is for | Talking to assistants one at a time, like IM | Watching and steering several assistants side by side |
+| Unit | An assistant, with its sessions behind it | A window of tiles, each tile one assistant's conversation |
+| Layout | Sidebar, conversation and details panel | Tiles over the same warm ground, each tile a small floating panel |
+
+What the two modes share:
+- the same avatars, names and business-state sentences;
+- the same bubbles, work-summary line, inline approvals and process modes;
+- the same details panel, opened from any tile.
+
+Moving between the modes keeps your place. Opening an assistant from a tile shows it in Bot mode, and pinning an assistant from Bot mode adds it to a window.
+
+Window mode gets the same visual language in the same step as Bot mode (I3), not a restyle afterwards. On the phone, a window becomes a swipeable stack of its tiles.
+
 ## Phone
 
 The phone is a first-class target, not a later port (owner, 2026-11-20). Every step is designed and accepted at phone width (390 x 844) as well as desktop:
@@ -107,7 +126,7 @@ The client runtime (`agent-client`: timeline, replica, send state, device store,
 | Design tokens and primitives | New `agent-client-web/src/theme` (tokens and themes) and primitives (bubble, card, avatar, pill, status line) | One source of truth for the visual language |
 | Assistant view | `agent-remote-lab` Bot mode (assistant list, conversation, details panel) | The new three-panel layout. Bot mode becomes the primary view because its model (one bot continuing many sessions) already matches "an assistant". |
 | Timeline rendering | `agent-client-web` `AgentTimeline` and items | Bubbles, the one-line work summary with L2 expansion, inline approval cards, the session-change line, the three process modes |
-| Window mode | `agent-remote-lab` Window mode | Kept as the multi-window workbench and moved onto the same tokens and primitives. Its behaviour does not change. |
+| Window mode | `agent-remote-lab` Window mode | Kept as the multi-window workbench and designed together with the assistant view: tiles are assistant conversations built from the same primitives. Its window and tile behaviour does not change. |
 | Brand | Site shell, `index.html`, icons, access page | Orchard wordmark and logo |
 
 ## Roadmap steps
@@ -121,12 +140,12 @@ These are the I steps in the roadmap. Each ships on its own.
    - The control check runs alongside the timeline subscription, not before it.
    - Enabling journals in production follows I1, with the owner's approval of the deploy.
 2. **I2 Design system.** Tokens, light and dark themes, primitives, avatar generation and the Orchard logo. Component fixture pages show every primitive in both themes.
-3. **I3 Assistant view.**
+3. **I3 Assistant view and workbench.** Bot mode and Window mode in the new design, together.
    - Bot mode in the new layout: sidebar, conversation with bubbles and the three process modes, details panel.
    - The details panel shows the agent, the machine, the sessions, settings, upcoming routines when P5 lands, and files.
    - Inline approvals, the work-summary line, the session-change line.
    - Assistant-voiced status sentences.
-4. **I4 Workbench.** Window mode on the new tokens and the Orchard brand across the site. The phone layout is not deferred to I4. I2 primitives and the I3 assistant view ship with their phone layouts and phone acceptance.
+4. **I4 Brand and polish.** The Orchard brand across the site (access page, about, icons, installed web app), and the remaining screens. The phone layout is not deferred to I4. I2 primitives and the I3 assistant view ship with their phone layouts and phone acceptance.
 
 ## Acceptance
 

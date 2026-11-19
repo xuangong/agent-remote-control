@@ -614,7 +614,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
       runtime.confirmedEvidence = new Map(runtime.historyEvidence);
       applyRefreshEffects(refreshWith({ type: 'discovery_succeeded' }));
       if (!runtime.desired) runtime.active = false;
-      const overtaken = runtime.desired && runtime.result?.status === 'pending' ? refreshWith({ type: 'composition_pending', code: runtime.result.code }) : [];
+      const overtaken = runtime.desired && runtime.result?.status === 'pending' ? refreshWith({ type: 'composition_pending', code: runtime.result.code ?? 'pending' }) : [];
       if (runtime.desired && runtime.result?.status === 'applied') refreshWith({ type: 'composition_applied' });
       if (overtaken.length) applyRefreshEffects(overtaken, () => queueMicrotask(() => { if (current()) void discover(); }));
       else if (runtime.desired && runtime.result?.status !== 'applied') runtime.error = runtime.discoveryError = `Session composition needs synchronization (${runtime.result?.code ?? 'pending'}).`;

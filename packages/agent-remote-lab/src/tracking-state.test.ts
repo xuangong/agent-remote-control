@@ -151,7 +151,7 @@ it('shows the strongest reminder of the capsule list, and nothing once the list 
     a: { connection: 'ready' as const, activity: 'waiting' as const, attention: 'pending' as const },
     b: { connection: 'ready' as const, activity: 'idle' as const, attention: 'idle' as const },
     c: { connection: 'ready' as const, activity: 'idle' as const },
-    d: { connection: 'failed' as const, attention: 'pending' as const },
+    d: { connection: 'disconnected' as const, attention: 'pending' as const },
   };
   expect(trackingAlert(['a', 'b', 'c'], observations)).toBe('pending');
   expect(trackingAlert(['b', 'c'], observations)).toBe('idle');

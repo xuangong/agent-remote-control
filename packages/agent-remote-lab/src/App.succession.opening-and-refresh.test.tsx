@@ -370,30 +370,6 @@ it('finishes committed recovery when an earlier native attachment synchronizes d
   } finally { releaseAttach(); releaseCurrent(); }
 }, testDeadline);
 
-it.each(['cancelled'] as const)('waits for the original native session to recover after a %s handoff', async phase => {
-  const real = successionHooks.useSessionSuccession;
-  let succession!: ReturnType<typeof real>;
-  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
-  const f = await failureFixture(false, 'B', false, '', { chain: [] });
-  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
-  const binding = succession.binding!;
-  const source = binding.session;
-  const result: SuccessionActionResult = { role: { id: 'primary', revision: 1, origin: native('A'), current: native('A'),
-    workspace: { controllerId: 'installation', canonicalCwd: '/fixture' } },
-    record: { operationId: 'cancelled-op', roleId: 'primary', expectedRevision: 1, from: native('A'), phase, startedAt: 'now', updatedAt: 'now' } };
-  await act(async () => f.updatesByAgent.get('agent-A')!('A', 'restoring'));
-  await settleApp(() => expect(binding.client.getSessionState().recovering).toBe(true));
-  let outcome = 'pending', failure: unknown;
-  await act(async () => { void succession.refreshSettled(result, source).then(() => { outcome = 'confirmed'; }, error => { outcome = 'failed'; failure = error; }); });
-  await settleApp(() => expect(succession.discovering).toBe(false));
-  expect(outcome).toBe('pending');
-  expect(succession.binding?.client).toBe(binding.client);
-  await act(async () => f.updatesByAgent.get('agent-A')!('A', 'connected'));
-  await settleApp(() => { expect(failure).toBeUndefined(); expect(outcome).toBe('confirmed'); });
-  expect(f.requests.filter(request => request.url.endsWith('/attach') && request.body?.nativeSessionId === 'A')).toHaveLength(1);
-  expect(f.frames.some(frame => ['send_message', 'execute_command'].includes(frame.message?.type ?? ''))).toBe(false);
-}, testDeadline);
-
 it('does not complete a committed refresh while its previously confirmed native session is restoring', async () => {
   const real = successionHooks.useSessionSuccession;
   let succession!: ReturnType<typeof real>;

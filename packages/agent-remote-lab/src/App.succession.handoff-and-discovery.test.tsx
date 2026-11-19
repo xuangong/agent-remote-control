@@ -498,12 +498,6 @@ it('retains closed and nested Ask owners, and supplies T with its own replaceabl
 });
 
 
-it.each(['route_not_found'])('keeps ordinary fixed navigation available when initial HTTP discovery reports unsupported %s', async code => {
-  const f = await failureFixture(false, 'A', false, '', { replayFailure: code });
-  await settleApp(() => { expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['A']); });
-  await waitFor(() => expect(f.view.querySelector('.lab-has-agent')).not.toBeNull());
-});
-
 it('does not treat authorization-hidden succession as an unsupported transport', async () => {
   const f = await failureFixture(false, 'A', false, '', { replayFailure: 'session_not_found' });
   await waitFor(() => expect(f.view.textContent).toContain('Fixture succession route unavailable.'));

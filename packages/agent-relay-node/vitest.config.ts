@@ -17,6 +17,8 @@ export default defineConfig({
     slowTestThreshold: 300,
     include: ['src/**/*.test.ts'],
     testTimeout: 10_000,
+    // The Relay answers within milliseconds; vitest's default 50 ms poll interval would be most of a test's time.
+    expect: { poll: { interval: 5 } },
     env: { HOME: home, USERPROFILE: home },
   },
 });

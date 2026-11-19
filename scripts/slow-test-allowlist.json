@@ -14,36 +14,8 @@
    "reason": "Encodes and stores a Relay of 1,000s of records to prove commit cost; CPU bound by the size under test."
   },
   {
-   "test": "packages/agent-relay-node/src/connection-diagnostics.test.ts > replays original disconnect evidence into the correct Host file after reconnect and Server restart",
-   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
-  },
-  {
-   "test": "packages/agent-relay-node/src/connection-diagnostics.test.ts > does not send the new RPC to a legacy Controller and retains its evidence without disrupting catalog requests",
-   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
-  },
-  {
-   "test": "packages/agent-relay-node/src/connection-diagnostics.test.ts > preserves the native close code after terminate through reconnect into the Host log",
-   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
-  },
-  {
-   "test": "packages/agent-relay-node/src/connection-diagnostics.test.ts > records browser stream opening, readiness and closure without conversation content",
-   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
-  },
-  {
-   "test": "packages/agent-relay-node/src/connection-diagnostics.test.ts > preserves the native close code after close through reconnect into the Host log",
-   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
-  },
-  {
-   "test": "packages/agent-relay-node/src/connection-diagnostics.test.ts > discovers the independent diagnostic capability even when updater status fails",
-   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
-  },
-  {
    "test": "packages/agent-relay-node/src/live-launcher.test.ts > live DSH launcher > runs the caller-supplied pnpm executable",
    "reason": "Uses a real socket, child process or probe timeout; a transport or process test kept in the unit project."
-  },
-  {
-   "test": "packages/agent-relay-node/src/connection-diagnostics.test.ts > delivers bounded business timeout metadata without request payloads or query strings",
-   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
   },
   {
    "test": "packages/agent-remote-journal/src/session-journal.test.ts > SessionJournal > prepends 200,000 items and keeps the sequence contiguous",

@@ -17,7 +17,7 @@ afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await c
 
 async function setup(options: Partial<RemoteHostBrokerOptions> = {}, initial: RelayDiagnostic[] = []) {
   let saved = initial;
-  const journal = createDiagnosticJournal({ storage: { initial, async save(entries) { saved = entries; } } });
+  const journal = createDiagnosticJournal({ deliveryDelayMs: 5, storage: { initial, async save(entries) { saved = entries; } } });
   const broker = createRemoteHostBroker({ origin: 'http://127.0.0.1:6175', diagnostics: journal, rpcTimeoutMs: 80, ...options });
   const server = createServer((_, response) => { response.statusCode = 404; response.end(); });
   broker.install(server);

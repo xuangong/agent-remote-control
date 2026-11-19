@@ -5,8 +5,9 @@ type Details = Omit<RelayDiagnostic, 'id' | 'timestamp' | 'source' | 'hostId' | 
 type Sender = (entries: RelayDiagnostic[]) => Promise<{status: number}>;
 interface Connection { send: Sender; timer?: ReturnType<typeof setTimeout>; pending: boolean; unsupported: boolean }
 /** Diagnostic persistence and delivery are deliberately independent of business state commits. */
-export function createDiagnosticJournal(options: {storage?: RelayDiagnosticStore; context?: RelayDiagnosticContext; now?(): number} = {}) {
+export function createDiagnosticJournal(options: {storage?: RelayDiagnosticStore; context?: RelayDiagnosticContext; now?(): number; /** How long new evidence waits before it is sent to its Host. Defaults to one second. */ deliveryDelayMs?: number} = {}) {
   const now = options.now ?? Date.now;
+  const deliveryDelayMs = options.deliveryDelayMs ?? 1000;
   const relayInstanceId = randomUUID();
   const metadata: RelayDiagnosticContext = {};
   for (const key of ['runtimeInstanceId', 'workerVersionId'] as const) {
@@ -33,7 +34,7 @@ export function createDiagnosticJournal(options: {storage?: RelayDiagnosticStore
     }
     return saving;
   }
-  function schedule(hostId: string, connection: Connection, delay = 1000) {
+  function schedule(hostId: string, connection: Connection, delay = deliveryDelayMs) {
     if (closed || connections.get(hostId) !== connection || connection.pending || connection.unsupported || connection.timer) return;
     connection.timer=setTimeout(()=>{connection.timer=undefined;void deliver(hostId,connection);},delay);
     connection.timer.unref?.();
@@ -53,7 +54,7 @@ export function createDiagnosticJournal(options: {storage?: RelayDiagnosticStore
       if(response.status===404)connection.unsupported=true;
       else if(response.status===204) {
         const ids=new Set(batch.map(entry=>entry.id));entries=entries.filter(entry=>!ids.has(entry.id));
-        await persist();retry=1000;
+        await persist();retry=deliveryDelayMs;
       }
     } catch { /* Keep the original batch for a later connection or retry. */ }
     finally {

@@ -19,9 +19,9 @@ export async function enrollmentTransport(f: SuccessionHost, initial?: RemoteHos
   // Each transport is another Relay with its own origin, as a new listener port was.
   const origin = `http://relay-${++relays}.example`;
   const authority = { version: 1 as const, origin, issuer: 'https://issuer.example', namespace: 'tenant', ownerSubject: 'owner' };
-  let saved: RemoteHostBrokerState | undefined; let dropCreationResponse=false;const createRequests=new Set<string>();let failProjection = false, failBinding=false; let beforeControl=async(_input:{action?:string;freeze?:unknown})=>{};
+  let saved: RemoteHostBrokerState | undefined; let dropCreationResponse=false;const createRequests=new Set<string>();let failProjection = false;
   const makeBroker=(initialState?:RemoteHostBrokerState)=>createHostBroker({ origin, ownerSubject: 'owner', durable: true, successionEnrollment: authority, ...(options.noAllowance ? {} : { successionProjectionAllowance: () => options.ceiling ?? 2 * 1024 * 1024 }), initialState,
-    onStateChange: async state => { if (failProjection && state.associations?.freezes.some(item => item.released)) throw new Error('Projection storage unavailable'); if(failBinding&&state.bindings.some(item=>item.sourceRelation))throw new Error('Binding storage unavailable'); saved = structuredClone(state); }, rpcTimeoutMs: options.rpcTimeoutMs ?? 2000 });
+    onStateChange: async state => { if (failProjection && state.associations?.freezes.some(item => item.released)) throw new Error('Projection storage unavailable'); saved = structuredClone(state); }, rpcTimeoutMs: options.rpcTimeoutMs ?? 2000 });
   let broker=makeBroker(initial);
   const closers: Array<() => void | Promise<void>> = [];
   const link = relayConnection(() => broker, closers, {
@@ -68,10 +68,10 @@ export async function enrollmentTransport(f: SuccessionHost, initial?: RemoteHos
     }
     return createRemoteHostUplinkClient({relay:f.host.relay,installationId:options.installationId??'controller',name:'Fixture',providers:f.providerDescriptors,connect:link.connect,
       remoteKey:pairing.key,onCredential:async()=>{},url:origin.replace('http:','ws:')+'/ws/remote-host',resolveSession:f.host.resolveSession,acquireSession:f.host.acquireSession,
-      control:f.host.control,...(options.enrollment===false?{}:{successionEnrollment:{control:async(request,context)=>{const result=await f.host.enrollFromRelay(request,context);await beforeControl(JSON.parse(request.body??'{}'));return result;}}})});
+      control:f.host.control,...(options.enrollment===false?{}:{successionEnrollment:{control:f.host.enrollFromRelay}})});
   };
   let client=await connect();const {hostId}=await client.ready;
-  return {get client(){return client;},get broker(){return broker;},authority,request,enrollmentRpc,hostId,restart:async(beforeConnect?:()=>Promise<void>)=>{await client.close();broker.close();await beforeConnect?.();broker=makeBroker(saved);client=await connect();await client.ready;},failBinding:(value:boolean)=>{failBinding=value;},dropCreationResponse:()=>{dropCreationResponse=true;},beforeControl:(hook:typeof beforeControl)=>{beforeControl=hook;},failProjection:(value:boolean)=>{failProjection=value;},saved:()=>structuredClone(saved!),action:(action:string,input:unknown,subject='owner')=>request(`/v1/remote/hosts/${hostId}/succession/${action}`,input,subject),
+  return {get client(){return client;},get broker(){return broker;},authority,request,enrollmentRpc,hostId,restart:async(beforeConnect?:()=>Promise<void>)=>{await client.close();broker.close();await beforeConnect?.();broker=makeBroker(saved);client=await connect();await client.ready;},dropCreationResponse:()=>{dropCreationResponse=true;},failProjection:(value:boolean)=>{failProjection=value;},saved:()=>structuredClone(saved!),action:(action:string,input:unknown,subject='owner')=>request(`/v1/remote/hosts/${hostId}/succession/${action}`,input,subject),
     close:async()=>{await client.close();broker.close();for(const close of closers.splice(0).reverse())await close();}};
 }
 

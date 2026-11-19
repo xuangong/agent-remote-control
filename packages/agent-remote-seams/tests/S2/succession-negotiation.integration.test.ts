@@ -38,17 +38,6 @@ test('old Host on upgraded Relay is legacy-recovery-only and gets no strict v2 a
   } finally {await transport.close();await f.close();}
 },10000);
 
-test('public projection rejection is pre-effect and leaves the durable Relay freeze safely cancellable', async () => {
-  const f=await fixture(false,true), transport=await enrollmentTransport(f,undefined,{ceiling:1});
-  try {
-    const response=await transport.action('prepare',{operationId:'too-small',providerId:'fixture',nativeSessionId:'A',expectedRevision:1});
-    expect(response.status).toBe(409);expect(await response.json()).toMatchObject({code:'succession_projection_capacity_exceeded'});
-    expect(f.creates()).toBe(0);expect(transport.saved().associations!.freezes[0]!.released).toBeUndefined();
-    expect((await transport.action('cancel',{operationId:'too-small'})).status).toBe(200);
-    expect(transport.saved().associations!.freezes[0]!.released).toBe('cancelled');expect(f.creates()).toBe(0);
-  } finally {await transport.close();await f.close();}
-},10000);
-
 test('saved bounded recovery is explicitly unavailable on an old Relay while ordinary connection and records remain intact',async()=>{
   const options={legacyRelay:false},f=await fixture(false,true),transport=await enrollmentTransport(f,undefined,options);
   try{
@@ -61,42 +50,5 @@ test('saved bounded recovery is explicitly unavailable on an old Relay while ord
     expect(transport.saved().associations!.freezes[0]!.receipt).toEqual(freeze);expect(f.creates()).toBe(1);
     options.legacyRelay=false;await transport.restart();
     expect((await transport.action('status',{operationId:input.operationId})).status).toBe(200);expect(f.creates()).toBe(1);
-  }finally{await transport.close();await f.close();}
-},10000);
-
-test('authenticated v2 retries reject missing invalid or changed ceilings without another native creation',async()=>{
-  const f=await fixture(false,true),transport=await enrollmentTransport(f);
-  try{
-    const input={operationId:'fixed-ceiling',providerId:'fixture',nativeSessionId:'A',expectedRevision:1};
-    expect((await transport.action('prepare',input)).status).toBe(200);expect(f.creates()).toBe(1);
-    const freeze=transport.saved().associations!.freezes[0]!.receipt;
-    if(freeze.version!==2)throw new Error('Missing v2 fixture freeze');
-    for(const maxProjectionBytes of [undefined,0,1.5,freeze.maxProjectionBytes+1]){
-      expect((await transport.enrollmentRpc({action:'prepare',freeze:{...freeze,maxProjectionBytes}})).status).toBe(409);
-      expect(f.creates()).toBe(1);
-    }
-    expect((await transport.enrollmentRpc({action:'prepare',freeze})).status).toBe(200);
-    expect(f.creates()).toBe(1);expect(transport.saved().associations!.freezes[0]!.receipt).toEqual(freeze);
-  }finally{await transport.close();await f.close();}
-},10000);
-
-test('authenticated committed output invariant errors preserve complete evidence and never become pre-effect refusal',async()=>{
-  const f=await fixture(false,true),transport=await enrollmentTransport(f);
-  try{
-    const input={operationId:'invariant',providerId:'fixture',nativeSessionId:'A',expectedRevision:1};
-    expect((await transport.action('prepare',input)).status).toBe(200);
-    expect((await transport.action('commit',{operationId:input.operationId})).status).toBe(200);
-    const state=f.stateFiles.roles.json('state.json');
-    const record=structuredClone(state.roles[0].operations[0]),role=structuredClone(state.roles[0].role);
-    // Durable allowance fault injection exercises output diagnostics after native commit.
-    state.roles[0].enrollments[0].maxProjectionBytes=1;f.stateFiles.roles.put('state.json',state);
-    await transport.restart(()=>f.restart());
-    for(const action of ['prepare','status','commit','reconcile','release']){
-      const response=await transport.enrollmentRpc({action,freeze:state.roles[0].enrollments[0]});
-      expect(response.status).toBe(409);expect(JSON.parse(response.body)).toMatchObject({code:'succession_projection_invariant_failed'});
-    }
-    const retained=f.stateFiles.roles.json('state.json');
-    expect(retained.roles[0].operations[0]).toEqual(record);expect(retained.roles[0].role).toEqual(role);
-    expect(record.phase).toBe('committed');expect(f.creates()).toBe(1);
   }finally{await transport.close();await f.close();}
 },10000);

@@ -7,6 +7,10 @@ import { join } from 'node:path';
 import { IMAGE_INPUT_CAPABILITIES, type AgentInputPart } from '@orchardworks/agent-provider-sdk';
 import { WebSocket } from 'ws';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createAgentRemoteRelay, createRemoteHostUplinkClient, InputImageStore } from '@orchardworks/agent-session-runtime';
+import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } from '@orchardworks/agent-client';
+import { createAgentHost } from '@orchardworks/agent-remote-controller';
+import { createRecordedLabProvider } from './recorded.js';
 import { createRemoteHostBroker } from './remote-host-broker.js';
 import type { AgentMessageOptions, AgentSession } from '@orchardworks/agent-provider-sdk';
 
@@ -264,10 +268,6 @@ describe('Remote Host broker', () => {
 });
 
 it('carries native-host discovery, creation, snapshots, and chat through the production uplink client', async () => {
-  const { createAgentRemoteRelay, createRemoteHostUplinkClient, InputImageStore } = await import('@orchardworks/agent-session-runtime');
-  const { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } = await import('@orchardworks/agent-client');
-  const { createRecordedLabProvider } = await import('./recorded.js');
-  const { vi } = await import('vitest');
   const f = await setup(); const pair = await (await f.post('/v1/remote/pairings')).json();
   const provider = createRecordedLabProvider({ capabilities: { queueMessage: true, imageInput: IMAGE_INPUT_CAPABILITIES } }).provider;
   const imageDeliveries: AgentInputPart[][] = [];
@@ -375,7 +375,6 @@ it('rejects expired credentials and prevents a bound key from registering anothe
 });
 
 it('advertises Controller environment over a real uplink and preserves it across Relay restart', async () => {
-  const { createAgentHost } = await import('@orchardworks/agent-remote-controller');
   const environment = { detectedAt: 1234, os: { platform: 'linux', name: 'Ubuntu', release: '6.8', arch: 'arm64' },
     wsl: false, container: true, shell: { name: 'bash', source: 'account' as const }, shells: [],
     browsers: [{ id: 'chromium', name: 'Chromium', status: 'found' as const }], vscode: { status: 'not-found' as const } };

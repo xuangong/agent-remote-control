@@ -3,7 +3,7 @@ import { AgentOperationRejectedError, AGENT_NATIVE_EVIDENCE_LIMITS, parseAgentPr
 import type { StateFiles } from './state-file.js';
 import { isNativeSessionRef, isSuccessionRequest, nativeSessionRefKey, MAX_NORMALIZED_CONTEXT_BYTES, MAX_NORMALIZED_CONTEXT_ENTRIES, quotedSessionContextPrefix,
   type NativeSessionRef, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
-import { assertSuccessionCapacity, isReservation, jsonBytes, largestSuccessionRef, diskStateFiles, reservationBytes, SuccessionCapacityError, SuccessionPublicationUnknown } from './succession-persistence.js';
+import { SUCCESSION_STORE_BYTES, assertSuccessionCapacity, isReservation, jsonBytes, largestSuccessionRef, diskStateFiles, reservationBytes, SuccessionCapacityError, SuccessionPublicationUnknown } from './succession-persistence.js';
 
 export interface SuccessionContextAttachment {
   operationId: string;
@@ -65,7 +65,6 @@ export interface SuccessionDeliveryEvidence {
 }
 interface MutationCoverage { target: NativeSessionRef; operationId?: string; prepared?: true }
 interface ContextState { version: 3; attachments: SuccessionContextRecord[]; preparations?: ContextPreparationRecord[]; coverage?: MutationCoverage[] }
-const MAX_STORE_BYTES = 8 * 1024 * 1024;
 /** How long a restarted Controller fences a session whose mutation outcome the previous process could not confirm. */
 export const RESTART_SETTLE_MS = 5 * 60_000;
 const sameRef = (a: NativeSessionRef, b: NativeSessionRef) => nativeSessionRefKey(a) === nativeSessionRefKey(b);
@@ -93,7 +92,8 @@ export class SessionSuccessionContextStore {
   }
   private readonly dispatchTails = new Map<string, Promise<unknown>>();
   private restoredAt = 0;
-  constructor(directory: string, private readonly options: { restartSettleMs?: number; now?: () => number } = {}, private readonly files: StateFiles = diskStateFiles(directory)) { this.ready = this.restore(); }
+  private get storeBytes(): number { return this.options.storeBytes ?? SUCCESSION_STORE_BYTES; }
+  constructor(directory: string, private readonly options: { restartSettleMs?: number; now?: () => number; storeBytes?: number } = {}, private readonly files: StateFiles = diskStateFiles(directory)) { this.ready = this.restore(); }
   /**
    * A marker restored from the previous process covers work whose outcome that process could not confirm, so it
    * fences succession while that work could still reach the native session. Succession separately requires the
@@ -402,9 +402,9 @@ export class SessionSuccessionContextStore {
     return result.execution;
   }
   private updateReservations(state: ContextState): void {
-    for (const preparation of state.preparations ?? []) preparation.reservedBytes = reservationBytes(this.bindingGrowth(preparation));
-    for (const record of state.attachments) if (record.resumeReservedBytes !== undefined) record.resumeReservedBytes = reservationBytes(this.resumeGrowth(record));
-    for (const record of state.attachments) for (const delivery of record.deliveries) if (delivery.reservedBytes !== undefined) delivery.reservedBytes = reservationBytes(this.deliveryGrowth(record, delivery));
+    for (const preparation of state.preparations ?? []) preparation.reservedBytes = reservationBytes(this.bindingGrowth(preparation), this.storeBytes);
+    for (const record of state.attachments) if (record.resumeReservedBytes !== undefined) record.resumeReservedBytes = reservationBytes(this.resumeGrowth(record), this.storeBytes);
+    for (const record of state.attachments) for (const delivery of record.deliveries) if (delivery.reservedBytes !== undefined) delivery.reservedBytes = reservationBytes(this.deliveryGrowth(record, delivery), this.storeBytes);
   }
   private checkCapacity(state: ContextState): void {
     let reserved = 0;
@@ -413,7 +413,7 @@ export class SessionSuccessionContextStore {
     for (const record of state.attachments) reserve(Number(record.resumeReservedBytes ?? 0));
     for (const record of state.attachments) for (const delivery of record.deliveries) reserve(Number(delivery.reservedBytes ?? 0));
     if (!Number.isSafeInteger(jsonBytes(state) + reserved)) throw new SuccessionCapacityError();
-    assertSuccessionCapacity(state, reserved);
+    assertSuccessionCapacity(state, reserved, this.storeBytes);
   }
   private validateInput(input: SuccessionInput): void {
     if (!input || !nonempty(input.operationId) || !nonempty(input.roleId) || !isNativeSessionRef(input.target)
@@ -463,15 +463,15 @@ export class SessionSuccessionContextStore {
     };
     for (const record of state.preparations ?? []) {
       this.validatePreparation(record); validateProvenance(record);
-      if (record.version !== 2 || ids.has(record.operationId) || !isReservation(record.reservedBytes) || record.reservedBytes !== reservationBytes(this.bindingGrowth(record))
+      if (record.version !== 2 || ids.has(record.operationId) || !isReservation(record.reservedBytes, this.storeBytes) || record.reservedBytes !== reservationBytes(this.bindingGrowth(record), this.storeBytes)
         || Object.keys(record).some(name => !['operationId', 'roleId', 'roleRevision', 'source', 'capturedAt', 'boundary', 'text', 'itemCount', 'shortenedToolCount', 'inheritedFrom', 'version', 'reservedBytes'].includes(name))) throw new Error('Invalid saved context preparation.');
       ids.add(record.operationId);
     }
     for (const record of state.attachments) {
       this.validateAttachment(record);
       if (record.resumeHandle) this.validateResumeHandle(record, record.resumeHandle);
-      if (record.resumeReservedBytes !== undefined && (!isReservation(record.resumeReservedBytes)
-        || record.resumeReservedBytes !== reservationBytes(this.resumeGrowth(record)))) throw new Error('Invalid recovery configuration capacity reservation.');
+      if (record.resumeReservedBytes !== undefined && (!isReservation(record.resumeReservedBytes, this.storeBytes)
+        || record.resumeReservedBytes !== reservationBytes(this.resumeGrowth(record), this.storeBytes))) throw new Error('Invalid recovery configuration capacity reservation.');
       const target = nativeSessionRefKey(record.target);
       if (![1, 2, 3].includes(record.version) || ids.has(record.operationId) || targets.has(target) || !Array.isArray(record.deliveries) || record.deliveries.length > 512
         || 'reservedBytes' in record || !['pending', 'dispatching', 'accepted', 'unknown', 'materialized'].includes(record.state)) throw new Error('Invalid succession context record.');
@@ -484,7 +484,7 @@ export class SessionSuccessionContextStore {
           || typeof delivery.includesContext !== 'boolean' || !['dispatching', 'accepted', 'unknown', 'rejected', 'materialized'].includes(delivery.state)
           || delivery.nativeEvidence !== undefined && !nonempty(delivery.nativeEvidence)
           || delivery.inputAcceptance !== undefined && (!['accepted', 'materialized', 'rejected'].includes(delivery.state) || !['started', 'queued', 'handled'].includes(delivery.inputAcceptance.disposition) || Object.keys(delivery.inputAcceptance).some(name => name !== 'disposition'))
-          || delivery.reservedBytes !== undefined && (!isReservation(delivery.reservedBytes) || delivery.reservedBytes !== reservationBytes(this.deliveryGrowth(record, delivery)))) throw new Error('Invalid succession delivery record.');
+          || delivery.reservedBytes !== undefined && (!isReservation(delivery.reservedBytes, this.storeBytes) || delivery.reservedBytes !== reservationBytes(this.deliveryGrowth(record, delivery), this.storeBytes))) throw new Error('Invalid succession delivery record.');
         if (delivery.preparedInput !== undefined) {
           if (record.version !== 3 || delivery.reservedBytes === undefined) throw new Error('Optional input evidence requires its versioned reservation.');
           this.validatePreparedInput(record, delivery);
@@ -517,14 +517,14 @@ export class SessionSuccessionContextStore {
     await this.files.open();
     const text = await this.files.read('context.json');
     if (text === undefined) { this.loaded = true; return; }
-    if (Buffer.byteLength(text) > MAX_STORE_BYTES) throw new Error('Succession context storage byte limit exceeded.');
+    if (Buffer.byteLength(text) > this.storeBytes) throw new Error('Succession context storage byte limit exceeded.');
     const parsed = JSON.parse(text);
     if (parsed.version === 1 && (parsed.preparations !== undefined || parsed.attachments?.some((record: SuccessionContextRecord) => record.version !== 1 || record.deliveries?.some(delivery => delivery.reservedBytes !== undefined)))) throw new Error('Ambiguous legacy context storage.');
     const legacy = [1, 2].includes(parsed.version);
     if (legacy && parsed.attachments?.some((record: SuccessionContextRecord) => record.version === 3 || record.deliveries?.some(delivery => delivery.preparedInput !== undefined))) throw new Error('Legacy context cannot certify optional native evidence.');
     const state: ContextState = legacy ? { ...parsed, version: 3 } : parsed;
     this.validate(state); let changed = legacy;
-    for (const record of state.attachments) if (record.resumeReservedBytes !== undefined) record.resumeReservedBytes = reservationBytes(this.resumeGrowth(record));
+    for (const record of state.attachments) if (record.resumeReservedBytes !== undefined) record.resumeReservedBytes = reservationBytes(this.resumeGrowth(record), this.storeBytes);
     for (const record of state.attachments) for (const delivery of record.deliveries) if (delivery.state === 'dispatching') {
       delivery.state = 'unknown'; if (delivery.includesContext) record.state = 'unknown'; changed = true;
     }

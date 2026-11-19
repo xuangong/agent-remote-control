@@ -5,6 +5,9 @@ import type { TpmWork } from '@orchardworks/agent-remote-protocol';
 import { TpmCoordinator, type TpmSessionAccess } from './tpm.js';
 import { memoryStateFiles } from './memory-state-files.js';
 
+// The coordinator settles in the background; poll it at a short interval (the default 50 ms interval adds up over a file of waits).
+const poll = ((read: () => unknown, options?: object) => expect.poll(read, { interval: 2, ...options })) as typeof expect.poll;
+
 class SessionManager {
   readonly listeners = new Set<(event: AgentManagerEvent) => void>();
   readonly messages: Array<{ text: string; options: unknown }> = [];
@@ -63,7 +66,7 @@ async function fixture(queueMessage = false, tickMs = 1_000_000) {
   const input = { providerId: 'codex', mainNativeSessionId: 'main', title: 'Deliver isolated work', requirement: 'Agree on scope and deliver evidence.', operationId: 'create-one', delegated: true };
   const create = async (operationId = input.operationId) => {
     const work = await coordinator.create({ ...input, operationId }, 'browser-scope');
-    await expect.poll(async () => (await coordinator.get(work.id)).outbox?.[0]?.status).toBe('accepted');
+    await poll(async () => (await coordinator.get(work.id)).outbox?.[0]?.status).toBe('accepted');
     const current = await coordinator.get(work.id);
     const tool = (await coordinator.extensions(current.providerId, current.tpmNativeSessionId!))!.tools!.find(tool => tool.name === 'update_todo_step')!;
     await tool.execute({ revision: current.todo!.revision, stepId: current.todo!.steps[0]!.id, status: 'in_progress', note: 'Discussing the requirement' });
@@ -105,12 +108,12 @@ async function fixture(queueMessage = false, tickMs = 1_000_000) {
     async restart() { await coordinator.close(); coordinator = new TpmCoordinator(options, access); fixtures.find(f => f.files === files)!.coordinator = coordinator; await coordinator.ready; },
   };
 }
-async function waitMessages(manager: SessionManager, count: number) { await expect.poll(() => manager.messages.length).toBe(count); }
+async function waitMessages(manager: SessionManager, count: number) { await poll(() => manager.messages.length).toBe(count); }
 
 it('starts manual work without recurring reviews and preserves normal work tools across restart', async () => {
   const f = await fixture();
   const work = await f.coordinator.create({ ...f.input, delegated: undefined }, 'manual');
-  await expect.poll(async () => (await f.coordinator.get(work.id)).outbox?.[0]?.status).toBe('accepted');
+  await poll(async () => (await f.coordinator.get(work.id)).outbox?.[0]?.status).toBe('accepted');
   expect((await f.coordinator.get(work.id)).delegated).toBe(false);
   const tpm = f.sessions.get(work.tpmNativeSessionId!)!;
   await f.acknowledge(work);
@@ -122,7 +125,7 @@ it('starts manual work without recurring reviews and preserves normal work tools
   const todo = (await f.coordinator.get(work.id)).todo!;
   await f.call(work, 'update_todo_step', { revision: todo.revision, stepId: todo.steps[0]!.id, status: 'in_progress', note: 'User-led discussion' });
   await f.call(work, 'send_main_message', { operationId: 'manual-question', purpose: 'consultation', text: 'Explain feasibility.' });
-  await expect.poll(() => f.sessions.get('main')!.messages.length).toBe(1);
+  await poll(() => f.sessions.get('main')!.messages.length).toBe(1);
   await f.restart(); f.advance(60_000); await f.coordinator.tick();
   expect((await f.coordinator.get(work.id)).delegated).toBe(false);
   expect(tpm.messages).toHaveLength(1);
@@ -142,7 +145,7 @@ it('stops future delegated reviews without interrupting an accepted review or it
   const manual = await f.coordinator.get(work.id);
   expect(manual.summary).toBe('Current review finished normally');
   await f.coordinator.action({ id: work.id, revision: manual.revision, operationId: 'delegate-again', action: 'set_delegated', delegated: true }, 'user');
-  await expect.poll(() => tpm.messages.length).toBe(3);
+  await poll(() => tpm.messages.length).toBe(3);
 });
 
 it('binds main dispatch to the current todo and requires explicit user approval before implementation', async () => {
@@ -174,7 +177,7 @@ it('rejects queued communication before native dispatch when its plan changed', 
   const current = await f.coordinator.get(work.id);
   await f.call(work, 'write_work_document', { revision: current.revision, document: 'A revised proposal', acceptance: 'New criteria' });
   main.setStatus('idle'); await f.coordinator.tick();
-  await expect.poll(async () => (await f.coordinator.get(work.id)).outbox?.find(item => item.id === intent.id)?.status).toBe('rejected');
+  await poll(async () => (await f.coordinator.get(work.id)).outbox?.find(item => item.id === intent.id)?.status).toBe('rejected');
   expect(main.messages).toEqual([]);
   expect((await f.coordinator.get(work.id)).outbox?.find(value => value.id === intent.id)?.resolvedTarget).toBeUndefined();
 }, 10000);
@@ -267,7 +270,7 @@ it('uses a longer user-waiting heartbeat and blocks review while a native intera
   const acknowledged = await f.acknowledge(work, { waiting: 'user' }); expect(acknowledged.nextCheckAt).toBe(f.now + 5000);
   f.advance(1000); await f.coordinator.tick(); expect(tpm.messages).toHaveLength(1);
   f.advance(4000); tpm.payload.pendingInteractions = [{ requestId: 'native-question' }]; await f.coordinator.tick(); expect(tpm.messages).toHaveLength(1);
-  tpm.payload.pendingInteractions = []; await expect.poll(async () => { await f.coordinator.tick(); return tpm.messages.length; }).toBe(2);
+  tpm.payload.pendingInteractions = []; await poll(async () => { await f.coordinator.tick(); return tpm.messages.length; }).toBe(2);
 }, 10000);
 
 it('coalesces committed main content while ignoring history and usage-only updates', async () => {
@@ -278,8 +281,8 @@ it('coalesces committed main content while ignoring history and usage-only updat
   await f.coordinator.tick(); expect(tpm.messages).toHaveLength(1);
   main.stream({ type: 'timeline', provider: 'codex', item: { id: 'answer', type: 'assistant_message', text: 'Work evidence' } });
   main.stream({ type: 'turn_completed', provider: 'codex', turnId: 'answer' });
-  await expect.poll(async () => (await f.coordinator.get(work.id)).nextCheckAt).toBeLessThanOrEqual(f.now + 5);
-  f.advance(5); await expect.poll(async () => { await f.coordinator.tick(); return tpm.messages.length; }).toBe(2);
+  await poll(async () => (await f.coordinator.get(work.id)).nextCheckAt).toBeLessThanOrEqual(f.now + 5);
+  f.advance(5); await poll(async () => { await f.coordinator.tick(); return tpm.messages.length; }).toBe(2);
   expect(tpm.messages[1]?.text).toContain('Main session updated.');
 }, 10000);
 
@@ -298,10 +301,10 @@ it('validates scoped tool arguments and revision conflicts without exposing repl
 it('retains main changes arriving during an active review for a subsequent bounded review', async () => {
   const f = await fixture(); const work = await f.create(); const main = f.sessions.get('main')!; const tpm = f.sessions.get(work.tpmNativeSessionId!)!;
   main.stream({ type: 'timeline', provider: 'codex', item: { id: 'during-review', type: 'assistant_message', text: 'New evidence while TPM is reviewing' } });
-  await expect.poll(async () => (await f.coordinator.get(work.id)).nextCheckAt).toBeLessThanOrEqual(f.now + 5);
+  await poll(async () => (await f.coordinator.get(work.id)).nextCheckAt).toBeLessThanOrEqual(f.now + 5);
   const acknowledged = await f.acknowledge(work); expect(acknowledged.nextCheckAt).toBe(f.now + 5);
   f.advance(5); await f.coordinator.tick(); expect(tpm.messages).toHaveLength(1);
-  f.advance(25); await expect.poll(async () => { await f.coordinator.tick(); return tpm.messages.length; }).toBe(2);
+  f.advance(25); await poll(async () => { await f.coordinator.tick(); return tpm.messages.length; }).toBe(2);
   expect(tpm.messages[1]?.text).toContain('Main session updated.');
 }, 10000);
 
@@ -311,7 +314,7 @@ it('limits automatic reviews to two and serves another work when a slot settles'
   await f.coordinator.tick(); await f.coordinator.store.flush();
   expect(f.sessions.get(one.tpmNativeSessionId!)!.messages).toHaveLength(1); expect(f.sessions.get(two.tpmNativeSessionId!)!.messages).toHaveLength(1);
   expect(third.messages).toEqual([]);
-  await f.acknowledge(one); await expect.poll(async () => { await f.coordinator.tick(); return third.messages.length; }).toBe(1);
+  await f.acknowledge(one); await poll(async () => { await f.coordinator.tick(); return third.messages.length; }).toBe(1);
 }, 10000);
 
 it('releases an archived review slot without interrupting its running native session', async () => {
@@ -321,7 +324,7 @@ it('releases an archived review slot without interrupting its running native ses
   await f.coordinator.tick(); expect(third.messages).toEqual([]);
   const current = await f.coordinator.get(one.id);
   await f.coordinator.action({ id: one.id, revision: current.revision, operationId: 'archive-one', action: 'archive' }, 'owner');
-  await expect.poll(async () => { await f.coordinator.tick(); return third.messages.length; }).toBe(1);
+  await poll(async () => { await f.coordinator.tick(); return third.messages.length; }).toBe(1);
   expect(first.payload.status).toBe('running'); expect(first.cancel).not.toHaveBeenCalled(); expect(first.leases).toBe(0);
 }, 10000);
 
@@ -348,7 +351,7 @@ it('still pauses the main recipient when the TPM execution route is unavailable'
 it('resolves an explicitly rejected uncertain message without resending that message', async () => {
   const f = await fixture(); const work = await f.create(); const main = f.sessions.get('main')!; main.sendFailure = new Error('Receipt lost');
   const sent = await f.call(work, 'send_main_message', { operationId: 'uncertain-main', purpose: 'consultation', text: 'Investigate feasibility' });
-  await expect.poll(async () => (await f.coordinator.get(work.id)).outbox?.find(value => value.id === sent.id)?.status).toBe('unknown');
+  await poll(async () => (await f.coordinator.get(work.id)).outbox?.find(value => value.id === sent.id)?.status).toBe('unknown');
   const current = await f.coordinator.get(work.id);
   await f.coordinator.action({ id: work.id, revision: current.revision, operationId: 'resolve-message', action: 'resolve', intentId: sent.id, resolution: 'rejected' }, 'scope');
   main.sendFailure = undefined; f.advance(10000); await f.coordinator.tick();
@@ -369,10 +372,10 @@ it('rechecks pause immediately before native dispatch and settles a deferred req
   let entered = false; let release!: () => void; const barrier = new Promise<void>(resolve => { release = resolve; });
   f.access.execute = async (_agent, _operation, operation) => { entered = true; await barrier; operation.beforeDispatch?.(); return operation.dispatch(); };
   const intent = await f.call(work, 'send_main_message', { operationId: 'pause-race', purpose: 'consultation', text: 'Investigate' });
-  await expect.poll(() => entered).toBe(true);
+  await poll(() => entered).toBe(true);
   const current = await f.coordinator.get(work.id);
   await f.coordinator.action({ id: work.id, revision: current.revision, operationId: 'pause-race-action', action: 'pause' }, 'scope'); release();
-  await expect.poll(async () => (await f.coordinator.get(work.id)).outbox?.find(value => value.id === intent.id)?.status).toBe('rejected');
+  await poll(async () => (await f.coordinator.get(work.id)).outbox?.find(value => value.id === intent.id)?.status).toBe('rejected');
   expect(main.messages).toEqual([]); expect((await f.coordinator.get(work.id)).paused).toBe(true);
   expect((await f.coordinator.get(work.id)).outbox?.find(value => value.id === intent.id)?.resolvedTarget).toBeUndefined();
 }, 10000);
@@ -380,7 +383,7 @@ it('rechecks pause immediately before native dispatch and settles a deferred req
 it('ignores a known outgoing message echo instead of treating it as independent work evidence', async () => {
   const f = await fixture(); const work = await f.create(); const main = f.sessions.get('main')!; const tpm = f.sessions.get(work.tpmNativeSessionId!)!;
   const intent = await f.call(work, 'send_main_message', { operationId: 'known-message', purpose: 'consultation', text: 'Investigate' }); await waitMessages(main, 1);
-  await expect.poll(async () => (await f.coordinator.get(work.id)).outbox?.find(value => value.id === intent.id)?.status).toBe('accepted');
+  await poll(async () => (await f.coordinator.get(work.id)).outbox?.find(value => value.id === intent.id)?.status).toBe('accepted');
   main.setStatus('idle'); await f.acknowledge(work); f.advance(40);
   main.stream({ type: 'timeline', provider: 'codex', item: { id: 'echo', type: 'user_message', clientMessageId: intent.id, text: 'Investigate' } });
   await f.coordinator.tick(); await f.coordinator.store.flush(); expect(tpm.messages).toHaveLength(1);
@@ -391,7 +394,7 @@ it.each(['started', 'queued', 'handled', undefined] as const)('preserves native 
   const f = await fixture(disposition === 'queued'); const work = await f.create(); const main = f.sessions.get('main')!;
   main.sendMessage = async (text, options) => { main.messages.push({ text, options }); return disposition === undefined ? undefined as any : { disposition }; };
   const intent = await f.call(work, 'send_main_message', { operationId: `acceptance-${disposition ?? 'unknown'}`, purpose: 'consultation', text: 'Inspect feasibility' });
-  await expect.poll(async () => (await f.coordinator.get(work.id)).outbox?.find(value => value.id === intent.id)?.status).toBe('accepted');
+  await poll(async () => (await f.coordinator.get(work.id)).outbox?.find(value => value.id === intent.id)?.status).toBe('accepted');
   const current = await f.coordinator.get(work.id); const settled = current.outbox?.find(value => value.id === intent.id);
   expect(settled?.acceptance).toBe(disposition); expect(current.phase).toBe('clarifying');
 }, 10000);
@@ -408,7 +411,7 @@ it('starts an unspecified TPM conversation and persists its name after clarifica
   const duplicate = await f.coordinator.create(input, 'browser-scope');
   expect(duplicate.id).toBe(created.id);
   expect(f.creates).toHaveLength(1);
-  await expect.poll(async () => (await f.coordinator.get(created.id)).outbox?.[0]?.status).toBe('accepted');
+  await poll(async () => (await f.coordinator.get(created.id)).outbox?.[0]?.status).toBe('accepted');
   const current = await f.coordinator.get(created.id);
   await f.call(current, 'update_work', { revision: current.revision, title: 'Improve session search', phase: 'clarifying', waiting: 'user', summary: 'Discussing search scope', nextAction: 'Agree on acceptance criteria' });
   expect((await f.coordinator.list()).works[0]!.title).toBe('Improve session search');
@@ -481,13 +484,13 @@ it.each([false, true])('archive settles only known pre-dispatch rejection and pr
   };
   const intent = await f.call(work, 'send_main_message', { operationId: 'archive-race', purpose: 'consultation', text: 'Inspect feasibility' });
   try {
-    await expect.poll(() => entered).toBe(true);
+    await poll(() => entered).toBe(true);
     const current = await f.coordinator.get(work.id);
     const archived = await f.coordinator.action({ id: work.id, revision: current.revision, operationId: 'stop-race', action: 'archive' }, 'owner');
     expect(archived.outbox?.find(value => value.id === intent.id)?.status).toBe(dispatched ? 'dispatching' : 'rejected');
     expect(archived.outbox?.find(value => value.id === intent.id)?.resolvedTarget).toEqual(dispatched ? { controllerId: 'controller', providerId: 'codex', nativeSessionId: 'main' } : undefined);
   } finally { release(); }
-  await expect.poll(async () => (await f.coordinator.get(work.id)).outbox?.find(value => value.id === intent.id)?.status).toBe(dispatched ? 'unknown' : 'rejected');
+  await poll(async () => (await f.coordinator.get(work.id)).outbox?.find(value => value.id === intent.id)?.status).toBe(dispatched ? 'unknown' : 'rejected');
   expect(main.messages).toHaveLength(dispatched ? 1 : 0);
   expect(main.cancel).not.toHaveBeenCalled();
   await f.restart(); f.advance(10000); await f.coordinator.tick();
@@ -611,7 +614,7 @@ it('rejects a claimed intent when succession commits before final native dispatc
     return original(agent, operation, execution);
   };
   const intent = await f.call(work, 'send_main_message', { operationId: 'commit-race', purpose: 'consultation', text: 'Check once' });
-  await expect.poll(async () => (await f.coordinator.get(work.id)).outbox?.find(item => item.id === intent.id)?.status).toBe('rejected');
+  await poll(async () => (await f.coordinator.get(work.id)).outbox?.find(item => item.id === intent.id)?.status).toBe('rejected');
   expect(f.sessions.get('main')!.messages).toEqual([]); expect(f.sessions.get('successor')!.messages).toEqual([]);
   await f.coordinator.tick();
   expect((await f.coordinator.get(work.id)).outbox!.find(item => item.id === intent.id)!.resolvedTarget).toEqual(route.origin);
@@ -624,7 +627,7 @@ it('enrolls existing fixed and legacy paused works when their main acquires a ro
   const work = await f.create();
   const intent = await f.call(work, 'send_main_message', { operationId: 'before-role', purpose: 'consultation', text: 'Old receipt' });
   await waitMessages(f.sessions.get('main')!, 1);
-  await expect.poll(async () => (await f.coordinator.get(work.id)).outbox!.find(item => item.id === intent.id)?.status).toBe('accepted');
+  await poll(async () => (await f.coordinator.get(work.id)).outbox!.find(item => item.id === intent.id)?.status).toBe('accepted');
   await f.coordinator.action({ id: work.id, revision: (await f.coordinator.get(work.id)).revision, operationId: 'pause', action: 'pause' }, 'owner');
   f.access.mainRouting!.bind = bind; route.commit('successor'); await f.coordinator.tick();
   const current = await f.coordinator.get(work.id);
@@ -738,9 +741,9 @@ it('surfaces background scheduler rejection and recovers on a later timer tick',
   const f = await fixture(false, 30); const work = await f.create();
   const available = f.access.available; let failure = true;
   f.access.available = () => { if (failure) throw new Error('Availability probe failed'); return available(); };
-  await expect.poll(async () => (await f.coordinator.get(work.id)).health, { interval: 5 }).toContain('Background TPM scheduling failed: Availability probe failed');
+  await poll(async () => (await f.coordinator.get(work.id)).health, { interval: 5 }).toContain('Background TPM scheduling failed: Availability probe failed');
   failure = false;
-  await expect.poll(async () => (await f.coordinator.get(work.id)).health, { interval: 5 }).toBeUndefined();
+  await poll(async () => (await f.coordinator.get(work.id)).health, { interval: 5 }).toBeUndefined();
 }, 10000);
 
 it('uses stable UUID execution identities while retaining tool receipts across work scope and restart', async () => {
@@ -813,7 +816,7 @@ it.each(['void', 'unknown', 'queued'] as const)('settles the original main inten
   notify!({ disposition: 'queued' }); await f.coordinator.store.flush();
   expect(f.coordinator.hasUnsettledRecipient(route.origin)).toBe(true);
   notify!({ disposition: 'started' });
-  await expect.poll(() => f.coordinator.hasUnsettledRecipient(route.origin)).toBe(false);
+  await poll(() => f.coordinator.hasUnsettledRecipient(route.origin)).toBe(false);
   const confirmed = await f.coordinator.get(work.id);
   expect(confirmed.outbox!.find(item => item.id === receipt.id)).toMatchObject({ status: 'accepted', acceptance: 'started', resolvedTarget: route.origin, roleRevision: 1 });
   expect(confirmed.outbox!.find(item => item.id === receipt.id)!.error).toBeUndefined();
@@ -853,7 +856,7 @@ it('rejects a queued main follow-up withdrawn by stopping the recipient and rele
   await f.coordinator.tick();
   expect(f.coordinator.hasUnsettledRecipient(route.origin)).toBe(true);
   options!.onWithdrawn!({ reason: 'stopped' });
-  await expect.poll(async () => (await f.coordinator.get(work.id)).outbox!.find(item => item.id === receipt.id)?.status).toBe('rejected');
+  await poll(async () => (await f.coordinator.get(work.id)).outbox!.find(item => item.id === receipt.id)?.status).toBe('rejected');
   expect((await f.coordinator.get(work.id)).outbox!.find(item => item.id === receipt.id)!.error).toMatch(/stopped before this follow-up ran/);
   expect(f.coordinator.hasUnsettledRecipient(route.origin)).toBe(false);
   expect(main.messages).toHaveLength(1);
@@ -948,7 +951,7 @@ it.each([false, true])('keeps TPM prefix recipients and pauses the current nativ
   expect(f.sessions.get('B')!.leases).toBe(1);
   expect(f.sessions.get('B')!.messages).toHaveLength(0);
   f.advance(3000); await f.coordinator.tick();
-  await expect.poll(async () => (await f.coordinator.get(work.id)).outbox?.find(intent => intent.target === 'tpm' && intent.purpose === 'review')?.status).toBe('accepted');
+  await poll(async () => (await f.coordinator.get(work.id)).outbox?.find(intent => intent.target === 'tpm' && intent.purpose === 'review')?.status).toBe('accepted');
   expect(f.sessions.get('B')!.messages).toHaveLength(1);
   expect(f.sessions.get(work.tpmNativeSessionId!)!.leases).toBe(0);
   expect(f.coordinator.store.get(work.id).work.tpmNativeSessionId).toBe(work.tpmNativeSessionId);
@@ -984,7 +987,7 @@ it.each([false, true])('keeps TPM prefix recipients and pauses the current nativ
   expect((await f.coordinator.get(work.id)).outbox).toEqual(receipts);
   const paused = await f.coordinator.get(work.id);
   await f.coordinator.action({ id: work.id, revision: paused.revision, operationId: 'resume-successor', action: 'resume' }, 'owner');
-  await expect.poll(async () => { await f.coordinator.tick(); return successor.messages.length; }).toBe(2);
+  await poll(async () => { await f.coordinator.tick(); return successor.messages.length; }).toBe(2);
   expect((await f.coordinator.get(work.id)).outbox!.slice(0, receipts.length)).toEqual(receipts);
   await f.coordinator.handoff('codex', work.tpmNativeSessionId!);
   expect((await f.coordinator.get(work.id)).paused).toBe(false);
@@ -1017,7 +1020,7 @@ it('native send visibility can precede durable TPM settlement and cannot authori
     const visible = await f.coordinator.get(work.id);
     expect(visible.outbox!.find(item => item.id === intent.id)!.status).toBe('dispatching');
     release();
-    await expect.poll(async () => (await f.coordinator.get(work.id)).outbox!.find(item => item.id === intent.id)!.status).toBe('accepted');
+    await poll(async () => (await f.coordinator.get(work.id)).outbox!.find(item => item.id === intent.id)!.status).toBe('accepted');
     await expect(f.coordinator.action({ id: work.id, revision: visible.revision, operationId: 'stale-pause', action: 'pause' }, 'owner')).rejects.toThrow('TPM work changed');
     const settled = await f.coordinator.get(work.id);
     expect(settled.revision).toBeGreaterThan(visible.revision);

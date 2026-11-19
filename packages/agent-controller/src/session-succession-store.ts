@@ -4,7 +4,7 @@ import { sourceParticipantId } from './source-participant.js';
 import { isRelationChangeReservation, isRelationChangeReceipt, relationChangeKey, type RelationChangeReservation, type RelationChangeReceipt } from '@orchardworks/agent-remote-protocol';
 import type { StateFiles } from './state-file.js';
 import { createHash } from 'node:crypto';
-import { assertSuccessionCapacity, isReservation, jsonBytes, largestSuccessionId, largestSuccessionRef, diskStateFiles, reservationBytes, SuccessionCapacityError, SuccessionPublicationUnknown } from './succession-persistence.js';
+import { SUCCESSION_STORE_BYTES, assertSuccessionCapacity, isReservation, jsonBytes, largestSuccessionId, largestSuccessionRef, diskStateFiles, reservationBytes, SuccessionCapacityError, SuccessionPublicationUnknown } from './succession-persistence.js';
 import { successionAuthorityKey, successionFreezeKey, isNativeSessionRef, isSuccessionAssociationAuthority, isSuccessionAssociationFreeze, type SuccessionAssociationAuthority, type SuccessionAssociationFreeze, type NativeSessionRef, isPrimaryRole, isPreparedSuccession, isSuccessionParticipant, isSuccessionRecord, isSuccessionRequest, nativeSessionRefKey, nativePrefixSelectionKey,
   type PrimaryRole, type SuccessionParticipant, type SuccessionPhase, type SuccessionRecord, type SuccessionRequest } from '@orchardworks/agent-remote-protocol';
 
@@ -38,7 +38,6 @@ interface StoreState { version: 8; associationResults: SourceAssociationResult[]
 type Advance = Pick<SuccessionRecord, 'phase'> & Partial<Pick<SuccessionRecord, 'to' | 'prepared' | 'failureCode'>>;
 const terminal = (phase: SuccessionPhase) => ['committed', 'rejected', 'cancelled'].includes(phase);
 const fingerprint = (request: SuccessionRequest) => JSON.stringify([request.operationId, request.roleId, request.expectedRevision, nativeSessionRefKey(request.from), request.targetProviderId ?? request.from.providerId, ...(request.preparation ? [nativePrefixSelectionKey(request.preparation)] : [])]);
-const maxBytes = 8 * 1024 * 1024;
 /** The cache retains the native-ID string, whose reviewed 512-unit JSON maximum is 3074 bytes. */
 export const SOURCE_WITNESS_RESULT_BYTES = jsonBytes(largestSuccessionId);
 
@@ -52,7 +51,7 @@ export class SessionSuccessionStore {
   private revision = 0;
   private pendingReaderGeneration = -1;
   private pendingReaders = new Set<string>();
-  constructor(directory: string, private readonly files: StateFiles = diskStateFiles(directory)) { this.ready = this.restore(); }
+  constructor(directory: string, private readonly files: StateFiles = diskStateFiles(directory), private readonly storeBytes = SUCCESSION_STORE_BYTES) { this.ready = this.restore(); }
   get generation(): number { this.assertReadable(); return this.revision; }
 
   private assertReadable(): void {
@@ -542,7 +541,7 @@ export class SessionSuccessionStore {
     return Math.max(...outcomes.map(outcome => jsonBytes({ ...progress.nativeCreation, outcome }) - jsonBytes(progress.nativeCreation)));
   }
   private updateReservations(state: StoreState): void {
-    for (const item of state.roles) for (const progress of item.localPreparations ?? []) progress.reservedBytes = reservationBytes(this.preparationGrowth(item, progress));
+    for (const item of state.roles) for (const progress of item.localPreparations ?? []) progress.reservedBytes = reservationBytes(this.preparationGrowth(item, progress), this.storeBytes);
   }
   private checkCapacity(state: StoreState): void {
     let remaining = 0;
@@ -559,7 +558,7 @@ export class SessionSuccessionStore {
       reserve(jsonBytes(future) + 1);
     }
     if (!Number.isSafeInteger(jsonBytes(state) + remaining)) throw new SuccessionCapacityError();
-    assertSuccessionCapacity(state, remaining);
+    assertSuccessionCapacity(state, remaining, this.storeBytes);
   }
 
   /** Unknown outcomes may advance only after the coordinator has reconciled their saved phase. */
@@ -704,7 +703,7 @@ export class SessionSuccessionStore {
         for (const progress of item.localPreparations) {
           const record = item.operations.find(value => value.operationId === progress.operationId);
           if (!record || Object.keys(progress).some(name => !['operationId', 'reservedBytes', 'stage', 'createOperationId', 'zeroInputAndTask', 'capture', 'orphanCandidate', 'nativeCreation', 'nativePrefix'].includes(name))
-            || !isReservation(progress.reservedBytes) || progress.reservedBytes !== reservationBytes(this.preparationGrowth(item, progress))) throw new Error('Invalid local succession reservation.');
+            || !isReservation(progress.reservedBytes, this.storeBytes) || progress.reservedBytes !== reservationBytes(this.preparationGrowth(item, progress), this.storeBytes)) throw new Error('Invalid local succession reservation.');
           if (!progress.stage) {
             if (Object.keys(progress).some(name => !['operationId', 'reservedBytes'].includes(name))) throw new Error('Legacy progress cannot certify native creation.');
             continue;
@@ -761,7 +760,7 @@ export class SessionSuccessionStore {
     await this.files.open();
     const text = await this.files.read('state.json');
     if (text === undefined) { this.loaded = true; return; }
-    if (Buffer.byteLength(text) > maxBytes) throw new Error('Succession storage size limit exceeded.');
+    if (Buffer.byteLength(text) > this.storeBytes) throw new Error('Succession storage size limit exceeded.');
     const parsed = JSON.parse(text);
     const legacyPreparation = [1, 2, 3].includes(parsed.version);
     const legacyProjection = legacyPreparation || parsed.version === 4;

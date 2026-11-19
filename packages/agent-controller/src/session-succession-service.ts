@@ -52,9 +52,9 @@ export class SessionSuccessionService {
   private readonly preparation: LocalSuccessionPreparation;
   private cursorKey?: Buffer;
   private readonly bindingReaders = new Map<string, SessionSourceBindings>();
-  constructor(private readonly directory: string, private readonly controllerId: string, private readonly ports: SessionSuccessionPorts, files: { roles?: StateFiles; contexts?: StateFiles } = {}) {
-    this.store = new SessionSuccessionStore(join(directory, 'roles'), files.roles);
-    this.contexts = new SessionSuccessionContextStore(join(directory, 'contexts'), undefined, files.contexts);
+  constructor(private readonly directory: string, private readonly controllerId: string, private readonly ports: SessionSuccessionPorts, files: { roles?: StateFiles; contexts?: StateFiles; storeBytes?: number } = {}) {
+    this.store = new SessionSuccessionStore(join(directory, 'roles'), files.roles, files.storeBytes);
+    this.contexts = new SessionSuccessionContextStore(join(directory, 'contexts'), { storeBytes: files.storeBytes }, files.contexts);
     const preparation = this.preparation = new LocalSuccessionPreparation(controllerId, '', {
       inspect: (source, preparation) => ports.inspect(source, preparation), supports: (source, targetProvider) => ports.supports(source, targetProvider),
       supportsBoundedProjection: (source, targetProvider) => ports.supportsBoundedProjection?.(source, targetProvider) ?? Promise.resolve(false),

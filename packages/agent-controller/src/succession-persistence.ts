@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { StateFiles } from './state-file.js';
 
+/** The production ceiling of one succession state file; the stores take it as an input. */
 export const SUCCESSION_STORE_BYTES = 8 * 1024 * 1024;
 export const jsonBytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value), 'utf8');
 /** Six escaped bytes per character bound every permitted 512-character identifier. */
@@ -21,13 +22,13 @@ export class SuccessionPublicationUnknown extends Error {
   constructor(cause: unknown) { super('Succession persistence outcome is unknown. Restart and read durable state before continuing.', { cause }); }
 }
 /** Fixed-width metadata makes its own serialized size independent of reserved growth. */
-export function reservationBytes(bytes: number): string {
-  if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > SUCCESSION_STORE_BYTES) throw new SuccessionCapacityError();
+export function reservationBytes(bytes: number, limit = SUCCESSION_STORE_BYTES): string {
+  if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > limit) throw new SuccessionCapacityError();
   return String(bytes).padStart(8, '0');
 }
-export function isReservation(value: unknown): value is string { return typeof value === 'string' && /^\d{8}$/.test(value) && Number(value) <= SUCCESSION_STORE_BYTES; }
-export function assertSuccessionCapacity(state: unknown, reservedGrowth: number): void {
-  if (jsonBytes(state) + reservedGrowth > SUCCESSION_STORE_BYTES) throw new SuccessionCapacityError();
+export function isReservation(value: unknown, limit = SUCCESSION_STORE_BYTES): value is string { return typeof value === 'string' && /^\d{8}$/.test(value) && Number(value) <= limit; }
+export function assertSuccessionCapacity(state: unknown, reservedGrowth: number, limit = SUCCESSION_STORE_BYTES): void {
+  if (jsonBytes(state) + reservedGrowth > limit) throw new SuccessionCapacityError();
 }
 /** Preserve the operation failure first when releasing its file handle also fails. */
 export async function withSuccessionFile(file: FileHandle, operation: () => Promise<void>): Promise<void> {

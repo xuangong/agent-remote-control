@@ -51,11 +51,15 @@ async function startRemoteHost(native: ReturnType<typeof remoteNativeHost>, over
   }));
   const sockets: WebSocket[] = [], credentials: string[] = [], registrations: unknown[] = [];
   const streamFrames = new Map<string, Array<Record<string, unknown>>>();
-  const pending = new Map<string, (response: Response) => void>();
+  const pending = new Map<string, { socket: WebSocket; answer: (response: Response) => void; fail: (error: Error) => void }>();
   let sequence = 0;
   broker.on('connection', (socket, request) => {
     sockets.push(socket);
     credentials.push(request.headers.authorization ?? '');
+    // A request to a Host whose uplink closed is never answered; fail it as a lost connection would, instead of waiting out its timeout.
+    socket.on('close', () => {
+      for (const [requestId, entry] of pending) if (entry.socket === socket) { pending.delete(requestId); entry.fail(new Error('Remote RPC fixture lost its Host uplink.')); }
+    });
     socket.on('message', (data) => {
       const message = JSON.parse(data.toString());
       if (message.type === 'register') {
@@ -63,7 +67,7 @@ async function startRemoteHost(native: ReturnType<typeof remoteNativeHost>, over
         socket.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', control: 1, hostId: 'host-one', heartbeat: { intervalMs: 30000, timeoutMs: 10000 } }));
       }
       if (message.type === 'rpc_response') {
-        pending.get(message.requestId)?.(new Response(message.body, { status: message.status }));
+        pending.get(message.requestId)?.answer(new Response(message.body, { status: message.status }));
         pending.delete(message.requestId);
       }
       if (typeof message.streamId === 'string') {
@@ -92,8 +96,9 @@ async function startRemoteHost(native: ReturnType<typeof remoteNativeHost>, over
   const request = (path: string, sessionId?: string, body?: string) => new Promise<Response>((resolve, reject) => {
     const requestId = `remote-rpc-${++sequence}`;
     const timeout = setTimeout(() => { pending.delete(requestId); reject(new Error(`Remote RPC fixture timed out for ${path}.`)); }, 3000);
-    pending.set(requestId, (response) => { clearTimeout(timeout); resolve(response); });
-    sockets.at(-1)!.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_request', requestId,
+    const socket = sockets.at(-1)!;
+    pending.set(requestId, { socket, answer: (response) => { clearTimeout(timeout); resolve(response); }, fail: (error) => { clearTimeout(timeout); reject(error); } });
+    socket.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_request', requestId,
       method: body === undefined ? 'GET' : 'POST', path, ...(sessionId === undefined ? {} : { sessionId }), ...(body === undefined ? {} : { body }),
     }));
   });

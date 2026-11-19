@@ -230,10 +230,6 @@
    "reason": "Starts the built debugger CLI as a child process against the recorded Relay; a process-tier test."
   },
   {
-   "test": "packages/agent-remote-dsh/src/agent-remote.test.ts > DSH Remote Host plugin > closes a pending borrowed projection without breaking a subsequent pairing",
-   "reason": "Waits a real borrowed-projection deadline in the DSH host; needs the deadline as an option."
-  },
-  {
    "test": "packages/agent-remote-journal/src/session-journal.test.ts > SessionJournal > prepends 200,000 items and keeps the sequence contiguous",
    "reason": "Builds a journal of 200,000 items to prove contiguity and paging at scale; CPU bound by the size under test."
   },

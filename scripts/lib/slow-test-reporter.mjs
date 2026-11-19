@@ -100,7 +100,7 @@ export class SlowTestReporter {
       mkdirSync(process.env.ARC_SLOW_TEST_DIR, { recursive: true });
       const name = basename(process.cwd());
       writeFileSync(join(process.env.ARC_SLOW_TEST_DIR, `${name}.json`), `${JSON.stringify({ package: name, tests: total,
-        over300ms: warn.length, over1s: slow.length, tiers: countTiers(everything), slowest: over(100) }, null, 1)}\n`);
+        over300ms: warn.length, over1s: slow.length, tiers: countTiers(everything), slowest: over(100).map(({ moduleId, ...entry }) => entry) }, null, 1)}\n`);
     }
     const stale = measured.filter(entry => allowlist.has(entry.key) && entry.durationMs <= warnMs);
     if (stale.length > 0) console.warn(`Allowlisted but now under ${warnMs} ms; remove from scripts/slow-test-allowlist.json:\n${stale.map(entry => `  ${entry.durationMs} ms  ${entry.key}`).join('\n')}`);

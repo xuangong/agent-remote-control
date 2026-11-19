@@ -3,7 +3,7 @@
 // own `runtime.json`, and the Controller's command line is checked against the checkout before any signal is sent.
 //
 // The runner ties the lifetimes together: it stops the site when its Controller exits, so a Controller fault takes the Relay
-// down with it and the instance must be started again. Isolating the Controller needs the Node Relay host (migration step M12).
+// down with it and the instance must be started again. The e2e stack (`stack/stack.ts`) stops its Controller alone.
 import { execFile } from 'node:child_process';
 import { readFile, rm, readdir } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
@@ -53,11 +53,13 @@ export async function journalStoreFiles(instance) {
 }
 
 /**
- * Restarts the instance from its existing build (`pnpm local up --no-build`) with journals on. With `emptyStore` it is stopped
+ * Restarts the instance from its existing build (`pnpm local up --no-build`) with journals on. With `journalLimits` the Relay runs
+ * with those limits (`ARC_LOCAL_JOURNAL_LIMITS`); without, with its defaults, whatever the caller's own environment says. With `emptyStore` it is stopped
  * first and its Relay journal files are removed, so the Relay starts with no journals and the Controller must republish.
  */
-export async function restartInstance(instance, { checkout, emptyStore = false, exec = (file, args, options) => run(file, args, options), remove = rm } = {}) {
-  const env = { ...process.env, ARC_LOCAL_JOURNALS: '1' };
+export async function restartInstance(instance, { checkout, emptyStore = false, journalLimits, exec = (file, args, options) => run(file, args, options), remove = rm } = {}) {
+  const { ARC_LOCAL_JOURNAL_LIMITS: _inherited, ...inherited } = process.env;
+  const env = { ...inherited, ARC_LOCAL_JOURNALS: '1', ...(journalLimits ? { ARC_LOCAL_JOURNAL_LIMITS: JSON.stringify(journalLimits) } : {}) };
   const local = (...args) => exec('pnpm', ['--silent', 'local', ...args], { cwd: checkout, env, encoding: 'utf8', timeout: 240_000, maxBuffer: 8 * 1024 * 1024 });
   const startedAt = Date.now();
   let removed = [];
@@ -70,5 +72,5 @@ export async function restartInstance(instance, { checkout, emptyStore = false, 
     }
   }
   await local('up', '--no-build');
-  return { emptyStore, removedFiles: removed.length, ms: Date.now() - startedAt };
+  return { emptyStore, removedFiles: removed.length, journalLimits: journalLimits ?? null, ms: Date.now() - startedAt };
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { controllerEnvironment } from './environment.mjs';
+import { controllerEnvironment, journalLimitsFrom } from './environment.mjs';
 
 const instance = { controller: '/dev/i/controller', workspace: '/dev/i/workspace', bin: '/dev/i/bin', record: { source: '/src/.worktrees/feature-x' } };
 const allowedParentVariables = ['HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR', 'TERM', 'SSH_AUTH_SOCK',
@@ -66,4 +66,18 @@ test('gives sessions the instance command directory and leaves the Codex home sk
   const environment = controllerEnvironment({ AGENT_HOST_CODEX_USER_SKILLS: '1' }, instance);
   assert.equal(environment.AGENT_HOST_SESSION_BIN, '/dev/i/bin');
   assert.equal(environment.AGENT_HOST_CODEX_USER_SKILLS, '0');
+});
+
+test('journal limits come only from a valid ARC_LOCAL_JOURNAL_LIMITS with journals on', () => {
+  assert.equal(journalLimitsFrom({ ARC_LOCAL_JOURNALS: '1' }), undefined);
+  assert.equal(journalLimitsFrom({ ARC_LOCAL_JOURNALS: '1', ARC_LOCAL_JOURNAL_LIMITS: '' }), undefined);
+  assert.deepEqual(journalLimitsFrom({ ARC_LOCAL_JOURNALS: '1', ARC_LOCAL_JOURNAL_LIMITS: '{"sessionBytes":262144,"hostBytes":8388608,"liveOnlyItems":4}' }),
+    { sessionBytes: 262144, hostBytes: 8388608, liveOnlyItems: 4 });
+  assert.throws(() => journalLimitsFrom({ ARC_LOCAL_JOURNAL_LIMITS: '{"sessionBytes":1}' }), /needs ARC_LOCAL_JOURNALS=1/);
+  const refused = text => () => journalLimitsFrom({ ARC_LOCAL_JOURNALS: '1', ARC_LOCAL_JOURNAL_LIMITS: text });
+  assert.throws(refused('not json'), /JSON object/);
+  assert.throws(refused('[1]'), /JSON object/);
+  assert.throws(refused('{"sessionBytes":0}'), /positive whole number/);
+  assert.throws(refused('{"sessionBytes":1.5}'), /positive whole number/);
+  assert.throws(refused('{"sessionBits":8}'), /no limit named sessionBits/);
 });

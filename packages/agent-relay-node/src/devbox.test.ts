@@ -305,6 +305,17 @@ it('stores Host journals in SQLite beside the state when journals are on, and gr
   } finally { database.close(); }
 }, 30000);
 
+it('refuses a journal entry that the given limits do not allow', async () => {
+  const f = await fixture('127.0.0.1', { journals: true, journalLimits: { sessionBytes: 1024, hostBytes: 1024 } });
+  const controller = await journalController(f.origin, (await f.server.getConnection()).remoteKey);
+  controller.send({ type: 'journal_open', requestId: 'open-1', sessionKey: 'codex:thread-1', publisherId: 'controller-1' });
+  await controller.take('journal_opened');
+  controller.send({ type: 'journal_publish', sessionKey: 'codex:thread-1', generation: 1, entries: [
+    { sequence: 1, op: 'append', row: { itemKey: 'm1', providerId: 'codex', sourceKey: 'm1:1', occurredAt: 1_725_000_000_000, turnId: 'turn-1', item: { type: 'assistant_message', text: 'x'.repeat(4096), messageId: 'm1' } } },
+  ] });
+  expect(await controller.take('journal_refused')).toMatchObject({ reason: 'quota_exceeded', sequence: 1 });
+}, 30000);
+
 it('refuses journals without a state file', () => {
   expect(() => createGatewayRelay({ origin: 'http://127.0.0.1:0', issuer: 'http://127.0.0.1:0', secret: 'journal-secret-01234567890123456789', journalFile: join(tmpdir(), 'arc-never.sqlite') })).toThrow(/state file/);
 });

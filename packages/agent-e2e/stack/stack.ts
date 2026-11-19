@@ -26,6 +26,8 @@ export interface StackOptions extends Omit<ScriptedProviderOptions, 'succession'
   installationId?: string;
   /** Serve the sessions of the scripted providers from the Relay's journal, as a Host with smart reading turned on is served. On by default. */
   smartReading?: boolean;
+  /** Safety bounds of the Relay's journal service, so a quota can bite in a small scenario; the defaults when absent. */
+  journalLimits?: { sessionBytes?: number; hostBytes?: number; liveOnlyItems?: number };
   /** More providers of the same Controller, for a flow that hands a session from one provider to another. */
   otherProviders?: ScriptedProviderOptions[];
   /**
@@ -62,7 +64,7 @@ export async function startStack(options: StackOptions = {}) {
   const webDist = options.webDist ?? WORKBENCH_DIST;
   const update = options.controllerUpdate;
   const controllerReleases = update ? { latest: async () => update.release, version: async () => update.release } : undefined;
-  const relayOptions = { origin, stateDir: join(state, 'relay'), webDist, journals: true, ...(controllerReleases ? { controllerReleases } : {}) };
+  const relayOptions = { origin, stateDir: join(state, 'relay'), webDist, journals: true, ...(options.journalLimits ? { journalLimits: options.journalLimits } : {}), ...(controllerReleases ? { controllerReleases } : {}) };
   let relay = await createDevboxServer(relayOptions);
   await relay.listen(port, '127.0.0.1');
   let connection = await relay.getConnection();

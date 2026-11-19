@@ -35,3 +35,24 @@ export function controllerEnvironment(parent, instance) {
     AGENT_HOST_CODEX_USER_SKILLS: '0',
   };
 }
+
+const journalLimitNames = ['sessionBytes', 'hostBytes', 'liveOnlyItems'];
+
+/**
+ * The Relay's journal limits for a run that needs a quota to bite: `ARC_LOCAL_JOURNAL_LIMITS` is a JSON object of positive whole
+ * numbers named `sessionBytes`, `hostBytes` or `liveOnlyItems`. Absent, the Relay keeps its production defaults. The limits mean
+ * nothing without journals, so they are refused unless `ARC_LOCAL_JOURNALS` is `1`.
+ */
+export function journalLimitsFrom(environment) {
+  const text = environment.ARC_LOCAL_JOURNAL_LIMITS;
+  if (text === undefined || text === '') return undefined;
+  if (environment.ARC_LOCAL_JOURNALS !== '1') throw new Error('ARC_LOCAL_JOURNAL_LIMITS needs ARC_LOCAL_JOURNALS=1.');
+  let limits;
+  try { limits = JSON.parse(text); } catch { throw new Error('ARC_LOCAL_JOURNAL_LIMITS must be a JSON object.'); }
+  if (!limits || typeof limits !== 'object' || Array.isArray(limits)) throw new Error('ARC_LOCAL_JOURNAL_LIMITS must be a JSON object.');
+  for (const [name, value] of Object.entries(limits)) {
+    if (!journalLimitNames.includes(name)) throw new Error(`ARC_LOCAL_JOURNAL_LIMITS has no limit named ${name}.`);
+    if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`ARC_LOCAL_JOURNAL_LIMITS ${name} must be a positive whole number.`);
+  }
+  return limits;
+}

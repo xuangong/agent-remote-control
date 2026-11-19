@@ -11,6 +11,8 @@ export interface DevboxServerOptions {
   webDist: string;
   /** Store Host session journals in SQLite beside the Relay state. Off unless set. */
   journals?: boolean;
+  /** Safety bounds of the journal service; the defaults when absent. Needs `journals`. */
+  journalLimits?: Parameters<typeof createGatewayRelay>[0]['journalLimits'];
   /** Where Controller releases are discovered; a test stack supplies fixed ones instead of GitHub. */
   controllerReleases?: Parameters<typeof createGatewayRelay>[0]['controllerReleases'];
   /** How long an idle Window poll waits for a change; the default returns before an outer preview tunnel's response deadline. */
@@ -28,7 +30,7 @@ export async function createDevboxServer(options: DevboxServerOptions) {
   const identity = await loadIdentity(options.stateDir, url.origin);
   const auth = { origin: url.origin, issuer: url.origin, secret: identity.secret, cookiePrefix: 'devbox' };
   const relay = createGatewayRelay({ ...auth, stateFile: join(options.stateDir, 'relay', 'state.json'),
-    ...(options.journals ? { journalFile: join(options.stateDir, 'relay', 'journals.sqlite') } : {}),
+    ...(options.journals ? { journalFile: join(options.stateDir, 'relay', 'journals.sqlite'), ...(options.journalLimits ? { journalLimits: options.journalLimits } : {}) } : {}),
     requestInterceptor: createDevboxAuthentication(auth),
     recentAuthentication: grant => grant.subject === 'devbox' ? true : undefined,
     // Return idle Window polls before an outer preview tunnel's response deadline.

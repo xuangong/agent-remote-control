@@ -56,6 +56,17 @@ describe('restarting the instance', () => {
     expect(seen).toEqual([{ args: ['--silent', 'local', 'up', '--no-build'], journals: '1' }]);
     expect(outcome.removedFiles).toBe(0);
   });
+  it('gives the Relay the journal limits it is asked for, and never one the caller\'s own environment holds', async () => {
+    const limitsOf = async (options: object) => {
+      process.env.ARC_LOCAL_JOURNAL_LIMITS = '{"sessionBytes":1}';
+      let seen: unknown;
+      try { await restartInstance(instanceIn(), { checkout: '/work/checkout', ...options, exec: async (_file, _args, run) => { seen = (run?.env as Record<string, string>).ARC_LOCAL_JOURNAL_LIMITS; return { stdout: '' }; } }); }
+      finally { delete process.env.ARC_LOCAL_JOURNAL_LIMITS; }
+      return seen;
+    };
+    expect(JSON.parse(await limitsOf({ journalLimits: { sessionBytes: 262144, hostBytes: 8388608 } }) as string)).toEqual({ sessionBytes: 262144, hostBytes: 8388608 });
+    expect(await limitsOf({})).toBeUndefined();
+  });
   it('reads the instance from the development command', async () => {
     const info = { instance: 'x-1', directory: '/state/x-1', origin: 'http://localhost:9', source: '/work/checkout', state: 'running' };
     expect(await readInstance({ exec: async () => ({ stdout: JSON.stringify(info) }) })).toMatchObject({ origin: 'http://localhost:9', workspace: '/state/x-1/workspace' });

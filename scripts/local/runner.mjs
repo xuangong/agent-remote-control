@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { containerEnvironment } from '../controller/entrypoint.mjs';
 import { controllerBuildProvenance } from '../lib/build-provenance.mjs';
-import { controllerEnvironment } from './environment.mjs';
+import { controllerEnvironment, journalLimitsFrom } from './environment.mjs';
 import { instanceFiles, readJson, writeJson } from './instance.mjs';
 
 /** Settles like the promise, but rejects with the signal's reason as soon as the signal aborts. */
@@ -48,10 +48,12 @@ export async function startInstance({ directory, environment = process.env, crea
         : `The instance's saved Controller connection is unreadable (${error.message}). Check ${join(files.controller, 'connection.json')}.`, { cause: error });
     }
     signal?.throwIfAborted();
+    const journalLimits = journalLimitsFrom(environment);
     const factory = createServer ?? (await import(pathToFileURL(join(record.source, 'dist/devbox/server.mjs')).href)).createDevboxServer;
     server = await factory({ origin: record.origin, stateDir: files.relay,
       webDist: environment.ARC_LOCAL_WEB_DIST ?? join(record.source, 'dist/relay/web'),
-      ...(environment.ARC_LOCAL_JOURNALS === '1' ? { journals: true } : {}) });
+      ...(environment.ARC_LOCAL_JOURNALS === '1' ? { journals: true } : {}),
+      ...(journalLimits ? { journalLimits } : {}) });
     await server.listen(record.port, '127.0.0.1');
     // A saved device credential removed the server above; only a first start needs an invitation.
     const [invitation, provenance] = await abortable(Promise.all([

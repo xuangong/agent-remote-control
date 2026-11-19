@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { SqlJournalStore } from '@orchardworks/agent-remote-journal-sqlite';
 import { openNodeJournalDatabase, type NodeJournalDatabase } from '@orchardworks/agent-remote-journal-sqlite/node';
 import { InputResourceStore } from '@orchardworks/agent-session-runtime';
-import { BROKER_MAX_FRAME_BYTES, createHostedRelay, createHostJournals, type HostJournals, hostedAuthStorageIdentity, hostedRecordEncodingCosts, isPreviewDomain, migrateLegacyNodeState, resolveHostedAuth, type HostedAuthOptions, type HostedRelayOptions } from '@orchardworks/agent-relay-core';
+import { BROKER_MAX_FRAME_BYTES, createHostedRelay, createHostJournals, type HostJournals, hostedAuthStorageIdentity, hostedRecordEncodingCosts, isPreviewDomain, migrateLegacyNodeState, resolveHostedAuth, type HostedAuthOptions, type HostJournalsOptions, type HostedRelayOptions } from '@orchardworks/agent-relay-core';
 import { openGatewayState } from './gateway-state.js';
 import { openGatewayDiagnostics } from './gateway-diagnostics.js';
 import { InvalidHttpRequest, relaySocket, rejectUpgrade, webRequest, writeResponse } from './remote-host-broker.js';
@@ -19,6 +19,8 @@ export type GatewayRelayOptions = HostedAuthOptions & {
   stateFile?: string;
   /** Where Host session journals are stored (a SQLite file); absent, no Controller is granted journals. Needs `stateFile`. */
   journalFile?: string;
+  /** Safety bounds of the journal service (bytes per session and per Host, live-only items); absent, the service's defaults. For a test or a smoke run that needs a quota to bite. */
+  journalLimits?: HostJournalsOptions['limits'];
   keyLifetimeMs?: number;
   servePage?(request: IncomingMessage, response: ServerResponse): Promise<boolean>;
   /** Trusted runtime composition only; production entrypoints do not install authentication interceptors. */
@@ -117,7 +119,7 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
         if (options.stateFile) storage = openGatewayState(options.stateFile, auth.secret, hostedAuthStorageIdentity(auth), options.maxStateBytes);
         if (!options.journalFile) return;
         journalDatabase = await openNodeJournalDatabase(options.journalFile);
-        journalService = createHostJournals({ store: new SqlJournalStore(journalDatabase) });
+        journalService = createHostJournals({ store: new SqlJournalStore(journalDatabase), ...(options.journalLimits ? { limits: options.journalLimits } : {}) });
         await journalService.loadAllServed();
       };
       try {

@@ -303,6 +303,7 @@ Set these in the shell that runs `pnpm local`.
 | `ARC_LOCAL_BIN_DIR` | Directory where `up` installs `agent-remote-controller-dev`. | `~/.local/bin` |
 | `ARC_LOCAL_WEB_DIST` | Absolute path of the website build the instance serves; `up --no-build` checks it for `index.html`. `up` does not build into it. The tests use it. | `dist/relay/web` in the checkout |
 | `ARC_LOCAL_JOURNALS` | Set to `1` before `up` to store Host session journals in `relay/relay/journals.sqlite` of the instance (the runner's state directory is `relay/`, and the server keeps its Relay files in a `relay/` inside it). Off by default. Copilot sessions are published from the development Controller once the Host's smart-reading switch names `copilot` (`PUT /v1/remote/hosts/<hostId>/smart-reading`). Export it for every `up`: a restart without it turns journals off. | unset |
+| `ARC_LOCAL_JOURNAL_LIMITS` | JSON object of positive whole numbers that replaces the Relay's journal limits for a run that needs a quota to bite (the smoke scenario M4): `sessionBytes`, `hostBytes`, `liveOnlyItems`. Needs `ARC_LOCAL_JOURNALS=1`. Export it for every `up` that should keep it; the defaults return when it is absent. | unset |
 
 ## Shared native profiles
 

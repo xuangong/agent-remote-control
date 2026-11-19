@@ -404,3 +404,15 @@ test('asks the server to keep Host journals only when ARC_LOCAL_JOURNALS is 1', 
   await on.start();
   assert.equal(on.received.at(-1).journals, true);
 });
+
+test('hands the site the journal limits of ARC_LOCAL_JOURNAL_LIMITS', { timeout: 30000 }, async t => {
+  const f = await fixture(t);
+  f.environment.ARC_LOCAL_JOURNALS = '1';
+  f.environment.ARC_LOCAL_JOURNAL_LIMITS = '{"sessionBytes":262144}';
+  await f.start();
+  assert.deepEqual(f.received.at(-1).journalLimits, { sessionBytes: 262144 });
+  const plain = await fixture(t);
+  plain.environment.ARC_LOCAL_JOURNALS = '1';
+  await plain.start();
+  assert.equal(plain.received.at(-1).journalLimits, undefined);
+});

@@ -7,4 +7,4 @@ export function stopController(instance: Instance, options: {
   alive?: (pid: number) => boolean; waitMs?: number; readRuntimeFile?: (instance: Instance) => Promise<{ controllerPid?: number; runnerPid?: number } | undefined>;
 }): Promise<{ mode: string; controllerPid: number; runnerStopped: boolean; ms: number }>;
 export function journalStoreFiles(instance: Instance): Promise<string[]>;
-export function restartInstance(instance: Instance, options: { checkout: string; emptyStore?: boolean; exec?: Exec; remove?: (file: string, options: { force: boolean }) => Promise<void> }): Promise<{ emptyStore: boolean; removedFiles: number; ms: number }>;
+export function restartInstance(instance: Instance, options: { checkout: string; emptyStore?: boolean; journalLimits?: { sessionBytes?: number; hostBytes?: number; liveOnlyItems?: number }; exec?: Exec; remove?: (file: string, options: { force: boolean }) => Promise<void> }): Promise<{ emptyStore: boolean; removedFiles: number; journalLimits: object | null; ms: number }>;

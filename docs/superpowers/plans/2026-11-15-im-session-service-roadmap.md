@@ -107,3 +107,12 @@ The owner approved the [simplification assessment](../specs/2026-11-16-journal-s
   - The head's `attention.cursor` must be stated in the journal's epoch and sequence, not the Controller's.
 - **P1-C: native owners of journal-served sessions.** When the native CLI owns a session, the Controller stream cannot attach (`native_session_owned`). The Relay then answers the client's acquire with the pending state and the native owner, so reads continue and the client shows who holds the session. Taking control from there (`resumeNative`, then `take_over`) needs the Relay to open the Controller stream again after the native resume. P1-C wires this up together with read-only observation.
 - **P1-C: validate rows before batching.** The wire limits for a row are stricter than the journal's own types (`turnId` and `providerId` at most 512 characters, at most 256 `resources`, `sourceKey` at most 4096 characters, an integer `occurredAt` that is not negative). The Controller validates each row before it adds the row to a publication, because one invalid row makes the whole message unencodable.
+
+
+## Release 2026-11-19
+
+Shipped from main `e144b5a6`: the IM session service through S6a (journals, Relay-owned session control, the client device store and absorption, Claude Code, Codex and Copilot journals) together with the test and architecture restructuring (see section 11 of `docs/superpowers/specs/2026-11-18-target-architecture-and-tests.md`).
+
+- Worker `1701a6e0` deployed with the default `wrangler.jsonc` (journals off in production); previous Worker `8162e064`. Rolling the Relay back below this release stops sessions on updated Controllers.
+- Controller 0.3.0 released on GitHub as latest (`controller-v0.3.0`, sha256 `b8c6f4c9…`). Every Controller must update: older ones register and can be updated from the website but cannot open sessions.
+- Next iteration: enabling journals in production (deploy the partitions Worker, then the journals-enabled configuration) is proposed to the owner first.

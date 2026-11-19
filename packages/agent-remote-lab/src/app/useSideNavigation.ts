@@ -3,7 +3,8 @@ import { windowPrimaryViewId } from '@orchardworks/agent-remote-protocol';
 import { windowSessionBinding } from '../window-workspace.js';
 import { projectBotRoster } from '../bot-roster.js';
 import { sideWindowOperation } from '../window-side-navigation.js';
-import { resolveAskPresentation } from '../ask-presentation.js';
+import { askActivityOf, askSourcesOf } from '../state/ask-visibility.js';
+import { besideChildSession, childOpensBeside, childRequestCurrent, directParentOf, knownChildOf, replacingChildSession } from '../state/child-session-plan.js';
 import { unlinkSideView } from '../tracked-session-views.js';
 import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
@@ -97,22 +98,13 @@ export function useSideNavigation(scope: Pick<AppInputs & WorkbenchRecordsSlice 
     return session && sessionKey(session) === sessionKey(view.binding) ? [{ ...session, title: view.binding.title }] : [];
   }) : [...(stackRoot && primaryIsBound ? [stackRoot] : []), ...sideSessions], [sharedWindow, mountedViewSessions, sharedSlots, stackRoot, primaryIsBound, sideSessions]);
 
-  const askSources = useMemo(() => {
-    const slots = new Map(succession.document.slots.map(slot => [slot.id, slot]));
-    return succession.document.asks.flatMap(owner => {
-      const slot = slots.get(owner.sourceSlot), source = slot && compositionSession(slot);
-      return source ? [{ owner: owner.id, source }] : [];
-    });
-  }, [succession.document, succession.document.editRevision]);
+  const askSources = useMemo(() => askSourcesOf(succession.document.slots, succession.document.asks, compositionSession),
+    [succession.document, succession.document.editRevision]);
 
-  const askActivitySessions = useMemo(() => askSources.flatMap(({ source, owner }) => {
+  const askActivitySessions = useMemo(() => askActivityOf(askSources, (source, owner) => {
     const entry = ask.entryFor(source, owner);
-    const expanded = ask.isOpen(source, owner);
-    if (!ask.isEnabled(source, owner) || !entry.record?.target || expanded && !entry.attached) return [];
-    return [{ session: entry.record.target,
-      visible: resolveAskPresentation({ window: sharedWindow, view: ask.sharedView(owner), visible: askWindowsVisible, expanded, compact: compactLayout }).shown,
-      liveAgentId: entry.attached ? entry.record.target.agentId : undefined }];
-  }), [askSources, ask.revision, askWindowsVisible, sharedWindow, compactLayout]);
+    return { target: entry.record?.target, attached: !!entry.attached, enabled: ask.isEnabled(source, owner), expanded: ask.isOpen(source, owner), view: ask.sharedView(owner) };
+  }, { window: sharedWindow, visible: askWindowsVisible, compact: compactLayout }), [askSources, ask.revision, askWindowsVisible, sharedWindow, compactLayout]);
 
   useEffect(() => {
     replicas.retain([
@@ -206,13 +198,9 @@ export function useSideNavigation(scope: Pick<AppInputs & WorkbenchRecordsSlice 
     if (!parentAgent || !parentId || !directory) throw new Error('The parent session is unavailable.');
     let origin: OpenedSession = viewSession(source ?? activeOpened ?? { agentId: parentAgent.id, providerId: parentAgent.providerId, nativeSessionId: parentId, hostId: 'local', title: 'Parent conversation' });
     assertSourceCurrent(origin);
-    if (sharedWindow || !compactLayoutRef.current) {
-      const knownChild = sessionEntries.find(entry => entry.nativeSessionId === child.nativeSessionId && entry.providerId === origin.providerId && (entry.hostId ?? 'local') === (origin.hostId ?? 'local'));
-      if (knownChild?.parentNativeSessionId && knownChild.parentNativeSessionId !== origin.nativeSessionId) {
-        const actualParent = openWindows.find(session => session.nativeSessionId === knownChild.parentNativeSessionId && session.providerId === origin.providerId && (session.hostId ?? 'local') === (origin.hostId ?? 'local'));
-        if (!actualParent) throw new Error('Open the direct parent session before opening this nested subagent.');
-        origin = viewSession(actualParent);
-      }
+    const known = knownChildOf(sessionEntries, child.nativeSessionId, origin);
+    if (childOpensBeside({ sharedWindow: !!sharedWindow, compact: !!compactLayoutRef.current })) {
+      origin = viewSession(directParentOf(origin, known, openWindows));
       const cached = connections.find({ ...origin, nativeSessionId: child.nativeSessionId });
       const showChild = async (opened: OpenedSession) => {
         if (!stackPath.some(session => sessionKey(session) === sessionKey(origin)) && !await openSession(origin)) {
@@ -221,7 +209,7 @@ export function useSideNavigation(scope: Pick<AppInputs & WorkbenchRecordsSlice 
         selectSide(origin, opened);
       };
       if (cached) {
-        await showChild({ ...child, agentId: cached.agentId, providerId: origin.providerId, hostId: origin.hostId, parentAgentId: origin.agentId, parentNativeSessionId: origin.nativeSessionId });
+        await showChild(besideChildSession(child, origin, cached.agentId));
         return;
       }
       const generation = navigationGeneration.current;
@@ -229,16 +217,14 @@ export function useSideNavigation(scope: Pick<AppInputs & WorkbenchRecordsSlice 
       const target = (origin.hostId ?? 'local') === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, origin.hostId);
       try {
         const result = await target.attachChild(origin.providerId, origin.nativeSessionId, child.nativeSessionId);
-        if (navigationGeneration.current !== generation || sideRequests.current.get(sideRequestKey(origin)) !== request) return;
+        if (!childRequestCurrent({ generation, side: { issued: request, latest: sideRequests.current.get(sideRequestKey(origin)) } }, navigationGeneration.current)) return;
         assertSourceCurrent(origin);
-        const opened = { ...child, agentId: result.agentId, providerId: origin.providerId, hostId: origin.hostId, parentAgentId: origin.agentId, parentNativeSessionId: origin.nativeSessionId };
+        const opened = besideChildSession(child, origin, result.agentId);
         rememberSession(origin); rememberSession(opened); setSessionNotice(undefined);
         await showChild(opened);
       } catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); throw error; }
       return;
     }
-    const known = sessionEntries.find(entry => entry.nativeSessionId === child.nativeSessionId
-      && entry.providerId === origin.providerId && (entry.hostId ?? 'local') === (origin.hostId ?? 'local'));
     const generation = navigationGeneration.current;
     if (transitionRef.current) return;
     transitionRef.current = true;
@@ -248,13 +234,11 @@ export function useSideNavigation(scope: Pick<AppInputs & WorkbenchRecordsSlice 
     try {
       const hostId = origin.hostId ?? 'local';
       const target = hostId === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, hostId);
-      const parentNativeSessionId = known?.parentNativeSessionId ?? origin.nativeSessionId;
-      const result = await target.attachChild(origin.providerId, parentNativeSessionId, child.nativeSessionId);
-      if (navigationGeneration.current !== generation) return;
+      const result = await target.attachChild(origin.providerId, known?.parentNativeSessionId ?? origin.nativeSessionId, child.nativeSessionId);
+      if (!childRequestCurrent({ generation }, navigationGeneration.current)) return;
       assertSourceCurrent(origin);
       rememberSession(origin);
-      const opened = { agentId: result.agentId, providerId: origin.providerId, nativeSessionId: result.nativeSessionId,
-        title: child.title, createdAt: child.createdAt, hostId, parentAgentId: known?.parentAgentId ?? origin.agentId, parentNativeSessionId };
+      const opened = replacingChildSession(child, origin, known, result);
       rememberSession(opened); await windowSession.openAttached(opened);
     } catch (error) {
       if (navigationGeneration.current === generation) setSessionNotice(sessionConnectionFailure(error, false));

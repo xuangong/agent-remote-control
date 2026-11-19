@@ -1,4 +1,5 @@
 // Opening, creating and binding sessions.
+import { classifyCreationFailure, mayCreate, partialCreationMessage, planningOption, reservationFor } from '../state/agent-creation.js';
 import { bindPlan, focusesVisibleSession, returnsToParent } from '../state/session-binding.js';
 import { parseWindowFeature } from '../window-feature-views.js';
 import { createWindowView, hasBotAppearance, isBotView, rebindsBot, type Team, type WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
@@ -159,8 +160,7 @@ export function useSessionOpening(scope: Pick<AppInputs & HostAndStackSlice & Vi
 
   /** Creates a session from the New session form or, for `bot`, Bot mode's New bot, which starts a group named after it. */
   async function createAgent(bot = false): Promise<void> {
-    if (!providerId || creationUnavailableReason || transitionRef.current) return;
-    if (bot && !directory) return;
+    if (!mayCreate({ providerId, unavailableReason: creationUnavailableReason, opening: transitionRef.current, bot, hasDirectory: !!directory })) return;
     transitionRef.current = true;
     setTransitioning(true);
     setFailure(undefined); setSessionNotice(undefined);
@@ -169,8 +169,7 @@ export function useSessionOpening(scope: Pick<AppInputs & HostAndStackSlice & Vi
     let botSession = false;
     try {
       if (bot && directory) {
-        const reservation = creationReservation.current?.bot ? creationReservation.current
-          : { operationId: crypto.randomUUID(), providerId, bot: true as const, options: { ...sessionOptions } };
+        const reservation = reservationFor(creationReservation.current, true, () => ({ operationId: crypto.randomUUID(), providerId: providerId!, bot: true as const, options: { ...sessionOptions } }));
         creationReservation.current = reservation;
         setCreationLocked(true);
         const response = await directory.create(reservation.providerId, reservation.operationId, reservation.options);
@@ -186,7 +185,7 @@ export function useSessionOpening(scope: Pick<AppInputs & HostAndStackSlice & Vi
         return;
       }
       if (directory) {
-        const reservation = creationReservation.current ?? { operationId: crypto.randomUUID(), providerId, destination: directoryDestination(), options: { ...sessionOptions, ...(createPlanning && providerId !== 'dsh' ? { planning: true } : {}) } };
+        const reservation = reservationFor(creationReservation.current, false, () => ({ operationId: crypto.randomUUID(), providerId: providerId!, destination: directoryDestination(), options: { ...sessionOptions, ...planningOption(createPlanning, providerId!) } }));
         creationReservation.current = reservation;
         setCreationLocked(true);
         const response = await directory.create(reservation.providerId, reservation.operationId, reservation.options);
@@ -205,17 +204,16 @@ export function useSessionOpening(scope: Pick<AppInputs & HostAndStackSlice & Vi
       setProviderName(providerConnectionName(selectedHost.id, providerId));
       dispatchPanels({ type: 'sessionPanel.set', panel: 'list' });
     } catch (error) {
-      if (error instanceof DirectoryError && error.code === 'native_file_limit') {
+      const outcome = classifyCreationFailure({ code: error instanceof DirectoryError ? error.code : undefined, directoryError: error instanceof DirectoryError, hasDirectory: !!directory,
+        reservationHeld: !!creationReservation.current, bot, botSessionCreated: botSession, message: message(error, 'Agent could not be created.') });
+      if (outcome.partialNotice) {
         const notice = sessionConnectionFailure(error, false);
-        setSessionNotice({ ...notice, operation: 'Create session', message: `${notice.message} Creation may have partially completed. Inspect the native session list before creating a new intent. Retry keeps the same reservation.` });
+        setSessionNotice({ ...notice, operation: 'Create session', message: partialCreationMessage(notice.message) });
       }
-      const invalid = error instanceof DirectoryError && ['invalid_request', 'workspace_not_found', 'provider_not_found', 'session_quota_exceeded', 'operation_conflict'].includes(error.code ?? '');
-      if (invalid) { creationReservation.current = undefined; setCreationLocked(false); }
-      const failed = `${message(error, 'Agent could not be created.')}${directory && !invalid && creationReservation.current ? ' Retry keeps the same session reservation and settings.' : ''}`;
-      if (bot) {
-        // Before the session exists the sheet shows why; after, the roster shows the group's creation state and its Retry.
-        if (!botSession) setNewBot(current => ({ ...current, failure: failed }));
-      } else if (!(error instanceof DirectoryError && error.code === 'native_file_limit')) setFailure(failed);
+      if (outcome.releasesReservation) { creationReservation.current = undefined; setCreationLocked(false); }
+      // Before the session exists the sheet shows why; after, the roster shows the group's creation state and its Retry.
+      if (outcome.botSheetFailure) setNewBot(current => ({ ...current, failure: outcome.botSheetFailure }));
+      if (outcome.failure) setFailure(outcome.failure);
     } finally {
       if (directory && selectedHost.id !== 'local') retryHosts();
       transitionRef.current = false;

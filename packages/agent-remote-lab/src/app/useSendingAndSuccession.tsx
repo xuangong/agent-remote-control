@@ -14,6 +14,7 @@ import { compositionRoleKey } from '../session-composition.js';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import { sessionKey } from '../session-tree.js';
 import { forkActions } from '../fork-actions.js';
+import { canHandoffPrimary as canHandoffPrimaryOf, commandRefusal, conversationActionsAvailable, handoffCompletionMatches, handoffInputBlocker, primaryHandoffGated, successionAccessible } from '../state/succession-gates.js';
 import { message, viewKey } from './helpers.js';
 import type { AppActions } from './types.js';
 import type { ConversationConnectionsSlice } from './useConversationConnections.js';
@@ -39,9 +40,11 @@ export function useSendingAndSuccession(scope: Pick<AppInputs & ConversationConn
   const submittedClient = clientRef.current;
 
   function commandClient(): RemoteSessionClient {
-    if (!accessReadyRef.current) throw new Error('Workspace access is restoring.');
-    if (succession.active && !succession.isCurrent()) throw new Error('The current native session has not been confirmed.');
-    if (!submittedClient || clientRef.current !== submittedClient) throw new RemoteOperationError('session_changed', 'The conversation changed before this action could be sent. Return to its original session to retry.', true);
+    const refusal = commandRefusal({ accessReady: accessReadyRef.current, successionActive: succession.active, nativeConfirmed: !succession.active || succession.isCurrent(),
+      clientIsSubmitted: !!submittedClient && clientRef.current === submittedClient });
+    if (refusal === 'access-restoring') throw new Error('Workspace access is restoring.');
+    if (refusal === 'native-unconfirmed') throw new Error('The current native session has not been confirmed.');
+    if (refusal || !submittedClient) throw new RemoteOperationError('session_changed', 'The conversation changed before this action could be sent. Return to its original session to retry.', true);
     return submittedClient;
   }
 
@@ -62,15 +65,19 @@ export function useSendingAndSuccession(scope: Pick<AppInputs & ConversationConn
 
   const pendingPrimaryCount = pendingPrimaryInput?.key === primaryInputKey ? pendingPrimaryInput.count : 0;
 
-  const successionInputReason = successionDialog && (succession.document.windowBindings?.some(entry => entry.slotId === viewKey(successionDialog.source)) ? (pendingGroupInputs[viewKey(successionDialog.source)] ?? 0) > 0
-    : stackRoot && sessionKey(successionDialog.source) === sessionKey(stackRoot) && pendingPrimaryCount > 0)
-    ? 'Send or remove pending messages before handing off this conversation.' : undefined;
+  const sourceIsGroupView = !!successionDialog && !!succession.document.windowBindings?.some(entry => entry.slotId === viewKey(successionDialog.source));
+
+  const successionInputReason = handoffInputBlocker({ dialogOpen: !!successionDialog, sourceIsGroupView,
+    groupPending: sourceIsGroupView && successionDialog ? pendingGroupInputs[viewKey(successionDialog.source)] ?? 0 : 0,
+    sourceIsPrimary: !!successionDialog && !!stackRoot && sessionKey(successionDialog.source) === sessionKey(stackRoot), primaryPending: pendingPrimaryCount });
 
   const [successionGated, setSuccessionGated] = useState(() => !!loadSuccessionIntent(baseUrl));
 
-  const canHandoffPrimary = !successionDialog && !!directory && userScoped && accessReady && !hostOffline && status === 'ready'
-    && primaryIsBound && !transitioning && !detachedSideRoot && !boundFork && !sessionState.readOnly && !!stackRoot && !stackRoot.parentNativeSessionId
-    && navigationIntent.sessionIntent !== 'history' && remoteHosts.some(host => host.id === stackRoot.hostId && host.access !== 'shared' && host.online);
+  const handoffHost = (hostId: string | undefined) => remoteHosts.some(host => host.id === hostId && host.access !== 'shared' && host.online);
+
+  const canHandoffPrimary = canHandoffPrimaryOf({ dialogOpen: !!successionDialog, hasDirectory: !!directory, userScoped, accessReady, hostOffline, status, primaryBound: primaryIsBound,
+    transitioning, detachedSide: !!detachedSideRoot, fork: !!boundFork, readOnly: !!sessionState.readOnly, hasPrimary: !!stackRoot, isSubagent: !!stackRoot?.parentNativeSessionId,
+    history: navigationIntent.sessionIntent === 'history', hostAllowsHandoff: !!stackRoot && handoffHost(stackRoot.hostId) });
 
   const openingControlNotice = nativeTakeover ? <SessionControlNotice
     control={{ access: 'read_only', available: false, nativeOwner: nativeTakeover.owner }}
@@ -85,8 +92,7 @@ export function useSendingAndSuccession(scope: Pick<AppInputs & ConversationConn
     }} /> : undefined;
 
   function assertSuccessionAccess() {
-    if (!accessReadyRef.current || successionDialog?.scope !== baseUrl
-      || !userScoped || !remoteHosts.some(host => host.id === successionDialog?.source.hostId && host.access !== 'shared' && host.online)) throw new Error('Authorized Host access is required to recover this Handoff.');
+    if (!successionAccessible({ accessReady: accessReadyRef.current, dialogInScope: successionDialog?.scope === baseUrl, userScoped, hostAllowsHandoff: handoffHost(successionDialog?.source.hostId) })) throw new Error('Authorized Host access is required to recover this Handoff.');
   }
 
   async function executePrimaryCommand(id: string, args: string): Promise<AgentCommandResult> {
@@ -101,8 +107,9 @@ export function useSendingAndSuccession(scope: Pick<AppInputs & ConversationConn
     return createFork(state, activeOpened, id, args);
   }
 
-  const primarySuccessionGated = successionGated && successionDialog?.scope === baseUrl && !!stackRoot &&
-    (sessionKey(stackRoot) === sessionKey(successionDialog.source) || succession.desired?.operationId === successionDialog.resume?.operationId && !!successionDialog.resume);
+  const primarySuccessionGated = primaryHandoffGated({ gated: successionGated, dialogInScope: successionDialog?.scope === baseUrl, hasPrimary: !!stackRoot,
+    primaryIsSource: !!stackRoot && !!successionDialog && sessionKey(stackRoot) === sessionKey(successionDialog.source),
+    desiredIsResumed: !!successionDialog?.resume && succession.desired?.operationId === successionDialog.resume.operationId });
 
   const contextTarget = succession.desired?.target.native;
 
@@ -135,25 +142,11 @@ export function useSendingAndSuccession(scope: Pick<AppInputs & ConversationConn
       const assertCompletionView = (requireVerified = false) => {
         assertSuccessionAccess();
         const mapped = currentGroupBinding(slotId);
-        if (!mapped || sessionKey(mapped.binding) === sessionKey(source)) return;
         const slot = succession.document.slots.find(slot => slot.id === slotId);
-        const verified = succession.successionContextFor(slotId), receipt = result.record, pending = successionDialog.resume;
         const roleKey = slot?.intent.kind === 'role' ? slot.intent.roleKey : undefined;
-        const checkpoint = succession.document.roles.find(role => compositionRoleKey(role) === roleKey);
-        if (receipt.phase !== 'committed' || !receipt.to || !checkpoint || !pending
-          || pending.operationId !== receipt.operationId || pending.expectedRevision !== receipt.expectedRevision
-          || checkpoint.desired.operationId !== receipt.operationId || checkpoint.roleId !== receipt.roleId || result.role.id !== receipt.roleId
-          || checkpoint.desired.expectedRevision !== receipt.expectedRevision || checkpoint.desired.committedRevision !== receipt.committedRevision
-          || result.role.revision !== receipt.committedRevision
-          || nativeSessionRefKey(checkpoint.desired.from) !== nativeSessionRefKey(receipt.from)
-          || sessionKey({ hostId: source.hostId, ...receipt.from }) !== sessionKey(source)
-          || nativeSessionRefKey(checkpoint.desired.to) !== nativeSessionRefKey(receipt.to)
-          || nativeSessionRefKey(result.role.current) !== nativeSessionRefKey(receipt.to)
-          || sessionKey({ hostId: source.hostId, ...receipt.to }) !== sessionKey(mapped.binding)
-          || requireVerified && (!verified || verified.operationId !== receipt.operationId || checkpoint.appliedRevision !== receipt.committedRevision
-            || nativeSessionRefKey(verified.target) !== nativeSessionRefKey(receipt.to))) {
-          throw new Error('The Handoff source view changed before completion.');
-        }
+        if (!handoffCompletionMatches({ source, mappedKey: mapped && sessionKey(mapped.binding), receipt: result.record, role: result.role,
+          checkpoint: succession.document.roles.find(role => compositionRoleKey(role) === roleKey), pending: successionDialog.resume,
+          verified: succession.successionContextFor(slotId), requireVerified })) throw new Error('The Handoff source view changed before completion.');
       };
       assertCompletionView();
       await succession.refreshSettled(result, source);
@@ -203,7 +196,7 @@ export function useSendingAndSuccession(scope: Pick<AppInputs & ConversationConn
   const conversationActions = forkActions(clientActions, forkStore, boundFork, transport);
 
   // Retain message handlers so the composer can wait for readiness before sending.
-  const availableConversationActions = accessReady && !hostOffline && status === 'ready' ? conversationActions : {
+  const availableConversationActions = conversationActionsAvailable({ accessReady, hostOffline, status }) ? conversationActions : {
     sendMessage: conversationActions.sendMessage,
     sendMessageContent: conversationActions.sendMessageContent,
     deleteMessage: conversationActions.deleteMessage,

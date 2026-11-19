@@ -7,7 +7,7 @@ import { type SessionEntry, sessionKey } from '../session-tree.js';
 import { EarlierConversation } from '../components/EarlierConversation.js';
 import { useCallback, useRef } from 'react';
 import { timelineEntryKey, type AgentReplicaState } from '@orchardworks/agent-client';
-import { SessionDirectoryClient, type CreateSessionOptions, type OpenedSession } from '../directory-client.js';
+import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import type { LabWorkbenchActions } from '../components/LabWorkbench.js';
 import { SessionAsk } from '../components/SessionAsk.js';
 import { withSessionReferences } from '../session-references.js';
@@ -33,6 +33,10 @@ import type { WindowViewActionsSlice } from './useWindowViewActions.js';
 import type { TraceNavigationSlice } from './useTraceNavigation.js';
 import type { AppInputs } from './types.js';
 
+import { sessionQuotaMessage, sessionQuotaReached } from '../state/agent-creation.js';
+import { quoteCreationId, quoteLanding, quoteSessionOptions, quoteStart, reloadedConversationMessage } from '../state/quote-flow.js';
+import { askRestoreAllowed } from '../state/ask-visibility.js';
+
 export function useQuotesAndReferences(scope: Pick<AppInputs & RequestedSessionSlice & WorkbenchShellSlice & FocusedAskSlice & ViewSessionStateSlice & RemoteHostStateSlice & SessionSuccessionBindingSlice & SideSelectionSlice & ConversationConnectionsSlice & PanelsAndShortcutsSlice & ActiveSessionSlice & SharedFeedsAndTpmSlice & CommunicationsAndForksSlice & ProviderCreationSlice & WorkbenchRecordsSlice & WindowViewActionsSlice & TraceNavigationSlice, 'accessReady' | 'ask' | 'askSurfaceVisible' | 'askTriggerRef' | 'askView' | 'baseUrl' | 'compactLayout' | 'compositionProtected' | 'connections' | 'directory' | 'dispatchQuote' | 'earlierConversations' | 'earlierDirectory' | 'editWindow' | 'navigateAttributionRef' | 'openAsk' | 'pageOpen' | 'quote' | 'quoteSelection' | 'refreshRelations' | 'rememberSession' | 'remoteHosts' | 'replicaFor' | 'retryHosts' | 'selectedHost' | 'setDirectoryRevision' | 'sharedWindow' | 'sideSessions' | 'sourceCurrent' | 'succession' | 'transitioning' | 'transport' | 'viewNavigation' | 'windowWorkspace'>) {
   const { accessReady, ask, askSurfaceVisible, askTriggerRef, askView, baseUrl, compactLayout, compositionProtected, connections, directory, dispatchQuote, earlierConversations, earlierDirectory, editWindow, navigateAttributionRef, openAsk, pageOpen, quote, quoteSelection, refreshRelations, rememberSession, remoteHosts, replicaFor, retryHosts, selectedHost, setDirectoryRevision, sharedWindow, sideSessions, sourceCurrent, succession, transitioning, transport, viewNavigation, windowWorkspace } = scope;
 
@@ -48,7 +52,7 @@ export function useQuotesAndReferences(scope: Pick<AppInputs & RequestedSessionS
       && !!sourceState?.timeline.initialized && !!sourceState.timeline.epoch && !!native?.synchronized && native.runtime?.state === 'connected' && !native.controlChecking && !native.recovering;
     return <SessionAsk compact={compactLayout} key={associationOwner} associationOwner={associationOwner} imageRecipient={target ? succession.recipientFor(target, associationOwner) : undefined} source={source} ask={ask} storageScope={baseUrl}
       visible={askSurfaceVisible} covered={pageOpen} triggerRef={askTriggerRef} onToggleEnabled={() => askView.setVisible(!askView.visible)}
-      canRestore={accessReady && (!!target && !compositionProtected || available && (!compositionProtected || independentRestore))} synchronizing={compositionProtected} synchronize={refreshRelations}
+      canRestore={askRestoreAllowed({ accessReady, hasTarget: !!target, compositionProtected, sourceAvailable: !!available, independentRestore })} synchronizing={compositionProtected} synchronize={refreshRelations}
       onOpen={clean => openAsk(source, sourceState, clean)} replicaFor={replicaFor} transport={transport}
       navigation={viewNavigation} />;
   }
@@ -63,9 +67,8 @@ export function useQuotesAndReferences(scope: Pick<AppInputs & RequestedSessionS
     const agent = sourceState.agent;
     if (!directory || !agent) throw new Error('A new session cannot be created here.');
     const target = (source.hostId ?? 'local') === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, source.hostId);
-    const quota = remoteHosts.find(host => host.id === source.hostId)?.sessionQuota;
-    if (quota && quota.used >= quota.limit) throw new Error('Session creation limit reached. Existing sessions remain available. Ask the owner to raise your limit.');
-    const options: CreateSessionOptions = { ...(agent.cwd ? { cwd: agent.cwd } : {}), ...(agent.model && source.providerId !== 'dsh' ? { model: agent.model } : {}) };
+    if (sessionQuotaReached(remoteHosts.find(host => host.id === source.hostId)?.sessionQuota)) throw new Error(sessionQuotaMessage);
+    const options = quoteSessionOptions(agent, source.providerId);
     let created: { agentId: string; nativeSessionId?: string };
     try { created = await target.create(source.providerId, operationId, options); }
     finally { if (source.hostId && source.hostId !== 'local') retryHosts(); }
@@ -84,26 +87,25 @@ export function useQuotesAndReferences(scope: Pick<AppInputs & RequestedSessionS
 
   async function quoteSelected(viewId: string, source: OpenedSession, sourceState: AgentReplicaState, target: { windowId: string; viewId: string }): Promise<void> {
     const selection = quoteSelection;
-    if (selection?.viewId !== viewId || selection.busy) return;
-    const epoch = sourceState.timeline.epoch;
+    const start = quoteStart(selection, viewId, sourceState.timeline.epoch);
+    if (start === 'ignore' || !selection) return;
     try {
-      if (epoch !== selection.epoch) throw new Error('This conversation was reloaded. Select the messages again.');
+      if (start === 'reloaded') throw new Error(reloadedConversationMessage);
       const excerpt = createSessionExcerpt({ id: crypto.randomUUID(), capturedAt: new Date().toISOString(), entries: sourceState.timeline.entries,
         source: { hostId: source.hostId ?? 'local', providerId: source.providerId, nativeSessionId: source.nativeSessionId, title: source.title },
         selected: entry => selection.keys.has(timelineEntryKey(entry)) });
       let destination = target.viewId;
       if (destination === NEW_SESSION_TARGET) {
-        const creationId = selection.creationId ?? crypto.randomUUID();
+        const creationId = quoteCreationId(selection, () => crypto.randomUUID());
         dispatchQuote({ type: 'creating', viewId, creationId });
         destination = await createQuoteSession(source, sourceState, creationId);
       }
       addQuote(baseUrl, destination, excerpt);
       dispatchQuote({ type: 'quoted', viewId });
-      const window = quoteTargets(viewId, source).find(item => item.id === target.windowId);
-      if (!window || window.current) { revealQuoteTarget(destination); return; }
-      const title = window.views.find(item => item.viewId === destination)?.title ?? 'the session';
-      dispatchQuote({ type: 'quoted', viewId, notice: { viewId, message: `Quoted into “${title}” in Window “${window.title}”.`, async open() {
-        await windowWorkspace.open(target.windowId); revealQuoteTarget(destination);
+      const landing = quoteLanding(quoteTargets(viewId, source), target, destination);
+      if (landing.kind === 'reveal') { revealQuoteTarget(destination); return; }
+      dispatchQuote({ type: 'quoted', viewId, notice: { viewId, message: landing.message, async open() {
+        await windowWorkspace.open(landing.windowId); revealQuoteTarget(destination);
       } } });
     } catch (error) {
       dispatchQuote({ type: 'failed', viewId, error: message(error, 'The messages could not be quoted.') });

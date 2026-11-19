@@ -1,5 +1,6 @@
 // Provider catalog loading, the creation choice and attaching a session.
 import { creationUnavailableReason as creationUnavailableReasonOf, providerChoices, providerConnectionName as providerConnectionNameOf, restoreHostSelection } from '../state/creation-choice.js';
+import { mayResume, resumedSession } from '../state/agent-creation.js';
 import { type SessionEntry, sessionKey } from '../session-tree.js';
 import { remoteSessionState } from '@orchardworks/agent-client';
 import { conversationLocalStorage } from '../conversation-storage.js';
@@ -178,7 +179,7 @@ export function useProviderCreation(scope: Pick<AppInputs & PanelsAndShortcutsSl
   async function resumeAgent(): Promise<void> {
     const persistence = state?.agent?.persistence;
     const session = openedSessions.find((item) => item.agentId === state?.agent?.id);
-    if (!persistence || session?.parentAgentId || session?.parentNativeSessionId || transitionRef.current) return;
+    if (!persistence || !mayResume({ hasPersistence: true, isChild: !!(session?.parentAgentId || session?.parentNativeSessionId), opening: transitionRef.current })) return;
     transitionRef.current = true;
     setTransitioning(true);
     setFailure(undefined); setSessionNotice(undefined);
@@ -190,8 +191,7 @@ export function useProviderCreation(scope: Pick<AppInputs & PanelsAndShortcutsSl
         const target = hostId === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, hostId);
         const response = await target.attach(persistence.providerId, persistence.sessionId);
         if (navigationGeneration.current !== generation) return;
-        const resumed = { ...session, agentId: response.agentId, providerId: persistence.providerId,
-          nativeSessionId: response.nativeSessionId ?? persistence.sessionId, hostId, title: session?.title ?? 'Resumed session' };
+        const resumed = resumedSession(session, persistence, response);
         rememberSession(resumed); await windowSession.openAttached(resumed);
       } else {
         const response = await transport.resumeAgent(createAgentId(), persistence);

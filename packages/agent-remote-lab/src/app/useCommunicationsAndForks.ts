@@ -9,7 +9,7 @@ import { sessionViewNavigation, type SessionViewNavigationActions } from '../ses
 import { ConversationConnections } from '../conversation-connections.js';
 import { useEffect } from 'react';
 import type { AgentReplicaState } from '@orchardworks/agent-client';
-import { SessionDirectoryClient, type CreateSessionOptions, type OpenedSession } from '../directory-client.js';
+import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import { sideNavigationSource, sideNavigationTarget, sideLinkVisible, referenceForkContext, captureForkContext, type SessionFork } from '../session-forks.js';
 import { configureFork, sendForkInput } from '../fork-actions.js';
 import { message, viewKey } from './helpers.js';
@@ -32,6 +32,9 @@ import type { SessionOpeningSlice } from './useSessionOpening.js';
 import type { RemoteHostStateSlice } from './useRemoteHostState.js';
 import type { WindowModeActionsSlice } from './useWindowModeActions.js';
 import type { AppInputs } from './types.js';
+
+import { sessionQuotaMessage, sessionQuotaReached } from '../state/agent-creation.js';
+import { copiesConversation, firstInputPending, forkCommandRoute, forkCreateOptions, forkedSession, forkKey, forkSettings, needsWorkspaceLookup, selectsSideAfterFork, withForkContext, workspaceOptions } from '../state/fork-plan.js';
 
 export function useCommunicationsAndForks(scope: Pick<AppInputs & WorkbenchShellSlice & SessionSuccessionBindingSlice & ViewSessionStateSlice & FocusedAskSlice & HostAndStackSlice & SideSelectionSlice & PanelsAndShortcutsSlice & ViewTargetsSlice & ActiveSessionSlice & SideNavigationSlice & ConversationConnectionsSlice & RequestedSessionSlice & WorkbenchRecordsSlice & ProviderCreationSlice & WindowViewActionsSlice & SessionOpeningSlice & RemoteHostStateSlice & WindowModeActionsSlice, 'accessReady' | 'activeView' | 'ask' | 'askView' | 'assertSourceCurrent' | 'baseUrl' | 'compactLayout' | 'compactLayoutRef' | 'compositionProtected' | 'connections' | 'directory' | 'draftBindingFor' | 'editWindow' | 'favorites' | 'forkBusy' | 'forkReservation' | 'forkStore' | 'letterRequest' | 'letterReveals' | 'navigationGeneration' | 'nextSideRequest' | 'openChildSession' | 'openSession' | 'openWindows' | 'openedSessionsRef' | 'primaryExpanded' | 'refreshRelations' | 'rememberSession' | 'remoteHosts' | 'replicaFor' | 'replicas' | 'retryHosts' | 'selectSide' | 'selectedHost' | 'sessionEntries' | 'sessionWindows' | 'setDirectoryRevision' | 'setFailure' | 'setForkInputStatus' | 'setLetterReveals' | 'setSideAnchor' | 'setSideFocus' | 'sharedSlots' | 'sharedViewForSlot' | 'sharedWindow' | 'showView' | 'sideFocus' | 'sideRequestKey' | 'sideRequests' | 'sourceCurrent' | 'stackPath' | 'stackRange' | 'stackRoot' | 'state' | 'status' | 'succession' | 'traceRequestCounter' | 'transitioning' | 'transport' | 'viewSession' | 'windowMode' | 'windowWorkspace' | 'workbenchPanelRef'>) {
   const { accessReady, activeView, ask, askView, assertSourceCurrent, baseUrl, compactLayout, compactLayoutRef, compositionProtected, connections, directory, draftBindingFor, editWindow, favorites, forkBusy, forkReservation, forkStore, letterRequest, letterReveals, navigationGeneration, nextSideRequest, openChildSession, openSession, openWindows, openedSessionsRef, primaryExpanded, refreshRelations, rememberSession, remoteHosts, replicaFor, replicas, retryHosts, selectSide, selectedHost, sessionEntries, sessionWindows, setDirectoryRevision, setFailure, setForkInputStatus, setLetterReveals, setSideAnchor, setSideFocus, sharedSlots, sharedViewForSlot, sharedWindow, showView, sideFocus, sideRequestKey, sideRequests, sourceCurrent, stackPath, stackRange, stackRoot, state, status, succession, traceRequestCounter, transitioning, transport, viewSession, windowMode, windowWorkspace, workbenchPanelRef } = scope;
@@ -248,8 +251,9 @@ export function useCommunicationsAndForks(scope: Pick<AppInputs & WorkbenchShell
     const source = viewSession(saved ?? { agentId: agent.id, nativeSessionId: agent.runtimeInfo.sessionId, providerId: agent.providerId, title: 'Conversation', hostId: 'local' });
     assertSourceCurrent(source);
     const associationOwner = succession.ownerFor(viewKey(source));
-    if (id === 'console:ask' && ['', 'on', 'off', 'enable', 'disable'].includes(args.trim().toLowerCase())) return askView.execute(args);
-    if (id === 'console:ask') {
+    const route = forkCommandRoute(id, args);
+    if (route === 'ask-setting') return askView.execute(args);
+    if (route === 'ask-open') {
       askView.setVisible(true);
       return ask.open(sourceState, source, args, false, { associationOwner, synchronize: async () => { assertSourceCurrent(source); await refreshRelations(); assertSourceCurrent(source); } });
     }
@@ -257,24 +261,15 @@ export function useCommunicationsAndForks(scope: Pick<AppInputs & WorkbenchShell
     forkBusy.current = true;
     try {
       const target = (source.hostId ?? 'local') === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, source.hostId);
-      const key = JSON.stringify([sessionKey(source), id, args]);
+      const key = forkKey(sessionKey(source), id, args);
       let record = forkReservation.current?.key === key ? forkStore.get(forkReservation.current.record.id) : forkStore.all().find((fork) => fork.creationKey === key);
       if (!record) {
-        const quota = remoteHosts.find((host) => host.id === source.hostId)?.sessionQuota;
-        if (quota && quota.used >= quota.limit) throw new Error('Session creation limit reached. Existing sessions remain available. Ask the owner to raise your limit.');
-        const context = id === 'console:side' ? referenceForkContext(source) : await captureForkContext(transport, source);
-        const settings = (agent.runtimeInfo.settings ?? []).filter((setting) => setting.mutable && setting.scope === 'session' && setting.value !== null).map(({ id, value }) => ({ id, value }));
-        let options: CreateSessionOptions;
-        if ((source.hostId ?? 'local') !== 'local' && source.providerId === 'dsh') {
-          const workspaces = (await target.workspaces(source.providerId)).workspaces;
-          const workspace = workspaces.find(({ path }) => path === agent.cwd);
-          if (agent.cwd && !workspace) throw new Error('The source workspace is no longer registered on this Host.');
-          options = workspace ? { workspaceId: workspace.id } : {};
-        } else options = { ...(agent.cwd ? { cwd: agent.cwd } : {}), ...(agent.model && source.providerId !== 'dsh' ? { model: agent.model } : {}),
-          ...(agent.capabilities.planning && source.providerId !== 'dsh' ? { planning: agent.runtimeInfo.planning?.active === true } : {}) };
-        if (context.mode === 'reference') { options.sourceNativeSessionId = source.nativeSessionId; options.conversationKind = 'side'; }
-        else options.creationSource = { providerId: source.providerId, nativeSessionId: source.nativeSessionId };
-        record = forkStore.prepare(context, options, settings, key);
+        if (sessionQuotaReached(remoteHosts.find((host) => host.id === source.hostId)?.sessionQuota)) throw new Error(sessionQuotaMessage);
+        const context = copiesConversation(id) ? await captureForkContext(transport, source) : referenceForkContext(source);
+        const settings = forkSettings(agent.runtimeInfo.settings ?? []);
+        const placed = needsWorkspaceLookup(source) ? workspaceOptions(agent.cwd, (await target.workspaces(source.providerId)).workspaces)
+          : forkCreateOptions({ cwd: agent.cwd, model: agent.model, capabilities: agent.capabilities, planningActive: agent.runtimeInfo.planning?.active === true }, source.providerId);
+        record = forkStore.prepare(context, withForkContext(placed, context.mode, source), settings, key);
         forkReservation.current = { key, record };
       }
       assertSourceCurrent(source);
@@ -284,8 +279,7 @@ export function useCommunicationsAndForks(scope: Pick<AppInputs & WorkbenchShell
         try { result = await target.create(source.providerId, record.id, record.options); }
         finally { if (source.hostId && source.hostId !== 'local') retryHosts(); }
       }
-      const session = viewSession({ agentId: result.agentId, nativeSessionId: result.nativeSessionId ?? result.agentId, providerId: source.providerId,
-        hostId: source.hostId ?? 'local', title: `Fork of ${source.title}`, createdAt: record.capturedAt });
+      const session = viewSession(forkedSession(source, result, record.capturedAt));
       forkStore.bind(record.id, session);
       assertSourceCurrent(source);
       await configureFork(transport, forkStore, forkStore.get(record.id));
@@ -294,9 +288,9 @@ export function useCommunicationsAndForks(scope: Pick<AppInputs & WorkbenchShell
       setDirectoryRevision((value) => value + 1);
       const draft = draftBindingFor(session);
       if (args.trim()) draft.store.set(draft.key, args.trim());
-      if (id === 'console:side' && sideLinkVisible(forkStore.get(record.id))) selectSide(source, session);
+      if (selectsSideAfterFork(id, sideLinkVisible(forkStore.get(record.id)))) selectSide(source, session);
       assertSourceCurrent(source);
-      if (args.trim() && forkStore.get(record.id).delivery !== 'sent') {
+      if (firstInputPending(args, forkStore.get(record.id).delivery)) {
         setForkInputStatus({ agentId: session.agentId, pending: true });
         try { await sendForkInput(transport, forkStore, forkStore.get(record.id), args.trim()); }
         catch (error) { setForkInputStatus({ agentId: session.agentId, pending: false, error: message(error, 'The first fork input failed.') }); throw error; }

@@ -10,7 +10,7 @@ import { sessionKey } from '../session-tree.js';
 import type { LabSessionRef } from '../session-references.js';
 import { sideLinkVisible, type SessionFork } from '../session-forks.js';
 import { message, viewKey } from './helpers.js';
-import { askStaleness } from './helpers.js';
+import { askUnavailableReason } from '../state/ask-visibility.js';
 import type { HostAndStackSlice } from './useHostAndStack.js';
 import type { SideSelectionSlice } from './useSideSelection.js';
 import type { SessionOpeningSlice } from './useSessionOpening.js';
@@ -102,12 +102,9 @@ export function useFocusedAsk(scope: Pick<AppInputs & HostAndStackSlice & SideSe
     return succession.sourceStale(source);
   }
 
-  const focusedAskUnavailable = !focusedAskSession ? undefined
-    : !directory || !accessReady ? 'waiting for access'
-    : transitioning ? 'waiting for the session switch to finish'
-    : remoteHosts.find(host => host.id === focusedAskSession.hostId)?.online === false ? 'its Controller is offline'
-    : focusedAskEntry?.record?.target ? undefined
-    : askStaleness[sourceStale(focusedAskSession) ?? (focusedAskState?.agent ? '' : 'connecting')];
+  const focusedAskUnavailable = askUnavailableReason({ hasSource: !!focusedAskSession, hasDirectory: !!directory, accessReady, transitioning,
+    controllerOffline: remoteHosts.find(host => host.id === focusedAskSession?.hostId)?.online === false, hasTarget: !!focusedAskEntry?.record?.target,
+    staleness: focusedAskSession ? sourceStale(focusedAskSession) : undefined, hasAgentState: !!focusedAskState?.agent });
 
   const canOpenFocusedAsk = !!focusedAskSession && !focusedAskUnavailable;
 

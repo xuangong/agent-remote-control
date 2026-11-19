@@ -1,18 +1,8 @@
 import type { SessionEntry } from '../session-tree.js';
 import { conversationLocalStorage } from '../conversation-storage.js';
-import type { SourceStaleness, RemoteSessionStatus } from '@orchardworks/agent-client';
+import type { RemoteSessionStatus } from '@orchardworks/agent-client';
 import type { OpenedSession } from '../directory-client.js';
 import { Menu } from '../ui/Menu.js';
-
-export /** Explains a disabled Ask launcher, after the session it names. */
-const askStaleness: Record<SourceStaleness | '', string | undefined> = {
-  '': undefined,
-  inactive: 'waiting for this page to restore its sessions',
-  view: 'this view now shows another session',
-  connecting: 'waiting for the session to connect',
-  agent: 'waiting for the session to reattach',
-  native: 'waiting for the session to continue its current conversation',
-};
 
 export const nonTextInputTypes = new Set(['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit']);
 

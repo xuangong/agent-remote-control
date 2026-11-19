@@ -1,7 +1,8 @@
 // @vitest-environment node
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
-import { WebSocket, WebSocketServer } from 'ws';
+import { WebSocketServer } from 'ws';
+import { memoryHttp } from '@orchardworks/agent-session-runtime/testing';
 import { expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, type HistoryPage, type ServerMessage } from '@orchardworks/agent-remote-protocol';
 import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } from '@orchardworks/agent-client';
@@ -58,15 +59,13 @@ it.each([false, true])('recovers an omitted live echo through HTTP without recon
     });
     socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'ready' }));
   });
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
-  if (!address || typeof address === 'string') throw new Error('Missing test port');
-  const transport = new HttpWebSocketTransport(`http://127.0.0.1:${address.port}`, { WebSocket, sessionChannels: true });
+  const net = memoryHttp(server);
+  const transport = new HttpWebSocketTransport(net.url, { fetch: net.fetch, WebSocket: net.WebSocket, sessionChannels: true });
   const replica = new AgentReplica();
   const client = new RemoteSessionClient('one', transport, replica);
   const statuses: string[] = [];
   const unsubscribe = client.subscribeStatus(status => statuses.push(status));
-  // The client's echo wait runs on a fake clock; the sockets and HTTP stay real.
+  // The client's echo wait runs on a fake clock; the sockets and HTTP run in memory.
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   try {
     client.start();
@@ -86,9 +85,6 @@ it.each([false, true])('recovers an omitted live echo through HTTP without recon
   } finally {
     vi.useRealTimers();
     unsubscribe(); client.stop(); transport.dispose();
-    for (const socket of sockets.clients) socket.terminate();
-    await new Promise<void>(resolve => sockets.close(() => resolve()));
-    server.closeAllConnections();
-    await new Promise<void>(resolve => server.close(() => resolve()));
+    net.close();
   }
 }, 20_000);

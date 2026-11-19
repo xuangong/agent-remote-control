@@ -17,6 +17,7 @@ import {
 } from '@orchardworks/agent-client';
 import { createAgentRemoteRelay } from '@orchardworks/agent-session-runtime';
 import { createAgentRemoteHttpServer } from '@orchardworks/agent-session-runtime';
+import { memoryHttp } from '@orchardworks/agent-session-runtime/testing';
 
 const imageBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ1kAAAAASUVORK5CYII=';
 
@@ -42,9 +43,9 @@ describe('Codex images over HTTP and WebSocket', () => {
     const observations: RemoteProtocolObservation[] = [];
     let client: RemoteSessionClient | undefined;
     try {
-      const { url } = await server.listen(0, '127.0.0.1');
-      const transport = new HttpWebSocketTransport(url, { webSocketFactory: (socketUrl) => {
-        const socket = new WebSocket(socketUrl);
+      const net = memoryHttp(server.server), url = net.url;
+      const transport = new HttpWebSocketTransport(url, { fetch: net.fetch, webSocketFactory: (socketUrl) => {
+        const socket = net.webSocket(socketUrl);
         sockets.push(socket);
         return socket as unknown as WebSocketLike;
       } });

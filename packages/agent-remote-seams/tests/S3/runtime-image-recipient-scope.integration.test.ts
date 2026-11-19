@@ -9,12 +9,12 @@ it('keeps A, B and C image receipts scoped to their concrete recipients over a r
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
   const { default: events } = await import('node:events'); const once = events.once;
-  const { default: WebSocket } = await import('ws');
   const { PROTOCOL_VERSION } = await import('@orchardworks/agent-remote-protocol');
   const { IMAGE_INPUT_CAPABILITIES } = await import('@orchardworks/agent-provider-sdk');
   const { InputImageStore } = await import('@orchardworks/agent-session-runtime');
   const { createAgentRemoteRelay } = await import('@orchardworks/agent-session-runtime');
   const { createAgentRemoteHttpServer } = await import('@orchardworks/agent-session-runtime');
+  const { memoryHttp } = await import('@orchardworks/agent-session-runtime/testing');
   type ServerMessage = import('@orchardworks/agent-remote-protocol').ServerMessage;
   type InputPart = import('@orchardworks/agent-provider-sdk').AgentInputPart;
   const directory = await mkdtemp(join(tmpdir(), 'recipient-contract-'));
@@ -35,10 +35,10 @@ it('keeps A, B and C image receipts scoped to their concrete recipients over a r
   const server = createAgentRemoteHttpServer(relay, { websocketAuthorizer: { authenticate: () => ({ subject: 'fixture-owner' }), authorize: () => true } });
   const sockets: import('ws').WebSocket[] = [];
   try {
-    const { url } = await server.listen(0, '127.0.0.1');
+    const net = memoryHttp(server.server), url = net.url;
     async function connect(agentId: string) {
       await relay.createAgent({ protocolVersion: PROTOCOL_VERSION, type: 'create_agent', payload: { requestId: randomUUID(), operationId: randomUUID(), agentId, providerId: 'vision', config: { sessionId: agentId } } });
-      const socket = new WebSocket(`${url.replace('http', 'ws')}/v1/sessions/${agentId}/events`); sockets.push(socket);
+      const socket = net.webSocket(`${url.replace('http', 'ws')}/v1/sessions/${agentId}/events`); sockets.push(socket);
       const messages: ServerMessage[] = []; const listeners = new Set<() => void>();
       socket.on('message', data => { messages.push(JSON.parse(String(data))); for (const listener of listeners) listener(); });
       await once(socket, 'open');
@@ -77,7 +77,7 @@ it('keeps A, B and C image receipts scoped to their concrete recipients over a r
       previous = own;
     }
     expect(sent.map(value => value.native)).toEqual(['A', 'B', 'C']);
-    for (const input of sent) { const image = input.parts[0]!; if (image.type !== 'image') throw new Error('Missing image'); expect(await readFile(image.path)).toEqual(bytes); }
+    for (const input of sent) { const image = input.parts[0]!; if (image.type !== 'image') throw new Error('Missing image'); expect((await readFile(image.path)).equals(bytes)).toBe(true); }
   } finally {
     for (const socket of sockets) socket.terminate();
     await server.close(); await relay.close(); await rm(directory, { recursive: true, force: true });

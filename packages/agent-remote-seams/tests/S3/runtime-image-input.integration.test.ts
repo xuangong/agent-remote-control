@@ -10,6 +10,7 @@ import { PROTOCOL_VERSION, type ServerMessage } from '@orchardworks/agent-remote
 import { InputImageStore } from '@orchardworks/agent-session-runtime';
 import { createAgentRemoteRelay } from '@orchardworks/agent-session-runtime';
 import { createAgentRemoteHttpServer } from '@orchardworks/agent-session-runtime';
+import { memoryHttp } from '@orchardworks/agent-session-runtime/testing';
 import { uploadImage } from '@orchardworks/agent-client';
 
 function provider(sent: AgentInputPart[][]): AgentProviderAdapter {
@@ -38,10 +39,10 @@ describe('image input over real session WebSocket', () => {
     } });
     const sockets: WebSocket[] = [];
     try {
-      const { url } = await server.listen(0, '127.0.0.1');
+      const net = memoryHttp(server.server), url = net.url;
       for (const agentId of ['a', 'b']) await relay.createAgent({ protocolVersion: PROTOCOL_VERSION, type: 'create_agent', payload: { requestId: randomUUID(), operationId: randomUUID(), agentId, providerId: 'vision', config: { sessionId: agentId } } });
       async function connect(agentId = 'a', subject = 'owner', activity = false) {
-        const socket = new WebSocket(`${url.replace('http', 'ws')}/v1/sessions/${agentId}/events?subject=${subject}`); sockets.push(socket);
+        const socket = net.webSocket(`${url.replace('http', 'ws')}/v1/sessions/${agentId}/events?subject=${subject}`); sockets.push(socket);
         const messages: ServerMessage[] = []; const listeners = new Set<() => void>();
         socket.on('message', data => { messages.push(JSON.parse(data.toString())); for (const listener of listeners) listener(); });
         await once(socket, 'open');
@@ -89,7 +90,7 @@ describe('image input over real session WebSocket', () => {
         const response = await connection.request(type, { uploadId: 'upload', ...payload });
         if (type === 'image_upload_chunk') {
           // Keep receipts in transit long enough to exercise a full upload window.
-          await new Promise(resolve => setTimeout(resolve, 60));
+          await new Promise(resolve => setTimeout(resolve, 5));
           inFlight--;
         }
         if (response.type !== 'image_upload_result') throw new Error(`Unexpected upload response: ${response.type}`);
@@ -102,7 +103,7 @@ describe('image input over real session WebSocket', () => {
       expect((await connection.request('send_message', { operationId: randomUUID(), content })).type).toBe('command_acknowledged');
       expect(sent[0]!.map(part => part.type)).toEqual(['text', 'image', 'text']);
       const image = sent[0]![1]!; if (image.type !== 'image') throw new Error('Missing provider image');
-      expect(await readFile(image.path)).toEqual(bytes);
+      expect((await readFile(image.path)).equals(bytes)).toBe(true);
       const preview = await connection.request('resource_resolve_request', { locator: `input-image:${attachmentId}` });
       expect(preview).toMatchObject({ payload: { binding: { status: 'available' } } });
       const foreign = await connect('b');

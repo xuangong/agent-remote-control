@@ -1,6 +1,6 @@
 # I1: Quiet open
 
-**State: plan, not implemented.** I1 is the first Orchard step (roadmap "Next: Orchard"; [Orchard design](../specs/2026-11-20-orchard-im-experience-design.md), decisions 4 and 5 and step I1; [IM session service design](../specs/2026-11-15-im-session-service-design.md), targets T4 and T5, Presentation, Removed in smart mode). It meets T4 and T5 on the current page. There is no visual redesign, no protocol change and no Controller change.
+**State: implemented, open item E9 (section 10).** I1 is the first Orchard step (roadmap "Next: Orchard"; [Orchard design](../specs/2026-11-20-orchard-im-experience-design.md), decisions 4 and 5 and step I1; [IM session service design](../specs/2026-11-15-im-session-service-design.md), targets T4 and T5, Presentation, Removed in smart mode). It meets T4 and T5 on the current page. There is no visual redesign, no protocol change and no Controller change.
 
 ## 1. For the owner
 
@@ -643,6 +643,56 @@ What the control arm shows:
 **Tests.** `agent-remote-lab` 3,279 (was 3,283: eight toast tests deleted, four added), 67 to 85 s for the package. New in `SessionWorkbench.test.tsx`: no T5 word in the heading, notes or toasts through catching up, checking and a lost link; the composer dock and an enabled editor before the first Snapshot with a target, the empty state only without one; an offline Host said once. Rewritten: `LabWorkbench.test.tsx` label rows (business labels), the runtime-recovery rows (no heading word, one note for an unavailable agent, the send waits), the failure notes (the failure's own words), the handoff phases; `App.test.tsx` and `App.host-providers.test.tsx` app bar labels; the succession take-over words; `SideConversation`; the capacity test becomes "keeps a stream capacity refusal and a pause out of the conversation".
 
 **Deleted tests, with the reason.** `LabWorkbench.recovery.test.tsx` loses the eight tests of the "Session runtime" toast's 5 s debounce (short disconnects, the deadline through retries, foreground time after visibility and page suspension, session switches and hidden panels, the restoring runtime, background time, unmount): the toast itself is deleted by this task, so no rule remains for them to guard. One test replaces them: "raises no toast and shows no connection word through disconnects, retries, catch-up and a recovering runtime". The debounce rule lives on in `useRecoveryNotice` for the device banner, covered by `GatewayController.test.tsx`. The mapping table for Task 9 starts here.
+
+### Task 6, the coordinator's points and the review of Tasks 0 to 5
+
+**What changed, and why the plan's "measure first" was not followed.** The coordinator required two fixes regardless of the figure: the editor must keep its focus and content during a direct send, and a lost Relay link must not block sending. The plan's candidate fixes the first, so it was built before the measurement.
+- **One send path for text.** Every plain-text send goes through the composer's queue, now or later. The editor clears at once, is never disabled under a send, and keeps its focus and what is typed meanwhile. A dispatched message is the conversation's outgoing row, so the chip leaves: one Sending, never two. Image and resource sends keep the retained direct path; the retention tests moved to them, and their two text-only cases (newer edit, text ABA) were deleted because a queued text send snapshots its text.
+- **A lost link never blocks.** `WorkspaceReady` false and a lost live connection no longer set `mutationBlocked`. A view reopening its session takes sends that wait.
+- **A message that cannot go.** A waiting message the session cannot take (ended, failed, refused, read-only, a native owner, an unopened view) says Not sent with Retry and Cancel, and is never sent unasked. A send the session refused with a code that means it never took it (`native_session_owned`, `session_read_only`, `session_control_changed`, `host_offline`, `host_unavailable`, `controller_offline`) is Not sent with Retry. Any other failure after dispatch is Check delivery.
+
+**Review fixes.** (1) Only a refusal for good is an `unavailable` notice; the R1 product now carries a stale non-recoverable diagnostic in every combination. (2) As above. (3) The link is `unknown` once nobody watches the activity channel. (4) "Reconnect to take control" and "Reconnect before sending" are waits; the T5 list gains "Reconnect" (nine words), and the other session-level "Reconnect …" words were reworded. (5) The app bar says the activity label only; the notice is said once, by the conversation. (6) The banner's Retry reopens the activity channel now (`reopenRelayLink`). (7) One list: `agent-client/testing` (`connection-words.ts`), re-exported by `agent-e2e/faults/connection-words.mjs`; tests import the pattern. (8) `data-notice` and `agent-state-notice`.
+
+**State accounting.** `AgentComposer`: the direct text branch is unused for text (one send path); +1 effect (hold). `usePendingSend`: +1 method (`hold`), +1 item field (`held`). `SessionChannelPool`: +1 method (`reopenRelayLink`), +0 fields. `RelayLinkReport`: a reporter object (+1 callback). `useHostAndStack`: the notice branch removed. `session-presentation`: -1 branch.
+
+### Task 7
+
+Component and browser specs, the refusals spec, `toast-placement` (a refused send's error toast replaces the deleted runtime toast), `workbench.spec.ts` and the smoke invariant `noSessionConnectionLabel`. The changed specs run at 390x844 in the component config's `chromium-mobile` and WebKit mobile projects. Results: `pnpm test:components` 454 passed and 6 failed under load, the 6 passing on rerun; `pnpm test:preview-browser` 73 of 73; `live-cache-browser` 1 of 1; `specs/workbench.spec.ts` 9 passed, 2 skipped (`node scripts/run-tests.mjs e2e specs/workbench.spec.ts`; `pnpm test:e2e -- …` runs the whole suite); `agent-e2e` unit 123 of 123.
+
+### Task 8
+
+`flows/e9-quiet-open.e2e.ts`, `PageOptions.hold: 'agent_snapshot'`, `watchWords`. Both tests run at desktop and at 390x844 with touch emulation. WebKit is not run: `launchBrowser()` in `flows/browser.ts` is Chromium-only (WebKit builds are installed); adding it is left open. E4's refused text is now the queue chip.
+
+**E9 is flaky (open, needs an owner decision).** About half the whole-file runs fail at either viewport: the first editable composer is the stand-in pane that `SessionDocks` renders before the Window loads (`ConversationPane` → `LabWorkbench`); about 100 ms later the Window renders the conversation through `SessionFamily` → `SessionConversation` → `LabWorkbench`, a different component path, so React creates a second composer and the first one's text, focus and queued message are lost. No T5 word was seen in any run. One instance from the first frame needs both trees to render the conversation through the same mount (`SessionConversationMount` with the slot id the Window path uses). Deferring the stand-in's composer was tried and reverted: the page cannot tell a Window that is loading from no Window, and 47 App tests have none.
+
+### Task 9
+
+**Deleted.** `RemoteSessionState.holdingRows` and `holdsUnconfirmedRows`; `leaseActivityLabel`; `useRecoveryNotice`'s status and runtime arguments (only the device banner calls it); `sessionStatusLabel`; the runtime words, the Session runtime toast, `reconnectingNotice`, the capacity and pause notes; `noStaleLabel` and `RECONNECT_LABEL`; the locator's "still synchronizing" alert (now "not confirmed yet").
+
+**Kept, with the reason.** `RemoteSessionStatus` and `session.recovering` (L3, succession, quotes); the per-session restart and pause loop (P2); `AgentSessionSettings`' Connection row and its `disabled` prop (an L2 panel; the composer passes `false`; removing the prop rewrites seven settings tests, left for P2); `access-page.ts` words (decision 4); `local-baselines.mjs`'s T1 subset (`OPENING_LABELS`), so T1 compares with P0; the `fixture-synchronizing` hook (`workbench.spec.ts` still drives it).
+
+**Old test to new test.**
+| Old | New owner | Mutations it caught |
+|---|---|---|
+| `LabWorkbench.recovery` toast debounce (8) | deleted with the toast; "raises no toast and shows no connection word …" | the toast's delay, which no longer exists |
+| `session-state.test` "holds rows …" | vector rows "restored idle, connecting", "restored running turn, catching up, checking" | label from stored status |
+| `lease-view.test` activity column | vector rows 7 and "another Controller has control" | native owner words |
+| retention "newer edit", "text ABA" | `AgentComposer.test` "sends a message at once through the queue …" | text-only retained send, replaced by the queue |
+
+### Task 10: I1 arm against the control arm
+
+Build `563fee30`, the same Copilot session, journals and smart reading on, 10 opens and 3 two-send views per condition; raw data in `.tmp/i1-*.json`. Times p50 / p95 in ms from the key press. Control first, I1 second.
+
+| Condition | Opens with a T5 word | Editable from load | Key to Sending | Key to acknowledged | Key to delivered | Enter refused | Focus / text kept | `negotiated` to grant |
+|---|---|---|---|---|---|---|---|---|
+| 1x, 0 ms | 1 → 0 | 200/266 → 230/252 | 20/47 → 12/13 | 40/67 → 31/4104 (one outlier) | 103/128 → 111/7638 (same) | 0 → 0 | 10/10 → 10/10 | 28/71 → 30/33 |
+| 4x, 0 ms | 1 → 0 | 867/1021 → 852/877 | 92/112 → 47/51 | 140/158 → 98/111 | 304/325 → 165/177 | 0 → 0 | 10/10 → 10/10 | 78/81 → 72/97 |
+| 1x, 100 ms | 6 → 0 | 1030/1357 → 635/1410 | 27/36 (n=6) → 10/11 | 148/156 (n=6) → 236/243 | 208/215 (n=6) → 304/310 | 4 → 0 | 4/4 → 10/10 | 109/120 → 122/130 |
+| 4x, 100 ms | 10 → 0 | 1604/1970 → 1420/1614 | 106/181 → 49/55 | 260/317 → 234/267 | 358/427 → 316/337 | 0 → 0 | 0/0 → 10/10 | 118/131 → 114/122 |
+
+Against section 8: no open shows a T5 word (0 of 40); the editor was editable at the composer's first paint in every open; Sending p95 at 4x and 100 ms is 55 ms (target 100; Task 6's candidate needed no second change); focus and later text kept 40 of 40; the grant time is not worse. At 1x and 100 ms acknowledgement is slower than control because the control arm's six measured sends were typed after the session was ready, while every I1 send was typed during the open and waited for it. The runner types into the Window's pane, so it does not see E9's stand-in swap (Task 8).
+
+**Not done in this step.** `pnpm local` verification steps 3 to 5 beyond the runner (screenshots, the Bot mode check), the owner's review, and E9's flakiness. No Codex session was created.
 
 ## 11. Decisions (2026-11-20)
 

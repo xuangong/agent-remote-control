@@ -65,7 +65,7 @@ export function usePendingSend(sessionKey: string, visible: boolean) {
       else {
         // A session's definite refusal (a terminal in control, the Host offline) delivered nothing: the message can be retried.
         // Any other failure after dispatch is uncertain and asks the person to check delivery.
-        if (item.dispatched && error instanceof RemoteOperationError && !isUncertainSend(error) && NOT_DELIVERED.has(error.code)) item.dispatched = false;
+        if (item.dispatched && error instanceof RemoteOperationError && NOT_DELIVERED.has(error.code) && !isUncertainSend(error)) item.dispatched = false;
         item.phase = 'error';
         item.reason = error instanceof Error ? error.message : 'Message could not be sent.';
       }

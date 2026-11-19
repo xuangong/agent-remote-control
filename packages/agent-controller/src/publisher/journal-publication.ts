@@ -311,6 +311,10 @@ export class SessionPublication {
     // A manager that already broke the identity contract says so in the next tick; the journal is not opened for a session that is given up.
     await Promise.resolve();
     this.check(token);
+    // A window the Relay refused for its quota is read before the open, so an unchanged one opens nothing; otherwise the
+    // open comes first, as the window it answers is read next.
+    const held = this.refusedWindow !== undefined;
+    if (!held) { await this.open(token); this.check(token); }
     // Rows above this one reach the session as events; a reread that reaches them would publish them twice.
     const lastSeq = subscription.rows[subscription.rows.length - 1]?.seq ?? 0;
     let rows = subscription.rows;
@@ -329,9 +333,11 @@ export class SessionPublication {
     const items = timeline.filter(item => !this.skipped.has(item.key));
     const sendWindow = window.count > 0 || !this.source.hasOlderHistory();
     const offered = sendWindow ? windowFingerprint(window.op) : undefined;
-    if (offered !== undefined && offered === this.refusedWindow) throw new WindowHeld();
-    await this.open(token);
-    this.check(token);
+    if (held) {
+      if (offered !== undefined && offered === this.refusedWindow) throw new WindowHeld();
+      await this.open(token);
+      this.check(token);
+    }
     const ops = [...(sendWindow ? [window.op] : []), ...outcomeOps(items), ...rebindOps(items), this.takeHead()];
     try {
       for (const chunk of chunkOps(ops)) await this.publish(token, chunk);

@@ -1,4 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createHostedRelay } from './gateway.js';
 import { createServer, type Server } from 'node:http';
@@ -487,4 +488,25 @@ it('refuses cross-group operations without changing any group', async () => {
   // The stored state, rejected receipts included, is still valid.
   const restarted = await fixture(f.saved());
   expect((await restarted.call()).body.groups.map((group: { window: WorkspaceWindow }) => group.window.id)).toEqual(['window', 'section']);
+});
+
+it('lists a saved group holding bots stored with the older picture shapes and writes the new form', async () => {
+  const legacyBots = JSON.parse(readFileSync(new URL('../../agent-remote-protocol/src/fixtures/window-bots.v1.json', import.meta.url), 'utf8'));
+  const views = ['main', 'review', 'plain'].map((id, index) => createWindowView(id, { ...binding, nativeSessionId: id }, index === 0 ? 'primary' : undefined));
+  const stored: WorkspaceWindow = { schemaVersion: 3, id: 'legacy', title: 'Legacy', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views };
+  const f = await fixture({ ...emptyRelayState(auth), workspaceWindows: [{ subject: 'alice', id: 'legacy', window: stored, generation: 0, receipts: [], bots: legacyBots }] });
+  const listed = (await f.call()).body.groups.find((group: { window: WorkspaceWindow }) => group.window.id === 'legacy');
+  expect(listed.bots.members.main.picture).toEqual({ shape: 'squircle', color: '#2f6fed' });
+  expect(listed.bots.members.review.picture).toEqual({ shape: 'squircle', color: '#35836b' });
+  expect(listed.bots.members.plain).toEqual({ label: 'No picture' });
+  const update = (operationId: string, picture: unknown) => f.call('/legacy/operations', 'POST',
+    f.mutation(operationId, 0, { type: 'bot.update', viewId: 'main', details: { label: 'Writes the release notes', picture } }));
+  expect((await update('refused-hexagon', { shape: 'hexagon', color: '#2f6fed' })).status).toBe(400);
+  expect((await update('refused-gaze', { shape: 'circle', color: '#2f6fed', gaze: 6 })).status).toBe(400);
+  const picture = { shape: 'triangle', color: '#2f6fed', gaze: 4 };
+  expect((await update('write', picture)).body.result.status).toBe('committed');
+  expect((await f.call('/legacy')).body.bots.members.main.picture).toEqual(picture);
+  expect(f.saved().workspaceWindows![0]!.bots.members.main.picture).toEqual(picture);
+  const restarted = await fixture(f.saved());
+  expect((await restarted.call('/legacy')).body.bots.members.main.picture).toEqual(picture);
 });

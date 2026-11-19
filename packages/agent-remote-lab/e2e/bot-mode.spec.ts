@@ -396,7 +396,7 @@ test('reads long Bot labels with independent roster and conversation scrolling',
       ...otherBindings.map((target, index) => ({ type: 'view.create' as const, view: createWindowView(`long-${index + 1}`, target, 'primary') })),
     ] });
     const label = 'A readable label that wraps naturally across the available roster width. '.repeat(2).slice(0, 120);
-    await mutate(client, id, { type: 'bot.update', viewId: original.id, details: { label, picture: { shape: 'hexagon', color: '#35836b' }, pinned: true } });
+    await mutate(client, id, { type: 'bot.update', viewId: original.id, details: { label, picture: { shape: 'squircle', color: '#35836b', gaze: 2 }, pinned: true } });
     await mode(page, 'bot');
     const bot = modeRegion(page, 'bot'), nav = bot.getByRole('navigation', { name: 'Bots', exact: true });
     const row = nav.locator('[data-bot-place]').filter({ hasText: label }); await expect(row).toHaveCount(1); await row.click();

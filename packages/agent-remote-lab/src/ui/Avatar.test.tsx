@@ -3,10 +3,10 @@ import { render } from '../test/setup.js';
 import { Avatar, AVATAR_COLORS, avatarColor, avatarInitial } from './Avatar.js';
 
 it('draws the stored shape and color with the first letter of the name', async () => {
-  const container = await render(<Avatar name="release notes" picture={{ shape: 'hexagon', color: '#123456' }} size={30} />);
+  const container = await render(<Avatar name="release notes" picture={{ shape: 'squircle', color: '#123456' }} size={30} />);
   const avatar = container.querySelector('.ui-avatar') as HTMLElement;
   expect(avatar.getAttribute('aria-hidden')).toBe('true');
-  expect(avatar.dataset.shape).toBe('hexagon');
+  expect(avatar.dataset.shape).toBe('squircle');
   expect(avatar.textContent).toBe('R');
   expect(avatar.getAttribute('style')).toContain('#123456');
   expect(avatar.getAttribute('style')).toContain('30px');

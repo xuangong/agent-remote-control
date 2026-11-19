@@ -1,0 +1,8 @@
+{
+  "rank": "m",
+  "members": {
+    "main": { "label": "Writes the release notes", "picture": { "shape": "rounded", "color": "#2f6fed" }, "pinned": true },
+    "review": { "picture": { "shape": "hexagon", "color": "#35836b" } },
+    "plain": { "label": "No picture" }
+  }
+}

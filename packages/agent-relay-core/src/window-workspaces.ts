@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import {
   decodeWorkspaceWindow, hasWindowAppearance, isWindowBots, isWindowDeleteRequest, isWindowGroup, isWindowGroupCreateRequest, isWindowGroupMutation,
   isWindowMergeRequest, isWindowOperationResult, isWindowPresentation, isWindowSessionBinding, isWindowSplitRequest, isWindowTransferRequest,
-  applyGroupOperation, duplicateBot, groupBotViews, mergeGroups, pruneBotDetails, splitGroup, transferBot, WindowGroupError,
+  applyGroupOperation, duplicateBot, readBotPicture, groupBotViews, mergeGroups, pruneBotDetails, splitGroup, transferBot, WindowGroupError,
   WINDOW_OPERATION_RETENTION_MS,
   type WindowBots, type WindowDeleteRequest, type WindowGroup, type WindowGroupCreateRequest, type WindowGroupMutation,
   type WindowOperationResult, type WindowPresentation, type WindowSessionBinding, type WorkspaceWindow,
@@ -45,9 +45,20 @@ function canonical(value: unknown): string {
   if (value && typeof value === 'object') return '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + canonical((value as Record<string, unknown>)[key])).join(',') + '}';
   return JSON.stringify(value);
 }
+/** Stored bot details with each picture read in the current form; stored rows may hold shapes an older build wrote. Anything that is not bots is returned as it is. */
+function readStoredBots(bots: unknown): unknown {
+  const members = (bots as { members?: unknown } | null)?.members;
+  if (!members || typeof members !== 'object' || Array.isArray(members)) return bots;
+  return { ...(bots as object), members: Object.fromEntries(Object.entries(members).map(([viewId, details]) => {
+    if (!details || typeof details !== 'object' || !('picture' in details)) return [viewId, details];
+    const { picture, ...rest } = details as { picture: unknown };
+    const read = readBotPicture(picture);
+    return [viewId, read ? { ...rest, picture: read } : rest];
+  })) };
+}
 /** The group a stored row holds, without details left for views that are no longer bots; only for rows that are not deleted. */
 export function windowGroup(row: SavedWorkspaceWindow): WindowGroup {
-  return pruneBotDetails({ window: row.window!, ...(row.bots ? { bots: row.bots } : {}), ...(row.presentation ? { presentation: row.presentation } : {}) });
+  return pruneBotDetails({ window: row.window!, ...(row.bots ? { bots: readStoredBots(row.bots) as WindowBots } : {}), ...(row.presentation ? { presentation: row.presentation } : {}) });
 }
 function store(row: SavedWorkspaceWindow, group: WindowGroup) {
   row.window = group.window;
@@ -71,7 +82,7 @@ export function validWindowState(value: unknown): value is SavedWorkspaceWindow[
     // for views that are no longer bots. Both are inert, so only a live row's group is checked, without such details.
     // The shape checks come first because pruning assumes a well-formed `bots`.
     if (!row.deleted && (row.bots !== undefined || row.presentation !== undefined)
-      && ((row.bots !== undefined && !isWindowBots(row.bots)) || (row.presentation !== undefined && !isWindowPresentation(row.presentation))
+      && ((row.bots !== undefined && !isWindowBots(readStoredBots(row.bots))) || (row.presentation !== undefined && !isWindowPresentation(row.presentation))
         || !isWindowGroup(windowGroup({ ...row, window: decodeWorkspaceWindow(row.window) })))) return false;
     const operations = new Set<string>();
     return row.receipts.every((receipt: SavedWindowReceipt) => {

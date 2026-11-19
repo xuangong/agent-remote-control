@@ -9,13 +9,25 @@ const counter = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
 /** A fractional index: ranks compare as strings and never end in 0, so a new one fits between any two others until the length limit. */
 const rank = Type.String({ minLength: 1, maxLength: 64, pattern: '^[0-9a-z]*[1-9a-z]$' });
 
+/** A bot's picture: a shape, a colour and which of six directions it looks (0 to 5; omitted means the default look). */
+export const BotPicture = Type.Object({
+  shape: Type.Union([Type.Literal('circle'), Type.Literal('squircle'), Type.Literal('triangle'), Type.Literal('sideways')]),
+  color: Type.String({ pattern: '^#[0-9a-f]{6}$' }),
+  gaze: Type.Optional(Type.Integer({ minimum: 0, maximum: 5 })),
+}, strict);
+export type BotPicture = Static<typeof BotPicture>;
+/** A stored picture in the current form: older rows hold `rounded` or `hexagon`, which read as `squircle` with the same colour; an invalid picture reads as none. */
+export function readBotPicture(stored: unknown): BotPicture | undefined {
+  if (!stored || typeof stored !== 'object') return undefined;
+  const picture = stored as { shape?: unknown };
+  const current = picture.shape === 'rounded' || picture.shape === 'hexagon' ? { ...picture, shape: 'squircle' } : picture;
+  return Value.Check(BotPicture, current) ? current : undefined;
+}
+
 /** What Bot mode shows for one bot beyond its session's title. */
 export const WindowBotDetails = Type.Object({
   label: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
-  picture: Type.Optional(Type.Object({
-    shape: Type.Union([Type.Literal('circle'), Type.Literal('rounded'), Type.Literal('hexagon')]),
-    color: Type.String({ pattern: '^#[0-9a-f]{6}$' }),
-  }, strict)),
+  picture: Type.Optional(BotPicture),
   pinned: Type.Optional(Type.Literal(true)),
   hidden: Type.Optional(Type.Literal(true)),
   /** Asleep: quiet on every device, its conversation released until someone opens it, which wakes it. */

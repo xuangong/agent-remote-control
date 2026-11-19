@@ -1,10 +1,12 @@
 import { expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { Value } from '@sinclair/typebox/value';
 import type { WindowSessionBinding, WorkspaceWindow } from './window-workspace.js';
 import { WindowLayoutError, createWindowView } from './window-workspace-operations.js';
 import {
   WindowGroupError, applyGroupOperation, decodeWindowGroup, duplicateBot, hasBotAppearance, isBotView, isWindowGroup, isWindowGroupCreateRequest, isWindowGroupMutation,
   isWindowGroupOperation, isWindowMergeRequest, isWindowSplitRequest, isWindowTransferRequest, mergeGroups, splitGroup, toWindowGroup, transferBot, type WindowGroup,
-  rebindsBot,
+  rebindsBot, readBotPicture, WindowBotDetails,
 } from './window-groups.js';
 
 const session = (nativeSessionId: string, title = nativeSessionId) => ({ hostId: 'mac', providerId: 'claude', nativeSessionId, title });
@@ -132,11 +134,11 @@ it('puts a bot to sleep and wakes it as a detail of the group, shared by every d
 it('keeps details only for views that are still bots', () => {
   const window = windowOf('w', createWindowView('main', session('a'), 'primary'), createWindowView('dock', session('b')));
   let group = applyGroupOperation(section(window), { type: 'batch', operations: [
-    { type: 'bot.update', viewId: 'main', details: { label: 'Writes the release notes', picture: { shape: 'hexagon', color: '#2f6fed' }, pinned: true } },
+    { type: 'bot.update', viewId: 'main', details: { label: 'Writes the release notes', picture: { shape: 'squircle', color: '#2f6fed', gaze: 3 }, pinned: true } },
     { type: 'bot.update', viewId: 'dock', details: { label: 'Reviews' } },
   ] });
   expect(group.window.revision).toBe(1);
-  expect(group.bots?.members.main).toEqual({ label: 'Writes the release notes', picture: { shape: 'hexagon', color: '#2f6fed' }, pinned: true });
+  expect(group.bots?.members.main).toEqual({ label: 'Writes the release notes', picture: { shape: 'squircle', color: '#2f6fed', gaze: 3 }, pinned: true });
   // A view id reused within one batch starts without the details of the bot that held it.
   expect(applyGroupOperation(group, { type: 'batch', operations: [
     { type: 'view.close', viewId: 'dock' }, { type: 'view.create', view: createWindowView('dock', session('z')) },
@@ -289,4 +291,31 @@ it('tells when binding a view would take a bot\'s conversation away, as the grou
   expect(rebindsBot({}, bot, binding('two'))).toBe(false);
   expect(rebindsBot(group, createWindowView('empty', undefined, 'primary'), binding('two'))).toBe(false);
   expect(rebindsBot(group, undefined, binding('two'))).toBe(false);
+});
+
+const storedBots = JSON.parse(readFileSync(new URL('./fixtures/window-bots.v1.json', import.meta.url), 'utf8'));
+
+it('accepts the four picture shapes with and without a gaze', () => {
+  for (const shape of ['circle', 'squircle', 'triangle', 'sideways']) {
+    for (const gaze of [undefined, 0, 5]) {
+      const picture = { shape, color: '#2f6fed', ...(gaze === undefined ? {} : { gaze }) };
+      expect(Value.Check(WindowBotDetails, { picture })).toBe(true);
+      expect(readBotPicture(picture)).toEqual(picture);
+    }
+  }
+});
+
+it('refuses the older shapes and a gaze past 5 when a picture is written', () => {
+  const window = windowOf('w', createWindowView('main', session('a'), 'primary'));
+  for (const picture of [{ shape: 'hexagon', color: '#2f6fed' }, { shape: 'rounded', color: '#2f6fed' }, { shape: 'circle', color: '#2f6fed', gaze: 6 }, { shape: 'circle', color: '#2f6fed', gaze: 1.5 }]) {
+    expect(isWindowGroupOperation({ type: 'bot.update', viewId: 'main', details: { picture } })).toBe(false);
+    expect(isWindowGroup({ ...section(window), bots: { rank: 'm', members: { main: { picture } } } })).toBe(false);
+  }
+});
+
+it('reads the stored older pictures as squircles with the same colour and no gaze', () => {
+  expect(readBotPicture(storedBots.members.main.picture)).toEqual({ shape: 'squircle', color: '#2f6fed' });
+  expect(readBotPicture(storedBots.members.review.picture)).toEqual({ shape: 'squircle', color: '#35836b' });
+  expect(readBotPicture(storedBots.members.plain.picture)).toBeUndefined();
+  for (const invalid of [null, 'circle', { shape: 'star', color: '#2f6fed' }, { shape: 'hexagon', color: 'red' }, { shape: 'hexagon', color: '#2f6fed', extra: 1 }]) expect(readBotPicture(invalid)).toBeUndefined();
 });

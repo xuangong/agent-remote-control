@@ -1,5 +1,6 @@
 import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
+import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
 import { buildBinding, buildView, buildWindow } from '../test/window-builders.js';
 import { buildOpened, mockScope, renderHook } from '../test/render-hook.js';
 import { useSideSessions } from './useSideSessions.js';
@@ -74,6 +75,30 @@ describe('selecting a Side in a shared Window', () => {
     await act(async () => {});
     expect(scope.navigation.select).toHaveBeenCalledWith({ kind: 'bot', groupId: 'W', viewId: expect.any(String) });
   });
+
+  it('binds a new slot for a new view, and reuses the slot of a view that already has one', async () => {
+    const created = await mount(shared);
+    created.hook.selectSide(source, side);
+    expect(created.scope.succession.ensureWindowView).not.toHaveBeenCalled();
+    const bound = await mount({ ...shared, succession: { document: { slots: [{ id: 'view-side' }], windowBindings: [{ slotId: 'view-side' }] }, rememberSide: vi.fn(), bindWindowView: vi.fn(() => ({ id: 'slot-side' })), ensureWindowView: vi.fn(() => ({ id: 'slot-side' })) } });
+    bound.hook.selectSide(source, side);
+    expect(bound.scope.succession.bindWindowView).not.toHaveBeenCalled();
+    expect(bound.scope.succession.ensureWindowView).toHaveBeenCalled();
+  });
+  it('replaces the Side of the same view in the list of Sides and hands the view of the slot on', async () => {
+    const { scope, hook } = await mount(shared);
+    hook.selectSide(source, side);
+    const sessions = scope.setSideSessions.mock.calls[0]![0] as (value: unknown[]) => unknown[];
+    expect(sessions([{ ...side, viewId: 'slot-side' }, buildOpened('keep')])).toEqual([buildOpened('keep'), { ...side, viewId: 'slot-side' }]);
+    expect(scope.nextSideRequest).toHaveBeenCalledWith(source);
+  });
+  it('reports a failed edit with the notice of a connection failure that is not retrying', async () => {
+    const error = new Error('rejected');
+    const { scope, hook } = await mount({ ...shared, windowMode: false, windowWorkspace: { readWindow: () => sharedWindow, readGroup: () => undefined, operate: vi.fn(async () => { throw error; }) } });
+    hook.selectSide(source, side);
+    await act(async () => {});
+    expect(scope.setSessionNotice).toHaveBeenCalledWith(sessionConnectionFailure(error, false));
+  });
   it('refuses a source view that changed', async () => {
     const { hook } = await mount({ ...shared, sharedViewForSlot: () => ({ ...sourceView, binding: buildBinding('else') }) });
     expect(() => hook.selectSide(source, side)).toThrow('The source view changed. Open the Side session again.');
@@ -83,11 +108,58 @@ describe('selecting a Side in a shared Window', () => {
 });
 
 describe('selecting a Side in another group in Bot mode', () => {
+  const placedBindings = [{ slotId: 'view-source', windowId: 'W', viewId: 'source' }];
+  const succession = (bound: unknown[] = []) => ({ document: { slots: [{ id: 'view-side' }], windowBindings: [...placedBindings, ...bound] }, rememberSide: vi.fn(), bindWindowView: vi.fn(() => ({ id: 'slot-side' })), ensureWindowView: vi.fn(() => ({ id: 'slot-side' })) });
+  const workspace = (group: unknown, operateGroup = vi.fn(async () => undefined)) => ({ readWindow: () => sharedWindow, readGroup: () => group, operate: vi.fn(async () => undefined), operateGroup, authority: {} });
+  it('is not used in Window mode, or when the source has no placed binding, or its group is gone', async () => {
+    const windowMode = await mount({ windowMode: true, succession: succession(), windowWorkspace: workspace({ window: sharedWindow }) });
+    windowMode.hook.selectSide(source, side);
+    expect(windowMode.scope.windowWorkspace.operateGroup).not.toHaveBeenCalled();
+    const unplaced = await mount({ windowMode: false, succession: { ...succession(), document: { slots: [{ id: 'view-side' }], windowBindings: [] } }, windowWorkspace: workspace({ window: sharedWindow }) });
+    unplaced.hook.selectSide(source, side);
+    expect(unplaced.scope.windowWorkspace.operateGroup).not.toHaveBeenCalled();
+    const gone = await mount({ windowMode: false, succession: succession(), windowWorkspace: workspace(undefined) });
+    gone.hook.selectSide(source, side);
+    expect(gone.scope.windowWorkspace.operateGroup).not.toHaveBeenCalled();
+    expect(gone.scope.navigateSide).toHaveBeenCalled();
+  });
+  it('is not used for a source that a shared view of the Window shows', async () => {
+    const { scope, hook } = await mount({ windowMode: false, sharedWindow, sharedViewForSlot: () => ({ ...sourceView }), succession: succession(), windowWorkspace: workspace({ window: sharedWindow }) });
+    hook.selectSide(source, side);
+    expect(scope.windowWorkspace.operateGroup).not.toHaveBeenCalled();
+    expect(scope.windowWorkspace.operate).toHaveBeenCalled();
+  });
+  it('refuses a source view of the group that changed', async () => {
+    const changed = { window: buildWindow([buildView('source', 'primary', { binding: buildBinding('else') })]) };
+    const { hook } = await mount({ windowMode: false, succession: succession(), windowWorkspace: workspace(changed) });
+    expect(() => hook.selectSide(source, side)).toThrow('The source view changed. Open the Side session again.');
+    const gone = await mount({ windowMode: false, succession: succession(), windowWorkspace: workspace({ window: buildWindow([]) }) });
+    expect(() => gone.hook.selectSide(source, side)).toThrow('The source view changed.');
+  });
+  it('binds a new slot for a new view and reuses the slot of one that exists, and lists the Side once', async () => {
+    const { scope, hook } = await mount({ windowMode: false, succession: succession(), windowWorkspace: workspace({ window: sharedWindow }) });
+    hook.selectSide(source, side);
+    expect(scope.succession.bindWindowView).toHaveBeenCalledWith('W', expect.any(String), expect.objectContaining({ nativeSessionId: 'side' }), 'view-side');
+    const sessions = scope.setSideSessions.mock.calls[0]![0] as (value: unknown[]) => unknown[];
+    expect(sessions([{ ...side, viewId: 'slot-side' }, buildOpened('keep')])).toEqual([buildOpened('keep'), { ...side, viewId: 'slot-side' }]);
+    const bound = await mount({ windowMode: false, succession: succession([{ slotId: 'view-side' }]), windowWorkspace: workspace({ window: sharedWindow }) });
+    bound.hook.selectSide(source, side);
+    expect(bound.scope.succession.ensureWindowView).toHaveBeenCalled();
+    expect(bound.scope.succession.bindWindowView).not.toHaveBeenCalled();
+  });
+  it('reports a failed edit as a connection failure that is not retrying', async () => {
+    const error = new Error('rejected');
+    const { scope, hook } = await mount({ windowMode: false, succession: succession(), windowWorkspace: workspace({ window: sharedWindow }, vi.fn(async () => { throw error; })) });
+    hook.selectSide(source, side);
+    await act(async () => {});
+    expect(scope.setSessionNotice).toHaveBeenCalledWith(sessionConnectionFailure(error, false));
+    expect(scope.navigation.select).not.toHaveBeenCalled();
+  });
   it('adds the Side beside its bot in that group', async () => {
     const group = { window: sharedWindow };
     const { scope, hook } = await mount({ windowMode: false, succession: { document: { slots: [{ id: 'view-side' }], windowBindings: [{ slotId: 'view-source', windowId: 'W', viewId: 'source' }] },
       rememberSide: vi.fn(), bindWindowView: vi.fn(() => ({ id: 'slot-side' })), ensureWindowView: vi.fn(() => ({ id: 'slot-side' })) },
-      windowWorkspace: { readWindow: () => undefined, readGroup: () => group, operate: vi.fn(), operateGroup: vi.fn(async () => undefined), authority: {} } });
+      windowWorkspace: { readWindow: () => undefined, readGroup: () => group, operate: vi.fn(async () => undefined), operateGroup: vi.fn(async () => undefined), authority: {} } });
     hook.selectSide(source, side);
     expect(scope.windowWorkspace.operateGroup).toHaveBeenCalledWith('W', expect.objectContaining({ type: 'batch' }));
     await act(async () => {});

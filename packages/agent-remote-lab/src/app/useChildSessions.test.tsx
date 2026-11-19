@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
 import { DirectoryError } from '../directory-client.js';
 import { buildOpened, mockScope, renderHook } from '../test/render-hook.js';
 import { useChildSessions } from './useChildSessions.js';
@@ -79,7 +80,28 @@ describe('opening a child session beside its parent', () => {
     const { scope, attachChild, open } = await mount();
     attachChild.mockRejectedValue(new DirectoryError('offline', 'host_offline'));
     await expect(open()).rejects.toThrow('offline');
-    expect(scope.setSessionNotice).toHaveBeenCalledWith(expect.objectContaining({ message: expect.any(String) }));
+    expect(scope.setSessionNotice).toHaveBeenCalledWith(sessionConnectionFailure(new DirectoryError('offline', 'host_offline'), false));
+  });
+  it('needs the parent to have a native session id', async () => {
+    await expect((await mount({ state: { agent: { ...parentState.agent, runtimeInfo: {} } } })).open()).rejects.toThrow('The parent session is unavailable.');
+    await expect((await mount({ state: { agent: undefined } })).open()).rejects.toThrow('The parent session is unavailable.');
+  });
+  it('takes the parent from the state of the conversation when no view or active session names it', async () => {
+    const { attachChild, open } = await mount({ activeOpened: undefined });
+    await open();
+    expect(attachChild).toHaveBeenCalledWith('codex', 'parent', 'child');
+  });
+  it('takes the parent from the source it is given before the active session', async () => {
+    const other = buildOpened('other', { providerId: 'codex' });
+    const { attachChild, open } = await mount({ stackPath: [other] });
+    await open(other, { agent: { id: other.agentId, providerId: 'codex', runtimeInfo: { sessionId: 'other' } } });
+    expect(attachChild).toHaveBeenCalledWith('codex', 'other', 'child');
+  });
+  it('asks a Host other than the selected one through its own client', async () => {
+    const remote = buildOpened('parent', { hostId: 'remote' });
+    const { attachChild, open } = await mount({ activeOpened: remote, selectedHost: { id: 'other-host' }, baseUrl: 'http://127.0.0.1:1' });
+    await expect(open()).rejects.toThrow();
+    expect(attachChild).not.toHaveBeenCalled();
   });
   it('needs the state of the parent and a directory', async () => {
     await expect((await mount({ state: undefined })).open()).rejects.toThrow('The parent session is unavailable.');
@@ -109,7 +131,9 @@ describe('opening a child session in place of the parent', () => {
   });
   it('holds the opening lock while it works and frees it afterwards, also after a failure', async () => {
     const ok = await mount(compact);
-    await ok.open();
+    const pending = ok.open();
+    expect(ok.scope.transitionRef.current).toBe(true);
+    await pending;
     expect(ok.scope.transitionRef.current).toBe(false);
     expect(ok.scope.setTransitioning.mock.calls.map(call => call[0])).toEqual([true, false]);
     const failing = await mount(compact);

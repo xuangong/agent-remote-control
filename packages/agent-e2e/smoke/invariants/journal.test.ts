@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { page, streamEntry, tailPage, transcript } from './builders.js';
-import { journalSequencesContiguous, liveOnlyItemsSurvive, quotaRefusalsReported, noRefusedRowHole, oneReplacementPerRestart, trimReported, turnRowsCompleteAfterReturn } from './journal.js';
+import { journalSequencesContiguous, liveOnlyItemsSurvive, quotaRefusalsReported, noRefusedRowHole, oneReplacementPerRestart, refusedWindowNotResent, trimReported, turnRowsCompleteAfterReturn } from './journal.js';
 
 describe('journal sequences are contiguous', () => {
   it('passes when live entries continue the tail page', () => {
@@ -89,5 +89,23 @@ describe('quota refusals are reported', () => {
   it('ignores an answer for another generation and is not exercised without a window', () => {
     expect(quotaRefusalsReported(answered(b => b.receive(2, 'journal_ack', { sessionKey: 'p:s', generation: 2, watermark: 1 }))).status).toBe('failed');
     expect(quotaRefusalsReported(transcript().build()).status).toBe('not_exercised');
+  });
+});
+
+describe('a window refused for quota is not sent again unchanged', () => {
+  const publish = (generation: number, items: unknown[]) => ({ sessionKey: 'p:s', generation, entries: [{ sequence: 1, op: 'window', items }] });
+  const refused = (generation: number) => ({ sessionKey: 'p:s', generation, sequence: 1, reason: 'quota_exceeded' });
+  it('passes when only a changed window, or the same window on a new connection, follows the refusal', () => {
+    const wire = transcript().send(1, 'journal_publish', publish(1, ['a'])).receive(2, 'journal_refused', refused(1))
+      .send(3, 'journal_publish', publish(2, ['a', 'b'])).onConnection(2).send(4, 'journal_publish', publish(3, ['a'])).build();
+    expect(refusedWindowNotResent(wire).status).toBe('passed');
+  });
+  it('fails when the refused window is sent again on the same connection', () => {
+    const wire = transcript().send(1, 'journal_publish', publish(1, ['a'])).receive(2, 'journal_refused', refused(1)).send(3, 'journal_publish', publish(2, ['a'])).build();
+    expect(refusedWindowNotResent(wire).violations[0]?.message).toMatch(/sent again unchanged/);
+  });
+  it('is not exercised without a quota refusal of a window', () => {
+    const wire = transcript().send(1, 'journal_publish', publish(1, ['a'])).receive(2, 'journal_refused', { ...refused(1), reason: 'invalid' }).send(3, 'journal_publish', publish(2, ['a'])).build();
+    expect(refusedWindowNotResent(wire).status).toBe('not_exercised');
   });
 });

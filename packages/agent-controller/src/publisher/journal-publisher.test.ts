@@ -413,7 +413,7 @@ describe('recovering', () => {
 
   it('keeps reopening with backoff while the Relay keeps refusing, and never gives up or narrows the window', async () => {
     const diagnostics: Wire[] = [];
-    const relay = scriptedRelay({ onPublish: (message, answer) => { if (message.entries.some((value: Wire) => value.op === 'window')) answer.refuse('quota_exceeded'); else answer.ack(); } });
+    const relay = scriptedRelay({ onPublish: (message, answer) => { if (message.entries.some((value: Wire) => value.op === 'window')) answer.refuse('invalid'); else answer.ack(); } });
     const publisher = publisherFor(relay, {}, diagnostics);
     await attachSession(publisher, Array.from({ length: 5 }, (_, at) => item('history', `m${at}`, `Item ${at}`)));
     await until(() => relay.opens() >= 6, 'six opens');
@@ -422,6 +422,75 @@ describe('recovering', () => {
     expect(relay.unserves()).toEqual([]);
   });
 
+  describe('a window the Relay refused for its quota', () => {
+    const quotaRelay = () => scriptedRelay({ onPublish: (message, answer) => { if (message.entries.some((value: Wire) => value.op === 'window')) answer.refuse('quota_exceeded'); else answer.ack(); } });
+
+    it('is not sent again while it is unchanged: the reopens back off without opening the journal', async () => {
+      const diagnostics: Wire[] = [];
+      const relay = quotaRelay();
+      const publisher = publisherFor(relay, {}, diagnostics);
+      await attachSession(publisher, Array.from({ length: 5 }, (_, at) => item('history', `m${at}`, `Item ${at}`)));
+      await until(() => relay.refusedAt().length === 1, 'the refusal');
+      await settle(200);
+      expect(relay.opens()).toBe(1);
+      expect(relay.windows()).toHaveLength(1);
+      expect(diagnostics.filter(entry => entry.event === 'journal_publication_refused')).toEqual([{ event: 'journal_publication_refused', providerId: 'fake', reason: 'quota_exceeded' }]);
+      expect(diagnostics.map(entry => entry.event)).not.toContain('journal_session_stopped');
+      expect(relay.unserves()).toEqual([]);
+    });
+
+    it('is sent again once it changed', async () => {
+      const relay = quotaRelay();
+      const publisher = publisherFor(relay);
+      const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+      await until(() => relay.refusedAt().length === 1, 'the refusal');
+      await settle(100);
+      expect(relay.windows()).toHaveLength(1);
+      session.push(item('live', 'a', 'A new turn', { completes: true }));
+      await until(() => relay.windows().length === 2, 'the changed window');
+      expect(relay.windows()[1]!.items.map((input: Wire) => input.row.itemKey)).toEqual(['m1', 'a']);
+      await settle(100);
+      expect(relay.windows()).toHaveLength(2);
+    });
+
+    it('is sent again when an open item grew, with the same keys', async () => {
+      const relay = quotaRelay();
+      const publisher = publisherFor(relay);
+      const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+      await until(() => relay.refusedAt().length === 1, 'the refusal');
+      session.push(item('live', 'a', 'Stream', { completes: false }));
+      await until(() => relay.windows().length === 2, 'the window with the open item');
+      await settle(100);
+      session.push(item('live', 'a', 'ing on', { completes: false }));
+      await until(() => relay.windows().length === 3, 'the window after the open item grew');
+      expect(relay.windows().slice(1).map(value => value.items.map((input: Wire) => input.row.itemKey))).toEqual([['m1', 'a'], ['m1', 'a']]);
+    });
+
+    it('is sent again on a new connection, whose Relay may have room', async () => {
+      const relay = quotaRelay();
+      const publisher = publisherFor(relay);
+      await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+      await until(() => relay.refusedAt().length === 1, 'the refusal');
+      await settle(100);
+      publisher.available(undefined);
+      relay.connect(publisher);
+      await until(() => relay.windows().length === 2, 'the window on the new connection');
+      await settle(100);
+      expect(relay.windows()).toHaveLength(2);
+    });
+
+    it('is not held after a refusal for another reason, or after a quota refusal of a live row', async () => {
+      let refusals = 0;
+      const relay = scriptedRelay({ onPublish: (message, answer) => {
+        if (refusals === 0 && message.entries.some((value: Wire) => value.op === 'append')) { refusals += 1; answer.refuse('quota_exceeded'); } else answer.ack();
+      } });
+      const publisher = publisherFor(relay, { batchWindowMs: 25 });
+      const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+      await live(relay);
+      session.push(item('live', 'a', 'Hi', { completes: true }));
+      await until(() => relay.windows().length === 2 && relay.model().some(value => value.itemKey === 'a'), 'the window after the live refusal');
+    });
+  });
 
   it('stops, tells the Relay to stop serving the journal and records the breach when the provider emits an observation without identity', async () => {
     const diagnostics: Wire[] = [];

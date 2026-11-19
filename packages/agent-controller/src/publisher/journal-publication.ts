@@ -94,6 +94,12 @@ class Refused extends Error {
 /** The work was overtaken: the session opened again, stopped, or lost its connection. */
 class Cancelled extends Error {}
 class TimedOut extends Error {}
+/** The window is the one the Relay refused for its quota on this connection: it is not sent again until it changes. */
+class WindowHeld extends Error {}
+
+/** What identifies a window for the quota back-off: its items, their digests and its size. */
+const windowFingerprint = (op: SizedOp): string =>
+  op.op.op === 'window' ? `${op.bytes}\n${op.op.items.map(input => `${input.row.itemKey}:${input.digest ?? ''}`).join('\n')}` : '';
 /** The head cannot be put on the wire, so the journal could never show the session's state. */
 class HeadRejected extends Error {}
 
@@ -114,6 +120,11 @@ const pendingKey = (payload: AgentSnapshotPayload): string => payload.pendingInt
  * Recovery outcomes: (1) reopen with backoff after any refusal, a refused open, a timeout, a lost connection, a held-event
  * overflow or an unencodable message; (2) reopen at once after the provider rebuilt its timeline; (3) a head that cannot be
  * encoded gives up and unserves; (4) a provider that breaks the identity contract gives up and unserves.
+ *
+ * Quota back-off: the Relay admits a window whole or refuses it (`quota_exceeded`), and sending the same window again
+ * cannot fit the same room. So after that refusal the reopens with backoff read the window but do not open the journal or
+ * send it while it is unchanged; a changed window, or a new connection (whose Relay may have room), is sent again. The
+ * session reads through the Controller meanwhile, as the Relay took it out of serving.
  */
 export class SessionPublication {
   private phase: Phase = 'suspended';
@@ -138,6 +149,8 @@ export class SessionPublication {
   private identityBreach = false;
   private rebuilding = false;
   private requests: Array<Extract<JournalRelayMessage, { type: 'journal_fill_request' | 'journal_older_request' }>> = [];
+  /** The window the Relay refused for its quota on this connection, by `windowFingerprint`; it is not sent again unchanged. */
+  private refusedWindow: string | undefined;
   /** Items the wire refuses; they stay out for as long as the session is followed. */
   private readonly skipped = new Set<string>();
 
@@ -157,6 +170,7 @@ export class SessionPublication {
   resume(): void {
     if (this.phase === 'stopped') return;
     this.connected = true;
+    this.refusedWindow = undefined;
     if (this.identityBreach) {
       this.cycle += 1;
       this.teardown();
@@ -297,8 +311,6 @@ export class SessionPublication {
     // A manager that already broke the identity contract says so in the next tick; the journal is not opened for a session that is given up.
     await Promise.resolve();
     this.check(token);
-    await this.open(token);
-    this.check(token);
     // Rows above this one reach the session as events; a reread that reaches them would publish them twice.
     const lastSeq = subscription.rows[subscription.rows.length - 1]?.seq ?? 0;
     let rows = subscription.rows;
@@ -316,9 +328,20 @@ export class SessionPublication {
     for (const key of window.refused) this.skip(key);
     const items = timeline.filter(item => !this.skipped.has(item.key));
     const sendWindow = window.count > 0 || !this.source.hasOlderHistory();
-    const ops = [...(sendWindow ? [window.op] : []), ...outcomeOps(items), ...rebindOps(items), this.takeHead()];
-    for (const chunk of chunkOps(ops)) await this.publish(token, chunk);
+    const offered = sendWindow ? windowFingerprint(window.op) : undefined;
+    if (offered !== undefined && offered === this.refusedWindow) throw new WindowHeld();
+    await this.open(token);
     this.check(token);
+    const ops = [...(sendWindow ? [window.op] : []), ...outcomeOps(items), ...rebindOps(items), this.takeHead()];
+    try {
+      for (const chunk of chunkOps(ops)) await this.publish(token, chunk);
+    } catch (error) {
+      // Only the window grows the journal while it opens, so a quota refusal now is the window's.
+      if (offered !== undefined && error instanceof Refused && error.reason === 'quota_exceeded') this.refusedWindow = offered;
+      throw error;
+    }
+    this.check(token);
+    this.refusedWindow = undefined;
     this.goLive();
   }
 
@@ -399,6 +422,7 @@ export class SessionPublication {
   private recover(token: number, error: unknown): void {
     if (token !== this.cycle || error instanceof Cancelled) return;
     if (error instanceof HeadRejected) { this.giveUp('head_rejected'); return; }
+    if (error instanceof WindowHeld) { this.restart(this.backoffDelay(), undefined, true); return; }
     const reason = error instanceof Refused ? error.reason : error instanceof TimedOut ? 'timeout' : 'failure';
     if (error instanceof Refused) this.context.diagnostic({ event: error.event, providerId: this.options.providerId, reason: error.reason });
     this.restart(this.backoffDelay(), error instanceof Refused ? undefined : reason, true);

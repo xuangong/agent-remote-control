@@ -125,3 +125,32 @@ export function quotaRefusalsReported(transcript: Transcript, { sessionBytes }: 
   }
   return result('quota-refusals-reported', checked, violations);
 }
+
+/**
+ * M4: a window the Relay refused for its quota is not sent again unchanged on the same uplink connection: the Controller
+ * backs off until the window changes or a new connection starts (O36). Sending it again could only be refused again.
+ */
+export function refusedWindowNotResent(transcript: Transcript): InvariantResult {
+  const violations: Violation[] = [];
+  const refusedWindows = new Map<string, number>();
+  const offered = new Map<string, { items: string; t: number }>();
+  let checked = 0;
+  for (const frame of frames(transcript)) {
+    const payload = payloadOf(frame.message);
+    if (frame.direction === 'browser->relay' && frame.message.type === 'journal_publish') {
+      for (const entry of (payload.entries ?? []) as Array<{ sequence: number; op: string; items?: unknown[] }>) {
+        if (entry.op !== 'window') continue;
+        const items = JSON.stringify(entry.items ?? []);
+        const key = `${frame.connection}:${payload.sessionKey}`;
+        if (refusedWindows.has(`${key}\n${items}`)) violations.push({ message: `the window of ${payload.sessionKey} refused for quota was sent again unchanged`, at: frame.t });
+        offered.set(`${key}:${payload.generation}:${entry.sequence}`, { items, t: frame.t });
+      }
+    } else if (frame.direction === 'relay->browser' && frame.message.type === 'journal_refused' && payload.reason === 'quota_exceeded') {
+      const window = offered.get(`${frame.connection}:${payload.sessionKey}:${payload.generation}:${payload.sequence}`);
+      if (!window) continue;
+      checked += 1;
+      refusedWindows.set(`${frame.connection}:${payload.sessionKey}\n${window.items}`, window.t);
+    }
+  }
+  return result('refused-window-not-resent', checked, violations);
+}

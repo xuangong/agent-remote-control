@@ -1,7 +1,7 @@
 import { restartInstance } from '../../faults/instance-process.mjs';
 import { startLatencyProxy } from '../../faults/latency-proxy.mjs';
 import { QUOTA_PROFILES } from '../../faults/quota.mjs';
-import { journalSequencesContiguous, liveOnlyItemsSurvive, noBlankFrame, noDuplicateItemKey, noRefusedRowHole, quotaRefusalsReported, trimReported, type InvariantResult } from '../invariants/index.js';
+import { journalSequencesContiguous, liveOnlyItemsSurvive, noBlankFrame, noDuplicateItemKey, noRefusedRowHole, quotaRefusalsReported, refusedWindowNotResent, trimReported, type InvariantResult } from '../invariants/index.js';
 import { PageProbe, withContext } from '../lib/probe.js';
 import { startScriptedHost } from '../lib/scripted-host.js';
 import { heavyHistory, toolCall, TOOL_OUTPUT_CHARS } from '../lib/scripted-rows.js';
@@ -19,7 +19,8 @@ const HOST_LIMITS = QUOTA_PROFILES.tinyHost;
  * M4: the Relay runs with tiny journal limits and a scripted Host publishes sessions whose tool outputs add up to several MiB.
  * What the Relay's journal does with a window it cannot hold is to refuse it whole and say so (`journal_refused`), leaving the session to
  * be served by its Controller; it never keeps part of it. So the page must show no hole and a trimmed tail must say there is older history,
- * the Relay must answer every window it was given, and tool calls that are still running (they exist only live) must stay on the page.
+ * the Relay must answer every window it was given, the Controller must not send a refused window again unchanged on the same connection
+ * (it backs off until the window changes), and tool calls that are still running (they exist only live) must stay on the page.
  * Condition one limits one session; condition two limits the Host, whose sessions each fit but not together.
  */
 export const quotaPressure: Scenario = {
@@ -98,7 +99,7 @@ async function sessionQuota(context: RunContext, recorder: TranscriptRecorder, s
     refusals: wire.filter(entry => 'message' in entry && entry.message.type === 'journal_refused').length,
     tailPageBytes: wire.flatMap(entry => 'message' in entry && entry.direction === 'relay->browser' && entry.message.type === 'timeline_page' && entry.message.payload?.direction === 'tail' ? [JSON.stringify(entry.message.payload).length] : []) };
   const results: Array<{ label: string; results: InvariantResult[] }> = [
-    { label: 'one session over its limit', results: [quotaRefusalsReported(wire, { sessionBytes: SESSION_LIMITS.sessionBytes }), trimReported(wire), noRefusedRowHole(wire), journalSequencesContiguous(wire), noDuplicateItemKey(wire, value.page), noBlankFrame(value.page), liveOnlyItemsSurvive(value.page, value.liveKeys)] },
+    { label: 'one session over its limit', results: [quotaRefusalsReported(wire, { sessionBytes: SESSION_LIMITS.sessionBytes }), refusedWindowNotResent(wire), trimReported(wire), noRefusedRowHole(wire), journalSequencesContiguous(wire), noDuplicateItemKey(wire, value.page), noBlankFrame(value.page), liveOnlyItemsSurvive(value.page, value.liveKeys)] },
     { label: 'fresh open after the pressure', results: [trimReported(reopened), noRefusedRowHole(reopened), noDuplicateItemKey(reopened, value.secondPage), liveOnlyItemsSurvive(value.secondPage, value.liveKeys)] },
   ];
   return results;
@@ -127,5 +128,5 @@ async function hostQuota(context: RunContext, recorder: TranscriptRecorder, sche
   const answers = wire.flatMap(entry => 'message' in entry && entry.direction === 'relay->browser' && ['journal_ack', 'journal_refused'].includes(entry.message.type) ? [entry.message.type] : []);
   measurements.hostQuota = { limits: HOST_LIMITS, restart, sessions: count, historyBytesEach: callsEach * TOOL_OUTPUT_CHARS, shown: value.map(item => ({ id: item.id, shown: item.shown, rows: item.keys })), refusals: answers.filter(type => type === 'journal_refused').length };
   return value.map(item => ({ label: `${item.id} under the Host's quota`, results: [noRefusedRowHole(wire.filter(entry => entry.n > item.from)), trimReported(wire.filter(entry => entry.n > item.from)), noDuplicateItemKey(wire.filter(entry => entry.n > item.from), item.page), noBlankFrame(item.page)] }))
-    .concat([{ label: 'the Host quota', results: [quotaRefusalsReported(wire)] }]);
+    .concat([{ label: 'the Host quota', results: [quotaRefusalsReported(wire), refusedWindowNotResent(wire)] }]);
 }

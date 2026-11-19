@@ -100,14 +100,19 @@ export const uplinkScenarios: Scenario[] = [
   },
   {
     seam: 'S2', name: 'quota-refuses-window', consumers: [CONSUMER], relayBacking: { uplink: { limits: { sessionBytes: 9_000 } } },
-    description: 'The Relay has no room for the whole window: it refuses with quota_exceeded, and the Controller retries only with backoff.',
+    description: 'The Relay has no room for the whole window: it refuses it whole with quota_exceeded, and the Controller backs off: it does not open the journal again while the window is unchanged, and sends it again once it changed.',
     run: withUplink({ limits: { sessionBytes: 9_000 } }, async (uplink, recorder) => {
       const item = observationBuilder();
       recorder.step('open a window larger than the quota');
       const publisher = uplink.start();
-      await uplink.follow(publisher, Array.from({ length: 8 }, (_, at) => item('history', `m${at}`, `Item ${at} ${'y'.repeat(2000)}`)));
-      await uplink.until(() => uplink.count('journal_refused') >= 3, 'the third refusal');
-      await uplink.settle(5);
+      const { session } = await uplink.follow(publisher, Array.from({ length: 8 }, (_, at) => item('history', `m${at}`, `Item ${at} ${'y'.repeat(2000)}`)));
+      await uplink.until(() => uplink.count('journal_refused') >= 1, 'the refusal');
+      recorder.step('the unchanged window is held through the backoff');
+      await uplink.settle(200);
+      recorder.step('a new turn changes the window, which is sent once more');
+      session.push(item('live', 'm8', 'A new turn', { completes: true }));
+      await uplink.until(() => uplink.count('journal_refused') >= 2, 'the refusal of the changed window');
+      await uplink.settle(200);
     }),
   },
   {

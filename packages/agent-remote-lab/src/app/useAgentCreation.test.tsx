@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
 import { DirectoryError } from '../directory-client.js';
 import { mockScope, renderHook } from '../test/render-hook.js';
 import { useAgentCreation } from './useAgentCreation.js';
@@ -9,10 +10,10 @@ function scopeOf(facts: Record<string, unknown> = {}) {
   const calls: string[] = [];
   const scope = {
     attach: vi.fn(), closeContext: vi.fn(), createPlanning: false, creationReservation: { current: undefined as unknown }, creationUnavailableReason: undefined,
-    directory: { create: vi.fn(async () => created) }, directoryDestination: () => ({ windowId: 'W', viewId: 'v', binding: 'null' }), dispatchPanels: vi.fn(),
+    directory: { create: vi.fn(async (_provider: string, _operation: string, _options: object) => created) }, directoryDestination: () => ({ windowId: 'W', viewId: 'v', binding: 'null' }), dispatchPanels: vi.fn(),
     navigation: { select: vi.fn() }, providerConnectionName: (host: string, provider: string) => `${provider}@${host}`, providerId: 'codex', rememberSession: vi.fn(),
     retryHosts: vi.fn(), selectedHost: { id: 'local' }, sessionOptions: { cwd: '/work' }, setCreationLocked: vi.fn(), setDirectoryRevision: vi.fn(), setFailure: vi.fn(),
-    setNewBot: vi.fn(), setProviderName: vi.fn(), setSessionNotice: vi.fn(), setTransitioning: vi.fn(() => { calls.push('transitioning'); }), showView: vi.fn(),
+    setNewBot: vi.fn(), setProviderName: vi.fn(), setSessionNotice: vi.fn(), setTransitioning: vi.fn((_value: boolean) => { calls.push('transitioning'); }), showView: vi.fn(),
     trackedViews: { select: vi.fn() }, transitionRef: { current: false }, transport: { createAgent: vi.fn(async () => ({ payload: { agentId: 'transport-agent' } })) },
     windowWorkspace: { createBotGroup: vi.fn(async () => ({ groupId: 'G', viewId: 'V' })) }, rememberTrackedView: vi.fn(), bindDirectorySession: vi.fn(async () => true), ...facts,
   };
@@ -131,5 +132,70 @@ describe('a creation the Host refuses', () => {
   it('reports a plain error without a retry promise when there is no directory', async () => {
     const scope = await create({ directory: undefined, transport: { createAgent: vi.fn(async () => { throw new Error('transport down'); }) } });
     expect(scope.setFailure).toHaveBeenCalledWith('transport down');
+  });
+});
+
+describe('creating twice', () => {
+  it('starts one creation when the control is activated twice before the page renders again', async () => {
+    const built = scopeOf();
+    const { result } = await renderHook(() => useAgentCreation(built.mock));
+    await Promise.all([result.current.createAgent(), result.current.createAgent()]);
+    expect(built.scope.directory.create).toHaveBeenCalledTimes(1);
+  });
+  it('creates an ordinary session when no argument says bot', async () => {
+    const built = scopeOf();
+    const { result } = await renderHook(() => useAgentCreation(built.mock));
+    await result.current.createAgent();
+    expect(built.scope.bindDirectorySession).toHaveBeenCalled();
+    expect(built.scope.windowWorkspace.createBotGroup).not.toHaveBeenCalled();
+  });
+  it('retries with the reservation of the attempt that failed, so the Host creates the session once', async () => {
+    const built = scopeOf();
+    built.scope.directory.create.mockRejectedValueOnce(new DirectoryError('Host busy', 'host_busy'));
+    const { result } = await renderHook(() => useAgentCreation(built.mock));
+    await result.current.createAgent();
+    await result.current.createAgent();
+    const [first, second] = built.scope.directory.create.mock.calls.map(call => call[1]);
+    expect(second).toBe(first);
+  });
+  it('locks the form while the Host creates, and brackets the transition for the page', async () => {
+    const built = scopeOf();
+    const { result } = await renderHook(() => useAgentCreation(built.mock));
+    await result.current.createAgent();
+    expect(built.scope.setCreationLocked.mock.calls.map(call => call[0])).toEqual([true, false]);
+    expect(built.scope.setTransitioning.mock.calls.map(call => call[0])).toEqual([true, false]);
+    const bot = scopeOf();
+    const hooked = await renderHook(() => useAgentCreation(bot.mock));
+    await hooked.result.current.createAgent(true);
+    expect(bot.scope.setCreationLocked.mock.calls.map(call => call[0])).toEqual([true, false]);
+    expect(bot.scope.setTransitioning.mock.calls.map(call => call[0])).toEqual([true, false]);
+  });
+  it('names the session after the Host answer, falling back to the agent id for its native id', async () => {
+    const built = scopeOf({ directory: { create: vi.fn(async () => ({ agentId: 'agent-only' })) } });
+    const { result } = await renderHook(() => useAgentCreation(built.mock));
+    await result.current.createAgent();
+    expect(built.scope.rememberSession).toHaveBeenCalledWith(expect.objectContaining({ nativeSessionId: 'agent-only', title: 'New session' }));
+    const bot = scopeOf({ directory: { create: vi.fn(async () => ({ agentId: 'agent-only' })) } });
+    const hooked = await renderHook(() => useAgentCreation(bot.mock));
+    await hooked.result.current.createAgent(true);
+    expect(bot.scope.rememberSession).toHaveBeenCalledWith(expect.objectContaining({ nativeSessionId: 'agent-only' }));
+  });
+  it('asks the transport for planning when the form wants it', async () => {
+    const built = scopeOf({ directory: undefined, createPlanning: true });
+    const { result } = await renderHook(() => useAgentCreation(built.mock));
+    await result.current.createAgent();
+    expect(built.scope.transport.createAgent).toHaveBeenCalledWith(expect.any(String), 'codex', { sessionId: expect.any(String), planning: true });
+    const plain = scopeOf({ directory: undefined });
+    const hooked = await renderHook(() => useAgentCreation(plain.mock));
+    await hooked.result.current.createAgent();
+    expect(plain.scope.transport.createAgent).toHaveBeenCalledWith(expect.any(String), 'codex', { sessionId: expect.any(String) });
+  });
+  it('words the native file limit notice as a connection failure that is not retrying', async () => {
+    const error = new DirectoryError('limit', 'native_file_limit');
+    const built = scopeOf({ directory: { create: vi.fn(async () => { throw error; }) } });
+    const { result } = await renderHook(() => useAgentCreation(built.mock));
+    await result.current.createAgent();
+    const base = sessionConnectionFailure(error, false);
+    expect(built.scope.setSessionNotice).toHaveBeenCalledWith({ ...base, operation: 'Create session', message: expect.stringContaining(base.message) });
   });
 });

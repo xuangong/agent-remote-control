@@ -50,8 +50,14 @@ describe('sessionSuccessionHistory', () => {
     damage(state);
     expect(sessionSuccessionHistory({ scope: 'scope', replays: state.replays, current: state.confirmed, selected: session('C'), titles })).toBeUndefined();
   });
-  it('refuses a session the chain does not contain', () => {
+  it('refuses a session the chain does not contain, whether or not history is asked for', () => {
     expect(navigate('X')).toBeUndefined();
+    expect(navigate('X', 'history')).toBeUndefined();
+  });
+  it('refuses a chain that returns to a session it already left', () => {
+    const loop = buildSuccessionChain(['A', 'B', 'A']);
+    expect(navigate('A', 'history', loop, buildSuccessionCurrent(loop))).toBeUndefined();
+    expect(navigate('A', undefined, loop, buildSuccessionCurrent(loop))).toBeUndefined();
   });
   it('keeps a Host out of the chain of another Host', () => {
     const other = buildSuccessionCurrent(buildSuccessionChain(['A', 'B', 'C'], { hostId: 'elsewhere' }));

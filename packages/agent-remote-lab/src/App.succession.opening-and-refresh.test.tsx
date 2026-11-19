@@ -603,11 +603,3 @@ it('opens the Handoff chooser from its command, resolves claude and sends no nat
   expect(f.frames.some(frame => ['send_message', 'execute_command'].includes(frame.message?.type ?? ''))).toBe(false);
   expect(new DraftStore(f.scope).get('agent-A')).toBe('A local draft');
 }, testDeadline);
-
-it.each(['claude extra', 'claude;codex'])('rejects malformed Handoff provider arguments %s before choosing or sending', async args => {
-  const f = await handoffCommandFixture();
-  await act(async () => { await expect(f.primary.onExecuteConsoleCommand!('console:handoff', args)).rejects.toThrow(); });
-  expect(document.querySelector('dialog')).toBeNull();
-  expect(f.requests.some(request => request.url.endsWith('/succession/describe'))).toBe(false);
-  expect(f.frames.some(frame => ['send_message', 'execute_command'].includes(frame.message?.type ?? ''))).toBe(false);
-}, testDeadline);

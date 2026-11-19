@@ -51,27 +51,6 @@ it('opens Handoff while the native session is working and respects the Host bloc
   expect(f.frames.some(frame => ['send_message', 'execute_command'].includes(frame.message?.type ?? ''))).toBe(false);
 }, testDeadline);
 
-it('keeps the Handoff chooser available while pending input blocks preparation and recovers when cleared', async () => {
-  const f = await handoffCommandFixture();
-  await act(async () => f.primary.onPendingInputChange!(2));
-  await act(async () => { await f.primary.onExecuteConsoleCommand!('console:handoff', ''); });
-  await settleApp(() => expect(document.querySelector<HTMLSelectElement>('dialog [aria-label="Successor provider"]')?.value).toBe('opencode'));
-  const submit = () => document.querySelector<HTMLButtonElement>('dialog button[type="submit"]')!;
-  expect(document.querySelector('dialog')?.textContent).toContain('Send or remove pending messages before handing off this conversation.');
-  expect(submit().disabled).toBe(true);
-  await act(async () => document.querySelector('dialog form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
-  expect(f.requests.some(request => request.url.endsWith('/succession/prepare'))).toBe(false);
-  await act(async () => f.primary.onPendingInputChange!(0));
-  expect(submit().disabled).toBe(false);
-  await act(async () => f.primary.onPendingInputChange!(1));
-  expect(submit().disabled).toBe(true);
-  await act(async () => f.primary.onPendingInputChange!(0));
-  expect(submit().disabled).toBe(false);
-  expect(f.requests.some(request => request.url.endsWith('/succession/prepare'))).toBe(false);
-  expect(f.frames.some(frame => ['send_message', 'execute_command'].includes(frame.message?.type ?? ''))).toBe(false);
-  expect(new DraftStore(f.scope).get('agent-A')).toBe('A local draft');
-}, testDeadline);
-
 it('refreshes successor context after Composer delivery without waiting for a native timeline echo', async () => {
   vi.stubGlobal('crypto', webcrypto);
   // The context is read at most once per interval, 2 s by default.

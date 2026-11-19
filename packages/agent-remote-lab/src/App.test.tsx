@@ -693,22 +693,6 @@ describe('App', () => {
     expect(container.querySelector('[data-testid="connection-status"]')?.textContent).toBe('Connecting');
   });
 
-  it('starts only one Agent transition when the create control is activated twice before rerender', async () => {
-    const creation = deferred<AgentSessionResponse>();
-    const createAgent = vi.fn(() => creation.promise);
-    const transport = labTransport({ createAgent });
-    const container = await render(<App transport={transport} />);
-    await act(async () => { await Promise.resolve(); });
-    const create = container.querySelector('[data-testid="session-create"]') as HTMLButtonElement;
-
-    await act(async () => {
-      create.click();
-      create.click();
-    });
-
-    expect(createAgent).toHaveBeenCalledOnce();
-  });
-
   it('reattaches a remembered Agent when the injected transport changes', async () => {
     const connectFirst = vi.fn(() => ({ send: () => undefined, close: () => undefined }));
     const connectSecond = vi.fn(() => ({ send: () => undefined, close: () => undefined }));

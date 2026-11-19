@@ -33,6 +33,13 @@ describe('avatarWith', () => {
     expect(avatarWith('A1', { shape: 'circle', color: '#123456' })).toEqual({ ...generated, shape: 'circle', color: '#123456' });
     expect(avatarWith('A1', undefined)).toEqual(generated);
   });
+
+  it('keeps the id\'s own field for anything stored that is not a valid shape, colour or gaze', () => {
+    const generated = avatarFor('A1');
+    const stored = { shape: 'hexagon', color: 'red;background:url(x)', gaze: 9 } as unknown as Parameters<typeof avatarWith>[1];
+    expect(avatarWith('A1', stored)).toEqual(generated);
+    expect(avatarWith('A1', { shape: 'circle', color: '#0071E3' }).color).toBe('#0071e3');
+  });
 });
 
 describe('distinctAvatar', () => {

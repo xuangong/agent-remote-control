@@ -1,0 +1,37 @@
+/* Orchard primitives. Only --orchard-* tokens (theme.css) and no colour literal. Each root rule doubles its class, so
+   the Lab's bare `button` and container rules cannot restyle a primitive. Primitives own their keyframes and read the
+   motion tokens; under reduced motion no animation is applied at all. */
+
+/* Avatar: the root bobs and pops; the outline flows in its SVG. */
+.orchard-avatar.orchard-avatar {
+  display: inline-block; flex: none; width: var(--orchard-avatar-size); height: var(--orchard-avatar-size); line-height: 0;
+}
+.orchard-avatar.orchard-avatar > svg { display: block; overflow: visible; }
+.orchard-avatar-eye { fill: var(--orchard-avatar-eye); }
+.orchard-avatar.orchard-avatar[data-bob] { animation: orchard-avatar-bob var(--orchard-duration-bob) var(--orchard-ease-flow) infinite; }
+.orchard-avatar.orchard-avatar[data-pop] { animation: orchard-avatar-pop var(--orchard-duration-pop) var(--orchard-ease-standard) 1; }
+@keyframes orchard-avatar-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+@keyframes orchard-avatar-pop { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.12); } }
+
+/* Mark: brand colours, the same in both themes. */
+.orchard-mark { display: block; flex: none; }
+.orchard-mark-tile { fill: var(--orchard-brand-tile); }
+.orchard-mark-stem { stroke: var(--orchard-brand-stem); }
+.orchard-mark-leaf { fill: var(--orchard-brand-leaf); }
+.orchard-mark-body { fill: var(--orchard-brand-body); }
+.orchard-mark-eye { fill: var(--orchard-brand-eye); }
+.orchard-mark-glance { animation: orchard-mark-glance var(--orchard-duration-glance) ease-in-out infinite; }
+.orchard-mark-sway { transform-origin: 34px 16px; transform-box: view-box; animation: orchard-mark-sway var(--orchard-duration-sway) ease-in-out infinite; }
+@keyframes orchard-mark-glance { 0%, 40%, 100% { transform: translate(0, 0); } 50%, 80% { transform: translate(3px, 1px); } }
+@keyframes orchard-mark-sway { 0%, 100% { transform: rotate(-5deg); } 50% { transform: rotate(7deg); } }
+
+/* Wordmark: lowercase, rounded, weight 750; the system sans elsewhere. */
+.orchard-wordmark.orchard-wordmark {
+  display: inline-flex; align-items: center; gap: calc(var(--orchard-wordmark-size) * 0.5); color: var(--orchard-text-strong);
+  font: var(--orchard-type-wordmark-weight) var(--orchard-wordmark-size) / 1 var(--orchard-font-rounded); letter-spacing: -0.02em;
+}
+.orchard-wordmark.orchard-wordmark .orchard-mark { border-radius: calc(var(--orchard-wordmark-size) * 0.36); }
+
+@media (prefers-reduced-motion: reduce) {
+  .orchard-avatar.orchard-avatar[data-bob], .orchard-avatar.orchard-avatar[data-pop], .orchard-mark-glance, .orchard-mark-sway { animation: none; }
+}

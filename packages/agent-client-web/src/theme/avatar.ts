@@ -100,7 +100,13 @@ export function avatarFor(id: string): AvatarRecipe {
 export function avatarWith(id: string, picture: BotPicture | undefined): AvatarRecipe {
   const generated = avatarFor(id);
   if (!picture) return generated;
-  return { ...generated, shape: picture.shape, color: picture.color, ...(picture.gaze === undefined ? {} : { gaze: picture.gaze as AvatarGaze }) };
+  // A picture from storage or another build may not match the schema; each field that does not is the id's own.
+  return {
+    ...generated,
+    ...(avatarShapeNames.includes(picture.shape) ? { shape: picture.shape } : {}),
+    ...(/^#[0-9a-f]{6}$/i.test(picture.color) ? { color: picture.color.toLowerCase() } : {}),
+    ...(avatarGazes.includes(picture.gaze as AvatarGaze) ? { gaze: picture.gaze as AvatarGaze } : {}),
+  };
 }
 
 /** The first shape and colour pair, from the id's own, that no avatar in `taken` uses; the id's own when all 32 are taken. */

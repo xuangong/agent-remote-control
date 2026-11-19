@@ -430,3 +430,19 @@ The four files together: 27.2 s of summed test time before, 22.9 s after. The Co
 **Tier counts.** Transport: seams 62 → 9, Workbench 102 → 2, repository about 180 → 31. Workers: 157 → 31. Allowlist: 71 → 11.
 
 **Smoke.** M4 (seed 4001), M5 (seed 5002) and M8 (seed 8006, 10 minutes) pass; see O8 and O36.
+
+## Structure, redundancy and product sweep (O3, O6, O10, O11, O16, O18, O19, O21, O34 to O37)
+
+**O35, O37.** The narrowing of O28's re-discovery to `retired` is rejected: `local_edit` and `owner_edit` stop before writing and `recover` re-reads the current document, so a rediscovery applies the newer document with the edit (traced: one `local_edit`, one rediscovery, `applied`). The refresh table names the three codes explicitly (it read the constant, so the narrowing passed 148 client tests; now 3 fail). The O37 whole-app test expects the automatic re-application: 5.1 s failing to 0.36 s passing.
+
+**O36.** Refusal is the rule (the S1/S2 review notes). The Controller no longer re-sends a window the Relay refused for quota on the same connection while it is unchanged. 5 publisher tests (4 mutations caught), the S2 transcript `quota-refuses-window` re-recorded (17 to 14 lines; no other transcript changed), the M4 invariant `refused-window-not-resent`. A first version read the window before every open; the WebCrypto digest then sat between a refusal and the next open and a virtual-clock backoff test failed once under load, so only a held window is read first.
+
+**O11.** `provider-registry`, `attachment-ledger` and `bound-sessions` own the Controller session core's shared state; `SessionCoreContext` 50 to 44 members, 6 raw shared collections to 0; 25 unit tests, 39 of 39 mutations caught; no test deleted (the rules were inline in `host.ts`).
+
+**O6, O3.** The 53 Controller succession cases that started a Broker moved to `seams/S2/succession-*` through `./succession-host-testing`; `session-succession-enrollment` gained 30 unit tests; 158 mutations, none caught only by a moved test; 38 deleted, 15 kept as contract. The remaining relay-core and Node Relay succession and gateway groups (458 tests) are kept as wiring, decided by file. Per-test mapping: `2026-11-19-o3-o6-succession-mutation-mapping.md`.
+
+**O16, O21, O18, O10.** Six state slices (163 tests with `handoff-command`, 183 of 199 mutations caught, survivors equivalent), the three mixed hooks cut into 16 concern hooks (213 hook tests; 4 mutation-checked), the 161 `App.succession.*` tests mapped in `docs/current/agent-remote/workbench-state.md`, 4 whole-app tests deleted with mutation proof. Workbench 2,807 to 3,235 tests; over 300 ms 144 to 132; over 1 s 6 to 7, all allowlisted.
+
+**O19, O34.** Workbench, debugger and Workbench `dist-import` exceptions deleted (documented violations 55 to 22). The floating column's default placement stays above the composer in the visible area; the two `mobile.spec` tests run again.
+
+**Smoke harness.** Journal scenarios refuse to start without `ARC_LOCAL_JOURNALS=1`; the command line is checked against the user API (`host list`) and signed out and in again, because the Devbox answers a local `/auth/status` with an expired cookie by opening a new browser session, so `login status` said signed in while every user API call was refused.

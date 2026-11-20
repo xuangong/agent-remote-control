@@ -65,13 +65,31 @@ Moving between the modes keeps your place. Opening an assistant from a tile show
 
 Window mode gets the same visual language in the same step as Bot mode (I3), not a restyle afterwards. On the phone, a window becomes a swipeable stack of its tiles.
 
+## Organised as an IM product
+
+The owner's rule (2026-11-21): the product's features are organised the way an IM application organises them. Each requirement below maps to what Orchard already has, and a step that adds a feature places it in this map.
+
+| IM requirement | In Orchard |
+|---|---|
+| **Chats**: recent conversations sorted by activity, each with unread or needs-you dots, pin and mute, and a draft preserved per chat | The assistant list in Bot mode, ordered by last activity. The needs-you and unread dots come from attention. Pinning comes from the star. Drafts are kept per target. |
+| **Contacts**: everyone you can talk to, grouped, with add-new and presence | All assistants, including resting and hidden ones, grouped by Window group. Presence is working, idle, resting or Host offline. |
+| **Groups and workspaces**: several members side by side | Windows and Team. A window is a workspace of assistant tiles. Team messages appear as events in the conversation. |
+| **Me and Settings** | One Settings page, plus the account and device sections (see below) |
+| **Search** across chats and messages | Global search on the rail, plus search within a conversation |
+| **Notifications**: needs-you is distinct from unread; mute per chat | Attention rules, and per-assistant notifications in details and in Settings |
+| **Message actions**: copy, quote, resend, retract and edit where the agent allows | Message actions and prompt edit, with "Not sent" and Retry from I1 |
+| **Delivery states**: sending, sent, not delivered | I1 send states |
+| **Typing and working indicator** | The live status line |
+| **Multi-device**: drafts, read state and order synchronise | The device store, per-account drafts and reads (the IM session service design) |
+
 ## Navigation and Settings
 
 Approved by the owner on 2026-11-21. The mockup is in [`assets/2026-11-21-settings/`](assets/2026-11-21-settings/).
 
 **Desktop.** A narrow icon rail at the far left replaces the large Window/Bot switch at the top of the sidebar. From top to bottom it holds:
 - the Orchard mark;
-- **Assistants** (Bot mode);
+- **Chats** (Bot mode): recent assistant conversations by activity;
+- **Assistants**: the directory of every assistant, grouped, with add-new;
 - **Windows** (Window mode);
 - Search;
 - **Settings**, at the bottom;
@@ -79,7 +97,7 @@ Approved by the owner on 2026-11-21. The mockup is in [`assets/2026-11-21-settin
 
 Both modes share the rail. The sidebar carries no mode switch.
 
-**Phone.** The same three destinations form a bottom tab bar: Assistants, Windows and Settings.
+**Phone.** A bottom tab bar holds Chats, Assistants, Windows and Me. Me contains Settings.
 
 **One Settings page.** Groups sit on the left and content on the right; on the phone the groups form a list.
 - **General:** theme (system, light or dark), language (browser, 中文 or English), reduce motion, default view (assistants, windows or last used).

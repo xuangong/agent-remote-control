@@ -1,12 +1,20 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 test.use({ locale: 'en-GB', timezoneId: 'Asia/Shanghai' });
+
+/** The fixture is in Concise: its steps show one line each once the work line is open. */
+async function openWork(page: Page) {
+  const line = page.locator('.agent-work-line > button');
+  await line.click();
+  await expect(line).toHaveAttribute('aria-expanded', 'true');
+}
 
 test('keeps tool descriptions readable as a desktop timeline container narrows', async ({ page, isMobile }, testInfo) => {
   test.skip(isMobile, 'Desktop containers retain inline timestamps');
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto('/e2e/fixtures/ask-timeline-layout.html');
   const timeline = page.getByRole('main', { name: 'Tool timeline' });
+  await openWork(page);
   const tools = timeline.locator('.agent-tool');
   await expect(tools).toHaveCount(4);
   for (const width of [320, 440, 600]) {
@@ -39,6 +47,7 @@ test('keeps tool descriptions readable as a desktop timeline container narrows',
 
 test('keeps complete details and session navigation available in a narrow timeline', async ({ page, isMobile }) => {
   await page.goto('/e2e/fixtures/ask-timeline-layout.html');
+  await openWork(page);
   const source = page.locator('[data-entry-key="codex:2:source"]');
   const toggle = source.getByRole('button');
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');

@@ -4,19 +4,19 @@ import { CommunicationNavigationContext } from './CommunicationNavigation.js';
 import { expect, it, vi } from 'vitest';
 import { render, rerender } from '../test/setup.js';
 import { AgentTimeline } from './AgentTimeline.js';
-import { TimelineDisplay, TimelineLettersVisible, type TimelineDisplayMode } from './TimelineDisplay.js';
+import { TimelineLettersVisible } from './TimelineDisplay.js';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { TimelineItemRenderer } from './TimelineItemRenderer.js';
 import { createReplicaState, findTimelineMatches, timelineEntryKey } from '@orchardworks/agent-client';
 
-it('shows attributed agent tasks in content mode without user edit actions', async () => {
+it('shows attributed agent tasks without user edit actions', async () => {
   const entry: ProjectedTimelineEntry = { providerId: 'codex', seqStart: 1, seqEnd: 1, turnId: 'turn', timestamp: '2026-09-29T00:00:00Z',
     item: { type: 'agent_communication', messageId: 'amsg-task', sender: '/root', recipient: '/root/review', text: 'Review **this change**.' },
     resources: [], collapsed: [], sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }] };
   const state = createReplicaState();
   state.timeline = { ...state.timeline, initialized: true, epoch: 'epoch', entries: [entry] };
   const edit = vi.fn();
-  const container = await render(<TimelineDisplay.Provider value="content"><AgentTimeline state={state} onEditPrompt={edit} /></TimelineDisplay.Provider>);
+  const container = await render(<AgentTimeline state={state} onEditPrompt={edit} />);
   const message = container.querySelector('[aria-label="Agent communication"]');
   expect(message?.textContent).toContain('/root → /root/review');
   expect(message?.querySelector('strong')?.textContent).toBe('this change');

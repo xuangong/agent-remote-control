@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 import type { AgentChildSession, ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { render, rerender } from '../test/setup.js';
 import { AgentTimeline } from './AgentTimeline.js';
-import { TimelineDisplay } from './TimelineDisplay.js';
 import { createReplicaState, type AgentReplicaState } from '@orchardworks/agent-client';
 
 const child = (nativeSessionId: string, parentTurnId?: string): AgentChildSession => ({
@@ -32,10 +31,10 @@ function state(children: AgentChildSession[], entries: ProjectedTimelineEntry[])
 describe('AgentTimeline child sessions', () => {
   it('keeps collapsible child navigation available in content-only views', async () => {
     const opened: string[] = [];
-    const container = await render(<TimelineDisplay.Provider value="content"><AgentTimeline
+    const container = await render(<AgentTimeline
       state={state([child('review')], [entry(1, 'turn', 'Review requested')])}
       onOpenChildSession={item => { opened.push(item.nativeSessionId); }}
-    /></TimelineDisplay.Provider>);
+    />);
     const details = container.querySelector<HTMLDetailsElement>('details[aria-label="Session subagents"]');
     expect(details).not.toBeNull();
     expect(container.querySelector('.agent-timeline-entries')!.nextElementSibling).toBe(details);

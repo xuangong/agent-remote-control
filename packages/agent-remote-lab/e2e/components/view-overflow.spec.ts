@@ -26,16 +26,21 @@ async function expectContained(container: Locator) {
 }
 
 for (const width of [320, 390, 844, 1440]) {
-  for (const mode of ['preview', 'simple']) test(`keeps failed command output compact and readable in ${mode} at ${width}px`, async ({ page }, testInfo) => {
+  // Full shows the step at preview level; Concise shows it at summary level once the work line is open.
+  for (const mode of ['full', 'concise']) test(`keeps failed command output compact and readable in ${mode} at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 740 });
     await page.goto(`/e2e/fixtures/view-overflow.html?view=tool-error&mode=${mode}`);
     const error = page.getByRole('alert');
     const toggle = page.locator('.agent-tool-toggle');
     const tool = page.locator('.agent-tool');
+    if (mode === 'concise') {
+      await expect(page.locator('.agent-work-line')).toContainText('1 step failed');
+      await page.locator('.agent-work-line > button').click();
+    }
     await expect(error).toHaveCount(0);
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await expect(toggle).toContainText('Failed');
-    if (mode === 'simple') {
+    if (mode === 'concise') {
       await expect(tool.locator('.agent-tool-preview')).toHaveCount(0);
       await expectCompactTool(tool, width);
     } else {
@@ -112,7 +117,7 @@ for (const width of [320, 390, 844, 1440]) {
       if (view === 'workbench' || view === 'timeline') {
         await expect(page.locator('.agent-resources li')).toHaveCount(4);
         await expect(page.locator('.agent-tool-details:visible')).toHaveCount(7);
-        await expect(page.locator('.agent-interactions > *')).toHaveCount(6);
+        await expect(page.locator('.agent-turn-requests > *')).toHaveCount(6);
         const code = page.locator('.agent-markdown pre').first();
         expect(await code.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
         const table = page.getByRole('region', { name: 'Markdown table' }).first();

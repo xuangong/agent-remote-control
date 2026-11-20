@@ -55,7 +55,6 @@ export interface AgentTimelineProps {
   readonly childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[];
   readonly resolveSessionLink?: SessionLinkResolver;
   readonly registry?: RendererRegistry;
-  readonly showHeader?: boolean;
   /** How much of each turn's work shows (section 4.2 of the I3 plan); the host's ProcessModeContext, Concise, when it says nothing. */
   readonly processMode?: ProcessMode;
   /** Who answers: the name the live line uses and the avatar at the foot of the answers. A host without one shows "Assistant" and no avatar. */
@@ -93,7 +92,6 @@ export function AgentTimeline({
   registry,
   resolveSessionLink,
   childrenFor,
-  showHeader = true,
   processMode: processModeProp,
   assistant,
   onLoadOlder,
@@ -238,24 +236,13 @@ export function AgentTimeline({
   children.sort((a, b) => (Date.parse(a.createdAt ?? '') - Date.parse(b.createdAt ?? ''))
     || discovered.current.order.get(a.nativeSessionId)! - discovered.current.order.get(b.nativeSessionId)!);
   return <ResourceDownloadContext.Provider value={onDownloadResource}><section className="agent-remote-surface" aria-label="Agent timeline">
-    {showHeader ? <header className="agent-surface-header">
-      <div>
-        <span className="agent-item-kicker">REMOTE SESSION</span>
-        <h2>{state.agent?.id ?? 'Agent timeline'}</h2>
-      </div>
-      <div className="agent-surface-state">
-        <span className={`agent-presence agent-state-${state.agent?.status ?? 'starting'}`} aria-hidden="true" />
-        <span>{state.agent?.status ?? 'Connecting'}</span>
-        {state.timeline.epoch ? <code>{state.timeline.epoch} · {Math.max(0, state.timeline.nextSeq - 1)}</code> : null}
-      </div>
-    </header> : null}
 
     {state.timeline.hasOlder ? <HistoryControls loading={historyLoading} error={historyError}
       key={JSON.stringify([state.agent?.id])}
       onLoadOlder={onLoadOlder}
     /> : timelineStart ?? null}
 
-    <BubbleAvatarContext.Provider value={assistant?.avatar}><div className="agent-timeline-entries" aria-live="polite" data-process-mode={processMode}>
+    <ProcessModeContext.Provider value={processMode}><BubbleAvatarContext.Provider value={assistant?.avatar}><div className="agent-timeline-entries" aria-live="polite" data-process-mode={processMode}>
       {turns.length === 0 && outgoing.length === 0
         ? timelineStart && !state.timeline.hasOlder ? null : <p className="agent-timeline-empty">No timeline activity.</p>
         : turns.map((turn, index) => {
@@ -271,7 +258,7 @@ export function AgentTimeline({
       {turns.length === 0 ? pending : null}
       {live && !liveInTurn ? live : null}
       {timelineEnd ?? null}
-    </div></BubbleAvatarContext.Provider>
+    </div></BubbleAvatarContext.Provider></ProcessModeContext.Provider>
 
     <AgentChildSessionList childrenFor={childrenFor} key={identity} children={children} label="Session subagents" collapsible onOpenChildSession={onOpenChildSession} />
 

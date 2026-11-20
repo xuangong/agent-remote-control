@@ -4,7 +4,6 @@ import { expect, it, vi } from 'vitest';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { render, rerender } from '../test/setup.js';
 import { AgentTimeline } from './AgentTimeline.js';
-import { TimelineDisplay } from './TimelineDisplay.js';
 import { createReplicaState } from '@orchardworks/agent-client';
 
 function entry(seq: number, turnId: string, type: 'user_message' | 'assistant_message' | 'reasoning', text: string): ProjectedTimelineEntry {
@@ -19,11 +18,11 @@ function editable(container: HTMLElement) {
   return [...container.querySelectorAll('[data-prompt-editable]')].map(node => node.querySelector('.agent-message-user .agent-markdown')?.textContent);
 }
 
-it.each(['preview', 'content'] as const)('offers editing only for the first prompt per turn in %s mode', async mode => {
+it('offers editing only for the first prompt per turn', async () => {
   const edit = vi.fn(async () => {});
   const prompt = entry(1, 'turn', 'user_message', 'First prompt');
   const initial = [prompt, entry(2, 'turn', 'assistant_message', 'Working')];
-  const view = (entries: ProjectedTimelineEntry[]) => <TimelineDisplay.Provider value={mode}><AgentTimeline state={state(entries)} onEditPrompt={edit} /></TimelineDisplay.Provider>;
+  const view = (entries: ProjectedTimelineEntry[]) => <AgentTimeline state={state(entries)} onEditPrompt={edit} />;
   const container = await render(view(initial));
   const updated = [...initial, entry(3, 'turn', 'user_message', 'Steer'), entry(4, 'next', 'user_message', 'Next prompt')];
   await rerender(container, view(updated));
@@ -45,9 +44,9 @@ it('waits for older history before treating the first visible message as a turn 
   expect(editable(container)).toEqual(['First prompt', 'Next prompt']);
 });
 
-it('does not mistake a prompt following loaded turn activity for a first prompt in content mode', async () => {
-  const container = await render(<TimelineDisplay.Provider value="content"><AgentTimeline state={state([
+it('does not mistake a prompt following loaded turn activity for a first prompt', async () => {
+  const container = await render(<AgentTimeline state={state([
     entry(1, 'turn', 'reasoning', 'Already working'), entry(2, 'turn', 'user_message', 'Steer'),
-  ])} onEditPrompt={async () => {}} /></TimelineDisplay.Provider>);
+  ])} onEditPrompt={async () => {}} />);
   expect(editable(container)).toEqual([]);
 });

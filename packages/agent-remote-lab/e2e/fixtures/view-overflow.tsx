@@ -131,10 +131,13 @@ const contentState: AgentReplicaState = { ...previewState, timeline: { ...previe
     timestamp: '2026-09-18T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [], item,
   })),
 ] } };
-// The requested process mode is this device's default, which a workbench reads; bare timelines read it from context. Full by default.
+// A requested process mode becomes this device's default, which a workbench reads; bare timelines read it from context. Without
+// one, the stored choice stays, and a device that has none starts in Full.
 const requested = new URLSearchParams(location.search).get('mode');
-const mode = requested === 'concise' || requested === 'process' ? requested : 'full';
-localStorage.setItem('agent-remote:process-mode', mode);
+if (requested === 'concise' || requested === 'process' || requested === 'full') localStorage.setItem('agent-remote:process-mode', requested);
+else if (!localStorage.getItem('agent-remote:process-mode')) localStorage.setItem('agent-remote:process-mode', 'full');
+const stored = localStorage.getItem('agent-remote:process-mode');
+const mode = stored === 'concise' || stored === 'process' ? stored : 'full';
 createRoot(document.getElementById('root')!).render(
   <ProcessModeContext.Provider value={mode}><main style={{ height: '100dvh' }}>
     {view === 'previews' || view === 'content' ? <App initialState={view === 'content' ? contentState : previewState} initialSessionStatus="ready" /> : view === 'workbench' || view === 'tool-error' || view === 'file-changes' ? <LabWorkbench state={view === 'tool-error' ? failureState : view === 'file-changes' ? fileChangeState : state} sessionStatus="ready" actions={{ respondToInteraction: async () => {}, sendMessage: async () => {} }} />

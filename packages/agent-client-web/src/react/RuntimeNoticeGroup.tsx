@@ -7,27 +7,6 @@ type NoticeRenderEntry = TimelineRenderEntry & {
   readonly entry: ProjectedTimelineEntry & { readonly item: Extract<ProjectedTimelineEntry['item'], { type: 'error' }> };
 };
 
-type ConversationRow =
-  | { readonly type: 'entry'; readonly key: string; readonly value: TimelineRenderEntry }
-  | { readonly type: 'notices'; readonly key: string; readonly entries: NoticeRenderEntry[] };
-
-/** Filtering must not join notices separated by hidden timeline activity. */
-export function groupRuntimeNotices(model: readonly TimelineRenderEntry[], positions: ReadonlyMap<ProjectedTimelineEntry, number>): ConversationRow[] {
-  const rows: ConversationRow[] = [];
-  let previousPosition = -2;
-  for (const row of model) {
-    const position = positions.get(row.entry)!;
-    const previous = rows.at(-1);
-    if (row.entry.item.type === 'error') {
-      const notice = row as NoticeRenderEntry;
-      if (previous?.type === 'notices' && position === previousPosition + 1) previous.entries.push(notice);
-      else rows.push({ type: 'notices', key: row.key, entries: [notice] });
-    } else rows.push({ type: 'entry', key: row.key, value: row });
-    previousPosition = position;
-  }
-  return rows;
-}
-
 /** Remember choices by original entries so both append and history prepend preserve them. */
 export function useRuntimeNoticeDisclosure(scopeKey: string, searchEntryKey?: string, inspectedEntryKey?: string,
   searchRequestId?: number, inspectedRequestId?: number) {

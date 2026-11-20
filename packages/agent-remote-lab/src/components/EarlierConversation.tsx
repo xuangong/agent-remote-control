@@ -11,9 +11,11 @@ export type EarlierTransport = Pick<RemoteAgentTransport, 'fetchSnapshot' | 'fet
 export type EarlierDirectory = (hostId: string) => { attach(providerId: string, nativeSessionId: string, signal?: AbortSignal): Promise<{ agentId: string }> };
 const PAGE = 100;
 
-/** An earlier session shown read-only: no turn in progress, no interactions to answer, nothing to send. */
+/** An earlier session shown read-only: no turn in progress, so no live line, no interactions to answer, nothing to send. */
 function readOnly(state: AgentReplicaState): AgentReplicaState {
-  return { ...state, agent: state.agent ? { ...state.agent, activeTurn: null, pendingInteractions: [] } : state.agent, pendingInteractions: [], outgoingMessages: [] };
+  const agent = state.agent && { ...state.agent, activeTurn: null, pendingInteractions: [],
+    ...(state.agent.status === 'running' || state.agent.status === 'starting' || state.agent.status === 'waiting' ? { status: 'idle' as const } : {}) };
+  return { ...state, agent, pendingInteractions: [], outgoingMessages: [] };
 }
 
 function EarlierSession({ session, transport, directory, cached, onComplete }: {
@@ -45,7 +47,7 @@ function EarlierSession({ session, transport, directory, cached, onComplete }: {
   }
   const title = knownTitle(session);
   return <section className="lab-earlier-session" aria-label={title ? `Earlier conversation: ${title}` : 'Earlier conversation'} data-session={key}>
-    {shown ? <AgentTimeline state={readOnly(shown)} showHeader={false} interactionsReadOnly interactionDisabled
+    {shown ? <AgentTimeline state={readOnly(shown)} interactionsReadOnly interactionDisabled
       onLoadOlder={read.state === 'ready' ? loadOlder : undefined} /> : null}
     {read.state === 'loading' && !shown ? <p className="lab-earlier-status" role="status">Loading earlier conversation…</p> : null}
     {read.state === 'error' ? <p className="lab-earlier-status">Earlier conversation is unavailable.{' '}

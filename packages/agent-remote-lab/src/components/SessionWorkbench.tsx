@@ -332,7 +332,6 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
               inspectedRequestId={revealEntry?.requestId}
               searchEntryKey={selectedSearchKey}
               searchRequestId={searchSelection?.request}
-              showHeader={false}
               historyLoading={scroll.historyLoading}
               historyError={scroll.historyError}
               onOpenChildSession={onOpenChildSession}

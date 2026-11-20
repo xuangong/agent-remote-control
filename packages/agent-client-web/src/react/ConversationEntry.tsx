@@ -1,11 +1,11 @@
-import { memo, useMemo, type ReactNode } from 'react';
+import { memo, useContext, useMemo, type ReactNode } from 'react';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import type { AgentTimelineProps } from './AgentTimeline.js';
 import { TimelineEntry } from './TimelineEntry.js';
 import { TimelineItemRenderer } from './TimelineItemRenderer.js';
 import { ResourceList } from './ResourceList.js';
 import { PreviewActions, type PreviewController } from './PreviewActions.js';
-import { TimelineSearchReveal } from './TimelineDisplay.js';
+import { ProcessModeContext, TimelineSearchReveal } from './TimelineDisplay.js';
 import type { MessageGroupPosition } from './timeline-render-model.js';
 import { messageResources } from './message-resources.js';
 import { RuntimeNoticeItem } from './items/ErrorItem.js';
@@ -50,10 +50,10 @@ export const ConversationEntry = memo(function ConversationEntry({ entry, entryK
   scopeKey, resources, onEditPrompt, onInspectEntry, inspected, searchSelected, resolveSessionLink, onResourceResolve, onResourceRequest,
   previews, extension, noticeExpanded, noticeCount, onToggleNotice, noticeDetailsId, noticeControls, selection, selectionLabel, onSelect }: ConversationEntryProps) {
   const collapsed = noticeExpanded === false;
-  // A message lists its attachments by their labels, without the images its prose already shows; a step lists every resource it named.
-  const conversational = isConversational(entry.item);
-  const attachments = useMemo(() => messageResources(entry.item, entry.resources, conversational),
-    [entry.item, entry.resources, conversational]);
+  // A message lists its attachments by their labels, without the images its prose already shows; Full, today's preview level,
+  // and a step list every resource they named.
+  const everyResource = useContext(ProcessModeContext) === 'full' || !isConversational(entry.item);
+  const attachments = useMemo(() => messageResources(entry.item, entry.resources), [entry.item, entry.resources]);
   return <TimelineSearchReveal.Provider value={!!searchSelected}><TimelineEntry entryKey={entryKey}
     onEdit={onEditPrompt && !entry.item.background && entry.item.type === 'user_message' && !entry.item.withdrawn && entry.item.messageId && entry.turnId ? () => onEditPrompt(entry) : undefined}
     timestamp={entry.timestamp} sent={entry.item.type === 'user_message'}
@@ -67,7 +67,7 @@ export const ConversationEntry = memo(function ConversationEntry({ entry, entryK
       onResourceResolve={onResourceResolve} onResourceRequest={onResourceRequest} foot={foot} />}
     {previews && agentId && entry.item.type !== 'error' && previewable(entry.item) ? <PreviewActions agentId={agentId} itemId={entryKey} text={previewText(entry.item)} controller={previews} /> : null}
     {!collapsed ? extension : null}
-    {!collapsed ? <ResourceList bindings={conversational ? attachments.bindings : entry.resources} labels={attachments.labels}
+    {!collapsed ? <ResourceList bindings={everyResource ? entry.resources : attachments.bindings} labels={attachments.labels}
       resources={resources} onRequest={onResourceRequest} /> : null}
   </TimelineEntry></TimelineSearchReveal.Provider>;
 }, sameRow);

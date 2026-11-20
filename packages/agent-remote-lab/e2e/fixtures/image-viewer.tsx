@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import { useEffect, useState } from 'react';
 import type { AgentReplicaState } from '@orchardworks/agent-client';
-import { PreviewWorkspace, TimelineDisplay } from '@orchardworks/agent-client-web/react';
+import { PreviewWorkspace } from '@orchardworks/agent-client-web/react';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { ReadingPositions, RecoveryScope } from '../../src/conversation-recovery.js';
 import { replicaState } from '../../src/test/fixtures.js';
@@ -37,6 +37,8 @@ const initialState: AgentReplicaState = {
   ] },
 };
 
+// The workbench reads this device's process mode: Full shows every step at preview level, `?content` starts in Concise.
+localStorage.setItem('agent-remote:process-mode', options.has('content') ? 'concise' : 'full');
 const positions = new ReadingPositions('image-viewer-fixture');
 function Fixture() {
   const [state, setState] = useState(initialState);
@@ -51,13 +53,13 @@ function Fixture() {
     Object.assign(window, { appendImageViewerMessage: append });
     return () => { delete (window as Window & { appendImageViewerMessage?: () => void }).appendImageViewerMessage; };
   }, []);
-  return <TimelineDisplay.Provider value={options.has('content') ? 'content' : 'preview'}><RecoveryScope.Provider value={positions}>
+  return <RecoveryScope.Provider value={positions}>
     <PreviewWorkspace style={{ height: '100dvh' }} resourceScope="image-viewer-fixture">
       <LabWorkbench state={state} sessionStatus="ready" actions={{
         sendMessage: async () => {}, resolveResource: async () => binding, requestResource: async () => image,
       }} />
     </PreviewWorkspace>
-  </RecoveryScope.Provider></TimelineDisplay.Provider>;
+  </RecoveryScope.Provider>;
 }
 
 createRoot(document.getElementById('root')!).render(<Fixture />);

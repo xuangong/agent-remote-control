@@ -129,50 +129,62 @@ test.describe('local calendar date', () => {
   test('uses the device timezone across a date boundary', async ({ page, isMobile }) => {
     await page.goto('/e2e/fixtures/timeline-time.html');
     const row = page.locator('[data-entry-key="codex:1:user"]');
-    if (isMobile) await drag(page, row, -120);
-    const time = row.locator(isMobile ? '.agent-entry-time' : '.agent-title-time');
-    await expect(time).toBeVisible();
-    await expect(time).toContainText('17/09/2026');
-    await expect(time).toContainText('19:11:17');
+    if (isMobile) {
+      await drag(page, row, -120);
+      const time = row.locator('.agent-entry-time');
+      await expect(time).toBeVisible();
+      await expect(time).toContainText('17/09/2026');
+      await expect(time).toContainText('19:11:17');
+    } else {
+      // A bubble says its time on hover; the date is in its label and on the day line.
+      await row.hover();
+      const time = row.locator('.agent-bubble-time');
+      await expect(time).toHaveText('19:11:17');
+      await expect(time).toHaveAttribute('aria-label', '17/09/2026 19:11:17 (local time)');
+      await expect(page.locator('.agent-day-separator').first()).toHaveAttribute('aria-label', /17 Sept|Sep 17|17 Sep/);
+    }
   });
 });
 
 
-test('desktop titles show local time by default and toggle together on double click', async ({ page, isMobile }, testInfo) => {
+test('desktop step titles show local time, bubbles show it on hover, and a double click toggles every time together', async ({ page, isMobile }, testInfo) => {
   test.skip(isMobile, 'Desktop titles');
   await page.goto('/e2e/fixtures/timeline-time.html');
   const user = page.locator('[data-entry-key="codex:1:user"]');
-  const assistant = page.locator('[data-entry-key="codex:2:assistant"]');
-  for (const row of [user, assistant]) {
-    await expect(row.locator('.agent-title-time')).toBeVisible();
-    await expect(row.locator('.agent-title-time')).toHaveText('18/09/2026 10:11:17');
-  }
-  const title = assistant.locator('.agent-time-title-label').filter({ visible: true });
-  await title.click();
-  await expect(assistant.locator('.agent-title-time')).toBeVisible();
-  await title.dblclick();
-  await expect(assistant.locator('.agent-title-time')).toBeHidden();
-  await expect(user.locator('.agent-title-time')).toBeHidden();
+  const narration = page.locator('[data-entry-key="codex:2:assistant"]');
+  const reasoning = page.locator('[data-entry-key$=":reasoning"]');
+  const userTime = user.locator('.agent-bubble-time');
+  await expect(reasoning.locator('.agent-title-time')).toHaveText('18/09/2026 10:11:17');
+  await expect(userTime).toHaveText('10:11:17');
+  await expect(userTime).toHaveAttribute('aria-label', '18/09/2026 10:11:17 (local time)');
+  await expect(userTime).toHaveCSS('opacity', '0');
+  await user.hover();
+  await expect(userTime).toHaveCSS('opacity', '1');
+  const title = reasoning.locator('.agent-time-title-label').filter({ visible: true });
+  await title.dblclick({ delay: 120 });
   await expect(page.locator('.agent-title-time:visible')).toHaveCount(0);
+  await expect(userTime).toBeHidden();
+  await expect(narration.locator('.agent-bubble-time')).toBeHidden();
+  // Another timeline follows the same choice.
   await page.getByRole('button', { name: 'Open Side conversation' }).click();
   const side = page.locator('[data-entry-key="codex:1:side"]');
-  await expect(side.locator('.agent-title-time')).toBeHidden();
-  await side.locator('.agent-time-title-label:visible').dblclick();
-  await expect(assistant.locator('.agent-title-time')).toBeVisible();
-  await expect(user.locator('.agent-title-time')).toBeVisible();
-  await title.dblclick();
-  await expect(side.locator('.agent-title-time')).toBeHidden();
+  await expect(side).toBeVisible();
+  await expect(side.locator('.agent-bubble-time')).toBeHidden();
+  await title.dblclick({ delay: 120 });
+  await expect(side.locator('.agent-bubble-time')).toBeVisible();
+  await expect(userTime).toBeVisible();
+  await expect(reasoning.locator('.agent-title-time')).toBeVisible();
+  // Alt+T from inside a message toggles every time; a streaming update keeps the choice.
+  await narration.getByRole('link', { name: 'Open details' }).focus();
+  await page.keyboard.press('Alt+t');
+  await expect(userTime).toBeHidden();
+  await expect(reasoning.locator('.agent-title-time')).toBeHidden();
   await page.getByRole('button', { name: 'Update message' }).click();
-  await expect(assistant).toContainText('Streaming update');
-  await expect(assistant.locator('.agent-title-time')).toBeHidden();
-  await title.dblclick();
-  await expect(assistant.locator('.agent-title-time')).toBeVisible();
-  await expect(user.locator('.agent-title-time')).toBeVisible();
-  await user.locator('.agent-time-title-control').focus();
-  await page.keyboard.press('Enter');
-  await expect(user.locator('.agent-title-time')).toBeHidden();
-  await page.keyboard.press('Space');
-  await expect(user.locator('.agent-title-time')).toBeVisible();
+  await expect(narration).toContainText('Streaming update');
+  await expect(narration.locator('.agent-bubble-time')).toBeHidden();
+  await title.dblclick({ delay: 120 });
+  await expect(narration.locator('.agent-bubble-time')).toBeVisible();
+  await expect(userTime).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('desktop-local-time.png') });
 });
 
@@ -209,11 +221,17 @@ test('double clicking a tool title changes time without changing disclosure', as
 test('timestamps follow the desktop breakpoint without affecting mobile titles', async ({ page, isMobile }) => {
   test.skip(isMobile, 'Desktop viewport resizing');
   await page.goto('/e2e/fixtures/timeline-time.html');
-  const row = page.locator('[data-entry-key="codex:1:user"]');
+  const row = page.locator('[data-entry-key$=":reasoning"]');
+  const bubble = page.locator('[data-entry-key="codex:1:user"]');
   for (const width of [1440, 1181, 1180, 844, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
-    if (width > 1180) await expect(row.locator('.agent-title-time')).toBeVisible();
-    else await expect(row.locator('.agent-title-time')).toBeHidden();
+    if (width > 1180) {
+      await expect(row.locator('.agent-title-time')).toBeVisible();
+      await expect(bubble.locator('.agent-bubble-time')).toBeVisible();
+    } else {
+      await expect(row.locator('.agent-title-time')).toBeHidden();
+      await expect(bubble.locator('.agent-bubble-time')).toBeHidden();
+    }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   }
 });

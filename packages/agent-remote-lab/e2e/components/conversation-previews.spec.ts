@@ -7,21 +7,26 @@ async function openDisplayOptions(page: Page) {
 }
 
 for (const width of [320, 390, 844, 1440]) {
-  test(`starts in simple conversation, then shows and remembers previews at ${width}px`, async ({ page }, testInfo) => {
+  test(`starts in Concise, then shows and remembers every step's preview in Full at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 850 });
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.goto('/e2e/fixtures/view-overflow.html?view=previews');
-    await expect(page.locator('.agent-tool')).toHaveCount(2);
+    await page.goto('/e2e/fixtures/view-overflow.html?view=previews&mode=concise');
+    await expect(page.locator('.agent-tool')).toHaveCount(0);
     await expect(page.locator('.agent-tool-preview')).toHaveCount(0);
     await openDisplayOptions(page);
-    await expect(page.getByRole('radio', { name: 'Simple conversation', exact: true })).toBeChecked();
-    await page.getByRole('radio', { name: 'Preview', exact: true }).check();
+    const device = page.getByRole('group', { name: 'All assistants on this device' });
+    await expect(device.getByRole('button', { name: 'Concise', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await device.getByRole('button', { name: 'Full', exact: true }).click();
     await page.getByRole('button', { name: 'Session view options', exact: true }).click();
     await expect(page.locator('.agent-tool-preview')).toHaveCount(2);
     await expect(page.locator('.agent-file-preview')).toHaveCount(2);
     await expect(page.locator('.agent-reasoning .agent-content-preview')).toContainText('Check the existing event');
-    await expect(page.locator('.agent-question-completed .agent-content-preview')).toContainText('Which directory');
+    // An answered question stays one receipt line in every mode; its questions show when it is opened.
+    const receipt = page.locator('.agent-question-completed');
+    await expect(receipt.locator('.agent-receipt-details')).toBeHidden();
+    await receipt.locator('.agent-receipt-toggle').click();
+    await expect(receipt.locator('.agent-receipt-details')).toContainText('Which directory');
     const output = page.locator('.agent-tool-result-preview .agent-code-preview');
     const visibleLines = await output.locator('.agent-preview-line:visible').count();
     expect(visibleLines).toBe(width <= 640 ? 4 : 6);
@@ -49,7 +54,7 @@ for (const width of [320, 390, 844, 1440]) {
     await expect(tool.locator('.agent-tool-preview')).toHaveCount(0);
     await expect(tool.locator('.agent-tool-details')).toBeHidden();
     await openDisplayOptions(page);
-    await page.getByRole('radio', { name: 'Simple conversation', exact: true }).check();
+    await page.getByRole('group', { name: 'All assistants on this device' }).getByRole('button', { name: 'Concise', exact: true }).click();
     await expect(page.locator('.agent-tool-preview')).toHaveCount(0);
     expect(errors).toEqual([]);
   });

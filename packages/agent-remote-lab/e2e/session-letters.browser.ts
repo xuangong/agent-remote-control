@@ -89,7 +89,7 @@ for (const engine of [chromium, webkit]) it(`keeps child navigation at the conte
     await browserExpect(page).toHaveURL(/[?&]session=parent(?:&|$)/);
     const primary = page.locator('.lab-primary-conversation');
     await toggleView(primary);
-    await primary.getByRole('radio', { name: 'Content only', exact: true }).check();
+    await primary.getByRole('group', { name: 'All assistants on this device' }).getByRole('button', { name: 'Concise', exact: true }).click();
     await toggleView(primary);
     await browserExpect(primary.locator('.lab-workbench-heading')).toBeHidden();
     const children = primary.locator('details[aria-label="Session subagents"]');
@@ -187,13 +187,15 @@ for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(
     const primary = page.locator('.lab-primary-conversation');
     const letters = primary.locator('.agent-communication-letter');
     const activity = primary.getByText('Activity 39. This is the work after receiving the task. A longer paragraph keeps each conversation independently scrollable.', { exact: true });
-    const content = page.getByRole('radio', { name: 'Content only', exact: true });
-    const simple = page.getByRole('radio', { name: 'Simple conversation', exact: true });
+    const device = page.getByRole('group', { name: 'All assistants on this device' });
+    const concise = device.getByRole('button', { name: 'Concise', exact: true });
+    const process = device.getByRole('button', { name: 'Process', exact: true });
+    const full = device.getByRole('button', { name: 'Full', exact: true });
     const showLetters = page.getByRole('checkbox', { name: 'Show letters', exact: true });
-    const expectMode = async (mode: 'preview' | 'content' | 'simple') => {
-      await browserExpect(content).toBeChecked({ checked: mode === 'content' });
-      await browserExpect(simple).toBeChecked({ checked: mode === 'simple' });
-      await browserExpect(primary.getByRole('radio', { name: 'Preview', exact: true })).toBeChecked({ checked: mode === 'preview' });
+    const expectMode = async (mode: 'concise' | 'process' | 'full') => {
+      await browserExpect(concise).toHaveAttribute('aria-pressed', String(mode === 'concise'));
+      await browserExpect(process).toHaveAttribute('aria-pressed', String(mode === 'process'));
+      await browserExpect(full).toHaveAttribute('aria-pressed', String(mode === 'full'));
     };
     const expectFits = async () => {
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -213,11 +215,11 @@ for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(
     await waitForConversation();
     await browserExpect(showLetters).toBeChecked();
     await browserExpect(letters).toHaveCount(2);
-    await expectMode('preview');
+    await expectMode('concise');
     await showLetters.uncheck();
-    for (const mode of ['preview', 'content', 'simple'] as const) {
-      if (mode === 'content') await content.check();
-      if (mode === 'simple') await simple.check();
+    for (const mode of ['concise', 'full', 'process'] as const) {
+      if (mode === 'full') await full.click();
+      if (mode === 'process') await process.click();
       await expectMode(mode);
       await browserExpect(showLetters).not.toBeChecked();
       await browserExpect(letters).toHaveCount(0);
@@ -232,7 +234,7 @@ for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(
       await browserExpect(letters).toHaveCount(0);
       await browserExpect(activity).toBeVisible();
       await expectMode(mode);
-      if (mode === 'content') await page.screenshot({ path: `/tmp/arc-letter-toggle-${engine.name()}-${mobile ? 'mobile' : 'desktop'}-hidden.png` });
+      if (mode === 'concise') await page.screenshot({ path: `/tmp/arc-letter-toggle-${engine.name()}-${mobile ? 'mobile' : 'desktop'}-hidden.png` });
       await page.reload();
       await waitForConversation();
       await browserExpect(showLetters).not.toBeChecked();
@@ -242,18 +244,18 @@ for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(
     }
     await showLetters.check();
     await browserExpect(letters).toHaveCount(2);
-    await expectMode('simple');
-    await content.check();
-    await expectMode('content');
+    await expectMode('process');
+    await concise.click();
+    await expectMode('concise');
     await browserExpect(showLetters).toBeChecked();
     await browserExpect(letters).toHaveCount(2);
-    await primary.getByRole('radio', { name: 'Preview', exact: true }).check();
-    await expectMode('preview');
+    await full.click();
+    await expectMode('full');
     await page.reload();
     await waitForConversation();
     await browserExpect(showLetters).toBeChecked();
     await browserExpect(letters).toHaveCount(2);
-    await expectMode('preview');
+    await expectMode('full');
     await expectFits();
     await page.screenshot({ path: `/tmp/arc-letter-toggle-${engine.name()}-${mobile ? 'mobile' : 'desktop'}-visible.png` });
     if (mobile) {
@@ -287,12 +289,12 @@ for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(
       await browserExpect(letters).toHaveCount(0);
       await browserExpect(side.locator('.agent-communication-letter')).toHaveCount(2);
       await browserExpect(side).toBeVisible();
-      await expectMode('preview');
+      await expectMode('full');
       await showLetters.check();
       await browserExpect(letters).toHaveCount(2);
       await browserExpect(side.locator('.agent-communication-letter')).toHaveCount(2);
       await browserExpect(side).toBeVisible();
-      await expectMode('preview');
+      await expectMode('full');
     }
     expect(errors).toEqual([]);
   } finally { await browser.close(); }

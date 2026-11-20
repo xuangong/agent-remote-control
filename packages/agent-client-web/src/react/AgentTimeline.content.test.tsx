@@ -142,6 +142,14 @@ describe('the conversation in Concise: messages and decisions, the work behind i
     expect(container.querySelectorAll('.agent-resources li')).toHaveLength(3);
     expect(container.querySelector('[data-resource-download="diagram"]')).toBeNull();
     for (const id of ['example', 'fenced', 'attached']) expect(container.querySelector(`[data-resource-download="${id}"]`)).not.toBeNull();
+    // Full, today's preview level, lists every resource the message named, the image its prose shows too.
+    await rerender(container, <AgentTimeline processMode="full"
+      state={{ ...current, timeline: { ...current.timeline, entries: current.timeline.entries.map(entry => ({ ...entry, resources: bindings })) },
+        resources: Object.fromEntries(bindings.map(binding => [binding.resourceId, { status: 'available', mediaType: 'image/png', byteLength: 1, sha256: binding.resourceId, contentBase64: 'AA==' }])) }}
+      onResourceResolve={async locator => bindings.find(binding => binding.locator === locator)!} onResourceRequest={async () => {}}
+    />);
+    expect(container.querySelectorAll('.agent-resources li')).toHaveLength(4);
+    expect(container.querySelector('[data-resource-download="diagram"]')).not.toBeNull();
   });
 
   it('keeps messages and decisions in Concise, says a failed step on the work line, and shows every step in Full', async () => {
@@ -154,7 +162,6 @@ describe('the conversation in Concise: messages and decisions, the work behind i
     // The prompt, the answered plan review and the answer; the remark between steps folds into the work line.
     expect(container.querySelectorAll('[data-entry-key]')).toHaveLength(3);
     expect(container.querySelector('.agent-message-user strong')?.textContent).toBe('fix');
-    expect(container.querySelector('h2')?.textContent).toBe('Agent timeline');
     expect(container.querySelector('.agent-message-assistant h2')?.textContent).toBe('Summary');
     expect(container.querySelector('a')?.getAttribute('href')).toBe('https://example.com');
     expect(container.querySelector('[data-entry-key="test:9:summary"]')).toBe(summary);

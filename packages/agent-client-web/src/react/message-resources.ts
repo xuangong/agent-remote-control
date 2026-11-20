@@ -9,7 +9,7 @@ interface MarkdownNode {
 }
 
 /** Attachments belong to the conversation; images already in its prose need no second preview. */
-export function messageResources(item: AgentTimelineItem, bindings: readonly ResourceBinding[], rendersMarkdownImages: boolean) {
+export function messageResources(item: AgentTimelineItem, bindings: readonly ResourceBinding[]) {
   const labels = new Map<string, string>();
   if (item.type !== 'user_message' && item.type !== 'assistant_message' && item.type !== 'agent_communication') {
     return { bindings: [], labels };
@@ -21,7 +21,7 @@ export function messageResources(item: AgentTimelineItem, bindings: readonly Res
       else markdown.push(part.text);
     }
   } else markdown.push(item.text);
-  if (!rendersMarkdownImages || bindings.length === 0) return { bindings, labels };
+  if (bindings.length === 0) return { bindings, labels };
   const inlineImages = new Set(markdown.flatMap(text => [...markdownImages(text)]));
   return { bindings: bindings.filter(binding => !inlineImages.has(binding.locator)), labels };
 }

@@ -521,22 +521,7 @@ textarea {
   font-size: 14px;
 }
 
-.lab-timeline-scroll .agent-surface-header {
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  min-height: 54px;
-  margin: 0;
-  padding: 10px 2px;
-  border: 0;
-  border-bottom: 1px solid var(--obs-border);
-  border-radius: 0;
-  background: var(--obs-surface);
-}
 
-.lab-timeline-scroll .agent-surface-header h2 { color: var(--obs-text); font-size: 14px; }
-.lab-timeline-scroll .agent-surface-state { color: var(--obs-text-secondary); font-size: 12px; }
-.lab-timeline-scroll .agent-surface-state code { overflow-wrap: anywhere; font-family: var(--obs-mono); user-select: text; }
 .lab-timeline-scroll .agent-load-older { display: block; width: auto; min-height: 36px; margin: 14px auto; padding: 6px 14px; border-color: var(--obs-control-border); border-radius: 999px; color: var(--obs-action); background: var(--obs-surface); font-size: 12px; }
 
 .lab-timeline-scroll .agent-timeline-entries { gap: 0; }

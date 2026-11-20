@@ -98,7 +98,7 @@ export function buildEveryKindConversation(options: { providerId?: string } = {}
   rows.tool('Bash', { type: 'shell', command: 'ls -la', cwd: '/Users/me/notes' }, 'completed', { ...t1, key: 'tool-shell',
     result: { content: [{ type: 'text', text: 'notes.md\nREADME.md', stream: 'stdout' }], exitCode: 0, durationMs: 12 } });
   rows.tool('Read', { type: 'read', filePath: '/Users/me/notes/README.md' }, 'completed', { ...t1, key: 'tool-read', result: { content: [{ type: 'text', text: '# Notes' }] } });
-  rows.tool('Read', { type: 'read', filePath: '/Users/me/notes/style.md' }, 'completed', { ...t1, key: 'tool-read-2', result: { content: [{ type: 'text', text: 'Be brief.' }] } });
+  rows.tool('Read', { type: 'read', filePath: '/Users/me/notes/style.md' }, 'completed', { ...t1, key: 'tool-read-2', result: { content: [{ type: 'text', text: 'Be brief.' }], truncated: true } });
   rows.assistant('Let me check the existing notes first.', { ...t1, key: 'narration-1' });
   rows.tool('Grep', { type: 'search', query: 'principle' }, 'completed', { ...t1, key: 'tool-search', result: { content: [{ type: 'json', value: [] }] } });
   rows.tool('WebFetch', { type: 'fetch', url: 'https://example.com/im-design' }, 'completed', { ...t1, key: 'tool-fetch', result: { content: [{ type: 'text', text: 'IM design notes' }] } });

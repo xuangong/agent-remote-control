@@ -11,7 +11,6 @@ import { render, rerender } from '../test/setup.js';
 import { openReceipts, showChanges } from '../test/interactions.js';
 import { AgentTimeline } from './AgentTimeline.js';
 import type { PreviewController } from './PreviewActions.js';
-import { TimelineDisplay } from './TimelineDisplay.js';
 import { applyResourceUpdate, createReplicaState, type AgentReplicaState } from '@orchardworks/agent-client';
 
 function entry(
@@ -115,17 +114,6 @@ describe('AgentTimeline', () => {
     await openReceipts(container);
     expect(container.textContent).toContain('Inspect once');
     expect(container.querySelector('[data-entry-key]')?.getAttribute('data-entry-key')).toBe('provider-neutral:1:plan-history');
-  });
-
-  it('keeps a host-hidden header out of the conversation without removing entries', async () => {
-    const content = state([entry(1, { type: 'assistant_message', messageId: 'answer', text: 'The answer' })]);
-    const container = await render(<AgentTimeline state={content} />);
-    expect(container.querySelector('.agent-surface-header')).not.toBeNull();
-
-    await rerender(container, <AgentTimeline state={content} showHeader={false} />);
-
-    expect(container.querySelector('.agent-surface-header')).toBeNull();
-    expect(container.querySelector('[data-entry-key="provider-neutral:1:answer"]')?.textContent).toContain('The answer');
   });
 
   it('waits for earlier history and suppresses repeated activation before rendering pending state', async () => {
@@ -603,14 +591,14 @@ it('groups trusted quiet checks, preserves human and failed output, and reveals 
   expect(container.textContent).toContain('Later stale result');
 });
 
-it('reveals a quiet original search target in content mode without hiding unresolved assistant replies', async () => {
+it('reveals a quiet original search target without hiding unresolved assistant replies', async () => {
   const bg = { id: 'review', kind: 'review' as const, status: 'silent' as const };
   const input = entry(1, { type: 'user_message', text: 'Automatic source', background: bg });
   const reply = entry(2, { type: 'assistant_message', text: 'Quiet result', background: bg });
   const pending = entry(3, { type: 'assistant_message', text: 'Unsettled response', background: { ...bg, id: 'other', status: 'pending' } });
   const { timelineEntryKey } = await import("@orchardworks/agent-client");
   const key = timelineEntryKey(reply);
-  const container = await render(<TimelineDisplay.Provider value="content"><AgentTimeline state={state([input, reply, pending])} searchEntryKey={key} searchRequestId={1} /></TimelineDisplay.Provider>);
+  const container = await render(<AgentTimeline state={state([input, reply, pending])} searchEntryKey={key} searchRequestId={1} />);
   expect(container.textContent).toContain('Quiet result');
   expect(container.textContent).toContain('Unsettled response');
   expect(container.querySelector('[data-inspected]')?.getAttribute('data-entry-key')).toBe(key);

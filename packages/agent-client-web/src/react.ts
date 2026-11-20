@@ -1,8 +1,7 @@
 import './page/browser-environment.js';
 export { AgentTimeline } from './react/AgentTimeline.js';
-export { ProcessModeContext, TimelineDisplay, TimelineLettersVisible, TimelineStepLevel, isContentOnlyItem } from './react/TimelineDisplay.js';
+export { ProcessModeContext, TimelineLettersVisible, TimelineStepLevel } from './react/TimelineDisplay.js';
 export { LocaleContext, browserLocale, useTranslate } from './react/locale.js';
-export type { TimelineDisplayMode } from './react/TimelineDisplay.js';
 export type { AgentTimelineProps, AgentTimelineState, TimelineEntrySelection } from './react/AgentTimeline.js';
 export { isSelectableTimelineItem } from './react/AgentTimeline.js';
 export { SessionExcerptList, SessionExcerptNavigation, excerptMessageCount, withoutSessionExcerpts } from './react/SessionExcerpts.js';

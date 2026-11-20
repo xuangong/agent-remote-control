@@ -3,7 +3,9 @@ import { createRoot } from 'react-dom/client';
 import { createReplicaState } from '@orchardworks/agent-client';
 import { AgentTimeline } from '@orchardworks/agent-client-web/react';
 import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
+import '@orchardworks/agent-client-web/theme.css';
 import '@orchardworks/agent-client-web/styles.css';
+import '@orchardworks/agent-client-web/primitives.css';
 
 const items: AgentTimelineItem[] = [
   { type: 'user_message', text: 'Please check the build.', messageId: 'user' },
@@ -27,11 +29,12 @@ function Fixture() {
   {editable ? <output data-testid="inspections">{inspections}</output> : null}
   <button onClick={() => setUpdated(true)}>Update message</button>
   <button onClick={() => setSide(true)}>Open Side conversation</button>
-  {side ? <AgentTimeline showHeader={false} state={{ ...state, timeline: { ...state.timeline, epoch: 'side', initialized: true, entries: [{
+  {side ? <AgentTimeline state={{ ...state, timeline: { ...state.timeline, epoch: 'side', initialized: true, entries: [{
     providerId: 'codex', item: { type: 'assistant_message', messageId: 'side', text: 'Side conversation' }, timestamp: '2026-09-18T02:11:17.158Z',
     seqStart: 1, seqEnd: 1, sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }], collapsed: [], resources: [],
   }] } }} /> : null}
-  <AgentTimeline onInspectEntry={editable ? () => setInspections(value => value + 1) : undefined} onEditPrompt={editable ? async () => { setEdits(value => value + 1); } : undefined} resolveSessionLink={() => ({ href: "#research", async open() { location.hash = "research"; } })} showHeader={false} state={{ ...state, timeline: { ...state.timeline, epoch: 'time', initialized: true, entries: items.map((item, i) => ({
+  {/* Full: every step at preview level, so each kind of row can show its time. */}
+  <AgentTimeline processMode="full" onInspectEntry={editable ? () => setInspections(value => value + 1) : undefined} onEditPrompt={editable ? async () => { setEdits(value => value + 1); } : undefined} resolveSessionLink={() => ({ href: "#research", async open() { location.hash = "research"; } })} state={{ ...state, timeline: { ...state.timeline, epoch: 'time', initialized: true, entries: items.map((item, i) => ({
     providerId: 'codex', item: updated && item.type === 'assistant_message' && item.messageId === 'assistant' ? { ...item, text: item.text + '\n\nStreaming update' } : item, timestamp: i === 3 ? 'invalid' : '2026-09-18T02:11:17.158Z',
     turnId: 'turn-' + i, seqStart: i + 1, seqEnd: i + 1, sourceSeqRanges: [{ startSeq: i + 1, endSeq: i + 1 }], collapsed: [], resources: [],
   })) } }} />

@@ -32,7 +32,7 @@ function view(entries: ProjectedTimelineEntry[], mode: ProcessMode = 'full', sea
   const base = createReplicaState();
   const state = { ...base, timeline: { ...base.timeline, epoch, initialized: true, entries,
     nextSeq: (entries.at(-1)?.seqEnd ?? 0) + 1 } };
-  return <AgentTimeline state={state} processMode={mode} showHeader={false} searchEntryKey={searchEntryKey} {...inspection} />;
+  return <AgentTimeline state={state} processMode={mode} searchEntryKey={searchEntryKey} {...inspection} />;
 }
 
 function noticeToggles(container: HTMLElement): HTMLButtonElement[] {

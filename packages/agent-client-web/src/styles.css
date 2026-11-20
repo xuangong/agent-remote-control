@@ -50,21 +50,8 @@
   overflow: hidden;
 }
 
-.agent-surface-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  min-height: 58px;
-  padding: 10px 16px;
-  background: var(--agent-panel);
-  border-bottom: 1px solid var(--agent-rule);
-}
-
-.agent-surface-header h2,
 .agent-interaction h3,
 .agent-resources h4 { margin: 0; font-weight: 600; }
-.agent-surface-header h2 { font-size: 17px; letter-spacing: .01em; }
 
 .agent-item-kicker,
 .agent-state-label {
@@ -76,8 +63,6 @@
   text-transform: uppercase;
 }
 
-.agent-surface-state { display: flex; align-items: center; gap: 8px; color: var(--agent-muted); }
-.agent-surface-state code { padding-left: 8px; border-left: 1px solid var(--agent-rule); font-size: 11px; }
 .agent-presence { width: 7px; height: 7px; border-radius: 50%; background: var(--agent-muted); }
 .agent-presence.agent-state-running { background: var(--agent-running); box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent-running) 16%, transparent); }
 .agent-presence.agent-state-idle { background: var(--agent-success); }
@@ -119,7 +104,13 @@
 .agent-day-separator { color: var(--orchard-text-secondary); text-align: center;
   font: var(--orchard-type-caption-weight) var(--orchard-type-caption-size) / var(--orchard-type-caption-leading) var(--orchard-font-text); }
 .orchard-bubble > .agent-message { display: grid; gap: var(--orchard-space-s); margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: inherit; }
+/* Code in a message keeps its lines and scrolls sideways in its own box. */
+.orchard-bubble .agent-markdown pre { white-space: pre; }
 .orchard-bubble-row[data-from="mine"] .agent-markdown, .orchard-bubble-row[data-from="mine"] .agent-markdown a { color: inherit; }
+/* What a person attaches to a message (references, quoted excerpts) reads on the mine bubble in its own colour. */
+.orchard-bubble-row[data-from="mine"] :is(.agent-session-references, .agent-session-references button, .agent-session-excerpt,
+  .agent-session-excerpt-kicker, .agent-session-excerpt-count, .agent-image-tag) { color: inherit; }
+.orchard-bubble-row[data-from="mine"] .agent-session-excerpt { border-color: currentColor; background: transparent; }
 .orchard-bubble-row:has(.agent-message-group-first, .agent-message-group-middle) { margin-bottom: calc(var(--orchard-space-m) * -0.6); }
 .orchard-bubble:has(> .agent-message-withdrawn) { color: var(--orchard-text-secondary); background: transparent; outline: 1px dashed var(--orchard-separator); outline-offset: -1px; }
 .agent-outgoing-message[data-delivery-state="failed"] .orchard-bubble { outline: 1.5px solid var(--orchard-danger-text); outline-offset: 1px; }
@@ -128,6 +119,7 @@
   font: var(--orchard-type-caption-size) / var(--orchard-type-caption-leading) var(--orchard-font-text); font-variant-numeric: tabular-nums;
   transition: opacity var(--orchard-duration-fast) var(--orchard-ease-standard); }
 .agent-bubble-time[data-side="mine"] { margin-left: 0; text-align: right; }
+.agent-bubble-time[hidden] { display: none; }
 .agent-timeline-entry:is(:hover, :focus-within) .agent-bubble-time { opacity: 1; }
 .agent-work-line.orchard-work-summary { margin-left: calc(26px + var(--orchard-space-m)); }
 .orchard-work-summary-note { margin-left: var(--orchard-space-s); color: var(--orchard-danger-text);
@@ -160,7 +152,10 @@
 .agent-receipt-subject { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-receipt-subject::before { content: "· "; }
 .agent-receipt-details { display: grid; gap: var(--orchard-space-m); min-width: 0; margin-top: var(--orchard-space-xs); padding-left: var(--orchard-space-l); }
-@media (pointer: coarse) { .agent-receipt-toggle { min-height: 44px; } }
+@media (pointer: coarse) {
+  .agent-receipt-toggle,
+  .agent-work-steps :is(.agent-tool-toggle, .agent-reasoning-toggle, .agent-notice-toggle, .agent-background-summary) { min-height: 44px; }
+}
 @media (max-width: 1180px) { .agent-bubble-time { display: none; } }
 @media (prefers-reduced-motion: reduce) { .agent-bubble-time { transition: none; } }
 .agent-markdown { min-width: 0; overflow-wrap: anywhere; }
@@ -292,7 +287,7 @@
 .agent-interaction p { margin: 0; }
 .agent-interaction fieldset { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 9px; padding: 12px; border: 1px solid var(--agent-rule); }
 .agent-interaction legend { padding: 0 5px; font-weight: 600; }
-.agent-question-options { display: grid; gap: 5px; }
+.agent-question-options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; }
 .agent-question-options > label { display: flex; align-items: flex-start; gap: 9px; padding: 7px; border: 1px solid transparent; cursor: pointer; }
 .agent-question-options > label:hover { border-color: var(--agent-rule); }
 .agent-question-options label > span { display: grid; min-width: 0; gap: 2px; }
@@ -369,8 +364,6 @@
 .agent-extension-error { display: block; padding: 0 18px 12px; color: var(--agent-danger); }
 
 @media (max-width: 620px) {
-  .agent-surface-header { align-items: flex-start; flex-direction: column; gap: 8px; }
-  .agent-surface-state { flex-wrap: wrap; }
   .agent-todo li { grid-template-columns: 20px 1fr; }
   .agent-todo li small { grid-column: 2; }
 }

@@ -20,8 +20,9 @@ export function MarkdownImageFrame({ src, alt, dimensions, failure, frameRef }: 
     className={`agent-markdown-image${size ? ' agent-markdown-image-sized' : ''}`}
     data-image-state={state}
     aria-busy={state === 'loading'}
+    // The natural width, kept inside the column and the screen's height: a bubble that holds only the image still has its size.
     style={size ? { aspectRatio: `${size.width} / ${size.height}`,
-      width: `min(100%, ${size.width}px, ${70 * size.width / size.height}vh)` } : undefined}
+      width: `${size.width}px`, maxWidth: `min(100%, ${70 * size.width / size.height}vh)` } : undefined}
   >
     {src && <img className="agent-resource-image" src={src} alt={alt}
       width={size?.width} height={size?.height} loading="lazy" decoding="async"

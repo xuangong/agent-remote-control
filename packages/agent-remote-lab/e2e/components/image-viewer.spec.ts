@@ -28,7 +28,7 @@ async function openMarkdown(page: Page): Promise<Locator> {
 async function chooseContentOnly(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Session view options', exact: true }).click();
   const options = page.getByRole('region', { name: 'Session view options', exact: true });
-  await options.getByRole('radio', { name: 'Content only', exact: true }).check();
+  await options.getByRole('group', { name: 'All assistants on this device' }).getByRole('button', { name: 'Concise', exact: true }).click();
   await options.press('Escape');
   await expect(options).toHaveCount(0);
 }
@@ -355,7 +355,7 @@ test('supports dragging to dismiss with reduced motion and restores focus', asyn
   expect(await timeline.evaluate(element => element.scrollTop)).toBeCloseTo(scrollBefore, 0);
 });
 
-test('renders bound native images in content-only view and opens a zoomable fullscreen preview', async ({ page }, info) => {
+test('renders bound native images in Concise and opens a zoomable fullscreen preview', async ({ page }, info) => {
   for (const provider of ['codex', 'claude']) {
     await page.goto(`/e2e/fixtures/image-viewer.html?native-image=${provider}`);
     await chooseContentOnly(page);

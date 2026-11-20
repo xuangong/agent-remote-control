@@ -1,8 +1,10 @@
 import { createRoot } from 'react-dom/client';
 import { createReplicaState } from '@orchardworks/agent-client';
-import { AgentTimeline, TimelineDisplay } from '@orchardworks/agent-client-web/react';
+import { AgentTimeline, ProcessModeContext } from '@orchardworks/agent-client-web/react';
 import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
+import '@orchardworks/agent-client-web/theme.css';
 import '@orchardworks/agent-client-web/styles.css';
+import '@orchardworks/agent-client-web/primitives.css';
 
 const description = 'Read the source session conversation, including the latest messages and tool activity, to explain the current implementation and verification results. Return enough context to answer the question without changing the source session.';
 const items: AgentTimelineItem[] = [
@@ -15,13 +17,13 @@ const state = createReplicaState();
 
 createRoot(document.getElementById('root')!).render(
   <main style={{ width: 440, maxWidth: '100%' }} aria-label="Tool timeline">
-    <TimelineDisplay.Provider value="simple">
-      <AgentTimeline showHeader={false} resolveSessionLink={nativeSessionId => ({ href: `#${nativeSessionId}`, async open() { location.hash = nativeSessionId; } })} state={{ ...state, timeline: {
+    <ProcessModeContext.Provider value="concise">
+      <AgentTimeline resolveSessionLink={nativeSessionId => ({ href: `#${nativeSessionId}`, async open() { location.hash = nativeSessionId; } })} state={{ ...state, timeline: {
         ...state.timeline, epoch: 'layout', initialized: true, entries: items.map((item, index) => ({
           providerId: 'codex', item, timestamp: '2026-10-08T02:11:17.158Z',
           seqStart: index + 1, seqEnd: index + 1, sourceSeqRanges: [{ startSeq: index + 1, endSeq: index + 1 }], collapsed: [], resources: [],
         })),
       } }} />
-    </TimelineDisplay.Provider>
+    </ProcessModeContext.Provider>
   </main>,
 );

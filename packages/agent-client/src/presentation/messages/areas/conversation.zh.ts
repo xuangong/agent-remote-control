@@ -113,8 +113,8 @@ export const conversation: AreaMessages<typeof english> = {
 
   'assistants.title': '我的助手',
   'assistants.new': '新助手',
-  'assistants.back': '回到助手列表',
-  'assistants.backShort': '助手',
+  'assistants.back': '回到聊天列表',
+  'assistants.backShort': '聊天',
   'assistants.choose': '选一个助手，接着聊吧。',
   'assistants.chooseInGroup': '还没选助手，从这一组里挑一个吧。',
   'assistants.empty': '这一组还没有助手。',

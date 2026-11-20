@@ -69,7 +69,7 @@ it('compact Back restores the roster row and preserves the same editor without f
   const input = app.container.querySelector<HTMLElement>('.lab-bot-conversation [role="textbox"]')!;
   expect(document.activeElement).not.toBe(input);
   await act(async () => { setPromptText(input, 'retained'); input.dispatchEvent(new Event('input', { bubbles: true })); });
-  await act(async () => app.button('Back to assistants').click());
+  await act(async () => app.button('Back to chats').click());
   await until(() => expect(document.activeElement).toBe(app.button('A1')));
   await act(async () => app.button('A1').click());
   expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).toBe(input);
@@ -77,7 +77,7 @@ it('compact Back restores the roster row and preserves the same editor without f
   await app.close();
 });
 
-it('goes back to the assistant list from a chat on a phone with ‹ Assistants, at the place it left', async () => {
+it('goes back to the chat list from a chat on a phone with ‹ Chats, at the place it left', async () => {
   vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(max-width: 1180px)' || query === '(max-width: 760px)', addEventListener() {}, removeEventListener() {} }));
   const scope = 'http://localhost/bot-phone-back/'; seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?mode=bot');
   const app = await mountBotApp(scope);
@@ -86,9 +86,9 @@ it('goes back to the assistant list from a chat on a phone with ‹ Assistants, 
     roster().scrollTop = 120;
     await act(async () => app.button('A1').click());
     await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
-    const back = app.button('Back to assistants');
+    const back = app.button('Back to chats');
     // Like a phone's navigation bar: a chevron and the list's name, never a bare Back.
-    expect(back.textContent).toBe('Assistants');
+    expect(back.textContent).toBe('Chats');
     expect(back.querySelector('svg')).not.toBeNull();
     expect(app.container.querySelector('.lab-bot-workspace')!.getAttribute('data-navigation')).toBe('push');
     // A browser drops the scroll position of a list it stops displaying.
@@ -210,7 +210,7 @@ it('keeps the Chats heading outside the roster and visually hidden, on desktop a
     const conversation = main.querySelector<HTMLElement>('.lab-bot-conversation')!;
     expect(conversation.hidden).toBe(false);
     expect(title().classList.contains('agent-visually-hidden')).toBe(true);
-    await act(async () => app.button('Back to assistants').click());
+    await act(async () => app.button('Back to chats').click());
     expect(conversation.hidden).toBe(true);
     expect(title().classList.contains('agent-visually-hidden')).toBe(true);
   } finally { await app.close(); }

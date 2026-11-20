@@ -62,7 +62,7 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
         await expect(page.locator('.lab-bot-conversation')).toBeVisible();
         if (phone(page)) {
           await expect(page.locator('.lab-tab-bar')).toBeHidden();
-          await page.getByRole('button', { name: 'Back to assistants', exact: false }).or(page.locator('.lab-bot-back')).first().click();
+          await page.getByRole('button', { name: 'Back to chats', exact: false }).or(page.locator('.lab-bot-back')).first().click();
           await expect(page.locator('.lab-tab-bar')).toBeVisible();
         } else {
           expect(await coveringControls(page)).toEqual([]);

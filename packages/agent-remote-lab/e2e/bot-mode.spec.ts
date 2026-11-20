@@ -458,7 +458,7 @@ test('keeps Handoff modal and progress reachable across Bot and Window without r
     await progress.getByRole('button', { name: 'Details', exact: true }).click();
     await expect(progress.getByRole('button', { name: 'Cancel Handoff', exact: true })).toBeEnabled();
     await progress.getByRole('button', { name: 'Hide details', exact: true }).click();
-    if (await bot.getByRole('button', { name: 'Back to assistants', exact: true }).isVisible()) await bot.getByRole('button', { name: 'Back to assistants', exact: true }).click();
+    if (await bot.getByRole('button', { name: 'Back to chats', exact: true }).isVisible()) await bot.getByRole('button', { name: 'Back to chats', exact: true }).click();
     await nav.getByRole('button', { name: 'Bot other T', exact: true }).click();
     await expect(progress).toBeVisible(); await mode(page, 'window'); await expect(progress).toBeVisible();
     await progress.getByRole('button', { name: 'Details', exact: true }).click();
@@ -471,7 +471,7 @@ test('keeps Handoff modal and progress reachable across Bot and Window without r
     expect((await client.inspect(aId)).window).toEqual(before.window); expect(fixture.sessions.get('A')!.sent).toEqual([]);
     await progress.getByRole('button', { name: 'Hide details', exact: true }).click();
     await mode(page, 'bot');
-    if (await bot.getByRole('button', { name: 'Back to assistants', exact: true }).isVisible()) await bot.getByRole('button', { name: 'Back to assistants', exact: true }).click();
+    if (await bot.getByRole('button', { name: 'Back to chats', exact: true }).isVisible()) await bot.getByRole('button', { name: 'Back to chats', exact: true }).click();
     await nav.getByRole('button', { name: 'Bot source S', exact: true }).click(); release();
     await expect.poll(async () => (await client.inspect(bId)).window.views.find(view => view.id === 'B1')?.binding?.nativeSessionId).toBe('B');
     await expect(progress).toBeHidden();
@@ -533,8 +533,8 @@ for (const [width, height] of [[1440, 900], [1181, 800], [1180, 800], [390, 844]
     await noOverflow(page);
     if (width <= 1180) {
       await expect(bot.locator('.lab-bot-roster')).toBeHidden();
-      await expect(bot.getByRole('button', { name: 'Back to assistants', exact: true })).toBeVisible();
-      await bot.getByRole('button', { name: 'Back to assistants', exact: true }).click();
+      await expect(bot.getByRole('button', { name: 'Back to chats', exact: true })).toBeVisible();
+      await bot.getByRole('button', { name: 'Back to chats', exact: true }).click();
       await expect(row).toBeFocused(); await expect(bot.getByRole('region', { name: 'Bot conversation', exact: true })).toBeHidden();
       await expect(page.getByTestId('prompt-input').locator('visible=true')).toHaveCount(0);
       await screenshot(page, `roster-${width}`); await row.press('Enter');

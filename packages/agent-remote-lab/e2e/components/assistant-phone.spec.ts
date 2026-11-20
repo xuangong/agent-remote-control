@@ -29,7 +29,7 @@ async function swipe(target: Locator, from: { x: number; y: number }, to: { x: n
 test('a long name is cut short in the top bar, which leaves Back and the conversation\'s tools reachable', async ({ page }) => {
   await home(page, '&section=notes&bot=chief&longName=1');
   const bar = page.locator('.lab-assistant-top-bar');
-  const back = bar.getByRole('button', { name: 'Back to assistants', exact: true });
+  const back = bar.getByRole('button', { name: 'Back to chats', exact: true });
   const title = bar.locator('button.lab-assistant-title');
   await expect(title).toBeVisible();
   const [backBox, titleBox, toolsBox] = await Promise.all([back.boundingBox(), title.boundingBox(), bar.locator('.lab-assistant-top-bar-trailing').boundingBox()]);
@@ -42,7 +42,7 @@ test('a long name is cut short in the top bar, which leaves Back and the convers
   await expect(sheet.locator('ol.lab-assistant-chain li').first()).toBeVisible();
   expect(await sheet.locator('.lab-assistant-details-body').evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(1);
   const card = await sheet.locator('.lab-assistant-card').boundingBox();
-  expect(card!.x + card!.width).toBeLessThanOrEqual(390);
+  expect(card!.x + card!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
   await sheet.getByRole('button', { name: 'Close', exact: false }).first().click();
   await back.click();
   await expect(page.locator('.lab-bot-roster')).toBeVisible();
@@ -81,7 +81,7 @@ for (const theme of ['light', 'dark'] as const) {
     expect(Math.abs(await roster.evaluate(node => node.scrollTop) - scrolled)).toBeLessThanOrEqual(1);
     // The top bar's Back too.
     await page.getByRole('button', { name: 'Chief', exact: true }).click();
-    await page.getByRole('button', { name: 'Back to assistants', exact: true }).click();
+    await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
     await expect(roster).toBeVisible();
   });
 }

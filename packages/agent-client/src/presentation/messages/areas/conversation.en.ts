@@ -122,8 +122,8 @@ export const conversation = {
   // The assistant view: the list of assistants, the top bar of a conversation and Window tiles.
   'assistants.title': 'Assistants',
   'assistants.new': 'New assistant',
-  'assistants.back': 'Back to assistants',
-  'assistants.backShort': 'Assistants',
+  'assistants.back': 'Back to chats',
+  'assistants.backShort': 'Chats',
   'assistants.choose': 'Choose an assistant to continue its conversation.',
   'assistants.chooseInGroup': 'No assistant selected. Choose one from this group.',
   'assistants.empty': 'No assistants in this group yet.',

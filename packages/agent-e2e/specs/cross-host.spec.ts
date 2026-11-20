@@ -33,7 +33,7 @@ async function openBots(page: Page, fixture: Fixture) {
 }
 /** A phone shows the list or a chat: back to the list, where the rows are. */
 async function showList(page: Page) {
-  const back = page.locator('[data-workbench-mode="bot"]').getByRole('button', { name: 'Back to assistants', exact: true });
+  const back = page.locator('[data-workbench-mode="bot"]').getByRole('button', { name: 'Back to chats', exact: true });
   // A page that is still loading shows neither yet.
   await expect.poll(async () => await back.isVisible() || await bots(page).isVisible(), { timeout: 20_000 }).toBe(true);
   if (await back.isVisible()) await back.click();

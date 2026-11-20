@@ -119,6 +119,17 @@ const en = {
   'conversation.today': 'Today {time}',
   'conversation.yesterday': 'Yesterday {time}',
   'conversation.sending': 'Sending',
+
+  // The assistant's one sentence of business state.
+  'assistant.needsYou': 'Wants to ask you something',
+  'assistant.hostOffline': '{host} is offline. Messages go when it is back',
+  'assistant.hostOfflineUnnamed': 'The Host is offline. Messages go when it is back',
+  'assistant.failed': 'Something went wrong',
+  'assistant.ended': 'This conversation has ended',
+  'assistant.resting': 'Resting. Wakes when you need it',
+  'assistant.working': 'Working on it',
+  'assistant.waitingToSend': 'Will send when it is ready',
+  'assistant.ready': 'Ready when you are',
 } as const satisfies Readonly<Record<string, Message>>;
 
 export type MessageKey = keyof typeof en;
@@ -216,6 +227,16 @@ const zh: Readonly<Record<MessageKey, Message>> = {
   'conversation.today': '今天 {time}',
   'conversation.yesterday': '昨天 {time}',
   'conversation.sending': '发送中',
+
+  'assistant.needsYou': '想问你一件小事',
+  'assistant.hostOffline': '{host} 离线，消息会在它上线后送达',
+  'assistant.hostOfflineUnnamed': '电脑离线了，消息会在它上线后送达',
+  'assistant.failed': '出了点问题',
+  'assistant.ended': '这段对话已经结束了',
+  'assistant.resting': '在休息，需要时自动醒来',
+  'assistant.working': '在忙，稍等～',
+  'assistant.waitingToSend': '等它准备好就发出去',
+  'assistant.ready': '有事随时叫我',
 };
 
 const catalogues: Readonly<Record<Locale, Readonly<Record<MessageKey, Message>>>> = { en, zh };

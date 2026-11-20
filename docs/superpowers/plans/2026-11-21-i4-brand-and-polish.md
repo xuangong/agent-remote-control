@@ -238,4 +238,68 @@ Roadmap rule 1: fields and paths, +N/−M.
 
 ## 9. Results
 
-Filled in per task: commits, suites and counts, the CSS line count against `ac075f9d`, the ratchet, T1 and T5 against production, the captures and deviations.
+**Commits.** 63 commits on `design/im-session-service` after `0488f6af` (the plan, the rules, the catalogue in areas and the
+device choices, the composer capsule, the access pages, the rail, the tab bar, Chats, the directory and one Settings page,
+every remaining word, the CSS, the installed app, E11, and the fixes found on `pnpm local`).
+
+**Catalogue.** 2,981 keys per locale (426 at the start of I4), English byte-identical to the literals they replaced:
+common 54, conversation 213 (the I3 keys), composer 228, timeline 335, navigation 140, settings 177, hosts 274, windows 165,
+sessions 603, team 435, diagnostics 86, client 271. `messages.test.ts` covers every area: each locale has exactly the keys of
+the others, no empty form, the same placeholders, no key in two areas and each key under its area's prefix; the Chinese area
+files are typed by the English ones, and a key the code uses must exist (`MessageKey`). `chinese-screens.spec.ts`,
+`navigation.spec.ts` and `settings.spec.ts` find no stray English on the main screens in Chinese (desktop and phone). Left
+English on purpose: about 110 invariant and diagnostic strings that no person reads ("Invalid session view", transport
+diagnostics with codes), the Lab's recorded-scenario controls, proper names, commands and data from the Relay.
+
+**CSS.** Production CSS 4,271 lines, equal to `ac075f9d` (net 0 for I3 and I4; 4,313 before Task 8's last pass). Legacy
+ratchet lowered in every CSS commit (TPM, Ask, dock rail, folded cards and Team panel by Task 8; styles.css 387 → 381,
+app.css 503 → 501, host-overview.css 25 → 24 at the end).
+
+**Bundles.** Entry 67.4 KB gzip (budget 70), App 583.7 KB (budget 600); the sign-in entry carries no catalogue table.
+
+**Suites** (on the final tree): `pnpm verify` green (compatibility, architecture, every build and type check, every unit
+suite; the Lab 310 files, 3,406 tests); `pnpm test:preview-browser` 19 files, 73 tests; `pnpm test:e2e:flows` E1 to E11,
+41 tests, and E9 to E11 with `E2E_BROWSER=webkit`, 10 tests; `pnpm fixtures:check` consistent; `pnpm test:components`
+916 passed, 144 skipped, 3 failed in 11.9 minutes: two `pairing-keys` runs on `chromium-mobile` (the shared Settings opener
+did not close the phone's Context drawer; fixed in `7273dc69`, then green in `chromium-mobile`, `chromium-desktop` and
+`webkit-mobile-viewport`) and `assistant-phone.spec.ts:130` on `orchard-phone-webkit` (its page load timed out under the
+suite's load; alone it passed three times out of three). `pnpm compatibility:check` and `pnpm arch:check` green.
+
+**T1 and T5** (`pnpm local`, 4x CPU, 100 ms RTT; T1 on I3's five sessions, n = 50 reloads each arm, back to back on the
+same instance with the production web build `b270a227` served through `ARC_LOCAL_WEB_DIST`):
+
+| | Production `b270a227` | I4 `e1ef448c` |
+|---|---|---|
+| T1 start → content, p50 / p95 | 338 / 401 ms | 338 / 362 ms |
+| T1 pane mount, p50 / p95 | 249 / 278 ms | 198 / 271 ms |
+| T1 mount → content, p50 / p95 | 92 / 150 ms | 141 / 159 ms |
+| T5 opens with a connection word | not run (see below) | 0 of 10 |
+| T5 Sending, typed during the open, p50 / p95 | (I3b: 68 / 82 ms) | 45 / 53 ms |
+| T5 Sending, first send of a view, p50 / p95 | (I3b: 196 / 198 ms) | 82 / 86 ms |
+| T5 Sending, second send, p50 / p95 | (I3b: 85 / 103 ms) | 54 / 68 ms |
+
+Content arrives no later (equal p50, 39 ms better p95); the conversation's pane mounts about 50 ms earlier, so the gap
+from mount to content is longer while the content time is not. The production arm of T5 could not run on this instance's
+current Window state: the production page shows no selected pane for the session link (and turns a new session's link into
+the Window's last view), so the runner times out waiting for its pane; I4 opens the linked pane. The I3b numbers are
+production's from the I3 report, on the same runner and instance.
+
+**Captures.** `.tmp/i4/`: desktop Bot mode with the + menu and the details, Window mode, Settings (General), phone Chats,
+a conversation with the composer focused and the keyboard up, the details sheet; light and dark, English and Chinese.
+`.tmp/i4/access/`: the access page's wait, sign-in, unavailable and expired states, both themes and languages, desktop and
+phone.
+
+**Deviations.**
+- The composer's activity line stays in the page, visually hidden, for screen readers; its dot is gone.
+- The Relay's CLI access words live in `access-cli-words.ts`, beside the access page's table.
+- On the phone, Window mode keeps its Sessions drawer button (the only way to switch Windows there), above the tab bar.
+- `?mode=bot&section=…` opens the Assistants directory at that group.
+- Settings embeds the moved sections (Display, chat cache, support sharing, layout diagnostics) with their own headings.
+- In the details, the session's settings stand open as rows (Model, Permissions, Status); the composer keeps them behind
+  "+", which carries a dot for an unread setting error.
+- A chat pushed on the phone returns to Chats and says "‹ Chats".
+- Found on `pnpm local` and in the full suites, and fixed: the empty draft showed no placeholder (ProseMirror's paragraph
+  never matched `:empty`); Settings cut its segmented labels to an ellipsis; the details showed a lone "+" for the session's
+  settings; General named Display twice; the sidebar did not give way for the rail beside the inspector; the phone's tab bar
+  covered the context drawer's New session; choosing Search left the session actions open over the field; an account
+  without a name showed the initial of "This device".

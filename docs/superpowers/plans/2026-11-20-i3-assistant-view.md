@@ -582,6 +582,41 @@ Every open whose pane mounts with its session paints content in the mount frame 
 - A tile's sentence does not use the latest reply as Bot mode's row does ("Ready when you are" beside "LOCAL-OK" on `pnpm local`).
 - A bot is still named by its session's title. New assistant and Open in Bot mode take that title from the session, often its first prompt, so `pnpm local` shows the prompt as the bot's name in both modes (see question 4).
 
+### I3c (polish, the coordinator's decisions after I3b)
+
+**Commits** (from `bb8833cb`): the stored name `669e7e01`; the naming rule `1444d147`; names in the Lab and the details card `224c3c7e`; Window mode in Bot mode's language and B8's last deletions `803f8e7d`; fixture locales `59ea120c`; re-pointed specs `06f876cb`; unused style rules `f03627cd`; found on `pnpm local` and fixed: `2caa4171` (sidebar width), `493ec78c` (a long session title widened the details); send cost `8af3496b`; compatibility `a58d1c44`, `be311248`; these results in the commit after.
+
+**Deploy.** `WindowBotDetails.name` is a stored field: the Relay goes first (strict schema). Bots stored without a name are called by their generated name and store it with their first edit; no migration.
+
+**Names.** `assistantNames` gives every assistant its stored name or one of 25 soft names (团团 Dango, 软糖 Gummies, 窝 Nest, 石子 Pebbles, 孵 Hatch and twenty more) in the reader's language, picked by its group and view, unique in the account. A session's title is the conversation's subtitle and a row of the sessions list only. The name is renamed in place on the card.
+
+**T1 and T5** (`pnpm local`, 4x CPU, 100 ms RTT, the same instance and data, swapping only the website with `ARC_LOCAL_WEB_DIST` set to a build of production `9574eddd`; each T5 run adds 13 real Copilot turns, so the pairs were run back to back):
+
+| | Production `9574eddd` | I3c |
+|---|---|---|
+| T1 mount → content, p50 / p95 (30 reloads, 3 sessions) | 135 / 139 ms | 112 / 121 ms |
+| T1 content, p50 / p95 | 318 / 340 ms | 296 / 314 ms |
+| T5 opens with a connection word | 0 of 10, twice | 0 of 10, four times |
+| T5 first send, p50 / p95 (n = 3; pair A, pair B) | 56 / 57, 68 / 76 ms | 61 / 62, 71 / 73 ms |
+| T5 second send, p50 / p95 (n = 3) | 37 / 47, 43 / 45 ms | 42 / 46, 49 / 51 ms |
+| T5 typed during the open, p50 / p95 (n = 10) | 43 / 47, 52 / 54 ms | 39 / 44, 51 / 53 ms |
+| First send, Enter to the outgoing row painted (probe, n = 8) | 53 ms | 54 ms |
+| Second send, the same (probe, n = 8) | 75 ms | 61 ms |
+
+The send numbers move with the session's length (production went from 56 to 68 ms between pairs A and B) and stay within a few milliseconds of production in each pair; the eight-sample probe, run back to back, finds the first send equal and the second faster. Two costs were removed on the way: the tile heading's `:has()` rules and a group-operation callback that changed on every render. The T1 runner counts a view ready when no status label blocks it, since a tile shows none.
+
+**Suites.** Components: 785 passed, 131 skipped, 1 failed (10.2 min); the failure was `sidebar-resize.spec.ts` reading the sidebar panel's width, fixed in `2caa4171` and passing with the layout specs (42 of 42). The long session title (`493ec78c`) has its own phone test. Unit, flows and `pnpm verify`: see the report.
+
+**CSS.** Production CSS, measured as for I3a: 4,260 → 4,319 lines (+59; I3b alone was +105). I3c deleted the handoff line's stylesheet and the rules no element uses (−46). Not ≤ 0: the remaining growth is the details panel (`assistant.css`, 68) and the Window canvas and tile header (`session-dock.css`); the legacy rules they supersede still style the compact layouts, TPM and Ask views and the fixtures that render a dock rail outside the Window canvas.
+
+**Deviations.**
+- The attribution switch stays, as Info in the tile's ⋯ menu, which the decision lists.
+- Empty-view titles stay: the empty tile's header carries its close, drag and window controls.
+- The phone's single-visible-tile rule stays: the stack holds primary tiles; floating views on a phone still show one at a time.
+- The tile's ⋯ menu is a popover of the existing controls, not a list of labelled items.
+- A new assistant stores its name at its first edit, not at creation; a session of Other sessions is named by its key and stores nothing.
+- `foreground-recovery.local.test.tsx` (local only, not in `pnpm verify`) fails 3 of 6 on the send call's arguments, the same way on production `9574eddd`.
+
 ## 11. Open questions for the owner
 
 1. **English or Chinese words.** The design's sentences are Chinese and the product is English today. I3 writes English in the design's voice (decision 9). A Chinese locale would be a separate step with a string table; say if you want it in I4.

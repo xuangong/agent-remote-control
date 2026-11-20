@@ -16,6 +16,10 @@ beforeAll(async () => {
 });
 afterAll(async () => { await browser?.close(); await stack?.close(); });
 
+/** The name the assistant of a conversation is called by: its tile's in Window mode, which its row in Bot mode shows too. */
+const assistantOf = (page: Page, answer: string) => page.locator('.lab-session-family-pane').filter({ hasText: answer }).locator('.lab-tile-name').first().innerText();
+const botRow = (page: Page, name: string) => page.locator('[data-workbench-mode="bot"]').getByRole('button', { name, exact: true }).first();
+
 /** Alpha open, and Beta added to the same Window from All sessions. */
 async function groupOfTwo(): Promise<{ page: Page; close(): Promise<void> }> {
   const { context, page } = await openPage(browser, stack.sessionUrl('alpha'));
@@ -37,8 +41,9 @@ it('E6: a group is built by adding a second session to the Window', async () => 
 
 it('E6: Bot mode lists the group, opens one bot, and Window mode shows both panes again', async () => {
   const { page, close } = await groupOfTwo();
+  const beta = await assistantOf(page, 'beta answer');
   await page.getByRole('button', { name: 'Bot mode' }).first().click();
-  await page.getByRole('button', { name: /^Beta/ }).first().click();
+  await botRow(page, beta).click();
   await showsText(page, 'beta answer');
   await page.getByRole('button', { name: 'Window mode' }).first().click();
   await showsText(page, 'alpha answer');
@@ -57,8 +62,9 @@ it('E6: a folded pane gives up its rows and the other pane stays', async () => {
 it('E6: a draft stays in the composer when the person changes mode', async () => {
   const { page, close } = await groupOfTwo();
   await composerOf(page).first().fill('A draft that is not sent');
+  const alpha = await assistantOf(page, 'alpha answer');
   await page.getByRole('button', { name: 'Bot mode' }).first().click();
-  await page.getByRole('button', { name: /^Alpha/ }).first().click();
+  await botRow(page, alpha).click();
   await showsText(page, 'alpha answer');
   await page.getByRole('button', { name: 'Window mode' }).first().click();
   await showsText(page, 'alpha answer');
@@ -69,18 +75,20 @@ it('E6: a draft stays in the composer when the person changes mode', async () =>
 
 it('E6: a bot put to sleep gives up its rows in Window mode, and opening it wakes it', async () => {
   const { page, close } = await groupOfTwo();
+  const beta = await assistantOf(page, 'beta answer');
   await page.getByRole('button', { name: 'Bot mode' }).first().click();
-  // Sleep is on the bot's card, in its details beside the conversation (I3b).
-  await page.getByRole('button', { name: /^Beta/ }).first().click();
+  // Sleep is in the bot's card menu, in its details beside the conversation (I3c).
+  await botRow(page, beta).click();
   const title = page.locator('[data-workbench-mode="bot"] .lab-assistant-top-bar button.lab-assistant-title');
   if (await title.getAttribute('aria-expanded') !== 'true') await title.click();
-  await page.locator('.lab-assistant-details .lab-assistant-card-actions').getByRole('button', { name: 'Sleep', exact: true }).click();
+  await page.locator('.lab-assistant-details .lab-assistant-card-actions').getByRole('button', { name: /^More actions for / }).click();
+  await page.getByRole('menuitem', { name: 'Sleep', exact: true }).click();
   await showsText(page, 'is asleep. Opening it wakes it.');
   await page.getByRole('button', { name: 'Window mode' }).first().click();
   await showsText(page, 'alpha answer');
   await page.waitForFunction(() => !document.body.innerText.includes('beta answer'));
   await page.getByRole('button', { name: 'Bot mode' }).first().click();
-  await page.getByRole('button', { name: /^Beta/ }).first().click();
+  await botRow(page, beta).click();
   await showsText(page, 'beta answer');
   await page.getByRole('button', { name: 'Window mode' }).first().click();
   await showsText(page, 'alpha answer');

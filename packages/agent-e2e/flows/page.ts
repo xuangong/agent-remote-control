@@ -39,6 +39,12 @@ export async function sessionsList(page: Page) {
   return list;
 }
 
+/** Closes the details of the assistant on screen, which a tile opens over its window and its composer. */
+export async function closeDetails(page: Page): Promise<void> {
+  await assistantDetails(page).getByRole('button', { name: /^Close/ }).first().click();
+  await page.locator('.lab-tile-details:visible, .lab-assistant-details:visible, dialog.orchard-sheet[open]').first().waitFor({ state: 'hidden' }).catch(() => {});
+}
+
 /**
  * Chooses how much of each turn's work shows, for every assistant on this device: from the session's view options where its
  * heading has them, else from the details of the tile or the assistant.

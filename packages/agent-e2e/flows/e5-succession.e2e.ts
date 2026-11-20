@@ -5,7 +5,7 @@ import type { Browser, Page } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { startStack, type Stack } from '@orchardworks/agent-e2e/stack';
 import { launchBrowser, openPage } from './browser.js';
-import { send, sessionsList, showsText } from './page.js';
+import { closeDetails, send, sessionsList, showsText } from './page.js';
 
 let browser: Browser;
 beforeAll(async () => { browser = await launchBrowser(); });
@@ -42,6 +42,7 @@ it('E5: the page hands the session to a successor that carries the earlier conve
     const successor = successorUrl(page)!;
     // The assistant's details list the session it continued from.
     await (await sessionsList(page)).locator('ol.lab-assistant-chain a[href*="session=origin"]').waitFor();
+    await closeDetails(page);
     // The handoff itself sends nothing; the first message the person writes carries the quoted history once.
     expect(stack.provider.session(successor)?.sent ?? []).toEqual([]);
     await send(page, 'First message on the successor');
@@ -88,6 +89,7 @@ it('E5: a page refreshed while the handoff is half done keeps the conversation, 
     await page.getByRole('button', { name: 'Commit Handoff', exact: true }).click();
     await expect.poll(() => successorUrl(page), { timeout: 25_000 }).not.toBe('origin');
     await (await sessionsList(page)).locator('ol.lab-assistant-chain a[href*="session=origin"]').waitFor();
+    await closeDetails(page);
     await send(page, 'After the refresh');
     await showsText(page, 'Echo: ');
     await context.close();

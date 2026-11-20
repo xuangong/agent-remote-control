@@ -151,3 +151,22 @@ Shipped from main `8ac70385`.
   - focus and text kept: 0 → 10.
 - **Seen on `pnpm local`.** The access page still shows "Checking access" for about 60 ms before the workspace mounts. The I4 brand pass rewords it.
 - **Open phone defect.** On the phone, the floating launchers (activity, TPM, Window, Team) cover the conversation. This is O30 again, with more launchers, and it is fixed next.
+
+## Release 2026-11-20: I2 design system and phone launchers
+
+Shipped from main `ac075f9d`.
+- **Relay and website:** Worker `14c7416e`, deployed with `wrangler.journals-enabled.jsonc`. The rollback target is `3d63810e`. No Controller change.
+- **What shipped:**
+  - Orchard tokens with light, dark and system themes;
+  - the primitives;
+  - generated avatars, with four shapes and a gaze stored on the bot picture (a new Relay field);
+  - the Orchard mark, wordmark, icons and web-app manifest. The production page title is now "Orchard".
+- **Phone fixes:**
+  - launchers and the session toolbar take reserved rows on screens up to 1180 px;
+  - the composer reserves room for its hide tab;
+  - a generic component test fails when any fixed or absolute control overlaps conversation text at 390x844.
+- **Checks:**
+  - full `pnpm verify` passed;
+  - components passed (509); one known load flake passed on a 3-of-3 rerun alone;
+  - WCAG AA contrast held in both themes;
+  - touch targets are at least 44 px on the phone.

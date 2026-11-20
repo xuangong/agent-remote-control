@@ -8,6 +8,8 @@ test('filters execution environments without confusing same-name Hosts or overfl
   const hosts = [{ id: 'linux', name: 'My Host', online: true, environment: baseEnvironment, providers: [{ providerId: 'codex', displayName: 'Codex' }] },
     { id: 'mac', name: 'My Host', online: true, environment: { ...baseEnvironment, os: { ...baseEnvironment.os, platform: 'darwin', name: 'macOS' },
       container: false, shell: { name: 'zsh', source: 'account' }, browsers: [], vscode: { status: 'found' } }, providers: [{ providerId: 'codex', displayName: 'Codex' }] }];
+  // The Relay's own lists this test does not look at, answered empty so that no error toast covers the drawer.
+  await page.route('**/v1/providers?**', route => route.fulfill({ json: { protocolVersion: '1.8.0', type: 'provider_list', payload: { providers: [] } } }));
   await page.route('**/v1/remote/hosts', route => route.fulfill({ json: { hosts } }));
   await page.route('**/v1/remote/hosts/*/**', route => {
     const path = new URL(route.request().url()).pathname;

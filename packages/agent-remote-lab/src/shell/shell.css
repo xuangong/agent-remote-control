@@ -9,8 +9,8 @@
 .lab-frame { --lab-rail-width: 0px; --lab-tab-bar-height: 0px; display: flex; width: 100%; background: var(--orchard-ground); }
 .lab-frame[data-rail] { --lab-rail-width: calc(60px + var(--orchard-space-l)); }
 .lab-frame[data-tab-bar] { --lab-tab-bar-height: calc(56px + var(--orchard-safe-area-bottom)); }
-.lab-frame[data-tab-bar]:is(:has([data-viewport-occluded="true"]), :has(> .lab-bot-workspace[data-chat]:not([hidden]))) { --lab-tab-bar-height: 0px; }
-.lab-frame[data-tab-bar]:is(:has([data-viewport-occluded="true"]), :has(> .lab-bot-workspace[data-chat]:not([hidden]))) > .lab-tab-bar { display: none; }
+.lab-frame[data-tab-bar]:is(:has([data-viewport-occluded="true"]), :has(> .lab-bot-workspace[data-chat]:not([hidden])), :has(> .lab-shell.lab-supporting-open)) { --lab-tab-bar-height: 0px; }
+.lab-frame[data-tab-bar]:is(:has([data-viewport-occluded="true"]), :has(> .lab-bot-workspace[data-chat]:not([hidden])), :has(> .lab-shell.lab-supporting-open)) > .lab-tab-bar { display: none; }
 .lab-frame > :is(main, .lab-page) { flex: 1 1 0; width: auto; min-width: 0; height: calc(var(--lab-viewport-height, 100dvh) - var(--lab-tab-bar-height)); }
 @media (max-width: 1180px) { .lab-frame > .lab-shell { inset-inline-start: var(--lab-rail-width); }
   .lab-frame > .lab-shell:not([hidden]) { inset-inline-end: 0; } }

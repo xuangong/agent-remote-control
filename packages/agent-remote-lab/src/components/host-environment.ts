@@ -1,16 +1,17 @@
+import { translator, type Translate } from '@orchardworks/agent-client';
 import type { RemoteHost } from './HostPairing.js';
 
-export function hostEnvironmentLabels(host: RemoteHost): string[] {
+export function hostEnvironmentLabels(host: RemoteHost, t: Translate = translator('en')): string[] {
   const value = host.environment;
   if (!value) return [];
-  return [value.os.name, value.os.arch, ...(value.wsl ? ['WSL'] : []), ...(value.container ? ['Container'] : []),
+  return [value.os.name, value.os.arch, ...(value.wsl ? ['WSL'] : []), ...(value.container ? [t('hosts.env.container')] : []),
     ...(value.shell.name ? [value.shell.name] : []),
     ...value.browsers.filter(item => item.status === 'found').map(item => item.name),
     ...(value.vscode.status === 'found' ? ['VS Code'] : [])];
 }
-export function hostDisplayLabel(host: RemoteHost): string {
-  return [host.name, host.online ? 'Online' : 'Offline', ...(host.access === 'shared' ? ['Shared'] : []),
-    ...(host.environment ? hostEnvironmentLabels(host) : ['Environment unknown'])].join(' · ');
+export function hostDisplayLabel(host: RemoteHost, t: Translate = translator('en')): string {
+  return [host.name, host.online ? t('common.online') : t('common.offline'), ...(host.access === 'shared' ? [t('hosts.env.shared')] : []),
+    ...(host.environment ? hostEnvironmentLabels(host, t) : [t('hosts.env.unknown')])].join(' · ');
 }
 
 export function matchesHostEnvironment(host: RemoteHost, query: string): boolean {

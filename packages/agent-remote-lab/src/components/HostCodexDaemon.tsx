@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { CodexDaemonStatus } from '@orchardworks/agent-remote-protocol';
+import { errorWords } from '@orchardworks/agent-client';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { HostPairingService, RemoteHost } from './HostPairing.js';
 
 // Cover the fifteen-minute native refresh plus readiness confirmation and transport delay.
@@ -14,6 +16,8 @@ export function HostCodexDaemon({ host, service, visible = true }: { host: Remot
 function DaemonControl({ host, request, visible }: {
   host: RemoteHost; request: NonNullable<HostPairingService['codexDaemon']>; visible: boolean;
 }) {
+  const t = useTranslate();
+  const words = useRef(t); words.current = t;
   const [status, setStatus] = useState<CodexDaemonStatus>();
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -34,7 +38,7 @@ function DaemonControl({ host, request, visible }: {
       if (!mounted.current || ticket !== serial.current) return;
       setStatus(result); setFailure(undefined); setUncertain(false);
     } catch (error) {
-      if (mounted.current && ticket === serial.current) setFailure(error instanceof Error ? error.message : 'Could not check daemon status.');
+      if (mounted.current && ticket === serial.current) setFailure(errorWords(error, words.current, 'hosts.daemon.statusFailed'));
     } finally {
       if (mounted.current && ticket === serial.current) setChecking(false);
     }
@@ -70,7 +74,7 @@ function DaemonControl({ host, request, visible }: {
     } catch (error) {
       if (mounted.current && ticket === serial.current) {
         setUncertain(true);
-        setFailure(`${error instanceof Error ? error.message : 'The restart was not confirmed.'} Checking status without sending another restart.`);
+        setFailure(t('hosts.daemon.checking', { message: errorWords(error, t, 'hosts.daemon.restartUnconfirmed') }));
       }
     } finally {
       writing.current = false;
@@ -82,22 +86,22 @@ function DaemonControl({ host, request, visible }: {
   }
   const busy = submitting || status?.phase === 'restarting';
   const labels: Record<string, string> = {
-    restarting: 'Restarting Codex daemon…', ready: 'Restart completed. Codex daemon confirmed ready. Interrupted tasks do not resume automatically.',
-    failed: status?.message || 'Restart failed. Check the local daemon before trying again.',
-    unknown: 'Restart outcome unknown. Inspect native state before restarting again.',
+    restarting: t('hosts.daemon.restarting'), ready: t('hosts.daemon.ready'),
+    failed: status?.message || t('hosts.daemon.failed'),
+    unknown: t('hosts.daemon.unknown'),
   };
   return <div className="lab-host-codex-daemon">
     <div className="lab-host-security-actions">
-      <button type="button" disabled={!host.online || busy || checking || uncertain || !status} onClick={() => { setConfirming(true); void refresh(); }}>Restart Codex daemon</button>
-      <button type="button" disabled={!host.online || submitting || checking} onClick={() => { deadline.current = Date.now() + daemonStatusPollingWindowMs; void refresh(); }}>Check status</button>
+      <button type="button" disabled={!host.online || busy || checking || uncertain || !status} onClick={() => { setConfirming(true); void refresh(); }}>{t('hosts.daemon.restart')}</button>
+      <button type="button" disabled={!host.online || submitting || checking} onClick={() => { deadline.current = Date.now() + daemonStatusPollingWindowMs; void refresh(); }}>{t('hosts.daemon.check')}</button>
     </div>
-    {confirming ? <div className="gateway-security-confirmation" role="group" aria-label="Confirm Codex daemon restart" aria-describedby={description}>
-      <p id={description}>Restart the shared Codex daemon on {host.name}? All its Codex sessions, including local CLI sessions, will disconnect. Running tasks will be interrupted and will not resume automatically. Saved history is preserved.</p>
-      <button type="button" disabled={busy || checking || uncertain || !host.online} onClick={() => void restart()}>Confirm restart</button>
-      <button type="button" disabled={submitting} onClick={() => setConfirming(false)}>Cancel</button>
+    {confirming ? <div className="gateway-security-confirmation" role="group" aria-label={t('hosts.daemon.confirmLabel')} aria-describedby={description}>
+      <p id={description}>{t('hosts.daemon.confirm', { name: host.name })}</p>
+      <button type="button" disabled={busy || checking || uncertain || !host.online} onClick={() => void restart()}>{t('hosts.daemon.confirmAction')}</button>
+      <button type="button" disabled={submitting} onClick={() => setConfirming(false)}>{t('common.cancel')}</button>
     </div> : null}
-    {!host.online ? <p role="status">Host offline. Reconnect to check daemon status.</p>
-      : submitting || status?.phase && status.phase !== 'idle' ? <p role="status">{submitting ? 'Requesting daemon restart…' : labels[status!.phase]}</p> : null}
+    {!host.online ? <p role="status">{t('hosts.daemon.offline')}</p>
+      : submitting || status?.phase && status.phase !== 'idle' ? <p role="status">{submitting ? t('hosts.daemon.requesting') : labels[status!.phase]}</p> : null}
     {failure ? <p role="alert">{failure}</p> : null}
   </div>;
 }

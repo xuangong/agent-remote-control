@@ -1,5 +1,6 @@
 import { workspaceFetch } from './workspace-access.js';
-import { watchList } from '@orchardworks/agent-client';
+import { errorWords, watchList, withMessageKey } from '@orchardworks/agent-client';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { parseVscodeTunnelSnapshot, type VscodeTunnelSnapshot } from '@orchardworks/agent-remote-protocol';
 import type { RemoteHost } from './components/HostPairing.js';
@@ -18,7 +19,11 @@ export class HttpVscodeTunnelClient implements VscodeTunnelService {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(action === 'start' ? { acceptLicense: true } : {}),
     } : {}) });
     const body = await response.json();
-    if (!response.ok) throw new DirectoryError(response.status === 404 ? 'This Host does not support VS Code tunnels. Update its Controller.' : body.error ?? 'VS Code tunnel is unavailable.', body.code);
+    if (!response.ok) {
+      if (response.status === 404) throw withMessageKey(new DirectoryError('This Host does not support VS Code tunnels. Update its Controller.', body.code), 'hosts.vscode.noSupport');
+      const error = new DirectoryError(body.error ?? 'VS Code tunnel is unavailable.', body.code);
+      throw body.error === undefined || body.error === null ? withMessageKey(error, 'hosts.vscode.requestFailed') : error;
+    }
     return parseVscodeTunnelSnapshot(body);
   }
   status(hostId: string) { return this.request(hostId); }
@@ -46,6 +51,8 @@ export function VscodeTunnelScope({ host, service, polling = true, children }: {
 }
 
 function HostTunnelState({ host, service, polling, children }: { host: RemoteHost; service: VscodeTunnelService; polling: boolean; children: ReactNode }) {
+  const t = useTranslate();
+  const words = useRef(t); words.current = t;
   const [state, setState] = useState<VscodeTunnelSnapshot>();
   const [error, setError] = useState<string>();
   const [errorCode, setErrorCode] = useState<string>();
@@ -68,7 +75,7 @@ function HostTunnelState({ host, service, polling, children }: { host: RemoteHos
       if (mounted.current && sequence.current === current) { setState(previous => JSON.stringify(previous) === JSON.stringify(result) ? previous : result); setError(undefined); setErrorCode(undefined); }
     } catch (failure) {
       if (mounted.current && sequence.current === current) {
-        setError(failure instanceof Error ? failure.message : 'Could not read VS Code tunnel status.');
+        setError(errorWords(failure, words.current, 'hosts.vscode.statusFailed'));
         setErrorCode(failure instanceof DirectoryError ? failure.code : undefined);
       }
     } finally {

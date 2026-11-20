@@ -1,4 +1,4 @@
-import { PreviewProvider, usePreviewController, type PreviewContextValue } from '@orchardworks/agent-client-web/react';
+import { PreviewProvider, usePreviewController, useTranslate, type PreviewContextValue } from '@orchardworks/agent-client-web/react';
 import type { HttpPreviewClient } from '@orchardworks/agent-client';
 import type { RemoteHost } from './HostPairing.js';
 import { HostPreviewList } from './HostPreviewList.js';
@@ -7,11 +7,12 @@ export function HostPreviewGroups({ client, hosts, activeHostId, polling, onOpen
   client: HttpPreviewClient; hosts: readonly RemoteHost[]; activeHostId?: string; polling: boolean;
   onOpen(): void; onOpenSource(sessionId: string, itemId: string, hostId: string): void;
 }) {
+  const t = useTranslate();
   const workspace = usePreviewController();
   const owned = hosts.filter(host => host.access !== 'shared');
   if (!owned.length) return null;
-  return <section className="lab-preview-groups" aria-label="Host previews">
-    <h2>Previews</h2>
+  return <section className="lab-preview-groups" aria-label={t('hosts.preview.label')}>
+    <h2>{t('hosts.preview.title')}</h2>
     {owned.map(host => host.id === activeHostId && workspace
       ? <HostPreviewList key={host.id} hideEmpty hostName={host.name} controller={workspace} onOpen={onOpen} onOpenSource={(sessionId, itemId) => onOpenSource(sessionId, itemId, host.id)} />
       : <PreviewProvider key={host.id} client={client} hostId={host.id} canManage polling={polling}>

@@ -2,6 +2,8 @@ import type { HostProviderChange, HostProviderSettings, CodexDaemonRestart, Code
 import { hostDisplayLabel, hostEnvironmentLabels, matchesHostEnvironment } from './host-environment.js';
 import { useFeedbackToast } from './Toast.js';
 import { useState } from 'react';
+import { errorWords } from '@orchardworks/agent-client';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 export interface HostProvider { providerId: string; displayName: string; daemonControl?: true; sessionRename?: true; sessionReferences?: true; referenceNotes?: true; sessionCommands?: true }
 export interface RemoteHost {
@@ -43,47 +45,51 @@ export interface HostPairingService {
 
 /** What a Host reports about where it runs: its tags, the detection details and whether the reader owns it. */
 export function HostEnvironmentDetails({ host }: { host: RemoteHost }) {
+  const t = useTranslate();
+  const unknown = t('common.unknown');
+  const detection = (status: 'found' | 'not-found' | 'unknown') => status === 'found' ? t('hosts.env.installed') : status === 'not-found' ? t('hosts.env.notFound') : unknown;
   return <>
-    <div className="lab-host-environment" aria-label="Host environment">
+    <div className="lab-host-environment" aria-label={t('hosts.env.label')}>
       {host.environment ? <>
-        <div className="lab-host-environment-tags">{hostEnvironmentLabels(host).map((label, index) => <span key={`${index}:${label}`}>{label}</span>)}</div>
-        <details><summary>Detection details</summary>
-          <dl><dt>System release</dt><dd>{host.environment.os.release}</dd>
-            <dt>Primary shell</dt><dd>{host.environment.shell.name ?? 'Unknown'} · {host.environment.shell.source}</dd>
-            <dt>WSL / Container</dt><dd>{[host.environment.wsl, host.environment.container].map(value => value === null ? 'Unknown' : value ? 'Yes' : 'No').join(' / ')}</dd>
-            <dt>Browsers</dt><dd>{host.environment.browsers.map(item => `${item.name}: ${detectionLabel(item.status)}`).join(', ') || 'Unknown'}</dd>
-            <dt>Shells</dt><dd>{host.environment.shells.map(item => `${item.name}: ${detectionLabel(item.status)}`).join(', ') || 'Unknown'}</dd>
-            <dt>VS Code</dt><dd>{detectionLabel(host.environment.vscode.status)}</dd>
+        <div className="lab-host-environment-tags">{hostEnvironmentLabels(host, t).map((label, index) => <span key={`${index}:${label}`}>{label}</span>)}</div>
+        <details><summary>{t('hosts.env.detection')}</summary>
+          <dl><dt>{t('hosts.env.systemRelease')}</dt><dd>{host.environment.os.release}</dd>
+            <dt>{t('hosts.env.primaryShell')}</dt><dd>{host.environment.shell.name ?? unknown} · {host.environment.shell.source}</dd>
+            <dt>{t('hosts.env.wslContainer')}</dt><dd>{[host.environment.wsl, host.environment.container].map(value => value === null ? unknown : value ? t('common.yes') : t('common.no')).join(' / ')}</dd>
+            <dt>{t('hosts.env.browsers')}</dt><dd>{host.environment.browsers.map(item => `${item.name}: ${detection(item.status)}`).join(', ') || unknown}</dd>
+            <dt>{t('hosts.env.shells')}</dt><dd>{host.environment.shells.map(item => `${item.name}: ${detection(item.status)}`).join(', ') || unknown}</dd>
+            <dt>VS Code</dt><dd>{detection(host.environment.vscode.status)}</dd>
           </dl>
-          <p>Detected at {new Date(host.environment.detectedAt).toLocaleString()}. Restart the Controller to refresh. Installed software does not imply a running desktop or remote browser control.</p>
+          <p>{t('hosts.env.detectedAt', { time: new Date(host.environment.detectedAt).toLocaleString() })}</p>
         </details>
-      </> : <small>Environment unknown · This Host has not reported detection results.</small>}
+      </> : <small>{t('hosts.env.unreported')}</small>}
     </div>
-    {host.access ? <p className="lab-control-note">{host.access === 'shared' ? 'Shared with you' : 'You own this Host'}</p> : null}
+    {host.access ? <p className="lab-control-note">{host.access === 'shared' ? t('settings.computer.shared') : t('hosts.env.owned')}</p> : null}
   </>;
 }
 
 /** Revoke Host with its confirmation, for a Host the reader owns and a service that can revoke. */
 export function HostRevoke({ host, service, onRevoked }: { host: RemoteHost; service: HostPairingService; onRevoked(): void }) {
+  const t = useTranslate();
   const [confirming, setConfirming] = useState(false);
   const [revoking, setRevoking] = useState(false);
   const [failure, setFailure] = useState<string>();
-  useFeedbackToast('Host connection', failure);
+  useFeedbackToast(t('hosts.toast.connection'), failure);
   async function revoke(): Promise<void> {
     if (!service.revoke || revoking) return;
     setRevoking(true);
     setFailure(undefined);
     try { await service.revoke(host.id); setConfirming(false); onRevoked(); }
-    catch (error) { setFailure(error instanceof Error ? error.message : 'Could not revoke the Host.'); }
+    catch (error) { setFailure(errorWords(error, t, 'hosts.revoke.failed')); }
     finally { setRevoking(false); }
   }
   if (!host.managed || host.access === 'shared' || !service.revoke) return null;
   return <>
-    <button type="button" onClick={() => setConfirming(true)}>Revoke Host</button>
-    {confirming ? <div role="group" aria-label="Confirm Host revocation">
-      <p>Revoke {host.name}? Its remote connections will close. Running work may continue. Use Stop work first to request cancellation. Pair it again to restore access.</p>
-      <button type="button" disabled={revoking} onClick={() => void revoke()}>{revoking ? 'Revoking…' : 'Confirm revoke'}</button>
-      <button type="button" disabled={revoking} onClick={() => setConfirming(false)}>Cancel</button>
+    <button type="button" onClick={() => setConfirming(true)}>{t('hosts.revoke.action')}</button>
+    {confirming ? <div role="group" aria-label={t('hosts.revoke.confirmLabel')}>
+      <p>{t('hosts.revoke.confirm', { name: host.name })}</p>
+      <button type="button" disabled={revoking} onClick={() => void revoke()}>{revoking ? t('hosts.revoke.revoking') : t('hosts.revoke.confirmAction')}</button>
+      <button type="button" disabled={revoking} onClick={() => setConfirming(false)}>{t('common.cancel')}</button>
     </div> : null}
     {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
   </>;
@@ -94,38 +100,35 @@ export function HostPairing({ selectedHostId, selectionLocked, onSelect, hosts, 
   compact?: boolean;
   selectedHostId: string; selectionLocked?: boolean; onSelect(host: RemoteHost): void; hosts: RemoteHost[]; hostError?: string; onRetryHosts(): void; onNewSession?(): void;
 }) {
+  const t = useTranslate();
   const [filter, setFilter] = useState('');
   const matchingHosts = hosts.filter(host => matchesHostEnvironment(host, filter));
   const selectedHost = hosts.find(host => host.id === selectedHostId);
   const quota = selectedHost?.sessionQuota;
   const quotaExhausted = quota !== undefined && quota.used >= quota.limit;
-  useFeedbackToast('Host connection', hostError);
+  useFeedbackToast(t('hosts.toast.connection'), hostError);
 
   const hostFilter = <>
-    <label htmlFor="host-environment-filter">Find an execution environment</label>
+    <label htmlFor="host-environment-filter">{t('hosts.picker.filterLabel')}</label>
     <input id="host-environment-filter" type="search" value={filter} disabled={selectionLocked}
-      placeholder="Filter Hosts: Linux, zsh, Chrome…" autoComplete="off" spellCheck={false}
+      placeholder={t('hosts.picker.filterPlaceholder')} autoComplete="off" spellCheck={false}
       onChange={event => setFilter(event.target.value)} />
-    {filter.trim() ? <small role="status">{matchingHosts.length ? `${matchingHosts.length} matching Hosts` : 'No matching Hosts'}</small> : null}
+    {filter.trim() ? <small role="status">{matchingHosts.length ? t('hosts.picker.matching', { count: matchingHosts.length }) : t('hosts.picker.noMatch')}</small> : null}
   </>;
   const environment = selectedHost ? <HostEnvironmentDetails host={selectedHost} /> : null;
 
-  return <section className={`lab-host-pairing${compact ? ' lab-host-pairing-compact' : ''}`} aria-label="Remote Hosts">
-    <div className="lab-directory-heading"><h2>Hosts</h2><button type="button" onClick={onRetryHosts}>Retry Hosts</button></div>
+  return <section className={`lab-host-pairing${compact ? ' lab-host-pairing-compact' : ''}`} aria-label={t('hosts.picker.label')}>
+    <div className="lab-directory-heading"><h2>{t('hosts.picker.title')}</h2><button type="button" onClick={onRetryHosts}>{t('hosts.picker.retry')}</button></div>
     {!compact ? hostFilter : null}
-    <label className={compact ? 'agent-visually-hidden' : undefined} htmlFor="remote-host">Connected Host</label>
-    <select id="remote-host" title={selectedHost ? hostDisplayLabel(selectedHost) : undefined} value={selectedHostId} disabled={selectionLocked} onChange={(event) => { const host = hosts.find((item) => item.id === event.target.value); if (host) onSelect(host); }}>
-      {hosts.length > 0 && !selectedHost ? <option value={selectedHostId}>Select a Host</option> : null}
-      {selectedHost && !matchingHosts.includes(selectedHost) ? <option value={selectedHost.id} disabled>{selectedHost.name} · Current selection (filtered out)</option> : null}
-      {hosts.length ? matchingHosts.map((host) => <option key={host.id} value={host.id}>{hostDisplayLabel(host)}</option>) : <option value={selectedHostId}>No connected Hosts</option>}
+    <label className={compact ? 'agent-visually-hidden' : undefined} htmlFor="remote-host">{t('hosts.picker.connected')}</label>
+    <select id="remote-host" title={selectedHost ? hostDisplayLabel(selectedHost, t) : undefined} value={selectedHostId} disabled={selectionLocked} onChange={(event) => { const host = hosts.find((item) => item.id === event.target.value); if (host) onSelect(host); }}>
+      {hosts.length > 0 && !selectedHost ? <option value={selectedHostId}>{t('hosts.picker.select')}</option> : null}
+      {selectedHost && !matchingHosts.includes(selectedHost) ? <option value={selectedHost.id} disabled>{t('hosts.picker.filteredOut', { name: selectedHost.name })}</option> : null}
+      {hosts.length ? matchingHosts.map((host) => <option key={host.id} value={host.id}>{hostDisplayLabel(host, t)}</option>) : <option value={selectedHostId}>{t('hosts.picker.none')}</option>}
     </select>
-    {compact ? <details className="lab-host-disclosure"><summary>Filter &amp; Host details{filter.trim() ? <span>Filtered</span> : null}</summary><div>{hostFilter}{environment}</div></details> : environment}
-    {quota ? <p className="lab-control-note" role="status">Session creation allowance used: {quota.used} / {quota.limit}. This total does not reset when sessions finish.{quotaExhausted ? ' Creation limit reached. Existing sessions remain available.' : ''}</p> : null}
-    {onNewSession ? <button type="button" disabled={quotaExhausted} onClick={onNewSession}>New session</button> : null}
+    {compact ? <details className="lab-host-disclosure"><summary>{t('hosts.picker.disclosure')}{filter.trim() ? <span>{t('hosts.picker.filtered')}</span> : null}</summary><div>{hostFilter}{environment}</div></details> : environment}
+    {quota ? <p className="lab-control-note" role="status">{t('hosts.picker.quota', { used: quota.used, limit: quota.limit })}{quotaExhausted ? ` ${t('hosts.picker.quotaReached')}` : ''}</p> : null}
+    {onNewSession ? <button type="button" disabled={quotaExhausted} onClick={onNewSession}>{t('hosts.picker.newSession')}</button> : null}
     {hostError ? <p className="lab-control-note" role="alert">{hostError}</p> : null}
   </section>;
-}
-
-function detectionLabel(status: 'found' | 'not-found' | 'unknown'): string {
-  return status === 'found' ? 'Installed' : status === 'not-found' ? 'Not found' : 'Unknown';
 }

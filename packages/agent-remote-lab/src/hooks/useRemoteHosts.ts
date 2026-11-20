@@ -1,8 +1,11 @@
-import { watchFeedRefresh } from '@orchardworks/agent-client';
-import { useCallback, useEffect, useState } from 'react';
+import { errorWords, watchFeedRefresh } from '@orchardworks/agent-client';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { HostPairingService, RemoteHost } from '../components/HostPairing.js';
 
 export function useRemoteHosts(service: HostPairingService, enabled: boolean, discovery = true, activeHostId?: string) {
+  const t = useTranslate();
+  const words = useRef(t); words.current = t;
   const [hosts, setHosts] = useState<RemoteHost[]>([]);
   /** Until the first list arrives, an empty list does not mean a Host is missing. */
   const [loaded, setLoaded] = useState(false);
@@ -24,7 +27,7 @@ export function useRemoteHosts(service: HostPairingService, enabled: boolean, di
         const result = await service.hosts();
         offline = !!activeHostId && activeHostId !== 'local' && result.hosts.find(host => host.id === activeHostId)?.online !== true;
         if (!retired && request === current) { setHosts(previous => JSON.stringify(previous) === JSON.stringify(result.hosts) ? previous : result.hosts); setLoaded(true); setError(undefined); }
-      } catch (reason) { if (!retired && request === current) setError(reason instanceof Error ? reason.message : 'Could not load Hosts.'); }
+      } catch (reason) { if (!retired && request === current) setError(errorWords(reason, words.current, 'hosts.error.loadHosts')); }
       finally {
         if (request === current) inFlight = false;
         clearTimeout(timer);

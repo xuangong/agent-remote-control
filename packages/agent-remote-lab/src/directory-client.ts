@@ -1,5 +1,5 @@
 import { isSessionListingStatus, type SessionListingStatus } from '@orchardworks/agent-remote-protocol';
-import { RemoteHostControlClient, RemoteHostControlError, type TpmActionInput } from '@orchardworks/agent-client';
+import { RemoteHostControlClient, RemoteHostControlError, keyedError, withMessageKey, type MessageKey, type TpmActionInput } from '@orchardworks/agent-client';
 import type { TpmCreate, TpmList, TpmWork } from '@orchardworks/agent-remote-protocol';
 import { isHostProviderSettings, type HostProviderChange, type HostProviderSettings } from '@orchardworks/agent-remote-protocol';
 import { isHostStatus, type HostStatus } from '@orchardworks/agent-remote-protocol';
@@ -28,6 +28,11 @@ export interface OpenedSession { hostId?: string; agentId: string; providerId: s
 export class DirectoryError extends Error {
   constructor(message: string, readonly code?: string, readonly status?: number, readonly requestId?: string, readonly nativeOwner?: NativeSessionOwner) { super(message); }
 }
+/** A failure response: the words the Relay sent when it sent any (data stays as sent), else the fallback in the reader's language. */
+function failedResponse(sent: unknown, fallback: string, key: MessageKey, code?: string, status?: number, requestId?: string, nativeOwner?: NativeSessionOwner): DirectoryError {
+  const error = new DirectoryError(sent as string ?? fallback, code, status, requestId, nativeOwner);
+  return sent === undefined || sent === null ? withMessageKey(error, key) : error;
+}
 /** The Host's native agent looked the session up by its identity and has no such session, so opening it again cannot succeed. */
 export const nativeSessionMissing = (error: unknown): boolean => error instanceof DirectoryError && error.code === 'native_session_unavailable';
 export interface SuccessionPrepareInput { operationId: string; providerId: string; nativeSessionId: string; expectedRevision: number; targetProviderId?: string; preparation?: NativePrefixSelection }
@@ -40,23 +45,23 @@ export class SessionDirectoryClient {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
     });
     const data = await response.json();
-    if (!response.ok) throw new DirectoryError(data.error ?? data.message ?? 'Session service is unavailable.', data.code, response.status, typeof data.requestId === 'string' ? data.requestId : undefined, data.nativeOwner);
+    if (!response.ok) throw failedResponse(data.error ?? data.message, 'Session service is unavailable.', 'hosts.error.sessionService', data.code, response.status, typeof data.requestId === 'string' ? data.requestId : undefined, data.nativeOwner);
     return data as T;
   }
   async describeSuccession(providerId: string, nativeSessionId: string, preparation?: NativePrefixSelection): Promise<SuccessionDescription> {
     const value = await this.request('succession/describe', { providerId, nativeSessionId, ...(preparation ? { preparation } : {}) }, AbortSignal.timeout(15000));
-    if (!isSuccessionDescription(value)) throw new Error('Handoff eligibility could not be verified.');
+    if (!isSuccessionDescription(value)) throw keyedError('hosts.error.handoffEligibility');
     return value;
   }
   async prepareSuccession(input: SuccessionPrepareInput): Promise<SuccessionActionResult> {
     const value = await this.request('succession/prepare', input, AbortSignal.timeout(50000));
-    if (!isSuccessionActionResult(value)) throw new Error('The Handoff result could not be verified. Check this operation.');
+    if (!isSuccessionActionResult(value)) throw keyedError('hosts.error.handoffResult');
     return value;
   }
   async successionAction(action: 'commit' | 'cancel' | 'status' | 'reconcile', operationId: string, options?: { includeContext?: true; signal?: AbortSignal; original?: SuccessionPrepareInput }): Promise<SuccessionActionResult> {
-    if (options?.original && (action !== 'cancel' || options.original.operationId !== operationId)) throw new Error('Cancellation must retain its original Handoff identity.');
+    if (options?.original && (action !== 'cancel' || options.original.operationId !== operationId)) throw keyedError('hosts.error.handoffCancel');
     const value = await this.request(`succession/${action}`, { ...options?.original, operationId, ...(options?.includeContext ? { includeContext: true } : {}) }, options?.signal ?? AbortSignal.timeout(50000));
-    if (!isSuccessionActionResult(value)) throw new Error('The Handoff result could not be verified. Check this operation.');
+    if (!isSuccessionActionResult(value)) throw keyedError('hosts.error.handoffResult');
     return value;
   }
   sessionRefs(providerId: string, nativeSessionId: string): Promise<import('./session-references.js').LabSessionRefs> {
@@ -83,7 +88,7 @@ export class SessionDirectoryClient {
   async listing(providerId: string, refresh = false): Promise<SessionListingStatus> {
     const value = await this.request(`catalog/listing${refresh ? '' : '?' + new URLSearchParams({ providerId })}`,
       refresh ? { providerId } : undefined, AbortSignal.timeout(15000));
-    if (!isSessionListingStatus(value)) throw new DirectoryError('The session listing status is invalid.');
+    if (!isSessionListingStatus(value)) throw withMessageKey(new DirectoryError('The session listing status is invalid.'), 'hosts.error.listingInvalid');
     return value;
   }
   revision(providerId: string): Promise<{ revision: string }> { return this.request(`catalog/revision?${new URLSearchParams({ providerId })}`); }
@@ -113,7 +118,9 @@ export class RemoteHostClient implements HostPairingService {
     const response = await workspaceFetch(new URL(`v1/remote/${path}`, this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`), { method, ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
       ...(method === 'POST' || method === 'PUT' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(requestBody ?? {}) } : {}) });
     const body = await response.json();
-    if (!response.ok) throw new DirectoryError(body.code === 'reauthentication_required' ? 'A recent sign-in is required.' : body.error ?? 'Remote Host service is unavailable.', body.code, response.status, typeof body.requestId === 'string' ? body.requestId : undefined);
+    if (!response.ok) throw body.code === 'reauthentication_required'
+      ? withMessageKey(new DirectoryError('A recent sign-in is required.', body.code, response.status, typeof body.requestId === 'string' ? body.requestId : undefined), 'hosts.error.recentSignIn')
+      : failedResponse(body.error, 'Remote Host service is unavailable.', 'hosts.error.hostService', body.code, response.status, typeof body.requestId === 'string' ? body.requestId : undefined);
     return body as T;
   }
   tpmList(hostId: string): Promise<TpmList> { return this.tpm(client => client.tpmList(hostId, { signal: AbortSignal.timeout(15000) })); }
@@ -133,17 +140,17 @@ export class RemoteHostClient implements HostPairingService {
   controllerRelease(options: { refresh?: boolean } = {}): Promise<ControllerReleaseDiscovery> { return this.request(`controller-release${options.refresh ? '?refresh=1' : ''}`, 'GET', undefined, 35000); }
   async providerSettings(hostId: string, input?: HostProviderChange): Promise<HostProviderSettings> {
     const value = await this.request(`hosts/${encodeURIComponent(hostId)}/provider-settings`, input ? 'POST' : 'GET', input, 50000);
-    if (!isHostProviderSettings(value)) throw new Error('The Host provider result could not be verified. Refresh before changing settings.');
+    if (!isHostProviderSettings(value)) throw keyedError('hosts.error.providerResult');
     return value;
   }
   async codexDaemon(hostId: string, input?: CodexDaemonRestart): Promise<CodexDaemonStatus> {
     const value = await this.request(`hosts/${encodeURIComponent(hostId)}/codex-daemon`, input ? 'POST' : 'GET', input, 15000);
-    if (!isCodexDaemonStatus(value)) throw new Error('The daemon result could not be verified. Check status before restarting again.');
+    if (!isCodexDaemonStatus(value)) throw keyedError('hosts.error.daemonResult');
     return value;
   }
   async hostStatus(hostId: string): Promise<HostStatus> {
     const value = await this.request(`hosts/${encodeURIComponent(hostId)}/status`, 'GET', undefined, 15000);
-    if (!isHostStatus(value)) throw new Error('The Host status could not be verified.');
+    if (!isHostStatus(value)) throw keyedError('hosts.error.statusUnverified');
     return value;
   }
   controllerUpdate(hostId: string, input?: { version: string; operationId: string }): Promise<ControllerUpdateStatus> {
@@ -155,25 +162,25 @@ export class RemoteHostClient implements HostPairingService {
   async deletePairing(id: string): Promise<void> { await this.request(`pairings/${encodeURIComponent(id)}`, 'DELETE'); }
   async rotate(hostId: string): Promise<{ ok: true; status: 'pending' | 'rotated' }> {
     const value = await this.request<{ ok?: boolean; status?: string }>(`hosts/${encodeURIComponent(hostId)}/rotate`, 'POST');
-    if (value.ok !== true || !['pending', 'rotated'].includes(value.status ?? '')) throw new Error('The rotation result could not be confirmed. Refresh before trying again.');
+    if (value.ok !== true || !['pending', 'rotated'].includes(value.status ?? '')) throw keyedError('hosts.error.rotationResult');
     return value as { ok: true; status: 'pending' | 'rotated' };
   }
   async stop(hostId: string, operationId = crypto.randomUUID()): Promise<{ results: HostStopResult[] }> {
     const value = await this.request<{ results?: HostStopResult[] }>(`hosts/${encodeURIComponent(hostId)}/stop`, 'POST', { operationId });
-    if (!Array.isArray(value.results) || !value.results.every(result => result && typeof result.agentId === 'string' && ['cancelled', 'unsupported', 'failed'].includes(result.status) && (result.message === undefined || typeof result.message === 'string'))) throw new Error('The stop results could not be confirmed. Work may still be running.');
+    if (!Array.isArray(value.results) || !value.results.every(result => result && typeof result.agentId === 'string' && ['cancelled', 'unsupported', 'failed'].includes(result.status) && (result.message === undefined || typeof result.message === 'string'))) throw keyedError('hosts.error.stopResults');
     return { results: value.results };
   }
   async revoke(hostId: string): Promise<void> { await this.request(`hosts/${encodeURIComponent(hostId)}/revoke`, 'POST'); }
   /** The providers of a Host whose sessions the Relay reads ahead of an open conversation (the owner's choice). */
   async smartReading(hostId: string): Promise<{ providers: string[] }> {
     const value = await this.request<{ providers?: unknown }>(`hosts/${encodeURIComponent(hostId)}/smart-reading`);
-    if (!Array.isArray(value.providers) || !value.providers.every(item => typeof item === 'string')) throw new Error('The smart reading choice could not be verified.');
+    if (!Array.isArray(value.providers) || !value.providers.every(item => typeof item === 'string')) throw keyedError('hosts.error.smartReading');
     return { providers: value.providers };
   }
   /** Turns smart reading on or off for one provider of a Host; a refusal (no journals, not the owner) is thrown with its status. */
   async setSmartReading(hostId: string, providerId: string, enabled: boolean): Promise<{ providers: string[] }> {
     const value = await this.request<{ providers?: unknown }>(`hosts/${encodeURIComponent(hostId)}/smart-reading`, 'PUT', { providerId, enabled });
-    if (!Array.isArray(value.providers) || !value.providers.every(item => typeof item === 'string')) throw new Error('The smart reading choice could not be verified.');
+    if (!Array.isArray(value.providers) || !value.providers.every(item => typeof item === 'string')) throw keyedError('hosts.error.smartReading');
     return { providers: value.providers };
   }
 }

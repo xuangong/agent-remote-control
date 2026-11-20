@@ -6,9 +6,8 @@ import { englishWords } from './english-words.js';
 // group), in both themes and both languages: contrast, 44 px targets, no horizontal overflow, and no English word in Chinese.
 
 const phone = (page: Page) => (page.viewportSize()?.width ?? 0) <= 430;
-const sample = ['Chief', 'Builder', 'Reviewer', 'Notes', 'Helper', 'Tester', 'Mac', 'mini', 'Studio', 'chief@example.com', 'claude', 'Safari', 'App'];
+const sample = ['Chief', 'Builder', 'Reviewer', 'Notes', 'Helper', 'Tester', 'Mac', 'mini', 'Studio', 'chief@example.com', 'claude', 'Safari', 'App', 'darwin', 'arm64'];
 /** Pages of the Host settings that still hold their English words (moved whole from the old panel). */
-const legacy = ['.lab-host-card', '.lab-host-page', '.lab-pairing-details'];
 const GROUPS = {
   en: ['General', 'Assistants', 'Computers', 'Privacy and data', 'Advanced', 'Account and about'],
   zh: ['通用', '助手', '电脑', '隐私与数据', '高级', '账户与关于'],
@@ -47,7 +46,7 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
               expect(box.height, `${name}: ${(await control.textContent())?.slice(0, 30)}`).toBeGreaterThanOrEqual(43.5);
             }
           }
-          if (locale === 'zh-CN') expect(await englishWords(page, { allow: sample, skip: legacy }), name).toEqual([]);
+          if (locale === 'zh-CN') expect(await englishWords(page, { allow: sample }), name).toEqual([]);
           await page.screenshot({ path: testInfo.outputPath(`settings-${index}-${locale}-${theme}.png`) });
         }
       });

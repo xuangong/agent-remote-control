@@ -97,8 +97,8 @@ export function useHostAndStack(scope: Pick<AppInputs & ActiveSessionSlice & Rem
 
   useEffect(() => {
     if (!windowMode) return;
-    document.title = pageTitle?.trim() ? `${pageTitle.trim()} · Agent Remote Control` : 'Agent Remote Control';
-    return () => { document.title = 'Agent Remote Control'; };
+    document.title = pageTitle?.trim() ? `${pageTitle.trim()} · Orchard` : 'Orchard';
+    return () => { document.title = 'Orchard'; };
   }, [pageTitle, windowMode]);
 
   const sideTitle = (session: OpenedSession) => ({ ...session, title: forkStore.find(session)?.firstInput?.trim().slice(0, 72) || session.title });

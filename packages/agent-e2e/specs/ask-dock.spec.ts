@@ -19,7 +19,7 @@ async function start(page: Page, isMobile: boolean) {
   const response = await created;
   expect(response.ok()).toBe(true);
   const identity = await response.json() as { nativeSessionId: string };
-  await expect(page).toHaveTitle('New session · Agent Remote Control');
+  await expect(page).toHaveTitle('New session · Orchard');
   const owner = page.locator('.lab-primary-conversation');
   await enableAsk(owner.locator('.lab-session-view'));
   const trigger = page.getByRole('button', { name: 'Ask about this session', exact: true });

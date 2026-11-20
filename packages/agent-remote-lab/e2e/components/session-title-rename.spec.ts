@@ -51,7 +51,7 @@ for (const starred of [false, true]) {
     await dialog.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await expect(heading).toHaveText('Renamed research');
-    await expect(page).toHaveTitle('Renamed research · Agent Remote Control');
+    await expect(page).toHaveTitle('Renamed research · Orchard');
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({ providerId: 'recorded', nativeSessionId: 'recorded-session', title: 'Renamed research' });
     expect(requests[0]!.operationId).toBeTruthy();

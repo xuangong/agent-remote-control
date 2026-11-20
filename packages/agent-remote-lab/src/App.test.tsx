@@ -892,23 +892,23 @@ it('keeps the tab title on the leftmost bound session independently of pane sele
       { type: 'view.create', view: dock }, { type: 'view.create', view: left }, { type: 'view.create', view: right },
       { type: 'view.select', viewId: right.id },
     ] }));
-    expect(document.title).toBe('Left session · Agent Remote Control');
+    expect(document.title).toBe('Left session · Orchard');
     for (const viewId of [dock.id, 'main', right.id]) {
       await act(async () => workspace.operate({ type: 'view.select', viewId }));
-      expect(document.title).toBe('Left session · Agent Remote Control');
+      expect(document.title).toBe('Left session · Orchard');
     }
     await act(async () => workspace.operate({ type: 'view.move', viewId: right.id, afterId: 'main' }));
-    expect(document.title).toBe('Right session · Agent Remote Control');
+    expect(document.title).toBe('Right session · Orchard');
     await act(async () => workspace.operate({ type: 'view.move', viewId: left.id, afterId: 'main' }));
-    expect(document.title).toBe('Left session · Agent Remote Control');
+    expect(document.title).toBe('Left session · Orchard');
     await act(async () => workspace.operate({ type: 'view.close', viewId: left.id }));
-    expect(document.title).toBe('Right session · Agent Remote Control');
+    expect(document.title).toBe('Right session · Orchard');
     await act(async () => workspace.operate({ type: 'view.close', viewId: right.id }));
-    expect(document.title).toBe('Dock session · Agent Remote Control');
+    expect(document.title).toBe('Dock session · Orchard');
     await act(async () => workspace.operate({ type: 'batch', operations: [
       { type: 'view.close', viewId: dock.id }, { type: 'view.close', viewId: 'main' }, { type: 'rename', title: 'Empty Window' },
     ] }));
-    expect(document.title).toBe('Empty Window · Agent Remote Control');
+    expect(document.title).toBe('Empty Window · Orchard');
   } finally {
     if (container) await unmount(container);
     vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); history.replaceState(null, '', '/');
@@ -950,15 +950,15 @@ it('uses a rendered root title and skips descendants hidden behind empty roots',
       expect(container.querySelector(`.lab-session-family-pane[data-view-id="${viewId}"]`)).toBeNull();
     }
     expect(container.querySelector('.lab-session-family-pane[data-view-id="right-primary"]')?.getAttribute('aria-label')).toBe('Right session');
-    expect(document.title).toBe('Right session · Agent Remote Control');
+    expect(document.title).toBe('Right session · Orchard');
     await act(async () => workspace.operate({ type: 'view.close', viewId: 'right-primary' }));
     expect(container.querySelector('.lab-session-family-pane[data-view-id="bound-dock"]')?.getAttribute('aria-label')).toBe('Dock session');
-    expect(document.title).toBe('Dock session · Agent Remote Control');
+    expect(document.title).toBe('Dock session · Orchard');
     await act(async () => workspace.operate({ type: 'view.close', viewId: 'bound-dock' }));
     expect(container.querySelector('.lab-session-family-pane[data-view-id="bound-float"]')?.getAttribute('aria-label')).toBe('Float session');
-    expect(document.title).toBe('Float session · Agent Remote Control');
+    expect(document.title).toBe('Float session · Orchard');
     await act(async () => workspace.operate({ type: 'view.close', viewId: 'bound-float' }));
-    expect(document.title).toBe('Empty roots · Agent Remote Control');
+    expect(document.title).toBe('Empty roots · Orchard');
   } finally {
     if (container) await unmount(container);
     vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); sessionStorage.clear(); history.replaceState(null, '', '/');

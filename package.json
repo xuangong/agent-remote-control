@@ -35,6 +35,7 @@
     "compatibility:update": "node scripts/compatibility.mjs",
     "compatibility:check": "node scripts/compatibility.mjs --check",
     "lint:docs": "bash scripts/lint-mermaid.sh docs",
+    "brand:assets": "pnpm --filter @orchardworks/agent-client-web build && node scripts/brand-assets.mjs",
     "ardb": "node packages/agent-remote-debugger/dist/cli.js",
     "agent-remote-controller": "node packages/agent-controller/dist/cli.js",
     "test:claude": "node scripts/run-tests.mjs claude",

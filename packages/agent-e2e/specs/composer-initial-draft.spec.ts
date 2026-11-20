@@ -9,7 +9,7 @@ test('retains the first command entered after creating a source session', async 
   expect((await created).ok()).toBe(true);
   const primary = page.locator('.lab-primary-conversation .lab-session-view');
   await expect(primary.getByTestId('prompt-input')).toBeEnabled();
-  await expect(page).toHaveTitle('New session · Agent Remote Control');
+  await expect(page).toHaveTitle('New session · Orchard');
   await primary.getByTestId('prompt-input').fill('/ask');
   await expect(primary.getByTestId('prompt-input')).toHaveText('/ask');
   await expect(primary.getByTestId('prompt-submit')).toBeEnabled();

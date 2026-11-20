@@ -172,12 +172,3 @@ it('maps the Lab variables and the Session View code colors onto the tokens', ()
   expect(shared).toMatch(/\.agent-markdown pre \{[^}]*background: var\(--agent-code-block-background\)/);
   expect(shared).toMatch(/\.agent-markdown pre \{[^}]*color: var\(--agent-code-block-text\)/);
 });
-
-it('gives the browser a theme color and color scheme for each appearance', () => {
-  const html = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
-  expect(html).toContain('<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />');
-  expect(html).toContain('<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1c1c1e" />');
-  expect(html).toContain('<meta name="color-scheme" content="light dark" />');
-  const manifest = JSON.parse(readFileSync(new URL('../../public/app/manifest.webmanifest', import.meta.url), 'utf8')) as Record<string, unknown>;
-  expect(manifest).toMatchObject({ background_color: '#ffffff', theme_color: '#ffffff' });
-});

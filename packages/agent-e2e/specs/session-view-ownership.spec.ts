@@ -54,7 +54,7 @@ async function openComposition(page: Page, isMobile: boolean) {
   const primary = page.locator('[data-workbench-mode="window"] .lab-primary-conversation');
   sourceIdentities.set(primary, primaryIdentity.key);
   await expect(sourceView(primary).getByTestId('prompt-input')).toBeEnabled();
-  await expect(page).toHaveTitle('New session · Agent Remote Control');
+  await expect(page).toHaveTitle('New session · Orchard');
   const primaryTitle = await page.title();
   const sideCreated = createdSession(page);
   await send(sourceView(primary), '/side A separately focused side conversation');
@@ -347,7 +347,7 @@ test('Ask stays floating over the page while source panes resize and remain inte
 
 test('browser tab title identifies the business primary session while Side and Ask receive focus', async ({ page, isMobile }) => {
   const { primary, side, primaryTitle, select } = await openComposition(page, isMobile);
-  expect(primaryTitle).toBe('New session · Agent Remote Control');
+  expect(primaryTitle).toBe('New session · Orchard');
   await select(side, 1);
   await expect(page).toHaveTitle(primaryTitle);
   await send(sourceView(side), '/ask Inspect the side without changing the browser title');

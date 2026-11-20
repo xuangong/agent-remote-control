@@ -1,6 +1,6 @@
 // How a view presents its session, bot actions and folding.
 import { awakeDetails, closeOperation, foldsOnClose as foldsOnCloseOf, isAsleep, restorePlan } from '../state/pane-folding.js';
-import { isBotView, type WindowView, type AgentCommandResult, type WindowSessionBinding, type SessionExcerpt } from '@orchardworks/agent-remote-protocol';
+import { isBotView, type WindowView, type WindowBotDetails, type AgentCommandResult, type WindowSessionBinding, type SessionExcerpt } from '@orchardworks/agent-remote-protocol';
 import { windowSessionBinding } from '../window-workspace.js';
 import { botActivityLabel, botRole } from '../bot-roster.js';
 import { SessionOutboxMessages } from '../components/OutboxMessages.js';
@@ -128,8 +128,15 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
     const assistant = { name: source.title || source.nativeSessionId,
       avatar: <BotPicture id={assistantId} picture={options.bot ? botGroup?.bots?.members[options.bot.viewId]?.picture : undefined} size={26}
         mood={botWorking(context.state) ? 'working' : 'idle'} /> };
+    // A bot's own process mode is stored with its details; a view in a group without bots chooses only this device's default.
+    const botGroupId = options.bot?.groupId ?? (windowBot ? sharedWindow!.id : undefined), botViewId = options.bot?.viewId ?? (windowBot ? view!.id : undefined);
+    const processAssistant = botGroupId && botViewId ? {
+      details: windowWorkspace.readGroup(botGroupId)?.bots?.members[botViewId],
+      update: (details: WindowBotDetails) => { void windowWorkspace.operateGroup(botGroupId, { type: 'bot.update', viewId: botViewId, details }).catch(error => setSessionNotice(sessionConnectionFailure(error, false))); },
+    } : undefined;
     return {
       assistant,
+      processAssistant,
       headingMode: compactLayout ? 'toolbar' as const : 'inline' as const,
       state: botPresentation ? context.state : forkDisplayState(context.state, fork),
       questionDrafts: questionDrafts[source.agentId] ?? {},

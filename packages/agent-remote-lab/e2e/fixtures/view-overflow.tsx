@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import type { AgentInteractionRequest, AgentTimelineItem, AgentToolDetail } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState } from '@orchardworks/agent-client';
-import { AgentCommandDetails, AgentTimeline, TimelineDisplay } from '@orchardworks/agent-client-web/react';
+import { AgentCommandDetails, AgentTimeline, ProcessModeContext } from '@orchardworks/agent-client-web/react';
 import { App } from '../../src/App.js';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { ReplicaInspector } from '../../src/components/ReplicaInspector.js';
@@ -131,15 +131,17 @@ const contentState: AgentReplicaState = { ...previewState, timeline: { ...previe
     timestamp: '2026-09-18T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [], item,
   })),
 ] } };
-// A workbench chooses its own mode, so the requested one is its default; timelines alone read it from context.
-const mode = new URLSearchParams(location.search).get('mode') === 'simple' ? 'simple' : 'preview';
+// The requested process mode is this device's default, which a workbench reads; bare timelines read it from context. Full by default.
+const requested = new URLSearchParams(location.search).get('mode');
+const mode = requested === 'concise' || requested === 'process' ? requested : 'full';
+localStorage.setItem('agent-remote:process-mode', mode);
 createRoot(document.getElementById('root')!).render(
-  <TimelineDisplay.Provider value={mode}><main style={{ height: '100dvh' }}>
-    {view === 'previews' || view === 'content' ? <App initialState={view === 'content' ? contentState : previewState} initialSessionStatus="ready" /> : view === 'workbench' || view === 'tool-error' || view === 'file-changes' ? <LabWorkbench defaultDisplayMode={mode} state={view === 'tool-error' ? failureState : view === 'file-changes' ? fileChangeState : state} sessionStatus="ready" actions={{ respondToInteraction: async () => {}, sendMessage: async () => {} }} />
+  <ProcessModeContext.Provider value={mode}><main style={{ height: '100dvh' }}>
+    {view === 'previews' || view === 'content' ? <App initialState={view === 'content' ? contentState : previewState} initialSessionStatus="ready" /> : view === 'workbench' || view === 'tool-error' || view === 'file-changes' ? <LabWorkbench state={view === 'tool-error' ? failureState : view === 'file-changes' ? fileChangeState : state} sessionStatus="ready" actions={{ respondToInteraction: async () => {}, sendMessage: async () => {} }} />
       : view === 'trace' ? <TraceView state={state} />
       : view === 'inspector' ? <ReplicaInspector state={state} sessionStatus="ready" providerName={long} />
       : view === 'command' ? <AgentCommandDetails command={{ id: long, name: long, description: long, kind: 'skill', documentation: { resourceId: 'documentation', locator: 'SKILL.md', status: 'available' } }} resources={state.resources} onClose={() => {}} />
       : view === 'summaries' ? <AgentTimeline state={summaryState} />
       : <AgentTimeline state={state} onInteractionResponse={async () => {}} />}
-  </main></TimelineDisplay.Provider>,
+  </main></ProcessModeContext.Provider>,
 );

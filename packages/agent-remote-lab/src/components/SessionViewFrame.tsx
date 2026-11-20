@@ -1,16 +1,8 @@
-import { useContext, type ReactNode } from 'react';
-import { TimelineDisplay, type TimelineDisplayMode } from '@orchardworks/agent-client-web/react';
+import type { ReactNode } from 'react';
 
 /** Presentation shared by product sessions, standalone debugging, and recordings. */
-export function SessionViewFrame({ children, className = '', displayMode }: {
-  children: ReactNode;
-  className?: string;
-  displayMode?: TimelineDisplayMode;
-}) {
-  const inheritedMode = useContext(TimelineDisplay);
-  return <TimelineDisplay.Provider value={displayMode ?? inheritedMode}>
-    <div className="lab-session-view">
-      <div className={`lab-workbench-layout${className ? ` ${className}` : ''}`}>{children}</div>
-    </div>
-  </TimelineDisplay.Provider>;
+export function SessionViewFrame({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <div className="lab-session-view">
+    <div className={`lab-workbench-layout${className ? ` ${className}` : ''}`}>{children}</div>
+  </div>;
 }

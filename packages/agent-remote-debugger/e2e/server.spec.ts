@@ -63,7 +63,7 @@ sharedTest('CLI events broadcast into the product view; page controls reach stdi
   await expect(page.getByText('STDIO reply: browser broadcast', { exact: true })).toBeVisible();
   expect(JSON.stringify(await command('inspect', agentId))).toContain('STDIO reply: browser broadcast');
   await command('send', agentId, 'approve');
-  await page.getByRole('button', { name: 'Allow once', exact: true }).click();
+  await page.getByRole('button', { name: 'Allow', exact: true }).click();
   await expect(page.getByText('Approval received', { exact: true })).toBeVisible();
   await command('send', agentId, 'hold');
   await command('cancel', agentId);
@@ -121,16 +121,16 @@ sharedTest('standalone Session View keeps product presentation and display prefe
   };
   await checkPresentation(page);
   await command('send', agentId, 'trace');
+  await chooseDisplay(page, 'Full');
   await expect(page.locator('.agent-reasoning')).toContainText('Fixture reasoning detail');
-  await chooseDisplay(page, 'Simple conversation');
-  await expect(page.locator('.agent-reasoning')).toBeVisible();
-  await expect(page.getByText('Fixture reasoning detail', { exact: true })).toHaveCount(0);
-  await chooseDisplay(page, 'Content only');
+  await chooseDisplay(page, 'Process');
+  await expect(page.locator('.agent-reasoning')).toHaveCount(0);
+  await chooseDisplay(page, 'Concise');
   await expect(page.locator('.agent-reasoning')).toHaveCount(0);
   await expect(page.getByText('STDIO reply: trace', { exact: true })).toBeVisible();
   await page.reload();
   await page.getByRole('button', { name: 'Session view options', exact: true }).click();
-  await expect(page.getByRole('radio', { name: 'Content only', exact: true })).toBeChecked();
+  await expect(page.getByRole('group', { name: 'All assistants on this device' }).getByRole('button', { name: 'Concise', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('.agent-reasoning')).toHaveCount(0);
   const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   try { await checkPresentation(await mobile.newPage()); } finally { await mobile.close(); }
@@ -167,7 +167,7 @@ test('recorded CLI interaction replays in a read-only Session View with playback
   await expect(page.getByText('STDIO reply: browser recorded', { exact: true })).toBeVisible();
   await page.getByTestId('prompt-input').fill('approve');
   await page.getByTestId('prompt-input').press('Enter');
-  await page.getByRole('button', { name: 'Allow once', exact: true }).click();
+  await page.getByRole('button', { name: 'Allow', exact: true }).click();
   await expect.poll(() => output).toContain('Approval received');
   child.kill('SIGTERM');
   expect(await exited).toEqual({ code: 0, signal: null });
@@ -208,15 +208,15 @@ test('recorded CLI interaction replays in a read-only Session View with playback
   const captured = await (await page.request.get(`${url}/__ardb/recording`)).json();
   const approvalAt = captured.events.find((event: { record: { kind: string } }) => event.record.kind === 'interaction_requested').at;
   await progress.fill(String(approvalAt));
-  await expect(page.getByRole('button', { name: 'Allow once', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Allow', exact: true })).toBeDisabled();
   await progress.fill(await progress.getAttribute('max') ?? '0');
   await expect(page.getByText('STDIO reply: replay broadcast', { exact: true })).toBeVisible();
   await expect(page.getByText('STDIO reply: browser recorded', { exact: true })).toBeVisible();
   await expect(page.getByText('Approval received', { exact: true })).toBeVisible();
   await expect(page.locator('.agent-reasoning')).toHaveCount(1);
-  await chooseDisplay(page, 'Content only');
+  await chooseDisplay(page, 'Concise');
   await expect(page.locator('.agent-reasoning')).toHaveCount(0);
-  await chooseDisplay(page, 'Preview');
+  await chooseDisplay(page, 'Full');
   await expect(page.locator('.agent-reasoning')).toHaveCount(1);
   await page.getByRole('button', { name: 'Restart recording' }).click();
   await expect(page.getByText('Approval received', { exact: true })).toHaveCount(0);
@@ -406,13 +406,14 @@ test('replay entry point starts live from the floating controls and switches wit
   expect((await (await page.request.get(`${url}/__ardb/session`)).json()).live.agentId).toBe(agentId);
 });
 
-async function chooseDisplay(page: Page, name: 'Preview' | 'Simple conversation' | 'Content only'): Promise<void> {
+/** Chooses this device's process mode for every assistant from the session view options. */
+async function chooseDisplay(page: Page, name: 'Concise' | 'Process' | 'Full'): Promise<void> {
   const controls = page.locator('.ardb-controls-toggle');
   const controlsExpanded = await controls.getAttribute('aria-expanded') === 'true';
   if (controlsExpanded) await controls.click();
   const trigger = page.getByRole('button', { name: 'Session view options', exact: true });
   if (await trigger.getAttribute('aria-expanded') !== 'true') await trigger.click();
-  await page.getByRole('radio', { name, exact: true }).check();
+  await page.getByRole('group', { name: 'All assistants on this device' }).getByRole('button', { name, exact: true }).click();
   await trigger.click();
   if (controlsExpanded) await controls.click();
 }

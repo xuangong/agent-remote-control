@@ -513,6 +513,10 @@ it('shows a restored native failure inline without a runtime toast or duplicate 
       timestamp: '2026-09-28T00:00:00Z', sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }], collapsed: [], resources: [],
       item: { type: 'error' as const, message: reason } }] } };
   const container = await render(<ToastProvider><LabWorkbench state={state} sessionStatus="ready" actions={{}} /></ToastProvider>);
+  // The failed turn's work line says so; opening it shows the reason, once.
+  const line = container.querySelector<HTMLButtonElement>('.agent-work-line > button')!;
+  expect(container.querySelector('.agent-work-line')?.textContent).toContain('1 step failed');
+  await act(async () => line.click());
   expect(container.querySelector('[aria-label="Agent timeline"]')?.textContent).toContain(reason);
   expect(container.querySelectorAll('.agent-error')).toHaveLength(1);
   expect(container.querySelector('.lab-timeline-scroll .lab-error')).toBeNull();

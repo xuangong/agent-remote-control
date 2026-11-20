@@ -1,7 +1,6 @@
 import { createContext, memo, useCallback, useContext, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ContextType, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { RemoteAgentTransport } from '@orchardworks/agent-client';
-import type { TimelineDisplayMode } from '@orchardworks/agent-client-web/react';
 import type { WorkbenchMode } from '../workbench-mode.js';
 import { WorkspaceReady } from '../workspace-access.js';
 import { WindowLayoutContext, WindowPresentationContext, type WindowLayoutAuthority } from '../window-workspace-context.js';
@@ -18,7 +17,7 @@ import { hiddenConversationUnchanged } from './conversation-props.js';
 import { ToastActivity } from './Toast.js';
 
 interface ConversationPresentation {
-  visible: boolean; fixedDisplayMode?: TimelineDisplayMode;
+  visible: boolean;
   onPendingInputChange?(count: number): void;
 }
 export interface SessionSurfaceDescriptor {

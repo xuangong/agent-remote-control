@@ -2,7 +2,8 @@ import { act, useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { render, unmount } from '../test/setup.js';
 import { SessionHeadingActions } from './SessionHeadingActions.js';
-import { SessionViewOptions, type SessionDisplayPreferences } from './SessionViewOptions.js';
+import { SessionViewOptions } from './SessionViewOptions.js';
+import type { ProcessMode } from '@orchardworks/agent-client';
 
 const observers = new Set<() => void>();
 let triggerVisible = true;
@@ -43,8 +44,9 @@ afterEach(() => {
 async function click(element: Element) { await act(async () => (element as HTMLElement).click()); }
 async function resize() { await act(async () => { for (const callback of observers) callback(); }); }
 function Preferences() {
-  const [preferences, onChange] = useState<SessionDisplayPreferences>({ mode: 'preview', lettersVisible: false });
-  return <SessionViewOptions preferences={preferences} onChange={onChange} />;
+  const [device, setDevice] = useState<ProcessMode>('concise');
+  const [letters, setLetters] = useState(false);
+  return <SessionViewOptions process={{ mode: device, device, chooseForDevice: setDevice }} lettersVisible={letters} onLettersVisibleChange={setLetters} />;
 }
 
 it('opens view options in the top layer and preserves selection and Escape focus', async () => {
@@ -55,8 +57,9 @@ it('opens view options in the top layer and preserves selection and Escape focus
   expect(panel.matches(':popover-open')).toBe(true);
   expect(panel.parentElement).toBe(trigger.parentElement);
   expect(panel.style.getPropertyValue('--session-menu-left')).toBe('528px');
-  await click(panel.querySelector('input[value="simple"]')!);
-  expect(panel.querySelector<HTMLInputElement>('input[value="simple"]')!.checked).toBe(true);
+  const process = [...panel.querySelectorAll<HTMLButtonElement>('button[aria-pressed]')].find(button => button.textContent === 'Process')!;
+  await click(process);
+  expect(process.getAttribute('aria-pressed')).toBe('true');
   await act(async () => panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   expect(container.querySelector('section')).toBeNull();
   expect(panel.matches(':popover-open')).toBe(false);

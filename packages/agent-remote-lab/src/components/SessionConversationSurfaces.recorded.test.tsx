@@ -39,7 +39,7 @@ async function fixture() {
       directory: () => { throw new Error('Unused'); }, refreshSettled: async () => {} }}>
       <ConversationConnectionScope.Provider value={connections}><SessionConversationSurfaces scope={url} transport={transport} mode={state.mode}>
       {(['window', 'bot'] as const).map(mode => <section key={mode} data-destination={mode}>{state.claimed ? <SessionConversationMount mode={mode}
-        active={state.mode === mode} descriptor={{ ...descriptor, props: { ...descriptor.props, fixedDisplayMode: mode === 'bot' ? 'content' : undefined } }} /> : null}</section>)}
+        active={state.mode === mode} descriptor={descriptor} /> : null}</section>)}
     </SessionConversationSurfaces></ConversationConnectionScope.Provider></SessionViewOperationsContext.Provider>;
   }
   const container = await render(<Harness />);

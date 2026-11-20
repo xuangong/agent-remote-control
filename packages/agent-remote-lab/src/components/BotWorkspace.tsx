@@ -177,7 +177,7 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
         trailing={compact ? <><WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} />{botMenu}</> : botMenu ?? undefined} />
       {!unavailable ? availabilityNotice : null}
       {asleep && descriptor ? <AsleepNotice onWake={() => place?.kind === 'bot' && void actions.wake(place)} /> : null}
-      {descriptor ? <SessionConversationMount mode="bot" active={visible && showConversation} descriptor={{ ...descriptor, props: { ...descriptor.props, visible: visible && showConversation, active: visible && showConversation, fixedDisplayMode: 'content', folded: asleep } }} />
+      {descriptor ? <SessionConversationMount mode="bot" active={visible && showConversation} descriptor={{ ...descriptor, props: { ...descriptor.props, visible: visible && showConversation, active: visible && showConversation, folded: asleep } }} />
         : !selected.loading && !selected.error ? <p className="lab-bot-empty">{place?.kind === 'section' ? 'No bot selected. Choose a bot from this group.' : 'Choose a bot to continue its conversation.'}</p> : null}
     </section>
     {actions.sheets}

@@ -2,7 +2,7 @@ import { LiveConnectionsContext } from '../hooks/useLiveBudget.js';
 import type { LiveRegistration } from '../live-budget.js';
 import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type ComponentProps } from 'react';
 import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-client';
-import { CommunicationNavigationContext, type AgentChildSessionView, type TimelineDisplayMode } from '@orchardworks/agent-client-web/react';
+import { CommunicationNavigationContext, type AgentChildSessionView } from '@orchardworks/agent-client-web/react';
 import type { SessionWindowTarget } from '../hooks/useSessionWindows.js';
 import { WorkspaceReady } from '../workspace-access.js';
 import { ConversationConnectionScope } from '../conversation-connections.js';
@@ -22,7 +22,7 @@ import type { DraftBinding } from '../draft-store.js';
 import { sessionViewNavigation, type SessionViewNavigationActions, type SessionViewNavigationFactory } from '../session-view-navigation.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 import { LabWorkbench } from './LabWorkbench.js';
-import type { DisplayPreferenceBinding } from '../hooks/useSessionDisplayPreferences.js';
+import type { ViewBinding } from '../view-binding.js';
 import { SessionLocatorSynchronizingError, SessionViewOperationsContext } from '../session-view-operations.js';
 import { useSuccessionContext } from '../hooks/useSuccessionContext.js';
 
@@ -48,8 +48,8 @@ export interface SessionConversationProps extends Pick<ComponentProps<typeof Lab
   storageScope: string; baseUrl: string; target: SessionWindowTarget; hostLabel: string;
   compact: boolean; active: boolean; offline: boolean; controls?: ReactNode; menuActions?: ReactNode;
   transport: RemoteAgentTransport; draftStore: DraftBinding['store']; draftBinding?: DraftBinding; imageDraftBinding?: ImageDraftBinding; imageRecipient?: ImageDraftRecipient; navigation?: SessionViewNavigationFactory;
-  displayBinding?: DisplayPreferenceBinding;
-  visible?: boolean; fixedDisplayMode?: TimelineDisplayMode;
+  displayBinding?: ViewBinding;
+  visible?: boolean;
   /** The pane is folded into a slim card: its conversation is released at once (see LiveBudget). */
   folded?: boolean;
   attachmentEnabled?: boolean; mutationBlocked?: boolean; onPendingInputChange?(count: number): void;
@@ -220,7 +220,7 @@ export function SessionConversation(props: SessionConversationProps) {
     }} session={session ?? { ...currentTarget, agentId: '' }} attachmentAvailable={!disconnected && !!session} target={currentTarget} pending={pending} preview={preview} availabilityError={disconnected || owner ? undefined : resolutionNotice ?? error} nativeTakeover={nativeTakeover}
     onRetryAttachment={retrySynchronizing ?? (enabled && canAttach && !props.offline && !props.attachmentManaged ? () => { unavailable.forget(currentTarget); setAttempt(value => value + 1); } : undefined)} />;
 }
-function FamilyChat({ disconnected, opening, hostLabel, visible = true, fixedDisplayMode, mutationBlocked = false, onPendingInputChange, session, pending, transport, navigation, draftStore, draftBinding, imageDraftBinding, imageRecipient: explicitImageRecipient, controls, menuActions, offline, entries, onNavigate, displayBinding, baseUrl, target, preview, viewId, nativePrefixOnly, availabilityError, onRetryAttachment, consoleCommands, onExecuteConsoleCommand, replica, replicaFor, onSessionReady, onSessionBound, windowViewId, sessionPresentation, renderSessionFooter, familyRoot, nativeTakeover, sessionIntent, attachmentAvailable, compact, successionContext: explicitContext, directoryFor }: SessionConversationProps & { disconnected: boolean; opening: boolean; nativeTakeover?: ReactNode; attachmentAvailable: boolean; session: OpenedSession; pending: boolean; preview?: AgentReplicaState; availabilityError?: string; onRetryAttachment?(): void }) {
+function FamilyChat({ disconnected, opening, hostLabel, visible = true, mutationBlocked = false, onPendingInputChange, session, pending, transport, navigation, draftStore, draftBinding, imageDraftBinding, imageRecipient: explicitImageRecipient, controls, menuActions, offline, entries, onNavigate, displayBinding, baseUrl, target, preview, viewId, nativePrefixOnly, availabilityError, onRetryAttachment, consoleCommands, onExecuteConsoleCommand, replica, replicaFor, onSessionReady, onSessionBound, windowViewId, sessionPresentation, renderSessionFooter, familyRoot, nativeTakeover, sessionIntent, attachmentAvailable, compact, successionContext: explicitContext, directoryFor }: SessionConversationProps & { disconnected: boolean; opening: boolean; nativeTakeover?: ReactNode; attachmentAvailable: boolean; session: OpenedSession; pending: boolean; preview?: AgentReplicaState; availabilityError?: string; onRetryAttachment?(): void }) {
   const conversation = useConversationSession(session, transport, replica ?? replicaFor?.(session.agentId), pending, { viewId, nativePrefixOnly, externalAttachment: true, sessionIntent, attachmentAvailable });
   const { state, sessionState, status, actions, questions, setQuestions, imageRecipient, operationBinding } = conversation;
   const nativeIdentityMatches = state?.agent?.id === session.agentId && state.agent.providerId === session.providerId
@@ -293,7 +293,7 @@ function FamilyChat({ disconnected, opening, hostLabel, visible = true, fixedDis
   const firstInputPresentation = contextKey ? {
     pendingFirstInputContext: context && context.state !== 'materialized' ? { state: context.state, onRetry: context.onRetry } : undefined,
   } : undefined;
-  return <CommunicationNavigationContext.Provider value={inherited?.communication}><LabWorkbench displayBinding={familyDisplayBinding({ displayBinding, target, entries, viewId, windowViewId })} headingMode={compact ? 'toolbar' : 'inline'} defaultDisplayMode="content"
+  return <CommunicationNavigationContext.Provider value={inherited?.communication}><LabWorkbench displayBinding={familyDisplayBinding({ displayBinding, target, entries, viewId, windowViewId })} headingMode={compact ? 'toolbar' : 'inline'}
     sessionIdentity={presentedSession} hostLabel={hostLabel} host={{ online: !offline, ...(hostLabel ? { name: hostLabel } : {}) }} consoleCommands={consoleCommands} onExecuteConsoleCommand={onExecuteConsoleCommand} nativeTakeover={nativeTakeover}
     childrenFor={childrenFor} onOpenChildSession={navigationActions.openChildSession}
     resolveSessionLink={id => inherited?.resolveSessionLink(id) ?? local.resolveSessionLink(id)} revealEntry={inherited?.revealEntry}
@@ -301,7 +301,7 @@ function FamilyChat({ disconnected, opening, hostLabel, visible = true, fixedDis
     draftSessionKey={key} draftBinding={composerDraft} imageDraftBinding={imageDraftBinding} imageRecipient={pending ? undefined : explicitImageRecipient ?? imageRecipient} questionDrafts={pending ? {} : questions}
     onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}
     conversationPath={<strong className="agent-session-title">{presentedSession.title}</strong>} {...presentation} {...firstInputPresentation}
-    visible={visible && presentation?.visible !== false} fixedDisplayMode={fixedDisplayMode} mutationBlocked={mutationBlocked || presentation?.mutationBlocked}
+    visible={visible && presentation?.visible !== false} mutationBlocked={mutationBlocked || presentation?.mutationBlocked}
     draftOnly={pending && !opening || identityMismatch || !!presentation?.draftOnly}
     sessionManager={presentation?.sessionManager ?? <>{controls}<SessionHeadingActions sessionKey={key} alwaysCollapsed={!!menuActions}><SessionLink session={target} />{menuActions}</SessionHeadingActions></>}
     onPendingInputChange={reportPendingInput} headingStart={presentation?.headingStart}

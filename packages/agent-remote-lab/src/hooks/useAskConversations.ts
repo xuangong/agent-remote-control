@@ -14,7 +14,6 @@ import { compositionMetadataKey, compositionRoleKey, compositionSelection, saveC
 import { flushRecoveryWrites } from '../recovery-writes.js';
 import { recoveryGeneration } from '../conversation-recovery.js';
 import { inspectAskPosition, flushAskPosition } from './useAskPosition.js';
-import { inspectSessionDisplayPreferences, flushSessionDisplayPreferences } from './useSessionDisplayPreferences.js';
 import { inspectImageDraft } from '@orchardworks/agent-client-web/browser';
 import type { CompositionParticipantResult } from '../session-composition-application.js';
 import { isAskSelected } from '../ask-presentation.js';
@@ -597,11 +596,6 @@ export function useAskConversations(document: CompositionDocument, transport: Re
         const positionResult = flushAskPosition(owner.geometryScope, position.revision, current);
         if (positionResult.status !== 'ready') throw new Error('Ask geometry retention incomplete.');
         retentions.push(positionResult.retention);
-        if (owner.display) {
-          const display = inspectSessionDisplayPreferences(owner.display), result = flushSessionDisplayPreferences(owner.display, display.revision, current);
-          if (result.status !== 'ready') throw new Error('Ask display retention incomplete.');
-          checks.push(() => inspectSessionDisplayPreferences(owner.display!).revision === display.revision); retentions.push(result.retention);
-        }
         if (owner.image) {
           const image = await inspectImageDraft(owner.image), snapshot = image.snapshot();
           if (!current()) return { status: 'pending', retention: 'page', code: 'ask_owner_edit' };

@@ -188,7 +188,7 @@ function TpmChat({ session, replica, transport, draftBinding, navigation, title,
 }) {
   const { state, sessionState, status, actions, questions, setQuestions, imageRecipient, operationBinding } = useConversationSession(session, transport, replica, false, { nativePrefixOnly: true });
   const { communication, ...viewNavigation } = navigation?.(session, state) ?? {};
-  return <CommunicationNavigationContext.Provider value={communication}><LabWorkbench showAttributions={false} displayBinding={displayBinding} todo={todo} defaultDisplayMode="content" headingMode="toolbar" {...viewNavigation}
+  return <CommunicationNavigationContext.Provider value={communication}><LabWorkbench showAttributions={false} displayBinding={displayBinding} todo={todo} headingMode="toolbar" {...viewNavigation}
     state={state} sessionState={sessionState} sessionStatus={status} attachingAgentId={operationBinding.source.agentId} actions={actions} operationBinding={operationBinding}
     draftSessionKey={sessionKey(session)} draftBinding={draftBinding} imageRecipient={imageRecipient} questionDrafts={questions}
     onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}

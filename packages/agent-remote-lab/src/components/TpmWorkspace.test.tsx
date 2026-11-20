@@ -170,8 +170,9 @@ it('keeps the ordinary Session View connected and its full chatbox draft across 
   expect(container.querySelector('[aria-label="Session view options"]')).not.toBeNull();
   expect(container.querySelector('[data-testid="prompt-submit"]')).not.toBeNull();
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
-  await act(async () => container.querySelector<HTMLInputElement>('input[type="radio"][value="preview"]')!.click());
-  expect(container.querySelector<HTMLInputElement>('input[type="radio"][value="preview"]')!.checked).toBe(true);
+  const full = [...container.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="All assistants on this device"] button')].find(button => button.textContent === 'Full')!;
+  await act(async () => full.click());
+  expect(full.getAttribute('aria-pressed')).toBe('true');
   expect(container.querySelector('[aria-label="Show letters"]')).not.toBeNull();
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
   const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;

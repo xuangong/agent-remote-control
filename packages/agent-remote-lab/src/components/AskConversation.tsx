@@ -14,9 +14,9 @@ import { SessionLink } from './SessionLink.js';
 import { SessionViewPlacement } from './SessionDock.js';
 import { AskResize } from './AskResize.js';
 import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-client-web/browser';
-import type { DisplayPreferenceBinding } from '../hooks/useSessionDisplayPreferences.js';
+import type { ViewBinding } from '../view-binding.js';
 import { useWindowLayout, WindowPresentationContext } from '../window-workspace-context.js';
-interface AskStorageBindings { baseUrl?: string; viewId?: string; compact?: boolean; imageDraftBinding?: ImageDraftBinding; imageRecipient?: ImageDraftRecipient; displayBinding?: DisplayPreferenceBinding }
+interface AskStorageBindings { baseUrl?: string; viewId?: string; compact?: boolean; imageDraftBinding?: ImageDraftBinding; imageRecipient?: ImageDraftRecipient; displayBinding?: ViewBinding }
 
 export function AskConversation(props: Omit<Parameters<typeof AskConversationContent>[0], 'docked' | 'dockControls' | 'onAdditionalWidthChange'>) {
   const [additionalWidth, setAdditionalWidth] = useState(0);

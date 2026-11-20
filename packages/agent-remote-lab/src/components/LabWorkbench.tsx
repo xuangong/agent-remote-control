@@ -10,7 +10,7 @@ import { WorkspaceVscodeLink } from './HostVscodeTunnel.js';
 import { SessionWorkspaceContext } from './SessionLink.js';
 import { needsReauthentication } from '../security-client.js';
 import { ReauthenticationNotice } from './ReauthenticationNotice.js';
-import { useSessionDisplayPreferences, type DisplayPreferenceBinding } from '../hooks/useSessionDisplayPreferences.js';
+import type { ViewBinding } from '../view-binding.js';
 import { DraftRecoveryNotice } from './DraftRecoveryNotice.js';
 import { usePromptEditOperation } from '../hooks/usePromptEditOperation.js';
 import { SessionViewOperationsContext, type SessionOperationBinding } from '../session-view-operations.js';
@@ -21,7 +21,7 @@ import type { SessionExcerpt } from '@orchardworks/agent-remote-protocol';
 export type { SessionViewActions as LabWorkbenchActions } from '@orchardworks/agent-client-web/react';
 
 /** Product policy is supplied around the same session renderer used by ARDB. */
-export function LabWorkbench({ draftBinding, displayBinding, defaultDisplayMode, fixedDisplayMode, operationBinding, sessionIdentity, hostLabel, showAttributions = true, receiveQuotes, ...props }: ComponentProps<typeof SessionWorkbench> & { draftBinding?: DraftBinding; displayBinding?: DisplayPreferenceBinding; operationBinding?: SessionOperationBinding; sessionIdentity?: SessionEntry; hostLabel?: string; showAttributions?: boolean; receiveQuotes?(excerpts: readonly SessionExcerpt[]): void }) {
+export function LabWorkbench({ draftBinding, displayBinding, operationBinding, sessionIdentity, hostLabel, showAttributions = true, receiveQuotes, ...props }: ComponentProps<typeof SessionWorkbench> & { draftBinding?: DraftBinding; displayBinding?: ViewBinding; operationBinding?: SessionOperationBinding; sessionIdentity?: SessionEntry; hostLabel?: string; showAttributions?: boolean; receiveQuotes?(excerpts: readonly SessionExcerpt[]): void }) {
   const descriptions = useContext(SessionDescriptionsContext);
   const source = sessionIdentity ?? operationBinding?.source;
   const relationships = showAttributions ? props.sessionDescription ?? (source ? descriptions?.describe(source) ?? describeSession({ session: source }) : undefined) : undefined;
@@ -36,9 +36,6 @@ export function LabWorkbench({ draftBinding, displayBinding, defaultDisplayMode,
   const imageBinding = props.imageDraftBinding ?? (draftScope && props.draftSessionKey ? { scope: draftScope, key: JSON.stringify([draftScope, props.draftSessionKey]) } : undefined);
   const promptEdit = usePromptEditOperation(operationBinding, draftBinding, imageBinding, displayBinding?.key ?? draftBinding?.key, props.imageRecipient, receiveQuotes);
   const draft = useBoundDraft(draftBinding);
-  const [displayPreferences, onDisplayPreferencesChange] = useSessionDisplayPreferences(displayBinding?.scope ?? positions?.scope,
-    displayBinding?.key ?? props.draftSessionKey ?? props.state?.agent?.runtimeInfo.sessionId ?? props.attachingAgentId, defaultDisplayMode);
-  const effectiveDisplay = fixedDisplayMode ? { ...displayPreferences, mode: fixedDisplayMode } : displayPreferences;
   const agent = props.state?.agent;
   const reportedSession = agent?.runtimeInfo.sessionId, cwd = agent?.cwd, providerId = agent?.providerId;
   const identity = source ?? relationships?.identity;
@@ -67,7 +64,6 @@ export function LabWorkbench({ draftBinding, displayBinding, defaultDisplayMode,
       : id === TeamViewCommand.id && teamCommand ? teamCommand(args)
       : id === AskViewCommand.id && askVisibility && (!sourceAskCommand || ['', 'on', 'off', 'enable', 'disable'].includes(args.trim().toLowerCase())) ? askVisibility(args)
       : props.onExecuteConsoleCommand ? props.onExecuteConsoleCommand(id, args) : Promise.reject(new Error('Unknown console command.')) : props.onExecuteConsoleCommand}
-    fixedDisplayMode={fixedDisplayMode} displayPreferences={effectiveDisplay} onDisplayPreferencesChange={onDisplayPreferencesChange}
     readingPositions={positions} draftScope={draftScope}
     composerNotice={<>{props.composerNotice}{promptEdit.notice}{draftBinding ? <DraftRecoveryNotice binding={draftBinding} /> : null}</>}
     messageDraft={draftBinding ? draft.text : props.messageDraft} onMessageDraftChange={draftBinding ? draft.set : props.onMessageDraftChange}

@@ -1,5 +1,5 @@
 import { act, useState } from 'react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, type AgentChildSession } from '@orchardworks/agent-remote-protocol';
 import { AgentReplica } from '@orchardworks/agent-client';
 import { App, type LabTransport } from './App.js';
@@ -16,6 +16,8 @@ const snapshots = {
   parent,
   child: { ...parent, id: 'child', persistence: { providerId: 'codex', sessionId: 'native-child', opaque: 'native-child' }, runtimeInfo: { providerId: 'codex', sessionId: 'native-child', status: 'idle' as const } },
 };
+// Activity links live in the step that spawned the session (L2): these readers show every step.
+beforeEach(() => { window.localStorage.setItem('agent-remote:process-mode', 'full'); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); window.localStorage.clear(); window.sessionStorage.clear(); window.history.replaceState(null, '', '/'); });
 async function setup(reject = false, options: { live?: boolean; deferChild?: boolean; staleChild?: boolean; restricted?: boolean; discover?: boolean; navigation?: boolean; nested?: boolean; images?: boolean; desktop?: boolean; letters?: boolean; rootReference?: boolean; directChild?: boolean; ask?: boolean; restoreUrl?: string } = {}) {
   vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => <div data-test-runtime-agent={props.state?.agent?.id}>{realWorkbench(props)}</div>);
@@ -148,9 +150,7 @@ async function openAsk(container: HTMLElement) {
   const ask = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Ask"]')!;
   expect(ask).not.toBeNull();
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
-  await act(async () => ask.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
-  await act(async () => ask.querySelector<HTMLInputElement>('input[value="simple"]')!.click());
-  await act(async () => ask.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
+  // The device's Full mode (set for these tests) shows the Ask's steps, where its activity links are.
   return ask;
 }
 
@@ -213,9 +213,6 @@ it('resolves Side activity references within its source family', async () => {
   const f = await setup(false, { live: true, desktop: true, navigation: true });
   await act(async () => f.container.querySelector<HTMLButtonElement>('.lab-primary-conversation [data-child-session-id="native-child"]')!.click());
   await waitForSession(f.container.querySelector<HTMLElement>('.lab-side-conversation')!, 'child');
-  await act(async () => f.container.querySelector<HTMLButtonElement>('.lab-side-conversation [aria-label="Session view options"]')!.click());
-  await act(async () => f.container.querySelector<HTMLInputElement>('.lab-side-conversation input[value="simple"]')!.click());
-  await act(async () => f.container.querySelector<HTMLButtonElement>('.lab-side-conversation [aria-label="Session view options"]')!.click());
   const link = f.container.querySelector<HTMLAnchorElement>('.lab-side-conversation .agent-session-reference');
   expect(link).not.toBeNull();
   expect(new URL(link!.href).searchParams.get('session')).toBe('native-sibling');

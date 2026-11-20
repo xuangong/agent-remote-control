@@ -115,7 +115,7 @@ export function useViewModel(scope: Pick<AppInputs & SessionSuccessionBindingSli
       directoryFor: hostId => hostId === selectedHost.id ? directory : undefined,
       draftStore: messageDrafts, draftBinding: draftOwnerBinding(slot.owners.text), imageDraftBinding: slot.owners.image,
       displayBinding: view ? { scope: baseUrl, key: view.id } : undefined,
-      fixedDisplayMode: 'content', successionContext: succession.successionContextFor(slot.id),
+      successionContext: succession.successionContextFor(slot.id),
       sessionPresentation: context => presentSessionView(context, place.kind === 'bot' ? { bot: { groupId: place.groupId, viewId: place.viewId } } : { fallback: true }),
       onNavigate: async (destination, _children, source) => { navigation.select({ kind: 'session', session: { ...destination, hostId: 'hostId' in destination ? destination.hostId ?? source.hostId : source.hostId, providerId: 'providerId' in destination ? destination.providerId : source.providerId } }); },
     } };

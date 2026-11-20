@@ -33,8 +33,8 @@ describe('App', () => {
     item: { type: 'agent_communication' as const, messageId: 'task-letter', sender: '/root', recipient: '/root/review', text: 'Review the transport.' },
   }] } };
 
-  it('keeps Show letters independent from every display mode and restores it after remount', async () => {
-    const modeKey = 'agent-remote:timeline-display';
+  it('keeps Show letters independent from every process mode and restores it after remount', async () => {
+    const modeKey = 'agent-remote:process-mode';
     const lettersKey = 'agent-remote:show-letters';
     window.localStorage.removeItem(modeKey);
     window.localStorage.removeItem(lettersKey);
@@ -42,27 +42,24 @@ describe('App', () => {
       const container = await render(<App initialState={letterState} initialSessionStatus="ready" actions={{}} />);
       await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
       const letters = container.querySelector<HTMLInputElement>('[aria-label="Show letters"]');
-      const content = container.querySelector<HTMLInputElement>('input[value="content"]')!;
-      const simple = container.querySelector<HTMLInputElement>('input[value="simple"]')!;
-      const preview = container.querySelector<HTMLInputElement>('input[value="preview"]')!;
+      const device = container.querySelector<HTMLElement>('[role="group"][aria-label="All assistants on this device"]')!;
+      const choice = (name: string) => [...device.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === name)!;
       expect(letters).not.toBeNull();
       expect(letters!.checked).toBe(true);
       expect(container.querySelector('.agent-communication-letter')).not.toBeNull();
-      // Simple conversation is the default mode.
-      for (const mode of ['simple', 'content', 'preview'] as const) {
-        if (mode === 'content') await act(async () => content.click());
-        if (mode === 'preview') await act(async () => preview.click());
+      for (const mode of ['Concise', 'Process', 'Full'] as const) {
+        await act(async () => choice(mode).click());
         await act(async () => letters!.click());
-        expect(container.querySelector<HTMLInputElement>(`input[value="${mode}"]`)!.checked).toBe(true);
+        expect(choice(mode).getAttribute('aria-pressed')).toBe('true');
         expect(letters!.checked).toBe(false);
         expect(container.querySelector('.agent-communication-letter')).toBeNull();
         await act(async () => letters!.click());
-        expect(container.querySelector<HTMLInputElement>(`input[value="${mode}"]`)!.checked).toBe(true);
+        expect(choice(mode).getAttribute('aria-pressed')).toBe('true');
         expect(container.querySelector('.agent-communication-letter')).not.toBeNull();
       }
       await act(async () => letters!.click());
-      for (const button of [simple, content, simple]) {
-        await act(async () => button.click());
+      for (const mode of ['Concise', 'Full'] as const) {
+        await act(async () => choice(mode).click());
         expect(letters!.checked).toBe(false);
         expect(container.querySelector('.agent-communication-letter')).toBeNull();
       }
@@ -71,14 +68,14 @@ describe('App', () => {
       expect(restored.querySelector('.agent-communication-letter')).toBeNull();
       await act(async () => restored.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
       expect(restored.querySelector<HTMLInputElement>('[aria-label="Show letters"]')!.checked).toBe(false);
-      expect(restored.querySelector<HTMLInputElement>('input[value="simple"]')!.checked).toBe(true);
+      expect(restored.querySelector('[role="group"][aria-label="All assistants on this device"] [aria-pressed="true"]')?.textContent).toBe('Full');
     } finally { window.localStorage.removeItem(modeKey); window.localStorage.removeItem(lettersKey); }
   });
 
   it('shows a hidden letter opened from Trace and lets Show letters hide it again', async () => {
-    const modeKey = 'agent-remote:timeline-display';
+    const modeKey = 'agent-remote:process-mode';
     const lettersKey = 'agent-remote:show-letters';
-    window.localStorage.setItem(modeKey, 'content');
+    window.localStorage.setItem(modeKey, 'concise');
     window.localStorage.setItem(lettersKey, 'false');
     try {
       const container = await render(<App initialState={letterState} initialSessionStatus="ready" actions={{}} />);
@@ -89,7 +86,7 @@ describe('App', () => {
       await act(async () => show.click());
       expect(container.querySelector('[data-inspected="true"] .agent-communication-letter')).not.toBeNull();
       await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
-      expect(container.querySelector<HTMLInputElement>('input[value="content"]')!.checked).toBe(true);
+      expect(container.querySelector('[role="group"][aria-label="All assistants on this device"] [aria-pressed="true"]')?.textContent).toBe('Concise');
       expect(container.querySelector<HTMLInputElement>('[aria-label="Show letters"]')!.checked).toBe(true);
       await act(async () => container.querySelector<HTMLInputElement>('[aria-label="Show letters"]')!.click());
       expect(container.querySelector('.agent-communication-letter')).toBeNull();
@@ -117,9 +114,9 @@ describe('App', () => {
     } finally { window.localStorage.removeItem(lettersKey); }
   });
 
-  it('reveals a filtered execution event when explicitly opening it from Trace', async () => {
-    const key = 'agent-remote:timeline-display';
-    window.localStorage.setItem(key, 'content');
+  it('opens the work line of an execution event opened from Trace, without changing the process mode', async () => {
+    const key = 'agent-remote:process-mode';
+    window.localStorage.setItem(key, 'concise');
     const initialState = { ...replicaState, timeline: { ...replicaState.timeline, entries: [{
       providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-09-18T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [],
       item: { type: 'reasoning' as const, text: 'Inspect this reasoning.' },
@@ -134,13 +131,11 @@ describe('App', () => {
       expect(tab(container, 'Workbench').getAttribute('aria-selected')).toBe('true');
       expect(container.querySelector('[data-inspected="true"] .agent-reasoning')).not.toBeNull();
       await openSessionViewOptions(container);
-      expect(container.querySelector<HTMLInputElement>('input[value="simple"]')!.checked).toBe(true);
+      expect(container.querySelector('[role="group"][aria-label="All assistants on this device"] [aria-pressed="true"]')?.textContent).toBe('Concise');
     } finally { window.localStorage.removeItem(key); }
   });
 
-  it('selects display modes exclusively and restores this session choice after remount', async () => {
-    const key = 'agent-remote:timeline-display';
-    window.localStorage.removeItem(key);
+  it('chooses the process mode for every assistant on this device from View, exclusively, and keeps it after remount', async () => {
     const initialState = { ...replicaState, timeline: { ...replicaState.timeline, entries: [
       { type: 'user_message' as const, text: 'The requirement.' },
       { type: 'reasoning' as const, text: 'Execution details.' },
@@ -149,27 +144,22 @@ describe('App', () => {
       timestamp: '2026-09-18T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [], item })) } };
     try {
       const container = await render(<App initialState={initialState} initialSessionStatus="ready" actions={{}} />);
+      // Concise: the prompt and the answer; the reasoning is behind the work line.
+      expect(container.querySelectorAll('.agent-timeline-entry')).toHaveLength(2);
       await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
-      const content = container.querySelector<HTMLInputElement>('input[value="content"]');
-      const simple = container.querySelector<HTMLInputElement>('input[value="simple"]')!;
-      expect(content).not.toBeNull();
-      await act(async () => content!.click());
-      expect(simple.checked).toBe(false);
+      const device = container.querySelector<HTMLElement>('[role="group"][aria-label="All assistants on this device"]')!;
+      const choice = (name: string) => [...device.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === name)!;
+      await act(async () => choice('Full').click());
+      expect([...device.querySelectorAll('button')].filter(button => button.getAttribute('aria-pressed') === 'true').map(button => button.textContent)).toEqual(['Full']);
+      expect(container.querySelectorAll('.agent-timeline-entry')).toHaveLength(3);
+      expect(container.querySelector('.agent-content-preview')?.textContent).toContain('Execution details.');
+      const restored = await render(<App initialState={initialState} initialSessionStatus="ready" actions={{}} />);
+      expect(restored.querySelectorAll('.agent-timeline-entry')).toHaveLength(3);
+      await act(async () => choice('Concise').click());
       expect(container.querySelectorAll('.agent-timeline-entry')).toHaveLength(2);
       expect(container.querySelector('.agent-message-user')?.textContent).toContain('The requirement.');
       expect(container.querySelector('.agent-message-assistant')?.textContent).toContain('The summary.');
-      expect(content!.checked).toBe(true);
-      const restored = await render(<App initialState={initialState} initialSessionStatus="ready" actions={{}} />);
-      expect(restored.querySelectorAll('.agent-timeline-entry')).toHaveLength(2);
-      await act(async () => simple.click());
-      expect(content!.checked).toBe(false);
-      expect(container.querySelectorAll('.agent-timeline-entry')).toHaveLength(3);
-      await act(async () => content!.click());
-      expect(simple.checked).toBe(false);
-      await act(async () => container.querySelector<HTMLInputElement>('input[value="preview"]')!.click());
-      expect(container.querySelector<HTMLInputElement>('input[value="preview"]')!.checked).toBe(true);
-      expect(container.querySelector('.agent-content-preview')?.textContent).toContain('Execution details.');
-    } finally { window.localStorage.removeItem(key); }
+    } finally { window.localStorage.removeItem('agent-remote:process-mode'); }
   });
 
   it('does not restore an old inspect request after leaving and returning to a session', async () => {
@@ -219,28 +209,6 @@ describe('App', () => {
     expect(tab(container, 'Workbench').getAttribute('aria-selected')).toBe('true');
     expect(container.querySelector('[data-entry-key]')).toBe(conversation);
     expect(conversation?.getAttribute('data-inspected')).toBe('true');
-  });
-
-  it('switches conversation previews from View and restores the browser preference', async () => {
-    const key = 'agent-remote:timeline-display';
-    window.localStorage.removeItem(key);
-    const initialState = { ...replicaState, timeline: { ...replicaState.timeline, entries: [{
-      providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-09-15T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [], item: { type: 'reasoning' as const, text: 'Review the failing test first.' },
-    }] } };
-    try {
-      // Every step shows at preview level until the user chooses the conversation only.
-      const container = await render(<App initialState={initialState} transport={labTransport()} />);
-      expect(container.querySelector('.agent-content-preview')?.textContent).toContain('Review the failing test');
-      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
-      expect(container.querySelector<HTMLInputElement>('input[value="simple"]')!.checked).toBe(true);
-      await act(async () => container.querySelector<HTMLInputElement>('input[value="content"]')!.click());
-      expect(container.querySelector('.agent-content-preview')).toBeNull();
-      const restored = await render(<App initialState={initialState} transport={labTransport()} />);
-      expect(restored.querySelector('.agent-content-preview')).toBeNull();
-      await openSessionViewOptions(container);
-      await act(async () => container.querySelector<HTMLInputElement>('input[value="preview"]')!.click());
-      expect(container.querySelector('.agent-content-preview')?.textContent).toContain('Review the failing test');
-    } finally { window.localStorage.removeItem(key); }
   });
 
   it('opens a native child link without cached sessions and ignores a stale runtime Agent ID', async () => {

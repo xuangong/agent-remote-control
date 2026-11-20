@@ -1,5 +1,5 @@
 import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-client-web/browser';
-import { isUncertainSend, remoteSessionState, sessionActivityLabel, sessionNotice, sessionNoticeWords, type RemoteSessionState, type SessionDescription, type SessionAttribution, type SessionFacts, type SessionNotice } from '@orchardworks/agent-client';
+import { isUncertainSend, timelineEntryKey, remoteSessionState, sessionActivityLabel, sessionNotice, sessionNoticeWords, type RemoteSessionState, type SessionDescription, type SessionAttribution, type SessionFacts, type SessionNotice } from '@orchardworks/agent-client';
 import { SessionControlNotice } from './SessionControlNotice.js';
 import { SessionViewFrame } from './SessionViewFrame.js';
 import { useFeedbackToast, useToastAnchor } from './Toast.js';
@@ -12,13 +12,14 @@ import type {
   ResourceBinding,
 } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState, RemoteSessionStatus, SessionHandoffState } from '@orchardworks/agent-client';
-import { SessionAttributions, AgentCommandDetails, AgentTimeline, ProcessModeContext, type AgentTimelineProps, type TimelineEntrySelection, TimelineSearch, PreviewDock, TimelineDisplay, TimelineLettersVisible, createTimelineRenderModel, isContentOnlyItem, type TimelineDisplayMode, type AgentChildSessionView, type QuestionDraft, type SessionLinkResolver } from '@orchardworks/agent-client-web/react';
+import { SessionAttributions, AgentCommandDetails, AgentTimeline, ProcessModeContext, type AgentTimelineProps, type TimelineEntrySelection, TimelineSearch, PreviewDock, TimelineLettersVisible, type AgentChildSessionView, type QuestionDraft, type SessionLinkResolver } from '@orchardworks/agent-client-web/react';
 
 
 import { AgentComposer as DraftComposer, type SessionViewActions, type TimelineReadingPositions } from '@orchardworks/agent-client-web/react';
 
 import { PlanningControl } from './PlanningControl.js';
-import { SessionViewOptions, type SessionDisplayPreferences } from './SessionViewOptions.js';
+import { SessionViewOptions } from './SessionViewOptions.js';
+import { useLettersVisible, useProcessMode, type ProcessAssistant } from '../hooks/useProcessMode.js';
 import { SessionTodoPanel, type SessionTodoPanelProps } from '@orchardworks/agent-client-web/react';
 import { SessionHeading } from './SessionHeading.js';
 import { SessionHeadingActionsPresentationContext } from './SessionHeadingActions.js';
@@ -31,9 +32,11 @@ import type { TraceEntryRequest } from '../trace-model.js';
 
 export type LabWorkbenchActions = SessionViewActions;
 
-export function SessionWorkbench({ assistant, sessionDescription, onNavigateAttribution, todo, displayPreferences, onDisplayPreferencesChange, defaultDisplayMode = 'simple', fixedDisplayMode, sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, imageDraftBinding, imageRecipient, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, renderCommandError, readOnly: recordingReadOnly = false, draftOnly = false, opening = false, mutationBlocked = false, pendingFirstInputContext, onPendingInputChange, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, headingStart, headingMode = 'inline', sessionManager, headingContext, composerContext, composerNotice, composerStatus, nativeTakeover, consoleCommands, onExecuteConsoleCommand, entrySelection, timelineStart, timelineEnd, sendLater, loadingNotice, host }: { entrySelection?: TimelineEntrySelection;
+export function SessionWorkbench({ assistant, sessionDescription, onNavigateAttribution, todo, processAssistant, sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, imageDraftBinding, imageRecipient, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, renderCommandError, readOnly: recordingReadOnly = false, draftOnly = false, opening = false, mutationBlocked = false, pendingFirstInputContext, onPendingInputChange, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, headingStart, headingMode = 'inline', sessionManager, headingContext, composerContext, composerNotice, composerStatus, nativeTakeover, consoleCommands, onExecuteConsoleCommand, entrySelection, timelineStart, timelineEnd, sendLater, loadingNotice, host }: { entrySelection?: TimelineEntrySelection;
   /** Who answers in this conversation: the live line's name and the avatar at the foot of the answers. */
   assistant?: AgentTimelineProps['assistant'];
+  /** The bot this conversation is, when it is one: the view options choose its own process mode. */
+  processAssistant?: ProcessAssistant;
   /** The session's Host as the Relay last said: an offline Host is said once, and the composer stays enabled. */
   host?: SessionFacts['host'];
   /** Said in place of Opening session while the conversation cannot load yet, for example because its Host is offline. */
@@ -43,33 +46,21 @@ export function SessionWorkbench({ assistant, sessionDescription, onNavigateAttr
   /** Sends from a draft-only composer whose Host is offline: the message waits for the Host. */
   sendLater?: ComponentProps<typeof DraftComposer>['sendLater'];
   /** Content above this conversation's own entries once its oldest page is loaded: a bot's earlier sessions after a handoff. */
-  timelineStart?: ReactNode; timelineEnd?: ReactNode; sessionDescription?: SessionDescription; onNavigateAttribution?(attribution: SessionAttribution): void | Promise<void>; todo?: SessionTodoPanelProps; displayPreferences?: SessionDisplayPreferences; onDisplayPreferencesChange?(preferences: SessionDisplayPreferences): void; defaultDisplayMode?: TimelineDisplayMode; fixedDisplayMode?: TimelineDisplayMode; sessionState?: RemoteSessionState; handoff?: SessionHandoffState; readOnly?: boolean; draftOnly?: boolean; mutationBlocked?: boolean; pendingFirstInputContext?: ComponentProps<typeof DraftComposer>['pendingFirstInputContext']; onPendingInputChange?(count: number): void; workspaceLink?: ReactNode; readingPositions?: TimelineReadingPositions; draftScope?: string; imageDraftBinding?: ImageDraftBinding; imageRecipient?: ImageDraftRecipient; isAuthenticationError?(error: unknown): boolean; authenticationNotice?: ReactNode; renderSessionSettingError?(error: unknown): ReactNode; renderCommandError?(error: unknown): ReactNode; onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; composerStatus?: ReactNode; headingContext?: ReactNode; nativeTakeover?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; headingStart?: ReactNode; headingMode?: 'inline' | 'toolbar'; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
+  timelineStart?: ReactNode; timelineEnd?: ReactNode; sessionDescription?: SessionDescription; onNavigateAttribution?(attribution: SessionAttribution): void | Promise<void>; todo?: SessionTodoPanelProps; sessionState?: RemoteSessionState; handoff?: SessionHandoffState; readOnly?: boolean; draftOnly?: boolean; mutationBlocked?: boolean; pendingFirstInputContext?: ComponentProps<typeof DraftComposer>['pendingFirstInputContext']; onPendingInputChange?(count: number): void; workspaceLink?: ReactNode; readingPositions?: TimelineReadingPositions; draftScope?: string; imageDraftBinding?: ImageDraftBinding; imageRecipient?: ImageDraftRecipient; isAuthenticationError?(error: unknown): boolean; authenticationNotice?: ReactNode; renderSessionSettingError?(error: unknown): ReactNode; renderCommandError?(error: unknown): ReactNode; onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; composerStatus?: ReactNode; headingContext?: ReactNode; nativeTakeover?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; headingStart?: ReactNode; headingMode?: 'inline' | 'toolbar'; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
   const displayScope = draftSessionKey ?? state?.agent?.runtimeInfo.sessionId ?? attachingAgentId;
-  const [localDisplay, setLocalDisplay] = useState(() => ({ scope: displayScope, value: { mode: defaultDisplayMode, lettersVisible: true } }));
-  let localPreferences = localDisplay.value;
-  if (localDisplay.scope !== displayScope) {
-    localPreferences = { mode: defaultDisplayMode, lettersVisible: true };
-    setLocalDisplay({ scope: displayScope, value: localPreferences });
-  }
-  const storedPreferences = displayPreferences ?? localPreferences;
-  const preferences = fixedDisplayMode ? { ...storedPreferences, mode: fixedDisplayMode } : storedPreferences;
-  function changeDisplayPreferences(value: SessionDisplayPreferences): void {
-    if (fixedDisplayMode) return;
-    if (onDisplayPreferencesChange) onDisplayPreferencesChange(value);
-    else setLocalDisplay({ scope: displayScope, value });
-  }
-  const revealedDisplayRequest = useRef<string>();
+  const process = useProcessMode(processAssistant);
+  const [lettersVisible, setLettersVisible] = useLettersVisible();
+  // A Trace target that is a letter shows the letters; its turn opens by itself.
+  const revealedLetterRequest = useRef<string>();
   useLayoutEffect(() => {
-    if (fixedDisplayMode || !visible || !revealEntry || !state) return;
+    if (!visible || !revealEntry || !state || lettersVisible) return;
     const request = JSON.stringify([displayScope, state.timeline.epoch, revealEntry.requestId, revealEntry.key]);
-    if (revealedDisplayRequest.current === request) return;
-    const item = createTimelineRenderModel(state.timeline.entries).find(entry => entry.key === revealEntry.key)?.entry.item;
+    if (revealedLetterRequest.current === request) return;
+    const item = state.timeline.entries.find(entry => timelineEntryKey(entry) === revealEntry.key)?.item;
     if (!item) return;
-    revealedDisplayRequest.current = request;
-    const mode = preferences.mode === 'content' && !isContentOnlyItem(item) ? 'simple' : preferences.mode;
-    const lettersVisible = item.type === 'agent_communication' ? true : preferences.lettersVisible;
-    if (mode !== preferences.mode || lettersVisible !== preferences.lettersVisible) changeDisplayPreferences({ mode, lettersVisible });
-  }, [fixedDisplayMode, visible, displayScope, state?.timeline.epoch, state?.timeline.entries, revealEntry, preferences.mode, preferences.lettersVisible]);
+    revealedLetterRequest.current = request;
+    if (item.type === 'agent_communication') setLettersVisible(true);
+  }, [visible, displayScope, state?.timeline.epoch, state?.timeline.entries, revealEntry, lettersVisible]);
   const session = suppliedSessionState ?? remoteSessionState(state, connectionStatus);
   const sessionStatus = session.connection;
   const controlReadOnly = !!nativeTakeover || (!draftOnly && session.readOnly);
@@ -111,9 +102,9 @@ export function SessionWorkbench({ assistant, sessionDescription, onNavigateAttr
   const timelineNotice = notice && (notice.kind === 'unavailable' || notice.kind === 'agent_unavailable' || notice.kind === 'failed' && !failureInTimeline) ? notice : undefined;
   const hasTarget = (draftSessionKey ?? attachingAgentId) !== undefined;
   const hostNotice = notice?.kind === 'host_offline' && !(state === undefined && loadingNotice) ? sessionNoticeWords(notice) : undefined;
-  const viewOptions = fixedDisplayMode ? null : <SessionViewOptions key={displayScope} preferences={preferences} onChange={changeDisplayPreferences} />;
+  const viewOptions = <SessionViewOptions key={displayScope} process={process} lettersVisible={lettersVisible} onLettersVisibleChange={setLettersVisible} />;
   const layoutClass = [todo ? 'lab-workbench-with-todo' : '', selectedCommand ? 'lab-command-details-open' : '', headingMode === 'toolbar' ? 'lab-workbench-toolbar-heading' : ''].filter(Boolean).join(' ');
-  return <TimelineDisplay.Provider value={preferences.mode}><ProcessModeContext.Provider value={preferences.mode === 'content' ? 'concise' : 'full'}><TimelineLettersVisible.Provider value={preferences.lettersVisible}>
+  return <ProcessModeContext.Provider value={process.mode}><TimelineLettersVisible.Provider value={lettersVisible}>
     <SessionAttributions description={sessionDescription} onNavigate={onNavigateAttribution}>{({ toggle, details }) => <SessionViewFrame className={layoutClass}>
     <div className="lab-workbench-heading-group" hidden={headingMode === 'toolbar' && !headingContext && !details}>
     <SessionHeading hidden={headingMode === 'toolbar'}
@@ -200,7 +191,7 @@ export function SessionWorkbench({ assistant, sessionDescription, onNavigateAttr
       onRequestResource={actions.requestResource} onResolveResource={actions.resolveResource}
       resourceScopeKey={JSON.stringify([state.agent?.id, selectedCommand.id])}
       onClose={() => setInspected(undefined)} /> : null}
-  </SessionViewFrame>}</SessionAttributions></TimelineLettersVisible.Provider></ProcessModeContext.Provider></TimelineDisplay.Provider>;
+  </SessionViewFrame>}</SessionAttributions></TimelineLettersVisible.Provider></ProcessModeContext.Provider>;
 }
 
 
@@ -260,7 +251,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
     setSearchSelection(undefined);
     if (options?.restoreFocus !== false) requestAnimationFrame(() => searchTrigger.current?.focus({ preventScroll: true }));
   }
-  const display = useContext(TimelineDisplay);
+  const display = useContext(ProcessModeContext);
   const lettersVisible = useContext(TimelineLettersVisible);
   useLayoutEffect(() => { setSearchSelection(undefined); }, [lettersVisible]);
   const contentRevision = useMemo(() => ({}), [state, display, lettersVisible, notice, questionDrafts, childrenFor]);

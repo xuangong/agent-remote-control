@@ -34,7 +34,8 @@ it('keeps post-upgrade view preferences and owners when opening the same Window 
   await act(async () => ask.toggle(succession.binding!.session, owner));
   const primary = () => visibleQuery(f.view, '.lab-primary-conversation')!;
   await act(async () => primary().querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
-  await act(async () => primary().querySelector<HTMLInputElement>('input[name^="session-display-"][value="content"]')!.click());
+  const deviceChoice = (name: string) => [...primary().querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="All assistants on this device"] button')].find(button => button.textContent === name)!;
+  await act(async () => deviceChoice('Full').click());
   await f.newTab('D', windowId);
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('D'));
   expect(succession.desired?.slot.id).toBe(original.id);
@@ -42,7 +43,7 @@ it('keeps post-upgrade view preferences and owners when opening the same Window 
   expect(succession.ownerFor(original.id)).toBe(owner);
   expect(ask.isEnabled(succession.binding!.session, owner)).toBe(true);
   await act(async () => primary().querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
-  expect(primary().querySelector<HTMLInputElement>('input[name^="session-display-"][value="content"]')!.checked).toBe(true);
+  expect(deviceChoice('Full').getAttribute('aria-pressed')).toBe('true');
   expect(f.frames.filter(frame => frame.message && ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message.type))).toEqual([]);
 });
 

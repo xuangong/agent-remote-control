@@ -18,14 +18,14 @@ test('Claude live view preserves pending approval on reconnect and renders the a
   await page.goto(server.url);
   const input=page.getByRole('textbox',{name:'Message',exact:true});await expect(input).toBeEditable();
   await input.fill('Create result.md.');await page.getByRole('button',{name:'Send message',exact:true}).click();
-  const pending=page.getByRole('complementary',{name:'Pending interactions'});
-  await expect(pending.getByRole('button',{name:'Allow once',exact:true})).toBeEnabled({timeout:15000});
+  const pending=page.locator('.agent-turn-requests');
+  await expect(pending.getByRole('button',{name:'Allow',exact:true})).toBeEnabled({timeout:15000});
   await context.setOffline(true);for(const socket of sockets)socket.close({code:1001,reason:'Test reconnect'});
   await page.evaluate(()=>window.dispatchEvent(new Event('offline')));
   await expect(pending).toContainText('Waiting for connection to respond.');
   await context.setOffline(false);await page.evaluate(()=>window.dispatchEvent(new Event('online')));
-  await expect(pending.getByRole('button',{name:'Allow once',exact:true})).toBeEnabled({timeout:15000});
-  await pending.getByRole('button',{name:'Allow once',exact:true}).click();
+  await expect(pending.getByRole('button',{name:'Allow',exact:true})).toBeEnabled({timeout:15000});
+  await pending.getByRole('button',{name:'Allow',exact:true}).click();
   await expect(page.getByText('CLAUDE_BROWSER_COMPLETE',{exact:true})).toBeVisible({timeout:15000});
   const tool=page.locator('.agent-tool').filter({hasText:'Write'});await expect(tool).toHaveCount(1);
   const toggle=tool.locator('.agent-tool-toggle');if(await toggle.getAttribute('aria-expanded')!=='true')await toggle.click();

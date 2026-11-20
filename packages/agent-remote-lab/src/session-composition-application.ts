@@ -4,7 +4,6 @@ import { recoveryGeneration } from './conversation-recovery.js';
 import { flushRecoveryWrites } from './recovery-writes.js';
 import { inspectImageDraft, type ImageDraftStorageHandle } from '@orchardworks/agent-client-web/browser';
 import type { DraftStore } from './draft-store.js';
-import { inspectSessionDisplayPreferences, flushSessionDisplayPreferences } from './hooks/useSessionDisplayPreferences.js';
 import { patchTrackedSessions, readTrackedSessionsChecked, trackingEditRevision, type TrackedSessionPatch } from './tracking-state.js';
 import { sessionKey } from './session-tree.js';
 
@@ -40,7 +39,7 @@ const weakest = (values: Array<'page' | 'session' | 'local' | undefined>): 'page
 export async function retainCompositionDraftViews(context: CompositionApplicationContext, textStore: (scope: string) => DraftStore): Promise<CompositionParticipantResult> {
   const checks: Array<() => boolean> = [context.isCurrent];
   const retentions: Array<'page' | 'session' | 'local'> = [];
-  const texts = new Set<string>(), images = new Set<string>(), displays = new Set<string>();
+  const texts = new Set<string>(), images = new Set<string>();
   const current = () => checks.every(check => check());
   const imageHandles: ImageDraftStorageHandle[] = [];
   try {
@@ -67,14 +66,6 @@ export async function retainCompositionDraftViews(context: CompositionApplicatio
         const saved = await handle.flush(snapshot.revision, current);
         if (!current()) return pending('owner_edit');
         if (saved.status !== 'ready' || saved.savedRevision !== saved.revision) return saved.status === 'failed' ? failed('image_write') : pending('image_pending');
-        retentions.push(saved.retention);
-      }
-      const display = slot.owners.display, displayKey = JSON.stringify(display);
-      if (!displays.has(displayKey)) {
-        displays.add(displayKey); const snapshot = inspectSessionDisplayPreferences(display);
-        checks.push(() => inspectSessionDisplayPreferences(display).revision === snapshot.revision);
-        const saved = flushSessionDisplayPreferences(display, snapshot.revision, current);
-        if (saved.status !== 'ready') return saved.status === 'failed' ? failed('display_write') : pending('display_cancelled');
         retentions.push(saved.retention);
       }
     }

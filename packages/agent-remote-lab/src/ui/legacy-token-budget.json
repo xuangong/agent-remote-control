@@ -18,7 +18,7 @@
     "agent-remote-lab/src/components/team.css": 10,
     "agent-remote-lab/src/components/window-overview.css": 46,
     "agent-remote-lab/src/components/window-workspaces.css": 49,
-    "agent-remote-lab/src/session-view-options.css": 25,
+    "agent-remote-lab/src/session-view-options.css": 24,
     "agent-remote-lab/src/session-view-responsive.css": 1,
     "agent-remote-lab/src/shell/shell.css": 79,
     "agent-remote-lab/src/tpm.css": 33,

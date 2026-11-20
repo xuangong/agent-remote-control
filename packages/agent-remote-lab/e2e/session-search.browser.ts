@@ -55,7 +55,7 @@ beforeAll(async () => {
       const [client] = useState(() => new RemoteSessionClient(id, new HttpWebSocketTransport(location.origin), replica, { historyPageSize: 20, timelineRecovery: 'http' }));
       const [state, setState] = useState(replica.getState());
       useEffect(() => replica.subscribe(() => setState(replica.getState())), [replica]);
-      return <div data-view={id}><SessionWorkbench defaultDisplayMode="content" state={state} readOnly sessionStatus="ready" actions={{
+      return <div data-view={id}><SessionWorkbench state={state} readOnly sessionStatus="ready" actions={{
         searchTimeline: (query, options) => client.searchTimeline(query, options),
         loadSearchMatch: (match, options) => client.loadSearchMatch(match, options),
         loadOlder: () => client.loadOlder(),

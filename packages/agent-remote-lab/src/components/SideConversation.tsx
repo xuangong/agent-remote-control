@@ -18,7 +18,7 @@ import type { SessionViewNavigationFactory } from '../session-view-navigation.js
 export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, imageDraftBinding, displayBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onUnlink, onRecover, standalone = false, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, openSides, navigation, headingStart, headingMode, onRenameTitle }: {
   navigation?: SessionViewNavigationFactory;
   imageDraftBinding?: import('@orchardworks/agent-client-web/browser').ImageDraftBinding;
-  displayBinding?: import('../hooks/useSessionDisplayPreferences.js').DisplayPreferenceBinding;
+  displayBinding?: import('../view-binding.js').ViewBinding;
   headingStart?: ReactNode;
   headingMode?: 'inline' | 'toolbar';
   onRenameTitle?(): void;

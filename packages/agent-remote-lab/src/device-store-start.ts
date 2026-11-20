@@ -13,9 +13,20 @@ export function removeLegacyDisplayCache(): void {
   catch { /* Storage may be unavailable; there is nothing to remove then. */ }
 }
 
+/**
+ * The display modes before the process modes (I3): a per-view record and the old global default. They are removed once at
+ * start; this removal is deleted one release later.
+ */
+const legacyDisplayModes = /^agent-remote:(?:recovery:.+:view:.+|timeline-display)$/;
+export function removeLegacyDisplayModes(storage: Storage = conversationLocalStorage): void {
+  try { for (const key of storageKeys(storage)) if (legacyDisplayModes.test(key)) storage.removeItem(key); }
+  catch { /* Storage may be unavailable; there is nothing to remove then. */ }
+}
+
 /** Loads this device's stored conversations of the signed-in workspace into memory, so the first render reads them synchronously. They are shown only once the Relay confirms the lease. */
 export function startDeviceStore(gatewayMode: boolean): Promise<void> {
   removeLegacyDisplayCache();
+  removeLegacyDisplayModes();
   const access = gatewayMode ? readWorkspaceAccess() : undefined;
   if (gatewayMode && !access) return Promise.resolve();
   return deviceStore.preload(scopeFor(access?.basePath ?? window.location.origin)).catch(() => { /* The conversation opens without stored rows. */ });

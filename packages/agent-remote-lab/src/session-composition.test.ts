@@ -328,11 +328,15 @@ it('retains real legacy A and B text/image owners before deduplicating Track and
   const ask = vi.fn(async () => ({ status: 'applied' as const, retention: 'session' as const }));
   const application = new SuccessionApplication(document, authority(), { draftViews: context => retainCompositionDraftViews(context, () => drafts),
     track: context => applyCompositionTrack(context), ask });
-  const denied = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
-    if (key.endsWith(':view:' + sessionKey(nativeB))) throw new Error('Unknown B display');
-    return originalGet.call(this, key);
+  // An owner that cannot be read while the application runs fails it whole; nothing it touched has changed.
+  let denying = true;
+  const originalSet = Storage.prototype.setItem;
+  const denied = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+    if (denying && key === 'agent-remote:recovery:scope:drafts') throw new Error('Drafts cannot be saved');
+    return originalSet.call(this, key, value);
   });
   expect((await application.apply(replayCommit())).status).toBe('failed');
+  denying = false;
   expect(document.edges).toHaveLength(1); expect(readTrackedSessions('scope')).toHaveLength(2); expect(ask).not.toHaveBeenCalled();
   denied.mockRestore();
   expect((await application.apply(replayCommit())).status).toBe('applied');

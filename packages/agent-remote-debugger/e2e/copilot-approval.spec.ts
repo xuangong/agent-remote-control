@@ -20,7 +20,7 @@ test('mobile Copilot view keeps approvals through reconnect and controls native 
   const input = page.getByRole('textbox', {name: 'Message', exact: true});
   await expect(input).toBeEditable(); await input.fill('Read the fixture file twice.');
   await page.getByRole('button', {name: 'Send message', exact: true}).click();
-  const pending = page.getByRole('complementary', {name: 'Pending interactions'});
+  const pending = page.locator('.agent-turn-requests');
   await expect(pending).toContainText('Path access');
   await expect(pending).not.toContainText('toolCallId');
   await expect(pending).not.toContainText('permissionRequest');
@@ -49,12 +49,13 @@ test('mobile Copilot view keeps approvals through reconnect and controls native 
   await page.getByRole('button', {name: 'Close session controls', exact: true}).click();
   await input.fill('Run the shell marker.');
   await page.getByRole('button', {name: 'Send message', exact: true}).click();
-  await expect(pending.getByRole('button', {name: 'Allow once', exact: true})).toBeEnabled();
+  await expect(pending.getByRole('button', {name: 'Allow', exact: true})).toBeEnabled();
+  await pending.locator('summary', {hasText: 'Show what changes'}).click();
   await expect(pending.locator('pre[aria-label="Command"]')).toHaveCount(1);
   await expect(pending.locator('pre[aria-label="Command"]')).toHaveText('echo BROWSER_SHELL');
   await expect(pending).not.toContainText('fullCommandText');
   await page.screenshot({path: info.outputPath('copilot-mobile-shell-approval.png'), fullPage: true});
-  await pending.getByRole('button', {name: 'Allow once', exact: true}).click();
+  await pending.getByRole('button', {name: 'Allow', exact: true}).click();
   await expect(page.getByText('BROWSER_SHELL_COMPLETE', {exact: true})).toBeVisible({timeout: 15000});
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(errors).toEqual([]);

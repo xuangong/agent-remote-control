@@ -6,7 +6,7 @@ import type { Browser } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { actAsLocalUser, startStack, type Stack } from '@orchardworks/agent-e2e/stack';
 import { launchBrowser, openPage, openPageIn, resetWindows, rowTexts } from './browser.js';
-import { numberedHistory, rowOffset, send, showsText, timelineScroll, waitForEntries, waitForKeptConversation } from './page.js';
+import { holdsText, numberedHistory, rowOffset, send, showsText, timelineScroll, waitForEntries, waitForKeptConversation } from './page.js';
 
 let stack: Stack; let browser: Browser;
 beforeAll(async () => {
@@ -92,11 +92,12 @@ it('E3: the reader keeps their line when a row arrives and when the connection d
   const running = stack.provider.session('replaced');
   expect(running).toBeDefined();
   running!.write('assistant', 'Row 61 arrived while reading');
-  await page.waitForFunction(() => document.body.innerText.includes('Row 61 arrived while reading'));
+  // The row arrives below the reader's line, where its turn is not rendered: it is found in the timeline.
+  await holdsText(page, 'Row 61 arrived while reading');
   expect(Math.abs((await rowOffset(page, 'Row 30 padding'))! - before)).toBeLessThanOrEqual(2);
   await sockets.recoveredFrom(async () => { await sockets.drop(); });
   running!.write('assistant', 'Row 62 arrived after the drop');
-  await page.waitForFunction(() => document.body.innerText.includes('Row 62 arrived after the drop'));
+  await holdsText(page, 'Row 62 arrived after the drop');
   expect(Math.abs((await rowOffset(page, 'Row 30 padding'))! - before)).toBeLessThanOrEqual(2);
   await context.close();
 });
@@ -116,7 +117,7 @@ it('E3: with smart reading off, the reader keeps their line through a Controller
     await legacy.stopController();
     await legacy.startController();
     await send(page, 'after the restart');
-    await showsText(page, 'Echo: after the restart');
+    await holdsText(page, 'Echo: after the restart');
     expect(Math.abs((await rowOffset(page, 'Row 30 padding'))! - before)).toBeLessThanOrEqual(2);
     // The journal now serves the session: the same rows arrive under their item keys, so every row key changes at once.
     const rowKey = () => page.evaluate(() => document.querySelector<HTMLElement>('[data-entry-key]')?.dataset.entryKey);
@@ -128,7 +129,7 @@ it('E3: with smart reading off, the reader keeps their line through a Controller
     await legacy.stopController();
     await legacy.startController();
     await send(page, 'after smart reading');
-    await showsText(page, 'Echo: after smart reading');
+    await holdsText(page, 'Echo: after smart reading');
     await expect.poll(rowKey, { timeout: 10_000 }).not.toBe(controllerKey);
     expect(Math.abs((await rowOffset(page, 'Row 30 padding'))! - before)).toBeLessThanOrEqual(2);
     await context.close();
@@ -163,7 +164,7 @@ it('E3: the reader keeps their line when a Controller restart replaces the journ
   await stack.stopController();
   await stack.startController();
   await send(page, 'after the replacement');
-  await showsText(page, 'Echo: after the replacement');
+  await holdsText(page, 'Echo: after the replacement');
   expect(Math.abs((await rowOffset(page, 'Row 30 padding'))! - before)).toBeLessThanOrEqual(2);
   // The replacement did arrive: reading up to row 10 shows the rewritten text.
   await timelineScroll(page).hover();

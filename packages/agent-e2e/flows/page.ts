@@ -8,6 +8,11 @@ export const timelineEntries = (page: Page) => page.locator('.agent-timeline-ent
 export const waitForEntries = (page: Page, count: number) => page.waitForFunction(needed => document.querySelectorAll('.agent-timeline-entry').length >= needed, count);
 export const showsText = (page: Page, text: string, timeout = 25_000) => page.waitForFunction(needle => document.body.innerText.includes(needle), text, { timeout });
 export const lacksText = (page: Page, text: string, timeout = 25_000) => page.waitForFunction(needle => !document.body.innerText.includes(needle), text, { timeout });
+/**
+ * The page holds the text, on screen or not. A turn far below a reader who scrolled up is not rendered (`content-visibility`), so
+ * its words are in the timeline but not in the page's rendered text.
+ */
+export const holdsText = (page: Page, text: string, timeout = 25_000) => page.waitForFunction(needle => !!document.body.textContent?.includes(needle), text, { timeout });
 
 export async function send(page: Page, text: string): Promise<void> {
   await page.locator('[data-testid="prompt-input"]').click();

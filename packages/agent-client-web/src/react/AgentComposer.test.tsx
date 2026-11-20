@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, rerender } from '../test/setup.js';
 import { AgentComposer } from './AgentComposer.js';
 import { createReplicaState, type AgentReplicaState, remoteSessionState } from '@orchardworks/agent-client';
@@ -278,4 +278,85 @@ it('sends a message at once through the queue, keeps the editor enabled and focu
   await act(async () => acknowledge());
   expect(input.value).toBe('Typed meanwhile');
   expect(document.activeElement).toBe(input);
+});
+
+function readyAgent(imageInput: boolean): AgentReplicaState {
+  return { ...createReplicaState(), timeline: { ...createReplicaState().timeline, initialized: true }, agent: {
+    id: 'return-key', providerId: 'test', createdAt: '2026-09-20T00:00:00Z', updatedAt: '2026-09-20T00:00:00Z', status: 'idle', activeTurn: null,
+    capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: false, ...(imageInput ? { imageInput: { mediaTypes: ['image/png'], maxImages: 8, maxImageBytes: 10485760, maxMessageBytes: 20971520 } } : {}) },
+    pendingInteractions: [], runtimeInfo: { providerId: 'test', status: 'idle' },
+  } };
+}
+
+describe('settings placement', () => {
+  const view = (settings?: 'inline' | 'none') => {
+    const state = readyAgent(false);
+    return <AgentComposer sessionState={remoteSessionState(state, 'ready')} state={state} settings={settings} onSendMessage={vi.fn()} sessionControls={<span data-testid="extra-control" />} />;
+  };
+
+  it('keeps the model and permission controls inline by default', async () => {
+    const container = await render(view());
+    expect(container.querySelector('[data-testid="session-model-button"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="extra-control"]')).not.toBeNull();
+  });
+
+  it('leaves the settings out but keeps the actions and send', async () => {
+    const container = await render(view('none'));
+    expect(container.querySelector('[data-testid="session-model-button"]')).toBeNull();
+    expect(container.querySelector('[data-testid="extra-control"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Open chat commands"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="prompt-submit"]')).not.toBeNull();
+  });
+});
+
+describe.each([['textarea', false], ['editor', true]] as const)('Return key in the %s', (_name, rich) => {
+  const stubPointer = (coarse: boolean) => vi.stubGlobal('matchMedia', (query: string) => ({ matches: coarse && query === '(pointer: coarse)' }));
+  afterEach(() => vi.unstubAllGlobals());
+  const mount = async () => {
+    Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+    Range.prototype.getBoundingClientRect = () => new DOMRect();
+    const state = readyAgent(rich);
+    const send = vi.fn().mockResolvedValue(undefined), sendContent = vi.fn().mockResolvedValue(undefined);
+    const container = await render(<AgentComposer sessionState={remoteSessionState(state, 'ready')} state={state} draft="Hello" onSendMessage={send} onSendMessageContent={sendContent} onUploadImage={rich ? vi.fn() : undefined} />);
+    const input = container.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
+    const sent = () => send.mock.calls.length + sendContent.mock.calls.length;
+    const press = async (init: KeyboardEventInit) => {
+      const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...init });
+      await act(async () => { input.dispatchEvent(event); });
+      return event;
+    };
+    return { container, input, sent, press };
+  };
+
+  it('sends on Return and hints send under a fine pointer', async () => {
+    stubPointer(false);
+    const { input, sent, press } = await mount();
+    expect(input.getAttribute('enterkeyhint')).toBe('send');
+    await press({});
+    expect(sent()).toBe(1);
+  });
+
+  it('makes a new line on Return under a coarse pointer', async () => {
+    stubPointer(true);
+    const { input, sent, press } = await mount();
+    expect(input.getAttribute('enterkeyhint')).toBe('enter');
+    const plain = await press({});
+    expect(sent()).toBe(0);
+    if (rich) { expect(plain.defaultPrevented).toBe(true); expect(input.textContent).toContain('\n'); }
+    else expect(plain.defaultPrevented).toBe(false);
+  });
+
+  it.each([['Ctrl', { ctrlKey: true }], ['Command', { metaKey: true }]])('sends on %s-Return under a coarse pointer', async (_key, init) => {
+    stubPointer(true);
+    const { sent, press } = await mount();
+    await press(init);
+    expect(sent()).toBe(1);
+  });
+
+  it('sends with the button under a coarse pointer', async () => {
+    stubPointer(true);
+    const { container, sent } = await mount();
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
+    expect(sent()).toBe(1);
+  });
 });

@@ -47,6 +47,8 @@ export interface AgentComposerProps {
   readOnlyCollapsed?: boolean;
   state?: AgentReplicaState;
   sessionControls?: ReactNode;
+  /** `inline` shows the Model, Permissions and status controls beside the actions; `none` leaves them to a details panel and keeps the action toolbar, activity status and send. */
+  settings?: 'inline' | 'none';
   renderSessionSettingError?(error: unknown): ReactNode;
   /** Presents a failed command in place of its message, such as a sign-in it needs; nothing keeps the message. */
   renderCommandError?(error: unknown): ReactNode;
@@ -118,7 +120,7 @@ interface Draft {
   feedback?: { kind: 'success' | 'error'; message: string; delivery?: boolean; commandError?: unknown };
 }
 
-export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly: draftOnlyRequested = false, opening = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, state, sessionControls, renderSessionSettingError, renderCommandError, sessionKey, host, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent, sendLater }: AgentComposerProps) {
+export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly: draftOnlyRequested = false, opening = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, state, sessionControls, settings = 'inline', renderSessionSettingError, renderCommandError, sessionKey, host, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent, sendLater }: AgentComposerProps) {
   const draftOnly = draftOnlyRequested;
   const pendingFirstInputContext = firstInputContext !== undefined;
   const controlId = `composer-${useId().replace(/:/gu, '')}`;
@@ -642,7 +644,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     </div>
     <p id={`${controlId}-hint`} hidden={forcedReadOnly} className={`agent-composer-note${readOnly && !laterMode ? '' : ' agent-visually-hidden'}`}>{readOnly && !laterMode ? readOnlyHint : <>{nativeBusy ? 'Enter to send now' : 'Enter to send'} · Shift+Enter or hold Send for a new line · / for commands</>}</p>
     {!ownershipReadOnly ? <div className="agent-composer-actions">
-      {state?.agent && !draftOnly ? <AgentSessionSettings actions={toolbarActions} sessionState={session} key={agentId} state={state} disabled={false} readOnly={forcedReadOnly} view={currentDraft.view} busy={busy}
+      {state?.agent && !draftOnly && settings !== 'none' ? <AgentSessionSettings actions={toolbarActions} sessionState={session} key={agentId} state={state} disabled={false} readOnly={forcedReadOnly} view={currentDraft.view} busy={busy}
         onView={(view) => { currentDraft.view = view; refresh((value) => value + 1); }}
         onPendingChange={(value) => { currentDraft.settingPending = value; if (mounted.current) refresh((count) => count + 1); }}
         onSelect={onSetSessionSetting && !mutationBlocked ? async (id, value) => { if (latest.current.draftOnly || latest.current.mutationBlocked || latest.current.agentId !== agentId) return; await onSetSessionSetting(id, value); } : undefined} renderError={renderSessionSettingError}>{sessionControls}</AgentSessionSettings> : <div className="agent-session-controls">

@@ -16,7 +16,7 @@ export function RemoveBotSheet({ name, groupTitle, window, viewId, busy = false,
   const t = useTranslate();
   const names = useAssistantNames();
   return <Sheet open title={groupTitle ? t('navigation.removeBot.titleInGroup', { name, group: groupTitle }) : t('navigation.removeBot.titleInThisGroup', { name })} detent="content" onClose={() => { if (!busy) onCancel(); }}>
-    <p className="lab-sheet-message">{removalMessage(closingWith(window, viewId, id => window ? names.view(window.id, id) : id))}</p>
+    <p className="lab-sheet-message">{removalMessage(closingWith(window, viewId, id => window ? names.view(window.id, id) : id), t)}</p>
     <div className="lab-sheet-actions">
       <Button disabled={busy} onClick={onCancel}>{t('common.cancel')}</Button>
       <Button variant="destructive" disabled={busy} aria-busy={busy || undefined} onClick={onRemove}>{t('common.remove')}</Button>

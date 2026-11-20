@@ -7,7 +7,7 @@ import { IconButton } from '../../ui/IconButton.js';
 import { keepsEscape } from '../helpers.js';
 import type { AppScope } from '../types.js';
 
-export function SessionsPage({ scope }: { readonly scope: Pick<AppScope, 'closePage' | 'compactLayout' | 'directoryView' | 'favorites' | 'pageOpen' | 'sessionPanel' | 'sessionPanelContent' | 'sessionsPageTitle' | 'sessionsPageTitleRef' | 'setPageActionsTarget' | 'setPageViewTarget' | 'sidebarWindow' | 'userScoped'> }) {
+export function SessionsPage({ scope }: { readonly scope: Pick<AppScope, 'closePage' | 'compactLayout' | 'directoryView' | 'favorites' | 'pageOpen' | 'sessionPanel' | 'sessionPanelContent' | 'sessionsPageTitleRef' | 'setPageActionsTarget' | 'setPageViewTarget' | 'sidebarWindow' | 'userScoped'> }) {
   const { closePage, compactLayout, directoryView, favorites, pageOpen, sessionPanel, sessionPanelContent, sessionsPageTitleRef, setPageActionsTarget, setPageViewTarget, sidebarWindow, userScoped } = scope;
   const t = useTranslate();
   const sessionsPageTitle = sessionsPageTitleOf(sessionPanel, t);

@@ -2,7 +2,7 @@
 import { errorWords, keyedError } from '@orchardworks/agent-client';
 import { providerAfterHostChange } from '../state/creation-choice.js';
 import { paneDraftOwners } from '../state/draft-ownership.js';
-import { sessionsPageTitle as sessionsPageTitleOf, type SessionPanel } from '../state/panels.js';
+import type { SessionPanel } from '../state/panels.js';
 import { windowPrimaryViewId, type Team } from '@orchardworks/agent-remote-protocol';
 import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
 import { useEffect } from 'react';
@@ -59,7 +59,6 @@ export function useWindowViewActions(scope: Pick<AppInputs & RemoteHostStateSlic
   /** Desktop: shows a sidebar panel as a page in place of the Window. */
   function openPage(panel: SessionPanel) { dispatchPanels({ type: 'page.open', panel }); }
 
-  const sessionsPageTitle = sessionsPageTitleOf(sessionPanel);
 
   /** Shows a sidebar panel: a page on desktop, the drawer (instead of the inspector) on compact layouts. */
   function showPanel(panel: SessionPanel) { dispatchPanels({ type: 'panel.show', panel }); }
@@ -115,7 +114,7 @@ export function useWindowViewActions(scope: Pick<AppInputs & RemoteHostStateSlic
     if (view.bindingPolicy === 'managed') throw keyedError('windows.error.managedView');
     return { windowId: current.id, viewId: view.id, binding: JSON.stringify(view.binding ?? null) };
   }
-  return { selectHost, selectProvider, focusManagedWindow, showWindowSessionChooser, chooseWindowSession, openPage, sessionsPageTitle, showPanel, openNewSessionPanel, createWindowFromMenu, editWindow, selectPrimaryGroup, createSessionView, addSessionView, windowToolbarShown, windowDraftBinding, directoryDestination };
+  return { selectHost, selectProvider, focusManagedWindow, showWindowSessionChooser, chooseWindowSession, openPage, showPanel, openNewSessionPanel, createWindowFromMenu, editWindow, selectPrimaryGroup, createSessionView, addSessionView, windowToolbarShown, windowDraftBinding, directoryDestination };
 }
 
 export type WindowViewActionsSlice = ReturnType<typeof useWindowViewActions>;

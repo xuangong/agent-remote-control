@@ -28,6 +28,7 @@ it('names the group it leaves in English, and in Chinese', async () => {
   const chinese = (await render(zh(sheet))).textContent!;
   expect(chinese).toContain('把“Helper”从“Research”里移除？');
   expect(chinese).toContain('取消');
+  expect(chinese).toContain('它的会话会继续运行。');
 });
 
 it('speaks Chinese in the New assistant sheet', async () => {

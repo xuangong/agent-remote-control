@@ -43,3 +43,5 @@ export * from './device-store.js';
 export type { ResourceTransferOptions } from './client/resource-upload.js';
 export * from './client/image-upload.js';
 export * from './display-lease.js';
+
+export * from './presentation/index.js';

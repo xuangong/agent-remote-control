@@ -600,4 +600,5 @@ export const sessions = {
   'sessions.letter.ambiguous': 'This history does not identify both sessions unambiguously. Load their agent activity and retry.',
   'sessions.letter.sourceChanged': 'The source view changed. Open the letter again.',
   'sessions.toast.region': 'Notifications',
+  'sessions.console.track': 'Toggle Track view; use /track on or /track off',
 } as const satisfies Readonly<Record<string, Message>>;

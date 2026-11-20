@@ -600,4 +600,5 @@ export const sessions: AreaMessages<typeof english> = {
   'sessions.letter.ambiguous': '这份历史分不清是哪两段会话。先加载它们的 Agent 活动再试。',
   'sessions.letter.sourceChanged': '来源视图变了，请重新打开这封信。',
   'sessions.toast.region': '通知',
+  'sessions.console.track': '打开或关闭跟踪视图；用 /track on 或 /track off',
 };

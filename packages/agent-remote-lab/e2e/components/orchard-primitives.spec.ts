@@ -49,7 +49,8 @@ test.describe('theme override', () => {
     expect(await colours()).toEqual({ ground: 'rgb(243, 239, 233)', legacy: 'rgb(255, 255, 255)', bubble: 'rgb(244, 244, 246)' });
     await page.evaluate(() => (window as unknown as { orchardAppearance: { set(next: string): void } }).orchardAppearance.set('system'));
     expect(await colours()).toEqual({ ground: 'rgb(21, 21, 23)', legacy: 'rgb(28, 28, 30)', bubble: 'rgb(47, 47, 52)' });
-    expect(await page.evaluate(() => localStorage.getItem('agent-remote:appearance'))).toBe('system');
+    // System is the default: the device keeps no pinned theme.
+    expect(await page.evaluate(() => localStorage.getItem('agent-remote:appearance'))).toBeNull();
   });
 
   test('keeps the choice across a reload', async ({ page }) => {

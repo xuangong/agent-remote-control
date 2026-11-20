@@ -135,7 +135,8 @@
 
 /* Segmented control: an orange pill on a fill track. Segments are keyed on [aria-pressed] so the Lab's bare button rules
    cannot restyle them; the selected one is the brand fill with dark ink. */
-.orchard-segmented.orchard-segmented { display: flex; gap: var(--orchard-space-2xs); padding: 3px; border-radius: var(--orchard-radius-pill); background: var(--orchard-fill); }
+/* Equal segments as wide as the widest label: flex items with a zero basis would split the row evenly and cut the longest label. */
+.orchard-segmented.orchard-segmented { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--orchard-space-2xs); padding: 3px; border-radius: var(--orchard-radius-pill); background: var(--orchard-fill); }
 .orchard-segmented.orchard-segmented > button[aria-pressed] {
   position: relative; flex: 1; min-width: 0; min-height: 28px; margin: 0; padding: var(--orchard-space-xs) var(--orchard-space-xl); border: 0;
   border-radius: var(--orchard-radius-pill); color: var(--orchard-text); background: transparent; cursor: pointer; opacity: 1; transform: none;

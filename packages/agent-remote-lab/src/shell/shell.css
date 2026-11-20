@@ -141,6 +141,8 @@
    shown it takes no space. A panel opens under the navigation across its width. */
 @media (max-width: 1180px) {
   .lab-mobile-navigation { flex-wrap: wrap; row-gap: 0; }
+  /* The title starts from no width, so a long one shrinks beside Sessions instead of wrapping onto a line of its own. */
+  .lab-shell .lab-mobile-navigation > :is(.lab-title-favorites, .lab-mobile-session-title) { flex: 1 1 0; min-width: 0; }
 }
 .lab-launcher-bar { display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; padding-block: 2px 8px; }
 .lab-launcher-bar:not(:has(.lab-launcher:not([hidden], [data-hidden="true"]))) { display: none; }

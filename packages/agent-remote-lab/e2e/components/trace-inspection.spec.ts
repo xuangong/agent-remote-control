@@ -54,7 +54,8 @@ test('inspects a live tool and returns to a stable conversation anchor', async (
   expect(Math.abs(await entry.evaluate(element => element.getBoundingClientRect().top) - anchor)).toBeLessThanOrEqual(1);
   await viewport.hover();
   await page.mouse.wheel(0, 160);
-  await expect.poll(() => viewport.evaluate(element => element.scrollHeight - element.clientHeight + element.scrollTop)).not.toBe(top);
+  // Wait for the wheel itself: the one-pixel anchor rounding above is not a move.
+  await expect.poll(() => viewport.evaluate((element, top) => Math.abs(element.scrollHeight - element.clientHeight + element.scrollTop - top), top)).toBeGreaterThan(1);
   const readingTop = await viewport.evaluate(element => element.scrollHeight - element.clientHeight + element.scrollTop);
   await page.getByRole('tab', { name: 'Trace', exact: true }).click();
   await page.getByRole('tab', { name: 'Workbench', exact: true }).click();

@@ -55,6 +55,10 @@ test('at 390x844 the launchers take their own row and cover no conversation text
   expect(four.composers).toBeGreaterThan(0);
   expect(four.covered).toEqual([]);
   for (const launcher of four.launchers) expect(launcher.height, launcher.name).toBeGreaterThanOrEqual(44);
+  // The launcher row is the navigation's only second line: a long title shrinks beside Sessions.
+  const sessions = (await page.getByRole('button', { name: 'Open sessions', exact: true }).boundingBox())!, title = (await page.getByRole('button', { name: 'Favorites', exact: true }).boundingBox())!;
+  expect(Math.abs(title.y - sessions.y)).toBeLessThanOrEqual(2);
+  expect(title.x + title.width).toBeLessThanOrEqual(390);
   await page.screenshot({ path: testInfo.outputPath('launchers-390.png') });
 
   // More launchers than fit on one line wrap into another reserved line instead of covering the conversation.

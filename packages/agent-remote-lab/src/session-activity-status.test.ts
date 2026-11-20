@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionStatesView, SharedSessionState } from '@orchardworks/agent-client';
-import { activityLabel, sessionActivity, windowActivity } from './session-activity-status.js';
+import { activityGroups, sessionActivity, windowActivity } from './session-activity-status.js';
 import { sessionKey } from './session-tree.js';
 
 const session = { hostId: 'host', providerId: 'claude', nativeSessionId: 'one' };
@@ -24,7 +24,7 @@ describe('sessionActivity', () => {
 describe('windowActivity', () => {
   it.each([
     [['idle', 'running', 'waiting', 'failed'], 'waiting'],
-    [['idle', 'starting'], 'waiting'],
+    [['idle', 'starting'], 'running'],
     [['idle', 'running', 'failed'], 'failed'],
     [['idle', 'running', 'unknown'], 'running'],
     [['idle', 'unknown', 'offline'], 'idle'],
@@ -35,7 +35,8 @@ describe('windowActivity', () => {
   });
 });
 
-it('labels statuses as Track groups them', () => {
-  expect(['running', 'waiting', 'starting', 'idle', 'failed', 'offline', 'unknown'].map(status => activityLabel(status as never)))
+it('groups statuses as Track filters them', () => {
+  const group = (status: string) => activityGroups.find(item => item.activities.includes(status as never))?.label;
+  expect(['running', 'waiting', 'starting', 'idle', 'failed', 'offline', 'unknown'].map(group))
     .toEqual(['Working', 'Pending', 'Pending', 'Idle', 'Failed', 'Host offline', 'Status unavailable']);
 });

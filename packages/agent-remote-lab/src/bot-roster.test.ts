@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { createWindowView, type WindowGroup, type WindowSessionBinding, type WindowView } from '@orchardworks/agent-remote-protocol';
-import { botActivityLabel, projectBotRoster } from './bot-roster.js';
+import { projectBotRoster } from './bot-roster.js';
 import type { SessionActivityStatus } from './session-activity-status.js';
 
 const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: id });
@@ -12,7 +12,7 @@ it('derives Other sessions against every binding in all groups', () => {
   const result = projectBotRoster([section, ordinary], ['one', 'hidden', 'past', 'loose'].map(binding), { status: () => 'starting' });
   expect(result.sections[0]?.rows.map(row => row.viewId)).toEqual(['one']);
   expect(result.sections[0]?.hidden).toEqual(['hidden']);
-  expect(result.sections[0]?.status).toBe('Needs you');
+  expect(result.sections[0]?.rows[0]?.assistant.state).toBe('working');
   expect(result.other.map(session => session.nativeSessionId)).toEqual(['loose']);
 });
 it('makes every session a bot with its role, except Asks, history, subagents and empty views', () => {
@@ -58,13 +58,14 @@ it('orders bots by pin, rank, then document order', () => {
   expect(result.sections.map(section => section.groupId)).toEqual(['z', 'b', 'a']);
   expect(result.sections[1]?.rows.map(row => row.viewId)).toEqual(['pin', 'a', 'z', 'default-two', 'default-one']);
 });
-it('uses live urgency and excludes hidden statuses', () => {
+it("says each visible bot's live state by the one rule, and lists no hidden bot", () => {
   const section = group('s', ['working', 'failed', 'waiting', 'hidden'].map(id => createWindowView(id, binding(id))));
   section.bots!.members.hidden = { hidden: true };
   const values: Record<string, SessionActivityStatus> = { working: 'running', failed: 'failed', waiting: 'waiting', hidden: 'starting' };
-  const status = () => projectBotRoster([section], [], { status: b => values[b.nativeSessionId]! }).sections[0]?.status;
-  expect(status()).toBe('Needs you'); values.waiting = 'idle'; expect(status()).toBe('Failed'); values.failed = 'closed'; expect(status()).toBe('Working'); values.working = 'offline'; expect(status()).toBeUndefined();
-  expect(['idle', 'offline', 'unknown', 'closed', undefined].map(value => botActivityLabel(value as SessionActivityStatus))).toEqual([undefined, undefined, undefined, undefined, undefined]);
+  const states = () => projectBotRoster([section], [], { status: b => values[b.nativeSessionId]! }).sections[0]!.rows.map(row => [row.viewId, row.assistant.state]);
+  expect(states()).toEqual([['working', 'working'], ['failed', 'failed'], ['waiting', 'needs_you']]);
+  values.waiting = 'idle'; values.failed = 'closed'; values.working = 'offline';
+  expect(states()).toEqual([['working', 'host_offline'], ['failed', 'ended'], ['waiting', 'idle']]);
 });
 it('deduplicates fallback by full identity and sorts timestamps with missing ones last', () => {
   const loose = { ...binding('loose'), updatedAt: '2026-11-07', createdAt: '2026-01-01' };
@@ -111,7 +112,7 @@ it("follows a bot's current session after a handoff and keeps the latest reply o
     reply: session => replies[session.nativeSessionId], unread: (session, replyAt) => session.nativeSessionId === 'before' && replyAt > 5 });
   const row = model.sections[0]!.rows[0]!;
   expect(row.session.nativeSessionId).toBe('after');
-  expect(row.status).toBe('Working');
+  expect(row.assistant.state).toBe('working');
   // The successor has not replied yet: the latest reply is still the one before the handoff.
   expect(row.reply).toEqual({ replyAt: 7, preview: 'Handing off.' });
   expect(row.unread).toBe(true);

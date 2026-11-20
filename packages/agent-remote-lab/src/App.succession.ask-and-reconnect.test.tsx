@@ -33,8 +33,10 @@ it('keeps post-upgrade view preferences and owners when opening the same Window 
   const original = structuredClone(succession.desired!.slot), owner = succession.ownerFor(original.id);
   await act(async () => ask.toggle(succession.binding!.session, owner));
   const primary = () => visibleQuery(f.view, '.lab-primary-conversation')!;
-  await act(async () => primary().querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
-  const deviceChoice = (name: string) => [...primary().querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="All assistants on this device"] button')].find(button => button.textContent === name)!;
+  // A tile's view options are in its details, over the window.
+  const details = () => primary().querySelector<HTMLButtonElement>('.lab-tile-details-toggle')!;
+  await act(async () => details().click());
+  const deviceChoice = (name: string) => [...primary().querySelectorAll<HTMLButtonElement>('.lab-tile-details [role="group"][aria-label="All assistants on this device"] button')].find(button => button.textContent === name)!;
   await act(async () => deviceChoice('Full').click());
   await f.newTab('D', windowId);
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('D'));
@@ -42,7 +44,7 @@ it('keeps post-upgrade view preferences and owners when opening the same Window 
   expect(succession.desired?.slot.owners).toEqual(original.owners);
   expect(succession.ownerFor(original.id)).toBe(owner);
   expect(ask.isEnabled(succession.binding!.session, owner)).toBe(true);
-  await act(async () => primary().querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
+  if (details().getAttribute('aria-expanded') !== 'true') await act(async () => details().click());
   expect(deviceChoice('Full').getAttribute('aria-pressed')).toBe('true');
   expect(f.frames.filter(frame => frame.message && ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message.type))).toEqual([]);
 });

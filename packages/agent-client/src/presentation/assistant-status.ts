@@ -68,3 +68,17 @@ export function assistantStatus(facts: AssistantFacts, t: Translate = translator
   const state = stateOf(facts);
   return { state, sentence: sentenceOf(state, facts, t), mood: MOODS[state] };
 }
+
+/**
+ * A state in one or two words, for lists that roll several assistants up (a Window and its views in Window mode's list,
+ * the panes of the Window overview); the assistant view says the sentence. Quiet states have no word.
+ */
+export function assistantStateWord(state: AssistantState, t: Translate = translator('en')): string | undefined {
+  switch (state) {
+    case 'needs_you': return t('state.needsYou');
+    case 'working': return t('state.working');
+    case 'failed': return t('state.failed');
+    case 'host_offline': return t('state.hostOffline');
+    default: return undefined;
+  }
+}

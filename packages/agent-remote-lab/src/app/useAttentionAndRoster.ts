@@ -2,7 +2,7 @@
 import { attentionDestination, attentionSets, botDirectorySources as botDirectorySourcesOf, keySignature, readableSessions as readableSessionsOf } from '../state/attention-targets.js';
 import { windowPrimaryViewId } from '@orchardworks/agent-remote-protocol';
 import { useOtherSessions, type OtherSessionSource } from '../hooks/useOtherSessions.js';
-import { botActivityLabel, projectBotRoster } from '../bot-roster.js';
+import { projectBotRoster } from '../bot-roster.js';
 import { sharedReminders } from '../bot-attention.js';
 import { useSharedFeedOf, type SharedFeedsSnapshot } from '../shared-feeds.js';
 import { sessionActivity } from '../session-activity-status.js';
@@ -200,7 +200,7 @@ export function useAttentionAndRoster(scope: Pick<AppInputs & WorkbenchShellSlic
   /** The selected bot's activity: a finished turn may have named its session. */
   const selectedBotSessionRef = botPlace ? botRoster.sections.find(section => section.groupId === botPlace.groupId)?.rows.find(row => row.viewId === botPlace.viewId)?.session : undefined;
 
-  const selectedBotStatus = useSharedFeedOf(sharedFeeds, shared => selectedBotSessionRef ? botActivityLabel(sessionActivity(selectedBotSessionRef, tracking.liveObservations, shared.states)) : undefined);
+  const selectedBotStatus = useSharedFeedOf(sharedFeeds, shared => selectedBotSessionRef ? sessionActivity(selectedBotSessionRef, tracking.liveObservations, shared.states) : undefined);
   late.tracking = tracking;
   return { attention, tracking, openTrackedSession, windowSessionStatus, otherSessions, supportTeams, botRoster, projectSharedRoster, selectedBotStatus };
 }

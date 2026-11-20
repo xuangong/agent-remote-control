@@ -2,11 +2,11 @@
 import { awakeDetails, closeOperation, foldsOnClose as foldsOnCloseOf, isAsleep, restorePlan } from '../state/pane-folding.js';
 import { isBotView, type WindowView, type WindowBotDetails, type AgentCommandResult, type WindowSessionBinding, type SessionExcerpt } from '@orchardworks/agent-remote-protocol';
 import { windowSessionBinding } from '../window-workspace.js';
-import { botActivityLabel, botRole } from '../bot-roster.js';
+import { botRole } from '../bot-roster.js';
 import { SessionOutboxMessages } from '../components/OutboxMessages.js';
 import { BotPicture, botDisplayName } from '../components/BotRoster.js';
 import { sessionActivity } from '../session-activity-status.js';
-import { assistantName, type SessionAttribution, type AgentReplicaState } from '@orchardworks/agent-client';
+import { assistantName, assistantStatus, type SessionAttribution, type AgentReplicaState } from '@orchardworks/agent-client';
 import { labSessionSuccessionDirectory } from '../session-succession-directory.js';
 import type { FamilySessionPresentationContext } from '../components/SessionFamily.js';
 import { SessionSuccessionHistory } from '../components/SessionSuccessionHistory.js';
@@ -262,7 +262,7 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
           {quoteView && context.state && quoteSelection?.viewId !== quoteView
             ? <QuoteMessagesButton onClick={() => quoteEntrySelection(quoteView, context.state!.timeline.epoch).select([], true)} /> : null}
         </SessionHeadingActions></>,
-      conversationPath: botPresentation ? <span className="lab-bot-session-heading">{options.bot ? <BotPicture id={options.bot.viewId} picture={botGroup?.bots?.members[options.bot.viewId]?.picture} /> : null}<span><strong>{source.title}</strong>{options.bot && botGroup?.bots?.members[options.bot.viewId]?.label ? <small>{botGroup.bots.members[options.bot.viewId]!.label}</small> : null}<small>{context.offline ? 'Host offline' : context.state?.agent?.status === 'waiting' || context.state?.agent?.status === 'starting' ? 'Needs you' : context.state?.agent?.status === 'running' ? 'Working' : context.state?.agent?.status === 'failed' ? 'Failed' : context.status === 'ready' ? 'Idle' : 'Status unavailable'}</small></span></span> : <SessionTitle className={isPrimary ? 'lab-primary-title' : undefined} title={source.title} status={context.state?.agent?.status}
+      conversationPath: botPresentation ? undefined : <SessionTitle className={isPrimary ? 'lab-primary-title' : undefined} title={source.title} status={context.state?.agent?.status}
         onRename={mayRename ? () => setRenamingSession({ scope: baseUrl, session: { ...source, hostId: source.hostId ?? 'local' } }) : undefined} />,
     };
   }
@@ -294,7 +294,8 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
   function foldedBot(view: WindowView & { binding: WindowSessionBinding }): FoldedBot {
     return { id: view.id, name: botDisplayName(view.binding), picture: sharedWindow ? windowWorkspace.readGroup(sharedWindow.id)?.bots?.members[view.id]?.picture : undefined,
       role: botRole(view, teamId => supportTeams.has(teamId)), asleep: asleepBot(view),
-      statusOf: states => botActivityLabel(sessionActivity(sharedWindow ? currentBotSession(sharedWindow.id, view.id, view.binding) : view.binding, tracking.liveObservations, states)) };
+      statusOf: states => assistantStatus({ activity: sessionActivity(sharedWindow ? currentBotSession(sharedWindow.id, view.id, view.binding) : view.binding, tracking.liveObservations, states),
+        asleep: asleepBot(view), waitingToSend: false }, t) };
   }
   return { asleepBot, wakeBot, foldsOnClose, closeView, presentSessionView, confirmBotRemoval, restoreView, foldedBot };
 }

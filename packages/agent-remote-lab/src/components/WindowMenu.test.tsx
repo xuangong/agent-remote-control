@@ -39,8 +39,8 @@ async function menu(statuses: Record<string, SessionActivityStatus>) {
 }
 
 it('marks each bot\'s place and status, and leads each Window with what most needs the owner', async () => {
-  const { windowRow, viewRow } = await menu({ a: 'running', b: 'starting', c: 'failed', d: 'running', e: 'idle' });
-  // Worded as in Bot mode: Working, Needs you and Failed; Idle says nothing.
+  const { windowRow, viewRow } = await menu({ a: 'running', b: 'waiting', c: 'failed', d: 'running', e: 'idle' });
+  // Worded by the assistants' one rule: Working, Needs you and Failed; Idle says nothing.
   expect(viewRow('current-0').querySelector('small')!.textContent).toBe('Open · Working');
   expect(viewRow('current-1').querySelector('small')!.textContent).toBe('Open · Needs you');
   expect(viewRow('current-1').querySelector('.lab-bot-status')!.hasAttribute('data-attention')).toBe(true);

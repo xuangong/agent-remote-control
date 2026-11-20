@@ -1,6 +1,6 @@
 import { botViews, hasBotAppearance, windowSessionIdentity, type WindowBotDetails, type WindowGroup, type WindowSessionBinding, type WindowView } from '@orchardworks/agent-remote-protocol';
 import { assistantStatus, type AssistantStatus, type Translate } from '@orchardworks/agent-client';
-import { windowActivity, type SessionActivityStatus } from './session-activity-status.js';
+import type { SessionActivityStatus } from './session-activity-status.js';
 import { sessionKey, type SessionEntry } from './session-tree.js';
 
 /** A bot's position, shown as a tag beside its name like a job title; ordinary bots have none. */
@@ -13,7 +13,7 @@ export interface BotRow {
   groupId: string; viewId: string; binding: WindowSessionBinding;
   /** The session that drives the bot now: after a handoff, its successor; otherwise the view's own session. */
   session: BotSessionRef;
-  details: WindowBotDetails; role?: BotRole; asks: BotAsk[]; status?: 'Needs you' | 'Working' | 'Failed';
+  details: WindowBotDetails; role?: BotRole; asks: BotAsk[];
   /** The session's activity, and what the assistant is doing in one sentence (needs you, working, Host offline, resting…). */
   activity: SessionActivityStatus; assistant: AssistantStatus;
   /** The bot's latest reply, as its Host reported it, and whether the owner has not seen it yet. */
@@ -24,7 +24,7 @@ export interface BotRow {
   waiting?: true;
 }
 /** `hidden` lists the views of this group's bots hidden in Bot mode, which the group can show again. */
-export interface BotSection { groupId: string; title: string; rows: BotRow[]; hidden: string[]; status?: BotRow['status']; unread?: true }
+export interface BotSection { groupId: string; title: string; rows: BotRow[]; hidden: string[]; unread?: true }
 export interface BotRosterModel { sections: BotSection[]; other: SessionEntry[] }
 export interface BotRosterOptions {
   status(session: BotSessionRef): SessionActivityStatus;
@@ -55,11 +55,6 @@ export function appendedRank(groups: readonly WindowGroup[]): string {
 /** Native directory timestamps are metadata, never activity evidence. */
 export type DatedSessionEntry = SessionEntry & { updatedAt?: string };
 const lexical = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
-export function botActivityLabel(value: SessionActivityStatus | undefined): BotRow['status'] {
-  if (value === 'waiting' || value === 'starting') return 'Needs you';
-  if (value === 'running') return 'Working';
-  if (value === 'failed') return 'Failed';
-}
 export function sortDirectorySessions(entries: readonly DatedSessionEntry[]): DatedSessionEntry[] {
   const unique = new Map<string, DatedSessionEntry>();
   for (const entry of entries) if (!unique.has(sessionKey(entry))) unique.set(sessionKey(entry), entry);
@@ -121,14 +116,14 @@ export function projectBotRoster(groups: readonly WindowGroup[], directory: read
       const latest = candidates[0], reply = latest?.reply, draft = options.draft?.(session), waiting = options.waiting?.(session) ?? false;
       const host = options.host?.(session.hostId), activity = activities[index]!;
       const assistant = assistantStatus({ activity, ...(host ? { host } : {}), asleep: !!details.asleep, waitingToSend: waiting, ...(reply ? { replyPreview: reply.preview } : {}) }, options.t);
-      return { groupId: group.window.id, viewId: view.id, binding: view.binding, session, details, status: botActivityLabel(activity), activity, assistant,
+      return { groupId: group.window.id, viewId: view.id, binding: view.binding, session, details, activity, assistant,
         ...(botRole(view, options.supportTeam) ? { role: botRole(view, options.supportTeam)! } : {}),
         asks: asks.filter(ask => ask.closeWith === view.id).map(ask => ({ viewId: ask.id, title: ask.binding?.title ?? 'Ask' })),
         ...(reply ? { reply } : {}), ...(latest && options.unread?.(latest.owner, latest.reply.replyAt) ? { unread: true as const } : {}),
         ...(draft?.trim() ? { draft } : {}), ...(waiting ? { waiting: true as const } : {}) };
     });
     const hidden = botViews(group).filter(view => members[view.id]?.hidden).map(view => view.id);
-    return [{ groupId: group.window.id, title: group.window.title, rows, hidden, status: botActivityLabel(windowActivity(activities)),
+    return [{ groupId: group.window.id, title: group.window.title, rows, hidden,
       ...(rows.some(row => row.unread) ? { unread: true as const } : {}) }];
   });
   const grouped = new Set(groups.flatMap(group => group.window.views.flatMap(view => view.binding ? [sessionKey(view.binding)] : [])));

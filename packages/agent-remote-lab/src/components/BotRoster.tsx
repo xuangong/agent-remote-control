@@ -14,10 +14,6 @@ import { useTranslate } from '@orchardworks/agent-client-web/react';
 export function botDisplayName(binding: WindowSessionBinding): string {
   return binding.title || binding.nativeSessionId;
 }
-/** How a bot's avatar moves: it pops when it needs you (even asleep), rests grey while asleep, and bobs while working. */
-export function botMood(status: string | undefined, asleep: boolean | undefined): AvatarMood {
-  return status === 'Needs you' ? 'needs_you' : asleep ? 'resting' : status === 'Working' ? 'working' : 'idle';
-}
 /** A bot's avatar: generated from its view id, which survives a handoff, unless its stored picture overrides it. */
 export function BotPicture({ id, picture, size = 26, mood = 'idle' }: Pick<WindowBotDetails, 'picture'> & { id: string; size?: number; mood?: AvatarMood }) {
   return <AssistantAvatar id={id} {...(picture ? { picture } : {})} size={size} mood={mood} />;
@@ -97,7 +93,7 @@ export function BotRoster({ model, place, onSelect, directoryControls, hostName 
       <div className="lab-bot-section-head">
         <h2 id={`bot-section-${section.groupId}`}><button type="button" onClick={() => onSelect({ kind: 'section', groupId: section.groupId })}>{section.title}</button>
           {section.unread ? <span className="lab-bot-section-unread" role="img" aria-label={t('assistants.unread')} /> : null}
-          {section.status ? <small>{section.status}</small> : null}</h2>
+</h2>
         {groupActions ? <Menu label={t('assistants.groupActions', { group: section.title })} items={groupActions(section)} /> : null}
       </div>
       {!section.rows.length ? <p className="lab-bot-empty">{section.hidden.length ? t('assistants.hiddenEmpty') : t('assistants.empty')}</p> : null}

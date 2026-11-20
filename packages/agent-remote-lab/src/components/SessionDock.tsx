@@ -8,7 +8,8 @@ import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
 import { useSessionDockDrag } from '../hooks/useSessionDockDrag.js';
 import type { WindowBotDetails } from '@orchardworks/agent-remote-protocol';
 import type { SessionStatesView } from '@orchardworks/agent-client';
-import { BotPicture, botMood } from './BotRoster.js';
+import { BotPicture } from './BotRoster.js';
+import type { AssistantStatus } from '@orchardworks/agent-client';
 import { useSharedFeed } from '../shared-feeds.js';
 import { TileStack } from './assistant/TileStack.js';
 
@@ -180,10 +181,10 @@ export function MinimizeMainSession() {
   </button>;
 }
 
-/** The bot a folded pane shows: its picture, name, role tag and status from the shared channel. */
+/** The bot a folded pane shows: its picture, name, role tag and what it is doing, from the shared channel. */
 export interface FoldedBot {
   /** The bot's view id, which its avatar is generated from. */
-  id: string; name: string; picture?: WindowBotDetails['picture']; role?: string; status?: 'Needs you' | 'Working' | 'Failed'; asleep?: boolean;
+  id: string; name: string; picture?: WindowBotDetails['picture']; role?: string; status?: AssistantStatus; asleep?: boolean;
   /** Its status from the shared session states, read by the card itself so a states frame renders only the card. */
   statusOf?(states: SessionStatesView | undefined): FoldedBot['status'];
 }
@@ -196,15 +197,18 @@ export interface PrimarySessionGroupPane {
 export const FOLDED_BOT_WIDTH = 64;
 /** A folded bot: a slim card standing where its pane was; pressing it restores the pane. */
 export function FoldedBotCard({ label, fold: given, controls, onRestore }: { label: string; fold: FoldedBot; controls?: string; onRestore(): void }) {
-  const status = useSharedFeed(snapshot => given.statusOf ? given.statusOf(snapshot.states) : given.status);
-  const fold = { ...given, status };
+  // The selector returns words, not a new object per read, so an unchanged state renders nothing.
+  const words = useSharedFeed(snapshot => { const status = given.statusOf ? given.statusOf(snapshot.states) : given.status; return status ? `${status.state}\n${status.mood}\n${status.sentence}` : ''; });
+  const [shownState, mood, sentence] = words.split('\n') as [AssistantStatus['state'], AssistantStatus['mood'], string];
+  const fold = { ...given, status: words ? { state: shownState, mood, sentence } : undefined };
+  const state = fold.status?.state, marked = state === 'needs_you' || state === 'working' || state === 'failed';
   return <button type="button" className="lab-folded-bot" aria-label={label} aria-controls={controls} aria-expanded={controls ? false : undefined}
     data-asleep={fold.asleep || undefined}
-    aria-description={[fold.role, fold.asleep && fold.status !== 'Needs you' ? 'Asleep' : fold.status].filter(Boolean).join(' · ') || undefined} title={fold.name}
+    aria-description={[fold.role, fold.status?.sentence].filter(Boolean).join(' · ') || undefined} title={fold.name}
     onClick={onRestore}>
-    {/* Its picture with the status beside it, then its name and role running down the slim card. */}
-    <span className="lab-folded-bot-picture"><BotPicture id={fold.id} picture={fold.picture} size={28} mood={botMood(fold.status, fold.asleep)} />
-      {fold.status ? <span className="lab-folded-bot-status" data-attention={fold.status === 'Needs you' || undefined} data-failed={fold.status === 'Failed' || undefined} /> : null}</span>
+    {/* Its picture with a dot for a state that asks for something, then its name and role running down the slim card. */}
+    <span className="lab-folded-bot-picture"><BotPicture id={fold.id} picture={fold.picture} size={28} mood={fold.status?.mood ?? (fold.asleep ? 'resting' : 'idle')} />
+      {marked ? <span className="lab-folded-bot-status" data-state={state} data-attention={state === 'needs_you' || undefined} data-failed={state === 'failed' || undefined} /> : null}</span>
     <span className="lab-folded-bot-name">{fold.name}</span>
     {fold.role ? <span className="lab-folded-bot-role">{fold.role}</span> : null}
   </button>;

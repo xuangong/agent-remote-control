@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { SESSION_CONNECTION_PATTERN } from '../testing/connection-words.js';
 import type { SessionNotice } from '../client/session-presentation.js';
-import { assistantStatus, type AssistantFacts } from './assistant-status.js';
+import { assistantStateWord, assistantStatus, type AssistantFacts } from './assistant-status.js';
 import { ASSISTANT_STATUS_VECTORS } from './assistant-status.vectors.js';
 import { translator } from './messages.js';
 
@@ -48,5 +48,13 @@ describe('assistantStatus', () => {
     it.each(['unknown', 'offline'] as const)('%s alone is unknown or host_offline', activity => {
       expect(['unknown', 'host_offline']).toContain(assistantStatus(facts({ activity })).state);
     });
+  });
+});
+
+describe('assistantStateWord', () => {
+  it('words the states a list rolls up, and leaves the quiet ones without a word', () => {
+    expect((['needs_you', 'working', 'failed', 'host_offline', 'idle', 'resting', 'ended', 'waiting_to_send', 'unknown'] as const).map(state => assistantStateWord(state)))
+      .toEqual(['Needs you', 'Working', 'Failed', 'Host offline', undefined, undefined, undefined, undefined, undefined]);
+    expect(assistantStateWord('needs_you', translator('zh'))).toBe('需要你');
   });
 });

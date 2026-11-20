@@ -5,8 +5,8 @@ import type { SessionStateRef } from '@orchardworks/agent-client';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { navigationArrow } from '../hooks/useSessionViewMouseNavigation.js';
 import { byRecentUse } from '../window-recency.js';
-import { activityLabel, type SessionActivityStatus } from '../session-activity-status.js';
-import { botActivityLabel } from '../bot-roster.js';
+import type { SessionActivityStatus } from '../session-activity-status.js';
+import { assistantStateWord, assistantStatus } from '@orchardworks/agent-client';
 import { windowSummary } from '../window-summary.js';
 import { viewTitle } from './WindowWorkspaces.js';
 import { useSharedStates } from '../shared-feeds.js';
@@ -38,15 +38,15 @@ export function windowThumbnail(window: WorkspaceWindow): { panes: WindowThumbna
   return { panes, floating: window.views.filter(view => view.placement === 'float').length };
 }
 
-/** The states worth showing on a pane, worded as Bot mode words them (a Host that left as Track says it); idle, closed and unknown sessions stay quiet. */
+/** The states worth showing on a pane, worded by the assistants' one rule; idle, closed and unknown sessions stay quiet. */
 const LABELLED: readonly SessionActivityStatus[] = ['waiting', 'starting', 'failed', 'running', 'offline'];
-const paneLabel = (state: SessionActivityStatus) => botActivityLabel(state) ?? activityLabel(state);
+const paneLabel = (state: SessionActivityStatus) => assistantStateWord(assistantStatus({ activity: state, asleep: false, waitingToSend: false }).state);
 
 /** A Window's sessions that need the owner, failed or are working, most urgent first. */
 function stateSummary(states: SessionActivityStatus[]): string | undefined {
   const count = (...matches: SessionActivityStatus[]) => states.filter(value => matches.includes(value)).length;
-  const needs = count('waiting', 'starting');
-  const parts = [[needs, needs === 1 ? 'needs you' : 'need you'], [count('failed'), 'failed'], [count('running'), 'working']] as const;
+  const needs = count('waiting');
+  const parts = [[needs, needs === 1 ? 'needs you' : 'need you'], [count('failed'), 'failed'], [count('running', 'starting'), 'working']] as const;
   const text = parts.filter(([n]) => n > 0).map(([n, label]) => `${n} ${label}`).join(' · ');
   return text || undefined;
 }

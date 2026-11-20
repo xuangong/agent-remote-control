@@ -130,6 +130,10 @@ const en = {
   'assistant.working': 'Working on it',
   'assistant.waitingToSend': 'Will send when it is ready',
   'assistant.ready': 'Ready when you are',
+  'state.needsYou': 'Needs you',
+  'state.working': 'Working',
+  'state.failed': 'Failed',
+  'state.hostOffline': 'Host offline',
 
   // The assistant view: the list of assistants, the top bar of a conversation and Window tiles.
   'assistants.title': 'Assistants',
@@ -328,6 +332,10 @@ const zh: Readonly<Record<MessageKey, Message>> = {
   'assistant.working': '在忙，稍等～',
   'assistant.waitingToSend': '等它准备好就发出去',
   'assistant.ready': '有事随时叫我',
+  'state.needsYou': '需要你',
+  'state.working': '在忙',
+  'state.failed': '出错了',
+  'state.hostOffline': '电脑离线',
 
   'assistants.title': '我的助手',
   'assistants.new': '新助手',

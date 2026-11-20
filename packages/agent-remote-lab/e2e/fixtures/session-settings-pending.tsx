@@ -22,6 +22,8 @@ function Surface({ name, state, onSelect }: { name: string; state: AgentReplicaS
   return <section className="agent-remote-surface" aria-label={name} style={{ padding: 16, minWidth: 0 }}>
     <h2 style={{ margin: '0 0 8px', fontSize: 18 }}>{name}</h2>
     <p style={{ margin: '0 0 20px', color: 'var(--agent-muted)' }}>Same session · Task running</p>
+    {/* The conversation's place: the composer's + menu and its panels open upward over it, as in a Session View. */}
+    <div style={{ minHeight: 360 }} />
     <div className="agent-composer">
       <AgentSessionSettings state={state} disabled={false} busy={busy} view={view} onView={setView} onPendingChange={setBusy} onSelect={onSelect} />
       <textarea aria-label={`${name} draft`} defaultValue="Keep this task running." readOnly />

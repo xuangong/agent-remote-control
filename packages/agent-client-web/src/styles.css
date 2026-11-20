@@ -477,6 +477,7 @@
 }
 .agent-composer .agent-composer-capsule .agent-composer-plus { color: var(--orchard-text-secondary); background-color: transparent; }
 .agent-composer .agent-composer-capsule .agent-composer-plus:is(:hover, [aria-expanded="true"]):not(:disabled) { color: var(--orchard-text); background-color: var(--orchard-fill-strong); }
+.agent-composer .agent-composer-capsule .agent-composer-plus[data-attention] { background-image: radial-gradient(circle at 78% 22%, var(--orchard-danger-text) 0 3px, transparent 3.5px); }
 .agent-composer .agent-composer-capsule .agent-composer-stop { color: var(--orchard-text-strong); background-color: var(--orchard-fill-strong); }
 .agent-composer .agent-composer-capsule .agent-composer-send { color: var(--orchard-on-brand); background-color: var(--orchard-brand); }
 .agent-composer .agent-composer-capsule .agent-composer-send:hover:not(:disabled) { background-color: color-mix(in srgb, var(--orchard-brand) 88%, var(--orchard-text-strong)); }

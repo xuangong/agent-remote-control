@@ -113,12 +113,12 @@ export function AgentSessionSettings({ state, sessionState, children, entries = 
   const shown = (id: ComposerMenuItem['id']) => items.find(item => item.id === id);
   const settingEntries: ComposerMenuEntry[] = [
     ...(shown('model') ? [{ id: 'model', label: categoryLabel('model'), testId: 'session-model-button', text: t('composer.model'),
-      title: t('composer.modelTitle', { value: modelLabel ?? unavailable }), expanded: view === 'model', disabled: !shown('model')!.enabled,
+      title: t('composer.modelTitle', { value: modelLabel ?? unavailable }), expanded: view === 'model', disabled: !shown('model')!.enabled, attention: categoryUnread('model'),
       detail: <span className={categoryPending('model') ? 'agent-setting-pending' : undefined}>{modelLabel && modelLabel !== unavailable ? modelLabel : null}</span>,
       run: () => onView(view === 'model' ? undefined : 'model') }] : []),
     ...(shown('permissions') ? [{ id: 'permissions', label: categoryLabel('permissions'), testId: 'session-permissions-button', text: t('composer.permissions'),
       title: t('composer.permissionsTitle', { value: permissions.length ? permissions.map(setting => selectedLabel(setting, unavailable)).join(' · ') : unavailable }),
-      expanded: view === 'permissions', disabled: !shown('permissions')!.enabled,
+      expanded: view === 'permissions', disabled: !shown('permissions')!.enabled, attention: categoryUnread('permissions'),
       detail: <span className={categoryPending('permissions') ? 'agent-setting-pending' : undefined}>{permissionLabel || null}</span>,
       run: () => onView(view === 'permissions' ? undefined : 'permissions') }] : []),
     ...(shown('status') ? [{ id: 'status', label: t('composer.status'), title: t('composer.statusTitle'), expanded: view === 'status', disabled: !shown('status')!.enabled,

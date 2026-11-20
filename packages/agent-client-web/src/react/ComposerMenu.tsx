@@ -12,6 +12,8 @@ export interface ComposerMenuEntry {
   detail?: ReactNode;
   title?: string;
   testId?: string;
+  /** An outcome the person has not seen yet (a setting change that failed): "+" carries a dot while the menu is closed. */
+  attention?: boolean;
   disabled?: boolean;
   expanded?: boolean;
   icon?: ReactNode;
@@ -51,7 +53,7 @@ export function ComposerMenu({ entries, open, onOpen }: { entries: readonly Comp
   }, [open, onOpen]);
   return <>
     <button type="button" ref={trigger} className="agent-composer-plus" aria-label={t('common.moreActions')} title={t('common.moreActions')}
-      aria-expanded={expanded} aria-controls={id} disabled={!entries.length}
+      aria-expanded={expanded} aria-controls={id} disabled={!entries.length} data-attention={entries.some(entry => entry.attention) || undefined}
       onClick={() => { if (open) trigger.current?.focus({ preventScroll: true }); onOpen(!open); }}>
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
     </button>

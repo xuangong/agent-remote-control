@@ -1,4 +1,11 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
+
+/** Presses a session setting where the composer keeps it: "+" opens its menu, then the item (the menu closes as it runs). */
+async function press(view: Locator, trigger: string) {
+  const menu = view.getByRole('region', { name: 'More actions', exact: true });
+  if (!await menu.isVisible()) await view.locator('.agent-composer-plus').click();
+  await menu.getByTestId(trigger).click();
+}
 
 const scenarios = [
   { category: 'model', label: 'Model', original: 'model-a', target: 'model-b', originalLabel: 'Model A', targetLabel: 'Model B', panel: 'Model settings', trigger: 'session-model-button', action: 'model' },
@@ -15,7 +22,7 @@ for (const scenario of scenarios) test(`${scenario.category} stays editable whil
   const primaryButton = primary.getByTestId(scenario.trigger);
   const sharedButton = shared.getByTestId(scenario.trigger);
   await expect(primaryButton).toContainText(scenario.originalLabel);
-  await primaryButton.click();
+  await press(primary, scenario.trigger);
   const select = primary.getByRole('combobox', { name: scenario.label, exact: true });
   const normalColor = await select.evaluate(element => getComputedStyle(element).backgroundColor);
   await select.selectOption(scenario.target);
@@ -31,7 +38,7 @@ for (const scenario of scenarios) test(`${scenario.category} stays editable whil
   await page.screenshot({ path: testInfo.outputPath(`${scenario.category}-pending.png`), fullPage: true });
 
   await primary.getByRole('button', { name: 'Close session controls', exact: true }).click();
-  await sharedButton.click();
+  await press(shared, scenario.trigger);
   const sharedSelect = shared.getByRole('combobox', { name: scenario.label, exact: true });
   await expect(sharedSelect).toBeEnabled();
   await sharedSelect.selectOption(scenario.original);
@@ -49,20 +56,22 @@ for (const scenario of scenarios) test(`${scenario.category} stays editable whil
   await expect(page.getByRole('alert')).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath(`${scenario.category}-timeout-unread.png`), fullPage: true });
 
-  await primaryButton.click();
+  await expect(primary.locator('.agent-composer-plus')).toHaveAttribute('data-attention');
+  await press(primary, scenario.trigger);
   await expect(primaryButton).not.toHaveAttribute('aria-label', /unread/);
+  await expect(primary.locator('.agent-composer-plus')).not.toHaveAttribute('data-attention');
   await expect(sharedButton).toHaveAttribute('aria-label', /unread/);
   await expect(select).toHaveValue(scenario.original);
   await expect(select).toHaveCSS('background-color', normalColor);
   const explanation = primary.getByRole('region', { name: scenario.panel }).getByText(`${scenario.label} change was not confirmed in time. Current native value was retained.`, { exact: true });
   await expect(explanation).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath(`${scenario.category}-timeout-explanation.png`), fullPage: true });
-  await primaryButton.click();
-  await primaryButton.click();
+  await press(primary, scenario.trigger);
+  await press(primary, scenario.trigger);
   await expect(explanation).toBeVisible();
   await expect(primaryButton).not.toHaveAttribute('aria-label', /unread/);
   await primary.getByRole('button', { name: 'Close session controls', exact: true }).click();
-  await sharedButton.click();
+  await press(shared, scenario.trigger);
   await expect(sharedButton).not.toHaveAttribute('aria-label', /unread/);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect(errors).toEqual([]);
@@ -73,7 +82,7 @@ test('native confirmations replace pending values on both surfaces without an un
   await page.waitForLoadState('networkidle');
   const primary = page.getByRole('region', { name: 'Primary view', exact: true });
   for (const scenario of scenarios) {
-    await primary.getByTestId(scenario.trigger).click();
+    await press(primary, scenario.trigger);
     await primary.getByRole('combobox', { name: scenario.label, exact: true }).selectOption(scenario.target);
     await page.getByRole('button', { name: `Confirm ${scenario.action}`, exact: true }).click();
     for (const name of ['Primary view', 'Shared view']) {

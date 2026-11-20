@@ -10,9 +10,13 @@
  * `terminalTakes` makes a terminal the native owner of a session (the Controller lets the session go and refuses sends until a person takes it
  * back). `fork` adds a session whose history is a copy of another's, as a terminal fork does. Item keys are stable per session and position,
  * so a reload shows the same rows. The provider reads nothing outside this process.
+ *
+ * `turns(text)` scripts a whole turn instead of one answer: tool calls that run for a while and complete with an output, approvals that wait for the
+ * page's answer (`respondToInteraction`), and replies. Every row of the turn carries one turn id, the agent's active turn is set while it runs, and
+ * a denied approval ends it.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { parseAgentPreparedTextInput, serializeAgentPreparedTextInput, type AgentProviderAdapter, type AgentSessionNativeEvidence, type ProviderObservation, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import { parseAgentPreparedTextInput, serializeAgentPreparedTextInput, type AgentInteractionResponse, type AgentProviderAdapter, type AgentToolDetail, type AgentSessionNativeEvidence, type ProviderObservation, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory, AgentHostProviderRegistration } from '@orchardworks/agent-remote-controller';
 import { NativeSessionOwnerError, type NativeOwnerIdentity } from '@orchardworks/agent-remote-controller/testing';
 import { ScriptedSession } from '@orchardworks/agent-remote-fixtures';
@@ -39,6 +43,19 @@ export function row(providerId: string, delivery: 'history' | 'live', key: strin
   };
 }
 
+/** A tool detail as a flow writes it: a command string is a shell command, an object is the detail itself. */
+export type ScriptedToolInput = string | AgentToolDetail;
+/** One step of a scripted turn (`ScriptedProviderOptions.turns`). */
+export type ScriptedStep =
+  /** A tool call: a running `tool_call` row, then, after `ms`, the same item completed with `output`. */
+  | { tool: string; input: ScriptedToolInput; output: string; ms?: number }
+  /** A pending `tool_approval` of `command`; the turn waits until the page answers it. Allow goes on; deny or cancel ends the turn. */
+  | { approval: string; command: string }
+  /** An assistant message. */
+  | { reply: string };
+
+const toolDetail = (input: ScriptedToolInput): AgentToolDetail => typeof input === 'string' ? { type: 'shell', command: input } : input;
+
 export interface ScriptedSessionHandle {
   readonly nativeSessionId: string;
   readonly title: string;
@@ -53,6 +70,8 @@ export interface ScriptedProviderOptions {
   providerId?: string;
   displayName?: string;
   answer?(text: string): string;
+  /** Steps of the turn a sent text starts; when it returns steps, they replace `answer` for that text. */
+  turns?(text: string): ScriptedStep[];
   replyDelayMs?: number;
   /** Answer in two pieces, as a model streams: the page shows the first before the second arrives. */
   stream?: boolean;
@@ -104,6 +123,40 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
         base.push(row(providerId, 'live', key, { role: 'assistant', text: '' }, at, true, 3));
       }, options.replyDelayMs ?? 300);
     };
+    /** A scripted turn: the rows and state events of a real provider's turn, under one turn id. */
+    const pendingApprovals = new Map<string, (response: AgentInteractionResponse) => void>();
+    let turnCount = 0, eventCount = 0;
+    const playTurn = async (text: string, steps: ScriptedStep[]) => {
+      const turnId = `${nativeSessionId}-turn-${++turnCount}`;
+      const emit = (event: ProviderObservation['event'], sourceKey: string, itemIdentity?: ProviderObservation['itemIdentity']) =>
+        base.push({ type: 'observation', sourceKey: `live:${sourceKey}:${++eventCount}`, occurredAt: Date.now(), delivery: 'live', event, ...(itemIdentity ? { itemIdentity } : {}) });
+      const message = (role: ScriptedRow['role'], body: string) => {
+        const key = `${nativeSessionId}:h${saved.history.length + 1}`;
+        saved.history.push({ role, text: body }); saved.updatedAt = new Date().toISOString();
+        emit({ type: 'timeline', provider: providerId, turnId, item: { type: role === 'user' ? 'user_message' : 'assistant_message', text: body, messageId: key } }, key, { key, completes: true });
+      };
+      emit({ type: 'turn_started', provider: providerId, turnId }, 'turn-started');
+      message('user', text);
+      for (const [index, step] of steps.entries()) {
+        const callId = `${nativeSessionId}:${turnId}:c${index}`;
+        if ('reply' in step) message('assistant', step.reply);
+        else if ('tool' in step) {
+          const item = { type: 'tool_call' as const, callId, name: step.tool, detail: toolDetail(step.input) };
+          emit({ type: 'timeline', provider: providerId, turnId, item: { ...item, status: 'running', error: null } }, `${callId}:started`, { key: callId });
+          if (step.ms) await new Promise(resolve => setTimeout(resolve, step.ms));
+          emit({ type: 'timeline', provider: providerId, turnId, item: { ...item, status: 'completed', error: null, result: { content: [{ type: 'text', text: step.output }], exitCode: 0, durationMs: step.ms ?? 0 } } }, `${callId}:completed`, { key: callId, completes: true });
+        } else {
+          const requestId = `${turnId}:approval-${index}`;
+          const answered = new Promise<AgentInteractionResponse>(resolve => pendingApprovals.set(requestId, resolve));
+          emit({ type: 'interaction_requested', provider: providerId, turnId, request: { kind: 'tool_approval', requestId, toolCallId: callId, toolName: 'command', summary: step.approval,
+            detail: { type: 'shell', command: step.command }, allowedDecisions: ['allow', 'deny'], allowScopes: ['once'] } }, `${requestId}:requested`);
+          const response = await answered;
+          emit({ type: 'interaction_resolved', provider: providerId, turnId, requestId, response }, `${requestId}:resolved`, { key: `interaction:${requestId}`, completes: true, liveOnly: true });
+          if (response.kind === 'tool_approval' && response.decision !== 'allow') break;
+        }
+      }
+      emit({ type: 'turn_completed', provider: providerId, turnId }, 'turn-completed');
+    };
     const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
     let epoch = 0, preparations = 0;
     const evidence = (workspace: string): AgentSessionNativeEvidence => ({
@@ -119,7 +172,10 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
       },
       dispatchInput: async witness => {
         const text = witness.parts[0].text;
-        sent.push(text); write('user', text); epoch += 1;
+        sent.push(text); epoch += 1;
+        const steps = options.turns?.(text);
+        if (steps) { void playTurn(text, steps); return { disposition: 'started' }; }
+        write('user', text);
         if (options.stream) writeStreamed(answer(text)); else write('assistant', answer(text));
         return { disposition: 'started' };
       },
@@ -133,11 +189,21 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
         runtimeInfo: async () => ({ providerId, sessionId: nativeSessionId, status: 'idle' as const, cwd: options.succession!.workspace, persistence: { providerId, sessionId: nativeSessionId, opaque: '{}' } }) } : {}),
       sendMessage: (async (text: string) => {
         await held;
-        sent.push(text); write('user', text);
+        sent.push(text);
+        const steps = options.turns?.(text);
+        if (steps) { void playTurn(text, steps); return; }
+        write('user', text);
         if (options.stream) writeStreamed(answer(text));
         else if (options.replyDelayMs) setTimeout(() => write('assistant', answer(text)), options.replyDelayMs);
         else write('assistant', answer(text));
       }) as unknown as ScriptedSession['sendMessage'],
+      /** The page's answer to a scripted approval resolves it and the turn goes on. */
+      respondToInteraction: (async (requestId: string, response: AgentInteractionResponse) => {
+        const resolve = pendingApprovals.get(requestId);
+        if (!resolve) throw new Error(`No pending scripted interaction ${requestId}.`);
+        pendingApprovals.delete(requestId);
+        resolve(response);
+      }) as ScriptedSession['respondToInteraction'],
     });
     live.set(nativeSessionId, session);
     return session;

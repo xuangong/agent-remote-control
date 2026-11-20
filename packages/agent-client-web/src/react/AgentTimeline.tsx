@@ -170,14 +170,14 @@ export function AgentTimeline({
     return { ...previous, scope: readerScope, choices, revealed };
   });
   const disclosures = turns.map(turn => workDisclosure(processMode, turn.state, current.choices.get(turn.key), current.revealed.has(turn.key)));
-  // A range is taken over the entries shown, in the order they show: a closed work line's steps are never selected unseen.
-  const shown = turns.flatMap((turn, index) => [...(turn.prompt ? [turn.prompt] : []),
-    ...turn.work.filter(step => step.kind !== 'interaction_receipt' ? disclosures[index]!.line === 'open' : false).flatMap(step => step.entries),
-    ...turn.work.filter(step => step.kind === 'interaction_receipt').flatMap(step => step.entries), ...turn.answer, ...turn.letters]);
   const selectionAnchor = useRef<string>();
   const selectedKeys = entrySelection?.selected;
   if (!selectedKeys) selectionAnchor.current = undefined;
   const selectEntry = useTimelineAction(scopeKey, entrySelection ? (key: string, extend: boolean) => {
+    // A range is taken over the entries shown, in the order they show: a closed work line's steps are never selected unseen.
+    const shown = turns.flatMap((turn, index) => [...(turn.prompt ? [turn.prompt] : []),
+      ...turn.work.filter(step => step.kind !== 'interaction_receipt' ? disclosures[index]!.line === 'open' : false).flatMap(step => step.entries),
+      ...turn.work.filter(step => step.kind === 'interaction_receipt').flatMap(step => step.entries), ...turn.answer, ...turn.letters]);
     const order = shown.filter(entry => isSelectableTimelineItem(entry.item)).map(timelineEntryKey);
     const anchor = selectionAnchor.current, from = anchor === undefined ? -1 : order.indexOf(anchor), to = order.indexOf(key);
     selectionAnchor.current = key;
@@ -197,7 +197,16 @@ export function AgentTimeline({
       onResourceResolve={resolveResource} onResourceRequest={requestResource}
       previews={previews} extension={registry?.render(entry.item)}
       {...options} />;
-  const now = Date.now();
+  // Day lines read every turn's times, so they are worked out again only when the turns, the language or the day change.
+  const today = new Date().toDateString();
+  const separators = useMemo(() => {
+    const now = Date.now();
+    return turns.map((turn, index) => {
+      const previous = turns[index - 1];
+      const start = (turn.prompt ?? turn.work[0]?.entries[0] ?? turn.answer[0] ?? turn.letters[0])?.timestamp;
+      return start && startsDayLine(previous ? lastTimestamp(previous) : undefined, start) ? { label: dayLineLabel(start, now, locale, t), timestamp: start } : undefined;
+    });
+  }, [turns, locale, t, today]);
   const assistantName = assistant?.name || t('conversation.assistant');
   // The live line shows while the assistant works on a turn and nothing waits for the person.
   const agent = state.agent;
@@ -246,11 +255,8 @@ export function AgentTimeline({
       {turns.length === 0 && outgoing.length === 0
         ? timelineStart && !state.timeline.hasOlder ? null : <p className="agent-timeline-empty">No timeline activity.</p>
         : turns.map((turn, index) => {
-            const previous = turns[index - 1];
-            const start = (turn.prompt ?? turn.work[0]?.entries[0] ?? turn.answer[0] ?? turn.letters[0])?.timestamp;
-            const separator = start && startsDayLine(previous ? lastTimestamp(previous) : undefined, start) ? { label: dayLineLabel(start, now, locale, t), timestamp: start } : undefined;
             const disclosure = disclosures[index]!;
-            return <TimelineTurn key={turn.key} turn={turn} disclosure={disclosure} separator={separator}
+            return <TimelineTurn key={turn.key} turn={turn} disclosure={disclosure} separator={separators[index]}
               onToggle={() => toggleTurn(turn.key, disclosure.line === 'open')} renderEntry={renderEntry} groups={notices}
               after={index === turns.length - 1 ? <>{pending}{liveInTurn ? live : null}</> : undefined} />;
           })}

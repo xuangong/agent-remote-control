@@ -7,8 +7,17 @@ import type { Locale, Translate } from './messages.js';
 
 const GAP_MS = 30 * 60 * 1000;
 
+const formatters = new Map<string, Intl.DateTimeFormat>();
+/** One formatter per language, options and zone: making one costs about fifty times more than formatting with it. */
+function formatter(tag: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const key = JSON.stringify([tag, options]);
+  let format = formatters.get(key);
+  if (!format) formatters.set(key, format = new Intl.DateTimeFormat(tag, options));
+  return format;
+}
+
 function localDay(time: number, timeZone?: string): string {
-  return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', ...(timeZone ? { timeZone } : {}) }).format(time);
+  return formatter('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', ...(timeZone ? { timeZone } : {}) }).format(time);
 }
 
 /** Whether a day line goes before a turn that starts at `current`, after one that ended at `previous` (none for the first turn). */
@@ -25,10 +34,10 @@ export function dayLineLabel(timestamp: string, now: number, locale: Locale, t: 
   const time = Date.parse(timestamp);
   const zone = timeZone ? { timeZone } : {};
   const tag = locale === 'zh' ? 'zh-CN' : 'en-US';
-  const clock = new Intl.DateTimeFormat(tag, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', ...zone }).format(time);
+  const clock = formatter(tag, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', ...zone }).format(time);
   const day = localDay(time, timeZone);
   if (day === localDay(now, timeZone)) return t('conversation.today', { time: clock });
   if (day === localDay(now - 24 * 60 * 60 * 1000, timeZone)) return t('conversation.yesterday', { time: clock });
-  const date = new Intl.DateTimeFormat(tag, { month: 'short', day: 'numeric', ...(new Date(now).getUTCFullYear() !== new Date(time).getUTCFullYear() ? { year: 'numeric' } : {}), ...zone }).format(time);
+  const date = formatter(tag, { month: 'short', day: 'numeric', ...(new Date(now).getUTCFullYear() !== new Date(time).getUTCFullYear() ? { year: 'numeric' } : {}), ...zone }).format(time);
   return `${date} ${clock}`;
 }

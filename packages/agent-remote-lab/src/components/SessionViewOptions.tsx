@@ -9,7 +9,7 @@ import type { ProcessModeChoice } from '../hooks/useProcessMode.js';
  * The conversation's view options: how much of each turn's work shows for this assistant. The default for every assistant
  * on this device, and whether letters between agents show, are in Settings > Assistants.
  */
-export function SessionViewOptions({ process }: { process: ProcessModeChoice; /** Still passed by the conversation's host. */ lettersVisible?: boolean; onLettersVisibleChange?(visible: boolean): void }) {
+export function SessionViewOptions({ process }: { process: ProcessModeChoice }) {
   const t = useTranslate();
   const [open, setOpen] = useState(false);
   const id = useId();

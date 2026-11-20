@@ -75,7 +75,7 @@ export function SessionWorkbench({ assistant, details, conversationTitle, sessio
   const detailsHost: AssistantDetailsHost | undefined = providedHost ?? (tileChrome ? { surface: phone ? 'sheet' : 'panel', slot: tileDetailsSlot, open: tileDetailsOpen,
     setOpen: setTileDetailsOpen } : undefined);
   const process = useProcessMode(processAssistant);
-  const [lettersVisible, setLettersVisible] = useLettersVisible();
+  const [lettersVisible] = useLettersVisible();
   const session = suppliedSessionState ?? remoteSessionState(state, connectionStatus);
   const sessionStatus = session.connection;
   const controlReadOnly = !!nativeTakeover || (!draftOnly && session.readOnly);
@@ -118,7 +118,7 @@ export function SessionWorkbench({ assistant, details, conversationTitle, sessio
   const timelineNotice = notice && (notice.kind === 'unavailable' || notice.kind === 'agent_unavailable' || notice.kind === 'failed' && !failureInTimeline) ? notice : undefined;
   const hasTarget = (draftSessionKey ?? attachingAgentId) !== undefined;
   const hostNotice = notice?.kind === 'host_offline' && !(state === undefined && loadingNotice) ? sessionNoticeWords(notice, t) : undefined;
-  const viewOptions = <SessionViewOptions key={displayScope} process={process} lettersVisible={lettersVisible} onLettersVisibleChange={setLettersVisible} />;
+  const viewOptions = <SessionViewOptions key={displayScope} process={process} />;
   // The assistant's details: what its place and its presentation know, with this conversation's process mode, settings and files.
   const filePreview = useContext(FilePreviewContext);
   const detailsShown = !!detailsHost?.open && visible && (detailsHost.surface === 'sheet' || !!detailsHost.slot);
@@ -130,7 +130,7 @@ export function SessionWorkbench({ assistant, details, conversationTitle, sessio
     ...(detailsHost?.action ? { action: detailsHost.action } : {}), ...(detailsHost?.actions ? { actions: detailsHost.actions } : {}),
     ...(detailsHost?.where ? { where: detailsHost.where } : {}), ...(detailsHost?.setPicture ? { setPicture: detailsHost.setPicture } : {}),
     ...(detailsHost?.rename ? { rename: detailsHost.rename } : {}),
-    process, letters: { visible: lettersVisible, set: setLettersVisible },
+    process,
     sessions: { ...details?.sessions, ...(lastTurn ? { time: lastTurn } : {}), ...(state?.agent?.cwd ? { directory: state.agent.cwd } : {}), ...(reportedSession ? { sessionId: reportedSession } : {}),
       subagents: reportedSession ? childrenFor?.(reportedSession) ?? [] : [], ...(onOpenChildSession ? { openSubagent: onOpenChildSession } : {}),
       tools: <>{details?.sessions?.tools}{workspaceLink}</> },

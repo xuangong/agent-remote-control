@@ -24,9 +24,6 @@ export interface AssistantRef {
   readonly sessions?: AssistantSessions;
   /** This assistant's own process mode; the device's default, notifications and letters are in Settings > Assistants. */
   readonly process?: ProcessModeChoice;
-  /** Still passed by the conversation's host; Settings > Assistants owns them now. */
-  readonly letters?: unknown;
-  readonly notifications?: unknown;
   readonly settings?: ReactNode;
   readonly files?: readonly SessionFile[];
   readonly openFile?: (file: SessionFile, trigger: HTMLElement) => void;

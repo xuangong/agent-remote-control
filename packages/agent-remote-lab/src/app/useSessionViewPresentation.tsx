@@ -150,7 +150,7 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
     const earlier = chain?.predecessor && !chain.history ? [...chain.ancestors].reverse().concat(chain.predecessor) : [];
     const details = {
       id: botViewId ?? view?.id ?? source.viewId, ...(botDetails?.picture ? { picture: botDetails.picture } : {}), name: assistant.name,
-      ...(botDetails?.label ? { label: botDetails.label } : {}), ...(view && botRole(view, teamId => supportTeams.has(teamId)) ? { role: botRole(view, teamId => supportTeams.has(teamId))! } : {}),
+      ...(botDetails?.label ? { label: botDetails.label } : {}), ...(view && botRole(view, teamId => supportTeams.has(teamId), t) ? { role: botRole(view, teamId => supportTeams.has(teamId), t)! } : {}),
       mood: botWorking(context.state) ? 'working' as const : 'idle' as const,
       where: { host: host?.name ?? source.hostId, ...(host ? { online: host.online } : {}), provider: providerName(source.providerId) ?? source.providerId,
         earlier: earlier.map(session => providerName(session.providerId, session.hostId ?? source.hostId) ?? session.providerId) },
@@ -166,7 +166,6 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
         } },
         tools: <><StarButton session={source} favorites={favorites} /><SessionLink session={available ? source : windowSessionBinding(source)} sessionIntent={context.operationBinding.historical ? 'history' : undefined} /></>,
       },
-      notifications: attention.notifications,
       // A tile's assistant opens in Bot mode, keeping the Window's place.
       ...(openBot ? { action: { label: t('card.openInBot'), icon: 'person' as const, onSelect: openBot } } : {}),
       // A tile's assistant is renamed in its group's details; Bot mode's host renames a bot, and a session in no group keeps its name.
@@ -299,7 +298,7 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
   /** What a folded bot's slim card shows: who it is and how it is doing, from the shared channel, while its conversation is released. */
   function foldedBot(view: WindowView & { binding: WindowSessionBinding }): FoldedBot {
     return { id: view.id, name: sharedWindow ? assistantNames.view(sharedWindow.id, view.id) : assistantNames.session(view.binding), picture: sharedWindow ? windowWorkspace.readGroup(sharedWindow.id)?.bots?.members[view.id]?.picture : undefined,
-      role: botRole(view, teamId => supportTeams.has(teamId)), asleep: asleepBot(view),
+      role: botRole(view, teamId => supportTeams.has(teamId), t), asleep: asleepBot(view),
       statusOf: states => assistantStatus({ activity: sessionActivity(sharedWindow ? currentBotSession(sharedWindow.id, view.id, view.binding) : view.binding, tracking.liveObservations, states),
         asleep: asleepBot(view), waitingToSend: false }, t) };
   }

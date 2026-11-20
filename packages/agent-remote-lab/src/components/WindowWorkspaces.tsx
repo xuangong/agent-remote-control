@@ -43,7 +43,7 @@ function StatusWord({ state }: { state: AssistantState }) {
 function viewLine(t: Translate, view: WindowView, name: string, details: WindowBotDetails | undefined, status: SessionActivityStatus | undefined, supportTeam?: (teamId: string) => boolean) {
   const live = liveState(status);
   if (isBotView(view)) {
-    const role = botRole(view, supportTeam), place = details?.asleep ? t('windows.place.asleep') : view.collapsed ? t('windows.place.folded') : t('windows.place.open');
+    const role = botRole(view, supportTeam, t), place = details?.asleep ? t('windows.place.asleep') : view.collapsed ? t('windows.place.folded') : t('windows.place.open');
     const shown = details?.asleep && live !== 'needs_you' ? undefined : live;
     return { name, tags: [role && <span key="role" className="lab-bot-role">{role}</span>, details?.label && <span key="label" className="lab-bot-label">{details.label}</span>],
       detail: <>{place}{shown ? <> · <StatusWord state={shown} /></> : null}</> };

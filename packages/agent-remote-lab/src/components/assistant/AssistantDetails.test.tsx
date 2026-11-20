@@ -194,8 +194,6 @@ const reference = (overrides: Partial<AssistantRef> = {}): AssistantRef => ({
   where: { host: 'Mac mini', online: false, provider: 'Claude Code', earlier: ['Codex'] },
   sessions: { session: { hostId: 'local', providerId: 'claude', nativeSessionId: 's7', title: 'Release notes' }, directory: '/Users/me/notes', sessionId: 'session-7' },
   process: { mode: 'process', device: 'concise', chooseForAssistant: () => {}, chooseForDevice: () => {} },
-  letters: { visible: true, set: () => {} },
-  notifications: { enabled: true, available: true, set: () => {} },
   settings: <p>Model: Opus</p>,
   files: [{ path: '/Users/me/notes/notes.md', change: 'modified', source: 'change', entryKey: 'e1', additions: 3, deletions: 1 }],
   ...overrides,

@@ -9,7 +9,7 @@ type Scope = Parameters<typeof WindowToolbarRow>[0]['scope'];
 function scopeOf(overrides: Partial<Record<keyof Scope, unknown>> = {}) {
   const sharedWindow = buildWindow([buildView('a'), buildView('b', 'dock')], 'a', { id: 'A', title: 'Alpha' });
   const scope = {
-    addSessionView: vi.fn(), createSessionView: vi.fn(), asleepBot: vi.fn(() => false), docksHidden: false, setDocksHidden: vi.fn(),
+    addSessionView: vi.fn(), createSessionView: vi.fn(), asleepBot: vi.fn(() => false),
     setAgentControlOpen: vi.fn(), setDeleteConfirmOpen: vi.fn(), setWindowToolbarViewTarget: vi.fn(), sharedWindow, windowToolbarShown: true,
     windowActions: { busy: false, saveRename: vi.fn(async () => {}), setBotAppearance: vi.fn(async () => {}), copyLink: vi.fn(async () => {}) },
     windowWorkspace: { provisional: false, group: buildGroup(sharedWindow), client: undefined },
@@ -64,22 +64,6 @@ it('adds a session view and opens a session through their own actions', async ()
   expect(scope.createSessionView).not.toHaveBeenCalled();
   await choose(container, 'Add', 'Open session…');
   expect(scope.createSessionView).toHaveBeenCalledOnce();
-});
-
-it('offers the dock toggle for a Window with docks and flips the remembered choice', async () => {
-  const scope = scopeOf();
-  const container = await render(<WindowToolbarRow scope={scope} />);
-  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Hide docks"]')!.click());
-  const flip = vi.mocked(scope.setDocksHidden).mock.calls[0]![0] as unknown as (value: boolean) => boolean;
-  expect([flip(false), flip(true)]).toEqual([true, false]);
-  const noDocks = buildWindow([buildView('a')], 'a', { id: 'A' });
-  const without = await render(<WindowToolbarRow scope={scopeOf({ sharedWindow: noDocks, windowWorkspace: { provisional: false, group: buildGroup(noDocks) } })} />);
-  expect(without.querySelector('button[aria-label="Hide docks"]')).toBeNull();
-});
-
-it('says "Show docks" while the docks are hidden', async () => {
-  const container = await render(<WindowToolbarRow scope={scopeOf({ docksHidden: true })} />);
-  expect(container.querySelector('button[aria-label="Show docks"]')).not.toBeNull();
 });
 
 it('changes the Bot mode appearance of the Window\'s group, and leaves the toggle out for a Window without a group', async () => {

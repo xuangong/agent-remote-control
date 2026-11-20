@@ -1,5 +1,5 @@
 import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-client-web/browser';
-import { assistantStatus, isUncertainSend, sessionFiles, timelineEntryKey, remoteSessionState, sessionActivityLabel, sessionNotice, sessionNoticeWords, type RemoteSessionState, type SessionDescription, type SessionAttribution, type SessionFacts, type SessionNotice } from '@orchardworks/agent-client';
+import { isUncertainSend, sessionFiles, timelineEntryKey, remoteSessionState, sessionActivityLabel, sessionNotice, sessionNoticeWords, type RemoteSessionState, type SessionDescription, type SessionAttribution, type SessionFacts, type SessionNotice } from '@orchardworks/agent-client';
 import { SessionControlNotice } from './SessionControlNotice.js';
 import { SessionViewFrame } from './SessionViewFrame.js';
 import { useFeedbackToast, useToastAnchor } from './Toast.js';
@@ -22,13 +22,13 @@ import { SessionViewOptions } from './SessionViewOptions.js';
 import { useLettersVisible, useProcessMode, type ProcessAssistant } from '../hooks/useProcessMode.js';
 import { SessionTodoPanel, type SessionTodoPanelProps } from '@orchardworks/agent-client-web/react';
 import { SessionHeading } from './SessionHeading.js';
-import { SessionHeadingActionsPresentationContext } from './SessionHeadingActions.js';
+import { SessionHeadingActions, SessionHeadingActionsPresentationContext } from './SessionHeadingActions.js';
 import { SessionTimelineTools } from './SessionTimelineTools.js';
 import { IconButton } from '../ui/IconButton.js';
 
 import { useTimelineScroll } from '../hooks/useTimelineScroll.js';
 import { AssistantDetailsHostContext, type AssistantDetailsHost } from './assistant/details-host.js';
-import { TileHeader } from './assistant/TileHeader.js';
+import { TileHeader, type TileSession } from './assistant/TileHeader.js';
 import { usePhoneLayout } from '../hooks/usePhoneLayout.js';
 import { AssistantDetails, type AssistantRef } from './assistant/AssistantDetails.js';
 import { ModelSettings } from './assistant/ModelSettings.js';
@@ -41,7 +41,8 @@ export type LabWorkbenchActions = SessionViewActions;
 
 export function SessionWorkbench({ assistant, details, conversationTitle, sessionDescription, onNavigateAttribution, todo, processAssistant, sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, imageDraftBinding, imageRecipient, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, renderCommandError, readOnly: recordingReadOnly = false, draftOnly = false, opening = false, mutationBlocked = false, pendingFirstInputContext, onPendingInputChange, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, headingStart, headingMode = 'inline', sessionManager, headingContext, composerContext, composerNotice, composerStatus, nativeTakeover, consoleCommands, onExecuteConsoleCommand, entrySelection, timelineStart, timelineEnd, sendLater, loadingNotice, host }: { entrySelection?: TimelineEntrySelection;
   /** Who answers in this conversation: the live line's name and the avatar at the foot of the answers. */
-  assistant?: AgentTimelineProps['assistant'];
+  /** Who answers, and the session whose latest reply a tile's sentence says. */
+  assistant?: AgentTimelineProps['assistant'] & { readonly session?: TileSession };
   /** What the assistant's details show beyond this conversation's own process mode, settings and files: who it is, where it works, its sessions. */
   details?: Partial<AssistantRef>;
   /** The session's title as words; a tile shows it beside the assistant's name when it differs from the name. */
@@ -147,10 +148,15 @@ export function SessionWorkbench({ assistant, details, conversationTitle, sessio
   return <ProcessModeContext.Provider value={process.mode}><TimelineLettersVisible.Provider value={lettersVisible}>
     <SessionAttributions description={sessionDescription} onNavigate={onNavigateAttribution}>{({ toggle, details }) => <SessionViewFrame className={layoutClass}>
     {assistantChrome ? null : <div className="lab-workbench-heading-group" hidden={headingMode === 'toolbar' && !headingContext && !details}>
-    {tileChrome ? <TileHeader name={assistant?.name ?? t('conversation.assistant')} avatar={assistant?.avatar} title={conversationPath} titleText={conversationTitle}
-      status={assistantStatus({ activity: activity ?? 'unknown', ...(host ? { host } : {}), asleep: false, waitingToSend: false, ...(notice ? { notice } : {}) }, t)}
+    {tileChrome ? <TileHeader name={assistant?.name ?? t('conversation.assistant')} avatar={assistant?.avatar} title={conversationPath} {...(assistant?.session ? { session: assistant.session } : {})}
+      facts={{ activity: activity ?? 'unknown', ...(host ? { host } : {}), asleep: false, waitingToSend: false, ...(notice ? { notice } : {}) }}
       detailsOpen={tileDetailsOpen} detailsId={tileDetailsId} onToggleDetails={() => setTileDetailsOpen(open => !open)}
-      trailing={<>{sessionManager}<span className="lab-heading-search-slot" ref={setHeadingSearchTarget} />{toggle}</>} />
+      // One ⋯ menu holds the tile's controls: its details, search, Info, star, close and the session's own actions.
+      menu={<SessionHeadingActions alwaysCollapsed sessionKey={displayScope}><SessionHeadingActionsPresentationContext.Provider value="inline">
+        <IconButton icon="person" className="lab-tile-details-toggle" label={t('details.open', { name: assistant?.name ?? t('conversation.assistant') })} aria-expanded={tileDetailsOpen}
+          aria-controls={tileDetailsId} onClick={() => setTileDetailsOpen(open => !open)} />
+        <span className="lab-heading-search-slot" ref={setHeadingSearchTarget} />{toggle}{sessionManager}
+      </SessionHeadingActionsPresentationContext.Provider></SessionHeadingActions>} />
     : <SessionHeading hidden={headingMode === 'toolbar'}
       leading={headingMode === 'inline' ? <>{headingStart}{workspaceLink}{viewOptions}<span className="lab-heading-search-slot" ref={setHeadingSearchTarget} /></> : undefined}
       trailing={headingMode === 'inline' ? <>{sessionManager}<span className="lab-conversation-status">{activityLabel}</span></> : undefined}>

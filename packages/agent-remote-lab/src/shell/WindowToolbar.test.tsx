@@ -8,7 +8,7 @@ type Props = ComponentProps<typeof WindowToolbar>;
 async function toolbar(overrides: Partial<Props> = {}) {
   const props: Props = {
     windowId: 'research', title: 'Research', summary: '3 bots · 1 open', onRename: vi.fn(), onNewView: vi.fn(), onOpenSession: vi.fn(),
-    hasDocks: true, docksHidden: false, onToggleDocks: vi.fn(), botAppearance: true, onBotAppearance: vi.fn(),
+    botAppearance: true, onBotAppearance: vi.fn(),
     onCopyLink: vi.fn(), onAgentControl: vi.fn(), onDelete: vi.fn(), ...overrides,
   };
   const container = await render(<WindowToolbar {...props} />);
@@ -149,19 +149,6 @@ it('adds a new session view or opens a session from the Add menu', async () => {
   expect(props.onOpenSession).toHaveBeenCalledTimes(1);
 });
 
-it('toggles the docks, showing whether they are hidden', async () => {
-  const shown = await toolbar();
-  const hide = shown.bar.querySelector<HTMLButtonElement>('button[aria-label="Hide docks"]')!;
-  expect(hide.hasAttribute('aria-pressed')).toBe(false);
-  await act(async () => hide.click());
-  expect(shown.props.onToggleDocks).toHaveBeenCalledTimes(1);
-  const hidden = await toolbar({ docksHidden: true });
-  expect(hidden.bar.querySelector('button[aria-label="Show docks"]')?.hasAttribute('aria-pressed')).toBe(false);
-  expect(hidden.bar.querySelector('button[aria-label="Hide docks"]')).toBeNull();
-  const none = await toolbar({ hasDocks: false });
-  expect(none.bar.querySelector('button[aria-label$=" docks"]')).toBeNull();
-});
-
 it('lists the Window actions and runs each', async () => {
   const { bar, props } = await toolbar();
   let menu = await openMenu(bar, 'Window actions');
@@ -200,7 +187,7 @@ it('ends an open rename without saving when another Window takes the toolbar, an
   function Harness() {
     const [window, setWindow] = useState({ id: 'research', title: 'Research' }); show = setWindow;
     return <WindowToolbar windowId={window.id} title={window.title} summary="1 bot" onRename={onRename} onNewView={vi.fn()} onOpenSession={vi.fn()}
-      hasDocks={false} docksHidden={false} onToggleDocks={vi.fn()} botAppearance onBotAppearance={vi.fn()} onCopyLink={vi.fn()} onDelete={vi.fn()} />;
+      botAppearance onBotAppearance={vi.fn()} onCopyLink={vi.fn()} onDelete={vi.fn()} />;
   }
   const container = await render(<Harness />);
   const bar = container.querySelector<HTMLElement>('header.lab-window-toolbar')!;
@@ -249,10 +236,3 @@ it('ignores Enter while an input method is composing, so a candidate is not save
   expect(input()).not.toBeNull();
 });
 
-it('keeps focus on the dock toggle when it is pressed, even where a click does not focus buttons', async () => {
-  const { bar, props } = await toolbar();
-  const toggle = bar.querySelector<HTMLButtonElement>('button[aria-label="Hide docks"]')!;
-  await act(async () => toggle.click());
-  expect(props.onToggleDocks).toHaveBeenCalledTimes(1);
-  expect(document.activeElement).toBe(toggle);
-});

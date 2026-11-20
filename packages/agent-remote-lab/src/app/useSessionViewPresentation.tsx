@@ -9,7 +9,6 @@ import { sessionActivity } from '../session-activity-status.js';
 import { assistantStatus, type SessionAttribution, type AgentReplicaState } from '@orchardworks/agent-client';
 import { labSessionSuccessionDirectory } from '../session-succession-directory.js';
 import type { FamilySessionPresentationContext } from '../components/SessionFamily.js';
-import { SessionSuccessionHistory } from '../components/SessionSuccessionHistory.js';
 import { handoffCommand, handoffProvider } from '../handoff-command.js';
 import { SessionTitle } from '../components/SessionTitle.js';
 import { StarButton } from '../components/SessionFavorites.js';
@@ -143,6 +142,7 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
     const providerName = (providerId: string, hostId = source.hostId) => remoteHosts.find(item => item.id === hostId)?.providers?.find(provider => provider.providerId === providerId)?.displayName;
     const nameGroupId = options.bot?.groupId ?? (view ? sharedWindow?.id : undefined), nameViewId = options.bot?.viewId ?? view?.id;
     const assistant = { name: nameGroupId && nameViewId ? assistantNames.view(nameGroupId, nameViewId) : assistantNames.session(source),
+      session: { hostId: source.hostId, providerId: source.providerId, nativeSessionId: source.nativeSessionId },
       avatar: <BotPicture id={botViewId ?? view?.id ?? source.viewId} picture={botDetails?.picture} size={26} mood={botWorking(context.state) ? 'working' : 'idle'} /> };
     const openBot = !botPresentation && !team && sharedWindow && view && isBotView(view) ? () => void openInBotMode(sharedWindow.id, view.id) : undefined;
     // Where it works and the sessions behind it, for its details: the Host and agent, the agents before a handoff, the chain.
@@ -161,7 +161,8 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
           if (options.bot || options.fallback) { navigation.select({ kind: 'session', session: { ...session, hostId: session.hostId ?? source.hostId } }); return true; }
           return windowBot ? revealEarlier(view!.id, session)
           : view && sharedWindow ? bindDirectorySession({ ...session, sessionIntent: intent }, { windowId: sharedWindow.id, viewId: view.id, binding: JSON.stringify(view.binding ?? null) })
-          : false;
+          // Outside a Window the primary conversation opens it in place, as its handoff line did.
+          : openSession(session, undefined, undefined, false, undefined, intent);
         } },
         tools: <><StarButton session={source} favorites={favorites} /><SessionLink session={available ? source : windowSessionBinding(source)} sessionIntent={context.operationBinding.historical ? 'history' : undefined} /></>,
       },
@@ -241,11 +242,6 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
       ...(laterHost ? { sendLater: { label: `Send when ${laterHost.name} is back`, send: async (text: string) => { await transport.queueMessage!(outboxTarget, text); } } } : {}),
       ...(context.offline && host ? { loadingNotice: { title: `${host.name} is offline`,
         detail: laterHost ? 'The conversation appears here when it is back. Messages you send now wait for it.' : 'The conversation appears here when it is back.' } } : {}),
-      // Window mode says where a bot's conversation came from; its links read the earlier session in the bot's own pane.
-      headingContext: botPresentation ? undefined : <SessionSuccessionHistory navigation={succession.historyNavigationFor(source)}
-        onOpen={(session, intent) => windowBot ? Promise.resolve(revealEarlier(view!.id, session))
-          : view && sharedWindow ? bindDirectorySession({ ...session, sessionIntent: intent }, { windowId: sharedWindow.id, viewId: view.id, binding: JSON.stringify(view.binding ?? null) })
-          : Promise.resolve(false)} />,
       composerContext: botPresentation ? undefined : <>{referencing ? <SessionReferences scope={baseUrl} holder={refHolder} providers={host?.providers?.map(provider => provider.providerId) ?? [source.providerId]}
           fallback={forkReference} snapshot={fork?.mode === 'reference' ? null : forkReference} picking={referencePicker === source.viewId}
           shown={new Set(sourceForks.flatMap(item => item.target ? [`${item.target.providerId}/${item.target.nativeSessionId}`] : []))} onPickingChange={picking => setReferencePicker(picking ? source.viewId : undefined)}

@@ -28,8 +28,8 @@ import type { SharedFeedsAndTpmSlice } from './useSharedFeedsAndTpm.js';
 import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';
 import type { AppInputs } from './types.js';
 
-export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBindingSlice & SessionOpeningSlice & ViewSessionStateSlice & PanelsAndShortcutsSlice & ActiveSessionSlice & DocksAndBotSelectionSlice & WindowViewActionsSlice & WorkbenchShellSlice & ProviderStateSlice & SharedFeedsAndTpmSlice & WorkbenchRecordsSlice, 'addSessionView' | 'askView' | 'baseUrl' | 'closeContext' | 'closeInspector' | 'closePage' | 'compactLayout' | 'createWindowFromMenu' | 'expandedKeys' | 'modeSteps' | 'navigation' | 'openDirectorySession' | 'openSession' | 'presentedViewId' | 'setQueuedModeSteps' | 'setTeamReveal' | 'sharedViewForSlot' | 'sharedWindow' | 'showDockOf' | 'showView' | 'sideRequests' | 'succession' | 'teamRoster' | 'teamView' | 'tpmView' | 'windowActions' | 'windowWorkspace'>) {
-  const { addSessionView, askView, baseUrl, closeContext, closeInspector, closePage, compactLayout, createWindowFromMenu, expandedKeys, modeSteps, navigation, openDirectorySession, openSession, presentedViewId, setQueuedModeSteps, setTeamReveal, sharedViewForSlot, sharedWindow, showDockOf, showView, sideRequests, succession, teamRoster, teamView, tpmView, windowActions, windowWorkspace } = scope;
+export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBindingSlice & SessionOpeningSlice & ViewSessionStateSlice & PanelsAndShortcutsSlice & ActiveSessionSlice & DocksAndBotSelectionSlice & WindowViewActionsSlice & WorkbenchShellSlice & ProviderStateSlice & SharedFeedsAndTpmSlice & WorkbenchRecordsSlice, 'addSessionView' | 'askView' | 'baseUrl' | 'closeContext' | 'closeInspector' | 'closePage' | 'compactLayout' | 'createWindowFromMenu' | 'expandedKeys' | 'modeSteps' | 'navigation' | 'openDirectorySession' | 'openSession' | 'presentedViewId' | 'setQueuedModeSteps' | 'setTeamReveal' | 'sharedViewForSlot' | 'sharedWindow' | 'showView' | 'sideRequests' | 'succession' | 'teamRoster' | 'teamView' | 'tpmView' | 'windowActions' | 'windowWorkspace'>) {
+  const { addSessionView, askView, baseUrl, closeContext, closeInspector, closePage, compactLayout, createWindowFromMenu, expandedKeys, modeSteps, navigation, openDirectorySession, openSession, presentedViewId, setQueuedModeSteps, setTeamReveal, sharedViewForSlot, sharedWindow, showView, sideRequests, succession, teamRoster, teamView, tpmView, windowActions, windowWorkspace } = scope;
 
   function isViewVisible(slotId: string) {
     if (!sharedWindow) return expandedKeys.has(slotId);
@@ -69,7 +69,6 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
 
   /** Selects a view of the open Window as its sidebar row does: expanded, selected and scrolled into view, in place of a page. */
   function selectWindowView(view: WindowView) {
-    showDockOf(view);
     const failed = (error: unknown) => windowActions.setNotice(message(error, 'The session view was not selected.'));
     try { void windowWorkspace.operate(viewSelection(view)).catch(failed); } catch (error) { failed(error); return; }
     revealView(view.id); closePage();

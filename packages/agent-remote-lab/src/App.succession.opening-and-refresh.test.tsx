@@ -11,7 +11,7 @@ import * as workbenchComponents from './components/LabWorkbench.js';
 import * as historyHooks from './hooks/useConversationHistory.js';
 import * as directoryComponents from './components/SessionDirectory.js';
 import { saveStoredDisplay } from './stored-display.js';
-import { act, cachedConversation, cleanups, committed, editVisiblePrompt, failureFixture, handoffCommandFixture, native, settleApp, successionHistoryLink, testDeadline, visibleQuery, visibleText, waitFor, windowHandoffFixture } from './App.succession.fixture.js';
+import { act, cachedConversation, cleanups, committed, editVisiblePrompt, failureFixture, handoffCommandFixture, native, openSessions, settleApp, successionHistoryLink, testDeadline, visibleQuery, visibleText, waitFor, windowHandoffFixture } from './App.succession.fixture.js';
 
 it.each(['recovering', 'attach-failed', 'identity-mismatch'] as const)('keeps sharing the selected session while %s', async phase => {
   const modal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
@@ -254,7 +254,7 @@ it('opens predecessor A from current B, reloads its concrete history and returns
   const f = await failureFixture(false, 'B');
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
   const currentSlot = succession.desired!.slot.id, owners = structuredClone(succession.desired!.slot.owners);
-  const oldLink = successionHistoryLink(f.view, 'A');
+  const oldLink = await successionHistoryLink(f.view, 'A');
   expect(new URL(oldLink.href).searchParams.get('intent')).toBe('history');
   expect(new URL(oldLink.href).searchParams.has('agent')).toBe(false);
   await act(async () => oldLink.click());
@@ -265,8 +265,10 @@ it('opens predecessor A from current B, reloads its concrete history and returns
   expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe('');
   await f.reload();
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
-  const returnLink = successionHistoryLink(f.view, 'B');
+  await openSessions(f.view);
+  const returnLink = visibleQuery<HTMLAnchorElement>(f.view, '.lab-assistant-return a')!;
   expect(returnLink.textContent).toBe('Return to current');
+  expect(new URL(returnLink.href).searchParams.get('session')).toBe('B');
   expect(new URL(returnLink.href).searchParams.has('intent')).toBe(false);
   await act(async () => returnLink.click());
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
@@ -285,22 +287,23 @@ it('shows A-B-C handoff history once in reverse order while ordinary A navigatio
   vi.spyOn(historyHooks, 'useConversationHistory').mockImplementation((...args) => { open = args[2]; return realHistory(...args); });
   const f = await failureFixture(false, 'B', false, '', { chain: [committed(), committed('B', 'C', 3)] });
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('C'));
-  const nav = visibleQuery(f.view, '.lab-succession-history')!;
+  // The details list the chain newest first: C on screen, then B and A as links.
+  const nav = await openSessions(f.view);
   expect([...nav.querySelectorAll<HTMLAnchorElement>('a')].map(link => new URL(link.href).searchParams.get('session'))).toEqual(['B', 'A']);
-  expect(nav.querySelector('details')?.open).toBe(false);
-  expect(nav.querySelectorAll('a')).toHaveLength(2);
-  await act(async () => successionHistoryLink(f.view, 'B').click());
+  const link = await successionHistoryLink(f.view, 'B');
+  await act(async () => link.click());
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
   expect(new URL(window.location.href).searchParams.get('intent')).toBe('history');
-  await act(async () => successionHistoryLink(f.view, 'C').click());
+  const current = await successionHistoryLink(f.view, 'C');
+  await act(async () => current.click());
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('C'));
-  await act(async () => visibleQuery<HTMLElement>(f.view, '.lab-succession-history summary')!.click());
-  expect(visibleQuery<HTMLDetailsElement>(f.view, '.lab-succession-history details')?.open).toBe(true);
-  await act(async () => successionHistoryLink(f.view, 'A').click());
+  const oldest = await successionHistoryLink(f.view, 'A');
+  await act(async () => oldest.click());
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
   await f.reload();
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
-  await act(async () => successionHistoryLink(f.view, 'C').click());
+  const back = await successionHistoryLink(f.view, 'C');
+  await act(async () => back.click());
   await settleApp(() => expect(succession.binding?.session.nativeSessionId, succession.error).toBe('C'));
   await act(async () => { expect(await open({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'A', title: 'Original A link' })).toBe(true); });
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('C'));
@@ -315,11 +318,11 @@ it('removes handoff navigation when fresh authorized replay is denied', async ()
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
   const f = await failureFixture(false, 'B');
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
-  successionHistoryLink(f.view, 'A');
+  await successionHistoryLink(f.view, 'A');
   f.failReplay('succession_not_found');
   await act(async () => { await succession.refresh(); });
   expect(succession.historyNavigation).toBeUndefined();
-  expect(visibleQuery(f.view, '.lab-succession-history')).toBeNull();
+  await settleApp(() => expect(visibleQuery(f.view, '.lab-assistant-chain a')).toBeNull());
 }, testDeadline);
 
 it('waits for the selected native successor before reporting a committed refresh complete', async () => {
@@ -527,7 +530,8 @@ it('does not verify another role operation through the current historical role e
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
   const f = await failureFixture(false, 'B', false, '', { chain: [committed(), committed('X', 'Y', 2, 'side')] });
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
-  await act(async () => successionHistoryLink(f.view, 'A').click());
+  const earlier = await successionHistoryLink(f.view, 'A');
+  await act(async () => earlier.click());
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
   await act(async () => { await expect(succession.refreshCommitted('side-op-2')).rejects.toThrow(); });
   expect(succession.binding?.session.nativeSessionId).toBe('A');

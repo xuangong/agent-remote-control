@@ -99,8 +99,9 @@
 
 .lab-primary-group:has(.lab-ask-viewport:not([hidden])) > .lab-primary-group-minimize { visibility: hidden; }
 
+/* A narrow heading wraps its controls below the title, clear of the fold button; a tile's header keeps them on its first row. */
 @container session-view (max-width: 760px) {
-  .lab-primary-group:has(> .lab-primary-group-minimize):not(:has(.lab-ask-viewport:not([hidden]))) > .lab-primary-group-content > .lab-session-family > .lab-session-family-pane:not([hidden]):not(:has(~ .lab-session-family-pane:not([hidden]))) .lab-session-heading-trailing { padding-inline-end: 0; }
+  .lab-primary-group:has(> .lab-primary-group-minimize):not(:has(.lab-ask-viewport:not([hidden]))) > .lab-primary-group-content > .lab-session-family > .lab-session-family-pane:not([hidden]):not(:has(~ .lab-session-family-pane:not([hidden]))) .lab-session-heading:not(:has(.lab-tile-identity)) > .lab-session-heading-trailing { padding-inline-end: 0; }
 }
 
 /* A folded bot: a slim card standing where its pane was, like a collapsed sidebar in a native app. Its conversation is
@@ -187,20 +188,36 @@
   .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > :is(.lab-primary-group, .lab-session-dock-pane)::after { display: none; }
 }
 
-/* Window mode (I3 plan, B4): each tile is a floating panel on the warm ground, 10 px apart, and its header is the assistant's:
-   avatar, name, the session's title when it differs, one sentence, then the tile's controls and its details. */
+/* Window mode speaks Bot mode's language (I3 plan, B4; I3c): on desktop the sidebar is a floating panel and the toolbar stands
+   on the warm ground above the tiles, which are floating panels; the selected one keeps a quiet hairline, never the action blue.
+   A tile's header is the assistant's: avatar and name (they open its details), one line with the session's title and what
+   it is doing, and one ⋯ menu with the tile's controls. */
 .lab-window-workbench { background: var(--orchard-ground); }
-.lab-session-heading:has(.lab-tile-identity) { gap: var(--orchard-space-m); min-height: 52px; border-bottom: 0; background: var(--orchard-surface); }
-.lab-session-heading:has(.lab-tile-identity) > .lab-session-heading-title { position: static; flex: 1 1 auto; order: 0; justify-content: flex-start; padding-inline: 0; pointer-events: auto; }
+@media (min-width: 1181px) {
+  .lab-shell.lab-window-mode { background: var(--orchard-ground); }
+  .lab-window-mode .lab-context-rail { --ui-sidebar: var(--orchard-surface); margin: var(--orchard-space-l) 0 var(--orchard-space-l) var(--orchard-space-l); border: 0;
+    border-radius: var(--orchard-radius-panel); background: var(--orchard-surface); }
+  .lab-window-workbench > .lab-window-toolbar { border-bottom: 0; background: var(--orchard-ground); }
+  .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) :is(.lab-session-pane-selection, .lab-primary-group)[data-selected]::before { border-color: var(--orchard-separator); }
+  .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) .lab-session-pane-selection[data-selected] :is(.lab-session-heading, .lab-ask-heading, .lab-empty-session-heading) { background: var(--orchard-surface); }
+}
+.lab-workbench-heading.lab-session-heading:has(.lab-tile-identity) { flex-wrap: nowrap; gap: var(--orchard-space-m); min-height: 56px; border-bottom: 0; background: var(--orchard-surface); }
+.lab-session-heading:has(.lab-tile-identity) > .lab-session-heading-title { position: static; flex: 1 1 0; order: 0; justify-content: flex-start; min-width: 0; padding-inline: 0; pointer-events: auto; }
+.lab-tile-identity { display: grid; min-width: 0; text-align: left; }
+.lab-tile-who { display: inline-flex; align-items: center; gap: var(--orchard-space-m); justify-self: start; max-width: 100%; min-width: 0; padding: 0; border: 0; background: none;
+  color: var(--orchard-text-strong); font: var(--orchard-type-headline-weight) var(--orchard-type-headline-size) / 1.25 var(--orchard-font-text); cursor: pointer; }
+.lab-tile-who:hover:not(:disabled) { border-color: transparent; color: var(--orchard-text-strong); background: none; }
+.lab-tile-who:hover .lab-tile-name { text-decoration: underline; }
 .lab-tile-avatar { display: inline-flex; flex: none; }
-.lab-tile-identity { display: flex; flex-direction: column; min-width: 0; text-align: left; }
-.lab-tile-name, .lab-tile-identity > .agent-session-title { overflow: hidden; color: var(--orchard-text-strong); font: var(--orchard-type-headline-weight) var(--orchard-type-headline-size) / 1.25 var(--orchard-font-text);
-  text-overflow: ellipsis; white-space: nowrap; }
-.lab-tile-subtitle { display: flex; gap: var(--orchard-space-s); min-width: 0; color: var(--orchard-text-secondary); font: var(--orchard-type-caption-size) / 1.35 var(--orchard-font-text); }
+.lab-tile-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-tile-subtitle { display: flex; gap: var(--orchard-space-s); min-width: 0; padding-inline-start: calc(26px + var(--orchard-space-m)); color: var(--orchard-text-secondary);
+  font: var(--orchard-type-caption-size) / 1.35 var(--orchard-font-text); }
 .lab-tile-subtitle > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lab-tile-subtitle > .agent-session-title { flex: 0 1 auto; color: inherit; font-weight: 400; }
 .lab-tile-subtitle > .agent-session-title + .lab-tile-sentence::before { content: '·'; margin-inline-end: var(--orchard-space-s); }
 .lab-tile-sentence { flex: 0 1 auto; }
+.lab-session-heading:has(.lab-tile-identity) .lab-session-heading-actions[data-always-collapsed] > .lab-session-heading-actions-panel {
+  flex-wrap: wrap; justify-content: flex-end; max-width: min(300px, calc(100cqw - 24px)); border: 0; border-radius: var(--orchard-radius-group); box-shadow: var(--orchard-elevation-popover); }
 .lab-tile-sentence[data-state="needs_you"] { color: var(--orchard-text-strong); font-weight: 600; }
 .lab-tile-sentence[data-state="failed"] { color: var(--orchard-danger-text); }
 .lab-tile-details.orchard-panel { position: absolute; z-index: 30; top: 56px; right: var(--orchard-space-m); bottom: var(--orchard-space-m); display: flex; flex-direction: column; gap: var(--orchard-space-m);

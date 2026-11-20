@@ -24,8 +24,6 @@ export function createAgentId(): string {
   return `lab-${globalThis.crypto?.randomUUID?.() ?? Date.now()}`;
 }
 
-export /** Whether the desktop Window toolbar hides the dock rail's panes; one choice for every Window. */
-const DOCKS_HIDDEN_KEY = 'agent-remote:docks-hidden';
 
 export function isCompactLayout(): boolean {
   return typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 1180px)').matches;

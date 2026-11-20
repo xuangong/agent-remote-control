@@ -307,9 +307,18 @@ export async function settleApp(assertion: () => void, options?: { timeout?: num
   await waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); assertion(); }, options);
 }
 
-export function successionHistoryLink(view: HTMLElement, nativeSessionId: string): HTMLAnchorElement {
-  const link = [...view.querySelectorAll<HTMLAnchorElement>('.lab-succession-history a')]
-    .find(link => !link.closest('[hidden]') && new URL(link.href).searchParams.get('session') === nativeSessionId);
+/** The handoff chain is the Sessions list of the assistant's details: opens the shown tile's details when they are closed. */
+export async function openSessions(view: HTMLElement): Promise<HTMLElement> {
+  await settleApp(() => expect(visibleQuery(view, '.lab-assistant-sessions') ?? visibleQuery(view, 'button.lab-tile-who')).not.toBeNull());
+  if (!visibleQuery(view, '.lab-assistant-sessions')) await act(async () => visibleQuery<HTMLButtonElement>(view, 'button.lab-tile-who')!.click());
+  await settleApp(() => expect(visibleQuery(view, '.lab-assistant-sessions')).not.toBeNull());
+  return visibleQuery<HTMLElement>(view, '.lab-assistant-sessions')!;
+}
+
+/** The link of a session in the details' Sessions list (opened as needed). */
+export async function successionHistoryLink(view: HTMLElement, nativeSessionId: string): Promise<HTMLAnchorElement> {
+  const sessions = await openSessions(view);
+  const link = [...sessions.querySelectorAll<HTMLAnchorElement>('.lab-assistant-chain a')].find(link => new URL(link.href).searchParams.get('session') === nativeSessionId);
   expect(link).toBeDefined(); return link!;
 }
 

@@ -19,7 +19,6 @@ interface DockLayout { panes: Array<{ id: string; width: number }>; baseWidth?: 
 interface DockContext {
   enabled: boolean; items: DockItem[]; layout: DockLayout;
   /** Dock panes stay mounted and attached but are not shown; the main area takes their width. */
-  docksHidden: boolean;
   register(item: Omit<DockItem, 'width'>): void;
   unregister(id: string, host: HTMLElement): void;
   add(id: string): void;
@@ -46,10 +45,9 @@ function readLayout(key?: string): DockLayout {
 }
 
 /** Placement preferences outlive DOM registrations and main-session navigation. */
-export function SessionDockProvider({ enabled, docksHidden = false, storageScope, children }: {
+export function SessionDockProvider({ enabled, storageScope, children }: {
   enabled: boolean;
   /** Hides the dock panes, a view preference of this browser rather than a Window edit; the panes stay mounted. */
-  docksHidden?: boolean;
   storageScope?: string; children: ReactNode;
 }) {
   const key = storageScope ? `agent-remote:recovery:${storageScope}:workspace-dock` : undefined;
@@ -105,7 +103,7 @@ export function SessionDockProvider({ enabled, docksHidden = false, storageScope
     });
     if (operations.length) shared.operate({ type: 'batch', operations });
   }
-  const value: DockContext = shared ? { enabled, docksHidden, items, layout, register, unregister,
+  const value: DockContext = shared ? { enabled, items, layout, register, unregister,
     add: id => shared.operate({ type: 'view.place', viewId: resolve(id), placement: 'dock' }),
     remove: id => shared.operate({ type: 'view.place', viewId: resolve(id), placement: 'float' }),
     resize: (id, width) => shared.operate({ type: 'view.resize', viewId: resolve(id), width: clampWidth(width, 240) }),
@@ -123,7 +121,7 @@ export function SessionDockProvider({ enabled, docksHidden = false, storageScope
       const panes = [...layout.panes]; panes.splice(target, 0, panes.splice(source, 1)[0]!);
       orderSharedDocks(panes);
     },
-  } : { enabled, docksHidden, items, layout, register, unregister, add, remove, move, reorder, resize, resizeBase, minimizeMain };
+  } : { enabled, items, layout, register, unregister, add, remove, move, reorder, resize, resizeBase, minimizeMain };
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
@@ -174,7 +172,7 @@ export function SessionViewPlacement({ id, title, visible, additionalWidth, fold
 
 export function MinimizeMainSession() {
   const dock = useContext(Context);
-  if (!dock?.enabled || dock.docksHidden || !dock.items.some(item => item.visible)) return null;
+  if (!dock?.enabled || !dock.items.some(item => item.visible)) return null;
   return <button type="button" className="lab-session-main-minimize" aria-label="Minimize main session area" title="Minimize main session and subagents"
     onClick={event => { event.stopPropagation(); dock.minimizeMain(true); }}>
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M8 4v16m8-12-4 4 4 4" /></svg>
@@ -238,9 +236,7 @@ export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main s
   const contentId = useId();
   const preferredBaseWidth = dock?.layout.baseWidth;
   const active = dock?.enabled ? dock.items.filter(item => item.visible) : [];
-  const docksHidden = !!dock?.docksHidden;
-  // Hidden docks stay mounted, but the main area lays out as if there were none.
-  const shown = docksHidden ? [] : active;
+  const shown = active;
   const minimized = shown.length > 0 && dock?.layout.mainMinimized === true;
   useLayoutEffect(() => {
     if (minimized && content.current?.contains(document.activeElement)) restore.current?.focus({ preventScroll: true });
@@ -259,7 +255,7 @@ export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main s
     return () => observer.disconnect();
   }, []);
   const baseWidth = Math.max(minimumBaseWidth, preferredBaseWidth ?? width - defaultWidth);
-  return <div ref={rail} className="lab-session-dock-rail" data-stack={primaryGroups && stack && compact || undefined} data-docked={shown.length > 0 || primaryGroups && !compact || undefined} data-docks-hidden={docksHidden || undefined} data-primary-groups={primaryGroups ? true : undefined} data-compact={compact || undefined}>
+  return <div ref={rail} className="lab-session-dock-rail" data-stack={primaryGroups && stack && compact || undefined} data-docked={shown.length > 0 || primaryGroups && !compact || undefined} data-primary-groups={primaryGroups ? true : undefined} data-compact={compact || undefined}>
     {primaryGroups && stack && compact ? <TileStack selectedId={primaryGroups.find(group => group.selected)?.id} onSelect={id => onSelectPrimaryGroup?.(id)}
       tiles={primaryGroups.map((group, index) => ({ id: group.id, title: group.title, node: <PrimaryGroupPane group={group} compact stacked minimizedHeader={index === 0 ? minimizedHeader : undefined}
         onSelect={onSelectPrimaryGroup} onResize={onResizePrimaryGroup} onCollapse={onCollapsePrimaryGroup} onClose={onClosePrimaryGroup} onRemove={onRemovePrimaryGroup} /> }))} />
@@ -274,7 +270,7 @@ export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main s
       {shown.length && !minimized ? <DockResize title="Main conversation area" width={baseWidth} minimum={minimumBaseWidth} onResize={width => dock?.resizeBase(width)} /> : null}
     </div>}
     {dock?.enabled && onCreateView ? <button type="button" className="lab-session-dock-add" style={{ order: active.length + 1 }} aria-label="New session view" title="New session view" onClick={onCreateView}>+</button> : null}
-    {[...active].sort((a, b) => a.id.localeCompare(b.id)).map(item => <DockPane key={item.id} item={item} order={active.indexOf(item) + 1} hidden={docksHidden} />)}
+    {[...active].sort((a, b) => a.id.localeCompare(b.id)).map(item => <DockPane key={item.id} item={item} order={active.indexOf(item) + 1} />)}
   </div>;
 }
 
@@ -312,7 +308,7 @@ function PrimaryGroupPane({ group, compact, stacked = false, minimizedHeader, on
   </section>;
 }
 
-function DockPane({ item, order, hidden }: { item: DockItem; order: number; hidden: boolean }) {
+function DockPane({ item, order }: { item: DockItem; order: number }) {
   const target = useRef<HTMLDivElement>(null);
   const dock = useContext(Context)!;
   const shared = useWindowLayout();
@@ -328,7 +324,7 @@ function DockPane({ item, order, hidden }: { item: DockItem; order: number; hidd
     return () => cancelAnimationFrame(frame);
   }, [item.host]);
   // A folded bot stands as a slim card, as a folded primary group does.
-  return <section className="lab-session-dock-pane" data-session-family-shell data-dock-id={item.id} aria-label={`Docked ${item.title}`} hidden={hidden} data-folded={item.folded || undefined}
+  return <section className="lab-session-dock-pane" data-session-family-shell data-dock-id={item.id} aria-label={`Docked ${item.title}`} data-folded={item.folded || undefined}
     style={{ width: item.folded ? FOLDED_BOT_WIDTH : item.width + (item.additionalWidth ?? 0), minWidth: item.folded ? 0 : shared ? 240 : undefined, order }}>
     <div ref={target} className="lab-session-dock-content" />
     {item.folded ? null : <DockResize title={item.title} width={item.width} additionalWidth={item.additionalWidth} onResize={width => dock.resize(item.id, width)} />}

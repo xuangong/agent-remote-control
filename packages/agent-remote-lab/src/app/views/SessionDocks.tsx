@@ -3,7 +3,6 @@ import { isBotView, windowPrimaryViewId } from '@orchardworks/agent-remote-proto
 import { SessionFamily } from '../../components/SessionFamily.js';
 import { CommunicationNavigationContext } from '@orchardworks/agent-client-web/react';
 import { remoteSessionState } from '@orchardworks/agent-client';
-import { SessionSuccessionHistory } from '../../components/SessionSuccessionHistory.js';
 import { handoffCommand } from '../../handoff-command.js';
 import { SessionTitle } from '../../components/SessionTitle.js';
 import { StarButton } from '../../components/SessionFavorites.js';
@@ -97,7 +96,6 @@ export function SessionDocks({ scope }: { readonly scope: Pick<AppScope, 'access
           mutationBlocked={primarySuccessionGated}
           onPendingInputChange={reportPendingPrimaryInput}
           pendingFirstInputContext={successionContext && successionContext.state !== 'materialized' ? { state: successionContext.state, onRetry: successionContext.onRetry } : undefined}
-          headingContext={succession.historyNavigation ? <SessionSuccessionHistory navigation={succession.historyNavigation} onOpen={(session, intent) => openSession(session, undefined, undefined, false, undefined, intent)} /> : undefined}
           composerStatus={botHandoff ? undefined : successionProgress}
           imageDraftBinding={primaryDisplaySlot?.owners.image}
           imageRecipient={succession.imageRecipient}

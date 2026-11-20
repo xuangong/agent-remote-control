@@ -433,7 +433,6 @@ textarea {
 }
 
 .lab-workbench-heading-group, .lab-composer-region { min-width: 0; }
-.lab-workbench-heading-group > .lab-succession-history { padding: 4px 16px; border-bottom: 1px solid var(--obs-border); }
 .lab-composer-region > .lab-handoff-notice { position: relative; z-index: 6; margin: 0 12px 6px; }
 .lab-workbench-toolbar-heading:has(> .lab-workbench-heading-group:not([hidden])) { grid-template-rows: auto minmax(0, 1fr) auto; }
 .lab-workbench-with-todo.lab-workbench-toolbar-heading:has(> .lab-workbench-heading-group:not([hidden])) { grid-template-rows: auto auto minmax(0, 1fr) auto; }

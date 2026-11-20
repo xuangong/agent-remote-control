@@ -6,8 +6,8 @@ import { SidebarFooter } from '../../shell/SidebarFooter.js';
 import { Menu } from '../../ui/Menu.js';
 import type { AppScope } from '../types.js';
 
-export function ContextRail({ scope }: { readonly scope: Pick<AppScope, 'askSidebarSlot' | 'closePage' | 'compactLayout' | 'confirmBotRemoval' | 'contextFromSessions' | 'contextVisible' | 'createWindowFromMenu' | 'creatingWindow' | 'desktopContextVisible' | 'dispatchPanels' | 'favorites' | 'hostsLoaded' | 'menuCurrentBinding' | 'navigation' | 'openNewSessionPanel' | 'openPage' | 'openSearch' | 'pageOpen' | 'selectableHosts' | 'sessionPanel' | 'sessionPanelContent' | 'sessionsTriggerRef' | 'setSidebarViewTarget' | 'setWindowOverviewOpen' | 'shortcutSidebarSlot' | 'showDockOf' | 'supportTeams' | 'userScoped' | 'viewTriggerRef' | 'windowActions' | 'windowOverviewAvailable' | 'windowSessionStatus' | 'windowToolbarShown' | 'windowWorkspace'> }) {
-  const { askSidebarSlot, closePage, compactLayout, confirmBotRemoval, contextFromSessions, contextVisible, createWindowFromMenu, creatingWindow, desktopContextVisible, dispatchPanels, favorites, hostsLoaded, menuCurrentBinding, navigation, openNewSessionPanel, openPage, openSearch, pageOpen, selectableHosts, sessionPanel, sessionPanelContent, sessionsTriggerRef, setSidebarViewTarget, setWindowOverviewOpen, shortcutSidebarSlot, showDockOf, supportTeams, userScoped, viewTriggerRef, windowActions, windowOverviewAvailable, windowSessionStatus, windowToolbarShown, windowWorkspace } = scope;
+export function ContextRail({ scope }: { readonly scope: Pick<AppScope, 'askSidebarSlot' | 'closePage' | 'compactLayout' | 'confirmBotRemoval' | 'contextFromSessions' | 'contextVisible' | 'createWindowFromMenu' | 'creatingWindow' | 'desktopContextVisible' | 'dispatchPanels' | 'favorites' | 'hostsLoaded' | 'menuCurrentBinding' | 'navigation' | 'openNewSessionPanel' | 'openPage' | 'openSearch' | 'pageOpen' | 'selectableHosts' | 'sessionPanel' | 'sessionPanelContent' | 'sessionsTriggerRef' | 'setSidebarViewTarget' | 'setWindowOverviewOpen' | 'shortcutSidebarSlot' | 'supportTeams' | 'userScoped' | 'viewTriggerRef' | 'windowActions' | 'windowOverviewAvailable' | 'windowSessionStatus' | 'windowToolbarShown' | 'windowWorkspace'> }) {
+  const { askSidebarSlot, closePage, compactLayout, confirmBotRemoval, contextFromSessions, contextVisible, createWindowFromMenu, creatingWindow, desktopContextVisible, dispatchPanels, favorites, hostsLoaded, menuCurrentBinding, navigation, openNewSessionPanel, openPage, openSearch, pageOpen, selectableHosts, sessionPanel, sessionPanelContent, sessionsTriggerRef, setSidebarViewTarget, setWindowOverviewOpen, shortcutSidebarSlot, supportTeams, userScoped, viewTriggerRef, windowActions, windowOverviewAvailable, windowSessionStatus, windowToolbarShown, windowWorkspace } = scope;
   return <>
     <SupportingRail
       id="lab-context"
@@ -36,7 +36,7 @@ export function ContextRail({ scope }: { readonly scope: Pick<AppScope, 'askSide
       {compactLayout ? sessionPanelContent : <>
         <div className="lab-sidebar-scroll">
           <section className="lab-sidebar-section">
-            <WindowWorkspaces workspace={windowWorkspace} actions={windowActions} current={menuCurrentBinding} active={desktopContextVisible} sessionStatus={windowSessionStatus} onChooseView={showDockOf} onRemoveView={confirmBotRemoval}
+            <WindowWorkspaces workspace={windowWorkspace} actions={windowActions} current={menuCurrentBinding} active={desktopContextVisible} sessionStatus={windowSessionStatus} onRemoveView={confirmBotRemoval}
               supportTeam={teamId => supportTeams.has(teamId)} onOverview={windowOverviewAvailable ? () => setWindowOverviewOpen(true) : undefined} onNavigate={closePage} placement="sidebar" />
           </section>
           <nav className="lab-sidebar-section lab-sidebar-shortcuts" aria-label="Shortcuts">

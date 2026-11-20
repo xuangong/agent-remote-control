@@ -3,7 +3,6 @@ import { hasBotAppearance, isBotView, primaryWindowViews, type WindowView, type 
 import { useBotWorkspace } from '../hooks/useBotWorkspace.js';
 import { windowBindingKey } from '../window-composition.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DOCKS_HIDDEN_KEY } from './helpers.js';
 import type { SessionSuccessionBindingSlice } from './useSessionSuccessionBinding.js';
 import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
@@ -19,30 +18,11 @@ export function useDocksAndBotSelection(scope: Pick<AppInputs & SessionSuccessio
     windowActions.setNotice(undefined);
   }, [windowActions.notice, windowActions.noticeTone, toast]);
 
-  const [docksHidden, setDocksHidden] = useState(() => { try { return localStorage.getItem(DOCKS_HIDDEN_KEY) === '1'; } catch { return false; } });
-
-  useEffect(() => { try { localStorage.setItem(DOCKS_HIDDEN_KEY, docksHidden ? '1' : '0'); } catch { /* Keep the choice for this page without storage. */ } }, [docksHidden]);
-
   const [agentControlOpen, setAgentControlOpen] = useState(false);
 
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   // Docking a view in the open Window shows the docks again, and so does closing its last dock; switching Windows keeps the choice.
-  const dockViews = useRef<{ windowId?: string; ids: Set<string> }>({ ids: new Set() });
-
-  const dockIds = (sharedWindow?.views ?? []).filter(view => view.placement === 'dock').map(view => view.id);
-
-  const dockKey = dockIds.join('\n');
-
-  useEffect(() => {
-    const previous = dockViews.current, ids = new Set(dockIds);
-    dockViews.current = { windowId: sharedWindow?.id, ids };
-    if (!sharedWindow || previous.windowId !== sharedWindow.id) return;
-    if (dockIds.some(id => !previous.ids.has(id)) || previous.ids.size > 0 && ids.size === 0) setDocksHidden(false);
-  }, [sharedWindow?.id, dockKey]);
-
-  // A docked view that is chosen (sidebar row, search) would stay invisible behind hidden docks, so they show again.
-  const showDockOf = useCallback((view: Pick<WindowView, 'placement'>) => { if (view.placement === 'dock') setDocksHidden(false); }, []);
 
   const selectedBot = useBotWorkspace(windowWorkspace, succession, navigation.place, activated && accessReady && !windowMode);
 
@@ -70,7 +50,7 @@ export function useDocksAndBotSelection(scope: Pick<AppInputs & SessionSuccessio
   }
 
   const primaryGroups = sharedWindow ? primaryWindowViews(sharedWindow) : [];
-  return { docksHidden, setDocksHidden, agentControlOpen, setAgentControlOpen, deleteConfirmOpen, setDeleteConfirmOpen, showDockOf, selectedBot, teamConversationsOpen, botPresentation, primaryGroups };
+  return { agentControlOpen, setAgentControlOpen, deleteConfirmOpen, setDeleteConfirmOpen, selectedBot, teamConversationsOpen, botPresentation, primaryGroups };
 }
 
 export type DocksAndBotSelectionSlice = ReturnType<typeof useDocksAndBotSelection>;

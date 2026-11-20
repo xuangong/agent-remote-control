@@ -9,7 +9,7 @@ import './shell.css';
  * Window actions. The title button is named by its text, so the heading reads as the Window name; renaming is its
  * description. That keeps it apart from the sidebar row's "Rename Window: …" control, on screen with it.
  */
-export function WindowToolbar({ windowId, title, summary, leading, launchers, disabled, readOnly, deleteDisabled, onRename, onNewView, onOpenSession, hasDocks, docksHidden, onToggleDocks,
+export function WindowToolbar({ windowId, title, summary, leading, launchers, disabled, readOnly, deleteDisabled, onRename, onNewView, onOpenSession,
   botAppearance, onBotAppearance, onCopyLink, onAgentControl, onDelete }: {
   /** The Window shown; when another one takes the toolbar, an open rename ends without saving. */
   windowId: string; title: string; leading?: ReactNode; disabled?: boolean;
@@ -22,7 +22,7 @@ export function WindowToolbar({ windowId, title, summary, leading, launchers, di
   /** Deleting waits, for example while another Window action runs. */
   deleteDisabled?: boolean;
   onRename(title: string): void;
-  onNewView(): void; onOpenSession(): void; hasDocks: boolean; docksHidden: boolean; onToggleDocks(): void;
+  onNewView(): void; onOpenSession(): void;
   /** Whether the Window's group appears in Bot mode; undefined leaves the toggle out (no group to change). */
   botAppearance?: boolean; onBotAppearance(shown: boolean): void; onCopyLink(): void; onAgentControl?(): void; onDelete(): void;
 }) {
@@ -92,9 +92,6 @@ export function WindowToolbar({ windowId, title, summary, leading, launchers, di
         { label: 'New session view', icon: 'plus', disabled: readOnly, onSelect: onNewView },
         { label: 'Open session…', icon: 'sessions', disabled: readOnly, onSelect: onOpenSession },
       ]} />
-      {hasDocks ? <IconButton icon="dock" label={docksHidden ? 'Show docks' : 'Hide docks'}
-        // The name says what a press does, so the button is not also a pressed toggle. Hiding the docks may hide the focused control; focus stays on the toggle, even where a click does not focus buttons (Safari).
-        onClick={event => { event.currentTarget.focus({ preventScroll: true }); onToggleDocks(); }} /> : null}
       <Menu label="Window actions" items={actions} />
     </>} />;
 }

@@ -156,8 +156,14 @@ it.each(['dock', 'float'] as const)('opens handoff history and returns to curren
   const test = await fixture(placement);
   const primary = structuredClone(test.read().window!.views[0]!);
   const target = () => test.read().window!.views.find(view => view.id === 'ordinary-view')!;
-  const link = (label: string) => [...test.container.querySelectorAll<HTMLAnchorElement>('[data-view-id="ordinary-view"] .lab-succession-history a')]
-    .find(item => item.textContent === label);
+  // The handoff chain is the Sessions list of the view's details.
+  const pane = () => test.container.querySelector<HTMLElement>('[data-view-id="ordinary-view"]')!;
+  const link = (label: string) => [...pane().querySelectorAll<HTMLAnchorElement>('.lab-assistant-sessions a')].find(item => item.textContent === label);
+  const sessions = async () => {
+    await vi.waitFor(() => expect(pane().querySelector('.lab-assistant-sessions, button.lab-tile-who')).not.toBeNull());
+    if (!pane().querySelector('.lab-assistant-sessions')) await act(async () => pane().querySelector<HTMLButtonElement>('button.lab-tile-who')!.click());
+  };
+  await sessions();
   await vi.waitFor(() => expect(link('Past')).toBeDefined());
   await act(async () => { link('Past')!.click(); });
   await vi.waitFor(() => expect(target().binding).toMatchObject({ nativeSessionId: 'past-session', sessionIntent: 'history' }));
@@ -165,13 +171,14 @@ it.each(['dock', 'float'] as const)('opens handoff history and returns to curren
   expect(test.read().window?.views[0]).toEqual(primary);
   expect(test.read().window?.selectedPrimaryViewId).toBe('main');
   expect(test.read().window?.selectedViewId).toBe('ordinary-view');
+  await sessions();
   await vi.waitFor(() => expect(link('Return to current')).toBeDefined());
   await act(async () => { link('Return to current')!.click(); });
   await vi.waitFor(() => expect(target().binding?.nativeSessionId).toBe('current-session'));
   expect(target().binding?.sessionIntent).toBeUndefined();
   expect(test.read().window?.views[0]).toEqual(primary);
   expect(test.read().window?.views).toHaveLength(2);
-  expect(test.container.querySelector('.lab-succession-history-error')).toBeNull();
+  expect(pane().querySelector('.lab-assistant-sessions [role="alert"]')).toBeNull();
 }, 10000);
 
 it('gathers missing Team members after same-Window leader selection clones its feature', async () => {

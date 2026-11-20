@@ -274,8 +274,7 @@ it('continues a handed-off bot into its earlier session above the current conver
   await until(() => expect(conversation().querySelector<HTMLElement>('.lab-earlier-session')?.dataset.session).toBe(sessionKey(botTarget('B1'))));
   await until(() => expect(app.attachments.slice(attached)).toContain('B1'));
   expect(conversation().querySelector('.lab-earlier-conversation [role="separator"]')).not.toBeNull();
-  // Bot mode shows no handoff link; the earlier session is read, not opened as a view.
-  expect(conversation().querySelector('.lab-succession-history')).toBeNull();
+  // The earlier session is read, not opened as a view.
   expect(conversation().querySelector('.lab-earlier-session textarea, .lab-earlier-session [role="textbox"]')).toBeNull();
   // Its details name the agent of each earlier session.
   await until(() => expect(app.container.querySelector('.lab-assistant-details .lab-assistant-row')).not.toBeNull());
@@ -284,7 +283,7 @@ it('continues a handed-off bot into its earlier session above the current conver
   await app.close();
 });
 
-it('continues a handed-off bot of the shown Window into its earlier session in place; Continued from reads there and never rebinds the bot', async () => {
+it('continues a handed-off bot of the shown Window into its earlier session in place; its details\' earlier session reads there and never rebinds the bot', async () => {
   const scope = 'http://localhost/window-bot-earlier/'; seedGroup(scope, botGroup('A')); seedGroup(scope, botGroup('B'));
   history.replaceState(null, '', '/?window=B');
   const scrolled: string[] = [];
@@ -299,14 +298,14 @@ it('continues a handed-off bot of the shown Window into its earlier session in p
     const pane = () => app.container.querySelector<HTMLElement>('#lab-workbench [data-primary-group-id="B1"]')!;
     // As in Bot mode, the bot's conversation goes on into its earlier session, read above it: one bot, one conversation.
     await until(() => expect(pane().querySelector<HTMLElement>('.lab-earlier-session')?.dataset.session).toBe(sessionKey(botTarget('B1'))));
-    // Window mode still says where the conversation came from (in words: this page never showed B1's title); the link reads
-    // the earlier session where it is.
-    const link = await vi.waitFor(() => { const found = pane().querySelector<HTMLAnchorElement>('.lab-succession-history a'); expect(found?.textContent).toBe('previous session'); return found!; });
+    // The tile's details list where the conversation came from; the earlier session's link reads it where it is.
+    await act(async () => pane().querySelector<HTMLButtonElement>('button.lab-tile-who')!.click());
+    const link = await vi.waitFor(() => { const found = pane().querySelector<HTMLAnchorElement>('.lab-assistant-chain a'); expect(found && new URL(found.href).searchParams.get('session')).toBe('B1'); return found!; });
     await act(async () => link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
     await act(async () => {});
     expect(scrolled).toContain(sessionKey(botTarget('B1')));
     expect(pane().textContent).not.toContain('A bot keeps its conversation');
-    expect(pane().querySelector('.lab-succession-history-error')).toBeNull();
+    expect(pane().querySelector('.lab-assistant-sessions [role="alert"]')).toBeNull();
     expect(app.workspace().readGroup('B')!.window.views[0]!.binding).toMatchObject({ nativeSessionId: 'C' });
     expect(app.workspace().readGroup('B')!.window.views[0]!.binding?.sessionIntent).toBeUndefined();
   } finally { delete (Element.prototype as Partial<Element>).scrollIntoView; await app.close(); }

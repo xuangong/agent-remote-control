@@ -1,30 +1,35 @@
 import { useId, type ReactNode } from 'react';
-import type { AssistantStatus } from '@orchardworks/agent-client';
+import { assistantStatus, type AssistantFacts } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { SessionHeading } from '../SessionHeading.js';
-import { IconButton } from '../../ui/IconButton.js';
+import { useSharedFeed } from '../../shared-feeds.js';
+
+/** A session as the shared feeds know it, for its latest reply. */
+export interface TileSession { readonly hostId: string; readonly providerId: string; readonly nativeSessionId: string }
 
 /**
- * A Window tile's header (I3 plan, B4): the assistant's avatar, its name, the session's title when it differs from the
- * name (renamed and dragged as before), one sentence of what it is doing, its details, and the tile's own controls (fold or
- * close, star, ⋯). The title area keeps the drag handle the dock gives it.
+ * A Window tile's header (I3 plan, B4; I3c): the assistant's avatar and name, which open its details as Bot mode's title
+ * does, one line under them with the session's title (renamed and dragged as before) and what the assistant is doing, and
+ * one ⋯ menu with the tile's controls. The sentence says the latest reply as Bot mode's row does; it follows the shared
+ * feeds itself, so their frames render this header and not the conversation.
  */
-export function TileHeader({ name, avatar, title, titleText, status, detailsOpen, detailsId, onToggleDetails, trailing }: {
-  name: string; avatar?: ReactNode; title?: ReactNode; titleText?: string; status?: Pick<AssistantStatus, 'state' | 'sentence'>;
-  detailsOpen: boolean; detailsId: string; onToggleDetails(): void; trailing?: ReactNode;
+export function TileHeader({ name, avatar, title, facts, session, detailsOpen, detailsId, onToggleDetails, menu }: {
+  name: string; avatar?: ReactNode; title?: ReactNode; facts: Omit<AssistantFacts, 'replyPreview'>; session?: TileSession;
+  detailsOpen: boolean; detailsId: string; onToggleDetails(): void; menu?: ReactNode;
 }) {
   const t = useTranslate();
   const sentenceId = useId();
-  // A bot is called by its session's title: the title is its name, renamed in place.
-  const titleIsName = !!title && titleText === name;
-  return <SessionHeading leading={avatar ? <span className="lab-tile-avatar">{avatar}</span> : undefined}
-    trailing={<>{trailing}<IconButton icon="person" className="lab-tile-details-toggle" label={t('details.open', { name })} aria-expanded={detailsOpen} aria-controls={detailsId}
-      aria-describedby={status?.sentence ? sentenceId : undefined} onClick={onToggleDetails} /></>}>
+  const reply = useSharedFeed(snapshot => session ? snapshot.states?.reply(session)?.preview : undefined);
+  const status = assistantStatus({ ...facts, ...(reply ? { replyPreview: reply } : {}) }, t);
+  return <SessionHeading trailing={menu}>
     <span className="lab-tile-identity">
-      {titleIsName ? title : <span className="lab-tile-name">{name}</span>}
+      <button type="button" className="lab-tile-who" aria-label={t('details.open', { name })} aria-expanded={detailsOpen} aria-controls={detailsId}
+        aria-describedby={status.sentence ? sentenceId : undefined} onClick={onToggleDetails}>
+        {avatar ? <span className="lab-tile-avatar">{avatar}</span> : null}<span className="lab-tile-name">{name}</span>
+      </button>
       <span className="lab-tile-subtitle">
-        {!titleIsName && title ? title : null}
-        {status?.sentence ? <span id={sentenceId} className="lab-tile-sentence" data-state={status.state}>{status.sentence}</span> : null}
+        {title}
+        {status.sentence ? <span id={sentenceId} className="lab-tile-sentence" data-state={status.state}>{status.sentence}</span> : null}
       </span>
     </span>
   </SessionHeading>;

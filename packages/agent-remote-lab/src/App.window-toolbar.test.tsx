@@ -112,36 +112,6 @@ it('adds a session view, or opens All sessions for one, from the Add menu', asyn
   } finally { await app.close(); }
 });
 
-it('hides and shows the docks, remembering the choice, without dropping focus from a hidden dock', async () => {
-  const scope = 'http://localhost/window-toolbar-docks/';
-  seedGroup(scope, windowGroup('A', [createWindowView('A-dock', botTarget('Adock'), 'dock')]));
-  history.replaceState(null, '', '/?window=A');
-  const toggle = (container: ParentNode, label: string) => toolbar(container)!.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
-  let app = await mountBotApp(scope);
-  try {
-    await until(() => expect(app.container.querySelector('.lab-session-dock-pane')).not.toBeNull());
-    expect(app.container.querySelector('.lab-session-dock-pane[hidden]')).toBeNull();
-    const hide = toggle(app.container, 'Hide docks')!;
-    // Focus inside a dock pane moves to the toggle rather than falling to the page when the pane hides.
-    const inside = app.container.querySelector<HTMLElement>('.lab-session-dock-pane button, .lab-session-dock-pane [tabindex]')!;
-    inside.focus();
-    expect(document.activeElement).toBe(inside);
-    await act(async () => hide.click());
-    expect(app.container.querySelector('.lab-session-dock-pane[hidden]')).not.toBeNull();
-    expect(toggle(app.container, 'Show docks')).not.toBeNull();
-    expect(document.activeElement).toBe(toggle(app.container, 'Show docks'));
-  } finally { await app.close(); }
-
-  app = await mountBotApp(scope);
-  try {
-    await until(() => expect(toggle(app.container, 'Show docks')).not.toBeNull());
-    await until(() => expect(app.container.querySelector('.lab-session-dock-pane[hidden]')).not.toBeNull());
-    await act(async () => toggle(app.container, 'Show docks')!.click());
-    expect(app.container.querySelector('.lab-session-dock-pane[hidden]')).toBeNull();
-    expect(toggle(app.container, 'Hide docks')).not.toBeNull();
-  } finally { await app.close(); }
-});
-
 it('keeps View options at the toolbar\'s start when the sidebar is hidden', async () => {
   const scope = 'http://localhost/window-toolbar-view-options-hidden/'; seedGroup(scope, windowGroup('A'));
   history.replaceState(null, '', '/?window=A');
@@ -223,61 +193,6 @@ it('shows a cached Window read-only during a cold start: only Copy link acts, an
     app.releaseInspect();
     await until(() => expect(app.container.querySelector('#lab-workbench')!.hasAttribute('data-window-provisional')).toBe(false));
     expect(titleButton(app.container).disabled).toBe(false);
-  } finally { await app.close(); }
-});
-
-it('shows hidden docks again when a view is docked, and when the last dock closes', async () => {
-  const scope = 'http://localhost/window-toolbar-dock-reset/';
-  seedGroup(scope, windowGroup('A', [createWindowView('A-dock', botTarget('Adock'), 'dock'), createWindowView('A-float', botTarget('Afloat'), 'float')]));
-  history.replaceState(null, '', '/?window=A');
-  const app = await mountBotApp(scope);
-  const toggle = (label: string) => toolbar(app.container)?.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
-  try {
-    await until(() => expect(toggle('Hide docks')).not.toBeNull());
-    await act(async () => toggle('Hide docks')!.click());
-    expect(toggle('Show docks')).not.toBeNull();
-    await act(async () => { await app.workspace().operate({ type: 'view.place', viewId: 'A-float', placement: 'dock' }); });
-    await until(() => expect(toggle('Hide docks')).not.toBeNull());
-    expect(localStorage.getItem('agent-remote:docks-hidden')).toBe('0');
-
-    await act(async () => toggle('Hide docks')!.click());
-    await act(async () => { await app.workspace().operate({ type: 'batch', operations: [{ type: 'view.close', viewId: 'A-float' }, { type: 'view.close', viewId: 'A-dock' }] }); });
-    await until(() => expect(app.workspace().window?.views.some(view => view.placement === 'dock')).toBe(false));
-    expect(toggle('Show docks') ?? null).toBeNull();
-    expect(localStorage.getItem('agent-remote:docks-hidden')).toBe('0');
-  } finally { await app.close(); }
-});
-
-it('shows hidden docks again when a docked view is chosen in the sidebar', async () => {
-  const scope = 'http://localhost/window-toolbar-dock-choose/';
-  seedGroup(scope, windowGroup('A', [createWindowView('A-dock', botTarget('Adock'), 'dock')]));
-  history.replaceState(null, '', '/?window=A');
-  const app = await mountBotApp(scope);
-  const toggle = (label: string) => toolbar(app.container)?.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
-  try {
-    await until(() => expect(toggle('Hide docks')).not.toBeNull());
-    await act(async () => toggle('Hide docks')!.click());
-    expect(app.container.querySelector('.lab-session-dock-pane[hidden]')).not.toBeNull();
-    const row = app.container.querySelector<HTMLElement>('#lab-context [data-window-view-id="A-dock"]');
-    expect(row).not.toBeNull();
-    await act(async () => row!.click());
-    await until(() => expect(app.container.querySelector('.lab-session-dock-pane[hidden]')).toBeNull());
-    expect(toggle('Hide docks')).not.toBeNull();
-  } finally { await app.close(); }
-});
-
-it('keeps hidden docks hidden when the page switches to another Window', async () => {
-  const scope = 'http://localhost/window-toolbar-dock-switch/';
-  seedGroup(scope, windowGroup('A', [createWindowView('A-dock', botTarget('Adock'), 'dock')]));
-  seedGroup(scope, windowGroup('B', [createWindowView('B-dock', botTarget('Bdock'), 'dock')]));
-  history.replaceState(null, '', '/?window=A');
-  const app = await mountBotApp(scope);
-  try {
-    await until(() => expect(toolbar(app.container)?.querySelector('button[aria-label="Hide docks"]')).not.toBeNull());
-    await act(async () => toolbar(app.container)!.querySelector<HTMLButtonElement>('button[aria-label="Hide docks"]')!.click());
-    await act(async () => { await app.workspace().open('B'); });
-    await until(() => expect(titleButton(app.container)?.textContent).toBe('B'));
-    expect(toolbar(app.container)!.querySelector('button[aria-label="Show docks"]')).not.toBeNull();
   } finally { await app.close(); }
 });
 

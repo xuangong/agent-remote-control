@@ -19,8 +19,8 @@ interface MessageItemProps<T extends Message> {
   readonly item: T;
   readonly messageGroup?: MessageGroupPosition;
   readonly resourceContext?: MarkdownResourceContext;
-  /** An answer's last bubble carries the assistant's avatar at its foot; the bubbles before it keep its room. */
-  readonly foot?: 'avatar' | 'space';
+  /** An answer's last bubble carries the assistant's avatar at its foot, still in earlier turns; the bubbles before it keep its room. */
+  readonly foot?: 'avatar' | 'still' | 'space';
 }
 
 export function UserMessageItem({ item, messageGroup, resourceContext }: MessageItemProps<Extract<Message, { type: 'user_message' }>>) {
@@ -65,7 +65,7 @@ function MessageBubble({ item: message, messageGroup = 'single', resourceContext
     <SessionExcerptList excerpts={excerpts} />
   </article>;
   return <>
-    <Bubble from={user ? 'mine' : 'theirs'} className="agent-bubble" avatar={user ? undefined : foot === 'avatar' ? <BubbleAvatar /> : foot === 'space' ? <span className="agent-bubble-avatar-space" /> : undefined}>{article}</Bubble>
+    <Bubble from={user ? 'mine' : 'theirs'} className="agent-bubble" avatar={user ? undefined : foot === 'avatar' || foot === 'still' ? <BubbleAvatar still={foot === 'still'} /> : foot === 'space' ? <span className="agent-bubble-avatar-space" /> : undefined}>{article}</Bubble>
     <BubbleTime side={user ? 'mine' : 'theirs'} />
     {withdrawn ? <WithdrawnNote text={item.text} /> : null}
   </>;

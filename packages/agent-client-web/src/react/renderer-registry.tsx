@@ -15,9 +15,12 @@ export class RendererRegistry {
   register(type: AgentTimelineItem['type'], renderer: TimelineDetailRenderer): () => void {
     this.renderers.set(type, { renderer, revision: ++this.nextRendererRevision });
     return () => {
-      if (this.renderers.get(type)?.renderer === renderer) this.renderers.delete(type);
+      if (this.renderers.get(type)?.renderer === renderer) { this.renderers.delete(type); this.nextRendererRevision++; }
     };
   }
+
+  /** Changes with every registration and removal, so a timeline renders its rows again on its next render. */
+  get revision(): number { return this.nextRendererRevision; }
 
   render(item: AgentTimelineItem): ReactNode {
     const registered = this.renderers.get(item.type);

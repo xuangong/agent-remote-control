@@ -2,7 +2,7 @@
 export { AssistantAvatar } from './AssistantAvatar.js';
 export { OrchardMark } from './OrchardMark.js';
 export { Wordmark } from './Wordmark.js';
-export { MotionProvider, browserMotionPort, useMotionState, type MotionPort, type MotionState } from './MotionProvider.js';
+export { MotionProvider, MotionStill, browserMotionPort, useMotionState, type MotionPort, type MotionState } from './MotionProvider.js';
 export { Bubble } from './Bubble.js';
 export { Card } from './Card.js';
 export { Pill } from './Pill.js';

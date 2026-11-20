@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 /** What every avatar and mark needs to decide whether it moves. */
 export interface MotionState { readonly reducedMotion: boolean; readonly pageVisible: boolean }
@@ -39,4 +39,11 @@ export function MotionProvider({ children, port }: { children: ReactNode; port?:
 
 export function useMotionState(): MotionState {
   return useContext(MotionContext);
+}
+
+/** Holds the avatars and marks inside still, as reduced motion does: an earlier answer's avatar rests while the latest one moves. */
+export function MotionStill({ children }: { children: ReactNode }) {
+  const state = useContext(MotionContext);
+  const held = useMemo(() => state.reducedMotion ? state : { ...state, reducedMotion: true }, [state]);
+  return <MotionContext.Provider value={held}>{children}</MotionContext.Provider>;
 }

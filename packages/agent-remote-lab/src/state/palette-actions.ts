@@ -25,6 +25,10 @@ export interface PaletteFacts {
   readonly canToggleSidebar: boolean;
   readonly windowOverviewSupported: boolean;
   readonly apple: boolean;
+  /** The selected tile of the open Window is an assistant, which opens in Bot mode. */
+  readonly canOpenInBotMode?: boolean;
+  /** The assistant shown in Bot mode, which pins to a window. */
+  readonly canPinToWindow?: boolean;
 }
 
 export interface PaletteRuns {
@@ -39,6 +43,8 @@ export interface PaletteRuns {
   showPanel(panel: SessionPanel): void;
   toggleSidebar(): void;
   openWindowOverview(): void;
+  openInBotMode?(): void;
+  pinToWindow?(): void;
 }
 
 export function paletteActions(facts: PaletteFacts, runs: PaletteRuns): CommandItem[] {
@@ -48,6 +54,9 @@ export function paletteActions(facts: PaletteFacts, runs: PaletteRuns): CommandI
   const panel = (id: string, title: string, target: SessionPanel) => action(id, title, () => { runs.toWindow(); runs.showPanel(target); });
   return [
     ...(!facts.windowMode && facts.hasDirectory ? [action('new-bot', 'New assistant', runs.newBot)] : []),
+    // Moving between the modes keeps each mode's place.
+    ...(facts.windowMode && facts.canOpenInBotMode && runs.openInBotMode ? [action('open-in-bot-mode', 'Open in Bot mode', runs.openInBotMode)] : []),
+    ...(!facts.windowMode && facts.canPinToWindow && runs.pinToWindow ? [action('pin-to-window', 'Pin to a window', runs.pinToWindow)] : []),
     action('new-session', 'New session', () => { runs.toWindow(); runs.newSessionPanel(); }),
     action('new-window', 'New Window', runs.inWindow(runs.createWindow)),
     ...(facts.windowEditable ? [action('new-session-view', 'New session view', runs.inWindow(runs.addSessionView, true))] : []),

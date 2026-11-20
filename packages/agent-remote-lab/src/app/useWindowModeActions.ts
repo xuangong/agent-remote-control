@@ -2,7 +2,8 @@
 import { parseWindowFeature } from '../window-feature-views.js';
 import type { WindowView, WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
 import type { BotSessionRef } from '../bot-roster.js';
-import type { WorkbenchMode } from '../workbench-mode.js';
+import { botPlaceForTile, windowRouteForPin, type WorkbenchMode } from '../workbench-mode.js';
+import { appendedRank } from '../bot-roster.js';
 import { windowBindingKey } from '../window-composition.js';
 import { windowCatalog } from '../hooks/useWindowActions.js';
 import { attributionWindowOperation } from '../session-attribution-navigation.js';
@@ -128,6 +129,39 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
 
   searchRuns.current = { inMode, switchMode, openWindowFromSearch, openSessionFromSearch, createWindowFromMenu, addSessionView, focusShownMode };
 
+  /**
+   * Opens a tile's assistant in Bot mode (I3 plan, B5): its group first gains what it needs to show there, and the Window's
+   * place is kept for the way back.
+   */
+  async function openInBotMode(groupId: string, viewId: string): Promise<void> {
+    const group = windowWorkspace.readGroup(groupId);
+    const target = group ? botPlaceForTile(group, viewId, appendedRank(windowWorkspace.groups)) : undefined;
+    if (!target) return;
+    try { if (target.edit) await windowWorkspace.operateGroup(groupId, target.edit); }
+    catch (error) { windowActions.setNotice(message(error, 'The assistant was not opened in Bot mode.')); return; }
+    navigation.select(target.place);
+    inMode('bot', () => searchRuns.current.focusShownMode('bot'));
+  }
+
+  /**
+   * Pins a Bot-mode assistant to a window (I3 plan, B5): its group shows in Window mode (shown there first when it was
+   * hidden) with the assistant's tile presented; the Bot place is kept for the way back.
+   */
+  async function pinToWindow(groupId: string, viewId: string): Promise<void> {
+    const group = windowWorkspace.readGroup(groupId);
+    if (!group) return;
+    const pin = windowRouteForPin(group, viewId);
+    try { if (pin.request.kind === 'show') await windowWorkspace.operateGroup(groupId, pin.request.edit); }
+    catch (error) { windowActions.setNotice(message(error, 'The assistant was not pinned to a window.')); return; }
+    switchMode('window');
+    inMode('window', () => {
+      void windowWorkspace.open(pin.route.window).then(() => {
+        const open = windowWorkspace.readWindow(), view = open?.id === pin.route.window ? open.views.find(item => item.id === pin.viewId) : undefined;
+        if (view) selectWindowView(view);
+      }).catch(error => windowActions.setNotice(message(error, 'The Window was not opened.')));
+    });
+  }
+
   async function navigateAttribution(attribution: SessionAttribution): Promise<void> {
     const target = attribution.target;
     if (!target) return;
@@ -169,7 +203,7 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
     sideRequests.current.set(key, request);
     return request;
   }
-  return { isViewVisible, currentBotSession, earlierBotSessions, inMode, searchRuns, switchMode, navigateAttribution, sideRequestKey, nextSideRequest };
+  return { isViewVisible, currentBotSession, earlierBotSessions, inMode, searchRuns, switchMode, navigateAttribution, sideRequestKey, nextSideRequest, openInBotMode, pinToWindow };
 }
 
 export type WindowModeActionsSlice = ReturnType<typeof useWindowModeActions>;

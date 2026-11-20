@@ -20,6 +20,12 @@ export function useWorkbenchMode(scope: string) {
       try { conversationSessionStorage.setItem(botKey, JSON.stringify({ place: persistedBotPlace(bot.place), rosterVisible: bot.rosterVisible })); } catch { /* Retain the page-local place. */ }
     };
     const publish = () => { state = { mode: state.mode, ...bot }; persist(); for (const listener of listeners) listener(); };
+    /** Leaving Window mode keeps its route, so coming back returns to the same Window and session. */
+    const keepWindowRoute = () => {
+      if (state.mode !== 'window') return;
+      windowRoute = windowRouteFields(new URL(location.href));
+      try { conversationSessionStorage.setItem(windowKey, JSON.stringify(windowRoute)); } catch { /* The captured route stays on this page. */ }
+    };
     const write = () => { const url = writeWorkbenchRoute(new URL(location.href), state.mode, bot.place, windowRoute); if (url.href !== location.href) history.replaceState(history.state, '', url); };
     return {
       getSnapshot: () => state,
@@ -27,13 +33,11 @@ export function useWorkbenchMode(scope: string) {
       initialize: () => { if (!explicit && state.mode === 'bot') write(); persist(); },
       setMode: (mode: WorkbenchMode) => {
         if (mode === state.mode) return;
-        if (state.mode === 'window') {
-          windowRoute = windowRouteFields(new URL(location.href));
-          try { conversationSessionStorage.setItem(windowKey, JSON.stringify(windowRoute)); } catch { /* The captured route stays on this page. */ }
-        }
+        keepWindowRoute();
         state = { ...state, mode }; write(); publish();
       },
-      select: (place: BotPlace) => { bot.place = place; bot.rosterVisible = place.kind === 'section'; state = { ...state, mode: 'bot' }; write(); publish(); },
+      // Choosing a bot from Window mode (Open in Bot mode, search) keeps the Window's place for the way back.
+      select: (place: BotPlace) => { keepWindowRoute(); bot.place = place; bot.rosterVisible = place.kind === 'section'; state = { ...state, mode: 'bot' }; write(); publish(); },
       back: () => { bot.rosterVisible = true; publish(); },
       acceptSectionRoute: (groupId: string) => { bot.place = { kind: 'section', groupId }; bot.rosterVisible = true; state = { ...state, mode: 'bot' }; write(); publish(); },
       navigate: () => {

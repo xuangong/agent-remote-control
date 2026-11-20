@@ -519,3 +519,53 @@ it('closes the sessions page when the Trace view is chosen', async () => {
     expect(app.container.querySelector<HTMLElement>('#lab-trace')!.hidden).toBe(false);
   } finally { await app.close(); }
 });
+
+// Moving between the modes keeps your place (I3 plan, B5).
+it('opens a tile in Bot mode, keeping the Window route, and pins it back with its tile presented, keeping the bot place and its draft', async () => {
+  const scope = 'http://localhost/bot-mode-moves/'; seedGroup(scope, botGroup('A')); seedGroup(scope, botGroup('B', false));
+  history.replaceState(null, '', '/?window=B');
+  const app = await mountBotApp(scope, { hosted: true });
+  try {
+    await until(() => expect(app.workspace().window?.id).toBe('B'));
+    await until(() => expect(app.container.querySelector('.lab-window-mode .lab-open-in-bot')).not.toBeNull());
+    // B has no Bot section: opening its tile in Bot mode gives it one and selects that assistant.
+    const tile = [...app.container.querySelectorAll<HTMLButtonElement>('.lab-window-mode .lab-open-in-bot')][0]!;
+    const viewId = tile.closest<HTMLElement>('[data-view-id]')?.dataset.viewId ?? 'B2';
+    await act(async () => tile.click());
+    await until(() => expect(app.workspace().readGroup('B')?.bots).toBeDefined());
+    await until(() => expect(app.container.querySelector('[data-workbench-mode="bot"]')?.hasAttribute('hidden')).toBe(false));
+    await until(() => expect(app.container.querySelector('[aria-label="Assistants"] [aria-current="true"]')?.getAttribute('aria-label')).toBe(viewId));
+    expect(new URL(location.href).searchParams.get('section')).toBe('B');
+    // A draft typed in Bot mode goes with the assistant.
+    await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
+    const editor = app.container.querySelector<HTMLElement>('.lab-bot-conversation [role="textbox"]')!;
+    await act(async () => { setPromptText(editor, 'Kept across modes'); editor.dispatchEvent(new Event('input', { bubbles: true })); });
+    // Switching back returns to the Window it came from.
+    await app.switchMode('window');
+    await until(() => expect(new URL(location.href).searchParams.get('window')).toBe('B'));
+    await app.switchMode('bot');
+    // Pin to a window shows its group with its tile presented, and the Bot place stays for the way back.
+    const pin = [...app.container.querySelectorAll<HTMLButtonElement>('.lab-assistant-details .lab-assistant-card-actions button')].find(button => button.textContent === 'Pin to a window')!;
+    expect(pin).toBeDefined();
+    await act(async () => pin.click());
+    await until(() => expect(app.container.querySelector('[data-workbench-mode="window"]')?.hasAttribute('hidden')).toBe(false));
+    await until(() => expect(app.workspace().window?.id).toBe('B'));
+    await until(() => expect(app.workspace().readGroup('B')?.window.selectedViewId).toBe(viewId));
+    await until(() => expect([...app.container.querySelectorAll<HTMLElement>('.lab-window-mode [role="textbox"]')].some(input => promptText(input) === 'Kept across modes')).toBe(true));
+    await app.switchMode('bot');
+    expect(app.container.querySelector('[aria-label="Assistants"] [aria-current="true"]')?.getAttribute('aria-label')).toBe(viewId);
+  } finally { await app.close(); }
+});
+
+it('pins a bot whose group is hidden from Window mode by showing its group there first', async () => {
+  const scope = 'http://localhost/bot-mode-pin-hidden/'; const group = botGroup('A'); group.presentation = { window: false };
+  seedGroup(scope, group); history.replaceState(null, '', '/?mode=bot&section=A&bot=A1');
+  const app = await mountBotApp(scope, { hosted: true });
+  try {
+    await until(() => expect([...app.container.querySelectorAll('.lab-assistant-details .lab-assistant-card-actions button')].some(button => button.textContent === 'Pin to a window')).toBe(true));
+    await act(async () => [...app.container.querySelectorAll<HTMLButtonElement>('.lab-assistant-details .lab-assistant-card-actions button')].find(button => button.textContent === 'Pin to a window')!.click());
+    await until(() => expect(app.workspace().readGroup('A')?.presentation).toBeUndefined());
+    await until(() => expect(app.workspace().window?.id).toBe('A'));
+    await until(() => expect(app.workspace().readGroup('A')?.window.selectedViewId).toBe('A1'));
+  } finally { await app.close(); }
+});

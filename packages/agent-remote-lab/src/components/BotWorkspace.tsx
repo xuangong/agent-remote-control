@@ -52,6 +52,8 @@ export interface BotWorkspaceProps {
   onNewBot?(): void;
   /** Where a bot runs, for its details. */
   botInfo?(place: { groupId: string; viewId: string }): BotInfo | undefined;
+  /** Shows a bot's tile in Window mode, keeping this place for the way back. */
+  onPinToWindow?(place: { groupId: string; viewId: string }): void;
 }
 
 /**
@@ -59,7 +61,7 @@ export interface BotWorkspaceProps {
  * The details are closed by default below the compact width; at phone width one screen shows at a time, the list as home,
  * and the details open as a sheet.
  */
-export function BotWorkspace({ visible, compact, scope, workspace, navigation, selected, roster, projectRoster, directory, describeConversation, mount: Mount = SessionConversationMount, rosterCollapsed, onToggleRoster, onSearch, hostName = id => id, botInfo, onNewBot }: BotWorkspaceProps) {
+export function BotWorkspace({ visible, compact, scope, workspace, navigation, selected, roster, projectRoster, directory, describeConversation, mount: Mount = SessionConversationMount, rosterCollapsed, onToggleRoster, onSearch, hostName = id => id, botInfo, onNewBot, onPinToWindow }: BotWorkspaceProps) {
   const t = useTranslate();
   const phone = usePhoneLayout();
   const root = useVisualViewport(), title = useRef<HTMLButtonElement>(null), keyboardOpen = useRef(false), returning = useRef(false);
@@ -95,7 +97,9 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
   const info = place?.kind === 'bot' ? botInfo?.(place) : undefined;
   const detailsHost: AssistantDetailsHost = {
     surface: phone ? 'sheet' : 'panel', slot: detailsSlot, tools: toolsSlot, open: detailsShown, setOpen: setDetailsOpen,
-    ...(botRow && botSection ? { actions: actions.cardActions(botRow, botSection.title), setPicture: (picture: BotPicture) => actions.setPicture(botRow, picture) } : {}),
+    ...(botRow && botSection ? { actions: [...actions.cardActions(botRow, botSection.title),
+      ...(onPinToWindow ? [{ label: t('card.pin'), icon: 'window' as const, onSelect: () => onPinToWindow({ groupId: botRow.groupId, viewId: botRow.viewId }) }] : [])],
+      setPicture: (picture: BotPicture) => actions.setPicture(botRow, picture) } : {}),
     ...(info ? { where: info } : {}),
   };
   // Choosing another bot dismisses a notice about the last one.

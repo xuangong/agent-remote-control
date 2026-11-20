@@ -94,7 +94,7 @@ export const settings = {
   'settings.display.fullScreenNote': 'Hide the browser controls while you work. Your browser may leave full screen when you switch apps or use the keyboard.',
   'settings.display.standalone': 'Opened from your Home Screen, without the browser address bar.',
   'settings.display.unsupported': 'This browser does not support page full screen.',
-  'settings.display.failed': 'Full screen could not be changed. Try again, or open Agent Remote from your Home Screen.',
+  'settings.display.failed': 'Full screen could not be changed. Try again, or open Orchard from your Home Screen.',
   'settings.display.withoutAddressBar': 'Open without the address bar',
   'settings.display.iphone': 'On iPhone, use Safari: Share → Add to Home Screen. Enable Open as Web App if shown, then open the saved icon.',
   'settings.display.android': 'On Android, use your browser menu to install the app or add it to your Home Screen, then open the saved icon.',

@@ -197,7 +197,7 @@ export const timeline: AreaMessages<typeof english> = {
   'timeline.outgoing.deleteLocal': '删除本机上的这条消息',
   'timeline.tunnel.copyFailed': '复制失败，请选中下面的网址自己复制。',
   'timeline.tunnel.unavailable': '拿不到隧道网址。请检查 Host 的连接后再试。',
-  'timeline.tunnel.hint': '复制隧道链接。登录 Agent Remote 后才能打开。',
+  'timeline.tunnel.hint': '复制隧道链接。登录 Orchard 后才能打开。',
   'timeline.tunnel.copying': '正在复制…',
   'timeline.tunnel.copy': '复制隧道网址',
   'timeline.tunnel.url': '隧道网址',

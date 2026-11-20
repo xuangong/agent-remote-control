@@ -197,7 +197,7 @@ export const timeline = {
   'timeline.outgoing.deleteLocal': 'Delete local message',
   'timeline.tunnel.copyFailed': 'Copy failed. Select and copy the URL below.',
   'timeline.tunnel.unavailable': 'Tunnel URL unavailable. Check the Host connection and retry.',
-  'timeline.tunnel.hint': 'Copy a tunnel link. Sign in to Agent Remote to open it.',
+  'timeline.tunnel.hint': 'Copy a tunnel link. Sign in to Orchard to open it.',
   'timeline.tunnel.copying': 'Copying…',
   'timeline.tunnel.copy': 'Copy tunnel URL',
   'timeline.tunnel.url': 'Tunnel URL',

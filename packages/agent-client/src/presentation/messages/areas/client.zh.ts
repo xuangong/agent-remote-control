@@ -243,8 +243,8 @@ export const client: AreaMessages<typeof english> = {
   'client.quote.placementFloat': '浮动',
   'client.quote.placementSide': 'Side',
 
-  'client.transfer.notQr': '这不是会话二维码。请扫描 Agent Remote 里的二维码。',
-  'client.transfer.otherSite': '这个会话链接属于别的站点。请使用本站 Agent Remote 里的二维码。',
+  'client.transfer.notQr': '这不是会话二维码。请扫描 Orchard 里的二维码。',
+  'client.transfer.otherSite': '这个会话链接属于别的站点。请使用本站 Orchard 里的二维码。',
   'client.transfer.notLink': '这不是会话链接。',
   'client.transfer.noSession': '这个码没有指向任何会话。',
 

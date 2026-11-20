@@ -243,8 +243,8 @@ export const client = {
   'client.quote.placementFloat': 'Floating',
   'client.quote.placementSide': 'Side',
 
-  'client.transfer.notQr': 'This is not a session QR code. Scan a code from Agent Remote.',
-  'client.transfer.otherSite': 'This session link belongs to another site. Use a code from this Agent Remote site.',
+  'client.transfer.notQr': 'This is not a session QR code. Scan a code from Orchard.',
+  'client.transfer.otherSite': 'This session link belongs to another site. Use a code from this Orchard site.',
   'client.transfer.notLink': 'This is not a session link.',
   'client.transfer.noSession': 'This code does not identify a session.',
 

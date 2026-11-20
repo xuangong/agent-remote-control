@@ -10,7 +10,7 @@ export function AppBar({ scope }: { readonly scope: Pick<AppScope, 'activeAgentI
       <div className="lab-brand">
         <div ref={setHeaderViewTarget} data-pane-selection-ignore className="lab-global-view-slot" />
         <div>
-          <p>Agent Remote Control</p>
+          <p>Orchard</p>
           <h1>{t('navigation.appBar.title')}</h1>
         </div>
       </div>

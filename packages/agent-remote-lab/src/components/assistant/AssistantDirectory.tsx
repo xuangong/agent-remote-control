@@ -1,3 +1,4 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { useEffect, useState } from 'react';
 import { hasBotAppearance, hasWindowAppearance, type WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
 import { FloatingPanel, Pill } from '@orchardworks/agent-client-web/primitives';
@@ -30,7 +31,7 @@ export function AssistantDirectory({ model, project, workspace, focusGroup, host
     if (!operation) return true;
     setError(undefined);
     try { await workspace.operateGroup(groupId, operation); return true; }
-    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); return false; }
+    catch (reason) { setError(errorWords(reason, t, 'windows.unsaved')); return false; }
   }
   /** A hidden assistant, or one of a group hidden in Chats, shows there again: the same change opening a tile in Bot mode makes. */
   const showInChats = (row: BotRow) => {

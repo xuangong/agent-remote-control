@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { remoteSessionState, type RemoteSessionState, type AgentReplicaState, type RemoteSessionStatus, type Translate } from '@orchardworks/agent-client';
+import { errorWords, remoteSessionState, type RemoteSessionState, type AgentReplicaState, type RemoteSessionStatus, type Translate } from '@orchardworks/agent-client';
 import { useTranslate } from './locale.js';
 
 export interface AgentPlanningControlProps {
@@ -40,7 +40,7 @@ export function AgentPlanningControl({ state, sessionState, sessionStatus, onSet
       await onSetPlanning(requested);
     } catch (error) {
       setTarget(undefined);
-      setFailure(error instanceof Error && error.message ? error.message : t('composer.planning.changeFailed'));
+      setFailure(errorWords(error, t, 'composer.planning.changeFailed'));
     } finally {
       inFlight.current = false;
       setSubmitting(false);

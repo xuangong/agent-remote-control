@@ -1,3 +1,4 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { controllerPath } from '@orchardworks/agent-remote-protocol/model';
 import type { SessionSuccessionHistoryNavigation } from '@orchardworks/agent-client';
@@ -50,8 +51,8 @@ export function SessionsList({ sessions }: { sessions: AssistantSessions }) {
       event.preventDefault();
       if (opening.current) return;
       opening.current = true; setPending(true); setError(undefined);
-      try { if (!await sessions.chain.open(target, intent)) setError('This session could not be opened.'); }
-      catch (reason) { setError(reason instanceof Error ? reason.message : 'This session could not be opened.'); }
+      try { if (!await sessions.chain.open(target, intent)) setError(t('composer.openFailed')); }
+      catch (reason) { setError(errorWords(reason, t, 'composer.openFailed')); }
       finally { opening.current = false; setPending(false); }
     }
     return <a className="lab-assistant-session-title" href={href} onClick={event => void open(event)} aria-disabled={pending || undefined} title={target.title}>{label}</a>;

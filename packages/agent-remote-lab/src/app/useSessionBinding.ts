@@ -7,7 +7,7 @@ import { sessionConnectionFailure } from '../components/SessionConnectionNotice.
 import { compositionSelection } from '../session-composition.js';
 import { DirectoryError, type OpenedSession, type SessionSummary } from '../directory-client.js';
 import { sessionKey } from '../session-tree.js';
-import { message, viewKey } from './helpers.js';
+import { viewKey } from './helpers.js';
 import type { AppInputs } from './types.js';
 import type { HostAndStackSlice } from './useHostAndStack.js';
 import type { ViewSessionStateSlice } from './useViewSessionState.js';

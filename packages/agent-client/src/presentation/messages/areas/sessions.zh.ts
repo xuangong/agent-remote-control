@@ -308,6 +308,7 @@ export const sessions: AreaMessages<typeof english> = {
   'sessions.agentControl.clear': '清除整理者',
   'sessions.agentControl.selectView': '先选一个已绑定的会话视图，才能指定它的 Agent。',
   'sessions.agentControl.updating': '正在更新整理者…',
+  'sessions.agentControl.failed': '没能读取或更改管理者。',
   'sessions.asleep.note': '在睡觉，醒来后对话会自动跟上。',
   'sessions.asleep.wake': '叫醒',
   'sessions.collapsed.earlier': '前面的窗口',

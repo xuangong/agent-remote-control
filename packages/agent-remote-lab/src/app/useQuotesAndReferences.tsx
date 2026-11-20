@@ -14,7 +14,7 @@ import { withSessionReferences } from '../session-references.js';
 import type { TimelineEntrySelection } from '@orchardworks/agent-client-web/react';
 import { addQuote, withViewQuotes } from '../session-quotes.js';
 import { NEW_SESSION_TARGET, type QuoteTargetWindow } from '../components/SessionQuotes.js';
-import { message, viewKey } from './helpers.js';
+import { viewKey } from './helpers.js';
 import type { RequestedSessionSlice } from './useRequestedSession.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
 import type { FocusedAskSlice } from './useFocusedAsk.js';

@@ -24,7 +24,6 @@ export function createAgentId(): string {
   return `lab-${globalThis.crypto?.randomUUID?.() ?? Date.now()}`;
 }
 
-
 export function isCompactLayout(): boolean {
   return typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 1180px)').matches;
 }
@@ -39,10 +38,6 @@ export function rememberAgent(agentId: string): void {
   const url = new URL(window.location.href);
   url.searchParams.set('agent', agentId);
   window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
-}
-
-export function message(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 export function openedSessionsKey(baseUrl: string): string { return `agent-remote-opened:${baseUrl}`; }

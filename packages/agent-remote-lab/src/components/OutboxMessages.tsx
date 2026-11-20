@@ -1,6 +1,6 @@
 import { useEffect, useState, type ComponentProps } from 'react';
 import type { OutboxEntry } from '@orchardworks/agent-remote-protocol';
-import { translator, type SessionStateRef, type Translate } from '@orchardworks/agent-client';
+import { errorWords, translator, type SessionStateRef, type Translate } from '@orchardworks/agent-client';
 import { useSharedFeed } from '../shared-feeds.js';
 import { UserMessageItem, useTranslate } from '@orchardworks/agent-client-web/react';
 import './outbox-messages.css';
@@ -66,7 +66,7 @@ function OutboxMessage({ entry, hostName, hostOnline, now, onCancel, onRetry }: 
     if (busy) return;
     setBusy(true); setError(undefined);
     try { await action(entry.id); }
-    catch (reason) { setError(reason instanceof Error && reason.message ? reason.message : t('sessions.outbox.failed')); }
+    catch (reason) { setError(errorWords(reason, t, 'sessions.outbox.failed')); }
     finally { setBusy(false); }
   }
   return <div className="agent-timeline-entry agent-outgoing-message lab-outbox-message" data-entry-key={`outbox:${entry.id}`}

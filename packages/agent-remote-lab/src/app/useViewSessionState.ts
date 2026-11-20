@@ -12,7 +12,7 @@ import type { StoreOwner } from '../session-composition.js';
 import type { OpenedSession, SessionSummary } from '../directory-client.js';
 import { sessionKey } from '../session-tree.js';
 import { useDeploymentUpdate } from '../hooks/useDeploymentUpdate.js';
-import { message, viewKey } from './helpers.js';
+import { viewKey } from './helpers.js';
 import type { SessionSuccessionBindingSlice } from './useSessionSuccessionBinding.js';
 import type { RequestedSessionSlice } from './useRequestedSession.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';

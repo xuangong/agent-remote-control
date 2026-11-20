@@ -308,6 +308,7 @@ export const sessions = {
   'sessions.agentControl.clear': 'Clear manager',
   'sessions.agentControl.selectView': 'Select a bound session view to assign its Agent.',
   'sessions.agentControl.updating': 'Updating manager…',
+  'sessions.agentControl.failed': 'The manager could not be read or changed.',
   'sessions.asleep.note': 'Asleep. Its conversation catches up when it wakes.',
   'sessions.asleep.wake': 'Wake',
   'sessions.collapsed.earlier': 'Earlier windows',

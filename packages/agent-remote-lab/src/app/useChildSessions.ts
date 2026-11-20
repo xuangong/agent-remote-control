@@ -4,7 +4,6 @@ import type { AgentReplicaState } from '@orchardworks/agent-client';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import { sessionKey } from '../session-tree.js';
 import type { AgentChildSessionView } from '@orchardworks/agent-client-web/react';
-import { message } from './helpers.js';
 import type { AppInputs } from './types.js';
 import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';
 import type { FocusedAskSlice } from './useFocusedAsk.js';

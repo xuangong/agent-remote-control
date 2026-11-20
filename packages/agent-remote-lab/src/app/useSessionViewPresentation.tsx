@@ -29,7 +29,7 @@ import { restoreQuotes } from '../session-quotes.js';
 import { QuoteAttachments, QuoteMessagesButton, QuoteNotice, QuoteSelectionBar } from '../components/SessionQuotes.js';
 import { useTranslate, type QuestionDraft } from '@orchardworks/agent-client-web/react';
 import { IconButton } from '../ui/IconButton.js';
-import { message, viewKey } from './helpers.js';
+import { viewKey } from './helpers.js';
 import type { SessionSuccessionBindingSlice } from './useSessionSuccessionBinding.js';
 import type { ViewSessionStateSlice } from './useViewSessionState.js';
 import type { ProviderStateSlice } from './useProviderState.js';

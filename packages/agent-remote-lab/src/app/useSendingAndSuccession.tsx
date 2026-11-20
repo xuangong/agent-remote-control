@@ -15,7 +15,7 @@ import { SessionDirectoryClient, type OpenedSession } from '../directory-client.
 import { sessionKey } from '../session-tree.js';
 import { forkActions } from '../fork-actions.js';
 import { canHandoffPrimary as canHandoffPrimaryOf, commandRefusal, conversationActionsAvailable, handoffCompletionMatches, handoffInputBlocker, primaryHandoffGated, successionAccessible } from '../state/succession-gates.js';
-import { message, viewKey } from './helpers.js';
+import { viewKey } from './helpers.js';
 import type { AppActions } from './types.js';
 import type { ConversationConnectionsSlice } from './useConversationConnections.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';

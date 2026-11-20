@@ -46,7 +46,7 @@ it('loads manager state only while active and recovers a failed inspect explicit
   expect(s.requests).toHaveLength(0);
   await h.render({ active: true }); expect(h.read().status).toBe('loading');
   await complete(s.requests[0]!, { error: 'Unavailable' }, 503);
-  expect(h.read().status).toBe('error'); expect(h.read().error).toContain('Unavailable');
+  expect(h.read().status).toBe('error'); expect((h.read().error as Error).message).toContain('Unavailable');
   await act(async () => h.read().refresh());
   await complete(s.requests[1]!, snapshot('A', session('manager A')));
   expect(h.read().status).toBe('ready'); expect(h.read().manager?.title).toBe('manager A'); expect(h.read().error).toBeUndefined();

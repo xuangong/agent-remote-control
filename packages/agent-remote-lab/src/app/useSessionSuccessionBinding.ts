@@ -14,7 +14,7 @@ import { accountNames, withAssistantNames } from '../assistant-names.js';
 import { DirectoryError, nativeSessionMissing, SessionDirectoryClient } from '../directory-client.js';
 import { unavailableSessions } from '../unavailable-sessions.js';
 import { sessionKey } from '../session-tree.js';
-import { message, viewKey } from './helpers.js';
+import { viewKey } from './helpers.js';
 import type { ProviderStateSlice } from './useProviderState.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
 import type { RequestedSessionSlice } from './useRequestedSession.js';

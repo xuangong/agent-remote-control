@@ -37,7 +37,8 @@ export function sessionConnectionFailure(error: unknown, retrying: boolean, t: T
     session_binding_unavailable: 'sessions.connection.bindingUnavailable',
   };
   const description = code && Object.hasOwn(descriptions, code) ? t(descriptions[code]!) : errorWords(error, t, 'sessions.connection.openFailed');
-  const original = error instanceof Error && error.message.trim() && error.message !== description ? error.message : undefined;
+  const words = errorWords(error, t);
+  const original = words.trim() && words !== description ? words : undefined;
   return { tone: waiting ? 'status' : 'alert',
     message: retrying ? t('sessions.connection.retrying', { message: description }) : waiting ? t('sessions.connection.waitAndReopen', { message: description }) : description,
     code, status: detail?.status, requestId: detail?.requestId, ...(original ? { detail: original } : {}) };

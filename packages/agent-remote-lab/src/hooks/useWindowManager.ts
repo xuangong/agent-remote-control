@@ -6,13 +6,13 @@ import { isWindowSessionBinding, type WindowSessionBinding } from '@orchardworks
 interface ManagerState {
   manager?: WindowSessionBinding;
   status: 'loading' | 'ready' | 'error';
-  error?: string;
+  /** The last failure, shown in the reader's words by `errorWords`. */
+  error?: unknown;
   pending: boolean;
 }
 const empty: ManagerState = { status: 'ready', pending: false };
 const emptySnapshot = () => empty;
 const emptySubscription = () => () => {};
-const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 function managerEntry(client: WindowWorkspaceClient, windowId: string) {
   let state: ManagerState = { status: 'loading', pending: false };
@@ -34,7 +34,7 @@ function managerEntry(client: WindowWorkspaceClient, windowId: string) {
         if (abort.signal.aborted || generation !== readGeneration) return;
         update({ status: 'ready', pending: false, manager: snapshot.manager?.session });
       }).catch(error => {
-        if (!abort.signal.aborted && generation === readGeneration) update({ ...state, status: 'error', error: message(error) });
+        if (!abort.signal.aborted && generation === readGeneration) update({ ...state, status: 'error', error });
       });
     },
     async assign(session: WindowSessionBinding | null): Promise<void> {
@@ -52,7 +52,7 @@ function managerEntry(client: WindowWorkspaceClient, windowId: string) {
             : value.manager !== undefined)) throw keyedError('windows.error.managerInvalid');
         update({ status: 'ready', pending: false, manager: value.manager?.session });
       } catch (error) {
-        update({ ...state, pending: false, status: 'error', error: message(error) });
+        update({ ...state, pending: false, status: 'error', error });
         throw error;
       }
     },

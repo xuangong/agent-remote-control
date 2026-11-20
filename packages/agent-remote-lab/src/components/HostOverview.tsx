@@ -1,3 +1,4 @@
+import { errorWords } from '@orchardworks/agent-client';
 import './host-overview.css';
 import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import type { HostStatus } from '@orchardworks/agent-remote-protocol';
@@ -26,12 +27,11 @@ function usageText(used: number, total: number): string {
 }
 const lastSegment = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 
-/** The fallback for a status read that failed without saying why; the card shows it through the catalogue. */
-const STATUS_UNAVAILABLE = '';
 interface HostReading { status?: HostStatus; error?: string }
 
 /** Reads the status of every online Host that offers it, while the page is visible; a failed read keeps the last figures. */
 function useHostStatuses(service: Pick<HostPairingService, 'hostStatus'>, hosts: readonly RemoteHost[], visible: boolean): Record<string, HostReading> {
+  const t = useTranslate();
   const [readings, setReadings] = useState<Record<string, HostReading>>({});
   const eligible = hosts.filter(host => host.online && host.hostStatus).map(host => host.id).join('\n');
   useEffect(() => {
@@ -48,14 +48,14 @@ function useHostStatuses(service: Pick<HostPairingService, 'hostStatus'>, hosts:
         if (reading.has(id)) continue;
         reading.add(id);
         read(id).then(status => update(id, () => ({ status })),
-          (error: unknown) => update(id, previous => ({ ...previous, error: error instanceof Error ? error.message : STATUS_UNAVAILABLE })))
+          (error: unknown) => update(id, previous => ({ ...previous, error: errorWords(error, t, 'hosts.statusUnavailable') })))
           .finally(() => reading.delete(id));
       }
     };
     refresh();
     const timer = setInterval(refresh, REFRESH_MS);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [service, eligible, visible]);
+  }, [service, eligible, visible, t]);
   return readings;
 }
 
@@ -108,7 +108,7 @@ function HostCard({ host, reading, onOpenHost }: { host: RemoteHost; reading?: H
       : !host.hostStatus ? <p className="lab-host-note">{shared ? t('hosts.sharedNeedsUpdate') : t('hosts.needsUpdateToSee')}
         {!shared ? <Button className="lab-host-update" onClick={() => onOpenHost(host.id)}>{t('hosts.updateAction')}</Button> : null}</p>
       : shared && status ? <p className="lab-host-note">{t('hosts.sharedSessionsOnly')}</p> : null}
-    {host.online && reading?.error ? <p className="lab-host-note" role="status">{reading.error || t('hosts.statusUnavailable')}</p> : null}
+    {host.online && reading?.error ? <p className="lab-host-note" role="status">{reading.error}</p> : null}
   </article>;
 }
 

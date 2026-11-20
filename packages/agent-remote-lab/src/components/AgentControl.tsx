@@ -1,5 +1,5 @@
 import type { WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
-import type { WindowWorkspaceClient } from '@orchardworks/agent-client';
+import { errorWords, type WindowWorkspaceClient } from '@orchardworks/agent-client';
 import { useWindowManager } from '../hooks/useWindowManager.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 
@@ -16,7 +16,7 @@ export function AgentControl({ client, windowId, current, active }: {
   const manager = useWindowManager(client, windowId, active);
   return <>
     <p className="lab-window-note">{t('sessions.agentControl.intro')}</p>
-    {manager.status === 'loading' ? <p role="status">{t('sessions.agentControl.checking')}</p> : manager.status === 'error' ? <p role="alert">{manager.error} <button type="button" onClick={manager.refresh}>{t('common.retry')}</button></p>
+    {manager.status === 'loading' ? <p role="status">{t('sessions.agentControl.checking')}</p> : manager.status === 'error' ? <p role="alert">{errorWords(manager.error, t, 'sessions.agentControl.failed')} <button type="button" onClick={manager.refresh}>{t('common.retry')}</button></p>
       : <p className="lab-window-note">{t('sessions.agentControl.manager', { name: manager.manager?.title || manager.manager?.nativeSessionId || t('sessions.agentControl.unassigned') })}</p>}
     <div className="lab-window-actions">
       <button type="button" disabled={!current || manager.pending} onClick={() => void manager.assign(current!).catch(() => {})}>{t('sessions.agentControl.useCurrent')}</button>
@@ -24,6 +24,6 @@ export function AgentControl({ client, windowId, current, active }: {
     </div>
     {!current ? <p className="lab-window-note">{t('sessions.agentControl.selectView')}</p> : null}
     {manager.pending ? <p role="status">{t('sessions.agentControl.updating')}</p> : null}
-    {manager.error && manager.status !== 'error' ? <p role="alert">{manager.error}</p> : null}
+    {manager.error !== undefined && manager.status !== 'error' ? <p role="alert">{errorWords(manager.error, t, 'sessions.agentControl.failed')}</p> : null}
   </>;
 }

@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { errorWords } from '@orchardworks/agent-client';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { DirectoryError, type SessionCatalogPage, type SessionDirectoryClient } from '../directory-client.js';
 import { sortDirectorySessions } from '../bot-roster.js';
 
 export interface OtherSessionSource { id: string; hostId: string; providerId: string; directory: SessionDirectoryClient; online: boolean }
 export interface OtherSessionSourceState extends OtherSessionSource { loading: boolean; hasMore: boolean; error?: string; expired: boolean }
-interface DirectoryPages { source: OtherSessionSource; pages: SessionCatalogPage[]; loaded: boolean; loading: boolean; expired: boolean; error?: string; generation: number; abort?: AbortController }
+interface DirectoryPages { source: OtherSessionSource; pages: SessionCatalogPage[]; loaded: boolean; loading: boolean; expired: boolean; error?: unknown; generation: number; abort?: AbortController }
 export function useOtherSessions(sources: readonly OtherSessionSource[], enabled: boolean) {
+  const t = useTranslate();
   const cache = useRef(new Map<string, DirectoryPages>());
   const latest = useRef({ sources, enabled }); latest.current = { sources, enabled };
   const identities = useRef(new WeakMap<SessionDirectoryClient, number>());
@@ -31,7 +34,7 @@ export function useOtherSessions(sources: readonly OtherSessionSource[], enabled
       entry.pages = append ? [...entry.pages, page] : [page]; entry.loaded = true; entry.expired = false;
     } catch (error) {
       if (!live()) return;
-      entry.error = error instanceof Error ? error.message : String(error);
+      entry.error = error;
       if (error instanceof DirectoryError && error.code === 'cursor_expired') entry.expired = true;
     } finally { if (live()) { entry.loading = false; entry.abort = undefined; publish(); } }
   }, []);
@@ -55,7 +58,7 @@ export function useOtherSessions(sources: readonly OtherSessionSource[], enabled
   }, [signature, enabled, readPage]);
   const states: OtherSessionSourceState[] = sources.map(source => {
     const entry = cache.current.get(source.id);
-    return { ...source, loading: enabled && !!entry?.loading, hasMore: !!entry?.pages.at(-1)?.hasMore, expired: !!entry?.expired, ...(entry?.error ? { error: entry.error } : {}) };
+    return { ...source, loading: enabled && !!entry?.loading, hasMore: !!entry?.pages.at(-1)?.hasMore, expired: !!entry?.expired, ...(entry?.error !== undefined ? { error: errorWords(entry.error, t, 'sessions.directory.loadFailed') } : {}) };
   });
   const sessions = sortDirectorySessions(sources.flatMap(source => {
     const entry = cache.current.get(source.id);

@@ -444,7 +444,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
       // The message now shows as waiting in the conversation; the composer is ready for the next one.
       if (currentDraft.text === submitted) { if (richEnabled) imageDraft.setText(''); else { currentDraft.text = ''; if (currentAgent.current === agentId) onDraftChange?.(''); } }
     } catch (error) {
-      currentDraft.feedback = { kind: 'error', message: error instanceof Error && error.message ? error.message : t('composer.laterFailed') };
+      currentDraft.feedback = { kind: 'error', message: errorWords(error, t, 'composer.laterFailed') };
     } finally {
       currentDraft.pending = undefined;
       if (mounted.current) refresh((value) => value + 1);

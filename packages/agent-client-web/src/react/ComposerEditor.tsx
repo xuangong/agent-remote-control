@@ -32,6 +32,11 @@ function fromDocument(doc: ProseMirrorNode): DraftPart[] {
   doc.forEach(node => { if (node.isText) parts.push({ type: 'text', text: node.text! }); else if (node.type.name === 'resource') parts.push({ type: 'resource', resourceId: String(node.attrs.resourceId), label: String(node.attrs.label) }); else if (node.type.name === 'image') parts.push({ type: 'image', imageId: String(node.attrs.imageId), label: String(node.attrs.label) }); });
   return normalizeDraftParts(parts);
 }
+/** An empty draft shows its placeholder: ProseMirror always keeps a paragraph, so `:empty` never matches the editor. */
+function markEmpty(editor: EditorView): void {
+  const { doc } = editor.state;
+  editor.dom.toggleAttribute('data-empty', doc.childCount <= 1 && !doc.firstChild?.childCount);
+}
 export interface ComposerEditorHandle { focus(options?: { atEnd?: boolean }): void; openImage(imageId: string): void; insertText(text: string): void; captureSelection(): void; insertParts(parts: readonly DraftPart[]): void }
 interface Props {
   id: string; parts: readonly DraftPart[]; images: Readonly<Record<string, DraftImage>>; disabled: boolean;
@@ -98,6 +103,7 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
         for (const [key, selection] of pendingPastes.current) pendingPastes.current.set(key, selection.map(transaction.mapping));
         if (previewSelection.current) previewSelection.current = previewSelection.current.map(transaction.mapping);
         editor.updateState(editor.state.apply(transaction));
+        markEmpty(editor);
         const selection = editor.state.selection;
         setSelected(selection instanceof NodeSelection && selection.node.type.name === 'image' ? String(selection.node.attrs.imageId) : undefined);
         if (transaction.docChanged && !transaction.getMeta('retainedDraft')) latest.current.onChange(fromDocument(editor.state.doc));
@@ -207,6 +213,7 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
     editor.dom.setAttribute('aria-disabled', String(props.disabled));
     if (props.label) editor.dom.setAttribute('aria-label', props.label);
     if (props.placeholder !== undefined) editor.dom.setAttribute('data-placeholder', props.placeholder);
+    markEmpty(editor);
     for (const [attribute, value] of [['aria-describedby', props.describedBy], ['aria-controls', props.controls], ['aria-activedescendant', props.activeDescendant]] as const) {
       if (value) editor.dom.setAttribute(attribute, value); else editor.dom.removeAttribute(attribute);
     }

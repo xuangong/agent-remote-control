@@ -12,6 +12,6 @@ export function ModelSettings({ state, sessionState, readOnly, onSelect, renderE
 }) {
   const [view, setView] = useState<SessionControlView>();
   const [busy, setBusy] = useState(false);
-  return <AgentSessionSettings state={state} sessionState={sessionState} disabled={false} readOnly={readOnly} view={view} busy={busy}
+  return <AgentSessionSettings state={state} sessionState={sessionState} presentation="list" disabled={false} readOnly={readOnly} view={view} busy={busy}
     onView={setView} onPendingChange={setBusy} {...(onSelect ? { onSelect } : {})} {...(renderError ? { renderError } : {})}>{planning}</AgentSessionSettings>;
 }

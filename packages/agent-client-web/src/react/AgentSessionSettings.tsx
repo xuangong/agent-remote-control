@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { AgentSessionSetting, AgentSessionSettingChange } from '@orchardworks/agent-remote-protocol';
-import { ComposerMenu, type ComposerMenuEntry } from './ComposerMenu.js';
+import { ComposerMenu, ComposerMenuItems, type ComposerMenuEntry } from './ComposerMenu.js';
 import type { ComposerMenuItem } from './composer-menu.js';
 import { AgentSessionUsage } from './AgentSessionUsage.js';
 import { useTranslate } from './locale.js';
@@ -19,6 +19,8 @@ interface Props {
   entries?: readonly ComposerMenuEntry[];
   /** The settings' items as `composerMenu` gives them (Model, Permissions, Status). */
   items?: readonly ComposerMenuItem[];
+  /** Where the settings stand: behind the composer's + (`menu`), or open as rows where nothing else holds them (`list`, the details). */
+  presentation?: 'menu' | 'list';
   disabled: boolean;
   readOnly?: boolean;
   view?: SessionControlView;
@@ -33,7 +35,7 @@ interface Props {
  * The session's settings where the composer shows them (`settings="inline"`): their entries in the composer's + menu, and the panel
  * an entry opens above the capsule (Model, Permissions, Status with planning and usage).
  */
-export function AgentSessionSettings({ state, sessionState, children, entries = [], items = SETTINGS_ITEMS, disabled, readOnly = false, view, busy, onView, onPendingChange, onSelect, renderError }: Props) {
+export function AgentSessionSettings({ state, sessionState, children, entries = [], items = SETTINGS_ITEMS, presentation = 'menu', disabled, readOnly = false, view, busy, onView, onPendingChange, onSelect, renderError }: Props) {
   const t = useTranslate();
   const id = useId();
   const layer = useRef<HTMLDivElement>(null);
@@ -46,7 +48,8 @@ export function AgentSessionSettings({ state, sessionState, children, entries = 
     if (!view || view === 'actions') return;
     const controls = layer.current;
     const keyboardScope = controls?.closest<HTMLElement>('.agent-composer') ?? controls;
-    trigger.current = controls?.querySelector<HTMLElement>('.agent-composer-plus') ?? undefined;
+    // Focus returns to "+" in the composer, or to the row that opened the panel where the settings stand open.
+    trigger.current = controls?.querySelector<HTMLElement>(`.agent-composer-plus, [data-action-id="${view}"]`) ?? undefined;
     const dismiss = (event: PointerEvent) => { if (event.target instanceof Node && !layer.current?.contains(event.target)) onView(undefined); };
     const escape = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || layer.current?.closest('[hidden], [inert]')) return;
@@ -125,7 +128,8 @@ export function AgentSessionSettings({ state, sessionState, children, entries = 
       run: () => onView(view === 'status' ? undefined : 'status') }] : []),
   ];
   return <div className="agent-session-controls" ref={layer}>
-    <ComposerMenu entries={[...entries, ...settingEntries]} open={view === 'actions'} onOpen={open => onView(open ? 'actions' : undefined)} />
+    {presentation === 'list' ? <div className="agent-session-settings-list"><ComposerMenuItems entries={settingEntries} /></div>
+      : <ComposerMenu entries={[...entries, ...settingEntries]} open={view === 'actions'} onOpen={open => onView(open ? 'actions' : undefined)} />}
     <section hidden={!view || view === 'actions'} className="agent-session-panel" aria-label={view === 'status' ? t('composer.settings.status') : view === 'model' ? t('composer.settings.model') : t('composer.settings.permissions')}>
       <div className="agent-session-panel-heading"><strong>{view === 'status' ? t('composer.settings.status') : view === 'model' ? t('composer.settings.model') : t('composer.settings.permissions')}</strong><button type="button" aria-label={t('composer.settings.close')} onClick={() => { onView(undefined); restoreFocus(); }}>{t('common.close')}</button></div>
       {recovery}

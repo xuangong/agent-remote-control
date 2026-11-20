@@ -73,6 +73,11 @@ test.describe('in Chinese', () => {
     const capsule = page.locator('.agent-composer-capsule').first();
     const input = capsule.getByTestId('prompt-input');
     await expect.poll(() => input.evaluate(element => element.getAttribute('data-placeholder') ?? element.getAttribute('placeholder'))).toMatch(/^给 .+ 发消息…$/);
+    // The empty draft shows it: the rich editor draws it before its first line.
+    await expect.poll(() => input.evaluate(element => element.tagName === 'TEXTAREA' ? (element as HTMLTextAreaElement).placeholder : getComputedStyle(element, '::before').content)).toMatch(/给 .+ 发消息…/);
+    await input.click();
+    await input.pressSequentially('好');
+    await expect.poll(() => input.evaluate(element => element.tagName === 'TEXTAREA' ? 'none' : getComputedStyle(element, '::before').content)).toBe('none');
     await capsule.getByRole('button', { name: '更多操作', exact: true }).click();
     await expect(page.getByRole('region', { name: '更多操作', exact: true }).getByRole('button', { name: '打开命令', exact: true })).toBeVisible();
   });

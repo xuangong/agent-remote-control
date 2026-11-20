@@ -68,12 +68,16 @@ export function ComposerMenu({ entries, open, onOpen }: { entries: readonly Comp
         event.preventDefault();
         buttons[next]?.focus();
       }}>
-      {entries.map(entry => <button key={entry.id} type="button" className="agent-composer-menu-item" aria-label={entry.label} title={entry.title}
-        data-testid={entry.testId} data-action-id={entry.id} disabled={entry.disabled} aria-expanded={entry.expanded}
-        onClick={() => { trigger.current?.focus({ preventScroll: true }); onOpen(false); entry.run(); }}>
-        {entry.icon ? <span className="agent-composer-menu-icon" aria-hidden="true">{entry.icon}</span> : null}
-        <span className="agent-composer-menu-text"><span>{entry.text ?? entry.label}</span>{entry.detail ? <small>{entry.detail}</small> : null}</span>
-      </button>)}
+      <ComposerMenuItems entries={entries} onRun={entry => { trigger.current?.focus({ preventScroll: true }); onOpen(false); entry.run(); }} />
     </section>
   </>;
+}
+
+/** The items of the menu as buttons: inside the + menu, or as the rows of a list where they stand open (the assistant's details). */
+export function ComposerMenuItems({ entries, onRun = entry => entry.run() }: { entries: readonly ComposerMenuEntry[]; onRun?(entry: ComposerMenuEntry): void }) {
+  return <>{entries.map(entry => <button key={entry.id} type="button" className="agent-composer-menu-item" aria-label={entry.label} title={entry.title}
+    data-testid={entry.testId} data-action-id={entry.id} disabled={entry.disabled} aria-expanded={entry.expanded} onClick={() => onRun(entry)}>
+    {entry.icon ? <span className="agent-composer-menu-icon" aria-hidden="true">{entry.icon}</span> : null}
+    <span className="agent-composer-menu-text"><span>{entry.text ?? entry.label}</span>{entry.detail ? <small>{entry.detail}</small> : null}</span>
+  </button>)}</>;
 }

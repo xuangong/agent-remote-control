@@ -1,0 +1,9 @@
+{
+  "rank": "m",
+  "members": {
+    "main": { "label": "Writes the release notes", "picture": { "shape": "squircle", "color": "#2f6fed" }, "process": "concise", "pinned": true },
+    "review": { "process": "process" },
+    "audit": { "process": "full" },
+    "plain": { "label": "Follows the device default" }
+  }
+}

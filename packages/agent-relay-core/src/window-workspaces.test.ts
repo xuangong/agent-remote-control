@@ -510,3 +510,22 @@ it('lists a saved group holding bots stored with the older picture shapes and wr
   const restarted = await fixture(f.saved());
   expect((await restarted.call('/legacy')).body.bots.members.main.picture).toEqual(picture);
 });
+
+it('stores a bot\'s process mode through bot.update, keeps its other details and reads it back after a restart', async () => {
+  const processBots = JSON.parse(readFileSync(new URL('../../agent-remote-protocol/src/fixtures/window-bots.process.v1.json', import.meta.url), 'utf8'));
+  const views = ['main', 'review', 'audit', 'plain'].map((id, index) => createWindowView(id, { ...binding, nativeSessionId: id }, index === 0 ? 'primary' : undefined));
+  const stored: WorkspaceWindow = { schemaVersion: 3, id: 'modes', title: 'Modes', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views };
+  const f = await fixture({ ...emptyRelayState(auth), workspaceWindows: [{ subject: 'alice', id: 'modes', window: stored, generation: 0, receipts: [], bots: processBots }] });
+  const listed = (await f.call()).body.groups.find((group: { window: WorkspaceWindow }) => group.window.id === 'modes');
+  expect(listed.bots.members.review).toEqual({ process: 'process' });
+  expect(listed.bots.members.main).toEqual(processBots.members.main);
+  const details = { label: 'Writes the release notes', picture: { shape: 'squircle', color: '#2f6fed' }, process: 'full', pinned: true };
+  const update = (operationId: string, body: unknown) => f.call('/modes/operations', 'POST', f.mutation(operationId, 0, { type: 'bot.update', viewId: 'main', details: body }));
+  expect((await update('set', details)).body.result.status).toBe('committed');
+  expect((await f.call('/modes')).body.bots.members.main).toEqual(details);
+  expect((await f.call('/modes')).body.bots.members.review).toEqual({ process: 'process' });
+  const restarted = await fixture(f.saved());
+  expect((await restarted.call('/modes')).body.bots.members.main).toEqual(details);
+  const refused = await update('bad', { process: 'verbose' });
+  expect(refused.status).toBe(400);
+});

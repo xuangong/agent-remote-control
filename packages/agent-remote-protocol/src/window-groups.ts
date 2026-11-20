@@ -28,6 +28,11 @@ export function readBotPicture(stored: unknown): BotPicture | undefined {
 export const WindowBotDetails = Type.Object({
   label: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
   picture: Type.Optional(BotPicture),
+  /**
+   * How much of a turn the assistant view shows for this bot. Absent follows the device's default. All three modes are accepted, `concise` included,
+   * so a bot can be set to Concise on a device whose default is Process or Full; any other value is refused.
+   */
+  process: Type.Optional(Type.Union([Type.Literal('concise'), Type.Literal('process'), Type.Literal('full')])),
   pinned: Type.Optional(Type.Literal(true)),
   hidden: Type.Optional(Type.Literal(true)),
   /** Asleep: quiet on every device, its conversation released until someone opens it, which wakes it. */

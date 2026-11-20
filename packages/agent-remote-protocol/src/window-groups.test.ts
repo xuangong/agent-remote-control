@@ -319,3 +319,32 @@ it('reads the stored older pictures as squircles with the same colour and no gaz
   expect(readBotPicture(storedBots.members.plain.picture)).toBeUndefined();
   for (const invalid of [null, 'circle', { shape: 'star', color: '#2f6fed' }, { shape: 'hexagon', color: 'red' }, { shape: 'hexagon', color: '#2f6fed', extra: 1 }]) expect(readBotPicture(invalid)).toBeUndefined();
 });
+
+const processBots = JSON.parse(readFileSync(new URL('./fixtures/window-bots.process.v1.json', import.meta.url), 'utf8'));
+
+it('accepts the three process modes and refuses any other value', () => {
+  for (const process of ['concise', 'process', 'full']) {
+    expect(Value.Check(WindowBotDetails, { process })).toBe(true);
+    expect(isWindowGroupOperation({ type: 'bot.update', viewId: 'main', details: { process } })).toBe(true);
+  }
+  for (const process of ['verbose', 'Process', '', 1, true, null, { mode: 'full' }]) {
+    expect(Value.Check(WindowBotDetails, { process })).toBe(false);
+    expect(isWindowGroupOperation({ type: 'bot.update', viewId: 'main', details: { process } })).toBe(false);
+  }
+});
+
+it('carries the process mode through bot.update beside the other details', () => {
+  const window = windowOf('w', createWindowView('main', session('a'), 'primary'));
+  const group = applyGroupOperation(section(window), { type: 'bot.update', viewId: 'main', details: { label: 'Writes', pinned: true, process: 'full' } });
+  expect(group.bots?.members.main).toEqual({ label: 'Writes', pinned: true, process: 'full' });
+  expect(isWindowGroup(group)).toBe(true);
+  // Details replace the previous ones: leaving `process` out follows the device default again.
+  expect(applyGroupOperation(group, { type: 'bot.update', viewId: 'main', details: { label: 'Writes' } }).bots?.members.main).toEqual({ label: 'Writes' });
+});
+
+it('reads the frozen stored bots without a process mode and the fixture that has one', () => {
+  expect(Value.Check(WindowBotDetails, storedBots.members.plain)).toBe(true);
+  expect(storedBots.members.main.process).toBeUndefined();
+  expect(Object.values(processBots.members).map(details => (details as { process?: string }).process)).toEqual(['concise', 'process', 'full', undefined]);
+  for (const details of Object.values(processBots.members)) expect(Value.Check(WindowBotDetails, details)).toBe(true);
+});

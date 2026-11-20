@@ -144,6 +144,13 @@
   /* The title starts from no width, so a long one shrinks beside Sessions instead of wrapping onto a line of its own. */
   .lab-shell .lab-mobile-navigation > :is(.lab-title-favorites, .lab-mobile-session-title) { flex: 1 1 0; min-width: 0; }
 }
+/* A wide screen without the sidebar keeps the entries in the Window's toolbar: tiles that fill the width cannot be covered. */
+.lab-window-toolbar { position: relative; }
+.lab-toolbar-launchers { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.lab-toolbar-launchers:not(:has(.lab-launcher:not([hidden], [data-hidden="true"]))) { display: none; }
+.lab-toolbar-launchers .lab-launcher button.lab-session-popover-trigger { min-height: 32px; padding: 4px 12px; }
+.lab-toolbar-launchers .lab-launcher .lab-session-popover-panel { left: auto; right: 8px; width: min(420px, calc(100vw - 32px)); }
+@media (pointer: coarse) { .lab-toolbar-launchers .lab-launcher button.lab-session-popover-trigger { min-height: 44px; } }
 .lab-launcher-bar { display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; padding-block: 2px 8px; }
 .lab-launcher-bar:not(:has(.lab-launcher:not([hidden], [data-hidden="true"]))) { display: none; }
 .lab-launcher[hidden], .lab-launcher[data-hidden="true"] { display: none; }

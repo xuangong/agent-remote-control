@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { coveringControls } from './covering.js';
 
 // The Track, Team, TPM and Window launchers never cover the conversation's text or the composer. On a compact screen they sit in a
 // row of the navigation that the layout reserves, so the rule holds for any number of launchers; on a wide screen without the
@@ -36,49 +37,6 @@ async function coverage(page: Page) {
       ]),
     };
   }, launcherSelector);
-}
-
-/**
- * Every control in a fixed or absolutely positioned layer over the conversation's text area: the visible timeline, across the
- * width its text lines take. It is generic, so a
- * control added later is caught too. Controls inside the conversation (its own content) and toasts, which are transient and
- * dismissible notifications, are not resident controls.
- */
-async function coveringControls(page: Page) {
-  return page.evaluate(() => {
-    type Box = { left: number; top: number; right: number; bottom: number };
-    const meets = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
-    const timeline = document.querySelector('.lab-timeline-scroll')!;
-    const scroller = timeline.getBoundingClientRect();
-    const lines: Box[] = [];
-    const walker = document.createTreeWalker(timeline, NodeFilter.SHOW_TEXT);
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      if (!node.textContent?.trim()) continue;
-      const range = document.createRange(); range.selectNodeContents(node);
-      for (const rect of range.getClientRects()) {
-        const line = { left: rect.left, right: rect.right, top: Math.max(rect.top, scroller.top), bottom: Math.min(rect.bottom, scroller.bottom) };
-        if (line.bottom > line.top && rect.width > 0) lines.push(line);
-      }
-    }
-    const positioned = (element: Element) => {
-      for (let current: Element | null = element; current && current !== document.body; current = current.parentElement) {
-        if (current.contains(timeline)) return false;
-        if (['fixed', 'absolute'].includes(getComputedStyle(current).position)) return true;
-      }
-      return false;
-    };
-    const controls = [...document.querySelectorAll('button, a[href], input, select, textarea, summary, [role="button"], [tabindex]:not([tabindex="-1"])')]
-      .filter(element => !timeline.contains(element) && !element.closest('.lab-toast-region, [inert], [aria-hidden="true"]'))
-      .filter(element => getComputedStyle(element).visibility !== 'hidden' && positioned(element));
-    // Text scrolls through the whole visible timeline, so the area is that height across the width its lines take.
-    const area = { left: Math.min(...lines.map(line => line.left)), right: Math.max(...lines.map(line => line.right)), top: scroller.top, bottom: scroller.bottom };
-    if (!lines.length) return ['no conversation text'];
-    return controls.flatMap(element => {
-      const rect = element.getBoundingClientRect();
-      return rect.width > 0 && rect.height > 0 && meets(rect, area)
-        ? [element.getAttribute('aria-label') ?? element.textContent?.trim().slice(0, 30) ?? element.tagName] : [];
-    });
-  });
 }
 
 async function openLongConversation(page: Page, width: number, height: number) {
@@ -146,4 +104,33 @@ for (const width of [1440, 1181]) {
     expect(found.covered).toEqual([]);
     await page.screenshot({ path: testInfo.outputPath(`launchers-${width}.png`) });
   });
+}
+
+// The tiles of a Window can fill the width, leaving no margin to float in: the entries then take a row of the Window's toolbar
+// on a wide screen, or the launcher bar on a compact one. The rule holds with the sidebar shown or hidden, for 1, 2 and 3 tiles.
+for (const width of [1024, 1280, 1440]) {
+  for (const tiles of [1, 2, 3]) {
+    test(`at ${width}px with ${tiles} tile${tiles > 1 ? 's' : ''}, no control covers a tile's conversation text`, async ({ page, isMobile }, testInfo) => {
+      test.skip(isMobile, 'A desktop viewport on a desktop profile');
+      await page.setViewportSize({ width, height: 860 });
+      await page.addInitScript(() => { for (const view of ['track', 'team', 'tpm', 'window', 'ask']) localStorage.setItem(`agent-remote:${view}-view`, 'true'); });
+      await page.goto(`/e2e/fixtures/window-tiles.html?tiles=${tiles}`);
+      // A compact screen opens on its sessions drawer when the address names no session.
+      if (width <= 1180) await page.locator('#lab-context').getByRole('button', { name: 'Close', exact: false }).first().click();
+      await expect(page.locator('.lab-timeline-scroll').getByText('Item 1 of tile-1', { exact: false }).first()).toBeVisible();
+      // A compact screen keeps the entries in its launcher bar; a wide one in the sidebar's Shortcuts.
+      await expect(page.locator(width > 1180 ? '.lab-sidebar-shortcut' : '.lab-launcher-bar .lab-launcher').first()).toBeVisible();
+      expect(await coveringControls(page)).toEqual([]);
+      if (width > 1180) {
+        // Hiding the sidebar moves the entries out of it, into the Window's toolbar.
+        await page.evaluate(() => {
+          const platform = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform, apple = /mac|iphone|ipad/i.test(platform);
+          window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', code: 'Backslash', ctrlKey: !apple, metaKey: apple, bubbles: true, cancelable: true }));
+        });
+        await expect(page.locator('.lab-toolbar-launchers').getByRole('button', { name: 'Windows', exact: true })).toBeVisible();
+        expect(await coveringControls(page)).toEqual([]);
+      }
+      await page.screenshot({ path: testInfo.outputPath(`tiles-${width}-${tiles}.png`) });
+    });
+  }
 }

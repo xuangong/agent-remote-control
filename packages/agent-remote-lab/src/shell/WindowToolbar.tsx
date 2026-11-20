@@ -9,10 +9,12 @@ import './shell.css';
  * Window actions. The title button is named by its text, so the heading reads as the Window name; renaming is its
  * description. That keeps it apart from the sidebar row's "Rename Window: …" control, on screen with it.
  */
-export function WindowToolbar({ windowId, title, summary, leading, disabled, readOnly, deleteDisabled, onRename, onNewView, onOpenSession, hasDocks, docksHidden, onToggleDocks,
+export function WindowToolbar({ windowId, title, summary, leading, launchers, disabled, readOnly, deleteDisabled, onRename, onNewView, onOpenSession, hasDocks, docksHidden, onToggleDocks,
   botAppearance, onBotAppearance, onCopyLink, onAgentControl, onDelete }: {
   /** The Window shown; when another one takes the toolbar, an open rename ends without saving. */
   windowId: string; title: string; leading?: ReactNode; disabled?: boolean;
+  /** The Track, Team, TPM, Window and Ask entries, in a row of the toolbar, when the sidebar does not hold them. */
+  launchers?: ReactNode;
   /** What the Window holds, as its sidebar row says it (`windowSummary`): "6 bots · 1 open". */
   summary: string;
   /** The Window is shown before it is confirmed (a cold start): renaming, adding views, hiding in Bot mode and deletion wait. */
@@ -85,6 +87,7 @@ export function WindowToolbar({ windowId, title, summary, leading, disabled, rea
           disabled={titleDisabled} onClick={start}>{title}</button>}
     subtitle={summary}
     trailing={<>
+      {launchers ? <div className="lab-toolbar-launchers" role="group" aria-label="Shortcuts">{launchers}</div> : null}
       <Menu label="Add" icon="plus" items={[
         { label: 'New session view', icon: 'plus', disabled: readOnly, onSelect: onNewView },
         { label: 'Open session…', icon: 'sessions', disabled: readOnly, onSelect: onOpenSession },

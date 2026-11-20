@@ -359,8 +359,9 @@ it.each((['dock', 'attached', 'empty-dock'] as const).flatMap(destination => (['
   const setup = { chain: [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document, hostService };
   const f = await failureFixture(false, 'A', false, `&window=${document.id}`, setup);
   await settleApp(() => expect(f.view.querySelector('[data-window-view-id="feature-source"]')).not.toBeNull());
-  await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Windows"]')!.click());
-  const destinationOption = f.view.querySelector<HTMLButtonElement>('[data-window-view-id="feature-source"]')!;
+  await act(async () => f.view.querySelector<HTMLButtonElement>(':is(.lab-launcher-window, .lab-window-floating) [aria-label="Windows"]')!.click());
+  // The Windows entry's own row, not the hidden sidebar's.
+  const destinationOption = [...f.view.querySelectorAll<HTMLButtonElement>('[data-window-view-id="feature-source"]')].find(option => option.closest('.lab-launcher-window, .lab-window-floating'))!;
   expect(destinationOption.closest('[hidden]')).toBeNull();
   await act(async () => destinationOption.click());
   await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Close Windows"]')!.click());

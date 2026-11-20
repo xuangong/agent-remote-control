@@ -515,7 +515,7 @@ it.each(['ordinary', 'Track'] as const)('leaves a focused unlinked Side through 
     if (navigation === 'ordinary') await act(async () => manager.onOpen(session));
     else {
       await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
-      const row = () => [...f.view.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(row => row.textContent?.includes(session.title));
+      const row = () => [...f.view.querySelectorAll<HTMLButtonElement>(':is(.lab-tracking-floating, .lab-launcher-track) .lab-session-row')].find(row => row.textContent?.includes(session.title));
       await settleApp(() => expect(row()).toBeDefined());
       await act(async () => row()!.click());
     }
@@ -538,7 +538,7 @@ it.each(['ordinary', 'Track'] as const)('leaves a focused unlinked Side through 
   if (sharedWindow && navigation === 'Track') {
     // S is already a bot of this group, its own folded dock: Track selects and unfolds it instead of opening it again (rule 6).
     await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
-    const row = () => [...f.view.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(item => item.textContent?.includes(side.title));
+    const row = () => [...f.view.querySelectorAll<HTMLButtonElement>(':is(.lab-tracking-floating, .lab-launcher-track) .lab-session-row')].find(item => item.textContent?.includes(side.title));
     await settleApp(() => expect(row()).toBeDefined());
     await act(async () => row()!.click());
     await settleApp(() => {

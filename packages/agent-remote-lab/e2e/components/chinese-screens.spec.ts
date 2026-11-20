@@ -7,8 +7,8 @@ import { englishWords } from './english-words';
 test.use({ locale: 'zh-CN' });
 
 const conversation = '/e2e/fixtures/assistant-conversation.html?layout=bot&mode=bot&section=notes&bot=chief&pending=none';
-/** The fixtures' own sample data: agent names in the letters, providers, a folder, a tool, a Host and the account's name. */
-const sample = ['Chief', 'Planner', 'claude', 'notes', 'Write', 'Alice', 'Example', 'Work', 'Recorded'];
+/** The fixtures' own sample data: agent names in the letters, providers, a folder, a tool, a Host, a model and the account's name. */
+const sample = ['Chief', 'Planner', 'claude', 'notes', 'Write', 'Alice', 'Example', 'Work', 'Recorded', 'recorded-model'];
 
 async function shown(page: Page, where: string) {
   expect(await englishWords(page, { allow: sample }), where).toEqual([]);

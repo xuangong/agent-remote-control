@@ -38,6 +38,49 @@ async function coverage(page: Page) {
   }, launcherSelector);
 }
 
+/**
+ * Every control in a fixed or absolutely positioned layer over the conversation's text area: the visible timeline, across the
+ * width its text lines take. It is generic, so a
+ * control added later is caught too. Controls inside the conversation (its own content) and toasts, which are transient and
+ * dismissible notifications, are not resident controls.
+ */
+async function coveringControls(page: Page) {
+  return page.evaluate(() => {
+    type Box = { left: number; top: number; right: number; bottom: number };
+    const meets = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    const timeline = document.querySelector('.lab-timeline-scroll')!;
+    const scroller = timeline.getBoundingClientRect();
+    const lines: Box[] = [];
+    const walker = document.createTreeWalker(timeline, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (!node.textContent?.trim()) continue;
+      const range = document.createRange(); range.selectNodeContents(node);
+      for (const rect of range.getClientRects()) {
+        const line = { left: rect.left, right: rect.right, top: Math.max(rect.top, scroller.top), bottom: Math.min(rect.bottom, scroller.bottom) };
+        if (line.bottom > line.top && rect.width > 0) lines.push(line);
+      }
+    }
+    const positioned = (element: Element) => {
+      for (let current: Element | null = element; current && current !== document.body; current = current.parentElement) {
+        if (current.contains(timeline)) return false;
+        if (['fixed', 'absolute'].includes(getComputedStyle(current).position)) return true;
+      }
+      return false;
+    };
+    const controls = [...document.querySelectorAll('button, a[href], input, select, textarea, summary, [role="button"], [tabindex]:not([tabindex="-1"])')]
+      .filter(element => !timeline.contains(element) && !element.closest('.lab-toast-region, [inert], [aria-hidden="true"]'))
+      .filter(element => getComputedStyle(element).visibility !== 'hidden' && positioned(element));
+    // Text scrolls through the whole visible timeline, so the area is that height across the width its lines take.
+    const area = { left: Math.min(...lines.map(line => line.left)), right: Math.max(...lines.map(line => line.right)), top: scroller.top, bottom: scroller.bottom };
+    if (!lines.length) return ['no conversation text'];
+    return controls.flatMap(element => {
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && meets(rect, area)
+        ? [element.getAttribute('aria-label') ?? element.textContent?.trim().slice(0, 30) ?? element.tagName] : [];
+    });
+  });
+}
+
 async function openLongConversation(page: Page, width: number, height: number) {
   await page.setViewportSize({ width, height });
   // Track and TPM show by default only on a touch screen and Ask only when chosen; the person can show each anywhere.
@@ -59,6 +102,8 @@ test('at 390x844 the launchers take their own row and cover no conversation text
   const sessions = (await page.getByRole('button', { name: 'Open sessions', exact: true }).boundingBox())!, title = (await page.getByRole('button', { name: 'Favorites', exact: true }).boundingBox())!;
   expect(Math.abs(title.y - sessions.y)).toBeLessThanOrEqual(2);
   expect(title.x + title.width).toBeLessThanOrEqual(390);
+  // No fixed or absolutely positioned control of any kind covers the conversation's text.
+  expect(await coveringControls(page)).toEqual([]);
   await page.screenshot({ path: testInfo.outputPath('launchers-390.png') });
 
   // More launchers than fit on one line wrap into another reserved line instead of covering the conversation.

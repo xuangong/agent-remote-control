@@ -1566,6 +1566,16 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
   .lab-timeline-tools[data-collapsible] > .lab-timeline-tools-content button:not(.lab-chat-sessions button, .lab-session-connection-toggle, .agent-session-attributions-toggle) { flex: 0 0 42px; width: 42px; min-width: 42px; }
   .lab-timeline-tools[data-collapsible] > .lab-timeline-tools-content :is(.lab-session-connection-toggle, .agent-session-attributions-toggle) { flex: 0 0 auto; width: auto; min-width: max-content; white-space: nowrap; padding-inline: 8px; }
 }
+/* On a compact screen the session actions take a row of the timeline stage above the conversation, so neither their toggle nor
+   the expanded actions cover its text. */
+@media (max-width: 1180px) {
+  .lab-timeline-stage > .lab-timeline-controls > .lab-timeline-tools { position: static; flex: none; align-self: flex-end; max-width: 100%; margin-top: 4px; }
+  /* The composer's collapse tab sits on the top edge of its input frame; the dock reserves the tab's height, and on a touch screen
+     its larger hit area stays inside the dock instead of reaching over the conversation. */
+  :is(.lab-shell, .lab-session-view) .lab-composer-dock:not([data-collapsed]),
+  :is(.lab-shell, .lab-session-view) .lab-composer-dock[data-collapsed]:has(.agent-composer[data-control-readonly]) { padding-top: 20px; }
+  :is(.lab-shell, .lab-session-view) .lab-composer-dock .lab-composer-toggle::after { inset: -4px -9px -1px; }
+}
 @media (prefers-reduced-motion: reduce) {
   .lab-timeline-tools[data-collapsible], .lab-timeline-tools[data-collapsible] > .lab-timeline-tools-content,
   .lab-timeline-tools-toggle::before, .lab-timeline-tools-toggle::after, .lab-timeline-tools-toggle > svg,

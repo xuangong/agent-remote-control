@@ -104,8 +104,8 @@ it.each([false, true])('follows an edited Side without retargeting its original 
   let container = await render(<App {...props} />);
   async function assertAttachedNative(nativeSessionId: string): Promise<void> {
     const panel = container.querySelector<HTMLElement>('.lab-side-conversation:not([hidden])')!;
-    await waitFor(() => expect(panel.querySelector('button.agent-toolbar-more')).not.toBeNull());
-    await act(async () => panel.querySelector<HTMLButtonElement>('button.agent-toolbar-more')!.click());
+    await waitFor(() => expect(panel.querySelector('button.agent-composer-plus')).not.toBeNull());
+    await act(async () => panel.querySelector<HTMLButtonElement>('button.agent-composer-plus')!.click());
     const status = [...panel.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Status');
     if (status) await act(async () => status.click());
     await waitFor(() => {

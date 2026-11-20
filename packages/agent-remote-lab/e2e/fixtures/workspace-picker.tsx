@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { browserLocale, LocaleContext } from '@orchardworks/agent-client-web/react';
 import { SessionConfiguration } from '../../src/components/SessionDirectory.js';
 import { SupportingRail } from '../../src/components/SupportingRail.js';
 import { SessionDirectoryClient, type CreateSessionOptions } from '../../src/directory-client.js';
@@ -18,4 +19,4 @@ function View() {
     <output style={{ display: 'block', overflowWrap: 'anywhere' }} data-testid="selected-folder">{value.cwd}</output>
   </div>;
 }
-createRoot(document.getElementById('root')!).render(<View />);
+createRoot(document.getElementById('root')!).render(<LocaleContext.Provider value={browserLocale()}><View /></LocaleContext.Provider>);

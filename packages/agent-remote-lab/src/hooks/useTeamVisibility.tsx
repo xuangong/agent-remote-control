@@ -1,8 +1,9 @@
 import { createContext, useCallback, useEffect, useState } from 'react';
-import type { AgentCommand, AgentCommandResult } from '@orchardworks/agent-remote-protocol';
+import type { AgentCommandResult } from '@orchardworks/agent-remote-protocol';
+import type { ConsoleCommand } from '@orchardworks/agent-client-web/react';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 
-export const TeamViewCommand = { id: 'console:team', name: 'team', kind: 'command', description: 'Toggle Team view; use /team on or /team off', inputHint: '[on|off]' } satisfies AgentCommand;
+export const TeamViewCommand = { id: 'console:team', name: 'team', kind: 'command', description: 'Toggle Team view; use /team on or /team off', inputHint: '[on|off]', descriptionKey: 'team.console.team' } satisfies ConsoleCommand;
 export const TeamViewScope = createContext<((args: string) => Promise<AgentCommandResult>) | undefined>(undefined);
 const key = 'agent-remote:team-view';
 function preference(): boolean {

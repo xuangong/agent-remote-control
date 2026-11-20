@@ -2,6 +2,7 @@ import { withMessageKey } from '@orchardworks/agent-client';
 export const handoffCommand = {
   id: 'console:handoff', name: 'handoff', kind: 'command' as const,
   description: 'Continue this conversation in a new session, optionally with another provider',
+  descriptionKey: 'client.fork.handoffDescription',
 };
 
 export function handoffProvider(args: string): string | undefined {

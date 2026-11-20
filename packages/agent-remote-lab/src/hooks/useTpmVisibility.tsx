@@ -1,8 +1,9 @@
 import { createContext, useCallback, useEffect, useState } from 'react';
-import type { AgentCommand, AgentCommandResult } from '@orchardworks/agent-remote-protocol';
+import type { AgentCommandResult } from '@orchardworks/agent-remote-protocol';
+import type { ConsoleCommand } from '@orchardworks/agent-client-web/react';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 
-export const TpmViewCommand = { id: 'console:tpm', name: 'tpm', kind: 'command', description: 'Toggle TPM view; use /tpm on or /tpm off', inputHint: '[on|off]' } satisfies AgentCommand;
+export const TpmViewCommand = { id: 'console:tpm', name: 'tpm', kind: 'command', description: 'Toggle TPM view; use /tpm on or /tpm off', inputHint: '[on|off]', descriptionKey: 'team.console.tpm' } satisfies ConsoleCommand;
 export const TpmViewScope = createContext<((args: string) => Promise<AgentCommandResult>) | undefined>(undefined);
 const key = 'agent-remote:tpm-view';
 function preference(): boolean | undefined {

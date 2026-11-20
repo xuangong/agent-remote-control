@@ -434,4 +434,7 @@ export const team: AreaMessages<typeof english> = {
   'team.group.rosterWorkspace.shared': '共用',
   'team.group.rosterWorkspace.worktree': '独立工作树',
   'team.group.rosterWorkspace.remote': '远程',
+  'team.console.tpm': '打开或关闭 TPM 视图；用 /tpm on 或 /tpm off',
+  'team.console.team': '打开或关闭团队视图；用 /team on 或 /team off',
+  'team.console.ask': '打开或关闭全局 Ask 视图；用 on/off',
 };

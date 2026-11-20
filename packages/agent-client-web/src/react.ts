@@ -41,6 +41,7 @@ export type { MessageGroupPosition, TimelineRenderEntry } from './react/timeline
 export { useAgentReplica } from './react/use-agent-replica.js';
 export type { AgentReplicaStore } from './react/use-agent-replica.js';
 export { AgentComposer } from './react/AgentComposer.js';
+export type { ConsoleCommand } from './react/AgentComposer.js';
 export { AgentCommandDetails } from './react/AgentCommandDetails.js';
 export type { AgentCommandDetailsProps } from './react/AgentCommandDetails.js';
 export type { AgentComposerProps, PendingFirstInputContext } from './react/AgentComposer.js';

@@ -434,4 +434,7 @@ export const team = {
   'team.group.rosterWorkspace.shared': 'shared',
   'team.group.rosterWorkspace.worktree': 'worktree',
   'team.group.rosterWorkspace.remote': 'remote',
+  'team.console.tpm': 'Toggle TPM view; use /tpm on or /tpm off',
+  'team.console.team': 'Toggle Team view; use /team on or /team off',
+  'team.console.ask': 'Toggle global Ask view; use on/off',
 } as const satisfies Readonly<Record<string, Message>>;

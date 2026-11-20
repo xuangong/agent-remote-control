@@ -23,7 +23,10 @@ import { useSendButtonPress } from './useSendButtonPress.js';
 import { usePendingSend } from './usePendingSend.js';
 import { SharedByKey } from './shared-by-key.js';
 import { PendingSendQueue } from './PendingSendQueue.js';
-import { composerAvailability, remoteSessionState, type RemoteSessionState, type AgentReplicaState, type SessionFacts } from '@orchardworks/agent-client';
+import { composerAvailability, remoteSessionState, type MessageKey, type RemoteSessionState, type AgentReplicaState, type SessionFacts } from '@orchardworks/agent-client';
+
+/** A command of the page's own (a console command such as /ask or /handoff): its description's catalogue key says it in the reader's words. */
+export type ConsoleCommand = AgentCommand & { aliases?: readonly string[]; descriptionKey?: MessageKey };
 
 export interface PendingFirstInputContext {
   state: 'restoring' | 'pending' | 'dispatching' | 'accepted' | 'unknown' | 'unavailable';
@@ -58,7 +61,7 @@ export interface AgentComposerProps {
   /** Presents a failed command in place of its message, such as a sign-in it needs; nothing keeps the message. */
   renderCommandError?(error: unknown): ReactNode;
   attachments?: ReactNode;
-  consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[];
+  consoleCommands?: readonly ConsoleCommand[];
   onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>;
   sessionKey?: string;
   /** Host-confirmed captured history still awaiting native first-input materialization. */
@@ -643,7 +646,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
         : <div role="listbox" id={`${controlId}-commands`} aria-label={t('composer.nativeCommands')}>{commands.map((command, index) => <button
           type="button" role="option" aria-selected={index === commandIndex} id={`${controlId}-command-${index}`} key={command.id}
           onMouseDown={(event) => event.preventDefault()} onClick={() => chooseCommand(command)}>
-          <strong>/{command.name}</strong><span className="agent-command-description" title={command.description}>{command.shortDescription || command.description}</span>
+          <strong>/{command.name}</strong><span className="agent-command-description" title={command.description}>{(command as ConsoleCommand).descriptionKey ? t((command as ConsoleCommand).descriptionKey!) : command.shortDescription || command.description}</span>
           {consoleCommands.some((local) => local.id === command.id) ? <small className="agent-command-kind">{t('composer.kindConsole')}</small>
             : command.kind !== 'command' ? <small className="agent-command-kind">{command.kind === 'skill' ? t('composer.kindSkill') : t('composer.kindPrompt')}</small> : null}
         </button>)}</div>}

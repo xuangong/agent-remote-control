@@ -3,7 +3,7 @@ import type { AgentCommandResult } from '@orchardworks/agent-remote-protocol';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 export const AskViewScope = createContext<((args: string) => Promise<AgentCommandResult>) | undefined>(undefined);
-export const AskViewCommand = { id: 'console:ask', name: 'ask', kind: 'command' as const, description: 'Toggle global Ask view; use on/off' };
+export const AskViewCommand = { id: 'console:ask', name: 'ask', kind: 'command' as const, description: 'Toggle global Ask view; use on/off', descriptionKey: 'team.console.ask' as const };
 const key = 'agent-remote:ask-view';
 function preference(): boolean {
   try { return window.localStorage.getItem(key) === 'true'; }

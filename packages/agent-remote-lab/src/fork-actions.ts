@@ -3,11 +3,11 @@ import { AgentReplica, RemoteOperationError, RemoteSessionClient, type RemoteAge
 import type { LabWorkbenchActions } from './components/LabWorkbench.js';
 import { captureForkContext, contextPrefix, type ForkStore, type SessionFork } from './session-forks.js';
 
-export const askCommand = { id: 'console:ask', name: 'ask', kind: 'command' as const, description: 'Toggle global Ask view; use on/off, or add a question for this session' };
+export const askCommand = { id: 'console:ask', name: 'ask', kind: 'command' as const, description: 'Toggle global Ask view; use on/off, or add a question for this session', descriptionKey: 'client.fork.askDescription' as const };
 export const forkCommands = [
   askCommand,
-  { id: 'console:fork', name: 'fork', kind: 'command' as const, description: 'Create an independent session with this conversation’s context' },
-  { id: 'console:side', name: 'side', aliases: ['btw'], kind: 'command' as const, description: 'Open an independent conversation alongside this chat' },
+  { id: 'console:fork', name: 'fork', kind: 'command' as const, description: 'Create an independent session with this conversation’s context', descriptionKey: 'client.fork.forkDescription' as const },
+  { id: 'console:side', name: 'side', aliases: ['btw'], kind: 'command' as const, description: 'Open an independent conversation alongside this chat', descriptionKey: 'client.fork.sideDescription' as const },
 ];
 
 /**

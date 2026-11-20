@@ -44,9 +44,8 @@ afterEach(() => {
 async function click(element: Element) { await act(async () => (element as HTMLElement).click()); }
 async function resize() { await act(async () => { for (const callback of observers) callback(); }); }
 function Preferences() {
-  const [device, setDevice] = useState<ProcessMode>('concise');
-  const [letters, setLetters] = useState(false);
-  return <SessionViewOptions process={{ mode: device, device, chooseForDevice: setDevice }} lettersVisible={letters} onLettersVisibleChange={setLetters} />;
+  const [mode, setMode] = useState<ProcessMode>('concise');
+  return <SessionViewOptions process={{ mode, device: 'concise', chooseForDevice: () => {}, chooseForAssistant: setMode }} />;
 }
 
 it('opens view options in the top layer and preserves selection and Escape focus', async () => {

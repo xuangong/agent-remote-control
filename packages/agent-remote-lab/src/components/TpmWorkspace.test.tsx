@@ -168,14 +168,9 @@ it('keeps the ordinary Session View connected and its full chatbox draft across 
   expect(closes).toEqual([]);
   await act(async () => attributionToggle.click());
   expect(container.querySelector<HTMLElement>('.lab-session-heading')!.hidden).toBe(true);
-  expect(container.querySelector('[aria-label="Session view options"]')).not.toBeNull();
+  // A view that is no assistant has no process choice of its own: the device's default is in Settings, so no View options show.
+  expect(container.querySelector('[aria-label="Session view options"]')).toBeNull();
   expect(container.querySelector('[data-testid="prompt-submit"]')).not.toBeNull();
-  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
-  const full = [...container.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="All assistants on this device"] button')].find(button => button.textContent === 'Full')!;
-  await act(async () => full.click());
-  expect(full.getAttribute('aria-pressed')).toBe('true');
-  expect(container.querySelector('[aria-label="Show letters"]')).not.toBeNull();
-  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
   const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'Verify this result'); input.dispatchEvent(new Event('input', { bubbles: true })); });
   await act(async () => show(false));

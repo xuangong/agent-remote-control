@@ -236,7 +236,7 @@ it('manages browser sessions without unmounting drafts and clears private state 
   expect(button('Security')).toBeDefined();
   await act(async () => button('Security').click());
   expect(draft.closest('[hidden][inert]')).not.toBeNull();
-  expect(view.textContent).toContain('Chrome on Mac');
+  await vi.waitFor(() => expect(view.textContent).toContain('Chrome on Mac'));
   await act(async () => button('Back to conversation').click());
   expect(view.querySelector('input')).toBe(draft);
   expect(draft.closest('[hidden]')).toBeNull();

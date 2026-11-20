@@ -91,7 +91,9 @@ test('keeps composer controls inside the standalone viewport before native recov
   const before = (await dock.boundingBox())!;
   await page.screenshot({ path: info.outputPath('standalone-launch-composer.png') });
   await page.setViewportSize({ width: 402, height: 874 });
-  await expect(shell).toHaveCSS('height', '874px');
+  // The shell fills the viewport above the phone's tab bar.
+  const barHeight = (await page.locator('.lab-tab-bar').boundingBox())!.height;
+  await expect(shell).toHaveCSS('height', `${874 - barHeight}px`);
   await expectVisibleComposer();
   const after = (await dock.boundingBox())!;
   expect(after.y - before.y).toBeCloseTo(62, 1);

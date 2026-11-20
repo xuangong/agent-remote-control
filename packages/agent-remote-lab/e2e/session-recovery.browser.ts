@@ -13,6 +13,8 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
     return false;
   } });
   const baseUrl = fixture.url + fixture.alice.basePath;
+  // A phone opens on Chats; this test is about a Window's conversation coming back, so it opens the Window view.
+  const windowUrl = fixture.url + '/?mode=window';
   const source = `
     import React from 'react'; import { createRoot } from 'react-dom/client';
     import './session-view-styles.ts';
@@ -52,7 +54,7 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
   await page.context().addCookies([{ name: fixture.alice.cookie.slice(0, separator), value: fixture.alice.cookie.slice(separator + 1), url: fixture.url, httpOnly: true, sameSite: 'Strict' }]);
   const errors: string[] = []; let sockets = 0;
   page.on('pageerror', error => errors.push(error.message)); page.on('websocket', () => sockets++);
-  await page.goto(fixture.url + '/');
+  await page.goto(windowUrl);
   const input = page.getByTestId('prompt-input');
   // The movable TPM, Window and Team entries float over the short conversation, so a message action is pressed without a pointer hit test.
   await expect.poll(() => input.isEnabled()).toBe(true);
@@ -79,7 +81,7 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
   await page.clock.fastForward(60000);
   expect(await page.locator('[data-delivery-state="unconfirmed"]').textContent()).toContain('Do not lose this failed message');
   expect(await page.evaluate(() => (window as any).attempts.length)).toBe(1);
-  await page.goto(fixture.url + '/');
+  await page.goto(windowUrl);
   await expect.poll(() => input.isEnabled()).toBe(true);
   expect(await page.locator('[data-delivery-state="unconfirmed"]').textContent()).toContain('Do not lose this failed message');
   const savedOperation = await page.evaluate(base => {
@@ -93,13 +95,13 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
   expect(await page.locator('.agent-outgoing-message').count()).toBe(1);
   await page.clock.fastForward(31000);
   expect(await page.locator('.agent-message-delivery').textContent()).toContain('Sent');
-  await page.goto(fixture.url + '/');
+  await page.goto(windowUrl);
   await expect.poll(() => input.isEnabled()).toBe(true);
   await expect.poll(() => page.getByRole('button', { name: 'Delete message', exact: true }).isEnabled()).toBe(true);
   await page.screenshot({ path: `/tmp/arc-mobile-recovery-${engine.name()}.png` });
   await page.getByRole('button', { name: 'Delete message', exact: true }).click();
   expect(await page.locator('.agent-outgoing-message').count()).toBe(0);
-  await page.goto(fixture.url + '/');
+  await page.goto(windowUrl);
   await expect.poll(() => input.isEnabled()).toBe(true);
   expect(await page.locator('.agent-outgoing-message').count()).toBe(0);
   expect(errors).toEqual([]);

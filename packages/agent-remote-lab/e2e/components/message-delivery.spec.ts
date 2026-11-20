@@ -13,7 +13,8 @@ test('shows a pulsing outgoing message immediately and replaces it with the nati
   await expect(row).toContainText('Please check the result.');
   await expect(row).toContainText('Sending…');
   await expect(page.locator('.agent-message-user')).toHaveCount(1);
-  expect(await row.locator('.agent-message').evaluate(element => getComputedStyle(element).animationName)).toBe('agent-message-pending');
+  // A sending bubble keeps full opacity, which a pulse to half would take below AA; its state is the word beside it.
+  expect(await row.locator('.agent-message').evaluate(element => getComputedStyle(element).opacity)).toBe('1');
   await page.screenshot({ path: testInfo.outputPath('message-pending.png') });
   await page.getByRole('button', { name: 'Acknowledge send' }).click();
   await expect(row).toContainText('Sent — waiting for conversation…');
@@ -43,7 +44,7 @@ test('waits through compaction delays before acknowledgement and echo without sh
   await expect(page.getByTestId('prompt-input')).toHaveValue('');
   await expect(page.getByRole('alert')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Delivery error' })).toHaveCount(0);
-  expect(await row.locator('.agent-message').evaluate(element => getComputedStyle(element).animationName)).toBe('none');
+  expect(await row.locator('.agent-message').evaluate(element => getComputedStyle(element).opacity)).toBe('1');
   await page.screenshot({ path: testInfo.outputPath('slow-message-awaiting-echo.png') });
   await page.getByRole('button', { name: 'Deliver message' }).click();
   await expect(row).toHaveCount(0);

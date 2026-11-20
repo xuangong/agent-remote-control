@@ -1,5 +1,5 @@
 import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-client-web/browser';
-import { isUncertainSend, timelineEntryKey, remoteSessionState, sessionActivityLabel, sessionNotice, sessionNoticeWords, type RemoteSessionState, type SessionDescription, type SessionAttribution, type SessionFacts, type SessionNotice } from '@orchardworks/agent-client';
+import { isUncertainSend, remoteSessionState, sessionActivityLabel, sessionNotice, sessionNoticeWords, type RemoteSessionState, type SessionDescription, type SessionAttribution, type SessionFacts, type SessionNotice } from '@orchardworks/agent-client';
 import { SessionControlNotice } from './SessionControlNotice.js';
 import { SessionViewFrame } from './SessionViewFrame.js';
 import { useFeedbackToast, useToastAnchor } from './Toast.js';
@@ -50,17 +50,6 @@ export function SessionWorkbench({ assistant, sessionDescription, onNavigateAttr
   const displayScope = draftSessionKey ?? state?.agent?.runtimeInfo.sessionId ?? attachingAgentId;
   const process = useProcessMode(processAssistant);
   const [lettersVisible, setLettersVisible] = useLettersVisible();
-  // A Trace target that is a letter shows the letters; its turn opens by itself.
-  const revealedLetterRequest = useRef<string>();
-  useLayoutEffect(() => {
-    if (!visible || !revealEntry || !state || lettersVisible) return;
-    const request = JSON.stringify([displayScope, state.timeline.epoch, revealEntry.requestId, revealEntry.key]);
-    if (revealedLetterRequest.current === request) return;
-    const item = state.timeline.entries.find(entry => timelineEntryKey(entry) === revealEntry.key)?.item;
-    if (!item) return;
-    revealedLetterRequest.current = request;
-    if (item.type === 'agent_communication') setLettersVisible(true);
-  }, [visible, displayScope, state?.timeline.epoch, state?.timeline.entries, revealEntry, lettersVisible]);
   const session = suppliedSessionState ?? remoteSessionState(state, connectionStatus);
   const sessionStatus = session.connection;
   const controlReadOnly = !!nativeTakeover || (!draftOnly && session.readOnly);

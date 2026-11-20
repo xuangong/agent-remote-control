@@ -52,6 +52,13 @@ reveal in Full and Concise), `AgentTimeline.selection.test.tsx` (Full and Concis
 | `conversation-previews.spec.ts` "…the answered question's preview" | Preview mode showed the answered question's text | An answered question is one receipt line in every mode; the spec opens it and finds the question in its detail (inventory row I8) |
 | `view-overflow.spec.ts` "…compact and readable in simple" | The simple display | Concise with the work line open, the summary level; the pending requests are counted in `.agent-turn-requests` |
 | `ask-timeline-layout.spec.ts` | A bare timeline in the simple display | The same timeline in Concise with its work line open |
+| `message-delivery.spec.ts` "shows a pulsing outgoing message…" | A sending message pulsed to half opacity | A sending bubble keeps full opacity (half would fail AA); "Sending…" says its state |
+| `pane-navigation.spec.ts`, `session-family-resize.spec.ts`, `tpm-dock.spec.ts` | Every separator on the page was a resize handle | Day lines are separators too; the specs count and focus the handles by their "… width" names |
+| `tpm-dock.spec.ts` "TPM delegation…", `trace-inspection.spec.ts` | Steps showed in the preview display | The page opens in Full, today's preview level |
+| `session-letters.browser.ts` | Each view had its own letters choice | Letters are this device's choice: a side or child view hides them too, except the letter it was opened on; a letter of a turn without a prompt shows after that turn's answer, so the specs check it is brought into view, not its offset |
+| `App.test.tsx` "shows a hidden letter opened from Trace…", `AgentCommunication.test.tsx` "toggles letters independently…" | Opening a hidden letter from Trace turned letters on | The letter shows in its view while it is the target and Show letters keeps the reader's choice, as the per-view rule did |
+| `session-search.browser.ts` | A search hit showed in the content display only while selected | A hit opens its turn's work line while it is the target; closing the search closes it again (`AgentTimeline.turns.test.tsx` "closes the turn a search opened…") |
+| `journal-replacement.browser.ts` "keeps every unchanged row node…" | Every unchanged row kept its node | Rows keep their nodes unless their turn changed: rows after a person's message that left the window join the turn before and are rebuilt there |
 
 ## Re-pointed without a rule change
 

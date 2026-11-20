@@ -72,6 +72,16 @@ describe('the timeline renders turns', () => {
     expect(expanded(container)).toEqual(['false', 'false']);
   });
 
+  it('closes the turn a search opened once the search ends', async () => {
+    const state = conversation();
+    const target = timelineEntryKey(state.timeline.entries.find(entry => entry.itemKey === 'write-1')!);
+    const view = (key?: string) => <AgentTimeline state={state} processMode="concise" searchEntryKey={key} searchRequestId={key ? 1 : undefined} />;
+    const container = await render(view(target));
+    expect(expanded(container)).toEqual(['true', 'false']);
+    await rerender(container, view(undefined));
+    expect(expanded(container)).toEqual(['false', 'false']);
+  });
+
   it('shows the prompt as the person\'s bubble and the answer as the assistant\'s, the avatar at the foot of the last', async () => {
     const container = await render(<AgentTimeline state={conversation()} processMode="concise" assistant={{ name: 'Chief', avatar: <span data-testid="avatar" /> }} />);
     const rows = [...container.querySelectorAll<HTMLElement>('.orchard-bubble-row')];

@@ -6,7 +6,7 @@ import type { Browser, Page } from '@playwright/test';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startStack, type ScriptedStep, type Stack } from '@orchardworks/agent-e2e/stack';
 import { launchBrowser, openPage, type PageOptions } from './browser.js';
-import { send, showsText, waitForEntries } from './page.js';
+import { chooseProcessMode, send, showsText, waitForEntries } from './page.js';
 
 let stack: Stack; let browser: Browser;
 beforeAll(async () => { browser = await launchBrowser(); });
@@ -21,14 +21,6 @@ const turns = (text: string): ScriptedStep[] => text.includes('notes.md') ? [
 ] : [];
 
 const workLine = (page: Page) => page.locator('.agent-turn').last().locator('.agent-work-line > button');
-
-async function chooseFull(page: Page): Promise<void> {
-  const expand = page.getByRole('button', { name: 'Expand session actions', exact: true });
-  if (await expand.isVisible()) await expand.click();
-  await page.getByRole('button', { name: 'Session view options', exact: true }).first().click();
-  await page.getByRole('group', { name: 'All assistants on this device' }).getByRole('button', { name: 'Full', exact: true }).click();
-  await page.keyboard.press('Escape');
-}
 
 const variants: Array<[string, PageOptions]> = [
   ['desktop 1280x800', { viewport: { width: 1280, height: 800 } }],
@@ -67,7 +59,7 @@ describe.each(variants)('E10 at %s', (_name, view) => {
       await expect.poll(() => step.locator('.agent-tool-toggle').textContent()).toContain('npm test');
       expect(await step.locator('.agent-tool-preview').count()).toBe(0);
       // Full shows every step at preview level without the reader opening anything, and the step opens to its output.
-      await chooseFull(page);
+      await chooseProcessMode(page, 'Full');
       await expect.poll(() => workLine(page).getAttribute('aria-expanded')).toBe('true');
       await expect.poll(() => step.locator('.agent-tool-preview').textContent()).toContain('npm test');
       await step.locator('.agent-tool-toggle').click();

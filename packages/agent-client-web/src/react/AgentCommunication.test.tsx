@@ -121,8 +121,8 @@ it.each(['concise', 'process', 'full'] as const)('toggles letters independently 
   const state = createReplicaState();
   state.timeline = { ...state.timeline, epoch: 'epoch', initialized: true, entries: [letter, message] };
   const key = timelineEntryKey(letter);
-  const view = (visible: boolean, searchEntryKey?: string) =>
-    <TimelineLettersVisible.Provider value={visible}><AgentTimeline state={state} processMode={mode} searchEntryKey={searchEntryKey} inspectedEntryKey={key} /></TimelineLettersVisible.Provider>;
+  const view = (visible: boolean, searchEntryKey?: string, inspectedEntryKey?: string) =>
+    <TimelineLettersVisible.Provider value={visible}><AgentTimeline state={state} processMode={mode} searchEntryKey={searchEntryKey} inspectedEntryKey={inspectedEntryKey} /></TimelineLettersVisible.Provider>;
   const container = await render(view(true));
   expect(container.querySelectorAll('.agent-communication-letter')).toHaveLength(1);
   const assistant = container.querySelector('.agent-message-assistant');
@@ -131,7 +131,12 @@ it.each(['concise', 'process', 'full'] as const)('toggles letters independently 
   expect(container.querySelector('.agent-message-assistant')).toBe(assistant);
   expect(state.timeline.entries).toEqual([letter, message]);
   expect(findTimelineMatches('epoch', state.timeline.entries, 'Agent reply', 'all')).toHaveLength(1);
+  // A search hit or a Trace target shows the hidden letter while it is the target.
   await rerender(container, view(false, key));
+  expect(container.querySelectorAll('.agent-communication-letter')).toHaveLength(1);
+  await rerender(container, view(false));
+  expect(container.querySelector('.agent-communication-letter')).toBeNull();
+  await rerender(container, view(false, undefined, key));
   expect(container.querySelectorAll('.agent-communication-letter')).toHaveLength(1);
   await rerender(container, view(false));
   expect(container.querySelector('.agent-communication-letter')).toBeNull();

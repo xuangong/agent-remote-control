@@ -49,11 +49,11 @@ for (const family of ['Primary', 'Dock']) {
     page.on('pageerror', error => errors.push(error.message));
     await page.setViewportSize({ width: 1760, height: 900 });
     await page.goto(fixture);
-    await expect(page.getByRole('separator')).toHaveCount(6);
+    await expect(page.getByRole('separator', { name: /width$/ })).toHaveCount(6);
     for (const [name, delta] of [[family, 44], [`${family} child`, 36], [`${family} leaf`, 28]] as const) await resize(page, name, delta);
     const saved = await widths(page);
     await page.reload();
-    await expect(page.getByRole('separator')).toHaveCount(6);
+    await expect(page.getByRole('separator', { name: /width$/ })).toHaveCount(6);
     for (const name of names) await expect.poll(() => width(pane(page, name))).toBeCloseTo(saved[name]!, 0);
     const leaf = page.getByRole('separator', { name: `${family} leaf width`, exact: true });
     await leaf.scrollIntoViewIfNeeded();
@@ -67,7 +67,7 @@ test('a dock with no remaining children uses the same minimum width as every win
   test.setTimeout(30_000);
   await page.setViewportSize({ width: 1760, height: 900 });
   await page.goto(fixture);
-  await expect(page.getByRole('separator')).toHaveCount(6);
+  await expect(page.getByRole('separator', { name: /width$/ })).toHaveCount(6);
   await pane(page, 'Dock child').getByRole('button', { name: 'Close subagent', exact: true }).click();
   await expect(pane(page, 'Dock child')).toHaveCount(0);
   await expect(pane(page, 'Dock leaf')).toHaveCount(0);
@@ -86,7 +86,7 @@ test('one primary family can scroll to every child without another dock', async 
   test.setTimeout(30_000);
   await page.setViewportSize({ width: 1760, height: 900 });
   await page.goto(`${fixture}?primary-only`);
-  await expect(page.getByRole('separator')).toHaveCount(3);
+  await expect(page.getByRole('separator', { name: /width$/ })).toHaveCount(3);
   await expect(page.locator('.lab-session-dock-pane')).toHaveCount(0);
   const rail = page.locator('.lab-session-dock-rail');
   await rail.evaluate(element => { element.scrollLeft = element.scrollWidth; });
@@ -104,7 +104,7 @@ test('the window rail owns pane scrolling while Markdown content scrolls indepen
   test.setTimeout(30_000);
   await page.setViewportSize({ width: 1760, height: 900 });
   await page.goto(`${fixture}?content`);
-  await expect(page.getByRole('separator')).toHaveCount(6);
+  await expect(page.getByRole('separator', { name: /width$/ })).toHaveCount(6);
   const rail = page.locator('.lab-session-dock-rail');
   const families = page.locator('.lab-session-family');
   for (const family of await families.all()) {
@@ -138,7 +138,7 @@ test('a floating family keeps its own scrolling to reach attached sessions', asy
   test.setTimeout(30_000);
   await page.setViewportSize({ width: 1760, height: 900 });
   await page.goto(fixture);
-  await expect(page.getByRole('separator')).toHaveCount(6);
+  await expect(page.getByRole('separator', { name: /width$/ })).toHaveCount(6);
   await clickSessionAction(page, 'Float Dock');
   await expect(page.locator('.lab-session-dock-pane')).toHaveCount(0);
   const family = page.locator('.lab-bindable-session-window[data-view-id="dock"] .lab-session-family');
@@ -160,7 +160,7 @@ test('narrow presentation cancels a resize and removes handles without horizonta
   test.setTimeout(30_000);
   await page.setViewportSize({ width: 1760, height: 900 });
   await page.goto(fixture);
-  await expect(page.getByRole('separator')).toHaveCount(6);
+  await expect(page.getByRole('separator', { name: /width$/ })).toHaveCount(6);
   const original = await widths(page);
   const separator = page.getByRole('separator', { name: 'Primary width', exact: true });
   await separator.scrollIntoViewIfNeeded();
@@ -170,14 +170,14 @@ test('narrow presentation cancels a resize and removes handles without horizonta
   await page.mouse.move(x + 40, y, { steps: 8 });
   await expect.poll(() => width(pane(page, 'Primary'))).toBe(480);
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole('separator')).toHaveCount(0);
+  await expect(page.getByRole('separator', { name: /width$/ })).toHaveCount(0);
   await page.mouse.up();
   await expect(page.locator('.lab-session-dock-pane')).toHaveCount(0);
   await expect(pane(page, 'Primary')).toBeVisible();
   await expect(page.locator('.lab-session-family-pane:visible')).toHaveCount(1);
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.setViewportSize({ width: 1760, height: 900 });
-  await expect(page.getByRole('separator')).toHaveCount(6);
+  await expect(page.getByRole('separator', { name: /width$/ })).toHaveCount(6);
   for (const name of names) await expect.poll(() => width(pane(page, name))).toBe(original[name]);
   expect(await page.locator('[data-session-family-shell]').evaluateAll(elements => elements.map(element =>
     (element as HTMLElement).style.getPropertyValue('--lab-session-family-root-width')))).toEqual(['', '']);

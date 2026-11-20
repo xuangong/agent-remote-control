@@ -23,6 +23,15 @@ export async function toggleViewPanel(page: Page, panel: 'Header' | 'Sidebar' | 
   await page.keyboard.press('Escape');
 }
 
+/** Chooses how much of each turn's work shows, for every assistant on this device, from the session's view options. */
+export async function chooseProcessMode(page: Page, mode: 'Concise' | 'Process' | 'Full'): Promise<void> {
+  const expand = page.getByRole('button', { name: 'Expand session actions', exact: true });
+  if (await expand.isVisible()) await expand.click();
+  await page.getByRole('button', { name: 'Session view options', exact: true }).first().click();
+  await page.getByRole('group', { name: 'All assistants on this device' }).getByRole('button', { name: mode, exact: true }).click();
+  await page.keyboard.press('Escape');
+}
+
 export async function showTrace(page: Page): Promise<void> {
   if (!await page.getByRole('tab', { name: 'Trace', exact: true }).isVisible()) await toggleViewPanel(page, 'Header');
   await page.getByRole('tab', { name: 'Trace', exact: true }).click();

@@ -72,7 +72,7 @@ describe('App', () => {
     } finally { window.localStorage.removeItem(modeKey); window.localStorage.removeItem(lettersKey); }
   });
 
-  it('shows a hidden letter opened from Trace and lets Show letters hide it again', async () => {
+  it('shows a hidden letter opened from Trace in its own view and keeps Show letters as the reader left it', async () => {
     const modeKey = 'agent-remote:process-mode';
     const lettersKey = 'agent-remote:show-letters';
     window.localStorage.setItem(modeKey, 'concise');
@@ -87,9 +87,14 @@ describe('App', () => {
       expect(container.querySelector('[data-inspected="true"] .agent-communication-letter')).not.toBeNull();
       await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
       expect(container.querySelector('[role="group"][aria-label="All assistants on this device"] [aria-pressed="true"]')?.textContent).toBe('Concise');
-      expect(container.querySelector<HTMLInputElement>('[aria-label="Show letters"]')!.checked).toBe(true);
+      expect(container.querySelector<HTMLInputElement>('[aria-label="Show letters"]')!.checked).toBe(false);
+      expect(window.localStorage.getItem(lettersKey)).toBe('false');
+      // Showing letters and hiding them again leaves the letter Trace opened on the screen while it is the target.
       await act(async () => container.querySelector<HTMLInputElement>('[aria-label="Show letters"]')!.click());
-      expect(container.querySelector('.agent-communication-letter')).toBeNull();
+      expect(container.querySelectorAll('.agent-communication-letter')).toHaveLength(1);
+      await act(async () => container.querySelector<HTMLInputElement>('[aria-label="Show letters"]')!.click());
+      expect(container.querySelector('[data-inspected="true"] .agent-communication-letter')).not.toBeNull();
+      expect(window.localStorage.getItem(lettersKey)).toBe('false');
     } finally { window.localStorage.removeItem(modeKey); window.localStorage.removeItem(lettersKey); }
   });
 

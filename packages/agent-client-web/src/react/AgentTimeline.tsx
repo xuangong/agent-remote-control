@@ -145,20 +145,24 @@ export function AgentTimeline({
   // The fold reads every entry, so a turn keeps its key while letters are hidden; hidden letters only leave the screen.
   const folded = useMemo(() => foldTurns(state.timeline.entries, state.agent?.activeTurn ?? null, state.agent?.status, state.pendingInteractions.length),
     [state.timeline.entries, state.agent?.activeTurn, state.agent?.status, state.pendingInteractions.length]);
-  const turns = useMemo(() => lettersVisible ? folded : folded.map(turn => turn.letters.length ? { ...turn, letters: turn.letters.filter(entry =>
-    searchEntryKey !== undefined && timelineEntryKey(entry) === searchEntryKey) } : turn), [folded, lettersVisible, searchEntryKey]);
+  // Hidden letters leave the screen, except the one a search or a Trace target shows: the reader's choice holds in every view.
+  const turns = useMemo(() => lettersVisible ? folded : folded.map(turn => turn.letters.length ? { ...turn, letters: turn.letters.filter(entry => {
+    const key = timelineEntryKey(entry);
+    return key === searchEntryKey || key === inspectedEntryKey;
+  }) } : turn), [folded, lettersVisible, searchEntryKey, inspectedEntryKey]);
   const placement = useMemo(() => turnPlacement(turns), [turns]);
-  // The reader's own toggle of a turn's work line holds until the mode changes; a search or Trace target opens its turn once.
+  // The reader's own toggle of a turn's work line holds until the mode changes.
   const readerScope = JSON.stringify([state.agent?.id, processMode]);
   const revealRequest = JSON.stringify([searchEntryKey, searchRequestId, inspectedEntryKey, inspectedRequestId]);
   const [reader, setReader] = useState(() => ({ scope: readerScope, request: '', choices: new Map<string, boolean>(), revealed: new Set<string>() }));
   let current = reader;
   if (reader.scope !== readerScope || reader.request !== revealRequest) {
-    const keep = reader.scope === readerScope;
-    const choices = new Map(keep ? reader.choices : []), revealed = new Set(keep ? reader.revealed : []);
+    // A search or Trace target opens its turn while it is the target: a new one takes the reader's choice for that turn back, and
+    // once the search closes or the target moves on, the turn shows as its mode and the reader's own toggles say.
+    const choices = new Map(reader.scope === readerScope ? reader.choices : []), revealed = new Set<string>();
     for (const key of [searchEntryKey, inspectedEntryKey]) {
       const turn = key === undefined ? undefined : placement.workTurn.get(key);
-      if (turn !== undefined) { choices.set(turn, true); revealed.add(turn); }
+      if (turn !== undefined) { choices.delete(turn); revealed.add(turn); }
     }
     current = { scope: readerScope, request: revealRequest, choices, revealed };
     // Reveal during rendering: the workbench locates search and Trace targets in a layout effect.

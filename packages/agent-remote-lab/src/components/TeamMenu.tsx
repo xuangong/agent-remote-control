@@ -1,9 +1,9 @@
 import { createPortal } from 'react-dom';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { Translate } from '@orchardworks/agent-client';
-import { enumWords, errorWords, memberActivityWords, memberRoleWords, messageStatusWords, teamStatusWords } from '../team-words.js';
+import { enumWords, memberActivityWords, memberRoleWords, messageStatusWords, teamStatusWords } from '../team-words.js';
 import { useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
-import { RemoteTeamClient, watchList } from '@orchardworks/agent-client';
+import { errorWords, RemoteTeamClient, watchList } from '@orchardworks/agent-client';
 import type { Team, TeamAction, TeamSource } from '@orchardworks/agent-remote-protocol';
 import { workspaceFetch } from '../workspace-access.js';
 import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
@@ -29,7 +29,7 @@ interface Props {
 }
 /** How often the Team roster refreshes while someone looks at it or a Team is forming, and otherwise. */
 export const TEAM_REFRESH_MS = 4_000, TEAM_IDLE_REFRESH_MS = 30_000;
-const errorMessage = (t: Translate, error: unknown) => errorWords(t, error, 'team.team.operationFailed');
+const errorMessage = (t: Translate, error: unknown) => errorWords(error, t, 'team.team.operationFailed');
 const isCurrentMember = (member: Team['members'][number], current: Props['currentSession']) => !!current
   && member.hostId === (current.hostId ?? 'local') && member.providerId === current.providerId && member.nativeSessionId === current.nativeSessionId;
 export function TeamMenu(props: Props) {

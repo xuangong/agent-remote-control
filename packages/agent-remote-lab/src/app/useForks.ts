@@ -1,3 +1,4 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { type AgentCommandResult } from '@orchardworks/agent-remote-protocol';
 import { sessionKey } from '../session-tree.js';
 import type { AgentReplicaState } from '@orchardworks/agent-client';
@@ -5,7 +6,6 @@ import { SessionDirectoryClient, type OpenedSession } from '../directory-client.
 import { sideNavigationSource, sideNavigationTarget, sideLinkVisible, referenceForkContext, captureForkContext, type SessionFork } from '../session-forks.js';
 import { configureFork, sendForkInput } from '../fork-actions.js';
 import { viewKey } from './helpers.js';
-import { messageWords } from './message-words.js';
 import type { AppInputs } from './types.js';
 import { sessionQuotaMessage, sessionQuotaReached } from '../state/agent-creation.js';
 import { copiesConversation, firstInputPending, forkCommandRoute, forkCreateOptions, forkedSession, forkKey, forkSettings, needsWorkspaceLookup, selectsSideAfterFork, withForkContext, workspaceOptions } from '../state/fork-plan.js';
@@ -51,7 +51,7 @@ export function useForks(scope: Pick<AppInputs & WorkbenchShellSlice & SessionSu
       rememberSession(session);
       if (sideRequests.current.get(sideRequestKey(source)) === request && sideLinkVisible(forkStore.get(record.id)) && sessionKey(session) !== sessionKey(source)) selectSide(source, session);
     } catch (error) {
-      if (sideRequests.current.get(sideRequestKey(source)) === request) setFailure(messageWords(error, t('sessions.forks.openFailed'), t));
+      if (sideRequests.current.get(sideRequestKey(source)) === request) setFailure(errorWords(error, t, 'sessions.forks.openFailed'));
     }
   }
   async function createFork(sourceState: AgentReplicaState, saved: OpenedSession | undefined, id: string, args: string): Promise<AgentCommandResult> {
@@ -103,7 +103,7 @@ export function useForks(scope: Pick<AppInputs & WorkbenchShellSlice & SessionSu
       if (firstInputPending(args, forkStore.get(record.id).delivery)) {
         setForkInputStatus({ agentId: session.agentId, pending: true });
         try { await sendForkInput(transport, forkStore, forkStore.get(record.id), args.trim()); }
-        catch (error) { setForkInputStatus({ agentId: session.agentId, pending: false, error: messageWords(error, t('sessions.forks.firstInputFailed'), t) }); throw error; }
+        catch (error) { setForkInputStatus({ agentId: session.agentId, pending: false, error: errorWords(error, t, 'sessions.forks.firstInputFailed') }); throw error; }
         setForkInputStatus(undefined);
         if (draft.store.get(draft.key) === args.trim()) draft.store.set(draft.key, '');
       }

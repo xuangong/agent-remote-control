@@ -1,5 +1,5 @@
 import type { ResourceUploadReceipt } from '@orchardworks/agent-remote-protocol';
-import { withMessageKey } from '../presentation/error-words.js';
+import { withMessageKey } from '../presentation/locale-choice.js';
 
 export interface ResourceTransferOptions { signal?: AbortSignal; onProgress?(loaded: number, total: number): void }
 export type ResourceUploadRequest =

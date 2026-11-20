@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SessionViewActions } from './session-view-actions.js';
 import { useTranslate } from './locale.js';
-import { errorWordsOr } from './localized-error.js';
-import { type AgentReplicaState, findTimelineMatches, type TimelineSearchMatch, type TimelineSearchProgress, type TimelineSearchScope, timelineEntryKey } from '@orchardworks/agent-client';
+import { errorWords, findTimelineMatches, timelineEntryKey, type AgentReplicaState, type TimelineSearchMatch, type TimelineSearchProgress, type TimelineSearchScope } from '@orchardworks/agent-client';
 
 interface SearchState extends TimelineSearchProgress {
   query: string;
@@ -72,7 +71,7 @@ export function TimelineSearch({ state, search, onSelect, onClose, onClearSelect
       } })).then(value => {
         if (!controller.signal.aborted) setProgress({ ...value, query: needle, scope, phase: 'complete' });
       }, error => {
-        if (!controller.signal.aborted) setProgress(previous => ({ ...previous, phase: 'error', error: errorWordsOr(error, latest.current.t, 'timeline.search.failed') }));
+        if (!controller.signal.aborted) setProgress(previous => ({ ...previous, phase: 'error', error: errorWords(error, latest.current.t, 'timeline.search.failed') }));
       });
     }, 250);
     return () => { clearTimeout(timer); controller.abort(); };
@@ -99,7 +98,7 @@ export function TimelineSearch({ state, search, onSelect, onClose, onClearSelect
       await latest.current.onSelect(match, controller.signal);
       if (!controller.signal.aborted) setShowResults(false);
     } catch (error) {
-      if (!controller.signal.aborted) setJumpError(errorWordsOr(error, latest.current.t, 'timeline.search.openFailed'));
+      if (!controller.signal.aborted) setJumpError(errorWords(error, latest.current.t, 'timeline.search.openFailed'));
     } finally { if (!controller.signal.aborted) setJumping(false); }
   }
   function move(direction: number) {

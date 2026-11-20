@@ -12,7 +12,7 @@ import { watchPageResume, pageHidden } from '../page-lifecycle.js';
 import type {
   RemoteConnection, RemoteDisconnectReason, RemoteProtocolObservation, RemoteTransportDiagnostic, RemoteTransportListener,
 } from './transport.js';
-import { withMessageKey } from '../presentation/error-words.js';
+import { withMessageKey } from '../presentation/locale-choice.js';
 
 type Mode = 'session' | 'activity';
 type Negotiation = Extract<ClientMessage, { type: 'negotiate' }>;

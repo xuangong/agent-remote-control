@@ -2,13 +2,12 @@
 import { creationUnavailableReason as creationUnavailableReasonOf, providerChoices, providerConnectionName as providerConnectionNameOf, restoreHostSelection } from '../state/creation-choice.js';
 import { mayResume, resumedSession } from '../state/agent-creation.js';
 import { type SessionEntry, sessionKey } from '../session-tree.js';
-import { remoteSessionState } from '@orchardworks/agent-client';
+import { errorWords, remoteSessionState } from '@orchardworks/agent-client';
 import { conversationLocalStorage } from '../conversation-storage.js';
 import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
 import { useCallback, useEffect, useLayoutEffect, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
-import { messageWords } from './message-words.js';
 import { createAgentId, rememberedAgent, rememberAgent, openedSessionsKey, openedSessionMetadata } from './helpers.js';
 import type { PanelsAndShortcutsSlice } from './usePanelsAndShortcuts.js';
 import type { ViewTargetsSlice } from './useViewTargets.js';
@@ -64,7 +63,7 @@ export function useProviderCreation(scope: Pick<AppInputs & PanelsAndShortcutsSl
     } catch (error) {
       if (providerRequestGenerationRef.current !== generation) return;
       setCatalogStatus('error');
-      setCatalogError(messageWords(error, t('sessions.providerCreation.listFailed'), t));
+      setCatalogError(errorWords(error, t, 'sessions.providerCreation.listFailed'));
     }
   }, [transport]);
 
@@ -202,7 +201,7 @@ export function useProviderCreation(scope: Pick<AppInputs & PanelsAndShortcutsSl
         attach(response.payload.agentId);
       }
     } catch (error) {
-      if (navigationGeneration.current === generation) setFailure(messageWords(error, t('sessions.providerCreation.resumeFailed'), t));
+      if (navigationGeneration.current === generation) setFailure(errorWords(error, t, 'sessions.providerCreation.resumeFailed'));
     } finally {
       transitionRef.current = false;
       setTransitioning(false);

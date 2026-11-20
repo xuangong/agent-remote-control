@@ -1,3 +1,4 @@
+import { keyedError } from '@orchardworks/agent-client';
 import { useCallback, useEffect, useRef, useReducer } from 'react';
 import { createWindowView, type WindowOperation, type WindowSessionBinding, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { compositionSelection } from '../session-composition.js';
@@ -6,7 +7,6 @@ import { windowSessionBinding } from '../window-workspace.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 import type { OpenedSession } from '../directory-client.js';
 import type { useSessionSuccession } from './useSessionSuccession.js';
-import { WindowFailure } from '../window-errors.js';
 
 type Succession = Pick<ReturnType<typeof useSessionSuccession>, 'document' | 'desired' | 'selected' | 'discovering' | 'navigationIntent' | 'open' | 'openAttached' | 'ensureWindowView' | 'bindWindowView' | 'projectWindow' | 'leave' | 'clearPresentation'>;
 interface Options {
@@ -91,11 +91,11 @@ export function useWindowSessionBridge(options: Options) {
 
   const openPrimary = useCallback(async (session: SessionEntry, attached?: OpenedSession, restoreLayout = false, keepOriginal?: boolean, slotId?: string, targetViewId?: string, sessionIntent?: 'history', expectedBinding?: WindowSessionBinding | null): Promise<boolean> => {
     const current = latest.current, targetWindow = current.readWindow ? current.readWindow() : current.window;
-    if (current.unavailable) throw new WindowFailure('windows.error.chooseAvailable');
-    if (current.readOnly && targetWindow) throw new WindowFailure('windows.error.loadToOpen');
+    if (current.unavailable) throw keyedError('windows.error.chooseAvailable');
+    if (current.readOnly && targetWindow) throw keyedError('windows.error.loadToOpen');
     if (!targetWindow) return sessionIntent ? current.succession.open(session, sessionIntent, keepOriginal, slotId) : attached ? current.succession.openAttached(attached, restoreLayout) : current.succession.open(session);
     const destination = targetViewId ?? targetWindow.selectedPrimaryViewId;
-    if (destination && !targetWindow.views.some(view => view.id === destination && view.placement === 'primary')) throw new WindowFailure('windows.error.primaryUnavailable');
+    if (destination && !targetWindow.views.some(view => view.id === destination && view.placement === 'primary')) throw keyedError('windows.error.primaryUnavailable');
     const requestedBinding = windowSessionBinding(session, sessionIntent);
     const created = destination === null ? createWindowView(crypto.randomUUID(), requestedBinding, 'primary') : undefined;
     const viewId = created?.id ?? destination!, targetGroup = JSON.stringify([targetWindow.id, viewId]);

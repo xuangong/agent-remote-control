@@ -4,7 +4,7 @@ import {
   type WindowMergeRequest, type WindowMutation, type WindowOperationResult, type WindowPresentation, type WindowSessionBinding,
   type WindowSplitRequest, type WindowTransferRequest, type WorkspaceWindow,
 } from '@orchardworks/agent-remote-protocol';
-import { withMessageKey } from '../presentation/error-words.js';
+import { withMessageKey } from '../presentation/locale-choice.js';
 import type { MessageKey } from '../presentation/messages.js';
 
 export class WindowRequestError extends Error {

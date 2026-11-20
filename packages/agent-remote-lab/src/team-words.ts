@@ -1,14 +1,4 @@
-import { errorWords as clientErrorWords, translator, withMessageKey, type MessageKey, type MessageParams, type Translate } from '@orchardworks/agent-client';
-
-/** An error made for a person: its English `message` stays for logs and tests, its key lets the place that shows it use the person's language. */
-export function keyedError(key: MessageKey, params?: MessageParams): Error {
-  return withMessageKey(new Error(translator('en')(key, params)), key, params);
-}
-
-/** The words of an error for a person: its own key when it has one, else the message it carries, else the fallback. */
-export function errorWords(t: Translate, error: unknown, fallback: MessageKey, params?: MessageParams): string {
-  return (error instanceof Error ? clientErrorWords(error, t) : '') || t(fallback, params);
-}
+import type { MessageKey, Translate } from '@orchardworks/agent-client';
 
 /** The words of one value of a protocol enumeration; a value this build does not know is shown as it is. */
 export function enumWords<Value extends string>(t: Translate, table: Readonly<Record<Value, MessageKey>>, value: Value): string {

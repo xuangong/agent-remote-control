@@ -1,8 +1,7 @@
 import { useBoundDraft, type DraftBinding } from '../draft-store.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { keyedError } from '../team-words.js';
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type RefObject, type ReactNode } from 'react';
-import { storedWords, type AgentReplica, type RemoteAgentTransport } from '@orchardworks/agent-client';
+import { keyedError, storedWords, type AgentReplica, type RemoteAgentTransport } from '@orchardworks/agent-client';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 import { isAskAttached, askParticipantKey, type AskEntry, type AskInput, type AskInputSender } from '../hooks/useAskConversations.js';
 import { useConversationSession } from '../hooks/useConversationSession.js';

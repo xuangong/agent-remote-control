@@ -6,9 +6,8 @@ import { conversationSessionStorage } from '../conversation-storage.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TpmCreate, TpmList, TpmWork } from '@orchardworks/agent-remote-protocol';
 import type { SessionTodoDecision } from '@orchardworks/agent-remote-protocol';
-import { watchList, type TpmActionInput } from '@orchardworks/agent-client';
+import { errorWords, watchList, type TpmActionInput } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { errorWords } from '../team-words.js';
 import type { OpenedSession } from '../directory-client.js';
 import type { SessionEntry } from '../session-tree.js';
 
@@ -45,7 +44,7 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
   /** Whether the TPM list is open: with an open TPM workspace, what keeps catalogs refreshing closely. */
   listOpen = false) {
   const t = useTranslate();
-  const message = (error: unknown): string => errorWords(t, error, 'team.tpm.operationFailed');
+  const message = (error: unknown): string => errorWords(error, t, 'team.tpm.operationFailed');
   const storageKey = storageScope ? `agent-remote:recovery:${storageScope}:tpm-windows` : undefined;
   const shared = useRef(authority); shared.current = authority;
   const [restored] = useState(() => authority ? [] : readWindows(storageKey));

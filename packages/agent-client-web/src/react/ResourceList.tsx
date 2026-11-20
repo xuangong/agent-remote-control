@@ -3,9 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { ResourceBinding } from '@orchardworks/agent-remote-protocol';
 
 import { useTranslate } from './locale.js';
-import { errorWordsOr } from './localized-error.js';
 import { canPreviewImage, ResourceCard } from './ResourceCard.js';
-import { type AgentReplicaState } from '@orchardworks/agent-client';
+import { errorWords, type AgentReplicaState } from '@orchardworks/agent-client';
 
 export interface ResourceListProps {
   readonly bindings: readonly ResourceBinding[];
@@ -32,7 +31,7 @@ export function ResourceList({ bindings, resources, labels, onRequest }: Resourc
     } catch (error) {
       setFailures((current) => ({
         ...current,
-        [binding.resourceId]: errorWordsOr(error, t, 'timeline.resource.requestFailed'),
+        [binding.resourceId]: errorWords(error, t, 'timeline.resource.requestFailed'),
       }));
     } finally {
       setPending((current) => {

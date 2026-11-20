@@ -1,8 +1,8 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { useFeedbackToast } from './Toast.js';
 import { Fragment, type ReactElement, type ReactNode, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AgentReplicaState, RemoteSessionStatus } from '@orchardworks/agent-client';
 import { createTimelineRenderModel, useTranslate, type SessionLinkResolver } from '@orchardworks/agent-client-web/react';
-import { errorWords } from '../window-errors.js';
 import { traceItemLabel, traceItemLabels, traceItemStatus, traceItemSummary, traceSequence, traceSessionReferences, type TraceEntryRequest } from '../trace-model.js';
 import { TraceEntryDetails } from './TraceEntryDetails.js';
 import { TraceSessionLinks } from './TraceSessionLinks.js';

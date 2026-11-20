@@ -38,7 +38,7 @@ import type {
   RemoteTransportListener,
   RemoteServerMessage, SessionSuccessionSelection, SessionSuccessionSupport,
 } from './transport.js';
-import { withMessageKey } from '../presentation/error-words.js';
+import { withMessageKey } from '../presentation/locale-choice.js';
 
 type WebSocketEventHandler<TEvent> = {
   bivarianceHack(event: TEvent): void;

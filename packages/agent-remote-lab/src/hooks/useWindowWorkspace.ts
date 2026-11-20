@@ -1,6 +1,6 @@
 import { createWindowSessionBridge, resolveCompositionWindowViewId } from '../window-composition.js';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { WindowWorkspaceClient, WindowMutationUnknownError, WindowRequestError, type WindowOperationIdentity, type WindowSnapshot } from '@orchardworks/agent-client';
+import { errorWords, keyedError, WindowMutationUnknownError, WindowRequestError, WindowWorkspaceClient, type WindowOperationIdentity, type WindowSnapshot } from '@orchardworks/agent-client';
 import type { WindowCreateRequest, WindowOperation, WindowSessionBinding, WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { conversationLocalStorage, conversationSessionStorage } from '../conversation-storage.js';
 import { captureImportedWindowComposition, restoreImportedWindowComposition, commitImportedWindowComposition, importCompositionWindow, WindowWorkspaceStore } from '../window-workspace.js';
@@ -10,7 +10,6 @@ import type { WindowSaveState } from '../window-workspace-store.js';
 import { appendedRank } from '../bot-roster.js';
 import { newAssistantPicture } from '../assistant-picture.js';
 import { applyGroupOperation, applyWindowOperation, createWindowView, decodeWindowGroup, decodeWorkspaceWindow, hasWindowAppearance, isWindowCreateRequest, isWindowGroupCreateRequest, toWindowGroup, windowPrimaryViewId, type WindowGroup, type WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
-import { WindowFailure, errorWords } from '../window-errors.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 interface PendingCreation { request: WindowCreateRequest; candidate: WorkspaceWindow; bindings: Array<[string, string]> }
@@ -181,9 +180,9 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     const next = new WindowWorkspaceStore(group, client, client ? () => cache(next.getCommittedGroup()) : undefined, client ? undefined : async (source, operation) => {
       const commit = async () => {
         const value = decodeWindowGroup(JSON.parse(conversationLocalStorage.getItem(`${key}:${source.window.id}`) ?? 'null'));
-        if (!value) throw new WindowFailure('windows.error.localUnavailable');
+        if (!value) throw keyedError('windows.error.localUnavailable');
         const replacesLayout = operation.type === 'layout.apply' || operation.type === 'batch' && operation.operations.some(edit => edit.type === 'layout.apply');
-        if (replacesLayout && value.window.revision !== source.window.revision) throw new WindowFailure('windows.error.layoutChanged');
+        if (replacesLayout && value.window.revision !== source.window.revision) throw keyedError('windows.error.layoutChanged');
         const result = applyGroupOperation(value, operation); persistLocal(result); return result;
       };
       return globalThis.navigator.locks ? globalThis.navigator.locks.request(`${key}:${source.window.id}`, commit) : commit();
@@ -218,7 +217,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     const value: unknown = JSON.parse(saved);
     const raw = value && typeof value === 'object' && 'request' in value ? value.request : undefined;
     const candidate = raw && typeof raw === 'object' && 'window' in raw ? decodeWorkspaceWindow(raw.window) : undefined;
-    if (!candidate || !raw || typeof raw !== 'object' || !isWindowCreateRequest({ ...raw, window: candidate })) throw new WindowFailure('windows.error.pendingWindow');
+    if (!candidate || !raw || typeof raw !== 'object' || !isWindowCreateRequest({ ...raw, window: candidate })) throw keyedError('windows.error.pendingWindow');
     // Keep the serialized payload unchanged for legacy receipt fingerprints.
     const pending: PendingCreation = { request: raw as WindowCreateRequest, candidate, bindings: value && typeof value === 'object' && 'bindings' in value && Array.isArray(value.bindings) ? value.bindings : [] };
     restoreImportedWindowComposition(composition, candidate, pending.bindings);
@@ -299,8 +298,8 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   const acquireGroup = useCallback(async (id: string): Promise<GroupHandle> => {
     const ticket = admission;
     const live = () => inScope() && access.current && currentAdmission.current === ticket && !selection.deleted.has(id);
-    if (!live()) throw new WindowFailure('windows.error.scopeChanged');
-    if (deletions.has(id)) throw new WindowFailure('windows.error.unsettledDeletion');
+    if (!live()) throw keyedError('windows.error.scopeChanged');
+    if (deletions.has(id)) throw keyedError('windows.error.unsettledDeletion');
     let target = stores.get(id);
     if (!target || client && !confirmedStores.has(target)) {
       let loading = acquisitions.get(id);
@@ -309,8 +308,8 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
           let group: WindowGroup | undefined;
           try { group = client ? toWindowGroup(await client.inspect(id)) : readCached(id); }
           catch (error) { if (live() && error instanceof WindowRequestError && error.status === 404) forgetDeletedWindow(id); throw error; }
-          if (!live()) throw new WindowFailure('windows.error.scopeChanged');
-          if (!group || group.window.id !== id) throw new WindowFailure('windows.error.groupUnavailable');
+          if (!live()) throw keyedError('windows.error.scopeChanged');
+          if (!group || group.window.id !== id) throw keyedError('windows.error.groupUnavailable');
           const next = makeStore(group); next.accept(group); confirmedStores.add(next); return next;
         })();
         acquisitions.set(id, loading);
@@ -318,9 +317,9 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       }
       target = await loading;
     }
-    if (!live()) throw new WindowFailure('windows.error.scopeChanged');
+    if (!live()) throw keyedError('windows.error.scopeChanged');
     const releaseWatch = leaseStore(target); let released = false;
-    const assertLive = () => { if (released || !live() || stores.get(id) !== target) throw new WindowFailure('windows.error.leaseChanged'); };
+    const assertLive = () => { if (released || !live() || stores.get(id) !== target) throw keyedError('windows.error.leaseChanged'); };
     return {
       getGroup: target.getGroup, getSyncState: target.getSyncState, subscribe: target.subscribe,
       operate: operation => { assertLive(); return target!.operate(operation); },
@@ -332,10 +331,10 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   const operateGroup = useCallback(async (id: string, operation: WindowGroupOperation) => {
     const replacesLayout = operation.type === 'layout.apply' || operation.type === 'batch' && operation.operations.some(edit => edit.type === 'layout.apply');
     const expectedRevision = replacesLayout ? readGroup(id)?.window.revision : undefined;
-    if (replacesLayout && expectedRevision === undefined) throw new WindowFailure('windows.error.readGroupFirst');
+    if (replacesLayout && expectedRevision === undefined) throw keyedError('windows.error.readGroupFirst');
     const handle = await acquireGroup(id);
     try {
-      if (replacesLayout && handle.getGroup().window.revision !== expectedRevision) throw new WindowFailure('windows.error.groupLayoutChanged');
+      if (replacesLayout && handle.getGroup().window.revision !== expectedRevision) throw keyedError('windows.error.groupLayoutChanged');
       await handle.operate(operation);
     } finally { handle.release(); }
   }, [acquireGroup, readGroup]);
@@ -370,7 +369,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     if (!saved) { sectionCreation.pending = null; return; }
     const value = JSON.parse(saved) as PendingSectionCreation;
     const group = decodeWindowGroup(value?.group);
-    if (!group || !isWindowGroupCreateRequest({ ...group, operationId: value.operationId, issuedAt: value.issuedAt })) throw new WindowFailure('windows.error.pendingSection');
+    if (!group || !isWindowGroupCreateRequest({ ...group, operationId: value.operationId, issuedAt: value.issuedAt })) throw keyedError('windows.error.pendingSection');
     sectionCreation.pending = { ...value, group }; return sectionCreation.pending;
   };
   /**
@@ -378,7 +377,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
    * session (`template`). An uncertain request is kept and only Retry submits it again.
    */
   const createSectionRequest = (title: string | undefined, explicitRetry: boolean, template?: () => WindowGroup): Promise<string> => {
-    if (!inScope() || !access.current) return Promise.reject(new WindowFailure('windows.error.scopeChanged'));
+    if (!inScope() || !access.current) return Promise.reject(keyedError('windows.error.scopeChanged'));
     if (sectionCreation.running) return sectionCreation.running;
     const previous = pendingSection();
     if (!previous && title === undefined && !template) return Promise.resolve('');
@@ -400,13 +399,13 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
         try { confirmed = toWindowGroup(await client.recoverCreate(previous.group.window, previous)); }
         catch (error) {
           if (!explicitRetry || !(error instanceof WindowMutationUnknownError) || error.result?.status === 'committed') throw error;
-          if (!inScope() || !access.current || currentAdmission.current !== ticket) throw new WindowFailure('windows.error.scopeChanged');
+          if (!inScope() || !access.current || currentAdmission.current !== ticket) throw keyedError('windows.error.scopeChanged');
           confirmed = await submit();
         }
       }
       clear();
       sectionCreation.publish({ state: 'idle' });
-      if (!inScope() || !access.current || currentAdmission.current !== ticket) throw new WindowFailure('windows.error.scopeChanged');
+      if (!inScope() || !access.current || currentAdmission.current !== ticket) throw keyedError('windows.error.scopeChanged');
       const next = makeStore(confirmed); next.accept(confirmed); confirmedStores.add(next); updateCatalog(next.getGroup()); return confirmed.window.id;
     };
     const result = run().catch(error => {
@@ -567,8 +566,8 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   }, [stores, client, key, participating]);
   const operate = (operation: WindowGroupOperation): Promise<void> => {
     const active = currentStore.current;
-    if (!active || currentlyUnavailable.current || !inScope()) throw new WindowFailure('windows.error.openToEdit');
-    if (currentlyProvisional.current) return Promise.reject(new WindowFailure('windows.error.loadToEdit'));
+    if (!active || currentlyUnavailable.current || !inScope()) throw keyedError('windows.error.openToEdit');
+    if (currentlyProvisional.current) return Promise.reject(keyedError('windows.error.loadToEdit'));
     applyGroupOperation(active.getGroup(), operation);
     return active.operate(operation).catch(error => {
       if (inScope() && currentStore.current === active) setError(shown(error));
@@ -586,7 +585,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     acquireGroup, readGroup, operateGroup, refreshGroups,
     /** Starts a group from a new session: its Window holds the session as the primary view, and it shows in both modes, named after the session. */
     async createBotGroup(binding: WindowSessionBinding): Promise<{ groupId: string; viewId: string }> {
-      if (pendingSection()) throw new WindowFailure('windows.error.unconfirmedGroup');
+      if (pendingSection()) throw keyedError('windows.error.unconfirmedGroup');
       const viewId = 'main';
       const groupId = await createSectionRequest(undefined, false, () => ({
         window: { ...emptyWindow(), title: binding.title || 'New session', views: [createWindowView(viewId, binding, 'primary')], selectedPrimaryViewId: viewId, selectedViewId: viewId },
@@ -594,7 +593,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       return { groupId, viewId };
     },
     async createSection(title: string): Promise<string> {
-      const trimmed = title.trim(); if (!trimmed) throw new WindowFailure('windows.error.titleRequired'); if (trimmed.length > 256) throw new WindowFailure('windows.error.titleTooLong');
+      const trimmed = title.trim(); if (!trimmed) throw keyedError('windows.error.titleRequired'); if (trimmed.length > 256) throw keyedError('windows.error.titleTooLong');
       return createSectionRequest(trimmed, false);
     },
     discardLocalChanges: () => currentStore.current?.discardPendingChanges() ?? Promise.resolve(), unavailable: participating && enabled && unavailable, operate, readWindow,
@@ -605,25 +604,25 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     } : undefined,
     sessionBridge: window && !unavailable ? createWindowSessionBridge(composition, window) : undefined,
     async open(id: string) {
-      if (deletions.has(id)) throw new WindowFailure('windows.error.unsettledWindowDeletion');
+      if (deletions.has(id)) throw keyedError('windows.error.unsettledWindowDeletion');
       const generation = ++selection.generation;
       const cached = readCached(id);
       if (cached && (!workspaceNavigation || hasWindowAppearance(cached))) { choose(cached, false, !client); setError(undefined); }
       let next: WindowGroup;
       try {
         if (client) next = toWindowGroup(await client.inspect(id));
-        else { const cached = decodeWindowGroup(JSON.parse(conversationLocalStorage.getItem(`${key}:${id}`) ?? 'null')); if (!cached || cached.window.id !== id) throw new WindowFailure('windows.error.localWindowUnavailable'); next = cached; }
+        else { const cached = decodeWindowGroup(JSON.parse(conversationLocalStorage.getItem(`${key}:${id}`) ?? 'null')); if (!cached || cached.window.id !== id) throw keyedError('windows.error.localWindowUnavailable'); next = cached; }
       } catch (error) {
         if (generation !== selection.generation) return;
         if (error instanceof WindowRequestError && error.status === 404) forgetDeletedWindow(id);
         throw error;
       }
       if (generation !== selection.generation) return;
-      if (!inScope()) throw new WindowFailure('windows.error.scopeBeforeOpening');
+      if (!inScope()) throw keyedError('windows.error.scopeBeforeOpening');
       if (workspaceNavigation && !hasWindowAppearance(next)) {
         if (currentStore.current?.getSnapshot().id === id) selectStore(undefined);
         makeStore(next).accept(next); updateCatalog(next);
-        throw new WindowFailure('windows.error.sectionWithoutAppearance');
+        throw keyedError('windows.error.sectionWithoutAppearance');
       }
       setError(undefined); choose(next);
     },
@@ -643,8 +642,8 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     async rename(id: string, title: string): Promise<{ saved: Promise<void> }> {
       const operation: WindowOperation = { type: 'rename', title };
       if (currentStore.current?.getSnapshot().id === id) return { saved: operate(operation) };
-      if (!inScope()) throw new WindowFailure('windows.error.scopeBeforeRenaming');
-      if (selection.deleted.has(id) || deletions.has(id)) throw new WindowFailure('windows.error.beingDeleted');
+      if (!inScope()) throw keyedError('windows.error.scopeBeforeRenaming');
+      if (selection.deleted.has(id) || deletions.has(id)) throw keyedError('windows.error.beingDeleted');
       let target = stores.get(id);
       if (!target) {
         let group: WindowGroup | undefined;
@@ -653,8 +652,8 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
           if (error instanceof WindowRequestError && error.status === 404) forgetDeletedWindow(id);
           throw error;
         }
-        if (!group || group.window.id !== id) throw new WindowFailure('windows.error.windowUnavailable');
-        if (!inScope() || selection.deleted.has(id)) throw new WindowFailure('windows.error.scopeBeforeRenaming');
+        if (!group || group.window.id !== id) throw keyedError('windows.error.windowUnavailable');
+        if (!inScope() || selection.deleted.has(id)) throw keyedError('windows.error.scopeBeforeRenaming');
         target = stores.get(id) ?? makeStore(group);
       }
       const store = target, saved = store.operate(operation);
@@ -664,10 +663,10 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     },
     async remove(id: string) {
       const assertInactive = () => {
-        if (!id) throw new WindowFailure('windows.error.chooseToDelete');
+        if (!id) throw keyedError('windows.error.chooseToDelete');
         const active = currentStore.current;
-        if (!inScope() || !active || !confirmedStores.has(active)) throw new WindowFailure('windows.error.openBeforeDelete');
-        if (active.getSnapshot().id === id) throw new WindowFailure('windows.error.switchBeforeDelete');
+        if (!inScope() || !active || !confirmedStores.has(active)) throw keyedError('windows.error.openBeforeDelete');
+        if (active.getSnapshot().id === id) throw keyedError('windows.error.switchBeforeDelete');
       };
       assertInactive();
       if (client) {
@@ -677,13 +676,13 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
         pending.running ??= (async () => {
           const recovering = pending.dispatched;
           if (!pending.window) pending.window = (await client.inspect(id)).window;
-          if (!inScope()) throw new WindowFailure('windows.error.scopeBeforeDeletion');
+          if (!inScope()) throw keyedError('windows.error.scopeBeforeDeletion');
           assertInactive();
           if (recovering) {
             try { await client.recoverDelete(pending.window, pending.identity); return; }
             catch (error) { if (!(error instanceof WindowMutationUnknownError)) throw error; }
           }
-          if (!inScope()) throw new WindowFailure('windows.error.scopeBeforeDeletion');
+          if (!inScope()) throw keyedError('windows.error.scopeBeforeDeletion');
           assertInactive();
           pending.dispatched = true;
           try { await client.delete(pending.window, pending.identity); }

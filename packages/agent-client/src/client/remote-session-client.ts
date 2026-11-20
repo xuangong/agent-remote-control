@@ -43,7 +43,7 @@ import {
   type RemoteConnection,
   type RemoteServerMessage,
 } from './transport.js';
-import { withMessageKey } from '../presentation/error-words.js';
+import { withMessageKey } from '../presentation/locale-choice.js';
 import type { MessageKey } from '../presentation/messages.js';
 
 /** unavailable: the Relay refused the session (for example a native client owns it); it is not retried until the page resumes or the session reopens. */

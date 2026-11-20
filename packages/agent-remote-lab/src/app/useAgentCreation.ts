@@ -1,9 +1,9 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { classifyCreationFailure, mayCreate, partialCreationMessage, planningOption, reservationFor } from '../state/agent-creation.js';
 import { windowSessionBinding } from '../window-workspace.js';
 import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
 import { DirectoryError } from '../directory-client.js';
 import { createAgentId } from './helpers.js';
-import { messageWords } from './message-words.js';
 import type { AppInputs } from './types.js';
 import type { HostAndStackSlice } from './useHostAndStack.js';
 import type { ViewSessionStateSlice } from './useViewSessionState.js';
@@ -77,7 +77,7 @@ export function useAgentCreation(scope: Pick<AppInputs & HostAndStackSlice & Vie
       dispatchPanels({ type: 'sessionPanel.set', panel: 'list' });
     } catch (error) {
       const outcome = classifyCreationFailure({ code: error instanceof DirectoryError ? error.code : undefined, directoryError: error instanceof DirectoryError, hasDirectory: !!directory,
-        reservationHeld: !!creationReservation.current, bot, botSessionCreated: botSession, message: messageWords(error, t('sessions.creation.failed'), t) });
+        reservationHeld: !!creationReservation.current, bot, botSessionCreated: botSession, message: errorWords(error, t, 'sessions.creation.failed') });
       if (outcome.partialNotice) {
         const notice = sessionConnectionFailure(error, false, t);
         setSessionNotice({ ...notice, operation: t('sessions.connection.createSession'), message: partialCreationMessage(notice.message) });

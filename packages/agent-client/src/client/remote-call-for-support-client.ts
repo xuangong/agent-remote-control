@@ -1,5 +1,5 @@
 import { isCallForSupportProfile, type CallForSupportProfile, type CallForSupportProfileInput } from '@orchardworks/agent-remote-protocol';
-import { withMessageKey } from '../presentation/error-words.js';
+import { withMessageKey } from '../presentation/locale-choice.js';
 
 /** The profiles a session may call for, on the session that holds its role now. */
 export interface CallForSupportEnablement { hostId: string; providerId: string; nativeSessionId: string; profileIds: string[]; updatedAt: number }

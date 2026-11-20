@@ -1,5 +1,4 @@
 // Quoting, references and the earlier conversation.
-import { messageWords } from './message-words.js';
 import { quoteTargets as quoteTargetsOf } from '../state/quote-targets.js';
 import { selectedKeys } from '../state/quote-selection.js';
 import { createWindowView, type Team, createSessionExcerpt } from '@orchardworks/agent-remote-protocol';
@@ -7,7 +6,7 @@ import { windowSessionBinding } from '../window-workspace.js';
 import { type SessionEntry, sessionKey } from '../session-tree.js';
 import { EarlierConversation } from '../components/EarlierConversation.js';
 import { useCallback, useRef } from 'react';
-import { timelineEntryKey, type AgentReplicaState } from '@orchardworks/agent-client';
+import { errorWords, timelineEntryKey, type AgentReplicaState } from '@orchardworks/agent-client';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import type { LabWorkbenchActions } from '../components/LabWorkbench.js';
 import { SessionAsk } from '../components/SessionAsk.js';
@@ -111,7 +110,7 @@ export function useQuotesAndReferences(scope: Pick<AppInputs & RequestedSessionS
         await windowWorkspace.open(landing.windowId); revealQuoteTarget(destination);
       } } });
     } catch (error) {
-      dispatchQuote({ type: 'failed', viewId, error: messageWords(error, t('sessions.quoteFlow.failed'), t) });
+      dispatchQuote({ type: 'failed', viewId, error: errorWords(error, t, 'sessions.quoteFlow.failed') });
     }
   }
 

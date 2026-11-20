@@ -1,3 +1,4 @@
+import { keyedError } from '@orchardworks/agent-client';
 import { createWindowFeature, parseWindowFeature } from '../window-feature-views.js';
 import { windowSessionBinding } from '../window-workspace.js';
 import { createWindowView, type WindowOperation } from '@orchardworks/agent-remote-protocol';
@@ -5,7 +6,6 @@ import type { WindowLayoutAuthority } from '../window-workspace-context.js';
 import { useEffect, useRef, useState } from 'react';
 import { conversationSessionStorage } from '../conversation-storage.js';
 import { sessionKey } from '../session-tree.js';
-import { WindowFailure } from '../window-errors.js';
 import { bindCompositionView, compositionSelection, createCompositionView, SESSION_VIEW_LIMIT,
   type CompositionDocument, type CompositionSlot, type CompositionWindow } from '../session-composition.js';
 
@@ -96,12 +96,12 @@ export function useSessionWindows(scope: string, access: CompositionAccess) {
     if (latest.current.shared) { latest.current.shared.operate({ type: 'view.bind', viewId: id, binding: windowSessionBinding(target) }); return; }
     const { document, ensureView, save } = latest.current;
     const view = document.windows?.find(view => view.id === id);
-    if (!view || view.managed) throw new WindowFailure('windows.error.viewManaged');
-    if (!validTarget(target)) throw new WindowFailure('windows.error.identityIncomplete');
+    if (!view || view.managed) throw keyedError('windows.error.viewManaged');
+    if (!validTarget(target)) throw keyedError('windows.error.identityIncomplete');
     bindCompositionView(document, id, ensureView(target).id); save();
   }
   function uniqueTargets(targets: SessionWindowTarget[]) {
-    if (targets.some(target => !validTarget(target))) throw new WindowFailure('windows.error.identityIncomplete');
+    if (targets.some(target => !validTarget(target))) throw keyedError('windows.error.identityIncomplete');
     return [...new Map(targets.map(target => [sessionKey(target), target])).values()];
   }
   function matchesTarget(view: CompositionWindow, target: SessionWindowTarget) {
@@ -110,7 +110,7 @@ export function useSessionWindows(scope: string, access: CompositionAccess) {
   }
   function checkCapacity(missing: number) {
     if ((latest.current.document.windows?.length ?? 0) + missing > SESSION_VIEW_LIMIT) {
-      throw new WindowFailure('windows.error.viewLimit', { limit: SESSION_VIEW_LIMIT });
+      throw keyedError('windows.error.viewLimit', { limit: SESSION_VIEW_LIMIT });
     }
   }
   function open(targets: SessionWindowTarget[], groupRoot?: SessionWindowTarget, groupId?: string) {

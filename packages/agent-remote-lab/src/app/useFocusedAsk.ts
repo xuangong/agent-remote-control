@@ -1,11 +1,11 @@
 // The focused view, its Ask and its source.
+import { errorWords, keyedError } from '@orchardworks/agent-client';
 import { fixtureStaleness, viewStaleness, type CapturedBot, type GroupBindingLookup } from '../state/source-currency.js';
 import { windowBindingKey } from '../window-composition.js';
 import { useSessionRelations } from '../hooks/useSessionRelations.js';
 import type { SourceStaleness, AgentReplicaState } from '@orchardworks/agent-client';
 import { useRef } from 'react';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { errorWords, keyedError } from '../team-words.js';
 import { compositionSession, compositionSelection } from '../session-composition.js';
 import type { OpenedSession } from '../directory-client.js';
 import { sessionKey } from '../session-tree.js';
@@ -156,10 +156,10 @@ export function useFocusedAsk(scope: Pick<AppInputs & HostAndStackSlice & SideSe
         throw new Error(t('team.ask.error.sourceReferenceChanged'));
       }
     };
-    try { requireSource(); } catch (error) { setFailure(errorWords(t, error, 'team.ask.error.couldNotOpen')); return; }
+    try { requireSource(); } catch (error) { setFailure(errorWords(error, t, 'team.ask.error.couldNotOpen')); return; }
     void ask.open(sourceState, source, '', clean, { associationOwner, existingOnly, synchronize: async () => {
       requireSource(); await refreshRelations(); requireSource();
-    } }).catch(error => setFailure(errorWords(t, error, 'team.ask.error.couldNotOpen')));
+    } }).catch(error => setFailure(errorWords(error, t, 'team.ask.error.couldNotOpen')));
   }
   late.addressSession = addressSession;
   return { focusedWindow, focusedFamilyWindow, focusedFamilyIndex, primaryExpanded, addressSession, focusedMenuSession, focusedSessionKey, focusedMenuStatus, focusedAskSession, focusedAskEntry, currentGroupBinding, sourceStateFor, focusedAskState, focusedAskUnavailable, canOpenFocusedAsk, refreshRelations, pendingSideSources, unlinkSide, removedReference, restoredReference, sourceCurrent, assertSourceCurrent, openAsk };

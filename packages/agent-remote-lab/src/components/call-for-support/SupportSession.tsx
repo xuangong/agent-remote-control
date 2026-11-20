@@ -1,8 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { RemoteCallForSupportClient, type CallForSupportSettings, type MessageKey, type RemoteTeamClient } from '@orchardworks/agent-client';
+import { errorWords, RemoteCallForSupportClient, type CallForSupportSettings, type MessageKey, type RemoteTeamClient } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { callStatusWords, enumWords, errorWords } from '../../team-words.js';
+import { callStatusWords, enumWords } from '../../team-words.js';
 import { isCallForSupportCallInput, type CallForSupportCallInput, type CallForSupportDeliverable, type CallForSupportProfile, type Team, type TeamSource } from '@orchardworks/agent-remote-protocol';
 import { workspaceFetch } from '../../workspace-access.js';
 import './call-for-support.css';
@@ -34,7 +34,7 @@ export function SupportSession({ baseUrl, source, teams, teamClient, busy, run, 
   const [choice, setChoice] = useState<string[]>(), [calling, setCalling] = useState(false);
   useEffect(() => {
     let stopped = false; setSettings(undefined); setChoice(undefined);
-    void client.read().then(value => { if (!stopped) { setSettings(value); setLoadError(''); } }, error => { if (!stopped) setLoadError(errorWords(t, error, 'team.support.unavailable')); });
+    void client.read().then(value => { if (!stopped) { setSettings(value); setLoadError(''); } }, error => { if (!stopped) setLoadError(errorWords(error, t, 'team.support.unavailable')); });
     return () => { stopped = true; };
   }, [client, source.hostId, source.providerId, source.nativeSessionId]);
   const groups = workerGroups(teams, source);

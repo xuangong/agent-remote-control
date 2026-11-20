@@ -1,7 +1,7 @@
+import { keyedError } from '@orchardworks/agent-client';
 import type { SessionEntry } from './session-tree.js';
 import { compositionSelection, type CompositionDocument } from './session-composition-model.js';
 import type { SideSelections } from './side-tree.js';
-import { keyedError } from './team-words.js';
 
 export interface TrackedSessionView {
   primary: SessionEntry;

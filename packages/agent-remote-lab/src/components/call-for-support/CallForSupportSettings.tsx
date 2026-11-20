@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CallForSupportConflictError, RemoteCallForSupportClient, type Translate } from '@orchardworks/agent-client';
+import { CallForSupportConflictError, errorWords, RemoteCallForSupportClient, type Translate } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { errorWords } from '../../team-words.js';
 import type { CallForSupportProfile, CallForSupportProfileInput } from '@orchardworks/agent-remote-protocol';
 import { workspaceFetch } from '../../workspace-access.js';
 import { ProfileEditor, type SupportProvider } from './ProfileEditor.js';
 import './call-for-support.css';
 
 interface Host { id: string; name: string; providers?: SupportProvider[] }
-const errorMessage = (t: Translate, error: unknown) => errorWords(t, error, 'team.support.unavailable');
+const errorMessage = (t: Translate, error: unknown) => errorWords(error, t, 'team.support.unavailable');
 /** Every provider any Host offers, once. */
 export function supportProviders(hosts: readonly Host[]): SupportProvider[] {
   const providers = new Map<string, SupportProvider>();

@@ -1,4 +1,5 @@
 // Window selection, mode switching and the actions search runs.
+import { errorWords, keyedError } from '@orchardworks/agent-client';
 import { parseWindowFeature } from '../window-feature-views.js';
 import type { WindowView, WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
 import type { BotSessionRef } from '../bot-roster.js';
@@ -27,7 +28,6 @@ import type { ProviderStateSlice } from './useProviderState.js';
 import type { SharedFeedsAndTpmSlice } from './useSharedFeedsAndTpm.js';
 import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';
 import type { AppInputs } from './types.js';
-import { WindowFailure, errorWords } from '../window-errors.js';
 
 export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBindingSlice & SessionOpeningSlice & ViewSessionStateSlice & PanelsAndShortcutsSlice & ActiveSessionSlice & DocksAndBotSelectionSlice & WindowViewActionsSlice & WorkbenchShellSlice & ProviderStateSlice & SharedFeedsAndTpmSlice & WorkbenchRecordsSlice, 'addSessionView' | 'askView' | 'baseUrl' | 'closeContext' | 'closeInspector' | 'closePage' | 'compactLayout' | 'createWindowFromMenu' | 'expandedKeys' | 'modeSteps' | 'navigation' | 'openDirectorySession' | 'openSession' | 'presentedViewId' | 'setQueuedModeSteps' | 'setTeamReveal' | 'sharedViewForSlot' | 'sharedWindow' | 'showView' | 'sideRequests' | 'succession' | 'teamRoster' | 'teamView' | 'tpmView' | 'windowActions' | 'windowWorkspace'>) {
   const { addSessionView, askView, baseUrl, closeContext, closeInspector, closePage, compactLayout, createWindowFromMenu, expandedKeys, modeSteps, navigation, openDirectorySession, openSession, presentedViewId, setQueuedModeSteps, setTeamReveal, sharedViewForSlot, sharedWindow, showView, sideRequests, succession, teamRoster, teamView, tpmView, windowActions, windowWorkspace } = scope;
@@ -174,7 +174,7 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
     if (!target) return;
     if (target.kind === 'group') {
       if (target.groupType !== 'team' || teamRoster?.baseUrl !== baseUrl || !teamRoster.teams.some(team => team.id === target.groupId)) {
-        throw new WindowFailure('windows.error.groupGone');
+        throw keyedError('windows.error.groupGone');
       }
       teamView.setVisible(true);
       setTeamReveal({ baseUrl, teamId: target.groupId, requestId: crypto.randomUUID() });
@@ -195,7 +195,7 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
       // Navigation finishes locally; Window save state owns background persistence feedback.
       void windowWorkspace.operate(operation).catch(() => {});
     } else if (!await openSession({ ...target, title: attribution.value }, undefined, undefined, false, undefined, target.sessionIntent)) {
-      throw new WindowFailure('windows.error.relatedNotOpened');
+      throw keyedError('windows.error.relatedNotOpened');
     }
   }
 

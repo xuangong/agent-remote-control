@@ -1,7 +1,7 @@
+import { keyedError } from '@orchardworks/agent-client';
 import type { Team } from '@orchardworks/agent-remote-protocol';
 import type { CompositionDocument } from './session-composition.js';
 import { sessionKey, type SessionEntry } from './session-tree.js';
-import { keyedError } from './team-words.js';
 
 /** Local member identity selects public roster evidence; it never grants native authority. */
 export function teamViewTarget(document: CompositionDocument, teams: readonly Team[] | undefined, source: SessionEntry, viewId?: string): SessionEntry | undefined {

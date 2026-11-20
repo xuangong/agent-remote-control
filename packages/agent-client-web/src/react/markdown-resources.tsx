@@ -1,3 +1,4 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { useContext, useEffect, useRef, useState } from 'react';
 import type { ResourceBinding } from '@orchardworks/agent-remote-protocol';
 
@@ -9,7 +10,6 @@ import { useNearViewport } from './useNearViewport.js';
 
 export type { MarkdownResourceContext } from './local-resource.js';
 import { useTranslate } from './locale.js';
-import { errorWordsOr } from './localized-error.js';
 import { cachedLocalResourceBinding, loadLocalResource, type MarkdownResourceContext } from './local-resource.js';
 interface HastNode {
   type?: string;
@@ -95,7 +95,7 @@ export function MarkdownResourceImage({
       if (current) setResult({ key, binding, detail, resources: context.resources });
     }).catch((error: unknown) => {
       if (current) setResult(previous => ({ key, binding: previous?.key === key ? previous.binding : undefined,
-        failure: errorWordsOr(error, t, 'timeline.resource.imageUnavailable') }));
+        failure: errorWords(error, t, 'timeline.resource.imageUnavailable') }));
     });
     return () => { current = false; };
   }, [!!context, live, key, locator, sourceLocator, near, settled]);

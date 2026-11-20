@@ -1,6 +1,6 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { TimelineEntryIndex } from './timeline-entry-index.js';
 import { useTranslate } from './locale.js';
-import { errorWordsOr } from './localized-error.js';
 import { useCallback, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type PointerEvent, type TouchEvent, type WheelEvent } from 'react';
 import { captureReadingText, readingTextTop, type ReadingTextAnchor } from './reading-text-anchor.js';
 
@@ -277,7 +277,7 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
     const promise = Promise.resolve().then(() => {
       if (currentIdentity.current === requestIdentity && loading.current?.promise === promise) return action();
     }).catch((error: unknown) => {
-      if (currentIdentity.current === requestIdentity && loading.current?.promise === promise) setHistoryState({ identity: requestIdentity, pending: false, error: errorWordsOr(error, t, 'timeline.history.failed') });
+      if (currentIdentity.current === requestIdentity && loading.current?.promise === promise) setHistoryState({ identity: requestIdentity, pending: false, error: errorWords(error, t, 'timeline.history.failed') });
       throw error;
     }).finally(() => {
       if (loading.current?.promise !== promise) return;

@@ -1,4 +1,4 @@
-import { localizedError } from './localized-error.js';
+import { keyedError } from '@orchardworks/agent-client';
 import { useCallback, useLayoutEffect, useRef } from 'react';
 
 /** Keep event handlers stable without retaining a previous render's permissions or client. */
@@ -10,7 +10,7 @@ export function useTimelineAction<Args extends unknown[], Result>(scope: string,
   }, [scope, action]);
   const invoke = useCallback((...args: Args): Result => {
     const current = latest.current;
-    if (current.scope !== scope || !current.action) throw localizedError('This session action is no longer available.', 'timeline.action.unavailable');
+    if (current.scope !== scope || !current.action) throw keyedError('timeline.action.unavailable');
     return current.action(...args);
   }, [scope]);
   return action ? invoke : undefined;

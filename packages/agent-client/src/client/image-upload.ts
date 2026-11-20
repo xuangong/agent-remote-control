@@ -1,5 +1,5 @@
 import type { ImageMediaType, ImageUploadReceipt } from '@orchardworks/agent-remote-protocol';
-import { withMessageKey } from '../presentation/error-words.js';
+import { withMessageKey } from '../presentation/locale-choice.js';
 
 export type ImageUploadRequest =
   | { type: 'image_upload_begin'; sha256: string; byteLength: number; mediaType: ImageMediaType }

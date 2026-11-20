@@ -1,6 +1,6 @@
+import { keyedError } from '@orchardworks/agent-client';
 import type { Team } from '@orchardworks/agent-remote-protocol';
 import type { SessionWindowTarget } from './hooks/useSessionWindows.js';
-import { keyedError } from './team-words.js';
 
 /** Teams supply a layout preset; the workspace owns navigation and window lifetime. */
 export function teamLayoutTargets(team: Team, compact: boolean): { main: SessionWindowTarget; dock: SessionWindowTarget[]; groupRoot?: SessionWindowTarget } {

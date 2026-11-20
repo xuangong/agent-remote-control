@@ -4,11 +4,9 @@ import type { PreviewController } from './PreviewActions.js';
 import { previewRegistrationKey, usePreviewRenewal } from './usePreviewRenewal.js';
 import { PreviewBrowser } from './PreviewBrowser.js';
 import { useTranslate } from './locale.js';
-import { errorWordsOr } from './localized-error.js';
-import type { MessageKey, Translate } from '@orchardworks/agent-client';
 import { PreviewWorkspaceContext } from './PreviewWorkspace.js';
 import { FilePreviewProvider } from './FilePreviewScope.js';
-import { watchList, type HttpPreviewClient, type PinnedPreviewName, type PreviewRegistration, type PreviewRegistrationRequest } from '@orchardworks/agent-client';
+import { errorWords, watchList, type HttpPreviewClient, type PinnedPreviewName, type PreviewRegistration, type PreviewRegistrationRequest } from '@orchardworks/agent-client';
 
 export interface PreviewContextValue extends PreviewController {
   readonly loading: boolean;
@@ -92,7 +90,7 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, ena
           pinnedNames: current.version === scope.version ? current.pinnedNames : undefined,
           routing: current.version === scope.version ? current.routing : undefined,
           loading: false,
-          error: message(cause, t, 'timeline.preview.stateUnavailable'),
+          error: errorWords(cause, t, 'timeline.preview.stateUnavailable'),
         }));
       }
     } finally {
@@ -174,7 +172,7 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, ena
         if (!request.signal.aborted) update({ url });
         return url;
       } catch (error) {
-        if (!request.signal.aborted) update({ error: message(error, t, 'timeline.preview.accessUnavailable') });
+        if (!request.signal.aborted) update({ error: errorWords(error, t, 'timeline.preview.accessUnavailable') });
         return '';
       } finally { window.clearTimeout(deadline); if (requests.get(key) === request) requests.delete(key); }
     },
@@ -219,4 +217,3 @@ export function PreviewDock({ sessionId }: { readonly sessionId?: string }) {
 
 export function usePreviewController(): PreviewContextValue | undefined { return useContext(Context); }
 
-function message(error: unknown, t: Translate, fallback: MessageKey): string { return errorWordsOr(error, t, fallback); }

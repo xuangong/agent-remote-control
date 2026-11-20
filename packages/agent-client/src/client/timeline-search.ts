@@ -1,6 +1,6 @@
 import type { AgentTimelineItem, HistoryPage, ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { timelineEntryKey } from '../replica/timeline-entry-key.js';
-import { withMessageKey } from '../presentation/error-words.js';
+import { withMessageKey } from '../presentation/locale-choice.js';
 
 export interface TimelineSearchMatch {
   readonly key: string;

@@ -1,9 +1,9 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { ResourceDownload } from '../ResourceDownload.js';
 import { Fragment, useContext, useState } from 'react';
 import { FilePreviewContext } from '../FilePreviewContext.js';
 import { ImagePreview } from '../ImagePreview.js';
 import { loadLocalResource } from '../local-resource.js';
-import { errorWordsOr } from '../localized-error.js';
 import { TimelineTitle } from '../TimelineTitle.js';
 import { useTranslate } from '../locale.js';
 import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
@@ -88,7 +88,7 @@ function MessageImageTag({ label, locator, context }: { label: string; locator: 
       const { detail } = await loadLocalResource(context, locator);
       if (!detail || detail.status !== 'available' || !('contentBase64' in detail) || !detail.mediaType?.startsWith('image/')) throw new Error(t('timeline.message.imageUnavailable'));
       setBlob(new Blob([Uint8Array.from(atob(detail.contentBase64), value => value.charCodeAt(0))], { type: detail.mediaType }));
-    } catch (reason) { setError(errorWordsOr(reason, t, 'timeline.message.imageUnavailable')); }
+    } catch (reason) { setError(errorWords(reason, t, 'timeline.message.imageUnavailable')); }
     finally { setLoading(false); }
   }
   return <><button type="button" className="agent-image-tag" aria-label={t('timeline.message.preview', { label })} aria-busy={loading} disabled={!context || loading}

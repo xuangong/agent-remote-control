@@ -1,5 +1,5 @@
 import { isTeam, type Team, type TeamAction, type TeamCreate, type TeamDelete } from '@orchardworks/agent-remote-protocol';
-import { withMessageKey } from '../presentation/error-words.js';
+import { withMessageKey } from '../presentation/locale-choice.js';
 
 /** Mutations retain caller-owned identities and are never automatically retried. */
 export class RemoteTeamClient {

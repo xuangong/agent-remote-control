@@ -1,4 +1,5 @@
 // Window and view actions: choose, create, edit, add and bind.
+import { errorWords, keyedError } from '@orchardworks/agent-client';
 import { providerAfterHostChange } from '../state/creation-choice.js';
 import { paneDraftOwners } from '../state/draft-ownership.js';
 import { sessionsPageTitle as sessionsPageTitleOf, type SessionPanel } from '../state/panels.js';
@@ -19,7 +20,6 @@ import type { PanelsAndShortcutsSlice } from './usePanelsAndShortcuts.js';
 import type { ViewSessionStateSlice } from './useViewSessionState.js';
 import type { DocksAndBotSelectionSlice } from './useDocksAndBotSelection.js';
 import type { AppInputs } from './types.js';
-import { WindowFailure, errorWords } from '../window-errors.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 export function useWindowViewActions(scope: Pick<AppInputs & RemoteHostStateSlice & WorkbenchRecordsSlice & ConversationConnectionsSlice & ActiveSessionSlice & RequestedSessionSlice & ProviderStateSlice & ProviderCreationSlice & WorkbenchShellSlice & SessionSuccessionBindingSlice & PanelsAndShortcutsSlice & ViewSessionStateSlice & DocksAndBotSelectionSlice, 'baseUrl' | 'compactLayout' | 'creatingWindowRef' | 'creationLocked' | 'currentHost' | 'dispatchPanels' | 'draftOwnerBinding' | 'presentedSelection' | 'providerChoiceList' | 'providerId' | 'providers' | 'restoredHostSelection' | 'selectedHost' | 'sessionPanel' | 'sessionWindows' | 'setAgentControlOpen' | 'setCreatePlanning' | 'setCreatingWindow' | 'setDeleteConfirmOpen' | 'setLocalProviderId' | 'setSelectedHost' | 'setSessionNotice' | 'setSessionOptions' | 'sharedWindow' | 'sidebarWindow' | 'succession' | 'toast' | 'transitionRef' | 'windowMode' | 'windowWorkspace'>) {
@@ -112,7 +112,7 @@ export function useWindowViewActions(scope: Pick<AppInputs & RemoteHostStateSlic
     const current = windowWorkspace.readWindow();
     const view = presentedSelection(current);
     if (!current || !view) return;
-    if (view.bindingPolicy === 'managed') throw new WindowFailure('windows.error.managedView');
+    if (view.bindingPolicy === 'managed') throw keyedError('windows.error.managedView');
     return { windowId: current.id, viewId: view.id, binding: JSON.stringify(view.binding ?? null) };
   }
   return { selectHost, selectProvider, focusManagedWindow, showWindowSessionChooser, chooseWindowSession, openPage, sessionsPageTitle, showPanel, openNewSessionPanel, createWindowFromMenu, editWindow, selectPrimaryGroup, createSessionView, addSessionView, windowToolbarShown, windowDraftBinding, directoryDestination };

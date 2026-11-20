@@ -1,3 +1,4 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type RefObject, type ReactNode } from 'react';
 import type { SessionTodoDecision } from '@orchardworks/agent-remote-protocol';
 import type { SessionTodoPanelProps } from '@orchardworks/agent-client-web/react';
@@ -22,7 +23,7 @@ import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
 import { AskResize } from './AskResize.js';
 import { tpmPhaseWords } from './TpmMenu.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { enumWords, errorWords } from '../team-words.js';
+import { enumWords } from '../team-words.js';
 
 export function TpmWorkspace(props: Omit<Parameters<typeof TpmWorkspaceContent>[0], 'docked' | 'dockControls'>) {
   return <SessionViewPlacement id={`tpm:${props.item.key}`} title={props.item.work.title} visible={props.visible}>
@@ -71,7 +72,7 @@ function TpmWorkspaceContent({ item, mainTitle, session, replica, visible, stora
     if (title === item.work.title) { cancelRename(); return; }
     renameInFlight.current = true; setSavingTitle(true); setTitleError(undefined);
     try { await onRename(title); cancelRename(); }
-    catch (error) { setTitleError(errorWords(t, error, 'team.tpm.renameFailed')); }
+    catch (error) { setTitleError(errorWords(error, t, 'team.tpm.renameFailed')); }
     finally { renameInFlight.current = false; setSavingTitle(false); }
   }
   const [actionError, setActionError] = useState<string>();
@@ -100,7 +101,7 @@ function TpmWorkspaceContent({ item, mainTitle, session, replica, visible, stora
   }, [visible, onClose]);
   function run(operation: () => Promise<unknown>) {
     setActionError(undefined);
-    void operation().catch(error => setActionError(errorWords(t, error, 'team.tpm.operationFailed')));
+    void operation().catch(error => setActionError(errorWords(error, t, 'team.tpm.operationFailed')));
   }
   const work = item.work;
   const main = tpmMainTarget(item);

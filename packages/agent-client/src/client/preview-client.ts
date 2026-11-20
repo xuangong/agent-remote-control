@@ -1,5 +1,5 @@
 import type { PreviewRegistrationSnapshot } from '@orchardworks/agent-remote-protocol';
-import { withMessageKey } from '../presentation/error-words.js';
+import { withMessageKey } from '../presentation/locale-choice.js';
 import type { MessageKey, MessageParams } from '../presentation/messages.js';
 
 type ProtocolPreviewRegistration = PreviewRegistrationSnapshot['registrations'][number];

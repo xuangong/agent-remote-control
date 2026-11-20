@@ -1,9 +1,9 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { useEffect, useRef, useState } from 'react';
 import { hasWindowAppearance, type WindowOperation, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from './useWindowWorkspace.js';
 import { byRecentUse } from '../window-recency.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { errorWords } from '../window-errors.js';
 
 type Workspace = ReturnType<typeof useWindowWorkspace>;
 type Scope = { client: Workspace['client']; id?: string };

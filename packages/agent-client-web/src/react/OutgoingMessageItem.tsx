@@ -1,9 +1,8 @@
 import type { MarkdownResourceContext } from './markdown-resources.js';
 import { useState } from 'react';
 import { useTranslate } from './locale.js';
-import { errorWordsOr } from './localized-error.js';
 import { UserMessageItem } from './items/MessageItem.js';
-import { type OutgoingMessage, isUncertainSend, sendState, storedWords } from '@orchardworks/agent-client';
+import { errorWords, isUncertainSend, sendState, storedWords, type OutgoingMessage } from '@orchardworks/agent-client';
 
 export function OutgoingMessageItem({ message, onRetry, onDelete, resourceContext }: {
   readonly message: OutgoingMessage;
@@ -24,7 +23,7 @@ export function OutgoingMessageItem({ message, onRetry, onDelete, resourceContex
     catch (reason) {
       // An uncertain delivery is recorded on the message in plain words (what to check, what Retry does next); the Host's
       // own reply, written for operators, would only hide them.
-      if (!isUncertainSend(reason)) setError(errorWordsOr(reason, t, 'timeline.outgoing.retryFailed'));
+      if (!isUncertainSend(reason)) setError(errorWords(reason, t, 'timeline.outgoing.retryFailed'));
     }
     finally { setBusy(false); }
   }

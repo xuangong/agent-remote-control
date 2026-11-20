@@ -267,7 +267,7 @@ function useActionFeedback(actions: LabWorkbenchActions, sessionId: string | und
       setFailure(undefined);
       try { return await action(...args); }
       catch (error) {
-        if (activeSession.current === sessionId && !recorded(error)) setFailure({ title, message: error instanceof Error ? errorWords(error, t) : t('composer.action.unconfirmed'), reauthenticate: isAuthenticationError(error) });
+        if (activeSession.current === sessionId && !recorded(error)) setFailure({ title, message: errorWords(error, t, 'composer.action.unconfirmed'), reauthenticate: isAuthenticationError(error) });
         throw error;
       }
     } : undefined;

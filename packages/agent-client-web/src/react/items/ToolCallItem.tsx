@@ -1,3 +1,4 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { TimelineTitle } from '../TimelineTitle.js';
 import { ToolResultView } from './ToolResultView.js';
 import { Fragment, useId, useState } from 'react';
@@ -5,7 +6,6 @@ import { useItemDisclosure } from '../TimelineDisplay.js';
 import { ToolResultPreview } from './ToolResultPreview.js';
 import { ContentPreview } from './ContentPreview.js';
 import { useTranslate } from '../locale.js';
-import { errorWordsOr } from '../localized-error.js';
 import type { AgentTimelineItem, AgentToolDetail, AgentToolResult } from '@orchardworks/agent-remote-protocol';
 
 const statusKeys = {
@@ -35,7 +35,7 @@ export function ToolCallItem({ item, resolveSessionLink }: { readonly item: Extr
           if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
           event.preventDefault();
           setFailure(undefined);
-          void destination.open().catch(error => setFailure(errorWordsOr(error, t, 'timeline.tool.sessionUnavailable')));
+          void destination.open().catch(error => setFailure(errorWords(error, t, 'timeline.tool.sessionUnavailable')));
         }}>{title}</a> : <span>{title}</span>}
       </Fragment>;
     })}
@@ -45,7 +45,7 @@ export function ToolCallItem({ item, resolveSessionLink }: { readonly item: Extr
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
       setFailure(undefined);
-      void target.open().catch(error => setFailure(errorWordsOr(error, t, 'timeline.tool.sessionUnavailable')));
+      void target.open().catch(error => setFailure(errorWords(error, t, 'timeline.tool.sessionUnavailable')));
     }}>{reference.title}</a>
     {offset >= 0 ? summary.slice(offset + reference.title.length) : ''}
   </span> : null;

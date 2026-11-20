@@ -1,9 +1,7 @@
 import { useState } from 'react';
 import { CopyTunnelUrl } from './CopyTunnelUrl.js';
 import { useTranslate } from './locale.js';
-import { errorWordsOr } from './localized-error.js';
-import type { MessageKey, Translate } from '@orchardworks/agent-client';
-import { type PinnedPreviewName, type PreviewPathMode, type PreviewRegistration, type PreviewRegistrationRequest } from '@orchardworks/agent-client';
+import { errorWords, type PinnedPreviewName, type PreviewPathMode, type PreviewRegistration, type PreviewRegistrationRequest } from '@orchardworks/agent-client';
 
 
 export interface PreviewController {
@@ -80,14 +78,14 @@ function PreviewTarget({ agentId, itemId, target, controller }: {
       const registered = await controller.register(agentId, { target, itemId, pathMode });
       if (pathMode === 'strip') await controller.open(registered.id, target, agentId);
     }
-    catch (error) { setFailure(message(error, t, 'timeline.preview.registerFailed')); }
+    catch (error) { setFailure(errorWords(error, t, 'timeline.preview.registerFailed')); }
     finally { setPending(false); }
   }
   async function open(): Promise<void> {
     if (!registration) return;
     setPending(true); setFailure(undefined);
     try { await controller.open(registration.id, target, agentId); }
-    catch (error) { setFailure(message(error, t, 'timeline.preview.accessFailed')); }
+    catch (error) { setFailure(errorWords(error, t, 'timeline.preview.accessFailed')); }
     finally { setPending(false); }
   }
   async function getTunnelUrl(): Promise<string> {
@@ -102,7 +100,7 @@ function PreviewTarget({ agentId, itemId, target, controller }: {
     if (!registration) return;
     setPending(true); setFailure(undefined);
     try { await controller.unregister(registration.id); }
-    catch (error) { setFailure(message(error, t, 'timeline.preview.unregisterFailed')); }
+    catch (error) { setFailure(errorWords(error, t, 'timeline.preview.unregisterFailed')); }
     finally { setPending(false); }
   }
 
@@ -133,7 +131,6 @@ function PreviewTarget({ agentId, itemId, target, controller }: {
   </div>;
 }
 
-function message(error: unknown, t: Translate, fallback: MessageKey): string { return errorWordsOr(error, t, fallback); }
 
 function loopbackOrigin(source: string): string {
   const url = new URL(source);

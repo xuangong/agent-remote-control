@@ -1,3 +1,4 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { useRef, useState, type ReactNode } from 'react';
 import type {
   AgentInteractionRequest,
@@ -12,7 +13,6 @@ import { QuestionCard, type QuestionDraft } from './interactions/QuestionCard.js
 import { ToolApprovalCard } from './interactions/ToolApprovalCard.js';
 import { Card } from '../primitives/Card.js';
 import { useTranslate } from './locale.js';
-import { errorWordsOr } from './localized-error.js';
 
 export interface InteractionPanelProps {
   readonly request: AgentInteractionRequest;
@@ -53,7 +53,7 @@ function InteractionContent({ request, onResponse, questionDraft, onQuestionDraf
     try {
       await onResponse(request.requestId, response);
     } catch (error) {
-      setFailure(errorWordsOr(error, t, 'timeline.interaction.failed'));
+      setFailure(errorWords(error, t, 'timeline.interaction.failed'));
       inFlight.current = false;
       setPending(false);
     }

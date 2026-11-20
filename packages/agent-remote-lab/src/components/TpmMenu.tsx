@@ -1,3 +1,4 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { useContext, useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
 import { ShortcutPlacement } from '../shell/shortcut-placement.js';
@@ -5,7 +6,7 @@ import type { useTpmWork } from '../hooks/useTpmWork.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 import { groupTpmWorks, type TpmMainSession } from '../tpm-main-sessions.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { enumWords, errorWords } from '../team-words.js';
+import { enumWords } from '../team-words.js';
 
 export const tpmPhaseWords = { clarifying: 'team.tpm.phase.clarifying', ready: 'team.tpm.phase.ready', implementing: 'team.tpm.phase.implementing',
   validating: 'team.tpm.phase.validating', completed: 'team.tpm.phase.completed' } as const;
@@ -82,7 +83,7 @@ export function TpmMenu({ tpm, main, mainSessions, visible, triggerRef, inert, o
       {canCreate ? <button type="button" className="lab-tpm-create-trigger" aria-label={t('team.tpm.createWork')} disabled={!!tpm.busy} onClick={() => {
         if (!main) return;
         setFailure(undefined);
-        void tpm.create(main).catch(error => setFailure(errorWords(t, error, 'team.tpm.createFailed')));
+        void tpm.create(main).catch(error => setFailure(errorWords(error, t, 'team.tpm.createFailed')));
       }}>{tpm.busy === 'create' ? t('team.tpm.creating') : t('team.tpm.newSession')}</button> : supported ? <p className="lab-control-note">{t('team.tpm.chooseMain')}</p> : null}
       {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
     </section> : null}

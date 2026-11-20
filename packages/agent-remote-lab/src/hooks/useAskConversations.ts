@@ -1,3 +1,4 @@
+import { errorWords, keyedError } from '@orchardworks/agent-client';
 import { windowAskSourceAnchor, windowAskSourceMatches } from '../window-composition.js';
 import { parseWindowFeature } from '../window-feature-views.js';
 import type { WindowLayoutAuthority } from '../window-workspace-context.js';
@@ -5,7 +6,6 @@ import { askFeatureView, openFeatureView, projectFeatureBinding } from '../windo
 import { clearCacheOnClose, conversationSessionStorage, storageKeys } from '../conversation-storage.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { errorWords, keyedError } from '../team-words.js';
 import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-client';
 import { SessionDirectoryClient, type CreateSessionOptions, type OpenedSession } from '../directory-client.js';
 import { ForkStore, currentForkSource, referenceForkContext, type SessionFork } from '../session-forks.js';
@@ -357,7 +357,7 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       participant = askOwnerKey(latest);
       await open(undefined, source, '', false, { restoring: preparation, associationOwner });
     }).catch(error => {
-      if (ownsRestore() && !preparation.signal.aborted) update(key, { error: errorWords(t, error, 'team.ask.error.restoreFailed') });
+      if (ownsRestore() && !preparation.signal.aborted) update(key, { error: errorWords(error, t, 'team.ask.error.restoreFailed') });
     }).finally(() => {
       if (windows.controllers.get(key) !== preparation) return;
       const current = ownsRestore();
@@ -514,10 +514,10 @@ export function useAskConversations(document: CompositionDocument, transport: Re
     } catch (error) {
       if (!ownsEntry()) return settleRetired();
       if (preparation.signal.aborted) {
-        if (!(error instanceof Error && error.name === 'AbortError')) update(key, { error: errorWords(t, error, 'team.ask.error.resultNotRetained') });
+        if (!(error instanceof Error && error.name === 'AbortError')) update(key, { error: errorWords(error, t, 'team.ask.error.resultNotRetained') });
         return settleRetired();
       }
-      update(key, { ...(restoringCurrent ? { attached: false, attachedParticipant: undefined } : {}), error: errorWords(t, error, 'team.ask.error.openFailed') });
+      update(key, { ...(restoringCurrent ? { attached: false, attachedParticipant: undefined } : {}), error: errorWords(error, t, 'team.ask.error.openFailed') });
       if (queued) return {};
       throw error;
     } finally {

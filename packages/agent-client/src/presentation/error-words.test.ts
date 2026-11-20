@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { RemoteOperationError } from '../client/transport.js';
 import { sessionActivityLabel, sessionNoticeWords } from '../client/session-presentation.js';
 import { describe as describeSend } from '../replica/send-state.js';
-import { errorWords, storedWords, withMessageKey } from './error-words.js';
+import { errorWords, keyedError, storedWords, withMessageKey } from './error-words.js';
 import { translator } from './messages.js';
 
 const zh = translator('zh');
@@ -24,6 +24,27 @@ describe('words of an error the client made', () => {
     expect(storedWords('Delivery is not confirmed. Check the conversation before sending again.', zh)).toBe('没能确认送达。再发之前先看看对话里有没有。');
     expect(storedWords('Controller said no.', zh)).toBe('Controller said no.');
     expect(errorWords(new Error('Controller said no.'), zh)).toBe('Controller said no.');
+  });
+
+  it('makes a keyed error whose message is the English of its key', () => {
+    const error = keyedError('client.error.previewRequestFailed', { status: 404 });
+    expect(error.message).toBe(en('client.error.previewRequestFailed', { status: 404 }));
+    expect(errorWords(error, zh)).toBe(zh('client.error.previewRequestFailed', { status: 404 }));
+  });
+
+  it('says the fallback only when there are no words of the error', () => {
+    const vectors: readonly [unknown, string][] = [
+      [keyedError('client.error.reconnectRetry'), zh('client.error.reconnectRetry')],
+      [new Error('Controller said no.'), 'Controller said no.'],
+      [{ name: 'QuotaExceededError', message: 'Storage full' }, 'Storage full'],
+      ['Controller said no.', zh('client.error.reconnectRetry')],
+      [new Error(''), zh('client.error.reconnectRetry')],
+      [new Error('   '), zh('client.error.reconnectRetry')],
+      [undefined, zh('client.error.reconnectRetry')],
+      [{ code: 'busy' }, zh('client.error.reconnectRetry')],
+    ];
+    for (const [error, words] of vectors) expect(errorWords(error, zh, 'client.error.reconnectRetry')).toBe(words);
+    expect(errorWords(undefined, zh)).toBe('');
   });
 });
 

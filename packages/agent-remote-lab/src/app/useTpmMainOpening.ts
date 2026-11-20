@@ -1,3 +1,4 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { tpmMainTarget } from '../tpm-main-sessions.js';
 import { sessionKey } from '../session-tree.js';
 import type { AppInputs } from './types.js';
@@ -19,7 +20,6 @@ import type { ProviderStateSlice } from './useProviderState.js';
 import type { SharedFeedsAndTpmSlice } from './useSharedFeedsAndTpm.js';
 import type { SessionBindingSlice } from './useSessionBinding.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { errorWords } from '../team-words.js';
 
 // Opening the main session of a TPM work item once its current mapping is confirmed.
 export function useTpmMainOpening(scope: Pick<AppInputs & HostAndStackSlice & ViewSessionStateSlice & SideSelectionSlice & SessionSuccessionBindingSlice & PanelsAndShortcutsSlice & ActiveSessionSlice & WorkbenchRecordsSlice & RequestedSessionSlice & ConversationConnectionsSlice & WorkbenchShellSlice & ViewTargetsSlice & WindowViewActionsSlice & RemoteHostStateSlice & ProviderCreationSlice & ProviderStateSlice & SharedFeedsAndTpmSlice & SessionBindingSlice, 'accessReadyRef' | 'baseUrl' | 'mountedTransport' | 'sessionEntries' | 'setFailure' | 'tpm' | 'tpmMainRequest' | 'tpmMainState' | 'transport' | 'openSession'>) {
@@ -53,7 +53,7 @@ export function useTpmMainOpening(scope: Pick<AppInputs & HostAndStackSlice & Vi
       }
       const title = sessionEntries.find(entry => sessionKey(entry) === sessionKey(target))?.title ?? t('team.tpm.mainSessionDefaultTitle');
       await openSession({ ...target, title });
-    } catch (error) { if (current()) setFailure(errorWords(t, error, 'team.tpm.error.mainNotOpened')); }
+    } catch (error) { if (current()) setFailure(errorWords(error, t, 'team.tpm.error.mainNotOpened')); }
   }
   return { openTpmMain };
 }

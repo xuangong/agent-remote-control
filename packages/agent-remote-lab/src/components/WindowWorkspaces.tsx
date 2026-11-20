@@ -6,7 +6,7 @@ import { useWindowActions, windowCatalog } from '../hooks/useWindowActions.js';
 import { AgentControl } from './AgentControl.js';
 import { windowActivity, type SessionActivityStatus } from '../session-activity-status.js';
 import { botRole } from '../bot-roster.js';
-import { assistantStateWord, assistantStatus, translator, type AssistantState, type Translate } from '@orchardworks/agent-client';
+import { assistantStateWord, assistantStatus, errorWords, translator, type AssistantState, type Translate } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { windowSummary } from '../window-summary.js';
 import { useAssistantNames } from './assistant/names-context.js';
@@ -16,7 +16,6 @@ import { Button } from '../ui/Button.js';
 import { Sheet } from '@orchardworks/agent-client-web/primitives';
 import { revealView, viewSelection } from '../window-view-selection.js';
 import { useSharedStates } from '../shared-feeds.js';
-import { errorWords } from '../window-errors.js';
 
 export function viewTitle(view: WindowView, t: Translate = translator('en')): string {
   return view.binding?.title || (view.feature ? t('windows.view.feature', { kind: view.feature.kind.toUpperCase() }) : t('windows.view.empty'));

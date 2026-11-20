@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { RemoteTeamClient } from '@orchardworks/agent-client';
+import { errorWords, RemoteTeamClient } from '@orchardworks/agent-client';
 import { workspaceFetch } from '../workspace-access.js';
 import { type SessionWindowEntry, type SessionWindowTarget } from '../hooks/useSessionWindows.js';
 import { sessionKey } from '../session-tree.js';
 import { teamLayoutTargets } from '../team-layout.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { errorWords } from '../team-words.js';
 
 /** Team membership supplies targets; ordinary windows own their placement and lifetime. */
 export function TeamGatherButton({ baseUrl, entry, onGather }: {
@@ -30,7 +29,7 @@ export function TeamGatherButton({ baseUrl, entry, onGather }: {
       onGather(layout.dock);
       const unavailable = team.members.filter(member => member.creation !== 'abandoned' && member.creation !== 'released' && member.role !== 'requester' && (member.creation !== 'ready' || !member.nativeSessionId)).length;
       if (unavailable) setNotice(t('team.gather.unavailableMembers', { count: unavailable }));
-    } catch (error) { if (active.current) setNotice(errorWords(t, error, 'team.gather.loadFailed')); }
+    } catch (error) { if (active.current) setNotice(errorWords(error, t, 'team.gather.loadFailed')); }
     finally { pending.current = false; if (active.current) setBusy(false); }
   }
   return <span className="lab-team-gather">

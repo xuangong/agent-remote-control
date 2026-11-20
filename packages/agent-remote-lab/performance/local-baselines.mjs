@@ -335,7 +335,9 @@ const stateSummary = (states, from, until) => {
   return spans;
 };
 const firstAt = (states, predicate) => states.find(predicate)?.t;
-const isReady = state => state.labels.includes('Ready') && state.composer === 'enabled' && !state.loading.length && !state.control.length && state.messages > 0;
+// Ready: the composer takes text and nothing blocks it. Since I3b a tile shows no status label at all (its sentence is the
+// assistant's), so a build that shows one must show Ready.
+const isReady = state => state.labels.every(label => label === 'Ready') && state.composer === 'enabled' && !state.loading.length && !state.control.length && state.messages > 0;
 const isBlocked = state => state.composer === 'disabled' || state.labels.some(isBlockingLabel) || state.loading.length > 0 || state.control.length > 0;
 
 async function waitForState(handle, predicate, label, ms = actionMs) {

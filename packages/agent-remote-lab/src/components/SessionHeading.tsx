@@ -2,8 +2,8 @@ import { useContext, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
 
 /** Keeps the title centered while reserving room for unequal control groups. */
-export function SessionHeading({ leading, trailing, children, hidden }: {
-  leading?: ReactNode; trailing?: ReactNode; children: ReactNode; hidden?: boolean;
+export function SessionHeading({ leading, trailing, children, hidden, className }: {
+  leading?: ReactNode; trailing?: ReactNode; children: ReactNode; hidden?: boolean; className?: string;
 }) {
   const heading = useRef<HTMLElement>(null);
   const start = useRef<HTMLDivElement>(null);
@@ -25,7 +25,7 @@ export function SessionHeading({ leading, trailing, children, hidden }: {
     observer.observe(end.current!);
     return () => observer.disconnect();
   }, []);
-  return <header className="lab-workbench-heading lab-session-heading" ref={heading} hidden={hidden}>
+  return <header className={`lab-workbench-heading lab-session-heading${className ? ` ${className}` : ''}`} ref={heading} hidden={hidden}>
     <div className="lab-session-heading-leading" ref={start}>{leading}</div>
     <div {...titleInteraction} className="lab-session-heading-title">{children}</div>
     <div className="lab-session-heading-trailing" ref={end}>{trailing}</div>

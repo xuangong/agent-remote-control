@@ -21,7 +21,7 @@ export function TileHeader({ name, avatar, title, facts, session, detailsOpen, d
   const sentenceId = useId();
   const reply = useSharedFeed(snapshot => session ? snapshot.states?.reply(session)?.preview : undefined);
   const status = assistantStatus({ ...facts, ...(reply ? { replyPreview: reply } : {}) }, t);
-  return <SessionHeading trailing={menu}>
+  return <SessionHeading className="lab-tile-heading" trailing={menu}>
     <span className="lab-tile-identity">
       <button type="button" className="lab-tile-who" aria-label={t('details.open', { name })} aria-expanded={detailsOpen} aria-controls={detailsId}
         aria-describedby={status.sentence ? sentenceId : undefined} onClick={onToggleDetails}>

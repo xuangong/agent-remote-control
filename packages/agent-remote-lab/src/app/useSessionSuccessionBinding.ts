@@ -7,7 +7,7 @@ import type { Team, WindowGroupOperation } from '@orchardworks/agent-remote-prot
 import { DraftStore } from '../draft-store.js';
 import { useSessionSuccession } from '../hooks/useSessionSuccession.js';
 import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { accountNames, withAssistantNames } from '../assistant-names.js';
 import { DirectoryError, nativeSessionMissing, SessionDirectoryClient } from '../directory-client.js';
@@ -94,8 +94,11 @@ export function useSessionSuccessionBinding(scope: Pick<AppInputs & ProviderStat
   // Every assistant of the account is called by one name on every device; a bot's first edit stores the generated one.
   const t = useTranslate();
   const assistantNames = useMemo(() => accountNames(workspaceController.groups, t), [workspaceController.groups, t]);
-  const windowWorkspace = { ...workspaceController,
-    operateGroup: (id: string, operation: WindowGroupOperation) => workspaceController.operateGroup(id, withAssistantNames(workspaceController.readGroup(id), operation, assistantNames)),
+  const names = useRef(assistantNames); names.current = assistantNames;
+  // As stable as the workspace's own, so what depends on it does not run again on every render.
+  const { operateGroup: operate, readGroup } = workspaceController;
+  const operateGroup = useCallback((id: string, operation: WindowGroupOperation) => operate(id, withAssistantNames(readGroup(id), operation, names.current)), [operate, readGroup]);
+  const windowWorkspace = { ...workspaceController, operateGroup,
     ...(initialState ? { window: undefined, authority: undefined, sessionBridge: undefined, unavailable: false, provisional: false } : {}),
   };
 

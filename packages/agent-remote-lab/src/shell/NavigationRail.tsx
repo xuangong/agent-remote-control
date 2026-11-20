@@ -55,7 +55,8 @@ function RailAccount({ name, notice, onAccount }: { name?: string; notice?: Devi
   const status = t(state === 'online' ? 'navigation.linkOnline' : state === 'offline' ? 'navigation.linkOffline' : 'navigation.linkSignIn');
   return <span ref={root} className="lab-rail-account">
     <button type="button" className="lab-rail-button lab-rail-avatar" aria-label={`${t('navigation.account', { name: who })}. ${status}`} aria-expanded={open} aria-haspopup="true" onClick={() => setOpen(value => !value)}>
-      <span className="lab-rail-initial" aria-hidden="true">{[...who][0]?.toUpperCase()}</span>
+      {/* An account without a name shows a person, not the initial of a placeholder phrase. */}
+      {name ? <span className="lab-rail-initial" aria-hidden="true">{[...name][0]?.toUpperCase()}</span> : <Icon name="person" />}
       <span className="lab-link-dot" data-link={state} aria-hidden="true" />
     </button>
     {open ? <div className="lab-rail-popover orchard-panel" role="group" aria-label={t('navigation.account', { name: who })}>

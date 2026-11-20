@@ -56,7 +56,7 @@ export function SettingsPage({ context, group, phone, onGroup, linkNotice }: {
     const who = context.account?.name || context.account?.email || context.account?.id;
     return <FloatingPanel as="section" label={t('settings.me')} className="lab-settings lab-settings-me">
       <h1>{t('settings.me')}</h1>
-      <div className="lab-settings-account"><span className="lab-settings-initial" aria-hidden="true">{[...(who ?? t('navigation.accountUnknown'))][0]?.toUpperCase()}</span><strong>{who ?? t('navigation.accountUnknown')}</strong></div>
+      <div className="lab-settings-account"><span className="lab-settings-initial" aria-hidden="true">{who ? [...who][0]?.toUpperCase() : <Icon name="person" />}</span><strong>{who ?? t('navigation.accountUnknown')}</strong></div>
       {linkNotice ? <DeviceLinkWords notice={linkNotice} /> : null}
       {list}
     </FloatingPanel>;

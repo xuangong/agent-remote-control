@@ -116,3 +116,30 @@ links live in the spawning step: these readers choose Full), `App.succession.ask
 `New assistant`, `Back to bots` became `Back to assistants`; roster status classes (`.lab-bot-status`, `.lab-bot-preview`,
 `.lab-bot-typing`) became `.lab-bot-sentence` with `data-state`; a test that clicked the Windows entry or a Track row finds it in
 the launcher bar or toolbar row as well as floating.
+
+## I3c
+
+### Rules that moved into pure modules
+
+| Old home | Rule | New owner | Mutation checked |
+|---|---|---|---|
+| `assistantNames` (I3b: the agent and a number) | An assistant without a stored name is called by a default name, the same on every device and unique in the account | `assistantNames` (`assistant-name.vectors.ts`, 10 rows, and 3 tests: 25 names in both languages, every key a different name whatever the order) | A stored Chinese name not blocking its English twin: 1 test fails; unsorted keys: 2 fail |
+| — (new) | A bot's first edit stores the name it is called by | `withAssistantNames` (Lab), through `AssistantDetails.test.tsx` "calls a bot without a name by its generated name … stores that name with its first edit" and "gives a group formed from sessions its bot details …" | Vector-free: both tests read the stored details |
+
+### Deleted with the feature
+
+| Test | Rule | Why |
+|---|---|---|
+| `SessionSuccessionHistory.test.tsx` (Continued from and by, Earlier history, opening a link, its error) | The handoff line in a Window heading | The details' Sessions list carries the chain, Return to current and the links (`AssistantDetails.test.tsx` "lists the chain …", and the App succession tests, re-pointed). Not opening a session fails 6 tests |
+| `WindowToolbar.test.tsx` "toggles the docks …", "keeps focus on the dock toggle …"; `WindowToolbarRow.test.tsx` "offers the dock toggle …", "says Show docks …"; `SessionDock.test.tsx` "hides dock panes …", "hides and shows the docks of a shared Window …"; `App.window-toolbar.test.tsx` the four hidden-docks tests | The Window toolbar's docks switch and its stored choice | Deleted with the switch; folding stays on each tile (`App.window-fold.test.tsx`, `SessionDock` fold tests) |
+
+### Rules that changed
+
+| Test | Before | Now |
+|---|---|---|
+| Lab tests that find a bot by its session's title (`bot-mode-fixtures`, `window-builders`, the roster, palette, fold and render budget tests) | A bot was called by its session's title | The fixtures store each bot's name as its session is titled; a test that leaves a bot unnamed finds its row by place (`app.row(group, view)`) |
+| `BotWorkspace.test.tsx` "names a new bot and the group …" | The row followed the session's title | The group follows the title; the bot keeps its own name |
+| `AssistantDetails.test.tsx` card actions, section order, chain rows | Every action on the card; Where it works held the sessions | One visible action and a ⋯ menu; notifications, process, where it works, sessions, model, files; a session row is title, time and state, its chevron shows the ID |
+| `assistant-inventory.spec.ts` H4, H5, W1, W2 and the Chinese tests | The chain's text; the star in the tile header; Chief in Chinese | The rows' titles and states; the star in the tile's ⋯ menu (in the details' session row on a phone); the Chinese fixture's 团团 |
+| E5, `session-succession-joined.spec.ts`, `bot-mode.spec.ts`, App succession and window-action tests | The handoff line | The tile's details, Sessions (`sessionsList`, `openSessions`) |
+| E10 | The assistant was "Scripted" | The name its tile shows, never the session's title |

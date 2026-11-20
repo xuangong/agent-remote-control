@@ -15,6 +15,7 @@ import { IconButton } from '../ui/IconButton.js';
 import { MissingSessionNote } from './SessionConnectionNotice.js';
 import { sessionKey } from '../session-tree.js';
 import { useWindowLayout } from '../window-workspace-context.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 interface Props {
   entry: SessionWindowEntry; baseUrl: string; visible: boolean; compact: boolean; hostLabel: string; offline: boolean;
@@ -44,11 +45,12 @@ interface Props {
 
 /** An ordinary session family can float or occupy one independently movable dock. */
 export function SessionWindow(props: Props) {
+  const t = useTranslate();
   const removeDocks = useRemoveSessionDocks();
   // A bot's pane folds where it stands; any other view leaves its dock and closes.
   const close = props.onFold ?? (() => { removeDocks([props.entry.id, ...(props.closeWith ?? [])]); props.onClose(); });
   const [additionalWidth, setAdditionalWidth] = useState(0);
-  return <SessionViewPlacement id={props.entry.id} title={props.entry.target && !props.missing ? props.entry.target.title : 'Select session'} visible={props.visible}
+  return <SessionViewPlacement id={props.entry.id} title={props.entry.target && !props.missing ? props.entry.target.title : t('windows.selectSession')} visible={props.visible}
     dockRequest={props.entry.dockRequest} additionalWidth={additionalWidth} folded={!!props.fold}>
     {({ docked, controls }) => <WindowBody {...props} onClose={close} docked={docked} controls={controls} onAdditionalWidthChange={setAdditionalWidth} />}
   </SessionViewPlacement>;
@@ -56,10 +58,11 @@ export function SessionWindow(props: Props) {
 function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, transport, draftStore, draftBinding, imageDraftBinding, navigation, docked, controls, actions, onClose, onAdditionalWidthChange, selected, onFocus, onChangeSession, onSessionBound, sessionPresentation, renderSessionFooter, missing, onSessionUnavailable, fold, asleep, onWake, onFold, onRestore, onRemove, onCloseView }: Props & {
   docked: boolean; controls: React.ReactNode; onAdditionalWidthChange(width: number): void;
 }) {
+  const t = useTranslate();
   const shared = useWindowLayout();
   const titleInteraction = useContext(SessionTitleInteractionContext);
   const target = missing ? undefined : entry.target;
-  const title = target?.title ?? 'Select session';
+  const title = target?.title ?? t('windows.selectSession');
   const panel = useRef<HTMLElement>(null), anchor = useRef<HTMLSpanElement>(null);
   useAskPosition(panel, anchor, JSON.stringify([baseUrl, entry.id]), { docked });
   const focusWindow = (event: { target: EventTarget }) => {
@@ -67,13 +70,13 @@ function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, tran
     if (shared && event.target instanceof Element && event.target.closest('.lab-session-family-pane')) return;
     onFocus();
   };
-  const menuActions = controls || onChangeSession && target ? <>{controls}{onChangeSession && target ? <button type="button" aria-label="Change session" title={compact ? 'Choose a session from the sidebar' : 'Choose a session from All sessions'} onClick={onChangeSession}>↔</button> : null}</> : undefined;
+  const menuActions = controls || onChangeSession && target ? <>{controls}{onChangeSession && target ? <button type="button" aria-label={t('windows.changeSession')} title={compact ? t('windows.chooseFromSidebar') : t('windows.chooseFromAll')} onClick={onChangeSession}>↔</button> : null}</> : undefined;
   // Drawn as an icon, as the heading's other controls are.
-  const windowControls = <>{actions}<IconButton icon="close" className="lab-session-window-close" label={`Close ${title}`} title={onFold ? 'Fold. It stays in this group.' : 'Close session view'} onClick={onClose} /></>;
+  const windowControls = <>{actions}<IconButton icon="close" className="lab-session-window-close" label={t('windows.close.label', { title })} title={onFold ? t('windows.fold.hint') : t('windows.closeSessionView')} onClick={onClose} /></>;
   return <>
     <span ref={anchor} />
     <div className="lab-ask-viewport" hidden={!visible}>
-      <section ref={panel} className="lab-ask-window lab-bindable-session-window lab-session-pane-selection" aria-label={`Session: ${title}`}
+      <section ref={panel} className="lab-ask-window lab-bindable-session-window lab-session-pane-selection" aria-label={t('windows.sessionLabel', { title })}
         data-view-id={entry.id} data-active={selected || undefined} data-folded={fold ? true : undefined} tabIndex={-1}
         data-selected={!target && selected || undefined} aria-current={!target && selected ? 'true' : undefined}
         onPointerDownCapture={focusWindow} onFocusCapture={event => {
@@ -84,8 +87,8 @@ function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, tran
         }}>
         {/* Folded, the conversation stays mounted but unseen and released; the slim card stands in for it. */}
         {fold ? <>
-          <button type="button" data-pane-selection-ignore className="lab-folded-remove" aria-label={`Remove ${title} from this group`} title="Remove from group…" onClick={onRemove}>×</button>
-          <FoldedBotCard label={`Restore ${title}`} fold={fold} onRestore={() => onRestore?.()} />
+          <button type="button" data-pane-selection-ignore className="lab-folded-remove" aria-label={t('windows.group.removeLabel', { title })} title={t('windows.group.removeHint')} onClick={onRemove}>×</button>
+          <FoldedBotCard label={t('windows.restore.label', { title })} fold={fold} onRestore={() => onRestore?.()} />
         </> : null}
         {asleep && !fold && onWake ? <AsleepNotice onWake={onWake} /> : null}
         {target ? <SessionFamily folded={!!fold || !!asleep} onCloseView={onCloseView} storageScope={baseUrl} baseUrl={baseUrl} target={target} hostLabel={hostLabel} offline={offline}
@@ -93,9 +96,9 @@ function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, tran
           onSessionBound={onSessionBound} onSessionUnavailable={onSessionUnavailable} sessionPresentation={sessionPresentation} renderSessionFooter={renderSessionFooter}
           displayBinding={{ scope: baseUrl, key: entry.id }} active={visible} compact={compact} onAdditionalWidthChange={onAdditionalWidthChange}
           transport={transport} draftStore={draftStore} draftBinding={draftBinding} imageDraftBinding={imageDraftBinding} navigation={navigation} controls={windowControls} menuActions={menuActions} /> : <>
-          <header className="lab-empty-session-heading"><strong {...titleInteraction}>Select session</strong><div>{menuActions ? <SessionHeadingActions sessionKey={entry.id} alwaysCollapsed>{menuActions}</SessionHeadingActions> : null}{windowControls}</div></header>
-          <div className="lab-empty-session-body">{entry.target ? <MissingSessionNote title={entry.target.title} host={hostLabel} /> : null}<p>{compact ? 'Choose a session from the sidebar' : 'Choose a session from All sessions'}</p>
-            <button type="button" onClick={onChangeSession}>{compact ? 'Open sidebar' : 'Choose session'}</button></div>
+          <header className="lab-empty-session-heading"><strong {...titleInteraction}>{t('windows.selectSession')}</strong><div>{menuActions ? <SessionHeadingActions sessionKey={entry.id} alwaysCollapsed>{menuActions}</SessionHeadingActions> : null}{windowControls}</div></header>
+          <div className="lab-empty-session-body">{entry.target ? <MissingSessionNote title={entry.target.title} host={hostLabel} /> : null}<p>{compact ? t('windows.chooseFromSidebar') : t('windows.chooseFromAll')}</p>
+            <button type="button" onClick={onChangeSession}>{compact ? t('windows.openSidebar') : t('windows.chooseSession')}</button></div>
         </>}
         <AskResize label={title} />
       </section>

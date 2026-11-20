@@ -4,6 +4,7 @@ import { accountNames } from '../assistant-names.js';
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { applyWindowOperation, createWindowView, type WindowGroup, type WindowOperation, type WindowSessionBinding, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
+import { LocaleContext } from '@orchardworks/agent-client-web/react';
 import { render } from '../test/setup.js';
 import { WindowWorkspaces } from './WindowWorkspaces.js';
 import { useWindowActions } from '../hooks/useWindowActions.js';
@@ -465,4 +466,16 @@ it('lists the group\'s bots by name, role and place, with Sides beside their sou
   ]);
   // The Window row counts its bots, and leads with what most needs the owner.
   expect(container.querySelector('[data-window-id="release"] small')?.textContent).toBe('Needs you · 6 bots · 4 open');
+});
+
+it('words the Windows list in Chinese', async () => {
+  const group = botGroup('A');
+  const workspace = { window: group.window, group, windows: [group.window], groups: [group], readGroup: () => group, hasActiveWindow: true, unavailable: false } as unknown as ReturnType<typeof useWindowWorkspace>;
+  const container = await render(<LocaleContext.Provider value="zh"><WindowWorkspaces workspace={workspace} placement="sidebar" /></LocaleContext.Provider>);
+  expect(container.querySelector('nav[aria-label="窗口"]')).not.toBeNull();
+  expect(container.querySelector('nav[aria-label="会话视图"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label^="重命名窗口："]')).not.toBeNull();
+  expect(container.textContent).toContain('这个窗口里');
+  expect(container.textContent).toContain('窗口选项');
+  expect(container.textContent).not.toContain('Window options');
 });

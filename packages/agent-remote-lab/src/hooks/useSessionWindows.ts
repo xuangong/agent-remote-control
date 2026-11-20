@@ -5,6 +5,7 @@ import type { WindowLayoutAuthority } from '../window-workspace-context.js';
 import { useEffect, useRef, useState } from 'react';
 import { conversationSessionStorage } from '../conversation-storage.js';
 import { sessionKey } from '../session-tree.js';
+import { WindowFailure } from '../window-errors.js';
 import { bindCompositionView, compositionSelection, createCompositionView, SESSION_VIEW_LIMIT,
   type CompositionDocument, type CompositionSlot, type CompositionWindow } from '../session-composition.js';
 
@@ -95,12 +96,12 @@ export function useSessionWindows(scope: string, access: CompositionAccess) {
     if (latest.current.shared) { latest.current.shared.operate({ type: 'view.bind', viewId: id, binding: windowSessionBinding(target) }); return; }
     const { document, ensureView, save } = latest.current;
     const view = document.windows?.find(view => view.id === id);
-    if (!view || view.managed) throw new Error('This session view is closed or managed by its feature.');
-    if (!validTarget(target)) throw new Error('The selected session identity is incomplete.');
+    if (!view || view.managed) throw new WindowFailure('windows.error.viewManaged');
+    if (!validTarget(target)) throw new WindowFailure('windows.error.identityIncomplete');
     bindCompositionView(document, id, ensureView(target).id); save();
   }
   function uniqueTargets(targets: SessionWindowTarget[]) {
-    if (targets.some(target => !validTarget(target))) throw new Error('The selected session identity is incomplete.');
+    if (targets.some(target => !validTarget(target))) throw new WindowFailure('windows.error.identityIncomplete');
     return [...new Map(targets.map(target => [sessionKey(target), target])).values()];
   }
   function matchesTarget(view: CompositionWindow, target: SessionWindowTarget) {
@@ -109,7 +110,7 @@ export function useSessionWindows(scope: string, access: CompositionAccess) {
   }
   function checkCapacity(missing: number) {
     if ((latest.current.document.windows?.length ?? 0) + missing > SESSION_VIEW_LIMIT) {
-      throw new Error(`Close a session view before opening more than ${SESSION_VIEW_LIMIT}.`);
+      throw new WindowFailure('windows.error.viewLimit', { limit: SESSION_VIEW_LIMIT });
     }
   }
   function open(targets: SessionWindowTarget[], groupRoot?: SessionWindowTarget, groupId?: string) {

@@ -1,7 +1,7 @@
 // The dock rail: the primary groups of a Window, or the main conversation with its Side conversations.
 import { isBotView, windowPrimaryViewId } from '@orchardworks/agent-remote-protocol';
 import { SessionFamily } from '../../components/SessionFamily.js';
-import { CommunicationNavigationContext } from '@orchardworks/agent-client-web/react';
+import { CommunicationNavigationContext, useTranslate } from '@orchardworks/agent-client-web/react';
 import { remoteSessionState } from '@orchardworks/agent-client';
 import { handoffCommand } from '../../handoff-command.js';
 import { SessionTitle } from '../../components/SessionTitle.js';
@@ -29,6 +29,7 @@ import { usePhoneLayout } from '../../hooks/usePhoneLayout.js';
 export function SessionDocks({ scope }: { readonly scope: Pick<AppScope, 'accessReady' | 'activeAgentId' | 'activeOpened' | 'activeView' | 'ancestors' | 'asleepBot' | 'attachingAgentId' | 'availableConversationActions' | 'baseUrl' | 'botHandoff' | 'boundFork' | 'canHandoffPrimary' | 'closeSide' | 'closeView' | 'compactLayout' | 'compositionProtected' | 'conversationActions' | 'conversationHistory' | 'createFork' | 'createSessionView' | 'currentSession' | 'detachedSideRoot' | 'directory' | 'draftBindingFor' | 'draftOwnerBinding' | 'executePrimaryCommand' | 'expandedKeys' | 'favorites' | 'focusPrimaryContent' | 'focusSession' | 'focusedWindow' | 'foldedBot' | 'forkInputStatus' | 'forkStore' | 'handoff' | 'hostOffline' | 'inspectTimelineEntry' | 'letterReveals' | 'markSessionMissing' | 'messageDrafts' | 'missingSessions' | 'navigationIntent' | 'observeSideActivity' | 'openFork' | 'openLocalView' | 'openNewSessionPanel' | 'openSession' | 'openSideKeys' | 'openingControlNotice' | 'presentSessionView' | 'presentedPrimaryViewId' | 'presentedViewId' | 'primaryCommunication' | 'primaryDisplaySlot' | 'primaryExpanded' | 'primaryGroups' | 'primaryNavigation' | 'primarySuccessionGated' | 'questionDrafts' | 'receiveViewSession' | 'refreshRelations' | 'remoteHosts' | 'renamePrimaryTitle' | 'replicaFor' | 'reportPendingPrimaryInput' | 'restoreView' | 'revealSession' | 'selectPrimaryGroup' | 'selectedHost' | 'sessionEntries' | 'sessionState' | 'sessionWindows' | 'setMinimizedViewTarget' | 'setQuestionDrafts' | 'setRemovingBot' | 'setSessionViewTarget' | 'shareSession' | 'sharedSlots' | 'sharedWindow' | 'showWindowSessionChooser' | 'sideSessions' | 'stackPath' | 'stackRange' | 'stackRoot' | 'state' | 'status' | 'succession' | 'successionContext' | 'successionProgress' | 'supportingRailOpen' | 'traceRequest' | 'transitioning' | 'transport' | 'unlinkSide' | 'viewNavigation' | 'wakeBot' | 'windowMode' | 'windowSession' | 'windowStageVisible' | 'windowWorkspace'> }) {
   const { accessReady, activeAgentId, activeOpened, activeView, ancestors, asleepBot, attachingAgentId, availableConversationActions, baseUrl, botHandoff, boundFork, canHandoffPrimary, closeSide, closeView, compactLayout, compositionProtected, conversationActions, conversationHistory, createFork, createSessionView, currentSession, detachedSideRoot, directory, draftBindingFor, draftOwnerBinding, executePrimaryCommand, expandedKeys, favorites, focusPrimaryContent, focusSession, focusedWindow, foldedBot, forkInputStatus, forkStore, handoff, hostOffline, inspectTimelineEntry, letterReveals, markSessionMissing, messageDrafts, missingSessions, navigationIntent, observeSideActivity, openFork, openLocalView, openNewSessionPanel, openSession, openSideKeys, openingControlNotice, presentSessionView, presentedPrimaryViewId, presentedViewId, primaryCommunication, primaryDisplaySlot, primaryExpanded, primaryGroups, primaryNavigation, primarySuccessionGated, questionDrafts, receiveViewSession, refreshRelations, remoteHosts, renamePrimaryTitle, replicaFor, reportPendingPrimaryInput, restoreView, revealSession, selectPrimaryGroup, selectedHost, sessionEntries, sessionState, sessionWindows, setMinimizedViewTarget, setQuestionDrafts, setRemovingBot, setSessionViewTarget, shareSession, sharedSlots, sharedWindow, showWindowSessionChooser, sideSessions, stackPath, stackRange, stackRoot, state, status, succession, successionContext, successionProgress, supportingRailOpen, traceRequest, transitioning, transport, unlinkSide, viewNavigation, wakeBot, windowMode, windowSession, windowStageVisible, windowWorkspace } = scope;
   const phone = usePhoneLayout();
+  const t = useTranslate();
   return <>
         {sharedWindow ? <SessionDockRail compact={compactLayout} stack={phone} onCreateView={createSessionView}
           onSelectPrimaryGroup={selectPrimaryGroup}
@@ -47,7 +48,7 @@ export function SessionDocks({ scope }: { readonly scope: Pick<AppScope, 'access
                 .some(source => sessionKey(source) === sessionKey(view.binding!)) ? pendingSlot : undefined);
             const additionalWidth = sharedWindow.views.filter(child => child.id !== view.id && windowPrimaryViewId(sharedWindow, child.id) === view.id && !child.collapsed).reduce((total, child) => total + child.width, 0);
             const missing = !!view.binding && missingSessions.has(sessionKey(view.binding));
-            return { id: view.id, title: view.binding && !missing ? view.binding.title : 'Select session', width: view.width, additionalWidth,
+            return { id: view.id, title: view.binding && !missing ? view.binding.title : t('windows.selectSession'), width: view.width, additionalWidth,
               // A sleeping bot stands folded and dimmed; restoring it wakes it for every device.
               selected: view.id === presentedPrimaryViewId, collapsed: view.collapsed || asleepBot(view),
               // A folded bot shows who it is and how it is doing, from the shared channel, while its conversation is released.
@@ -70,20 +71,20 @@ export function SessionDocks({ scope }: { readonly scope: Pick<AppScope, 'access
                 sessionPresentation={presentSessionView} /></>
                 : <div className="lab-empty-session-view" role="status" data-view-id={view.id} aria-current={view.id === presentedViewId || undefined}>
                   <header className="lab-empty-session-heading">
-                    <strong>Select session</strong>
-                    <IconButton icon="close" data-pane-selection-ignore label="Close primary group: Select session" title="Close session view"
+                    <strong>{t('windows.selectSession')}</strong>
+                    <IconButton icon="close" data-pane-selection-ignore label={t('windows.group.closeLabel', { title: t('windows.selectSession') })} title={t('windows.closeSessionView')}
                       onClick={() => windowWorkspace.authority?.operate({ type: 'view.close', viewId: view.id })} />
                   </header><div className="lab-empty-session-body">
-                    {view.binding ? <MissingSessionNote title={view.binding.title} host={remoteHosts.find(host => host.id === view.binding!.hostId)?.name ?? view.binding.hostId} /> : <p>This session view is empty.</p>}
+                    {view.binding ? <MissingSessionNote title={view.binding.title} host={remoteHosts.find(host => host.id === view.binding!.hostId)?.name ?? view.binding.hostId} /> : <p>{t('windows.emptyView')}</p>}
                     <div className="lab-empty-session-actions">
-                      <button type="button" onClick={() => { selectPrimaryGroup(view.id); showWindowSessionChooser(); }}>Choose session</button>
-                      <button type="button" onClick={() => { selectPrimaryGroup(view.id); openNewSessionPanel(); }}>New session</button>
+                      <button type="button" onClick={() => { selectPrimaryGroup(view.id); showWindowSessionChooser(); }}>{t('windows.chooseSession')}</button>
+                      <button type="button" onClick={() => { selectPrimaryGroup(view.id); openNewSessionPanel(); }}>{t('windows.newSession')}</button>
                     </div></div></div>,
             };
           })} /> : <SessionDockRail onCreateView={createSessionView} minimizedHeader={<div ref={setMinimizedViewTarget} data-pane-selection-ignore className="lab-global-view-slot lab-minimized-view-slot" />} mainTitle={stackRoot?.title ?? activeOpened?.title} minimumBaseWidth={stackRange.end > stackRange.start ? 640 : 320}><ConversationSplit compact={compactLayout} start={stackRange.start} end={stackRange.end}>
         <CollapsedConversations entries={sessionEntries} sessions={stackPath.slice(0, stackRange.start)} offset={0} onExpand={revealSession} />
         <ConversationPane className="lab-primary-conversation lab-session-composition" data-active={!sessionWindows.activeId || undefined} tabIndex={-1} hidden={!primaryExpanded} onFocusCapture={event => focusPrimaryContent(event.target)} onClickCapture={event => focusPrimaryContent(event.target)}>
-        {windowSession.empty ? <div className="lab-empty-session-view" role="status"><p>This session view is empty.</p><button type="button" onClick={openNewSessionPanel}>New session</button>{botHandoff ? null : successionProgress}</div> : <><CommunicationNavigationContext.Provider value={primaryCommunication}><LabWorkbench {...primaryNavigation}
+        {windowSession.empty ? <div className="lab-empty-session-view" role="status"><p>{t('windows.emptyView')}</p><button type="button" onClick={openNewSessionPanel}>{t('windows.newSession')}</button>{botHandoff ? null : successionProgress}</div> : <><CommunicationNavigationContext.Provider value={primaryCommunication}><LabWorkbench {...primaryNavigation}
           sessionIdentity={stackRoot ?? succession.selected ?? activeOpened}
           operationBinding={succession.binding ? { source: succession.binding.session, historical: navigationIntent.sessionIntent === 'history', scope: { agentId: succession.binding.session.agentId, client: succession.binding.client, replica: succession.binding.replica, transport, recipient: succession.imageRecipient, isCurrent: succession.binding.isCurrent } } : undefined}
           headingMode={compactLayout ? 'toolbar' : 'inline'}
@@ -109,11 +110,11 @@ export function SessionDocks({ scope }: { readonly scope: Pick<AppScope, 'access
           composerContext={boundFork ? <ForkReference fork={boundFork} onOpen={revealSession} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} /> : undefined}
           composerNotice={<ForkEntries forks={forkStore.linked().filter((fork) => fork.target && (sideNavigationSource(fork).agentId === activeAgentId || (activeOpened && sessionKey(sideNavigationSource(fork)) === sessionKey(activeOpened))))} openSides={stackRoot ? openSideKeys(viewKey(stackRoot)) : undefined} onOpen={(fork) => void openFork(fork)} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} />}
           sessionManager={<><MinimizeMainSession />{!compactLayout && stackRoot ? <StarButton session={stackRoot} favorites={favorites} /> : null}<SessionHeadingActions sessionKey={stackRoot ? sessionKey(stackRoot) : activeAgentId}>{(!compactLayout || succession.localViews().length > 0) && directory && currentSession ? <ChatSessionManager current={currentSession} entries={sessionEntries} busy={transitioning || hostOffline} onOpen={(item) => void openSession(item)}
-            localViews={succession.localViews()} activeSlot={succession.desired?.slot.id} onOpenView={view => void openLocalView(view.slotId)} /> : null}<nav className="lab-conversation-history" aria-label="Conversation history">
-            <button type="button" aria-label="Back to previous conversation" title="Back" disabled={transitioning || !conversationHistory.canBack} onClick={conversationHistory.back}>←</button>
-            <button type="button" aria-label="Forward to next conversation" title="Forward" disabled={transitioning || !conversationHistory.canForward} onClick={conversationHistory.forward}>→</button>
+            localViews={succession.localViews()} activeSlot={succession.desired?.slot.id} onOpenView={view => void openLocalView(view.slotId)} /> : null}<nav className="lab-conversation-history" aria-label={t('windows.history.label')}>
+            <button type="button" aria-label={t('windows.history.back')} title={t('common.back')} disabled={transitioning || !conversationHistory.canBack} onClick={conversationHistory.back}>←</button>
+            <button type="button" aria-label={t('windows.history.forward')} title={t('windows.history.forwardHint')} disabled={transitioning || !conversationHistory.canForward} onClick={conversationHistory.forward}>→</button>
           </nav>{shareSession ? <SessionLink session={shareSession} sessionIntent={navigationIntent.sessionIntent} keepOriginal={navigationIntent.keepOriginal} /> : null}</SessionHeadingActions></>}
-          conversationPath={ancestors.length > 0 ? <nav className="lab-conversation-path" aria-label="Conversation path">
+          conversationPath={ancestors.length > 0 ? <nav className="lab-conversation-path" aria-label={t('windows.path.label')}>
             {ancestors.map((ancestor) => <span key={ancestor.agentId}>
               <button type="button" className="agent-session-title" data-session-status={sessionEntries.find(entry => entry.agentId === ancestor.agentId)?.status} disabled={transitioning} onClick={() => { void openSession(ancestor); }}>{ancestor.title}</button>
               <span aria-hidden="true"> / </span>

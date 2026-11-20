@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { hasWindowAppearance, type WindowOperation, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from './useWindowWorkspace.js';
 import { byRecentUse } from '../window-recency.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
+import { errorWords } from '../window-errors.js';
 
 type Workspace = ReturnType<typeof useWindowWorkspace>;
 type Scope = { client: Workspace['client']; id?: string };
 export type NoticeTone = 'info' | 'error';
-
-const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 /** The Windows a workspace lists: its catalog and the open Window, without groups shown only as sections. */
 export function windowCatalog(workspace: Workspace): WorkspaceWindow[] {
@@ -21,6 +21,8 @@ export function windowCatalog(workspace: Workspace): WorkspaceWindow[] {
  * @param scope The page scope that orders Windows by recent use; without it, catalog order applies.
  */
 export function useWindowActions(workspace: Workspace, scope?: string) {
+  const t = useTranslate();
+  const message = (error: unknown) => errorWords(error, t);
   const currentScope = useRef<Scope>({ client: workspace.client, id: workspace.window?.id });
   currentScope.current = { client: workspace.client, id: workspace.window?.id };
   // A notice is shown only in the Window it was given in, even when it arrives before that Window renders.
@@ -60,13 +62,13 @@ export function useWindowActions(workspace: Workspace, scope?: string) {
     const url = new URL(location.href); url.searchParams.set('window', id);
     for (const key of ['mode', 'section', 'bot']) url.searchParams.delete(key);
     await navigator.clipboard.writeText(url.href);
-    if (currentScope.current.id === id && currentScope.current.client === client) setNotice('Window link copied.', 'info');
+    if (currentScope.current.id === id && currentScope.current.client === client) setNotice(t('windows.notice.linkCopied'), 'info');
   });
   /** Shows or hides the open Window's group in Bot mode; it stays a Window either way. */
   const setBotAppearance = (shown: boolean) => run(async () => {
     const id = workspace.window!.id, client = workspace.client;
     await workspace.operateGroup(id, { type: shown ? 'bots.show' : 'bots.hide' });
-    if (currentScope.current.id === id && currentScope.current.client === client) setNotice(shown ? 'Shown in Bot mode.' : 'Hidden in Bot mode. It stays a Window.', 'info');
+    if (currentScope.current.id === id && currentScope.current.client === client) setNotice(shown ? t('windows.notice.botShown') : t('windows.notice.botHidden'), 'info');
   });
   /** Renames a Window; resolves whether the edit is finished, so the caller can close its form. */
   async function saveRename(id: string, title: string): Promise<boolean> {
@@ -118,7 +120,7 @@ export function useWindowActions(workspace: Workspace, scope?: string) {
     });
     if (!failure) return done;
     // The notice belongs to whichever Window is open now, which may not have rendered yet.
-    if (currentScope.current.client === client) noticeIn({ client, id: openNow() }, `The Window was not deleted: ${message(failure.error)}`);
+    if (currentScope.current.client === client) noticeIn({ client, id: openNow() }, t('windows.notice.notDeleted', { reason: message(failure.error) }));
     return false;
   }
   const deleteWindow = (id: string) => run(() => removing(id));

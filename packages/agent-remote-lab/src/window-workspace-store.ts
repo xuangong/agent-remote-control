@@ -4,6 +4,7 @@ import {
   type WindowBots, type WindowGroup, type WindowGroupEdit, type WindowGroupMutation, type WindowGroupOperation, type WindowPresentation, type WorkspaceWindow,
 } from '@orchardworks/agent-remote-protocol';
 import { WindowRequestError, type WindowCommit, type WindowWorkspaceClient } from '@orchardworks/agent-client';
+import { WindowFailure } from './window-errors.js';
 
 /** A value the store can read as a group: a Window, a group, or a Relay snapshot with its manager. */
 export type WindowGroupSource = WorkspaceWindow | { window: WorkspaceWindow; bots?: WindowBots; presentation?: WindowPresentation; manager?: unknown };
@@ -131,7 +132,7 @@ export class WindowWorkspaceStore {
   }
   operate(operation: WindowGroupOperation): Promise<void> {
     try {
-      if (this.stopped) throw new Error('This Window is no longer active in this account.');
+      if (this.stopped) throw new WindowFailure('windows.error.notActive');
       const next = applyGroupOperation(this.snapshot, operation);
       if (equivalent(this.snapshot, next)) return this.edits.at(-1)?.done ?? Promise.resolve();
       const first = this.edits.length === 0;
@@ -164,7 +165,7 @@ export class WindowWorkspaceStore {
   discardPendingChanges(): Promise<void> {
     if (this.discarding) return this.discarding;
     if (this.stopped || !this.client || this.sync.state !== 'error' || !this.edits.length) {
-      return Promise.reject(new Error('Only blocked local Window changes can be discarded.'));
+      return Promise.reject(new WindowFailure('windows.error.onlyBlocked'));
     }
     const captured = new Set(this.edits);
     let restored = false;
@@ -179,7 +180,7 @@ export class WindowWorkspaceStore {
       this.edits = this.edits.filter(edit => !captured.has(edit));
       const previous = this.snapshot;
       this.rebuild(); this.recordSelection(previous, 'discarded'); this.publish(this.edits.length ? 'saving' : 'saved');
-      for (const edit of discarded) edit.reject(new Error('Local Window changes were discarded in favor of the saved layout.'));
+      for (const edit of discarded) edit.reject(new WindowFailure('windows.error.discarded'));
       restored = true;
     }).catch(error => {
       if (!this.stopped) this.publish('error', message(error));
@@ -203,7 +204,7 @@ export class WindowWorkspaceStore {
     if (error) edit.reject(error); else edit.resolve();
   }
   private ensureActive() {
-    if (this.stopped) throw new Error('This Window is no longer active in this account.');
+    if (this.stopped) throw new WindowFailure('windows.error.notActive');
   }
   private async recover(edit: PendingEdit): Promise<WindowCommit> {
     this.ensureActive();
@@ -308,7 +309,7 @@ export class WindowWorkspaceStore {
   }
   dispose() {
     this.stopped = true; clearTimeout(this.retryTimer); this.retryTimer = undefined;
-    for (const edit of this.edits) edit.reject(new Error('The Window page was closed before its background save settled.'));
+    for (const edit of this.edits) edit.reject(new WindowFailure('windows.error.pageClosed'));
     this.listeners.clear();
   }
 }

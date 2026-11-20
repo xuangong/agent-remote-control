@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 const storageKey = 'agent-remote.sidebar-width';
 const defaultWidth = 260;
@@ -33,13 +34,14 @@ export function useSidebarWidth(inspectorOpen: boolean) {
 }
 
 export function SidebarResize({ width, maximum, onChange }: { width: number; maximum: number; onChange(value: number): void }) {
+  const t = useTranslate();
   const [dragging, setDragging] = useState(false);
   const drag = useRef<{ x: number; width: number }>();
   const resize = (value: number) => onChange(Math.round(Math.max(minWidth, Math.min(maximum, value))));
   return <div className="lab-sidebar-resize" role="separator" tabIndex={0}
-    aria-label="Sidebar width" aria-orientation="vertical" aria-controls="lab-context"
-    aria-valuemin={minWidth} aria-valuemax={maximum} aria-valuenow={width} aria-valuetext={`${width} pixels`}
-    title="Drag to resize. Double-click to reset. Arrow keys adjust width."
+    aria-label={t('windows.sidebarWidth')} aria-orientation="vertical" aria-controls="lab-context"
+    aria-valuemin={minWidth} aria-valuemax={maximum} aria-valuenow={width} aria-valuetext={t('windows.resize.value', { width })}
+    title={t('windows.sidebarResize.hint')}
     data-resizing={dragging || undefined}
     onDoubleClick={() => resize(defaultWidth)}
     onPointerDown={event => {

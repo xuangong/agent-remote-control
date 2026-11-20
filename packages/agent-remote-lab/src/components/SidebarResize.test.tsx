@@ -1,4 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
+import { LocaleContext } from '@orchardworks/agent-client-web/react';
 import { render } from '../test/setup.js';
 import { SidebarResize, useSidebarWidth } from './SidebarResize.js';
 
@@ -37,4 +38,11 @@ it('caps the width at 220 when a narrow viewport also shows the inspector', asyn
     expect(handle.getAttribute('aria-valuemax')).toBe('220');
     expect(handle.getAttribute('aria-valuenow')).toBe('220');
   } finally { window.innerWidth = innerWidth; }
+});
+
+it('words the handle in Chinese', async () => {
+  const container = await render(<LocaleContext.Provider value="zh"><Probe /></LocaleContext.Provider>);
+  const handle = container.querySelector('[role="separator"]')!;
+  expect(handle.getAttribute('aria-label')).toBe('侧边栏宽度');
+  expect(handle.getAttribute('aria-valuetext')).toBe('260 像素');
 });

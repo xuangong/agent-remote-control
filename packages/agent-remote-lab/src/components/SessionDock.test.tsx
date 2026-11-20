@@ -3,6 +3,7 @@ import { WindowLayoutContext } from '../window-workspace-context.js';
 import { applyWindowOperation, createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { act, StrictMode, useEffect, useState } from 'react';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
+import { LocaleContext } from '@orchardworks/agent-client-web/react';
 import { render } from '../test/setup.js';
 import { SessionDockProvider, SessionDockRail, SessionViewPlacement, MinimizeMainSession } from './SessionDock.js';
 
@@ -236,3 +237,13 @@ it.each([['A', 'keyboard'], ['B', 'keyboard'], ['B', 'drag'], [null, 'keyboard']
   expect(view.querySelector('[data-dock-id="D2"] textarea')).toBe(editor);
 });
 
+
+it('words the dock controls in Chinese', async () => {
+  const view = await render(<LocaleContext.Provider value="zh"><SessionDockProvider enabled><SessionDockRail><div>Main</div></SessionDockRail>
+    <SessionViewPlacement id="one" title="one" visible>{({ controls }) => <section><SessionHeading trailing={controls}>one</SessionHeading></section>}</SessionViewPlacement>
+  </SessionDockProvider></LocaleContext.Provider>);
+  expect(view.querySelector('[aria-label="把 one 停靠起来"]')).not.toBeNull();
+  await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="把 one 停靠起来"]')!.click());
+  expect(view.querySelector('[data-dock-id="one"]')!.getAttribute('aria-label')).toBe('已停靠的 one');
+  expect(view.querySelector('[aria-label="新建会话视图"]') ?? view.querySelector('[role="separator"]')!.getAttribute('aria-label')).not.toBeNull();
+});

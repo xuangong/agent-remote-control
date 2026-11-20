@@ -3,6 +3,7 @@ import { afterAll, beforeEach, expect, it, vi } from 'vitest';
 import { createWindowView, type WindowSessionBinding, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import type { SessionActivityStatus } from '../session-activity-status.js';
+import { LocaleContext } from '@orchardworks/agent-client-web/react';
 import { render } from '../test/setup.js';
 import { WindowMenu } from './WindowMenu.js';
 import { WindowWorkspaceClient } from '@orchardworks/agent-client';
@@ -153,4 +154,16 @@ it.each(['scope', 'panel'] as const)('still invalidates nested confirmation afte
   expect(test.container.querySelector('dialog')).toBeNull();
   expect(test.container.querySelector('[data-window-id="other"]')).not.toBeNull();
   expect(test.remove).not.toHaveBeenCalled();
+});
+
+it('words the Windows panel in Chinese', async () => {
+  const current = windowOf('current', ['a']);
+  const workspace = { window: current, windows: [current], hasActiveWindow: true, unavailable: false,
+    open: async () => {}, create: async () => {}, remove: async () => {}, operate: async () => {} } as unknown as ReturnType<typeof useWindowWorkspace>;
+  const container = await render(<LocaleContext.Provider value="zh"><WindowMenu workspace={workspace} visible onOverview={() => {}} /></LocaleContext.Provider>);
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="窗口"]')!.click());
+  expect(container.querySelector('[aria-label="关闭窗口列表"]')).not.toBeNull();
+  expect(container.textContent).toContain('新建窗口');
+  expect(container.textContent).toContain('1 个 Bot');
+  expect(container.textContent).not.toContain('New Window');
 });

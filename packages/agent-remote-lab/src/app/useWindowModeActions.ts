@@ -14,7 +14,7 @@ import type { OpenedSession } from '../directory-client.js';
 import { sessionKey } from '../session-tree.js';
 import { sessionViewLocation, type CommandSession } from '../shell/command-items.js';
 import { revealView, viewSelection } from '../window-view-selection.js';
-import { message } from './helpers.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { SessionSuccessionBindingSlice } from './useSessionSuccessionBinding.js';
 import type { SessionOpeningSlice } from './useSessionOpening.js';
 import type { ViewSessionStateSlice } from './useViewSessionState.js';
@@ -27,9 +27,11 @@ import type { ProviderStateSlice } from './useProviderState.js';
 import type { SharedFeedsAndTpmSlice } from './useSharedFeedsAndTpm.js';
 import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';
 import type { AppInputs } from './types.js';
+import { WindowFailure, errorWords } from '../window-errors.js';
 
 export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBindingSlice & SessionOpeningSlice & ViewSessionStateSlice & PanelsAndShortcutsSlice & ActiveSessionSlice & DocksAndBotSelectionSlice & WindowViewActionsSlice & WorkbenchShellSlice & ProviderStateSlice & SharedFeedsAndTpmSlice & WorkbenchRecordsSlice, 'addSessionView' | 'askView' | 'baseUrl' | 'closeContext' | 'closeInspector' | 'closePage' | 'compactLayout' | 'createWindowFromMenu' | 'expandedKeys' | 'modeSteps' | 'navigation' | 'openDirectorySession' | 'openSession' | 'presentedViewId' | 'setQueuedModeSteps' | 'setTeamReveal' | 'sharedViewForSlot' | 'sharedWindow' | 'showView' | 'sideRequests' | 'succession' | 'teamRoster' | 'teamView' | 'tpmView' | 'windowActions' | 'windowWorkspace'>) {
   const { addSessionView, askView, baseUrl, closeContext, closeInspector, closePage, compactLayout, createWindowFromMenu, expandedKeys, modeSteps, navigation, openDirectorySession, openSession, presentedViewId, setQueuedModeSteps, setTeamReveal, sharedViewForSlot, sharedWindow, showView, sideRequests, succession, teamRoster, teamView, tpmView, windowActions, windowWorkspace } = scope;
+  const t = useTranslate();
 
   function isViewVisible(slotId: string) {
     if (!sharedWindow) return expandedKeys.has(slotId);
@@ -69,7 +71,7 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
 
   /** Selects a view of the open Window as its sidebar row does: expanded, selected and scrolled into view, in place of a page. */
   function selectWindowView(view: WindowView) {
-    const failed = (error: unknown) => windowActions.setNotice(message(error, 'The session view was not selected.'));
+    const failed = (error: unknown) => windowActions.setNotice(errorWords(error, t, 'windows.notice.viewNotSelected'));
     try { void windowWorkspace.operate(viewSelection(view)).catch(failed); } catch (error) { failed(error); return; }
     revealView(view.id); closePage();
   }
@@ -96,7 +98,7 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
 
   async function openWindowFromSearch(id: string) {
     try { await windowWorkspace.open(id); closePage(); }
-    catch (error) { windowActions.setNotice(message(error, 'The Window was not opened.')); }
+    catch (error) { windowActions.setNotice(errorWords(error, t, 'windows.notice.windowNotOpened')); }
   }
 
   /**
@@ -109,7 +111,7 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
     if (!location) { void openDirectorySession(session); return; }
     if (location.windowId !== current?.id) {
       try { await windowWorkspace.open(location.windowId); }
-      catch (error) { windowActions.setNotice(message(error, 'The Window was not opened.')); return; }
+      catch (error) { windowActions.setNotice(errorWords(error, t, 'windows.notice.windowNotOpened')); return; }
     }
     // Only select once that Window is open: a newer navigation may have replaced it while it loaded.
     const open = windowWorkspace.readWindow();
@@ -137,7 +139,7 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
     const target = group ? botPlaceForTile(group, viewId, appendedRank(windowWorkspace.groups)) : undefined;
     if (!target) return;
     try { if (target.edit) await windowWorkspace.operateGroup(groupId, target.edit); }
-    catch (error) { windowActions.setNotice(message(error, 'The assistant was not opened in Bot mode.')); return; }
+    catch (error) { windowActions.setNotice(errorWords(error, t, 'windows.notice.botNotOpened')); return; }
     navigation.select(target.place);
     inMode('bot', () => searchRuns.current.focusShownMode('bot'));
   }
@@ -154,7 +156,7 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
       if (pin.request.kind === 'show') await windowWorkspace.operateGroup(groupId, pin.request.edit);
       // The Window opens while Bot mode still shows, so Window mode comes up with it rather than empty for a frame.
       await windowWorkspace.open(pin.route.window);
-    } catch (error) { windowActions.setNotice(message(error, 'The assistant was not pinned to a window.')); return; }
+    } catch (error) { windowActions.setNotice(errorWords(error, t, 'windows.notice.botNotPinned')); return; }
     // Window mode comes up at the pinned Window, never at another one or none for a frame, and on a phone not under its drawer.
     closeContext();
     navigation.setMode('window', { window: pin.route.window });
@@ -163,7 +165,7 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
       void windowWorkspace.open(pin.route.window).then(() => {
         const open = windowWorkspace.readWindow(), view = open?.id === pin.route.window ? open.views.find(item => item.id === pin.viewId) : undefined;
         if (view) selectWindowView(view);
-      }).catch(error => windowActions.setNotice(message(error, 'The Window was not opened.')));
+      }).catch(error => windowActions.setNotice(errorWords(error, t, 'windows.notice.windowNotOpened')));
     });
   }
 
@@ -172,7 +174,7 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
     if (!target) return;
     if (target.kind === 'group') {
       if (target.groupType !== 'team' || teamRoster?.baseUrl !== baseUrl || !teamRoster.teams.some(team => team.id === target.groupId)) {
-        throw new Error('This group is no longer available.');
+        throw new WindowFailure('windows.error.groupGone');
       }
       teamView.setVisible(true);
       setTeamReveal({ baseUrl, teamId: target.groupId, requestId: crypto.randomUUID() });
@@ -193,7 +195,7 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
       // Navigation finishes locally; Window save state owns background persistence feedback.
       void windowWorkspace.operate(operation).catch(() => {});
     } else if (!await openSession({ ...target, title: attribution.value }, undefined, undefined, false, undefined, target.sessionIntent)) {
-      throw new Error('The related session could not be opened.');
+      throw new WindowFailure('windows.error.relatedNotOpened');
     }
   }
 

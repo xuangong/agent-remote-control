@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import { createWindowView, type WindowView } from '@orchardworks/agent-remote-protocol';
+import { translator } from '@orchardworks/agent-client';
 import { windowSummary } from './window-summary.js';
 
 const bot = (id: string, extra: Partial<WindowView> = {}): WindowView => ({
@@ -23,4 +24,10 @@ it('counts views when a Window has no bot, and says when it is empty', () => {
   // Asks, history views and empty views are not bots.
   expect(windowSummary([bot('a'), askView, createWindowView('empty')])).toBe('1 bot');
   expect(windowSummary([bot('h', { binding: { hostId: 'h', providerId: 'codex', nativeSessionId: 'h', title: 'h', sessionIntent: 'history' } })])).toBe('1 view');
+});
+
+it('counts in Chinese when given the Chinese words', () => {
+  const t = translator('zh');
+  expect(windowSummary([bot('a'), bot('b', { collapsed: true })], () => false, t)).toBe('2 个 Bot · 1 个展开着');
+  expect(windowSummary([], () => false, t)).toBe('空的');
 });

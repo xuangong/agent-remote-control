@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 const key = 'agent-remote:window-view';
 function preference(): boolean {
@@ -7,6 +8,7 @@ function preference(): boolean {
 }
 
 export function useWindowVisibility() {
+  const t = useTranslate();
   const [visible, setChoice] = useState(preference);
   useEffect(() => {
     const refresh = () => setChoice(preference());
@@ -17,6 +19,6 @@ export function useWindowVisibility() {
     try { window.localStorage.setItem(key, String(value)); } catch { /* The current page can still change visibility. */ }
     setChoice(value);
   }, []);
-  const controls = <label><span>Window view</span><input aria-label="Window view" type="checkbox" checked={visible} onChange={event => setVisible(event.target.checked)} /></label>;
+  const controls = <label><span>{t('windows.windowView')}</span><input aria-label={t('windows.windowView')} type="checkbox" checked={visible} onChange={event => setVisible(event.target.checked)} /></label>;
   return { visible, setVisible, controls };
 }

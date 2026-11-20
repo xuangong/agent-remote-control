@@ -12,6 +12,7 @@ import { BotPicture } from './BotRoster.js';
 import type { AssistantStatus } from '@orchardworks/agent-client';
 import { useSharedFeed } from '../shared-feeds.js';
 import { TileStack } from './assistant/TileStack.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 const defaultWidth = 440, minimumWidth = 320, maximumWidth = 1600;
 interface DockItem { id: string; title: string; host: HTMLElement; visible: boolean; width: number; additionalWidth?: number; folded?: boolean }
@@ -142,6 +143,7 @@ export function moveSessionHost(host: HTMLElement, parent: HTMLElement) {
 export function SessionViewPlacement({ id, title, visible, additionalWidth, folded, dockRequest, children }: {
   id: string; title: string; visible: boolean; additionalWidth?: number; folded?: boolean; dockRequest?: string; children(placement: { docked: boolean; controls: ReactNode }): ReactNode;
 }) {
+  const t = useTranslate();
   const dock = useContext(Context);
   const [host] = useState(() => { const element = document.createElement('div'); element.className = 'lab-session-placement'; return element; });
   const home = useRef<HTMLDivElement>(null);
@@ -159,7 +161,7 @@ export function SessionViewPlacement({ id, title, visible, additionalWidth, fold
   useLayoutEffect(() => () => { unregister?.(id, host); host.remove(); }, [unregister, id, host]);
   const titleInteraction = useSessionDockDrag({ id, title, enabled: docked, move: dock?.move, reorder: dock?.reorder });
   const controls = dock?.enabled ? <>
-    <button type="button" className="lab-session-dock-toggle" aria-label={`${docked ? 'Float' : 'Dock'} ${title}`} title={docked ? 'Return to floating window' : 'Dock to the right of the conversations'}
+    <button type="button" className="lab-session-dock-toggle" aria-label={t(docked ? 'windows.dock.float' : 'windows.dock.dock', { title })} title={docked ? t('windows.dock.floatHint') : t('windows.dock.dockHint')}
       onClick={() => docked ? dock.remove(id) : dock.add(id)}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x={docked ? '5' : '3'} y={docked ? '5' : '4'} width="16" height="16" rx="2" />{docked ? <path d="M3 16V3h13" /> : <path d="M13 4v16" />}</svg>
     </button>
@@ -171,9 +173,10 @@ export function SessionViewPlacement({ id, title, visible, additionalWidth, fold
 }
 
 export function MinimizeMainSession() {
+  const t = useTranslate();
   const dock = useContext(Context);
   if (!dock?.enabled || !dock.items.some(item => item.visible)) return null;
-  return <button type="button" className="lab-session-main-minimize" aria-label="Minimize main session area" title="Minimize main session and subagents"
+  return <button type="button" className="lab-session-main-minimize" aria-label={t('windows.main.minimize')} title={t('windows.main.minimizeHint')}
     onClick={event => { event.stopPropagation(); dock.minimizeMain(true); }}>
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M8 4v16m8-12-4 4 4 4" /></svg>
   </button>;
@@ -223,7 +226,9 @@ interface SessionDockRailProps {
   /** The × of a folded bot's card: removing the bot from its group, after a confirmation. */
   onRemovePrimaryGroup?(id: string): void;
 }
-export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main session', minimumBaseWidth = minimumWidth, onCreateView, compact = false, stack = false, primaryGroups, onSelectPrimaryGroup, onResizePrimaryGroup, onCollapsePrimaryGroup, onClosePrimaryGroup, onRemovePrimaryGroup }: SessionDockRailProps) {
+export function SessionDockRail({ children, minimizedHeader, mainTitle: givenMainTitle, minimumBaseWidth = minimumWidth, onCreateView, compact = false, stack = false, primaryGroups, onSelectPrimaryGroup, onResizePrimaryGroup, onCollapsePrimaryGroup, onClosePrimaryGroup, onRemovePrimaryGroup }: SessionDockRailProps) {
+  const t = useTranslate();
+  const mainTitle = givenMainTitle ?? t('windows.main.session');
   const dock = useContext(Context);
   const rail = useRef<HTMLDivElement>(null);
   const shared = useWindowLayout();
@@ -262,14 +267,14 @@ export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main s
     : primaryGroups ? primaryGroups.map((group, index) => <PrimaryGroupPane key={group.id} group={group} compact={compact} minimizedHeader={index === 0 ? minimizedHeader : undefined} onSelect={onSelectPrimaryGroup} onResize={onResizePrimaryGroup} onCollapse={onCollapsePrimaryGroup} onClose={onClosePrimaryGroup} onRemove={onRemovePrimaryGroup} />) : <div className="lab-session-dock-base" data-minimized={minimized || undefined} style={shown.length ? { flexBasis: minimized ? 44 : baseWidth } : undefined}>
       <div ref={content} id={contentId} className="lab-session-dock-main-content" hidden={minimized}>{children}</div>
       {minimized ? minimizedHeader : null}
-      {minimized ? <button ref={restore} type="button" className="lab-session-main-restore" aria-label={`Restore main session: ${mainTitle}`} title={`Restore main session: ${mainTitle}`} aria-expanded={false} aria-controls={contentId}
+      {minimized ? <button ref={restore} type="button" className="lab-session-main-restore" aria-label={t('windows.main.restore', { title: mainTitle })} title={t('windows.main.restore', { title: mainTitle })} aria-expanded={false} aria-controls={contentId}
         onClick={() => { restoreFocus.current = true; dock?.minimizeMain(false); }}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
-        <span className="lab-session-main-label">Main</span><span className="lab-session-main-title">{mainTitle}</span>
+        <span className="lab-session-main-label">{t('windows.main.label')}</span><span className="lab-session-main-title">{mainTitle}</span>
       </button> : null}
-      {shown.length && !minimized ? <DockResize title="Main conversation area" width={baseWidth} minimum={minimumBaseWidth} onResize={width => dock?.resizeBase(width)} /> : null}
+      {shown.length && !minimized ? <DockResize title={t('windows.main.area')} width={baseWidth} minimum={minimumBaseWidth} onResize={width => dock?.resizeBase(width)} /> : null}
     </div>}
-    {dock?.enabled && onCreateView ? <button type="button" className="lab-session-dock-add" style={{ order: active.length + 1 }} aria-label="New session view" title="New session view" onClick={onCreateView}>+</button> : null}
+    {dock?.enabled && onCreateView ? <button type="button" className="lab-session-dock-add" style={{ order: active.length + 1 }} aria-label={t('windows.newSessionView')} title={t('windows.newSessionView')} onClick={onCreateView}>+</button> : null}
     {[...active].sort((a, b) => a.id.localeCompare(b.id)).map(item => <DockPane key={item.id} item={item} order={active.indexOf(item) + 1} />)}
   </div>;
 }
@@ -282,6 +287,7 @@ function PrimaryGroupPane({ group, compact, stacked = false, minimizedHeader, on
   onClose?: SessionDockRailProps['onClosePrimaryGroup'];
   onRemove?: SessionDockRailProps['onRemovePrimaryGroup'];
 }) {
+  const t = useTranslate();
   const minimized = !compact && group.collapsed;
   const contentId = useId();
   const select = (event: { target: EventTarget }) => {
@@ -289,26 +295,27 @@ function PrimaryGroupPane({ group, compact, stacked = false, minimizedHeader, on
     onSelect?.(group.id);
   };
   return <section className="lab-primary-group" data-session-family-shell data-primary-group-id={group.id} data-selected={group.selected || undefined}
-    data-minimized={minimized || undefined} hidden={compact && !stacked && !group.selected} aria-label={`Primary group: ${group.title}`}
+    data-minimized={minimized || undefined} hidden={compact && !stacked && !group.selected} aria-label={t('windows.group.label', { title: group.title })}
     style={compact ? undefined : { width: minimized ? group.fold ? FOLDED_BOT_WIDTH : 44 : group.width + (group.additionalWidth ?? 0) }}
     onPointerDownCapture={select} onFocusCapture={select}>
     <div id={contentId} className="lab-primary-group-content" hidden={minimized}>{group.content}</div>
     {minimized ? minimizedHeader : null}
     {/* A folded bot is removed from its group only on request; other views close at once. */}
-    {minimized && group.fold && onRemove ? <button type="button" data-pane-selection-ignore className="lab-primary-group-close" aria-label={`Remove ${group.title} from this group`}
-      title="Remove from group…" onClick={() => onRemove(group.id)}>×</button>
-      : minimized && onClose ? <button type="button" data-pane-selection-ignore className="lab-primary-group-close" aria-label={`Close primary group: ${group.title}`}
-      title="Close this session view. Agent sessions keep running." onClick={() => onClose(group.id)}>×</button> : null}
-    {minimized && group.fold ? <FoldedBotCard label={`Restore primary group: ${group.title}`} fold={group.fold} controls={contentId} onRestore={() => onCollapse?.(group.id, false)} />
-    : minimized ? <button type="button" className="lab-session-main-restore" aria-label={`Restore primary group: ${group.title}`} aria-controls={contentId} aria-expanded={false}
-      onClick={() => onCollapse?.(group.id, false)}><span className="lab-session-main-label">Group</span><span className="lab-session-main-title">{group.title}</span></button>
-      : !compact && onCollapse ? <button type="button" className="lab-primary-group-minimize" aria-label={`Minimize primary group: ${group.title}`} aria-controls={contentId} aria-expanded={true}
+    {minimized && group.fold && onRemove ? <button type="button" data-pane-selection-ignore className="lab-primary-group-close" aria-label={t('windows.group.removeLabel', { title: group.title })}
+      title={t('windows.group.removeHint')} onClick={() => onRemove(group.id)}>×</button>
+      : minimized && onClose ? <button type="button" data-pane-selection-ignore className="lab-primary-group-close" aria-label={t('windows.group.closeLabel', { title: group.title })}
+      title={t('windows.closeView.hint')} onClick={() => onClose(group.id)}>×</button> : null}
+    {minimized && group.fold ? <FoldedBotCard label={t('windows.group.restore', { title: group.title })} fold={group.fold} controls={contentId} onRestore={() => onCollapse?.(group.id, false)} />
+    : minimized ? <button type="button" className="lab-session-main-restore" aria-label={t('windows.group.restore', { title: group.title })} aria-controls={contentId} aria-expanded={false}
+      onClick={() => onCollapse?.(group.id, false)}><span className="lab-session-main-label">{t('windows.group.name')}</span><span className="lab-session-main-title">{group.title}</span></button>
+      : !compact && onCollapse ? <button type="button" className="lab-primary-group-minimize" aria-label={t('windows.group.minimize', { title: group.title })} aria-controls={contentId} aria-expanded={true}
         onClick={() => onCollapse(group.id, true)}>−</button> : null}
     {!compact && !minimized && onResize ? <DockResize title={group.title} width={group.width} additionalWidth={group.additionalWidth} minimum={240} onResize={width => onResize(group.id, width)} /> : null}
   </section>;
 }
 
 function DockPane({ item, order }: { item: DockItem; order: number }) {
+  const t = useTranslate();
   const target = useRef<HTMLDivElement>(null);
   const dock = useContext(Context)!;
   const shared = useWindowLayout();
@@ -324,7 +331,7 @@ function DockPane({ item, order }: { item: DockItem; order: number }) {
     return () => cancelAnimationFrame(frame);
   }, [item.host]);
   // A folded bot stands as a slim card, as a folded primary group does.
-  return <section className="lab-session-dock-pane" data-session-family-shell data-dock-id={item.id} aria-label={`Docked ${item.title}`} data-folded={item.folded || undefined}
+  return <section className="lab-session-dock-pane" data-session-family-shell data-dock-id={item.id} aria-label={t('windows.dock.docked', { title: item.title })} data-folded={item.folded || undefined}
     style={{ width: item.folded ? FOLDED_BOT_WIDTH : item.width + (item.additionalWidth ?? 0), minWidth: item.folded ? 0 : shared ? 240 : undefined, order }}>
     <div ref={target} className="lab-session-dock-content" />
     {item.folded ? null : <DockResize title={item.title} width={item.width} additionalWidth={item.additionalWidth} onResize={width => dock.resize(item.id, width)} />}
@@ -332,6 +339,7 @@ function DockPane({ item, order }: { item: DockItem; order: number }) {
 }
 
 export function DockResize({ title, width, additionalWidth = 0, minimum: preferredMinimum, onResize }: { title: string; width: number; additionalWidth?: number; minimum?: number; onResize(width: number): void }) {
+  const t = useTranslate();
   const shared = useWindowLayout();
   const minimum = preferredMinimum ?? (shared ? 240 : minimumWidth);
   const drag = useRef<{ x: number; width: number; preferred?: number;
@@ -352,10 +360,10 @@ export function DockResize({ title, width, additionalWidth = 0, minimum: preferr
     if (gesture?.preferred !== undefined) resize(gesture.preferred);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
-  return <div className="lab-session-dock-resize" role="separator" tabIndex={0} aria-label={`${title} width`} aria-orientation="vertical"
+  return <div className="lab-session-dock-resize" role="separator" tabIndex={0} aria-label={t('windows.resize.label', { title })} aria-orientation="vertical"
     style={additionalWidth > 0 ? { left: `calc(var(--lab-session-family-root-width, ${width}px) - 6px)`, right: 'auto' } : undefined}
-    aria-valuemin={minimum} aria-valuemax={maximumWidth} aria-valuenow={Math.round(width)} aria-valuetext={`${Math.round(width)} pixels`}
-    title="Drag to resize. Arrow keys adjust width. Double-click to reset."
+    aria-valuemin={minimum} aria-valuemax={maximumWidth} aria-valuenow={Math.round(width)} aria-valuetext={t('windows.resize.value', { width: Math.round(width) })}
+    title={t('windows.resize.hint')}
     onDoubleClick={() => resize(defaultWidth)}
     onPointerDown={event => {
       if (event.button !== 0 || drag.current) return;

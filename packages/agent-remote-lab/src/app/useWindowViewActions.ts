@@ -19,9 +19,12 @@ import type { PanelsAndShortcutsSlice } from './usePanelsAndShortcuts.js';
 import type { ViewSessionStateSlice } from './useViewSessionState.js';
 import type { DocksAndBotSelectionSlice } from './useDocksAndBotSelection.js';
 import type { AppInputs } from './types.js';
+import { WindowFailure, errorWords } from '../window-errors.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 export function useWindowViewActions(scope: Pick<AppInputs & RemoteHostStateSlice & WorkbenchRecordsSlice & ConversationConnectionsSlice & ActiveSessionSlice & RequestedSessionSlice & ProviderStateSlice & ProviderCreationSlice & WorkbenchShellSlice & SessionSuccessionBindingSlice & PanelsAndShortcutsSlice & ViewSessionStateSlice & DocksAndBotSelectionSlice, 'baseUrl' | 'compactLayout' | 'creatingWindowRef' | 'creationLocked' | 'currentHost' | 'dispatchPanels' | 'draftOwnerBinding' | 'presentedSelection' | 'providerChoiceList' | 'providerId' | 'providers' | 'restoredHostSelection' | 'selectedHost' | 'sessionPanel' | 'sessionWindows' | 'setAgentControlOpen' | 'setCreatePlanning' | 'setCreatingWindow' | 'setDeleteConfirmOpen' | 'setLocalProviderId' | 'setSelectedHost' | 'setSessionNotice' | 'setSessionOptions' | 'sharedWindow' | 'sidebarWindow' | 'succession' | 'toast' | 'transitionRef' | 'windowMode' | 'windowWorkspace'>) {
   const { baseUrl, compactLayout, creatingWindowRef, creationLocked, currentHost, dispatchPanels, draftOwnerBinding, presentedSelection, providerChoiceList, providerId, providers, restoredHostSelection, selectedHost, sessionPanel, sessionWindows, setAgentControlOpen, setCreatePlanning, setCreatingWindow, setDeleteConfirmOpen, setLocalProviderId, setSelectedHost, setSessionNotice, setSessionOptions, sharedWindow, sidebarWindow, succession, toast, transitionRef, windowMode, windowWorkspace } = scope;
+  const t = useTranslate();
 
 
   function selectHost(host: RemoteHost, preferredId = providerId): void {
@@ -68,7 +71,7 @@ export function useWindowViewActions(scope: Pick<AppInputs & RemoteHostStateSlic
     if (creatingWindowRef.current) return;
     creatingWindowRef.current = true; setCreatingWindow(true);
     void windowWorkspace.create().then(() => toast?.dismiss('new-window'),
-      (error: unknown) => toast?.show('new-window', 'Window not created', error instanceof Error ? error.message : String(error), 'error'))
+      (error: unknown) => toast?.show('new-window', t('windows.notice.notCreated'), errorWords(error, t), 'error'))
       .finally(() => { creatingWindowRef.current = false; setCreatingWindow(false); });
   }
 
@@ -109,7 +112,7 @@ export function useWindowViewActions(scope: Pick<AppInputs & RemoteHostStateSlic
     const current = windowWorkspace.readWindow();
     const view = presentedSelection(current);
     if (!current || !view) return;
-    if (view.bindingPolicy === 'managed') throw new Error('This view belongs to an Ask, Team, or TPM. Select an ordinary session view or create an empty view first.');
+    if (view.bindingPolicy === 'managed') throw new WindowFailure('windows.error.managedView');
     return { windowId: current.id, viewId: view.id, binding: JSON.stringify(view.binding ?? null) };
   }
   return { selectHost, selectProvider, focusManagedWindow, showWindowSessionChooser, chooseWindowSession, openPage, sessionsPageTitle, showPanel, openNewSessionPanel, createWindowFromMenu, editWindow, selectPrimaryGroup, createSessionView, addSessionView, windowToolbarShown, windowDraftBinding, directoryDestination };

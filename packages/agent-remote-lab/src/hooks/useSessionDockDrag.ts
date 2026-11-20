@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { SessionTitleInteraction } from '../components/SessionTitleInteraction.js';
 
 const duration = 200;
@@ -36,6 +37,7 @@ export function useSessionDockDrag({ id, title, enabled, move, reorder }: {
   id: string; title: string; enabled: boolean;
   move?(id: string, offset: number): void; reorder?(id: string, target: string): void;
 }): SessionTitleInteraction | undefined {
+  const t = useTranslate();
   const current = useRef({ id, move, reorder }); current.current = { id, move, reorder };
   const gesture = useRef<Gesture>();
   const suppressClickUntil = useRef(0);
@@ -64,7 +66,7 @@ export function useSessionDockDrag({ id, title, enabled, move, reorder }: {
   return {
     'data-session-title-draggable': true,
     tabIndex: 0,
-    'aria-label': `Move ${title}`,
+    'aria-label': t('windows.dock.move', { title }),
     'aria-keyshortcuts': 'Alt+ArrowLeft Alt+ArrowRight',
     onPointerDown: event => {
       if (event.button !== 0 || event.isPrimary === false || gesture.current || !(event.target instanceof HTMLElement)

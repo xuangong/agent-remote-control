@@ -6,7 +6,9 @@ import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { navigationArrow } from '../hooks/useSessionViewMouseNavigation.js';
 import { byRecentUse } from '../window-recency.js';
 import type { SessionActivityStatus } from '../session-activity-status.js';
-import { assistantStateWord, assistantStatus } from '@orchardworks/agent-client';
+import { assistantStateWord, assistantStatus, translator, type Translate } from '@orchardworks/agent-client';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
+import { errorWords } from '../window-errors.js';
 import { windowSummary } from '../window-summary.js';
 import { viewTitle } from './WindowWorkspaces.js';
 import { useSharedStates } from '../shared-feeds.js';
@@ -21,7 +23,7 @@ export interface WindowThumbnailPane { id: string; title: string; providerId?: s
  * The panes of a Window in the order its rail shows them: top-level views with the views attached to them, then dock
  * views with theirs. Floating views are only counted.
  */
-export function windowThumbnail(window: WorkspaceWindow): { panes: WindowThumbnailPane[]; floating: number } {
+export function windowThumbnail(window: WorkspaceWindow, t: Translate = translator('en')): { panes: WindowThumbnailPane[]; floating: number } {
   const attached = new Map<string, WindowView[]>();
   for (const view of window.views) if (view.attachedTo) attached.set(view.attachedTo, [...attached.get(view.attachedTo) ?? [], view]);
   const panes: WindowThumbnailPane[] = [], seen = new Set<string>();
@@ -29,7 +31,7 @@ export function windowThumbnail(window: WorkspaceWindow): { panes: WindowThumbna
     if (seen.has(view.id)) return;
     seen.add(view.id);
     const binding = view.binding;
-    panes.push({ id: view.id, title: viewTitle(view), providerId: binding?.providerId, width: view.collapsed ? COLLAPSED_WIDTH : view.width,
+    panes.push({ id: view.id, title: viewTitle(view, t), providerId: binding?.providerId, width: view.collapsed ? COLLAPSED_WIDTH : view.width,
       selected: view.id === window.selectedViewId, collapsed: view.collapsed, attached: !!view.attachedTo,
       ...(binding ? { session: { hostId: binding.hostId, providerId: binding.providerId, nativeSessionId: binding.nativeSessionId } } : {}) });
     for (const child of attached.get(view.id) ?? []) visit(child);
@@ -40,38 +42,39 @@ export function windowThumbnail(window: WorkspaceWindow): { panes: WindowThumbna
 
 /** The states worth showing on a pane, worded by the assistants' one rule; idle, closed and unknown sessions stay quiet. */
 const LABELLED: readonly SessionActivityStatus[] = ['waiting', 'starting', 'failed', 'running', 'offline'];
-const paneLabel = (state: SessionActivityStatus) => assistantStateWord(assistantStatus({ activity: state, asleep: false, waitingToSend: false }).state);
+const paneLabel = (state: SessionActivityStatus, t: Translate) => assistantStateWord(assistantStatus({ activity: state, asleep: false, waitingToSend: false }, t).state, t);
 
 /** A Window's sessions that need the owner, failed or are working, most urgent first. */
-function stateSummary(states: SessionActivityStatus[]): string | undefined {
+function stateSummary(states: SessionActivityStatus[], t: Translate): string | undefined {
   const count = (...matches: SessionActivityStatus[]) => states.filter(value => matches.includes(value)).length;
   const needs = count('waiting');
-  const parts = [[needs, needs === 1 ? 'needs you' : 'need you'], [count('failed'), 'failed'], [count('running', 'starting'), 'working']] as const;
-  const text = parts.filter(([n]) => n > 0).map(([n, label]) => `${n} ${label}`).join(' · ');
+  const parts = [[needs, t('windows.card.needYou', { count: needs })], [count('failed'), t('windows.card.failed', { count: count('failed') })], [count('running', 'starting'), t('windows.card.working', { count: count('running', 'starting') })]] as const;
+  const text = parts.filter(([n]) => n > 0).map(([, label]) => label).join(' · ');
   return text || undefined;
 }
 
 function WindowCard({ window, current, opening, asleep, sessionStatus, onOpen }: { window: WorkspaceWindow; current: boolean; opening: boolean; asleep(viewId: string): boolean; sessionStatus?(session: SessionStateRef): SessionActivityStatus; onOpen(): void }) {
-  const { panes } = windowThumbnail(window);
+  const t = useTranslate();
+  const { panes } = windowThumbnail(window, t);
   const paneStates = panes.map(pane => pane.session && sessionStatus ? sessionStatus(pane.session) : undefined);
-  const summary = stateSummary(paneStates.filter((state): state is SessionActivityStatus => !!state));
+  const summary = stateSummary(paneStates.filter((state): state is SessionActivityStatus => !!state), t);
   const attention = paneStates.includes('waiting');
   return <button type="button" className="lab-window-card" data-window-card={window.id} aria-current={current || undefined} aria-busy={opening || undefined}
-    data-attention={attention || undefined} aria-label={`${current ? 'Return to' : 'Open'} Window: ${window.title}${summary ? `, ${summary}` : ''}`} onClick={onOpen}>
+    data-attention={attention || undefined} aria-label={((label) => summary ? t('windows.card.withSummary', { label, summary }) : label)(t(current ? 'windows.card.return' : 'windows.card.open', { title: window.title }))} onClick={onOpen}>
     <span className="lab-window-card-layout" aria-hidden="true">
       {panes.length ? panes.map((pane, index) => <span key={pane.id} className="lab-window-card-pane" style={{ flexGrow: pane.width }}
         data-selected={pane.selected || undefined} data-collapsed={pane.collapsed || undefined} data-attached={pane.attached || undefined} data-state={paneStates[index]}>
         {pane.collapsed ? null : <>
-          {paneStates[index] && LABELLED.includes(paneStates[index]!) ? <span className="lab-window-card-state">{paneLabel(paneStates[index]!)}</span> : null}
+          {paneStates[index] && LABELLED.includes(paneStates[index]!) ? <span className="lab-window-card-state">{paneLabel(paneStates[index]!, t)}</span> : null}
           <span className="lab-window-card-pane-title">{pane.title}</span>{pane.providerId ? <span className="lab-window-card-provider">{pane.providerId}</span> : null}
         </>}
-      </span>) : <span className="lab-window-card-empty">No session views</span>}
+      </span>) : <span className="lab-window-card-empty">{t('windows.noViews')}</span>}
     </span>
     <span className="lab-window-card-caption">
       <strong>{window.title}</strong>
-      <small>{opening ? 'Opening…' : windowSummary(window.views, asleep)}
+      <small>{opening ? t('windows.opening') : windowSummary(window.views, asleep, t)}
         {summary && !opening ? <span className="lab-window-card-summary"> · {summary}</span> : null}</small>
-      {current ? <span className="lab-window-card-current">Current</span> : null}
+      {current ? <span className="lab-window-card-current">{t('windows.card.current')}</span> : null}
     </span>
   </button>;
 }
@@ -86,6 +89,7 @@ export function WindowOverview({ workspace, scope, enabled, open, sessionStatus,
   sessionStatus?(session: SessionStateRef): SessionActivityStatus;
   onOpenChange(open: boolean): void;
 }) {
+  const t = useTranslate();
   // Statuses come from sessionStatus, which reads the shared states: render again when they change.
   useSharedStates();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -131,7 +135,7 @@ export function WindowOverview({ workspace, scope, enabled, open, sessionStatus,
     if (id === workspace.window?.id) { onOpenChange(false); return; }
     setOpeningId(id); setNotice(undefined);
     try { await workspace.open(id); onOpenChange(false); }
-    catch (error) { setNotice(error instanceof Error ? error.message : String(error)); }
+    catch (error) { setNotice(errorWords(error, t)); }
     finally { setOpeningId(undefined); }
   }
   function move(event: ReactKeyboardEvent<HTMLDivElement>) {
@@ -150,21 +154,21 @@ export function WindowOverview({ workspace, scope, enabled, open, sessionStatus,
     card?.scrollIntoView?.({ block: 'nearest' });
   }
   if (!shown) return null;
-  return <dialog ref={dialog} className="lab-window-overview" aria-label="All Windows" onCancel={event => { event.preventDefault(); onOpenChange(false); }}
+  return <dialog ref={dialog} className="lab-window-overview" aria-label={t('windows.allWindows')} onCancel={event => { event.preventDefault(); onOpenChange(false); }}
     // A click beside the cards returns, as on the blurred page behind them.
     onClick={event => { if (event.target === event.currentTarget || (event.target as Element).matches('.lab-window-overview-body, .lab-window-overview-grid')) onOpenChange(false); }}>
     <div className="lab-window-overview-body">
       <div className="lab-window-overview-heading">
-        <h2>Windows</h2>
-        <span className="lab-window-overview-hint">Arrow keys move, Enter opens, Esc returns</span>
-        <button type="button" aria-label="Return to the current Window" title="Return (Esc)" onClick={() => onOpenChange(false)}>×</button>
+        <h2>{t('windows.heading')}</h2>
+        <span className="lab-window-overview-hint">{t('windows.overview.hint')}</span>
+        <button type="button" aria-label={t('windows.overview.return')} title={t('windows.overview.returnTitle')} onClick={() => onOpenChange(false)}>×</button>
       </div>
       {notice ? <p className="lab-window-overview-notice" role="alert">{notice}</p> : null}
-      <div ref={grid} className="lab-window-overview-grid" role="group" aria-label="Windows, most recently used first" onKeyDown={move}>
+      <div ref={grid} className="lab-window-overview-grid" role="group" aria-label={t('windows.overview.group')} onKeyDown={move}>
         {windows.map(window => <WindowCard key={window.id} window={window} current={window.id === workspace.window?.id} opening={openingId === window.id}
           asleep={viewId => !!workspace.readGroup?.(window.id)?.bots?.members[viewId]?.asleep} sessionStatus={sessionStatus} onOpen={() => void choose(window.id)} />)}
       </div>
-      {!windows.length ? <p className="lab-window-overview-notice">No Windows yet.</p> : null}
+      {!windows.length ? <p className="lab-window-overview-notice">{t('windows.overview.none')}</p> : null}
     </div>
   </dialog>;
 }

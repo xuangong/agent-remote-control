@@ -6,6 +6,7 @@ import { ShortcutPlacement } from '../shell/shortcut-placement.js';
 import type { SessionActivityStatus } from '../session-activity-status.js';
 import { WindowWorkspaces } from './WindowWorkspaces.js';
 import { useSharedStates } from '../shared-feeds.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 /** The floating entry manages presentation; hiding it does not change the Window. */
 export function WindowMenu({ workspace, current, visible, inert = false, onOverview, sessionStatus, supportTeam, onRemoveView }: {
@@ -18,6 +19,7 @@ export function WindowMenu({ workspace, current, visible, inert = false, onOverv
   supportTeam?(teamId: string): boolean;
   onRemoveView?: ComponentProps<typeof WindowWorkspaces>['onRemoveView'];
 }) {
+  const t = useTranslate();
   // Statuses come from sessionStatus, which reads the shared states: render again when they change.
   useSharedStates();
   const [open, setOpen] = useState(false);
@@ -46,17 +48,17 @@ export function WindowMenu({ workspace, current, visible, inert = false, onOverv
     data-hidden={!visible || undefined} data-open={expanded || undefined} data-attention={pendingElsewhere || undefined} aria-hidden={!visible || undefined}
     {...(!visible || inert ? { inert: '' } : {})}
     onKeyDown={event => { if (event.key === 'Escape' && expanded) { event.preventDefault(); event.stopPropagation(); close(); } }}>
-    <button ref={trigger} type="button" className="lab-session-popover-trigger" aria-label="Windows" aria-expanded={expanded}
-      aria-controls={panelId} title={pendingElsewhere ? 'Another Window has pending sessions' : undefined} onClick={() => setOpen(value => !value)}>
-      <span>Window</span><span>{count}</span>{pendingElsewhere ? <span className="lab-tracking-attention" aria-hidden="true" /> : null}
+    <button ref={trigger} type="button" className="lab-session-popover-trigger" aria-label={t('windows.heading')} aria-expanded={expanded}
+      aria-controls={panelId} title={pendingElsewhere ? t('windows.pendingElsewhere') : undefined} onClick={() => setOpen(value => !value)}>
+      <span>{t('windows.window')}</span><span>{count}</span>{pendingElsewhere ? <span className="lab-tracking-attention" aria-hidden="true" /> : null}
     </button>
-    <section id={panelId} className="lab-session-popover-panel lab-window-panel" aria-label="Windows" hidden={!expanded}>
-      <div className="lab-directory-heading"><h2>Windows</h2>
-        {onOverview ? <button type="button" className="lab-window-overview-trigger" aria-label="Show all Windows" title="Show all Windows (Ctrl+Shift+Up)" aria-keyshortcuts="Control+Shift+ArrowUp"
-          onClick={() => { close(); onOverview(); }}>All Windows</button> : null}
-        <button type="button" aria-label="Close Windows" onClick={close}>×</button></div>
+    <section id={panelId} className="lab-session-popover-panel lab-window-panel" aria-label={t('windows.heading')} hidden={!expanded}>
+      <div className="lab-directory-heading"><h2>{t('windows.heading')}</h2>
+        {onOverview ? <button type="button" className="lab-window-overview-trigger" aria-label={t('windows.showAll')} title={t('windows.showAllTitle')} aria-keyshortcuts="Control+Shift+ArrowUp"
+          onClick={() => { close(); onOverview(); }}>{t('windows.allWindows')}</button> : null}
+        <button type="button" aria-label={t('windows.closePanel')} onClick={close}>×</button></div>
       <div className="lab-window-panel-scroll"><WindowWorkspaces workspace={workspace} current={current} active={expanded} sessionStatus={sessionStatus} supportTeam={supportTeam} onRemoveView={onRemoveView} /></div>
     </section>
-    <span className="agent-visually-hidden" role="status">{pendingElsewhere ? 'Another Window has pending sessions.' : ''}</span>
+    <span className="agent-visually-hidden" role="status">{pendingElsewhere ? t('windows.pendingElsewhereNote') : ''}</span>
   </div>;
 }

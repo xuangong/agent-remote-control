@@ -10,6 +10,7 @@ import { WindowSessionBridgeContext } from '../window-session-bridge-context.js'
 import { createCompositionSlot } from '../session-composition.js';
 import { DraftStore } from '../draft-store.js';
 import { WorkspaceReady } from '../workspace-access.js';
+import { LocaleContext } from '@orchardworks/agent-client-web/react';
 import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
 import * as conversationHooks from '../hooks/useConversationSession.js';
@@ -121,4 +122,19 @@ it.each([{ shared: true }, { shared: false }, { shared: true, intent: 'history' 
     pane.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
   });
   expect(focus).toHaveBeenCalledTimes(shared ? 0 : 2);
+});
+
+it('words an empty session view in Chinese', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  const root = createWindowView('root');
+  const view = await render(<LocaleContext.Provider value="zh"><WorkspaceReady.Provider value={false}><WindowLayoutContext.Provider value={{ window: {
+    schemaVersion: 3, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: null, selectedViewId: root.id, views: [root],
+  }, operate: () => {} }}><SessionWindow entry={{ id: root.id, slotId: 'slot', target: undefined, managed: false }}
+    baseUrl="http://fixture" visible compact selected hostLabel="Host" offline transport={transport} draftStore={new DraftStore('zh-empty')}
+    navigation={() => ({ childrenFor: () => [], resolveSessionLink: () => undefined })} onFocus={() => {}} onClose={() => {}} onChangeSession={() => {}} />
+  </WindowLayoutContext.Provider></WorkspaceReady.Provider></LocaleContext.Provider>);
+  expect(view.textContent).toContain('选一个会话');
+  expect(view.textContent).toContain('从侧边栏选一个会话');
+  expect(view.textContent).toContain('打开侧边栏');
+  expect(view.textContent).not.toContain('Select session');
 });

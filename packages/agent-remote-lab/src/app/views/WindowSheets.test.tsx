@@ -1,5 +1,6 @@
 import { act } from 'react';
 import { afterAll, beforeEach, expect, it, vi } from 'vitest';
+import { LocaleContext } from '@orchardworks/agent-client-web/react';
 import { render } from '../../test/setup.js';
 import { buildView, buildWindow } from '../../test/window-builders.js';
 import { WindowSheets } from './WindowSheets.js';
@@ -114,4 +115,12 @@ it('opens the Agent control sheet for the shown Window', async () => {
   await render(<WindowSheets scope={scope} />);
   expect(dialog('Agent control')!.textContent).toContain('Name the session that arranges this Window.');
   expect(inspect).toHaveBeenCalledWith('A', expect.anything());
+});
+
+it('words the delete sheet in Chinese', async () => {
+  await render(<LocaleContext.Provider value="zh"><WindowSheets scope={scopeOf({}, [buildWindow([buildView('x')], 'x', { id: 'B' })])} /></LocaleContext.Provider>);
+  const sheet = dialog('删除这个窗口？')!;
+  expect(sheet.querySelector('.lab-sheet-message')!.textContent).toBe('“Alpha”和它的布局会被删除。里面的 Agent 会话照常运行，仍留在全部会话里。');
+  expect(button(sheet, '删除窗口')).toBeDefined();
+  expect(button(sheet, '取消')).toBeDefined();
 });

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { WindowWorkspaceClient } from '@orchardworks/agent-client';
 import { isWindowSessionBinding, type WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
+import { WindowFailure } from '../window-errors.js';
 
 interface ManagerState {
   manager?: WindowSessionBinding;
@@ -37,7 +38,7 @@ function managerEntry(client: WindowWorkspaceClient, windowId: string) {
       });
     },
     async assign(session: WindowSessionBinding | null): Promise<void> {
-      if (state.pending) throw new Error('A manager change is already pending for this Window.');
+      if (state.pending) throw new WindowFailure('windows.error.managerPending');
       cancelRead();
       update({ ...state, pending: true, error: undefined });
       try {
@@ -48,7 +49,7 @@ function managerEntry(client: WindowWorkspaceClient, windowId: string) {
           || (session ? !isWindowSessionBinding(value.manager?.session) || value.manager?.generation !== value.generation
             || value.manager.session.hostId !== session.hostId || value.manager.session.providerId !== session.providerId
             || value.manager.session.nativeSessionId !== session.nativeSessionId
-            : value.manager !== undefined)) throw new Error('The service returned an invalid manager result. Refresh this Window before retrying.');
+            : value.manager !== undefined)) throw new WindowFailure('windows.error.managerInvalid');
         update({ status: 'ready', pending: false, manager: value.manager?.session });
       } catch (error) {
         update({ ...state, pending: false, status: 'error', error: message(error) });
@@ -76,7 +77,7 @@ export function useWindowManager(client: WindowWorkspaceClient | undefined, wind
   }, [entry, active]);
   return { ...state,
     async assign(session: WindowSessionBinding | null): Promise<void> {
-      if (!entry) throw new Error('Choose a hosted Window before managing its Agent.');
+      if (!entry) throw new WindowFailure('windows.error.chooseHosted');
       await entry.assign(session);
     },
     refresh() { if (active) entry?.refresh(); },

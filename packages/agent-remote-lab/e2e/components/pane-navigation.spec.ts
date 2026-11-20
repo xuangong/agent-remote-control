@@ -7,7 +7,7 @@ const selected = (page: Page) => page.locator('.lab-session-family-pane[data-sel
 async function open(page: Page) {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`${fixture}?content`);
-  await expect(page.getByRole('separator')).toHaveCount(6);
+  await expect(page.getByRole('separator', { name: /width$/ })).toHaveCount(6);
   const rail = page.locator('.lab-session-dock-rail');
   await expect.poll(() => rail.evaluate(element => element.scrollWidth - element.clientWidth)).toBeGreaterThan(400);
   return rail;

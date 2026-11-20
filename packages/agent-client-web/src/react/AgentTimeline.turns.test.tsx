@@ -7,6 +7,7 @@ import { SESSION_CONNECTION_PATTERN, TimelineRows, TURN_VECTORS } from '@orchard
 import { render, rerender } from '../test/setup.js';
 import { AgentTimeline } from './AgentTimeline.js';
 import { LocaleContext } from './locale.js';
+import { MotionProvider, useMotionState } from '../primitives/MotionProvider.js';
 
 /** Two ended turns of work and answers, and a running third, as a replica holds them. */
 function conversation(running = false): AgentReplicaState {
@@ -72,6 +73,16 @@ describe('the timeline renders turns', () => {
     expect(expanded(container)).toEqual(['false', 'false']);
   });
 
+  it('closes the turn a search opened once the search ends', async () => {
+    const state = conversation();
+    const target = timelineEntryKey(state.timeline.entries.find(entry => entry.itemKey === 'write-1')!);
+    const view = (key?: string) => <AgentTimeline state={state} processMode="concise" searchEntryKey={key} searchRequestId={key ? 1 : undefined} />;
+    const container = await render(view(target));
+    expect(expanded(container)).toEqual(['true', 'false']);
+    await rerender(container, view(undefined));
+    expect(expanded(container)).toEqual(['false', 'false']);
+  });
+
   it('shows the prompt as the person\'s bubble and the answer as the assistant\'s, the avatar at the foot of the last', async () => {
     const container = await render(<AgentTimeline state={conversation()} processMode="concise" assistant={{ name: 'Chief', avatar: <span data-testid="avatar" /> }} />);
     const rows = [...container.querySelectorAll<HTMLElement>('.orchard-bubble-row')];
@@ -80,6 +91,13 @@ describe('the timeline renders turns', () => {
     expect(rows[1]!.querySelector('.agent-bubble-avatar-space')).not.toBeNull();
     expect(container.querySelectorAll('.orchard-bubble .agent-item-kicker')).toHaveLength(0);
     expect(lines(container).map(line => line.textContent)).toEqual(['Read README.md, wrote notes.md', 'Ran a command']);
+  });
+
+  it('moves only the latest answer\'s avatar, so a long conversation does not move dozens of them', async () => {
+    const Probe = () => <span data-testid="avatar" data-still={String(useMotionState().reducedMotion)} />;
+    const port = { read: () => ({ reducedMotion: false, pageVisible: true }), subscribe: () => () => {} };
+    const container = await render(<MotionProvider port={port}><AgentTimeline state={conversation()} processMode="concise" assistant={{ name: 'Chief', avatar: <Probe /> }} /></MotionProvider>);
+    expect([...container.querySelectorAll('[data-testid="avatar"]')].map(node => node.getAttribute('data-still'))).toEqual(['true', 'false']);
   });
 
   it('places a request waiting for the person in its turn, after the answer, as an inline card', async () => {

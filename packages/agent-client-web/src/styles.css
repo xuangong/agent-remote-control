@@ -99,7 +99,12 @@
 /* The conversation as turns (I3): the person's bubbles on the right, the assistant's on the left with its avatar at the foot of
    an answer, one work line per turn with its steps in place, and a day line. Orchard tokens only. */
 .agent-turn { display: flex; flex-direction: column; gap: var(--orchard-space-m); box-sizing: border-box; width: 100%; min-width: 0;
-  max-width: calc(var(--orchard-space-column) + 180px); margin-inline: auto; padding-block: var(--orchard-space-s); }
+  max-width: calc(var(--orchard-space-column) + 180px); margin-inline: auto; padding-block: var(--orchard-space-s);
+  /* A turn keeps its style, layout and paint to itself and is skipped while far off screen: a new message costs one turn. */
+  contain: layout paint style; content-visibility: auto; contain-intrinsic-size: auto 160px; }
+/* While a search or Trace target is shown every turn is laid out, so the reveal measures real positions (WebKit lands it off
+   target over skipped turns). */
+.agent-timeline-entries[data-revealing] > .agent-turn { content-visibility: visible; }
 .agent-turn .agent-timeline-entry { border-bottom: 0; }
 .agent-day-separator { color: var(--orchard-text-secondary); text-align: center;
   font: var(--orchard-type-caption-weight) var(--orchard-type-caption-size) / var(--orchard-type-caption-leading) var(--orchard-font-text); }
@@ -765,7 +770,7 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
 .agent-timeline-entry:has(> .agent-entry-content > .orchard-bubble-row[data-from="mine"]) > .agent-entry-actions { right: auto; left: 2px; }
 .agent-inspect-entry { display: grid; place-items: center; flex: none; width: 26px; height: 26px; padding: 0; border: 1px solid var(--agent-rule); border-radius: 5px; background: var(--agent-panel-raised); color: var(--agent-muted); cursor: pointer; }
 .agent-timeline-entry:hover > .agent-entry-actions, .agent-timeline-entry:focus-within > .agent-entry-actions { opacity: 1; }
-.agent-timeline-entry[data-inspected] { outline: 2px solid var(--agent-signal); outline-offset: 3px; border-radius: 4px; }
+.agent-timeline-entry[data-inspected] { outline: 2px solid var(--agent-signal); outline-offset: -2px; border-radius: 4px; }
 .agent-inspect-entry:focus-visible { opacity: 1; outline: 2px solid currentColor; outline-offset: 2px; }
 @media (hover: none) { .agent-entry-actions { opacity: .7; } }
 

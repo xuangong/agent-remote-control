@@ -62,6 +62,15 @@ test('touch targets of the work line, the steps and the card choices are at leas
   expect(targets.filter(target => target.height < 44)).toEqual([]);
 });
 
+test('nothing in the conversation moves under reduced motion, the live line and its avatar included', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await open(page, 'mode=concise&theme=light&pending=none');
+  await page.locator('.agent-turn-status').waitFor();
+  // WebKit lists the Lab's 0.01 ms reduced-motion transitions for a frame, so the check polls.
+  await expect.poll(() => page.evaluate(() => document.getAnimations().length), { timeout: 2000 }).toBe(0);
+  expect(await page.locator('.agent-turn-status [data-bob], .agent-turn-status animate').count()).toBe(0);
+});
+
 test("a bubble's actions sit beside it, never over its words", async ({ page }) => {
   await open(page, 'mode=concise&theme=light&pending=none');
   for (const key of ['prompt-1', 'answer-1']) {

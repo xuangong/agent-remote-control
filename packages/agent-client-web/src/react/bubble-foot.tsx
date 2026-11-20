@@ -1,12 +1,15 @@
 import { createContext, useContext, type ReactNode } from 'react';
 import { TimelineTimeContext } from './TimelineTitle.js';
+import { MotionStill } from '../primitives/MotionProvider.js';
 
 /** The assistant's avatar for the foot of its answers, given once by the timeline so rows stay memoized. */
 export const BubbleAvatarContext = createContext<ReactNode>(undefined);
 
-export function BubbleAvatar() {
+/** The assistant's avatar at an answer's foot; `still` in earlier turns, so a long conversation does not move dozens of avatars. */
+export function BubbleAvatar({ still = false }: { still?: boolean }) {
   const avatar = useContext(BubbleAvatarContext);
-  return avatar ? <>{avatar}</> : <span className="agent-bubble-avatar-space" />;
+  if (!avatar) return <span className="agent-bubble-avatar-space" />;
+  return still ? <MotionStill>{avatar}</MotionStill> : <>{avatar}</>;
 }
 
 /** A message's local time under its bubble: quiet until the entry is hovered or focused, and gone while timestamps are hidden (Alt+T). */

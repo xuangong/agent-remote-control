@@ -287,7 +287,9 @@ for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(
       await toggleView(primary);
       await showLetters.uncheck();
       await browserExpect(letters).toHaveCount(0);
-      await browserExpect(side.locator('.agent-communication-letter')).toHaveCount(2);
+      // The choice is this device's, so the side hides its letters too, except the one it was opened on.
+      await browserExpect(side.locator('.agent-communication-letter')).toHaveCount(1);
+      await browserExpect(side.locator('[data-inspected="true"] .agent-communication-letter')).toHaveCount(1);
       await browserExpect(side).toBeVisible();
       await expectMode('full');
       await showLetters.check();
@@ -333,8 +335,10 @@ for (const engine of [chromium, webkit]) it(`moves letters through available spa
     expect(await primaryScroll.evaluate(e=>e.scrollTop)).toBeCloseTo(sourcePosition,0);
     const sideScroll=side.locator('.lab-timeline-scroll');
     const receipt=side.locator('[data-entry-key$=":task"]');
+    // The received task is a letter of a turn without a prompt, so it shows after that turn's answer: the side brings it into view.
     const receiptBox=await receipt.boundingBox(), viewport=await sideScroll.boundingBox();
-    expect(Math.abs(receiptBox!.y-viewport!.y-12)).toBeLessThan(3);
+    expect(receiptBox!.y).toBeGreaterThanOrEqual(viewport!.y - 1);
+    expect(receiptBox!.y+receiptBox!.height).toBeLessThanOrEqual(viewport!.y+viewport!.height+1);
     await sideScroll.evaluate(e=>{e.scrollTop=e.scrollHeight;e.dispatchEvent(new Event('scroll'));});
     await primaryScroll.evaluate(e=>{e.scrollTop=0;e.dispatchEvent(new Event('scroll'));});
     const reply=side.getByRole('button',{name:'Open letter from /root/review to /root',exact:true});
@@ -377,10 +381,11 @@ for (const engine of [chromium, webkit]) it(`navigates mobile letters in the cur
     await browserExpect(current.locator('[data-inspected="true"]')).toHaveAttribute('data-entry-key', /task$/);
     const receipt = current.locator('[data-entry-key$=":task"]');
     const viewport = current.locator('.lab-timeline-scroll');
+    // The received task is a letter of a turn without a prompt, so it shows after that turn's answer: the view brings it into view.
     await browserExpect.poll(async () => {
       const entry = await receipt.boundingBox(), scroll = await viewport.boundingBox();
-      return Math.abs(entry!.y - scroll!.y - 12);
-    }).toBeLessThan(3);
+      return entry!.y >= scroll!.y - 1 && entry!.y + entry!.height <= scroll!.y + scroll!.height + 1;
+    }).toBe(true);
     await expandSessionActions(current);
     // An attached child view returns to the view it was opened from.
     await current.getByRole('button', { name: 'Back to Conversation', exact: true }).click();
@@ -395,6 +400,10 @@ for (const engine of [chromium, webkit]) it(`navigates mobile letters in the cur
     await browserExpect(current.locator('[data-inspected="true"]')).toHaveAttribute('data-entry-key', /task$/);
     await current.getByRole('button', { name: 'Open letter from /root to /root/review', exact: true }).click();
     await browserExpect(page).toHaveURL(/session=child/);
+    // Letters are this device's choice: the child shows only the letter it was opened on until they show again.
+    await toggleView(current);
+    await page.getByRole('checkbox', { name: 'Show letters', exact: true }).check();
+    await toggleView(current);
     await current.getByRole('button', { name: 'Open letter from /root/review to /root', exact: true }).click();
     await browserExpect(page).toHaveURL(/session=parent/);
     await browserExpect(current).toHaveCount(1);

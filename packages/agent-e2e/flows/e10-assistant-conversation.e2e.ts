@@ -6,7 +6,7 @@ import type { Browser, Page } from '@playwright/test';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startStack, type ScriptedStep, type Stack } from '@orchardworks/agent-e2e/stack';
 import { launchBrowser, openPage, openPageIn, type PageOptions } from './browser.js';
-import { send, showsText, waitForEntries } from './page.js';
+import { assistantDetails, chooseProcessMode, send, showsText, waitForEntries } from './page.js';
 
 let stack: Stack; let browser: Browser;
 beforeAll(async () => { browser = await launchBrowser(); });
@@ -21,22 +21,6 @@ const turns = (text: string): ScriptedStep[] => text.includes('notes.md') ? [
 ] : [];
 
 const workLine = (page: Page) => page.locator('.agent-turn').last().locator('.agent-work-line > button');
-
-/** The assistant's details: over the window from its tile on a wide screen, a sheet on a phone. */
-const details = (page: Page) => page.locator('.lab-tile-details:visible, .lab-assistant-details:visible, dialog.orchard-sheet[open]').first();
-async function openTileDetails(page: Page): Promise<void> {
-  await page.getByRole('button', { name: /^Details of / }).first().click();
-  await details(page).waitFor();
-}
-async function closeDetails(page: Page): Promise<void> {
-  await details(page).getByRole('button', { name: /^Close/ }).first().click();
-}
-
-async function chooseFull(page: Page): Promise<void> {
-  await openTileDetails(page);
-  await details(page).getByRole('group', { name: 'All assistants on this device' }).getByRole('button', { name: 'Full', exact: true }).click();
-  await closeDetails(page);
-}
 
 const variants: Array<[string, PageOptions]> = [
   ['desktop 1280x800', { viewport: { width: 1280, height: 800 } }],
@@ -76,7 +60,7 @@ describe.each(variants)('E10 at %s', (_name, view) => {
       await expect.poll(() => step.locator('.agent-tool-toggle').textContent()).toContain('npm test');
       expect(await step.locator('.agent-tool-preview').count()).toBe(0);
       // Full shows every step at preview level without the reader opening anything, and the step opens to its output.
-      await chooseFull(page);
+      await chooseProcessMode(page, 'Full');
       await expect.poll(() => workLine(page).getAttribute('aria-expanded')).toBe('true');
       await expect.poll(() => step.locator('.agent-tool-preview').textContent()).toContain('npm test');
       await step.locator('.agent-tool-toggle').click();
@@ -99,7 +83,7 @@ describe.each(variants)('E10 at %s', (_name, view) => {
       // Its details: a panel beside the conversation, or a sheet from its name on a phone.
       const title = bot.locator('.lab-assistant-top-bar button.lab-assistant-title');
       if (await title.getAttribute('aria-expanded') !== 'true') await title.click();
-      const assistantMode = () => details(page).getByRole('group', { name: 'This assistant' });
+      const assistantMode = () => assistantDetails(page).getByRole('group', { name: 'This assistant' });
       await assistantMode().getByRole('button', { name: 'Process', exact: true }).click();
       await expect.poll(() => assistantMode().getByRole('button', { name: 'Process', exact: true }).getAttribute('aria-pressed')).toBe('true');
       // The choice is the account's: it survives a reload and shows on another device.
@@ -114,11 +98,11 @@ describe.each(variants)('E10 at %s', (_name, view) => {
         const secondTitle = second.page.locator('[data-workbench-mode="bot"] .lab-assistant-top-bar button.lab-assistant-title');
         await secondTitle.waitFor();
         if (await secondTitle.getAttribute('aria-expanded') !== 'true') await secondTitle.click();
-        await expect.poll(() => details(second.page).getByRole('group', { name: 'This assistant' }).getByRole('button', { name: 'Process', exact: true }).getAttribute('aria-pressed'), { timeout: 10_000 }).toBe('true');
+        await expect.poll(() => assistantDetails(second.page).getByRole('group', { name: 'This assistant' }).getByRole('button', { name: 'Process', exact: true }).getAttribute('aria-pressed'), { timeout: 10_000 }).toBe('true');
         expect(await second.words.seen()).toEqual([]);
       } finally { await other.close(); }
       // Pin to a window shows its tile in Window mode, and Bot mode keeps the assistant for the way back.
-      await details(page).getByRole('button', { name: 'Pin to a window', exact: true }).click();
+      await assistantDetails(page).getByRole('button', { name: 'Pin to a window', exact: true }).click();
       await expect.poll(() => page.locator('[data-workbench-mode="window"]').getAttribute('hidden')).toBeNull();
       await page.getByRole('button', { name: /^Details of / }).first().waitFor();
       if (view.mobile) {

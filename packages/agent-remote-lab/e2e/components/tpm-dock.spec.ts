@@ -68,7 +68,7 @@ test('desktop Dock preserves sessions, resizes and reorders only the appended vi
   const connections = await page.locator('html').getAttribute('data-fixture-connections');
   const first = page.getByRole('region', { name: 'Docked Search delivery', exact: true });
   const second = page.getByRole('region', { name: 'Docked Connection recovery', exact: true });
-  const separator = first.getByRole('separator');
+  const separator = first.getByRole('separator', { name: /width$/ });
   await separator.focus(); await separator.press('ArrowRight');
   await expect(separator).toHaveAttribute('aria-valuenow', '450');
   const boundary = (await separator.boundingBox())!;
@@ -157,6 +157,8 @@ test('Dock follows viewport width even on touch devices and restores after narro
 });
 
 test('TPM delegation is explicit and quiet reviews use the ordinary session view', async ({ page, isMobile }, testInfo) => {
+  // Full shows every step, the quiet reviews' background group among them, as the preview display did.
+  await page.addInitScript(() => localStorage.setItem('agent-remote:process-mode', 'full'));
   await page.goto('/e2e/fixtures/tpm-dock.html');
   await page.getByRole('button', { name: 'TPM works', exact: true }).click();
   const list = page.getByRole('region', { name: 'TPM works', exact: true });
@@ -203,11 +205,11 @@ test('reload restores multiple TPM docks with their widths, order and drafts', a
   const second = page.getByRole('region', { name: 'Docked Connection recovery', exact: true });
   await second.locator('[data-session-title-draggable]').first().focus();
   await second.locator('[data-session-title-draggable]').first().press('Alt+ArrowLeft');
-  await first.getByRole('separator').focus(); await first.getByRole('separator').press('ArrowRight');
+  await first.getByRole('separator', { name: /width$/ }).focus(); await first.getByRole('separator', { name: /width$/ }).press('ArrowRight');
   await page.reload();
   await expect(first).toBeVisible(); await expect(second).toBeVisible();
   await expect(first).toHaveCSS('order', '2'); await expect(second).toHaveCSS('order', '1');
-  await expect(first.getByRole('separator')).toHaveAttribute('aria-valuenow', '450');
+  await expect(first.getByRole('separator', { name: /width$/ })).toHaveAttribute('aria-valuenow', '450');
   await expect(first.getByTestId('prompt-input')).toHaveText('Draft for Search delivery');
   await expect(second.getByTestId('prompt-input')).toHaveText('Draft for Connection recovery');
 });

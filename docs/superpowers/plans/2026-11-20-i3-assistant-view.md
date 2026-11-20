@@ -496,6 +496,62 @@ Earlier work the new layout makes unnecessary, with its tests mapped in the I3 m
 
 Filled in per task: commits, suites and counts, the T1 and T5 table (control, I3a, I3b), the mapping doc, the ratchet's before and after, and deviations.
 
+### I3a
+
+**Commits** (on `design/im-session-service`, from `4cc45240`): catalogue `4ce19c78`; A1 `c5c17137`; A2 `21d757c8`; A3 `48451995`, `4a68ec5f`; A4 `32457521`; A5 `dcf7c669`; A6 `fae25120` (the stored field), `ed490f5d` (the Lab); A7 `d9be49f3`; A8 and A9 `9a2f2160`; A10 `e25e93c9` (scripted turns), `8581fd25` (E10); found on `pnpm local` and fixed: `b2689732`, `53bb8558` (one avatar per assistant in Window and Bot mode), `bfc1f691` (a person's bubble keeps its actions off its words), `8dcb81a8` (render cost); found by the full browser runs: `b68a5f6e` (revealed letters and search hits, the phone actions row, the last re-pointed specs); send cost `c20f4467`; compatibility `2ca96b5d`, `b89cefac`, `797df78d`, `95d9c028` and in `b68a5f6e`; these results in the commit after. A0 measured the control on `4cc45240` and has no commit.
+
+**Deploy.** The per-assistant mode is a new optional field of the stored bot details (`WindowBotDetails.process`): deploy the Relay first, then the website. The device default stays in the browser (`agent-remote:process-mode`).
+
+**Inventory.** `assistant-inventory.spec.ts` has one test per section 5 row: the 35 I3a rows pass in chromium-desktop, chromium-mobile, orchard-phone-chromium and orchard-phone-webkit (390 × 844); the 9 I3b rows (H4, H5, W1 to W7) are skipped until B9. Its Chinese tests check the design voice, the live line and the day line in zh-CN.
+
+**T1 and T5** (`pnpm local`, 4x CPU, 100 ms RTT, Task A0's commands; I3a twice, on `797df78d` and on `95d9c028` after the render cost fix):
+
+| | Control `4cc45240` | I3a run 1 | I3a run 2 |
+|---|---|---|---|
+| T1 mount → content, p50 / p95 (n = 50 reloads) | 0 / 142 ms | 0 / 159 ms | 137 / 155 ms |
+| T1 content, p50 / p95 | 258 / 396 ms | 254 / 372 ms | 341 / 404 ms |
+| T1 opens whose pane mounts before its binding ("Start with a Provider" first) | 1 of 5 sessions (134–148 ms) | 1 of 5 (153–175 ms) | 3 of 5 (143–172 ms) |
+| T5 opens with a connection word | 0 of 10 | 0 of 10 | 0 of 10 |
+| T5 Sending, typed during the open, p50 / p95 (n = 10) | 70 / 75 ms | 85 / 106 ms | 68 / 82 ms |
+| T5 Sending, first send of a view, p50 / p95 (n = 3) | 122 / 145 ms | 246 / 274 ms | 196 / 198 ms |
+| T5 Sending, second send, p50 / p95 (n = 3) | 49 / 50 ms | 91 / 109 ms | 85 / 103 ms |
+
+Every open whose pane mounts with its session paints content in the mount frame (0 ms) in every arm; T1's p95 comes from the runner's rebinding of the selected view, which leaves a pane empty for one frame, and which sessions take that path changes between runs. Run 1 found the timeline making two to four `Intl.DateTimeFormat`s per turn on every render (8.9 ms per render of 150 turns in jsdom); `8dcb81a8` caches them and memoizes the day lines (2.3 ms). The remaining send cost is style and layout of the larger bubble DOM, forced when the reading position is restored after the outgoing row appears: removing the timeline's avatar animations does not change it, removing the three new `:has()` rules takes 2 to 7 ms off, and `content-visibility: auto` on earlier turns about 7 ms (a candidate for I3b). The T5 session had grown from 254 to 286 history rows between the control and run 1. `open-fresh` stops in every arm at the Copilot session after the Relay's sign-in limit.
+
+**Send cost, fixed after the report (`c20f4467`).** A profile of one send at 4x CPU found every turn rendered again, about fifty answer avatars moving and a forced style recalculation over the whole timeline. Turns now keep their objects across folds and are memoized, only the latest answer's avatar moves, and a turn contains its layout, paint and style and is skipped while far off screen. Measured as an A/B on the same instance and data, swapping only the website (`ARC_LOCAL_WEB_DIST` set to a build of `4cc45240`), `session-control.mjs` at 4x CPU and 100 ms RTT:
+
+| Sending | Control `4cc45240` | I3a with the fix |
+|---|---|---|
+| First send of a view, p50 / p90 / max | 130 / 165 / 169 ms (n = 10) | 116 / 137 / 199 ms (n = 15, one outlier) |
+| Second send, p50 / p95 | 50 / 63 ms (n = 10) | 48 / 61 ms (n = 15) |
+| Typed during the open, p50 / p95 (n = 5) | 69 / 74 ms | 43 / 65 ms |
+| Opens with a connection word | 0 | 0 |
+
+**Suites.** Unit (`pnpm verify`): agent-client 733 tests (1.6 s), agent-client-web 848 (9.0 s), agent-remote-lab 3,267 (73 s), agent-remote-seams 406 (9.5 s), agent-e2e 126 (3.4 s), protocol 468 (1.7 s), relay-core 1,207 (7.4 s), controller 2,008 (56 s), debugger 155 (25 s), relay-node 286 (10 s), and the other suites. Components: 679 passed and 113 skipped by project (11.0 min), whose 18 failures were the five specs that still counted separators or read the old display, re-pointed and passing (60 passed, 1.0 min). Preview browser: the first run failed 13 tests of three specs written for per-view letters and the content display; re-pointed (see the mapping), the rerun passed 72 of 73. The one left, `session-recovery` "restores sessions and failed input across mobile page lifecycles in webkit", is unchanged by I3 and fails on a WebKit "access control checks" page error of the hosts request in 2 of 3 runs alone; it fails the same way on `4cc45240` (1 of 5 runs in a worktree at that commit), so it is not I3's. `pnpm test:e2e:flows`: 35 of 37, the two E1 reading flows needing Full to read tool rows and reasoning; with it E1 and E10 pass. E10 passes at 1280 × 800 and 390 × 844 in Chromium and with `E2E_BROWSER=webkit`. `pnpm verify` passes on `b68a5f6e`: compatibility, architecture, build, typecheck and 11,974 unit tests in 27 suites. `arch:check`, `compatibility:check` and `fixtures:check` pass. A Controller test (`journal-publisher` backoff) failed once under the load of a parallel real turn and passed alone three times.
+
+**Ratchet and CSS.** `styles.css` 448 → 434, `app.css` 582 → 568, `earlier-conversation.css` 10 → 0, `session-view-options.css` 25 → 24, `typing-bubble.css` deleted. Production CSS of the Lab and the Session View without `theme.css` and `primitives.css`: 4,271 → 4,253 lines. Entry chunk 67.6 KB gzip (budget 70), App chunk 577 KB (600).
+
+**Mapping.** `docs/superpowers/specs/2026-11-20-i3-test-mapping.md`.
+
+**Captures.** `.tmp/i3-before-*.png` and `.tmp/i3-after-*.png`: Bot and Window mode, desktop 1440 × 900 and phone 390 × 844, light and dark, English and Chinese (16 each). A real Claude turn on `pnpm local`: `.tmp/local/i3a-turn-{live,approval,done,open,full}.png` (the live line, the inline approval answered with Allow, the one-line receipt, the work line opened, Full with the step's diff). The three modes per theme and locale: the `assistant-conversation` screenshots in `packages/agent-remote-lab/test-results/`.
+
+**Deviations.**
+- `WindowBotDetails.process` also stores Concise: an assistant can be Concise on a device whose default is not; a choice equal to the device default clears the field.
+- `WorkStep.entries` is always an array. The vectors live in `@orchardworks/agent-client/testing` (`TURN_VECTORS`); the check against recorded Claude, Codex and Copilot rows is seam S6, since `agent-client` has no provider packages.
+- Answered interactions are one-line receipts outside the work line (still `interaction_receipt` steps in the fold); Full keeps them one line.
+- Show what changes is a `<details>` disclosure. `agent-remote:show-letters` became the device's letters choice; only `timeline-display` is removed.
+- Bot mode no longer forces content: it reads the process mode as Window mode does.
+- A message's bubble lists only its attachments in Concise and Process; Full lists every resource it named, as the preview display did.
+- The `--agent-*` variables were not re-pointed to Orchard tokens at `:root`; the ratchet still falls rule by rule.
+- Existing detail strings (step headers, Allow once and for session, tool labels) stay English; they move in I4.
+- The Window view's `display` record and `window view display` remain in the protocol and the command line, unused by the Lab.
+- A plain session's assistant is named by its title, so a prompt-titled session reads "Reply with … is working"; naming is I3b's.
+- E10 checks Full before opening the step: a step the reader opened stays open across a mode change.
+- The scripted provider reports the session running with its active turn and idle after it, as real providers' runtime updates do.
+- Letters are this device's choice; a letter a search or Trace opened shows in its view while it is the target and leaves the choice as it was. A search reveal lasts while the search targets it.
+- A turn wraps its rows, so a row whose turn changes (the person's message before it left the window) is rebuilt; every other row keeps its node through a journal replacement.
+- Only the latest answer's avatar moves; earlier answers' avatars rest. A turn is skipped while far off screen (`content-visibility: auto`), except while a search or Trace target is shown, when WebKit would otherwise land the reveal off target. The inspected row's outline is drawn inside the row, since a turn clips its overflow.
+
 ## 11. Open questions for the owner
 
 1. **English or Chinese words.** The design's sentences are Chinese and the product is English today. I3 writes English in the design's voice (decision 9). A Chinese locale would be a separate step with a string table; say if you want it in I4.

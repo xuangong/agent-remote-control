@@ -7,6 +7,8 @@ import { showNewSession } from '../session-navigation';
 test('inspects a live tool and returns to a stable conversation anchor', async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
+  // Full: the live tool shows in the conversation at preview level, as the preview display showed it.
+  await page.addInitScript(() => localStorage.setItem('agent-remote:process-mode', 'full'));
   await page.goto('/e2e/fixtures/trace-inspection.html');
   const prompt = page.getByTestId('prompt-input');
   await prompt.fill('Keep this draft');

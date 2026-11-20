@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from 'react';
+import { useId, useMemo, useState, type ReactNode } from 'react';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import type { TimelineRenderEntry } from './timeline-render-model.js';
 import { useTimelineAction } from './useTimelineAction.js';
@@ -23,7 +23,8 @@ export function useRuntimeNoticeDisclosure(scopeKey: string, searchEntryKey?: st
     // Reveal during rendering: the workbench locates search/Trace targets in a layout effect.
     setStored(current);
   }
-  return {
+  // One object while nothing changes, so turns that hold no group stay as they are.
+  return useMemo(() => ({
     isExpanded: (entries: readonly TimelineRenderEntry[]) => entries.some(entry => current.open.has(entry.key)),
     toggle: (entries: readonly TimelineRenderEntry[]) => setStored(previous => {
       const open = new Set(previous.scopeKey === scopeKey ? previous.open : []);
@@ -34,7 +35,7 @@ export function useRuntimeNoticeDisclosure(scopeKey: string, searchEntryKey?: st
       }
       return { scopeKey, searchRequest, inspectRequest, open };
     }),
-  };
+  }), [current, scopeKey, searchRequest, inspectRequest]);
 }
 
 /** Primitive props keep each historical ConversationEntry eligible for memoization. */

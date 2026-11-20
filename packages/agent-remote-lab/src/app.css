@@ -1533,6 +1533,8 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
    the expanded actions cover its text. */
 @media (max-width: 1180px) {
   .lab-timeline-stage > .lab-timeline-controls > .lab-timeline-tools { position: static; flex: none; align-self: flex-end; max-width: 100%; margin-top: 4px; }
+  /* A collapsible row sits 12 px to the left of its place, so a full row would start off the screen. */
+  .lab-timeline-stage > .lab-timeline-controls > .lab-timeline-tools[data-collapsible] { max-width: calc(100% - 12px); }
   /* The composer's collapse tab sits on the top edge of its input frame; the dock reserves the tab's height, and on a touch screen
      its larger hit area stays inside the dock instead of reaching over the conversation. */
   :is(.lab-shell, .lab-session-view) .lab-composer-dock:not([data-collapsed]),

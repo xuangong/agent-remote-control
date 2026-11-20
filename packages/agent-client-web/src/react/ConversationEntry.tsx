@@ -17,8 +17,8 @@ interface ConversationEntryProps extends Pick<AgentTimelineProps, 'onEditPrompt'
   entry: ProjectedTimelineEntry;
   entryKey: string;
   messageGroup?: MessageGroupPosition;
-  /** The foot of an answer bubble: the assistant's avatar on the last one, its room on the others. */
-  foot?: 'avatar' | 'space';
+  /** The foot of an answer bubble: the assistant's avatar on the last one (still in earlier turns), its room on the others. */
+  foot?: 'avatar' | 'still' | 'space';
   agentId?: string;
   scopeKey: string;
   resources: AgentReplicaState['resources'];

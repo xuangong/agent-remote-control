@@ -1,6 +1,6 @@
 import { ResourceDownloadContext, type DownloadResource } from './ResourceDownload.js';
 import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
-import { useContext, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
   AgentInteractionResponse,
   ResourceBinding,
@@ -145,30 +145,35 @@ export function AgentTimeline({
   // The fold reads every entry, so a turn keeps its key while letters are hidden; hidden letters only leave the screen.
   const folded = useMemo(() => foldTurns(state.timeline.entries, state.agent?.activeTurn ?? null, state.agent?.status, state.pendingInteractions.length),
     [state.timeline.entries, state.agent?.activeTurn, state.agent?.status, state.pendingInteractions.length]);
-  const turns = useMemo(() => lettersVisible ? folded : folded.map(turn => turn.letters.length ? { ...turn, letters: turn.letters.filter(entry =>
-    searchEntryKey !== undefined && timelineEntryKey(entry) === searchEntryKey) } : turn), [folded, lettersVisible, searchEntryKey]);
+  // Hidden letters leave the screen, except the one a search or a Trace target shows: the reader's choice holds in every view.
+  const shownTurns = useMemo(() => lettersVisible ? folded : folded.map(turn => turn.letters.length ? { ...turn, letters: turn.letters.filter(entry => {
+    const key = timelineEntryKey(entry);
+    return key === searchEntryKey || key === inspectedEntryKey;
+  }) } : turn), [folded, lettersVisible, searchEntryKey, inspectedEntryKey]);
+  const turns = useStableTurns(shownTurns);
   const placement = useMemo(() => turnPlacement(turns), [turns]);
-  // The reader's own toggle of a turn's work line holds until the mode changes; a search or Trace target opens its turn once.
+  // The reader's own toggle of a turn's work line holds until the mode changes.
   const readerScope = JSON.stringify([state.agent?.id, processMode]);
   const revealRequest = JSON.stringify([searchEntryKey, searchRequestId, inspectedEntryKey, inspectedRequestId]);
   const [reader, setReader] = useState(() => ({ scope: readerScope, request: '', choices: new Map<string, boolean>(), revealed: new Set<string>() }));
   let current = reader;
   if (reader.scope !== readerScope || reader.request !== revealRequest) {
-    const keep = reader.scope === readerScope;
-    const choices = new Map(keep ? reader.choices : []), revealed = new Set(keep ? reader.revealed : []);
+    // A search or Trace target opens its turn while it is the target: a new one takes the reader's choice for that turn back, and
+    // once the search closes or the target moves on, the turn shows as its mode and the reader's own toggles say.
+    const choices = new Map(reader.scope === readerScope ? reader.choices : []), revealed = new Set<string>();
     for (const key of [searchEntryKey, inspectedEntryKey]) {
       const turn = key === undefined ? undefined : placement.workTurn.get(key);
-      if (turn !== undefined) { choices.set(turn, true); revealed.add(turn); }
+      if (turn !== undefined) { choices.delete(turn); revealed.add(turn); }
     }
     current = { scope: readerScope, request: revealRequest, choices, revealed };
     // Reveal during rendering: the workbench locates search and Trace targets in a layout effect.
     setReader(current);
   }
-  const toggleTurn = (key: string, open: boolean) => setReader(previous => {
+  const toggleTurn = useCallback((key: string, open: boolean) => setReader(previous => {
     const choices = new Map(previous.scope === readerScope ? previous.choices : []), revealed = new Set(previous.scope === readerScope ? previous.revealed : []);
     choices.set(key, !open); revealed.delete(key);
     return { ...previous, scope: readerScope, choices, revealed };
-  });
+  }), [readerScope]);
   const disclosures = turns.map(turn => workDisclosure(processMode, turn.state, current.choices.get(turn.key), current.revealed.has(turn.key)));
   const selectionAnchor = useRef<string>();
   const selectedKeys = entrySelection?.selected;
@@ -185,18 +190,29 @@ export function AgentTimeline({
     else entrySelection.select([key], !selectedKeys?.has(key));
   } : undefined);
   const notices = useRuntimeNoticeDisclosure(scopeKey, searchEntryKey, inspectedEntryKey, searchRequestId, inspectedRequestId);
-  const renderEntry = ({ entry, key, messageGroup }: TimelineRenderEntry, options?: TurnRowOptions) =>
-    <ConversationEntry key={key} entry={entry} entryKey={key}
-      searchSelected={key === searchEntryKey} messageGroup={messageGroup} agentId={state.agent?.id}
-      scopeKey={scopeKey} resources={state.resources}
-      onEditPrompt={editablePrompts.has(entry) ? editPrompt : undefined}
+  // A host may hand a new resolver on every render; rows resolve through the latest one, so a new function alone renders nothing again.
+  const latestSessionLinks = useRef(resolveSessionLink);
+  latestSessionLinks.current = resolveSessionLink;
+  const hasSessionLinks = !!resolveSessionLink;
+  const sessionLinks = useMemo<SessionLinkResolver | undefined>(() => hasSessionLinks ? nativeSessionId => latestSessionLinks.current!(nativeSessionId) : undefined, [hasSessionLinks]);
+  const agentId = state.agent?.id, resources = state.resources, selectionLabel = entrySelection?.label;
+  // One function while what every row reads stays the same, so a turn that did not change is not rendered again.
+  const renderEntry = useCallback(({ entry, key, messageGroup }: TimelineRenderEntry, options?: TurnRowOptions) => {
+    const { editable, ...presentation } = options ?? {};
+    return <ConversationEntry key={key} entry={entry} entryKey={key}
+      searchSelected={key === searchEntryKey} messageGroup={messageGroup} agentId={agentId}
+      scopeKey={scopeKey} resources={resources}
+      onEditPrompt={editable ? editPrompt : undefined}
       selection={selectEntry && isSelectableTimelineItem(entry.item) ? selectedKeys ? selectedKeys.has(key) ? 'selected' : 'unselected' : 'available' : undefined}
-      selectionLabel={entrySelection?.label} onSelect={selectEntry}
+      selectionLabel={selectionLabel} onSelect={selectEntry}
       onInspectEntry={inspectEntry} inspected={inspectedEntryKey === key}
-      resolveSessionLink={entry.item.type === 'tool_call' ? resolveSessionLink : undefined}
+      resolveSessionLink={entry.item.type === 'tool_call' ? sessionLinks : undefined}
       onResourceResolve={resolveResource} onResourceRequest={requestResource}
       previews={previews} extension={registry?.render(entry.item)}
-      {...options} />;
+      {...presentation} />;
+    // The registry is mutable: its revision says when its renderers changed.
+  }, [searchEntryKey, agentId, scopeKey, resources, editPrompt, selectEntry, selectedKeys, selectionLabel, inspectEntry, inspectedEntryKey, sessionLinks,
+    resolveResource, requestResource, previews, registry, registry?.revision]);
   // Day lines read every turn's times, so they are worked out again only when the turns, the language or the day change.
   const today = new Date().toDateString();
   const separators = useMemo(() => {
@@ -251,13 +267,15 @@ export function AgentTimeline({
       onLoadOlder={onLoadOlder}
     /> : timelineStart ?? null}
 
-    <ProcessModeContext.Provider value={processMode}><BubbleAvatarContext.Provider value={assistant?.avatar}><div className="agent-timeline-entries" aria-live="polite" data-process-mode={processMode}>
+    <ProcessModeContext.Provider value={processMode}><BubbleAvatarContext.Provider value={assistant?.avatar}><div className="agent-timeline-entries" aria-live="polite" data-process-mode={processMode}
+      data-revealing={searchEntryKey !== undefined || inspectedEntryKey !== undefined || undefined}>
       {turns.length === 0 && outgoing.length === 0
         ? timelineStart && !state.timeline.hasOlder ? null : <p className="agent-timeline-empty">No timeline activity.</p>
         : turns.map((turn, index) => {
             const disclosure = disclosures[index]!;
             return <TimelineTurn key={turn.key} turn={turn} disclosure={disclosure} separator={separators[index]}
-              onToggle={() => toggleTurn(turn.key, disclosure.line === 'open')} renderEntry={renderEntry} groups={notices}
+              onToggle={toggleTurn} renderEntry={renderEntry} groups={notices}
+              promptEditable={!!turn.prompt && editablePrompts.has(turn.prompt)} latest={index === turns.length - 1}
               after={index === turns.length - 1 ? <>{pending}{liveInTurn ? live : null}</> : undefined} />;
           })}
       {outgoing.map(message => <OutgoingMessageItem key={message.id} message={message} resourceContext={onResourceResolve && onResourceRequest ? { scopeKey: JSON.stringify([state.agent?.id]), bindings: [], resources: state.resources, resolveResource: onResourceResolve, requestResource: onResourceRequest } : undefined} onRetry={onRetryMessage} onDelete={onDeleteMessage} />)}
@@ -269,6 +287,33 @@ export function AgentTimeline({
     <AgentChildSessionList childrenFor={childrenFor} key={identity} children={children} label="Session subagents" collapsible onOpenChildSession={onOpenChildSession} />
 
   </section></ResourceDownloadContext.Provider>;
+}
+
+/**
+ * The previous fold's turn object for each turn whose rows and state did not change, so a new row, a status change or a
+ * message being sent renders the one turn it touched.
+ */
+function useStableTurns(turns: readonly Turn[]): readonly Turn[] {
+  const previous = useRef(new Map<string, Turn>());
+  return useMemo(() => {
+    const before = previous.current;
+    const stable = turns.map(turn => { const earlier = before.get(turn.key); return earlier && sameTurnRows(earlier, turn) ? earlier : turn; });
+    previous.current = new Map(stable.map(turn => [turn.key, turn]));
+    return stable;
+  }, [turns]);
+}
+
+type Row = Turn['answer'][number];
+/** The same row as a row renders it (ConversationEntry's rule), under the same key. */
+const sameRow = (a: Row | undefined, b: Row | undefined) => a === b || !!a && !!b && a.item === b.item && a.resources === b.resources
+  && a.collapsed === b.collapsed && a.timestamp === b.timestamp && a.turnId === b.turnId && a.providerId === b.providerId && timelineEntryKey(a) === timelineEntryKey(b);
+const sameEntries = (a: readonly Row[], b: readonly Row[]) => a.length === b.length && a.every((entry, index) => sameRow(entry, b[index]));
+function sameTurnRows(a: Turn, b: Turn): boolean {
+  return a.state === b.state && a.turnId === b.turnId && sameRow(a.prompt, b.prompt) && sameEntries(a.answer, b.answer) && sameEntries(a.letters, b.letters)
+    && a.work.length === b.work.length && a.work.every((step, index) => {
+      const other = b.work[index]!;
+      return step.key === other.key && step.kind === other.kind && step.state === other.state && sameEntries(step.entries, other.entries);
+    });
 }
 
 /** The turn whose work line holds each step entry: a search or Trace target there opens its turn. */

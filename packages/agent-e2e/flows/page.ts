@@ -23,6 +23,30 @@ export async function toggleViewPanel(page: Page, panel: 'Header' | 'Sidebar' | 
   await page.keyboard.press('Escape');
 }
 
+/** An assistant's details: beside the conversation or over the window on a wide screen, a sheet on a phone. */
+export const assistantDetails = (page: Page) => page.locator('.lab-tile-details:visible, .lab-assistant-details:visible, dialog.orchard-sheet[open]').first();
+
+/**
+ * Chooses how much of each turn's work shows, for every assistant on this device: from the session's view options where its
+ * heading has them, else from the details of the tile or the assistant.
+ */
+export async function chooseProcessMode(page: Page, mode: 'Concise' | 'Process' | 'Full'): Promise<void> {
+  const expand = page.getByRole('button', { name: 'Expand session actions', exact: true });
+  if (await expand.isVisible()) await expand.click();
+  const options = page.getByRole('button', { name: 'Session view options', exact: true }).first();
+  const details = page.getByRole('button', { name: /^Details of / }).first();
+  await options.or(details).first().waitFor();
+  if (await options.isVisible()) {
+    await options.click();
+    await page.getByRole('group', { name: 'All assistants on this device' }).getByRole('button', { name: mode, exact: true }).click();
+    await page.keyboard.press('Escape');
+    return;
+  }
+  await details.click();
+  await assistantDetails(page).getByRole('group', { name: 'All assistants on this device' }).getByRole('button', { name: mode, exact: true }).click();
+  await assistantDetails(page).getByRole('button', { name: /^Close/ }).first().click();
+}
+
 export async function showTrace(page: Page): Promise<void> {
   if (!await page.getByRole('tab', { name: 'Trace', exact: true }).isVisible()) await toggleViewPanel(page, 'Header');
   await page.getByRole('tab', { name: 'Trace', exact: true }).click();

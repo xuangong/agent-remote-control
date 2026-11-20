@@ -24,8 +24,8 @@ export interface TimelineItemRendererProps {
   readonly resourceScopeKey?: string;
   readonly onResourceResolve?: (locator: string, sourceLocator?: string) => Promise<ResourceBinding>;
   readonly onResourceRequest?: (binding: ResourceBinding) => Promise<void | ResourceResponseState>;
-  /** The foot of an answer bubble: the assistant's avatar on the last one, its room on the others. */
-  readonly foot?: 'avatar' | 'space';
+  /** The foot of an answer bubble: the assistant's avatar on the last one (still in earlier turns), its room on the others. */
+  readonly foot?: 'avatar' | 'still' | 'space';
 }
 
 export const TimelineItemRenderer = memo(function TimelineItemRenderer({ item, entry, messageGroup, resolveSessionLink, resources, resourceBindings, resourceScopeKey, onResourceResolve, onResourceRequest, foot }: TimelineItemRendererProps) {

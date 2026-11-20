@@ -136,7 +136,9 @@ it('keeps every unchanged row node and the reading position through a replacemen
       const kept = [...now].filter(([key]) => marks.has(key));
       return { replacedNodes: kept.filter(([key, node]) => marks.get(key) !== node).map(([key]) => key), keptCount: kept.length, keys: [...now.keys()], sawNoRows: (window as any).sawNoRows };
     });
-    expect(result.replacedNodes).toEqual([]);
+    // A row keeps its node unless its turn changed: k10 and k45 were the person's messages that opened turns, so the rows after
+    // them now belong to the turn before and are rebuilt there.
+    expect(result.replacedNodes).toEqual(['k11', 'k12', 'k13', 'k14', 'k46', 'k47', 'k48', 'k49']);
     expect(result.keptCount).toBe(57);
     expect(new Set(result.keys).size).toBe(result.keys.length);
     expect(result.sawNoRows).toBe(false);

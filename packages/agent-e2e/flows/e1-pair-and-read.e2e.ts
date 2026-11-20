@@ -5,7 +5,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 import { recording as claudeRecording } from '@orchardworks/agent-provider-claude/recordings';
 import { recordedHistory, startStack, type Stack } from '@orchardworks/agent-e2e/stack';
 import { launchBrowser, openPage, rowTexts } from './browser.js';
-import { openAllSessions, openSettings, showTrace, showsText, timelineEntries, waitForEntries } from './page.js';
+import { chooseProcessMode, openAllSessions, openSettings, showTrace, showsText, timelineEntries, waitForEntries } from './page.js';
 
 const markdown = '## Summary\n\n- **bold** item\n- `code` item\n\n```ts\nconst answer = 42;\n```';
 let stack: Stack; let browser: Browser;
@@ -52,6 +52,9 @@ it('E1: the directory lists the Host and its session, and opening the session sh
 
 it('E1: messages, tool calls and markdown of a recorded Claude run read as a conversation', async () => {
   const { context, page } = await openPage(browser, stack.sessionUrl('tools'));
+  // Full shows every step of each turn's work, as the preview display did; Concise folds them into the work line.
+  await page.locator('.agent-turn').first().waitFor();
+  await chooseProcessMode(page, 'Full');
   await waitForEntries(page, 9);
   const rows = await rowTexts(page);
   expect(rows.filter(text => /▸(Write|Edit|Bash)/.test(text))).toHaveLength(3);
@@ -64,6 +67,8 @@ it('E1: messages, tool calls and markdown of a recorded Claude run read as a con
 
 it('E1: reasoning reads in the conversation and Trace lists the same events', async () => {
   const { context, page } = await openPage(browser, stack.sessionUrl('thinking'));
+  await page.locator('.agent-turn').first().waitFor();
+  await chooseProcessMode(page, 'Full');
   await waitForEntries(page, 3);
   expect(await timelineEntries(page).filter({ hasText: 'Let me think about it.' }).count()).toBe(1);
   await showTrace(page);

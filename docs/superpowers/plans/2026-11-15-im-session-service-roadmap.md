@@ -170,3 +170,31 @@ Shipped from main `ac075f9d`.
   - components passed (509); one known load flake passed on a 3-of-3 rerun alone;
   - WCAG AA contrast held in both themes;
   - touch targets are at least 44 px on the phone.
+
+## Release 2026-11-20: I3a, the conversation
+
+Shipped from main `9574eddd`. Worker `739de574`, with `wrangler.journals-enabled.jsonc`; the rollback target is `14c7416e`. The Durable Object reported `739de574` in fresh diagnostics within about a minute.
+
+**What changed:**
+- turns render as bubbles, with one work line that expands in place;
+- inline approvals;
+- a live status line and a session-change line;
+- three process modes, stored per assistant (`WindowBotDetails.process`, a new Relay field) and per device;
+- English and Chinese, following the browser;
+- avatars of equal visual weight, with a clearer gaze.
+
+**Checks:**
+- full `pnpm verify`: 11,974 tests;
+- E10 on desktop and phone, Chromium and WebKit;
+- every element shown before is reachable: 35 inventory rows, each with a test.
+
+**Send latency** at 4x CPU and 100 ms, against the control:
+- first send p50: 130 → 116 ms;
+- second send: 50/63 → 48/61 ms;
+- typed during open: 69/74 → 43/65 ms.
+
+**Known issues, handed to I3b:**
+- a plain session's prompt title used as the assistant name;
+- floating launchers over the third tile of a full-width Window on desktop.
+
+`session-recovery` (WebKit) fails intermittently on the base commit too, so this release did not cause it.

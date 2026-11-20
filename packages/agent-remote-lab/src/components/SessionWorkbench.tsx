@@ -75,17 +75,6 @@ export function SessionWorkbench({ assistant, details, conversationTitle, sessio
     setOpen: setTileDetailsOpen } : undefined);
   const process = useProcessMode(processAssistant);
   const [lettersVisible, setLettersVisible] = useLettersVisible();
-  // A Trace target that is a letter shows the letters; its turn opens by itself.
-  const revealedLetterRequest = useRef<string>();
-  useLayoutEffect(() => {
-    if (!visible || !revealEntry || !state || lettersVisible) return;
-    const request = JSON.stringify([displayScope, state.timeline.epoch, revealEntry.requestId, revealEntry.key]);
-    if (revealedLetterRequest.current === request) return;
-    const item = state.timeline.entries.find(entry => timelineEntryKey(entry) === revealEntry.key)?.item;
-    if (!item) return;
-    revealedLetterRequest.current = request;
-    if (item.type === 'agent_communication') setLettersVisible(true);
-  }, [visible, displayScope, state?.timeline.epoch, state?.timeline.entries, revealEntry, lettersVisible]);
   const session = suppliedSessionState ?? remoteSessionState(state, connectionStatus);
   const sessionStatus = session.connection;
   const controlReadOnly = !!nativeTakeover || (!draftOnly && session.readOnly);

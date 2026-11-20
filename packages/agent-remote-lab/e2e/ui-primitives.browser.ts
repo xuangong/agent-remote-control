@@ -55,11 +55,13 @@ type Primitive = keyof typeof PRIMITIVES;
 
 const styles = (page: Page, scope: string, primitive: Primitive) => page.$eval(`${scope} ${PRIMITIVES[primitive]}`, (element, primitive) => {
   const s = getComputedStyle(element);
+  // The segmented track holds no text of its own: its font and text color are inherited from where it sits (so is the color of its
+  // empty border); its segments set theirs. The unread dot has no text color either, only its own background.
+  const inherits = primitive === 'segmented' || primitive === 'unread';
   return {
-    // The segmented track holds no text of its own: its font is inherited from where it sits; its segments set theirs.
     ...(primitive === 'segmented' ? {} : { font: s.font }),
-    padding: s.padding, margin: s.margin, border: `${s.borderTopWidth} ${s.borderTopStyle} ${s.borderTopColor}`, radius: s.borderRadius,
-    minWidth: s.minWidth, minHeight: s.minHeight, height: s.height, width: s.width, color: s.color, background: s.backgroundColor,
+    padding: s.padding, margin: s.margin, border: `${s.borderTopWidth} ${s.borderTopStyle}${inherits ? '' : ' ' + s.borderTopColor}`, radius: s.borderRadius,
+    minWidth: s.minWidth, minHeight: s.minHeight, height: s.height, width: s.width, ...(inherits ? {} : { color: s.color }), background: s.backgroundColor,
     boxShadow: s.boxShadow, opacity: s.opacity, transform: s.transform };
 }, primitive);
 

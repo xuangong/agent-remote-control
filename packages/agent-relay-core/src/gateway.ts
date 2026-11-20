@@ -517,7 +517,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   }
   async function completeSignIn(grant: HostedGrant, request: Request, pending: { returnPath?: string; hostId?: string; google?: { browserId?: string } }, redirect: boolean, owned: Tenant): Promise<Response> {
     const exchange = await sessions.exchange(grant, request, pending.google?.browserId);
-    if (exchange.status !== 'active') return redirect ? authenticationFailure(auth.origin, exchange.status, pending.returnPath)
+    if (exchange.status !== 'active') return redirect ? authenticationFailure(auth.origin, exchange.status, pending.returnPath, request.headers.get('accept-language'))
       : json(exchange.status === 'unavailable' ? 503 : exchange.status === 'capacity' ? 429 : 401, { error: 'Sign-in access could not be renewed.' });
     if (authentication.persistent(grant)) {
       owned.authorityUntil = exchange.grant.expiresAt; owned.authorityDenied = false; owned.authorityConfirmedAt = Date.now();
@@ -620,8 +620,8 @@ export function createHostedRelay(options: HostedRelayOptions) {
     }
     if (googleLogin && url.pathname === '/auth/callback' && request.method === 'GET') {
       const result = await googleLogin.callback(request);
-      if (result.status !== 'active') return authenticationFailure(auth.origin, result.status, result.returnPath);
-      const owned = tenant(result.grant); if (!owned) return authenticationFailure(auth.origin, 'capacity', result.pending.returnPath);
+      if (result.status !== 'active') return authenticationFailure(auth.origin, result.status, result.returnPath, request.headers.get('accept-language'));
+      const owned = tenant(result.grant); if (!owned) return authenticationFailure(auth.origin, 'capacity', result.pending.returnPath, request.headers.get('accept-language'));
       return completeSignIn(result.grant, request, result.pending, true, owned);
     }
     if (url.pathname === '/auth/status' && request.method === 'GET') {
@@ -705,11 +705,11 @@ export function createHostedRelay(options: HostedRelayOptions) {
     if (url.pathname === '/auth/cli' && request.method === 'GET') {
       const code = url.searchParams.get('code') ?? '';
       const described = /^[A-Z]{8}$/.test(code) ? cliAuthorizations.describe(code) : undefined;
-      if (!described || described.status !== 'pending') return cliApprovalPage(auth.origin, { state: 'unavailable' });
+      if (!described || described.status !== 'pending') return cliApprovalPage(auth.origin, { state: 'unavailable' }, request.headers.get('accept-language'));
       const signedIn = await sessions.authenticate(request);
-      if (!signedIn.grant) return cliApprovalPage(auth.origin, { state: 'signin' });
-      if (accountBacked && !recentAuthentication(signedIn.grant)) return cliApprovalPage(auth.origin, { state: 'reauthenticate' });
-      return cliApprovalPage(auth.origin, { state: 'approve', userCode: code, label: described.label });
+      if (!signedIn.grant) return cliApprovalPage(auth.origin, { state: 'signin' }, request.headers.get('accept-language'));
+      if (accountBacked && !recentAuthentication(signedIn.grant)) return cliApprovalPage(auth.origin, { state: 'reauthenticate' }, request.headers.get('accept-language'));
+      return cliApprovalPage(auth.origin, { state: 'approve', userCode: code, label: described.label }, request.headers.get('accept-language'));
     }
     if (url.pathname === '/auth/cli' && request.method === 'POST') {
       if (!originAllowed(request)) return json(403, { error: 'Origin is not allowed.' });
@@ -728,7 +728,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       }
       return json(status === 'failed' ? 409 : 410, { error: status === 'failed' ? 'Command line access needs a saved browser session. Sign in again.' : 'This sign-in expired or was already answered.' });
     }
-    if (url.pathname === '/auth/callback' && request.method === 'GET') return authenticationCallback(auth.origin);
+    if (url.pathname === '/auth/callback' && request.method === 'GET') return authenticationCallback(auth.origin, request.headers.get('accept-language'));
     if (request.method === 'GET' && !url.pathname.startsWith('/v1/') && !url.pathname.startsWith('/u/') && !url.pathname.startsWith('/auth/')) return undefined;
     const grant = await authorize(request); if (grant instanceof Response) return grant;
     if (request.headers.has('origin') && !originAllowed(request)) return json(403, { error: 'Origin is not allowed.' });

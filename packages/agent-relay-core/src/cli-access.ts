@@ -1,5 +1,7 @@
 import { createHash, randomBytes, randomInt } from 'node:crypto';
-import { accessBrandMark, accessPageStyle } from './access-page.js';
+import { accessLocale, accessWord, type AccessView } from './access-page.js';
+import { cliWord, cliWordsOf, type CliWordKey } from './access-cli-words.js';
+import { accessDocument, accessPanel, escapeHtml } from './auth-page.js';
 
 /** How long an approval link stays usable, and how often a command line asks whether it was approved. */
 const AUTHORIZATION_MS = 10 * 60_000;
@@ -56,42 +58,34 @@ export function createCliAuthorizations(now: () => number = Date.now) {
 }
 export type CliAuthorizations = ReturnType<typeof createCliAuthorizations>;
 
-const escape = (value: string) => value.replace(/[&<>"']/g, character => `&#${character.charCodeAt(0)};`);
-
 /** The page where a signed-in user approves or refuses a command line sign-in. */
-export function cliApprovalPage(origin: string, view: { state: 'approve'; userCode: string; label: string } | { state: 'signin' | 'reauthenticate' | 'unavailable' }): Response {
-  const css = 'body{margin:0}' + accessPageStyle;
-  const copy = view.state === 'approve' ? { title: 'Allow command line access?', description: `${view.label} asks to act as you in Agent Remote Control: read and drive your sessions, Windows and Hosts. Allow it only if you started this sign-in.` }
-    : view.state === 'signin' ? { title: 'Sign in first', description: 'Sign in to Agent Remote Control in this browser, then open the link from your terminal again.' }
-    : view.state === 'reauthenticate' ? { title: 'Sign in again', description: 'Allowing command line access needs a recent sign-in. Sign in again, then open the link from your terminal again.' }
-    : { title: 'This sign-in is not available', description: 'It expired or was already answered. Start again from your terminal with agent-remote-controller login.' };
+export function cliApprovalPage(origin: string, view: { state: 'approve'; userCode: string; label: string } | { state: 'signin' | 'reauthenticate' | 'unavailable' }, languages?: string | null): Response {
+  const locale = accessLocale(languages);
+  const key = (name: 'title' | 'description'): CliWordKey => `${view.state}.${name}` as CliWordKey;
+  const card: AccessView = { kind: 'card', title: cliWord(locale, key('title')), description: cliWord(locale, key('description'), { label: view.state === 'approve' ? view.label : '' }), action: '' };
+  const words = cliWordsOf(locale);
+  const action = accessWord(locale, 'action.signIn');
   const script = view.state === 'approve' ? `
+const words=${JSON.stringify({ saving: words['saving'], allowed: words['allowed'], refused: words['refused'], failed: words['failed'] })};
 const status=document.getElementById('cli-status');
 for(const button of document.querySelectorAll('[data-decision]'))button.addEventListener('click',async()=>{
   for(const other of document.querySelectorAll('[data-decision]'))other.disabled=true;
-  status.textContent='Saving…';
+  status.textContent=words.saving;
   try{
     const response=await fetch('/auth/cli',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:${JSON.stringify(view.userCode)},decision:button.dataset.decision})});
     const result=await response.json().catch(()=>({}));
-    status.textContent=response.ok?(result.status==='approved'?'Allowed. Return to your terminal.':'Refused. You can close this page.'):(result.error||'This could not be saved. Start again from your terminal.');
-  }catch{status.textContent='This could not be saved. Start again from your terminal.';}
-});` : '';
+    status.textContent=response.ok?(result.status==='approved'?words.allowed:words.refused):(result.error||words.failed);
+  }catch{status.textContent=words.failed;}
+});` : undefined;
+  const note = view.state === 'approve' ? `<p class="arc-access-note">${escapeHtml(words['approve.code']).replace('{code}', `<strong>${escapeHtml(view.userCode)}</strong>`)}</p>` : '';
   const actions = view.state === 'approve'
-    ? `<p class="arc-access-note">Code <strong>${escape(view.userCode)}</strong>: check that your terminal shows the same.</p><div class="arc-access-actions"><button type="button" class="arc-access-action" data-decision="approve">Allow</button><button type="button" class="arc-access-secondary" data-decision="deny">Refuse</button></div><p id="cli-status" role="status"></p>`
-    : view.state === 'unavailable' ? '' : `<div class="arc-access-actions"><a class="arc-access-action" href="${view.state === 'reauthenticate' ? '/auth/login?reauthenticate=1' : '/auth/login'}">Sign in</a></div>`;
-  const sha = (value: string) => createHash('sha256').update(value).digest('base64');
-  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>Command line access · Agent Remote</title><style>${css}</style></head><body>
-<main class="arc-access">
-  <header class="arc-access-brand">${accessBrandMark}Agent Remote</header>
-  <section class="arc-access-body" aria-labelledby="access-title">
-    <p class="arc-access-eyebrow">Command line access</p>
-    <h1 id="access-title">${escape(copy.title)}</h1>
-    <p class="arc-access-description">${escape(copy.description)}</p>
-    ${actions}
-  </section>
-  <footer class="arc-access-footer"><span>Agent Remote Control</span><span class="arc-access-host">${escape(new URL(origin).host)}</span></footer>
-</main>${script ? `<script>${script}</script>` : ''}</body></html>`, { status: view.state === 'unavailable' ? 410 : 200, headers: {
+    ? `<button type="button" class="arc-access-action" data-decision="approve">${escapeHtml(words['approve.allow'])}</button><button type="button" class="arc-access-secondary" data-decision="deny">${escapeHtml(words['approve.refuse'])}</button>`
+    : view.state === 'unavailable' ? '' : `<a class="arc-access-action" href="${view.state === 'reauthenticate' ? '/auth/login?reauthenticate=1' : '/auth/login'}">${escapeHtml(action)}</a>`;
+  const status = view.state === 'approve' ? '<p class="arc-access-status" id="cli-status" role="status"></p>' : '';
+  const page = accessDocument({ locale, title: 'page.cli', ...(script ? { script } : {}),
+    body: accessPanel({ state: 'cli', view: card, host: new URL(origin).host, actions, extra: note, after: status }) });
+  return new Response(page.html, { status: view.state === 'unavailable' ? 410 : 200, headers: {
     'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff',
-    'content-security-policy': `default-src 'none'; style-src 'sha256-${sha(css)}'; ${script ? `script-src 'sha256-${sha(script)}'; connect-src 'self'; ` : ''}base-uri 'none'; frame-ancestors 'none'; form-action 'none'`,
+    'content-security-policy': `default-src 'none'; style-src 'sha256-${page.styleHash}'; ${script ? `script-src 'sha256-${page.scriptHash}'; connect-src 'self'; ` : ''}base-uri 'none'; frame-ancestors 'none'; form-action 'none'`,
   } });
 }

@@ -76,8 +76,8 @@ async function fixture(durable = true, cookiePrefix?: string) {
     expect(consent.status).toBe(302);
     return { callback: new URL(consent.headers.get('location')!), cookie: login.headers.getSetCookie().map(value => value.split(';')[0]).join('; '), login, destination };
   }
-  async function finish(login: Awaited<ReturnType<typeof begin>>, target = relay, extraCookie = '') {
-    return (await target.fetch(new Request(login.callback, { headers: { cookie: [login.cookie, extraCookie].filter(Boolean).join('; ') } })))!;
+  async function finish(login: Awaited<ReturnType<typeof begin>>, target = relay, extraCookie = '', language?: string) {
+    return (await target.fetch(new Request(login.callback, { headers: { cookie: [login.cookie, extraCookie].filter(Boolean).join('; '), ...(language ? { 'accept-language': language } : {}) } })))!;
   }
   async function signIn() { const login = await begin(); const callback = await finish(login); expect(callback.status).toBe(303); return { callback, cookie: callback.headers.getSetCookie().filter(value => !value.includes('Max-Age=0')).map(value => value.split(';')[0]).join('; ') }; }
   return { auth, relay, start, begin, finish, signIn, request, saved: () => saved!, claims: (value: JWTPayload) => { claims = value; }, wrongSignature: () => { invalidSignature = true; } };
@@ -294,6 +294,16 @@ it('renders a private readable callback failure and preserves only the validated
   expect(await invalid!.text()).not.toContain('evil');
 });
 
+it('renders the callback failure in the language of the request', async () => {
+  const f = await fixture(); f.wrongSignature();
+  const login = await f.begin(f.relay, undefined, '/auth/login?host=studio&provider=codex&session=one');
+  const html = await (await f.finish(login, f.relay, '', 'zh-CN,zh;q=0.9,en;q=0.8')).text();
+  expect(html).toContain('<html lang="zh-CN">');
+  expect(html).toContain('>重新登录</a>');
+  expect(html).toContain('href="/">回到 Orchard</a>');
+  expect(html).not.toContain('Sign in again');
+});
+
 it('renders a safe retry with the saved target when a signed Google callback reaches session capacity', async () => {
   const f = await fixture(); await f.signIn();
   const snapshot = f.saved();
@@ -311,7 +321,7 @@ it('renders a safe retry with the saved target when a signed Google callback rea
   const html = await response.text();
   expect(html).toContain('account capacity');
   expect(html).toContain('href="/auth/login?host=studio&amp;provider=codex&amp;session=one">Sign in again');
-  expect(html).toContain('href="/">Back to Agent Remote');
+  expect(html).toContain('href="/">Back to Orchard');
   for (const value of [login.callback.searchParams.get('code')!, login.callback.searchParams.get('state')!, '/auth/session', '<script']) expect(html).not.toContain(value);
   expect(f.saved().sessions).toHaveLength(1024);
   expect(f.saved().loginChallenges).toEqual([]);

@@ -1,32 +1,30 @@
 import { useEffect, useRef } from 'react';
-import { accessBrandMark, accessCopy, accessPageStyle, type AccessPageState } from '@orchardworks/agent-relay-core/access-page';
+import { accessMark, accessPageStyle, accessView, accessWordmark, type AccessPageState } from '@orchardworks/agent-relay-core/access-page';
+import { deviceChoices } from '../device-choices.js';
 
+/** The page's own sign-in entry: a quiet wait (the mark and one sentence) or a card that needs the reader. */
 export function AccessPage({ state, sessionLink, loginUrl, onLogin, onRetry }: {
   state: AccessPageState; sessionLink: boolean; loginUrl: string; onLogin(): void; onRetry(): void;
 }) {
-  const copy = accessCopy[state];
-  const error = state === 'expired' || state === 'unavailable';
-  const busy = !!copy.status;
+  const view = accessView(state, deviceChoices().language.locale, { sessionLink });
   const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => { if (!busy) heading.current?.focus({ preventScroll: true }); }, [state, busy]);
-  const step = state === 'checking' ? 0 : state === 'opening' ? 2 : 1;
-  return <main className="arc-access" data-state={state}>
+  const card = view.kind === 'card';
+  useEffect(() => { if (card) heading.current?.focus({ preventScroll: true }); }, [state, card]);
+  const error = state === 'expired' || state === 'unavailable';
+  return <main className="arc-access" data-state={state} data-kind={card ? 'card' : 'wait'}>
     <style>{accessPageStyle}</style>
-    <header className="arc-access-brand"><span dangerouslySetInnerHTML={{ __html: accessBrandMark }} />Agent Remote</header>
-    <section className="arc-access-body" aria-labelledby="access-title">
-      <ol className="arc-access-progress" aria-label="Sign-in progress">
-        {['Open link', 'Sign in', sessionLink ? 'Open session' : 'Open workspace'].map((label, index) => <li key={label} aria-current={step === index ? 'step' : undefined}><span>{index + 1}</span>{label}</li>)}
-      </ol>
-      <p className="arc-access-eyebrow">{error ? 'Try again' : sessionLink ? 'Continue on this device' : 'Your agent workspace'}</p>
-      <h1 id="access-title" ref={heading} tabIndex={-1}>{state === 'checking' && !sessionLink ? 'Opening your workspace' : copy.title}</h1>
-      <p className="arc-access-description" role={error ? 'alert' : undefined}>{state === 'signin' && !sessionLink ? 'Sign in to open your Agent Hosts and sessions.' : copy.description}</p>
-      {busy ? <p className="arc-access-activity" role="status">{copy.status}</p> : <div className="arc-access-actions">
-        {state === 'unavailable' ? <button className="arc-access-action" type="button" onClick={onRetry}>Try again</button>
-          : <a className="arc-access-action" href={loginUrl} onClick={onLogin}>Sign in</a>}
-        {state === 'unavailable' ? <a className="arc-access-secondary" href={loginUrl} onClick={onLogin}>Sign in</a> : null}
+    <div className="arc-access-panel">
+      <div className="arc-access-brand"><span className="arc-access-mark" dangerouslySetInnerHTML={{ __html: accessMark }} /><span className="arc-access-wordmark">{accessWordmark}</span></div>
+      {view.kind === 'wait' ? <p className="arc-access-sentence" role="status">{view.sentence}</p> : <div className="arc-access-detail">
+        <h1 id="access-title" ref={heading} tabIndex={-1}>{view.title}</h1>
+        <p className="arc-access-description" role={error ? 'alert' : undefined}>{view.description}</p>
+        <div className="arc-access-actions">
+          {state === 'unavailable' ? <button className="arc-access-action" type="button" onClick={onRetry}>{view.action}</button>
+            : <a className="arc-access-action" href={loginUrl} onClick={onLogin}>{view.action}</a>}
+          {state === 'unavailable' && view.secondary ? <a className="arc-access-secondary" href={loginUrl} onClick={onLogin}>{view.secondary}</a> : null}
+        </div>
+        <footer className="arc-access-footer">{window.location.host}</footer>
       </div>}
-      {!busy && <p className="arc-access-note">{sessionLink ? 'After sign-in, this link opens the same session. Use an account with access to its Host.' : 'Use an account approved for this site.'}</p>}
-    </section>
-    <footer className="arc-access-footer"><span>Agent Remote Control</span><span className="arc-access-host">{window.location.host}</span></footer>
+    </div>
   </main>;
 }

@@ -21,9 +21,9 @@ async function signedInRelay(authenticatedAt: () => number = Date.now) {
   const issuer = `http://127.0.0.1:${(authority.address() as AddressInfo).port}`;
   const relay = createHostedRelay({ origin, issuer, secret, storage: { async commit() {} }, scheduler: { schedule() {}, cancel() {} } });
   closers.push(() => relay.close());
-  const send = async (path: string, options: { cookie?: string; body?: unknown; origin?: string | null } = {}) => (await relay.fetch(new Request(origin + path, {
+  const send = async (path: string, options: { cookie?: string; body?: unknown; origin?: string | null; language?: string } = {}) => (await relay.fetch(new Request(origin + path, {
     ...(options.body === undefined ? {} : { method: 'POST', body: JSON.stringify(options.body) }),
-    headers: { ...(options.cookie ? { cookie: options.cookie } : {}), ...(options.body === undefined ? {} : { 'content-type': 'application/json' }),
+    headers: { ...(options.cookie ? { cookie: options.cookie } : {}), ...(options.language ? { 'accept-language': options.language } : {}), ...(options.body === undefined ? {} : { 'content-type': 'application/json' }),
       ...(options.body !== undefined && options.origin !== null ? { origin: options.origin ?? origin } : {}) },
   })))!;
   const login = await send('/auth/login');
@@ -90,6 +90,20 @@ it('gives a command line its own session once the signed-in user allows its code
   expect(revoked.status).toBe(200);
   expect((await send('/auth/status', { cookie: commandLine })).status).toBe(401);
   expect((await send('/auth/status', { cookie: browser })).status).toBe(200);
+});
+
+it('speaks the language of the request on the command line page and the callback page', async () => {
+  const { send, browser } = await signedInRelay();
+  const started = await (await send('/auth/cli/start', { body: { label: 'laptop' }, origin: null })).json();
+  const approve = await (await send(`/auth/cli?code=${started.userCode}`, { cookie: browser, language: 'zh-CN,zh;q=0.9' })).text();
+  expect(approve).toContain('<html lang="zh-CN">');
+  expect(approve).toContain('<h1 id="access-title" tabindex="-1">允许命令行访问吗？</h1>');
+  expect(approve).toContain('>允许</button>');
+  expect(approve).toContain('正在保存…');
+  const callback = await (await send('/auth/callback', { language: 'zh-CN' })).text();
+  expect(callback).toContain('<html lang="zh-CN">');
+  expect(callback).toContain('正在登录…');
+  expect(await (await send('/auth/callback')).text()).toContain('<html lang="en">');
 });
 
 it('refuses a command line the user refuses, and asks for a recent sign-in before allowing one', async () => {

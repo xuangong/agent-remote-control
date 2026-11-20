@@ -4,6 +4,8 @@
  * strings: these pages load before the app and stay small, so this module imports nothing.
  */
 export const signInReturnKey = 'agent-remote-sign-in-return';
+/** Where the device keeps its language choice (`zh` or `en`); a test keeps it equal to the client's key. */
+export const accessLanguageKey = 'agent-remote:language';
 
 export type AccessLocale = 'en' | 'zh';
 
@@ -45,21 +47,6 @@ const accessWords = {
     'action.tryAgain': 'Try again',
     'action.back': 'Back to Orchard',
     noscript: 'JavaScript is required to finish signing in. Turn it on, then sign in again.',
-    'cli.approve.title': 'Allow command line access?',
-    'cli.approve.description': '{label} asks to act as you in Orchard: read and drive your sessions, windows and computers. Allow it only if you started this sign-in.',
-    'cli.approve.code': 'Code {code}: check that your terminal shows the same.',
-    'cli.approve.allow': 'Allow',
-    'cli.approve.refuse': 'Refuse',
-    'cli.saving': 'Saving…',
-    'cli.allowed': 'Allowed. Return to your terminal.',
-    'cli.refused': 'Refused. You can close this page.',
-    'cli.failed': 'This could not be saved. Start again from your terminal.',
-    'cli.signin.title': 'Sign in first',
-    'cli.signin.description': 'Sign in to Orchard in this browser, then open the link from your terminal again.',
-    'cli.reauthenticate.title': 'Sign in again',
-    'cli.reauthenticate.description': 'Allowing command line access needs a recent sign-in. Sign in again, then open the link from your terminal again.',
-    'cli.unavailable.title': 'This sign-in is not available',
-    'cli.unavailable.description': 'It expired or was already answered. Start again from your terminal with agent-remote-controller login.',
   },
   zh: {
     brand: 'Orchard',
@@ -85,21 +72,6 @@ const accessWords = {
     'action.tryAgain': '再试一次',
     'action.back': '回到 Orchard',
     noscript: '需要打开 JavaScript 才能完成登录。打开之后，请重新登录。',
-    'cli.approve.title': '允许命令行访问吗？',
-    'cli.approve.description': '{label} 想以你的身份使用 Orchard：查看和操作你的会话、窗口和电脑。只有这次登录是你自己发起的，才允许它。',
-    'cli.approve.code': '代码 {code}：确认终端里显示的一样。',
-    'cli.approve.allow': '允许',
-    'cli.approve.refuse': '拒绝',
-    'cli.saving': '正在保存…',
-    'cli.allowed': '已允许，回到终端吧。',
-    'cli.refused': '已拒绝，可以关掉这个页面了。',
-    'cli.failed': '没能保存，请在终端里重新开始。',
-    'cli.signin.title': '先登录',
-    'cli.signin.description': '先在这个浏览器里登录 Orchard，再从终端重新打开这个链接。',
-    'cli.reauthenticate.title': '重新登录',
-    'cli.reauthenticate.description': '允许命令行访问需要刚刚登录过。请重新登录，再从终端打开这个链接。',
-    'cli.unavailable.title': '这次登录已经不可用了',
-    'cli.unavailable.description': '它过期了，或者已经处理过。请在终端里用 agent-remote-controller login 重新开始。',
   },
 } as const satisfies Record<AccessLocale, Record<string, string>>;
 export type AccessWordKey = keyof typeof accessWords.en;
@@ -148,63 +120,47 @@ export function accessView(state: AccessPageState, locale: AccessLocale, facts: 
 
 /** A wait shows nothing for this long, so a quick check paints only the ground; then its mark and sentence fade in. */
 export const accessWaitDelayMs = 400;
-export const accessBrandMark = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M3 9h18M9 9v12"/></svg>';
-export const accessCopy = {
-  checking: { title: 'Opening your session', description: 'Checking whether you are already signed in.', status: 'Checking access…' },
-  signin: { title: 'Sign in to continue', description: 'Sign in with an account approved for this site. We will bring you straight back to this session.', status: '' },
-  restoring: { title: 'Reconnecting securely', description: 'Your conversation will return as soon as access is restored.', status: 'Restoring access…' },
-  verifying: { title: 'Completing sign-in', description: 'Confirming your access before opening your conversation.', status: 'Verifying access…' },
-  opening: { title: 'You are signed in', description: 'Taking you back to your conversation.', status: 'Opening session…' },
-  expired: { title: 'Let’s try signing in again', description: 'This sign-in has expired or is no longer valid. Start again in this browser.', status: '' },
-  unavailable: { title: 'Connection interrupted', description: 'We could not reach the service. Check your connection and try again.', status: '' },
-} as const;
-export type AccessPageState = keyof typeof accessCopy;
+/** The Orchard mark, the drawing of `markSvg()` in agent-client-web (a test keeps them equal); the clip has an id of its own. */
+export const accessMark = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><defs><clipPath id="arc-tile"><rect width="64" height="64" rx="15"/></clipPath></defs><g clip-path="url(#arc-tile)"><rect width="64" height="64" fill="#24242a"/><g transform="rotate(-14 32 44)"><path d="M33 20c0-4 1-7 4-9" stroke="#2f8f55" stroke-width="3.2" stroke-linecap="round" fill="none"/><path d="M37 11.5c2-7 10-9 15-6-2 6-10 8-15 6z" fill="#4cc27a"/><path d="M33 19c-17 0-29 12-29 28 0 10 4 19 8 24h42c4-5 8-14 8-24 0-16-12-28-29-28z" fill="#ff7f45"/><ellipse cx="25" cy="35" rx="3.9" ry="6" fill="#16161a"/><ellipse cx="36" cy="35" rx="3.9" ry="6" fill="#16161a"/></g></g></svg>';
+export const accessWordmark = 'orchard';
 
+/**
+ * The pages' style: Orchard colours as light-dark() pairs (the page follows the system or the root's colour-scheme), one surface card
+ * on the ground, pill buttons. A wait paints only the ground for the delay, then fades its mark and sentence in.
+ */
 export const accessPageStyle = `
-.arc-access {
-  --entry-bg: var(--obs-canvas, oklch(0.975 0.006 255.5));
-  --entry-surface: var(--obs-surface, oklch(0.993 0.003 247.9));
-  --entry-text: var(--obs-text, oklch(0.243 0.024 248.8));
-  --entry-muted: var(--obs-text-secondary, oklch(0.485 0.029 246.6));
-  --entry-line: var(--obs-border, oklch(0.909 0.016 248));
-  --entry-action: var(--obs-action, oklch(0.533 0.137 250.7));
-  box-sizing: border-box; min-height: 100svh; width: 100%; margin: 0;
-  display: grid; grid-template-rows: auto 1fr auto;
-  padding: max(28px, env(safe-area-inset-top)) max(32px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(32px, env(safe-area-inset-left));
-  background: var(--entry-bg); color: var(--entry-text);
-  font: 400 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-}
-.arc-access *, .arc-access *::before, .arc-access *::after { box-sizing: border-box; }
-.arc-access [hidden] { display: none !important; }
-.arc-access-brand { display: flex; align-items: center; gap: 10px; width: min(100%, 1040px); margin-inline: auto; font-weight: 650; letter-spacing: -.02em; }
-.arc-access-brand svg { width: 26px; height: 26px; color: var(--entry-action); }
-.arc-access-body { width: min(100%, 424px); margin: auto; padding-block: 56px 72px; }
-.arc-access-progress { display: flex; list-style: none; padding: 0; margin: 0 0 44px; gap: 16px; }
-.arc-access-progress li { flex: 1; border-top: 2px solid var(--entry-line); padding-top: 10px; color: var(--entry-muted); font-size: 12px; }
-.arc-access-progress li[aria-current="step"] { color: var(--entry-action); border-color: var(--entry-action); font-weight: 650; }
-.arc-access-progress span { margin-right: 7px; font-variant-numeric: tabular-nums; }
-.arc-access-eyebrow { color: var(--entry-muted); margin: 0 0 12px; font-size: 11px; font-weight: 650; letter-spacing: .12em; text-transform: uppercase; }
-.arc-access h1 { font-size: 30px; line-height: 1.2; font-weight: 650; letter-spacing: -.035em; margin: 0 0 16px; text-wrap: balance; }
-.arc-access h1:focus { outline: none; }
-.arc-access-description { color: var(--entry-muted); font-size: 16px; margin: 0; line-height: 1.65; max-width: 40ch; }
-.arc-access-activity { display: flex; align-items: center; gap: 10px; margin-top: 32px; color: var(--entry-muted); font-size: 13px; }
-.arc-access-activity::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--entry-action); animation: arc-access-pulse 1.6s ease-in-out infinite; }
-.arc-access-actions { display: grid; gap: 12px; margin-top: 32px; }
-.arc-access-action { display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%; min-height: 48px; border: 1px solid var(--entry-action); border-radius: 8px; padding: 12px 18px; background: var(--entry-action); color: var(--entry-surface); font: inherit; font-weight: 600; cursor: pointer; text-decoration: none; transition: background-color 180ms ease-out; }
-.arc-access .arc-access-action:hover { background: color-mix(in oklch, var(--entry-action) 88%, var(--entry-text)); color: var(--entry-surface); }
-.arc-access-action:focus-visible, .arc-access-secondary:focus-visible { outline: 2px solid var(--entry-action); outline-offset: 4px; }
-.arc-access .arc-access-secondary { display: flex; justify-content: center; align-items: center; min-height: 44px; padding: 8px; color: var(--entry-muted); background: transparent; border: 0; font: inherit; text-decoration: underline; text-underline-offset: 4px; cursor: pointer; }
-.arc-access-note { color: var(--entry-muted); font-size: 12px; line-height: 1.6; margin: 18px 0 0; }
-.arc-access-footer { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; width: min(100%, 1040px); margin-inline: auto; padding-top: 18px; border-top: 1px solid var(--entry-line); color: var(--entry-muted); font-size: 12px; }
-.arc-access-host { overflow-wrap: anywhere; }
-.arc-access[data-state="expired"] .arc-access-eyebrow, .arc-access[data-state="unavailable"] .arc-access-eyebrow { color: var(--obs-warning, oklch(0.532 0.113 62)); }
-@keyframes arc-access-pulse { 50% { opacity: .35; } }
-@media (prefers-reduced-motion: reduce) { .arc-access-activity::before { animation: none; } .arc-access-action { transition: none; } }
-@media (max-width: 600px) {
-  .arc-access { padding-inline: max(24px, env(safe-area-inset-left)) max(24px, env(safe-area-inset-right)); }
-  .arc-access-body { padding-block: 48px 64px; }
-  .arc-access-progress { margin-bottom: 36px; gap: 12px; }
-  .arc-access h1 { font-size: 28px; }
-}
-@media (max-height: 540px) { .arc-access-body { padding-block: 24px 32px; } .arc-access-progress { margin-bottom: 24px; } }
+:root{color-scheme:light dark}
+body{margin:0}
+.arc-access{--arc-ground:light-dark(#f3efe9,#151517);--arc-surface:light-dark(#ffffff,#232327);--arc-fill:light-dark(#f4f4f6,#2f2f34);--arc-text:light-dark(#2a2b30,#dcdde2);--arc-strong:light-dark(#1d1d1f,#f2f2f5);--arc-secondary:light-dark(#696d75,#9a9da4);--arc-brand:light-dark(#ff7f45,#ff7f45);--arc-on-brand:light-dark(#1d1d1f,#1d1d1f);--arc-focus:light-dark(#d9581c,#ff7f45);--arc-danger:light-dark(#c4321f,#ff7a6b);--arc-separator:light-dark(rgb(0 0 0 / 0.06),rgb(255 255 255 / 0.07));
+  box-sizing:border-box;min-height:100svh;width:100%;display:grid;place-items:center;padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));
+  background:var(--arc-ground);color:var(--arc-text);font:400 14.5px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+.arc-access *,.arc-access *::before,.arc-access *::after{box-sizing:border-box}
+.arc-access [hidden]{display:none!important}
+.arc-access-panel{display:grid;justify-items:center;gap:16px;width:min(100%,400px);text-align:center}
+.arc-access[data-kind="card"] .arc-access-panel{justify-items:stretch;gap:0;padding:28px;border-radius:22px;background:var(--arc-surface);text-align:left}
+.arc-access-brand{display:flex;align-items:center;gap:10px}
+.arc-access[data-kind="card"] .arc-access-brand{margin-bottom:22px}
+.arc-access-mark{display:block;width:56px;height:56px;flex:none}
+.arc-access[data-kind="card"] .arc-access-mark{width:28px;height:28px}
+.arc-access-mark svg{display:block;width:100%;height:100%}
+.arc-access-wordmark{font:750 20px/1 ui-rounded,"SF Pro Rounded",-apple-system,system-ui,sans-serif;letter-spacing:-.02em;color:var(--arc-strong)}
+.arc-access[data-kind="wait"] .arc-access-wordmark,.arc-access[data-kind="wait"] .arc-access-detail,.arc-access[data-kind="card"] .arc-access-sentence{display:none}
+.arc-access-sentence{margin:0;color:var(--arc-secondary)}
+.arc-access[data-kind="wait"] .arc-access-mark,.arc-access[data-kind="wait"] .arc-access-sentence{animation:arc-access-in 240ms ease-out ${accessWaitDelayMs}ms both}
+.arc-access h1{margin:0 0 8px;font:650 22px/1.25 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;letter-spacing:-.02em;color:var(--arc-strong);text-wrap:balance}
+.arc-access h1:focus{outline:none}
+.arc-access-description{margin:0;color:var(--arc-secondary)}
+.arc-access-note{margin:14px 0 0;color:var(--arc-secondary);font-size:13px}
+.arc-access-note strong{padding:1px 6px;border-radius:6px;background:var(--arc-fill);color:var(--arc-strong);font:600 13px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em}
+.arc-access-actions{display:grid;gap:6px;margin-top:24px}
+.arc-access-action{display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;padding:12px 20px;border:0;border-radius:999px;background:var(--arc-brand);color:var(--arc-on-brand);font:inherit;font-weight:600;font-size:15px;text-decoration:none;cursor:pointer}
+.arc-access-action:hover{filter:brightness(.96)}
+.arc-access .arc-access-secondary{display:flex;align-items:center;justify-content:center;min-height:44px;padding:8px;border:0;background:none;color:var(--arc-secondary);font:inherit;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.arc-access-action:focus-visible,.arc-access-secondary:focus-visible{outline:2px solid var(--arc-focus);outline-offset:2px}
+.arc-access-status{min-height:1.55em;margin:12px 0 0;color:var(--arc-secondary);font-size:13px}
+.arc-access-footer{margin:24px 0 0;padding-top:14px;border-top:1px solid var(--arc-separator);color:var(--arc-secondary);font-size:12px;overflow-wrap:anywhere}
+@keyframes arc-access-in{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){.arc-access[data-kind="wait"] .arc-access-mark,.arc-access[data-kind="wait"] .arc-access-sentence{animation-duration:.01ms}}
+:root[data-motion="reduce"] .arc-access[data-kind="wait"] .arc-access-mark,:root[data-motion="reduce"] .arc-access[data-kind="wait"] .arc-access-sentence{animation-duration:.01ms}
+@media (max-width:600px){.arc-access[data-kind="card"] .arc-access-panel{padding:24px}}
 `;

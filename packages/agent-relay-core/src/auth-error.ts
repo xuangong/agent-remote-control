@@ -1,29 +1,17 @@
-import { createHash } from 'node:crypto';
-import { accessBrandMark, accessCopy, accessPageStyle } from './access-page.js';
-
-const escape = (value: string) => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
+import { accessLocale, accessView, accessWord } from './access-page.js';
+import { accessDocument, accessPanel, escapeHtml } from './auth-page.js';
 
 /** Render Google callback failures without attempting the Gateway ticket exchange. */
-export function authenticationFailure(origin: string, reason: 'denied' | 'unavailable' | 'capacity', returnPath?: string): Response {
+export function authenticationFailure(origin: string, reason: 'denied' | 'unavailable' | 'capacity', returnPath?: string, languages?: string | null): Response {
+  const locale = accessLocale(languages);
   const state = reason === 'denied' ? 'expired' : 'unavailable';
-  const copy = accessCopy[state];
-  const description = reason === 'denied' ? 'This sign-in expired, was cancelled, or the account is not approved for this site. Sign in again with an approved account.'
-    : reason === 'capacity' ? 'This site has reached its account capacity. Contact the site operator before trying again.' : copy.description;
+  const view = accessView(state, locale, { surface: 'relay', ...(reason === 'unavailable' ? {} : { failure: reason }) });
+  if (view.kind !== 'card') throw new Error('A sign-in failure is a card.');
   const target = returnPath && (returnPath === '/' || returnPath.startsWith('/?')) && returnPath.length <= 32768 ? returnPath : '/';
-  const css = 'body{margin:0}' + accessPageStyle;
-  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>Sign in · Agent Remote</title><style>${css}</style></head><body>
-<main class="arc-access" data-state="${state}">
-  <header class="arc-access-brand">${accessBrandMark}Agent Remote</header>
-  <section class="arc-access-body" aria-labelledby="access-title">
-    <p class="arc-access-eyebrow">Sign-in interrupted</p>
-    <h1 id="access-title">${copy.title}</h1>
-    <p class="arc-access-description" role="alert">${description}</p>
-    <div class="arc-access-actions"><a class="arc-access-action" href="${escape('/auth/login' + target.slice(1))}">Sign in again</a><a class="arc-access-secondary" href="/">Back to Agent Remote</a></div>
-    <p class="arc-access-note">Use an account approved for this site.</p>
-  </section>
-  <footer class="arc-access-footer"><span>Agent Remote Control</span><span class="arc-access-host">${escape(new URL(origin).host)}</span></footer>
-</main></body></html>`, { status: reason === 'denied' ? 401 : reason === 'capacity' ? 429 : 503, headers: {
+  const actions = `<a class="arc-access-action" href="${escapeHtml('/auth/login' + target.slice(1))}">${escapeHtml(view.action)}</a><a class="arc-access-secondary" href="/">${escapeHtml(view.secondary ?? accessWord(locale, 'action.back'))}</a>`;
+  const page = accessDocument({ locale, title: 'page.signIn', body: accessPanel({ state, view, host: new URL(origin).host, actions, error: true }) });
+  return new Response(page.html, { status: reason === 'denied' ? 401 : reason === 'capacity' ? 429 : 503, headers: {
     'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff',
-    'content-security-policy': `default-src 'none'; style-src 'sha256-${createHash('sha256').update(css).digest('base64')}'; base-uri 'none'; frame-ancestors 'none'`,
+    'content-security-policy': `default-src 'none'; style-src 'sha256-${page.styleHash}'; base-uri 'none'; frame-ancestors 'none'`,
   } });
 }

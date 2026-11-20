@@ -122,7 +122,7 @@ export const windows = {
   'windows.notice.windowNotOpened': 'The Window was not opened.',
   'windows.notice.botNotOpened': 'The assistant was not opened in Bot mode.',
   // The final period is an escape: the client-ui rule reads `window.` in source as the browser global.
-  'windows.notice.botNotPinned': 'The assistant was not pinned to a window\u002E',
+  'windows.notice.botNotPinned': 'The assistant was not pinned to a window.',
   'windows.error.localUnavailable': 'The local Window is unavailable.',
   'windows.error.layoutChanged': 'The Window changed before applying this layout. Refresh and retry.',
   'windows.error.pendingWindow': 'The pending Window creation cannot be recovered. Preserve its saved request before creating another Window.',

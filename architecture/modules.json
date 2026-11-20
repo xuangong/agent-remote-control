@@ -527,6 +527,16 @@
       ]
     },
     {
+      "name": "client-words",
+      "layer": 1,
+      "paths": [
+        "packages/agent-client/src/presentation/messages/**"
+      ],
+      "seams": [],
+      "flows": [],
+      "invariants": []
+    },
+    {
       "name": "client",
       "layer": 2,
       "paths": [

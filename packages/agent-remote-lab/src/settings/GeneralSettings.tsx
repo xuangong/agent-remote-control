@@ -50,6 +50,7 @@ export function GeneralSettings() {
         <SegmentedControl<DefaultView> label={t('settings.defaultView')} options={DEFAULT_VIEWS.map(value => ({ value, label: t(`settings.defaultView.${value}` as const) }))} value={defaultView} onChange={setDefaultView} />
       </SettingsRow>
     </SettingsSection>
-    <SettingsSection title={t('settings.general.display')}><div className="lab-setting-legacy"><MobileDisplaySettings /></div></SettingsSection>
+    {/* The display settings carry their own heading, as every moved section does. */}
+    <SettingsSection><div className="lab-setting-legacy"><MobileDisplaySettings /></div></SettingsSection>
   </>;
 }

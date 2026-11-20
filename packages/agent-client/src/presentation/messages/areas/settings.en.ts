@@ -19,7 +19,6 @@ export const settings = {
   'settings.general.hint': 'How this device shows things.',
   'settings.general.look': 'Look',
   'settings.general.opening': 'When it opens',
-  'settings.general.display': 'Display',
   'settings.theme': 'Theme',
   'settings.theme.system': 'System',
   'settings.theme.light': 'Light',

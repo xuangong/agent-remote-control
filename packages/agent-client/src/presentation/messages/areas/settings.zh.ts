@@ -19,7 +19,6 @@ export const settings: AreaMessages<typeof english> = {
   'settings.general.hint': '这台设备上的显示方式。',
   'settings.general.look': '外观',
   'settings.general.opening': '打开时',
-  'settings.general.display': '显示',
   'settings.theme': '主题',
   'settings.theme.system': '跟随系统',
   'settings.theme.light': '浅色',

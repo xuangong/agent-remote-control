@@ -7,6 +7,10 @@
   "exports": {
     "./faults/connection-words.mjs": "./faults/connection-words.mjs",
     "./faults/latency-proxy.mjs": "./faults/latency-proxy.mjs",
+    "./smoke/probe": {
+      "import": "./smoke/lib/probe.ts",
+      "types": "./smoke/lib/probe.ts"
+    },
     "./stack": {
       "import": "./stack/index.ts",
       "types": "./stack/index.ts"

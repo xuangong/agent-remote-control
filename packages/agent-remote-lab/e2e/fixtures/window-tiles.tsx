@@ -1,11 +1,13 @@
 /// <reference types="vite/client" />
 // A Window of 1 to 4 tiles in the real Workbench (?tiles=N, default 3; ?bots=1 makes its group a group of bots), each tile a
-// long conversation. The Window workspace answers from memory and the sessions from a recorded transport; no Relay runs.
+// long conversation; ?docks=N docks 1 or 2 more sessions beside them, and ?working=tile-2,… names the sessions that are working.
+// The Window workspace answers from memory and the sessions from a recorded transport; no Relay runs.
 import { createRoot } from 'react-dom/client';
 import { applyGroupOperation, createWindowView, type WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { WindowWorkspaceClient, type HttpWebSocketTransport, type RemoteAgentTransport, type RemoteTransportListener } from '@orchardworks/agent-client';
 import { App } from '../../src/App.js';
 import { SessionDirectoryClient } from '../../src/directory-client.js';
+import { SessionStarsClient } from '../../src/session-stars-client.js';
 import { replicaState } from '../../src/test/fixtures.js';
 import { browserLocale } from '@orchardworks/agent-client-web/react';
 import '../../src/session-view-styles.js';
@@ -17,7 +19,11 @@ const baseUrl = location.origin + '/u/alice/';
 const zh = browserLocale() === 'zh';
 const binding = (index: number) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: `tile-${index}`,
   title: zh ? `用 LOCAL 和 OK 回答，第 ${index} 块` : `Reply with the words LOCAL and OK, tile ${index}` });
-const views = Array.from({ length: count }, (_, index) => createWindowView(`v${index + 1}`, binding(index + 1), 'primary'));
+const docks = Math.max(0, Math.min(2, Number(params.get('docks') ?? 0)));
+const working = new Set((params.get('working') ?? '').split(',').filter(Boolean));
+const statusOf = (nativeSessionId: string) => working.has(nativeSessionId) ? 'running' as const : 'idle' as const;
+const views = [...Array.from({ length: count }, (_, index) => createWindowView(`v${index + 1}`, binding(index + 1), 'primary')),
+  ...Array.from({ length: docks }, (_, index) => createWindowView(`d${index + 1}`, binding(count + index + 1), 'dock'))];
 let group: WindowGroup = { window: { schemaVersion: 3, id: 'tiles', revision: 1, title: zh ? '窗口' : 'Tiles', selectedPrimaryViewId: 'v1', selectedViewId: 'v1', views },
   ...(params.has('bots') ? { bots: { rank: 'm', members: {} } } : {}) };
 localStorage.setItem(`agent-remote:recovery:${baseUrl}:shared-window:tiles`, JSON.stringify(group));
@@ -33,14 +39,16 @@ WindowWorkspaceClient.prototype.mutate = async (_id, mutation) => {
 };
 
 // Every directory client of the page, the ones a Window makes per Host included.
-SessionDirectoryClient.prototype.list = async () => ({ items: views.map(view => ({ ...view.binding!, state: 'idle' as const, createdAt: '2026-11-20', updatedAt: '2026-11-20' })), hasMore: false, revision: '1' });
+SessionDirectoryClient.prototype.list = async () => ({ items: views.map(view => ({ ...view.binding!, state: statusOf(view.binding!.nativeSessionId), createdAt: '2026-11-20', updatedAt: '2026-11-20' })), hasMore: false, revision: '1' });
 SessionDirectoryClient.prototype.workspaces = async () => ({ workspaces: [] });
 SessionDirectoryClient.prototype.attach = async (_providerId, nativeSessionId) => ({ agentId: nativeSessionId, nativeSessionId });
+// No favorites: without an answer the page would say the favorites failed, in a toast over the last tile's composer.
+SessionStarsClient.prototype.snapshot = async () => ({ stars: [], folders: [], revision: 0 });
 const directory = new SessionDirectoryClient(baseUrl, undefined, 'host');
 const entries = (agentId: string) => Array.from({ length: 24 }, (_, index) => ({ providerId: 'recorded', seqStart: index + 1, seqEnd: index + 1, timestamp: '2026-11-20T05:20:00Z',
   sourceSeqRanges: [{ startSeq: index + 1, endSeq: index + 1 }], collapsed: [], resources: [],
   item: { type: 'assistant_message' as const, messageId: `${agentId}-${index + 1}`, text: zh ? `${agentId} 的第 ${index + 1} 条。${'不能被遮住的对话文字。'.repeat(3)}` : `Item ${index + 1} of ${agentId}. ${'Readable conversation text that must stay uncovered. '.repeat(3)}` } }));
-const snapshot = (agentId: string) => ({ ...replicaState.agent!, id: agentId, status: 'idle' as const, runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: agentId } });
+const snapshot = (agentId: string) => ({ ...replicaState.agent!, id: agentId, status: statusOf(agentId), runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: agentId, status: statusOf(agentId) } });
 const transport: RemoteAgentTransport & Pick<HttpWebSocketTransport, 'listProviders' | 'createAgent' | 'resumeAgent'> = {
   listProviders: async () => [{ providerId: 'recorded', displayName: 'Recorded' }],
   createAgent: async () => { throw new Error('Creation is not used'); },
@@ -57,7 +65,7 @@ const transport: RemoteAgentTransport & Pick<HttpWebSocketTransport, 'listProvid
     return { close: () => {}, send: message => {
       if (message.type === 'negotiate' && message.observation === 'activity') {
         listener.onMessage({ protocolVersion: '1.8.0', type: 'negotiated' });
-        listener.onMessage({ protocolVersion: '1.8.0', type: 'agent_activity', payload: { agentId, status: 'idle' } });
+        listener.onMessage({ protocolVersion: '1.8.0', type: 'agent_activity', payload: { agentId, status: statusOf(agentId) } });
       } else if (message.type === 'negotiate') {
         listener.onMessage({ protocolVersion: '1.8.0', type: 'negotiated' });
         listener.onMessage({ protocolVersion: '1.8.0', type: 'agent_snapshot', payload: snapshot(agentId) });

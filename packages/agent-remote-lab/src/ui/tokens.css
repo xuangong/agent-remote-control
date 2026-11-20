@@ -24,7 +24,6 @@
   --ui-failure-on-fill: light-dark(#b8000e, #ffa39e); /* Destructive text on a gray fill */
   --ui-row-hover: light-dark(rgb(120 120 128 / 0.12), rgb(118 118 128 / 0.06)); /* A hovered sidebar or list row */
   --ui-on-accent: #ffffff;
-  --ui-on-light-fill: #1d1d1f; /* Ink on the light fills of a colored avatar, such as yellow */
   --ui-focus-ring: light-dark(#0071e3, #409cff);
 
   --ui-status-attention: light-dark(#c93400, #ffb340);

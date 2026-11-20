@@ -1,6 +1,10 @@
 import { createContext, useContext, useState } from 'react';
 import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
+import type { ProcessMode } from '@orchardworks/agent-client';
 export const TimelineSearchReveal = createContext(false);
+
+/** The process mode a host gives every timeline below it, an earlier session's included; a timeline's own prop wins. */
+export const ProcessModeContext = createContext<ProcessMode>('concise');
 
 /** How each step of an open work line shows: its one-line header (`summary`) or today's preview block (`preview`). */
 export const TimelineStepLevel = createContext<'summary' | 'preview'>('preview');

@@ -8,7 +8,6 @@ import { sessionKey } from '../session-tree.js';
 import { Icon } from '../ui/Icon.js';
 import { Menu, MenuPanel, type MenuEntry } from '../ui/Menu.js';
 import { replyTime } from '../reply-time.js';
-import { TypingDots } from './TypingBubble.js';
 
 /** The name a bot is known by. A label or role never replaces it. */
 export function botDisplayName(binding: WindowSessionBinding): string {
@@ -115,4 +114,9 @@ export function BotRoster({ model, place, onSelect, directoryControls, hostName 
       {directoryControls}
     </details>
   </nav>;
+}
+
+/** Three small dots where a row says the bot is working. */
+function TypingDots() {
+  return <span className="lab-bot-typing" aria-hidden="true"><span /><span /><span /></span>;
 }

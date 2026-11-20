@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { act } from 'react';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { createReplicaState, timelineEntryKey, type AgentReplicaState, type ProcessMode } from '@orchardworks/agent-client';
-import { TimelineRows, TURN_VECTORS } from '@orchardworks/agent-client/testing';
+import { SESSION_CONNECTION_PATTERN, TimelineRows, TURN_VECTORS } from '@orchardworks/agent-client/testing';
 import { render, rerender } from '../test/setup.js';
 import { AgentTimeline } from './AgentTimeline.js';
 import { LocaleContext } from './locale.js';
@@ -124,6 +124,40 @@ describe('the timeline renders turns', () => {
       for (const button of container.querySelectorAll<HTMLButtonElement>('.agent-background-summary[aria-expanded="false"], .agent-notice-toggle[aria-expanded="false"]')) await act(async () => button.click());
       expect(new Set(shownKeys(container)), vector.name).toEqual(new Set(vector.entries.map(timelineEntryKey)));
     }
+  });
+});
+
+describe('the live line', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('shows only while the last turn runs, says the running step, the todo progress and the time since the turn started', async () => {
+    vi.useFakeTimers({ now: Date.parse('2026-11-20T10:01:16Z'), toFake: ['Date', 'setInterval', 'clearInterval'] });
+    const running = conversation(true);
+    const rows = new TimelineRows('claude', Date.parse('2026-11-20T10:00:00Z'));
+    rows.todo([{ text: 'Write', completed: true, status: 'completed' }, { text: 'Test', completed: false, status: 'in_progress' }], { key: 'todo-2', turnId: 't2' });
+    const state = { ...running, timeline: { ...running.timeline, entries: [...running.timeline.entries.slice(0, -1), { ...rows.entries[0]!, seqStart: 90, seqEnd: 90 }, running.timeline.entries.at(-1)!] } };
+    const container = await render(<AgentTimeline state={state} assistant={{ name: 'Chief', avatar: <span data-testid="avatar" /> }} />);
+    const line = container.querySelector<HTMLElement>('.agent-turn-status')!;
+    expect(line.closest('.agent-turn')).toBe([...container.querySelectorAll('.agent-turn')].at(-1));
+    expect(line.querySelector('[role="status"]')?.textContent).toBe('Chief is running tests');
+    expect(line.querySelector('.orchard-status-detail')?.textContent).toBe('working · 1m 10s · 1 of 2 done');
+    expect(line.querySelector('[data-testid="avatar"]')).not.toBeNull();
+    expect(container.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
+    await rerender(container, <AgentTimeline state={conversation(false)} assistant={{ name: 'Chief' }} />);
+    expect(container.querySelector('.agent-turn-status')).toBeNull();
+  });
+
+  it('says the assistant is working when its turn is not loaded yet, and gives way to a request waiting for the person', async () => {
+    const ended = conversation(false);
+    const working = { ...ended, agent: { ...ended.agent!, status: 'running' as const, activeTurn: { turnId: 't9', startedAt: null } } };
+    const container = await render(<LocaleContext.Provider value="zh"><AgentTimeline state={working} assistant={{ name: 'Chief' }} /></LocaleContext.Provider>);
+    const line = container.querySelector('.agent-turn-status')!;
+    expect(line.closest('.agent-turn')).toBeNull();
+    expect(line.querySelector('[role="status"]')?.textContent).toBe('Chief 在忙');
+    expect(line.querySelector('.orchard-status-detail')?.textContent).toBe('认真工作中');
+    const request = { kind: 'question' as const, requestId: 'q', questions: [{ questionId: 'a', header: 'A', prompt: 'Which?', required: true, selection: 'single' as const, options: [], allowCustomText: true, allowDismiss: false }] };
+    await rerender(container, <AgentTimeline state={{ ...working, pendingInteractions: [request] }} assistant={{ name: 'Chief' }} />);
+    expect(container.querySelector('.agent-turn-status')).toBeNull();
   });
 });
 

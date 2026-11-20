@@ -1,16 +1,18 @@
-/* A bot's earlier sessions, read-only above its current conversation. They read like the rest of the conversation;
-   only a hairline marks where the current session begins, as a chat app separates earlier history. */
-.lab-earlier-conversation { display: grid; gap: 8px; min-width: 0; }
+/* A bot's earlier sessions, read-only above its current conversation. They read like the rest of the conversation; a
+   session-change line ("Continued in a new session") marks where each later session begins. Orchard tokens only. */
+.lab-earlier-conversation { display: grid; gap: var(--orchard-space-m); min-width: 0; }
 .lab-earlier-session { min-width: 0; }
 /* An earlier session without conversation content adds nothing above the current one. */
 .lab-earlier-session .agent-timeline-empty { display: none; }
-.lab-earlier-divider { height: 0; margin: 12px 0 16px; border-top: 0.5px solid var(--ui-separator); }
-.lab-earlier-status { margin: 8px 0; color: var(--ui-label-secondary); font-size: 12px; text-align: center; }
-.lab-earlier-status button { padding: 0; border: 0; background: none; color: var(--ui-accent-text); font: inherit; cursor: pointer; }
-.lab-earlier-status button:hover { text-decoration: underline; }
-.lab-earlier-reveal { justify-self: center; min-height: 28px; padding: 4px 12px; border: 0; border-radius: 999px; background: var(--ui-fill);
-  color: var(--ui-label-secondary); font: inherit; font-size: 12px; cursor: pointer; transition: background-color var(--ui-duration-short) var(--ui-ease); }
-.lab-earlier-reveal:hover, .lab-earlier-reveal:active { color: var(--ui-label); background: var(--ui-fill-strong); }
-.lab-earlier-reveal:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 2px; }
+.lab-earlier-conversation > .orchard-session-change { margin-block: var(--orchard-space-s) var(--orchard-space-l); }
+.lab-earlier-status { margin: var(--orchard-space-s) 0; color: var(--orchard-text-secondary); text-align: center;
+  font: var(--orchard-type-footnote-size) / var(--orchard-type-footnote-leading) var(--orchard-font-text); }
+.lab-earlier-status button { padding: 0; border: 0; background: none; color: var(--orchard-text-strong); font: inherit; text-decoration: underline; cursor: pointer; }
+.lab-earlier-reveal { justify-self: center; min-height: 28px; padding: var(--orchard-space-xs) var(--orchard-space-l); border: 0; border-radius: var(--orchard-radius-pill);
+  background: var(--orchard-fill); color: var(--orchard-text-secondary); cursor: pointer;
+  font: var(--orchard-type-footnote-size) / 1.2 var(--orchard-font-text);
+  transition: background-color var(--orchard-duration-fast) var(--orchard-ease-standard); }
+.lab-earlier-reveal:hover, .lab-earlier-reveal:active { color: var(--orchard-text); background: var(--orchard-fill-strong); }
+.lab-earlier-reveal:focus-visible { outline: 2px solid var(--orchard-focus); outline-offset: 2px; }
 @media (pointer: coarse) { .lab-earlier-reveal { min-height: 44px; } }
 @media (prefers-reduced-motion: reduce) { .lab-earlier-reveal { transition: none; } }

@@ -1,7 +1,8 @@
+import { SESSION_CONNECTION_PATTERN } from '@orchardworks/agent-client/testing';
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, type AgentSnapshot, type HistoryPage, type ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
-import { TimelineDisplay } from '@orchardworks/agent-client-web/react';
+import { LocaleContext } from '@orchardworks/agent-client-web/react';
 import type { AgentReplicaState } from '@orchardworks/agent-client';
 import { replicaState } from '../test/fixtures.js';
 import { render } from '../test/setup.js';
@@ -36,7 +37,7 @@ function fixture(pages: Record<string, HistoryPage[]>) {
   };
   return { attach, transport, requests, directory: () => ({ attach }) };
 }
-const view = (node: React.ReactNode) => <TimelineDisplay.Provider value="content">{node}</TimelineDisplay.Provider>;
+const view = (node: React.ReactNode, locale: 'en' | 'zh' = 'en') => <LocaleContext.Provider value={locale}>{node}</LocaleContext.Provider>;
 const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
 
 it('shows the cached earlier conversation at once, then the fetched one, without a stream or controls', async () => {
@@ -52,7 +53,9 @@ it('shows the cached earlier conversation at once, then the fetched one, without
   expect(container.textContent).not.toContain('Cached reply');
   expect(f.transport.connect).not.toHaveBeenCalled();
   expect(f.requests).toEqual([['agent-past', 'tail', undefined]]);
-  expect([...container.querySelectorAll('[role="separator"]')].map(node => node.getAttribute('aria-label'))).toContain('Earlier conversation');
+  // One session-change line after the earlier session, named by its words; no connection word anywhere.
+  expect([...container.querySelectorAll('.orchard-session-change[role="separator"]')].map(node => node.getAttribute('aria-label'))).toEqual(['Continued in a new session']);
+  expect(container.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
   expect(container.querySelector('textarea, [contenteditable="true"], [role="textbox"]')).toBeNull();
 });
 
@@ -105,4 +108,15 @@ it('names an earlier session by its title, and only as an earlier conversation w
   await act(async () => container.querySelector<HTMLButtonElement>('.lab-earlier-reveal')!.click());
   await settle();
   expect([...container.querySelectorAll('.lab-earlier-session')].map(section => section.getAttribute('aria-label'))).toEqual(['Earlier conversation', 'Earlier conversation: Plan the release']);
+});
+
+it('says the session change in the reader\'s language, once between each session and the next', async () => {
+  const f = fixture({ 'agent-past': [page('agent-past', [entry(3, 'Later past')], false)], 'agent-older': [page('agent-older', [entry(1, 'Oldest')], false)] });
+  const container = await render(view(<EarlierConversation baseUrl="http://relay/" transport={f.transport} directory={f.directory} sessions={[session('past'), session('older')]} readCached={() => undefined} />, 'zh'));
+  await settle();
+  const older = container.querySelector<HTMLButtonElement>('.lab-earlier-reveal');
+  if (older) { await act(async () => older.click()); await settle(); }
+  const lines = [...container.querySelectorAll('.orchard-session-change[role="separator"]')];
+  expect(lines.map(line => line.getAttribute('aria-label'))).toEqual(older ? ['换到新的会话继续', '换到新的会话继续'] : ['换到新的会话继续']);
+  expect(lines.at(-1)?.nextElementSibling).toBeNull();
 });

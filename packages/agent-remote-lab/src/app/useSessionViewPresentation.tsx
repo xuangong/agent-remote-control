@@ -25,7 +25,6 @@ import { refCommand, SessionReferences } from '../components/SessionReferences.j
 import { loadSessionRefs, sessionRefsEntry } from '../session-references.js';
 import { sideNavigationSource, forkDisplayState } from '../session-forks.js';
 import type { FoldedBot } from '../components/SessionDock.js';
-import { TypingBubble } from '../components/TypingBubble.js';
 import { forkActions, forkCommands } from '../fork-actions.js';
 import { restoreQuotes } from '../session-quotes.js';
 import { QuoteAttachments, QuoteMessagesButton, QuoteNotice, QuoteSelectionBar } from '../components/SessionQuotes.js';
@@ -124,7 +123,13 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
     const forkReference = fork ? <ForkReference fork={fork} onOpen={revealSession} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} /> : null;
     // Quoting happens between the session views of shared Windows.
     const quoteView = !botPresentation && sharedWindow && context.windowViewId && !source.parentNativeSessionId ? context.windowViewId : undefined;
+    // Who answers: the bot's or the session's name, and its avatar, which works while it does.
+    const assistantId = options.bot?.viewId ?? source.viewId;
+    const assistant = { name: source.title || source.nativeSessionId,
+      avatar: <BotPicture id={assistantId} picture={options.bot ? botGroup?.bots?.members[options.bot.viewId]?.picture : undefined} size={26}
+        mood={botWorking(context.state) ? 'working' : 'idle'} /> };
     return {
+      assistant,
       headingMode: compactLayout ? 'toolbar' as const : 'inline' as const,
       state: botPresentation ? context.state : forkDisplayState(context.state, fork),
       questionDrafts: questionDrafts[source.agentId] ?? {},
@@ -179,10 +184,9 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
           onOpen={quoteNotice.open ? () => { const open = quoteNotice.open!; dispatchQuote({ type: 'notice.dismiss' }); void open().catch(() => {}); } : undefined} /> : null}</>,
       // Bot mode does not announce a handoff: the conversation continues into the earlier sessions instead of linking to them.
       timelineStart: botPresentation || windowBot ? earlierConversationFor(succession.historyNavigationFor(source)) : undefined,
-      // Bot mode shows a bot at work as a chat shows a contact typing, until it finishes, waits for the owner or disconnects.
-      timelineEnd: <>{transport.cancelQueuedMessage ? <SessionOutboxMessages session={outboxTarget} hostName={host?.name ?? source.hostId} hostOnline={host?.online === true}
-          onCancel={async id => { await transport.cancelQueuedMessage!(id); }} onRetry={async id => { await transport.retryQueuedMessage!(id); }} /> : null}
-        {botPresentation && botWorking(context.state) ? <TypingBubble name={source.title || source.nativeSessionId} /> : null}</>,
+      // Messages waiting for an offline Host follow the conversation; the timeline's own live line says when the assistant works.
+      timelineEnd: transport.cancelQueuedMessage ? <SessionOutboxMessages session={outboxTarget} hostName={host?.name ?? source.hostId} hostOnline={host?.online === true}
+          onCancel={async id => { await transport.cancelQueuedMessage!(id); }} onRetry={async id => { await transport.retryQueuedMessage!(id); }} /> : undefined,
       ...(laterHost ? { sendLater: { label: `Send when ${laterHost.name} is back`, send: async (text: string) => { await transport.queueMessage!(outboxTarget, text); } } } : {}),
       ...(context.offline && host ? { loadingNotice: { title: `${host.name} is offline`,
         detail: laterHost ? 'The conversation appears here when it is back. Messages you send now wait for it.' : 'The conversation appears here when it is back.' } } : {}),

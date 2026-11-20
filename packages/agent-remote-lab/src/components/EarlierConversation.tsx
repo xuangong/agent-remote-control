@@ -1,7 +1,8 @@
 import './earlier-conversation.css';
-import { useEffect, useMemo, useReducer, useState } from 'react';
+import { Fragment, useEffect, useMemo, useReducer, useState } from 'react';
 import { AgentReplica, type AgentReplicaState, type RemoteAgentTransport } from '@orchardworks/agent-client';
-import { AgentTimeline, useAgentReplica } from '@orchardworks/agent-client-web/react';
+import { AgentTimeline, useAgentReplica, useTranslate } from '@orchardworks/agent-client-web/react';
+import { SessionChangeLine } from '@orchardworks/agent-client-web/primitives';
 import { loadStoredDisplay, readStoredDisplay } from '../stored-display.js';
 import { knownTitle, sessionKey, type SessionEntry } from '../session-tree.js';
 
@@ -55,13 +56,15 @@ function EarlierSession({ session, transport, directory, cached, onComplete }: {
 /**
  * A bot's earlier sessions after handoffs, read-only above its current conversation. `sessions` lists them newest first
  * (the predecessor, then older ones); the oldest shown reads first. An older session is revealed only once the one after it
- * has no older pages. A quiet line separates them from the current conversation; Bot mode does not announce the handoff.
+ * has no older pages. A session-change line follows each of them, so each later session, the current one included, starts
+ * after "Continued in a new session".
  */
 export function EarlierConversation({ baseUrl, transport, directory, sessions, readCached }: {
   baseUrl: string; transport: EarlierTransport; directory: EarlierDirectory; sessions: readonly SessionEntry[];
   /** The last display of a session this browser saved; defaults to the workspace cache. */
   readCached?(session: SessionEntry): AgentReplicaState | undefined;
 }) {
+  const t = useTranslate();
   const [revealed, setRevealed] = useState(1);
   const [completeKeys, setCompleteKeys] = useState<ReadonlySet<string>>(new Set());
   const shown = sessions.slice(0, revealed);
@@ -81,12 +84,14 @@ export function EarlierConversation({ baseUrl, transport, directory, sessions, r
   return <div className="lab-earlier-conversation">
     {oldest && completeKeys.has(sessionKey(oldest)) && revealed < sessions.length
       ? <button type="button" className="lab-earlier-reveal" onClick={() => setRevealed(value => value + 1)}>Show earlier conversation</button> : null}
-    {[...shown].reverse().map(session => <EarlierSession key={sessionKey(session)} session={session} transport={transport} directory={directory} cached={read(session)}
-      onComplete={complete => setCompleteKeys(current => {
-        const key = sessionKey(session);
-        if (current.has(key) === complete) return current;
-        const next = new Set(current); if (complete) next.add(key); else next.delete(key); return next;
-      })} />)}
-    <div className="lab-earlier-divider" role="separator" aria-label="Earlier conversation" />
+    {[...shown].reverse().map(session => <Fragment key={sessionKey(session)}>
+      <EarlierSession session={session} transport={transport} directory={directory} cached={read(session)}
+        onComplete={complete => setCompleteKeys(current => {
+          const key = sessionKey(session);
+          if (current.has(key) === complete) return current;
+          const next = new Set(current); if (complete) next.add(key); else next.delete(key); return next;
+        })} />
+      <SessionChangeLine>{t('conversation.sessionChange')}</SessionChangeLine>
+    </Fragment>)}
   </div>;
 }

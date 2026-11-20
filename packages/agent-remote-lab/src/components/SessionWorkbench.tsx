@@ -12,7 +12,7 @@ import type {
   ResourceBinding,
 } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState, RemoteSessionStatus, SessionHandoffState } from '@orchardworks/agent-client';
-import { SessionAttributions, AgentCommandDetails, AgentTimeline, type TimelineEntrySelection, TimelineSearch, PreviewDock, TimelineDisplay, TimelineLettersVisible, createTimelineRenderModel, isContentOnlyItem, type TimelineDisplayMode, type AgentChildSessionView, type QuestionDraft, type SessionLinkResolver } from '@orchardworks/agent-client-web/react';
+import { SessionAttributions, AgentCommandDetails, AgentTimeline, ProcessModeContext, type AgentTimelineProps, type TimelineEntrySelection, TimelineSearch, PreviewDock, TimelineDisplay, TimelineLettersVisible, createTimelineRenderModel, isContentOnlyItem, type TimelineDisplayMode, type AgentChildSessionView, type QuestionDraft, type SessionLinkResolver } from '@orchardworks/agent-client-web/react';
 
 
 import { AgentComposer as DraftComposer, type SessionViewActions, type TimelineReadingPositions } from '@orchardworks/agent-client-web/react';
@@ -31,7 +31,9 @@ import type { TraceEntryRequest } from '../trace-model.js';
 
 export type LabWorkbenchActions = SessionViewActions;
 
-export function SessionWorkbench({ sessionDescription, onNavigateAttribution, todo, displayPreferences, onDisplayPreferencesChange, defaultDisplayMode = 'simple', fixedDisplayMode, sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, imageDraftBinding, imageRecipient, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, renderCommandError, readOnly: recordingReadOnly = false, draftOnly = false, opening = false, mutationBlocked = false, pendingFirstInputContext, onPendingInputChange, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, headingStart, headingMode = 'inline', sessionManager, headingContext, composerContext, composerNotice, composerStatus, nativeTakeover, consoleCommands, onExecuteConsoleCommand, entrySelection, timelineStart, timelineEnd, sendLater, loadingNotice, host }: { entrySelection?: TimelineEntrySelection;
+export function SessionWorkbench({ assistant, sessionDescription, onNavigateAttribution, todo, displayPreferences, onDisplayPreferencesChange, defaultDisplayMode = 'simple', fixedDisplayMode, sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, imageDraftBinding, imageRecipient, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, renderCommandError, readOnly: recordingReadOnly = false, draftOnly = false, opening = false, mutationBlocked = false, pendingFirstInputContext, onPendingInputChange, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, headingStart, headingMode = 'inline', sessionManager, headingContext, composerContext, composerNotice, composerStatus, nativeTakeover, consoleCommands, onExecuteConsoleCommand, entrySelection, timelineStart, timelineEnd, sendLater, loadingNotice, host }: { entrySelection?: TimelineEntrySelection;
+  /** Who answers in this conversation: the live line's name and the avatar at the foot of the answers. */
+  assistant?: AgentTimelineProps['assistant'];
   /** The session's Host as the Relay last said: an offline Host is said once, and the composer stays enabled. */
   host?: SessionFacts['host'];
   /** Said in place of Opening session while the conversation cannot load yet, for example because its Host is offline. */
@@ -111,7 +113,7 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
   const hostNotice = notice?.kind === 'host_offline' && !(state === undefined && loadingNotice) ? sessionNoticeWords(notice) : undefined;
   const viewOptions = fixedDisplayMode ? null : <SessionViewOptions key={displayScope} preferences={preferences} onChange={changeDisplayPreferences} />;
   const layoutClass = [todo ? 'lab-workbench-with-todo' : '', selectedCommand ? 'lab-command-details-open' : '', headingMode === 'toolbar' ? 'lab-workbench-toolbar-heading' : ''].filter(Boolean).join(' ');
-  return <TimelineDisplay.Provider value={preferences.mode}><TimelineLettersVisible.Provider value={preferences.lettersVisible}>
+  return <TimelineDisplay.Provider value={preferences.mode}><ProcessModeContext.Provider value={preferences.mode === 'content' ? 'concise' : 'full'}><TimelineLettersVisible.Provider value={preferences.lettersVisible}>
     <SessionAttributions description={sessionDescription} onNavigate={onNavigateAttribution}>{({ toggle, details }) => <SessionViewFrame className={layoutClass}>
     <div className="lab-workbench-heading-group" hidden={headingMode === 'toolbar' && !headingContext && !details}>
     <SessionHeading hidden={headingMode === 'toolbar'}
@@ -131,7 +133,7 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
       visible={visible} readingPositions={readingPositions} actions={actions} revealEntry={revealEntry}
       notice={timelineNotice} hasTarget={hasTarget} runtimeMutationDisabled={runtimeMutationDisabled}
       onInspectEntry={onInspectEntry} onOpenChildSession={onOpenChildSession} childrenFor={childrenFor} resolveSessionLink={resolveSessionLink}
-      questionDrafts={questionDrafts} onQuestionDraftChange={onQuestionDraftChange} entrySelection={entrySelection} timelineStart={timelineStart} timelineEnd={timelineEnd} loadingNotice={loadingNotice} />
+      questionDrafts={questionDrafts} onQuestionDraftChange={onQuestionDraftChange} entrySelection={entrySelection} timelineStart={timelineStart} timelineEnd={timelineEnd} loadingNotice={loadingNotice} assistant={assistant} />
     {headingMode === 'toolbar' && timelineToolsTarget ? createPortal(<SessionHeadingActionsPresentationContext.Provider value="inline">{workspaceLink}{sessionManager}{viewOptions}{toggle}</SessionHeadingActionsPresentationContext.Provider>, timelineToolsTarget) : null}
     <div className="lab-composer-region">
     {composerStatus}
@@ -198,7 +200,7 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
       onRequestResource={actions.requestResource} onResolveResource={actions.resolveResource}
       resourceScopeKey={JSON.stringify([state.agent?.id, selectedCommand.id])}
       onClose={() => setInspected(undefined)} /> : null}
-  </SessionViewFrame>}</SessionAttributions></TimelineLettersVisible.Provider></TimelineDisplay.Provider>;
+  </SessionViewFrame>}</SessionAttributions></TimelineLettersVisible.Provider></ProcessModeContext.Provider></TimelineDisplay.Provider>;
 }
 
 
@@ -237,7 +239,7 @@ function useActionFeedback(actions: LabWorkbenchActions, sessionId: string | und
 
 const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, readOnly, state, sessionStatus, attachingAgentId, visible, readingPositions, actions, revealEntry,
   notice, hasTarget, runtimeMutationDisabled, onInspectEntry, onOpenChildSession, childrenFor, resolveSessionLink,
-  questionDrafts, onQuestionDraftChange, toolsTargetRef, toolsCollapsible, toolsScope, searchTriggerTarget, entrySelection, timelineStart, timelineEnd, loadingNotice }: Pick<Parameters<typeof SessionWorkbench>[0], 'readOnly' | 'state' | 'sessionStatus' | 'attachingAgentId' | 'visible' | 'actions' | 'revealEntry' | 'onInspectEntry' | 'onOpenChildSession' | 'childrenFor' | 'resolveSessionLink' | 'questionDrafts' | 'onQuestionDraftChange' | 'timelineStart' | 'timelineEnd' | 'entrySelection' | 'loadingNotice'> & {
+  questionDrafts, onQuestionDraftChange, toolsTargetRef, toolsCollapsible, toolsScope, searchTriggerTarget, entrySelection, timelineStart, timelineEnd, loadingNotice, assistant }: Pick<Parameters<typeof SessionWorkbench>[0], 'readOnly' | 'state' | 'sessionStatus' | 'attachingAgentId' | 'visible' | 'actions' | 'revealEntry' | 'onInspectEntry' | 'onOpenChildSession' | 'childrenFor' | 'resolveSessionLink' | 'questionDrafts' | 'onQuestionDraftChange' | 'timelineStart' | 'timelineEnd' | 'entrySelection' | 'loadingNotice' | 'assistant'> & {
     readingPositions: NonNullable<Parameters<typeof useTimelineScroll>[2]>; toolsTargetRef(node: HTMLDivElement | null): void; toolsCollapsible: boolean; toolsScope?: string;
     /** The session's notice when it belongs above the timeline: refused, failed or unavailable. */
     notice?: SessionNotice;
@@ -330,7 +332,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
             {notice ? <p className="lab-control-note" role="alert">{sessionNoticeWords(notice)}</p> : null}
             <AgentTimeline
               state={state}
-              processMode={display === 'content' ? 'concise' : 'full'}
+              assistant={assistant}
               onEditPrompt={actions.editPrompt}
               onRetryMessage={actions.retryMessage}
               onDeleteMessage={actions.deleteMessage}

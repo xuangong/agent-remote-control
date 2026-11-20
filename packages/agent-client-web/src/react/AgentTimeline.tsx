@@ -17,11 +17,12 @@ import { useRuntimeNoticeDisclosure } from './RuntimeNoticeGroup.js';
 import type { PreviewController } from './PreviewActions.js';
 import { usePreviewController } from './PreviewContext.js';
 import { OutgoingMessageItem } from './OutgoingMessageItem.js';
-import { TimelineLettersVisible } from './TimelineDisplay.js';
+import { ProcessModeContext, TimelineLettersVisible } from './TimelineDisplay.js';
 import { useTimelineAction } from './useTimelineAction.js';
 import { TimelineTurn, type TurnRowOptions } from './TimelineTurn.js';
 import { BubbleAvatarContext } from './bubble-foot.js';
 import { LocaleContext, useTranslate } from './locale.js';
+import { TurnStatus } from './TurnStatus.js';
 import { type AgentReplicaState, type ProcessMode, type Turn, dayLineLabel, foldTurns, startsDayLine, timelineEntryKey, workDisclosure } from '@orchardworks/agent-client';
 
 export type AgentTimelineState = AgentReplicaState;
@@ -55,7 +56,7 @@ export interface AgentTimelineProps {
   readonly resolveSessionLink?: SessionLinkResolver;
   readonly registry?: RendererRegistry;
   readonly showHeader?: boolean;
-  /** How much of each turn's work shows (section 4.2 of the I3 plan); Concise when the host says nothing. */
+  /** How much of each turn's work shows (section 4.2 of the I3 plan); the host's ProcessModeContext, Concise, when it says nothing. */
   readonly processMode?: ProcessMode;
   /** Who answers: the name the live line uses and the avatar at the foot of the answers. A host without one shows "Assistant" and no avatar. */
   readonly assistant?: { readonly name: string; readonly avatar?: ReactNode };
@@ -93,7 +94,7 @@ export function AgentTimeline({
   resolveSessionLink,
   childrenFor,
   showHeader = true,
-  processMode = 'concise',
+  processMode: processModeProp,
   assistant,
   onLoadOlder,
   historyLoading,
@@ -119,6 +120,8 @@ export function AgentTimeline({
   const inheritedPreviewController = usePreviewController();
   const previews = previewController ?? inheritedPreviewController;
   const lettersVisible = useContext(TimelineLettersVisible);
+  const inheritedProcessMode = useContext(ProcessModeContext);
+  const processMode = processModeProp ?? inheritedProcessMode;
   const locale = useContext(LocaleContext);
   const t = useTranslate();
   const scopeKey = JSON.stringify([state.agent?.id]);
@@ -198,6 +201,14 @@ export function AgentTimeline({
       {...options} />;
   const now = Date.now();
   const assistantName = assistant?.name || t('conversation.assistant');
+  // The live line shows while the assistant works on a turn and nothing waits for the person.
+  const agent = state.agent;
+  const working = !!agent && (agent.status === 'running' || agent.status === 'starting') && !state.pendingInteractions.length
+    && agent.runtimeInfo.connection?.state !== 'unavailable';
+  const lastTurn = turns.at(-1);
+  const live = working ? <TurnStatus name={assistantName} turn={lastTurn?.state === 'running' ? lastTurn : undefined}
+    startedAt={agent?.activeTurn?.startedAt} avatar={assistant?.avatar} /> : null;
+  const liveInTurn = !!live && lastTurn?.state === 'running';
   // Requests waiting for the person belong to the turn that asked: the last one, after its answer.
   const pending = state.pendingInteractions.length ? <div className="agent-turn-requests">
     {state.pendingInteractions.map((request) => <fieldset
@@ -254,10 +265,11 @@ export function AgentTimeline({
             const disclosure = disclosures[index]!;
             return <TimelineTurn key={turn.key} turn={turn} disclosure={disclosure} separator={separator}
               onToggle={() => toggleTurn(turn.key, disclosure.line === 'open')} renderEntry={renderEntry} groups={notices}
-              after={index === turns.length - 1 ? pending : undefined} />;
+              after={index === turns.length - 1 ? <>{pending}{liveInTurn ? live : null}</> : undefined} />;
           })}
       {outgoing.map(message => <OutgoingMessageItem key={message.id} message={message} resourceContext={onResourceResolve && onResourceRequest ? { scopeKey: JSON.stringify([state.agent?.id]), bindings: [], resources: state.resources, resolveResource: onResourceResolve, requestResource: onResourceRequest } : undefined} onRetry={onRetryMessage} onDelete={onDeleteMessage} />)}
       {turns.length === 0 ? pending : null}
+      {live && !liveInTurn ? live : null}
       {timelineEnd ?? null}
     </div></BubbleAvatarContext.Provider>
 

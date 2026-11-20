@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ComponentType } from 'react';
+import { forwardRef, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ComponentType } from 'react';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import type { useWorkbenchMode } from '../hooks/useWorkbenchMode.js';
 import type { useBotWorkspace } from '../hooks/useBotWorkspace.js';
@@ -42,8 +42,6 @@ export interface BotWorkspaceProps {
   describeConversation(place: BotPlace): SessionSurfaceDescriptor | undefined;
   /** Mounts a described conversation; the Workbench's surfaces by default. */
   mount?: ComponentType<ComponentProps<typeof SessionConversationMount>>;
-  /** Whether the desktop roster is hidden; the state lives in App so the shell shortcut can toggle it. Phone layouts ignore it. */
-  rosterCollapsed: boolean; onToggleRoster(): void;
   /** Opens search; the roster's header offers it. */
   onSearch?(): void;
   /** A Host's display name for a Host ID. */
@@ -61,20 +59,14 @@ export interface BotWorkspaceProps {
  * The details are closed by default below the compact width; at phone width one screen shows at a time, the list as home,
  * and the details open as a sheet.
  */
-export function BotWorkspace({ visible, compact, scope, workspace, navigation, selected, roster, projectRoster, directory, describeConversation, mount: Mount = SessionConversationMount, rosterCollapsed, onToggleRoster, onSearch, hostName = id => id, botInfo, onNewBot, onPinToWindow }: BotWorkspaceProps) {
+export function BotWorkspace({ visible, compact, scope, workspace, navigation, selected, roster, projectRoster, directory, describeConversation, mount: Mount = SessionConversationMount, onSearch, hostName = id => id, botInfo, onNewBot, onPinToWindow }: BotWorkspaceProps) {
   const t = useTranslate();
   const phone = usePhoneLayout();
   const root = useVisualViewport(), title = useRef<HTMLButtonElement>(null), keyboardOpen = useRef(false), returning = useRef(false);
   const [error, setError] = useState<string>();
   const currentScope = useRef(scope); currentScope.current = scope;
-  const rosterId = useId(), detailsId = useId(), rosterElement = useRef<HTMLElement>(null), rosterToggle = useRef<HTMLButtonElement | null>(null);
-  const backButton = useRef<HTMLButtonElement>(null), toggleHadFocus = useRef(false);
-  // React detaches the ref before it removes the node, so this sees whether the toggle had focus when a phone layout replaces it.
-  const toggleRef = useCallback((node: HTMLButtonElement | null) => {
-    if (!node && rosterToggle.current && rosterToggle.current === document.activeElement) toggleHadFocus.current = true;
-    rosterToggle.current = node;
-  }, []);
-  const rosterHidden = !phone && rosterCollapsed;
+  const rosterId = useId(), detailsId = useId(), rosterElement = useRef<HTMLElement>(null);
+  const backButton = useRef<HTMLButtonElement>(null);
   const place = navigation.place, key = place && botPlaceKey(place);
   const conversation = !!place && place.kind !== 'section';
   const descriptor = conversation ? describeConversation(place) : undefined;
@@ -112,16 +104,6 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
       [...root.current?.querySelectorAll<HTMLButtonElement>('[data-bot-place]') ?? []].find(row => row.dataset.botPlace === key)?.focus({ preventScroll: true });
     } else if (keyboardOpen.current && showConversation) { keyboardOpen.current = false; title.current?.focus({ preventScroll: true }); }
   }, [visible, key, showConversation, navigation.rosterVisible]);
-  // Hiding the roster (by its button or the shell shortcut) must not drop focus to the page: move it to the sidebar button.
-  useLayoutEffect(() => {
-    if (rosterHidden && rosterElement.current?.contains(document.activeElement)) rosterToggle.current?.focus({ preventScroll: true });
-  }, [rosterHidden]);
-  // A phone layout replaces the sidebar button with Back: keep focus on the conversation's top bar.
-  useLayoutEffect(() => {
-    if (!phone || !toggleHadFocus.current) return;
-    toggleHadFocus.current = false;
-    if (showConversation) (backButton.current ?? title.current)?.focus({ preventScroll: true });
-  }, [phone]);
   /** A group's appearance in either mode, from its header menu; a group always stays visible in one of them. */
   function groupActions(section: BotSection): MenuEntry[] {
     const group = workspace.readGroup(section.groupId);
@@ -176,7 +158,7 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
   const name = place?.kind === 'session' ? assistantName({ key: botPlaceKey(place), providerId: place.session.providerId })
     : selected.view ? botDisplayName(selected.view.binding) : descriptor?.props.target.title ?? selected.group?.window.title ?? '';
   return <main ref={root} className="lab-bot-workspace" hidden={!visible} {...(!visible ? { inert: '' } : {})} data-workbench-mode="bot" data-compact={compact || undefined} data-phone={phone || undefined}
-    data-roster-collapsed={rosterHidden || undefined} data-details={detailsShown && !phone || undefined}
+    data-details={detailsShown && !phone || undefined}
     data-navigation={phone ? motion : undefined}
     onClickCapture={() => { if (phone && !showConversation && rosterElement.current) rosterScroll.current = rosterElement.current.scrollTop; }}
     onPointerDown={event => event.stopPropagation()} onFocus={event => event.stopPropagation()}
@@ -185,7 +167,7 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
       if (phone && showConversation) { event.preventDefault(); back(); }
     }}>
     <h1 className="lab-bot-title agent-visually-hidden">{t('assistants.title')}</h1>
-    <aside ref={rosterElement} id={rosterId} className="lab-bot-roster orchard-panel" hidden={(phone && showConversation) || rosterHidden}>
+    <aside ref={rosterElement} id={rosterId} className="lab-bot-roster orchard-panel" hidden={phone && showConversation}>
       <SidebarHeader brand mode={navigation.mode} onModeChange={navigation.setMode} onSearch={onSearch} actions={onNewBot ? <IconButton icon="plus" label={t('assistants.new')} onClick={onNewBot} /> : undefined} />
       {unavailable ? availabilityNotice : null}
       {saving ? <p className="lab-bot-notice" role="status">Saving the new group…</p> : null}
@@ -193,7 +175,6 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
       {creation.state === 'unknown' ? <p className="lab-bot-notice" role="status">The new group is not confirmed. <button type="button" onClick={() => void retryGroup()}>Retry</button></p> : null}
       {actions.notice}
       <div className="lab-bot-roster-scroll" onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><SharedBotRoster model={roster} project={projectRoster} place={place} onSelect={open} hostName={hostName} groupActions={groupActions} compact={phone}
-        rowActions={(row, section) => actions.cardActions(row, section.title)}
         directoryControls={<div className="lab-bot-directory-controls">
           {directory.sources.map(source => <div key={source.id}><small>{hostName(source.hostId)} · {source.providerId}</small>
             {!source.online ? <p>Host offline</p> : null}{source.loading ? <p role="status">Loading sessions…</p> : null}
@@ -212,8 +193,7 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
       }}>
       {conversation ? <SharedTopBar ref={title} place={place} row={botRow} project={projectRoster} name={name}
         detailsOpen={detailsShown} detailsId={detailsId} onToggleDetails={descriptor ? () => setDetailsOpen(open => !open) : undefined}
-        leading={phone ? <Button ref={backButton} variant="plain" className="lab-bot-back" aria-label={t('assistants.back')} onClick={back}><Icon name="chevron-left" size={20} />{t('assistants.backShort')}</Button>
-          : <IconButton ref={toggleRef} icon="sidebar" label={rosterCollapsed ? 'Show sidebar' : 'Hide sidebar'} aria-expanded={!rosterCollapsed} aria-controls={rosterId} onClick={onToggleRoster} />}
+        leading={phone ? <Button ref={backButton} variant="plain" className="lab-bot-back" aria-label={t('assistants.back')} onClick={back}><Icon name="chevron-left" size={20} />{t('assistants.backShort')}</Button> : undefined}
         trailing={<span ref={setToolsSlot} className="lab-assistant-tools" />} /> : null}
       {!unavailable ? availabilityNotice : null}
       {asleep && descriptor ? <AsleepNotice onWake={() => place?.kind === 'bot' && void actions.wake(place)} /> : null}

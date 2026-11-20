@@ -25,8 +25,8 @@ import type { WindowViewActionsSlice } from './useWindowViewActions.js';
 import type { AttentionAndRosterSlice } from './useAttentionAndRoster.js';
 import type { AppInputs } from './types.js';
 
-export function useCommandSearch(scope: Pick<AppInputs & SessionSuccessionBindingSlice & PanelsAndShortcutsSlice & WorkbenchShellSlice & WindowModeActionsSlice & ActiveSessionSlice & RequestedSessionSlice & RemoteHostStateSlice & ProviderStateSlice & SharedFeedsAndTpmSlice & WindowViewActionsSlice & AttentionAndRosterSlice, 'baseUrl' | 'botRoster' | 'botRosterCollapsed' | 'closePage' | 'desktopContextVisible' | 'directory' | 'favorites' | 'inMode' | 'initialState' | 'modeSteps' | 'navigation' | 'openNewBot' | 'openNewSessionPanel' | 'providers' | 'queuedModeSteps' | 'remoteHosts' | 'searchOpen' | 'searchRuns' | 'sessionEntries' | 'setWindowOverviewOpen' | 'sharedWindow' | 'showPanel' | 'switchMode' | 'toggleSidebar' | 'userScoped' | 'windowMode' | 'windowOverviewSupported' | 'windowWorkspace' | 'openInBotMode' | 'pinToWindow'>) {
-  const { baseUrl, botRoster, botRosterCollapsed, closePage, desktopContextVisible, directory, favorites, inMode, initialState, modeSteps, navigation, openNewBot, openNewSessionPanel, providers, queuedModeSteps, remoteHosts, searchOpen, searchRuns, sessionEntries, setWindowOverviewOpen, sharedWindow, showPanel, switchMode, toggleSidebar, userScoped, windowMode, windowOverviewSupported, windowWorkspace, openInBotMode, pinToWindow } = scope;
+export function useCommandSearch(scope: Pick<AppInputs & SessionSuccessionBindingSlice & PanelsAndShortcutsSlice & WorkbenchShellSlice & WindowModeActionsSlice & ActiveSessionSlice & RequestedSessionSlice & RemoteHostStateSlice & ProviderStateSlice & SharedFeedsAndTpmSlice & WindowViewActionsSlice & AttentionAndRosterSlice, 'baseUrl' | 'botRoster' | 'closePage' | 'desktopContextVisible' | 'directory' | 'favorites' | 'inMode' | 'initialState' | 'modeSteps' | 'navigation' | 'openNewBot' | 'openNewSessionPanel' | 'providers' | 'queuedModeSteps' | 'remoteHosts' | 'searchOpen' | 'searchRuns' | 'sessionEntries' | 'setWindowOverviewOpen' | 'sharedWindow' | 'showPanel' | 'switchMode' | 'toggleSidebar' | 'userScoped' | 'windowMode' | 'windowOverviewSupported' | 'windowWorkspace' | 'openInBotMode' | 'pinToWindow'>) {
+  const { baseUrl, botRoster, closePage, desktopContextVisible, directory, favorites, inMode, initialState, modeSteps, navigation, openNewBot, openNewSessionPanel, providers, queuedModeSteps, remoteHosts, searchOpen, searchRuns, sessionEntries, setWindowOverviewOpen, sharedWindow, showPanel, switchMode, toggleSidebar, userScoped, windowMode, windowOverviewSupported, windowWorkspace, openInBotMode, pinToWindow } = scope;
 
   const windowConfirmed = !!initialState || windowWorkspace.unavailable || windowWorkspace.hasActiveWindow && !windowWorkspace.provisional;
 
@@ -58,7 +58,7 @@ export function useCommandSearch(scope: Pick<AppInputs & SessionSuccessionBindin
     const selectedTile = sharedWindow?.views.find(view => view.id === sharedWindow.selectedViewId);
     const botPlace = navigation.place?.kind === 'bot' ? navigation.place : undefined;
     const actions = paletteActions({ windowMode, hasDirectory: !!directory, userScoped, windowEditable: !!sharedWindow && !windowWorkspace.unavailable,
-      sidebarShown: windowMode ? desktopContextVisible : !botRosterCollapsed, canToggleSidebar: !!toggleSidebar, windowOverviewSupported, apple: applePlatform(),
+      sidebarShown: desktopContextVisible, canToggleSidebar: !!toggleSidebar, windowOverviewSupported, apple: applePlatform(),
       canOpenInBotMode: !!sharedWindow && !!selectedTile && isBotView(selectedTile), canPinToWindow: !!botPlace }, {
       openInBotMode: () => { if (sharedWindow && selectedTile) void openInBotMode(sharedWindow.id, selectedTile.id); },
       pinToWindow: () => { if (botPlace) void pinToWindow(botPlace.groupId, botPlace.viewId); },

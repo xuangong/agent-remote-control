@@ -61,3 +61,48 @@ first, or render Full (today's preview level): `AgentTimeline*.test.tsx`, `Inter
 journal replacement transport test, and in the Lab `LabWorkbench.test.tsx`, `App.test.tsx`, `App.children.test.tsx` (activity
 links live in the spawning step: these readers choose Full), `App.succession.ask-and-reconnect.test.tsx`, `TpmWorkspace.test.tsx`,
 `SessionMenus.test.tsx`, `EarlierConversation.test.tsx`, `tool-approval.spec.ts`. The debugger's specs follow the same changes.
+
+## I3b
+
+### Rules that moved into pure modules
+
+| Old home | Rule | New owner | Mutation checked |
+|---|---|---|---|
+| `botActivityLabel` (`bot-roster.ts`), the Bot heading's chain (`useSessionViewPresentation`), `activityLabel` (`session-activity-status.ts`), `botMood` (`BotRoster.tsx`) | What an assistant is doing, in words and mood | `assistantStatus` and `assistantStateWord` (`assistant-status.vectors.ts`, 40 rows; invariant A-1 over 1,280 fact combinations) | Waiting read as working: 9 Lab tests fail (`BotRoster.test.tsx` 4, `App.bot-attention.test.tsx` 2, `SessionDock.groups.test.tsx` 2, `WindowMenu.test.tsx` 1). Working before needs you: 3 vector rows. `offline` alone as working: 2 tests (a vector row and A-1). |
+| — (new) | An assistant is called by a name, never its prompt | `assistantNames` (`assistant-name.vectors.ts`, 11 rows) | The display name before the short agent name: 2 rows fail |
+| — (new) | The files a conversation changed or shared | `sessionFiles` (`session-files.test.ts`, 9 tests) | Keeping the oldest change: 3 tests fail |
+| — (new) | Which place a tile opens in Bot mode, which Window a pin shows | `botPlaceForTile`, `windowRouteForPin` (`workbench-mode.test.ts`, 13 rows) | Vector rows only |
+
+### Moved with the feature
+
+| Test | Rule | Where it lives now |
+|---|---|---|
+| `BotWorkspace.menu.test.tsx` (7 tests: Label, details formed in the same change, Hide with Undo, Remove after confirming, Info, Sleep with Undo, asleep while open) | A bot's own actions | `components/assistant/AssistantDetails.test.tsx`, through the name card's buttons; "Info" became "shows where a bot runs in its details" |
+| `App.bot-succession.test.tsx` "continues a handed-off bot…" (the Info part) | The providers of earlier sessions | The same test reads the details' Where it works ("before: …") |
+| `BotWorkspace.test.tsx` "shows the shared sidebar header, a toolbar above the conversation, and collapses the roster" | The sidebar header and the conversation's heading | Kept, re-pointed to the wordmark and the top bar; collapsing went with the feature |
+
+### Deleted with the feature
+
+| Test | Rule | Why |
+|---|---|---|
+| `BotRoster.test.tsx` "offers a bot's own actions as a context menu on its row…", "leaves a long press to the phone…" | The roster's right-click menu | The actions are on the details card (B3), tested there |
+| `BotWorkspace.test.tsx` "moves focus from a collapsing roster to the sidebar button" | Collapsing Bot mode's roster | The three panels replace the toggle; ⌘\ now toggles Window mode's sidebar only (`App.bot-mode` and the re-pointed sidebar header test check that it hides nothing in Bot mode) |
+| `state/panels.test.ts` (the `botRoster.toggle` half of "shows and hides the sidebar…") | Bot roster collapse state | Deleted with the state (`botRosterCollapsed`) |
+
+### Rules that changed
+
+| Test | Before | Now |
+|---|---|---|
+| `session-activity-status.test.ts` `windowActivity` row `['idle', 'starting']` | A starting session needed the owner | A starting session works (`assistantStatus`: starting → working); the overview counts it as working |
+| `WindowMenu.test.tsx` "marks each bot's place and status…" | `starting` read "Needs you" | The row that asks for the owner is `waiting`; words come from `assistantStateWord` |
+| `bot-roster.test.ts` "uses live urgency…" | A group heading said its most urgent word | Each row says its own sentence; the group heading carries the unread dot only |
+| `App.bot-mode.test.tsx` "moves the floating entries into the sidebar…", "keeps the Team entry mounted…" | Without the sidebar the entries floated | They take a row of the Window toolbar (the coordinator's overlap defect); the same element moves, its panel stays open |
+| `BotWorkspace.test.tsx` "goes back to the assistant list from a chat on a phone…" | Back set the list visible at once | On a phone, opening a conversation is a history entry and Back pops it (`useWorkbenchMode.test.tsx` covers both paths) |
+| `App.succession.ask-and-reconnect.test.tsx` "keeps post-upgrade view preferences…" | The tile heading's View options | The tile's details, Process |
+
+## Re-pointed without a rule change (I3b)
+
+`[aria-label="Bots"]` became `[aria-label="Assistants"]` in the Lab, `agent-e2e` and `bot-mode.spec.ts` selectors; `New bot` became
+`New assistant`, `Back to bots` became `Back to assistants`; roster status classes (`.lab-bot-status`, `.lab-bot-preview`,
+`.lab-bot-typing`) became `.lab-bot-sentence` with `data-state`; a test that clicked the Windows entry or a Track row finds it in
+the launcher bar or toolbar row as well as floating.

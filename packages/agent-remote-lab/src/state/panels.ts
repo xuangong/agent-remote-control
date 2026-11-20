@@ -28,7 +28,6 @@ export interface PanelsState {
   /** The desktop page that replaces the Window with a sidebar panel. */
   readonly sessionsPage: boolean;
   readonly headerHidden: boolean;
-  readonly botRosterCollapsed: boolean;
   readonly sessionPanel: SessionPanel;
 }
 
@@ -45,7 +44,6 @@ export type PanelsEvent =
   | { readonly type: 'all.setVisible'; readonly visible: boolean }
   | { readonly type: 'header.toggle' }
   | { readonly type: 'desktopSidebar.toggle' }
-  | { readonly type: 'botRoster.toggle' }
   | { readonly type: 'sessionPanel.set'; readonly panel: SessionPanel }
   | { readonly type: 'chooser.show' }
   | { readonly type: 'page.open'; readonly panel: SessionPanel }
@@ -62,7 +60,7 @@ export function initialPanels(layout: { readonly compact: boolean; readonly open
   return {
     activeView: 'workbench', compact: layout.compact, contextOpen: layout.compact && !layout.opensSession, contextFromSessions: true,
     inspectorOpen: false, desktopContextVisible: !layout.opensSession, sessionsPage: false, headerHidden: true,
-    botRosterCollapsed: false, sessionPanel: 'list',
+    sessionPanel: 'list',
   };
 }
 
@@ -97,7 +95,6 @@ export function reducePanels(state: PanelsState, event: PanelsEvent): PanelsStep
     };
     case 'header.toggle': return { state: { ...state, headerHidden: !state.headerHidden }, effects: none };
     case 'desktopSidebar.toggle': return { state: { ...state, desktopContextVisible: !state.desktopContextVisible }, effects: none };
-    case 'botRoster.toggle': return { state: { ...state, botRosterCollapsed: !state.botRosterCollapsed }, effects: none };
     case 'sessionPanel.set': return { state: { ...state, sessionPanel: event.panel }, effects: none };
     case 'chooser.show': return {
       state: { ...state, activeView: 'workbench', sessionPanel: 'list', ...(state.compact ? { contextOpen: true } : { sessionsPage: true }) },

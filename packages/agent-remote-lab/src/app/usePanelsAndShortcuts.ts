@@ -32,7 +32,7 @@ export function usePanelsAndShortcuts(scope: Pick<AppInputs & RequestedSessionSl
     else void favorites.refresh();
   });
 
-  const { activeView, contextOpen, inspectorOpen, headerHidden, desktopContextVisible, compact: compactLayout, botRosterCollapsed, sessionPanel, contextFromSessions } = panels;
+  const { activeView, contextOpen, inspectorOpen, headerHidden, desktopContextVisible, compact: compactLayout, sessionPanel, contextFromSessions } = panels;
 
   const showView = useCallback((view: MainView) => dispatchPanels({ type: 'view.show', view }), [dispatchPanels]);
 
@@ -60,10 +60,8 @@ export function usePanelsAndShortcuts(scope: Pick<AppInputs & RequestedSessionSl
 
   const sidebarShown = useRef(desktopContextVisible);
 
-  // ⌘\ toggles the desktop sidebar of the current mode; compact layouts have no sidebar to collapse.
-  const toggleSidebar = compactLayout ? undefined : windowMode
-    ? () => dispatchPanels({ type: 'desktopSidebar.toggle' })
-    : () => dispatchPanels({ type: 'botRoster.toggle' });
+  // ⌘\ toggles Window mode's desktop sidebar; compact layouts have none to collapse, and Bot mode's panels stay.
+  const toggleSidebar = compactLayout || !windowMode ? undefined : () => dispatchPanels({ type: 'desktopSidebar.toggle' });
 
   // ⌘K opens the command palette, which serves both modes.
   const [searchOpen, setSearchOpen] = useState(false);
@@ -88,7 +86,7 @@ export function usePanelsAndShortcuts(scope: Pick<AppInputs & RequestedSessionSl
     if (trigger?.isConnected && !trigger.closest('[hidden], [inert]')) trigger.focus({ preventScroll: true });
     if (document.activeElement !== trigger) focusableElements(document.querySelector<HTMLElement>('.lab-main-stage'))[0]?.focus({ preventScroll: true });
   }, [desktopContextVisible]);
-  return { traceNavigation, setTraceNavigation, traceRequestCounter, scanOpen, setScanOpen, pageFocusReturn, panels, dispatchPanels, activeView, contextOpen, inspectorOpen, headerHidden, desktopContextVisible, compactLayout, botRosterCollapsed, sessionPanel, contextFromSessions, showView, closeInspector, sidebar, shortcutHost, askHost, shortcutSidebarSlot, shortcutFloatingSlot, shortcutBarSlot, shortcutToolbarSlot, askSidebarSlot, askFloatingSlot, askBarSlot, askToolbarSlot, pageOpen, sessionsPageTitleRef, closePage, closeContext, toggleSidebar, searchOpen, setSearchOpen, openSearch, modeSteps, queuedModeSteps, setQueuedModeSteps };
+  return { traceNavigation, setTraceNavigation, traceRequestCounter, scanOpen, setScanOpen, pageFocusReturn, panels, dispatchPanels, activeView, contextOpen, inspectorOpen, headerHidden, desktopContextVisible, compactLayout, sessionPanel, contextFromSessions, showView, closeInspector, sidebar, shortcutHost, askHost, shortcutSidebarSlot, shortcutFloatingSlot, shortcutBarSlot, shortcutToolbarSlot, askSidebarSlot, askFloatingSlot, askBarSlot, askToolbarSlot, pageOpen, sessionsPageTitleRef, closePage, closeContext, toggleSidebar, searchOpen, setSearchOpen, openSearch, modeSteps, queuedModeSteps, setQueuedModeSteps };
 }
 
 export type PanelsAndShortcutsSlice = ReturnType<typeof usePanelsAndShortcuts>;

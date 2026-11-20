@@ -58,9 +58,8 @@ describe('the sidebar of a session context', () => {
     expect(open).toMatchObject({ contextOpen: true, inspectorOpen: false, contextFromSessions: true, desktopContextVisible: true });
   });
 
-  it('shows and hides the sidebar of Window mode apart from the Bot roster', () => {
+  it('shows and hides the sidebar of Window mode', () => {
     expect(run(desktop, { type: 'desktopSidebar.toggle' }).desktopContextVisible).toBe(!desktop.desktopContextVisible);
-    expect(run(desktop, { type: 'botRoster.toggle' })).toMatchObject({ botRosterCollapsed: true, desktopContextVisible: desktop.desktopContextVisible });
   });
 });
 

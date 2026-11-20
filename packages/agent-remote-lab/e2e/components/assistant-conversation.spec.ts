@@ -62,6 +62,19 @@ test('touch targets of the work line, the steps and the card choices are at leas
   expect(targets.filter(target => target.height < 44)).toEqual([]);
 });
 
+test("a bubble's actions sit beside it, never over its words", async ({ page }) => {
+  await open(page, 'mode=concise&theme=light&pending=none');
+  for (const key of ['prompt-1', 'answer-1']) {
+    const covered = await page.locator(`.agent-timeline-entry[data-entry-key="${key}"]`).evaluate(node => {
+      const actions = node.querySelector(':scope > .agent-entry-actions')!.getBoundingClientRect();
+      const bubble = node.querySelector('.orchard-bubble')!.getBoundingClientRect();
+      return Math.max(0, Math.min(actions.right, bubble.right) - Math.max(actions.left, bubble.left)) > 0
+        && Math.max(0, Math.min(actions.bottom, bubble.bottom) - Math.max(actions.top, bubble.top)) > 0;
+    });
+    expect(covered, key).toBe(false);
+  }
+});
+
 test('nothing scrolls sideways at the page or in the conversation', async ({ page }) => {
   await open(page, 'mode=full&theme=light');
   await openEverything(page);

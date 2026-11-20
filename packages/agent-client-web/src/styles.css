@@ -761,6 +761,8 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
 }
 .agent-timeline-entry:has(> .agent-entry-actions) { position: relative; }
 .agent-entry-actions { position: absolute; top: 2px; right: 2px; z-index: 2; display: flex; align-items: center; gap: 6px; opacity: 0; }
+/* A person's bubble fills the right of its row, so its actions show at the left instead of over its words. */
+.agent-timeline-entry:has(> .agent-entry-content > .orchard-bubble-row[data-from="mine"]) > .agent-entry-actions { right: auto; left: 2px; }
 .agent-inspect-entry { display: grid; place-items: center; flex: none; width: 26px; height: 26px; padding: 0; border: 1px solid var(--agent-rule); border-radius: 5px; background: var(--agent-panel-raised); color: var(--agent-muted); cursor: pointer; }
 .agent-timeline-entry:hover > .agent-entry-actions, .agent-timeline-entry:focus-within > .agent-entry-actions { opacity: 1; }
 .agent-timeline-entry[data-inspected] { outline: 2px solid var(--agent-signal); outline-offset: 3px; border-radius: 4px; }

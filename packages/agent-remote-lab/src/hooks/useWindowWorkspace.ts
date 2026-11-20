@@ -8,6 +8,7 @@ import type { CompositionDocument } from '../session-composition.js';
 import type { WorkbenchMode } from '../workbench-mode.js';
 import type { WindowSaveState } from '../window-workspace-store.js';
 import { appendedRank } from '../bot-roster.js';
+import { newAssistantPicture } from '../assistant-picture.js';
 import { applyGroupOperation, applyWindowOperation, createWindowView, decodeWindowGroup, decodeWorkspaceWindow, hasWindowAppearance, isWindowCreateRequest, isWindowGroupCreateRequest, toWindowGroup, windowPrimaryViewId, type WindowGroup, type WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
 
 interface PendingCreation { request: WindowCreateRequest; candidate: WorkspaceWindow; bindings: Array<[string, string]> }
@@ -585,7 +586,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       const viewId = 'main';
       const groupId = await createSectionRequest(undefined, false, () => ({
         window: { ...emptyWindow(), title: binding.title || 'New session', views: [createWindowView(viewId, binding, 'primary')], selectedPrimaryViewId: viewId, selectedViewId: viewId },
-        bots: { rank: appendedRank(catalog.groups), members: {} } }));
+        bots: { rank: appendedRank(catalog.groups), members: { [viewId]: { picture: newAssistantPicture(viewId, catalog.groups) } } } }));
       return { groupId, viewId };
     },
     async createSection(title: string): Promise<string> {

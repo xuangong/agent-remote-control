@@ -1,7 +1,8 @@
 import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
-import { buildBinding, buildView, buildWindow } from '../test/window-builders.js';
+import { takenAvatars } from '../assistant-picture.js';
+import { buildBinding, buildGroup, buildView, buildWindow } from '../test/window-builders.js';
 import { buildOpened, mockScope, renderHook } from '../test/render-hook.js';
 import { useSideSessions } from './useSideSessions.js';
 
@@ -15,7 +16,7 @@ function scopeOf(facts: Record<string, unknown> = {}) {
     setSessionNotice: vi.fn(), setSideAnchor: vi.fn(), setSideFocus: vi.fn(), setSideSelections: vi.fn(), setSideSessions: vi.fn(), sharedViewForSlot: () => undefined, sharedWindow: undefined,
     stackPath: [source], succession: { document: { slots: [{ id: 'view-side' }], windowBindings: [] }, rememberSide: vi.fn(), bindWindowView: vi.fn(() => ({ id: 'slot-side' })), ensureWindowView: vi.fn(() => ({ id: 'slot-side' })) },
     viewSession: (session: object) => session, windowMode: true,
-    windowWorkspace: { readWindow: () => sharedWindow, readGroup: () => undefined, operate: vi.fn(async () => undefined), operateGroup: vi.fn(async () => undefined), authority: { operate: vi.fn() } }, ...facts,
+    windowWorkspace: { groups: [], readWindow: () => sharedWindow, readGroup: () => undefined, operate: vi.fn(async () => undefined), operateGroup: vi.fn(async () => undefined), authority: { operate: vi.fn() } }, ...facts,
   };
   return { scope, mock: mockScope<typeof useSideSessions>(scope) };
 }
@@ -54,7 +55,7 @@ describe('selecting a Side in a shared Window', () => {
   it('only selects the view when the Side is already shown beside its source, and reuses its slot', async () => {
     const attached = { ...buildView('side', 'attached'), attachedTo: 'source', binding: buildBinding('side') };
     const window = buildWindow([sourceView, attached]);
-    const { scope, hook } = await mount({ ...shared, sharedWindow: window, windowWorkspace: { readWindow: () => window, readGroup: () => undefined, operate: vi.fn(), authority: {} } });
+    const { scope, hook } = await mount({ ...shared, sharedWindow: window, windowWorkspace: { groups: [], readWindow: () => window, readGroup: () => undefined, operate: vi.fn(), authority: {} } });
     hook.selectSide(source, side);
     expect(scope.succession.bindWindowView).not.toHaveBeenCalled();
     expect(scope.succession.ensureWindowView).toHaveBeenCalledWith('W', 'side', expect.anything());
@@ -62,7 +63,7 @@ describe('selecting a Side in a shared Window', () => {
   });
   it('opens the Side as a bot of the group in Bot mode, and reports a failed edit as a notice', async () => {
     const operate = vi.fn(async () => { throw new Error('rejected'); });
-    const { scope, hook } = await mount({ ...shared, windowMode: false, windowWorkspace: { readWindow: () => sharedWindow, readGroup: () => undefined, operate } });
+    const { scope, hook } = await mount({ ...shared, windowMode: false, windowWorkspace: { groups: [], readWindow: () => sharedWindow, readGroup: () => undefined, operate } });
     hook.selectSide(source, side);
     await act(async () => {});
     expect(scope.setSessionNotice).toHaveBeenCalled();
@@ -94,7 +95,7 @@ describe('selecting a Side in a shared Window', () => {
   });
   it('reports a failed edit with the notice of a connection failure that is not retrying', async () => {
     const error = new Error('rejected');
-    const { scope, hook } = await mount({ ...shared, windowMode: false, windowWorkspace: { readWindow: () => sharedWindow, readGroup: () => undefined, operate: vi.fn(async () => { throw error; }) } });
+    const { scope, hook } = await mount({ ...shared, windowMode: false, windowWorkspace: { groups: [], readWindow: () => sharedWindow, readGroup: () => undefined, operate: vi.fn(async () => { throw error; }) } });
     hook.selectSide(source, side);
     await act(async () => {});
     expect(scope.setSessionNotice).toHaveBeenCalledWith(sessionConnectionFailure(error, false));
@@ -110,7 +111,7 @@ describe('selecting a Side in a shared Window', () => {
 describe('selecting a Side in another group in Bot mode', () => {
   const placedBindings = [{ slotId: 'view-source', windowId: 'W', viewId: 'source' }];
   const succession = (bound: unknown[] = []) => ({ document: { slots: [{ id: 'view-side' }], windowBindings: [...placedBindings, ...bound] }, rememberSide: vi.fn(), bindWindowView: vi.fn(() => ({ id: 'slot-side' })), ensureWindowView: vi.fn(() => ({ id: 'slot-side' })) });
-  const workspace = (group: unknown, operateGroup = vi.fn(async () => undefined)) => ({ readWindow: () => sharedWindow, readGroup: () => group, operate: vi.fn(async () => undefined), operateGroup, authority: {} });
+  const workspace = (group: unknown, operateGroup = vi.fn(async () => undefined)) => ({ groups: [], readWindow: () => sharedWindow, readGroup: () => group, operate: vi.fn(async () => undefined), operateGroup, authority: {} });
   it('is not used in Window mode, or when the source has no placed binding, or its group is gone', async () => {
     const windowMode = await mount({ windowMode: true, succession: succession(), windowWorkspace: workspace({ window: sharedWindow }) });
     windowMode.hook.selectSide(source, side);
@@ -123,11 +124,12 @@ describe('selecting a Side in another group in Bot mode', () => {
     expect(gone.scope.windowWorkspace.operateGroup).not.toHaveBeenCalled();
     expect(gone.scope.navigateSide).toHaveBeenCalled();
   });
-  it('is not used for a source that a shared view of the Window shows', async () => {
+  it('is not used for a source that a shared view of the Window shows: the shown Window is edited as a group', async () => {
     const { scope, hook } = await mount({ windowMode: false, sharedWindow, sharedViewForSlot: () => ({ ...sourceView }), succession: succession(), windowWorkspace: workspace({ window: sharedWindow }) });
     hook.selectSide(source, side);
-    expect(scope.windowWorkspace.operateGroup).not.toHaveBeenCalled();
-    expect(scope.windowWorkspace.operate).toHaveBeenCalled();
+    expect(scope.succession.bindWindowView).toHaveBeenCalledWith('W', expect.any(String), expect.anything(), 'view-side');
+    expect(scope.windowWorkspace.operate).not.toHaveBeenCalled();
+    expect(scope.windowWorkspace.operateGroup).toHaveBeenCalledWith('W', expect.objectContaining({ type: 'batch' }));
   });
   it('refuses a source view of the group that changed', async () => {
     const changed = { window: buildWindow([buildView('source', 'primary', { binding: buildBinding('else') })]) };
@@ -159,11 +161,46 @@ describe('selecting a Side in another group in Bot mode', () => {
     const group = { window: sharedWindow };
     const { scope, hook } = await mount({ windowMode: false, succession: { document: { slots: [{ id: 'view-side' }], windowBindings: [{ slotId: 'view-source', windowId: 'W', viewId: 'source' }] },
       rememberSide: vi.fn(), bindWindowView: vi.fn(() => ({ id: 'slot-side' })), ensureWindowView: vi.fn(() => ({ id: 'slot-side' })) },
-      windowWorkspace: { readWindow: () => undefined, readGroup: () => group, operate: vi.fn(async () => undefined), operateGroup: vi.fn(async () => undefined), authority: {} } });
+      windowWorkspace: { groups: [], readWindow: () => undefined, readGroup: () => group, operate: vi.fn(async () => undefined), operateGroup: vi.fn(async () => undefined), authority: {} } });
     hook.selectSide(source, side);
     expect(scope.windowWorkspace.operateGroup).toHaveBeenCalledWith('W', expect.objectContaining({ type: 'batch' }));
     await act(async () => {});
     expect(scope.navigation.select).toHaveBeenCalledWith({ kind: 'bot', groupId: 'W', viewId: expect.any(String) });
+  });
+});
+
+describe('the picture of a new Side', () => {
+  const placed = [{ slotId: 'view-source', windowId: 'W', viewId: 'source' }];
+  const succession = { document: { slots: [{ id: 'view-side' }], windowBindings: placed }, rememberSide: vi.fn(), bindWindowView: vi.fn(() => ({ id: 'slot-side' })), ensureWindowView: vi.fn(() => ({ id: 'slot-side' })) };
+  const pictureWritten = (call: unknown[]) => {
+    const operation = call[1] as { operations: Array<{ type: string; viewId?: string; details?: { picture?: { shape: string; color: string } } }> };
+    return operation.operations.find(edit => edit.type === 'bot.update')?.details?.picture;
+  };
+  it('is written with the Side when it joins a group in Bot mode, and differs from the bot beside it', async () => {
+    const group = buildGroup(sharedWindow);
+    const operateGroup = vi.fn(async () => undefined);
+    const { hook } = await mount({ windowMode: false, succession, windowWorkspace: { groups: [group], readWindow: () => undefined, readGroup: () => group, operate: vi.fn(), operateGroup, authority: {} } });
+    hook.selectSide(source, side);
+    const picture = pictureWritten(operateGroup.mock.calls[0]!)!;
+    const beside = takenAvatars([group])[0]!;
+    expect(`${picture.shape}/${picture.color}`).not.toBe(`${beside.shape}/${beside.color}`);
+  });
+  it('is written when the Side joins the shown Window in Bot mode', async () => {
+    const group = buildGroup(sharedWindow);
+    const operateGroup = vi.fn(async () => undefined), operate = vi.fn(async () => undefined);
+    const { hook } = await mount({ windowMode: false, sharedWindow, sharedViewForSlot: () => sourceView, succession: { ...succession, document: { slots: [{ id: 'view-side' }], windowBindings: [] } },
+      windowWorkspace: { groups: [group], readWindow: () => sharedWindow, readGroup: () => group, operate, operateGroup, authority: {} } });
+    hook.selectSide(source, side);
+    expect(pictureWritten(operateGroup.mock.calls[0]!)).toBeDefined();
+    expect(operate).not.toHaveBeenCalled();
+  });
+  it('is not written for a Side that is already shown', async () => {
+    const attached = { ...buildView('side', 'attached'), attachedTo: 'source', binding: buildBinding('side') };
+    const window = buildWindow([sourceView, attached]), group = buildGroup(window);
+    const operateGroup = vi.fn(async () => undefined);
+    const { hook } = await mount({ windowMode: false, succession, windowWorkspace: { groups: [group], readWindow: () => undefined, readGroup: () => group, operate: vi.fn(), operateGroup, authority: {} } });
+    hook.selectSide(source, side);
+    expect(operateGroup).toHaveBeenCalledWith('W', { type: 'view.select', viewId: 'side' });
   });
 });
 

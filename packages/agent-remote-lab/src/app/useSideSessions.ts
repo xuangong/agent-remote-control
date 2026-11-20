@@ -1,4 +1,5 @@
 import { windowSessionBinding } from '../window-workspace.js';
+import { withNewAssistantPicture } from '../assistant-picture.js';
 import { sideWindowOperation } from '../window-side-navigation.js';
 import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
 import { type OpenedSession } from '../directory-client.js';
@@ -46,7 +47,7 @@ export function useSideSessions(scope: Pick<AppInputs & WorkbenchRecordsSlice & 
       succession.rememberSide(opened);
       setSideSessions(current => [...current.filter(entry => viewKey(entry) !== opened.viewId), opened]);
       nextSideRequest(source);
-      void windowWorkspace.operateGroup(group.window.id, operation).then(() => navigation.select({ kind: 'bot', groupId: group.window.id, viewId }))
+      void windowWorkspace.operateGroup(group.window.id, withNewAssistantPicture(group, windowWorkspace.groups, operation)).then(() => navigation.select({ kind: 'bot', groupId: group.window.id, viewId }))
         .catch(error => setSessionNotice(sessionConnectionFailure(error, false)));
       return;
     }
@@ -65,8 +66,9 @@ export function useSideSessions(scope: Pick<AppInputs & WorkbenchRecordsSlice & 
       setSideSessions(current => [...current.filter(entry => viewKey(entry) !== opened.viewId), opened]);
       nextSideRequest(source);
       // In Bot mode the new Side is a bot of this group: open it, as for a group that is not the shown Window.
+      const sharedGroup = windowWorkspace.readGroup(sharedWindow.id);
       if (windowMode) editWindow(operation);
-      else void windowWorkspace.operate(operation).then(() => navigation.select({ kind: 'bot', groupId: sharedWindow.id, viewId }))
+      else void (sharedGroup ? windowWorkspace.operateGroup(sharedWindow.id, withNewAssistantPicture(sharedGroup, windowWorkspace.groups, operation)) : windowWorkspace.operate(operation)).then(() => navigation.select({ kind: 'bot', groupId: sharedWindow.id, viewId }))
         .catch(error => setSessionNotice(sessionConnectionFailure(error, false)));
       return;
     }

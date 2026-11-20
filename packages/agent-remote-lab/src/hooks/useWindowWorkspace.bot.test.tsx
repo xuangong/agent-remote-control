@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import { WindowMutationUnknownError, WindowRequestError, WindowWorkspaceClient } from '@orchardworks/agent-client';
 import { createWindowView, applyGroupOperation, type WindowGroup } from '@orchardworks/agent-remote-protocol';
+import { avatarPalette, avatarShapeNames } from '@orchardworks/agent-client-web/theme';
 import { createCompositionDocument } from '../session-composition.js';
 import { conversationLocalStorage, conversationSessionStorage } from '../conversation-storage.js';
 import { useWindowWorkspace, type GroupHandle } from './useWindowWorkspace.js';
@@ -70,9 +71,19 @@ it('starts a group from a new session, shown in both modes with bot details, wit
   await act(async () => { created = await read().createBotGroup({ hostId: 'h', providerId: 'p', nativeSessionId: 'new', title: 'New session' }); });
   const made = read().readGroup(created.groupId)!;
   expect(read().window).toEqual(before); expect(location.href).toBe(url);
-  expect(made.presentation).toBeUndefined(); expect(made.bots).toEqual({ rank: 'm', members: {} }); expect(made.window.title).toBe('New session');
+  expect(made.presentation).toBeUndefined(); expect(made.bots).toEqual({ rank: 'm', members: { [created.viewId]: { picture: { shape: expect.any(String), color: expect.stringMatching(/^#[0-9a-f]{6}$/), gaze: expect.any(Number) } } } }); expect(made.window.title).toBe('New session');
   expect(made.window.views).toEqual([expect.objectContaining({ id: created.viewId, placement: 'primary', binding: { hostId: 'h', providerId: 'p', nativeSessionId: 'new', title: 'New session' } })]);
   expect(made.window.selectedPrimaryViewId).toBe(created.viewId);
+});
+it('stores a picture for a new assistant that no other assistant of the account has, while one pair remains', async () => {
+  const pairs = avatarShapeNames.flatMap(shape => avatarPalette.map(entry => ({ shape, color: entry.value })));
+  const [free, ...taken] = pairs.slice().reverse();
+  const holders = taken.map((picture, index) => ({ ...group(`holder-${index}`, true), bots: { rank: 'm', members: { main: { picture } } } }) as WindowGroup);
+  const backend = server(group('a'), ...holders); history.replaceState(null, '', '/?window=a'); const { read } = await mount('https://bot-picture/', true);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'createGroup').mockImplementation(async created => { backend.groups.set(created.window.id, created); return created; });
+  let created!: { groupId: string; viewId: string };
+  await act(async () => { created = await read().createBotGroup({ hostId: 'h', providerId: 'p', nativeSessionId: 'new', title: 'New session' }); });
+  expect(read().readGroup(created.groupId)!.bots!.members[created.viewId]!.picture).toMatchObject(free!);
 });
 it('creates local empty sections separately from Window place and uses ranked group envelopes', async () => {
   const { read } = await mount('local-sections'); const before = read().window; const url = location.href;

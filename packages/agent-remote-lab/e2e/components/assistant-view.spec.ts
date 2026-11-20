@@ -91,7 +91,9 @@ test.describe('window', () => {
       // Its details open over the window.
       await header.getByRole('button', { name: /^Details of / }).click();
       const details = tiles.first().locator('.lab-tile-details');
-      await expect(details.locator('.lab-assistant-card-name')).toHaveText('Reply with the words LOCAL and OK, tile 1');
+      // The assistant is called by its name, never the session's title.
+      await expect(details.locator('.lab-assistant-card-name')).toHaveText(await header.locator('.lab-tile-name').innerText());
+      await expect(details.locator('.lab-assistant-card-name')).not.toHaveText('Reply with the words LOCAL and OK, tile 1');
       expect(await contrastFailures(page)).toEqual([]);
       await page.screenshot({ path: testInfo.outputPath(`window-mode-details-${theme}.png`) });
       await details.getByRole('button', { name: 'Close details' }).click();

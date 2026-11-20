@@ -486,7 +486,7 @@ test('keeps Handoff modal and progress reachable across Bot and Window without r
   } finally { release(); await page.close(); await fixture.close(); }
 });
 
-test('reads a handed-off bot\'s earlier session in its Window pane, where Continued from leads, and keeps the bot', async ({ page, context }) => {
+test('reads a handed-off bot\'s earlier session in its Window pane, where its details\' Sessions lead, and keeps the bot', async ({ page, context }) => {
   const fixture = await joinedFixture();
   try {
     await fixture.seed(context); const client = fixtureClient(context, fixture.scope, fixture.origin);
@@ -503,11 +503,13 @@ test('reads a handed-off bot\'s earlier session in its Window pane, where Contin
     // One bot, one conversation: the earlier session reads above the current one in the bot's own pane, as in Bot mode.
     const earlier = pane.getByRole('region', { name: 'Earlier conversation: Bot source S', exact: true });
     await expect(earlier).toBeAttached();
-    const link = pane.getByRole('navigation', { name: 'Session handoff history', exact: true }).getByRole('link', { name: 'Bot source S', exact: true });
+    // The tile's details list the session it continued from; its link reads it where it is.
+    await pane.locator('button.lab-tile-who').click();
+    const link = pane.locator('.lab-assistant-sessions').getByRole('link', { name: 'Bot source S', exact: true });
     await expect(link).toBeVisible(); await link.click();
     await expect(earlier).toBeInViewport();
     await expect(page.getByText('A bot keeps its conversation')).toHaveCount(0);
-    await expect(pane.locator('.lab-succession-history-error')).toHaveCount(0);
+    await expect(pane.locator('.lab-assistant-sessions [role="alert"]')).toHaveCount(0);
     await screenshot(page, 'window-bot-earlier-conversation');
     const binding = (await client.inspect(id)).window.views.find(view => view.id === 'B1')!.binding!;
     expect(binding.nativeSessionId).toBe('B'); expect(binding.sessionIntent).toBeUndefined();

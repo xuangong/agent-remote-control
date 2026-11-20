@@ -335,27 +335,34 @@ const checks: Record<string, Check> = {
   // I3b: the details panel, the sidebar, the top bar and the Window tiles.
   H4: async page => {
     await openBot(page, 'history=1');
-    const sessions = details(page).locator('.lab-assistant-chain');
-    await expect(sessions.locator('li')).toHaveText(['Chiefcurrent', 'Earlier notes', 'Oldest notes']);
-    await expect(sessions.locator('li[aria-current]')).toHaveText('Earlier notes');
+    const sessions = details(page).locator('ol.lab-assistant-chain');
+    // One compact row per session, newest first: its title, then its time and state.
+    await expect(sessions.locator('li .lab-assistant-session-title')).toHaveText(['Chief', 'Earlier notes', 'Oldest notes']);
+    // The session on screen says when its last turn was.
+    await expect(sessions.locator('li .lab-assistant-session small')).toHaveText(['current', /.+ · earlier$/, 'earlier']);
+    await expect(sessions.locator('li[aria-current] .lab-assistant-session-title')).toHaveText('Earlier notes');
     await expect(details(page).getByRole('link', { name: 'Return to current' })).toBeVisible();
   },
   H5: async page => {
     await openBot(page);
     await expect(details(page).getByRole('heading', { name: 'Subagent sessions' })).toBeVisible();
-    await expect(details(page).getByRole('button', { name: 'Explore the notes folder' })).toBeVisible();
+    await expect(details(page).getByRole('button', { name: 'Explore the notes folder', exact: true })).toBeVisible();
   },
   W1: async page => {
     const tile = await openTile(page);
-    // The star stands in the tile's header on a wide screen; on a phone it is in the details' Sessions.
-    if (await tile.getByRole('button', { name: /^Star / }).count()) await expect(tile.getByRole('button', { name: /^Star / })).toBeVisible();
-    else {
-      await press(tile.getByRole('button', { name: /^Details of / }));
-      await expect(page.locator('dialog.orchard-sheet[open]').getByRole('button', { name: /^Star / })).toBeVisible();
-      await press(page.locator('dialog.orchard-sheet[open]').getByRole('button', { name: 'Close', exact: false }).first());
-    }
+    // The tile's one ⋯ menu holds its controls, the star among them on a wide screen; on a phone the star is in the details'
+    // row of the session.
     await press(tile.getByRole('button', { name: 'More session actions' }));
-    const menu = tile.locator('.lab-session-heading-actions-panel');
+    const menu = tile.locator('.lab-session-heading-actions-panel').first();
+    if (!await menu.getByRole('button', { name: /^Star / }).count()) {
+      await press(tile.getByRole('button', { name: 'More session actions' }));
+      await press(tile.locator('button.lab-tile-who'));
+      const sheet = page.locator('dialog.orchard-sheet[open]');
+      await press(sheet.locator('ol.lab-assistant-chain .lab-assistant-session-toggle').first());
+      await expect(sheet.getByRole('button', { name: /^Star / })).toBeVisible();
+      await press(sheet.getByRole('button', { name: 'Close', exact: false }).first());
+      await press(tile.getByRole('button', { name: 'More session actions' }));
+    } else await expect(menu.getByRole('button', { name: /^Star / })).toBeVisible();
     for (const name of ['Back to previous conversation', 'Forward to next conversation', 'Share session link', 'Quote messages', 'Open in Bot mode']) await expect(menu.getByRole('button', { name })).toBeVisible();
     // Changing the tile's session: its menu on a wide screen, the navigation's Sessions on a phone.
     if (await menu.getByText('Sessions', { exact: false }).count()) await expect(menu.getByText('Sessions', { exact: false }).first()).toBeVisible();
@@ -368,6 +375,8 @@ const checks: Record<string, Check> = {
     const panel = page.locator('.lab-tile-details:visible, dialog.orchard-sheet[open]').first();
     const rows = Object.fromEntries(await panel.locator('.lab-assistant-row').evaluateAll(nodes => nodes.map(row => [row.firstElementChild?.textContent, row.lastElementChild?.textContent])));
     expect(rows).toMatchObject({ Agent: 'Recorded', Machine: 'Work Mac' });
+    // The session's row opens to its ID.
+    await press(panel.locator('.lab-assistant-chain .lab-assistant-session-toggle').first());
     await expect(panel.locator('.lab-assistant-identity')).toContainText('tile-1');
   },
   W3: async page => {
@@ -427,13 +436,14 @@ test.describe('every element of the conversation is reachable', () => {
 });
 
 test.describe('in Chinese', () => {
+  // A Chinese reader's fixture: Chinese sample data too, its assistant named 团团.
   test.use({ locale: 'zh-CN' });
 
   test('the conversation speaks in the design voice', async ({ page }) => {
     await open(page);
     await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
     const card = requests(page).locator('.agent-tool-approval').first();
-    await expect(card.locator('.orchard-approval-prompt')).toHaveText('Chief 想改一下 notes.md，可以吗？');
+    await expect(card.locator('.orchard-approval-prompt')).toHaveText('团团 想改一下 notes.md，可以吗？');
     for (const name of ['好的', '先别']) await expect(card.getByRole('button', { name, exact: true })).toBeVisible();
     await expect(card.locator('summary', { hasText: '看看要改什么' })).toBeVisible();
     await expect(turnOf(page, 'prompt-1').locator('.agent-work-line')).toContainText('2 步没成功');
@@ -444,7 +454,7 @@ test.describe('in Chinese', () => {
 
   test('the live line says what the assistant is doing', async ({ page }) => {
     await open(page, 'pending=none');
-    await expect(page.locator('.agent-turn-status').getByRole('status')).toHaveText('Chief 在跑测试，稍等～');
+    await expect(page.locator('.agent-turn-status').getByRole('status')).toHaveText('团团 在跑测试，稍等～');
     await expect(page.locator('.agent-turn-status')).toContainText('认真工作中');
     await expect(page.locator('.agent-turn-status')).toContainText('完成 1/3');
   });

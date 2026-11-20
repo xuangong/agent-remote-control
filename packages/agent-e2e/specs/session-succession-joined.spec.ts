@@ -165,7 +165,9 @@ test('real joined UI hands A to B, sends deferred context once, reloads and hand
     expect(f.sessions.get('B')!.sent).toEqual([]);
     await expect.poll(() => currentNative(page, f.scope)).toBe('B');
     await expect(page.locator('.lab-primary-conversation').getByTestId('prompt-input')).toHaveText('Device one retained draft');
-    await expect(page.getByRole('navigation', { name: 'Session handoff history' })).toContainText('Continued from');
+    // The assistant's details list the session it continued from.
+    await page.locator('.lab-primary-conversation button.lab-tile-who').first().click();
+    await expect(page.locator('.lab-primary-conversation .lab-assistant-sessions ol.lab-assistant-chain a').first()).toBeVisible();
     await screenshot(page, 'handoff-current-before-first-input');
     const firstOperation = f.actions.find(item => item.action === 'prepare')!.body.operationId;
     await send(page, 'First explicit B input');
@@ -250,8 +252,11 @@ test('real joined UI hands A to B, sends deferred context once, reloads and hand
     const latestFavorites = await (await context.request.get(`${f.scope}v1/favorites`)).json();
     expect(latestFavorites.stars[0].nativeSessionId).toBe('C');
     await screenshot(page, 'handoff-current-with-retained-image');
-    const history = page.getByRole('navigation', { name: 'Session handoff history' });
-    await history.getByRole('link').first().click();
+    // The details' Sessions list opens the predecessor and returns to the current session.
+    const history = page.locator('.lab-primary-conversation .lab-assistant-sessions');
+    if (!await history.count()) await page.locator('.lab-primary-conversation button.lab-tile-who').first().click();
+    await history.locator('ol.lab-assistant-chain a').first().click();
+    if (!await history.count()) await page.locator('.lab-primary-conversation button.lab-tile-who').first().click();
     await expect(history.getByRole('link', { name: 'Return to current', exact: true })).toBeVisible();
     await expect(page.locator('.lab-primary-conversation .agent-outgoing-message')).toHaveCount(0);
     await screenshot(page, 'handoff-predecessor-history');

@@ -40,12 +40,14 @@ describe.each(variants)('E10 at %s', (_name, view) => {
       await send(page, PROMPT);
       // While the test command runs, one live line says so.
       const live = page.locator('.agent-turn-status [role="status"]');
-      // A session that is no bot is called by its agent, never by its title (I3b).
-      await expect.poll(() => live.textContent(), { timeout: 15_000 }).toBe('Scripted is running tests');
+      // The assistant is called by its name, never by its session's title (I3c): the name its tile shows.
+      const name = await page.locator('.lab-tile-name:visible').first().innerText();
+      expect(name).not.toBe('Chief');
+      await expect.poll(() => live.textContent(), { timeout: 15_000 }).toBe(`${name} is running tests`);
       // The assistant asks inline, in its turn, with plain choices.
       const card = page.locator('.agent-turn').last().locator('.agent-turn-requests .agent-tool-approval');
       await card.waitFor({ timeout: 15_000 });
-      await expect.poll(() => card.locator('.orchard-approval-prompt').textContent()).toBe('Scripted wants to run a command');
+      await expect.poll(() => card.locator('.orchard-approval-prompt').textContent()).toBe(`${name} wants to run a command`);
       await card.getByRole('button', { name: 'Allow', exact: true }).click();
       await showsText(page, 'Wrote notes.md with three principles.');
       expect(stack.provider.session('chief')!.sent).toContain(PROMPT);
@@ -80,6 +82,9 @@ describe.each(variants)('E10 at %s', (_name, view) => {
       const bot = page.locator('[data-workbench-mode="bot"]');
       await bot.locator('.lab-assistant-top-bar').waitFor();
       await expect.poll(() => new URL(page.url()).searchParams.get('mode')).toBe('bot');
+      // It keeps the name its tile had, stored with its first edit; never its session's title.
+      const botName = await bot.locator('.lab-assistant-top-bar .lab-assistant-name').innerText();
+      expect(botName).not.toBe('Chief');
       // Its details: a panel beside the conversation, or a sheet from its name on a phone.
       const title = bot.locator('.lab-assistant-top-bar button.lab-assistant-title');
       if (await title.getAttribute('aria-expanded') !== 'true') await title.click();
@@ -109,7 +114,7 @@ describe.each(variants)('E10 at %s', (_name, view) => {
         // On a phone the assistant list is home: the address alone lands there, a conversation opens over it, and Back returns to it.
         await page.goto(new URL('/', page.url()).href);
         await bot.getByRole('navigation', { name: 'Assistants' }).waitFor();
-        await bot.locator('.lab-bot-row').filter({ hasText: 'Chief' }).first().click();
+        await bot.locator('.lab-bot-row').filter({ hasText: botName }).first().click();
         await bot.locator('.lab-assistant-top-bar').waitFor();
         await page.goBack();
         await bot.getByRole('navigation', { name: 'Assistants' }).waitFor();

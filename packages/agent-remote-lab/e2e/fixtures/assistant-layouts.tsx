@@ -38,7 +38,7 @@ views.push({ ...createWindowView('chief-ask', { ...binding('chief-ask', SAMPLE.a
 const initialGroup: WindowGroup = {
   window: { schemaVersion: 3, id: 'notes', revision: 0, title: SAMPLE.group, selectedPrimaryViewId: 'chief', selectedViewId: 'chief', views },
   // Each assistant has its own name, stored with its details as a bot's first edit stores it.
-  bots: { rank: 'm', members: { ...Object.fromEntries(ASSISTANTS.map(item => [item.id, { name: item.title, picture: item.picture }])),
+  bots: { rank: 'm', members: { ...Object.fromEntries(quiet.map(item => [item.id, { name: item.title }])), ...Object.fromEntries(ASSISTANTS.map(item => [item.id, { name: item.title, picture: item.picture }])),
     chief: { name: chiefName, picture: ASSISTANTS[0].picture, pinned: true }, builder: { name: ASSISTANTS[1].title, picture: ASSISTANTS[1].picture, label: SAMPLE.label } } },
 };
 const sessionOf = (id: string, title: string) => ({ hostId: 'mac', providerId: 'claude', nativeSessionId: id, title });

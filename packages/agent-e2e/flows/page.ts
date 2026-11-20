@@ -31,6 +31,14 @@ export async function toggleViewPanel(page: Page, panel: 'Header' | 'Sidebar' | 
 /** An assistant's details: beside the conversation or over the window on a wide screen, a sheet on a phone. */
 export const assistantDetails = (page: Page) => page.locator('.lab-tile-details:visible, .lab-assistant-details:visible, dialog.orchard-sheet[open]').first();
 
+/** The Sessions list of the assistant on screen, from its details: opened from its tile or its top bar as needed. */
+export async function sessionsList(page: Page) {
+  const list = assistantDetails(page).locator('.lab-assistant-sessions');
+  if (!await list.count()) await page.locator('button.lab-tile-who:visible, button.lab-assistant-title:visible').first().click();
+  await list.waitFor();
+  return list;
+}
+
 /**
  * Chooses how much of each turn's work shows, for every assistant on this device: from the session's view options where its
  * heading has them, else from the details of the tile or the assistant.

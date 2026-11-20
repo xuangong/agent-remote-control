@@ -104,17 +104,21 @@ it('keeps the same visible Bot editor and content while Access suspends and resu
   } finally { await app.close(); }
 });
 
-it("draws a bot's stored picture at the foot of its answers, in a Window of bots and in Bot mode alike", async () => {
-  const scope = 'http://localhost/bot-picture/', group = botGroup('B');
-  group.bots!.members.B1 = { picture: { shape: 'triangle', color: '#2f6fed' } };
+it.each([['a stored picture', true], ['no bot details', false]] as const)("draws a bot with %s at the foot of its answers as the roster does, in Window and Bot mode alike", async (_name, details) => {
+  const scope = `http://localhost/bot-picture-${details}/`, group = botGroup('B', details);
+  if (details) group.bots!.members.B1 = { picture: { shape: 'triangle', color: '#2f6fed' } };
   seedGroup(scope, group); history.replaceState(null, '', '/?window=B');
   const app = await mountBotApp(scope, { hosted: true, timeline: [{ providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: 'now', turnId: 'B1-turn',
     resources: [], collapsed: [], sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }], item: { type: 'assistant_message', text: 'Readable Bot content' } }] });
-  const foot = (root: ParentNode | null) => root?.querySelector<HTMLElement>('.orchard-bubble-row[data-from="theirs"] .orchard-avatar')?.dataset.shape;
+  const face = (avatar: HTMLElement | null | undefined) => avatar ? [avatar.dataset.shape, avatar.querySelector('.orchard-avatar-body')?.getAttribute('style')].join(' ') : undefined;
+  const foot = (root: ParentNode | null) => face(root?.querySelector<HTMLElement>('.orchard-bubble-row[data-from="theirs"] .orchard-avatar'));
   try {
-    await until(() => expect(foot(app.container.querySelector('[data-view-id="B1"]'))).toBe('triangle'));
+    await until(() => expect(foot(app.container.querySelector('[data-view-id="B1"]'))).toBeDefined());
+    const windowFace = foot(app.container.querySelector('[data-view-id="B1"]'));
+    if (details) expect(windowFace).toMatch(/^triangle /);
     await app.switchMode('bot'); await act(async () => app.button('B1').click());
-    await until(() => expect(foot(app.container.querySelector('.lab-bot-conversation'))).toBe('triangle'));
+    await until(() => expect(foot(app.container.querySelector('.lab-bot-conversation'))).toBe(windowFace));
+    expect(face(app.button('B1').querySelector<HTMLElement>('.orchard-avatar'))).toBe(windowFace);
   } finally { await app.close(); }
 });
 

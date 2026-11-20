@@ -127,9 +127,10 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
     // a view in a group without bots has none and chooses only this device's default.
     const botGroupId = options.bot?.groupId ?? (windowBot ? sharedWindow!.id : undefined), botViewId = options.bot?.viewId ?? (windowBot ? view!.id : undefined);
     const botDetails = botGroupId && botViewId ? windowWorkspace.readGroup(botGroupId)?.bots?.members[botViewId] : undefined;
-    // Who answers: the bot's or the session's name, and its avatar, which works while it does.
+    // Who answers: the bot's or the session's name, and its avatar, which works while it does. The avatar is the one the
+    // roster draws for the same Window view: its stored picture, or the picture of its view id.
     const assistant = { name: source.title || source.nativeSessionId,
-      avatar: <BotPicture id={botViewId ?? source.viewId} picture={botDetails?.picture} size={26} mood={botWorking(context.state) ? 'working' : 'idle'} /> };
+      avatar: <BotPicture id={botViewId ?? view?.id ?? source.viewId} picture={botDetails?.picture} size={26} mood={botWorking(context.state) ? 'working' : 'idle'} /> };
     const processAssistant = botGroupId && botViewId ? {
       details: botDetails,
       update: (details: WindowBotDetails) => { void windowWorkspace.operateGroup(botGroupId, { type: 'bot.update', viewId: botViewId, details }).catch(error => setSessionNotice(sessionConnectionFailure(error, false))); },

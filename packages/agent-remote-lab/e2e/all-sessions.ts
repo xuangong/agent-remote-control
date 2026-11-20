@@ -23,6 +23,10 @@ export async function openSessionsPage(page: Page, entry: 'All sessions' | 'Favo
  */
 export async function openSettingsPage(page: Page, group?: string): Promise<Locator> {
   const rail = page.locator('.lab-rail'), tabs = page.locator('.lab-tab-bar');
+  // A phone's Window mode may open its Context drawer (Sessions and Hosts) over the whole screen, tab bar included: close it.
+  const drawer = page.getByRole('dialog', { name: 'Context', exact: true });
+  await expect.poll(async () => await rail.isVisible() || await tabs.isVisible() || await drawer.isVisible()).toBe(true);
+  if (await drawer.isVisible()) { await page.keyboard.press('Escape'); await expect(drawer).toBeHidden(); }
   await expect(rail.or(tabs)).toBeVisible();
   if (await rail.isVisible()) await rail.getByRole('button', { name: 'Settings', exact: true }).click();
   else await tabs.getByRole('button', { name: 'Me', exact: true }).click();

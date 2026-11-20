@@ -222,7 +222,7 @@ it("renders each section from the assistant's state, in order, in the reader's l
   expect(container.querySelector('[aria-label="All assistants on this device"], [role="switch"]')).toBeNull();
   expect(container.querySelector('.lab-assistant-files')?.textContent).toBe('notes.mdedited+3 −1');
   const chinese = await render(<LocaleContext.Provider value="zh"><AssistantDetails assistant={reference({ files: [] })} surface="panel" onClose={() => {}} /></LocaleContext.Provider>);
-  expect([...chinese.querySelectorAll('.lab-assistant-section > h3')].map(heading => heading.textContent)).toEqual(['过程显示', '它在哪里工作', '会话', '模型', '文件']);
+  expect([...chinese.querySelectorAll('.lab-assistant-section > h3')].map(heading => heading.textContent)).toEqual(['过程显示', '它在哪里工作', '会话', '模型和设置', '文件']);
   expect(chinese.querySelector('.lab-assistant-empty')?.textContent).toBe(translator('zh')('details.noFiles'));
 });
 

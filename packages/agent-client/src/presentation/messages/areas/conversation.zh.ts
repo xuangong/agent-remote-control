@@ -148,7 +148,7 @@ export const conversation: AreaMessages<typeof english> = {
   'details.subagents': '子代理会话',
   'details.notifications': '通知',
   'details.notify': '完成任务或需要我时',
-  'details.model': '模型',
+  'details.model': '模型和设置',
   'details.files': '文件',
   'details.noFiles': '还没有改过或分享过文件。',
   'details.fileAdded': '新建',

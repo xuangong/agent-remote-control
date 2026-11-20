@@ -173,7 +173,7 @@ async function fixture(target: SessionStar, activityReady = true, other?: Sessio
   expect(fetchTimeline).not.toHaveBeenCalled();
   const open = async (title = target.title) => {
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
-    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(row => row.textContent?.includes(title))!.click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>(':is(.lab-tracking-floating, .lab-launcher-track) .lab-session-row')].find(row => row.textContent?.includes(title))!.click());
   };
   const emitActivity = (agentId: string, seq: number) => act(async () => {
     activityListeners.get(agentId)!.onMessage({ protocolVersion: '1.8.0', type: 'agent_activity', payload: {
@@ -396,7 +396,7 @@ it('keeps a closed side conversation in tracking and preserves its unseen conten
   expect(side.hidden).toBe(true);
   await f.emitContent('child-agent', 2);
   await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
-  const row = [...f.container.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(button => button.textContent?.includes(child.title));
+  const row = [...f.container.querySelectorAll<HTMLButtonElement>(':is(.lab-tracking-floating, .lab-launcher-track) .lab-session-row')].find(button => button.textContent?.includes(child.title));
   expect(row).toBeDefined();
   expect(row!.querySelector('.lab-tracked-change')).not.toBeNull();
   await act(async () => row!.click());

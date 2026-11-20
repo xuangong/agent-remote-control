@@ -4,6 +4,8 @@ import { render } from '../test/setup.js';
 import { AskButton } from '../components/AskButton.js';
 import { TpmMenu } from '../components/TpmMenu.js';
 import { SessionTrackingMenu } from '../components/SessionTrackingMenu.js';
+import { WindowMenu } from '../components/WindowMenu.js';
+import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import type { SessionTracking } from '../hooks/useSessionTracking.js';
 import { sessionKey } from '../session-tree.js';
 import { useTpmWork, type TpmService } from '../hooks/useTpmWork.js';
@@ -75,4 +77,25 @@ it('keeps the Ask and Track status, alert and attention on the sidebar rows', as
   expect(trigger.getAttribute('aria-label')).toBe('Tracked sessions');
   expect(trigger.textContent).toContain('Track');
   expect(trigger.title).not.toContain('Drag');
+});
+
+it('renders every entry as a launcher capsule in the compact bar, without floating placement or dragging', async () => {
+  const bar = (node: JSX.Element) => <ShortcutPlacement.Provider value="bar">{node}</ShortcutPlacement.Provider>;
+  const tracking = { sessions: [], backgroundSessions: [], observations: {} } as unknown as SessionTracking;
+  const workspace = { windows: [], hasActiveWindow: false, unavailable: false } as unknown as ReturnType<typeof useWindowWorkspace>;
+  const container = await render(bar(<>
+    <SessionTrackingMenu tracking={tracking} busy={false} inert={false} onOpen={() => {}} />
+    <WindowMenu workspace={workspace} visible />
+    <AskButton triggerRef={createRef()} disabled={false} onOpen={() => {}} />
+  </>));
+  const launchers = [...container.querySelectorAll('.lab-launcher')];
+  expect(launchers.map(element => element.className)).toEqual(['lab-launcher lab-launcher-track', 'lab-launcher lab-launcher-window', 'lab-launcher lab-launcher-ask']);
+  expect(container.querySelector('.lab-tracking-floating')).toBeNull();
+  for (const launcher of launchers) {
+    expect(launcher.getAttribute('style')).toBeNull();
+    expect(launcher.querySelector('button')?.title ?? '').not.toContain('Drag');
+  }
+  expect(container.querySelector('.lab-launcher-ask button')?.hasAttribute('aria-description')).toBe(false);
+  // The capsule keeps the Track icon and counts without the sidebar row's label.
+  expect(container.querySelector('.lab-launcher-track button')?.textContent).not.toContain('Track');
 });

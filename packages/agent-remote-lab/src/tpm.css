@@ -1,7 +1,7 @@
 .lab-tracking-floating.lab-tpm-floating { top: calc(114px + env(safe-area-inset-top, 0px)); z-index: 146; }
 .lab-tpm-workspaces { position: fixed; inset: 0; z-index: 145; pointer-events: none; }
 .lab-tpm-floating[hidden], .lab-tpm-viewport[hidden], .lab-tpm-document[hidden], .lab-tpm-conversation[hidden] { display: none; }
-.lab-tpm-floating > .lab-session-popover-trigger { display: flex; align-items: center; gap: 7px; min-height: 44px; }
+:is(.lab-tpm-floating, .lab-launcher-tpm) > .lab-session-popover-trigger { display: flex; align-items: center; gap: 7px; min-height: 44px; }
 .lab-tpm-count { color: var(--obs-text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
 .lab-tpm-panel { overflow: auto; overscroll-behavior: contain; }
 .lab-tpm-panel .lab-directory-heading > button { flex: none; }

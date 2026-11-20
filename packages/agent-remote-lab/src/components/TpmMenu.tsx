@@ -11,10 +11,10 @@ export function TpmMenu({ tpm, main, mainSessions, visible, triggerRef, inert, o
   mainSessions?: ReadonlyMap<string, TpmMainSession>; open: boolean; onOpenChange(open: boolean): void;
   tpm: ReturnType<typeof useTpmWork>; main?: SessionEntry; visible: boolean; triggerRef: RefObject<HTMLButtonElement>; inert: boolean;
 }) {
-  const floating = useContext(ShortcutPlacement) === 'floating';
+  const placement = useContext(ShortcutPlacement), floating = placement === 'floating';
   const { root, style, handlers, edge } = useTrackingPosition('agent-remote:tpm-position', undefined, { enabled: floating });
   const rootProps = floating ? { style, ...handlers, 'data-edge': edge, className: 'lab-tracking-floating lab-tpm-floating' }
-    : { className: 'lab-sidebar-shortcut lab-sidebar-shortcut-tpm' };
+    : placement === 'bar' ? { className: 'lab-launcher lab-launcher-tpm' } : { className: 'lab-sidebar-shortcut lab-sidebar-shortcut-tpm' };
   const panel = useRef<HTMLElement>(null);
   const id = useId();
   const [failure, setFailure] = useState<string>();

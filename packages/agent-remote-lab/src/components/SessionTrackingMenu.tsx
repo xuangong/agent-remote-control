@@ -13,10 +13,10 @@ import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
 import { ShortcutPlacement } from '../shell/shortcut-placement.js';
 
 export function SessionTrackingMenu({ tracking, catchUp, teams = [], knownSessions = [], busy, inert, onOpen }: { catchUp?: SessionCatchUp; tracking: SessionTracking; teams?: readonly Team[]; knownSessions?: readonly SessionEntry[]; busy: boolean; inert: boolean; onOpen(session: SessionStar): void }) {
-  const floating = useContext(ShortcutPlacement) === 'floating';
+  const placement = useContext(ShortcutPlacement), floating = placement === 'floating';
   const { root, style, handlers, edge } = useTrackingPosition(undefined, undefined, { enabled: floating });
   const rootProps = floating ? { style, ...handlers, 'data-edge': edge, className: 'lab-tracking-floating' }
-    : { className: 'lab-sidebar-shortcut lab-sidebar-shortcut-track' };
+    : placement === 'bar' ? { className: 'lab-launcher lab-launcher-track' } : { className: 'lab-sidebar-shortcut lab-sidebar-shortcut-track' };
   const sessions = tracking.backgroundSessions;
   const titles = new Map([...tracking.sessions, ...knownSessions].map(session => [sessionKey(session), session.title]));
   const teamSources = new Map(teams.flatMap(team => team.members
@@ -39,7 +39,7 @@ export function SessionTrackingMenu({ tracking, catchUp, teams = [], knownSessio
   const alertLabel = alert === 'pending' ? 'New pending sessions need attention.' : alert === 'idle' ? 'A working session is now idle.' : '';
   const attention = sessions.some(session => ['waiting', 'failed'].includes(tracking.observations[sessionKey(session)]?.activity ?? ''));
   return <div ref={root} {...rootProps} data-attention={attention} data-alert={alert} {...(inert ? { inert: '' } : {})}>
-    <SessionPopover label="Tracked sessions" triggerTitle={floating ? `${alertLabel ? `${alertLabel} ` : ''}Drag to move, or focus and use arrow keys` : alertLabel || undefined} trigger={<><SessionCatchUpRing value={catchUp} /><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg>{floating ? null : <span>Track</span>}<span className="lab-tracking-counts">{counts.length ? counts.map(group => <span key={group.status} className="lab-tracking-count agent-session-title" data-session-status={group.status} title={`${group.label}: ${group.count}`} aria-label={`${group.count} ${group.label.toLowerCase()} sessions`}>{group.count}</span>) : <span className="lab-tracking-count" title="No background sessions">0</span>}</span>{changes ? <span className="lab-tracking-badge" aria-label={`${changes} sessions with new content`} /> : attention ? <span className="lab-tracking-attention" aria-label="A tracked session needs attention" /> : null}</>}>
+    <SessionPopover label="Tracked sessions" triggerTitle={floating ? `${alertLabel ? `${alertLabel} ` : ''}Drag to move, or focus and use arrow keys` : alertLabel || undefined} trigger={<><SessionCatchUpRing value={catchUp} /><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg>{placement === 'sidebar' ? <span>Track</span> : null}<span className="lab-tracking-counts">{counts.length ? counts.map(group => <span key={group.status} className="lab-tracking-count agent-session-title" data-session-status={group.status} title={`${group.label}: ${group.count}`} aria-label={`${group.count} ${group.label.toLowerCase()} sessions`}>{group.count}</span>) : <span className="lab-tracking-count" title="No background sessions">0</span>}</span>{changes ? <span className="lab-tracking-badge" aria-label={`${changes} sessions with new content`} /> : attention ? <span className="lab-tracking-attention" aria-label="A tracked session needs attention" /> : null}</>}>
       {close => <>
         <p className="lab-control-note">Tracking on this client · Drag to reorder</p>
         <span id={hintId} className="agent-visually-hidden">Open a session with Enter. Drag a row to reorder; on touch screens use its grip. Alt plus Up or Down also changes its position.</span>

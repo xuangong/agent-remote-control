@@ -60,7 +60,7 @@ it.each(['directory', 'directory-open', 'Favorites', 'Track'] as const)('opens a
   else if (navigation === 'Favorites') await act(async () => favoritesMenu.onOpen({ ...target, starredAt: 1, available: true, online: true }));
   else {
     await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
-    await act(async () => [...f.view.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(row => row.textContent?.includes(target.title))!.click());
+    await act(async () => [...f.view.querySelectorAll<HTMLButtonElement>(':is(.lab-tracking-floating, .lab-launcher-track) .lab-session-row')].find(row => row.textContent?.includes(target.title))!.click());
   }
   // Rule 6: X is a bot and keeps its conversation; D opens beside it as a new primary group, selected.
   const selectedGroup = () => f.view.querySelector<HTMLElement>('[data-primary-group-id][data-selected="true"]');
@@ -239,7 +239,7 @@ it.each((['dock', 'attached', 'float'] as const).flatMap(placement => [false, tr
   const trigger = () => f.view.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]');
   await settleApp(() => { expect(trigger()).not.toBeNull(); expect(setup.windowDocument.selectedViewId).toBe(selected.id); });
   await act(async () => trigger()!.click());
-  const row = () => [...f.view.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(item => item.textContent?.includes('Track D'));
+  const row = () => [...f.view.querySelectorAll<HTMLButtonElement>(':is(.lab-tracking-floating, .lab-launcher-track) .lab-session-row')].find(item => item.textContent?.includes('Track D'));
   await settleApp(() => { expect(row()).toBeDefined(); expect(row()!.disabled).toBe(false); });
   await act(async () => row()!.click());
   const openedD = () => setup.windowDocument.views.find(view => view.binding?.nativeSessionId === 'D');
@@ -279,7 +279,7 @@ it('rejects Track replacement of the selected managed view without changing prim
   const f = await failureFixture(false, 'A', false, `&window=${document.id}`, setup);
   await settleApp(() => expect(f.view.querySelector('[aria-label="Tracked sessions"]')).not.toBeNull());
   await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
-  const row = () => [...f.view.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(item => item.textContent?.includes('Managed D'));
+  const row = () => [...f.view.querySelectorAll<HTMLButtonElement>(':is(.lab-tracking-floating, .lab-launcher-track) .lab-session-row')].find(item => item.textContent?.includes('Managed D'));
   await settleApp(() => { expect(row()).toBeDefined(); expect(row()!.disabled).toBe(false); });
   await act(async () => row()!.click());
   await settleApp(() => expect(f.view.textContent).toContain('Select an ordinary session view or create an empty view first.'));
@@ -313,7 +313,7 @@ it('opens Track beside a dock bot whose replacement is still saving, leaving tha
   try {
     await settleApp(() => expect(entered).toBe(true));
     await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
-    const row = () => [...f.view.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(item => item.textContent?.includes('Queued D'));
+    const row = () => [...f.view.querySelectorAll<HTMLButtonElement>(':is(.lab-tracking-floating, .lab-launcher-track) .lab-session-row')].find(item => item.textContent?.includes('Queued D'));
     await settleApp(() => { expect(row()).toBeDefined(); expect(row()!.disabled).toBe(false); });
     await act(async () => row()!.click());
     // The dock is a bot showing Y (still saving): D opens beside it in a new dock, queued after that save, and the dock keeps Y.
@@ -589,7 +589,7 @@ it('opens an existing Team from a managed view by selecting its new ordinary sou
     expect(f.view.querySelector(`[data-view-id="${managed.id}"]`)?.closest('[hidden]')).toBeNull();
   });
   await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Teams"]')!.click());
-  const openTeam = () => [...f.view.querySelectorAll<HTMLButtonElement>('.lab-team-floating .lab-session-row')]
+  const openTeam = () => [...f.view.querySelectorAll<HTMLButtonElement>(':is(.lab-team-floating, .lab-launcher-team) .lab-session-row')]
     .find(button => button.textContent?.includes('Unopened Team'));
   await settleApp(() => expect(openTeam()).toBeDefined());
   await act(async () => openTeam()!.click());

@@ -135,3 +135,25 @@
   .lab-command-option[aria-selected="true"] { forced-color-adjust: none; color: HighlightText; background: Highlight; }
   .lab-command-option[aria-selected="true"] :is(.lab-command-subtitle, .lab-command-shortcut) { color: HighlightText; }
 }
+
+/* The launcher bar of the compact navigation: the Track, Team, TPM, Window and Ask entries as capsules in a row the layout
+   reserves. It wraps instead of overlapping, so no number of entries covers the conversation or the composer; with no entry
+   shown it takes no space. A panel opens under the navigation across its width. */
+@media (max-width: 1180px) {
+  .lab-mobile-navigation { flex-wrap: wrap; row-gap: 0; }
+  /* The title starts from no width, so a long one shrinks beside Sessions instead of wrapping onto a line of its own. */
+  .lab-shell .lab-mobile-navigation > :is(.lab-title-favorites, .lab-mobile-session-title) { flex: 1 1 0; min-width: 0; }
+}
+.lab-launcher-bar { display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; padding-block: 2px 8px; }
+.lab-launcher-bar:not(:has(.lab-launcher:not([hidden], [data-hidden="true"]))) { display: none; }
+.lab-launcher[hidden], .lab-launcher[data-hidden="true"] { display: none; }
+.lab-launcher, .lab-launcher .lab-session-popover { position: static; min-width: 0; }
+.lab-launcher button.lab-session-popover-trigger {
+  --tracking-edge-color: var(--obs-control-border); justify-content: flex-start; min-height: 44px; padding: 8px 12px;
+  border-color: var(--tracking-edge-color); border-radius: 24px;
+}
+.lab-launcher button.lab-session-popover-trigger:where(:hover:not(:disabled)) { --tracking-edge-color: var(--obs-action); }
+.lab-launcher .lab-session-popover-panel {
+  position: absolute; top: calc(100% + 4px); right: max(8px, env(safe-area-inset-right)); left: max(8px, env(safe-area-inset-left));
+  width: auto; max-height: min(560px, 70dvh);
+}

@@ -1,6 +1,6 @@
 .lab-tracking-floating.lab-window-floating { top: calc(168px + env(safe-area-inset-top, 0px)); z-index: 146; }
 .lab-window-floating[data-hidden="true"] { visibility: hidden; pointer-events: none; }
-.lab-window-floating .lab-window-panel { display: flex; flex-direction: column; overflow: hidden; padding: 12px; }
+:is(.lab-window-floating, .lab-launcher-window) .lab-window-panel { display: flex; flex-direction: column; overflow: hidden; padding: 12px; }
 .lab-window-panel > .lab-directory-heading { flex: none; }
 .lab-window-panel-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .lab-window-workspaces { min-width: 0; color: var(--obs-text); font-size: 13px; }

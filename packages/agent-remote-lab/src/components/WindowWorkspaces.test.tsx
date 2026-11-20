@@ -34,7 +34,6 @@ it('copies a Window link without Bot route fields and surfaces section conflicts
   const scope = 'http://localhost/window-section-options/'; seedGroup(scope, { ...botGroup('A', false), presentation: { bots: false } }); history.replaceState(null, '', '/?window=A');
   const app = await mountBotApp(scope, { hosted: true });
   await until(() => expect(app.workspace().hasActiveWindow).toBe(true));
-  await act(async () => app.button('Windows').click());
   let copied = '';
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (value: string) => { copied = value; } } });
   history.replaceState(null, '', '/?window=A&mode=bot&section=B&bot=B1');

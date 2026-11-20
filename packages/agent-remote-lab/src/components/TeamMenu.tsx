@@ -41,10 +41,10 @@ export function TeamMenu(props: Props) {
   const [revealing, setRevealing] = useState(false);
   const [pendingCreate, setPendingCreate] = useState<{operationId:string;source:TeamSource;sourceViewId?:string;origin?:{windowId:string;viewId:string}}>();
 
-  const floating = useContext(ShortcutPlacement) === 'floating';
+  const placement = useContext(ShortcutPlacement), floating = placement === 'floating';
   const { root, style, handlers, edge } = useTrackingPosition('agent-remote:team-position', undefined, { enabled: floating });
   const rootProps = floating ? { style, ...handlers, 'data-edge': edge, className: 'lab-tracking-floating lab-team-floating' }
-    : { className: 'lab-sidebar-shortcut lab-sidebar-shortcut-team' };
+    : placement === 'bar' ? { className: 'lab-launcher lab-launcher-team' } : { className: 'lab-sidebar-shortcut lab-sidebar-shortcut-team' };
   const trigger = useRef<HTMLButtonElement>(null);
   const revealedRequest = useRef<string>();
   const currentClient = useRef(client); currentClient.current = client;

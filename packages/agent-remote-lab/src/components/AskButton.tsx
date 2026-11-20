@@ -7,10 +7,10 @@ import { ShortcutPlacement } from '../shell/shortcut-placement.js';
 export function AskButton({ observation, sourceTitle, disabled, unavailable, onOpen, triggerRef }: {
   triggerRef: RefObject<HTMLButtonElement>; observation?: SessionObservation; sourceTitle?: string; disabled: boolean; unavailable?: string; onOpen(): void;
 }) {
-  const floating = useContext(ShortcutPlacement) === 'floating';
+  const placement = useContext(ShortcutPlacement), floating = placement === 'floating';
   const { root, style, handlers, edge } = useTrackingPosition('agent-remote:ask-position', undefined, { enabled: floating });
   const rootProps = floating ? { style, ...handlers, 'data-edge': edge, className: 'lab-tracking-floating lab-ask-floating' }
-    : { className: 'lab-sidebar-shortcut lab-sidebar-shortcut-ask' };
+    : placement === 'bar' ? { className: 'lab-launcher lab-launcher-ask' } : { className: 'lab-sidebar-shortcut lab-sidebar-shortcut-ask' };
   const ready = observation?.connection === 'ready';
   const activity = ready ? observation.activity : undefined;
   const alert = ready ? observation.attention : undefined;

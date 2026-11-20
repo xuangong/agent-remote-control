@@ -3,8 +3,8 @@ import { FavoritesMenu } from '../../components/SessionFavorites.js';
 import { viewKey } from '../helpers.js';
 import type { AppScope } from '../types.js';
 
-export function MobileNavigation({ scope }: { readonly scope: Pick<AppScope, 'addressSession' | 'backgroundInert' | 'compactLayout' | 'contextOpen' | 'directory' | 'familyPath' | 'favorites' | 'focusedFamilyIndex' | 'focusedFamilyWindow' | 'focusedMenuSession' | 'focusedMenuStatus' | 'focusedSessionKey' | 'openContext' | 'openDirectorySession' | 'revealSession' | 'sessionEntries' | 'sessionsTriggerRef' | 'setMobileViewTarget' | 'setScanOpen' | 'sharedWindow' | 'sidebarWindow' | 'tracking' | 'transitioning' | 'userScoped'> }) {
-  const { addressSession, backgroundInert, compactLayout, contextOpen, directory, familyPath, favorites, focusedFamilyIndex, focusedFamilyWindow, focusedMenuSession, focusedMenuStatus, focusedSessionKey, openContext, openDirectorySession, revealSession, sessionEntries, sessionsTriggerRef, setMobileViewTarget, setScanOpen, sharedWindow, sidebarWindow, tracking, transitioning, userScoped } = scope;
+export function MobileNavigation({ scope }: { readonly scope: Pick<AppScope, 'addressSession' | 'askBarSlot' | 'backgroundInert' | 'compactLayout' | 'contextOpen' | 'directory' | 'familyPath' | 'favorites' | 'focusedFamilyIndex' | 'focusedFamilyWindow' | 'focusedMenuSession' | 'focusedMenuStatus' | 'focusedSessionKey' | 'openContext' | 'openDirectorySession' | 'revealSession' | 'sessionEntries' | 'sessionsTriggerRef' | 'setMobileViewTarget' | 'setScanOpen' | 'sharedWindow' | 'shortcutBarSlot' | 'sidebarWindow' | 'tracking' | 'transitioning' | 'userScoped'> }) {
+  const { addressSession, askBarSlot, backgroundInert, compactLayout, contextOpen, directory, familyPath, favorites, focusedFamilyIndex, focusedFamilyWindow, focusedMenuSession, focusedMenuStatus, focusedSessionKey, openContext, openDirectorySession, revealSession, sessionEntries, sessionsTriggerRef, setMobileViewTarget, setScanOpen, sharedWindow, shortcutBarSlot, sidebarWindow, tracking, transitioning, userScoped } = scope;
   return <>
     {compactLayout ? <nav className="lab-mobile-navigation" aria-label="Session navigation" {...backgroundInert}>
       <button ref={sessionsTriggerRef} type="button" aria-label="Open sessions" aria-haspopup="dialog" aria-expanded={contextOpen} aria-controls="lab-context" onClick={() => { openContext(true); }}>Sessions</button>
@@ -18,6 +18,11 @@ export function MobileNavigation({ scope }: { readonly scope: Pick<AppScope, 'ad
           {familyPath.map((session, index) => <option key={viewKey(session)} value={viewKey(session)}>{index === 0 ? 'Root' : `Side ${index}`} · {session.title}</option>)}
         </select>
       </div> : null}
+      {/* A row of the navigation, so the entries take their own space and never cover the conversation. */}
+      <div className="lab-launcher-bar" role="group" aria-label="Shortcuts">
+        <div ref={shortcutBarSlot} className="lab-movable-slot" />
+        <div ref={askBarSlot} className="lab-movable-slot" />
+      </div>
     </nav> : null}
   </>;
 }

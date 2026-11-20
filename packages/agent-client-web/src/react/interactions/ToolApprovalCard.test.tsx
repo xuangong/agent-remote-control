@@ -6,6 +6,7 @@ import type { AgentInteractionRequest, AgentInteractionResponse } from '@orchard
 import { render } from '../../test/setup.js';
 import { InteractionPanel } from '../InteractionPanel.js';
 import { InteractionItem } from '../items/InteractionItem.js';
+import { showChanges } from '../../test/interactions.js';
 
 const request: Extract<AgentInteractionRequest, { kind: 'tool_approval' }> = {
   kind: 'tool_approval', requestId: 'command', toolCallId: 'call', toolName: 'command',
@@ -17,10 +18,34 @@ const request: Extract<AgentInteractionRequest, { kind: 'tool_approval' }> = {
 };
 
 describe('tool approval', () => {
+  it('asks in plain words: Allow sends allow once, Not now sends deny, Show what changes opens every decision and the command', async () => {
+    const respond = vi.fn().mockResolvedValue(undefined);
+    const container = await render(<InteractionPanel request={{ ...request, detail: { type: 'write', filePath: '/w/notes.md' } }} onResponse={respond} assistantName="Chief" />);
+    expect(container.querySelector('.orchard-approval-prompt')?.textContent).toBe('Chief wants to write notes.md');
+    const pills = [...container.querySelectorAll<HTMLElement>('.orchard-approval-choices > button, .orchard-approval-choices > details > summary')];
+    expect(pills.map(pill => pill.textContent)).toEqual(['Allow', 'Not now', 'Show what changes']);
+    const changes = container.querySelector<HTMLDetailsElement>('details.agent-approval-changes')!;
+    expect(changes.open).toBe(false);
+    await act(async () => pills[2]!.click());
+    expect(changes.open).toBe(true);
+    expect(pills[2]!.textContent).toBe('Hide what changes');
+    expect(container.querySelector('[data-scope="session"]')?.textContent).toBe('Allow for session');
+    expect(container.querySelector('.agent-approval-rules summary')?.textContent).toContain('Rules for future requests');
+    expect(container.textContent).toContain('/w/notes.md');
+    await act(async () => pills[0]!.click());
+    expect(respond).toHaveBeenLastCalledWith('command', { kind: 'tool_approval', decision: 'allow', scope: 'once' });
+    const refusing = await render(<InteractionPanel request={request} onResponse={respond} assistantName="Chief" />);
+    await act(async () => refusing.querySelector<HTMLButtonElement>('.orchard-approval-choices > button[data-decision="deny"]')!.click());
+    expect(respond).toHaveBeenLastCalledWith('command', { kind: 'tool_approval', decision: 'deny' });
+  });
+
+
   it('keeps exact rule descriptions separate from actions and never infers their decision semantics', async () => {
     const respond = vi.fn().mockResolvedValue(undefined);
     const container = await render(<InteractionPanel request={request} onResponse={respond} />);
-    const rules = container.querySelector('details')!;
+    expect(container.querySelector<HTMLDetailsElement>('details.agent-approval-changes')!.open).toBe(false);
+    await showChanges(container);
+    const rules = container.querySelector<HTMLDetailsElement>('details.agent-approval-rules')!;
     expect(rules.open).toBe(false);
     await act(async () => rules.querySelector('summary')!.click());
     expect(rules.open).toBe(true);
@@ -30,13 +55,16 @@ describe('tool approval', () => {
     expect(document.getElementById(apply.getAttribute('aria-describedby')!)?.textContent).toBe(request.policies![0]!.description);
     await act(async () => apply.click());
     expect(respond).toHaveBeenCalledExactlyOnceWith('command', { kind: 'tool_approval', decision: 'allow', scope: 'policy', policyId: 'deny-host' });
-    expect([...container.querySelectorAll('button')].every(button => button.disabled)).toBe(true);
+    expect([...container.querySelectorAll<HTMLButtonElement>('[data-decision], [data-policy-id]')].every(button => button.disabled)).toBe(true);
     expect(container.querySelector('[role="status"]')?.textContent).toBe('Submitting…');
   });
 
   it.each(['once', 'session'] as const)('submits only the chosen %s scope and preserves the request after failure', async scope => {
     const respond = vi.fn().mockRejectedValueOnce(new Error('Host disconnected')).mockResolvedValue(undefined);
     const container = await render(<InteractionPanel request={request} onResponse={respond} />);
+    // Allow is once; every scope, with the command, is under Show what changes.
+    expect(container.querySelector('[data-scope="session"]')?.closest('details:not([open])')).not.toBeNull();
+    await showChanges(container);
     const button = container.querySelector<HTMLButtonElement>(`[data-scope="${scope}"]`)!;
     await act(async () => button.click());
     expect(container.querySelector('[role="alert"]')?.textContent).toBe('Host disconnected');
@@ -51,18 +79,19 @@ describe('tool approval', () => {
   it.each(['cancel', 'deny'] as const)('only offers and submits the permitted %s decision', async decision => {
     const respond = vi.fn().mockResolvedValue(undefined);
     const container = await render(<InteractionPanel request={{ ...request, allowedDecisions: [decision] }} onResponse={respond} />);
-    expect(container.querySelector('details')).toBeNull();
-    expect(container.querySelectorAll('button')).toHaveLength(1);
-    await act(async () => container.querySelector('button')!.click());
+    expect(container.querySelector('details.agent-approval-rules')).toBeNull();
+    expect(container.querySelectorAll('.orchard-approval-choices > [data-decision]')).toHaveLength(1);
+    expect(container.querySelector('[data-decision]')?.textContent).toBe('Not now');
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-decision]')!.click());
     expect(respond).toHaveBeenCalledExactlyOnceWith('command', { kind: 'tool_approval', decision });
   });
 
   it.each([
     [{ kind: 'tool_approval', decision: 'allow', scope: 'once' }, 'Allowed once'],
-    [{ kind: 'tool_approval', decision: 'allow', scope: 'session' }, 'Allowed for session'],
+    [{ kind: 'tool_approval', decision: 'allow', scope: 'session' }, 'Allowed for this session'],
     [{ kind: 'tool_approval', decision: 'allow', scope: 'policy', policyId: 'deny-host' }, 'Rule applied'],
     [{ kind: 'tool_approval', decision: 'cancel' }, 'Canceled'],
-    [{ kind: 'tool_approval', decision: 'deny', message: 'Needs review first.' }, 'Denied'],
+    [{ kind: 'tool_approval', decision: 'deny', message: 'Needs review first.' }, 'Not allowed'],
   ] satisfies [Extract<AgentInteractionResponse, { kind: 'tool_approval' }>, string][])('keeps completed approvals compact and discloses the full receipt: %s', async (response, label) => {
     const container = await render(<InteractionItem item={{ type: 'interaction', request, response }} />);
     const toggle = container.querySelector('button')!;

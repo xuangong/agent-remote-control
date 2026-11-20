@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 import { render, rerender } from '../test/setup.js';
+import { openReceipts, showChanges } from '../test/interactions.js';
 import { AgentTimeline } from './AgentTimeline.js';
 import { createReplicaState, type ProcessMode } from '@orchardworks/agent-client';
 
@@ -50,11 +51,11 @@ describe('the conversation in Concise: messages and decisions, the work behind i
     expect(container.querySelectorAll('[data-entry-key]')).toHaveLength(5);
     expect(container.querySelector('.agent-todo')?.textContent).toContain('In progress');
     expect(container.querySelector('.agent-tool')?.textContent).toContain('Running');
+    expect(container.querySelector('.agent-tool-approval-completed .agent-receipt-toggle')?.textContent).toContain('Not allowed');
+    await openReceipts(container);
     expect(container.querySelector('.agent-question-completed')?.textContent).toContain('Mobile');
     expect(container.querySelector('.agent-question-completed')?.textContent).toContain('Which platform?');
     expect(container.querySelector('.agent-plan-completed')?.textContent).toContain('Include desktop too.');
-    expect(container.querySelector('.agent-tool-approval-completed')?.textContent).toContain('Denied');
-    await act(async () => container.querySelector<HTMLButtonElement>('.agent-approval-receipt-toggle')!.click());
     expect(container.querySelector('.agent-tool-approval-completed')?.textContent).toContain('Wait for review.');
     const task = container.querySelector('.agent-todo');
     const tool = content[1] as Extract<AgentTimelineItem, { type: 'tool_call' }>;
@@ -214,7 +215,11 @@ describe('the conversation in Concise: messages and decisions, the work behind i
     const container = await render(<AgentTimeline state={{ ...state(), pendingInteractions: [{
       kind: 'plan_approval', requestId: 'pending-plan', plan: 'Please review this plan.', allowedActions: ['approve'],
     }] }} onInteractionResponse={async () => {}} />);
-    expect(container.querySelector('.agent-interactions')?.textContent).toContain('Please review this plan.');
+    // The request is a card at the end of the last turn, with Allow at hand and the plan under Show what changes.
+    const card = container.querySelector('.agent-turn:last-of-type .agent-plan')!;
+    expect(card.querySelector<HTMLButtonElement>('[data-choice="allow"]')?.disabled).toBe(false);
+    await showChanges(container);
+    expect(card.textContent).toContain('Please review this plan.');
     expect(container.querySelector<HTMLButtonElement>('[data-action="approve"]')?.disabled).toBe(false);
   });
 });

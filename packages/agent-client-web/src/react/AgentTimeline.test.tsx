@@ -8,6 +8,7 @@ import type {
 } from '@orchardworks/agent-remote-protocol';
 
 import { render, rerender } from '../test/setup.js';
+import { openReceipts, showChanges } from '../test/interactions.js';
 import { AgentTimeline } from './AgentTimeline.js';
 import type { PreviewController } from './PreviewActions.js';
 import { TimelineDisplay } from './TimelineDisplay.js';
@@ -105,11 +106,13 @@ describe('AgentTimeline', () => {
     const request: AgentInteractionRequest = { kind: 'plan_approval', requestId: 'plan-history', plan: 'Inspect once', allowedActions: ['approve'] };
     const response: AgentInteractionResponse = { kind: 'plan_approval', action: 'approve' };
     const container = await render(<AgentTimeline state={state([], [request])} onInteractionResponse={async () => undefined} />);
-    expect(container.querySelectorAll('.agent-interactions .agent-plan')).toHaveLength(1);
+    expect(container.querySelectorAll('.agent-timeline-entries .agent-plan')).toHaveLength(1);
     expect(container.querySelector('.agent-interaction-completed')).toBeNull();
     await rerender(container, <AgentTimeline state={state([entry(1, { type: 'interaction', request, response })])} onInteractionResponse={async () => undefined} />);
-    expect(container.querySelector('.agent-interactions')).toBeNull();
+    expect(container.querySelector('.agent-plan')).toBeNull();
     expect(container.querySelectorAll('.agent-interaction-completed')).toHaveLength(1);
+    expect(container.querySelector('.agent-receipt-toggle')?.textContent).toContain('Plan approved');
+    await openReceipts(container);
     expect(container.textContent).toContain('Inspect once');
     expect(container.querySelector('[data-entry-key]')?.getAttribute('data-entry-key')).toBe('provider-neutral:1:plan-history');
   });
@@ -374,6 +377,7 @@ describe('AgentTimeline', () => {
       onInteractionResponse={(requestId, response) => responses.push({ requestId, response })}
     />);
 
+    await showChanges(container);
     expect(container.querySelector('.agent-plan strong')?.textContent).toBe('Inspect');
     expect(container.querySelector('button[data-action="approve"]')).toBeNull();
     await act(async () => container.querySelector<HTMLButtonElement>('button[data-action="approve_and_resume"]')?.click());
@@ -542,6 +546,7 @@ describe('AgentTimeline', () => {
       onInteractionResponse={() => Promise.reject(new Error('Interaction response was rejected.'))}
     />);
 
+    await showChanges(container);
     await act(async () => (container.querySelector('[data-action="approve"]') as HTMLButtonElement).click());
 
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('Interaction response was rejected.');

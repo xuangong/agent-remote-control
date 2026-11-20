@@ -295,7 +295,7 @@ it('uses child input capabilities while keeping its native approval actionable',
   expect(hint.textContent).toBe('This session is read-only. Direct input is disabled.');
   expect(hint.classList.contains('agent-visually-hidden')).toBe(false);
   expect(f.container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')?.disabled).toBe(true);
-  const approve = [...f.container.querySelectorAll<HTMLButtonElement>('.agent-plan button')].find((button) => button.textContent === 'Approve');
+  const approve = f.container.querySelector<HTMLButtonElement>('.agent-plan [data-choice="allow"]') ?? undefined;
   expect(approve?.disabled).toBe(false);
   await act(async () => approve!.click());
   expect(f.respondToInteraction).toHaveBeenCalledWith('child-plan', { kind: 'plan_approval', action: 'approve' });

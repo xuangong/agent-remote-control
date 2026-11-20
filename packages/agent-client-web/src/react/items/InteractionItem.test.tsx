@@ -5,6 +5,7 @@ import type { AgentInteractionRequest, AgentTimelineItem } from '@orchardworks/a
 
 import { render } from '../../test/setup.js';
 import { TimelineItemRenderer } from '../TimelineItemRenderer.js';
+import { openReceipts } from '../../test/interactions.js';
 
 describe('InteractionItem', () => {
   it('renders completed answers by stable question ID with exact option labels and custom text', async () => {
@@ -17,6 +18,8 @@ describe('InteractionItem', () => {
       response: { kind: 'question', answers: [{ questionId: 'runtime', selectedValues: ['web'] }, { questionId: 'tools', selectedValues: ['a,b', 'test'], customText: 'Keep logs' }] },
     } satisfies AgentTimelineItem;
     const container = await render(<TimelineItemRenderer item={item} />);
+    expect(container.querySelector('.agent-receipt-toggle')?.textContent).toContain('Answered');
+    await openReceipts(container);
     const answers = container.querySelectorAll('.agent-completed-answer');
     expect(answers[0]?.querySelector('dt')?.textContent).toBe('Choice');
     expect(answers[0]?.textContent).toContain('Build');
@@ -26,7 +29,7 @@ describe('InteractionItem', () => {
     expect(answers[0]?.querySelector('ul')?.closest('[hidden]')).toBeNull();
     expect(answers[0]?.querySelector('.agent-answer-custom')?.closest('[hidden]')).toBeNull();
     expect(container.querySelector('input, textarea')).toBeNull();
-    expect(container.querySelectorAll('button')).toHaveLength(1);
+    expect(container.querySelectorAll('button')).toHaveLength(2);
   });
 
   it('discloses original prompts and descriptions without hiding or changing the recorded answers', async () => {
@@ -37,7 +40,8 @@ describe('InteractionItem', () => {
       ] },
       response: { kind: 'question', answers: [{ questionId: 'file', selectedValues: ['input'] }] },
     }} />);
-    const toggle = container.querySelector<HTMLButtonElement>('button')!;
+    await openReceipts(container);
+    const toggle = container.querySelector<HTMLButtonElement>('.agent-question-context-toggle')!;
     expect(toggle?.textContent).toContain('Show questions');
     expect(toggle?.getAttribute('aria-expanded')).toBe('false');
     expect(document.getElementById(toggle?.getAttribute('aria-controls') ?? '')).not.toBeNull();
@@ -64,12 +68,15 @@ describe('InteractionItem', () => {
       request: { kind: 'plan_approval', requestId: 'plan', plan: '# Safe rollout\n1. **Inspect**\n2. Roll back on errors', allowedActions: ['approve_and_resume', 'reject'] },
       response: { kind: 'plan_approval', action: 'reject', feedback: 'Add a dry run' },
     }} />);
+    expect(container.querySelector('.agent-receipt-toggle')?.textContent).toContain('Asked for changes to the plan');
+    expect(container.querySelector('h1')).toBeNull();
+    await openReceipts(container);
     expect(container.querySelector('h1')?.textContent).toBe('Safe rollout');
     expect(container.querySelector('strong')?.textContent).toBe('Inspect');
     expect(container.textContent).toContain('Roll back on errors');
-    expect(container.textContent).toContain('Rejected');
     expect(container.textContent).toContain('Add a dry run');
-    expect(container.querySelector('button, textarea')).toBeNull();
+    expect(container.querySelector('textarea')).toBeNull();
+    expect(container.querySelectorAll('button')).toHaveLength(1);
   });
 
   it('preserves unknown option values and multiline custom-only answers', async () => {
@@ -81,6 +88,7 @@ describe('InteractionItem', () => {
       ] },
       response: { kind: 'question', answers: [{ questionId: 'unknown', selectedValues: ['unmapped-value'] }, { questionId: 'custom', selectedValues: [], customText: 'Keep the first line.\nKeep the second line, too.' }] },
     }} />);
+    await openReceipts(container);
     const answers = container.querySelectorAll('.agent-completed-answer');
     expect(answers[0]?.querySelector('dd')?.textContent).toContain('unmapped-value');
     expect(answers[1]?.querySelector('.agent-answer-custom')?.textContent).toBe('Keep the first line.\nKeep the second line, too.');
@@ -97,6 +105,8 @@ describe('InteractionItem', () => {
       type: 'interaction', request,
       response: { kind: 'question', answers: [{ questionId: 'answered', selectedValues: [], customText: 'Recorded answer' }] },
     }} />);
+    expect(partial.querySelector('.agent-receipt-toggle')?.textContent).toContain('1 of 2 answered');
+    await openReceipts(partial);
     expect(partial.querySelector('.agent-question-receipt-status')?.textContent).toBe('Partially answered');
     expect(partial.querySelector('.agent-question-receipt-count')?.textContent).toBe('1 of 2 answered');
     expect(partial.querySelectorAll('.agent-completed-answer')[1]?.textContent).toContain('No answer provided');
@@ -105,6 +115,7 @@ describe('InteractionItem', () => {
       type: 'interaction', request: { ...request, requestId: 'dismissed' },
       response: { kind: 'question', dismissed: true, answers: [{ questionId: 'answered', selectedValues: [], customText: 'Recorded answer' }] },
     }} />);
+    await openReceipts(dismissed);
     expect(dismissed.querySelector('.agent-question-receipt-status')?.textContent).toBe('Dismissed');
     expect(dismissed.querySelectorAll('.agent-completed-answer')[0]?.textContent).toContain('Recorded answer');
     expect(dismissed.querySelectorAll('.agent-completed-answer')[1]?.querySelector('.agent-answer-empty')?.textContent).toBe('Dismissed');

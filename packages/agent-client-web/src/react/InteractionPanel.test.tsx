@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AgentInteractionRequest } from '@orchardworks/agent-remote-protocol';
 
 import { render, rerender } from '../test/setup.js';
+import { openReceipts, showChanges } from '../test/interactions.js';
 import { InteractionPanel } from './InteractionPanel.js';
 import type { QuestionDraft } from './interactions/QuestionCard.js';
 
@@ -70,6 +71,7 @@ describe('InteractionPanel', () => {
     const respond = vi.fn().mockRejectedValueOnce(new Error('Try again')).mockResolvedValue(undefined);
     const plan: AgentInteractionRequest = { kind: 'plan_approval', requestId: 'plan', plan: 'Review **all** steps', allowedActions: ['approve', 'reject'] };
     const container = await render(<InteractionPanel request={plan} onResponse={respond} />);
+    await showChanges(container);
     await type(container.querySelector<HTMLTextAreaElement>('textarea')!, 'Include a rollback');
     await act(async () => container.querySelector<HTMLButtonElement>('[data-action="reject"]')!.click());
     expect(respond).toHaveBeenLastCalledWith('plan', { kind: 'plan_approval', action: 'reject', feedback: 'Include a rollback' });

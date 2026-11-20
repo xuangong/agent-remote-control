@@ -82,6 +82,20 @@ describe('the timeline renders turns', () => {
     expect(lines(container).map(line => line.textContent)).toEqual(['Read README.md, wrote notes.md', 'Ran a command']);
   });
 
+  it('places a request waiting for the person in its turn, after the answer, as an inline card', async () => {
+    const state = conversation(true);
+    const request = { kind: 'tool_approval' as const, requestId: 'write', toolCallId: 'call', toolName: 'Write', summary: 'Allow Write?',
+      detail: { type: 'write' as const, filePath: '/w/notes.md' }, allowedDecisions: ['allow' as const, 'deny' as const], allowScopes: ['once' as const] };
+    const container = await render(<AgentTimeline state={{ ...state, pendingInteractions: [request] }} assistant={{ name: 'Chief' }} onInteractionResponse={async () => {}} />);
+    const turns = [...container.querySelectorAll('.agent-turn')];
+    const card = turns.at(-1)!.querySelector('.agent-tool-approval')!;
+    expect(card.querySelector('.orchard-approval-prompt')?.textContent).toBe('Chief wants to write notes.md');
+    expect(turns[0]!.querySelector('.agent-tool-approval')).toBeNull();
+    expect(container.querySelector('aside')).toBeNull();
+    const last = [...turns.at(-1)!.querySelectorAll('.agent-timeline-entry, .agent-tool-approval')].at(-1);
+    expect(last).toBe(card);
+  });
+
   it('shows "Assistant" and no avatar when the host names no assistant', async () => {
     const container = await render(<AgentTimeline state={conversation()} />);
     // Each answer bubble keeps the avatar's room, so the answers line up as they would with one.

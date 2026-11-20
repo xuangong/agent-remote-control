@@ -218,7 +218,7 @@ describe('LabWorkbench', () => {
     expect(container.querySelector<HTMLButtonElement>('[aria-label="Open chat commands"]')?.disabled).toBe(true);
     expect(container.querySelector<HTMLButtonElement>('[data-testid="cancel-submit"]')?.disabled).toBe(true);
     expect(container.querySelector<HTMLButtonElement>('[role="switch"]')?.disabled).toBe(true);
-    expect(container.querySelector<HTMLButtonElement>('[data-action="approve"]')?.matches(':disabled')).toBe(true);
+    expect(container.querySelector<HTMLButtonElement>('[data-choice="allow"]')?.matches(':disabled')).toBe(true);
     await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="session-model-button"]')!.click());
     expect(container.querySelector<HTMLSelectElement>('[data-testid="session-setting-model"]')?.disabled).toBe(true);
   });
@@ -360,10 +360,10 @@ it.each(['connecting', 'catching_up', 'disconnected', 'idle'] as const)('locks c
   const container = await render(<Harness />);
   const pendingWindow = container.querySelector('[data-window="pending"]')!;
   const readyWindow = container.querySelector('[data-window="ready"]')!;
-  expect(pendingWindow.querySelector('[aria-label="Pending interactions"]')).not.toBeNull();
+  expect(pendingWindow.querySelector('.agent-turn-requests .agent-plan')).not.toBeNull();
   expect(pendingWindow.textContent).not.toContain('Interaction unavailable');
   expect(pendingWindow.textContent).toContain('Waiting for connection to respond.');
-  expect(pendingWindow.querySelector('[data-action="approve"]')?.matches(':disabled')).toBe(true);
+  expect(pendingWindow.querySelector('[data-choice="allow"]')?.matches(':disabled')).toBe(true);
   expect(pendingWindow.textContent).toContain('Cached approval');
   expect(pendingWindow.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
   expect(pendingWindow.querySelector<HTMLButtonElement>('[aria-label="Open chat commands"]')!.disabled).toBe(true);

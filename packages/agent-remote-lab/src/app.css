@@ -569,17 +569,6 @@ textarea {
 .lab-timeline-scroll .agent-error { gap: 0; padding-block: 2px; color: var(--obs-text-secondary); }
 .lab-timeline-scroll .agent-notice-toggle:hover:not(:disabled) { color: var(--obs-text); background: var(--agent-panel); }
 
-.lab-timeline-scroll .agent-interactions {
-  position: static;
-  max-height: none;
-  margin-top: 22px;
-  padding: 16px 0 0;
-  overflow: visible;
-  border: 0;
-  border-top: 1px solid var(--obs-border-strong);
-  border-radius: 0;
-  background: var(--obs-surface);
-}
 
 .lab-timeline-scroll .agent-interaction { border: 0; border-bottom: 1px solid var(--obs-border); border-radius: 0; background: var(--obs-surface); }
 .lab-timeline-scroll .agent-interaction-unsupported,

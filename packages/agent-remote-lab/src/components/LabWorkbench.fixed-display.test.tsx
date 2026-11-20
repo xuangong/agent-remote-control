@@ -58,7 +58,7 @@ it('keeps approval, settings, interrupt and failed delivery controls available i
   const container = await render(<LabWorkbench fixedDisplayMode="content" state={active} sessionStatus="ready" messageDraft="A useful draft"
     actions={{ respondToInteraction: approve, cancel, setSessionSetting: setting, sendMessage: async () => { throw new Error('Delivery could not be confirmed.'); } }} />);
   expect(container.querySelector('[aria-label="Session view options"]')).toBeNull();
-  await act(async () => container.querySelector<HTMLButtonElement>('[data-action="approve"]')!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-choice="allow"]')!.click());
   expect(approve).toHaveBeenCalledTimes(1);
   await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="cancel-submit"]')!.click());
   expect(cancel).toHaveBeenCalledTimes(1);

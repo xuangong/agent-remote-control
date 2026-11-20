@@ -550,7 +550,7 @@ describe('App', () => {
     expect(composer).not.toBeNull();
     expect(interaction.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
 
-    await act(async () => (interaction.querySelector('[data-action="approve"]') as HTMLButtonElement).click());
+    await act(async () => (interaction.querySelector('[data-choice="allow"]') as HTMLButtonElement).click());
     expect(respondToInteraction).toHaveBeenCalledWith('plan-1', { kind: 'plan_approval', action: 'approve' });
   });
 

@@ -57,3 +57,14 @@ export function CompletedQuestionItem({ request, response }: CompletedQuestionIt
     </dl>
   </article>;
 }
+
+/** How a question was answered, for its one-line receipt. */
+export function questionReceipt(request: CompletedQuestionItemProps['request'], response: CompletedQuestionItemProps['response']): { status: 'receipt.dismissed' | 'receipt.answered' | 'receipt.partlyAnswered' | 'receipt.unanswered'; answered: number; total: number } {
+  const answered = request.questions.filter(question => {
+    const answer = response.answers.find(({ questionId }) => questionId === question.questionId);
+    return Boolean(answer?.redacted || answer?.selectedValues.length || answer?.customText);
+  }).length;
+  const total = request.questions.length;
+  const status = response.dismissed ? 'receipt.dismissed' : answered === total ? 'receipt.answered' : answered ? 'receipt.partlyAnswered' : 'receipt.unanswered';
+  return { status, answered, total };
+}

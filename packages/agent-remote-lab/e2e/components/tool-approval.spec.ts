@@ -1,18 +1,26 @@
 import { expect, test } from '@playwright/test';
 
-test('reviews long commands and rules without expanding completed approval history', async ({ page }, testInfo) => {
+test('asks inline with plain choices, opens long commands and rules in the card, and keeps the answer one line', async ({ page }, testInfo) => {
   test.setTimeout(30_000);
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/e2e/fixtures/tool-approval.html');
   const approval = page.locator('.agent-tool-approval');
-  await expect(approval.getByRole('heading', { name: 'Approval required' })).toBeVisible();
-  await expect(approval.locator('pre')).toContainText('cmd.exe');
+  // The card sits in the conversation, in the turn that asked, not in a panel after it.
+  await expect(approval).toHaveCount(1);
+  expect(await approval.evaluate(node => !!node.closest('.agent-turn'))).toBe(true);
+  await expect(approval.locator('.orchard-approval-prompt')).toHaveText('Assistant wants to run a command');
+  await expect(approval.getByRole('button', { name: 'Allow', exact: true })).toBeVisible();
+  await expect(approval.getByRole('button', { name: 'Not now', exact: true })).toBeVisible();
+  await expect(approval.locator('pre')).toBeHidden();
   await expect(approval.getByRole('button', { name: 'Apply rule', exact: true })).toBeHidden();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('approval.png') });
 
-  await approval.locator('summary').click();
+  await approval.locator('summary', { hasText: 'Show what changes' }).click();
+  await expect(approval.locator('pre')).toContainText('cmd.exe');
+  await expect(approval).toContainText('Working directory');
+  await approval.locator('summary', { hasText: 'Rules for future requests' }).click();
   const apply = approval.getByRole('button', { name: 'Apply rule', exact: true });
   await expect(apply).toBeVisible();
   await expect(apply).toHaveAccessibleDescription(/Allow command prefix/);
@@ -21,7 +29,7 @@ test('reviews long commands and rules without expanding completed approval histo
   await apply.click();
 
   const receipt = page.locator('.agent-tool-approval-completed');
-  const toggle = receipt.getByRole('button');
+  const toggle = receipt.locator('.agent-receipt-toggle');
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await expect(toggle).toContainText('Rule applied');
   await expect(receipt.locator('pre')).toHaveCount(0);

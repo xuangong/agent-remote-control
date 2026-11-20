@@ -3,6 +3,7 @@ import { act } from 'react';
 import { expect, it, vi } from 'vitest';
 import type { AgentInteractionRequest } from '@orchardworks/agent-remote-protocol';
 import { render, rerender } from '../test/setup.js';
+import { openReceipts, showChanges } from '../test/interactions.js';
 import { InteractionPanel } from './InteractionPanel.js';
 import { InteractionItem } from './items/InteractionItem.js';
 
@@ -36,6 +37,7 @@ it('renders exact permission scope buttons and returns only the chosen scope', a
   const respond = vi.fn();
   const request = { kind: 'permission_approval', requestId: 'permission', summary: 'Read source', permissions: [{ resource: 'filesystem', access: 'read', target: '/workspace/src' }], allowScopes: ['turn'] } as AgentInteractionRequest;
   const container = await render(<InteractionPanel request={request} onResponse={respond} />);
+  await showChanges(container);
   expect(container.textContent).toContain('/workspace/src');
   expect(container.querySelector('[data-scope="session"]')).toBeNull();
   await act(async () => container.querySelector<HTMLButtonElement>('[data-scope="turn"]')!.click());
@@ -59,6 +61,7 @@ it('renders a policy choice without inventing other approval scopes', async () =
   const respond = vi.fn();
   const request = { kind: 'tool_approval', requestId: 'tool', toolCallId: 'call', toolName: 'command', summary: 'Connect to docs', detail: { type: 'other', description: 'Network request' }, allowedDecisions: ['allow', 'cancel'], allowScopes: ['policy'], policies: [{ policyId: 'allow-host', description: 'Allow docs.example.com for future requests' }] } as AgentInteractionRequest;
   const container = await render(<InteractionPanel request={request} onResponse={respond} />);
+  await showChanges(container);
   expect(container.querySelector('[data-scope="session"]')).toBeNull();
   expect(container.querySelector('[data-scope="once"]')).toBeNull();
   await act(async () => container.querySelector('summary')!.click());
@@ -69,9 +72,11 @@ it('renders a policy choice without inventing other approval scopes', async () =
 it('does not render sensitive question answers or form values in completed receipts', async () => {
   const request = { kind: 'question', requestId: 'secret', questions: [{ questionId: 'token', header: 'Token', prompt: 'Enter token', required: true, selection: 'single', options: [], allowCustomText: true, allowDismiss: true, sensitive: true }] } as AgentInteractionRequest;
   const container = await render(<InteractionItem item={{ type: 'interaction', request, response: { kind: 'question', answers: [{ questionId: 'token', selectedValues: [], customText: 'never-display' }] } }} />);
+  await openReceipts(container);
   expect(container.textContent).not.toContain('never-display');
   expect(container.textContent).toContain('Hidden');
   const receipt = await render(<InteractionItem item={{ type: 'interaction', request: form, response: { kind: 'form', action: 'submit', values: { token: 'never-display', count: 3, enabled: false, region: 'west' } } } as never} />);
+  await openReceipts(receipt);
   expect(receipt.textContent).not.toContain('never-display');
   expect(receipt.textContent).toContain('Hidden');
 });

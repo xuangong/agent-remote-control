@@ -110,6 +110,8 @@ const en = {
   'receipt.permissionSession': 'Allowed for this session',
   'receipt.completed': 'Done',
   'receipt.mismatch': 'The recorded answer does not match its question',
+  'receipt.questions': { one: '{count} question', other: '{count} questions' },
+  'receipt.answeredOf': '{answered} of {total} answered',
 
   // The conversation around the bubbles.
   'conversation.assistant': 'Assistant',
@@ -206,6 +208,8 @@ const zh: Readonly<Record<MessageKey, Message>> = {
   'receipt.permissionSession': '这次会话都允许',
   'receipt.completed': '完成了',
   'receipt.mismatch': '记录的回答和问题对不上',
+  'receipt.questions': { other: '{count} 个问题' },
+  'receipt.answeredOf': '答了 {answered}/{total}',
 
   'conversation.assistant': '助手',
   'conversation.sessionChange': '换到新的会话继续',

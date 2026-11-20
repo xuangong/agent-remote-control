@@ -197,6 +197,23 @@ export function AgentTimeline({
       previews={previews} extension={registry?.render(entry.item)}
       {...options} />;
   const now = Date.now();
+  const assistantName = assistant?.name || t('conversation.assistant');
+  // Requests waiting for the person belong to the turn that asked: the last one, after its answer.
+  const pending = state.pendingInteractions.length ? <div className="agent-turn-requests">
+    {state.pendingInteractions.map((request) => <fieldset
+      className="agent-interaction-lock"
+      disabled={interactionDisabled}
+      key={JSON.stringify([state.agent?.id, request.requestId])}
+    ><InteractionPanel
+        readOnly={interactionsReadOnly}
+        waitingForConnection={interactionsWaitingForConnection}
+        request={request}
+        onResponse={onInteractionResponse}
+        assistantName={assistantName}
+        questionDraft={questionDrafts?.[request.requestId]}
+        onQuestionDraftChange={onQuestionDraftChange ? (draft) => onQuestionDraftChange(request.requestId, draft) : undefined}
+      /></fieldset>)}
+  </div> : null;
   const outgoing = (state.outgoingMessages ?? []).filter(message => message.agentId === state.agent?.id);
   const discovered = useRef({ identity: '', order: new Map<string, number>() });
   const identity = JSON.stringify([state.agent?.providerId, state.agent?.id]);
@@ -236,28 +253,16 @@ export function AgentTimeline({
             const separator = start && startsDayLine(previous ? lastTimestamp(previous) : undefined, start) ? { label: dayLineLabel(start, now, locale, t), timestamp: start } : undefined;
             const disclosure = disclosures[index]!;
             return <TimelineTurn key={turn.key} turn={turn} disclosure={disclosure} separator={separator}
-              onToggle={() => toggleTurn(turn.key, disclosure.line === 'open')} renderEntry={renderEntry} groups={notices} />;
+              onToggle={() => toggleTurn(turn.key, disclosure.line === 'open')} renderEntry={renderEntry} groups={notices}
+              after={index === turns.length - 1 ? pending : undefined} />;
           })}
       {outgoing.map(message => <OutgoingMessageItem key={message.id} message={message} resourceContext={onResourceResolve && onResourceRequest ? { scopeKey: JSON.stringify([state.agent?.id]), bindings: [], resources: state.resources, resolveResource: onResourceResolve, requestResource: onResourceRequest } : undefined} onRetry={onRetryMessage} onDelete={onDeleteMessage} />)}
+      {turns.length === 0 ? pending : null}
       {timelineEnd ?? null}
     </div></BubbleAvatarContext.Provider>
 
     <AgentChildSessionList childrenFor={childrenFor} key={identity} children={children} label="Session subagents" collapsible onOpenChildSession={onOpenChildSession} />
 
-    {state.pendingInteractions.length > 0 ? <aside className="agent-interactions" aria-label="Pending interactions">
-      {state.pendingInteractions.map((request) => <fieldset
-        className="agent-interaction-lock"
-        disabled={interactionDisabled}
-        key={JSON.stringify([state.agent?.id, request.requestId])}
-      ><InteractionPanel
-          readOnly={interactionsReadOnly}
-          waitingForConnection={interactionsWaitingForConnection}
-          request={request}
-          onResponse={onInteractionResponse}
-          questionDraft={questionDrafts?.[request.requestId]}
-          onQuestionDraftChange={onQuestionDraftChange ? (draft) => onQuestionDraftChange(request.requestId, draft) : undefined}
-        /></fieldset>)}
-    </aside> : null}
   </section></ResourceDownloadContext.Provider>;
 }
 

@@ -1,0 +1,8 @@
+{
+  "rank": "m",
+  "members": {
+    "main": { "name": "Dango", "label": "Writes the release notes", "picture": { "shape": "squircle", "color": "#2f6fed" }, "process": "concise", "pinned": true },
+    "review": { "name": "团团" },
+    "plain": { "label": "Called by its generated name" }
+  }
+}

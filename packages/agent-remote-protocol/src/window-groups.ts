@@ -26,6 +26,12 @@ export function readBotPicture(stored: unknown): BotPicture | undefined {
 
 /** What Bot mode shows for one bot beyond its session's title. */
 export const WindowBotDetails = Type.Object({
+  /**
+   * The assistant's own name, which the owner gives it. Absent, every client calls it by the same generated name (the
+   * `assistantNames` rule of `@orchardworks/agent-client`) and stores that name with the bot's first edit. A session's title
+   * is never the name.
+   */
+  name: Type.Optional(Type.String({ minLength: 1, maxLength: 60 })),
   label: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
   picture: Type.Optional(BotPicture),
   /**

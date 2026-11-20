@@ -348,3 +348,26 @@ it('reads the frozen stored bots without a process mode and the fixture that has
   expect(Object.values(processBots.members).map(details => (details as { process?: string }).process)).toEqual(['concise', 'process', 'full', undefined]);
   for (const details of Object.values(processBots.members)) expect(Value.Check(WindowBotDetails, details)).toBe(true);
 });
+
+const namedBots = JSON.parse(readFileSync(new URL('./fixtures/window-bots.name.v1.json', import.meta.url), 'utf8'));
+
+it('accepts an assistant name of 1 to 60 characters in any language and refuses an empty, long or non-text one', () => {
+  for (const name of ['Dango', '团团', 'Release notes writer', 'x'.repeat(60)]) {
+    expect(Value.Check(WindowBotDetails, { name })).toBe(true);
+    expect(isWindowGroupOperation({ type: 'bot.update', viewId: 'main', details: { name } })).toBe(true);
+  }
+  for (const name of ['', 'x'.repeat(61), 1, true, null, { en: 'Dango' }]) {
+    expect(Value.Check(WindowBotDetails, { name })).toBe(false);
+    expect(isWindowGroupOperation({ type: 'bot.update', viewId: 'main', details: { name } })).toBe(false);
+  }
+});
+
+it('carries the name through bot.update beside the other details, and reads the stored bots with and without one', () => {
+  const window = windowOf('w', createWindowView('main', session('a'), 'primary'));
+  const group = applyGroupOperation(section(window), { type: 'bot.update', viewId: 'main', details: { name: 'Dango', label: 'Writes', pinned: true } });
+  expect(group.bots?.members.main).toEqual({ name: 'Dango', label: 'Writes', pinned: true });
+  expect(Value.Check(WindowBotDetails, storedBots.members.plain)).toBe(true);
+  expect(storedBots.members.main.name).toBeUndefined();
+  expect(Object.values(namedBots.members).map(details => (details as { name?: string }).name)).toEqual(['Dango', '团团', undefined]);
+  for (const details of Object.values(namedBots.members)) expect(Value.Check(WindowBotDetails, details)).toBe(true);
+});

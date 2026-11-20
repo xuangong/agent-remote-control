@@ -529,3 +529,19 @@ it('stores a bot\'s process mode through bot.update, keeps its other details and
   const refused = await update('bad', { process: 'verbose' });
   expect(refused.status).toBe(400);
 });
+
+it('stores an assistant\'s name through bot.update, keeps its other details and reads it back after a restart', async () => {
+  const namedBots = JSON.parse(readFileSync(new URL('../../agent-remote-protocol/src/fixtures/window-bots.name.v1.json', import.meta.url), 'utf8'));
+  const views = ['main', 'review', 'plain'].map((id, index) => createWindowView(id, { ...binding, nativeSessionId: id }, index === 0 ? 'primary' : undefined));
+  const stored: WorkspaceWindow = { schemaVersion: 3, id: 'names', title: 'Names', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views };
+  const f = await fixture({ ...emptyRelayState(auth), workspaceWindows: [{ subject: 'alice', id: 'names', window: stored, generation: 0, receipts: [], bots: namedBots }] });
+  const listed = (await f.call()).body.groups.find((group: { window: WorkspaceWindow }) => group.window.id === 'names');
+  expect(listed.bots.members.review).toEqual({ name: '团团' });
+  expect(listed.bots.members.plain).toEqual({ label: 'Called by its generated name' });
+  const update = (operationId: string, body: unknown) => f.call('/names/operations', 'POST', f.mutation(operationId, 0, { type: 'bot.update', viewId: 'plain', details: body }));
+  expect((await update('rename', { name: 'Pebbles', label: 'Called by its generated name' })).body.result.status).toBe('committed');
+  expect((await f.call('/names')).body.bots.members.plain).toEqual({ name: 'Pebbles', label: 'Called by its generated name' });
+  const restarted = await fixture(f.saved());
+  expect((await restarted.call('/names')).body.bots.members.plain.name).toBe('Pebbles');
+  expect((await update('empty', { name: '' })).status).toBe(400);
+});

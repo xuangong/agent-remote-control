@@ -19,14 +19,25 @@ export const avatarGazes: readonly AvatarGaze[] = [0, 1, 2, 3, 4, 5];
 export const avatarEye = { rx: 3.6, ry: 6.2 } as const;
 /** How far the eyes move from the shape's centre for each gaze, so an assistant always looks somewhere. */
 export const gazeOffsets: Readonly<Record<AvatarGaze, readonly [number, number]>> = {
-  0: [-3.5, -3], 1: [3.5, -3], 2: [-4.5, 0], 3: [4.5, 0], 4: [-3.5, 3], 5: [3.5, 3],
+  0: [-5.5, -5], 1: [5.5, -5], 2: [-7.5, 0], 3: [7.5, 0], 4: [-5.5, 5], 5: [5.5, 5],
 };
+
+export interface AvatarShapeDrawing {
+  base: string;
+  keyframes: readonly [string, string, string];
+  /** The eye centres before the optical scale and the gaze offset. */
+  eyes: readonly [readonly [number, number], readonly [number, number]];
+  /** Scale about `centroid` that gives the shape the circle's filled area, so every shape weighs the same at one size. */
+  optical: { scale: number; centroid: readonly [number, number] };
+  /** The largest eye offset along each axis that keeps both eyes inside the outline. */
+  gazeReach: readonly [number, number];
+}
 
 /**
  * 64 × 64 path data, absolute M, C and Z only: the resting outline, the three outlines its flow passes through (the
- * first is the resting one), and the eye centres before the gaze offset, about the shape's visual centre.
+ * first is the resting one), and the eye centres before the optical scale and the gaze offset.
  */
-export const avatarShapes: Readonly<Record<AvatarShape, { base: string; keyframes: readonly [string, string, string]; eyes: readonly [readonly [number, number], readonly [number, number]] }>> = {
+export const avatarShapes: Readonly<Record<AvatarShape, AvatarShapeDrawing>> = {
   circle: {
     base: 'M32 7C46 7 57 18 57 32C57 46 46 57 32 57C18 57 7 46 7 32C7 18 18 7 32 7Z',
     keyframes: [
@@ -35,6 +46,8 @@ export const avatarShapes: Readonly<Record<AvatarShape, { base: string; keyframe
       'M31 8C45 6 58 17 58 31C58 45 47 56 33 58C19 59 6 47 6 33C6 19 17 9 31 8Z',
     ],
     eyes: [[26, 32], [38, 32]],
+    optical: { scale: 1, centroid: [32, 32] },
+    gazeReach: [14, 17],
   },
   squircle: {
     base: 'M33 8C50 8 56 15 56 32C56 50 49 56 31 56C14 56 8 49 8 31C8 14 15 8 33 8Z',
@@ -44,6 +57,8 @@ export const avatarShapes: Readonly<Record<AvatarShape, { base: string; keyframe
       'M32 9C49 7 57 14 57 31C57 49 50 55 32 57C15 58 7 50 7 32C7 15 14 10 32 9Z',
     ],
     eyes: [[26, 32], [38, 32]],
+    optical: { scale: 1, centroid: [32, 32] },
+    gazeReach: [13, 16],
   },
   triangle: {
     base: 'M45 30C52 43 52 55 32 55C12 55 12 43 19 30C26 17 38 17 45 30Z',
@@ -53,6 +68,8 @@ export const avatarShapes: Readonly<Record<AvatarShape, { base: string; keyframe
       'M44 29C51 42 53 54 33 55C11 56 13 42 20 29C27 18 37 16 44 29Z',
     ],
     eyes: [[27, 39], [37, 39]],
+    optical: { scale: 1.458, centroid: [32, 39.05] },
+    gazeReach: [12, 15],
   },
   sideways: {
     base: 'M12 14C12 6 20 6 28 10C44 18 56 24 56 32C56 40 44 46 28 54C20 58 12 58 12 50C12 38 12 26 12 14Z',
@@ -62,6 +79,8 @@ export const avatarShapes: Readonly<Record<AvatarShape, { base: string; keyframe
       'M13 13C13 7 19 5 27 9C43 17 55 23 57 31C57 39 45 45 29 55C21 59 13 59 13 51C13 39 13 25 13 13Z',
     ],
     eyes: [[25, 32], [35, 32]],
+    optical: { scale: 1.13, centroid: [29.73, 32] },
+    gazeReach: [10, 13],
   },
 };
 
@@ -124,9 +143,18 @@ export function distinctAvatar(id: string, taken: readonly Pick<AvatarRecipe, 's
   return generated;
 }
 
-/** The two eye centres of a recipe, in the 64-unit viewBox. */
+/** The SVG transform that applies a shape's optical scale about its centroid. */
+export function avatarOpticalTransform(shape: AvatarShape): string {
+  const { scale, centroid: [x, y] } = avatarShapes[shape].optical;
+  return `translate(${x} ${y}) scale(${scale}) translate(${-x} ${-y})`;
+}
+
+/** The two eye centres of a recipe, in the 64-unit viewBox: scaled with the shape, then moved by the gaze within its reach. */
 export function avatarEyes(shape: AvatarShape, gaze: AvatarGaze): readonly [readonly [number, number], readonly [number, number]] {
+  const { eyes, optical: { scale, centroid }, gazeReach } = avatarShapes[shape];
   const [dx, dy] = gazeOffsets[gaze];
-  const [left, right] = avatarShapes[shape].eyes;
-  return [[left[0] + dx, left[1] + dy], [right[0] + dx, right[1] + dy]];
+  const moveX = Math.max(-gazeReach[0], Math.min(gazeReach[0], dx)), moveY = Math.max(-gazeReach[1], Math.min(gazeReach[1], dy));
+  const place = ([x, y]: readonly [number, number]): readonly [number, number] =>
+    [centroid[0] + (x - centroid[0]) * scale + moveX, centroid[1] + (y - centroid[1]) * scale + moveY];
+  return [place(eyes[0]), place(eyes[1])];
 }

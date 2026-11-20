@@ -133,6 +133,35 @@ test.describe('motion', () => {
     expect(await page.locator('svg[aria-label="Orchard 32"]').evaluate(mark => mark.getAnimations({ subtree: true }).length)).toBe(0);
   });
 
+  test('the four avatar shapes paint about the same area at 40 px', async ({ page }) => {
+    await open(page, 'theme=light&motion=off');
+    const painted: Record<string, number> = {};
+    for (const shape of ['circle', 'squircle', 'triangle', 'sideways']) {
+      const avatar = page.locator(`[data-testid="avatar-grid"] .orchard-avatar[data-shape="${shape}"]`).first();
+      await avatar.scrollIntoViewIfNeeded();
+      const png = (await avatar.screenshot({ animations: 'disabled' })).toString('base64');
+      // Pixels that differ from the corner's background colour (the shape and its eyes, the same eyes in each shape).
+      painted[shape] = await page.evaluate(async source => {
+        const image = new Image();
+        image.src = `data:image/png;base64,${source}`;
+        await image.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = image.width; canvas.height = image.height;
+        const context = canvas.getContext('2d')!;
+        context.drawImage(image, 0, 0);
+        const { data } = context.getImageData(0, 0, image.width, image.height);
+        let count = 0;
+        for (let index = 0; index < data.length; index += 4) {
+          if (Math.abs(data[index]! - data[0]!) + Math.abs(data[index + 1]! - data[1]!) + Math.abs(data[index + 2]! - data[2]!) > 60) count++;
+        }
+        return count;
+      }, png);
+    }
+    const areas = Object.values(painted);
+    expect(Math.min(...areas), JSON.stringify(painted)).toBeGreaterThan(0);
+    expect(Math.max(...areas) / Math.min(...areas), JSON.stringify(painted)).toBeLessThan(1.1);
+  });
+
   test('a hidden page runs no avatar or mark animation, and a visible one resumes', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await open(page, 'theme=light&motion=on');

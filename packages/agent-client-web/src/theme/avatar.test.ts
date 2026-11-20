@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { avatarEye, avatarEyes, avatarFor, avatarGazes, avatarShapeNames, avatarShapes, avatarWith, distinctAvatar, type AvatarShape } from './avatar.js';
+import { avatarEye, avatarEyes, avatarFor, avatarGazes, gazeOffsets, avatarShapeNames, avatarShapes, avatarWith, distinctAvatar, type AvatarShape } from './avatar.js';
 import { avatarPalette } from './tokens.js';
 
 describe('avatarFor', () => {
@@ -92,6 +92,16 @@ function inside([x, y]: Point, polygon: readonly Point[]): boolean {
   }
   return result;
 }
+function area(polygon: readonly Point[]): number {
+  let sum = 0;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) sum += polygon[j]![0] * polygon[i]![1] - polygon[i]![0] * polygon[j]![1];
+  return Math.abs(sum / 2);
+}
+/** The outline after the shape's optical scale about its centroid. */
+function scaled(shape: AvatarShape): Point[] {
+  const { scale, centroid: [cx, cy] } = avatarShapes[shape].optical;
+  return flatten(avatarShapes[shape].base).map(([x, y]) => [cx + (x - cx) * scale, cy + (y - cy) * scale]);
+}
 function centroid(polygon: readonly Point[]): Point {
   let area = 0, cx = 0, cy = 0;
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
@@ -102,8 +112,28 @@ function centroid(polygon: readonly Point[]): Point {
 }
 
 describe.each(avatarShapeNames)('the %s shape', (shape: AvatarShape) => {
-  const outline = flatten(avatarShapes[shape].base);
+  const outline = scaled(shape);
   const centre = centroid(outline);
+
+  it('fills the circle\'s area within 6 % after its optical scale, and stays inside the 64 box', () => {
+    expect(Math.abs(area(outline) / area(scaled('circle')) - 1)).toBeLessThan(0.06);
+    for (const [x, y] of outline) { expect(x).toBeGreaterThanOrEqual(0); expect(x).toBeLessThanOrEqual(64); expect(y).toBeGreaterThanOrEqual(0); expect(y).toBeLessThanOrEqual(64); }
+  });
+
+  it('declares the centroid its scale turns about', () => {
+    const [x, y] = centroid(flatten(avatarShapes[shape].base));
+    expect(Math.hypot(x - avatarShapes[shape].optical.centroid[0], y - avatarShapes[shape].optical.centroid[1])).toBeLessThan(0.1);
+  });
+
+  it('moves its eyes at least as far as the gaze asks, so it always looks somewhere', () => {
+    const { optical: { scale, centroid: [cx, cy] }, eyes: [rest] } = avatarShapes[shape];
+    const still: Point = [cx + (rest[0] - cx) * scale, cy + (rest[1] - cy) * scale];
+    const minimum = shape === 'circle' || shape === 'squircle' ? 7 : 6;
+    for (const gaze of avatarGazes) {
+      const [left] = avatarEyes(shape, gaze);
+      expect(Math.hypot(left[0] - still[0], left[1] - still[1]), `gaze ${gaze}`).toBeGreaterThanOrEqual(minimum);
+    }
+  });
 
   it.each(avatarGazes)('looks somewhere with gaze %i: the eyes sit off-centre, wholly inside the shape', gaze => {
     const [left, right] = avatarEyes(shape, gaze);
@@ -121,6 +151,12 @@ describe.each(avatarShapeNames)('the %s shape', (shape: AvatarShape) => {
     expect(keyframes[0]).toBe(base);
     const commands = (path: string) => path.replace(/[^MCZ]/g, '');
     for (const frame of keyframes) expect(commands(frame)).toBe(commands(base));
+  });
+});
+
+describe('gazeOffsets', () => {
+  it('asks every gaze for at least 7 units of 64', () => {
+    for (const [dx, dy] of Object.values(gazeOffsets)) expect(Math.hypot(dx, dy)).toBeGreaterThanOrEqual(7);
   });
 });
 

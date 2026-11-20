@@ -7,6 +7,7 @@ import type {
   TimelineCursor,
   TimelineDirection,
 } from '@orchardworks/agent-remote-protocol';
+import type { MessageKey, MessageParams } from '../presentation/messages.js';
 
 export type RemoteServerMessage = ServerMessage | IncompatibleProtocolVersionErrorMessage;
 
@@ -48,6 +49,9 @@ export class RemoteOperationError extends Error {
     message: string,
     readonly recoverable: boolean,
     readonly requestId?: string,
+    /** The catalogue key of `message`, for an error the client made for a person. */
+    readonly messageKey?: MessageKey,
+    readonly messageParams?: MessageParams,
   ) {
     super(message);
   }

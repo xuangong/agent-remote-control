@@ -1,6 +1,5 @@
 import { applyWindowOperation, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
-
-const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+import { translator, type Translate } from '@orchardworks/agent-client';
 /** What closes with a bot's view: its Asks, and the views attached to it or closing with it, such as a Team leader's members. */
 export function closingWith(window: WorkspaceWindow | undefined, viewId: string, nameOf: (viewId: string) => string): { asks: number; bots: string[] } {
   // The bot may already be gone (removed here or on another device) while its confirmation is still closing.
@@ -11,10 +10,10 @@ export function closingWith(window: WorkspaceWindow | undefined, viewId: string,
     bots: leaving.filter(view => view.feature?.kind !== 'ask' && view.binding).map(view => nameOf(view.id)) };
 }
 /** “Its session keeps running.”, then what closes with the bot: “Edge cases” and 1 Ask close with it. */
-export function removalMessage(closing: { asks: number; bots: string[] } | undefined): string {
-  const items = [...closing?.bots.map(name => `“${name}”`) ?? [], ...closing?.asks ? [plural(closing.asks, 'Ask', 'Asks')] : []];
-  if (!items.length) return 'Its session keeps running.';
-  const list = items.length === 1 ? items[0] : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`;
+export function removalMessage(closing: { asks: number; bots: string[] } | undefined, t: Translate = translator('en')): string {
+  const items = [...closing?.bots.map(name => `“${name}”`) ?? [], ...closing?.asks ? [t('client.removal.asks', { count: closing.asks })] : []];
+  if (!items.length) return t('client.removal.keepsRunning');
+  const list = items.length === 1 ? items[0]! : t('client.removal.listAnd', { head: items.slice(0, -1).join(t('client.removal.separator')), last: items.at(-1)! });
   const single = items.length === 1 && !(closing!.asks > 1 && !closing!.bots.length);
-  return `Its session keeps running. ${list} ${single ? 'closes' : 'close'} with it.`;
+  return t(single ? 'client.removal.closes' : 'client.removal.closeMany', { list });
 }

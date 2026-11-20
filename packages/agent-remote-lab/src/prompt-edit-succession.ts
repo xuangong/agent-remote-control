@@ -2,6 +2,7 @@ import { isNativePrefixSelection, isSessionExcerpt, type SessionExcerpt } from '
 import { releaseImageDraft, writeImageDraft, type ImageDraft, type ImageDraftBinding } from '@orchardworks/agent-client-web/browser';
 import type { OpenedSession, SuccessionPrepareInput } from './directory-client.js';
 import { clearCacheOnClose, conversationSessionStorage } from './conversation-storage.js';
+import { withMessageKey } from '@orchardworks/agent-client';
 
 export interface PrefixEditIntent {
   version: 1; source: OpenedSession; operation: SuccessionPrepareInput;
@@ -17,7 +18,7 @@ const promptKey = (scope: string, view: string, operationId: string) => JSON.str
 function assertPromptOwner(scope: string, view: string, intent: PrefixEditIntent): void {
   const legacy = JSON.stringify([scope, 'prefix-edit-prompt', intent.operation.operationId]);
   if (intent.prompt.scope !== scope || intent.prompt.key !== promptKey(scope, view, intent.operation.operationId) && intent.prompt.key !== legacy) {
-    throw new Error('The prompt snapshot does not belong to this operation. Its recovery intent has been preserved.');
+    throw withMessageKey(new Error('The prompt snapshot does not belong to this operation. Its recovery intent has been preserved.'), 'client.edit.snapshotMismatch');
   }
 }
 interface PrefixEditWork { tail: Promise<void>; closing: Set<string> }
@@ -45,35 +46,35 @@ export function readPrefixEdit(scope: string, view: string): PrefixEditIntent | 
     || value.restoration !== undefined && (typeof value.restoration?.text !== 'string' || typeof value.restoration?.imageParts !== 'string')
     || value.excerpts !== undefined && (!Array.isArray(value.excerpts) || !value.excerpts.every(isSessionExcerpt))
     || ![value.baseline.textRevision, value.baseline.imageRevision].every(item => Number.isSafeInteger(item) && item >= 0)) {
-    throw new Error('The original prompt edit could not be read. Its saved intent has been preserved.');
+    throw withMessageKey(new Error('The original prompt edit could not be read. Its saved intent has been preserved.'), 'client.edit.originalUnreadable');
   }
   return value;
 }
 export function savePrefixEdit(scope: string, view: string, intent: PrefixEditIntent): void {
-  if (clearCacheOnClose()) throw new Error('Prompt editing requires retained recovery storage.');
+  if (clearCacheOnClose()) throw withMessageKey(new Error('Prompt editing requires retained recovery storage.'), 'client.edit.needsStorage');
   assertPromptOwner(scope, view, intent);
   const existing = readPrefixEdit(scope, view);
-  if (existing && existing.operation.operationId !== intent.operation.operationId) throw new Error('Resolve the original prompt edit before starting another.');
+  if (existing && existing.operation.operationId !== intent.operation.operationId) throw withMessageKey(new Error('Resolve the original prompt edit before starting another.'), 'client.edit.resolveFirst');
   const encoded = JSON.stringify(intent);
   conversationSessionStorage.setItem(storageKey(scope, view), encoded);
-  if (conversationSessionStorage.getItem(storageKey(scope, view)) !== encoded) throw new Error('The prompt edit identity could not be retained.');
+  if (conversationSessionStorage.getItem(storageKey(scope, view)) !== encoded) throw withMessageKey(new Error('The prompt edit identity could not be retained.'), 'client.edit.identityNotRetained');
 }
 export async function retainPrefixEdit(scope: string, view: string, intent: Omit<PrefixEditIntent, 'prompt'>, draft: Omit<ImageDraft, 'scope' | 'key'>, isCurrent: () => boolean = () => true): Promise<PrefixEditIntent> {
-  if (pendingEdits.get(storageKey(scope, view))?.closing.has(intent.operation.operationId)) throw new Error('The original prompt edit is closing.');
+  if (pendingEdits.get(storageKey(scope, view))?.closing.has(intent.operation.operationId)) throw withMessageKey(new Error('The original prompt edit is closing.'), 'client.edit.closing');
   return mutatePrefixEdit(scope, view, async () => {
     const existing = readPrefixEdit(scope, view);
-    if (existing && existing.operation.operationId !== intent.operation.operationId) throw new Error('Resolve the original prompt edit before starting another.');
-    if (!isCurrent()) throw new Error('The prompt edit owner changed.');
+    if (existing && existing.operation.operationId !== intent.operation.operationId) throw withMessageKey(new Error('Resolve the original prompt edit before starting another.'), 'client.edit.resolveFirst');
+    if (!isCurrent()) throw withMessageKey(new Error('The prompt edit owner changed.'), 'client.edit.ownerChanged');
     if (existing) { assertPromptOwner(scope, view, existing); return existing; }
     const prompt = { scope, key: promptKey(scope, view, intent.operation.operationId) };
     const retained: PrefixEditIntent = { ...intent, prompt };
     try {
       // The operation is publishable only after its selected prompt can survive reload.
       const result = await writeImageDraft({ ...draft, ...prompt }).catch(() => {
-        throw new Error('The selected prompt could not be retained in browser storage. No native preparation was requested.');
+        throw withMessageKey(new Error('The selected prompt could not be retained in browser storage. No native preparation was requested.'), 'client.edit.notRetainedBrowser');
       });
       if (!isCurrent() || result.status !== 'saved' || result.retention !== 'local') {
-        throw new Error('The selected prompt could not be retained for recovery. No native preparation was requested.');
+        throw withMessageKey(new Error('The selected prompt could not be retained for recovery. No native preparation was requested.'), 'client.edit.notRetainedRecovery');
       }
       savePrefixEdit(scope, view, retained);
       return retained;
@@ -83,7 +84,7 @@ export async function retainPrefixEdit(scope: string, view: string, intent: Omit
       let published: PrefixEditIntent | undefined;
       try { published = readPrefixEdit(scope, view); }
       catch (readError) {
-        throw new AggregateError([error, readError], 'The prompt edit identity could not be verified. Its snapshot was preserved; restore browser storage before retrying recovery.');
+        throw withMessageKey(new AggregateError([error, readError], 'The prompt edit identity could not be verified. Its snapshot was preserved; restore browser storage before retrying recovery.'), 'client.edit.identityUnverified');
       }
       if (published?.operation.operationId !== intent.operation.operationId || published.prompt.key !== prompt.key) {
         try { await releaseImageDraft(prompt); }
@@ -92,9 +93,9 @@ export async function retainPrefixEdit(scope: string, view: string, intent: Omit
           // so ordinary recovery can retry cleanup without preparing a candidate.
           try { savePrefixEdit(scope, view, { ...retained, cancelRequested: true }); }
           catch (identityError) {
-            throw new AggregateError([error, cleanupError, identityError], 'The selected prompt cleanup failed, and its recovery identity could not be retained. Browser storage must recover before cleanup can be retried.');
+            throw withMessageKey(new AggregateError([error, cleanupError, identityError], 'The selected prompt cleanup failed, and its recovery identity could not be retained. Browser storage must recover before cleanup can be retried.'), 'client.edit.cleanupIdentityLost');
           }
-          throw new AggregateError([error, cleanupError], 'The selected prompt cleanup failed. Its snapshot has been preserved for recovery.');
+          throw withMessageKey(new AggregateError([error, cleanupError], 'The selected prompt cleanup failed. Its snapshot has been preserved for recovery.'), 'client.edit.cleanupFailed');
         }
       }
       throw error;
@@ -104,7 +105,7 @@ export async function retainPrefixEdit(scope: string, view: string, intent: Omit
 export function finishPrefixEdit(scope: string, view: string, operationId: string, options: { unpublishedOnly?: boolean } = {}): Promise<void> {
   return mutatePrefixEdit(scope, view, async () => {
     const intent = readPrefixEdit(scope, view);
-    if (options.unpublishedOnly && intent) throw new Error('Resolve the original prompt edit before starting another.');
+    if (options.unpublishedOnly && intent) throw withMessageKey(new Error('Resolve the original prompt edit before starting another.'), 'client.edit.resolveFirst');
     if (intent && intent.operation.operationId !== operationId) return;
     if (intent) assertPromptOwner(scope, view, intent);
     await releaseImageDraft(intent?.prompt ?? { scope, key: promptKey(scope, view, operationId) });

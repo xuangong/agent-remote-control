@@ -1,5 +1,5 @@
 import type { AgentChildSession } from '@orchardworks/agent-remote-protocol';
-import { sessionKey } from '@orchardworks/agent-client';
+import { sessionKey, translator, type Translate } from '@orchardworks/agent-client';
 import type { OpenedSession } from './directory-client.js';
 
 export interface SessionEntry extends Partial<AgentChildSession> {
@@ -60,9 +60,11 @@ export function sessionForest(entries: readonly SessionEntry[], known: readonly 
 export function openedEntry(item: OpenedSession, known: readonly SessionEntry[]): SessionEntry {
   return { ...known.find((entry) => sessionKey(entry) === sessionKey(item)), ...item };
 }
-export function sessionStatusLabel(item: SessionEntry): string {
-  if (item.observation === 'saved_history') return 'Saved history';
-  return item.status === 'running' ? 'Working' : item.status === 'waiting' ? 'Waiting' : item.status === 'closed' ? 'Closed' : item.status === 'failed' ? 'Failed' : item.status === 'starting' ? 'Starting' : item.status === 'idle' ? 'Idle' : '';
+export function sessionStatusLabel(item: SessionEntry, t: Translate = translator('en')): string {
+  if (item.observation === 'saved_history') return t('client.status.savedHistory');
+  const key = item.status === 'running' ? 'client.activity.working' : item.status === 'waiting' ? 'client.status.waiting' : item.status === 'closed' ? 'client.activity.closed'
+    : item.status === 'failed' ? 'client.status.failed' : item.status === 'starting' ? 'client.activity.starting' : item.status === 'idle' ? 'client.status.idle' : undefined;
+  return key ? t(key) : '';
 }
 
 /** Resolve a native family without crossing Host or Provider boundaries. */

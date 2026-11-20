@@ -4,6 +4,7 @@ import type { OpenedSession } from './directory-client.js';
 import { controllerPath } from '@orchardworks/agent-remote-protocol/model';
 import { sessionChildren, sessionKey, sessionRootKey, type SessionEntry } from './session-tree.js';
 import type { TraceEntryRequest } from './trace-model.js';
+import { withMessageKey } from '@orchardworks/agent-client';
 
 export interface SessionViewNavigation {
   childrenFor(nativeSessionId: string): readonly AgentChildSessionView[];
@@ -43,7 +44,7 @@ export function sessionViewNavigation({ source, state, entries, openSession, ope
       const target = family.get(sessionKey({ ...source, nativeSessionId }));
       if (!target || sessionRootKey(target, known) !== sessionRootKey(origin, known)) return undefined;
       return { title: target.title, href: controllerPath({ ...target, hostId: target.hostId ?? 'local', sessionIntent: 'history' }), open: async () => {
-        if (!await openSession(target, 'history')) throw new Error('This session could not be opened.');
+        if (!await openSession(target, 'history')) throw withMessageKey(new Error('This session could not be opened.'), 'client.view.notOpened');
       } };
     },
     onOpenChildSession: openChildSession, communication, revealEntry,

@@ -26,8 +26,8 @@ export class SessionStarsClient {
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(12000)]) : AbortSignal.timeout(12000),
       ...(body ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) });
     const value = await response.json();
-    if (!response.ok) throw new Error(typeof value?.error === 'string' ? value.error : 'Favorites could not be updated. Try again.');
-    if (!Array.isArray(value?.stars) || !value.stars.every((item: unknown) => validSessionStar(item) && 'available' in item && typeof item.available === 'boolean' && 'online' in item && typeof item.online === 'boolean')) throw new Error('The favorites response is invalid.');
+    if (!response.ok) throw typeof value?.error === 'string' ? new Error(value.error) : withMessageKey(new Error('Favorites could not be updated. Try again.'), 'client.view.favoritesFailed');
+    if (!Array.isArray(value?.stars) || !value.stars.every((item: unknown) => validSessionStar(item) && 'available' in item && typeof item.available === 'boolean' && 'online' in item && typeof item.online === 'boolean')) throw withMessageKey(new Error('The favorites response is invalid.'), 'client.view.favoritesInvalid');
     return value.stars;
   }
   private async favoritesRequest(command?: FavoriteCommand, signal?: AbortSignal): Promise<FavoritesSnapshot> {
@@ -38,13 +38,13 @@ export class SessionStarsClient {
     if (!response.ok) {
       const message = typeof value?.error === 'string' ? value.error : 'Favorites could not be updated. Try again.';
       if (response.status === 409) throw new FavoritesConflict(message);
-      throw new Error(message);
+      throw typeof value?.error === 'string' ? new Error(message) : withMessageKey(new Error(message), 'client.view.favoritesFailed');
     }
     if (value?.successionProgress !== undefined && !validSuccessionProgress(value.successionProgress) || !Number.isSafeInteger(value?.revision) || value.revision < 0 || !Array.isArray(value.folders) || !value.folders.every((folder: any) =>
       typeof folder?.id === 'string' && typeof folder.title === 'string' && (folder.parentId === null || typeof folder.parentId === 'string') && Number.isSafeInteger(folder.order)) ||
       !Array.isArray(value.stars) || !value.stars.every((star: any) => validSessionStar(star) && typeof star.favoriteId === 'string' &&
         (star.folderId === null || typeof star.folderId === 'string') && Number.isSafeInteger(star.order) && 'available' in star && typeof star.available === 'boolean' && 'online' in star && typeof star.online === 'boolean')) {
-      throw new Error('The favorites response is invalid.');
+      throw withMessageKey(new Error('The favorites response is invalid.'), 'client.view.favoritesInvalid');
     }
     return value;
   }
@@ -57,6 +57,7 @@ export class SessionStarsClient {
 
 export type { Folder, FavoritesSnapshot, FavoriteCommand } from '@orchardworks/agent-remote-protocol/model';
 import type { FavoritesSnapshot, FavoriteCommand } from '@orchardworks/agent-remote-protocol/model';
+import { withMessageKey } from '@orchardworks/agent-client';
 type WithoutRevision<T> = T extends unknown ? Omit<T, 'revision'> : never;
 export type FavoriteChange = WithoutRevision<FavoriteCommand>;
 export class FavoritesConflict extends Error {}

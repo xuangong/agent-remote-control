@@ -12,6 +12,7 @@ import { watchPageResume, pageHidden } from '../page-lifecycle.js';
 import type {
   RemoteConnection, RemoteDisconnectReason, RemoteProtocolObservation, RemoteTransportDiagnostic, RemoteTransportListener,
 } from './transport.js';
+import { withMessageKey } from '../presentation/error-words.js';
 
 type Mode = 'session' | 'activity';
 type Negotiation = Extract<ClientMessage, { type: 'negotiate' }>;
@@ -254,9 +255,9 @@ export class SessionChannelPool {
   }
 
   private send(subscription: Subscription, message: ClientMessage): void {
-    if (!subscription.active) throw new Error('Remote WebSocket connection is closed.');
+    if (!subscription.active) throw withMessageKey(new Error('Remote WebSocket connection is closed.'), 'client.error.socketClosed');
     const encoded = encodeClientMessage(message);
-    if (encoded.status === 'rejected') throw new Error('Client message was rejected by the public protocol.');
+    if (encoded.status === 'rejected') throw withMessageKey(new Error('Client message was rejected by the public protocol.'), 'client.error.messageRejected');
     if (!subscription.negotiation) {
       if (message.type !== 'negotiate') throw new Error('Remote session must negotiate before sending messages.');
       if (this.nextId >= Number.MAX_SAFE_INTEGER) throw new Error('Remote session channel subscription limit reached.');
@@ -551,7 +552,7 @@ export class SessionChannelPool {
   private write(channel: Channel, message: SessionChannelClientMessage): void {
     if (!channel.active || (channel.socket.readyState !== undefined && channel.socket.readyState !== 1)) {
       this.failChannel(channel, false);
-      throw new Error('Remote WebSocket connection is closed.');
+      throw withMessageKey(new Error('Remote WebSocket connection is closed.'), 'client.error.socketClosed');
     }
     const encoded = encodeSessionChannelClientMessage(message);
     if (encoded.status === 'rejected') throw new Error('Session channel message was rejected by the public protocol.');

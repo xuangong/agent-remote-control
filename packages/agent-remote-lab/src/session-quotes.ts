@@ -2,6 +2,7 @@ import { useCallback, useSyncExternalStore } from 'react';
 import { appendSessionExcerpts, isSessionExcerpt, MAX_SESSION_EXCERPTS_PER_MESSAGE, sessionExcerptAttachment, type SessionExcerpt } from '@orchardworks/agent-remote-protocol';
 import type { LabWorkbenchActions } from './components/LabWorkbench.js';
 import { conversationLocalStorage } from './conversation-storage.js';
+import { withMessageKey } from '@orchardworks/agent-client';
 
 /**
  * Excerpts quoted into a session view wait in its composer until the next message carries them. They belong to the
@@ -42,13 +43,13 @@ function write(scope: string, change: (views: SavedQuotes['views']) => void): vo
 export function readQuotes(scope: string, viewId: string): SessionExcerpt[] { return read(scope).views[viewId]?.excerpts ?? []; }
 /** Quotes an excerpt into a view's composer; the view can hold as many as one message can carry. */
 export function addQuote(scope: string, viewId: string, excerpt: SessionExcerpt): void {
-  if (!isSessionExcerpt(excerpt)) throw new Error('The quoted messages could not be read.');
+  if (!isSessionExcerpt(excerpt)) throw withMessageKey(new Error('The quoted messages could not be read.'), 'client.quote.unreadable');
   const current = readQuotes(scope, viewId);
   if (current.some(item => item.id === excerpt.id)) return;
-  if (current.length >= MAX_SESSION_EXCERPTS_PER_MESSAGE) throw new Error(`That message already carries ${MAX_SESSION_EXCERPTS_PER_MESSAGE} quotes. Send it or remove one first.`);
+  if (current.length >= MAX_SESSION_EXCERPTS_PER_MESSAGE) throw withMessageKey(new Error(`That message already carries ${MAX_SESSION_EXCERPTS_PER_MESSAGE} quotes. Send it or remove one first.`), 'client.quote.tooMany', { max: MAX_SESSION_EXCERPTS_PER_MESSAGE });
   try {
     write(scope, views => { views[viewId] = { updatedAt: Date.now(), excerpts: [...(views[viewId]?.excerpts ?? []), excerpt] }; });
-  } catch { throw new Error('The quote could not be saved in this browser. Remove other quotes or free browser storage.'); }
+  } catch { throw withMessageKey(new Error('The quote could not be saved in this browser. Remove other quotes or free browser storage.'), 'client.quote.notSaved'); }
 }
 export function removeQuotes(scope: string, viewId: string, ids: readonly string[]): void {
   write(scope, views => {

@@ -12,6 +12,7 @@
  */
 import type { AgentProviderDescriptor } from '@orchardworks/agent-remote-protocol';
 import type { RemoteHost } from '../components/HostPairing.js';
+import { translator, type Translate } from '@orchardworks/agent-client';
 
 export const LOCAL_HOST_ID = 'local';
 
@@ -53,23 +54,23 @@ export interface CreationFacts {
 }
 
 /** A Host the link asked for that the Relay does not list for this person. */
-export function requestedHostUnavailableReason(facts: CreationFacts): string | undefined {
+export function requestedHostUnavailableReason(facts: CreationFacts, t: Translate = translator('en')): string | undefined {
   const { requestedHostId, hosts } = facts;
   const missing = facts.hostsLoaded && !!requestedHostId && requestedHostId !== LOCAL_HOST_ID && !facts.hostSelectionRestored && !hosts.some(candidate => candidate.id === requestedHostId);
-  return missing ? 'Requested Host is unavailable or is not shared with you. Retry Hosts or select another Host.' : undefined;
+  return missing ? t('client.creation.requestedHostMissing') : undefined;
 }
 
-export function creationUnavailableReason(facts: CreationFacts): string | undefined {
+export function creationUnavailableReason(facts: CreationFacts, t: Translate = translator('en')): string | undefined {
   const { selectedHostId, hosts } = facts;
   const host = hosts.find(candidate => candidate.id === selectedHostId);
-  const requestedMissing = requestedHostUnavailableReason(facts);
+  const requestedMissing = requestedHostUnavailableReason(facts, t);
   if (requestedMissing) return requestedMissing;
   const remote = selectedHostId !== LOCAL_HOST_ID;
-  if (remote && !facts.hostsLoaded && !facts.hostError) return 'Loading Hosts…';
-  if (remote && host?.online !== true) return 'This Host is offline. Reconnect it or select another Host.';
+  if (remote && !facts.hostsLoaded && !facts.hostError) return t('client.creation.loadingHosts');
+  if (remote && host?.online !== true) return t('client.creation.hostOffline');
   const quota = host?.sessionQuota;
-  if (quota !== undefined && quota.used >= quota.limit && !facts.reserved) return 'Session creation limit reached. Existing sessions remain available. Ask the owner to raise your limit.';
-  if (remote && !facts.providerId) return 'No providers available on this Host. Check installed agents and provider settings.';
+  if (quota !== undefined && quota.used >= quota.limit && !facts.reserved) return t('client.creation.quotaReached');
+  if (remote && !facts.providerId) return t('client.creation.noProviders');
   return undefined;
 }
 

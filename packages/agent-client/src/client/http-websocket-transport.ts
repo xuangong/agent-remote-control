@@ -38,6 +38,7 @@ import type {
   RemoteTransportListener,
   RemoteServerMessage, SessionSuccessionSelection, SessionSuccessionSupport,
 } from './transport.js';
+import { withMessageKey } from '../presentation/error-words.js';
 
 type WebSocketEventHandler<TEvent> = {
   bivarianceHack(event: TEvent): void;
@@ -170,7 +171,7 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
     const body = await this.fetchBody('v1/session-drafts', { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ hostId: session.hostId, providerId: session.providerId, nativeSessionId: session.nativeSessionId, text }) });
     const draft: unknown = JSON.parse(body);
-    if (!isSessionDraft(draft)) throw new Error('The Relay returned an invalid draft.');
+    if (!isSessionDraft(draft)) throw withMessageKey(new Error('The Relay returned an invalid draft.'), 'client.error.invalidDraft');
     this.sessionDrafts.accept(draft);
     return draft;
   }
@@ -196,7 +197,7 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
   }
   private acceptOutboxEntry(body: string): OutboxEntry {
     const entry: unknown = JSON.parse(body);
-    if (!isOutboxEntry(entry)) throw new Error('The Relay returned an invalid outbox message.');
+    if (!isOutboxEntry(entry)) throw withMessageKey(new Error('The Relay returned an invalid outbox message.'), 'client.error.invalidOutbox');
     this.sessionOutbox.accept(entry);
     return entry;
   }
@@ -279,7 +280,7 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
     if (new TextEncoder().encode(body).byteLength <= 16 * 1024 * 1024) {
       try { const value: unknown = JSON.parse(body); if (valid(value)) return value; } catch { /* Invalid JSON follows the same rejection path. */ }
     }
-    this.invalidBody('http'); throw new Error('Relay succession response was invalid.');
+    this.invalidBody('http'); throw withMessageKey(new Error('Relay succession response was invalid.'), 'client.error.invalidSuccession');
   }
 
   async fetchSnapshot(agentId: string, options?: RemoteRequestOptions) {
@@ -296,7 +297,7 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
       return decoded.value;
     }
     this.invalidBody('http');
-    throw new Error('Relay response was invalid.');
+    throw withMessageKey(new Error('Relay response was invalid.'), 'client.error.invalidRelayResponse');
   }
 
   async fetchTimeline(
@@ -328,13 +329,13 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
       return decoded.value;
     }
     this.invalidBody('http');
-    throw new Error('Relay response was invalid.');
+    throw withMessageKey(new Error('Relay response was invalid.'), 'client.error.invalidRelayResponse');
   }
 
   async listProviders(options?: RemoteRequestOptions): Promise<ProviderListResponse['payload']['providers']> {
     const query = new URLSearchParams({ protocolVersion: PROTOCOL_VERSION });
     const message = await this.fetchServerMessage(`v1/providers?${query}`, undefined, options);
-    if (message.type !== 'provider_list') throw new Error('Relay response was invalid.');
+    if (message.type !== 'provider_list') throw withMessageKey(new Error('Relay response was invalid.'), 'client.error.invalidRelayResponse');
     return message.payload.providers;
   }
 
@@ -430,9 +431,9 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
     };
     return {
       send: (message) => {
-        if (!active || (socket.readyState !== undefined && socket.readyState !== 1)) throw new Error('Remote WebSocket connection is closed.');
+        if (!active || (socket.readyState !== undefined && socket.readyState !== 1)) throw withMessageKey(new Error('Remote WebSocket connection is closed.'), 'client.error.socketClosed');
         const encoded = encodeClientMessage(message);
-        if (encoded.status === 'rejected') throw new Error('Client message was rejected by the public protocol.');
+        if (encoded.status === 'rejected') throw withMessageKey(new Error('Client message was rejected by the public protocol.'), 'client.error.messageRejected');
         socket.send(encoded.json);
         this.observe({ direction: 'outbound', channel: 'websocket', message });
       },
@@ -456,12 +457,12 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
     options?: RemoteRequestOptions,
   ): Promise<AgentSessionResponse> {
     const encoded = encodeClientMessage(request);
-    if (encoded.status === 'rejected') throw new Error('Client message was rejected by the public protocol.');
+    if (encoded.status === 'rejected') throw withMessageKey(new Error('Client message was rejected by the public protocol.'), 'client.error.messageRejected');
     this.observe({ direction: 'outbound', channel: 'http', message: request });
     const message = await this.fetchServerMessage(path, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: encoded.json,
     }, options);
-    if (message.type !== 'agent_session') throw new Error('Relay response was invalid.');
+    if (message.type !== 'agent_session') throw withMessageKey(new Error('Relay response was invalid.'), 'client.error.invalidRelayResponse');
     return message;
   }
 
@@ -474,7 +475,7 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
       return decoded.value;
     }
     this.invalidBody('http');
-    throw new Error('Relay response was invalid.');
+    throw withMessageKey(new Error('Relay response was invalid.'), 'client.error.invalidRelayResponse');
   }
 
   private async fetchBody(
@@ -496,7 +497,7 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
           message: 'Relay request could not be completed.', recoverable: true,
         });
       }
-      throw new RemoteOperationError('network_error', 'Could not reach the Relay. Check your connection and try again.', true);
+      throw new RemoteOperationError('network_error', 'Could not reach the Relay. Check your connection and try again.', true, undefined, 'client.error.networkError');
     }
     if (options?.signal?.aborted) throw new Error('Relay request was retired.');
     let body: string;
@@ -636,12 +637,16 @@ function httpFailure(status: number, body: string): RemoteOperationError {
     : status === 403 ? 'Access to this session is unavailable.'
     : status === 413 ? 'The requested data exceeds the Relay transfer limit.'
     : 'The Relay could not complete this request.';
+  const fallbackKey = status === 401 ? 'client.error.httpSignIn' : status === 403 ? 'client.error.httpForbidden'
+    : status === 413 ? 'client.error.httpTooLarge' : 'client.error.httpFailed';
+  const sent = typeof detail?.error === 'string' && detail.error.trim() && detail.error !== 'Relay request failed.';
   return new RemoteOperationError(
     typeof detail?.code === 'string' && detail.code ? detail.code : `http_${status}`,
-    typeof detail?.error === 'string' && detail.error.trim() && detail.error !== 'Relay request failed.'
-      ? detail.error : `${fallback} (HTTP ${status})`,
+    sent ? detail!.error as string : `${fallback} (HTTP ${status})`,
     status >= 500 || status === 408 || status === 429,
     typeof detail?.requestId === 'string' ? detail.requestId : undefined,
+    sent ? undefined : fallbackKey,
+    sent ? undefined : { status },
   );
 }
 

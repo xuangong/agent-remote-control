@@ -1,4 +1,4 @@
-import { timelineEntryKey, type AgentReplicaState } from '@orchardworks/agent-client';
+import { timelineEntryKey, type AgentReplicaState, withMessageKey } from '@orchardworks/agent-client';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import type { OpenedSession } from './directory-client.js';
 import { sessionKey, type SessionEntry } from './session-tree.js';
@@ -70,14 +70,14 @@ export async function loadSessionCommunication(
   for (;;) {
     signal.throwIfAborted();
     const state = connection.replica.getState();
-    if (state.timeline.epoch !== epoch) throw new Error('The target conversation changed. Open the letter again.');
+    if (state.timeline.epoch !== epoch) throw withMessageKey(new Error('The target conversation changed. Open the letter again.'), 'client.letter.targetChanged');
     const received = findSessionCommunication(state, entry, endpoint);
     if (received) return { key: timelineEntryKey(received) };
     const before = state.timeline.entries[0]?.seqStart;
-    if (!state.timeline.hasOlder || before === undefined) throw new Error('The target history does not contain this letter. Refresh the session and retry.');
+    if (!state.timeline.hasOlder || before === undefined) throw withMessageKey(new Error('The target history does not contain this letter. Refresh the session and retry.'), 'client.letter.notInHistory');
     await connection.client.loadOlder();
     signal.throwIfAborted();
-    if (connection.replica.getState().timeline.entries[0]?.seqStart === before) throw new Error('Earlier target history could not be loaded. Retry the letter.');
+    if (connection.replica.getState().timeline.entries[0]?.seqStart === before) throw withMessageKey(new Error('Earlier target history could not be loaded. Retry the letter.'), 'client.letter.earlierNotLoaded');
     await new Promise(resolve => setTimeout(resolve, 0));
   }
 }

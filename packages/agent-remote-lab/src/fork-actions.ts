@@ -1,5 +1,5 @@
 import type { AgentCommandResult } from '@orchardworks/agent-remote-protocol';
-import { AgentReplica, RemoteOperationError, RemoteSessionClient, type RemoteAgentTransport } from '@orchardworks/agent-client';
+import { AgentReplica, RemoteOperationError, RemoteSessionClient, type RemoteAgentTransport, withMessageKey } from '@orchardworks/agent-client';
 import type { LabWorkbenchActions } from './components/LabWorkbench.js';
 import { captureForkContext, contextPrefix, type ForkStore, type SessionFork } from './session-forks.js';
 
@@ -24,7 +24,7 @@ export function forkActions(actions: LabWorkbenchActions, store: ForkStore, reco
   async function withContext<T>(text: string, dispatch: (input: string) => Promise<T>, identity?: string): Promise<T | undefined> {
     await inheritSettings(actions, store, record!, transport);
     const send = (input: string) => {
-      if (targetsFork && !targetsFork()) throw new RemoteOperationError('session_changed', 'The conversation changed before this action could be sent. Return to its original session to retry.', true);
+      if (targetsFork && !targetsFork()) throw new RemoteOperationError('session_changed', 'The conversation changed before this action could be sent. Return to its original session to retry.', true, undefined, 'client.fork.changedBeforeSend');
       return dispatch(input);
     };
     return store.send(record!.id, text, send, async () => {
@@ -52,7 +52,7 @@ export function forkActions(actions: LabWorkbenchActions, store: ForkStore, reco
 
 async function inheritSettings(actions: LabWorkbenchActions, store: ForkStore, record: SessionFork, transport: RemoteAgentTransport): Promise<void> {
   const delivery = store.getLocalForEffect(record.id);
-  if (!delivery) throw new Error('The fork context is unavailable.');
+  if (!delivery) throw withMessageKey(new Error('The fork context is unavailable.'), 'client.fork.contextUnavailable');
   if (delivery.configured || !delivery.target) return;
   record = delivery;
   if (record.settings.length) {
@@ -61,7 +61,7 @@ async function inheritSettings(actions: LabWorkbenchActions, store: ForkStore, r
       const setting = snapshot.payload.runtimeInfo.settings?.find(({ id }) => id === desired.id);
       if (setting?.value === desired.value) continue;
       if (!setting?.mutable || setting.scope !== 'session' || !actions.setSessionSetting || desired.value === null) {
-        throw new Error(`Cannot inherit session setting ${desired.id}. The fork has not sent any input.`);
+        throw withMessageKey(new Error(`Cannot inherit session setting ${desired.id}. The fork has not sent any input.`), 'client.fork.inheritSetting', { setting: desired.id });
       }
       await actions.setSessionSetting(desired.id, desired.value);
     }
@@ -73,7 +73,7 @@ export async function configureFork(transport: RemoteAgentTransport, store: Fork
   signal?.throwIfAborted();
   if (record.remote && !store.getLocal(record.id)) return;
   const delivery = store.getLocalForEffect(record.id);
-  if (!delivery) throw new Error('The fork context is unavailable.');
+  if (!delivery) throw withMessageKey(new Error('The fork context is unavailable.'), 'client.fork.contextUnavailable');
   if (delivery.configured) return;
   record = delivery;
   if (!record.settings.length) { store.markConfigured(record.id, true); return; }
@@ -92,7 +92,7 @@ function clientActions(client: RemoteSessionClient): LabWorkbenchActions {
 }
 async function withForkClient(transport: RemoteAgentTransport, record: SessionFork, use: (client: RemoteSessionClient) => Promise<void>, signal?: AbortSignal): Promise<void> {
   signal?.throwIfAborted();
-  if (!record.target) throw new Error('The fork has not been created.');
+  if (!record.target) throw withMessageKey(new Error('The fork has not been created.'), 'client.fork.notCreated');
   const client = new RemoteSessionClient(record.target.agentId, transport, new AgentReplica());
   let unsubscribe: (() => void) | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -103,7 +103,7 @@ async function withForkClient(transport: RemoteAgentTransport, record: SessionFo
   });
   try {
     await Promise.race([new Promise<void>((resolve, reject) => {
-      timer = setTimeout(() => reject(new Error('The fork could not connect. Retry opening the fork.')), 15_000);
+      timer = setTimeout(() => reject(withMessageKey(new Error('The fork could not connect. Retry opening the fork.'), 'client.fork.couldNotConnect')), 15_000);
       unsubscribe = client.subscribeStatus((status) => { if (status === 'ready') resolve(); });
       client.start();
     }), aborted]);

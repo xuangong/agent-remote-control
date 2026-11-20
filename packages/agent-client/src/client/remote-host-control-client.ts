@@ -1,11 +1,12 @@
 import { isTpmAction, isTpmCreate, isTpmList, isTpmWork, type TpmAction, type TpmCreate, type TpmList, type TpmWork } from '@orchardworks/agent-remote-protocol';
 import { RemoteOperationError, type RemoteRequestOptions } from './transport.js';
+import type { MessageKey } from '../presentation/messages.js';
 
 type WithoutId<T> = T extends unknown ? Omit<T, 'id'> : never;
 export type TpmActionInput = WithoutId<TpmAction>;
 export class RemoteHostControlError extends RemoteOperationError {
-  constructor(code: string, message: string, readonly status: number, requestId?: string) {
-    super(code, message, status >= 500 || status === 409, requestId);
+  constructor(code: string, message: string, readonly status: number, requestId?: string, messageKey?: MessageKey) {
+    super(code, message, status >= 500 || status === 409, requestId, messageKey);
   }
 }
 
@@ -31,14 +32,14 @@ export class RemoteHostControlClient {
     return this.work(await this.request(hostId, `tpm/work?${new URLSearchParams({ id })}`, undefined, options), id);
   }
   async tpmCreate(hostId: string, input: TpmCreate, options?: RemoteRequestOptions): Promise<TpmWork> {
-    if (!isTpmCreate(input)) throw new RemoteHostControlError('invalid_request', 'The TPM creation request is invalid.', 400);
+    if (!isTpmCreate(input)) throw new RemoteHostControlError('invalid_request', 'The TPM creation request is invalid.', 400, undefined, 'client.error.invalidTpmCreate');
     const value = this.work(await this.request(hostId, 'tpm/create', input, options));
     if (value.providerId !== input.providerId || value.mainNativeSessionId !== input.mainNativeSessionId) throw invalidResponse();
     return value;
   }
   async tpmAction(hostId: string, id: string, input: TpmActionInput, options?: RemoteRequestOptions): Promise<TpmWork> {
     const body = { ...input, id };
-    if (!isTpmAction(body)) throw new RemoteHostControlError('invalid_request', 'The TPM action request is invalid.', 400);
+    if (!isTpmAction(body)) throw new RemoteHostControlError('invalid_request', 'The TPM action request is invalid.', 400, undefined, 'client.error.invalidTpmAction');
     return this.work(await this.request(hostId, 'tpm/action', body, options), id);
   }
   private work(value: unknown, expectedId?: string): TpmWork {
@@ -57,11 +58,12 @@ export class RemoteHostControlClient {
       const record = value && typeof value === 'object' ? value as Record<string, unknown> : {};
       throw new RemoteHostControlError(typeof record.code === 'string' ? record.code : 'host_operation_failed',
         typeof record.error === 'string' ? record.error : typeof record.message === 'string' ? record.message : 'The Host operation failed.',
-        response.status, typeof record.requestId === 'string' ? record.requestId : undefined);
+        response.status, typeof record.requestId === 'string' ? record.requestId : undefined,
+        typeof record.error !== 'string' && typeof record.message !== 'string' ? 'client.error.hostOperationFailed' : undefined);
     }
     return value;
   }
 }
 function invalidResponse(): RemoteHostControlError {
-  return new RemoteHostControlError('invalid_host_response', 'The Host TPM response could not be verified. Refresh before trying again.', 502);
+  return new RemoteHostControlError('invalid_host_response', 'The Host TPM response could not be verified. Refresh before trying again.', 502, undefined, 'client.error.invalidHostResponse');
 }

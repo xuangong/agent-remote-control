@@ -1,5 +1,5 @@
 import type { NativeSessionRef, Team } from '@orchardworks/agent-remote-protocol';
-import type { SessionAttribution, SessionDescription, SessionDescriptionIdentity } from '@orchardworks/agent-client';
+import { translator, type SessionAttribution, type SessionDescription, type SessionDescriptionIdentity, type Translate } from '@orchardworks/agent-client';
 import type { TpmItem } from './hooks/useTpmWork.js';
 import { currentForkSource, sideLinkVisible, sideNavigationSource, sideNavigationTarget, type SessionFork } from './session-forks.js';
 import { sessionKey, type SessionEntry } from './session-tree.js';
@@ -15,6 +15,8 @@ export interface DescribeSessionInput {
   tpmWorks?: readonly TpmItem[];
   teams?: readonly Team[];
   hostNames?: ReadonlyMap<string, string>;
+  /** The words of the reader's language; English when absent. */
+  t?: Translate;
 }
 
 interface SourceEvidence {
@@ -24,7 +26,7 @@ interface SourceEvidence {
 }
 
 /** Project existing owners' records; this description never owns a relationship graph. */
-export function describeSession({ session, sessions = [], forks = [], asks = [], tpmWorks = [], teams = [], hostNames }: DescribeSessionInput): SessionDescription {
+export function describeSession({ session, sessions = [], forks = [], asks = [], tpmWorks = [], teams = [], hostNames, t = translator('en') }: DescribeSessionInput): SessionDescription {
   const known = new Map(sessions.map(entry => [sessionKey(entry), entry]));
   const currentKey = sessionKey(session);
   const current = { ...session, parentNativeSessionId: session.parentNativeSessionId ?? known.get(currentKey)?.parentNativeSessionId };
@@ -47,13 +49,13 @@ export function describeSession({ session, sessions = [], forks = [], asks = [],
       ...(explanation ? { detail: explanation } : {}),
       target: { kind: 'session', ...identity(entry), ...(history ? { sessionIntent: 'history' as const } : {}) } });
   };
-  const addRole = (role: string) => add({ id: `role:${role}`, kind: 'role', label: 'Role', value: role });
+  const addRole = (role: string) => add({ id: `role:${role}`, kind: 'role', label: t('client.describe.role'), value: role });
   const addOrigin = (id: string, origin: SourceEvidence, effective: DescribedSession, kind: 'source' | 'role-origin' = 'source') => {
     if (origin.session && sessionKey(origin.session) === sessionKey(effective)) return;
-    const name = kind === 'role-origin' ? 'Role origin' : 'Original source';
-    if (origin.session) addSession(id, kind, name, origin.session, kind === 'role-origin' ? 'Original session of the followed main role' : 'Original context source', true);
+    const name = kind === 'role-origin' ? t('client.describe.roleOrigin') : t('client.describe.originalSource');
+    if (origin.session) addSession(id, kind, name, origin.session, kind === 'role-origin' ? t('client.describe.mainRoleSession') : t('client.describe.originalContextSource'), true);
     else add({ id, kind, label: name, value: origin.nativeSessionId,
-      detail: `${origin.providerId} · Host identity unavailable` });
+      detail: t('client.describe.hostIdentityUnavailable', { provider: origin.providerId }) });
   };
 
   for (const [records, kind] of [[asks, 'ask'], [forks, 'side']] as const) {
@@ -65,26 +67,26 @@ export function describeSession({ session, sessions = [], forks = [], asks = [],
       const original = forkOrigin(record);
       if (matches(record.target) && !matches(target)) {
         addRole(kind === 'ask' ? 'Ask' : record.mode === 'reference' ? 'Side' : 'Fork');
-        if (original.session) addSession(`${prefix}:created-source`, 'source', 'Source', original.session, 'Original context source', true);
-        else add({ id: `${prefix}:created-source`, kind: 'source', label: 'Source', value: original.nativeSessionId,
-          detail: `${original.providerId} · Host identity unavailable` });
+        if (original.session) addSession(`${prefix}:created-source`, 'source', t('client.describe.source'), original.session, t('client.describe.originalContextSource'), true);
+        else add({ id: `${prefix}:created-source`, kind: 'source', label: t('client.describe.source'), value: original.nativeSessionId,
+          detail: t('client.describe.hostIdentityUnavailable', { provider: original.providerId }) });
       }
       if (matches(target)) {
         addRole(kind === 'ask' ? 'Ask' : record.mode === 'reference' ? 'Side' : 'Fork');
         if (kind === 'ask') {
-          addSession(`${prefix}:main`, 'main', 'Main', source, undefined, record.sourceBinding?.kind === 'fixed');
+          addSession(`${prefix}:main`, 'main', t('client.describe.main'), source, undefined, record.sourceBinding?.kind === 'fixed');
           addOrigin(`${prefix}:origin`, original, source);
         } else if (record.mode === 'reference') {
-          addSession(`${prefix}:source`, 'source', 'Source', source, 'Source reference · Read on demand', record.sourceBinding?.kind === 'fixed');
+          addSession(`${prefix}:source`, 'source', t('client.describe.source'), source, t('client.describe.sourceReference'), record.sourceBinding?.kind === 'fixed');
           addOrigin(`${prefix}:origin`, original, source);
           const navigation = sideNavigationSource(record);
           if (sideLinkVisible(record) && sessionKey(navigation) !== sessionKey(source)) {
-            addSession(`${prefix}:navigation`, 'navigation-source', 'Navigation source', navigation, 'Navigation link; context source is unchanged');
+            addSession(`${prefix}:navigation`, 'navigation-source', t('client.describe.navigationSource'), navigation, t('client.describe.navigationLink'));
           }
         } else {
-          addSession(`${prefix}:source`, 'source', 'Source', record.source, undefined, true);
-          add({ id: `${prefix}:context`, kind: 'context', label: 'Context', value: 'Fixed snapshot',
-            detail: `${record.itemCount} items · ${record.capturedAt} · Later source messages are not included` });
+          addSession(`${prefix}:source`, 'source', t('client.describe.source'), record.source, undefined, true);
+          add({ id: `${prefix}:context`, kind: 'context', label: t('client.describe.context'), value: t('client.describe.fixedSnapshot'),
+            detail: t('client.describe.snapshotDetail', { count: record.itemCount, time: record.capturedAt }) });
         }
       }
       const navigation = kind === 'ask' ? source : sideNavigationSource(record);
@@ -106,7 +108,7 @@ export function describeSession({ session, sessions = [], forks = [], asks = [],
     const prefix = `tpm:${JSON.stringify([item.hostId, work.id])}`;
     if (matches(target)) {
       addRole('TPM');
-      addSession(`${prefix}:main`, 'main', 'Main', main, undefined, work.mainBinding?.kind === 'fixed');
+      addSession(`${prefix}:main`, 'main', t('client.describe.main'), main, undefined, work.mainBinding?.kind === 'fixed');
       const binding = work.mainBinding;
       const origin = binding?.kind === 'fixed' ? binding.source : binding?.origin;
       if (origin) {
@@ -115,7 +117,7 @@ export function describeSession({ session, sessions = [], forks = [], asks = [],
           binding?.kind === 'primary_role' ? 'role-origin' : 'source');
       }
     }
-    if (matches(main) && !matches(target)) addSession(`${prefix}:related`, 'tpm', 'TPM', target, work.archived ? 'Archived' : undefined);
+    if (matches(main) && !matches(target)) addSession(`${prefix}:related`, 'tpm', 'TPM', target, work.archived ? t('client.describe.archived') : undefined);
   }
 
   for (const team of teams) {
@@ -124,13 +126,13 @@ export function describeSession({ session, sessions = [], forks = [], asks = [],
     const prefix = `team:${team.id}`;
     const support = team.callForSupport;
     const open = support?.calls.filter(call => call.status === 'open' || call.status === 'queued').length ?? 0;
-    const addTeam = () => add({ id: `${prefix}:group`, kind: 'team', label: support ? 'Support' : 'Team', value: support ? support.role : team.title,
-      ...(team.status === 'archived' ? { detail: 'Archived' } : support ? { detail: support.status === 'paused_budget' ? 'Paused' : `${open} open ${open === 1 ? 'call' : 'calls'}` } : {}),
+    const addTeam = () => add({ id: `${prefix}:group`, kind: 'team', label: support ? t('client.describe.support') : 'Team', value: support ? support.role : team.title,
+      ...(team.status === 'archived' ? { detail: t('client.describe.archived') } : support ? { detail: support.status === 'paused_budget' ? t('client.describe.paused') : t('client.describe.openCalls', { count: open }) } : {}),
       target: { kind: 'group', groupType: 'team', groupId: team.id } });
     const addMember = (member: Team['members'][number], kind: string, name: string) => {
       const id = `${prefix}:${kind}:${member.id}`;
       if (member.nativeSessionId) addSession(id, kind, name, { ...member, nativeSessionId: member.nativeSessionId, title: member.name });
-      else add({ id, kind, label: name, value: member.name, detail: [scopeDetail(member), 'Session unavailable'].filter(Boolean).join(' · ') });
+      else add({ id, kind, label: name, value: member.name, detail: [scopeDetail(member), t('client.describe.sessionUnavailable')].filter(Boolean).join(' · ') });
     };
     for (const member of team.members) {
       const matchesMember = member.nativeSessionId
@@ -138,30 +140,30 @@ export function describeSession({ session, sessions = [], forks = [], asks = [],
         : session.teamId === team.id && session.teamMemberId === member.id
           && (current.hostId ?? 'local') === member.hostId && current.providerId === member.providerId;
       if (!matchesMember) continue;
-      addRole(support ? member.role === 'leader' ? 'Support coordinator' : member.role === 'requester' ? 'Calls for support' : 'Supporter' : member.role === 'leader' ? 'Team leader' : 'Team member');
+      addRole(t(support ? member.role === 'leader' ? 'client.describe.supportCoordinator' : member.role === 'requester' ? 'client.describe.callsForSupport' : 'client.describe.supporter' : member.role === 'leader' ? 'client.describe.teamLeader' : 'client.describe.teamMember'));
       addTeam();
       if (member.role === 'requester') continue;
-      if (member.role !== 'leader' && leader) addMember(leader, 'leader', 'Leader');
-      addSession(`${prefix}:main`, 'main', 'Main', team.source);
+      if (member.role !== 'leader' && leader) addMember(leader, 'leader', t('client.describe.leader'));
+      addSession(`${prefix}:main`, 'main', t('client.describe.main'), team.source);
       if (member.role === 'leader') {
         for (const peer of team.members) {
-          if (peer.role !== 'leader') addMember(peer, 'member', 'Member');
+          if (peer.role !== 'leader') addMember(peer, 'member', t('client.describe.member'));
         }
       }
     }
     if (matches(team.source)) {
       addTeam();
-      if (leader && !matches(leaderSession)) addMember(leader, 'team-leader', 'Team leader');
+      if (leader && !matches(leaderSession)) addMember(leader, 'team-leader', t('client.describe.teamLeader'));
     }
   }
 
   if (current.parentNativeSessionId && current.parentNativeSessionId !== current.nativeSessionId) {
     const parent = { hostId: current.hostId, providerId: current.providerId, nativeSessionId: current.parentNativeSessionId };
-    addSession(`parent:${sessionKey(parent)}`, 'parent', 'Parent', parent);
+    addSession(`parent:${sessionKey(parent)}`, 'parent', t('client.describe.parent'), parent);
   }
   for (const child of known.values()) {
     if (child.parentNativeSessionId && matches({ ...child, nativeSessionId: child.parentNativeSessionId }) && !matches(child)) {
-      addSession(`child:${sessionKey(child)}`, 'child', 'Child', child);
+      addSession(`child:${sessionKey(child)}`, 'child', t('client.describe.child'), child);
     }
   }
   const related = [...attributions.values()].filter(row => relatedIds.has(row.id));

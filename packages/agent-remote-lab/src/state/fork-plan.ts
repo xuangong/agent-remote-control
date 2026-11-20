@@ -18,6 +18,7 @@
  * - `selectsSideAfterFork`: a `/side` whose link is visible selects the new Side beside its source.
  */
 import type { CreateSessionOptions } from '../directory-client.js';
+import { withMessageKey } from '@orchardworks/agent-client';
 
 export type ForkCommandRoute = 'ask-setting' | 'ask-open' | 'fork';
 
@@ -47,7 +48,7 @@ export function needsWorkspaceLookup(source: { readonly hostId?: string; readonl
 
 export function workspaceOptions(cwd: string | null | undefined, workspaces: readonly { readonly id: string; readonly path: string }[]): CreateSessionOptions {
   const workspace = workspaces.find(({ path }) => path === cwd);
-  if (cwd && !workspace) throw new Error('The source workspace is no longer registered on this Host.');
+  if (cwd && !workspace) throw withMessageKey(new Error('The source workspace is no longer registered on this Host.'), 'client.fork.workspaceGone');
   return workspace ? { workspaceId: workspace.id } : {};
 }
 

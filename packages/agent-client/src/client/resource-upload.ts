@@ -1,4 +1,5 @@
 import type { ResourceUploadReceipt } from '@orchardworks/agent-remote-protocol';
+import { withMessageKey } from '../presentation/error-words.js';
 
 export interface ResourceTransferOptions { signal?: AbortSignal; onProgress?(loaded: number, total: number): void }
 export type ResourceUploadRequest =
@@ -16,11 +17,11 @@ export async function uploadResource(file: Blob, name: string, uploadId: string,
   request: (message: ResourceUploadRequest) => Promise<ResourceUploadReceipt>, options: ResourceTransferOptions = {},
 ): Promise<NonNullable<ResourceUploadReceipt['resource']>> {
   checkResourceAborted(options.signal);
-  if (file.size > MAX_BYTES) throw new Error('Each resource must be at most 50 MiB.');
+  if (file.size > MAX_BYTES) throw withMessageKey(new Error('Each resource must be at most 50 MiB.'), 'client.error.resourceTooLarge');
   const sha256 = await digest(file); const mediaType = file.type || 'application/octet-stream';
   const receive = async (message: ResourceUploadRequest) => {
     checkResourceAborted(options.signal); const receipt = await request(message); checkResourceAborted(options.signal);
-    if (receipt.uploadId !== uploadId || !Number.isSafeInteger(receipt.offset) || receipt.offset < 0 || receipt.offset > file.size) throw new Error('The Host returned an invalid resource upload offset.');
+    if (receipt.uploadId !== uploadId || !Number.isSafeInteger(receipt.offset) || receipt.offset < 0 || receipt.offset > file.size) throw withMessageKey(new Error('The Host returned an invalid resource upload offset.'), 'client.error.badResourceOffset');
     return receipt;
   };
   let receipt = await receive({ type: 'resource_upload_begin', name, mediaType, byteLength: file.size, sha256 });
@@ -29,12 +30,12 @@ export async function uploadResource(file: Blob, name: string, uploadId: string,
     const offset = receipt.offset;
     const bytes = new Uint8Array(await file.slice(offset, offset + CHUNK_BYTES).arrayBuffer());
     receipt = await receive({ type: 'resource_upload_chunk', offset, contentBase64: btoa(String.fromCharCode(...bytes)) });
-    if (receipt.offset !== offset + bytes.length) throw new Error('The Host returned an unexpected resource offset. Retry to resume.');
+    if (receipt.offset !== offset + bytes.length) throw withMessageKey(new Error('The Host returned an unexpected resource offset. Retry to resume.'), 'client.error.unexpectedResourceOffset');
     options.onProgress?.(receipt.offset, file.size);
   }
   if (!receipt.resource) receipt = await receive({ type: 'resource_upload_finish' });
   const resource = receipt.resource;
-  if (!resource || receipt.offset !== file.size || resource.sha256 !== sha256 || resource.byteLength !== file.size || resource.mediaType !== mediaType || resource.name !== name) throw new Error('The Host could not verify the uploaded resource.');
+  if (!resource || receipt.offset !== file.size || resource.sha256 !== sha256 || resource.byteLength !== file.size || resource.mediaType !== mediaType || resource.name !== name) throw withMessageKey(new Error('The Host could not verify the uploaded resource.'), 'client.error.cannotVerifyResource');
   return resource;
 }
 
@@ -42,15 +43,15 @@ export async function downloadResource(resourceId: string, request: (offset: num
   const chunks: Uint8Array<ArrayBuffer>[] = []; let offset = 0; let metadata: ResourceDownloadChunk | undefined;
   do {
     checkResourceAborted(options.signal); const chunk = await request(offset); checkResourceAborted(options.signal);
-    if (chunk.resourceId !== resourceId || chunk.offset !== offset || !Number.isSafeInteger(chunk.byteLength) || chunk.byteLength < 0 || chunk.byteLength > MAX_BYTES || !/^[a-f0-9]{64}$/.test(chunk.sha256)) throw new Error('Invalid resource download metadata.');
-    if (metadata && ['sha256', 'name', 'mediaType', 'byteLength'].some(key => chunk[key as keyof ResourceDownloadChunk] !== metadata![key as keyof ResourceDownloadChunk])) throw new Error('The resource changed while downloading.');
+    if (chunk.resourceId !== resourceId || chunk.offset !== offset || !Number.isSafeInteger(chunk.byteLength) || chunk.byteLength < 0 || chunk.byteLength > MAX_BYTES || !/^[a-f0-9]{64}$/.test(chunk.sha256)) throw withMessageKey(new Error('Invalid resource download metadata.'), 'client.error.badDownloadMetadata');
+    if (metadata && ['sha256', 'name', 'mediaType', 'byteLength'].some(key => chunk[key as keyof ResourceDownloadChunk] !== metadata![key as keyof ResourceDownloadChunk])) throw withMessageKey(new Error('The resource changed while downloading.'), 'client.error.resourceChanged');
     metadata = chunk;
     const bytes = Uint8Array.from(atob(chunk.contentBase64), char => char.charCodeAt(0));
-    if (bytes.length > CHUNK_BYTES || offset + bytes.length > chunk.byteLength || (!bytes.length && offset < chunk.byteLength)) throw new Error('Invalid resource download chunk.');
+    if (bytes.length > CHUNK_BYTES || offset + bytes.length > chunk.byteLength || (!bytes.length && offset < chunk.byteLength)) throw withMessageKey(new Error('Invalid resource download chunk.'), 'client.error.badDownloadChunk');
     chunks.push(bytes); offset += bytes.length; options.onProgress?.(offset, chunk.byteLength);
   } while (offset < metadata.byteLength);
   const blob = new Blob(chunks, { type: metadata.mediaType });
-  if (await digest(blob) !== metadata.sha256) throw new Error('Resource integrity check failed.');
+  if (await digest(blob) !== metadata.sha256) throw withMessageKey(new Error('Resource integrity check failed.'), 'client.error.integrityFailed');
   checkResourceAborted(options.signal);
   return { blob, name: metadata.name, sha256: metadata.sha256 };
 }

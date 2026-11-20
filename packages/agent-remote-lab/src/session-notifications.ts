@@ -1,3 +1,4 @@
+import { translator, type Translate } from '@orchardworks/agent-client';
 import type { SessionObservation } from './tracking-state.js';
 import type { SessionEntry } from './session-tree.js';
 import { sessionKey } from './session-tree.js';
@@ -24,7 +25,8 @@ export class SessionAttentionNotifications {
   private disposed = false;
   constructor(private readonly scope: string, private readonly enabled: () => boolean,
     private readonly open: (session: SessionEntry) => void,
-    private readonly clickScope: () => NotificationClickScope = () => this.defaultClickScope) {}
+    private readonly clickScope: () => NotificationClickScope = () => this.defaultClickScope,
+    private readonly t: Translate = translator('en')) {}
 
   setEligible(sessions: readonly SessionEntry[]): void {
     const keys = new Set(sessions.map(sessionKey));
@@ -108,7 +110,7 @@ export class SessionAttentionNotifications {
           if (Array.isArray(stored)) receipts = stored.filter((item): item is string => typeof item === 'string');
           if (dedupe && receipts.includes(id)) return;
         } catch { /* Browser tags still collapse active notifications if storage is blocked. */ }
-        const notification = new Notification(reminder === 'waiting' ? 'Session needs your input' : 'Session completed', {
+        const notification = new Notification(this.t(reminder === 'waiting' ? 'client.notification.needsInput' : 'client.notification.completed'), {
           body: session.title, tag: `arc:${id}`,
         });
         const delivered = { key, admission, clickScope };

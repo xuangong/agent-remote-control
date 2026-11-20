@@ -1,6 +1,7 @@
 import type { AgentReplicaState } from '../replica/types.js';
 import { leaseNoticeLabel, leaseView, type LeaseState } from './lease-view.js';
 import type { RemoteSessionState } from './session-state.js';
+import { translator, type Translate } from '../presentation/messages.js';
 
 /**
  * What a person sees of a session: its one business notice, whether the composer takes input and whether a send goes now,
@@ -37,6 +38,10 @@ export type SessionNotice =
   /** The adapter reports the native runtime unavailable. Sends wait (owner decision 1). */
   | { readonly kind: 'agent_unavailable'; readonly message: string };
 
+/** The Host the notice names when the Relay gave none. */
+const ITS_HOST = 'its Host';
+const AGENT_UNAVAILABLE = /^The agent is not available on (.+)\.$/;
+
 export type ComposerBlock = 'read_only' | 'terminal_in_control' | 'other_controller' | 'ended' | 'failed' | 'unavailable' | 'unsupported';
 export type ComposerAvailability =
   /** `dispatch: 'now'` when a send may go to the session at once; otherwise it waits in the send queue. */
@@ -45,7 +50,6 @@ export type ComposerAvailability =
 
 const UNAVAILABLE = 'This session is unavailable.';
 const FAILED = 'The agent failed without error details.';
-const UNSUPPORTED = 'This agent does not take messages.';
 
 function lastFailure(replica: AgentReplicaState | undefined): string | undefined {
   return [...(replica?.diagnostics ?? [])].reverse().find(diagnostic => !diagnostic.recoverable)?.message.trim() || undefined;
@@ -71,30 +75,36 @@ export function sessionNotice(facts: SessionFacts): SessionNotice | undefined {
   if (host?.online === false) return host.name ? { kind: 'host_offline', hostName: host.name } : { kind: 'host_offline' };
   const lease = leaseNotice(leaseView(session.control).state);
   if (lease) return lease;
-  if (session.runtime?.state === 'unavailable') return { kind: 'agent_unavailable', message: `The agent is not available on ${host?.name ?? 'its Host'}.` };
+  if (session.runtime?.state === 'unavailable') return { kind: 'agent_unavailable', message: `The agent is not available on ${host?.name ?? ITS_HOST}.` };
   return undefined;
 }
 
 /** Plain words for a notice, for example "Mac mini is offline. Messages will be delivered when it is back." */
-export function sessionNoticeWords(notice: SessionNotice): string {
+export function sessionNoticeWords(notice: SessionNotice, t: Translate = translator('en')): string {
   switch (notice.kind) {
-    case 'host_offline': return `${notice.hostName ?? 'The Host'} is offline. Messages will be delivered when it is back.`;
-    case 'ended': return 'This session has ended.';
-    case 'terminal_in_control': return leaseNoticeLabel('native_cli');
-    case 'other_controller': return leaseNoticeLabel('other_controller');
-    case 'read_only': return leaseNoticeLabel('read_only');
-    case 'failed': case 'unavailable': case 'agent_unavailable': return notice.message;
+    case 'host_offline': return t('client.notice.hostOffline', { host: notice.hostName ?? t('client.notice.theHost') });
+    case 'ended': return t('client.notice.ended');
+    case 'terminal_in_control': return leaseNoticeLabel('native_cli', t);
+    case 'other_controller': return leaseNoticeLabel('other_controller', t);
+    case 'read_only': return leaseNoticeLabel('read_only', t);
+    // The client's own default words are translated; a failure the agent, the Relay or a Controller described stays as sent.
+    case 'failed': return notice.message === FAILED ? t('client.notice.failedNoDetails') : notice.message;
+    case 'unavailable': return notice.message === UNAVAILABLE ? t('client.notice.unavailable') : notice.message;
+    case 'agent_unavailable': {
+      const host = AGENT_UNAVAILABLE.exec(notice.message)?.[1];
+      return host === undefined ? notice.message : t('client.notice.agentUnavailable', { host: host === ITS_HOST ? t('client.notice.itsHost') : host });
+    }
   }
 }
 
 /** Whether the composer takes input, and whether a send goes now or waits. Only a business reason disables it. */
-export function composerAvailability(facts: SessionFacts): ComposerAvailability {
+export function composerAvailability(facts: SessionFacts, t: Translate = translator('en')): ComposerAvailability {
   const { session } = facts;
   const notice = sessionNotice(facts);
   const blocking = session.connection === 'unavailable' || notice?.kind === 'failed' || notice?.kind === 'ended' ? notice
     : leaseNotice(leaseView(session.control).state);
-  if (blocking) return { input: 'disabled', reason: blocking.kind as ComposerBlock, words: sessionNoticeWords(blocking) };
-  if (facts.replica?.agent?.capabilities.sendMessage === false) return { input: 'disabled', reason: 'unsupported', words: UNSUPPORTED };
+  if (blocking) return { input: 'disabled', reason: blocking.kind as ComposerBlock, words: sessionNoticeWords(blocking, t) };
+  if (facts.replica?.agent?.capabilities.sendMessage === false) return { input: 'disabled', reason: 'unsupported', words: t('client.notice.unsupported') };
   // `send_message` is allowed only once the session is synchronized and its control check granted control (R3).
   const now = session.operations.send_message.allowed;
   return { input: 'enabled', dispatch: now ? 'now' : 'when_ready' };
@@ -104,18 +114,18 @@ export function composerAvailability(facts: SessionFacts): ComposerAvailability 
  * The business label of the activity line: Working, Waiting for response, Starting, Ready, Closed, Agent failed, the native
  * owner's words; undefined before any Snapshot and for a session the Relay refused.
  */
-export function sessionActivityLabel(facts: SessionFacts, commandPending = false): string | undefined {
+export function sessionActivityLabel(facts: SessionFacts, commandPending = false, t: Translate = translator('en')): string | undefined {
   const { session } = facts;
   // A session the Relay refused for good has no activity to report; its notice says why.
   if (session.activity === undefined || session.connection === 'unavailable') return undefined;
   const lease = leaseView(session.control).state;
-  if (lease === 'native_cli') return leaseNoticeLabel('native_cli');
-  if (lease === 'other_controller') return 'Native control transferred';
+  if (lease === 'native_cli') return leaseNoticeLabel('native_cli', t);
+  if (lease === 'other_controller') return t('client.activity.nativeTransferred');
   switch (session.activity) {
-    case 'failed': return 'Agent failed';
-    case 'closed': return 'Closed';
-    case 'waiting': return 'Waiting for response';
-    case 'running': return 'Working';
-    default: return commandPending ? 'Executing command' : session.activity === 'starting' ? 'Starting' : 'Ready';
+    case 'failed': return t('client.activity.failed');
+    case 'closed': return t('client.activity.closed');
+    case 'waiting': return t('client.activity.waiting');
+    case 'running': return t('client.activity.working');
+    default: return t(commandPending ? 'client.activity.executingCommand' : session.activity === 'starting' ? 'client.activity.starting' : 'client.activity.ready');
   }
 }

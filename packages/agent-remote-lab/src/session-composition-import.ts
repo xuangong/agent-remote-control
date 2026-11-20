@@ -1,3 +1,4 @@
+import { withMessageKey } from '@orchardworks/agent-client';
 import { conversationLocalStorage, conversationSessionStorage, storageKeys } from './conversation-storage.js';
 import { recoveryGeneration } from './conversation-recovery.js';
 import { flushRecoveryWrites } from './recovery-writes.js';
@@ -9,7 +10,7 @@ import { compositionMetadataKey, compositionOriginId, compositionOwnersImported,
   type AskAssociationOwner, type CompositionDocument, type CompositionRead, type CompositionSlot } from './session-composition-model.js';
 
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
-const requireValue = (ok: unknown): void => { if (!ok) throw new Error('The original session view data could not be imported.'); };
+const requireValue = (ok: unknown): void => { if (!ok) throw withMessageKey(new Error('The original session view data could not be imported.'), 'client.import.notImported'); };
 const nonempty = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 function read(storage: Storage, key: string): unknown {
   flushRecoveryWrites(key);
@@ -177,11 +178,11 @@ export function initializeCompositionDocument(scope: string): CompositionRead<Co
     const document = parseComposition(existing.status === 'ready' ? existing.document : compositionOwnersImported(scope) ? restoreTabComposition(scope) : importComposition(scope), scope);
     const write = saveCompositionDocument(document, current);
     flushRecoveryWrites(compositionMetadataKey(scope));
-    if (write.result?.status !== 'saved') throw new Error('Session view import could not be saved. Original data has been preserved.');
+    if (write.result?.status !== 'saved') throw withMessageKey(new Error('Session view import could not be saved. Original data has been preserved.'), 'client.import.notSaved');
     const verified = readCompositionDocument(scope);
     if (verified.status !== 'ready' || JSON.stringify(verified.document) !== JSON.stringify(document)) {
       conversationSessionStorage.removeItem(compositionMetadataKey(scope));
-      throw new Error('Session view import could not be verified. Original data has been preserved.');
+      throw withMessageKey(new Error('Session view import could not be verified. Original data has been preserved.'), 'client.import.notVerified');
     }
     completeCompositionOwnerImport(scope, current);
     return verified;

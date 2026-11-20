@@ -1,4 +1,5 @@
 import type { SessionFork } from './session-forks.js';
+import { withMessageKey } from '@orchardworks/agent-client';
 
 export interface RelationEdit {
   operationId: string;
@@ -9,7 +10,7 @@ export interface RelationEdit {
 }
 /** Full reader and authenticated Host mapping; legacy URL/relation-only records are not reused. */
 export function relationEditScope(record: Pick<SessionFork,'target' | 'relationId' | 'hostLocator'>): string {
-  if (!record.target || !record.relationId || !record.hostLocator) throw new Error('The shared side identity is incomplete. Refresh before trying again.');
+  if (!record.target || !record.relationId || !record.hostLocator) throw withMessageKey(new Error('The shared side identity is incomplete. Refresh before trying again.'), 'client.fork.sideIdentityIncomplete');
   return JSON.stringify([record.hostLocator.hostId,record.hostLocator.controllerId,record.target.providerId,record.target.nativeSessionId,record.relationId]);
 }
 export class RelationEditStore {
@@ -29,7 +30,7 @@ export class RelationEditStore {
   }
   set(scope: string, edit: RelationEdit): void {
     try { localStorage.setItem(this.prefix + scope, JSON.stringify(edit)); }
-    catch { throw new Error('The side edit identity could not be saved. Free browser storage before continuing.'); }
+    catch { throw withMessageKey(new Error('The side edit identity could not be saved. Free browser storage before continuing.'), 'client.fork.sideEditNotSaved'); }
     this.edits.set(scope, edit);
   }
   clear(scope: string, operationId: string): void {

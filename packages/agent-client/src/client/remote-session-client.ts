@@ -43,6 +43,8 @@ import {
   type RemoteConnection,
   type RemoteServerMessage,
 } from './transport.js';
+import { withMessageKey } from '../presentation/error-words.js';
+import type { MessageKey } from '../presentation/messages.js';
 
 /** unavailable: the Relay refused the session (for example a native client owns it); it is not retried until the page resumes or the session reopens. */
 export type RemoteSessionStatus = 'idle' | 'connecting' | 'catching_up' | 'ready' | 'disconnected' | 'unavailable';
@@ -197,6 +199,7 @@ export class RemoteSessionClient {
         'connection_disconnected',
         'Remote session connection disconnected.',
         true,
+        'client.error.sessionDisconnected',
       );
     }
     this.stopConnection();
@@ -237,7 +240,7 @@ export class RemoteSessionClient {
     this.unwatchResume?.(); this.unwatchResume = undefined;
     this.paused = false;
     this.generation += 1;
-    this.rejectPendingOperations('operation_stopped', 'Remote session client was stopped.', false);
+    this.rejectPendingOperations('operation_stopped', 'Remote session client was stopped.', false, 'client.error.sessionStopped');
     this.stopConnection();
     this.setStatus('idle');
   }
@@ -261,12 +264,12 @@ export class RemoteSessionClient {
   }
 
   async takeControl(options: SessionTakeControlOptions = {}): Promise<void> {
-    if (!this.control) throw new RemoteOperationError('session_read_only', 'Session control is not available yet.', true);
-    if (this.observeOnly) throw new RemoteOperationError('session_read_only', 'This client only observes the session.', false);
+    if (!this.control) throw new RemoteOperationError('session_read_only', 'Session control is not available yet.', true, undefined, 'client.error.sessionControlPending');
+    if (this.observeOnly) throw new RemoteOperationError('session_read_only', 'This client only observes the session.', false, undefined, 'client.error.observeOnly');
     const owner = this.control.nativeOwner;
     if (owner) {
-      if (!this.controlExtension) throw new RemoteOperationError('native_control_unavailable', 'This connection cannot resume a native-owned session.', false);
-      if (this.nativeTakeover) throw new RemoteOperationError('native_control_in_progress', 'Native control is already being requested.', false);
+      if (!this.controlExtension) throw new RemoteOperationError('native_control_unavailable', 'This connection cannot resume a native-owned session.', false, undefined, 'client.error.nativeControlUnavailable');
+      if (this.nativeTakeover) throw new RemoteOperationError('native_control_in_progress', 'Native control is already being requested.', false, undefined, 'client.error.nativeControlInProgress');
       const controller = new AbortController();
       this.nativeTakeover = controller;
       const deadline = setTimeout(() => controller.abort(), this.connectionTimeoutMs);
@@ -288,8 +291,8 @@ export class RemoteSessionClient {
   }
 
   async takeControlAfterNativeResume(): Promise<void> {
-    if (this.observeOnly) throw new RemoteOperationError('session_read_only', 'This client only observes the session.', false);
-    if (this.nativeTakeover) throw new RemoteOperationError('native_control_in_progress', 'Native control is already being requested.', false);
+    if (this.observeOnly) throw new RemoteOperationError('session_read_only', 'This client only observes the session.', false, undefined, 'client.error.observeOnly');
+    if (this.nativeTakeover) throw new RemoteOperationError('native_control_in_progress', 'Native control is already being requested.', false, undefined, 'client.error.nativeControlInProgress');
     const controller = new AbortController();
     this.nativeTakeover = controller;
     const deadline = setTimeout(() => controller.abort(), this.connectionTimeoutMs);
@@ -306,11 +309,11 @@ export class RemoteSessionClient {
         done = true; unwatch(); signal.removeEventListener('abort', aborted);
         error ? reject(error) : resolve();
       };
-      const aborted = () => finish(new RemoteOperationError('native_handoff_unknown', 'Native resume has not synchronized. Check the session before retrying.', false));
+      const aborted = () => finish(new RemoteOperationError('native_handoff_unknown', 'Native resume has not synchronized. Check the session before retrying.', false, undefined, 'client.error.nativeHandoffUnknown'));
       const check = () => {
         if (signal.aborted) return aborted();
         const owner = this.control?.nativeOwner;
-        if (owner && ownerGeneration !== undefined && owner.generation !== ownerGeneration) return finish(new RemoteOperationError('native_owner_changed', 'Native ownership changed before control was acquired.', false));
+        if (owner && ownerGeneration !== undefined && owner.generation !== ownerGeneration) return finish(new RemoteOperationError('native_owner_changed', 'Native ownership changed before control was acquired.', false, undefined, 'client.error.nativeOwnerChanged'));
         if (this.currentStatus === 'ready' && this.control && !owner) finish();
       };
       signal.addEventListener('abort', aborted, { once: true });
@@ -331,10 +334,10 @@ export class RemoteSessionClient {
     const timeline = this.replica.getState().timeline;
     const epoch = timeline.epoch;
     const generation = this.generation;
-    if (!timeline.initialized || !epoch) return Promise.reject(new Error('Wait for the conversation to synchronize before searching.'));
+    if (!timeline.initialized || !epoch) return Promise.reject(withMessageKey(new Error('Wait for the conversation to synchronize before searching.'), 'client.error.searchNotReady'));
     return scanTimelineHistory({ ...options, epoch, entries: timeline.entries, hasOlder: timeline.hasOlder, query,
       assertCurrent: () => {
-        if (generation !== this.generation || epoch !== this.replica.getState().timeline.epoch) throw new Error('Conversation changed. Search again.');
+        if (generation !== this.generation || epoch !== this.replica.getState().timeline.epoch) throw withMessageKey(new Error('Conversation changed. Search again.'), 'client.error.conversationChanged');
       },
       fetchBefore: seq => this.readTimeline('before', { epoch, seq }, options.signal ?? new AbortController().signal),
     });
@@ -346,12 +349,12 @@ export class RemoteSessionClient {
     while (true) {
       options.signal?.throwIfAborted();
       const timeline = this.replica.getState().timeline;
-      if (generation !== this.generation || timeline.epoch !== match.epoch) throw new Error('Conversation changed. Search again.');
+      if (generation !== this.generation || timeline.epoch !== match.epoch) throw withMessageKey(new Error('Conversation changed. Search again.'), 'client.error.conversationChanged');
       if (timeline.entries.some(entry => timelineEntryKey(entry) === match.key)) return;
       const before = timeline.entries[0]?.seqStart;
-      if (!timeline.hasOlder || !before || before <= match.seq) throw new Error('This search result is no longer available. Search again.');
+      if (!timeline.hasOlder || !before || before <= match.seq) throw withMessageKey(new Error('This search result is no longer available. Search again.'), 'client.error.searchResultGone');
       await this.loadOlder();
-      if (this.replica.getState().timeline.entries[0]?.seqStart === before) throw new Error('Earlier activity could not be loaded. Retry the jump.');
+      if (this.replica.getState().timeline.entries[0]?.seqStart === before) throw withMessageKey(new Error('Earlier activity could not be loaded. Retry the jump.'), 'client.error.earlierRetryJump');
       await new Promise(resolve => setTimeout(resolve, 0));
     }
   }
@@ -372,11 +375,11 @@ export class RemoteSessionClient {
     const promise = this.readTimeline('before', { epoch: state.epoch, seq: first?.seqStart ?? 1 }, controller.signal).then((page) => {
       if (generation !== this.generation || controller.signal.aborted) return;
       if (page.payload.epoch !== this.replica.getState().timeline.epoch || page.payload.reset || page.payload.staleCursor || page.payload.gap) {
-        throw new Error('Earlier activity changed. Retry loading history.');
+        throw withMessageKey(new Error('Earlier activity changed. Retry loading history.'), 'client.error.earlierChanged');
       }
       if (page.payload.error) throw new Error(page.payload.error);
       const result = this.replica.applyHistory(page);
-      if (result.status !== 'applied' && result.status !== 'duplicate') throw new Error('Earlier activity could not be loaded.');
+      if (result.status !== 'applied' && result.status !== 'duplicate') throw withMessageKey(new Error('Earlier activity could not be loaded.'), 'client.error.earlierNotLoaded');
     }).finally(() => {
       if (this.olderHistory?.controller === controller) this.olderHistory = undefined;
     });
@@ -407,7 +410,7 @@ export class RemoteSessionClient {
     const generation = this.generation;
     const assertActive = () => {
       checkUploadAborted(options.signal);
-      if (generation !== this.generation || this.currentStatus !== 'ready') throw new Error('Image upload paused. Wait for the session to reconnect, then retry.');
+      if (generation !== this.generation || this.currentStatus !== 'ready') throw withMessageKey(new Error('Image upload paused. Wait for the session to reconnect, then retry.'), 'client.error.imageUploadPausedRetry');
     };
     const request = async (input: ImageUploadRequest) => {
       assertActive();
@@ -416,7 +419,7 @@ export class RemoteSessionClient {
       const operation = this.sendOperation<ImageUploadResult>({ protocolVersion: PROTOCOL_VERSION, type,
         payload: { ...payload, requestId, agentId: this.agentId, uploadId } } as Extract<ClientMessage, { type: ImageUploadRequest['type'] }>,
       'image_upload_result', (response): response is ImageUploadResult => response.type === 'image_upload_result' && response.payload.agentId === this.agentId && response.payload.uploadId === uploadId);
-      const abort = () => this.rejectPendingOperation(requestId, 'image_upload_result', new RemoteOperationError('upload_paused', 'Image upload paused.', true, requestId));
+      const abort = () => this.rejectPendingOperation(requestId, 'image_upload_result', new RemoteOperationError('upload_paused', 'Image upload paused.', true, requestId, 'client.error.imageUploadPaused'));
       options.signal?.addEventListener('abort', abort, { once: true });
       if (options.signal?.aborted) abort();
       try {
@@ -440,14 +443,14 @@ export class RemoteSessionClient {
     const generation = this.generation;
     const active = () => {
       checkResourceAborted(options.signal);
-      if (generation !== this.generation || this.currentStatus !== 'ready') throw new Error('Resource upload paused. Wait for the session to reconnect, then retry.');
+      if (generation !== this.generation || this.currentStatus !== 'ready') throw withMessageKey(new Error('Resource upload paused. Wait for the session to reconnect, then retry.'), 'client.error.resourceUploadPausedRetry');
     };
     const request = async (input: ResourceUploadRequest) => {
       active(); const requestId = this.createRequestId(); const { type, ...payload } = input;
       const operation = this.sendOperation<ResourceUploadResult>({ protocolVersion: PROTOCOL_VERSION, type,
         payload: { ...payload, requestId, agentId: this.agentId, uploadId } } as Extract<ClientMessage, { type: ResourceUploadRequest['type'] }>,
         'resource_upload_result', (response): response is ResourceUploadResult => response.type === 'resource_upload_result' && response.payload.agentId === this.agentId && response.payload.uploadId === uploadId);
-      const abort = () => this.rejectPendingOperation(requestId, 'resource_upload_result', new RemoteOperationError('upload_paused', 'Resource upload paused.', true, requestId));
+      const abort = () => this.rejectPendingOperation(requestId, 'resource_upload_result', new RemoteOperationError('upload_paused', 'Resource upload paused.', true, requestId, 'client.error.resourceUploadPaused'));
       options.signal?.addEventListener('abort', abort, { once: true });
       if (options.signal?.aborted) abort();
       try { const result = await operation; active(); return result.payload; }
@@ -461,12 +464,12 @@ export class RemoteSessionClient {
     const generation = this.generation;
     return downloadResource(resourceId, async offset => {
       checkResourceAborted(options.signal);
-      if (generation !== this.generation || this.currentStatus !== 'ready') throw new Error('Wait for the session to reconnect, then retry the download.');
+      if (generation !== this.generation || this.currentStatus !== 'ready') throw withMessageKey(new Error('Wait for the session to reconnect, then retry the download.'), 'client.error.downloadPausedRetry');
       const requestId = this.createRequestId();
       const operation = this.sendOperation<ResourceDownloadResult>({ protocolVersion: PROTOCOL_VERSION, type: 'resource_download_request',
         payload: { requestId, agentId: this.agentId, resourceId, offset } }, 'resource_download_result',
         (response): response is ResourceDownloadResult => response.type === 'resource_download_result' && response.payload.agentId === this.agentId && response.payload.resourceId === resourceId);
-      const abort = () => this.rejectPendingOperation(requestId, 'resource_download_result', new RemoteOperationError('download_paused', 'Resource download paused.', true, requestId));
+      const abort = () => this.rejectPendingOperation(requestId, 'resource_download_result', new RemoteOperationError('download_paused', 'Resource download paused.', true, requestId, 'client.error.downloadPaused'));
       options.signal?.addEventListener('abort', abort, { once: true });
       if (options.signal?.aborted) abort();
       try { const result = await operation; return result.payload; }
@@ -477,8 +480,8 @@ export class RemoteSessionClient {
   retryMessage(id: string): Promise<CommandAcknowledgementMessage> {
     const state = this.replica.getState();
     const message = state.outgoingMessages?.find(item => item.id === id && item.agentId === this.agentId);
-    if (!message || !canSettle(message.status)) return Promise.reject(new Error('This message is not available to retry.'));
-    if (!this.connectionOpen) return Promise.reject(new RemoteOperationError('connection_not_ready', 'Wait for the session to reconnect, then retry.', true));
+    if (!message || !canSettle(message.status)) return Promise.reject(withMessageKey(new Error('This message is not available to retry.'), 'client.error.messageNotRetryable'));
+    if (!this.connectionOpen) return Promise.reject(new RemoteOperationError('connection_not_ready', 'Wait for the session to reconnect, then retry.', true, undefined, 'client.error.reconnectRetry'));
     const operationId = message.operationId && retriesSameOperation({ state: message.status, ...(message.retryRequiresNewOperation === undefined ? {} : { retryRequiresNewOperation: message.retryRequiresNewOperation }),
       placeHeld: message.afterKey !== undefined && anchorPosition(state, message.afterKey) !== undefined, hasOperation: true })
       ? message.operationId : this.createOperationId();
@@ -563,8 +566,7 @@ export class RemoteSessionClient {
   respondToInteraction(requestId: string, response: AgentInteractionResponse, operationId?: string): Promise<CommandAcknowledgementMessage> {
     if (!operationId && !this.replica.getState().pendingInteractions.some((request) => request.requestId === requestId)) {
       return this.observeRejection(Promise.reject(new RemoteOperationError(
-        'stale_interaction', 'This interaction is no longer pending.', false, requestId,
-      )));
+        'stale_interaction', 'This interaction is no longer pending.', false, requestId, 'client.error.staleInteraction')));
     }
     const message = {
       protocolVersion: PROTOCOL_VERSION,
@@ -836,8 +838,7 @@ export class RemoteSessionClient {
     } }, 'timeline_page', (message): message is HistoryPage => message.type === 'timeline_page'
       && message.payload.agentId === this.agentId && message.payload.direction === direction, null);
     const abort = () => this.rejectPendingOperation(requestId, 'timeline_page', new RemoteOperationError(
-      'recovery_retired', 'This timeline recovery has been superseded.', true, requestId,
-    ));
+      'recovery_retired', 'This timeline recovery has been superseded.', true, requestId, 'client.error.recoverySuperseded'));
     signal.addEventListener('abort', abort, {once: true});
     if (signal.aborted) abort();
     try { return await pending; }
@@ -850,7 +851,7 @@ export class RemoteSessionClient {
       !continuation
       || continuation.epoch !== page.payload.epoch
       || continuation.seq <= cursor.seq
-    ) throw new Error('Timeline recovery did not advance.');
+    ) throw withMessageKey(new Error('Timeline recovery did not advance.'), 'client.error.recoveryStalled');
     return continuation;
   }
 
@@ -869,7 +870,7 @@ export class RemoteSessionClient {
   private restartDisconnected(generation: number): void {
     if (generation !== this.generation) return;
     this.generation += 1;
-    this.rejectPendingOperations('connection_disconnected', 'Remote session connection disconnected.', true);
+    this.rejectPendingOperations('connection_disconnected', 'Remote session connection disconnected.', true, 'client.error.sessionDisconnected');
     this.stopConnection();
     const nextGeneration = this.generation;
     this.setStatus('disconnected');
@@ -879,7 +880,7 @@ export class RemoteSessionClient {
   private pauseDisconnected(generation: number, reason: string): void {
     if (generation !== this.generation) return;
     this.generation += 1;
-    this.rejectPendingOperations('connection_disconnected', 'Remote session connection disconnected.', true);
+    this.rejectPendingOperations('connection_disconnected', 'Remote session connection disconnected.', true, 'client.error.sessionDisconnected');
     this.stopConnection();
     this.paused = true;
     this.replica.reportDiagnostic('session_paused', reason, true);
@@ -891,7 +892,7 @@ export class RemoteSessionClient {
   private refuseDisconnected(generation: number, reason: string): void {
     if (generation !== this.generation) return;
     this.generation += 1;
-    this.rejectPendingOperations('session_unavailable', reason || 'The session is unavailable.', false);
+    this.rejectPendingOperations('session_unavailable', reason || 'The session is unavailable.', false, reason ? undefined : 'client.error.sessionUnavailable');
     this.stopConnection();
     this.replica.reportDiagnostic('session_unavailable', reason || 'The session is unavailable.', false);
     this.setStatus('unavailable');
@@ -909,7 +910,7 @@ export class RemoteSessionClient {
   }
 
   private send(message: ClientMessage): void {
-    if (!this.connection) throw new Error('Remote session is not connected.');
+    if (!this.connection) throw withMessageKey(new Error('Remote session is not connected.'), 'client.error.notConnected');
     this.connection.send(message);
   }
 
@@ -923,21 +924,18 @@ export class RemoteSessionClient {
     const requestId = correlationId;
     if (isSessionMutation(message) && (this.controlSupported || this.requireSessionControl)) {
       if (this.control?.access !== 'control' || !this.control.token) return this.observeRejection(Promise.reject(new RemoteOperationError(
-        'session_read_only', 'This page is read-only. Take control before operating this session.', true, requestId,
-      )));
+        'session_read_only', 'This page is read-only. Take control before operating this session.', true, requestId, 'client.error.readOnlyPage')));
       message = { ...message, controlToken: this.control.token };
     }
     if (!this.connectionOpen) return this.observeRejection(Promise.reject(new RemoteOperationError(
-      'connection_not_ready', 'Not sent. Wait for the session to reconnect, then retry.', true, requestId,
-    )));
+      'connection_not_ready', 'Not sent. Wait for the session to reconnect, then retry.', true, requestId, 'client.error.notSentReconnect')));
     const operations = this.pendingOperations.get(requestId) ?? new Map<string, PendingOperation>();
     if (operations.has(operationType)) {
       return this.observeRejection(Promise.reject(new RemoteOperationError(
         'duplicate_request_id',
         'A matching remote operation is already pending.',
         true,
-        requestId,
-      )));
+        requestId, 'client.error.duplicateOperation')));
     }
     this.pendingOperations.set(requestId, operations);
     const operation = new Promise<T>((resolve, reject) => {
@@ -947,8 +945,7 @@ export class RemoteSessionClient {
           'operation_timeout',
           'Remote operation timed out waiting for a relay response.',
           true,
-          requestId,
-        ));
+          requestId, 'client.error.operationTimedOut'));
         this.restartDisconnected(generation);
       }, timeoutMs);
       operations.set(operationType, {
@@ -964,8 +961,7 @@ export class RemoteSessionClient {
           'operation_send_failed',
           'Remote operation could not be sent.',
           true,
-          requestId,
-        ));
+          requestId, 'client.error.operationNotSent'));
         this.restartDisconnected(generation);
       }
     });
@@ -997,11 +993,11 @@ export class RemoteSessionClient {
     }
   }
 
-  private rejectPendingOperations(code: string, message: string, recoverable: boolean): void {
+  private rejectPendingOperations(code: string, message: string, recoverable: boolean, messageKey?: MessageKey): void {
     for (const requestId of [...this.pendingOperations.keys()]) {
       this.rejectPendingOperationsForRequestId(
         requestId,
-        new RemoteOperationError(code, message, recoverable, requestId),
+        new RemoteOperationError(code, message, recoverable, requestId, messageKey),
       );
     }
   }

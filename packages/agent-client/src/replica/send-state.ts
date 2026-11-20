@@ -16,6 +16,7 @@
  *   uncertain, its place in the conversation is still held and the Host can run it again; otherwise it is a new operation.
  * - `failed` is never changed by an acknowledgement, an echo or a history rewrite (an echo of a failed message is not matched).
  */
+import { translator, type Translate } from '../presentation/messages.js';
 export type SendState = 'sending' | 'awaiting_echo' | 'unconfirmed' | 'failed';
 
 export const SEND_STATES: readonly SendState[] = ['sending', 'awaiting_echo', 'unconfirmed', 'failed'];
@@ -98,11 +99,11 @@ export interface SendWords {
   readonly deliveryState: SendState | 'pending';
 }
 
-export function describe(state: SendState, delivery?: 'immediate' | 'next_turn'): SendWords {
+export function describe(state: SendState, delivery?: 'immediate' | 'next_turn', t: Translate = translator('en')): SendWords {
   const settled = canSettle(state);
-  const label = state === 'failed' ? 'Send failed'
-    : state === 'unconfirmed' ? 'Delivery not confirmed'
-    : state === 'sending' ? 'Sending…'
-    : delivery === 'next_turn' ? 'Queued — waiting for conversation…' : 'Sent — waiting for conversation…';
+  const label = t(state === 'failed' ? 'client.send.failed'
+    : state === 'unconfirmed' ? 'client.send.unconfirmed'
+    : state === 'sending' ? 'client.send.sending'
+    : delivery === 'next_turn' ? 'client.send.queued' : 'client.send.sent');
   return { label, settled, deliveryState: settled ? state : 'pending' };
 }

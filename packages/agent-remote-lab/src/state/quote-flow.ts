@@ -13,6 +13,7 @@
  */
 import type { QuoteSelection } from './quote-selection.js';
 import type { CreateSessionOptions } from '../directory-client.js';
+import { translator, type Translate } from '@orchardworks/agent-client';
 
 export const reloadedConversationMessage = 'This conversation was reloaded. Select the messages again.';
 
@@ -31,9 +32,9 @@ export function quoteSessionOptions(agent: { readonly cwd?: string | null; reado
 
 export type QuoteLanding = { readonly kind: 'reveal' } | { readonly kind: 'notice'; readonly message: string; readonly windowId: string };
 
-export function quoteLanding(windows: readonly { readonly id: string; readonly title: string; readonly current: boolean; readonly views: readonly { readonly viewId: string; readonly title: string }[] }[], target: { readonly windowId: string }, destination: string): QuoteLanding {
+export function quoteLanding(windows: readonly { readonly id: string; readonly title: string; readonly current: boolean; readonly views: readonly { readonly viewId: string; readonly title: string }[] }[], target: { readonly windowId: string }, destination: string, t: Translate = translator('en')): QuoteLanding {
   const window = windows.find(item => item.id === target.windowId);
   if (!window || window.current) return { kind: 'reveal' };
-  const title = window.views.find(item => item.viewId === destination)?.title ?? 'the session';
-  return { kind: 'notice', windowId: target.windowId, message: `Quoted into “${title}” in Window “${window.title}”.` };
+  const title = window.views.find(item => item.viewId === destination)?.title ?? t('client.quote.theSession');
+  return { kind: 'notice', windowId: target.windowId, message: t('client.quote.landed', { title, window: window.title }) };
 }

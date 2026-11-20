@@ -1,5 +1,5 @@
 import type { AgentStatus } from '@orchardworks/agent-remote-protocol';
-import type { SessionStateRef, SessionStatesView } from '@orchardworks/agent-client';
+import { storedWords, translator, type SessionStateRef, type SessionStatesView, type Translate } from '@orchardworks/agent-client';
 import { sessionKey } from './session-tree.js';
 import type { SessionObservation } from './tracking-state.js';
 
@@ -17,6 +17,11 @@ export const activityGroups: readonly { status: SessionActivityStatus; label: st
   { status: 'offline', label: 'Host offline', activities: ['offline'] },
 ];
 
+
+/** A status group's label in the locale's words. */
+export function activityGroupLabel(group: { readonly label: string }, t: Translate = translator('en')): string {
+  return storedWords(group.label, t);
+}
 
 /** Track's live observation when it has one, otherwise the state the Relay shares for the session. */
 export function sessionActivity(session: SessionStateRef, observations?: Readonly<Record<string, SessionObservation>>, states?: SessionStatesView): SessionActivityStatus {

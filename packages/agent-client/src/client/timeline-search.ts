@@ -1,5 +1,6 @@
 import type { AgentTimelineItem, HistoryPage, ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { timelineEntryKey } from '../replica/timeline-entry-key.js';
+import { withMessageKey } from '../presentation/error-words.js';
 
 export interface TimelineSearchMatch {
   readonly key: string;
@@ -81,13 +82,13 @@ export async function scanTimelineHistory({ epoch, entries, hasOlder, query, fet
   let before = entries[0]?.seqStart;
   while (hasOlder) {
     check();
-    if (!before) throw new Error('History has no search cursor. Reconnect and retry.');
+    if (!before) throw withMessageKey(new Error('History has no search cursor. Reconnect and retry.'), 'client.error.noSearchCursor');
     const page = (await fetchBefore(before)).payload;
     check();
-    if (page.epoch !== epoch || page.reset || page.staleCursor || page.gap) throw new Error('Conversation history changed. Search again.');
+    if (page.epoch !== epoch || page.reset || page.staleCursor || page.gap) throw withMessageKey(new Error('Conversation history changed. Search again.'), 'client.error.historyChangedSearch');
     if (page.error) throw new Error(page.error);
     const next = page.entries[0]?.seqStart;
-    if ((next !== undefined && next >= before) || (page.hasOlder && next === undefined)) throw new Error('History search did not advance. Retry when the session is ready.');
+    if ((next !== undefined && next >= before) || (page.hasOlder && next === undefined)) throw withMessageKey(new Error('History search did not advance. Retry when the session is ready.'), 'client.error.searchStalled');
     const known = new Set(matches.map(match => match.key));
     matches = [...matches, ...findTimelineMatches(epoch, page.entries, query, scope).filter(match => !known.has(match.key))];
     scanned += page.entries.length;

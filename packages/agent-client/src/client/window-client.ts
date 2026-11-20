@@ -4,9 +4,14 @@ import {
   type WindowMergeRequest, type WindowMutation, type WindowOperationResult, type WindowPresentation, type WindowSessionBinding,
   type WindowSplitRequest, type WindowTransferRequest, type WorkspaceWindow,
 } from '@orchardworks/agent-remote-protocol';
+import { withMessageKey } from '../presentation/error-words.js';
+import type { MessageKey } from '../presentation/messages.js';
 
 export class WindowRequestError extends Error {
-  constructor(message: string, readonly status: number, readonly code?: string, readonly result?: WindowOperationResult) { super(message); this.name = 'WindowRequestError'; }
+  constructor(message: string, readonly status: number, readonly code?: string, readonly result?: WindowOperationResult, messageKey?: MessageKey) {
+    super(message); this.name = 'WindowRequestError';
+    if (messageKey) withMessageKey(this, messageKey);
+  }
 }
 export type WindowOperationIdentity = Pick<WindowCreateRequest, 'operationId' | 'issuedAt'>;
 /** Preserve the exact request when transport failure cannot establish its outcome. */
@@ -16,6 +21,7 @@ export class WindowMutationUnknownError extends Error {
     super(result?.status === 'committed' ? 'The Window operation committed, but its current snapshot is unavailable. Recover the original request before continuing.'
       : 'The Window operation outcome is unknown. Recover the original request before continuing.', { cause });
     this.name = 'WindowMutationUnknownError';
+    withMessageKey(this, result?.status === 'committed' ? 'client.error.windowCommitted' : 'client.error.windowUnknown');
   }
 }
 const identity = (): WindowOperationIdentity => ({ operationId: crypto.randomUUID(), issuedAt: Date.now() });
@@ -39,17 +45,18 @@ export class WindowWorkspaceClient {
       ...(body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
     });
     const value = await response.json();
-    if (!response.ok) throw new WindowRequestError(value.error?.message ?? value.error ?? 'Window request failed.', response.status, value.code ?? value.error?.code);
+    if (!response.ok) throw new WindowRequestError(value.error?.message ?? value.error ?? 'Window request failed.', response.status, value.code ?? value.error?.code, undefined,
+      value.error?.message ?? value.error ? undefined : 'client.error.windowRequestFailed');
     return { value, status: response.status };
   }
-  async list(): Promise<WorkspaceWindow[]> { const { value } = await this.request(''); if (!Array.isArray(value.windows)) throw new Error('Invalid Window list.'); const windows = value.windows.map(decodeWorkspaceWindow); if (windows.some((window: WorkspaceWindow | undefined) => !window)) throw new Error('Invalid Window list.'); return windows as WorkspaceWindow[]; }
+  async list(): Promise<WorkspaceWindow[]> { const { value } = await this.request(''); if (!Array.isArray(value.windows)) throw withMessageKey(new Error('Invalid Window list.'), 'client.error.invalidWindowList'); const windows = value.windows.map(decodeWorkspaceWindow); if (windows.some((window: WorkspaceWindow | undefined) => !window)) throw withMessageKey(new Error('Invalid Window list.'), 'client.error.invalidWindowList'); return windows as WorkspaceWindow[]; }
   /** Every group with its appearances; a Relay without groups answers with Windows only. */
   async listGroups(): Promise<WindowGroup[]> {
     const { value } = await this.request('');
     const raw = value.groups ?? (Array.isArray(value.windows) ? value.windows.map((window: unknown) => ({ window })) : undefined);
-    if (!Array.isArray(raw)) throw new Error('Invalid Window list.');
+    if (!Array.isArray(raw)) throw withMessageKey(new Error('Invalid Window list.'), 'client.error.invalidWindowList');
     const groups = raw.map(decodeWindowGroup);
-    if (groups.includes(undefined)) throw new Error('Invalid Window list.');
+    if (groups.includes(undefined)) throw withMessageKey(new Error('Invalid Window list.'), 'client.error.invalidWindowList');
     return groups as WindowGroup[];
   }
   async inspect(id: string, signal?: AbortSignal): Promise<WindowSnapshot> { const { value } = await this.request(`/${encodeURIComponent(id)}`, 'GET', undefined, signal); this.validate(value, id); return value; }
@@ -57,20 +64,21 @@ export class WindowWorkspaceClient {
     const decoded = decodeWorkspaceWindow(value.window);
     const appearances = value.bots !== undefined || value.presentation !== undefined;
     if (!decoded || decoded.id !== id || value.manager !== undefined && (!isWindowSessionBinding(value.manager?.session) || !Number.isSafeInteger(value.manager?.generation) || value.manager.generation < 0)
-      || appearances && !isWindowGroup({ window: decoded, ...(value.bots === undefined ? {} : { bots: value.bots }), ...(value.presentation === undefined ? {} : { presentation: value.presentation }) })) throw new Error('Invalid Window snapshot.');
+      || appearances && !isWindowGroup({ window: decoded, ...(value.bots === undefined ? {} : { bots: value.bots }), ...(value.presentation === undefined ? {} : { presentation: value.presentation }) })) throw withMessageKey(new Error('Invalid Window snapshot.'), 'client.error.invalidWindowSnapshot');
     value.window = decoded;
   }
   private receipt({ value, status }: WindowResponse, operationId: string): WindowOperationResult {
-    if (!isWindowOperationResult(value?.result) || value.result.operationId !== operationId) throw new WindowRequestError('Invalid Window receipt.', status, 'invalid_window_receipt');
+    if (!isWindowOperationResult(value?.result) || value.result.operationId !== operationId) throw new WindowRequestError('Invalid Window receipt.', status, 'invalid_window_receipt', undefined, 'client.error.invalidWindowReceipt');
     return value.result;
   }
   private committed(result: WindowOperationResult, status: number): void {
-    if (result.status === 'rejected') throw new WindowRequestError(result.message ?? 'Window operation was rejected.', status, result.code ?? 'operation_rejected', result);
+    if (result.status === 'rejected') throw new WindowRequestError(result.message ?? 'Window operation was rejected.', status, result.code ?? 'operation_rejected', result,
+      result.message === undefined ? 'client.error.windowRejected' : undefined);
   }
   private commit(response: WindowResponse, id: string, result: WindowOperationResult): WindowCommit {
     this.validate(response.value, id);
     // A retained receipt describes its original settlement; the snapshot may have advanced.
-    if (result.revision > response.value.window.revision) throw new WindowRequestError('Invalid Window receipt.', response.status, 'invalid_window_receipt');
+    if (result.revision > response.value.window.revision) throw new WindowRequestError('Invalid Window receipt.', response.status, 'invalid_window_receipt', undefined, 'client.error.invalidWindowReceipt');
     return response.value as WindowCommit;
   }
   private async recover(id: string, input: WindowCreateRequest | WindowDeleteRequest): Promise<WindowOperationResult> {
@@ -155,7 +163,7 @@ export class WindowWorkspaceClient {
     const response = await this.request(`/${encodeURIComponent(id)}/${action}`, 'POST', request);
     const result = this.receipt(response, request.operationId);
     this.committed(result, response.status);
-    const invalid = () => new WindowRequestError('Invalid Window groups.', response.status, 'invalid_window_receipt');
+    const invalid = () => new WindowRequestError('Invalid Window groups.', response.status, 'invalid_window_receipt', undefined, 'client.error.invalidWindowGroups');
     const raw = response.value.groups;
     if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !Object.hasOwn(raw, id) || !Object.hasOwn(raw, other)
       || Object.keys(raw).some(key => key !== id && key !== other) || action === 'merge' && raw[other] !== null) throw invalid();

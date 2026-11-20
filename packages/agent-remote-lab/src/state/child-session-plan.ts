@@ -1,3 +1,4 @@
+import { withMessageKey } from '@orchardworks/agent-client';
 /**
  * Child session plan: how a subagent (child) session of a parent opens.
  *
@@ -35,7 +36,7 @@ export function knownChildOf<Entry extends ChildIdentity>(entries: readonly Entr
 export function directParentOf<Open extends ChildIdentity>(origin: Open, known: ChildIdentity | undefined, open: readonly Open[]): Open {
   if (!known?.parentNativeSessionId || known.parentNativeSessionId === origin.nativeSessionId) return origin;
   const parent = open.find(session => session.nativeSessionId === known.parentNativeSessionId && sameWorkspace(session, origin));
-  if (!parent) throw new Error('Open the direct parent session before opening this nested subagent.');
+  if (!parent) throw withMessageKey(new Error('Open the direct parent session before opening this nested subagent.'), 'client.fork.parentFirst');
   return parent;
 }
 

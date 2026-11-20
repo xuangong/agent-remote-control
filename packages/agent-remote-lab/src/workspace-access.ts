@@ -1,4 +1,4 @@
-import { displayLeaseValid, type ChannelLink } from '@orchardworks/agent-client';
+import { displayLeaseValid, type ChannelLink, withMessageKey } from '@orchardworks/agent-client';
 import { createContext } from 'react';
 
 export type WorkspaceAccess = { user?: { id: string; name?: string; email?: string }; basePath: string; expiresAt: number; refreshAfterMs?: number };
@@ -115,7 +115,7 @@ export const workspaceFetch: typeof fetch = async (input, init) => {
   const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
   if (gate?.retired) throw new Error('Workspace access was retired.');
   while (gate && (!gate.ready || gate.confirming)) {
-    if (!gate.ready && method !== 'GET' && method !== 'HEAD') throw new Error('Workspace access is restoring. Try again when connected.');
+    if (!gate.ready && method !== 'GET' && method !== 'HEAD') throw withMessageKey(new Error('Workspace access is restoring. Try again when connected.'), 'client.view.accessRestoring');
     await new Promise<void>((resolve, reject) => {
       const cleanup = () => { gate.listeners.delete(check); signal?.removeEventListener('abort', cancel); };
       const check = () => { if (gate.retired) { cleanup(); reject(new Error('Workspace access was retired.')); return; } if (gate.ready && !gate.confirming) { cleanup(); resolve(); } };

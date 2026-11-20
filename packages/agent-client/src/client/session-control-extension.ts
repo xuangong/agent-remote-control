@@ -1,4 +1,5 @@
 import type { NativeSessionOwner } from '@orchardworks/agent-remote-protocol';
+import { withMessageKey } from '../presentation/error-words.js';
 
 export interface SessionTakeControlOptions {
   onRestoring?(): void;
@@ -70,7 +71,7 @@ export class SessionHandoff {
 
   /** Namespace the generation by target when one consumer opens multiple unbound sessions. */
   async run(generation: string, operation: (options: { checkOnly: boolean; onRestoring(): void }) => Promise<void>, options: SessionTakeControlOptions = {}): Promise<void> {
-    if (this.running) throw Object.assign(new Error('Native control is already being requested.'), { code: 'native_control_in_progress' });
+    if (this.running) throw Object.assign(withMessageKey(new Error('Native control is already being requested.'), 'client.error.nativeControlInProgress'), { code: 'native_control_in_progress' });
     const wasUnknown = this.getState(generation)?.phase === 'unknown';
     const checkOnly = wasUnknown || options.checkOnly === true;
     let restoring = false;

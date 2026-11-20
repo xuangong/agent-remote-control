@@ -1,4 +1,5 @@
 import { isCallForSupportProfile, type CallForSupportProfile, type CallForSupportProfileInput } from '@orchardworks/agent-remote-protocol';
+import { withMessageKey } from '../presentation/error-words.js';
 
 /** The profiles a session may call for, on the session that holds its role now. */
 export interface CallForSupportEnablement { hostId: string; providerId: string; nativeSessionId: string; profileIds: string[]; updatedAt: number }
@@ -12,7 +13,7 @@ export class CallForSupportConflictError extends Error {}
 
 const settings = (value: unknown): CallForSupportSettings => {
   const result = value as Partial<CallForSupportSettings> | undefined;
-  if (!result || !Array.isArray(result.profiles) || !result.profiles.every(isCallForSupportProfile) || !Array.isArray(result.enablement)) throw new Error('Invalid Call For Support settings.');
+  if (!result || !Array.isArray(result.profiles) || !result.profiles.every(isCallForSupportProfile) || !Array.isArray(result.enablement)) throw withMessageKey(new Error('Invalid Call For Support settings.'), 'client.error.invalidSupportSettings');
   return { profiles: result.profiles, enablement: result.enablement };
 };
 
@@ -25,7 +26,9 @@ export class RemoteCallForSupportClient {
       ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }),
     });
     const value = await response.json() as { error?: string; code?: string };
-    if (!response.ok) throw value.code === 'conflict' ? new CallForSupportConflictError(value.error ?? 'The profile changed.') : new Error(value.error ?? 'Call For Support is unavailable.');
+    if (!response.ok) throw value.code === 'conflict'
+      ? (value.error === undefined ? withMessageKey(new CallForSupportConflictError('The profile changed.'), 'client.error.supportProfileChanged') : new CallForSupportConflictError(value.error))
+      : (value.error === undefined ? withMessageKey(new Error('Call For Support is unavailable.'), 'client.error.supportUnavailable') : new Error(value.error));
     return value;
   }
   async read(): Promise<CallForSupportSettings> { return settings(await this.request('')); }

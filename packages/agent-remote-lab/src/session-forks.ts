@@ -6,6 +6,7 @@ import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agen
 import { RemoteOperationError } from '@orchardworks/agent-client';
 import type { CreateSessionOptions, OpenedSession } from './directory-client.js';
 import { sessionKey } from './session-tree.js';
+import { withMessageKey } from '@orchardworks/agent-client';
 
 export interface SnapshotForkContext {
   mode?: 'snapshot';
@@ -67,8 +68,8 @@ function forkSessionReference(session: OpenedSession): OpenedSession {
 export async function captureForkContext(transport: Pick<RemoteAgentTransport, 'fetchTimeline'>, source: OpenedSession): Promise<SnapshotForkContext> {
   const signal = AbortSignal.timeout(30_000);
   const page = (await transport.fetchTimeline(source.agentId, 'tail', undefined, MAX_CONTEXT_ENTRIES, { signal })).payload;
-  if (page.reset || page.staleCursor || page.gap || page.error) throw new Error('Source history changed during capture. Try the fork again.');
-  if (page.hasOlder) throw new Error('The source history could not be fully captured in one snapshot.');
+  if (page.reset || page.staleCursor || page.gap || page.error) throw withMessageKey(new Error('Source history changed during capture. Try the fork again.'), 'client.fork.sourceChanged');
+  if (page.hasOlder) throw withMessageKey(new Error('The source history could not be fully captured in one snapshot.'), 'client.fork.sourceNotCaptured');
   const boundary = { epoch: page.epoch, seq: page.window.maxSeq };
   const { text, itemCount, shortenedToolCount } = serializeNormalizedHistory(page.entries, Number.POSITIVE_INFINITY);
   return { source: { ...source }, capturedAt: new Date().toISOString(), boundary, itemCount, text, ...(shortenedToolCount ? { shortenedToolCount } : {}) };
@@ -138,7 +139,7 @@ export class ForkStore {
       const value: unknown = JSON.parse(stored);
       if (validRecord(value) && !value.remote) return value;
     } catch { /* Report the same recoverable delivery error for unavailable or invalid storage. */ }
-    throw new Error('The fork context is unavailable. Restore browser storage before sending again.');
+    throw withMessageKey(new Error('The fork context is unavailable. Restore browser storage before sending again.'), 'client.fork.contextRestoreStorage');
   }
   all(): readonly SessionFork[] {
     const local = this.allLocal();
@@ -188,7 +189,7 @@ export class ForkStore {
     if (this.shared.has(id)) return this.withEditedNavigation(this.shared.get(id)!);
     const matches = [...this.shared.values()].filter(record => record.relationId === id);
     if (matches.length === 1) return this.withEditedNavigation(matches[0]!);
-    throw new Error('The fork context is unavailable.');
+    throw withMessageKey(new Error('The fork context is unavailable.'), 'client.fork.contextUnavailable');
   }
   private sharedFor(record: SessionFork): SessionFork | undefined {
     const knownNavigation = this.readNavigation(record);
@@ -214,8 +215,8 @@ export class ForkStore {
   followEditedSide(id: string, from: OpenedSession, target: OpenedSession): void {
     const record = this.get(id);
     const source = sideNavigationTarget(record);
-    if (!source || sessionKey(source) !== sessionKey(from)) throw new Error('The side navigation changed. Refresh before following the edit.');
-    if ((from.hostId ?? 'local') !== (target.hostId ?? 'local') || from.providerId !== target.providerId) throw new Error('The edited side must retain its Host and provider.');
+    if (!source || sessionKey(source) !== sessionKey(from)) throw withMessageKey(new Error('The side navigation changed. Refresh before following the edit.'), 'client.fork.sideNavigationChanged');
+    if ((from.hostId ?? 'local') !== (target.hostId ?? 'local') || from.providerId !== target.providerId) throw withMessageKey(new Error('The edited side must retain its Host and provider.'), 'client.fork.sideKeepHost');
     this.saveNavigation(record, record.linked !== false, record.revision ?? 0, target);
     for (const listener of this.listeners) listener();
   }
@@ -235,12 +236,12 @@ export class ForkStore {
     } catch { /* Shared in-memory navigation remains available when persistence is denied. */ }
   }
   private saveNavigation(record: SessionFork, linked: boolean, revision: number, editedTarget = this.readNavigation(record)?.editedTarget): void {
-    if (!record.target || !this.storage) throw new Error('The side link could not be saved. Free browser storage before continuing.');
+    if (!record.target || !this.storage) throw withMessageKey(new Error('The side link could not be saved. Free browser storage before continuing.'), 'client.fork.sideLinkNotSaved');
     const key = this.navigationKey + sessionKey(record.target);
     const identity = record.remote ? navigationIdentity(record) : undefined;
     const value: ForkNavigation = { ...(identity ? { identity } : {}), source: sessionKey(record.source), ...(record.hostLocator?{controllerId:record.hostLocator.controllerId}:{}), linked, revision, relationId: record.relationId, ...(editedTarget ? { editedTarget: forkSessionReference(editedTarget) } : {}) };
     try { if (this.storage.getItem(key) !== JSON.stringify(value)) this.storage.setItem(key, JSON.stringify(value)); }
-    catch { throw new Error('The side link could not be saved. Free browser storage before continuing.'); }
+    catch { throw withMessageKey(new Error('The side link could not be saved. Free browser storage before continuing.'), 'client.fork.sideLinkNotSaved'); }
   }
   setRelationEditPending(id: string, pending: boolean): void {
     const local = this.getLocal(id);
@@ -252,8 +253,8 @@ export class ForkStore {
   }
   setLinked(id: string, linked: boolean, expectedRevision = 0): void {
     const record = this.get(id);
-    if (record.remote) throw new Error('Shared side links must be changed through the server.');
-    if ((record.revision ?? 0) !== expectedRevision) throw new Error('The side link changed. Refresh before trying again.');
+    if (record.remote) throw withMessageKey(new Error('Shared side links must be changed through the server.'), 'client.fork.sideSharedViaServer');
+    if ((record.revision ?? 0) !== expectedRevision) throw withMessageKey(new Error('The side link changed. Refresh before trying again.'), 'client.fork.sideLinkChanged');
     if ((record.linked !== false) === linked) return;
     this.saveNavigation(record, linked, expectedRevision + 1);
     for (const listener of this.listeners) listener();
@@ -281,7 +282,7 @@ export class ForkStore {
       record = remote;
     }
     record ??= this.get(id);
-    if (record.target && sessionKey(record.target) !== sessionKey(target)) throw new Error('The fork target changed. Open its original session before continuing.');
+    if (record.target && sessionKey(record.target) !== sessionKey(target)) throw withMessageKey(new Error('The fork target changed. Open its original session before continuing.'), 'client.fork.targetChanged');
     const reference = forkSessionReference(target);
     if (!record.remote) { this.update(id, { target: reference }, true); return; }
     this.shared.set(record.id, { ...record, target: reference });
@@ -290,24 +291,24 @@ export class ForkStore {
   private update(id: string, change: Partial<ForkDelivery>, requireLocal = false): void {
     const record = this.getLocalForEffect(id);
     if (record) this.save({ ...record, ...change });
-    else if (requireLocal) throw new Error('The fork context is unavailable.');
+    else if (requireLocal) throw withMessageKey(new Error('The fork context is unavailable.'), 'client.fork.contextUnavailable');
     else this.get(id);
   }
   private save(record: SessionFork): void {
     try { if (!this.storage) throw new Error('Storage unavailable'); this.storage.setItem(this.key + record.id, JSON.stringify(record)); }
-    catch { throw new Error('The fork context could not be saved. Free browser storage before continuing.'); }
+    catch { throw withMessageKey(new Error('The fork context could not be saved. Free browser storage before continuing.'), 'client.fork.contextNotSaved'); }
     for (const listener of this.listeners) listener();
   }
   async send<T>(id: string, text: string, send: (input: string) => Promise<T>, delivered: () => Promise<boolean>, identity = text, requireLocal = false): Promise<T | undefined> {
     const record = this.getLocalForEffect(id);
     if (!record) {
-      if (requireLocal || !this.get(id).remote) throw new Error('The fork context is unavailable.');
+      if (requireLocal || !this.get(id).remote) throw withMessageKey(new Error('The fork context is unavailable.'), 'client.fork.contextUnavailable');
       return send(text);
     }
     const started = record.delivery;
     const run = () => {
       const latest = this.getLocalForEffect(id);
-      if (!latest) throw new Error('The fork context is unavailable.');
+      if (!latest) throw withMessageKey(new Error('The fork context is unavailable.'), 'client.fork.contextUnavailable');
       if (started !== 'sent' && latest.delivery === 'sent' && (latest.firstInputIdentity ?? latest.firstInput) === identity) return Promise.resolve(undefined);
       return this.sendInput(id, text, send, delivered, identity);
     };
@@ -315,14 +316,14 @@ export class ForkStore {
   }
   private async sendInput<T>(id: string, text: string, send: (input: string) => Promise<T>, delivered: () => Promise<boolean>, identity = text): Promise<T | undefined> {
     let record = this.getLocalForEffect(id);
-    if (!record) throw new Error('The fork context is unavailable.');
+    if (!record) throw withMessageKey(new Error('The fork context is unavailable.'), 'client.fork.contextUnavailable');
     if (record.delivery === 'uncertain') {
-      if (!await delivered()) throw new Error('The first input has an unknown delivery status. Reconnect and check its native history before sending again.');
+      if (!await delivered()) throw withMessageKey(new Error('The first input has an unknown delivery status. Reconnect and check its native history before sending again.'), 'client.fork.unknownDelivery');
       const sameInput = (record.pendingInputIdentity ?? record.pendingInput) === identity;
       this.update(id, { delivery: 'sent', pendingInput: undefined }, true);
       if (sameInput) return undefined;
       record = this.getLocalForEffect(id);
-      if (!record) throw new Error('The fork context is unavailable.');
+      if (!record) throw withMessageKey(new Error('The fork context is unavailable.'), 'client.fork.contextUnavailable');
     }
     if (record.delivery === 'sent') return send(text);
     this.update(id, { delivery: 'uncertain', pendingInput: text, firstInput: text, pendingInputIdentity: identity, firstInputIdentity: identity }, true);

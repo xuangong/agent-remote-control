@@ -10,23 +10,25 @@
 import type { WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { parseWindowFeature } from '../window-feature-views.js';
 import { sessionKey } from '../session-tree.js';
+import { translator, type Translate } from '@orchardworks/agent-client';
 
 export interface QuoteTargetView { readonly viewId: string; readonly title: string; readonly detail: string }
 export interface QuoteTargetWindow { readonly id: string; readonly title: string; readonly current: boolean; readonly views: readonly QuoteTargetView[] }
 
-const placement = { primary: 'Main', dock: 'Docked', float: 'Floating', attached: 'Side' } as const;
+const placement = { primary: 'client.quote.placementMain', dock: 'client.quote.placementDock', float: 'client.quote.placementFloat', attached: 'client.quote.placementSide' } as const;
 
 export function quoteTargets(
   known: readonly WorkspaceWindow[], open: WorkspaceWindow | undefined,
   source: { readonly viewId: string; readonly session: Parameters<typeof sessionKey>[0] },
+  t: Translate = translator('en'),
 ): QuoteTargetWindow[] {
   const catalog = [...new Map([...known, ...(open ? [open] : [])].map(window => [window.id, window])).values()];
   return catalog.map(window => ({
-    id: window.id, title: window.title || 'Untitled Window', current: window.id === open?.id,
+    id: window.id, title: window.title || t('client.quote.untitledWindow'), current: window.id === open?.id,
     views: window.views.filter(view => {
       const feature = parseWindowFeature(view.feature);
       return view.id !== source.viewId && !!view.binding && view.binding.sessionIntent !== 'history' && !view.binding.parentNativeSessionId
         && (!feature || feature.kind === 'team') && sessionKey(view.binding) !== sessionKey(source.session);
-    }).map(view => ({ viewId: view.id, title: view.binding!.title || 'Untitled session', detail: placement[view.placement] })),
+    }).map(view => ({ viewId: view.id, title: view.binding!.title || t('client.quote.untitledSession'), detail: t(placement[view.placement]) })),
   })).filter(window => window.current || window.views.length).sort((a, b) => Number(b.current) - Number(a.current));
 }

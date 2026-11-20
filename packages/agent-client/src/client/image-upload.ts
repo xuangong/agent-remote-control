@@ -1,4 +1,5 @@
 import type { ImageMediaType, ImageUploadReceipt } from '@orchardworks/agent-remote-protocol';
+import { withMessageKey } from '../presentation/error-words.js';
 
 export type ImageUploadRequest =
   | { type: 'image_upload_begin'; sha256: string; byteLength: number; mediaType: ImageMediaType }
@@ -21,8 +22,8 @@ export async function uploadImage(file: Blob, uploadId: string,
   options: ImageUploadOptions = {},
 ): Promise<NonNullable<ImageUploadReceipt['attachment']>> {
   checkUploadAborted(options.signal);
-  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) throw new Error('Choose a PNG, JPEG, or WebP image.');
-  if (!file.size || file.size > 10 * 1024 * 1024) throw new Error('Each image must be between 1 byte and 10 MiB.');
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) throw withMessageKey(new Error('Choose a PNG, JPEG, or WebP image.'), 'client.error.imageType');
+  if (!file.size || file.size > 10 * 1024 * 1024) throw withMessageKey(new Error('Each image must be between 1 byte and 10 MiB.'), 'client.error.imageSize');
   let digest = digests.get(file);
   if (!digest) {
     digest = file.arrayBuffer().then(bytes => crypto.subtle.digest('SHA-256', bytes)).then(hash =>
@@ -35,7 +36,7 @@ export async function uploadImage(file: Blob, uploadId: string,
     checkUploadAborted(options.signal);
     const receipt = await request(message);
     checkUploadAborted(options.signal);
-    if (receipt.uploadId !== uploadId || !Number.isSafeInteger(receipt.offset) || receipt.offset < 0 || receipt.offset > file.size) throw new Error('The Host returned an invalid image upload offset.');
+    if (receipt.uploadId !== uploadId || !Number.isSafeInteger(receipt.offset) || receipt.offset < 0 || receipt.offset > file.size) throw withMessageKey(new Error('The Host returned an invalid image upload offset.'), 'client.error.badImageOffset');
     return receipt;
   };
   let receipt = await receive({ type: 'image_upload_begin', sha256, byteLength: file.size, mediaType: file.type as ImageMediaType });
@@ -59,7 +60,7 @@ export async function uploadImage(file: Blob, uploadId: string,
           assertUploading();
           pending.push(receive({ type: 'image_upload_chunk', offset, contentBase64: btoa(String.fromCharCode(...bytes)) })
             .then<ChunkResult>(received => {
-              if (received.offset !== offset + bytes.length) throw new Error('The Host returned an unexpected image upload offset. Retry to resume.');
+              if (received.offset !== offset + bytes.length) throw withMessageKey(new Error('The Host returned an unexpected image upload offset. Retry to resume.'), 'client.error.unexpectedImageOffset');
               return { receipt: received };
             }).catch((error: unknown) => {
               failure ??= { error };
@@ -81,6 +82,6 @@ export async function uploadImage(file: Blob, uploadId: string,
   }
   if (!receipt.attachment) receipt = await receive({ type: 'image_upload_finish' });
   const attachment = receipt.attachment;
-  if (!attachment || receipt.offset !== file.size || attachment.sha256 !== sha256 || attachment.byteLength !== file.size || attachment.mediaType !== file.type) throw new Error('The Host could not verify the uploaded image.');
+  if (!attachment || receipt.offset !== file.size || attachment.sha256 !== sha256 || attachment.byteLength !== file.size || attachment.mediaType !== file.type) throw withMessageKey(new Error('The Host could not verify the uploaded image.'), 'client.error.cannotVerifyImage');
   return attachment;
 }

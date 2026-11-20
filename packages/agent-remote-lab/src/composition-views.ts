@@ -1,4 +1,5 @@
 import type { CompositionDocument } from './session-composition-model.js';
+import { withMessageKey } from '@orchardworks/agent-client';
 
 /** A presentation identity references a session binding only after selection. */
 export interface CompositionWindow {
@@ -28,7 +29,7 @@ export function parseCompositionWindows(value: unknown, slots: ReadonlySet<strin
 }
 
 export function createCompositionView(document: CompositionDocument): CompositionWindow {
-  if ((document.windows?.length ?? 0) >= SESSION_VIEW_LIMIT) throw new Error(`Close a session view before opening more than ${SESSION_VIEW_LIMIT}.`);
+  if ((document.windows?.length ?? 0) >= SESSION_VIEW_LIMIT) throw withMessageKey(new Error(`Close a session view before opening more than ${SESSION_VIEW_LIMIT}.`), 'client.view.limit', { limit: SESSION_VIEW_LIMIT });
   const view = { id: `view:${crypto.randomUUID()}` };
   (document.windows ??= []).push(view);
   document.editRevision++;
@@ -37,14 +38,14 @@ export function createCompositionView(document: CompositionDocument): Compositio
 
 /** The destination is required; only the previous binding may be empty. */
 export function bindCompositionView(document: CompositionDocument, id: string, slotId: string): void {
-  if (!document.slots.some(slot => slot.id === slotId)) throw new Error('The selected session binding no longer exists.');
+  if (!document.slots.some(slot => slot.id === slotId)) throw withMessageKey(new Error('The selected session binding no longer exists.'), 'client.view.bindingGone');
   if (id === 'main') {
     if (document.primary === slotId && document.address === slotId) return;
     document.primary = slotId; document.address = slotId;
   } else {
     const view = document.windows?.find(view => view.id === id);
-    if (!view) throw new Error('This session view has been closed.');
-    if (view.managed) throw new Error('This session view is managed by its feature.');
+    if (!view) throw withMessageKey(new Error('This session view has been closed.'), 'client.view.closed');
+    if (view.managed) throw withMessageKey(new Error('This session view is managed by its feature.'), 'client.view.managed');
     if (view.slotId === slotId) return;
     view.slotId = slotId;
   }

@@ -18,7 +18,7 @@ import { EarlierConversation, type EarlierTransport } from '../../src/components
 import { ReplicaInspector } from '../../src/components/ReplicaInspector.js';
 import { ToastProvider } from '../../src/components/Toast.js';
 import '../../src/session-view-styles';
-import { BotFixture } from './assistant-layouts.js';
+import { BotFixture, SAMPLE } from './assistant-layouts.js';
 
 const params = new URLSearchParams(location.search);
 const appearance = bindAppearance(document, localStorage);
@@ -32,7 +32,8 @@ const status: RemoteSessionStatus = params.get('status') === 'connecting' ? 'con
 const locale = browserLocale();
 document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en';
 
-const conversation = buildEveryKindConversation();
+const conversation = buildEveryKindConversation({ locale });
+const zh = locale === 'zh';
 const invalid: AgentInteractionRequest = { kind: 'tool_approval', requestId: 'pending-invalid', toolCallId: 'call-invalid', toolName: 'Bash', summary: 'Allow Bash?',
   detail: { type: 'shell', command: 'rm -rf build' }, allowedDecisions: ['allow'], allowScopes: [] };
 const base = createReplicaState();
@@ -41,14 +42,14 @@ const state: AgentReplicaState = { ...base, agent: { ...conversation.snapshot, s
   pendingInteractions: answered ? [] : [...conversation.pendingInteractions, invalid],
   timeline: { ...base.timeline, epoch: 'fixture', initialized: true, entries: conversation.entries, nextSeq: conversation.entries.length + 1, hasOlder: params.get('older') === '1' },
   outgoingMessages: [
-    { id: 'outgoing-sending', agentId: conversation.snapshot.id, text: 'Also rename the title to IM principles.', status: 'sending' },
-    { id: 'outgoing-failed', agentId: conversation.snapshot.id, text: 'And add a summary line.', status: 'failed', error: 'The Host did not accept the message.' },
+    { id: 'outgoing-sending', agentId: conversation.snapshot.id, text: zh ? '顺便把标题改成「IM 原则」。' : 'Also rename the title to IM principles.', status: 'sending' },
+    { id: 'outgoing-failed', agentId: conversation.snapshot.id, text: zh ? '再加一行总结。' : 'And add a summary line.', status: 'failed', error: zh ? '电脑没有接收这条消息。' : 'The Host did not accept the message.' },
   ] };
 
 /** The session before this one, in the assistant's chain: read once, then the one before it fails after a moment of loading. */
 const earlierRows = new TimelineRows('claude', Date.parse('2026-11-19T09:00:00Z'));
-earlierRows.user('Start the notes.', { key: 'earlier-prompt', turnId: 'earlier-1' });
-earlierRows.assistant('Started notes.md with a title.', { key: 'earlier-answer', turnId: 'earlier-1' });
+earlierRows.user(zh ? '开始写笔记。' : 'Start the notes.', { key: 'earlier-prompt', turnId: 'earlier-1' });
+earlierRows.assistant(zh ? '已经建好 notes.md，加了标题。' : 'Started notes.md with a title.', { key: 'earlier-answer', turnId: 'earlier-1' });
 const earlierTransport: EarlierTransport = {
   fetchSnapshot: async agentId => ({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: { ...conversation.snapshot, id: agentId, status: 'idle', activeTurn: null } }),
   fetchTimeline: async agentId => buildTailPage(earlierRows.entries, { epoch: `epoch-${agentId}`, agentId }),
@@ -75,11 +76,11 @@ function Conversation() {
 export function EveryKindWorkbench({ selected, setSelected, respond, setInspected, ...props }: { selected?: ReadonlySet<string>; setSelected(keys: ReadonlySet<string>): void;
   respond?: () => Promise<void>; setInspected(key: string): void } & Partial<ComponentProps<typeof LabWorkbench>>) {
   return <LabWorkbench state={state} sessionStatus={status} draftSessionKey="every-kind"
-      assistant={{ name: 'Chief', avatar: <AssistantAvatar id="chief" picture={{ shape: 'triangle', color: '#ff8a3d', gaze: 1 }} size={26} mood="working" /> }}
+      assistant={{ name: SAMPLE.names[0]!, avatar: <AssistantAvatar id="chief" picture={{ shape: 'triangle', color: '#ff8a3d', gaze: 1 }} size={26} mood="working" /> }}
       onInspectEntry={key => setInspected(key)}
       entrySelection={{ selected, label: 'Quote', select(keys, value) { const next = new Set(selected); for (const key of keys) if (value) next.add(key); else next.delete(key); setSelected(next); } }}
       timelineStart={<EarlierConversation baseUrl="http://fixture/" transport={earlierTransport} directory={earlierDirectory}
-        sessions={[{ hostId: 'local', providerId: 'claude', nativeSessionId: 'earlier', title: 'Earlier notes' }, { hostId: 'local', providerId: 'claude', nativeSessionId: 'oldest', title: 'Oldest notes' }]}
+        sessions={[{ hostId: 'local', providerId: 'claude', nativeSessionId: 'earlier', title: SAMPLE.earlier }, { hostId: 'local', providerId: 'claude', nativeSessionId: 'oldest', title: SAMPLE.oldest }]}
         readCached={() => undefined} />}
       actions={{
         ...(respond ? { respondToInteraction: respond } : {}),

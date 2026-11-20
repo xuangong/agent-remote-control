@@ -7,14 +7,18 @@ import { WindowWorkspaceClient, type HttpWebSocketTransport, type RemoteAgentTra
 import { App } from '../../src/App.js';
 import { SessionDirectoryClient } from '../../src/directory-client.js';
 import { replicaState } from '../../src/test/fixtures.js';
+import { browserLocale } from '@orchardworks/agent-client-web/react';
 import '../../src/session-view-styles.js';
 
 const params = new URLSearchParams(location.search);
 const count = Math.max(1, Math.min(4, Number(params.get('tiles') ?? 3)));
 const baseUrl = location.origin + '/u/alice/';
-const binding = (index: number) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: `tile-${index}`, title: `Reply with the words LOCAL and OK, tile ${index}` });
+// The sample data is in the reader's language: a Chinese fixture shows Chinese sample data, an English one English.
+const zh = browserLocale() === 'zh';
+const binding = (index: number) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: `tile-${index}`,
+  title: zh ? `用 LOCAL 和 OK 回答，第 ${index} 块` : `Reply with the words LOCAL and OK, tile ${index}` });
 const views = Array.from({ length: count }, (_, index) => createWindowView(`v${index + 1}`, binding(index + 1), 'primary'));
-let group: WindowGroup = { window: { schemaVersion: 3, id: 'tiles', revision: 1, title: 'Tiles', selectedPrimaryViewId: 'v1', selectedViewId: 'v1', views },
+let group: WindowGroup = { window: { schemaVersion: 3, id: 'tiles', revision: 1, title: zh ? '窗口' : 'Tiles', selectedPrimaryViewId: 'v1', selectedViewId: 'v1', views },
   ...(params.has('bots') ? { bots: { rank: 'm', members: {} } } : {}) };
 localStorage.setItem(`agent-remote:recovery:${baseUrl}:shared-window:tiles`, JSON.stringify(group));
 if (!params.has('window')) history.replaceState(null, '', `${location.pathname}${location.search ? `${location.search}&` : '?'}window=tiles`);
@@ -35,7 +39,7 @@ SessionDirectoryClient.prototype.attach = async (_providerId, nativeSessionId) =
 const directory = new SessionDirectoryClient(baseUrl, undefined, 'host');
 const entries = (agentId: string) => Array.from({ length: 24 }, (_, index) => ({ providerId: 'recorded', seqStart: index + 1, seqEnd: index + 1, timestamp: '2026-11-20T05:20:00Z',
   sourceSeqRanges: [{ startSeq: index + 1, endSeq: index + 1 }], collapsed: [], resources: [],
-  item: { type: 'assistant_message' as const, messageId: `${agentId}-${index + 1}`, text: `Item ${index + 1} of ${agentId}. ${'Readable conversation text that must stay uncovered. '.repeat(3)}` } }));
+  item: { type: 'assistant_message' as const, messageId: `${agentId}-${index + 1}`, text: zh ? `${agentId} 的第 ${index + 1} 条。${'不能被遮住的对话文字。'.repeat(3)}` : `Item ${index + 1} of ${agentId}. ${'Readable conversation text that must stay uncovered. '.repeat(3)}` } }));
 const snapshot = (agentId: string) => ({ ...replicaState.agent!, id: agentId, status: 'idle' as const, runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: agentId } });
 const transport: RemoteAgentTransport & Pick<HttpWebSocketTransport, 'listProviders' | 'createAgent' | 'resumeAgent'> = {
   listProviders: async () => [{ providerId: 'recorded', displayName: 'Recorded' }],

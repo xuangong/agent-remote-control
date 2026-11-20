@@ -12,6 +12,20 @@ export const AVATAR_MOTION_MIN_SIZE = 24;
 /** The mark is static at this many pixels and below. */
 export const MARK_STATIC_MAX_SIZE = 32;
 
+/** The device's motion choice: follow the system (absent or unknown), or always reduce. */
+export type MotionChoice = 'system' | 'reduce';
+/** The localStorage key of the choice, per device; a display choice, so clearing conversations keeps it. */
+export const MOTION_STORAGE_KEY = 'agent-remote:motion';
+
+export function readMotionChoice(stored: string | null | undefined): MotionChoice {
+  return stored === 'reduce' ? 'reduce' : 'system';
+}
+
+/** Motion is reduced when the system asks for it or the device's choice does; the choice cannot add motion the system refused. */
+export function reducesMotion(choice: MotionChoice, system: boolean): boolean {
+  return system || choice === 'reduce';
+}
+
 export function avatarMotion({ reducedMotion, pageVisible, size, mood }: MotionFacts): AvatarMotion {
   const moving = !reducedMotion && pageVisible && size >= AVATAR_MOTION_MIN_SIZE && mood !== 'resting';
   return { outline: moving, bob: moving && mood === 'working', pop: moving && mood === 'needs_you', grey: mood === 'resting' };

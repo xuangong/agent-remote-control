@@ -96,3 +96,5 @@
 @media (prefers-reduced-motion: reduce) {
   :root { --orchard-duration-fast: 0ms; --orchard-duration-base: 0ms; --orchard-duration-pop: 0ms; --orchard-duration-bob: 0ms; --orchard-duration-glance: 0ms; --orchard-duration-sway: 0ms; }
 }
+/* The device's own choice to reduce motion (data-motion on the root) stops the same durations. */
+:root[data-motion="reduce"] { --orchard-duration-fast: 0ms; --orchard-duration-base: 0ms; --orchard-duration-pop: 0ms; --orchard-duration-bob: 0ms; --orchard-duration-glance: 0ms; --orchard-duration-sway: 0ms; }

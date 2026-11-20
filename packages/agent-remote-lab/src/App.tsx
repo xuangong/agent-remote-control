@@ -1,5 +1,6 @@
 import { ToastProvider } from './components/Toast.js';
-import { browserLocale, LocaleContext } from '@orchardworks/agent-client-web/react';
+import { LocaleProvider } from '@orchardworks/agent-client-web/react';
+import { deviceChoices } from './device-choices.js';
 import { useWorkbenchShell } from './app/useWorkbenchShell.js';
 import { useRequestedSession } from './app/useRequestedSession.js';
 import { useWorkbenchRecords } from './app/useWorkbenchRecords.js';
@@ -35,12 +36,9 @@ import type { AppInputs, AppLate, AppProps } from './app/types.js';
 export type { AppActions, AppProps, LabTransport } from './app/types.js';
 
 
-// The conversation speaks the browser's language: Chinese for a Chinese browser, English otherwise.
-const locale = browserLocale();
-if (typeof document !== 'undefined') document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en';
-
 export function App(props: AppProps) {
-  return <LocaleContext.Provider value={locale}><ToastProvider><AppContent {...props} /></ToastProvider></LocaleContext.Provider>;
+  // Every word follows this device's language choice, or the browser's language without one (Settings > General).
+  return <LocaleProvider language={deviceChoices().language}><ToastProvider><AppContent {...props} /></ToastProvider></LocaleProvider>;
 }
 function AppContent({
   baseUrl = window.location.origin,

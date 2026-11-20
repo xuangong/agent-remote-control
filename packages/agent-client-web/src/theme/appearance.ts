@@ -1,6 +1,6 @@
 /**
  * The appearance choice of this device: follow the system, or pin the light or the dark theme. Pure: the stored value,
- * the root element's theme and the browser chrome colour are reached through a port (bindAppearance in browser.ts).
+ * the root element's theme and the browser chrome colour are reached through a port; bindAppearance in browser.ts stores the choice.
  */
 import { orchardColors, type ThemeName } from './tokens.js';
 
@@ -10,8 +10,6 @@ export const APPEARANCE_STORAGE_KEY = 'agent-remote:appearance';
 export const appearances: readonly Appearance[] = ['system', 'light', 'dark'];
 
 export interface AppearancePort {
-  read(): string | null;
-  write(value: Appearance): void;
   /** Pins the root's theme (`data-theme`), or clears it to follow the system. */
   setTheme(theme: ThemeName | undefined): void;
   /** Sets the browser chrome colour the page declares for the system's light or dark appearance. */
@@ -28,10 +26,4 @@ export function applyAppearance(port: AppearancePort, appearance: Appearance): v
   const pinned = appearance === 'system' ? undefined : appearance;
   port.setTheme(pinned);
   for (const media of ['light', 'dark'] as const) port.setChromeColor(orchardColors.ground[pinned ?? media], media);
-}
-
-/** Stores and shows a new choice. */
-export function chooseAppearance(port: AppearancePort, appearance: Appearance): void {
-  port.write(appearance);
-  applyAppearance(port, appearance);
 }

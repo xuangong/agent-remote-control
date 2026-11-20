@@ -9,15 +9,19 @@ export interface MotionPort { read(): MotionState; subscribe(onChange: () => voi
 const still: MotionState = { reducedMotion: true, pageVisible: true };
 const MotionContext = createContext<MotionState>(still);
 
-/** The browser's port: one reduced-motion query and the page's visibility. */
-export function browserMotionPort(view: Window = window): MotionPort {
-  const query = view.matchMedia('(prefers-reduced-motion: reduce)');
+/** Whether motion is reduced, as this device's motion choice says (bindMotion in browser.ts), and how to hear it change. */
+export interface ReducedMotionSource { readonly reduced: boolean; subscribe(onChange: () => void): () => void }
+
+/** The browser's port: the reduced-motion query, or the device's motion choice that includes it, and the page's visibility. */
+export function browserMotionPort(view: Window = window, choice?: ReducedMotionSource): MotionPort {
+  const query = choice ? undefined : view.matchMedia('(prefers-reduced-motion: reduce)');
   return {
-    read: () => ({ reducedMotion: query.matches, pageVisible: view.document.visibilityState !== 'hidden' }),
+    read: () => ({ reducedMotion: choice ? choice.reduced : query!.matches, pageVisible: view.document.visibilityState !== 'hidden' }),
     subscribe: onChange => {
-      query.addEventListener('change', onChange);
+      const stopChoice = choice?.subscribe(onChange);
+      query?.addEventListener('change', onChange);
       view.document.addEventListener('visibilitychange', onChange);
-      return () => { query.removeEventListener('change', onChange); view.document.removeEventListener('visibilitychange', onChange); };
+      return () => { stopChoice?.(); query?.removeEventListener('change', onChange); view.document.removeEventListener('visibilitychange', onChange); };
     },
   };
 }

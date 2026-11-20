@@ -9,7 +9,7 @@ import { useEffect, useMemo } from 'react';
 import { sessionKey } from '../session-tree.js';
 import type { CommandItem } from '../shell/command-search.js';
 import { appearanceItems, commandSessions, sessionSubtitle } from '../shell/command-items.js';
-import { currentAppearance } from '../appearance.js';
+import { currentAppearance } from '../device-choices.js';
 import { applePlatform } from '../platform.js';
 import type { SessionSuccessionBindingSlice } from './useSessionSuccessionBinding.js';
 import type { PanelsAndShortcutsSlice } from './usePanelsAndShortcuts.js';

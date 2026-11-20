@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import type { AvatarMood } from './avatar.js';
-import { avatarMotion, markMotion } from './motion.js';
+import { avatarMotion, markMotion, readMotionChoice, reducesMotion } from './motion.js';
 
 const moods: readonly AvatarMood[] = ['idle', 'working', 'needs_you', 'resting'];
 /** Section 4.4's rule written out as a table row: what each fact combination must give. */
@@ -28,3 +28,9 @@ it.each([
 ] as const)('mark at %i px (reduced %s, visible %s) moves: %s', (size, reducedMotion, pageVisible, moving) => {
   expect(markMotion({ reducedMotion, pageVisible, size })).toEqual({ glance: moving, sway: moving });
 });
+
+it.each([[null, 'system'], ['', 'system'], ['system', 'system'], ['reduce', 'reduce'], ['REDUCE', 'system'], ['off', 'system']] as const)(
+  'reads the stored motion choice %j as %s', (stored, choice) => { expect(readMotionChoice(stored)).toBe(choice); });
+
+it.each([['system', false, false], ['system', true, true], ['reduce', false, true], ['reduce', true, true]] as const)(
+  'the %s choice with the system reducing (%s) reduces motion: %s', (choice, system, reduced) => { expect(reducesMotion(choice, system)).toBe(reduced); });

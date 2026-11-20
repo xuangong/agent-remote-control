@@ -179,6 +179,8 @@ export function renderThemeCss(): string {
     '@media (prefers-reduced-motion: reduce) {',
     `  :root { ${reduced.join(' ')} }`,
     '}',
+    '/* The device\'s own choice to reduce motion (data-motion on the root) stops the same durations. */',
+    `:root[data-motion="reduce"] { ${reduced.join(' ')} }`,
     '',
   ].join('\n');
 }

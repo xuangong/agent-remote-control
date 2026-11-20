@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chooseLocale, elapsedWords, LOCALES, messageCatalogue, messagePlaceholders, pluralCategory, translator, type MessageKey } from './messages.js';
+import { chooseLocale, effectiveLocale, elapsedWords, LOCALES, messageAreas, messageCatalogue, messagePlaceholders, pluralCategory, readLanguageChoice, translator, type MessageKey } from './messages.js';
 
 describe('the message catalogue', () => {
   const english = messageCatalogue('en');
@@ -14,6 +14,22 @@ describe('the message catalogue', () => {
       if (typeof message === 'string') expect(message.trim(), key).not.toBe('');
       else for (const form of Object.values(message)) expect(form?.trim(), key).not.toBe('');
     }
+  });
+
+  it.each(LOCALES)('%s defines no key in two areas, and every key carries its area prefix or an I3 one', locale => {
+    const areas = Object.entries(messageAreas(locale));
+    const seen = new Map<string, string>();
+    for (const [area, table] of areas) for (const key of Object.keys(table)) {
+      expect(seen.get(key), `${locale} ${key} is in ${seen.get(key)} and ${area}`).toBeUndefined();
+      seen.set(key, area);
+      if (area !== 'conversation') expect(key.startsWith(`${area}.`), `${locale} ${key} in ${area}`).toBe(true);
+    }
+    expect(seen.size).toBe(Object.keys(messageCatalogue(locale)).length);
+  });
+
+  it('has the same areas, with the same keys, in every locale', () => {
+    const shape = (locale: (typeof LOCALES)[number]) => Object.fromEntries(Object.entries(messageAreas(locale)).map(([area, table]) => [area, Object.keys(table).sort()]));
+    for (const locale of LOCALES) expect(shape(locale), locale).toEqual(shape('en'));
   });
 
   it('uses the same placeholders in every locale', () => {
@@ -60,5 +76,18 @@ describe('the message catalogue', () => {
     const en = translator('en'), zh = translator('zh');
     expect([0, 12, 65, 3725].map(seconds => elapsedWords(seconds, en))).toEqual(['0s', '12s', '1m 05s', '1h 02m 05s']);
     expect(elapsedWords(65, zh)).toBe('1 分 05 秒');
+  });
+
+  it.each([
+    [null, 'browser'], ['', 'browser'], ['browser', 'browser'], ['zh', 'zh'], ['en', 'en'], ['fr', 'browser'], ['ZH', 'browser'],
+  ] as const)('reads the stored language choice %j as %s', (stored, choice) => {
+    expect(readLanguageChoice(stored)).toBe(choice);
+  });
+
+  it.each([
+    ['browser', ['zh-CN', 'en'], 'zh'], ['browser', ['en-US'], 'en'], ['browser', [], 'en'],
+    ['zh', ['en-US'], 'zh'], ['en', ['zh-CN'], 'en'], ['zh', [], 'zh'],
+  ] as const)('a %s choice with the browser speaking %j shows %s', (choice, languages, locale) => {
+    expect(effectiveLocale(choice, languages)).toBe(locale);
   });
 });

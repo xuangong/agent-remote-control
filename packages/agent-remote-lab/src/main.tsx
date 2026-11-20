@@ -1,6 +1,6 @@
 import { lazy, Suspense, StrictMode } from 'react';
-import { startAppearance } from './appearance.js';
-import { MotionProvider } from '@orchardworks/agent-client-web/primitives';
+import { deviceChoices } from './device-choices.js';
+import { MotionProvider, browserMotionPort } from '@orchardworks/agent-client-web/primitives';
 import { createRoot } from 'react-dom/client';
 
 import { WorkspaceShell } from './components/WorkspaceShell.js';
@@ -17,8 +17,8 @@ const App = lazy(() => appModule ?? loadApp());
 import { trackFocusModality } from './focus-modality.js';
 import './session-view-styles.js';
 
-// The stored appearance is shown before anything renders, so the first paint already has the chosen theme.
-startAppearance();
+// The stored appearance, language and motion are shown before anything renders, so the first paint already has them.
+const choices = deviceChoices();
 
 const stopTrackingFocus = trackFocusModality(document);
 if (import.meta.hot) import.meta.hot.dispose(stopTrackingFocus);
@@ -38,6 +38,6 @@ const fixtureAction = fixtureEndpoint ? async (
 const devbox = document.querySelector('meta[name="agent-remote-devbox"]')?.getAttribute('content') === 'true';
 const shell = <WorkspaceShell />;
 // One motion subscription for the page: every avatar and mark reads reduced motion and visibility from it.
-createRoot(root).render(<StrictMode><MotionProvider>{gatewayMode
+createRoot(root).render(<StrictMode><MotionProvider port={browserMotionPort(window, choices.motion)}>{gatewayMode
   ? <GatewayController automaticAccess={devbox}>{(baseUrl, accountAction) => <Suspense fallback={shell}><App baseUrl={baseUrl} accountAction={accountAction} userScoped /></Suspense>}</GatewayController>
   : <Suspense fallback={shell}><App fixtureAction={fixtureAction} /></Suspense>}</MotionProvider></StrictMode>);

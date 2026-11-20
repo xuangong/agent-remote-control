@@ -24,6 +24,7 @@ import { SessionTrackingMenu } from '../components/SessionTrackingMenu.js';
 import { SessionConnectionNotice } from '../components/SessionConnectionNotice.js';
 import { MobileDisplaySettings } from '../components/MobileDisplaySettings.js';
 import { useMemo, useRef, type ContextType } from 'react';
+import { keyedError } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { HostPairing } from '../components/HostPairing.js';
 import { HostOverview } from '../components/HostOverview.js';
@@ -162,11 +163,11 @@ export function useViewModel(scope: Pick<AppInputs & SessionSuccessionBindingSli
   // The Host, provider, directory and new-session panels: written once, placed in the compact drawer or on the desktop page.
   // On desktop the page itself is the Favorites region, and its toolbar the Favorites heading: the section inside it carries no second name or heading.
   const sessionPanelContent = <div className="lab-sidebar-content">
-      {userScoped && sessionPanel === 'favorites' ? <section className="lab-session-directory lab-favorites-section" aria-label={compactLayout ? 'Favorites' : undefined}>{compactLayout ? <div className="lab-directory-heading"><h2><FavoritesHeading loading={favorites.loading} /></h2></div> : null}<FavoritesList favorites={favorites} tracking={tracking} trackedOnly={trackedOnly} onFilterChange={setTrackedOnly} activeKey={focusedSessionKey} busy={transitioning && !sidebarWindow} onOpen={item => void openDirectorySession(item)} /></section> : null}
+      {userScoped && sessionPanel === 'favorites' ? <section className="lab-session-directory lab-favorites-section" aria-label={compactLayout ? t('navigation.favorites') : undefined}>{compactLayout ? <div className="lab-directory-heading"><h2><FavoritesHeading loading={favorites.loading} /></h2></div> : null}<FavoritesList favorites={favorites} tracking={tracking} trackedOnly={trackedOnly} onFilterChange={setTrackedOnly} activeKey={focusedSessionKey} busy={transitioning && !sidebarWindow} onOpen={item => void openDirectorySession(item)} /></section> : null}
       {directory ? <HostPairing compact={sessionPanel === 'list'} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning && !sidebarWindow} hosts={selectableHosts} hostError={hostError ?? requestedHostUnavailableReason(creationFacts, t)} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
       <div className="lab-directory-panel" hidden={sessionPanel !== 'list'}>
-      {directory || providerChoiceList.length > 1 ? <label className="lab-browse-provider">Browse provider<select aria-label="Browse provider" value={selectedProviderChoice?.selectionId ?? ''} disabled={creationLocked || transitioning && !sidebarWindow || providerChoiceList.length === 0} onChange={(event) => selectProvider(event.target.value)}>{providerChoiceList.length === 0 ? <option value="">No providers available</option> : null}{providerChoiceList.map((provider) => <option key={provider.selectionId} value={provider.selectionId}>{provider.displayName}</option>)}</select></label> : null}
-      {directory ? <SessionDirectory quickOpen={<button type="button" className="lab-session-scan-trigger" aria-label="Scan session QR code" onClick={() => setScanOpen(true)}>Scan</button>} favorites={favorites} searchable directory={directory} providerId={providerId} activeAgentId={focusedMenuSession?.agentId} opened={openedSessions} known={sessionEntries} sideStore={forkStore} askStore={ask.store} hostId={selectedHost.id} onOpenRelated={(item) => void openDirectorySession(item)} busy={!sidebarWindow && (transitioning || remoteHosts.find((host) => host.id === selectedHost.id)?.online === false)} revision={directoryRevision} onOpen={(item) => void openDirectorySession(item)} onSelect={(item) => void openDirectorySession(item)} onClose={(agentId) => setOpenedSessions((current) => current.filter((item) => item.agentId !== agentId))} /> : null}
+      {directory || providerChoiceList.length > 1 ? <label className="lab-browse-provider">{t('navigation.browse.provider')}<select aria-label={t('navigation.browse.provider')} value={selectedProviderChoice?.selectionId ?? ''} disabled={creationLocked || transitioning && !sidebarWindow || providerChoiceList.length === 0} onChange={(event) => selectProvider(event.target.value)}>{providerChoiceList.length === 0 ? <option value="">{t('navigation.browse.noProviders')}</option> : null}{providerChoiceList.map((provider) => <option key={provider.selectionId} value={provider.selectionId}>{provider.displayName}</option>)}</select></label> : null}
+      {directory ? <SessionDirectory quickOpen={<button type="button" className="lab-session-scan-trigger" aria-label={t('navigation.browse.scanQr')} onClick={() => setScanOpen(true)}>{t('navigation.browse.scan')}</button>} favorites={favorites} searchable directory={directory} providerId={providerId} activeAgentId={focusedMenuSession?.agentId} opened={openedSessions} known={sessionEntries} sideStore={forkStore} askStore={ask.store} hostId={selectedHost.id} onOpenRelated={(item) => void openDirectorySession(item)} busy={!sidebarWindow && (transitioning || remoteHosts.find((host) => host.id === selectedHost.id)?.online === false)} revision={directoryRevision} onOpen={(item) => void openDirectorySession(item)} onSelect={(item) => void openDirectorySession(item)} onClose={(agentId) => setOpenedSessions((current) => current.filter((item) => item.agentId !== agentId))} /> : null}
       </div>
       <div hidden={sessionPanel !== 'new'}>
       <ProviderSessionControls
@@ -198,13 +199,13 @@ export function useViewModel(scope: Pick<AppInputs & SessionSuccessionBindingSli
     hostNames: new Map([['local', t('team.host.labServer')], ...remoteHosts.map(host => [host.id, host.name] as const)]),
   }), hostName: id => remoteHosts.find(host => host.id === id)?.name, navigate: navigateAttribution }, operations: { storageScope: baseUrl, transport, enabled: accessReady && activated, resolveTarget: (source, requested) => {
     const mapped = currentGroupBinding(requested?.viewId);
-    if (mapped && sessionKey(mapped.binding) !== sessionKey(source)) throw new Error('The session view binding changed. Reopen its current conversation.');
+    if (mapped && sessionKey(mapped.binding) !== sessionKey(source)) throw keyedError('navigation.view.bindingChanged');
     const roster = teamRosterRef.current;
     const member = teamViewTarget(succession.document, roster?.baseUrl === baseUrl ? roster.teams : undefined, source, requested?.viewId);
     // A Team member follows prompt edits and handoffs alike: Team routing moves its seat to the successor.
     const result = succession.resolveTarget(source, requested);
-    if (mapped && sessionKey(mapped.binding) !== sessionKey(result.target)) throw new Error('The session view binding is still synchronizing.');
-    if (member && sessionKey(member) !== sessionKey(result.target)) throw new Error('The Team execution is not confirmed yet. Retry to look for it again.');
+    if (mapped && sessionKey(mapped.binding) !== sessionKey(result.target)) throw keyedError('navigation.view.bindingSynchronizing');
+    if (member && sessionKey(member) !== sessionKey(result.target)) throw keyedError('navigation.view.teamUnconfirmed');
     return { ...result, target: { ...result.target, ...(member ? { teamId: member.teamId, teamMemberId: member.teamMemberId } : {}) } };
   }, directory: source => labSessionSuccessionDirectory(new SessionDirectoryClient(baseUrl, undefined, source.hostId)), refreshSettled: succession.refreshSettled,
     successionContextFor: succession.successionContextFor, synchronize: () => void succession.refresh() } };

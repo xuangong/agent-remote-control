@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import type { BotPicture, WindowBotDetails, WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
+import { errorWords } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { appendedRank, type BotRow, type BotSection } from '../bot-roster.js';
@@ -17,7 +18,6 @@ export interface BotInfo {
 }
 type OpenSheet = { kind: 'label' | 'remove'; row: BotRow; groupTitle: string };
 type Workspace = Pick<ReturnType<typeof useWindowWorkspace>, 'readGroup' | 'operateGroup' | 'groups'>;
-const message = (reason: unknown) => reason instanceof Error ? reason.message : String(reason);
 /**
  * A bot's own actions, on its name card (Label…, Sleep or Wake, Hide in Bot mode, Remove from group…), its avatar, and the
  * group's way to show hidden bots again. Every change is a group operation, shared by every device; a group formed from
@@ -37,7 +37,7 @@ export function useBotActions({ scope, workspace, onSelect, onError }: {
   async function run(groupId: string, operation: WindowGroupOperation): Promise<boolean> {
     const requestScope = scope; setBusy(true); onError(undefined);
     try { await workspace.operateGroup(groupId, operation); return true; }
-    catch (reason) { if (currentScope.current === requestScope) onError(message(reason)); return false; }
+    catch (reason) { if (currentScope.current === requestScope) onError(errorWords(reason, t, 'navigation.botActions.failed')); return false; }
     finally { if (currentScope.current === requestScope) setBusy(false); }
   }
   function update(row: Pick<BotRow, 'groupId' | 'viewId'>, details: WindowBotDetails) {
@@ -52,7 +52,7 @@ export function useBotActions({ scope, workspace, onSelect, onError }: {
     setNotice(undefined);
     if (!await update(row, { ...row.details, hidden: true })) return;
     onSelect({ kind: 'section', groupId: row.groupId });
-    setNotice({ text: `Hidden in Bot mode: “${row.name}” stays in its Window.`, undo: async () => {
+    setNotice({ text: t('navigation.botActions.hiddenNotice', { name: row.name }), undo: async () => {
       setNotice(undefined);
       const current = workspace.readGroup(row.groupId)?.bots?.members[row.viewId] ?? {};
       if (await update(row, without(current, 'hidden'))) onSelect({ kind: 'bot', groupId: row.groupId, viewId: row.viewId });
@@ -63,7 +63,7 @@ export function useBotActions({ scope, workspace, onSelect, onError }: {
     setNotice(undefined);
     if (!await update(row, { ...row.details, asleep: true })) return;
     onSelect({ kind: 'section', groupId: row.groupId });
-    setNotice({ text: `“${row.name}” is asleep. Opening it wakes it.`, undo: async () => {
+    setNotice({ text: t('navigation.botActions.asleepNotice', { name: row.name }), undo: async () => {
       setNotice(undefined);
       if (await wake(row)) onSelect({ kind: 'bot', groupId: row.groupId, viewId: row.viewId });
     } });
@@ -107,7 +107,7 @@ export function useBotActions({ scope, workspace, onSelect, onError }: {
   }
   function groupMenu(section: BotSection): MenuEntry[] {
     if (!section.hidden.length) return [];
-    return [{ label: 'Show hidden bots', icon: 'list', onSelect: () => {
+    return [{ label: t('navigation.botActions.showHidden'), icon: 'list', onSelect: () => {
       const group = workspace.readGroup(section.groupId);
       if (!group?.bots) return;
       setNotice(undefined);
@@ -118,20 +118,20 @@ export function useBotActions({ scope, workspace, onSelect, onError }: {
   const close = () => { if (!busy) setOpen(undefined); };
   const row = open?.row, name = row?.name ?? '';
   const sheets: ReactNode = !open || !row ? null
-    : open.kind === 'label' ? <Sheet open title="Label" detent="content" onClose={close}>
+    : open.kind === 'label' ? <Sheet open title={t('navigation.botActions.label')} detent="content" onClose={close}>
       <form className="lab-bot-sheet-form" onSubmit={event => void saveLabel(event, draft.trim() || undefined)}>
-        <input aria-label="Label" autoFocus maxLength={120} placeholder="Reviewer, On call…" value={draft} disabled={busy} onChange={event => setDraft(event.target.value)} />
-        <p className="lab-sheet-note">{`Shown beside “${name}” in Bot mode on every device. The role tag stays.`}</p>
+        <input aria-label={t('navigation.botActions.label')} autoFocus maxLength={120} placeholder={t('navigation.botActions.labelPlaceholder')} value={draft} disabled={busy} onChange={event => setDraft(event.target.value)} />
+        <p className="lab-sheet-note">{t('navigation.botActions.labelNote', { name })}</p>
         <div className="lab-sheet-actions">
-          {row.details.label ? <Button variant="plain" className="lab-sheet-leading" disabled={busy} onClick={event => void saveLabel(event, undefined)}>Remove label</Button> : null}
-          <Button disabled={busy} onClick={close}>Cancel</Button>
-          <Button type="submit" variant="primary" disabled={busy || !draft.trim() || draft.trim() === row.details.label} aria-busy={busy || undefined}>Save</Button>
+          {row.details.label ? <Button variant="plain" className="lab-sheet-leading" disabled={busy} onClick={event => void saveLabel(event, undefined)}>{t('navigation.botActions.removeLabel')}</Button> : null}
+          <Button disabled={busy} onClick={close}>{t('common.cancel')}</Button>
+          <Button type="submit" variant="primary" disabled={busy || !draft.trim() || draft.trim() === row.details.label} aria-busy={busy || undefined}>{t('common.save')}</Button>
         </div>
       </form>
     </Sheet>
     : <RemoveBotSheet name={name} groupTitle={open.groupTitle} window={workspace.readGroup(row.groupId)?.window} viewId={row.viewId} busy={busy}
       onCancel={close} onRemove={() => void remove()} />;
   const noticeLine: ReactNode = notice ? <p className="lab-bot-notice" role="status">{notice.text}
-    {notice.undo ? <button type="button" onClick={() => void notice.undo!()}>Undo</button> : null}</p> : null;
+    {notice.undo ? <button type="button" onClick={() => void notice.undo!()}>{t('navigation.botActions.undo')}</button> : null}</p> : null;
   return { cardActions, setPicture, rename, groupMenu, wake, sheets, notice: noticeLine, clearNotice: () => setNotice(undefined) };
 }

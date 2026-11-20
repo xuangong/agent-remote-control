@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { errorWords } from '@orchardworks/agent-client';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { botViews, hasBotAppearance, isBotView, type WindowGroup } from '@orchardworks/agent-remote-protocol';
 import type { BotPlace } from '../workbench-mode.js';
 import { windowBindingKey, windowSuccessionLayout } from '../window-composition.js';
@@ -8,7 +10,9 @@ import type { GroupHandle, useWindowWorkspace } from './useWindowWorkspace.js';
 type Workspace = ReturnType<typeof useWindowWorkspace>;
 type Succession = Pick<ReturnType<typeof useSessionSuccession>, 'document' | 'ensureWindowView' | 'save' | 'refresh' | 'discovering'>;
 export function useBotWorkspace(workspace: Workspace, succession: Succession, place: BotPlace | undefined, enabled: boolean) {
-  const latest = useRef({ workspace, succession, enabled }); latest.current = { workspace, succession, enabled };
+  const t = useTranslate();
+  const latest = useRef({ workspace, succession, enabled, t }); latest.current = { workspace, succession, enabled, t };
+  const words = (error: unknown) => errorWords(error, latest.current.t, 'navigation.botWorkspace.failed');
   const runtime = useMemo(() => {
     const listeners = new Set<() => void>();
     const state = { active: false, version: 0, leases: new Map<string, { handle: GroupHandle; unsubscribe(): void }>(), pending: new Map<string, symbol>(), errors: new Map<string, string>(), enrolled: new Set<string>(), layouts: new Set<string>(),
@@ -37,7 +41,7 @@ export function useBotWorkspace(workspace: Workspace, succession: Succession, pl
       runtime.pending.delete(id); const unsubscribe = handle.subscribe(runtime.emit); runtime.leases.set(id, { handle, unsubscribe }); runtime.emit();
     } catch (error) {
       if (!runtime.active || runtime.pending.get(id) !== token) return;
-      runtime.pending.delete(id); runtime.errors.set(id, error instanceof Error ? error.message : String(error)); runtime.emit();
+      runtime.pending.delete(id); runtime.errors.set(id, words(error)); runtime.emit();
     }
   };
   useEffect(() => {
@@ -54,7 +58,7 @@ export function useBotWorkspace(workspace: Workspace, succession: Succession, pl
     if (!enabled) return;
     let active = true;
     const refreshCatalog = () => { void latest.current.workspace.refreshGroups().catch(error => {
-      if (active && runtime.active && selectedId) { runtime.errors.set(selectedId, error instanceof Error ? error.message : String(error)); runtime.emit(); }
+      if (active && runtime.active && selectedId) { runtime.errors.set(selectedId, words(error)); runtime.emit(); }
     }); };
     refreshCatalog(); addEventListener('focus', refreshCatalog);
     return () => { active = false; removeEventListener('focus', refreshCatalog); };
@@ -78,10 +82,10 @@ export function useBotWorkspace(workspace: Workspace, succession: Succession, pl
       if (!runtime.enrolled.has(identities)) {
         runtime.enrolled.add(identities);
         void current.refresh().catch(error => {
-          if (runtime.active && latest.current.enabled && selectedId && runtime.leases.get(selectedId)?.handle === handle) { runtime.errors.set(selectedId, String(error instanceof Error ? error.message : error)); runtime.emit(); }
+          if (runtime.active && latest.current.enabled && selectedId && runtime.leases.get(selectedId)?.handle === handle) { runtime.errors.set(selectedId, words(error)); runtime.emit(); }
         });
       }
-    } catch (error) { if (selectedId) { runtime.errors.set(selectedId, String(error instanceof Error ? error.message : error)); runtime.emit(); } }
+    } catch (error) { if (selectedId) { runtime.errors.set(selectedId, words(error)); runtime.emit(); } }
   }, [runtime, locatorSet, enabled, succession.document]);
   useEffect(() => {
     if (!enabled || succession.discovering || !runtime.active) return;
@@ -98,14 +102,14 @@ export function useBotWorkspace(workspace: Workspace, succession: Succession, pl
       const selected = current.window.id === selectedId;
       void latest.current.workspace.operateGroup(current.window.id, operation).catch(error => {
         // Only the selected group's failure is the selected bot's error; another group retries when it changes or is opened.
-        if (selected && runtime.active && latest.current.enabled && runtime.leases.get(current.window.id)?.handle === handle) { runtime.errors.set(current.window.id, error instanceof Error ? error.message : String(error)); runtime.emit(); }
+        if (selected && runtime.active && latest.current.enabled && runtime.leases.get(current.window.id)?.handle === handle) { runtime.errors.set(current.window.id, words(error)); runtime.emit(); }
       });
     }
   }, [runtime, locatorSet, succession.document, succession.document.editRevision, succession.discovering, enabled]);
   const slotId = view && group ? succession.document.windowBindings?.find(entry => entry.windowId === group.window.id && entry.viewId === view.id && entry.bindingKey === windowBindingKey(view.binding))?.slotId : undefined;
   const slot = slotId ? succession.document.slots.find(slot => slot.id === slotId) : undefined;
   const loading = enabled && !!selectedId && !deleted && runtime.pending.has(selectedId);
-  const error = !enabled || !selectedId ? undefined : deleted ? 'This bot or section is unavailable.' : runtime.errors.get(selectedId) ?? (!loading && (!group || place?.kind === 'bot' && !view) ? 'This bot or section is unavailable.' : undefined);
+  const error = !enabled || !selectedId ? undefined : deleted ? t('navigation.botWorkspace.unavailable') : runtime.errors.get(selectedId) ?? (!loading && (!group || place?.kind === 'bot' && !view) ? t('navigation.botWorkspace.unavailable') : undefined);
   return { group, view, slot, loading, error, saveState: handle?.getSyncState(),
     retry: async () => {
       if (handle) { await handle.retry(); if (selectedId) runtime.errors.delete(selectedId); runtime.emit(); }

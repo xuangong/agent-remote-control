@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { Toolbar } from '../ui/Toolbar.js';
 import { IconButton } from '../ui/IconButton.js';
 import { Menu, type MenuEntry } from '../ui/Menu.js';
@@ -26,6 +27,7 @@ export function WindowToolbar({ windowId, title, summary, leading, launchers, di
   /** Whether the Window's group appears in Bot mode; undefined leaves the toggle out (no group to change). */
   botAppearance?: boolean; onBotAppearance(shown: boolean): void; onCopyLink(): void; onAgentControl?(): void; onDelete(): void;
 }) {
+  const t = useTranslate();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(title);
   const button = useRef<HTMLButtonElement>(null);
@@ -65,16 +67,16 @@ export function WindowToolbar({ windowId, title, summary, leading, launchers, di
   };
   const actions: MenuEntry[] = [
     ...(botAppearance === undefined ? [] : [botAppearance
-      ? { label: 'Hide in Bot mode', icon: 'eye-off', disabled: readOnly, onSelect: () => onBotAppearance(false) } as const
-      : { label: 'Show in Bot mode', icon: 'sidebar', disabled: readOnly, onSelect: () => onBotAppearance(true) } as const]),
-    { label: 'Copy link', icon: 'link', onSelect: onCopyLink },
-    ...(onAgentControl ? [{ label: 'Agent control…', icon: 'person', onSelect: onAgentControl } as const] : []),
+      ? { label: t('navigation.windowToolbar.hideInBot'), icon: 'eye-off', disabled: readOnly, onSelect: () => onBotAppearance(false) } as const
+      : { label: t('navigation.windowToolbar.showInBot'), icon: 'sidebar', disabled: readOnly, onSelect: () => onBotAppearance(true) } as const]),
+    { label: t('navigation.windowToolbar.copyLink'), icon: 'link', onSelect: onCopyLink },
+    ...(onAgentControl ? [{ label: t('navigation.windowToolbar.agentControl'), icon: 'person', onSelect: onAgentControl } as const] : []),
     { kind: 'separator' },
-    { label: 'Delete Window…', icon: 'trash', destructive: true, disabled: readOnly || deleteDisabled, onSelect: onDelete },
+    { label: t('navigation.windowToolbar.delete'), icon: 'trash', destructive: true, disabled: readOnly || deleteDisabled, onSelect: onDelete },
   ];
   return <Toolbar className="lab-window-toolbar" leading={leading}
     title={editing
-      ? <input className="lab-window-toolbar-input" aria-label="Window title" autoFocus maxLength={256} value={draft}
+      ? <input className="lab-window-toolbar-input" aria-label={t('navigation.windowToolbar.titleField')} autoFocus maxLength={256} value={draft}
           onFocus={event => event.currentTarget.select()} onChange={event => setDraft(event.target.value)}
           onKeyDown={event => {
             if (event.nativeEvent.isComposing) return;
@@ -83,15 +85,15 @@ export function WindowToolbar({ windowId, title, summary, leading, launchers, di
             else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); finish(false); }
           }}
           onBlur={() => finish(true)} />
-      : <button ref={button} type="button" className="lab-window-toolbar-title" title="Rename this Window" aria-description="Rename this Window"
+      : <button ref={button} type="button" className="lab-window-toolbar-title" title={t('navigation.windowToolbar.rename')} aria-description={t('navigation.windowToolbar.rename')}
           disabled={titleDisabled} onClick={start}>{title}</button>}
     subtitle={summary}
     trailing={<>
-      {launchers ? <div className="lab-toolbar-launchers" role="group" aria-label="Shortcuts">{launchers}</div> : null}
-      <Menu label="Add" icon="plus" items={[
-        { label: 'New session view', icon: 'plus', disabled: readOnly, onSelect: onNewView },
-        { label: 'Open session…', icon: 'sessions', disabled: readOnly, onSelect: onOpenSession },
+      {launchers ? <div className="lab-toolbar-launchers" role="group" aria-label={t('navigation.shortcuts')}>{launchers}</div> : null}
+      <Menu label={t('navigation.windowToolbar.add')} icon="plus" items={[
+        { label: t('navigation.palette.newSessionView'), icon: 'plus', disabled: readOnly, onSelect: onNewView },
+        { label: t('navigation.windowToolbar.openSession'), icon: 'sessions', disabled: readOnly, onSelect: onOpenSession },
       ]} />
-      <Menu label="Window actions" items={actions} />
+      <Menu label={t('navigation.windowToolbar.actions')} items={actions} />
     </>} />;
 }

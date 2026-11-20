@@ -12,6 +12,8 @@
  * - Reading and window state are not owned here; see window-composition and the Window workspace.
  */
 
+import { translator, type Translate } from '@orchardworks/agent-client';
+
 export type SessionPanel = 'list' | 'favorites' | 'new';
 export type MainView = 'workbench' | 'trace';
 
@@ -134,6 +136,6 @@ export function windowStageVisible(state: PanelsState, windowMode: boolean): boo
 }
 
 /** The title of the sessions page for a panel. */
-export function sessionsPageTitle(panel: SessionPanel): string {
-  return panel === 'list' ? 'All sessions' : panel === 'favorites' ? 'Favorites' : 'New session';
+export function sessionsPageTitle(panel: SessionPanel, t: Translate = translator('en')): string {
+  return t(panel === 'list' ? 'navigation.allSessions' : panel === 'favorites' ? 'navigation.favorites' : 'navigation.newSession');
 }

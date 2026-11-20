@@ -1,3 +1,5 @@
+import { keyedError } from '@orchardworks/agent-client';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentCommandResult } from '@orchardworks/agent-remote-protocol';
 import type { ConsoleCommand } from '@orchardworks/agent-client-web/react';
@@ -20,6 +22,8 @@ function permission(): NotificationPermission | 'unsupported' {
 }
 
 export function useSessionAttention(scope: string, active: boolean, onOpen: (session: SessionEntry) => void, mode: WorkbenchMode = 'window') {
+  const t = useTranslate();
+  const translate = useRef(t); translate.current = t;
   const [mobile, setMobile] = useState(() => window.matchMedia?.('(pointer: coarse)').matches ?? false);
   const [trackChoice, setTrackChoice] = useState(() => preference(trackKey));
   const [notificationChoice, setNotificationChoice] = useState(() => preference(notificationKey) ?? true);
@@ -83,14 +87,14 @@ export function useSessionAttention(scope: string, active: boolean, onOpen: (ses
   const latestTrack = useRef({ trackVisible, setTrackVisible }); latestTrack.current = { trackVisible, setTrackVisible };
   const executeTrack = useCallback(async (args: string): Promise<AgentCommandResult> => {
     const arg = args.trim().toLowerCase();
-    if (!['', 'on', 'off', 'enable', 'disable'].includes(arg)) throw new Error('Use /track, /track on, or /track off.');
+    if (!['', 'on', 'off', 'enable', 'disable'].includes(arg)) throw keyedError('navigation.track.usage');
     const next = arg ? arg === 'on' || arg === 'enable' : !latestTrack.current.trackVisible;
     latestTrack.current.setTrackVisible(next);
-    return { text: `Track view ${next ? 'shown' : 'hidden'}.` };
+    return { text: translate.current(next ? 'navigation.track.shown' : 'navigation.track.hidden') };
   }, []);
   const observe = useCallback((session: SessionEntry, value: SessionObservation) => { void notifier.observe(session, value); }, [notifier]);
   const controls = <>
-    <label><span>Track view</span><input type="checkbox" checked={trackVisible} onChange={event => setTrackVisible(event.target.checked)} /></label>
+    <label><span>{t('navigation.viewOptions.trackView')}</span><input type="checkbox" checked={trackVisible} onChange={event => setTrackVisible(event.target.checked)} /></label>
   </>;
   /** This device's session notifications, for an assistant's details: one choice that every assistant shares. */
   const notifications = { enabled: notificationChoice, available: !mobile && notificationPermission !== 'unsupported', permission: notificationPermission, requestFailed: permissionError, request: () => void requestPermission(), set(value: boolean) {

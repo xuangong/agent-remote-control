@@ -36,15 +36,15 @@ export function SessionViewOptions({ process }: { process: ProcessModeChoice }) 
       }
     }}>
     <button type="button" ref={trigger} className="lab-session-view-options-trigger"
-      aria-label="Session view options" aria-expanded={open} aria-controls={id}
+      aria-label={t('navigation.viewOptions.session')} aria-expanded={open} aria-controls={id}
       title={`${t('process.heading')}: ${t(`process.${process.mode}` as const)}`}
       onClick={() => setOpen(value => !value)}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
         <path d="M4 6h16M4 12h10M4 18h16" /><path d="m18 10 3 2-3 2" />
       </svg>
-      <span>View</span>
+      <span>{t('navigation.viewOptions.view')}</span>
     </button>
-    {open ? <section ref={panel} id={id} className="lab-session-view-options-panel" aria-label="Session view options" tabIndex={-1}>
+    {open ? <section ref={panel} id={id} className="lab-session-view-options-panel" aria-label={t('navigation.viewOptions.session')} tabIndex={-1}>
       <p className="lab-session-view-options-heading">{t('process.heading')}</p>
       {process.chooseForAssistant ? <div className="lab-process-choice">
         <span id={`${id}-assistant`}>{t('process.assistant')}</span>

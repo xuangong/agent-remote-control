@@ -1,10 +1,11 @@
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { commandKinds, searchCommands, type CommandItem, type CommandKind } from './command-search.js';
 import { applePlatform } from '../platform.js';
 import { isSearchKey } from '../hooks/useShellShortcuts.js';
 import './shell.css';
 
-const groupLabels: Record<CommandKind, string> = { action: 'Actions', window: 'Windows', bot: 'Bots', session: 'Sessions' };
+const groupKeys = { action: 'navigation.palette.groupAction', window: 'navigation.palette.groupWindow', bot: 'navigation.palette.groupBot', session: 'navigation.palette.groupSession' } as const satisfies Record<CommandKind, string>;
 
 /**
  * ⌘K: search actions, Windows, Bots and known sessions, and run one. A modal dialog with a combobox and a listbox; the
@@ -14,6 +15,7 @@ const groupLabels: Record<CommandKind, string> = { action: 'Actions', window: 'W
  * palette handles it itself: pressed again, it closes.
  */
 export function CommandPalette({ open, items, onClose }: { open: boolean; items: readonly CommandItem[]; onClose(): void }) {
+  const t = useTranslate();
   const dialog = useRef<HTMLDialogElement>(null);
   const input = useRef<HTMLInputElement>(null);
   // The body mounts with the dialog's opening (its effects run first), so each opening starts with an empty query.
@@ -28,7 +30,7 @@ export function CommandPalette({ open, items, onClose }: { open: boolean; items:
   // A press closes from the backdrop only when it both starts and ends there, so a text selection dragged out of the
   // field does not close the palette.
   const pressedBackdrop = useRef(false);
-  return <dialog ref={dialog} className="lab-command-palette" aria-label="Search"
+  return <dialog ref={dialog} className="lab-command-palette" aria-label={t('common.search')}
     onCancel={event => { event.preventDefault(); onClose(); }}
     onKeyDown={event => {
       if (event.nativeEvent.isComposing || event.altKey || event.shiftKey) return;
@@ -51,6 +53,7 @@ export function CommandPalette({ open, items, onClose }: { open: boolean; items:
 }
 
 function PaletteBody({ items, input, onClose }: { items: readonly CommandItem[]; input: RefObject<HTMLInputElement>; onClose(): void }) {
+  const t = useTranslate();
   const listId = useId();
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
@@ -69,9 +72,9 @@ function PaletteBody({ items, input, onClose }: { items: readonly CommandItem[];
   useEffect(() => { if (current >= 0) document.getElementById(optionId(current))?.scrollIntoView?.({ block: 'nearest' }); }, [current, query]);
   let index = 0;
   return <div className="lab-command-body">
-    <input ref={input} className="lab-command-input" type="text" role="combobox" aria-label="Search Windows, Bots, sessions and actions" aria-expanded={shown.length > 0}
+    <input ref={input} className="lab-command-input" type="text" role="combobox" aria-label={t('navigation.palette.placeholder')} aria-expanded={shown.length > 0}
       aria-controls={listId} aria-autocomplete="list" aria-activedescendant={current >= 0 ? optionId(current) : undefined}
-      placeholder="Search Windows, Bots, sessions and actions" autoComplete="off" spellCheck={false} value={query}
+      placeholder={t('navigation.palette.placeholder')} autoComplete="off" spellCheck={false} value={query}
       onChange={event => { setQuery(event.target.value); setActive(0); }}
       onKeyDown={event => {
         if (event.nativeEvent.isComposing) return;
@@ -83,9 +86,9 @@ function PaletteBody({ items, input, onClose }: { items: readonly CommandItem[];
         else return;
         event.preventDefault();
       }} />
-    <div id={listId} role="listbox" aria-label="Results" className="lab-command-results">
-      {groups.map(group => <div key={group.kind} role="group" aria-label={groupLabels[group.kind]} className="lab-command-group">
-        <div className="lab-command-group-title" aria-hidden="true">{groupLabels[group.kind]}</div>
+    <div id={listId} role="listbox" aria-label={t('navigation.palette.results')} className="lab-command-results">
+      {groups.map(group => <div key={group.kind} role="group" aria-label={t(groupKeys[group.kind])} className="lab-command-group">
+        <div className="lab-command-group-title" aria-hidden="true">{t(groupKeys[group.kind])}</div>
         {group.entries.map(item => {
           const position = index++;
           return <div key={item.id} id={optionId(position)} role="option" aria-selected={position === current} aria-keyshortcuts={item.keyShortcuts} className="lab-command-option"
@@ -97,6 +100,6 @@ function PaletteBody({ items, input, onClose }: { items: readonly CommandItem[];
         })}
       </div>)}
     </div>
-    <p className="lab-command-empty" role="status">{shown.length ? '' : 'No results'}</p>
+    <p className="lab-command-empty" role="status">{shown.length ? '' : t('navigation.palette.noResults')}</p>
   </div>;
 }

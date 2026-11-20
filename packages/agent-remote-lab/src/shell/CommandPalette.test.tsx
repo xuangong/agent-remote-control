@@ -1,6 +1,7 @@
 import { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { LocaleContext } from '@orchardworks/agent-client-web/react';
 import { render } from '../test/setup.js';
 import type { CommandItem } from './command-search.js';
 import { CommandPalette } from './CommandPalette.js';
@@ -276,4 +277,14 @@ it('scrolls the active option into view only when it changes, not when the page 
     await type('pars');
     expect(scroll).toHaveBeenCalledTimes(2);
   } finally { delete (Element.prototype as Partial<Element>).scrollIntoView; }
+});
+
+it('speaks Chinese: the dialog, the field, the groups and the empty result', async () => {
+  log.length = 0;
+  await render(<LocaleContext.Provider value="zh"><Harness items={allKinds} /></LocaleContext.Provider>);
+  expect(document.querySelector('dialog')!.getAttribute('aria-label')).toBe('搜索');
+  expect(combobox().placeholder).toBe('搜索窗口、Bot、会话和操作');
+  expect([...document.querySelectorAll('.lab-command-group-title')].map(title => title.textContent)).toEqual(['操作', '窗口', 'Bot', '会话']);
+  await type('zzzz-nothing');
+  expect(document.querySelector('.lab-command-empty')!.textContent).toBe('没有找到');
 });

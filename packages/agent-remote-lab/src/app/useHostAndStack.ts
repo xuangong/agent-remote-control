@@ -1,4 +1,5 @@
 // The active Host, the conversation stack, the page title and renaming.
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { remoteSessionState, RemoteOperationError, sessionActivityLabel } from '@orchardworks/agent-client';
 import { useEffect } from 'react';
 import { compositionSession } from '../session-composition.js';
@@ -24,6 +25,7 @@ import type { AppLate } from './types.js';
 export function useHostAndStack(scope: Pick<AppInputs & ActiveSessionSlice & RemoteHostStateSlice & RequestedSessionSlice & ProviderStateSlice & ViewSessionStateSlice & SessionSuccessionBindingSlice & ProviderCreationSlice & ConversationConnectionsSlice & WorkbenchRecordsSlice & SideSelectionSlice & WorkbenchShellSlice & DocksAndBotSelectionSlice, 'accessReady' | 'activeAgentId' | 'activeOpened' | 'baseUrl' | 'confirmedTitles' | 'currentSession' | 'detachedSideRoot' | 'directoryView' | 'forkStore' | 'initialState' | 'primaryGroups' | 'providerConnectionName' | 'providerName' | 'remoteHosts' | 'selectedHost' | 'setRenamingSession' | 'setUncertainMutation' | 'sharedWindow' | 'sideSelections' | 'sideSessions' | 'state' | 'status' | 'succession' | 'userScoped' | 'viewSession' | 'windowMode'>, late: AppLate) {
   const { accessReady, activeAgentId, activeOpened, baseUrl, confirmedTitles, currentSession, detachedSideRoot, directoryView, forkStore, initialState, primaryGroups, providerConnectionName, providerName, remoteHosts, selectedHost, setRenamingSession, setUncertainMutation, sharedWindow, sideSelections, sideSessions, state, status, succession, userScoped, viewSession, windowMode } = scope;
 
+  const t = useTranslate();
   const activeRemoteSession = activeOpened?.hostId !== undefined && activeOpened.hostId !== 'local';
 
   const activeHost = remoteHosts.find((host) => host.id === activeOpened?.hostId);
@@ -34,7 +36,7 @@ export function useHostAndStack(scope: Pick<AppInputs & ActiveSessionSlice & Rem
 
   const hostOffline = activeHost?.online === false;
 
-  const connectionProviderName = providerName ?? state?.agent?.providerId ?? (succession.selected ? providerConnectionName(succession.selected.hostId ?? 'local', succession.selected.providerId) : 'No active Agent');
+  const connectionProviderName = providerName ?? state?.agent?.providerId ?? (succession.selected ? providerConnectionName(succession.selected.hostId ?? 'local', succession.selected.providerId) : t('navigation.appBar.noAgent'));
 
   // The session's activity, never its connection phase (target T5). Its notice is said once, by the conversation itself.
   const connectionStatusLabel = sessionActivityLabel({ session: remoteSessionState(state, status), replica: state }) ?? '';

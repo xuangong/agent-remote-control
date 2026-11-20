@@ -96,3 +96,12 @@ describe('what each action does first', () => {
     expect(run('action:new-bot', { windowMode: false })).toEqual(['newBot']);
   });
 });
+
+it('names every action in the reader\'s language', () => {
+  const titles = paletteActions(facts({ canOpenInBotMode: true, windowMode: true }), recorder().runs).map(item => item.title);
+  const chinese = paletteActions(facts({ canOpenInBotMode: true, windowMode: true, t: translator('zh') }), recorder().runs).map(item => item.title);
+  expect(chinese).toContain('新会话');
+  expect(chinese).toContain('收起侧栏');
+  expect(chinese).toContain('全部窗口');
+  expect(chinese).toHaveLength(titles.length);
+});

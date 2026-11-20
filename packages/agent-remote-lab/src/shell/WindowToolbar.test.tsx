@@ -1,5 +1,6 @@
 import { act, useState, type ComponentProps } from 'react';
 import { expect, it, vi } from 'vitest';
+import { LocaleContext } from '@orchardworks/agent-client-web/react';
 import { render } from '../test/setup.js';
 import { WindowToolbar } from './WindowToolbar.js';
 
@@ -236,3 +237,11 @@ it('ignores Enter while an input method is composing, so a candidate is not save
   expect(input()).not.toBeNull();
 });
 
+
+it('speaks Chinese: the title description and the Window actions', async () => {
+  const container = await render(<LocaleContext.Provider value="zh"><WindowToolbar windowId="research" title="Research" summary="3" onRename={vi.fn()} onNewView={vi.fn()} onOpenSession={vi.fn()}
+    botAppearance onBotAppearance={vi.fn()} onCopyLink={vi.fn()} onDelete={vi.fn()} /></LocaleContext.Provider>);
+  expect(container.querySelector('.lab-window-toolbar-title')!.getAttribute('title')).toBe('重命名这个窗口');
+  expect(container.querySelector('button[aria-label="窗口操作"]')).not.toBeNull();
+  expect(container.querySelector('button[aria-label="添加"]')).not.toBeNull();
+});

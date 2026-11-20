@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { translator } from '@orchardworks/agent-client';
 import { describe, expect, it } from 'vitest';
 import {
   contextVisible, initialPanels, pageOpen, reducePanels, sessionsPageTitle, supportingRailOpen, windowStageVisible,
@@ -141,5 +142,9 @@ describe('what the Window can show', () => {
 
   it.each([['list', 'All sessions'], ['favorites', 'Favorites'], ['new', 'New session']] as const)('titles the %s page', (panel, title) => {
     expect(sessionsPageTitle(panel)).toBe(title);
+  });
+
+  it('titles the pages in the reader\'s language', () => {
+    expect(sessionsPageTitle('favorites', translator('zh'))).toBe('收藏');
   });
 });

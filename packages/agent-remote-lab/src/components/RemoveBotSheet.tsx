@@ -1,3 +1,4 @@
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { closingWith, removalMessage } from '../bot-removal.js';
 import type { WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { Sheet } from '@orchardworks/agent-client-web/primitives';
@@ -12,12 +13,13 @@ export function RemoveBotSheet({ name, groupTitle, window, viewId, busy = false,
   name: string; groupTitle?: string; window: WorkspaceWindow | undefined; viewId: string; busy?: boolean;
   onCancel(): void; onRemove(): void;
 }) {
+  const t = useTranslate();
   const names = useAssistantNames();
-  return <Sheet open title={`Remove “${name}” from ${groupTitle ? `“${groupTitle}”` : 'this group'}?`} detent="content" onClose={() => { if (!busy) onCancel(); }}>
+  return <Sheet open title={groupTitle ? t('navigation.removeBot.titleInGroup', { name, group: groupTitle }) : t('navigation.removeBot.titleInThisGroup', { name })} detent="content" onClose={() => { if (!busy) onCancel(); }}>
     <p className="lab-sheet-message">{removalMessage(closingWith(window, viewId, id => window ? names.view(window.id, id) : id))}</p>
     <div className="lab-sheet-actions">
-      <Button disabled={busy} onClick={onCancel}>Cancel</Button>
-      <Button variant="destructive" disabled={busy} aria-busy={busy || undefined} onClick={onRemove}>Remove</Button>
+      <Button disabled={busy} onClick={onCancel}>{t('common.cancel')}</Button>
+      <Button variant="destructive" disabled={busy} aria-busy={busy || undefined} onClick={onRemove}>{t('common.remove')}</Button>
     </div>
   </Sheet>;
 }

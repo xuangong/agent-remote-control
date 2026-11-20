@@ -58,21 +58,21 @@ export function paletteActions(facts: PaletteFacts, runs: PaletteRuns): CommandI
     ({ id: `action:${id}`, kind: 'action', title, run, ...(keys ? { shortcut: keys.shown, keyShortcuts: keys.aria } : {}) });
   const panel = (id: string, title: string, target: SessionPanel) => action(id, title, () => { runs.toWindow(); runs.showPanel(target); });
   return [
-    ...(!facts.windowMode && facts.hasDirectory ? [action('new-bot', 'New assistant', runs.newBot)] : []),
+    ...(!facts.windowMode && facts.hasDirectory ? [action('new-bot', t('navigation.palette.newAssistant'), runs.newBot)] : []),
     // Moving between the modes keeps each mode's place.
-    ...(facts.windowMode && facts.canOpenInBotMode && runs.openInBotMode ? [action('open-in-bot-mode', 'Open in Bot mode', runs.openInBotMode)] : []),
-    ...(!facts.windowMode && facts.canPinToWindow && runs.pinToWindow ? [action('pin-to-window', 'Pin to a window', runs.pinToWindow)] : []),
-    action('new-session', 'New session', () => { runs.toWindow(); runs.newSessionPanel(); }),
-    action('new-window', 'New Window', runs.inWindow(runs.createWindow)),
-    ...(facts.windowEditable ? [action('new-session-view', 'New session view', runs.inWindow(runs.addSessionView, true))] : []),
-    panel('all-sessions', 'All sessions', 'list'),
-    ...(facts.userScoped ? [panel('favorites', 'Favorites', 'favorites')] : []),
-    ...(facts.canToggleSidebar ? [action('toggle-sidebar', facts.sidebarShown ? 'Hide sidebar' : 'Show sidebar', runs.toggleSidebar,
+    ...(facts.windowMode && facts.canOpenInBotMode && runs.openInBotMode ? [action('open-in-bot-mode', t('navigation.palette.openInBotMode'), runs.openInBotMode)] : []),
+    ...(!facts.windowMode && facts.canPinToWindow && runs.pinToWindow ? [action('pin-to-window', t('navigation.palette.pinToWindow'), runs.pinToWindow)] : []),
+    action('new-session', t('navigation.newSession'), () => { runs.toWindow(); runs.newSessionPanel(); }),
+    action('new-window', t('navigation.newWindow'), runs.inWindow(runs.createWindow)),
+    ...(facts.windowEditable ? [action('new-session-view', t('navigation.palette.newSessionView'), runs.inWindow(runs.addSessionView, true))] : []),
+    panel('all-sessions', t('navigation.allSessions'), 'list'),
+    ...(facts.userScoped ? [panel('favorites', t('navigation.favorites'), 'favorites')] : []),
+    ...(facts.canToggleSidebar ? [action('toggle-sidebar', t(facts.sidebarShown ? 'navigation.palette.hideSidebar' : 'navigation.palette.showSidebar'), runs.toggleSidebar,
       apple ? { shown: '⌘\\', aria: 'Meta+\\' } : { shown: 'Ctrl+\\', aria: 'Control+\\' })] : []),
     action('chats', t('navigation.palette.chats'), () => runs.go('chats'), apple ? { shown: '⌥⌘2', aria: 'Alt+Meta+2' } : { shown: 'Ctrl+Alt+2', aria: 'Control+Alt+2' }),
     action('assistants', t('navigation.palette.assistants'), () => runs.go('assistants')),
     action('windows', t('navigation.palette.windows'), () => runs.go('windows'), apple ? { shown: '⌥⌘1', aria: 'Alt+Meta+1' } : { shown: 'Ctrl+Alt+1', aria: 'Control+Alt+1' }),
     action('settings', t('navigation.palette.settings'), () => runs.go('settings')),
-    ...(facts.windowOverviewSupported ? [action('all-windows', 'All Windows', () => { runs.toWindow(); runs.openWindowOverview(); })] : []),
+    ...(facts.windowOverviewSupported ? [action('all-windows', t('navigation.palette.allWindows'), () => { runs.toWindow(); runs.openWindowOverview(); })] : []),
   ];
 }

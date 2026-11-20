@@ -2,6 +2,7 @@ import { relayLinkView, watchPageResume, type ChannelLink } from '@orchardworks/
 import { DeviceLinkContext, type DeviceLink } from './device-link.js';
 import type { AccountFacts } from './account.js';
 import { deviceStore } from '@orchardworks/agent-client/device-store';
+import { withMessageKey } from '@orchardworks/agent-client/locale';
 import { controllerPath, readControllerLocation } from '@orchardworks/agent-remote-protocol/model';
 import { Suspense, lazy, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { signInReturnKey } from '@orchardworks/agent-relay-core/access-page';
@@ -118,10 +119,10 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
           }
           return;
         }
-        if (!response.ok) throw new Error('Access service is unavailable.');
+        if (!response.ok) throw withMessageKey(new Error('Access service is unavailable.'), 'navigation.gateway.accessUnavailable');
         const value = parseAccess(await response.json());
         if (stopped || controller.signal.aborted) return;
-        if (value.expiresAt <= Date.now()) throw new Error('Access response expired.');
+        if (value.expiresAt <= Date.now()) throw withMessageKey(new Error('Access response expired.'), 'navigation.gateway.accessExpired');
         const previousPath = display.current?.basePath ?? previousWorkspacePath();
         if (previousPath && previousPath !== value.basePath) {
           retireWorkspace(previousPath);

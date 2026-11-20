@@ -10,7 +10,7 @@ function Options({ assistant = true }: { assistant?: boolean }) {
   const [own, setOwn] = useState<ProcessMode>('full');
   return <SessionViewOptions process={{ mode: own, device: 'concise', chooseForDevice: () => {}, ...(assistant ? { chooseForAssistant: setOwn } : {}) }} />;
 }
-const open = async (container: HTMLElement) => act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
+const open = async (container: HTMLElement, label = 'Session view options') => act(async () => container.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!.click());
 const group = (container: HTMLElement, name: string) => container.querySelector<HTMLElement>(`[role="group"][aria-label="${name}"]`);
 const pressed = (container: HTMLElement, name: string) => [...group(container, name)!.querySelectorAll('button')].find(button => button.getAttribute('aria-pressed') === 'true')?.textContent;
 
@@ -32,6 +32,6 @@ it('offers nothing for a view that is no assistant', async () => {
 
 it('speaks Chinese for a Chinese browser', async () => {
   const container = await render(<LocaleContext.Provider value="zh"><Options /></LocaleContext.Provider>);
-  await open(container);
+  await open(container, '会话视图选项');
   expect([...group(container, '这个助手')!.querySelectorAll('button')].map(button => button.textContent)).toEqual(['简洁', '过程', '完整']);
 });

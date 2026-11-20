@@ -18,6 +18,7 @@ import { IconButton } from '../ui/IconButton.js';
 import { Button } from '../ui/Button.js';
 import { Icon } from '../ui/Icon.js';
 import { botViews, type BotPicture } from '@orchardworks/agent-remote-protocol';
+import { errorWords } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { AssistantTopBar } from './assistant/AssistantTopBar.js';
 import { AssistantDetailsHostContext, type AssistantDetailsHost } from './assistant/details-host.js';
@@ -76,8 +77,8 @@ export function BotWorkspace({ visible, covered = false, compact, scope, workspa
   const descriptor = conversation ? describeConversation(place) : undefined;
   const unavailable = phone && !!selected.error && !descriptor;
   const showConversation = botConversationShown({ ...(place ? { place } : {}), phone, rosterVisible: navigation.rosterVisible, unavailable });
-  const availabilityNotice = selected.loading ? <p role="status">Opening bot…</p> : selected.error && place?.kind !== 'session'
-    ? <p role="alert">{selected.error} <button type="button" onClick={() => void selected.retry()}>Retry</button></p> : null;
+  const availabilityNotice = selected.loading ? <p role="status">{t('navigation.botWorkspace.opening')}</p> : selected.error && place?.kind !== 'session'
+    ? <p role="alert">{selected.error} <button type="button" onClick={() => void selected.retry()}>{t('common.retry')}</button></p> : null;
   const creation = workspace.sectionCreationState, saving = creation.state === 'saving';
   const actions = useBotActions({ scope, workspace, onSelect: navigation.select, onError: setError });
   const botSection = place?.kind === 'bot' ? roster.sections.find(section => section.groupId === place.groupId) : undefined;
@@ -139,7 +140,7 @@ export function BotWorkspace({ visible, covered = false, compact, scope, workspa
       if (currentScope.current !== requestScope || !id) return;
       const group = workspace.readGroup(id), bot = group ? botViews(group)[0] : undefined;
       navigation.select(bot ? { kind: 'bot', groupId: id, viewId: bot.id } : { kind: 'section', groupId: id });
-    } catch (reason) { if (currentScope.current === requestScope) setError(reason instanceof Error ? reason.message : String(reason)); }
+    } catch (reason) { if (currentScope.current === requestScope) setError(errorWords(reason, t, 'navigation.botWorkspace.failed')); }
   }
   // An assistant is called by its name, never by its session's title (often its first prompt).
   const name = place?.kind === 'session' ? names.session(place.session)
@@ -157,17 +158,17 @@ export function BotWorkspace({ visible, covered = false, compact, scope, workspa
     <aside ref={rosterElement} id={rosterId} className="lab-bot-roster orchard-panel" hidden={phone && showConversation}>
       <SidebarHeader brand actions={onNewBot ? <IconButton icon="plus" label={t('assistants.new')} onClick={onNewBot} /> : undefined} />
       {unavailable ? availabilityNotice : null}
-      {saving ? <p className="lab-bot-notice" role="status">Saving the new group…</p> : null}
+      {saving ? <p className="lab-bot-notice" role="status">{t('navigation.botWorkspace.saving')}</p> : null}
       {error || creation.error ? <p className="lab-bot-notice" role="alert">{error ?? creation.error}</p> : null}
-      {creation.state === 'unknown' ? <p className="lab-bot-notice" role="status">The new group is not confirmed. <button type="button" onClick={() => void retryGroup()}>Retry</button></p> : null}
+      {creation.state === 'unknown' ? <p className="lab-bot-notice" role="status">{t('navigation.botWorkspace.groupUnconfirmed')} <button type="button" onClick={() => void retryGroup()}>{t('common.retry')}</button></p> : null}
       {actions.notice}
       <div className="lab-bot-roster-scroll" onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><SharedBotRoster model={roster} project={projectRoster} place={place} onSelect={open} hostName={hostName} compact={phone}
         directoryControls={<div className="lab-bot-directory-controls">
           {directory.sources.map(source => <div key={source.id}><small>{hostName(source.hostId)} · {source.providerId}</small>
-            {!source.online ? <p>Host offline</p> : null}{source.loading ? <p role="status">Loading sessions…</p> : null}
+            {!source.online ? <p>{t('navigation.botWorkspace.hostOffline')}</p> : null}{source.loading ? <p role="status">{t('navigation.botWorkspace.loadingSessions')}</p> : null}
             {source.error ? <p role="alert">{source.error}</p> : null}
-            <button type="button" disabled={!source.online || source.loading} onClick={() => void directory.refresh(source.id)}>Refresh</button>
-            {source.hasMore && !source.expired ? <button type="button" disabled={!source.online || source.loading} onClick={() => void directory.loadMore(source.id)}>Load more</button> : null}
+            <button type="button" disabled={!source.online || source.loading} onClick={() => void directory.refresh(source.id)}>{t('common.refresh')}</button>
+            {source.hasMore && !source.expired ? <button type="button" disabled={!source.online || source.loading} onClick={() => void directory.loadMore(source.id)}>{t('navigation.botWorkspace.loadMore')}</button> : null}
           </div>)}
         </div>} /></div>
     </aside>

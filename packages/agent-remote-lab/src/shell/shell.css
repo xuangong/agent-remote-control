@@ -149,10 +149,10 @@
 .lab-launcher[hidden], .lab-launcher[data-hidden="true"] { display: none; }
 .lab-launcher, .lab-launcher .lab-session-popover { position: static; min-width: 0; }
 .lab-launcher button.lab-session-popover-trigger {
-  --tracking-edge-color: var(--obs-control-border); justify-content: flex-start; min-height: 44px; padding: 8px 12px;
+  --tracking-edge-color: var(--orchard-separator); justify-content: flex-start; min-height: 44px; padding: 8px 12px;
   border-color: var(--tracking-edge-color); border-radius: 24px;
 }
-.lab-launcher button.lab-session-popover-trigger:where(:hover:not(:disabled)) { --tracking-edge-color: var(--obs-action); }
+.lab-launcher button.lab-session-popover-trigger:where(:hover:not(:disabled)) { --tracking-edge-color: var(--orchard-text-secondary); }
 .lab-launcher .lab-session-popover-panel {
   position: absolute; top: calc(100% + 4px); right: max(8px, env(safe-area-inset-right)); left: max(8px, env(safe-area-inset-left));
   width: auto; max-height: min(560px, 70dvh);

@@ -1,5 +1,6 @@
 import { clickSessionAction } from '../session-actions';
 import { expect, test } from '@playwright/test';
+import { englishWords } from './english-words.js';
 
 test('TPM groups remain usable while multiple workspaces are open', async ({ page, isMobile }, testInfo) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
@@ -212,4 +213,23 @@ test('reload restores multiple TPM docks with their widths, order and drafts', a
   await expect(first.getByRole('separator', { name: /width$/ })).toHaveAttribute('aria-valuenow', '450');
   await expect(first.getByTestId('prompt-input')).toHaveText('Draft for Search delivery');
   await expect(second.getByTestId('prompt-input')).toHaveText('Draft for Connection recovery');
+});
+
+test.describe('in Chinese', () => {
+  test.use({ locale: 'zh-CN' });
+  test('words the TPM list and a TPM workspace in Chinese', async ({ page }) => {
+    await page.goto('/e2e/fixtures/tpm-dock.html');
+    await page.getByRole('button', { name: 'TPM 工作', exact: true }).click();
+    const list = page.getByRole('region', { name: 'TPM 工作', exact: true });
+    await expect(list.getByRole('button', { name: '关闭 TPM 工作' })).toBeVisible();
+    await list.locator('[data-tpm-work]').filter({ hasText: 'Search delivery' }).click();
+    const workspace = page.getByRole('dialog', { name: 'TPM：Search delivery' });
+    await expect(workspace).toBeVisible();
+    await expect(workspace.getByRole('navigation', { name: '工作视图' })).toContainText('计划与验收');
+    await expect(workspace.getByRole('button', { name: '重命名 TPM 会话' })).toBeVisible();
+    // The works, summaries and sessions of the fixture are the Controller's data, not the page's words.
+    const sample = ['Search', 'delivery', 'Connection', 'recovery', 'Website', 'reliability', 'Remote', 'Control', 'Review', 'Choose', 'scope', 'acceptance', 'Query', 'items', 'Main', 'session', 'Plan', 'Specification'];
+    const found = await englishWords(page, { allow: sample, skip: ['.lab-tpm-conversation', '.lab-tpm-document', '.lab-tpm-progress', '.lab-tpm-group', '.lab-session-dock-rail', '.agent-session-title', 'main.lab-shell > nav'] });
+    expect(found).toEqual([]);
+  });
 });

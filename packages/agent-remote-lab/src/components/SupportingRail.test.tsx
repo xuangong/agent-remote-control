@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { render } from '../test/setup.js';
 import { SupportingRail } from './SupportingRail.js';
+import { LocaleContext } from '@orchardworks/agent-client-web/react';
 
 function Harness({ compact = true }: { compact?: boolean }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -76,5 +77,14 @@ describe('SupportingRail', () => {
     expect(rail.getAttribute('role')).toBeNull();
     expect(rail.getAttribute('aria-modal')).toBeNull();
     expect(rail.textContent).toContain('First action');
+  });
+});
+
+describe('SupportingRail in Chinese', () => {
+  it('names the compact context rail and its close control in Chinese', async () => {
+    const container = await render(<LocaleContext.Provider value="zh"><Harness /></LocaleContext.Provider>);
+    await act(async () => container.querySelector<HTMLButtonElement>('button')!.click());
+    expect(container.querySelector('aside')!.textContent).toContain('会话与 Host');
+    expect(container.querySelector('.lab-rail-close')!.textContent).toBe('关闭Context');
   });
 });

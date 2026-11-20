@@ -13,6 +13,7 @@ vi.mock('./LabWorkbench.js',()=>({LabWorkbench:(props:any)=><div data-testid="st
 import { createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { WindowLayoutContext } from '../window-workspace-context.js';
 import { TeamMenu } from './TeamMenu.js';
+import { LocaleContext } from '@orchardworks/agent-client-web/react';
 import { ShortcutPlacement } from '../shell/shortcut-placement.js';
 import { SessionTrackingMenu } from './SessionTrackingMenu.js';
 import type { SessionTracking } from '../hooks/useSessionTracking.js';
@@ -355,4 +356,11 @@ it('refreshes the roster every 4 s while it is open or a Team is forming, and tw
     expect(await minute()).toBe(15);
     await unmount(view);
   } finally { vi.useRealTimers(); }
+});
+it('speaks Chinese: the menu, its heading and the empty state come from the catalogue',async()=>{
+  fixture.teams=[];const view=await render(<LocaleContext.Provider value="zh"><App/></LocaleContext.Provider>);
+  await act(async()=>view.querySelector<HTMLButtonElement>('button[aria-label="Team"]')!.click());
+  expect(view.querySelector('section[aria-label="Team"]')).not.toBeNull();
+  expect(view.textContent).toContain('先从一位组长开始');
+  expect(button(view,'新建 Team')).toBeDefined();
 });

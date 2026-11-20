@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { browserLocale, LocaleContext } from '@orchardworks/agent-client-web/react';
 import type { AgentSnapshot, ClientMessage, HistoryPage, Team } from '@orchardworks/agent-remote-protocol';
 import type { RemoteAgentTransport, RemoteTransportListener } from '@orchardworks/agent-client';
 import { TeamMenu } from '../../src/components/TeamMenu';
@@ -116,4 +117,4 @@ function Fixture() {
  {windows.entries.map(entry=><SessionWindow key={entry.id} entry={entry} baseUrl={location.origin} visible={!compact} compact={compact} hostLabel={entry.target?.hostId ?? ''} offline={false} transport={transport} draftStore={drafts} navigation={navigation} closeWith={windows.entries.filter(child=>child.closeWith===entry.id).map(child=>child.id)} onFocus={()=>windows.focus(entry.id)} onClose={()=>windows.close(entry.id)} actions={entry.groupId?<TeamGatherButton baseUrl={location.origin} entry={entry} onGather={targets=>windows.gather(entry,targets)}/>:undefined}/>)}
  </main></SessionDockProvider>;
 }
-createRoot(document.getElementById('root')!).render(<Fixture/>);
+createRoot(document.getElementById('root')!).render(<LocaleContext.Provider value={browserLocale()}><Fixture/></LocaleContext.Provider>);

@@ -1,5 +1,6 @@
 import { StrictMode, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { browserLocale, LocaleContext } from '@orchardworks/agent-client-web/react';
 import type { TpmWork, AgentSnapshot, HistoryPage } from '@orchardworks/agent-remote-protocol';
 import type { RemoteAgentTransport } from '@orchardworks/agent-client';
 import { MinimizeMainSession, SessionDockProvider, SessionDockRail } from '../../src/components/SessionDock';
@@ -82,4 +83,4 @@ function Fixture() {
     </ConversationSplit></SessionDockRail>
   </main></SessionDockProvider>;
 }
-createRoot(document.getElementById('root')!).render(<StrictMode><Fixture /></StrictMode>);
+createRoot(document.getElementById('root')!).render(<StrictMode><LocaleContext.Provider value={browserLocale()}><Fixture /></LocaleContext.Provider></StrictMode>);

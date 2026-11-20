@@ -19,6 +19,7 @@ vi.mock('@orchardworks/agent-client', async importOriginal => {
   } };
 });
 import { CallForSupportSettings } from './CallForSupportSettings.js';
+import { LocaleContext } from '@orchardworks/agent-client-web/react';
 
 const hosts = [{ id: 'mac', name: 'Mac', providers: [{ providerId: 'codex', displayName: 'Codex' }, { providerId: 'claude', displayName: 'Claude Code' }] }];
 const profile: CallForSupportProfile = { id: 'review', name: 'Cross review', description: 'Two reviewers.', coordinator: {}, enableByDefault: false, revision: 3, updatedAt: 1,
@@ -73,3 +74,13 @@ it('saves an edit with its revision and reloads after a conflict', async () => {
   expect(fixture.commands.at(-1)).toEqual({ type: 'delete', id: 'review', revision: 4 });
   expect(view.textContent).toContain('No support profiles yet.');
 });
+
+it('speaks Chinese: the intro, the empty state and the summary of a profile', async () => {
+  fixture.profiles = [{ ...profile }];
+  const view = await render(<LocaleContext.Provider value="zh"><CallForSupportSettings baseUrl="https://relay.test" enabled hosts={hosts} /></LocaleContext.Provider>);
+  await act(async () => {});
+  expect(view.textContent).toContain('求助支援');
+  expect(view.textContent).toContain('1 种配置，同时最多 2 位 · 每份名单都由你批准');
+  expect(button(view, '删除 Cross review')).toBeDefined();
+  expect(button(view, '新建支援方案')).toBeDefined();
+}, );

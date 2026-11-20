@@ -2,6 +2,7 @@ import { act, useRef } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { render, unmount } from '../test/setup.js';
 import { AskButton } from './AskButton.js';
+import { LocaleContext } from '@orchardworks/agent-client-web/react';
 
 const rect = (x: number, y: number, width: number, height: number) => ({ x, y, left: x, top: y, right: x + width, bottom: y + height, width, height, toJSON: () => ({}) });
 let visualClientRects = false;
@@ -153,4 +154,11 @@ it('reports when it rests against the right viewport edge', async () => {
   expect(root.dataset.edge).toBeUndefined();
   await key(button, 'ArrowRight', true);
   expect(root.dataset.edge).toBe('right');
+});
+
+it('speaks Chinese in its labels', async () => {
+  const container = await render(<LocaleContext.Provider value="zh"><Harness sourceTitle="Source" unavailable="等授权" /></LocaleContext.Provider>);
+  const button = container.querySelector('button')!;
+  expect(button.getAttribute('aria-label')).toBe('问问这段会话');
+  expect(button.getAttribute('title')).toBe('问问 Source · 等授权');
 });

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { englishWords } from './english-words.js';
 
 const source = { hostId: 'mac', providerId: 'codex', nativeSessionId: 'source', title: 'Project' };
 const mandate = { supporters: [{ providerId: 'claude-code', model: 'opus' }], maxSupporters: 2, workspaces: ['shared'], remoteHosts: [], approval: 'every_roster' };
@@ -49,4 +50,26 @@ test('approves a support roster and calls for support from the Team panel', asyn
   await expect.poll(() => created).toEqual([{ operationId: expect.any(String), source,
     callForSupport: { profileId: 'review', fresh: true, call: { task: 'Review the session handling before the pull request.', deliverable: 'findings', context: { commit: 'abcdef1' } } } }]);
   await expect(dialog).toBeHidden();
+});
+
+test.describe('in Chinese', () => {
+  test.use({ locale: 'zh-CN' });
+  test('words the Team panel and the support panel in Chinese', async ({ page }) => {
+    await page.route('**/v1/remote/teams', route => route.fulfill({ json: { teams: [group('pending')] } }));
+    await page.route('**/v1/remote/call-for-support', route => route.fulfill({ json: { profiles, enablement: [] } }));
+    await page.goto('/e2e/fixtures/team.html');
+    await page.getByRole('button', { name: 'Team，有件事等你决定', exact: true }).click();
+    const role = page.getByRole('region', { name: '支援角色 Cross review' });
+    await expect(role.getByLabel('名单提议')).toContainText('Opus reviewer');
+    await expect(role.getByRole('button', { name: '批准', exact: true })).toBeVisible();
+    const panel = page.getByRole('region', { name: '求助支援' });
+    await expect(panel).toContainText('1 项进行中的求助');
+    await panel.getByRole('button', { name: '求助支援…' }).click();
+    await expect(page.getByRole('dialog', { name: '求助支援' })).toBeVisible();
+    // The sample data of the fixture (names, descriptions, tasks) is the Relay's and the person's, not the page's words.
+    const sample = ['Cross', 'review', 'Independent', 'reviewers', 'Coordinator', 'Worker', 'Opus', 'reviewer', 'Review', 'correctness', 'An', 'independent', 'model', 'Project', 'codex', 'claude', 'findings', 'opus', 'claude-code', 'change', 'for', 'login', 'the'];
+    // "Ordinary workspace" is the workspace picker's word (another screen).
+    const otherScreens = ['Ordinary', 'workspace'];
+    expect(await englishWords(page, { allow: [...sample, ...otherScreens] })).toEqual([]);
+  });
 });

@@ -4,6 +4,7 @@ import type { TpmWork } from '@orchardworks/agent-remote-protocol';
 import { render } from '../test/setup.js';
 import { useTpmWork, type TpmService } from '../hooks/useTpmWork.js';
 import { TpmMenu } from './TpmMenu.js';
+import { LocaleContext } from '@orchardworks/agent-client-web/react';
 
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { vi.unstubAllGlobals(); });
@@ -103,4 +104,13 @@ it('groups active and archived work under their main sessions', async () => {
   expect(mainGroup.querySelectorAll('[data-tpm-work]').length).toBe(2);
   expect([...groups].some(group => group.querySelector('h3')!.textContent === 'other-main')).toBe(true);
   expect(container.querySelector('.lab-tpm-archived h3')!.textContent).toBe('Main session');
+});
+
+it('speaks Chinese: the list, its phase and the attention words come from the catalogue', async () => {
+  const h = harness({ supported: true, supportedProviders: ['codex'], works: [work] });
+  const container = await render(<LocaleContext.Provider value="zh"><h.Harness /></LocaleContext.Provider>);
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="TPM 工作"]')!.click());
+  expect(container.textContent).toContain('验证中');
+  expect(container.textContent).toContain('等你决定');
+  expect(container.querySelector('[aria-label="新建 TPM 工作"]')).not.toBeNull();
 });

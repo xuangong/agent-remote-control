@@ -3,6 +3,7 @@ import { expect, it } from 'vitest';
 import type { Team, TeamAction } from '@orchardworks/agent-remote-protocol';
 import { render } from '../../test/setup.js';
 import { SupportGroup } from './SupportGroup.js';
+import { LocaleContext } from '@orchardworks/agent-client-web/react';
 import { enabledProfiles, workerGroups } from './SupportSession.js';
 import { describeSession } from '../../session-description.js';
 
@@ -126,4 +127,13 @@ it('deletes an archived role only after confirmation', async () => {
   await act(async () => button(archived, 'Delete').click());
   await act(async () => button(archived, 'Confirm deletion').click());
   expect(deleted).toBe(1);
+});
+
+it('speaks Chinese: usage, call states and the actions of a support group', async () => {
+  const view = await render(<LocaleContext.Provider value="zh"><SupportGroup team={supportTeam()} hosts={[{ id: 'mac', name: 'Mac' }]} busy={false} onChange={async () => true} onDelete={async () => true} onOpenSession={() => {}} /></LocaleContext.Provider>);
+  expect(view.textContent).toContain('1,500 个令牌 · $0.25');
+  expect(view.textContent).toContain('求助（2）');
+  expect(view.textContent).toContain('已汇报');
+  expect(view.textContent).toContain('来自求助方');
+  expect(view.textContent).toContain('打开求助方的会话');
 });

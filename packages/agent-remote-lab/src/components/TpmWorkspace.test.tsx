@@ -9,6 +9,7 @@ import type { TpmItem } from '../hooks/useTpmWork.js';
 import { SessionDescriptionsContext } from '../session-description-context.js';
 import { describeSession } from '../session-description.js';
 import { TpmWorkspace } from './TpmWorkspace.js';
+import { LocaleContext } from '@orchardworks/agent-client-web/react';
 import { SessionDockProvider, SessionDockRail } from './SessionDock.js';
 import { WindowLayoutContext, WindowPresentationContext } from '../window-workspace-context.js';
 
@@ -310,4 +311,18 @@ it('lets the user stop unfinished work with unknown delivery and explicitly resu
   await act(async () => resume!.click());
   expect(actions.at(-1)).toBe('resume');
   expect(container.querySelector('[aria-label="Resume work"]')).toBeNull();
+});
+
+it('speaks Chinese: the heading controls, work view and the draft come from the catalogue', async () => {
+  const drafts = new DraftStore('tpm-workspace-zh');
+  function Harness() {
+    const trigger = useRef<HTMLButtonElement>(null);
+    return <><button ref={trigger}>TPM</button><TpmWorkspace item={item} visible storageScope="tpm-workspace-zh" triggerRef={trigger}
+      transport={{} as RemoteAgentTransport} draftBinding={{ store: drafts, key: item.key }} onClose={() => {}} onShowList={() => {}}
+      onOpenMain={() => {}} onAction={async () => {}} onResolve={async () => {}} onRetry={() => {}} /></>;
+  }
+  const container = await render(<LocaleContext.Provider value="zh"><Harness /></LocaleContext.Provider>);
+  expect(container.querySelector('[aria-label="收起 TPM"]')).not.toBeNull();
+  expect(container.querySelector('nav[aria-label="工作视图"]')!.textContent).toContain('计划与验收');
+  expect(container.querySelector('[aria-label="TPM 草稿"]')!.getAttribute('placeholder')).toBe('问问这项工作…');
 });

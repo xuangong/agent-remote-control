@@ -28,7 +28,9 @@ lists the flags. `--out` is required. `HOST` is a Host `id` from
 ignored `.tmp/`. The file is only a capture: open it and say what it shows
 ([screenshot evidence](verification.md#screenshot-evidence)).
 
-A new browser context opens in Window mode. For Bot mode, open `/?mode=bot` and
+A new browser context opens in Window mode on a wide viewport. At phone width (760 px and below) the assistant
+list is home unless the address names Window mode, a window or a session: open `/?mode=window` for Window mode
+there. For Bot mode, open `/?mode=bot` and
 wait for its own root, since the Window-mode `main.lab-shell` stays mounted but
 hidden: `pnpm local screenshot '/?mode=bot' --out .tmp/local/bot.png --wait-for 'main.lab-bot-workspace'`,
 and `node .agents/skills/prepare-arc-local/scripts/page-map.mjs '/?mode=bot' 'main.lab-bot-workspace'`. Its `Workbench mode`

@@ -29,7 +29,7 @@ for (const width of [320, 390, 844, 1440]) {
   // Full shows the step at preview level; Concise shows it at summary level once the work line is open.
   for (const mode of ['full', 'concise']) test(`keeps failed command output compact and readable in ${mode} at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 740 });
-    await page.goto(`/e2e/fixtures/view-overflow.html?view=tool-error&mode=${mode}`);
+    await page.goto(`/e2e/fixtures/view-overflow.html?view=tool-error&process=${mode}`);
     const error = page.getByRole('alert');
     const toggle = page.locator('.agent-tool-toggle');
     const tool = page.locator('.agent-tool');

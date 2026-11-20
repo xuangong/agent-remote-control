@@ -106,6 +106,9 @@ links live in the spawning step: these readers choose Full), `App.succession.ask
 | `App.bot-mode.test.tsx` "moves the floating entries into the sidebar…", "keeps the Team entry mounted…" | Without the sidebar the entries floated | They take a row of the Window toolbar (the coordinator's overlap defect); the same element moves, its panel stays open |
 | `BotWorkspace.test.tsx` "goes back to the assistant list from a chat on a phone…" | Back set the list visible at once | On a phone, opening a conversation is a history entry and Back pops it (`useWorkbenchMode.test.tsx` covers both paths) |
 | `App.succession.ask-and-reconnect.test.tsx` "keeps post-upgrade view preferences…" | The tile heading's View options | The tile's details, Process |
+| Window-mode specs at phone width (`standalone-layout`, `layout-diagnostics`, `favorites-layout`, `touch-targets`, `dock-title-interactions` narrow, `launcher-layout` at 390, `conversation-previews` at 320 and 390, `trace-inspection`, `pairing-keys`, `host-environment` on `chromium-mobile`) | A phone opened in Window mode | On a phone the assistant list is home: the App's fixtures (`session-stars`, `view-overflow`, `trace-inspection`) name `mode=window` when their address names no mode, and the specs that open `/` open `/?mode=window`. The previews fixture reads its process mode from `?process=` |
+| `toast-placement.spec.ts` | Enter sent the message | Under a coarse pointer Return makes a new line (B6); the spec sends with the send button, as E9 does |
+| `chooseProcessMode` (`agent-e2e/flows/page.ts`, E1 and E10) | The heading's Session view options | Where a tile or an assistant's top bar replaces them, the details' Process section |
 
 ## Re-pointed without a rule change (I3b)
 

@@ -1,6 +1,7 @@
 import type { ImageDraftBinding, ImageDraftRecipient } from '../image-drafts.js';
 import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { isCoarsePointer, returnKeyAction } from './return-key.js';
 import { AgentSessionSettings, type SessionControlView } from './AgentSessionSettings.js';
 import type { AgentCommand, AgentCommandResult, AgentMessageOptions, ResourceBinding } from '@orchardworks/agent-remote-protocol';
 import { AgentCommandDetails } from './AgentCommandDetails.js';
@@ -550,7 +551,8 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
         return;
       }
     }
-    if (event.key !== 'Enter' || event.shiftKey) return;
+    if (event.key !== 'Enter') return;
+    if (returnKeyAction({ coarsePointer: isCoarsePointer(), shift: event.shiftKey, composing: false, modifier: event.ctrlKey || event.metaKey }) !== 'send') return;
     event.preventDefault();
     void run('send');
   }
@@ -626,6 +628,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
       value={text}
       onChange={(event) => { setText(event.target.value); currentDraft.commandIndex = 0; currentDraft.commandsDismissed = false; currentDraft.feedback = undefined; refresh((value) => value + 1); }}
       onKeyDown={handleKeyDown}
+      enterKeyHint={isCoarsePointer() ? 'enter' : 'send'}
       onCompositionStart={() => { composing.current = true; }}
       onCompositionEnd={() => { composing.current = false; }}
       disabled={!ownershipReadOnly && ((blocked || agentId === '') && !draftOnly && !laterMode || readOnly && !laterMode || busy)}

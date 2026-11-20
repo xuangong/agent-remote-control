@@ -180,3 +180,14 @@ it('synchronizes a retained draft without reporting another user edit', async ()
   await act(async () => input.dispatchEvent(paste));
   expect(change).toHaveBeenCalledWith([{ type: 'text', text: 'new draft' }]);
 });
+
+it('reads the paragraph input as a line break under a coarse pointer', async () => {
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(pointer: coarse)' }));
+  try {
+    const change = vi.fn();
+    const container = await render(<ComposerEditor id="editor" parts={[]} images={{}} disabled={false} onChange={change} onFiles={() => []} onImport={value => [...value]} onRetry={() => {}} onKeyDown={() => {}} />);
+    const editor = container.querySelector('[role="textbox"]')!;
+    await act(async () => editor.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertParagraph', bubbles: true, cancelable: true })));
+    expect(change).toHaveBeenCalledWith([{ type: 'text', text: '\n' }]);
+  } finally { vi.unstubAllGlobals(); }
+});

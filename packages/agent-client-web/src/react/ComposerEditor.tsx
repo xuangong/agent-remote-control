@@ -8,6 +8,7 @@ import { history, redo, undo } from 'prosemirror-history';
 import type { DraftImage } from '../image-drafts.js';
 import { normalizeDraftParts, type DraftPart } from './composer-document.js';
 import { ImagePreview } from './ImagePreview.js';
+import { isCoarsePointer, returnKeyAction } from './return-key.js';
 
 const schema = new Schema({ nodes: {
   doc: { content: 'inline*', whitespace: 'pre' },
@@ -86,7 +87,7 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
     if (!container.current) return;
     const editor = new EditorView(container.current, {
       state: EditorState.create({ schema, doc: toDocument(latest.current.parts), plugins: [history(), keymap({ 'Mod-z': undo, 'Mod-y': redo, 'Mod-Shift-z': redo, 'Shift-Enter': (state, dispatch) => { dispatch?.(state.tr.insertText('\n')); return true; } }), keymap(baseKeymap)] }),
-      attributes: { id: props.id, role: 'textbox', 'aria-label': 'Message', 'aria-multiline': 'true', 'data-testid': 'prompt-input', class: 'agent-composer-editor', 'data-placeholder': 'Message…' },
+      attributes: { id: props.id, role: 'textbox', 'aria-label': 'Message', 'aria-multiline': 'true', 'data-testid': 'prompt-input', enterkeyhint: isCoarsePointer() ? 'enter' : 'send', class: 'agent-composer-editor', 'data-placeholder': 'Message…' },
       editable: () => !latest.current.disabled,
       dispatchTransaction(transaction) {
         if (bookmark.current) bookmark.current = bookmark.current.map(transaction.mapping);
@@ -110,7 +111,11 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
           previewSelection.current = editor.state.selection.getBookmark();
           event.preventDefault(); setPreviewOpen(true); return true;
         }
-        latest.current.onKeyDown(event); return event.defaultPrevented;
+        latest.current.onKeyDown(event);
+        if (!event.defaultPrevented && event.key === 'Enter' && !event.shiftKey && returnKeyAction({ coarsePointer: isCoarsePointer(), shift: false, composing: false, modifier: event.ctrlKey || event.metaKey }) === 'newline') {
+          event.preventDefault(); editor.dispatch(editor.state.tr.insertText('\n').scrollIntoView()); return true;
+        }
+        return event.defaultPrevented;
       },
       handlePaste(_view, event) {
         if (latest.current.disabled) return false;
@@ -147,7 +152,13 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
         beforeinput(_view, event) {
           if (latest.current.disabled || editor.composing || event.isComposing) return false;
           if (event.inputType === 'insertLineBreak' || event.inputType === 'insertParagraph' && shiftEnterDown.current) { event.preventDefault(); editor.dispatch(editor.state.tr.insertText('\n')); return true; }
-          if (event.inputType === 'insertParagraph') { event.preventDefault(); latest.current.onKeyDown(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true })); return true; }
+          if (event.inputType === 'insertParagraph') {
+            event.preventDefault();
+            const enter = new KeyboardEvent('keydown', { key: 'Enter', cancelable: true });
+            latest.current.onKeyDown(enter);
+            if (!enter.defaultPrevented && isCoarsePointer()) editor.dispatch(editor.state.tr.insertText('\n'));
+            return true;
+          }
           return false;
         },
         // ProseMirror takes Enter on iOS before handleKeyDown and later replays it without Shift, so Shift is read from the DOM event.

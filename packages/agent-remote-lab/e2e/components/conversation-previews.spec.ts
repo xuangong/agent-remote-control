@@ -1,10 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-
-async function openDisplayOptions(page: Page) {
-  const expand = page.getByRole('button', { name: 'Expand session actions', exact: true });
-  if (await expand.isVisible()) await expand.click();
-  await page.getByRole('button', { name: 'Session view options', exact: true }).click();
-}
+import { expect, test } from '@playwright/test';
+import { chooseDeviceProcessMode } from './device-process-mode.js';
 
 for (const width of [320, 390, 844, 1440]) {
   test(`starts in Concise, then shows and remembers every step's preview in Full at ${width}px`, async ({ page }, testInfo) => {
@@ -14,11 +9,7 @@ for (const width of [320, 390, 844, 1440]) {
     await page.goto('/e2e/fixtures/view-overflow.html?view=previews&process=concise');
     await expect(page.locator('.agent-tool')).toHaveCount(0);
     await expect(page.locator('.agent-tool-preview')).toHaveCount(0);
-    await openDisplayOptions(page);
-    const device = page.getByRole('group', { name: 'All assistants on this device' });
-    await expect(device.getByRole('button', { name: 'Concise', exact: true })).toHaveAttribute('aria-pressed', 'true');
-    await device.getByRole('button', { name: 'Full', exact: true }).click();
-    await page.getByRole('button', { name: 'Session view options', exact: true }).click();
+    await chooseDeviceProcessMode(page, 'Full');
     await expect(page.locator('.agent-tool-preview')).toHaveCount(2);
     await expect(page.locator('.agent-file-preview')).toHaveCount(2);
     await expect(page.locator('.agent-reasoning .agent-content-preview')).toContainText('Check the existing event');
@@ -53,8 +44,7 @@ for (const width of [320, 390, 844, 1440]) {
     await tool.locator('.agent-tool-toggle').click();
     await expect(tool.locator('.agent-tool-preview')).toHaveCount(0);
     await expect(tool.locator('.agent-tool-details')).toBeHidden();
-    await openDisplayOptions(page);
-    await page.getByRole('group', { name: 'All assistants on this device' }).getByRole('button', { name: 'Concise', exact: true }).click();
+    await chooseDeviceProcessMode(page, 'Concise');
     await expect(page.locator('.agent-tool-preview')).toHaveCount(0);
     expect(errors).toEqual([]);
   });

@@ -385,13 +385,15 @@ const checks: Record<string, Check> = {
     await openBot(page);
     const rows = Object.fromEntries(await details(page).locator('.lab-assistant-row').evaluateAll(nodes => nodes.map(row => [row.firstElementChild?.textContent, row.lastElementChild?.textContent])));
     expect(rows).toMatchObject({ Agent: 'Claude Codebefore: Codex', Machine: 'Mac mini' });
+    // The group is a heading of the Assistants directory, which `section` opens at that group.
+    await page.goto('/e2e/fixtures/assistant-conversation.html?layout=bot&mode=bot&section=notes');
     await expect(page.locator('.lab-bot-section-head h2')).toContainText('Notes');
   },
   W4: async page => {
-    // The sidebar is the phone's home screen.
-    await page.goto('/e2e/fixtures/assistant-conversation.html?layout=bot&mode=bot&section=notes');
-    await page.getByRole('navigation', { name: 'Assistants' }).waitFor();
-    const row = (name: string) => page.getByRole('navigation', { name: 'Assistants' }).getByRole('button', { name, exact: true });
+    // The Chats list is the phone's home screen.
+    await page.goto('/e2e/fixtures/assistant-conversation.html?layout=bot&mode=bot');
+    await page.getByRole('navigation', { name: 'Chats', exact: true }).waitFor();
+    const row = (name: string) => page.getByRole('navigation', { name: 'Chats', exact: true }).getByRole('button', { name, exact: true });
     await expect(row('Reviewer').locator('.lab-bot-role')).toHaveText('Side');
     await expect(row('Builder').locator('.lab-bot-label')).toHaveText('Tester');
     await expect(row('Reviewer').locator('.lab-bot-time')).toBeVisible();

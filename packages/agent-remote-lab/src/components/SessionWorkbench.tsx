@@ -1,5 +1,5 @@
 import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-client-web/browser';
-import { isUncertainSend, timelineEntryKey, remoteSessionState, sessionActivityLabel, sessionNotice, sessionNoticeWords, type RemoteSessionState, type SessionDescription, type SessionAttribution, type SessionFacts, type SessionNotice } from '@orchardworks/agent-client';
+import { isUncertainSend, sessionFiles, timelineEntryKey, remoteSessionState, sessionActivityLabel, sessionNotice, sessionNoticeWords, type RemoteSessionState, type SessionDescription, type SessionAttribution, type SessionFacts, type SessionNotice } from '@orchardworks/agent-client';
 import { SessionControlNotice } from './SessionControlNotice.js';
 import { SessionViewFrame } from './SessionViewFrame.js';
 import { useFeedbackToast, useToastAnchor } from './Toast.js';
@@ -27,15 +27,20 @@ import { SessionTimelineTools } from './SessionTimelineTools.js';
 
 import { useTimelineScroll } from '../hooks/useTimelineScroll.js';
 import { AssistantDetailsHostContext } from './assistant/details-host.js';
+import { AssistantDetails, type AssistantRef } from './assistant/AssistantDetails.js';
+import { ModelSettings } from './assistant/ModelSettings.js';
+import { FilePreviewContext, useTranslate } from '@orchardworks/agent-client-web/react';
 
 
 import type { TraceEntryRequest } from '../trace-model.js';
 
 export type LabWorkbenchActions = SessionViewActions;
 
-export function SessionWorkbench({ assistant, sessionDescription, onNavigateAttribution, todo, processAssistant, sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, imageDraftBinding, imageRecipient, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, renderCommandError, readOnly: recordingReadOnly = false, draftOnly = false, opening = false, mutationBlocked = false, pendingFirstInputContext, onPendingInputChange, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, headingStart, headingMode = 'inline', sessionManager, headingContext, composerContext, composerNotice, composerStatus, nativeTakeover, consoleCommands, onExecuteConsoleCommand, entrySelection, timelineStart, timelineEnd, sendLater, loadingNotice, host }: { entrySelection?: TimelineEntrySelection;
+export function SessionWorkbench({ assistant, details, sessionDescription, onNavigateAttribution, todo, processAssistant, sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, imageDraftBinding, imageRecipient, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, renderCommandError, readOnly: recordingReadOnly = false, draftOnly = false, opening = false, mutationBlocked = false, pendingFirstInputContext, onPendingInputChange, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, headingStart, headingMode = 'inline', sessionManager, headingContext, composerContext, composerNotice, composerStatus, nativeTakeover, consoleCommands, onExecuteConsoleCommand, entrySelection, timelineStart, timelineEnd, sendLater, loadingNotice, host }: { entrySelection?: TimelineEntrySelection;
   /** Who answers in this conversation: the live line's name and the avatar at the foot of the answers. */
   assistant?: AgentTimelineProps['assistant'];
+  /** What the assistant's details show beyond this conversation's own process mode, settings and files: who it is, where it works, its sessions. */
+  details?: Partial<AssistantRef>;
   /** The bot this conversation is, when it is one: the view options choose its own process mode. */
   processAssistant?: ProcessAssistant;
   /** The session's Host as the Relay last said: an offline Host is said once, and the composer stays enabled. */
@@ -108,6 +113,30 @@ export function SessionWorkbench({ assistant, sessionDescription, onNavigateAttr
   const hasTarget = (draftSessionKey ?? attachingAgentId) !== undefined;
   const hostNotice = notice?.kind === 'host_offline' && !(state === undefined && loadingNotice) ? sessionNoticeWords(notice) : undefined;
   const viewOptions = <SessionViewOptions key={displayScope} process={process} lettersVisible={lettersVisible} onLettersVisibleChange={setLettersVisible} />;
+  // The assistant's details: what its place and its presentation know, with this conversation's process mode, settings and files.
+  const t = useTranslate();
+  const filePreview = useContext(FilePreviewContext);
+  const detailsShown = !!detailsHost?.open && visible && (detailsHost.surface === 'sheet' || !!detailsHost.slot);
+  const files = useMemo(() => detailsShown && state ? sessionFiles(state.timeline.entries) : [], [detailsShown, state?.timeline.entries]);
+  const reportedSession = state?.agent?.runtimeInfo.sessionId;
+  const assistantRef: AssistantRef | undefined = detailsShown ? {
+    id: details?.id ?? displayScope ?? 'assistant', name: details?.name ?? assistant?.name ?? t('conversation.assistant'), ...details,
+    ...(detailsHost?.actions ? { actions: detailsHost.actions } : {}), ...(detailsHost?.where ? { where: detailsHost.where } : {}),
+    ...(detailsHost?.setPicture ? { setPicture: detailsHost.setPicture } : {}),
+    process, letters: { visible: lettersVisible, set: setLettersVisible },
+    sessions: { ...details?.sessions, ...(state?.agent?.cwd ? { directory: state.agent.cwd } : {}), ...(reportedSession ? { sessionId: reportedSession } : {}),
+      subagents: reportedSession ? childrenFor?.(reportedSession) ?? [] : [], ...(onOpenChildSession ? { openSubagent: onOpenChildSession } : {}),
+      tools: <>{details?.sessions?.tools}{workspaceLink}</> },
+    ...(state?.agent && !draftOnly ? { settings: <ModelSettings state={state} sessionState={session} readOnly={readOnly || mutationBlocked}
+      {...(actions.setSessionSetting ? { onSelect: (id: string, value: string) => actions.setSessionSetting!(id, value) } : {})} {...(renderSessionSettingError ? { renderError: renderSessionSettingError } : {})}
+      planning={<PlanningControl sessionState={session} key={state.agent.id} state={state} sessionStatus={sessionStatus} onSetPlanning={actions.setPlanning} />} /> } : {}),
+    files, ...(filePreview && state ? { openFile: (file, trigger) => {
+      const entry = state.timeline.entries.find(item => timelineEntryKey(item) === file.entryKey);
+      filePreview.open({ locator: file.path, returnFocus: trigger, context: { scopeKey: JSON.stringify([state.agent?.id, file.entryKey]), bindings: entry?.resources ?? [],
+        resources: state.resources, ...(actions.resolveResource ? { resolveResource: actions.resolveResource } : {}), ...(actions.requestResource ? { requestResource: actions.requestResource } : {}) } });
+    } } : {}),
+  } : undefined;
+  const detailsPanel = assistantRef && detailsHost ? <AssistantDetails assistant={assistantRef} surface={detailsHost.surface} onClose={() => detailsHost.setOpen(false)} /> : null;
   const layoutClass = [todo ? 'lab-workbench-with-todo' : '', selectedCommand ? 'lab-command-details-open' : '', headingMode !== 'inline' ? 'lab-workbench-toolbar-heading' : ''].filter(Boolean).join(' ');
   return <ProcessModeContext.Provider value={process.mode}><TimelineLettersVisible.Provider value={lettersVisible}>
     <SessionAttributions description={sessionDescription} onNavigate={onNavigateAttribution}>{({ toggle, details }) => <SessionViewFrame className={layoutClass}>
@@ -151,6 +180,7 @@ export function SessionWorkbench({ assistant, sessionDescription, onNavigateAttr
         <div id={composerId} className="lab-composer-body" hidden={composerHidden && !controlReadOnly}>
           <DraftComposer
             keyboardDismissBoundaryRef={composerTouchBoundary}
+            settings={assistantChrome ? 'none' : 'inline'}
             sessionState={session}
             host={host}
             draftOnly={draftOnly}
@@ -196,6 +226,7 @@ export function SessionWorkbench({ assistant, sessionDescription, onNavigateAttr
       onRequestResource={actions.requestResource} onResolveResource={actions.resolveResource}
       resourceScopeKey={JSON.stringify([state.agent?.id, selectedCommand.id])}
       onClose={() => setInspected(undefined)} /> : null}
+    {detailsPanel && detailsHost?.surface === 'panel' && detailsHost.slot ? createPortal(detailsPanel, detailsHost.slot) : detailsPanel}
   </SessionViewFrame>}</SessionAttributions></TimelineLettersVisible.Provider></ProcessModeContext.Provider>;
 }
 

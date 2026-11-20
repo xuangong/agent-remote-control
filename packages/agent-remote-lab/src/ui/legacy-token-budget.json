@@ -6,6 +6,7 @@
     "agent-remote-lab/src/ask-resize.css": 3,
     "agent-remote-lab/src/ask.css": 15,
     "agent-remote-lab/src/components/SessionSuccessionHistory.css": 6,
+    "agent-remote-lab/src/components/assistant/assistant.css": 0,
     "agent-remote-lab/src/components/bot-workspace.css": 0,
     "agent-remote-lab/src/components/call-for-support/call-for-support.css": 15,
     "agent-remote-lab/src/components/earlier-conversation.css": 0,

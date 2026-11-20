@@ -1,7 +1,7 @@
 // Bot mode's real layout on builder states: three assistants of one group, with Chief's conversation of every kind. The
 // workspace applies group operations in memory, the navigation is the Workbench's own (the URL's mode, section and bot).
 import { useRef, useState, type ReactNode } from 'react';
-import { applyGroupOperation, createWindowView, type WindowGroup, type WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
+import { applyGroupOperation, createWindowView, type BotPicture, type WindowGroup, type WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
 import { translator } from '@orchardworks/agent-client';
 import { browserLocale } from '@orchardworks/agent-client-web/react';
 import { AssistantAvatar } from '@orchardworks/agent-client-web/primitives';
@@ -24,7 +24,8 @@ const initialGroup: WindowGroup = {
 };
 
 /** Bot mode with the assistants of `initialGroup`; `conversation` renders the conversation of the assistant shown. */
-export function BotFixture({ conversation }: { conversation(props: { assistant: { name: string; avatar: ReactNode }; visible: boolean; headingMode: 'assistant' }): ReactNode }) {
+export function BotFixture({ conversation }: { conversation(props: { assistant: { name: string; avatar: ReactNode }; visible: boolean; headingMode: 'assistant';
+  details: { id: string; name: string; picture?: BotPicture } }): ReactNode }) {
   const [groups, setGroups] = useState<WindowGroup[]>([initialGroup]);
   const latest = useRef(groups); latest.current = groups;
   const navigation = useWorkbenchMode('fixture');
@@ -54,7 +55,7 @@ export function BotFixture({ conversation }: { conversation(props: { assistant: 
   const mount: NonNullable<BotWorkspaceProps['mount']> = ({ descriptor }) => {
     const assistant = ASSISTANTS.find(item => item.id === descriptor.slotId)!;
     const picture = readGroup('notes')?.bots?.members[assistant.id]?.picture;
-    return <>{conversation({ visible: descriptor.props.visible !== false, headingMode: 'assistant',
+    return <>{conversation({ visible: descriptor.props.visible !== false, headingMode: 'assistant', details: { id: assistant.id, name: assistant.title, ...(picture ? { picture } : {}) },
       assistant: { name: assistant.title, avatar: <AssistantAvatar id={assistant.id} {...(picture ? { picture } : {})} size={26} mood={assistant.activity === 'running' ? 'working' : 'idle'} /> } })}</>;
   };
   return <div className="lab-shell fixture-assistant" style={{ display: 'block', height: '100dvh' }}>

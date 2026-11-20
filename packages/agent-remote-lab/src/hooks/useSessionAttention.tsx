@@ -101,5 +101,10 @@ export function useSessionAttention(scope: string, active: boolean, onOpen: (ses
       {permissionError ? <small>Permission could not be requested. Try Allow browser notifications again.</small> : null}
     </> : null}
   </>;
-  return { enabled: active && !mobile && notificationChoice && notificationPermission === 'granted', trackVisible, setTrackVisible, executeTrack, controls, observe, notifier };
+  /** This device's session notifications, for an assistant's details: one choice that every assistant shares. */
+  const notifications = { enabled: notificationChoice, available: !mobile && notificationPermission !== 'unsupported', set(value: boolean) {
+    save(notificationKey, value); setNotificationChoice(value);
+    if (value) void requestPermission();
+  } };
+  return { enabled: active && !mobile && notificationChoice && notificationPermission === 'granted', trackVisible, setTrackVisible, executeTrack, controls, observe, notifier, notifications };
 }

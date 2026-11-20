@@ -269,11 +269,10 @@ it('continues a handed-off bot into its earlier session above the current conver
   // Bot mode shows no handoff link; the earlier session is read, not opened as a view.
   expect(conversation().querySelector('.lab-succession-history')).toBeNull();
   expect(conversation().querySelector('.lab-earlier-session textarea, .lab-earlier-session [role="textbox"]')).toBeNull();
-  // Info names the provider of each earlier session.
-  await act(async () => app.container.querySelector<HTMLButtonElement>('button[aria-label="Bot actions: B1"]')!.click());
-  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menu"] [role="menuitem"]')].find(item => item.textContent === 'Info')!.click());
-  const rows = Object.fromEntries([...document.querySelectorAll('dialog .lab-bot-info dt')].map(term => [term.textContent, term.nextElementSibling?.textContent]));
-  expect(rows).toMatchObject({ Provider: 'Recorded Provider', Earlier: 'Recorded Provider' });
+  // Its details name the agent of each earlier session.
+  await until(() => expect(app.container.querySelector('.lab-assistant-details .lab-assistant-row')).not.toBeNull());
+  const rows = Object.fromEntries([...app.container.querySelectorAll('.lab-assistant-details .lab-assistant-row')].map(row => [row.firstElementChild?.textContent, row.lastElementChild?.textContent]));
+  expect(rows).toMatchObject({ Agent: 'Recorded Providerbefore: Recorded Provider' });
   await app.close();
 });
 

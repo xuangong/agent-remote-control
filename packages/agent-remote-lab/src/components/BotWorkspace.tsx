@@ -11,14 +11,13 @@ import { BotRoster, botDisplayName, botPlaceKey } from './BotRoster.js';
 import { useSharedFeed, type SharedFeedsSnapshot } from '../shared-feeds.js';
 import { useBotActions, type BotInfo } from './BotActions.js';
 import { AsleepNotice } from './AsleepNotice.js';
-import { Menu } from '../ui/Menu.js';
 import { SessionConversationMount, type SessionSurfaceDescriptor } from './SessionConversationSurfaces.js';
 import { SidebarHeader } from '../shell/SidebarHeader.js';
 import { IconButton } from '../ui/IconButton.js';
 import { Button } from '../ui/Button.js';
 import { Icon } from '../ui/Icon.js';
 import type { MenuEntry } from '../ui/Menu.js';
-import { botViews, hasBotAppearance, hasWindowAppearance } from '@orchardworks/agent-remote-protocol';
+import { botViews, hasBotAppearance, hasWindowAppearance, type BotPicture } from '@orchardworks/agent-remote-protocol';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { assistantName } from '@orchardworks/agent-client';
 import type { BotSection } from '../bot-roster.js';
@@ -82,12 +81,11 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
   const availabilityNotice = selected.loading ? <p role="status">Opening bot…</p> : selected.error && place?.kind !== 'session'
     ? <p role="alert">{selected.error} <button type="button" onClick={() => void selected.retry()}>Retry</button></p> : null;
   const creation = workspace.sectionCreationState, saving = creation.state === 'saving';
-  const actions = useBotActions({ scope, workspace, onSelect: navigation.select, onError: setError, botInfo });
+  const actions = useBotActions({ scope, workspace, onSelect: navigation.select, onError: setError });
   const botSection = place?.kind === 'bot' ? roster.sections.find(section => section.groupId === place.groupId) : undefined;
   const botRow = place?.kind === 'bot' ? botSection?.rows.find(row => row.viewId === place.viewId) : undefined;
   // A bot put to sleep elsewhere while open here: its conversation is released until it is woken.
   const asleep = place?.kind === 'bot' && !!workspace.readGroup(place.groupId)?.bots?.members[place.viewId]?.asleep;
-  const botMenu = botRow && botSection && descriptor ? <Menu label={`Bot actions: ${botDisplayName(botRow.binding)}`} items={actions.botMenu(botRow, botSection.title)} /> : null;
   // The details sit beside the conversation from the compact width up; below it they wait to be opened.
   const [detailsOpen, setDetailsOpen] = useState(!compact);
   useEffect(() => { setDetailsOpen(!compact); }, [compact]);
@@ -97,7 +95,7 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
   const info = place?.kind === 'bot' ? botInfo?.(place) : undefined;
   const detailsHost: AssistantDetailsHost = {
     surface: phone ? 'sheet' : 'panel', slot: detailsSlot, tools: toolsSlot, open: detailsShown, setOpen: setDetailsOpen,
-    ...(botRow && botSection ? { actions: actions.botMenu(botRow, botSection.title).filter(entry => !('label' in entry) || entry.label !== 'Info') } : {}),
+    ...(botRow && botSection ? { actions: actions.cardActions(botRow, botSection.title), setPicture: (picture: BotPicture) => actions.setPicture(botRow, picture) } : {}),
     ...(info ? { where: info } : {}),
   };
   // Choosing another bot dismisses a notice about the last one.
@@ -189,7 +187,7 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
       {creation.state === 'unknown' ? <p className="lab-bot-notice" role="status">The new group is not confirmed. <button type="button" onClick={() => void retryGroup()}>Retry</button></p> : null}
       {actions.notice}
       <div className="lab-bot-roster-scroll" onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><SharedBotRoster model={roster} project={projectRoster} place={place} onSelect={open} hostName={hostName} groupActions={groupActions} compact={phone}
-        rowActions={(row, section) => actions.botMenu(row, section.title)}
+        rowActions={(row, section) => actions.cardActions(row, section.title)}
         directoryControls={<div className="lab-bot-directory-controls">
           {directory.sources.map(source => <div key={source.id}><small>{hostName(source.hostId)} · {source.providerId}</small>
             {!source.online ? <p>Host offline</p> : null}{source.loading ? <p role="status">Loading sessions…</p> : null}
@@ -205,7 +203,7 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
         detailsOpen={detailsShown} detailsId={detailsId} onToggleDetails={descriptor ? () => setDetailsOpen(open => !open) : undefined}
         leading={phone ? <Button ref={backButton} variant="plain" className="lab-bot-back" aria-label={t('assistants.back')} onClick={back}><Icon name="chevron-left" size={20} />{t('assistants.backShort')}</Button>
           : <IconButton ref={toggleRef} icon="sidebar" label={rosterCollapsed ? 'Show sidebar' : 'Hide sidebar'} aria-expanded={!rosterCollapsed} aria-controls={rosterId} onClick={onToggleRoster} />}
-        trailing={<><span ref={setToolsSlot} className="lab-assistant-tools" />{botMenu}</>} /> : null}
+        trailing={<span ref={setToolsSlot} className="lab-assistant-tools" />} /> : null}
       {!unavailable ? availabilityNotice : null}
       {asleep && descriptor ? <AsleepNotice onWake={() => place?.kind === 'bot' && void actions.wake(place)} /> : null}
       {descriptor ? <AssistantDetailsHostContext.Provider value={detailsHost}>

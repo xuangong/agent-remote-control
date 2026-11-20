@@ -1,0 +1,61 @@
+/* The details of an assistant: its name card on the brand tint, then grouped sections on the fill (I3 plan, section 4.5). */
+.lab-assistant-details-body { display: grid; gap: var(--orchard-space-l); min-width: 0; color: var(--orchard-text); font-size: var(--orchard-type-footnote-size); }
+.lab-assistant-card.orchard-card { display: grid; justify-items: center; gap: var(--orchard-space-xs); padding: var(--orchard-space-3xl) var(--orchard-space-xl) var(--orchard-space-2xl); text-align: center; }
+.lab-assistant-card-avatar { display: inline-flex; padding: var(--orchard-space-xs); border: 0; border-radius: var(--orchard-radius-card); background: transparent; }
+button.lab-assistant-card-avatar { cursor: pointer; }
+button.lab-assistant-card-avatar:hover:not(:disabled) { border-color: transparent; background: var(--orchard-surface); }
+.lab-assistant-card-name { margin: var(--orchard-space-xs) 0 0; color: var(--orchard-text-strong); font: var(--orchard-type-title-weight) var(--orchard-type-title-size) / var(--orchard-type-title-leading) var(--orchard-font-text); overflow-wrap: anywhere; }
+.lab-assistant-card-role, .lab-assistant-card-tags { display: flex; justify-content: center; gap: var(--orchard-space-s); margin: 0; color: var(--orchard-text-secondary); font-size: var(--orchard-type-caption-size); }
+.lab-assistant-card-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--orchard-space-s); margin-top: var(--orchard-space-m); }
+.lab-assistant-action { display: inline-flex; align-items: center; gap: var(--orchard-space-xs); min-height: 32px; padding: var(--orchard-space-xs) var(--orchard-space-l); border: 0;
+  border-radius: var(--orchard-radius-pill); background: var(--orchard-surface); color: var(--orchard-text-strong); font: inherit; cursor: pointer; }
+.lab-assistant-action:hover:not(:disabled) { border-color: transparent; color: var(--orchard-text-strong); background: var(--orchard-fill-strong); }
+.lab-assistant-action[data-destructive] { color: var(--orchard-danger-text); }
+.lab-avatar-picker { display: grid; gap: var(--orchard-space-s); }
+.lab-avatar-picker fieldset { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--orchard-space-2xs); margin: 0; padding: 0; border: 0; }
+.lab-avatar-picker legend { width: 100%; margin-bottom: var(--orchard-space-2xs); color: var(--orchard-text-secondary); font-size: var(--orchard-type-caption-size); }
+.lab-avatar-picker button { display: inline-grid; place-items: center; min-width: 36px; min-height: 36px; padding: 0; border: 0; border-radius: var(--orchard-radius-group); background: transparent; cursor: pointer; }
+.lab-avatar-picker button[aria-pressed="true"] { background: var(--orchard-surface); box-shadow: inset 0 0 0 2px var(--orchard-focus); }
+.lab-avatar-swatch { display: block; width: 20px; height: 20px; border-radius: 50%; }
+.lab-assistant-section > h3 { margin: var(--orchard-space-xs) var(--orchard-space-xs) var(--orchard-space-s); color: var(--orchard-text-secondary); font: var(--orchard-type-footnote-weight) var(--orchard-type-footnote-size) / 1.4 var(--orchard-font-text); }
+.lab-assistant-group, .lab-assistant-settings { display: grid; padding: var(--orchard-space-xs) var(--orchard-space-l); border-radius: var(--orchard-radius-group); background: var(--orchard-fill); }
+.lab-assistant-row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--orchard-space-l); min-height: 36px; padding: var(--orchard-space-s) 0; box-sizing: border-box; }
+.lab-assistant-row-sessions { display: grid; }
+.lab-assistant-value { display: inline-flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; gap: var(--orchard-space-xs); min-width: 0; color: var(--orchard-text-secondary); text-align: end; overflow-wrap: anywhere; }
+.lab-assistant-value small { flex-basis: 100%; font-size: var(--orchard-type-caption-size); }
+.lab-assistant-value[data-online="false"] small { color: var(--orchard-danger-text); }
+.lab-assistant-online { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--orchard-online); align-self: center; }
+.lab-assistant-value[data-online="false"] .lab-assistant-online { background: var(--orchard-ink-faint); }
+.lab-assistant-sessions { display: grid; gap: var(--orchard-space-s); min-width: 0; }
+.lab-assistant-sessions :is(ol, ul) { display: grid; gap: var(--orchard-space-2xs); margin: 0; padding: 0; list-style: none; }
+.lab-assistant-chain li { display: flex; align-items: baseline; justify-content: space-between; gap: var(--orchard-space-s); min-width: 0; }
+.lab-assistant-chain li > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-assistant-chain li[aria-current] > :first-child { color: var(--orchard-text-strong); font-weight: 600; }
+.lab-assistant-sessions small { flex: none; color: var(--orchard-text-secondary); }
+.lab-assistant-sessions :is(a, .lab-assistant-subagents button) { padding: 0; border: 0; background: none; color: var(--orchard-text-strong); font: inherit; text-align: left; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.lab-assistant-sessions h4 { margin: var(--orchard-space-xs) 0 0; color: var(--orchard-text-secondary); font: inherit; }
+.lab-assistant-return { margin: 0; }
+.lab-assistant-identity { display: grid; gap: var(--orchard-space-xs); margin: 0; }
+.lab-assistant-identity > div { display: grid; gap: var(--orchard-space-2xs); }
+.lab-assistant-identity dt { color: var(--orchard-text-secondary); font-size: var(--orchard-type-caption-size); }
+.lab-assistant-identity dd { display: flex; align-items: center; gap: var(--orchard-space-xs); min-width: 0; margin: 0; }
+.lab-assistant-identity code { min-width: 0; overflow-wrap: anywhere; font: var(--orchard-type-caption-size) / 1.4 var(--orchard-font-mono); }
+.lab-assistant-copy { flex: none; min-width: 28px; min-height: 28px; padding: 0; border: 0; border-radius: var(--orchard-radius-pill); background: transparent; color: var(--orchard-text-secondary); cursor: pointer; }
+.lab-assistant-session-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--orchard-space-s); }
+.lab-assistant-process { display: grid; gap: var(--orchard-space-m); }
+.lab-assistant-process .lab-process-choice { display: grid; gap: var(--orchard-space-xs); color: var(--orchard-text-secondary); font-size: var(--orchard-type-caption-size); }
+.lab-assistant-settings { gap: var(--orchard-space-s); padding-block: var(--orchard-space-m); }
+.lab-assistant-files { display: grid; gap: var(--orchard-space-2xs); margin: 0; padding: 0; list-style: none; }
+.lab-assistant-files :is(button, span[title]) { display: flex; align-items: baseline; justify-content: space-between; gap: var(--orchard-space-m); width: 100%; min-height: 36px; padding: var(--orchard-space-s) var(--orchard-space-l);
+  box-sizing: border-box; border: 0; border-radius: var(--orchard-radius-group); background: var(--orchard-fill); color: var(--orchard-text); font: inherit; text-align: left; }
+.lab-assistant-files button { cursor: pointer; }
+.lab-assistant-files button:hover:not(:disabled) { border-color: transparent; color: var(--orchard-text); background: var(--orchard-fill-strong); }
+.lab-assistant-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-assistant-file-meta { display: inline-flex; flex: none; gap: var(--orchard-space-s); color: var(--orchard-text-secondary); font-size: var(--orchard-type-caption-size); }
+.lab-assistant-files li[data-change="deleted"] .lab-assistant-file-name { text-decoration: line-through; }
+.lab-assistant-empty { margin: 0; padding: var(--orchard-space-s) var(--orchard-space-xs); color: var(--orchard-text-secondary); }
+.lab-assistant-details-body :focus-visible { outline: 2px solid var(--orchard-focus); outline-offset: 2px; }
+@media (pointer: coarse) {
+  .lab-assistant-action, .lab-assistant-copy, .lab-avatar-picker button, .lab-assistant-files :is(button, span[title]) { min-height: 44px; }
+  .lab-assistant-copy, .lab-avatar-picker button { min-width: 44px; }
+}

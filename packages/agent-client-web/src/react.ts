@@ -49,12 +49,14 @@ export type { AgentPlanningControlProps } from './react/AgentPlanningControl.js'
 export { useTimelineScroll } from './react/useTimelineScroll.js';
 export type { TimelineReadingContinuity, TimelineReadingContinuityPosition, TimelineReadingContinuityPositions, TimelineReadingPosition, TimelineReadingPositions } from './react/useTimelineScroll.js';
 export { AgentChildSessionList } from './react/AgentChildSessionList.js';
+export { AgentSessionSettings, type SessionControlView } from './react/AgentSessionSettings.js';
 export type { AgentChildSessionListProps, AgentChildSessionView } from './react/AgentChildSessionList.js';
 
 export type { SessionLinkResolver } from './react/items/ToolCallItem.js';
 
 export { PreviewWorkspace } from './react/PreviewWorkspace.js';
 export { FilePreviewScope } from './react/FilePreviewScope.js';
+export { FilePreviewContext, type FilePreviewRequest } from './react/FilePreviewContext.js';
 export { clearImageDraftScope } from './image-drafts.js';
 export type { DraftPart } from './react/composer-document.js';
 export { preparePromptDraft, savePromptDraft } from './react/prompt-draft.js';

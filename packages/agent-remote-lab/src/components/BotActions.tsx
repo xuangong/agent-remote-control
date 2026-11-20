@@ -1,31 +1,33 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import type { WindowBotDetails, WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
+import type { BotPicture, WindowBotDetails, WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { appendedRank, type BotRow, type BotSection } from '../bot-roster.js';
 import type { BotPlace } from '../workbench-mode.js';
 import type { MenuEntry } from '../ui/Menu.js';
 import { Sheet } from '@orchardworks/agent-client-web/primitives';
 import { Button } from '../ui/Button.js';
-import { BotPicture, botDisplayName, botMood } from './BotRoster.js';
+import { botDisplayName } from './BotRoster.js';
 import { RemoveBotSheet } from './RemoveBotSheet.js';
 
-/** Where a bot runs, for its Info sheet. App knows the Hosts, the providers and the bot's handoff chain. */
+/** Where a bot runs, for its details. App knows the Hosts, the providers and the bot's handoff chain. */
 export interface BotInfo {
   host: string; online?: boolean; provider: string;
   /** The providers of the bot's earlier sessions, oldest first. */
   earlier: readonly string[];
 }
-type OpenSheet = { kind: 'info' | 'label' | 'remove'; row: BotRow; groupTitle: string };
+type OpenSheet = { kind: 'label' | 'remove'; row: BotRow; groupTitle: string };
 type Workspace = Pick<ReturnType<typeof useWindowWorkspace>, 'readGroup' | 'operateGroup' | 'groups'>;
 const message = (reason: unknown) => reason instanceof Error ? reason.message : String(reason);
 /**
- * A bot's own actions (Info, Label, Hide in Bot mode, Remove from group) and the group's way to show hidden bots again.
- * Every change is a group operation, shared by every device; a group formed from sessions gains its bot details in the same change.
+ * A bot's own actions, on its name card (Label…, Sleep or Wake, Hide in Bot mode, Remove from group…), its avatar, and the
+ * group's way to show hidden bots again. Every change is a group operation, shared by every device; a group formed from
+ * sessions gains its bot details in the same change.
  */
-export function useBotActions({ scope, workspace, onSelect, onError, botInfo }: {
+export function useBotActions({ scope, workspace, onSelect, onError }: {
   scope: string; workspace: Workspace; onSelect(place: BotPlace): void; onError(error: string | undefined): void;
-  botInfo?(place: { groupId: string; viewId: string }): BotInfo | undefined;
 }) {
+  const t = useTranslate();
   const [open, setOpen] = useState<OpenSheet>();
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
@@ -83,15 +85,19 @@ export function useBotActions({ scope, workspace, onSelect, onError, botInfo }: 
     if (await run(row.groupId, { type: 'view.close', viewId: row.viewId })) { setOpen(undefined); onSelect({ kind: 'section', groupId: row.groupId }); }
   }
 
-  function botMenu(row: BotRow, groupTitle: string): MenuEntry[] {
+  /** The actions of a bot's name card; asleep, it offers Wake in place of Sleep. */
+  function cardActions(row: BotRow, groupTitle: string): MenuEntry[] {
     return [
-      { label: 'Info', icon: 'person', onSelect: () => setOpen({ kind: 'info', row, groupTitle }) },
-      { label: 'Label…', icon: 'pencil', onSelect: () => { setDraft(row.details.label ?? ''); setOpen({ kind: 'label', row, groupTitle }); } },
-      { kind: 'separator' },
-      { label: 'Sleep', icon: 'moon', onSelect: () => void sleep(row) },
-      { label: 'Hide in Bot mode', icon: 'eye-off', onSelect: () => void hide(row) },
-      { label: 'Remove from group…', icon: 'trash', destructive: true, onSelect: () => setOpen({ kind: 'remove', row, groupTitle }) },
+      { label: t('card.label'), icon: 'pencil', onSelect: () => { setDraft(row.details.label ?? ''); setOpen({ kind: 'label', row, groupTitle }); } },
+      row.details.asleep ? { label: t('card.wake'), icon: 'moon', onSelect: () => void wake(row) } : { label: t('card.sleep'), icon: 'moon', onSelect: () => void sleep(row) },
+      { label: t('card.hide'), icon: 'eye-off', onSelect: () => void hide(row) },
+      { label: t('card.remove'), icon: 'trash', destructive: true, onSelect: () => setOpen({ kind: 'remove', row, groupTitle }) },
     ];
+  }
+  /** A bot's new avatar, for every device. */
+  function setPicture(row: Pick<BotRow, 'groupId' | 'viewId'>, picture: BotPicture) {
+    const current = workspace.readGroup(row.groupId)?.bots?.members[row.viewId] ?? {};
+    void update(row, { ...current, picture });
   }
   function groupMenu(section: BotSection): MenuEntry[] {
     if (!section.hidden.length) return [];
@@ -105,21 +111,7 @@ export function useBotActions({ scope, workspace, onSelect, onError, botInfo }: 
 
   const close = () => { if (!busy) setOpen(undefined); };
   const row = open?.row, name = row ? botDisplayName(row.binding) : '';
-  const info = open?.kind === 'info' && row ? botInfo?.({ groupId: row.groupId, viewId: row.viewId }) : undefined;
   const sheets: ReactNode = !open || !row ? null
-    : open.kind === 'info' ? <Sheet open title={name} detent="content" onClose={close}>
-      <div className="lab-bot-info-head">
-        <BotPicture id={row.viewId} picture={row.details.picture} size={56} mood={botMood(row.status, row.details.asleep)} />
-        {row.role || row.details.label ? <p className="lab-bot-name-line">{row.role ? <span className="lab-bot-role">{row.role}</span> : null}
-          {row.details.label ? <span className="lab-bot-label">{row.details.label}</span> : null}</p> : null}
-      </div>
-      <dl className="lab-bot-info">
-        <div><dt>Group</dt><dd>{open.groupTitle}</dd></div>
-        <div><dt>Host</dt><dd>{info?.host ?? row.binding.hostId}{info?.online === false ? <small> · Offline</small> : null}</dd></div>
-        <div><dt>Provider</dt><dd>{info?.provider ?? row.binding.providerId}</dd></div>
-        {info?.earlier.length ? <div><dt>Earlier</dt><dd>{info.earlier.join(' → ')}</dd></div> : null}
-      </dl>
-    </Sheet>
     : open.kind === 'label' ? <Sheet open title="Label" detent="content" onClose={close}>
       <form className="lab-bot-sheet-form" onSubmit={event => void saveLabel(event, draft.trim() || undefined)}>
         <input aria-label="Label" autoFocus maxLength={120} placeholder="Reviewer, On call…" value={draft} disabled={busy} onChange={event => setDraft(event.target.value)} />
@@ -135,5 +127,5 @@ export function useBotActions({ scope, workspace, onSelect, onError, botInfo }: 
       onCancel={close} onRemove={() => void remove()} />;
   const noticeLine: ReactNode = notice ? <p className="lab-bot-notice" role="status">{notice.text}
     {notice.undo ? <button type="button" onClick={() => void notice.undo!()}>Undo</button> : null}</p> : null;
-  return { botMenu, groupMenu, wake, sheets, notice: noticeLine, clearNotice: () => setNotice(undefined) };
+  return { cardActions, setPicture, groupMenu, wake, sheets, notice: noticeLine, clearNotice: () => setNotice(undefined) };
 }

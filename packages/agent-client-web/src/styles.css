@@ -337,7 +337,6 @@
 .agent-preview-target > small, .agent-preview-target > [role="alert"] { flex-basis: 100%; margin: 0; color: var(--agent-muted); }
 .agent-preview-target > [role="alert"] { color: var(--agent-danger); }
 .agent-preview-copy-url { min-width: 0; width: 100%; box-sizing: border-box; }
-.agent-preview-ready { font-weight: 650; }
 .agent-preview-state { color: var(--agent-muted); font-size: 12px; }
 .agent-interaction-unsupported { border-left-color: var(--agent-danger); }
 
@@ -555,8 +554,6 @@
 .agent-answer-hidden { color: var(--agent-muted); font-style: italic; }
 
 .agent-tool-approval { gap: 16px; border-left-width: 1px; }
-.agent-tool-approval .agent-approval-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
-.agent-approval-heading h3 { font-size: 16px; line-height: 1.4; }
 .agent-approval-tool-name { min-width: 0; color: var(--agent-muted); font-size: 12px; overflow-wrap: anywhere; }
 .agent-approval-details { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
 .agent-approval-details p { margin: 0; }
@@ -582,19 +579,11 @@
 .agent-approval-rules p, .agent-approval-applied-rule p { margin: 0; font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-approval-submitting { color: var(--agent-muted); font-size: 12px; }
 .agent-tool-approval-completed { min-width: 0; gap: 0; border-left: 0; }
-.agent-approval-receipt-toggle { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: 36px; padding: 4px 0; border: 0; border-radius: 4px; color: var(--agent-muted); background: transparent; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
-.agent-approval-receipt-toggle > .agent-timeline-title { flex-shrink: 0; font-weight: 600; }
-.agent-approval-receipt-toggle > .agent-approval-tool-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agent-approval-result { flex-shrink: 0; margin-left: auto; color: var(--agent-ink); font-size: 12px; }
-.agent-approval-receipt-details:not([hidden]) { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 8px 0 12px; }
-.agent-approval-receipt-details > p { margin: 0; overflow-wrap: anywhere; }
 .agent-approval-applied-rule { display: grid; gap: 4px; }
 .agent-approval-rules summary:focus-visible,
-.agent-approval-command pre:focus-visible,
-.agent-approval-receipt-toggle:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; }
+.agent-approval-command pre:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; }
 @media (pointer: coarse) {
-  .agent-tool-approval .agent-interaction-actions button,
-  .agent-approval-receipt-toggle { min-height: 44px; }
+  .agent-tool-approval .agent-interaction-actions button { min-height: 44px; }
   .agent-approval-rules summary { padding-block: 12px; }
 }
 @media (max-width: 480px) {
@@ -658,7 +647,6 @@
 .agent-command-details > header button { background: transparent; border: 0; color: var(--agent-muted); min-width: 36px; min-height: 36px; }
 .agent-command-details-content { overflow: auto; min-height: 0; padding: 16px 20px 24px; font-size: 13px; }
 .agent-command-introduction { margin: 0 0 20px; line-height: 1.6; color: var(--agent-muted); overflow-wrap: anywhere; }
-.agent-command-help { padding: 0; list-style: none; margin: 0; display: grid; gap: 6px; font-size: 12px; }
 
 .agent-command-details .agent-markdown { font-size: 13px; line-height: 1.6; }
 .agent-command-details .agent-markdown h1 { font-size: 18px; }

@@ -19,9 +19,13 @@ it('plays tool steps and a reply as one turn: a running row, the completed row u
   const run = await opened(() => [{ tool: 'command', input: 'ls', output: 'a.txt', ms: 1 }, { reply: 'Done' }]);
   await run.session.sendMessage('list files');
   await run.settle();
-  expect(run.events()).toEqual(['turn_started', 'user_message', 'tool_call:running', 'tool_call:completed', 'assistant_message', 'turn_completed']);
-  const turnIds = new Set(run.seen.map(({ event }) => (event as { turnId?: string }).turnId));
+  expect(run.events()).toEqual(['runtime_updated', 'turn_started', 'user_message', 'tool_call:running', 'tool_call:completed', 'assistant_message', 'turn_completed', 'runtime_updated']);
+  const turnIds = new Set(run.seen.flatMap(({ event }) => event.type === 'runtime_updated' ? [] : [(event as { turnId?: string }).turnId]));
   expect(turnIds.size).toBe(1);
+  // The session says it runs that turn while the turn plays, and idles after it, as a real provider does.
+  const [started, ended] = run.seen.filter(({ event }) => event.type === 'runtime_updated').map(({ event }) => event as Extract<ProviderObservation['event'], { type: 'runtime_updated' }>);
+  expect(started).toMatchObject({ runtimeInfo: { status: 'running' }, activeTurnId: [...turnIds][0] });
+  expect(ended).toMatchObject({ runtimeInfo: { status: 'idle' }, activeTurnId: null });
   const [running, completed] = run.seen.filter(({ event }) => event.type === 'timeline' && event.item.type === 'tool_call');
   expect(running!.itemIdentity).toEqual({ key: completed!.itemIdentity!.key });
   expect(completed!.itemIdentity!.completes).toBe(true);
@@ -33,13 +37,13 @@ it('holds an approval until the page answers it, then goes on after an allow', a
   const run = await opened(() => [{ approval: 'Write a file', command: 'touch a' }, { reply: 'Written' }]);
   await run.session.sendMessage('write');
   await run.settle();
-  expect(run.events()).toEqual(['turn_started', 'user_message', 'interaction_requested']);
-  const request = (run.seen[2]!.event as Extract<ProviderObservation['event'], { type: 'interaction_requested' }>).request;
+  expect(run.events()).toEqual(['runtime_updated', 'turn_started', 'user_message', 'interaction_requested']);
+  const request = (run.seen[3]!.event as Extract<ProviderObservation['event'], { type: 'interaction_requested' }>).request;
   expect(request).toMatchObject({ kind: 'tool_approval', summary: 'Write a file', detail: { type: 'shell', command: 'touch a' } });
   await run.session.respondToInteraction(request.requestId, { kind: 'tool_approval', decision: 'allow', scope: 'once' });
   await run.settle();
-  expect(run.events().slice(3)).toEqual(['interaction_resolved', 'assistant_message', 'turn_completed']);
-  expect(run.seen[3]!.itemIdentity).toEqual({ key: `interaction:${request.requestId}`, completes: true, liveOnly: true });
+  expect(run.events().slice(4)).toEqual(['interaction_resolved', 'assistant_message', 'turn_completed', 'runtime_updated']);
+  expect(run.seen[4]!.itemIdentity).toEqual({ key: `interaction:${request.requestId}`, completes: true, liveOnly: true });
   await run.close();
 });
 
@@ -47,9 +51,9 @@ it('ends the turn at a denied approval', async () => {
   const run = await opened(() => [{ approval: 'Delete', command: 'rm a' }, { reply: 'Never said' }]);
   await run.session.sendMessage('delete');
   await run.settle();
-  const request = (run.seen[2]!.event as Extract<ProviderObservation['event'], { type: 'interaction_requested' }>).request;
+  const request = (run.seen[3]!.event as Extract<ProviderObservation['event'], { type: 'interaction_requested' }>).request;
   await run.session.respondToInteraction(request.requestId, { kind: 'tool_approval', decision: 'deny' });
   await run.settle();
-  expect(run.events().slice(3)).toEqual(['interaction_resolved', 'turn_completed']);
+  expect(run.events().slice(4)).toEqual(['interaction_resolved', 'turn_completed', 'runtime_updated']);
   await run.close();
 });

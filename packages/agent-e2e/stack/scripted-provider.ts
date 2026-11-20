@@ -12,8 +12,8 @@
  * so a reload shows the same rows. The provider reads nothing outside this process.
  *
  * `turns(text)` scripts a whole turn instead of one answer: tool calls that run for a while and complete with an output, approvals that wait for the
- * page's answer (`respondToInteraction`), and replies. Every row of the turn carries one turn id, the agent's active turn is set while it runs, and
- * a denied approval ends it.
+ * page's answer (`respondToInteraction`), and replies. Every row of the turn carries one turn id; the session reports itself running with that
+ * active turn until the turn ends, as a real provider does, and a denied approval ends it.
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { parseAgentPreparedTextInput, serializeAgentPreparedTextInput, type AgentInteractionResponse, type AgentProviderAdapter, type AgentToolDetail, type AgentSessionNativeEvidence, type ProviderObservation, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
@@ -125,11 +125,18 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
     };
     /** A scripted turn: the rows and state events of a real provider's turn, under one turn id. */
     const pendingApprovals = new Map<string, (response: AgentInteractionResponse) => void>();
-    let turnCount = 0, eventCount = 0;
+    let turnCount = 0, eventCount = 0, status: 'idle' | 'running' = 'idle';
+    const runtimeInfo = () => ({ providerId, sessionId: nativeSessionId, status, ...(options.succession ? { cwd: options.succession.workspace } : {}),
+      persistence: { providerId, sessionId: nativeSessionId, opaque: '{}' } });
     const playTurn = async (text: string, steps: ScriptedStep[]) => {
       const turnId = `${nativeSessionId}-turn-${++turnCount}`;
       const emit = (event: ProviderObservation['event'], sourceKey: string, itemIdentity?: ProviderObservation['itemIdentity']) =>
         base.push({ type: 'observation', sourceKey: `live:${sourceKey}:${++eventCount}`, occurredAt: Date.now(), delivery: 'live', event, ...(itemIdentity ? { itemIdentity } : {}) });
+      const running = (next: typeof status) => {
+        status = next;
+        emit({ type: 'runtime_updated', provider: providerId, runtimeInfo: runtimeInfo(), activeTurnId: next === 'running' ? turnId : null }, `runtime-${next}`);
+      };
+      running('running');
       const message = (role: ScriptedRow['role'], body: string) => {
         const key = `${nativeSessionId}:h${saved.history.length + 1}`;
         saved.history.push({ role, text: body }); saved.updatedAt = new Date().toISOString();
@@ -156,6 +163,7 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
         }
       }
       emit({ type: 'turn_completed', provider: providerId, turnId }, 'turn-completed');
+      running('idle');
     };
     const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
     let epoch = 0, preparations = 0;
@@ -184,9 +192,8 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
         contentSha256: witness.content.sha256, nativeSelectionsSha256: sha256(JSON.stringify(witness.selections)) } }),
     });
     const session = Object.assign(base, {
-      title: saved.title, sent, write,
-      ...(options.succession ? { nativeEvidence: evidence(options.succession.workspace),
-        runtimeInfo: async () => ({ providerId, sessionId: nativeSessionId, status: 'idle' as const, cwd: options.succession!.workspace, persistence: { providerId, sessionId: nativeSessionId, opaque: '{}' } }) } : {}),
+      title: saved.title, sent, write, runtimeInfo: async () => runtimeInfo(),
+      ...(options.succession ? { nativeEvidence: evidence(options.succession.workspace) } : {}),
       sendMessage: (async (text: string) => {
         await held;
         sent.push(text);

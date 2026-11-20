@@ -198,3 +198,23 @@ Shipped from main `9574eddd`. Worker `739de574`, with `wrangler.journals-enabled
 - floating launchers over the third tile of a full-width Window on desktop.
 
 `session-recovery` (WebKit) fails intermittently on the base commit too, so this release did not cause it.
+
+## Release 2026-11-20: I3b and I3c, the layout
+
+Shipped from main `b270a227`.
+- **Worker** `bfd082d8`, deployed with `wrangler.journals-enabled.jsonc`. Rollback target `739de574`. The Durable Object reported `bfd082d8` about 5 minutes after the deploy.
+- **Changes:**
+  - Bot mode in three floating panels.
+  - Assistants have their own name, a new `name` field on the bot details. A soft default is generated and is never the prompt. The name is renamed on the details card.
+  - The details panel has one visible action and a "…" menu, plus where it works, process modes, notifications, sessions as a compact list and the model.
+  - Window mode uses the same visual language: floating panels, tiles with avatar, name, status and a "…" menu.
+  - Moving between modes keeps your place.
+  - Phone: the assistant list is home, the conversation is full screen with Back, details open as a sheet, and a window is a stack of tiles.
+  - On a coarse pointer, Return makes a new line.
+  - No floating control covers conversation text, at any width.
+- **Measured** at 4x CPU and 100 ms against the I3a release: mount to content 135 → 112 ms. Sends within a few milliseconds of the I3a release.
+- **Full `pnpm verify`** after the merge failed only in `agent-controller` `opencode-server.test.ts`, a process-tier test of a real OpenCode server that I3 does not touch. It passed 3 of 3 alone, so it was load, not a regression. This should have been confirmed before `main` was pushed: the push ran in the same command chain as the verification.
+- **Left for I4:**
+  - the composer is still the old style;
+  - production CSS is +59 lines net, from legacy rules still used by compact, TPM and Ask views;
+  - a few expanded-detail strings are English only.

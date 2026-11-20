@@ -12,7 +12,7 @@
     "agent-remote-lab/src/components/earlier-conversation.css": 0,
     "agent-remote-lab/src/components/host-overview.css": 25,
     "agent-remote-lab/src/components/outbox-messages.css": 2,
-    "agent-remote-lab/src/components/session-dock.css": 62,
+    "agent-remote-lab/src/components/session-dock.css": 45,
     "agent-remote-lab/src/components/session-family.css": 2,
     "agent-remote-lab/src/components/session-quotes.css": 11,
     "agent-remote-lab/src/components/session-succession.css": 15,

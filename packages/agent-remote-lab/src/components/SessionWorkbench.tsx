@@ -1,5 +1,5 @@
 import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-client-web/browser';
-import { isUncertainSend, sessionFiles, timelineEntryKey, remoteSessionState, sessionActivityLabel, sessionNotice, sessionNoticeWords, type RemoteSessionState, type SessionDescription, type SessionAttribution, type SessionFacts, type SessionNotice } from '@orchardworks/agent-client';
+import { assistantStatus, isUncertainSend, sessionFiles, timelineEntryKey, remoteSessionState, sessionActivityLabel, sessionNotice, sessionNoticeWords, type RemoteSessionState, type SessionDescription, type SessionAttribution, type SessionFacts, type SessionNotice } from '@orchardworks/agent-client';
 import { SessionControlNotice } from './SessionControlNotice.js';
 import { SessionViewFrame } from './SessionViewFrame.js';
 import { useFeedbackToast, useToastAnchor } from './Toast.js';
@@ -24,9 +24,12 @@ import { SessionTodoPanel, type SessionTodoPanelProps } from '@orchardworks/agen
 import { SessionHeading } from './SessionHeading.js';
 import { SessionHeadingActionsPresentationContext } from './SessionHeadingActions.js';
 import { SessionTimelineTools } from './SessionTimelineTools.js';
+import { IconButton } from '../ui/IconButton.js';
 
 import { useTimelineScroll } from '../hooks/useTimelineScroll.js';
-import { AssistantDetailsHostContext } from './assistant/details-host.js';
+import { AssistantDetailsHostContext, type AssistantDetailsHost } from './assistant/details-host.js';
+import { TileHeader } from './assistant/TileHeader.js';
+import { usePhoneLayout } from '../hooks/usePhoneLayout.js';
 import { AssistantDetails, type AssistantRef } from './assistant/AssistantDetails.js';
 import { ModelSettings } from './assistant/ModelSettings.js';
 import { FilePreviewContext, useTranslate } from '@orchardworks/agent-client-web/react';
@@ -36,11 +39,13 @@ import type { TraceEntryRequest } from '../trace-model.js';
 
 export type LabWorkbenchActions = SessionViewActions;
 
-export function SessionWorkbench({ assistant, details, sessionDescription, onNavigateAttribution, todo, processAssistant, sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, imageDraftBinding, imageRecipient, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, renderCommandError, readOnly: recordingReadOnly = false, draftOnly = false, opening = false, mutationBlocked = false, pendingFirstInputContext, onPendingInputChange, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, headingStart, headingMode = 'inline', sessionManager, headingContext, composerContext, composerNotice, composerStatus, nativeTakeover, consoleCommands, onExecuteConsoleCommand, entrySelection, timelineStart, timelineEnd, sendLater, loadingNotice, host }: { entrySelection?: TimelineEntrySelection;
+export function SessionWorkbench({ assistant, details, conversationTitle, sessionDescription, onNavigateAttribution, todo, processAssistant, sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, imageDraftBinding, imageRecipient, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, renderCommandError, readOnly: recordingReadOnly = false, draftOnly = false, opening = false, mutationBlocked = false, pendingFirstInputContext, onPendingInputChange, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, headingStart, headingMode = 'inline', sessionManager, headingContext, composerContext, composerNotice, composerStatus, nativeTakeover, consoleCommands, onExecuteConsoleCommand, entrySelection, timelineStart, timelineEnd, sendLater, loadingNotice, host }: { entrySelection?: TimelineEntrySelection;
   /** Who answers in this conversation: the live line's name and the avatar at the foot of the answers. */
   assistant?: AgentTimelineProps['assistant'];
   /** What the assistant's details show beyond this conversation's own process mode, settings and files: who it is, where it works, its sessions. */
   details?: Partial<AssistantRef>;
+  /** The session's title as words; a tile shows it beside the assistant's name when it differs from the name. */
+  conversationTitle?: string;
   /** The bot this conversation is, when it is one: the view options choose its own process mode. */
   processAssistant?: ProcessAssistant;
   /** The session's Host as the Relay last said: an offline Host is said once, and the composer stays enabled. */
@@ -53,11 +58,21 @@ export function SessionWorkbench({ assistant, details, sessionDescription, onNav
   sendLater?: ComponentProps<typeof DraftComposer>['sendLater'];
   /** Content above this conversation's own entries once its oldest page is loaded: a bot's earlier sessions after a handoff. */
   timelineStart?: ReactNode; timelineEnd?: ReactNode; sessionDescription?: SessionDescription; onNavigateAttribution?(attribution: SessionAttribution): void | Promise<void>; todo?: SessionTodoPanelProps; sessionState?: RemoteSessionState; handoff?: SessionHandoffState; readOnly?: boolean; draftOnly?: boolean; mutationBlocked?: boolean; pendingFirstInputContext?: ComponentProps<typeof DraftComposer>['pendingFirstInputContext']; onPendingInputChange?(count: number): void; workspaceLink?: ReactNode; readingPositions?: TimelineReadingPositions; draftScope?: string; imageDraftBinding?: ImageDraftBinding; imageRecipient?: ImageDraftRecipient; isAuthenticationError?(error: unknown): boolean; authenticationNotice?: ReactNode; renderSessionSettingError?(error: unknown): ReactNode; renderCommandError?(error: unknown): ReactNode; onInspectEntry?: (key: string) => void; revealEntry?: TraceEntryRequest; composerContext?: ReactNode; composerNotice?: ReactNode; composerStatus?: ReactNode; headingContext?: ReactNode; nativeTakeover?: ReactNode; consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[]; onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>; state?: AgentReplicaState; sessionStatus: RemoteSessionStatus; attachingAgentId?: string; actions: LabWorkbenchActions; conversationPath?: ReactNode; headingStart?: ReactNode;
-  /** `assistant`: the assistant view's top bar is the heading, and this conversation puts its search there. */
-  headingMode?: 'inline' | 'toolbar' | 'assistant'; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
+  /**
+   * `assistant`: the assistant view's top bar is the heading, and this conversation puts its search there. `tile`: a Window
+   * tile, whose heading is the assistant's (avatar, name, the session's title and a sentence), its details opening over the window.
+   */
+  headingMode?: 'inline' | 'toolbar' | 'assistant' | 'tile'; sessionManager?: ReactNode; resolveSessionLink?: SessionLinkResolver; childrenFor?: (nativeSessionId: string) => readonly AgentChildSessionView[]; onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>; visible?: boolean; draftSessionKey?: string; messageDraft?: string; onMessageDraftChange?(text: string): void; questionDrafts?: Readonly<Record<string, QuestionDraft>>; onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void }) {
   const displayScope = draftSessionKey ?? state?.agent?.runtimeInfo.sessionId ?? attachingAgentId;
-  const detailsHost = useContext(AssistantDetailsHostContext);
-  const assistantChrome = headingMode === 'assistant';
+  const providedHost = useContext(AssistantDetailsHostContext);
+  const assistantChrome = headingMode === 'assistant', tileChrome = headingMode === 'tile';
+  // A tile opens its assistant's details over the window, or as a sheet on a phone.
+  const phone = usePhoneLayout();
+  const [tileDetailsOpen, setTileDetailsOpen] = useState(false);
+  const [tileDetailsSlot, setTileDetailsSlot] = useState<HTMLElement | null>(null);
+  const tileDetailsId = useId();
+  const detailsHost: AssistantDetailsHost | undefined = providedHost ?? (tileChrome ? { surface: phone ? 'sheet' : 'panel', slot: tileDetailsSlot, open: tileDetailsOpen,
+    setOpen: setTileDetailsOpen } : undefined);
   const process = useProcessMode(processAssistant);
   const [lettersVisible, setLettersVisible] = useLettersVisible();
   // A Trace target that is a letter shows the letters; its turn opens by itself.
@@ -141,20 +156,24 @@ export function SessionWorkbench({ assistant, details, sessionDescription, onNav
   return <ProcessModeContext.Provider value={process.mode}><TimelineLettersVisible.Provider value={lettersVisible}>
     <SessionAttributions description={sessionDescription} onNavigate={onNavigateAttribution}>{({ toggle, details }) => <SessionViewFrame className={layoutClass}>
     {assistantChrome ? null : <div className="lab-workbench-heading-group" hidden={headingMode === 'toolbar' && !headingContext && !details}>
-    <SessionHeading hidden={headingMode === 'toolbar'}
+    {tileChrome ? <TileHeader name={assistant?.name ?? t('conversation.assistant')} avatar={assistant?.avatar} title={conversationPath} titleText={conversationTitle}
+      status={assistantStatus({ activity: activity ?? 'unknown', ...(host ? { host } : {}), asleep: false, waitingToSend: false, ...(notice ? { notice } : {}) }, t)}
+      detailsOpen={tileDetailsOpen} detailsId={tileDetailsId} onToggleDetails={() => setTileDetailsOpen(open => !open)}
+      trailing={<>{sessionManager}<span className="lab-heading-search-slot" ref={setHeadingSearchTarget} />{toggle}</>} />
+    : <SessionHeading hidden={headingMode === 'toolbar'}
       leading={headingMode === 'inline' ? <>{headingStart}{workspaceLink}{viewOptions}<span className="lab-heading-search-slot" ref={setHeadingSearchTarget} /></> : undefined}
       trailing={headingMode === 'inline' ? <>{sessionManager}<span className="lab-conversation-status">{activityLabel}</span></> : undefined}>
         {conversationPath}
         <h2 hidden={!!conversationPath} className="agent-session-title" data-session-status={activity}>{hasReplica || hasTarget ? 'Conversation' : 'Ready for a session'}</h2>
         {headingMode === 'inline' ? toggle : null}
-    </SessionHeading>
+    </SessionHeading>}
     {details}
     {headingContext}
     </div>}
     {todo ? <SessionTodoPanel key={displayScope} {...todo} disabled={todo.disabled || readOnly || mutationBlocked} /> : null}
     <PreviewDock sessionId={state?.agent?.id ?? attachingAgentId} />
     <WorkbenchTimeline toolsTargetRef={setTimelineToolsTarget} toolsCollapsible={headingMode === 'toolbar'} toolsScope={displayScope}
-      searchTriggerTarget={headingMode === 'inline' ? headingSearchTarget : assistantChrome ? detailsHost?.tools ?? null : undefined} nativeTakeover={!!nativeTakeover} readOnly={readOnly} state={state} sessionStatus={sessionStatus} attachingAgentId={attachingAgentId}
+      searchTriggerTarget={headingMode === 'inline' || tileChrome ? headingSearchTarget : assistantChrome ? detailsHost?.tools ?? null : undefined} nativeTakeover={!!nativeTakeover} readOnly={readOnly} state={state} sessionStatus={sessionStatus} attachingAgentId={attachingAgentId}
       visible={visible} readingPositions={readingPositions} actions={actions} revealEntry={revealEntry}
       notice={timelineNotice} hasTarget={hasTarget} runtimeMutationDisabled={runtimeMutationDisabled}
       onInspectEntry={onInspectEntry} onOpenChildSession={onOpenChildSession} childrenFor={childrenFor} resolveSessionLink={resolveSessionLink}
@@ -180,7 +199,7 @@ export function SessionWorkbench({ assistant, details, sessionDescription, onNav
         <div id={composerId} className="lab-composer-body" hidden={composerHidden && !controlReadOnly}>
           <DraftComposer
             keyboardDismissBoundaryRef={composerTouchBoundary}
-            settings={assistantChrome ? 'none' : 'inline'}
+            settings={assistantChrome || tileChrome ? 'none' : 'inline'}
             sessionState={session}
             host={host}
             draftOnly={draftOnly}
@@ -226,6 +245,10 @@ export function SessionWorkbench({ assistant, details, sessionDescription, onNav
       onRequestResource={actions.requestResource} onResolveResource={actions.resolveResource}
       resourceScopeKey={JSON.stringify([state.agent?.id, selectedCommand.id])}
       onClose={() => setInspected(undefined)} /> : null}
+    {tileChrome && !phone ? <aside ref={setTileDetailsSlot} id={tileDetailsId} className="lab-tile-details orchard-panel" aria-label={t('details.title')} hidden={!tileDetailsOpen}>
+      <header className="lab-assistant-details-head"><h2>{t('details.title')}</h2>
+        <IconButton icon="close" label={t('details.close')} onClick={() => setTileDetailsOpen(false)} /></header>
+    </aside> : null}
     {detailsPanel && detailsHost?.surface === 'panel' && detailsHost.slot ? createPortal(detailsPanel, detailsHost.slot) : detailsPanel}
   </SessionViewFrame>}</SessionAttributions></TimelineLettersVisible.Provider></ProcessModeContext.Provider>;
 }

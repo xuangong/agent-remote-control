@@ -164,9 +164,10 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
     return {
       assistant,
       details,
+      conversationTitle: source.title,
       processAssistant,
-      // Bot mode's top bar is the conversation's heading; a Window tile keeps its own.
-      headingMode: botPresentation ? 'assistant' as const : compactLayout ? 'toolbar' as const : 'inline' as const,
+      // Bot mode's top bar is the conversation's heading; a Window tile has the assistant's own header.
+      headingMode: botPresentation ? 'assistant' as const : 'tile' as const,
       state: botPresentation ? context.state : forkDisplayState(context.state, fork),
       questionDrafts: questionDrafts[source.agentId] ?? {},
       onQuestionDraftChange: (requestId: string, draft: QuestionDraft) => setQuestionDrafts(current => ({

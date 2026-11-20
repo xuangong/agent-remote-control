@@ -133,17 +133,17 @@
 @keyframes lab-folded-working { 50% { opacity: .4; } }
 @media (prefers-reduced-motion: reduce) { .lab-folded-bot-status { animation: none; } }
 
-/* Window mode's canvas on desktop, as in the walkthrough: the group's panes stand as cards on a grouped background with
-   room between them, and folded bots are slim cards among them. Each card isolates its own stacking. Its corners come
+/* Window mode's canvas on desktop: the group's tiles stand as floating panels on the warm ground, 10 px apart (I3 plan,
+   B4), and folded bots are slim cards among them. Each card isolates its own stacking. Its corners come
    from an overlay in the canvas color rather than from clipping, so menus, Info and floating Asks are never cut. Compact
    layouts show one view at a time and keep their plain layout. Every rule starts with the canvas selector (0,4,0), above
    the dock rules it refines. */
 .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) {
-  --lab-canvas: var(--ui-background-grouped); --lab-card-radius: var(--ui-radius-pane);
-  gap: 8px; padding: 8px; scroll-padding-inline: 8px; background: var(--lab-canvas);
+  --lab-canvas: var(--orchard-ground); --lab-card-radius: var(--orchard-radius-panel);
+  gap: var(--orchard-space-l); padding: var(--orchard-space-l); scroll-padding-inline: var(--orchard-space-l); background: var(--lab-canvas);
 }
 .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > :is(.lab-primary-group, .lab-session-dock-pane) {
-  isolation: isolate; border-radius: var(--lab-card-radius); background: var(--ui-background); box-shadow: var(--ui-shadow-pane);
+  isolation: isolate; border-radius: var(--lab-card-radius); background: var(--orchard-surface); box-shadow: var(--orchard-elevation-flat);
 }
 /* The hairline between panes gives way to the gap; the same pseudo-element rounds the card's corners. */
 .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > :is(.lab-primary-group, .lab-session-dock-pane)::after {
@@ -160,24 +160,24 @@
 /* A pane is resized from the gap after it; the line shows under the pointer or keyboard focus. */
 .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > * > .lab-session-dock-resize { inset: 10px -7px 10px auto; width: 6px; }
 .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > * > .lab-session-dock-resize::before {
-  inset: 0 2px; border-radius: 1px; background: transparent; transition: background-color var(--ui-duration-short) var(--ui-ease);
+  inset: 0 2px; border-radius: 1px; background: transparent; transition: background-color var(--orchard-duration-fast) var(--orchard-ease-standard);
 }
-.lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > * > .lab-session-dock-resize:is(:hover, :focus-visible)::before { background: var(--ui-accent); }
+.lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > * > .lab-session-dock-resize:is(:hover, :focus-visible)::before { background: var(--orchard-focus); }
 /* A folded card's × (removing the bot from its group, after asking) shows under the pointer or keyboard focus, at its foot. */
 .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) :is(.lab-folded-remove, .lab-primary-group-close) {
   position: absolute; left: 50%; bottom: 8px; z-index: 2; width: 24px; height: 24px; min-height: 24px; margin-left: -12px; padding: 0;
-  border-radius: 50%; color: var(--ui-label-secondary); background: var(--ui-fill); opacity: 0; transition: opacity var(--ui-duration-short) var(--ui-ease);
+  border-radius: 50%; color: var(--orchard-text-secondary); background: var(--orchard-fill); opacity: 0; transition: opacity var(--orchard-duration-fast) var(--orchard-ease-standard);
 }
 .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > :is(:hover, :focus-within) :is(.lab-folded-remove, .lab-primary-group-close) { opacity: 1; }
-.lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) :is(.lab-folded-remove, .lab-primary-group-close):hover { color: var(--ui-status-failure); }
+.lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) :is(.lab-folded-remove, .lab-primary-group-close):hover { color: var(--orchard-danger-text); }
 .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) .lab-folded-bot { padding-top: 14px; }
 .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) .lab-folded-bot-name { max-height: calc(100% - 140px); }
 /* New session view: a quiet round button at the end of the canvas. */
 .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > .lab-session-dock-add {
-  flex: 0 0 32px; width: 32px; height: 32px; margin: 0; padding: 0; border-radius: 50%; color: var(--ui-label-secondary); font-size: 20px; line-height: 1;
-  transition: background-color var(--ui-duration-short) var(--ui-ease);
+  flex: 0 0 32px; width: 32px; height: 32px; margin: 0; padding: 0; border-radius: 50%; color: var(--orchard-text-secondary); font-size: 20px; line-height: 1;
+  transition: background-color var(--orchard-duration-fast) var(--orchard-ease-standard);
 }
-.lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > .lab-session-dock-add:hover { color: var(--ui-label); background: var(--ui-row-hover); }
+.lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > .lab-session-dock-add:hover { color: var(--orchard-text); background: var(--orchard-fill); }
 @media (prefers-reduced-motion: reduce) {
   .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) :is(.lab-folded-remove, .lab-primary-group-close, .lab-session-dock-add),
   .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > * > .lab-session-dock-resize::before { transition: none; }
@@ -186,3 +186,23 @@
   .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > :is(.lab-primary-group, .lab-session-dock-pane) { border: 1px solid CanvasText; }
   .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > :is(.lab-primary-group, .lab-session-dock-pane)::after { display: none; }
 }
+
+/* Window mode (I3 plan, B4): each tile is a floating panel on the warm ground, 10 px apart, and its header is the assistant's:
+   avatar, name, the session's title when it differs, one sentence, then the tile's controls and its details. */
+.lab-window-workbench { background: var(--orchard-ground); }
+.lab-session-heading:has(.lab-tile-identity) { gap: var(--orchard-space-m); min-height: 52px; border-bottom: 0; background: var(--orchard-surface); }
+.lab-session-heading:has(.lab-tile-identity) > .lab-session-heading-title { position: static; flex: 1 1 auto; order: 0; justify-content: flex-start; padding-inline: 0; pointer-events: auto; }
+.lab-tile-avatar { display: inline-flex; flex: none; }
+.lab-tile-identity { display: flex; flex-direction: column; min-width: 0; text-align: left; }
+.lab-tile-name, .lab-tile-identity > .agent-session-title { overflow: hidden; color: var(--orchard-text-strong); font: var(--orchard-type-headline-weight) var(--orchard-type-headline-size) / 1.25 var(--orchard-font-text);
+  text-overflow: ellipsis; white-space: nowrap; }
+.lab-tile-subtitle { display: flex; gap: var(--orchard-space-s); min-width: 0; color: var(--orchard-text-secondary); font: var(--orchard-type-caption-size) / 1.35 var(--orchard-font-text); }
+.lab-tile-subtitle > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-tile-subtitle > .agent-session-title { flex: 0 1 auto; color: inherit; font-weight: 400; }
+.lab-tile-subtitle > .agent-session-title + .lab-tile-sentence::before { content: '·'; margin-inline-end: var(--orchard-space-s); }
+.lab-tile-sentence { flex: 0 1 auto; }
+.lab-tile-sentence[data-state="needs_you"] { color: var(--orchard-text-strong); font-weight: 600; }
+.lab-tile-sentence[data-state="failed"] { color: var(--orchard-danger-text); }
+.lab-tile-details.orchard-panel { position: absolute; z-index: 30; top: 56px; right: var(--orchard-space-m); bottom: var(--orchard-space-m); display: flex; flex-direction: column; gap: var(--orchard-space-m);
+  box-sizing: border-box; width: min(300px, calc(100% - 16px)); overflow: auto; padding: var(--orchard-space-xl); box-shadow: var(--orchard-elevation-floating); }
+.lab-tile-details[hidden] { display: none; }

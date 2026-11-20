@@ -61,3 +61,53 @@ test.describe('desktop', () => {
     await expect(page.locator('.lab-assistant-details')).toBeHidden();
   });
 });
+
+// Window mode (I3 plan, Task B4): every tile is a floating panel on the same ground, with the assistant's header (avatar, name,
+// sentence) and its details over the window; window and tile behaviour is unchanged.
+test.describe('window', () => {
+  test.skip(({ isMobile }) => isMobile, 'Tiles stand side by side on a desktop width; the phone stacks them.');
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`tiles are floating panels with the assistant's header, ${theme}`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.emulateMedia({ colorScheme: theme });
+      await page.goto('/e2e/fixtures/window-tiles.html?tiles=3&bots=1');
+      const tiles = page.locator('.lab-window-workbench .lab-primary-group');
+      await expect(tiles).toHaveCount(3);
+      await expect(page.locator('.lab-timeline-scroll').getByText('Item 1 of tile-1', { exact: false }).first()).toBeVisible();
+      const boxes = await tiles.evaluateAll(nodes => nodes.map(node => { const box = node.getBoundingClientRect(); return { left: box.left, right: box.right, radius: getComputedStyle(node).borderTopLeftRadius }; }));
+      for (const box of boxes) expect(box.radius).toBe('22px');
+      for (let index = 1; index < boxes.length; index++) expect(Math.round(boxes[index]!.left - boxes[index - 1]!.right)).toBe(10);
+      const ground = await page.locator('.lab-window-workbench').evaluate(node => getComputedStyle(node).backgroundColor);
+      expect(ground).not.toBe(await tiles.first().evaluate(node => getComputedStyle(node).backgroundColor));
+      // Each header: the avatar, the name and one sentence; the session's title is the name of a bot.
+      const header = tiles.first().locator('.lab-session-heading');
+      await expect(header.locator('.lab-tile-avatar .orchard-avatar')).toBeVisible();
+      await expect(header.locator('.lab-tile-identity .agent-session-title')).toHaveText('Reply with the words LOCAL and OK, tile 1');
+      await expect(header.locator('.lab-tile-sentence')).toHaveText('Ready when you are');
+      expect(await contrastFailures(page)).toEqual([]);
+      expect(await coveringControls(page)).toEqual([]);
+      await page.screenshot({ path: testInfo.outputPath(`window-mode-${theme}.png`) });
+      // Its details open over the window.
+      await header.getByRole('button', { name: /^Details of / }).click();
+      const details = tiles.first().locator('.lab-tile-details');
+      await expect(details.locator('.lab-assistant-card-name')).toHaveText('Reply with the words LOCAL and OK, tile 1');
+      expect(await contrastFailures(page)).toEqual([]);
+      await page.screenshot({ path: testInfo.outputPath(`window-mode-details-${theme}.png`) });
+      await details.getByRole('button', { name: 'Close details' }).click();
+      await expect(details).toBeHidden();
+    });
+  }
+
+  test('a folded tile is the same assistant: its avatar is the header\'s', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/e2e/fixtures/window-tiles.html?tiles=3&bots=1');
+    const tile = page.locator('.lab-window-workbench .lab-primary-group').nth(1);
+    await expect(tile.locator('.lab-tile-avatar .orchard-avatar')).toBeVisible();
+    const avatar = (scope: ReturnType<Page['locator']>) => scope.evaluate(node => { const svg = node.querySelector('.orchard-avatar'); return [svg?.getAttribute('data-shape'), svg?.querySelector<SVGPathElement>('.orchard-avatar-body')?.style.fill]; });
+    const before = await avatar(tile.locator('.lab-tile-avatar'));
+    await tile.getByRole('button', { name: /^Minimize primary group: / }).click();
+    await expect(tile.locator('.lab-folded-bot')).toBeVisible();
+    expect(await avatar(tile.locator('.lab-folded-bot-picture'))).toEqual(before);
+  });
+});

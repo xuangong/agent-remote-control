@@ -120,17 +120,6 @@ button.lab-assistant-title:is(:hover, [aria-expanded="true"]):not(:disabled) { b
   border-radius: var(--orchard-radius-group); background: var(--orchard-fill); color: var(--orchard-text); font-size: var(--orchard-type-footnote-size); }
 .lab-bot-asleep > button { margin-left: 0; }
 
-/* Info: the bot's picture and tags, then an inset grouped list of where it runs. */
-.lab-bot-info-head { display: grid; justify-items: center; gap: var(--orchard-space-m); padding: var(--orchard-space-xs) 0 var(--orchard-space-2xl); }
-.lab-bot-info-head .lab-bot-name-line { justify-content: center; margin: 0; }
-.lab-bot-info { margin: 0 0 var(--orchard-space-m); padding: 0 var(--orchard-space-xl); border-radius: var(--orchard-radius-group); background: var(--orchard-fill); }
-.lab-bot-info > div { display: flex; align-items: baseline; gap: var(--orchard-space-2xl); min-height: 44px; padding: 11px 0; box-sizing: border-box; }
-.lab-bot-info > div + div { border-top: 0.5px solid var(--orchard-separator); }
-.lab-bot-info :is(dt, dd) { font: var(--orchard-type-body-size) / 1.35 var(--orchard-font-text); }
-.lab-bot-info dt { flex: none; color: var(--orchard-text); }
-.lab-bot-info dd { flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--orchard-text-secondary); text-align: end; }
-.lab-bot-info dd small { font-size: inherit; color: var(--orchard-danger-text); }
-
 /* Label: one field, its note, and the actions. */
 .lab-bot-sheet-form { display: grid; gap: var(--orchard-space-m); padding-top: var(--orchard-space-xs); }
 .lab-bot-sheet-form input { box-sizing: border-box; width: 100%; min-height: 44px; padding: var(--orchard-space-l) var(--orchard-space-xl); border: 1px solid var(--orchard-fill-strong);

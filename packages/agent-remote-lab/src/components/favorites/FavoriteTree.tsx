@@ -1,5 +1,6 @@
 import { RenameSessionDialog } from './RenameSessionDialog.js';
 import { createPortal } from 'react-dom';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { SessionStars } from '../../hooks/useSessionStars.js';
 import type { SessionTracking } from '../../hooks/useSessionTracking.js';
@@ -14,6 +15,7 @@ export function FavoriteIcon({folder,expanded}:{folder?:boolean;expanded?:boolea
   </svg>;
 }
 export function FavoriteTree({favorites,tracking,trackedOnly=false,onFilterChange,activeKey,busy,onOpen}:{favorites:SessionStars;tracking:SessionTracking;trackedOnly?:boolean;onFilterChange?(trackedOnly:boolean):void;activeKey?:string;busy:boolean;onOpen(item:VisibleSessionStar):void}) {
+  const t=useTranslate();
   const storageKey=`agent-remote-favorite-folders:${favorites.scope}`;
   const [expanded,setExpanded]=useState<Set<string>>(()=>{try{const saved=JSON.parse(localStorage.getItem(storageKey)??'[]');return new Set(Array.isArray(saved)?saved.filter((id:unknown)=>typeof id==='string'):[]);}catch{return new Set();}});
   const [menu,setMenu]=useState<string>(),[edit,setEdit]=useState<FavoriteEdit>(),[focused,setFocused]=useState<string>();
@@ -66,15 +68,15 @@ export function FavoriteTree({favorites,tracking,trackedOnly=false,onFilterChang
   function action(value:FavoriteEdit) {setMenu(undefined);setEdit(value);}
   const focusedId=visible.some(n=>n.id===focused)?focused:visible[0]?.id;
   return <div className="lab-favorites-manager" aria-busy={disabled}>
-    <div className="lab-favorites-toolbar"><div className="lab-favorites-filter-group" role={onFilterChange?'group':undefined} aria-label={onFilterChange?'Favorites filter':undefined}>
-      {onFilterChange?<><button type="button" className="lab-favorites-filter" aria-label="Show all favorites" aria-pressed={!trackedOnly} onClick={()=>onFilterChange(false)}>{favorites.stars.length} favorites</button>
-      <button type="button" className="lab-favorites-filter" aria-label="Filter tracked favorites" aria-pressed={trackedOnly} title="Show tracked favorites on this device" onClick={()=>onFilterChange(true)}>{favorites.stars.filter(star=>trackedKeys.has(sessionKey(star))).length} tracked</button></>
-      :<span className="lab-favorites-count">{favorites.stars.length} {favorites.stars.length===1?'favorite':'favorites'}</span>}
-    </div>{!trackedOnly?<button type="button" disabled={disabled} onClick={()=>setEdit({type:'create',parentId:null})}>＋ New folder</button>:null}</div>
-    {!(trackedOnly?visible:nodes).length ? <p className="lab-control-note" style={{visibility:favorites.loading?'hidden':undefined}}>{trackedOnly?'No tracked favorites. Choose Track from a favorite’s menu to watch it here.':'Star a session or create a folder to start organizing.'}</p> : null}
+    <div className="lab-favorites-toolbar"><div className="lab-favorites-filter-group" role={onFilterChange?'group':undefined} aria-label={onFilterChange?t('sessions.favorites.filterLabel'):undefined}>
+      {onFilterChange?<><button type="button" className="lab-favorites-filter" aria-label={t('sessions.favorites.showAll')} aria-pressed={!trackedOnly} onClick={()=>onFilterChange(false)}>{t('sessions.favorites.allCount',{count:favorites.stars.length})}</button>
+      <button type="button" className="lab-favorites-filter" aria-label={t('sessions.favorites.filterTracked')} aria-pressed={trackedOnly} title={t('sessions.favorites.showTracked')} onClick={()=>onFilterChange(true)}>{t('sessions.favorites.trackedCount',{count:favorites.stars.filter(star=>trackedKeys.has(sessionKey(star))).length})}</button></>
+      :<span className="lab-favorites-count">{t('sessions.favorites.count',{count:favorites.stars.length})}</span>}
+    </div>{!trackedOnly?<button type="button" disabled={disabled} onClick={()=>setEdit({type:'create',parentId:null})}>{t('sessions.favorites.plusNewFolder')}</button>:null}</div>
+    {!(trackedOnly?visible:nodes).length ? <p className="lab-control-note" style={{visibility:favorites.loading?'hidden':undefined}}>{trackedOnly?t('sessions.favorites.noTracked'):t('sessions.favorites.emptyHint')}</p> : null}
     <div ref={root} tabIndex={-1} className="lab-favorites-scroll" data-dragging={!!drag.drag}>
-      {!trackedOnly?<div data-favorite-root className="lab-favorite-root" data-drop={drag.drag?.target?.id===null?'inside':undefined}><FavoriteIcon folder expanded/><span>Favorites</span></div>:null}
-      <div role="tree" aria-label={trackedOnly?"Tracked favorites":"Favorites folders and sessions"} className="lab-favorite-tree">
+      {!trackedOnly?<div data-favorite-root className="lab-favorite-root" data-drop={drag.drag?.target?.id===null?'inside':undefined}><FavoriteIcon folder expanded/><span>{t('sessions.favorites.title')}</span></div>:null}
+      <div role="tree" aria-label={trackedOnly?t('sessions.favorites.trackedTree'):t('sessions.favorites.tree')} className="lab-favorite-tree">
         {visible.map((node,index)=>{
           const tracked=node.session&&tracking.sessions.some(s=>sessionKey(s)===sessionKey(node.session!));
           const current=node.session&&activeKey===sessionKey(node.session);
@@ -85,27 +87,27 @@ export function FavoriteTree({favorites,tracking,trackedOnly=false,onFilterChang
             aria-current={current?'page':undefined} tabIndex={node.id===focusedId?0:-1} onFocus={()=>setFocused(node.id)} onKeyDown={e=>key(e,node,index)} data-favorite-id={node.id}
             className="lab-favorite-node" data-current={!!current} data-drop={target} data-moving={drag.drag?.id===node.id} style={{paddingInlineStart:`${6+node.depth*14}px`}}
             onContextMenu={e=>{e.preventDefault();setMenu(node.id);}}>
-            {!trackedOnly?<button type="button" tabIndex={-1} className="lab-favorite-drag" title="Drag to move, or click to choose a folder" aria-label={`Move ${node.title}`} disabled={disabled}
+            {!trackedOnly?<button type="button" tabIndex={-1} className="lab-favorite-drag" title={t('sessions.favorites.dragHint')} aria-label={t('sessions.favorites.moveLabel',{title:node.title})} disabled={disabled}
               onPointerDown={e=>drag.start(e,node)} onClick={()=>{if(!drag.consumeClick())action({type:'move',node});}}>⠿</button>:null}
             <button type="button" tabIndex={-1} className={node.folder?'lab-favorite-folder':'lab-session-row'} disabled={!node.folder&&(busy||!!unavailable)} onClick={()=>open(node)}
-              title={node.session?`${node.title}\n${node.session.hostName??'Unavailable Host'} · ${node.session.providerId}${unavailable?' · Offline or access unavailable':''}`:node.title}>
-              <FavoriteIcon folder={!!node.folder} expanded={expanded.has(node.id)}/><span className="lab-favorite-label"><strong>{node.title}</strong>{node.session?<small>{node.session.hostName??'Unavailable Host'} · {node.session.providerId}{!node.session.available?' · No access':!node.session.online?' · Offline':''}</small>:null}</span>
+              title={node.session?`${node.title}\n${t('sessions.favorites.hostLine',{host:node.session.hostName??t('sessions.favorites.unavailableHost'),provider:node.session.providerId})}${unavailable?` · ${t('sessions.favorites.offlineOrNoAccess')}`:''}`:node.title}>
+              <FavoriteIcon folder={!!node.folder} expanded={expanded.has(node.id)}/><span className="lab-favorite-label"><strong>{node.title}</strong>{node.session?<small>{t('sessions.favorites.hostLine',{host:node.session.hostName??t('sessions.favorites.unavailableHost'),provider:node.session.providerId})}{!node.session.available?` · ${t('sessions.favorites.noAccess')}`:!node.session.online?` · ${t('sessions.favorites.offline')}`:''}</small>:null}</span>
             </button>
-            {tracked?<span className="lab-favorite-tracked" aria-label="Tracked on this device" title="Tracked on this device">◉</span>:null}
-            <button type="button" className="lab-favorite-more" aria-label={`Actions for ${node.title}`} aria-expanded={menu===node.id} disabled={disabled} onClick={()=>setMenu(menu===node.id?undefined:node.id)}>⋯</button>
-            {menu===node.id?createPortal(<div ref={menuRoot} data-favorites-dialog style={{top:menuTop,left:menuLeft}} onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()} onBlur={e=>{e.stopPropagation();if(e.relatedTarget instanceof Node&&!e.currentTarget.contains(e.relatedTarget))setMenu(undefined);}} className="lab-favorite-menu" role="group" aria-label={`Actions for ${node.title}`} onKeyDown={e=>{if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();e.stopPropagation();const buttons=Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));const index=buttons.indexOf(document.activeElement as HTMLButtonElement);buttons[(index+(e.key==='ArrowDown'?1:buttons.length-1))%buttons.length]?.focus();}if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeMenu();}}}>
-              {node.folder?<><button type="button" onClick={()=>action({type:'create',parentId:node.id})}>New folder</button><button type="button" onClick={()=>action({type:'rename',node})}>Rename</button></>:<button type="button" disabled={!tracked&&!node.session!.available} onClick={()=>{tracking.toggle(node.session!);closeMenu();}}>{tracked?'Untrack':'Track'}</button>}
-              {node.session?.canRename ? <button type="button" disabled={!node.session.available||!node.session.online} onClick={()=>{setMenu(undefined);setRenameSession(node.session);}}>Rename session…</button> : null}
-              <button type="button" onClick={()=>action({type:'move',node})}>Move to…</button>
-              {!trackedOnly?<><button type="button" disabled={position===0} onClick={()=>{void favorites.change({type:'move',id:node.id,parentId:node.parentId,beforeId:siblings[position-1]!.id});closeMenu();}}>Move up</button>
-              <button type="button" disabled={position===siblings.length-1} onClick={()=>{void favorites.change({type:'move',id:node.id,parentId:node.parentId,beforeId:siblings[position+2]?.id??null});closeMenu();}}>Move down</button></>:null}
-              <button type="button" onClick={()=>{if(node.folder)action({type:'delete',node});else {const {hostId,providerId,nativeSessionId}=node.session!;void favorites.change({type:'remove-session',session:{hostId,providerId,nativeSessionId}});closeMenu();}}}>{node.folder?'Delete folder…':'Remove favorite'}</button>
+            {tracked?<span className="lab-favorite-tracked" aria-label={t('sessions.favorites.trackedHere')} title={t('sessions.favorites.trackedHere')}>◉</span>:null}
+            <button type="button" className="lab-favorite-more" aria-label={t('sessions.favorites.actionsFor',{title:node.title})} aria-expanded={menu===node.id} disabled={disabled} onClick={()=>setMenu(menu===node.id?undefined:node.id)}>⋯</button>
+            {menu===node.id?createPortal(<div ref={menuRoot} data-favorites-dialog style={{top:menuTop,left:menuLeft}} onPointerDown={e=>e.stopPropagation()} onClick={e=>e.stopPropagation()} onBlur={e=>{e.stopPropagation();if(e.relatedTarget instanceof Node&&!e.currentTarget.contains(e.relatedTarget))setMenu(undefined);}} className="lab-favorite-menu" role="group" aria-label={t('sessions.favorites.actionsFor',{title:node.title})} onKeyDown={e=>{if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();e.stopPropagation();const buttons=Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));const index=buttons.indexOf(document.activeElement as HTMLButtonElement);buttons[(index+(e.key==='ArrowDown'?1:buttons.length-1))%buttons.length]?.focus();}if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeMenu();}}}>
+              {node.folder?<><button type="button" onClick={()=>action({type:'create',parentId:node.id})}>{t('sessions.favorites.newFolder')}</button><button type="button" onClick={()=>action({type:'rename',node})}>{t('sessions.favorites.renameFolder')}</button></>:<button type="button" disabled={!tracked&&!node.session!.available} onClick={()=>{tracking.toggle(node.session!);closeMenu();}}>{tracked?t('sessions.favorites.untrack'):t('sessions.favorites.track')}</button>}
+              {node.session?.canRename ? <button type="button" disabled={!node.session.available||!node.session.online} onClick={()=>{setMenu(undefined);setRenameSession(node.session);}}>{t('sessions.favorites.renameSession')}</button> : null}
+              <button type="button" onClick={()=>action({type:'move',node})}>{t('sessions.favorites.moveTo')}</button>
+              {!trackedOnly?<><button type="button" disabled={position===0} onClick={()=>{void favorites.change({type:'move',id:node.id,parentId:node.parentId,beforeId:siblings[position-1]!.id});closeMenu();}}>{t('sessions.favorites.moveUp')}</button>
+              <button type="button" disabled={position===siblings.length-1} onClick={()=>{void favorites.change({type:'move',id:node.id,parentId:node.parentId,beforeId:siblings[position+2]?.id??null});closeMenu();}}>{t('sessions.favorites.moveDown')}</button></>:null}
+              <button type="button" onClick={()=>{if(node.folder)action({type:'delete',node});else {const {hostId,providerId,nativeSessionId}=node.session!;void favorites.change({type:'remove-session',session:{hostId,providerId,nativeSessionId}});closeMenu();}}}>{node.folder?t('sessions.favorites.deleteFolder'):t('sessions.favorites.remove')}</button>
             </div>,document.body):null}
           </div>;
         })}
       </div>
     </div>
-    <p className="lab-favorite-drag-status" role="status">{drag.drag ? drag.drag.target ? `Moving ${drag.drag.title}. Release to place.` : `Moving ${drag.drag.title}. Choose a folder or gap.` : ''}</p>
+    <p className="lab-favorite-drag-status" role="status">{drag.drag ? drag.drag.target ? t('sessions.favorites.movingPlace',{title:drag.drag.title}) : t('sessions.favorites.movingChoose',{title:drag.drag.title}) : ''}</p>
     {renameSession?<RenameSessionDialog favorites={favorites} session={renameSession} onClose={()=>{setRenameSession(undefined);requestAnimationFrame(()=>focusNode(renameSession.favoriteId!));}}/>:null}
     {edit?<FavoriteDialog favorites={favorites} edit={edit} onClose={()=>{const id=edit&&'node' in edit?edit.node.id:undefined;setEdit(undefined);requestAnimationFrame(()=>{if(id)focusNode(id);else root.current?.parentElement?.querySelector<HTMLButtonElement>('.lab-favorites-toolbar button')?.focus();});}}/>:null}
   </div>;

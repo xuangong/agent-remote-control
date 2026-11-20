@@ -1,11 +1,13 @@
 import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { useSessionMenuLayer } from '../hooks/useSessionMenuLayer.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 /** A containing toolbar can own disclosure for all supplied session actions. */
 export const SessionHeadingActionsPresentationContext = createContext<'adaptive' | 'inline'>('adaptive');
 
 /** Groups application actions in responsive or explicitly collapsed overflow. */
 export function SessionHeadingActions({ children, sessionKey, alwaysCollapsed = false }: { children: ReactNode; sessionKey?: string; alwaysCollapsed?: boolean }) {
+  const t = useTranslate();
   const inline = useContext(SessionHeadingActionsPresentationContext) === 'inline';
   const [open, setOpen] = useState(false);
   const id = useId();
@@ -34,7 +36,7 @@ export function SessionHeadingActions({ children, sessionKey, alwaysCollapsed = 
       }
     }}>
     <button ref={trigger} type="button" className="lab-session-heading-actions-trigger"
-      aria-label="More session actions" title="More session actions" aria-expanded={open} aria-controls={id}
+      aria-label={t('sessions.heading.moreActions')} title={t('sessions.heading.moreActions')} aria-expanded={open} aria-controls={id}
       onClick={() => setOpen(value => !value)}>···</button>
     <div ref={panel} id={id} className="lab-session-heading-actions-panel" hidden={alwaysCollapsed && !open}>{children}</div>
   </div>;

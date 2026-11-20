@@ -1,10 +1,12 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { SessionStars } from '../../hooks/useSessionStars.js';
 import type { StarInput } from '../../session-stars-client.js';
 import { SessionDirectoryClient } from '../../directory-client.js';
 
 export function RenameSessionDialog({ favorites, session, onClose, onRenamed }: { favorites: SessionStars; session: StarInput; onClose(): void; onRenamed?(session: StarInput): void }) {
+  const t = useTranslate();
   const providerName = session.providerId === 'codex' ? 'Codex' : session.providerId === 'copilot' ? 'GitHub Copilot' : session.providerId === 'claude' ? 'Claude Code' : session.providerId === 'opencode' ? 'OpenCode' : session.providerId;
   const dialog = useRef<HTMLDialogElement>(null), label = useId();
   const [title, setTitle] = useState(session.title), [saving, setSaving] = useState(false), [error, setError] = useState<string>();
@@ -29,19 +31,19 @@ export function RenameSessionDialog({ favorites, session, onClose, onRenamed }: 
       await favorites.refresh();
       if (mounted.current) onClose();
     } catch (error) {
-      if (mounted.current) setError(error instanceof Error ? error.message : 'The session name could not be confirmed. Retry to check the same change.');
+      if (mounted.current) setError(error instanceof Error ? error.message : t('sessions.rename.unconfirmed'));
     } finally { inFlight.current = false; if (mounted.current) setSaving(false); }
   }
   const close = () => { if (!inFlight.current) onClose(); };
   return createPortal(<dialog ref={dialog} className="lab-favorite-dialog" data-favorites-dialog aria-labelledby={label}
     onKeyDown={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()} onBlur={e => e.stopPropagation()}
     onCancel={e => { e.preventDefault(); close(); }} onClose={close}>
-    <header><h2 id={label}>Rename session</h2><button type="button" aria-label="Close session name editor" disabled={saving} onClick={close}>×</button></header>
+    <header><h2 id={label}>{t('sessions.rename.title')}</h2><button type="button" aria-label={t('sessions.rename.close')} disabled={saving} onClick={close}>×</button></header>
     <form onSubmit={e => { e.preventDefault(); void save(); }}>
-      <label>Name<input autoFocus required maxLength={session.providerId === 'copilot' ? 100 : 512} value={title} disabled={saving} onChange={e => setTitle(e.target.value)} /></label>
-      <p className="lab-control-note">Updates the session name in {providerName}, too.</p>
+      <label>{t('sessions.favorites.name')}<input autoFocus required maxLength={session.providerId === 'copilot' ? 100 : 512} value={title} disabled={saving} onChange={e => setTitle(e.target.value)} /></label>
+      <p className="lab-control-note">{t('sessions.rename.note', { provider: providerName })}</p>
       {error ? <p role="alert" className="lab-control-note">{error}</p> : null}
-      <footer><button type="button" disabled={saving} onClick={close}>Cancel</button><button type="submit" className="lab-favorite-primary" disabled={saving || !title.trim()}>{saving ? 'Saving…' : 'Save'}</button></footer>
+      <footer><button type="button" disabled={saving} onClick={close}>{t('common.cancel')}</button><button type="submit" className="lab-favorite-primary" disabled={saving || !title.trim()}>{saving ? t('common.saving') : t('common.save')}</button></footer>
     </form>
   </dialog>, document.body);
 }

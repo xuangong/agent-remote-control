@@ -23,6 +23,7 @@ import type { AppInputs } from './types.js';
 import type { AppLate } from './types.js';
 
 export function useSessionSuccessionBinding(scope: Pick<AppInputs & ProviderStateSlice & WorkbenchShellSlice & RequestedSessionSlice & ConversationConnectionsSlice & WorkbenchRecordsSlice, 'accessReady' | 'activated' | 'asleepSlot' | 'baseUrl' | 'cachedState' | 'clientRef' | 'connections' | 'directory' | 'draftStores' | 'initialLayout' | 'initialSession' | 'initialState' | 'liveConnections' | 'markSessionMissing' | 'navigation' | 'navigationGeneration' | 'openedSessionsRef' | 'pendingViewRestore' | 'primaryBinding' | 'replicaFor' | 'replicaRef' | 'replicas' | 'selectedHost' | 'setProviderName' | 'teamRoster' | 'teamRosterRef' | 'transport' | 'unsubscribeReplicaRef' | 'userScoped'>, late: AppLate) {
+  const t = useTranslate();
   const { accessReady, activated, asleepSlot, baseUrl, cachedState, clientRef, connections, directory, draftStores, initialLayout, initialSession, initialState, liveConnections, markSessionMissing, navigation, navigationGeneration, openedSessionsRef, pendingViewRestore, primaryBinding, replicaFor, replicaRef, replicas, selectedHost, setProviderName, teamRoster, teamRosterRef, transport, unsubscribeReplicaRef, userScoped } = scope;
 
   const succession = useSessionSuccession({
@@ -33,7 +34,7 @@ export function useSessionSuccessionBinding(scope: Pick<AppInputs & ProviderStat
     validateTarget(selection, viewId, document) {
       const roster = teamRosterRef.current;
       const target = teamViewTarget(document, roster?.baseUrl === baseUrl ? roster.teams : undefined, selection, viewId);
-      if (target && sessionKey(target) !== sessionKey(selection)) throw new Error('The Team execution is not confirmed yet. Its history and draft are preserved.');
+      if (target && sessionKey(target) !== sessionKey(selection)) throw new Error(t('sessions.succession.teamUnconfirmed'));
     },
     scope: baseUrl, transport, enabled: activated && accessReady,
     initial: initialSession, initialDisplayState: cachedState, initialLayout: initialSession ? initialLayout : undefined,
@@ -63,7 +64,7 @@ export function useSessionSuccessionBinding(scope: Pick<AppInputs & ProviderStat
     },
     failed: (error, selection, retrying = false) => {
       if (!retrying && nativeSessionMissing(error)) { markSessionMissing(selection); unavailableSessions(transport).remember(selection, error); }
-      late.setSessionNotice({ ...sessionConnectionFailure(error, retrying), successionError: error instanceof Error ? error.message : 'The session could not be opened.' });
+      late.setSessionNotice({ ...sessionConnectionFailure(error, retrying, t), successionError: error instanceof Error ? error.message : t('sessions.connection.openFailed') });
       if (error instanceof DirectoryError && error.nativeOwner) late.setNativeTakeover({ item: selection, owner: error.nativeOwner, message: error.message });
     },
   });
@@ -92,7 +93,6 @@ export function useSessionSuccessionBinding(scope: Pick<AppInputs & ProviderStat
   }, [workspaceController.deletedWindowIds, windowRetention]);
 
   // Every assistant of the account is called by one name on every device; a bot's first edit stores the generated one.
-  const t = useTranslate();
   const assistantNames = useMemo(() => accountNames(workspaceController.groups, t), [workspaceController.groups, t]);
   const names = useRef(assistantNames); names.current = assistantNames;
   // As stable as the workspace's own, so what depends on it does not run again on every render.

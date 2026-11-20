@@ -1,4 +1,5 @@
 // Quoting, references and the earlier conversation.
+import { messageWords } from './message-words.js';
 import { quoteTargets as quoteTargetsOf } from '../state/quote-targets.js';
 import { selectedKeys } from '../state/quote-selection.js';
 import { createWindowView, type Team, createSessionExcerpt } from '@orchardworks/agent-remote-protocol';
@@ -36,8 +37,10 @@ import type { AppInputs } from './types.js';
 import { sessionQuotaMessage, sessionQuotaReached } from '../state/agent-creation.js';
 import { quoteCreationId, quoteLanding, quoteSessionOptions, quoteStart, reloadedConversationMessage } from '../state/quote-flow.js';
 import { askRestoreAllowed } from '../state/ask-visibility.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 export function useQuotesAndReferences(scope: Pick<AppInputs & RequestedSessionSlice & WorkbenchShellSlice & FocusedAskSlice & ViewSessionStateSlice & RemoteHostStateSlice & SessionSuccessionBindingSlice & SideSelectionSlice & ConversationConnectionsSlice & PanelsAndShortcutsSlice & ActiveSessionSlice & SharedFeedsAndTpmSlice & CommunicationsAndForksSlice & ProviderCreationSlice & WorkbenchRecordsSlice & WindowViewActionsSlice & TraceNavigationSlice, 'accessReady' | 'ask' | 'askSurfaceVisible' | 'askTriggerRef' | 'askView' | 'baseUrl' | 'compactLayout' | 'compositionProtected' | 'connections' | 'directory' | 'dispatchQuote' | 'earlierConversations' | 'earlierDirectory' | 'editWindow' | 'navigateAttributionRef' | 'openAsk' | 'pageOpen' | 'quote' | 'quoteSelection' | 'refreshRelations' | 'rememberSession' | 'remoteHosts' | 'replicaFor' | 'retryHosts' | 'selectedHost' | 'setDirectoryRevision' | 'sharedWindow' | 'sideSessions' | 'sourceCurrent' | 'succession' | 'transitioning' | 'transport' | 'viewNavigation' | 'windowWorkspace'>) {
+  const t = useTranslate();
   const { accessReady, ask, askSurfaceVisible, askTriggerRef, askView, baseUrl, compactLayout, compositionProtected, connections, directory, dispatchQuote, earlierConversations, earlierDirectory, editWindow, navigateAttributionRef, openAsk, pageOpen, quote, quoteSelection, refreshRelations, rememberSession, remoteHosts, replicaFor, retryHosts, selectedHost, setDirectoryRevision, sharedWindow, sideSessions, sourceCurrent, succession, transitioning, transport, viewNavigation, windowWorkspace } = scope;
 
   function renderAsk(source: OpenedSession, sourceState?: AgentReplicaState) {
@@ -59,13 +62,13 @@ export function useQuotesAndReferences(scope: Pick<AppInputs & RequestedSessionS
 
   /** Session views of every Window that can receive a quote from `sourceViewId`, located by Window and session. */
   function quoteTargets(sourceViewId: string, source: OpenedSession): QuoteTargetWindow[] {
-    return quoteTargetsOf(windowWorkspace.windows ?? [], windowWorkspace.readWindow() ?? sharedWindow, { viewId: sourceViewId, session: source });
+    return quoteTargetsOf(windowWorkspace.windows ?? [], windowWorkspace.readWindow() ?? sharedWindow, { viewId: sourceViewId, session: source }, t);
   }
 
   /** A new session in the source's workspace, with its provider and model, opened as a dock of the current Window. */
   async function createQuoteSession(source: OpenedSession, sourceState: AgentReplicaState, operationId: string): Promise<string> {
     const agent = sourceState.agent;
-    if (!directory || !agent) throw new Error('A new session cannot be created here.');
+    if (!directory || !agent) throw new Error(t('sessions.quoteFlow.cannotCreate'));
     const target = (source.hostId ?? 'local') === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, source.hostId);
     if (sessionQuotaReached(remoteHosts.find(host => host.id === source.hostId)?.sessionQuota)) throw new Error(sessionQuotaMessage);
     const options = quoteSessionOptions(agent, source.providerId);
@@ -102,19 +105,19 @@ export function useQuotesAndReferences(scope: Pick<AppInputs & RequestedSessionS
       }
       addQuote(baseUrl, destination, excerpt);
       dispatchQuote({ type: 'quoted', viewId });
-      const landing = quoteLanding(quoteTargets(viewId, source), target, destination);
+      const landing = quoteLanding(quoteTargets(viewId, source), target, destination, t);
       if (landing.kind === 'reveal') { revealQuoteTarget(destination); return; }
       dispatchQuote({ type: 'quoted', viewId, notice: { viewId, message: landing.message, async open() {
         await windowWorkspace.open(landing.windowId); revealQuoteTarget(destination);
       } } });
     } catch (error) {
-      dispatchQuote({ type: 'failed', viewId, error: message(error, 'The messages could not be quoted.') });
+      dispatchQuote({ type: 'failed', viewId, error: messageWords(error, t('sessions.quoteFlow.failed'), t) });
     }
   }
 
   const openExcerptSource = useCallback((source: { hostId?: string; providerId: string; nativeSessionId: string; title: string }) =>
-    navigateAttributionRef.current({ id: 'excerpt-source', kind: 'quote', label: 'Quoted from', value: source.title,
-      target: { kind: 'session', hostId: source.hostId, providerId: source.providerId, nativeSessionId: source.nativeSessionId } }).catch(() => undefined), []);
+    navigateAttributionRef.current({ id: 'excerpt-source', kind: 'quote', label: t('sessions.quoteFlow.quotedFrom'), value: source.title,
+      target: { kind: 'session', hostId: source.hostId, providerId: source.providerId, nativeSessionId: source.nativeSessionId } }).catch(() => undefined), [t]);
 
   // Stable wrappers keep memoized timelines from rendering again on unrelated changes.
   const quotedActionCache = useRef(new WeakMap<LabWorkbenchActions, Map<string, LabWorkbenchActions>>());
@@ -146,7 +149,7 @@ export function useQuotesAndReferences(scope: Pick<AppInputs & RequestedSessionS
 
   /** Starting a selection in another view replaces the one in progress. */
   function quoteEntrySelection(viewId: string, epoch: string | null): TimelineEntrySelection {
-    return { label: 'Quote', selected: selectedKeys(quote, viewId, epoch), select(keys, value) { dispatchQuote({ type: 'select', viewId, epoch, keys, value }); } };
+    return { label: t('sessions.quotes.quote'), selected: selectedKeys(quote, viewId, epoch), select(keys, value) { dispatchQuote({ type: 'select', viewId, epoch, keys, value }); } };
   }
 
   /** team: a Team Leader or Member view, which shows the member's name and offers Handoff like a primary view. */

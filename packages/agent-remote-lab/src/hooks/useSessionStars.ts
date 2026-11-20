@@ -3,8 +3,10 @@ import { type RemoteAgentTransport, watchList } from '@orchardworks/agent-client
 import { SessionStarsClient, FavoritesConflict, type FavoriteChange, type FavoritesSnapshot, type StarInput } from '../session-stars-client.js';
 import { sessionKey } from '../session-tree.js';
 import { useFeedbackToast } from '../components/Toast.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 const empty = (): FavoritesSnapshot => ({ revision: 0, folders: [], stars: [] });
 export function useSessionStars(baseUrl: string, enabled: boolean, transport?: RemoteAgentTransport) {
+  const t = useTranslate();
   const service = useMemo(() => new SessionStarsClient(baseUrl), [baseUrl]);
   const [snapshot, setSnapshot] = useState<FavoritesSnapshot>(empty);
   const [confirmedScope, setConfirmedScope] = useState<string>();
@@ -31,7 +33,7 @@ export function useSessionStars(baseUrl: string, enabled: boolean, transport?: R
     const controller = new AbortController(); requestController.current = controller;
     setLoading(true);
     try { const value = await service.snapshot(controller.signal); if (current() && generation.current === request) { publish(value); setError(undefined); } }
-    catch (error) { if (current() && generation.current === request) setError(error instanceof Error ? error.message : 'Favorites could not be loaded.'); }
+    catch (error) { if (current() && generation.current === request) setError(error instanceof Error ? error.message : t('sessions.stars.loadFailed')); }
     finally { if (current() && generation.current === request) setLoading(false); }
   }, [service, enabled, lifetime]);
   useEffect(() => { publish(empty()); setConfirmedScope(undefined); }, [service]);
@@ -67,7 +69,7 @@ export function useSessionStars(baseUrl: string, enabled: boolean, transport?: R
       publish(value); return true;
     } catch (error) {
       if (current() && request === generation.current) {
-        setError(error instanceof Error ? error.message : 'The favorite change could not be confirmed. Refresh and try again.');
+        setError(error instanceof Error ? error.message : t('sessions.stars.changeUnconfirmed'));
         if (error instanceof FavoritesConflict) {
           try { const value = await service.snapshot(controller.signal); if (current() && request === generation.current) publish(value); }
           catch { /* Keep the last confirmed tree and the original failure visible. */ }
@@ -81,7 +83,7 @@ export function useSessionStars(baseUrl: string, enabled: boolean, transport?: R
     const { hostId, providerId, nativeSessionId } = item;
     await change(exists ? { type: 'remove-session', session: { hostId, providerId, nativeSessionId } } : { type: 'save-session', session: item, folderId: null });
   }
-  useFeedbackToast('Favorites', error);
+  useFeedbackToast(t('sessions.favorites.title'), error);
   return { enabled, scope: baseUrl, ready: enabled && confirmedScope === baseUrl && confirmedLifetime.current === lifetime && !loading && !pending && !error, ...(confirmedScope === baseUrl ? snapshot : empty()), loading, pending, error, refresh, toggle, change };
 }
 export type SessionStars = ReturnType<typeof useSessionStars>;

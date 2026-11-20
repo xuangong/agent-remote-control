@@ -27,9 +27,11 @@ import type { WindowViewActionsSlice } from './useWindowViewActions.js';
 import type { SessionOpeningSlice } from './useSessionOpening.js';
 import type { RemoteHostStateSlice } from './useRemoteHostState.js';
 import type { WindowModeActionsSlice } from './useWindowModeActions.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 // Opening the other endpoint of a letter between sessions.
 export function useLetterNavigation(scope: Pick<AppInputs & WorkbenchShellSlice & SessionSuccessionBindingSlice & ViewSessionStateSlice & FocusedAskSlice & HostAndStackSlice & SideSelectionSlice & PanelsAndShortcutsSlice & ViewTargetsSlice & ActiveSessionSlice & SideNavigationSlice & ConversationConnectionsSlice & RequestedSessionSlice & WorkbenchRecordsSlice & ProviderCreationSlice & WindowViewActionsSlice & SessionOpeningSlice & RemoteHostStateSlice & WindowModeActionsSlice, 'assertSourceCurrent' | 'baseUrl' | 'compactLayout' | 'compactLayoutRef' | 'connections' | 'directory' | 'editWindow' | 'favorites' | 'letterRequest' | 'navigationGeneration' | 'openSession' | 'openWindows' | 'openedSessionsRef' | 'rememberSession' | 'replicaFor' | 'replicas' | 'selectSide' | 'selectedHost' | 'setLetterReveals' | 'setSideAnchor' | 'setSideFocus' | 'sharedSlots' | 'sharedViewForSlot' | 'sharedWindow' | 'showView' | 'stackPath' | 'stackRange' | 'stackRoot' | 'state' | 'status' | 'traceRequestCounter' | 'viewSession' | 'windowWorkspace'>) {
+  const t = useTranslate();
   const { assertSourceCurrent, baseUrl, compactLayout, compactLayoutRef, connections, directory, editWindow, favorites, letterRequest, navigationGeneration, openSession, openWindows, openedSessionsRef, rememberSession, replicaFor, replicas, selectSide, selectedHost, setLetterReveals, setSideAnchor, setSideFocus, sharedSlots, sharedViewForSlot, sharedWindow, showView, stackPath, stackRange, stackRoot, state, status, traceRequestCounter, viewSession, windowWorkspace } = scope;
 
   function communicationSnapshots(source: OpenedSession, sourceState?: AgentReplicaState): CommunicationSnapshot[] {
@@ -49,15 +51,15 @@ export function useLetterNavigation(scope: Pick<AppInputs & WorkbenchShellSlice 
   }
 
   async function openCommunication(entry: ProjectedTimelineEntry, source: OpenedSession, sourceState?: AgentReplicaState): Promise<void> {
-    if (!directory || entry.item.type !== 'agent_communication') throw new Error('Session navigation is unavailable in this view.');
+    if (!directory || entry.item.type !== 'agent_communication') throw new Error(t('sessions.letter.unavailable'));
     letterRequest.current?.abort();
     const controller = new AbortController(); letterRequest.current = controller;
-    const deadline = setTimeout(() => controller.abort(new Error('Opening the letter timed out. Retry when the Host is connected.')), 60000);
+    const deadline = setTimeout(() => controller.abort(new Error(t('sessions.letter.timedOut'))), 60000);
     assertSourceCurrent(source);
     const originView = sharedViewForSlot(viewKey(source));
     const originWindowId = sharedWindow?.id;
     const generation = navigationGeneration.current;
-    const check = () => { assertSourceCurrent(source); controller.signal.throwIfAborted(); if (generation !== navigationGeneration.current) throw new Error('The workspace changed. Open the letter again.'); };
+    const check = () => { assertSourceCurrent(source); controller.signal.throwIfAborted(); if (generation !== navigationGeneration.current) throw new Error(t('sessions.letter.workspaceChanged')); };
     const leases = new Map<string, ReturnType<ConversationConnections['acquire']>>();
     const snapshots = communicationSnapshots(source, sourceState);
     const attachParticipant = async (identity: SessionEntry): Promise<OpenedSession> => {
@@ -98,12 +100,12 @@ export function useLetterNavigation(scope: Pick<AppInputs & WorkbenchShellSlice 
         }
       }
       if (!pair.sender || !pair.recipient || sessionKey(pair.sender) === sessionKey(pair.recipient)) {
-        throw new Error('This history does not identify both sessions unambiguously. Load their agent activity and retry.');
+        throw new Error(t('sessions.letter.ambiguous'));
       }
       if (originView && originWindowId) {
         const sourceKey = sessionKey(source);
         const endpoint = otherEndpoint(sourceKey, sessionKey(pair.sender), sessionKey(pair.recipient));
-        if (!endpoint) throw new Error('This conversation is not an endpoint of the letter.');
+        if (!endpoint) throw new Error(t('sessions.letter.notEndpoint'));
         const destination = await attachParticipant(endpoint === 'sender' ? pair.sender : pair.recipient);
         const recipient = endpoint === 'sender' ? source : destination;
         const revealSession = compactLayoutRef.current ? destination : recipient;
@@ -112,7 +114,7 @@ export function useLetterNavigation(scope: Pick<AppInputs & WorkbenchShellSlice 
         check();
         const current = windowWorkspace.readWindow();
         const origin = current?.views.find(view => view.id === originView.id);
-        if (current?.id !== originWindowId || !origin?.binding || sessionKey(origin.binding) !== sourceKey) throw new Error('The source view changed. Open the letter again.');
+        if (current?.id !== originWindowId || !origin?.binding || sessionKey(origin.binding) !== sourceKey) throw new Error(t('sessions.letter.sourceChanged'));
         const family = communicationFamily(source);
         const existing = family.find(view => view.binding && sessionKey(view.binding) === sessionKey(destination));
         const operations: WindowEdit[] = [];
@@ -131,12 +133,12 @@ export function useLetterNavigation(scope: Pick<AppInputs & WorkbenchShellSlice 
       if (compactLayoutRef.current) {
         const sourceKey = sessionKey(source);
         const endpoint = otherEndpoint(sourceKey, sessionKey(pair.sender), sessionKey(pair.recipient));
-        if (!endpoint) throw new Error('This conversation is not an endpoint of the letter.');
+        if (!endpoint) throw new Error(t('sessions.letter.notEndpoint'));
         const destination = await attachParticipant(endpoint === 'sender' ? pair.sender : pair.recipient);
         const observation = await observe(destination);
         const target = await loadSessionCommunication(observation, entry, controller.signal, endpoint);
         check();
-        if (!await openSession(destination, undefined, undefined, true)) throw new Error('The linked session could not be opened.');
+        if (!await openSession(destination, undefined, undefined, true)) throw new Error(t('sessions.letter.linkedOpenFailed'));
         // Opening the other endpoint intentionally advances the navigation generation.
         controller.signal.throwIfAborted();
         setLetterReveals(values => ({ ...values, [destination.agentId]: { ...target, align: 'start', requestId: ++traceRequestCounter.current } }));
@@ -155,7 +157,7 @@ export function useLetterNavigation(scope: Pick<AppInputs & WorkbenchShellSlice 
       else if (plan.kind === 'anchor') setSideAnchor(viewKey(stackPath[plan.index]!));
       else if (plan.kind === 'open-origin') {
         const origin = participant(plan.from);
-        if (!await openSession(origin, undefined, undefined, true)) throw new Error('The sending session could not be opened.');
+        if (!await openSession(origin, undefined, undefined, true)) throw new Error(t('sessions.letter.senderOpenFailed'));
         selectSide(origin, participant(plan.to));
       }
       setSideFocus(viewKey(viewSession(recipient))); showView('workbench');

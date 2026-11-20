@@ -1,7 +1,8 @@
 import { relationEditScope, RelationEditStore } from '../relation-edit-store.js';
 import { isNativeSessionRef, isSourceBinding, nativeSessionRefKey } from '@orchardworks/agent-remote-protocol';
 import { useEffect, useMemo, useRef } from 'react';
-import { watchList } from '@orchardworks/agent-client';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
+import { watchList, type Translate } from '@orchardworks/agent-client';
 import type { SessionRelation } from '@orchardworks/agent-remote-protocol/model';
 import type { ForkStore, SessionFork } from '../session-forks.js';
 import { workspaceFetch } from '../workspace-access.js';
@@ -9,6 +10,7 @@ import { sessionKey } from '../session-tree.js';
 
 /** Sync navigation independently of native observation, local drafts and delivery receipts. */
 export function useSessionRelations(baseUrl: string, enabled: boolean, sides: ForkStore, asks: ForkStore, current?: string, accountScoped = enabled) {
+  const t = useTranslate();
   const refreshRef = useRef<() => Promise<void>>();
   const reconcileRef = useRef<(record: SessionFork) => Promise<void>>();
   const setLinkedRef = useRef<(record: SessionFork, linked: boolean) => Promise<void>>();
@@ -40,8 +42,8 @@ export function useSessionRelations(baseUrl: string, enabled: boolean, sides: Fo
       const currentResponse = () => !controller.signal.aborted && startedAtChange === navigationChange;
       const response = await workspaceFetch(url, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
       if (response.status === 404) { unsupported = true; return; }
-      if (!response.ok) throw new Error('Related sessions could not be checked. Reconnect before opening Ask.');
-      let relations = readRelations(await response.json());
+      if (!response.ok) throw new Error(t('sessions.relations.askUnavailable'));
+      let relations = readRelations(await response.json(), t);
       if (!currentResponse()) return;
       let importedCount = 0;
       const known = new Set(relations.map(item => sessionKey(item.target)));
@@ -56,7 +58,7 @@ export function useSessionRelations(baseUrl: string, enabled: boolean, sides: Fo
             signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]),
             body: JSON.stringify({ hostId, providerId, nativeSessionId, sourceNativeSessionId: record.source.nativeSessionId, id: record.id, kind, createdAt: record.capturedAt }) });
           if (imported.ok) {
-            relations = readRelations(await imported.json());
+            relations = readRelations(await imported.json(), t);
             for (const item of relations) known.add(sessionKey(item.target));
           } else if ([400, 403, 409].includes(imported.status)) rejectedImports.add(record.id);
           else break;
@@ -69,20 +71,20 @@ export function useSessionRelations(baseUrl: string, enabled: boolean, sides: Fo
     }
     refreshRef.current = refresh;
     setLinkedRef.current = async (record, linked) => {
-      if (changing) throw new Error('The side link is already being changed. Wait before trying again.');
-      if (!record.target) throw new Error('The side session is not available yet.');
+      if (changing) throw new Error(t('sessions.relations.busy'));
+      if (!record.target) throw new Error(t('sessions.relations.sideNotReady'));
       if (!record.remote && !record.relationId) await refresh();
-      if (changing) throw new Error('The side link is already being changed. Wait before trying again.');
+      if (changing) throw new Error(t('sessions.relations.busy'));
       const latest = sides.get(record.id);
-      if (unsupported || !latest.relationId) throw new Error('The shared side link is unavailable. Refresh before trying again.');
+      if (unsupported || !latest.relationId) throw new Error(t('sessions.relations.sharedUnavailable'));
       const { hostId, providerId, nativeSessionId } = latest.target!;
       const scope = latest.hostLocator ? relationEditScope(latest) : undefined;
       const retained = scope ? edits.get(scope) : undefined;
-      if (retained && retained.linked !== linked) throw new Error('A previous side edit is unconfirmed. Reconcile its status before another change.');
+      if (retained && retained.linked !== linked) throw new Error(t('sessions.relations.unconfirmedEdit'));
       const expectedRevision = retained?.expectedRevision ?? record.revision ?? 0;
       const edit = retained ?? { operationId: crypto.randomUUID(), linked, expectedRevision, expectedRoleRevision: record.roleRevision,
         sourceNativeSessionId: record.nativeSourceRef?.nativeSessionId ?? record.options.sourceNativeSessionId ?? record.source.nativeSessionId };
-      if (record.sourceBinding || retained) { if (!scope) throw new Error('The shared side identity is incomplete.'); edits.set(scope, edit); sides.setRelationEditPending(latest.id,true); }
+      if (record.sourceBinding || retained) { if (!scope) throw new Error(t('sessions.relations.identityIncomplete')); edits.set(scope, edit); sides.setRelationEditPending(latest.id,true); }
       changing = true;
       navigationChange++;
       try {
@@ -94,23 +96,23 @@ export function useSessionRelations(baseUrl: string, enabled: boolean, sides: Fo
               id: latest.relationId, linked, expectedRevision,
               ...(record.sourceBinding || retained ? { operationId: edit.operationId, expectedRoleRevision: edit.expectedRoleRevision } : {}) }) });
         } catch {
-          throw new Error('The side link change could not be confirmed. Refresh its status before retrying.');
+          throw new Error(t('sessions.relations.changeUnconfirmed'));
         }
         const data: unknown = await response.json().catch(() => undefined);
-        if (controller.signal.aborted) throw new Error('The side link change could not be confirmed. Refresh its status before retrying.');
+        if (controller.signal.aborted) throw new Error(t('sessions.relations.changeUnconfirmed'));
         if (response.status === 409) {
-          try { applyRelations(readRelations(data)); }
+          try { applyRelations(readRelations(data, t)); }
           catch { await synchronize().catch(() => {}); }
-          throw new Error('The side link changed on another device. Refresh before trying again.');
+          throw new Error(t('sessions.relations.changedElsewhere'));
         }
         if (!response.ok) {
           const error = (data as { error?: string | { message?: unknown } } | undefined)?.error;
           const message = typeof error === 'string' ? error : error?.message;
-          throw new Error(typeof message === 'string' && message.trim() ? message : 'The side link could not be changed. Reconnect and try again.');
+          throw new Error(typeof message === 'string' && message.trim() ? message : t('sessions.relations.changeFailed'));
         }
         let relations: SessionRelation[];
-        try { relations = readRelations(data); }
-        catch { throw new Error('The side link change could not be confirmed. Refresh its status before retrying.'); }
+        try { relations = readRelations(data, t); }
+        catch { throw new Error(t('sessions.relations.changeUnconfirmed')); }
         const confirmed = relations.find(item => item.id === latest.relationId && item.kind === 'side'
           && sessionKey(item.target) === sessionKey(latest.target!)
           && (!scope || item.hostLocator && relationEditScope({...item,relationId:item.id})===scope)
@@ -118,19 +120,19 @@ export function useSessionRelations(baseUrl: string, enabled: boolean, sides: Fo
             ? nativeSessionRefKey(record.nativeSourceRef) === nativeSessionRefKey(item.nativeSourceRef)
             : !record.nativeSourceRef && item.source.nativeSessionId === record.source.nativeSessionId));
         if (!confirmed || (confirmed.linked !== false) !== linked || (confirmed.revision ?? 0) < expectedRevision) {
-          throw new Error('The side link change could not be confirmed. Refresh its status before retrying.');
+          throw new Error(t('sessions.relations.changeUnconfirmed'));
         }
-        if (confirmed.operation && (confirmed.operation.operationId !== edit.operationId || confirmed.operation.phase !== 'committed')) throw new Error('The side edit is pending. Reconcile its status before continuing.');
+        if (confirmed.operation && (confirmed.operation.operationId !== edit.operationId || confirmed.operation.phase !== 'committed')) throw new Error(t('sessions.relations.editPending'));
         if (scope) edits.clear(scope,edit.operationId);
         applyRelations(relations);
       } finally { changing = false; navigationChange++; }
     };
     reconcileRef.current = async record => {
-      if (changing) throw new Error('The side link is already being changed. Wait before trying again.');
-      if (!record.target || !record.relationId || record.target.hostId === 'local') throw new Error('A shared side is required.');
+      if (changing) throw new Error(t('sessions.relations.busy'));
+      if (!record.target || !record.relationId || record.target.hostId === 'local') throw new Error(t('sessions.relations.sharedRequired'));
       const scope = relationEditScope(record), retained = edits.get(scope);
       const operationId = retained?.operationId ?? record.relationOperation?.operationId;
-      if (!operationId) throw new Error('No pending side edit exists.');
+      if (!operationId) throw new Error(t('sessions.relations.noPendingEdit'));
       changing = true; navigationChange++;
       try {
         let response = await workspaceFetch(new URL(url.toString() + '/reconcile'), {
@@ -146,10 +148,10 @@ export function useSessionRelations(baseUrl: string, enabled: boolean, sides: Fo
             expectedRoleRevision:retained.expectedRoleRevision,operationId}),
           signal:AbortSignal.any([controller.signal,AbortSignal.timeout(15000)]),
         });
-        if (!response.ok) throw new Error('The side edit remains pending.');
+        if (!response.ok) throw new Error(t('sessions.relations.stillPending'));
         const data = await response.json();
-        if (controller.signal.aborted) throw new Error('The side edit could not be confirmed.');
-        const relations = readRelations(data);
+        if (controller.signal.aborted) throw new Error(t('sessions.relations.editUnconfirmed'));
+        const relations = readRelations(data, t);
         const matching = relations.find(item => item.kind==='side' && item.hostLocator && relationEditScope({...item,relationId:item.id})===scope);
         const sameSource = matching?.nativeSourceRef && record.nativeSourceRef && nativeSessionRefKey(matching.nativeSourceRef)===nativeSessionRefKey(record.nativeSourceRef);
         const reset = data.reset, intent = reset?.intent;
@@ -162,7 +164,7 @@ export function useSessionRelations(baseUrl: string, enabled: boolean, sides: Fo
           && data.operation?.reservation?.operationId===operationId && data.operation.phase==='committed';
         if (resetConfirmed || committed) edits.clear(scope,operationId);
         applyRelations(relations);
-        if (!resetConfirmed && !committed) throw new Error('The side edit remains pending.');
+        if (!resetConfirmed && !committed) throw new Error(t('sessions.relations.stillPending'));
       } finally { changing=false; navigationChange++; }
     };
     const backgroundRefresh = () => {
@@ -177,24 +179,24 @@ export function useSessionRelations(baseUrl: string, enabled: boolean, sides: Fo
   useEffect(() => { if (enabled) void refreshRef.current?.().catch(() => {}); }, [enabled, current]);
   return useMemo(() => Object.assign(async () => { if (enabled) await refreshRef.current?.(); }, {
     reconcile: async (record: SessionFork) => {
-      if (!enabled || !reconcileRef.current) throw new Error('Workspace access is restoring.');
+      if (!enabled || !reconcileRef.current) throw new Error(t('sessions.relations.accessRestoring'));
       await reconcileRef.current(record);
     },
     setLinked: async (record: SessionFork, linked: boolean) => {
       let local: SessionFork;
       try { local = sides.get(record.id); }
-      catch { throw new Error('Only side links can be changed here.'); }
+      catch { throw new Error(t('sessions.relations.onlySideLinks')); }
       if (!record.target || !local.target || sessionKey(record.target) !== sessionKey(local.target)
-        || sessionKey(record.source) !== sessionKey(local.source)) throw new Error('The side link changed. Refresh before trying again.');
+        || sessionKey(record.source) !== sessionKey(local.source)) throw new Error(t('sessions.relations.linkChanged'));
       if (!accountScoped) { sides.setLinked(record.id, linked, record.revision ?? 0); return; }
-      if (!enabled || !setLinkedRef.current) throw new Error('Workspace access is restoring. Try again when connected.');
+      if (!enabled || !setLinkedRef.current) throw new Error(t('sessions.relations.accessRestoringRetry'));
       if (local.mode !== 'reference') { sides.setLinked(record.id, linked, record.revision ?? 0); return; }
       await setLinkedRef.current(record, linked);
     },
   }), [enabled, accountScoped, sides]);
 }
 
-function readRelations(value: unknown): SessionRelation[] {
+function readRelations(value: unknown, t: Translate): SessionRelation[] {
   const relations = (value as { relations?: unknown } | null)?.relations;
   const session = (item: unknown) => !!item && typeof item === 'object' && ['hostId', 'providerId', 'nativeSessionId', 'agentId', 'title']
     .every(key => typeof (item as Record<string, unknown>)[key] === 'string');
@@ -208,7 +210,7 @@ function readRelations(value: unknown): SessionRelation[] {
     && (item.operation === undefined || typeof item.operation.operationId === 'string' && ['reserved','metadata_committed','overlay_applied','committed'].includes(item.operation.phase))
     && (item.linked === undefined || typeof item.linked === 'boolean')
     && (item.revision === undefined || Number.isSafeInteger(item.revision) && item.revision >= 0))) {
-    throw new Error('Related sessions returned an invalid response. Refresh before trying again.');
+    throw new Error(t('sessions.relations.invalid'));
   }
   return relations;
 }

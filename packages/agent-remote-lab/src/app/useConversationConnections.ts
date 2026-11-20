@@ -11,8 +11,10 @@ import type { LabTransport } from './types.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
 import type { RequestedSessionSlice } from './useRequestedSession.js';
 import type { AppInputs } from './types.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 export function useConversationConnections(scope: Pick<AppInputs & WorkbenchShellSlice & RequestedSessionSlice, 'accessReadyRef' | 'baseUrl' | 'directory' | 'selectedHost' | 'transport'>) {
+  const t = useTranslate();
   const { accessReadyRef, baseUrl, directory, selectedHost, transport } = scope;
 
   const { value: catchUp, begin: beginCatchUp, focus: focusCatchUp } = useSessionCatchUp();
@@ -30,10 +32,10 @@ export function useConversationConnections(scope: Pick<AppInputs & WorkbenchShel
 
   const connections = useMemo(() => new ConversationConnections(transport, baseUrl, (agentId, session) => session ? {
     async resumeNative(owner, options) {
-      if (!accessReadyRef.current) throw new SessionHandoffRejectedError('Workspace access is restoring.');
+      if (!accessReadyRef.current) throw new SessionHandoffRejectedError(t('sessions.relations.accessRestoring'));
       const target = new SessionDirectoryClient(baseUrl, undefined, session.hostId ?? 'local');
       const result = await target.attach(session.providerId, session.nativeSessionId, options.signal, options.checkOnly ? undefined : owner.generation);
-      if (result.agentId !== agentId) throw new Error('Native resume returned a different session binding.');
+      if (result.agentId !== agentId) throw new Error(t('sessions.connections.differentBinding'));
     },
   } : undefined), [baseUrl, transport]);
 

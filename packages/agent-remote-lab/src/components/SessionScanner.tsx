@@ -1,18 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
+import type { Translate } from '@orchardworks/agent-client';
 
-function cameraFailure(error: unknown): string {
+function cameraFailure(error: unknown, t: Translate): string {
   const name = error instanceof Error ? error.name : '';
-  if (name === 'NotAllowedError' || name === 'SecurityError') return 'Camera access was denied. Allow camera access in your browser settings, then retry, or paste a session link.';
-  if (name === 'NotFoundError') return 'No camera found. Paste a session link instead.';
-  if (name === 'NotReadableError') return 'The camera is in use or unavailable. Close other camera apps and retry.';
-  return 'The camera could not start. Retry or paste a session link.';
+  if (name === 'NotAllowedError' || name === 'SecurityError') return t('sessions.scanner.denied');
+  if (name === 'NotFoundError') return t('sessions.scanner.notFound');
+  if (name === 'NotReadableError') return t('sessions.scanner.notReadable');
+  return t('sessions.scanner.startFailed');
 }
 
 export function SessionScanner({ onRead }: { onRead(text: string): void }) {
+  const t = useTranslate();
   const video = useRef<HTMLVideoElement>(null);
   const callback = useRef(onRead); callback.current = onRead;
   const [attempt, setAttempt] = useState(0);
-  const [status, setStatus] = useState('Starting camera…');
+  const [status, setStatus] = useState(t('sessions.scanner.starting'));
   const [failure, setFailure] = useState<string>();
   const [paused, setPaused] = useState(false);
   useEffect(() => {
@@ -23,29 +26,29 @@ export function SessionScanner({ onRead }: { onRead(text: string): void }) {
     const stop = () => { if (timer) clearTimeout(timer); stream?.getTracks().forEach(track => track.stop()); if (element.srcObject === stream) element.srcObject = null; };
     const hide = () => {
       if (!document.hidden) return;
-      retired = true; stop(); setPaused(true); setStatus('Camera paused.');
+      retired = true; stop(); setPaused(true); setStatus(t('sessions.scanner.paused'));
     };
-    setFailure(undefined); setPaused(false); setStatus('Starting camera…');
+    setFailure(undefined); setPaused(false); setStatus(t('sessions.scanner.starting'));
     document.addEventListener('visibilitychange', hide);
     async function start() {
       // The decoder loads with the first scan, not with the workbench (stage 6).
       let decodeQr: typeof import('jsqr').default;
       try { decodeQr = (await import('jsqr')).default; }
-      catch { if (!retired) setFailure('The QR decoder could not be loaded. Retry or paste a session link.'); return; }
+      catch { if (!retired) setFailure(t('sessions.scanner.decoderMissing')); return; }
       if (retired) return;
       try {
         if (!navigator.mediaDevices?.getUserMedia) {
-          setFailure('Camera scanning is unavailable in this browser. Use HTTPS or paste a session link.'); return;
+          setFailure(t('sessions.scanner.unsupported')); return;
         }
         stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 720 }, height: { ideal: 720 } } });
         if (retired) { stop(); return; }
         element.srcObject = stream;
         await element.play();
         if (retired) return;
-        setStatus('Point your camera at a session QR code.');
+        setStatus(t('sessions.scanner.pointCamera'));
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d', { willReadFrequently: true });
-        if (!context) throw new Error('Camera decoding is unavailable');
+        if (!context) throw new Error(t('sessions.scanner.decodingUnavailable'));
         function scan() {
           if (retired) return;
           try {
@@ -58,18 +61,18 @@ export function SessionScanner({ onRead }: { onRead(text: string): void }) {
               if (code) { retired = true; stop(); callback.current(code.data); return; }
             }
             timer = setTimeout(scan, 200);
-          } catch { stop(); setFailure('This camera frame could not be read. Retry or paste a session link.'); }
+          } catch { stop(); setFailure(t('sessions.scanner.frameFailed')); }
         }
         scan();
-      } catch (error) { stop(); if (!retired) setFailure(cameraFailure(error)); }
+      } catch (error) { stop(); if (!retired) setFailure(cameraFailure(error, t)); }
     }
     // Defer acquisition so a retired mount never requests camera access.
     queueMicrotask(() => { if (!retired) void start(); });
     return () => { retired = true; stop(); document.removeEventListener('visibilitychange', hide); };
   }, [attempt]);
   return <div className="lab-session-scanner">
-    <div className="lab-session-camera"><video ref={video} muted playsInline aria-label="Session QR camera" /><span aria-hidden="true" /></div>
+    <div className="lab-session-camera"><video ref={video} muted playsInline aria-label={t('sessions.scanner.cameraLabel')} /><span aria-hidden="true" /></div>
     <p role={failure ? 'alert' : 'status'}>{failure ?? status}</p>
-    {failure || paused ? <button type="button" onClick={() => setAttempt(value => value + 1)}>{paused ? 'Resume camera' : 'Retry camera'}</button> : null}
+    {failure || paused ? <button type="button" onClick={() => setAttempt(value => value + 1)}>{paused ? t('sessions.scanner.resume') : t('sessions.scanner.retry')}</button> : null}
   </div>;
 }

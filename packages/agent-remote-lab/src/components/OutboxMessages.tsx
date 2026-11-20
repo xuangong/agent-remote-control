@@ -1,17 +1,17 @@
 import { useEffect, useState, type ComponentProps } from 'react';
 import type { OutboxEntry } from '@orchardworks/agent-remote-protocol';
-import type { SessionStateRef } from '@orchardworks/agent-client';
+import { translator, type SessionStateRef, type Translate } from '@orchardworks/agent-client';
 import { useSharedFeed } from '../shared-feeds.js';
-import { UserMessageItem } from '@orchardworks/agent-client-web/react';
+import { UserMessageItem, useTranslate } from '@orchardworks/agent-client-web/react';
 import './outbox-messages.css';
 
 /** How long a message has waited, once that is over a minute: 5 min, 2 h, 3 d. */
-export function waitingAge(createdAt: number, now: number): string {
+export function waitingAge(createdAt: number, now: number, t: Translate = translator('en')): string {
   const minutes = Math.floor((now - createdAt) / 60_000);
   if (minutes < 1) return '';
-  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 60) return t('sessions.outbox.minutes', { count: minutes });
   const hours = Math.floor(minutes / 60);
-  return hours < 24 ? `${hours} h` : `${Math.floor(hours / 24)} d`;
+  return hours < 24 ? t('sessions.outbox.hours', { count: hours }) : t('sessions.outbox.days', { count: Math.floor(hours / 24) });
 }
 
 function useNow(enabled: boolean, fixed?: number): number {
@@ -55,16 +55,18 @@ export function SessionOutboxMessages({ session, ...props }: Omit<ComponentProps
 
 function OutboxMessage({ entry, hostName, hostOnline, now, onCancel, onRetry }: { entry: OutboxEntry; hostName: string; hostOnline: boolean; now: number;
   onCancel(id: string): Promise<void>; onRetry(id: string): Promise<void> }) {
+  const t = useTranslate();
   const [busy, setBusy] = useState(false), [error, setError] = useState<string>();
   const settled = entry.status === 'failed' || entry.status === 'unknown';
-  const age = waitingAge(entry.createdAt, now);
-  const label = entry.status === 'delivering' ? 'Sending…' : entry.status === 'failed' ? 'Not delivered' : entry.status === 'unknown' ? 'Check delivery'
-    : `${hostOnline ? 'Waiting to send' : `Waiting for ${hostName}`}${age ? ` · ${age}` : ''}`;
+  const age = waitingAge(entry.createdAt, now, t);
+  const waiting = hostOnline ? t('sessions.outbox.waitingToSend') : t('sessions.outbox.waitingForHost', { host: hostName });
+  const label = entry.status === 'delivering' ? t('sessions.outbox.sending') : entry.status === 'failed' ? t('sessions.outbox.notDelivered') : entry.status === 'unknown' ? t('sessions.outbox.checkDelivery')
+    : age ? t('sessions.outbox.withAge', { label: waiting, age }) : waiting;
   async function act(action: (id: string) => Promise<void>) {
     if (busy) return;
     setBusy(true); setError(undefined);
     try { await action(entry.id); }
-    catch (reason) { setError(reason instanceof Error && reason.message ? reason.message : 'That did not work. Try again.'); }
+    catch (reason) { setError(reason instanceof Error && reason.message ? reason.message : t('sessions.outbox.failed')); }
     finally { setBusy(false); }
   }
   return <div className="agent-timeline-entry agent-outgoing-message lab-outbox-message" data-entry-key={`outbox:${entry.id}`}
@@ -76,8 +78,8 @@ function OutboxMessage({ entry, hostName, hostOnline, now, onCancel, onRetry }: 
         : <svg {...icon} className="lab-outbox-icon"><circle cx="10" cy="10" r="7.5" /><path d="M10 6v4.5l3 2" /></svg>}
       <span className="lab-outbox-label">{label}</span>
       {entry.status !== 'delivering' ? <span className="agent-delivery-actions">
-        {settled ? <button type="button" aria-label="Send again" title="Send again" disabled={busy} onClick={() => void act(onRetry)}><svg {...icon}><path d="M3 8a7 7 0 1 1 1 7M3 3v5h5" /></svg></button> : null}
-        <button type="button" aria-label={entry.status === 'waiting' ? 'Cancel message' : 'Dismiss message'} title={entry.status === 'waiting' ? 'Cancel: it will not be sent' : 'Dismiss'}
+        {settled ? <button type="button" aria-label={t('sessions.outbox.sendAgain')} title={t('sessions.outbox.sendAgain')} disabled={busy} onClick={() => void act(onRetry)}><svg {...icon}><path d="M3 8a7 7 0 1 1 1 7M3 3v5h5" /></svg></button> : null}
+        <button type="button" aria-label={entry.status === 'waiting' ? t('sessions.outbox.cancelMessage') : t('sessions.outbox.dismissMessage')} title={entry.status === 'waiting' ? t('sessions.outbox.cancelTitle') : t('sessions.outbox.dismissTitle')}
           disabled={busy} onClick={() => void act(onCancel)}><svg {...icon}><path d="m5.5 5.5 9 9m0-9-9 9" /></svg></button>
       </span> : null}
       {settled && entry.error ? <span className="agent-delivery-error">{entry.error}</span> : null}

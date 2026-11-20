@@ -1,6 +1,6 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ProjectedTimelineEntry, SessionExcerpt } from '@orchardworks/agent-remote-protocol';
-import { preparePromptDraft, withoutSessionExcerpts } from '@orchardworks/agent-client-web/react';
+import { preparePromptDraft, useTranslate, withoutSessionExcerpts } from '@orchardworks/agent-client-web/react';
 import { inspectImageDraft, readImageDraft, type ImageDraftBinding, type ImageDraftRecipient } from '@orchardworks/agent-client-web/browser';
 import { SessionSuccessionDialog } from '../components/SessionSuccessionDialog.js';
 import { ComposerDraftOwner, type DraftOwnerToken } from '../composer-draft-owner.js';
@@ -15,6 +15,7 @@ import { readPrefixEdit, retainPrefixEdit, savePrefixEdit, finishPrefixEdit, typ
 export function usePromptEditOperation(binding: SessionOperationBinding | undefined, text: DraftBinding | undefined,
   image: ImageDraftBinding | undefined, viewId: string | undefined, explicitRecipient?: ImageDraftRecipient,
   receiveQuotes?: (excerpts: readonly SessionExcerpt[]) => void) {
+  const t = useTranslate();
   const environment = useContext(SessionViewOperationsContext);
   const quoteReceiver = useRef(receiveQuotes);
   quoteReceiver.current = receiveQuotes;
@@ -28,7 +29,7 @@ export function usePromptEditOperation(binding: SessionOperationBinding | undefi
   const access = accessRef.current;
   const restored = useMemo(() => {
     try { return { intent: scope && key ? readPrefixEdit(scope, key) : undefined, error: undefined as string | undefined }; }
-    catch (error) { return { intent: undefined, error: error instanceof Error ? error.message : 'The original prompt edit could not be read.' }; }
+    catch (error) { return { intent: undefined, error: error instanceof Error ? error.message : t('sessions.promptEdit.readFailed') }; }
   }, [identity]);
   const [selected, setSelection] = useState<{ identity: string; lifetime: { active: boolean }; entry: ProjectedTimelineEntry; binding: SessionOperationBinding; access: typeof access; recipient?: ImageDraftRecipient; text: DraftBinding; image: ImageDraftBinding }>();
   const selection = selected?.identity === identity ? selected : undefined;
@@ -72,7 +73,7 @@ export function usePromptEditOperation(binding: SessionOperationBinding | undefi
     ? { kind: 'native_prefix' as const, turnId: selection.entry.turnId, messageId: selection.entry.item.messageId } : undefined), [intent?.operation, selection]);
   function assertAccess() {
     if (!(selection?.access ?? access).active || !access.active || !mounted.current || latest.current.identity !== identity || !environment?.enabled || !latest.current.environment?.enabled
-      || latest.current.environment.transport !== environment.transport) throw new Error('The account or view connection changed. Reopen the original prompt edit.');
+      || latest.current.environment.transport !== environment.transport) throw new Error(t('sessions.promptEdit.connectionChanged'));
   }
   function assertSource() {
     assertAccess();
@@ -86,17 +87,17 @@ export function usePromptEditOperation(binding: SessionOperationBinding | undefi
       || !selection && (!resumedOwner || latest.current.text?.store !== resumedOwner.text.store || latest.current.text?.key !== intent?.owner.textKey
         || JSON.stringify(latest.current.image) !== JSON.stringify(intent?.owner.image) || latest.current.explicitRecipient !== resumed?.recipient)
       || source.parentNativeSessionId || !current.client.getSessionState().synchronized || current.client.getSessionState().readOnly
-      || (selection?.recipient ?? resumed?.recipient) && !(selection?.recipient ?? resumed?.recipient)!.isCurrent()) throw new Error('The original prompt view is no longer ready for editing.');
+      || (selection?.recipient ?? resumed?.recipient) && !(selection?.recipient ?? resumed?.recipient)!.isCurrent()) throw new Error(t('sessions.promptEdit.viewNotReady'));
   }
   const editPrompt = environment && binding?.scope && text && image && key && !binding.historical && !binding.source.parentNativeSessionId
     ? async (entry: ProjectedTimelineEntry) => {
-      if (intent || preparing.current) throw new Error('Resolve the original prompt edit before starting another.');
+      if (intent || preparing.current) throw new Error(t('sessions.promptEdit.resolveFirst'));
       if (restored.error) throw new Error(restored.error);
-      if (entry.item.type !== 'user_message' || !entry.item.messageId || !entry.turnId) throw new Error('This prompt has no native prefix boundary.');
+      if (entry.item.type !== 'user_message' || !entry.item.messageId || !entry.turnId) throw new Error(t('sessions.promptEdit.noBoundary'));
       const messageId = entry.item.messageId;
       const actual = binding.scope!.replica.getState().timeline.entries.find(candidate => candidate.turnId === entry.turnId
         && candidate.item.type === 'user_message' && candidate.item.messageId === messageId && candidate.seqStart === entry.seqStart);
-      if (!binding.scope!.isCurrent() || !actual) throw new Error('The selected prompt no longer belongs to this view.');
+      if (!binding.scope!.isCurrent() || !actual) throw new Error(t('sessions.promptEdit.notInView'));
       setSelection({ identity, lifetime: { active: true }, entry: actual, binding, access, recipient: explicitRecipient, text, image });
     } : undefined;
   const notice = source && directory && environment && scope && key && preparation ? <SessionSuccessionDialog key={identity}
@@ -104,7 +105,7 @@ export function usePromptEditOperation(binding: SessionOperationBinding | undefi
     assertAccess={assertAccess} assertSource={assertSource}
     onPreparing={async operation => {
       assertSource();
-      if (!selection || !text || !image || selection.entry.item.type !== 'user_message') throw new Error('The selected prompt is unavailable.');
+      if (!selection || !text || !image || selection.entry.item.type !== 'user_message') throw new Error(t('sessions.promptEdit.unavailable'));
       const previous = preparationOperation.current;
       if (previous?.identity === identity && previous.operationId !== operation.operationId) {
         await finishPrefixEdit(scope, key, previous.operationId, { unpublishedOnly: true });
@@ -115,7 +116,7 @@ export function usePromptEditOperation(binding: SessionOperationBinding | undefi
       assertSource();
       const imageSnapshot = await handle.flush(handle.snapshot().revision, () => selection.binding.scope!.isCurrent());
       assertSource();
-      if (imageSnapshot.status !== 'ready') throw new Error('The current image draft is not ready.');
+      if (imageSnapshot.status !== 'ready') throw new Error(t('sessions.promptEdit.imagesNotReady'));
       const owner = new ComposerDraftOwner(text, handle), captured = owner.capture();
       baselineHandle.current = { identity, operationId: operation.operationId, token: captured.token };
       const current = selection.binding.scope!, state = current.replica.getState();
@@ -136,13 +137,13 @@ export function usePromptEditOperation(binding: SessionOperationBinding | undefi
     }}
     onIntent={(operation, cancelRequested) => {
       const saved = preparing.current ?? intent;
-      if (!saved || saved.operation.operationId !== operation.operationId) throw new Error('The original prompt edit identity changed.');
+      if (!saved || saved.operation.operationId !== operation.operationId) throw new Error(t('sessions.promptEdit.identityChanged'));
       const next = { ...saved, cancelRequested }; savePrefixEdit(scope, key, next); preparing.current = next; setPending({ identity, intent: next });
     }}
     onSettled={async result => {
       assertAccess();
       let saved = readPrefixEdit(scope, key);
-      if (!saved || saved.operation.operationId !== result.record.operationId) throw new Error('The original prompt edit identity changed.');
+      if (!saved || saved.operation.operationId !== result.record.operationId) throw new Error(t('sessions.promptEdit.identityChanged'));
       await recovery.current;
       assertAccess();
       await environment.refreshSettled(result, source);
@@ -158,7 +159,7 @@ export function usePromptEditOperation(binding: SessionOperationBinding | undefi
       const current = latest.current.binding, owner = latest.current.text, imageOwner = latest.current.image;
       if (!target || !current?.scope?.isCurrent() || current.source.providerId !== target.providerId || current.source.nativeSessionId !== target.nativeSessionId
         || !owner || !imageOwner || owner.key !== saved.owner.textKey || JSON.stringify(imageOwner) !== JSON.stringify(saved.owner.image)
-        || latest.current.explicitRecipient && !latest.current.explicitRecipient.isCurrent()) throw new Error('The committed prompt is retained. Wait for its exact target view, then retry refresh.');
+        || latest.current.explicitRecipient && !latest.current.explicitRecipient.isCurrent()) throw new Error(t('sessions.promptEdit.retained'));
       const targetScope = current.scope, recipient = latest.current.explicitRecipient;
       const targetCurrent = () => {
         try { assertAccess(); } catch { return false; }
@@ -177,11 +178,11 @@ export function usePromptEditOperation(binding: SessionOperationBinding | undefi
       const expected = applied ?? original;
       if (snapshot.status !== 'ready' || !expected || !composer.matches(expected.token)
         || !alreadyApplied && !applied && (captured.text !== saved.baseline.text || captured.imageParts !== saved.baseline.imageParts)) {
-        throw new Error('A newer draft is preserved. The original prompt edit remains available for recovery.');
+        throw new Error(t('sessions.promptEdit.newerDraft'));
       }
       const draft = await readImageDraft(saved.prompt.key);
       assertAccess();
-      if (!draft || !targetCurrent() || !composer.matches(expected.token)) throw new Error('The selected prompt or its target owner is unavailable.');
+      if (!draft || !targetCurrent() || !composer.matches(expected.token)) throw new Error(t('sessions.promptEdit.targetUnavailable'));
       if (!alreadyApplied) {
         saved = { ...saved, restoration: { text: draft.parts.flatMap(part => part.type === 'text' ? [part.text] : []).join(''), imageParts: JSON.stringify(draft.parts) } };
         savePrefixEdit(scope, key, saved);
@@ -189,10 +190,10 @@ export function usePromptEditOperation(binding: SessionOperationBinding | undefi
       const receipt = await (alreadyApplied ? composer.retain(expected.token, targetCurrent) : composer.restore(expected.token, draft, targetCurrent));
       if (receipt.application.status === 'applied') appliedHandle.current = { operationId: saved.operation.operationId, token: receipt.application.token };
       if (receipt.application.status !== 'applied' || receipt.persistence.image !== 'saved') {
-        throw new Error('The selected prompt could not be restored without replacing a newer draft.');
+        throw new Error(t('sessions.promptEdit.cannotRestore'));
       }
-      if (receipt.persistence.text !== 'saved') throw new Error('The restored prompt is not yet retained. Keep this view open.');
-      if (!targetCurrent() || !composer.matches(receipt.application.token)) throw new Error('A newer draft is preserved. The original prompt edit remains available for recovery.');
+      if (receipt.persistence.text !== 'saved') throw new Error(t('sessions.promptEdit.notRetained'));
+      if (!targetCurrent() || !composer.matches(receipt.application.token)) throw new Error(t('sessions.promptEdit.newerDraft'));
       if (saved.excerpts?.length) quoteReceiver.current?.(saved.excerpts);
       savePrefixEdit(scope, key, { ...saved, restored: true });
     }}

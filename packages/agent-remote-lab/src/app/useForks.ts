@@ -4,7 +4,8 @@ import type { AgentReplicaState } from '@orchardworks/agent-client';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import { sideNavigationSource, sideNavigationTarget, sideLinkVisible, referenceForkContext, captureForkContext, type SessionFork } from '../session-forks.js';
 import { configureFork, sendForkInput } from '../fork-actions.js';
-import { message, viewKey } from './helpers.js';
+import { viewKey } from './helpers.js';
+import { messageWords } from './message-words.js';
 import type { AppInputs } from './types.js';
 import { sessionQuotaMessage, sessionQuotaReached } from '../state/agent-creation.js';
 import { copiesConversation, firstInputPending, forkCommandRoute, forkCreateOptions, forkedSession, forkKey, forkSettings, needsWorkspaceLookup, selectsSideAfterFork, withForkContext, workspaceOptions } from '../state/fork-plan.js';
@@ -26,9 +27,11 @@ import type { WindowViewActionsSlice } from './useWindowViewActions.js';
 import type { SessionOpeningSlice } from './useSessionOpening.js';
 import type { RemoteHostStateSlice } from './useRemoteHostState.js';
 import type { WindowModeActionsSlice } from './useWindowModeActions.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 // Opening a saved fork and creating one from a conversation command.
 export function useForks(scope: Pick<AppInputs & WorkbenchShellSlice & SessionSuccessionBindingSlice & ViewSessionStateSlice & FocusedAskSlice & HostAndStackSlice & SideSelectionSlice & PanelsAndShortcutsSlice & ViewTargetsSlice & ActiveSessionSlice & SideNavigationSlice & ConversationConnectionsSlice & RequestedSessionSlice & WorkbenchRecordsSlice & ProviderCreationSlice & WindowViewActionsSlice & SessionOpeningSlice & RemoteHostStateSlice & WindowModeActionsSlice, 'ask' | 'askView' | 'assertSourceCurrent' | 'baseUrl' | 'directory' | 'draftBindingFor' | 'forkBusy' | 'forkReservation' | 'forkStore' | 'letterRequest' | 'nextSideRequest' | 'refreshRelations' | 'rememberSession' | 'remoteHosts' | 'retryHosts' | 'selectSide' | 'selectedHost' | 'setDirectoryRevision' | 'setFailure' | 'setForkInputStatus' | 'sideRequestKey' | 'sideRequests' | 'succession' | 'transport' | 'viewSession'>) {
+  const t = useTranslate();
   const { ask, askView, assertSourceCurrent, baseUrl, directory, draftBindingFor, forkBusy, forkReservation, forkStore, letterRequest, nextSideRequest, refreshRelations, rememberSession, remoteHosts, retryHosts, selectSide, selectedHost, setDirectoryRevision, setFailure, setForkInputStatus, sideRequestKey, sideRequests, succession, transport, viewSession } = scope;
 
   async function openFork(record: SessionFork): Promise<void> {
@@ -48,13 +51,13 @@ export function useForks(scope: Pick<AppInputs & WorkbenchShellSlice & SessionSu
       rememberSession(session);
       if (sideRequests.current.get(sideRequestKey(source)) === request && sideLinkVisible(forkStore.get(record.id)) && sessionKey(session) !== sessionKey(source)) selectSide(source, session);
     } catch (error) {
-      if (sideRequests.current.get(sideRequestKey(source)) === request) setFailure(message(error, 'Forked session could not be opened.'));
+      if (sideRequests.current.get(sideRequestKey(source)) === request) setFailure(messageWords(error, t('sessions.forks.openFailed'), t));
     }
   }
   async function createFork(sourceState: AgentReplicaState, saved: OpenedSession | undefined, id: string, args: string): Promise<AgentCommandResult> {
     letterRequest.current?.abort();
     const agent = sourceState.agent;
-    if (!directory || !agent?.runtimeInfo.sessionId) throw new Error('This session cannot be forked.');
+    if (!directory || !agent?.runtimeInfo.sessionId) throw new Error(t('sessions.forks.cannotFork'));
     const source = viewSession(saved ?? { agentId: agent.id, nativeSessionId: agent.runtimeInfo.sessionId, providerId: agent.providerId, title: 'Conversation', hostId: 'local' });
     assertSourceCurrent(source);
     const associationOwner = succession.ownerFor(viewKey(source));
@@ -64,7 +67,7 @@ export function useForks(scope: Pick<AppInputs & WorkbenchShellSlice & SessionSu
       askView.setVisible(true);
       return ask.open(sourceState, source, args, false, { associationOwner, synchronize: async () => { assertSourceCurrent(source); await refreshRelations(); assertSourceCurrent(source); } });
     }
-    if (forkBusy.current) throw new Error('A session fork is already being created.');
+    if (forkBusy.current) throw new Error(t('sessions.forks.inProgress'));
     forkBusy.current = true;
     try {
       const target = (source.hostId ?? 'local') === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, source.hostId);
@@ -100,7 +103,7 @@ export function useForks(scope: Pick<AppInputs & WorkbenchShellSlice & SessionSu
       if (firstInputPending(args, forkStore.get(record.id).delivery)) {
         setForkInputStatus({ agentId: session.agentId, pending: true });
         try { await sendForkInput(transport, forkStore, forkStore.get(record.id), args.trim()); }
-        catch (error) { setForkInputStatus({ agentId: session.agentId, pending: false, error: message(error, 'The first fork input failed.') }); throw error; }
+        catch (error) { setForkInputStatus({ agentId: session.agentId, pending: false, error: messageWords(error, t('sessions.forks.firstInputFailed'), t) }); throw error; }
         setForkInputStatus(undefined);
         if (draft.store.get(draft.key) === args.trim()) draft.store.set(draft.key, '');
       }

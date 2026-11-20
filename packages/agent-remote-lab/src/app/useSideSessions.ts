@@ -23,9 +23,11 @@ import type { WindowViewActionsSlice } from './useWindowViewActions.js';
 import type { RequestedSessionSlice } from './useRequestedSession.js';
 import type { ViewTargetsSlice } from './useViewTargets.js';
 import type { ProviderCreationSlice } from './useProviderCreation.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 // Selecting and revealing a Side beside its source.
 export function useSideSessions(scope: Pick<AppInputs & WorkbenchRecordsSlice & FocusedAskSlice & SessionOpeningSlice & SideSelectionSlice & SessionSuccessionBindingSlice & ViewSessionStateSlice & WindowModeActionsSlice & HostAndStackSlice & WorkbenchShellSlice & ConversationConnectionsSlice & ActiveSessionSlice & PanelsAndShortcutsSlice & DocksAndBotSelectionSlice & WindowViewActionsSlice & RequestedSessionSlice & ViewTargetsSlice & ProviderCreationSlice, 'editWindow' | 'expandedKeys' | 'navigateSide' | 'navigation' | 'nextSideRequest' | 'openSession' | 'setSessionNotice' | 'setSideAnchor' | 'setSideFocus' | 'setSideSelections' | 'setSideSessions' | 'sharedViewForSlot' | 'sharedWindow' | 'stackPath' | 'succession' | 'viewSession' | 'windowMode' | 'windowWorkspace'>) {
+  const t = useTranslate();
   const { editWindow, expandedKeys, navigateSide, navigation, nextSideRequest, openSession, setSessionNotice, setSideAnchor, setSideFocus, setSideSelections, setSideSessions, sharedViewForSlot, sharedWindow, stackPath, succession, viewSession, windowMode, windowWorkspace } = scope;
 
   function selectSide(source: OpenedSession, session: OpenedSession): void {
@@ -36,7 +38,7 @@ export function useSideSessions(scope: Pick<AppInputs & WorkbenchRecordsSlice & 
     const group = placed ? windowWorkspace.readGroup(placed.windowId) : undefined;
     if (placed && group) {
       const origin = group.window.views.find(view => view.id === placed.viewId);
-      if (!origin?.binding || sessionKey(origin.binding) !== sessionKey(source)) throw new Error('The source view changed. Open the Side session again.');
+      if (!origin?.binding || sessionKey(origin.binding) !== sessionKey(source)) throw new Error(t('sessions.side.sourceChanged'));
       const binding = windowSessionBinding(session);
       const { operation, viewId } = sideWindowOperation(group.window, { windowId: group.window.id, viewId: origin.id, binding: origin.binding }, binding, crypto.randomUUID());
       const targetSlot = succession.document.slots.find(slot => slot.id === viewSession(session).viewId)!;
@@ -48,12 +50,12 @@ export function useSideSessions(scope: Pick<AppInputs & WorkbenchRecordsSlice & 
       setSideSessions(current => [...current.filter(entry => viewKey(entry) !== opened.viewId), opened]);
       nextSideRequest(source);
       void windowWorkspace.operateGroup(group.window.id, withNewAssistantPicture(group, windowWorkspace.groups, operation)).then(() => navigation.select({ kind: 'bot', groupId: group.window.id, viewId }))
-        .catch(error => setSessionNotice(sessionConnectionFailure(error, false)));
+        .catch(error => setSessionNotice(sessionConnectionFailure(error, false, t)));
       return;
     }
     if (sharedWindow) {
       const origin = sharedViewForSlot(sourceSlot);
-      if (!origin?.binding || sessionKey(origin.binding) !== sessionKey(source)) throw new Error('The source view changed. Open the Side session again.');
+      if (!origin?.binding || sessionKey(origin.binding) !== sessionKey(source)) throw new Error(t('sessions.side.sourceChanged'));
       const binding = windowSessionBinding(session);
       const { operation, viewId } = sideWindowOperation(windowWorkspace.readWindow(), { windowId: sharedWindow.id, viewId: origin.id, binding: origin.binding }, binding, crypto.randomUUID());
       const candidate = viewSession(session);
@@ -69,7 +71,7 @@ export function useSideSessions(scope: Pick<AppInputs & WorkbenchRecordsSlice & 
       const sharedGroup = windowWorkspace.readGroup(sharedWindow.id);
       if (windowMode) editWindow(operation);
       else void (sharedGroup ? windowWorkspace.operateGroup(sharedWindow.id, withNewAssistantPicture(sharedGroup, windowWorkspace.groups, operation)) : windowWorkspace.operate(operation)).then(() => navigation.select({ kind: 'bot', groupId: sharedWindow.id, viewId }))
-        .catch(error => setSessionNotice(sessionConnectionFailure(error, false)));
+        .catch(error => setSessionNotice(sessionConnectionFailure(error, false, t)));
       return;
     }
     nextSideRequest(source);

@@ -22,6 +22,7 @@ import { isAskAttached, askParticipantKey, type useAskConversations } from './us
 import type { SessionStars } from './useSessionStars.js';
 import { readStoredDisplay, workspaceDisplayState } from '../stored-display.js';
 import { storedRowsRelay } from '../workspace-access.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 type Selection = Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId' | 'title'> & Partial<Pick<OpenedSession, 'agentId' | 'parentAgentId' | 'parentNativeSessionId' | 'createdAt'>> & { viewId?: string };
 interface NativeBinding {
@@ -53,11 +54,13 @@ interface SuccessionOptions {
   failed(error: unknown, selection: Selection, retrying?: boolean): void;
 }
 const selectionFor = compositionSelection;
-const identityConfirmationError = 'The native session identity could not be confirmed.';
+
 const unavailable = (code: string): CompositionParticipantResult => ({ status: 'pending', retention: 'page', code });
 
 /** Product ownership and binding glue. Composition participants perform no native work. */
 export function useSessionSuccession(options: SuccessionOptions) {
+  const t = useTranslate();
+  const identityConfirmationError = t('sessions.succession.identityUnconfirmed');
   const [revision, render] = useReducer(value => value + 1, 0);
   const latest = useRef(options); latest.current = options;
   const supported = !!options.transport.fetchSessionSuccessions && !!options.transport.fetchSessionSuccessionCurrent && !!options.transport.fetchSessionSuccessionOperation
@@ -175,7 +178,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
       // A predecessor resolves to its role's slot, which already targets the successor; accept that view again.
       const successor = runtime.document.scope === options.scope ? lineageSlot(selection)?.slot ?? roleOriginSlot(selection) : undefined;
       const existing = explicitSlot(selection, explicitId) ?? (successor?.id === explicitId ? successor : undefined);
-      if (!existing) throw new Error('The selected session view no longer matches this session.');
+      if (!existing) throw new Error(t('sessions.succession.viewMismatch'));
       return existing;
     }
     const lineage = lineageSlot(selection);
@@ -202,7 +205,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
     publish();
     void write.completion.then(result => {
       if (current() && runtime.document.editRevision === revision && !runtime.error && result.status !== 'saved' && result.status !== 'cancelled') {
-        runtime.error = 'The current session layout could not be saved.'; publish();
+        runtime.error = t('sessions.succession.layoutNotSaved'); publish();
       }
     });
     return write.completion;
@@ -277,7 +280,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
       : await directory.attach(identity.providerId, identity.nativeSessionId, signal, takeOver);
     signal.throwIfAborted();
     runtime.suspendedSlots.delete(slot.id);
-    if (response.nativeSessionId !== undefined && response.nativeSessionId !== identity.nativeSessionId) throw new Error('The Host returned a different native session.');
+    if (response.nativeSessionId !== undefined && response.nativeSessionId !== identity.nativeSessionId) throw new Error(t('sessions.succession.differentNative'));
     const currentSlot = runtime.document.slots.find(candidate => candidate.id === slot.id && sessionKey(selectionFor(candidate)) === sessionKey(identity));
     return { ...slot.metadata, ...identity, agentId: response.agentId, title: currentSlot?.metadata?.title ?? title, viewId: slot.id };
   }
@@ -304,7 +307,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
         if (!live() || request.signal.aborted || JSON.stringify(slot.intent.target) !== target) return;
         runtime.sides.set(slot.id, session); slot.metadata = compositionSessionMetadata(session);
         runtime.document.editRevision++; save();
-      }).catch(error => { if (live() && !request.signal.aborted) { runtime.error = error instanceof Error ? error.message : 'The side session could not be opened.'; publish(); } })
+      }).catch(error => { if (live() && !request.signal.aborted) { runtime.error = error instanceof Error ? error.message : t('sessions.succession.sideOpenFailed'); publish(); } })
         .finally(() => { if (runtime.sideRequests.get(slot.id) === request) runtime.sideRequests.delete(slot.id); });
     }
   }
@@ -489,7 +492,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
       }
     } catch (error) {
       navigationLease?.release();
-      if (current()) { runtime.activeAttempt = undefined; runtime.error = error instanceof Error ? error.message : 'The session could not be opened.';
+      if (current()) { runtime.activeAttempt = undefined; runtime.error = error instanceof Error ? error.message : t('sessions.connection.openFailed');
         latest.current.failed(error, { hostId: desired.target.hostId, ...desired.target.native, title: desired.title }); publish(); }
     }
   }
@@ -504,21 +507,21 @@ export function useSessionSuccession(options: SuccessionOptions) {
     rememberHistoryTitles(runtime.document.slots.map(selectionFor)); publish();
     let replayRead = false;
     try {
-      if (!runtime.readable) throw new Error('Saved session composition is unreadable or unsupported. Its original data has been preserved.');
-      if (runtime.result && 'code' in runtime.result && runtime.result.code === 'invalid_view') throw new Error('The selected session view no longer matches this session.');
+      if (!runtime.readable) throw new Error(t('sessions.succession.compositionUnreadable'));
+      if (runtime.result && 'code' in runtime.result && runtime.result.code === 'invalid_view') throw new Error(t('sessions.succession.viewMismatch'));
       const all: SessionSuccessionReplay[] = [], cursors = new Set<string>(); let cursor: string | undefined;
       if (supported && !runtime.unsupported) do {
         const page = await options.transport.fetchSessionSuccessions!({ limit: 64, ...(cursor ? { cursor } : {}) }, request);
         if (!current()) return;
         all.push(...page.successions);
-        if (all.length > 1024) throw new Error('Session succession replay exceeded the retained limit.');
+        if (all.length > 1024) throw new Error(t('sessions.succession.replayLimit'));
         cursor = page.nextCursor ?? undefined;
-        if (cursor && cursors.has(cursor)) throw new Error('Session succession replay did not advance.');
+        if (cursor && cursors.has(cursor)) throw new Error(t('sessions.succession.replayStuck'));
         if (cursor) cursors.add(cursor);
       } while (cursor);
       runtime.replays = all; replayRead = true;
       if (runtime.selection && runtime.intent !== 'history' && !runtime.selectedSlot) runtime.selectedSlot = ensureView(runtime.selection).id;
-      if (runtime.selectedSlot && !runtime.document.slots.some(slot => slot.id === runtime.selectedSlot)) throw new Error('The selected session view is no longer available.');
+      if (runtime.selectedSlot && !runtime.document.slots.some(slot => slot.id === runtime.selectedSlot)) throw new Error(t('sessions.succession.viewGone'));
       const windowSlots = new Set(runtime.document.windowBindings?.map(binding => binding.slotId));
       const latestByRole = latestReplayByRole(options.scope, all, (replay, key) => runtime.intent !== 'history' || runtime.document.slots.some(slot => {
         if (!windowSlots.has(slot.id)) return false;
@@ -529,7 +532,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
       }));
       for (const replay of latestByRole.values()) admitReplay(replay);
       const local = runtime.intent !== 'history' && runtime.selectedSlot ? runtime.document.slots.find(slot => slot.id === runtime.selectedSlot) : undefined;
-      if (local?.intent.kind === 'role' && runtime.desired?.slot.id !== local.id) throw new Error('The selected session view could not be recovered from the current role.');
+      if (local?.intent.kind === 'role' && runtime.desired?.slot.id !== local.id) throw new Error(t('sessions.succession.roleRecoveryFailed'));
       if (local && local.intent.kind !== 'role' && runtime.desired?.slot.id !== local.id) {
         const target = local.intent.target;
         selectDesired(local, target, 0);
@@ -617,7 +620,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
       const overtaken = runtime.desired && runtime.result?.status === 'pending' ? refreshWith({ type: 'composition_pending', code: runtime.result.code ?? 'pending' }) : [];
       if (runtime.desired && runtime.result?.status === 'applied') refreshWith({ type: 'composition_applied' });
       if (overtaken.length) applyRefreshEffects(overtaken, () => queueMicrotask(() => { if (current()) void discover(); }));
-      else if (runtime.desired && runtime.result?.status !== 'applied') runtime.error = runtime.discoveryError = `Session composition needs synchronization (${runtime.result?.code ?? 'pending'}).`;
+      else if (runtime.desired && runtime.result?.status !== 'applied') runtime.error = runtime.discoveryError = t('sessions.succession.needsSync', { code: runtime.result?.code ?? 'pending' });
       else {
         if (runtime.error === runtime.discoveryError) runtime.error = undefined;
         runtime.discoveryError = undefined;
@@ -652,7 +655,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
     if (slotId && (!requestedSlot || (requestedSlot.intent.kind === 'history') !== (intent === 'history'))) {
       runtime.sequence++; runtime.metadata?.abort(); retireBinding(); runtime.desired = undefined; runtime.selectedSlot = slotId;
       runtime.selection = selection; runtime.intent = undefined; runtime.active = true; runtime.discovering = false;
-      runtime.result = unavailable('invalid_view'); runtime.error = 'The selected session view no longer matches this session.'; publish(); return true;
+      runtime.result = unavailable('invalid_view'); runtime.error = t('sessions.succession.viewMismatch'); publish(); return true;
     }
     if (intent === 'history') {
       const request = new AbortController();
@@ -714,9 +717,9 @@ export function useSessionSuccession(options: SuccessionOptions) {
     }
   }
   async function refreshCommitted(operationId: string): Promise<void> {
-    if (!live()) throw new Error('Workspace access is required to refresh this Handoff.');
+    if (!live()) throw new Error(t('sessions.succession.refreshNeedsAccess'));
     await refreshComposition();
-    if (!live()) throw new Error('Workspace access changed while refreshing this Handoff.');
+    if (!live()) throw new Error(t('sessions.succession.refreshAccessChanged'));
     const verdict = committedRefreshOf({ operationId, evidence: runtime.historyEvidence, roles: roleProgress(), shown: runtime.error });
     if (verdict.status === 'failed') throw new Error(verdict.message);
     const { roleKey, evidence } = verdict;
@@ -727,9 +730,9 @@ export function useSessionSuccession(options: SuccessionOptions) {
     const outcome = handoffOutcome(result.record.phase, result.record.from, source);
     if (outcome === 'committed') return refreshCommitted(result.record.operationId);
     if (outcome === 'unconfirmed') throw new Error(unconfirmedOutcome);
-    if (!live()) throw new Error('Workspace access is required to restore this conversation.');
+    if (!live()) throw new Error(t('sessions.succession.restoreNeedsAccess'));
     await refreshComposition();
-    if (!live()) throw new Error('Workspace access changed while restoring this conversation.');
+    if (!live()) throw new Error(t('sessions.succession.restoreAccessChanged'));
     const roleKey = compositionRoleKey({ scope: options.scope, hostId: source.hostId ?? 'local', controllerId: result.role.current.controllerId, roleId: result.role.id });
     const restored = restoredSourceOf({ roleCurrent: result.role.current, recordFrom: result.record.from, hasEvidence: !!runtime.historyEvidence.get(roleKey) });
     if (restored.status === 'failed') throw new Error(restored.message);
@@ -805,7 +808,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
   }
   function ownerFor(viewId: string): string {
     const owner = runtime.document.asks.find(owner => owner.sourceSlot === viewId);
-    if (!owner) throw new Error('The session view has no Ask owner.');
+    if (!owner) throw new Error(t('sessions.succession.noAskOwner'));
     return owner.id;
   }
   function resolveTarget(selection: Selection, requested: { nativePrefixOnly?: boolean; viewId?: string } = {}) {
@@ -822,7 +825,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
       if (!runtime.binding.isCurrent()) {
         runtime.binding.retireRecipient();
         try { latest.current.validateTarget?.(runtime.binding.session, runtime.binding.session.viewId, runtime.document); }
-        catch (error) { runtime.error = error instanceof Error ? error.message : 'The current execution locator is unavailable.'; publish(); }
+        catch (error) { runtime.error = error instanceof Error ? error.message : t('sessions.succession.locatorUnavailable'); publish(); }
       }
       else runtime.binding.resumeRecipient();
     } else if (runtime.discovered && !runtime.discovering && runtime.desired && !runtime.activeAttempt && runtime.targetUnavailable) void attachDesired(true);
@@ -1055,7 +1058,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
     },
     rememberSide: (session: OpenedSession & { viewId: string }) => {
       const slot = explicitSlot(session, session.viewId);
-      if (!slot) throw new Error('The side view no longer matches this session.');
+      if (!slot) throw new Error(t('sessions.succession.sideViewMismatch'));
       const metadata = compositionSessionMetadata(session), previous = runtime.sides.get(slot.id);
       if (previous && canonicalJson(previous) === canonicalJson(session) && canonicalJson(slot.metadata) === canonicalJson(metadata)) return;
       runtime.sides.set(slot.id, session); slot.metadata = metadata;

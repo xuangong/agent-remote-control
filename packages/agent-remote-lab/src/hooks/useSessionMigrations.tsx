@@ -6,6 +6,7 @@ import { decodeSessionChannelServerMessage, PROTOCOL_VERSION, type SessionMigrat
 import type { OpenedSession } from '../directory-client.js';
 import { sessionKey } from '../session-tree.js';
 import { sessionUrl } from '../components/SessionLink.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 export function useSessionMigrations(options: {
   baseUrl: string; enabled: boolean; transport: RemoteAgentTransport; current?: OpenedSession; loaded?: readonly OpenedSession[];
@@ -16,6 +17,7 @@ export function useSessionMigrations(options: {
   needsPromptRestore?(migration: SessionMigration): boolean;
   stay?(migration: SessionMigration): void;
 }) {
+  const t = useTranslate();
   const latest = useRef(options); latest.current = options;
   const [records, setRecords] = useState<SessionMigration[]>([]);
   const [seen, setSeen] = useState<Set<string>>(() => new Set());
@@ -92,9 +94,9 @@ export function useSessionMigrations(options: {
       const opened = await latest.current.follow({ ...migration.to, title: source.title }, source);
       if (latest.current.baseUrl !== scope) return;
       if (opened) { acknowledge(migration.id); setPrevious(source); }
-      else setFailure('The new branch could not be opened. Retry when connected.');
+      else setFailure(t('sessions.migration.openFailed'));
     } catch {
-      if (latest.current.baseUrl === scope) setFailure('The new branch could not be opened. Retry when connected.');
+      if (latest.current.baseUrl === scope) setFailure(t('sessions.migration.openFailed'));
     } finally {
       opening.current = false;
       if (latest.current.baseUrl === scope) setFollowing(false);
@@ -123,13 +125,13 @@ export function useSessionMigrations(options: {
   originalUrl?.searchParams.set('keepOriginal', '1');
   const needsPromptRestore = pending && options.needsPromptRestore?.(pending);
   const notice = original ? <div className="lab-prompt-edit-notice" role="status">
-    <span>{failure ?? (needsPromptRestore ? 'Prompt edit interrupted. Retry editing the original message, or stay here.' : following ? 'Opening the edited branch…' : pending && requested !== pending.id ? 'An edited branch is available. You can stay here or open it.' : pending && options.blocked(pending) ? 'Automatic switching paused.' : pending ? `Prompt edited. Switching to the new branch in ${remaining}s…` : 'Opened the edited branch.')}</span>
-    <a href={originalUrl!.href} target="_blank" rel="noreferrer">Original session</a>
-    {pending && !needsPromptRestore ? <button type="button" disabled={following || options.blocked(pending)} onClick={() => { void openBranch(pending, original); }}>{failure ? 'Retry' : 'Open edited branch'}</button> : null}
+    <span>{failure ?? (needsPromptRestore ? t('sessions.migration.interrupted') : following ? t('sessions.migration.opening') : pending && requested !== pending.id ? t('sessions.migration.available') : pending && options.blocked(pending) ? t('sessions.migration.paused') : pending ? t('sessions.migration.switching', { seconds: remaining }) : t('sessions.migration.opened'))}</span>
+    <a href={originalUrl!.href} target="_blank" rel="noreferrer">{t('sessions.migration.originalSession')}</a>
+    {pending && !needsPromptRestore ? <button type="button" disabled={following || options.blocked(pending)} onClick={() => { void openBranch(pending, original); }}>{failure ? t('common.retry') : t('sessions.migration.openBranch')}</button> : null}
     {pending ? <button type="button" disabled={following || options.blocked(pending)} onClick={() => {
       latest.current.stay?.(pending); acknowledge(pending.id); setPrevious(undefined); setFailure(undefined);
-    }}>Stay here</button> : null}
-    {!pending ? <button type="button" aria-label="Dismiss branch notice" onClick={() => setPrevious(undefined)}>×</button> : null}
+    }}>{t('sessions.migration.stay')}</button> : null}
+    {!pending ? <button type="button" aria-label={t('sessions.migration.dismiss')} onClick={() => setPrevious(undefined)}>×</button> : null}
   </div> : null;
   return { notice, pending, refresh: () => refreshRef.current?.() ?? Promise.resolve(false), requestFollow(id: string) { setRequested(id); void refreshRef.current?.(); } };
 }

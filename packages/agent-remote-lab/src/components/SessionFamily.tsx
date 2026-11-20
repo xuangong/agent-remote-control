@@ -1,6 +1,6 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import type { AgentChildSessionView } from '@orchardworks/agent-client-web/react';
+import { useTranslate, type AgentChildSessionView } from '@orchardworks/agent-client-web/react';
 import { isBotView } from '@orchardworks/agent-remote-protocol';
 import type { SessionWindowTarget } from '../hooks/useSessionWindows.js';
 import { useWindowSessionBridgeContext } from '../window-session-bridge-context.js';
@@ -42,6 +42,7 @@ function restore(key: string, root: SessionWindowTarget): Layout {
 
 /** Each session window owns its visible descendants, independently of other participants. */
 export function SessionFamily(props: Props) {
+  const t = useTranslate();
   const { target, compact, active } = props;
   const titleInteraction = useContext(SessionTitleInteractionContext);
   const storageKey = `agent-remote:recovery:${props.storageScope}:session-family:${props.displayBinding && !props.displayBinding.key.startsWith('session:') ? `${props.displayBinding.key}:` : ''}${sessionKey(target)}`;
@@ -141,10 +142,10 @@ export function SessionFamily(props: Props) {
     const sourceCurrent = () => mounted.current && (sourceViewId
       ? currentPanes.current.some(view => view.id === sourceViewId && !!view.binding && sessionKey(view.binding) === parentIdentity)
       : !!currentPath.current[index] && sessionKey(currentPath.current[index]!) === parentIdentity);
-    if (!sourceCurrent()) throw new Error('The source session changed before its subagent could be opened.');
+    if (!sourceCurrent()) throw new Error(t('sessions.family.sourceChangedBefore'));
     if (('providerId' in destination && destination.providerId !== target.providerId)
       || ('hostId' in destination && (destination.hostId ?? 'local') !== target.hostId)) {
-      throw new Error('This session belongs to a different Host or Provider.');
+      throw new Error(t('sessions.family.differentHost'));
     }
     const existing = path.findIndex(item => item.nativeSessionId === destination.nativeSessionId);
     if (existing >= 0) { show(existing); return; }
@@ -161,7 +162,7 @@ export function SessionFamily(props: Props) {
       return undefined;
     }
     const descendants = route(source.nativeSessionId) ?? (!('providerId' in destination) ? [{ ...target, nativeSessionId: destination.nativeSessionId, title: destination.title, parentNativeSessionId: source.nativeSessionId }] : undefined);
-    if (!descendants) throw new Error('This subagent is no longer in the session family. Refresh its parent session and retry.');
+    if (!descendants) throw new Error(t('sessions.family.subagentGone'));
     const directory = props.directoryFor?.(source.hostId ?? 'local') ?? new SessionDirectoryClient(props.baseUrl, undefined, source.hostId);
     const destinationTarget = descendants.at(-1)!;
     const value = await new Promise<Awaited<ReturnType<SessionDirectoryClient['attachChild']>>>((resolve, reject) => {
@@ -174,12 +175,12 @@ export function SessionFamily(props: Props) {
             childRequests.current.delete(request); resolve(value);
           }, error => { if (current === generation) { childRequests.current.delete(request); reject(error); } });
         },
-        cancel() { generation++; childRequests.current.delete(request); reject(new Error('The source session view was closed.')); },
+        cancel() { generation++; childRequests.current.delete(request); reject(new Error(t('sessions.family.viewClosed'))); },
       };
       childRequests.current.add(request); request.retry();
     });
-    if (!sourceCurrent()) throw new Error('The source session changed while its subagent was opening.');
-    if (value.nativeSessionId && value.nativeSessionId !== destinationTarget.nativeSessionId) throw new Error('The Host returned a different child session.');
+    if (!sourceCurrent()) throw new Error(t('sessions.family.sourceChangedWhile'));
+    if (value.nativeSessionId && value.nativeSessionId !== destinationTarget.nativeSessionId) throw new Error(t('sessions.family.differentChild'));
     const opened = (current: Record<string, OpenedSession>) => ({ ...current, [sessionKey(destinationTarget)]: { ...destinationTarget, agentId: value.agentId } });
     if (shared && sourceViewId) {
       // The Window store renders the new pane synchronously; it must already see the attached session, or it attaches again.
@@ -210,14 +211,14 @@ export function SessionFamily(props: Props) {
   // A folded primary group releases every conversation in it; a folded Side releases its own. Compact layouts do not
   // fold a closed pane, but a sleeping bot's family (props.folded) is released in every layout.
   const familyFolded = !!props.folded || !compact && !!rootView?.collapsed;
-  return <div className="lab-session-family" ref={container} data-compact={compact || undefined} hidden={!active} aria-label={`${target.title} session family`}>
+  return <div className="lab-session-family" ref={container} data-compact={compact || undefined} hidden={!active} aria-label={t('sessions.family.label', { title: target.title })}>
     {path.map((item, index) => {
       const paneView = index === 0 ? rootView : attached[index - 1];
       const selected = !!paneView && paneView.id === presentedViewId;
       const childSlot = index > 0 && attached[index - 1] ? sessionBridge?.slotForView(attached[index - 1]!.id) : undefined;
       const parent = index > 0 ? parentIndex(index) : 0;
-      const controls = index === 0 ? props.controls : compact ? <button type="button" aria-label={`Back to ${path[parent]!.title}`} title="Back to parent session" onClick={() => show(parent)}>←</button>
-        : <IconButton icon="close" label="Close subagent" title="Close subagent view" onClick={() => close(index)} />;
+      const controls = index === 0 ? props.controls : compact ? <button type="button" aria-label={t('sessions.family.backTo', { title: path[parent]!.title })} title={t('sessions.family.backToParent')} onClick={() => show(parent)}>←</button>
+        : <IconButton icon="close" label={t('sessions.family.closeSubagent')} title={t('sessions.family.closeSubagentView')} onClick={() => close(index)} />;
       return <section key={index === 0 ? "root" : `${paneView?.id ?? ''}:${sessionKey(item)}`} className={`lab-session-family-pane lab-session-pane-selection lab-session-composition${shared && rootView?.placement === 'primary' ? index === 0 ? ' lab-primary-conversation' : ' lab-side-conversation' : ''}`} aria-label={item.title} hidden={compact && focus !== index || index > 0 && attached[index - 1]?.collapsed}
         data-view-id={paneView?.id} data-selected={selected || undefined} aria-current={selected ? 'true' : undefined}
         style={compact ? undefined : index === 0 ? rootView ? { width: rootView.placement === 'float' ? '100%' : rootView.width, minWidth: rootView.placement === 'float' ? 0 : 240,

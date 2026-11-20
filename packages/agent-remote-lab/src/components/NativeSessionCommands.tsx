@@ -1,6 +1,9 @@
 import { useState } from 'react';
+import type { MessageKey } from '@orchardworks/agent-client';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 function CopyCommand({ command, label, action }: { command: string; label: string; action: string }) {
+  const t = useTranslate();
   const [copied, setCopied] = useState<string>();
   const [failed, setFailed] = useState(false);
   async function copy() {
@@ -9,18 +12,18 @@ function CopyCommand({ command, label, action }: { command: string; label: strin
   }
   return <div className="lab-native-command">
     <label>{label}<input readOnly value={command} onFocus={event => event.currentTarget.select()} /></label>
-    <button type="button" onClick={() => void copy()}>{copied === command ? 'Copied' : action}</button>
-    {failed ? <p role="alert">Copy failed. Select and copy the command above.</p> : null}
+    <button type="button" onClick={() => void copy()}>{copied === command ? t('common.copied') : action}</button>
+    {failed ? <p role="alert">{t('sessions.native.copyFailed')}</p> : null}
   </div>;
 }
 
 const uuid = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 const attachableIds: Readonly<Record<string, RegExp>> = { codex: uuid, copilot: uuid, claude: uuid, opencode: /^ses_[A-Za-z\d]+$/ };
-const attachNotes: Readonly<Record<string, string>> = {
-  codex: 'Run on the Host computer using its Controller configuration. The Controller supplies the shared daemon automatically.',
-  copilot: 'Run on the Host computer using the same Copilot profile. If another client controls this session, the command offers to take it over.',
-  claude: 'Run on the Host computer using the same Claude profile. If this session is open here, the command asks before interrupting it and taking control.',
-  opencode: 'Run on the Host computer. It attaches to the shared OpenCode server; this session stays open here.',
+const attachNotes: Readonly<Record<string, MessageKey>> = {
+  codex: 'sessions.native.noteCodex',
+  copilot: 'sessions.native.noteCopilot',
+  claude: 'sessions.native.noteClaude',
+  opencode: 'sessions.native.noteOpencode',
 };
 
 /** Moves to the session's working directory, then opens it with the Controller's session attach. */
@@ -37,21 +40,24 @@ export function nativeOpenCommand({ hostId = 'local', providerId, nativeSessionI
 }
 
 export function NativeSessionCommand({ hostId, providerId, nativeSessionId, workspace }: { hostId?: string; providerId: string; nativeSessionId: string; workspace?: string }) {
+  const t = useTranslate();
   const command = nativeOpenCommand({ hostId, providerId, nativeSessionId }, workspace);
   if (!command) return null;
-  return <section className="lab-native-session-command" aria-label="Open on Host">
-    <h3>Open on Host</h3>
-    <p>{attachNotes[providerId]}{command.startsWith('agent-remote-controller ') ? ' Run it from the session’s working directory.' : ''}</p>
-    <CopyCommand key={nativeSessionId} label="Terminal command" action="Copy command" command={command} />
+  const note = attachNotes[providerId] ? t(attachNotes[providerId]!) : '';
+  return <section className="lab-native-session-command" aria-label={t('sessions.native.openOnHost')}>
+    <h3>{t('sessions.native.openOnHost')}</h3>
+    <p>{command.startsWith('agent-remote-controller ') ? t('sessions.native.runFromDirectory', { note }) : note}</p>
+    <CopyCommand key={nativeSessionId} label={t('sessions.native.terminalCommand')} action={t('sessions.native.copyCommand')} command={command} />
   </section>;
 }
 
 export function NativeDaemonRecovery() {
+  const t = useTranslate();
   return <details className="lab-native-daemon-recovery">
-    <summary>Restart daemon to recover…</summary>
-    <p>Restarting disconnects all sessions using this shared Codex daemon. Running responses and tools may be interrupted. Saved history remains, but unfinished work may need checking; unconfirmed messages will not be resent automatically.</p>
-    <p>Check active work first. If you choose to restart, run this on the Host computer using the same Controller configuration. Copying does not execute it.</p>
-    <CopyCommand label="Restart command" action="Copy restart command" command="agent-remote-controller codex daemon restart" />
-    <p>If the problem returns, check the daemon’s file descriptor usage and limit. The Controller starts the replacement with a limit of 8192 unless configured otherwise.</p>
+    <summary>{t('sessions.native.restartSummary')}</summary>
+    <p>{t('sessions.native.restartWarning')}</p>
+    <p>{t('sessions.native.restartAdvice')}</p>
+    <CopyCommand label={t('sessions.native.restartCommand')} action={t('sessions.native.copyRestartCommand')} command="agent-remote-controller codex daemon restart" />
+    <p>{t('sessions.native.descriptorAdvice')}</p>
   </details>;
 }

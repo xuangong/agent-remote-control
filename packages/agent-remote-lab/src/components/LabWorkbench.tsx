@@ -3,6 +3,7 @@ import { TrackViewCommand, TrackViewScope } from '../hooks/useSessionAttention.j
 import { TpmViewCommand, TpmViewScope } from '../hooks/useTpmVisibility.js';
 import { AskViewCommand, AskViewScope } from '../hooks/useAskVisibility.js';
 import { useContext, useMemo, type ComponentProps } from 'react';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { SessionWorkbench } from './SessionWorkbench.js';
 import { RecoveryScope } from '../conversation-recovery.js';
 import { useBoundDraft, type DraftBinding } from '../draft-store.js';
@@ -22,6 +23,7 @@ export type { SessionViewActions as LabWorkbenchActions } from '@orchardworks/ag
 
 /** Product policy is supplied around the same session renderer used by ARDB. */
 export function LabWorkbench({ draftBinding, displayBinding, operationBinding, sessionIdentity, hostLabel, showAttributions = true, receiveQuotes, ...props }: ComponentProps<typeof SessionWorkbench> & { draftBinding?: DraftBinding; displayBinding?: ViewBinding; operationBinding?: SessionOperationBinding; sessionIdentity?: SessionEntry; hostLabel?: string; showAttributions?: boolean; receiveQuotes?(excerpts: readonly SessionExcerpt[]): void }) {
+  const t = useTranslate();
   const descriptions = useContext(SessionDescriptionsContext);
   const source = sessionIdentity ?? operationBinding?.source;
   const relationships = showAttributions ? props.sessionDescription ?? (source ? descriptions?.describe(source) ?? describeSession({ session: source }) : undefined) : undefined;
@@ -44,11 +46,11 @@ export function LabWorkbench({ draftBinding, displayBinding, operationBinding, s
   const sessionDescription = showAttributions && identity ? {
     identity,
     attributions: [
-      { id: 'identity:host', kind: 'identity', label: 'Host', value: resolvedHostLabel ?? identity.hostId ?? 'local',
+      { id: 'identity:host', kind: 'identity', label: t('sessions.workbench.host'), value: resolvedHostLabel ?? identity.hostId ?? 'local',
         ...(resolvedHostLabel && identity.hostId && resolvedHostLabel !== identity.hostId ? { detail: identity.hostId } : {}) },
-      { id: 'identity:provider', kind: 'identity', label: 'Provider', value: identity.providerId },
-      { id: 'identity:cwd', kind: 'identity', label: 'cwd', value: matchingAgent?.cwd || 'Not available in saved history' },
-      { id: 'identity:session', kind: 'identity', label: 'Session ID', value: identity.nativeSessionId },
+      { id: 'identity:provider', kind: 'identity', label: t('sessions.workbench.provider'), value: identity.providerId },
+      { id: 'identity:cwd', kind: 'identity', label: t('sessions.workbench.cwd'), value: matchingAgent?.cwd || t('sessions.workbench.noHistoryCwd') },
+      { id: 'identity:session', kind: 'identity', label: t('sessions.workbench.sessionId'), value: identity.nativeSessionId },
       ...(relationships?.attributions ?? []),
     ],
   } : relationships;
@@ -63,7 +65,7 @@ export function LabWorkbench({ draftBinding, displayBinding, operationBinding, s
       : id === TpmViewCommand.id && tpmCommand ? tpmCommand(args)
       : id === TeamViewCommand.id && teamCommand ? teamCommand(args)
       : id === AskViewCommand.id && askVisibility && (!sourceAskCommand || ['', 'on', 'off', 'enable', 'disable'].includes(args.trim().toLowerCase())) ? askVisibility(args)
-      : props.onExecuteConsoleCommand ? props.onExecuteConsoleCommand(id, args) : Promise.reject(new Error('Unknown console command.')) : props.onExecuteConsoleCommand}
+      : props.onExecuteConsoleCommand ? props.onExecuteConsoleCommand(id, args) : Promise.reject(new Error(t('sessions.workbench.unknownCommand'))) : props.onExecuteConsoleCommand}
     readingPositions={positions} draftScope={draftScope}
     composerNotice={<>{props.composerNotice}{promptEdit.notice}{draftBinding ? <DraftRecoveryNotice binding={draftBinding} /> : null}</>}
     messageDraft={draftBinding ? draft.text : props.messageDraft} onMessageDraftChange={draftBinding ? draft.set : props.onMessageDraftChange}

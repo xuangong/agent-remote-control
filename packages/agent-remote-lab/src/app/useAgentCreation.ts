@@ -2,7 +2,8 @@ import { classifyCreationFailure, mayCreate, partialCreationMessage, planningOpt
 import { windowSessionBinding } from '../window-workspace.js';
 import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
 import { DirectoryError } from '../directory-client.js';
-import { createAgentId, message } from './helpers.js';
+import { createAgentId } from './helpers.js';
+import { messageWords } from './message-words.js';
 import type { AppInputs } from './types.js';
 import type { HostAndStackSlice } from './useHostAndStack.js';
 import type { ViewSessionStateSlice } from './useViewSessionState.js';
@@ -22,9 +23,11 @@ import type { ProviderStateSlice } from './useProviderState.js';
 import type { SharedFeedsAndTpmSlice } from './useSharedFeedsAndTpm.js';
 import type { StackSelectionSlice } from './useStackSelection.js';
 import type { SessionBindingSlice } from './useSessionBinding.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 // Creating a session from the New session form, or a bot from Bot mode.
 export function useAgentCreation(scope: Pick<AppInputs & HostAndStackSlice & ViewSessionStateSlice & SideSelectionSlice & SessionSuccessionBindingSlice & PanelsAndShortcutsSlice & ActiveSessionSlice & WorkbenchRecordsSlice & RequestedSessionSlice & ConversationConnectionsSlice & WorkbenchShellSlice & ViewTargetsSlice & WindowViewActionsSlice & RemoteHostStateSlice & ProviderCreationSlice & ProviderStateSlice & SharedFeedsAndTpmSlice & StackSelectionSlice & SessionBindingSlice, 'attach' | 'closeContext' | 'createPlanning' | 'creationReservation' | 'creationUnavailableReason' | 'directory' | 'directoryDestination' | 'dispatchPanels' | 'navigation' | 'providerConnectionName' | 'providerId' | 'rememberSession' | 'retryHosts' | 'selectedHost' | 'sessionOptions' | 'setCreationLocked' | 'setDirectoryRevision' | 'setFailure' | 'setNewBot' | 'setProviderName' | 'setSessionNotice' | 'setTransitioning' | 'showView' | 'trackedViews' | 'transitionRef' | 'transport' | 'windowWorkspace' | 'rememberTrackedView' | 'bindDirectorySession'>) {
+  const t = useTranslate();
   const { attach, closeContext, createPlanning, creationReservation, creationUnavailableReason, directory, directoryDestination, dispatchPanels, navigation, providerConnectionName, providerId, rememberSession, retryHosts, selectedHost, sessionOptions, setCreationLocked, setDirectoryRevision, setFailure, setNewBot, setProviderName, setSessionNotice, setTransitioning, showView, trackedViews, transitionRef, transport, windowWorkspace, rememberTrackedView, bindDirectorySession } = scope;
 
   /** Creates a session from the New session form or, for `bot`, Bot mode's New bot, which starts a group named after it. */
@@ -74,10 +77,10 @@ export function useAgentCreation(scope: Pick<AppInputs & HostAndStackSlice & Vie
       dispatchPanels({ type: 'sessionPanel.set', panel: 'list' });
     } catch (error) {
       const outcome = classifyCreationFailure({ code: error instanceof DirectoryError ? error.code : undefined, directoryError: error instanceof DirectoryError, hasDirectory: !!directory,
-        reservationHeld: !!creationReservation.current, bot, botSessionCreated: botSession, message: message(error, 'Agent could not be created.') });
+        reservationHeld: !!creationReservation.current, bot, botSessionCreated: botSession, message: messageWords(error, t('sessions.creation.failed'), t) });
       if (outcome.partialNotice) {
-        const notice = sessionConnectionFailure(error, false);
-        setSessionNotice({ ...notice, operation: 'Create session', message: partialCreationMessage(notice.message) });
+        const notice = sessionConnectionFailure(error, false, t);
+        setSessionNotice({ ...notice, operation: t('sessions.connection.createSession'), message: partialCreationMessage(notice.message) });
       }
       if (outcome.releasesReservation) { creationReservation.current = undefined; setCreationLocked(false); }
       // Before the session exists the sheet shows why; after, the roster shows the group's creation state and its Retry.

@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 export function SessionPopover({ label, trigger, triggerTitle, className = '', children, onOpen, heading, headingAction }: { label: string; trigger: ReactNode; triggerTitle?: string; className?: string; children(close: () => void): ReactNode; onOpen?(): void; heading?: ReactNode; headingAction?(close: () => void): ReactNode }) {
+  const t = useTranslate();
   const [open, setOpen] = useState(false);
   const id = useId();
   const root = useRef<HTMLDivElement>(null);
@@ -19,7 +21,7 @@ export function SessionPopover({ label, trigger, triggerTitle, className = '', c
     <button type="button" ref={button} className="lab-session-popover-trigger" title={triggerTitle} aria-label={label} aria-expanded={open} aria-controls={id}
       onClick={() => { if (!open) onOpen?.(); setOpen(value => !value); }}>{trigger}</button>
     {open ? <section ref={panel} tabIndex={-1} id={id} className="lab-session-popover-panel" aria-label={label}>
-      <div className="lab-directory-heading"><h2>{heading ?? label}</h2>{headingAction?.(close)}<button type="button" aria-label={`Close ${label}`} onClick={close}>×</button></div>
+      <div className="lab-directory-heading"><h2>{heading ?? label}</h2>{headingAction?.(close)}<button type="button" aria-label={t('sessions.popover.close', { label })} onClick={close}>×</button></div>
       {children(close)}
     </section> : null}
   </div>;

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { sessionForest, sessionKey, sessionStatusLabel, type SessionEntry, type SessionNode } from '../session-tree.js';
 import { SessionTree } from './SessionTree.js';
 
@@ -8,6 +9,7 @@ export function ChatSessionManager({ current, entries, busy, onOpen, localViews,
   current: SessionEntry; entries: readonly SessionEntry[]; busy: boolean; onOpen(item: SessionEntry): void;
   localViews?: readonly LocalSessionView[]; activeSlot?: string; onOpenView?(view: LocalSessionView): void;
 }) {
+  const t = useTranslate();
   const [expanded, setExpanded] = useState(false);
   const layer = useRef<HTMLElement>(null);
   const key = sessionKey(current);
@@ -33,16 +35,16 @@ export function ChatSessionManager({ current, entries, busy, onOpen, localViews,
   const working = family ? workingSubagents(family) : 0;
   const represented = new Set(onOpenView ? localViews?.map(view => sessionKey(view.session)) : []);
   const nativeNodes = remainingFamily(family ? [family] : sessionForest([current]), represented);
-  return <section ref={layer} className="lab-chat-sessions" aria-label="Chat sessions">
+  return <section ref={layer} className="lab-chat-sessions" aria-label={t('sessions.manager.label')}>
     <button type="button" className="lab-chat-sessions-heading" data-working={working > 0 || undefined} aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
-      <span aria-hidden="true">{expanded ? '▾' : '▸'}</span><strong>Sessions</strong>{' '}{working > 0 ? <span className="lab-session-working-count">{working} working</span> : null}
+      <span aria-hidden="true">{expanded ? '▾' : '▸'}</span><strong>{t('sessions.manager.heading')}</strong>{' '}{working > 0 ? <span className="lab-session-working-count">{t('sessions.manager.working', { count: working })}</span> : null}
     </button>
     {expanded ? <>{onOpenView ? localViews?.map(view => <button key={view.slotId} type="button" className="lab-session-row lab-chat-session-row"
       aria-current={view.slotId === activeSlot ? 'page' : undefined} disabled={busy || view.slotId === activeSlot} onClick={() => onOpenView(view)}>
-      <strong className="agent-session-title">{view.session.title}</strong><small>{view.slotId === activeSlot ? 'Current view' : 'Saved view'}</small>
+      <strong className="agent-session-title">{view.session.title}</strong><small>{view.slotId === activeSlot ? t('sessions.manager.currentView') : t('sessions.manager.savedView')}</small>
     </button>) : null}<SessionTree defaultExpanded nodes={nativeNodes} activeKey={key} renderRow={(item, placeholder) => <button type="button" className="lab-session-row lab-chat-session-row" data-working={!!item.parentNativeSessionId && item.status === 'running' || undefined} aria-current={sessionKey(item) === key ? 'page' : undefined}
       disabled={busy || placeholder || sessionKey(item) === key} onClick={() => onOpen(item)}>
-      <strong className="agent-session-title" data-session-status={item.status}>{item.title}</strong><small>{sessionKey(item) === key ? 'Current' : item.parentNativeSessionId ? item.role ?? 'Subagent' : 'Parent'}{sessionStatusLabel(item) ? ` · ${sessionStatusLabel(item)}` : ''}</small>
+      <strong className="agent-session-title" data-session-status={item.status}>{item.title}</strong><small>{sessionKey(item) === key ? t('sessions.manager.current') : item.parentNativeSessionId ? item.role ?? t('sessions.manager.subagent') : t('sessions.manager.parent')}{sessionStatusLabel(item, t) ? ` · ${sessionStatusLabel(item, t)}` : ''}</small>
     </button>} /></> : null}
   </section>;
 }

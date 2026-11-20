@@ -2,7 +2,7 @@ import { LiveConnectionsContext } from '../hooks/useLiveBudget.js';
 import type { LiveRegistration } from '../live-budget.js';
 import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type ComponentProps } from 'react';
 import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-client';
-import { CommunicationNavigationContext, type AgentChildSessionView } from '@orchardworks/agent-client-web/react';
+import { CommunicationNavigationContext, useTranslate, type AgentChildSessionView } from '@orchardworks/agent-client-web/react';
 import type { SessionWindowTarget } from '../hooks/useSessionWindows.js';
 import { WorkspaceReady } from '../workspace-access.js';
 import { ConversationConnectionScope } from '../conversation-connections.js';
@@ -60,6 +60,7 @@ const ignoreChanges = () => () => {};
 /** How long a view waits for its locator before it reports the wait with a Retry. */
 export const locatorSynchronizingNoticeMs = 30_000;
 export function SessionConversation(props: SessionConversationProps) {
+  const t = useTranslate();
   const { target, baseUrl, attachmentEnabled = true } = props;
   const operations = useContext(SessionViewOperationsContext);
   const [inputOwner, setInputOwner] = useState<{ source: SessionWindowTarget; target: SessionWindowTarget; count: number }>();
@@ -68,7 +69,7 @@ export function SessionConversation(props: SessionConversationProps) {
     const resolved = operations?.resolveTarget(target, { viewId: props.viewId, nativePrefixOnly: props.nativePrefixOnly });
     if (resolved) { currentTarget = { ...target, ...resolved.target, hostId: resolved.target.hostId ?? 'local' }; historyRoleId = resolved.historyRoleId; }
   } catch (error) {
-    resolutionError = error instanceof Error ? error.message : 'The current session locator is unavailable.';
+    resolutionError = error instanceof Error ? error.message : t('sessions.conversation.locatorUnavailable');
     synchronizing = error instanceof SessionLocatorSynchronizingError;
     staleLocator = error instanceof SessionLocatorSynchronizingError && error.stale;
   }
@@ -85,7 +86,7 @@ export function SessionConversation(props: SessionConversationProps) {
     && sessionKey(inputOwner.target) !== sessionKey(currentTarget);
   if (retainingInput) {
     currentTarget = inputOwner!.target;
-    resolutionError ??= 'The previous input is still pending. Check its result before continuing in the replacement session.';
+    resolutionError ??= t('sessions.conversation.inputPending');
   }
   // Synchronizing is a wait, not a failure: the view shows it as opening, without an alert and its Retry, unless the
   // wait lasts long enough to need one.
@@ -144,17 +145,17 @@ export function SessionConversation(props: SessionConversationProps) {
       const abort = new AbortController(); restorations.current.add(abort);
       try { await handoff.run(owner.generation, async progress => {
         if (!availability.current.enabled || availability.current.offline || availability.current.targetKey !== targetKey)
-          throw new SessionHandoffRejectedError('Workspace access is restoring or the session changed.');
+          throw new SessionHandoffRejectedError(t('sessions.conversation.accessRestoring'));
         const value = await directory.attach(currentTarget.providerId, currentTarget.nativeSessionId, abort.signal, progress.checkOnly ? undefined : owner.generation);
         abort.signal.throwIfAborted();
         progress.onRestoring();
-        if (!availability.current.enabled || availability.current.targetKey !== targetKey) throw new Error('Session navigation changed before native restoration was confirmed.');
-        if (value.nativeSessionId && value.nativeSessionId !== currentTarget.nativeSessionId) throw new Error('The Host returned a different session.');
+        if (!availability.current.enabled || availability.current.targetKey !== targetKey) throw new Error(t('sessions.conversation.navigationChanged'));
+        if (value.nativeSessionId && value.nativeSessionId !== currentTarget.nativeSessionId) throw new Error(t('sessions.conversation.differentSession'));
         const restored = { ...currentTarget, agentId: value.agentId };
         const lease = connections?.acquire(value.agentId, props.replicaFor?.(value.agentId) ?? new AgentReplica(), restored);
         setSession(restored); setError('');
         try { await lease?.client.takeControlAfterNativeResume(); } finally { lease?.release(); }
-      }, options); } catch (failure) { if (!abort.signal.aborted) setError(failure instanceof Error ? failure.message : 'The session could not be restored.'); throw failure; }
+      }, options); } catch (failure) { if (!abort.signal.aborted) setError(failure instanceof Error ? failure.message : t('sessions.conversation.restoreFailed')); throw failure; }
       finally { restorations.current.delete(abort); }
       setNativeOwner(current => current?.targetKey === targetKey && current.owner.generation === owner.generation ? undefined : current);
     }} />{error ? <p role="alert">{error}</p> : null}</> : undefined;
@@ -183,7 +184,7 @@ export function SessionConversation(props: SessionConversationProps) {
       : client.attach(currentTarget.providerId, currentTarget.nativeSessionId, abort.signal);
     void attachment.then(value => {
       if (stopped || !availability.current.enabled || availability.current.targetKey !== targetKey) return;
-      if (value.nativeSessionId && value.nativeSessionId !== currentTarget.nativeSessionId) throw new Error('The Host returned a different session. Reopen this subagent from its parent.');
+      if (value.nativeSessionId && value.nativeSessionId !== currentTarget.nativeSessionId) throw new Error(t('sessions.conversation.differentSessionReopen'));
       setSession({ ...currentTarget, agentId: value.agentId }); setNativeOwner(undefined);
     }).catch(error => {
       // A person who lost access to a conversation keeps nothing of it on this device.
@@ -192,7 +193,7 @@ export function SessionConversation(props: SessionConversationProps) {
       if (stopped || !availability.current.enabled || availability.current.targetKey !== targetKey) return;
       if (props.familyRoot && props.onSessionUnavailable && nativeSessionMissing(error) && !historyRoleId && !currentTarget.parentNativeSessionId
         && sessionKey(currentTarget) === sessionKey(target)) { props.onSessionUnavailable(currentTarget); return; }
-      setError(error instanceof DirectoryError && error.nativeOwner ? '' : error instanceof Error ? error.message : 'The session could not be opened.');
+      setError(error instanceof DirectoryError && error.nativeOwner ? '' : error instanceof Error ? error.message : t('sessions.conversation.openFailed'));
       setNativeOwner(error instanceof DirectoryError && error.nativeOwner ? { targetKey, owner: error.nativeOwner } : undefined);
     });
     return () => { stopped = true; abort.abort(); };
@@ -221,6 +222,7 @@ export function SessionConversation(props: SessionConversationProps) {
     onRetryAttachment={retrySynchronizing ?? (enabled && canAttach && !props.offline && !props.attachmentManaged ? () => { unavailable.forget(currentTarget); setAttempt(value => value + 1); } : undefined)} />;
 }
 function FamilyChat({ disconnected, opening, hostLabel, visible = true, mutationBlocked = false, onPendingInputChange, session, pending, transport, navigation, draftStore, draftBinding, imageDraftBinding, imageRecipient: explicitImageRecipient, controls, menuActions, offline, entries, onNavigate, displayBinding, baseUrl, target, preview, viewId, nativePrefixOnly, availabilityError, onRetryAttachment, consoleCommands, onExecuteConsoleCommand, replica, replicaFor, onSessionReady, onSessionBound, windowViewId, sessionPresentation, renderSessionFooter, familyRoot, nativeTakeover, sessionIntent, attachmentAvailable, compact, successionContext: explicitContext, directoryFor }: SessionConversationProps & { disconnected: boolean; opening: boolean; nativeTakeover?: ReactNode; attachmentAvailable: boolean; session: OpenedSession; pending: boolean; preview?: AgentReplicaState; availabilityError?: string; onRetryAttachment?(): void }) {
+  const t = useTranslate();
   const conversation = useConversationSession(session, transport, replica ?? replicaFor?.(session.agentId), pending, { viewId, nativePrefixOnly, externalAttachment: true, sessionIntent, attachmentAvailable });
   const { state, sessionState, status, actions, questions, setQuestions, imageRecipient, operationBinding } = conversation;
   const nativeIdentityMatches = state?.agent?.id === session.agentId && state.agent.providerId === session.providerId
@@ -239,8 +241,8 @@ function FamilyChat({ disconnected, opening, hostLabel, visible = true, mutation
   }, [session.hostId, session.providerId, session.nativeSessionId, session.agentId, viewId, windowViewId, bound]);
   useEffect(() => { onSessionReady?.(conversation); return () => onSessionReady?.(undefined); }, [onSessionReady, conversation.sendQueuedInput, actions.sendMessage]);
   const open = (destination: SessionEntry | AgentChildSessionView) => {
-    if (pending) throw new Error('The session is still opening.');
-    if (offline) throw new Error('The Host is offline. Open the subagent when it is back.');
+    if (pending) throw new Error(t('sessions.conversation.stillOpening'));
+    if (offline) throw new Error(t('sessions.conversation.hostOffline'));
     return onNavigate(destination, childrenFor, presentedSession);
   };
   const navigationActions: SessionViewNavigationActions = {
@@ -306,7 +308,7 @@ function FamilyChat({ disconnected, opening, hostLabel, visible = true, mutation
     sessionManager={presentation?.sessionManager ?? <>{controls}<SessionHeadingActions sessionKey={key} alwaysCollapsed={!!menuActions}><SessionLink session={target} />{menuActions}</SessionHeadingActions></>}
     onPendingInputChange={reportPendingInput} headingStart={presentation?.headingStart}
     composerNotice={<>{/* While the Host is away the conversation opens again by itself once it is back; nothing to retry. */}
-      {availabilityError && !offline ? <p role="alert">{availabilityError} <button type="button" onClick={onRetryAttachment} disabled={!onRetryAttachment}>Retry</button></p> : null}{presentation?.composerNotice}</>} />{renderSessionFooter?.(presentationContext)}</CommunicationNavigationContext.Provider>;
+      {availabilityError && !offline ? <p role="alert">{availabilityError} <button type="button" onClick={onRetryAttachment} disabled={!onRetryAttachment}>{t('common.retry')}</button></p> : null}{presentation?.composerNotice}</>} />{renderSessionFooter?.(presentationContext)}</CommunicationNavigationContext.Provider>;
 }
 
 function familyDisplayBinding({ displayBinding, target, entries, viewId, windowViewId }: Pick<SessionConversationProps, 'displayBinding' | 'target' | 'entries' | 'viewId' | 'windowViewId'>) {

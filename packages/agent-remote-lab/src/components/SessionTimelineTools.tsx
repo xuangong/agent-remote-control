@@ -1,9 +1,11 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 /** Keeps floating actions within their Session View without covering the reading area. */
 export function SessionTimelineTools({ collapsible, searchOpen, searchPanel, timelineRef, onDismissSearch, children }: {
   collapsible: boolean; searchOpen: boolean; searchPanel?: ReactNode; timelineRef: RefObject<HTMLElement>; onDismissSearch(): void; children?: ReactNode;
 }) {
+  const t = useTranslate();
   const [collapsed, setCollapsed] = useState(true);
   const contentId = useId();
   const container = useRef<HTMLDivElement>(null);
@@ -49,9 +51,9 @@ export function SessionTimelineTools({ collapsible, searchOpen, searchPanel, tim
       ownerDocument.removeEventListener('keydown', dismissOnScrollKey);
     };
   }, [collapsible, hidden, timelineRef]);
-  const label = hidden ? 'Expand session actions' : 'Collapse session actions';
+  const label = hidden ? t('sessions.tools.expand') : t('sessions.tools.collapse');
   return <div ref={container} className="lab-timeline-controls">
-    {children ? <div className="lab-timeline-tools" role="toolbar" aria-label="Session actions"
+    {children ? <div className="lab-timeline-tools" role="toolbar" aria-label={t('sessions.tools.label')}
     data-collapsible={collapsible || undefined} data-collapsed={hidden || undefined}>
     <div ref={content} id={contentId} className="lab-timeline-tools-content"
       aria-hidden={hidden || undefined} {...(hidden ? { inert: '' } : {})}>{children}</div>

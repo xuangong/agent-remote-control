@@ -1,4 +1,4 @@
-import { CommunicationNavigationContext } from '@orchardworks/agent-client-web/react';
+import { CommunicationNavigationContext, useTranslate } from '@orchardworks/agent-client-web/react';
 import type { DraftBinding } from '../draft-store.js';
 import { SessionLink } from './SessionLink.js';
 import { SessionTitle } from './SessionTitle.js';
@@ -31,6 +31,7 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
   onFocus?(): void; onClose(): void; onOpenSource(session: OpenedSession): void; onOpenFork(fork: SessionFork): void;
   onFork(state: AgentReplicaState, session: OpenedSession, id: string, args: string): Promise<AgentCommandResult>; visible?: boolean;
 }) {
+  const t = useTranslate();
   const { state, sessionState, handoff, status, questions, setQuestions, actions, imageRecipient, operationBinding } = useConversationSession(session, transport, cachedReplica, initialInput?.pending);
   const { communication, ...viewNavigation } = navigation?.(session, state) ?? {};
   const panel = useRef<HTMLElement>(null);
@@ -43,20 +44,20 @@ export function SideConversation({ session, replica: cachedReplica, transport, s
   useEffect(() => { onActivityChange?.(session.agentId, activity); }, [session.agentId, activity, onActivityChange]);
   const record = store.find(session);
   const title = standalone ? session.title : record?.firstInput?.trim().slice(0, 72) || session.title;
-  return <ConversationPane as="aside" position={position} className="lab-side-conversation lab-session-composition" aria-label="Side conversation" tabIndex={-1} ref={panel} onFocusCapture={onFocus} onClickCapture={onFocus} hidden={!expanded}>
+  return <ConversationPane as="aside" position={position} className="lab-side-conversation lab-session-composition" aria-label={t('sessions.side.label')} tabIndex={-1} ref={panel} onFocusCapture={onFocus} onClickCapture={onFocus} hidden={!expanded}>
     <CommunicationNavigationContext.Provider value={communication}><LabWorkbench {...viewNavigation} sessionState={sessionState} handoff={handoff} draftSessionKey={sessionKey(session)} state={forkDisplayState(state, record)} sessionStatus={status} attachingAgentId={session.agentId}
       operationBinding={operationBinding} visible={visible && expanded} actions={forkActions(actions, store, record, transport)} draftBinding={draftBinding} imageDraftBinding={imageDraftBinding} imageRecipient={imageRecipient} displayBinding={displayBinding} messageDraft={draft} onMessageDraftChange={onDraftChange}
       questionDrafts={questions} onQuestionDraftChange={(id, value) => setQuestions((current) => ({ ...current, [id]: value }))}
       headingStart={headingStart}
       headingMode={headingMode}
       conversationPath={<span className="lab-side-title" title={title}>{standalone ? null : <span className="lab-window-number">{position + 1}</span>}<SessionTitle as="span" className="lab-side-title-text" title={title} status={activity} onRename={onRenameTitle} /></span>}
-      sessionManager={<><SessionLink session={session} />{standalone ? null : <button className="lab-side-close" type="button" aria-label="Close side conversation, back to source" title="Close side conversation" onClick={onClose}>
+      sessionManager={<><SessionLink session={session} />{standalone ? null : <button className="lab-side-close" type="button" aria-label={t('sessions.side.closeLabel')} title={t('sessions.side.close')} onClick={onClose}>
         <svg className="lab-side-back-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg>
-        <span className="lab-side-back-label" aria-hidden="true">Back</span><span className="lab-side-close-icon" aria-hidden="true">×</span>
+        <span className="lab-side-back-label" aria-hidden="true">{t('sessions.side.back')}</span><span className="lab-side-close-icon" aria-hidden="true">×</span>
       </button>}</>}
       composerContext={record && sideLinkVisible(record) ? <ForkReference fork={record} onOpen={onOpenSource} onUnlink={onUnlink} onRecover={onRecover} /> : undefined}
-      composerNotice={<>{initialInput?.pending ? <p className="lab-control-note" role="status">Sending the first branch message…</p> : initialInput?.error ? <p className="lab-control-note" role="alert">{initialInput.error}</p> : null}<ForkEntries forks={store.linked().filter((fork) => fork.target && sessionKey(sideNavigationSource(fork)) === sessionKey(session))} openSides={openSides} onOpen={onOpenFork} onUnlink={onUnlink} onRecover={onRecover} /></>}
+      composerNotice={<>{initialInput?.pending ? <p className="lab-control-note" role="status">{t('sessions.side.sendingFirst')}</p> : initialInput?.error ? <p className="lab-control-note" role="alert">{initialInput.error}</p> : null}<ForkEntries forks={store.linked().filter((fork) => fork.target && sessionKey(sideNavigationSource(fork)) === sessionKey(session))} openSides={openSides} onOpen={onOpenFork} onUnlink={onUnlink} onRecover={onRecover} /></>}
       consoleCommands={status === 'ready' && !initialInput?.pending && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []}
-      onExecuteConsoleCommand={(id, args) => { if (!state || status !== 'ready' || initialInput?.pending) return Promise.reject(new Error('The side session is not ready.')); return onFork(state, session, id, args); }} /></CommunicationNavigationContext.Provider>
+      onExecuteConsoleCommand={(id, args) => { if (!state || status !== 'ready' || initialInput?.pending) return Promise.reject(new Error(t('sessions.side.notReady'))); return onFork(state, session, id, args); }} /></CommunicationNavigationContext.Provider>
   </ConversationPane>;
 }

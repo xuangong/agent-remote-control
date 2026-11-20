@@ -1,12 +1,15 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import type { Translate } from '@orchardworks/agent-client';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { SessionDirectoryClient, type SessionSummary } from '../directory-client.js';
 import { changeSessionRef, useSessionRefs, type LabSessionRef, type LabSessionReferrer, type SessionRefHolder } from '../session-references.js';
 import { ForkIcon } from './ForkReference.js';
 
 /** The `/ref` command: picks a session of the same Host for this session to reference. */
-export const refCommand = { id: 'console:ref', name: 'ref', kind: 'command' as const, description: 'Reference another session of this Host' };
+export const refCommandId = 'console:ref';
+export const refCommand = (t: Translate) => ({ id: refCommandId, name: 'ref', kind: 'command' as const, description: t('sessions.references.command') });
 
-const title = (ref: Pick<LabSessionRef, 'title'>) => ref.title || 'Untitled session';
+const title = (ref: Pick<LabSessionRef, 'title'>, t: Translate) => ref.title || t('sessions.references.untitled');
 
 /**
  * The sessions a session references, above its composer: the source it was opened from and sessions the user added.
@@ -24,6 +27,7 @@ export function SessionReferences({ scope, holder, providers, fallback, snapshot
   onRemoved?(ref: LabSessionRef, restore: () => Promise<void>): void | Promise<void>;
   onRestore?(ref: LabSessionRef): void | Promise<void>;
 }) {
+  const t = useTranslate();
   const entry = useSessionRefs(scope, holder);
   const [pending, setPending] = useState<string>();
   const [error, setError] = useState<string>();
@@ -35,7 +39,7 @@ export function SessionReferences({ scope, holder, providers, fallback, snapshot
     if (pending) return;
     setPending(label); setError(undefined);
     try { await changeSessionRef(scope, holder, action, ref); return true; }
-    catch (failure) { setError(failure instanceof Error ? failure.message : 'The reference could not be changed. Try again.'); return false; }
+    catch (failure) { setError(failure instanceof Error ? failure.message : t('sessions.references.changeFailed')); return false; }
     finally { setPending(undefined); }
   };
   const remove = async (ref: LabSessionRef) => {
@@ -43,16 +47,16 @@ export function SessionReferences({ scope, holder, providers, fallback, snapshot
     await onRemoved?.(ref, async () => { await changeSessionRef(scope, holder, 'add', ref); await onRestore?.(ref); });
   };
   // The references belong to the next message, so they sit on the composer, below who references this session.
-  return <>{snapshot}{referencedBy}<div className="lab-session-refs" aria-label="Session references">
+  return <>{snapshot}{referencedBy}<div className="lab-session-refs" aria-label={t('sessions.references.region')}>
     <div className="lab-session-ref-list">{refs.map(ref => <span key={`${ref.providerId}/${ref.nativeSessionId}`} className="lab-session-ref" data-origin={ref.origin}>
-      <button type="button" className="lab-session-ref-open" title={`${ref.origin === 'source' ? 'Source' : 'Reference'}: ${title(ref)}`} onClick={() => onOpen(ref)}>
+      <button type="button" className="lab-session-ref-open" title={t('sessions.references.titled', { kind: ref.origin === 'source' ? t('sessions.references.source') : t('sessions.references.reference'), title: title(ref, t) })} onClick={() => onOpen(ref)}>
         {ref.origin === 'source' ? <span className="lab-fork-symbol" aria-hidden="true">&amp;<span><ForkIcon /></span></span> : <span className="lab-session-ref-symbol" aria-hidden="true">@</span>}
-        <span className="lab-session-ref-title">{title(ref)}</span>
+        <span className="lab-session-ref-title">{title(ref, t)}</span>
       </button>
-      <button type="button" className="lab-session-ref-remove" aria-label={`Remove reference to ${title(ref)}`} title="Remove reference"
+      <button type="button" className="lab-session-ref-remove" aria-label={t('sessions.references.removeLabel', { title: title(ref, t) })} title={t('sessions.references.remove')}
         disabled={!!pending} onClick={() => void remove(ref)}>×</button>
     </span>)}</div>
-    <button type="button" className="lab-session-ref-add" aria-label="Reference another session" title="Reference another session" aria-expanded={picking}
+    <button type="button" className="lab-session-ref-add" aria-label={t('sessions.references.add')} title={t('sessions.references.add')} aria-expanded={picking}
       onClick={() => onPickingChange(!picking)}>+</button>
     {picking ? <SessionRefPicker scope={scope} holder={holder} providers={providers} existing={refs} busy={!!pending}
       onCancel={() => onPickingChange(false)} onPick={session => void change('add', session, `add:${session.providerId}/${session.nativeSessionId}`).then(added => { if (added) onPickingChange(false); })} /> : null}
@@ -62,13 +66,14 @@ export function SessionReferences({ scope, holder, providers, fallback, snapshot
 
 /** The sessions that reference this one; Sides opened from it first. */
 function ReferencedBy({ referrers, onOpen }: { referrers: readonly LabSessionReferrer[]; onOpen(ref: LabSessionReferrer): void }) {
+  const t = useTranslate();
   const ordered = [...referrers].sort((left, right) => Number(right.origin === 'source') - Number(left.origin === 'source'));
-  return <div className="lab-session-refs lab-session-referrers" aria-label="Referenced by">
-    <span className="lab-session-referrers-label">Referenced by</span>
+  return <div className="lab-session-refs lab-session-referrers" aria-label={t('sessions.references.referencedBy')}>
+    <span className="lab-session-referrers-label">{t('sessions.references.referencedBy')}</span>
     {ordered.map(ref => <button type="button" key={`${ref.providerId}/${ref.nativeSessionId}`} className="lab-session-ref lab-session-ref-open"
-      data-origin={ref.origin} title={`${ref.origin === 'source' ? 'Opened from this session' : 'References this session'}: ${title(ref)}`} onClick={() => onOpen(ref)}>
+      data-origin={ref.origin} title={t('sessions.references.titled', { kind: ref.origin === 'source' ? t('sessions.references.openedFrom') : t('sessions.references.referencesThis'), title: title(ref, t) })} onClick={() => onOpen(ref)}>
       <span className="lab-session-ref-symbol" aria-hidden="true">{ref.origin === 'source' ? '↳' : '@'}</span>
-      <span className="lab-session-ref-title">{title(ref)}</span>
+      <span className="lab-session-ref-title">{title(ref, t)}</span>
     </button>)}
   </div>;
 }
@@ -84,6 +89,7 @@ function SessionRefPicker({ scope, holder, providers, existing, busy, onPick, on
   const input = useRef<HTMLInputElement>(null);
   const root = useRef<HTMLDivElement>(null);
   const cancel = useRef(onCancel); cancel.current = onCancel;
+  const t = useTranslate();
   const label = useId();
   const providerKey = providers.join('\n');
   useEffect(() => {
@@ -92,7 +98,7 @@ function SessionRefPicker({ scope, holder, providers, existing, busy, onPick, on
     void Promise.allSettled(providerKey.split('\n').filter(Boolean).map(providerId => client.list(providerId, undefined, controller.signal))).then(results => {
       if (controller.signal.aborted) return;
       const listed = results.flatMap(result => result.status === 'fulfilled' ? result.value.items : []);
-      if (!listed.length && results.some(result => result.status === 'rejected')) setFailure('Sessions could not be listed. Try again.');
+      if (!listed.length && results.some(result => result.status === 'rejected')) setFailure(t('sessions.references.listFailed'));
       setSessions(listed.sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt)));
     });
     return () => controller.abort();
@@ -127,17 +133,17 @@ function SessionRefPicker({ scope, holder, providers, existing, busy, onPick, on
     && !existing.some(ref => ref.providerId === session.providerId && ref.nativeSessionId === session.nativeSessionId)
     && (session.title || '').toLowerCase().includes(filter.trim().toLowerCase())).slice(0, 30), [sessions, existing, filter, holder.providerId, holder.nativeSessionId]);
   return <div ref={root} className="lab-session-ref-picker" role="dialog" aria-labelledby={label} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onCancel(); } }}>
-    <strong id={label}>Reference a session</strong>
-    <input ref={input} type="search" value={filter} placeholder="Filter by title" aria-label="Filter sessions by title" onChange={event => setFilter(event.target.value)} />
-    {sessions === undefined ? <p className="lab-control-note" role="status">Loading sessions…</p> : null}
+    <strong id={label}>{t('sessions.references.pickerTitle')}</strong>
+    <input ref={input} type="search" value={filter} placeholder={t('sessions.references.filterPlaceholder')} aria-label={t('sessions.references.filterLabel')} onChange={event => setFilter(event.target.value)} />
+    {sessions === undefined ? <p className="lab-control-note" role="status">{t('sessions.references.loading')}</p> : null}
     {failure ? <p className="lab-fork-action-error" role="alert">{failure}</p> : null}
-    {sessions && !visible.length && !failure ? <p className="lab-control-note">No other sessions match.</p> : null}
+    {sessions && !visible.length && !failure ? <p className="lab-control-note">{t('sessions.references.noMatch')}</p> : null}
     {visible.length ? <ul>{visible.map(session => <li key={`${session.providerId}/${session.nativeSessionId}`}>
       <button type="button" disabled={busy} onClick={() => onPick(session)}>
-        <span className="lab-session-ref-title">{session.title || 'Untitled session'}</span>
+        <span className="lab-session-ref-title">{session.title || t('sessions.references.untitled')}</span>
         <small>{session.providerId} · {new Date(session.updatedAt).toLocaleString()}</small>
       </button>
     </li>)}</ul> : null}
-    <button type="button" onClick={onCancel}>Cancel</button>
+    <button type="button" onClick={onCancel}>{t('common.cancel')}</button>
   </div>;
 }

@@ -28,8 +28,10 @@ import type { PanelsAndShortcutsSlice } from './usePanelsAndShortcuts.js';
 import type { SideSelectionSlice } from './useSideSelection.js';
 import type { SessionOpeningSlice } from './useSessionOpening.js';
 import type { AppInputs } from './types.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 export function useSessionTitles(scope: Pick<AppInputs & SessionSuccessionBindingSlice & ViewSessionStateSlice & AttentionAndRosterSlice & ProviderCreationSlice & RequestedSessionSlice & WorkbenchRecordsSlice & WorkbenchShellSlice & DocksAndBotSelectionSlice & ActiveSessionSlice & WindowViewActionsSlice & SideNavigationSlice & ConversationConnectionsSlice & PanelsAndShortcutsSlice & SideSelectionSlice & SessionOpeningSlice, 'accessReady' | 'activeOpened' | 'activeView' | 'baseUrl' | 'confirmedTitles' | 'editWindow' | 'favorites' | 'forkStore' | 'openSession' | 'openWindows' | 'rememberSession' | 'selectedBot' | 'selectedBotStatus' | 'sessionEntries' | 'setConfirmedTitleState' | 'setDetachedSideRoot' | 'setDirectoryRevision' | 'setOpenedSessions' | 'setSessionNotice' | 'setSideAnchor' | 'setSideFocus' | 'setSideSelections' | 'setSideSessions' | 'sharedWindow' | 'sideActivity' | 'sideSessions' | 'state' | 'succession' | 'supportingRailOpen' | 'trackEntryId' | 'trackedViews' | 'tracking' | 'transitionRef' | 'transport' | 'userScoped' | 'viewSession' | 'windowMode' | 'windowWorkspace'>) {
+  const t = useTranslate();
   const { accessReady, activeOpened, activeView, baseUrl, confirmedTitles, editWindow, favorites, forkStore, openSession, openWindows, rememberSession, selectedBot, selectedBotStatus, sessionEntries, setConfirmedTitleState, setDetachedSideRoot, setDirectoryRevision, setOpenedSessions, setSessionNotice, setSideAnchor, setSideFocus, setSideSelections, setSideSessions, sharedWindow, sideActivity, sideSessions, state, succession, supportingRailOpen, trackEntryId, trackedViews, tracking, transitionRef, transport, userScoped, viewSession, windowMode, windowWorkspace } = scope;
 
   useEffect(() => { if (succession.observerReady) trackedViews.retain(tracking.sessions.map(trackEntryId)); }, [trackedViews, tracking.sessions, succession.observerReady]);
@@ -66,7 +68,7 @@ export function useSessionTitles(scope: Pick<AppInputs & SessionSuccessionBindin
         if (edit.type === 'view.bind') void windowWorkspace.operate(edit).catch(() => {});
         else editWindow(edit);
       }
-    } catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); }
+    } catch (error) { setSessionNotice(sessionConnectionFailure(error, false, t)); }
   }, [sharedWindow?.id, sharedWindow?.revision, windowWorkspace.provisional, confirmedTitles]);
 
   const botTitleProjection = useRef<{ titles?: ReadonlyMap<string, string>; revision?: string }>({});

@@ -21,6 +21,7 @@ function readOnly(state: AgentReplicaState): AgentReplicaState {
 function EarlierSession({ session, transport, directory, cached, onComplete }: {
   session: SessionEntry; transport: EarlierTransport; directory: EarlierDirectory; cached?: AgentReplicaState; onComplete(complete: boolean): void;
 }) {
+  const t = useTranslate();
   const key = sessionKey(session);
   const replica = useMemo(() => new AgentReplica(), [key]);
   const live = useAgentReplica(replica);
@@ -46,12 +47,12 @@ function EarlierSession({ session, transport, directory, cached, onComplete }: {
     replica.applyHistory(await transport.fetchTimeline(read.agentId, 'before', { epoch: live.timeline.epoch, seq: first.seqStart }, PAGE));
   }
   const title = knownTitle(session);
-  return <section className="lab-earlier-session" aria-label={title ? `Earlier conversation: ${title}` : 'Earlier conversation'} data-session={key}>
+  return <section className="lab-earlier-session" aria-label={title ? t('sessions.earlier.labelTitled', { title }) : t('sessions.earlier.label')} data-session={key}>
     {shown ? <AgentTimeline state={readOnly(shown)} interactionsReadOnly interactionDisabled
       onLoadOlder={read.state === 'ready' ? loadOlder : undefined} /> : null}
-    {read.state === 'loading' && !shown ? <p className="lab-earlier-status" role="status">Loading earlier conversation…</p> : null}
-    {read.state === 'error' ? <p className="lab-earlier-status">Earlier conversation is unavailable.{' '}
-      <button type="button" onClick={() => setAttempt(value => value + 1)}>Retry</button></p> : null}
+    {read.state === 'loading' && !shown ? <p className="lab-earlier-status" role="status">{t('sessions.earlier.loading')}</p> : null}
+    {read.state === 'error' ? <p className="lab-earlier-status">{t('sessions.earlier.unavailable')}{' '}
+      <button type="button" onClick={() => setAttempt(value => value + 1)}>{t('common.retry')}</button></p> : null}
   </section>;
 }
 
@@ -85,7 +86,7 @@ export function EarlierConversation({ baseUrl, transport, directory, sessions, r
   if (!sessions.length) return null;
   return <div className="lab-earlier-conversation">
     {oldest && completeKeys.has(sessionKey(oldest)) && revealed < sessions.length
-      ? <button type="button" className="lab-earlier-reveal" onClick={() => setRevealed(value => value + 1)}>Show earlier conversation</button> : null}
+      ? <button type="button" className="lab-earlier-reveal" onClick={() => setRevealed(value => value + 1)}>{t('sessions.earlier.show')}</button> : null}
     {[...shown].reverse().map(session => <Fragment key={sessionKey(session)}>
       <EarlierSession session={session} transport={transport} directory={directory} cached={read(session)}
         onComplete={complete => setCompleteKeys(current => {

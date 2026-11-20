@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { OpenedSession, SuccessionActionResult, SuccessionDescription, SuccessionPrepareInput } from '../directory-client.js';
 import type { SessionSuccessionDirectory } from '../session-succession-directory.js';
 import './session-succession.css';
@@ -26,6 +27,7 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
   onIntent(operation: SuccessionPrepareInput, cancelRequested: boolean): void;
   onSettled(result: SuccessionActionResult): Promise<void>; onClose(retain?: boolean): void | Promise<void>; onOpen?(): void; onGatedChange?(gated: boolean): void;
 }) {
+  const t = useTranslate();
   const dialog = useRef<HTMLDialogElement>(null), label = useId(), detailsId = useId();
   const [description, setDescription] = useState<SuccessionDescription>();
   const [target, setTarget] = useState(''), [intent, setIntent] = useState(resume);
@@ -75,7 +77,7 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
         setDescription(value);
         setTarget(preferredTarget(value, initialProvider));
       } catch (failure) {
-        if (active && mounted.current) setError(failure instanceof Error ? failure.message : 'Handoff availability could not be confirmed.');
+        if (active && mounted.current) setError(failure instanceof Error ? failure.message : t('sessions.handoff.availabilityFailed'));
       }
     })();
     return () => { active = false; };
@@ -121,13 +123,13 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
     } catch (failure) {
       if (mounted.current) {
         setProjection('failed');
-        setError(failure instanceof Error ? failure.message : 'The current conversation could not be refreshed.');
+        setError(failure instanceof Error ? failure.message : t('sessions.handoff.refreshFailed'));
       }
     } finally { projecting.current = false; }
   }
   async function accept(value: SuccessionActionResult) {
     if (!mounted.current) return;
-    if (value.record.operationId !== operation.current?.operationId) throw new Error('The Handoff response has a different operation identity. Check the original operation.');
+    if (value.record.operationId !== operation.current?.operationId) throw new Error(t('sessions.handoff.operationMismatch'));
     if (isTerminal(settled.current) && settled.current?.record.phase !== value.record.phase) return;
     settled.current = value;
     setResult(value);
@@ -156,13 +158,13 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
       }
       try { callbacks.current.assertAccess(); accessBlocked.current = false; }
       catch (failure) { accessBlocked.current = true; throw failure; }
-      if (action === 'commit' && cancelRequested.current) throw new Error('Cancellation was requested. Check or reconcile this operation before continuing.');
+      if (action === 'commit' && cancelRequested.current) throw new Error(t('sessions.handoff.cancellationRequested'));
       if (action === 'prepare') {
         callbacks.current.assertSource();
-        if (operation.current) throw new Error('A Handoff is already retained. Check the original operation.');
-        if (!description || description.eligibility.status !== 'ready' || !description.targets.some(item => item.providerId === target)) throw new Error('An eligible target has not been confirmed.');
+        if (operation.current) throw new Error(t('sessions.handoff.alreadyRetained'));
+        if (!description || description.eligibility.status !== 'ready' || !description.targets.some(item => item.providerId === target)) throw new Error(t('sessions.handoff.noEligibleTarget'));
         if (preparation && (description.role.current.providerId !== source.providerId || description.role.current.nativeSessionId !== source.nativeSessionId)) {
-          throw new Error('The selected prompt belongs to a retired native session. Reopen its current view before editing.');
+          throw new Error(t('sessions.handoff.retiredSession'));
         }
         const pending = { operationId: crypto.randomUUID(), providerId: description.role.current.providerId,
           nativeSessionId: description.role.current.nativeSessionId, expectedRevision: description.role.revision, targetProviderId: target,
@@ -191,7 +193,7 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
     } catch (failure) {
       if (mounted.current) {
         if (operation.current && !isTerminal(settled.current)) setUncertain(true);
-        setError(failure instanceof Error ? failure.message : 'The outcome could not be confirmed. Check the same Handoff before continuing.');
+        setError(failure instanceof Error ? failure.message : t('sessions.handoff.outcomeUnconfirmed'));
       }
     } finally {
       if (action === 'cancel') cancelling.current = false;
@@ -230,7 +232,7 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
     } catch (failure) {
       if (mounted.current) {
         if (isTerminal(settled.current)) { projected.current = false; setProjection('failed'); }
-        setError(failure instanceof Error ? failure.message : 'The operation snapshot could not be released. Retry cleanup.');
+        setError(failure instanceof Error ? failure.message : t('sessions.handoff.cleanupFailed'));
       }
     } finally { closing.current = false; }
   }
@@ -239,68 +241,68 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
   const targetLabel = description?.targets.find(item => item.providerId === targetId)?.displayName ?? providerName(targetId || source.providerId);
   const cwd = description?.role.workspace.canonicalCwd ?? result?.role.workspace.canonicalCwd;
   const phase = result?.record.phase;
-  const terminalMessage = phase === 'committed' ? 'Handoff complete.' : phase === 'cancelled' ? 'Handoff cancelled.' : 'Handoff could not be completed.';
-  const progress = terminal ? `${terminalMessage}${projection === 'failed' ? ' Refresh the conversation to continue.' : projection !== 'done' ? ' Refreshing the conversation…' : ''}`
-    : statusExhausted ? 'Automatic checks stopped. Open Details to continue this Handoff.'
-    : cancellation ? 'Cancellation requested. Confirming the outcome…'
-    : busy && !result && !uncertain ? `Handing off to ${targetLabel}…`
-    : phase === 'ready' && !uncertain ? 'Handoff is ready. Review the next step in Details.'
-    : !uncertain && phase && phase !== 'unknown' ? `Handing off to ${targetLabel}…`
-    : 'Handoff is not yet confirmed. Your conversation is preserved.';
+  const terminalMessage = phase === 'committed' ? t('sessions.handoff.complete') : phase === 'cancelled' ? t('sessions.handoff.cancelled') : t('sessions.handoff.incomplete');
+  const progress = terminal ? (projection === 'failed' ? t('sessions.handoff.refreshToContinue', { message: terminalMessage }) : projection !== 'done' ? t('sessions.handoff.refreshing', { message: terminalMessage }) : terminalMessage)
+    : statusExhausted ? t('sessions.handoff.autoChecksStopped')
+    : cancellation ? t('sessions.handoff.cancelling')
+    : busy && !result && !uncertain ? t('sessions.handoff.handingOff', { target: targetLabel })
+    : phase === 'ready' && !uncertain ? t('sessions.handoff.ready')
+    : !uncertain && phase && phase !== 'unknown' ? t('sessions.handoff.handingOff', { target: targetLabel })
+    : t('sessions.handoff.notConfirmed');
 
   if (showChooser) return createPortal(<dialog ref={dialog} className="lab-favorite-dialog lab-handoff-chooser" aria-labelledby={label}
     onKeyDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}
     onCancel={event => { event.preventDefault(); close(); }}>
-    <header><h2 id={label}>Hand off conversation</h2><button type="button" aria-label="Close Handoff" onClick={close}>×</button></header>
+    <header><h2 id={label}>{t('sessions.handoff.title')}</h2><button type="button" aria-label={t('sessions.handoff.close')} onClick={close}>×</button></header>
     <form onSubmit={event => { event.preventDefault(); void run('prepare'); }}>
-      <p className="lab-handoff-source">Continue from {source.title || 'this conversation'}.</p>
+      <p className="lab-handoff-source">{t('sessions.handoff.continueFrom', { title: source.title || t('sessions.handoff.thisConversation') })}</p>
       {description ? <>
-        <label>Provider<select aria-label="Successor provider" value={target} disabled={busy || description.eligibility.status !== 'ready'} onChange={event => setTarget(event.target.value)}>
-          {!target ? <option value="" disabled>Choose a provider</option> : null}
+        <label>{t('sessions.handoff.providerLabel')}<select aria-label={t('sessions.handoff.successorProvider')} value={target} disabled={busy || description.eligibility.status !== 'ready'} onChange={event => setTarget(event.target.value)}>
+          {!target ? <option value="" disabled>{t('sessions.handoff.chooseProvider')}</option> : null}
           {description.targets.map(item => <option key={item.providerId} value={item.providerId}>{item.displayName}</option>)}
         </select></label>
         <p className="lab-handoff-workspace">{cwd}</p>
-        {initialProvider && !target ? <p role="status">The requested provider “{initialProvider}” is not available. Choose an available provider to continue.</p> : null}
+        {initialProvider && !target ? <p role="status">{t('sessions.handoff.requestedUnavailable', { provider: initialProvider })}</p> : null}
         {description.eligibility.status !== 'ready' ? <p role="status">{description.eligibility.reason}</p> : null}
-      </> : <p role="status">Checking availability…</p>}
-      <p className="lab-handoff-context">Conversation context carries over with your next message. This step sends no message.</p>
+      </> : <p role="status">{t('sessions.handoff.checking')}</p>}
+      <p className="lab-handoff-context">{t('sessions.handoff.contextNote')}</p>
       {blockedReason ? <p role="status">{blockedReason}</p> : null}
       {error ? <p role="alert">{error}</p> : null}
-      <footer><button type="button" onClick={close}>Cancel</button><button type="submit" className="lab-favorite-primary" disabled={busy || !!blockedReason || description?.eligibility.status !== 'ready' || !target}>Hand off</button></footer>
+      <footer><button type="button" onClick={close}>{t('common.cancel')}</button><button type="submit" className="lab-favorite-primary" disabled={busy || !!blockedReason || description?.eligibility.status !== 'ready' || !target}>{t('sessions.handoff.submit')}</button></footer>
     </form>
   </dialog>, document.body);
-  if (!intent) return autoPrepare ? <section className="lab-handoff-notice" aria-label="Edit prompt">
-    <p role={error ? 'alert' : 'status'}>{error ?? (description?.eligibility.status !== 'ready' ? description?.eligibility.reason : undefined) ?? 'Preparing selected prompt…'}</p>
-    {error && !busy ? <button type="button" onClick={cleanupRequested.current ? close : () => void run('prepare')}>{cleanupRequested.current ? 'Retry cleanup' : 'Retry preparation'}</button> : null}
-    <button type="button" onClick={close}>Close</button>
+  if (!intent) return autoPrepare ? <section className="lab-handoff-notice" aria-label={t('sessions.handoff.editPrompt')}>
+    <p role={error ? 'alert' : 'status'}>{error ?? (description?.eligibility.status !== 'ready' ? description?.eligibility.reason : undefined) ?? t('sessions.handoff.preparing')}</p>
+    {error && !busy ? <button type="button" onClick={cleanupRequested.current ? close : () => void run('prepare')}>{cleanupRequested.current ? t('sessions.handoff.retryCleanup') : t('sessions.handoff.retryPreparation')}</button> : null}
+    <button type="button" onClick={close}>{t('common.close')}</button>
   </section> : null;
-  const progressView = <section className={`lab-handoff-notice${progressPortal ? ' lab-bot-handoff-notice' : ''}`} aria-label="Handoff">
+  const progressView = <section className={`lab-handoff-notice${progressPortal ? ' lab-bot-handoff-notice' : ''}`} aria-label={t('sessions.handoff.region')}>
     <div className="lab-handoff-summary">
       <div className="lab-handoff-message"><p role="status" aria-live="polite" title={progress}>{progress}</p></div>
       <div className="lab-handoff-quick-actions">
-        {projection === 'failed' ? <button type="button" onClick={() => void refreshSettled()}>Retry refresh</button> : null}
-        <button type="button" aria-expanded={expanded} aria-controls={detailsId} onClick={expanded ? close : openDetails}>{expanded ? 'Hide details' : 'Details'}</button>
+        {projection === 'failed' ? <button type="button" onClick={() => void refreshSettled()}>{t('sessions.handoff.retryRefresh')}</button> : null}
+        <button type="button" aria-expanded={expanded} aria-controls={detailsId} onClick={expanded ? close : openDetails}>{expanded ? t('sessions.handoff.hideDetails') : t('common.details')}</button>
       </div>
     </div>
     {expanded ? <div className="lab-handoff-details" id={detailsId}>
-      <dl><div><dt>Source</dt><dd>{source.title || source.nativeSessionId}</dd></div><div><dt>Provider</dt><dd>{targetLabel}</dd></div>
-        {cwd ? <div><dt>Workspace</dt><dd>{cwd}</dd></div> : null}
-        <div><dt>Operation</dt><dd>{intent.operationId}</dd></div><div><dt>Status</dt><dd>{phase ?? 'unconfirmed'}</dd></div>
-        <div><dt>Host</dt><dd>{source.hostId ?? 'local'}</dd></div></dl>
-      <p>Checking status keeps this operation. Reconcile asks the Host to inspect an uncertain result.</p>
-      {statusExhausted ? <p>Automatic checks stopped. Check status, reconcile this operation, or request cancellation. The current conversation remains protected until the outcome is confirmed.</p> : null}
-      {cancellation ? <p>Cancellation requested. This page will not commit the operation.</p> : null}
-      {phase === 'cancelled' ? <p>A created or late candidate remains available for inspection.</p> : null}
+      <dl><div><dt>{t('sessions.handoff.source')}</dt><dd>{source.title || source.nativeSessionId}</dd></div><div><dt>{t('sessions.handoff.providerLabel')}</dt><dd>{targetLabel}</dd></div>
+        {cwd ? <div><dt>{t('sessions.handoff.workspace')}</dt><dd>{cwd}</dd></div> : null}
+        <div><dt>{t('sessions.handoff.operation')}</dt><dd>{intent.operationId}</dd></div><div><dt>{t('sessions.handoff.status')}</dt><dd>{phase ?? t('sessions.handoff.unconfirmed')}</dd></div>
+        <div><dt>{t('sessions.handoff.host')}</dt><dd>{source.hostId ?? 'local'}</dd></div></dl>
+      <p>{t('sessions.handoff.statusNote')}</p>
+      {statusExhausted ? <p>{t('sessions.handoff.exhaustedNote')}</p> : null}
+      {cancellation ? <p>{t('sessions.handoff.cancellationNote')}</p> : null}
+      {phase === 'cancelled' ? <p>{t('sessions.handoff.lateCandidateNote')}</p> : null}
       {result?.record.failureCode ? <p>{result.record.failureCode}</p> : null}
       {error ? <p role="alert">{error}</p> : null}
       <div className="lab-handoff-controls">
-        {!terminal ? <button type="button" disabled={busy} onClick={() => void run('status')}>Check status</button> : null}
+        {!terminal ? <button type="button" disabled={busy} onClick={() => void run('status')}>{t('sessions.handoff.checkStatus')}</button> : null}
         {!terminal ? <>
-          <button type="button" disabled={busy} onClick={() => void run('reconcile')}>Reconcile</button>
-          {phase === 'ready' && !cancellation ? <button type="button" disabled={busy} onClick={() => void run('commit')}>Commit Handoff</button> : null}
-          <button type="button" disabled={cancelBusy} onClick={() => void run('cancel')}>Cancel Handoff</button>
-          <button type="button" onClick={close}>Hide Handoff</button>
-        </> : projection !== 'failed' && projection !== 'syncing' ? <button type="button" onClick={close}>Done</button> : <button type="button" onClick={close}>Hide Handoff</button>}
+          <button type="button" disabled={busy} onClick={() => void run('reconcile')}>{t('sessions.handoff.reconcile')}</button>
+          {phase === 'ready' && !cancellation ? <button type="button" disabled={busy} onClick={() => void run('commit')}>{t('sessions.handoff.commit')}</button> : null}
+          <button type="button" disabled={cancelBusy} onClick={() => void run('cancel')}>{t('sessions.handoff.cancel')}</button>
+          <button type="button" onClick={close}>{t('sessions.handoff.hide')}</button>
+        </> : projection !== 'failed' && projection !== 'syncing' ? <button type="button" onClick={close}>{t('common.done')}</button> : <button type="button" onClick={close}>{t('sessions.handoff.hide')}</button>}
       </div>
     </div> : null}
   </section>;

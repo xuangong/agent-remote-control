@@ -15,8 +15,10 @@ import { sessionKey } from '../session-tree.js';
 import { HttpVscodeTunnelClient } from '../vscode-tunnel.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
 import type { AppInputs } from './types.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 export function useRequestedSession(scope: Pick<AppInputs & WorkbenchShellSlice, 'accessReady' | 'activated' | 'baseUrl' | 'hostService' | 'initialState' | 'injectedDirectory' | 'injectedTransport' | 'transport' | 'userScoped'>) {
+  const t = useTranslate();
   const { accessReady, activated, baseUrl, hostService, initialState, injectedDirectory, injectedTransport, transport, userScoped } = scope;
 
   const favorites = useSessionStars(baseUrl, userScoped && accessReady, transport);
@@ -38,7 +40,7 @@ export function useRequestedSession(scope: Pick<AppInputs & WorkbenchShellSlice,
       const target = readControllerLocation(new URLSearchParams(window.location.search));
       return { target: Object.keys(target).length ? target : readLastSession(baseUrl) };
     }
-    catch { return { error: 'Invalid session link.' }; }
+    catch { return { error: t('sessions.requested.invalidLink') }; }
   });
 
   const [initialLayout] = useState(() => readCurrentConversationLayout(baseUrl));
@@ -49,7 +51,7 @@ export function useRequestedSession(scope: Pick<AppInputs & WorkbenchShellSlice,
   const requestedHostId = requested.target?.hostId;
 
   const [selectedHost, setSelectedHost] = useState<RemoteHost>(() => requestedHostId
-    ? { id: requestedHostId, name: 'Requested Host', online: false, providers: [], providerId: '' }
+    ? { id: requestedHostId, name: t('sessions.requested.host'), online: false, providers: [], providerId: '' }
     : { id: 'local', name: 'Recorded fixture', online: true });
 
   const vscodeTunnelClient = useMemo(() => new HttpVscodeTunnelClient(baseUrl), [baseUrl]);

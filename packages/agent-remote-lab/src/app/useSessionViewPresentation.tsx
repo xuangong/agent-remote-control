@@ -20,7 +20,7 @@ import { SessionDirectoryClient } from '../directory-client.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 import { ChatSessionManager } from '../components/ChatSessionManager.js';
 import { ForkEntries, ForkReference } from '../components/ForkReference.js';
-import { refCommand, SessionReferences } from '../components/SessionReferences.js';
+import { refCommand, refCommandId, SessionReferences } from '../components/SessionReferences.js';
 import { loadSessionRefs, sessionRefsEntry } from '../session-references.js';
 import { sideNavigationSource, forkDisplayState } from '../session-forks.js';
 import type { FoldedBot } from '../components/SessionDock.js';
@@ -73,13 +73,13 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
     if (!trimmed || !group) return;
     const change = { type: 'bot.update' as const, viewId, details: { ...group.bots?.members[viewId], name: trimmed } };
     void windowWorkspace.operateGroup(groupId, group.bots ? change : { type: 'batch', operations: [{ type: 'bots.add', rank: appendedRank(windowWorkspace.groups) }, change] })
-      .catch(error => setSessionNotice(sessionConnectionFailure(error, false)));
+      .catch(error => setSessionNotice(sessionConnectionFailure(error, false, t)));
   }
 
   /** Wakes a sleeping bot for every device, keeping its other details. */
   function wakeBot(groupId: string, viewId: string) {
     const details = awakeDetails(windowWorkspace.readGroup(groupId)?.bots?.members[viewId]);
-    void windowWorkspace.operateGroup(groupId, { type: 'bot.update', viewId, details }).catch(error => setSessionNotice(sessionConnectionFailure(error, false)));
+    void windowWorkspace.operateGroup(groupId, { type: 'bot.update', viewId, details }).catch(error => setSessionNotice(sessionConnectionFailure(error, false, t)));
   }
 
   /** A bot of a group shown in Bot mode folds when its pane closes; removing it from the group is a separate, confirmed step. */
@@ -174,7 +174,7 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
     };
     const processAssistant = botGroupId && botViewId ? {
       details: botDetails,
-      update: (details: WindowBotDetails) => { void windowWorkspace.operateGroup(botGroupId, { type: 'bot.update', viewId: botViewId, details }).catch(error => setSessionNotice(sessionConnectionFailure(error, false))); },
+      update: (details: WindowBotDetails) => { void windowWorkspace.operateGroup(botGroupId, { type: 'bot.update', viewId: botViewId, details }).catch(error => setSessionNotice(sessionConnectionFailure(error, false, t))); },
     } : undefined;
     return {
       assistant,
@@ -198,7 +198,7 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
       revealEntry: botPresentation ? undefined : letterReveals[source.agentId] ?? (traceRequest?.view === 'workbench' && context.state?.agent?.id === state?.agent?.id ? traceRequest : undefined),
       onNavigateAttribution: botPresentation ? async (attribution: SessionAttribution) => {
         if (!attribution.target) return;
-        if (attribution.target.kind === 'group') throw new Error('Open this group in Window mode.');
+        if (attribution.target.kind === 'group') throw new Error(t('sessions.presentation.openInWindow'));
         navigation.select({ kind: 'session', session: { ...attribution.target, title: attribution.value } });
       } : undefined,
       onPendingInputChange: (count: number) => setPendingGroupInputs(values => values[source.viewId] === count ? values : { ...values, [source.viewId]: count }),
@@ -208,24 +208,24 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
       ...(quoteView ? { receiveQuotes: (excerpts: readonly SessionExcerpt[]) => restoreQuotes(baseUrl, quoteView, excerpts) } : {}),
       // In Bot mode a Side joins the bot's group beside it (a Side is a bot); a fork or an Ask would open elsewhere.
       consoleCommands: [...(available && directory && context.state?.agent?.capabilities.sendMessage && context.state.agent.capabilities.history ? botPresentation ? options.bot ? forkCommands.filter(command => command.id === 'console:side') : [] : forkCommands : []), ...(handoffAvailable ? [handoffCommand] : []),
-        ...(!botPresentation && referencing && available ? [refCommand] : [])],
+        ...(!botPresentation && referencing && available ? [refCommand(t)] : [])],
       onExecuteConsoleCommand: async (id: string, args: string): Promise<AgentCommandResult> => {
-        if (id === refCommand.id) {
+        if (id === refCommandId) {
           await loadSessionRefs(baseUrl, refHolder);
-          if (sessionRefsEntry(baseUrl, refHolder).unsupported) throw new Error('Referencing sessions needs a newer Controller. Update the Controller in Settings.');
+          if (sessionRefsEntry(baseUrl, refHolder).unsupported) throw new Error(t('sessions.presentation.refsNeedUpdate'));
           setReferencePicker(source.viewId);
           return {};
         }
         assertSourceCurrent(source);
         if (id === handoffCommand.id) {
-          if (botPresentation && sourceStateFor(source)?.agent?.status !== 'idle') throw new Error('Wait for this conversation to become idle before handing it off.');
-          if (!handoffAvailable) throw new Error('Handoff requires a current writable conversation with authorized Host access.');
+          if (botPresentation && sourceStateFor(source)?.agent?.status !== 'idle') throw new Error(t('sessions.presentation.waitIdle'));
+          if (!handoffAvailable) throw new Error(t('sessions.presentation.handoffNeeds'));
           setSuccessionDialog({ scope: baseUrl, source, visible: true, initialProvider: handoffProvider(args), directory: labSessionSuccessionDirectory(new SessionDirectoryClient(baseUrl, undefined, source.hostId)) });
           return {};
         }
         // A Side joins a bot's group; a session listed under Other sessions has no group to join.
-        if (botPresentation && (id !== 'console:side' || !options.bot)) throw new Error('This command is unavailable in Bot mode.');
-        if (!context.state || !available) throw new Error('Wait for this session to finish synchronizing.');
+        if (botPresentation && (id !== 'console:side' || !options.bot)) throw new Error(t('sessions.presentation.botUnavailable'));
+        if (!context.state || !available) throw new Error(t('sessions.sending.waitSync'));
         return createFork(context.state, source, id, args);
       },
       composerStatus: <>{!botHandoff && (gated || successionDialog && viewKey(successionDialog.source) === source.viewId) ? successionProgress : null}
@@ -239,19 +239,19 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
       // Messages waiting for an offline Host follow the conversation; the timeline's own live line says when the assistant works.
       timelineEnd: transport.cancelQueuedMessage ? <SessionOutboxMessages session={outboxTarget} hostName={host?.name ?? source.hostId} hostOnline={host?.online === true}
           onCancel={async id => { await transport.cancelQueuedMessage!(id); }} onRetry={async id => { await transport.retryQueuedMessage!(id); }} /> : undefined,
-      ...(laterHost ? { sendLater: { label: `Send when ${laterHost.name} is back`, send: async (text: string) => { await transport.queueMessage!(outboxTarget, text); } } } : {}),
-      ...(context.offline && host ? { loadingNotice: { title: `${host.name} is offline`,
-        detail: laterHost ? 'The conversation appears here when it is back. Messages you send now wait for it.' : 'The conversation appears here when it is back.' } } : {}),
+      ...(laterHost ? { sendLater: { label: t('sessions.presentation.sendWhenBack', { host: laterHost.name }), send: async (text: string) => { await transport.queueMessage!(outboxTarget, text); } } } : {}),
+      ...(context.offline && host ? { loadingNotice: { title: t('sessions.presentation.hostOffline', { host: host.name }),
+        detail: laterHost ? t('sessions.presentation.backLater') : t('sessions.presentation.back2') } } : {}),
       composerContext: botPresentation ? undefined : <>{referencing ? <SessionReferences scope={baseUrl} holder={refHolder} providers={host?.providers?.map(provider => provider.providerId) ?? [source.providerId]}
           fallback={forkReference} snapshot={fork?.mode === 'reference' ? null : forkReference} picking={referencePicker === source.viewId}
           shown={new Set(sourceForks.flatMap(item => item.target ? [`${item.target.providerId}/${item.target.nativeSessionId}`] : []))} onPickingChange={picking => setReferencePicker(picking ? source.viewId : undefined)}
           onOpen={ref => void openExcerptSource({ hostId: source.hostId, providerId: ref.providerId, nativeSessionId: ref.nativeSessionId, title: ref.title ?? '' })}
           onRemoved={(ref, restore) => removedReference(ref, restore, fork)} onRestore={() => restoredReference(fork)} /> : forkReference}
         {quoteView ? <QuoteAttachments scope={baseUrl} viewId={quoteView} /> : null}</>,
-      composerNotice: outdatedOffline ? <p className="agent-composer-note lab-outbox-hint" role="status">Update the Controller on {host!.name} to send while it is offline.</p>
+      composerNotice: outdatedOffline ? <p className="agent-composer-note lab-outbox-hint" role="status">{t('sessions.presentation.updateController', { host: host!.name })}</p>
         : botPresentation ? undefined : <ForkEntries forks={sourceForks} openSides={openSideKeys(source.viewId)} onOpen={record => void openFork({ ...record, navigationSource: source })} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} />,
-      sessionManager: botPresentation ? undefined : <>{context.controls}{isPrimary ? <IconButton icon="close" data-pane-selection-ignore label={`Close primary group: ${source.title}`}
-        title={foldsOnClose(view) ? 'Fold. It stays in this group.' : 'Close this session view. Agent sessions keep running.'}
+      sessionManager: botPresentation ? undefined : <>{context.controls}{isPrimary ? <IconButton icon="close" data-pane-selection-ignore label={t('sessions.presentation.closeGroup', { title: source.title })}
+        title={foldsOnClose(view) ? t('sessions.presentation.fold') : t('sessions.presentation.closeView')}
         onClick={() => closeView(view.id)} /> : null}
         {!compactLayout ? <StarButton session={source} favorites={favorites} /> : null}
         <SessionHeadingActions sessionKey={sessionKey(source)} alwaysCollapsed={!!context.menuActions}>
@@ -259,9 +259,9 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
           {isPrimary && (!compactLayout || succession.localViews().length > 0) && directory ? <ChatSessionManager current={source} entries={sessionEntries} busy={false}
             localViews={succession.localViews()} activeSlot={context.viewId} onOpenView={view => void openLocalView(view.slotId)}
             onOpen={item => void openSession(item, undefined, undefined, false, undefined, undefined, undefined, undefined, 'primary', view.id)} /> : null}
-          {isPrimary && view.id === sharedWindow?.selectedPrimaryViewId ? <nav className="lab-conversation-history" aria-label="Conversation history">
-            <button type="button" aria-label="Back to previous conversation" title="Back" disabled={!conversationHistory.canBack} onClick={conversationHistory.back}>←</button>
-            <button type="button" aria-label="Forward to next conversation" title="Forward" disabled={!conversationHistory.canForward} onClick={conversationHistory.forward}>→</button>
+          {isPrimary && view.id === sharedWindow?.selectedPrimaryViewId ? <nav className="lab-conversation-history" aria-label={t('sessions.presentation.history')}>
+            <button type="button" aria-label={t('sessions.presentation.backToPrevious')} title={t('sessions.side.back')} disabled={!conversationHistory.canBack} onClick={conversationHistory.back}>←</button>
+            <button type="button" aria-label={t('sessions.presentation.forwardToNext')} title={t('sessions.presentation.forward')} disabled={!conversationHistory.canForward} onClick={conversationHistory.forward}>→</button>
           </nav> : null}
           <SessionLink session={available ? source : windowSessionBinding(source)} sessionIntent={context.operationBinding.historical ? 'history' : undefined} />
           {openBot ? <button type="button" className="lab-open-in-bot" onClick={openBot}>{t('card.openInBot')}</button> : null}

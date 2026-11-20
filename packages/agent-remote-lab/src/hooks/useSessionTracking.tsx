@@ -9,6 +9,7 @@ import type { SessionStar } from '../session-stars-client.js';
 import { MAX_TRACKED_SESSIONS, nextObservation, readTrackedSessionsChecked, readTrackedSessions, saveTrackedSessions, type SessionObservation, patchTrackedSessions, trackingEditRevision, type TrackedSessionPatch, type LocalTrackedSession } from '../tracking-state.js';
 import { useFeedbackToast } from '../components/Toast.js';
 import { restoreSession } from '../session-restoration.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { unavailableSessions } from '../unavailable-sessions.js';
 
 export type TrackRefreshResult =
@@ -27,6 +28,7 @@ export interface SessionTrackingScope {
 const defaultScope: SessionTrackingScope = {};
 
 export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransport, currentSessionKey?: string, openSessions: readonly OpenedSession[] = noOpenSessions, auxiliarySessions: readonly AuxiliarySession[] = noAuxiliarySessions, connections?: ConversationConnections, enabled = true, visibleSessions?: readonly SessionEntry[], onObservation?: (session: SessionEntry, value: SessionObservation) => void, scope: SessionTrackingScope = defaultScope) {
+  const t = useTranslate();
   const [selection, setSelection] = useState(() => ({ scope: baseUrl, sessions: readTrackedSessions(baseUrl) }));
   const sessions = useMemo(() => selection.scope === baseUrl ? selection.sessions : [], [selection, baseUrl]);
   const [observationState, setObservationState] = useState<{ scope: string; transport: RemoteAgentTransport; values: Record<string, SessionObservation> }>(() => ({ scope: baseUrl, transport, values: {} }));
@@ -167,10 +169,10 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     if (!mutationCurrent()) return;
     const key = sessionKey(session), previous = current.current;
     const exists = previous.some(item => sessionKey(item) === key);
-    if (!exists && previous.length >= MAX_TRACKED_SESSIONS) { setError(`Track up to ${MAX_TRACKED_SESSIONS} sessions on this client. Untrack one to add another.`); return; }
+    if (!exists && previous.length >= MAX_TRACKED_SESSIONS) { setError(t('sessions.tracking.limit', { limit: MAX_TRACKED_SESSIONS })); return; }
     const next = exists ? previous.filter(item => sessionKey(item) !== key) : [...previous, session];
     try { saveTrackedSessions(baseUrl, next); setError(undefined); }
-    catch { setError('Tracking changed for this page, but this browser could not save it for the next visit.'); }
+    catch { setError(t('sessions.tracking.saveFailed')); }
     publishSelection(next);
     if (exists && !visible.current.has(key)) {
       readCursors.delete(key);
@@ -187,7 +189,7 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     next.splice(index + (placement === 'after' ? 1 : 0), 0, source);
     if (next.every((session, index) => session === previous[index])) return;
     try { saveTrackedSessions(baseUrl, next); setError(undefined); }
-    catch { setError('Tracking order changed for this page, but this browser could not save it for the next visit.'); }
+    catch { setError(t('sessions.tracking.orderSaveFailed')); }
     publishSelection(next);
   }
   const rename = useCallback((session: Pick<import('@orchardworks/agent-remote-protocol').SessionTitleUpdate, 'hostId' | 'providerId' | 'nativeSessionId' | 'title'>) => {
@@ -267,7 +269,7 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     const sessions = previous.filter(session => allowed.has(sessionKey(session)));
     if (sessions.length !== previous.length) {
       try { saveTrackedSessions(baseUrl, sessions); }
-      catch { setError('Tracking changed for this page, but this browser could not save it for the next visit.'); }
+      catch { setError(t('sessions.tracking.saveFailed')); }
       publishSelection(sessions);
     }
     setObservations(values => {
@@ -288,12 +290,13 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     return Object.fromEntries(Object.entries(observations).filter(([key]) => keys.has(key)));
   }, [observations, observedSessions]);
   const observers = useMemo(() => observedSessions.map(({ session, liveAgentId }) => <SessionObserver key={`${baseUrl}:${sessionKey(session)}:${retries[sessionKey(session)] ?? 0}`} session={session} liveAgentId={liveAgentId} baseUrl={baseUrl} transport={transport} connections={connections} update={update} enabled={enabled} />), [observedSessions, baseUrl, transport, connections, update, retries, enabled]);
-  useFeedbackToast('Session tracking', error);
+  useFeedbackToast(t('sessions.tracking.toastTitle'), error);
   return { refresh, project, editRevision: () => trackingEditRevision(baseUrl), reorder, reconcileFavorites, rename, replace, sessions, backgroundSessions, observations, liveObservations, error, toggle, retry, acknowledge, observers };
 }
 export type SessionTracking = ReturnType<typeof useSessionTracking>;
 
 function SessionObserver({ session, liveAgentId, baseUrl, transport, connections, update, enabled }: { session: SessionEntry; liveAgentId?: string; baseUrl: string; transport: RemoteAgentTransport; connections?: ConversationConnections; update(key: string, value: SessionObservation): void; enabled: boolean }) {
+  const t = useTranslate();
   const key = sessionKey(session);
   const binding = useRef<(agentId: string) => void>();
   const attachment = useRef<(enabled: boolean) => void>();
@@ -348,7 +351,7 @@ function SessionObserver({ session, liveAgentId, baseUrl, transport, connections
         restored: attached => start(attached.agentId),
         failed: error => {
           unavailable.remember(session, error);
-          update(key, { connection: 'disconnected', error: error instanceof Error ? error.message : 'Tracking could not connect. Try again.' });
+          update(key, { connection: 'disconnected', error: error instanceof Error ? error.message : t('sessions.tracking.connectFailed') });
         },
       });
     };

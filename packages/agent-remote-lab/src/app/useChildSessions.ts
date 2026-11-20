@@ -25,9 +25,11 @@ import type { ViewTargetsSlice } from './useViewTargets.js';
 import type { ProviderCreationSlice } from './useProviderCreation.js';
 import type { OpenWindowsSlice } from './useOpenWindows.js';
 import type { SideSessionsSlice } from './useSideSessions.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 // Opening a subagent (child) session of a parent.
 export function useChildSessions(scope: Pick<AppInputs & WorkbenchRecordsSlice & FocusedAskSlice & SessionOpeningSlice & SideSelectionSlice & SessionSuccessionBindingSlice & ViewSessionStateSlice & WindowModeActionsSlice & HostAndStackSlice & WorkbenchShellSlice & ConversationConnectionsSlice & ActiveSessionSlice & PanelsAndShortcutsSlice & DocksAndBotSelectionSlice & WindowViewActionsSlice & RequestedSessionSlice & ViewTargetsSlice & ProviderCreationSlice & OpenWindowsSlice & SideSessionsSlice, 'activeOpened' | 'assertSourceCurrent' | 'baseUrl' | 'compactLayoutRef' | 'connections' | 'directory' | 'letterRequest' | 'navigationGeneration' | 'nextSideRequest' | 'openSession' | 'rememberSession' | 'selectedHost' | 'sessionEntries' | 'setFailure' | 'setSessionNotice' | 'setTransitioning' | 'sharedWindow' | 'sideRequestKey' | 'sideRequests' | 'stackPath' | 'state' | 'transitionRef' | 'viewSession' | 'windowSession' | 'openWindows' | 'selectSide'>) {
+  const t = useTranslate();
   const { activeOpened, assertSourceCurrent, baseUrl, compactLayoutRef, connections, directory, letterRequest, navigationGeneration, nextSideRequest, openSession, rememberSession, selectedHost, sessionEntries, setFailure, setSessionNotice, setTransitioning, sharedWindow, sideRequestKey, sideRequests, stackPath, state, transitionRef, viewSession, windowSession, openWindows, selectSide } = scope;
 
   async function openChildSession(child: AgentChildSessionView, source?: OpenedSession, sourceState?: AgentReplicaState): Promise<void> {
@@ -35,7 +37,7 @@ export function useChildSessions(scope: Pick<AppInputs & WorkbenchRecordsSlice &
     const parentState = sourceState ?? state;
     const parentId = parentState?.agent?.runtimeInfo.sessionId;
     const parentAgent = parentState?.agent;
-    if (!parentAgent || !parentId || !directory) throw new Error('The parent session is unavailable.');
+    if (!parentAgent || !parentId || !directory) throw new Error(t('sessions.children.parentUnavailable'));
     let origin: OpenedSession = viewSession(source ?? activeOpened ?? { agentId: parentAgent.id, providerId: parentAgent.providerId, nativeSessionId: parentId, hostId: 'local', title: 'Parent conversation' });
     assertSourceCurrent(origin);
     const known = knownChildOf(sessionEntries, child.nativeSessionId, origin);
@@ -44,7 +46,7 @@ export function useChildSessions(scope: Pick<AppInputs & WorkbenchRecordsSlice &
       const cached = connections.find({ ...origin, nativeSessionId: child.nativeSessionId });
       const showChild = async (opened: OpenedSession) => {
         if (!stackPath.some(session => sessionKey(session) === sessionKey(origin)) && !await openSession(origin)) {
-          throw new Error('The parent session could not be opened.');
+          throw new Error(t('sessions.children.parentOpenFailed'));
         }
         selectSide(origin, opened);
       };
@@ -62,7 +64,7 @@ export function useChildSessions(scope: Pick<AppInputs & WorkbenchRecordsSlice &
         const opened = besideChildSession(child, origin, result.agentId);
         rememberSession(origin); rememberSession(opened); setSessionNotice(undefined);
         await showChild(opened);
-      } catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); throw error; }
+      } catch (error) { setSessionNotice(sessionConnectionFailure(error, false, t)); throw error; }
       return;
     }
     const generation = navigationGeneration.current;
@@ -70,7 +72,7 @@ export function useChildSessions(scope: Pick<AppInputs & WorkbenchRecordsSlice &
     transitionRef.current = true;
     setTransitioning(true);
     setFailure(undefined);
-    setSessionNotice({ tone: 'status', message: 'Opening the existing child session. Waiting for the Host to confirm it is ready…' });
+    setSessionNotice({ tone: 'status', message: t('sessions.children.opening') });
     try {
       const hostId = origin.hostId ?? 'local';
       const target = hostId === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, hostId);
@@ -81,7 +83,7 @@ export function useChildSessions(scope: Pick<AppInputs & WorkbenchRecordsSlice &
       const opened = replacingChildSession(child, origin, known, result);
       rememberSession(opened); await windowSession.openAttached(opened);
     } catch (error) {
-      if (navigationGeneration.current === generation) setSessionNotice(sessionConnectionFailure(error, false));
+      if (navigationGeneration.current === generation) setSessionNotice(sessionConnectionFailure(error, false, t));
       throw error;
     } finally {
       transitionRef.current = false;

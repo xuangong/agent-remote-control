@@ -1,4 +1,5 @@
 import { useContext, useId, useState } from 'react';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { Team } from '@orchardworks/agent-remote-protocol';
 import { useTrackedSessionDrag } from '../hooks/useTrackedSessionDrag.js';
 import { SessionCatchUpRing } from './SessionCatchUpRing.js';
@@ -7,12 +8,13 @@ import type { SessionTracking } from '../hooks/useSessionTracking.js';
 import type { SessionStar } from '../session-stars-client.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 import { observationLabel, trackingAlert } from '../tracking-state.js';
-import { activityGroups } from '../session-activity-status.js';
+import { activityGroupLabel, activityGroups } from '../session-activity-status.js';
 import { SessionPopover } from './SessionPopover.js';
 import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
 import { ShortcutPlacement } from '../shell/shortcut-placement.js';
 
 export function SessionTrackingMenu({ tracking, catchUp, teams = [], knownSessions = [], busy, inert, onOpen }: { catchUp?: SessionCatchUp; tracking: SessionTracking; teams?: readonly Team[]; knownSessions?: readonly SessionEntry[]; busy: boolean; inert: boolean; onOpen(session: SessionStar): void }) {
+  const t = useTranslate();
   const placement = useContext(ShortcutPlacement), floating = placement === 'floating';
   const { root, style, handlers, edge } = useTrackingPosition(undefined, undefined, { enabled: floating });
   const rootProps = floating ? { style, ...handlers, 'data-edge': edge, className: 'lab-tracking-floating' }
@@ -28,7 +30,7 @@ export function SessionTrackingMenu({ tracking, catchUp, teams = [], knownSessio
     tracking.reorder(key, target, placement);
     const source = sessions.find(session => sessionKey(session) === key);
     const destination = sessions.find(session => sessionKey(session) === target);
-    if (source && destination) setAnnouncement(`Moved ${source.title} ${placement} ${destination.title}.`);
+    if (source && destination) setAnnouncement(t('sessions.tracking.moved', { title: source.title, placement: placement === 'before' ? t('sessions.tracking.before') : t('sessions.tracking.after'), destination: destination.title }));
   };
   const ordering = useTrackedSessionDrag(sessions.map(sessionKey), reorder);
   const counts = activityGroups.map(group => ({ ...group,
@@ -36,14 +38,14 @@ export function SessionTrackingMenu({ tracking, catchUp, teams = [], knownSessio
   })).filter(group => group.count > 0);
   const changes = sessions.filter(session => tracking.observations[sessionKey(session)]?.changed).length;
   const alert = trackingAlert(sessions.map(sessionKey), tracking.observations);
-  const alertLabel = alert === 'pending' ? 'New pending sessions need attention.' : alert === 'idle' ? 'A working session is now idle.' : '';
+  const alertLabel = alert === 'pending' ? t('sessions.tracking.alertPending') : alert === 'idle' ? t('sessions.tracking.alertIdle') : '';
   const attention = sessions.some(session => ['waiting', 'failed'].includes(tracking.observations[sessionKey(session)]?.activity ?? ''));
   return <div ref={root} {...rootProps} data-attention={attention} data-alert={alert} {...(inert ? { inert: '' } : {})}>
-    <SessionPopover label="Tracked sessions" triggerTitle={floating ? `${alertLabel ? `${alertLabel} ` : ''}Drag to move, or focus and use arrow keys` : alertLabel || undefined} trigger={<><SessionCatchUpRing value={catchUp} /><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg>{placement === 'sidebar' ? <span>Track</span> : null}<span className="lab-tracking-counts">{counts.length ? counts.map(group => <span key={group.status} className="lab-tracking-count agent-session-title" data-session-status={group.status} title={`${group.label}: ${group.count}`} aria-label={`${group.count} ${group.label.toLowerCase()} sessions`}>{group.count}</span>) : <span className="lab-tracking-count" title="No background sessions">0</span>}</span>{changes ? <span className="lab-tracking-badge" aria-label={`${changes} sessions with new content`} /> : attention ? <span className="lab-tracking-attention" aria-label="A tracked session needs attention" /> : null}</>}>
+    <SessionPopover label={t('sessions.tracking.title')} triggerTitle={floating ? `${alertLabel ? `${alertLabel} ` : ''}${t('sessions.tracking.dragHint')}` : alertLabel || undefined} trigger={<><SessionCatchUpRing value={catchUp} /><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg>{placement === 'sidebar' ? <span>{t('sessions.tracking.sidebarLabel')}</span> : null}<span className="lab-tracking-counts">{counts.length ? counts.map(group => <span key={group.status} className="lab-tracking-count agent-session-title" data-session-status={group.status} title={t('sessions.tracking.groupTitle', { label: activityGroupLabel(group, t), count: group.count })} aria-label={t('sessions.tracking.groupLabel', { count: group.count, label: activityGroupLabel(group, t).toLowerCase() })}>{group.count}</span>) : <span className="lab-tracking-count" title={t('sessions.tracking.noBackground')}>0</span>}</span>{changes ? <span className="lab-tracking-badge" aria-label={t('sessions.tracking.newContentCount', { count: changes })} /> : attention ? <span className="lab-tracking-attention" aria-label={t('sessions.tracking.needsAttention')} /> : null}</>}>
       {close => <>
-        <p className="lab-control-note">Tracking on this client · Drag to reorder</p>
-        <span id={hintId} className="agent-visually-hidden">Open a session with Enter. Drag a row to reorder; on touch screens use its grip. Alt plus Up or Down also changes its position.</span>
-        {!sessions.length ? <p className="lab-control-note">{tracking.sessions.length ? 'The current session shows its status in the conversation.' : 'Choose Track in Favorites to watch a session here.'}</p> : null}
+        <p className="lab-control-note">{t('sessions.tracking.intro')}</p>
+        <span id={hintId} className="agent-visually-hidden">{t('sessions.tracking.keyboardHint')}</span>
+        {!sessions.length ? <p className="lab-control-note">{tracking.sessions.length ? t('sessions.tracking.currentShown') : t('sessions.tracking.chooseTrack')}</p> : null}
         <ul ref={ordering.list} className="lab-favorite-list lab-tracked-list">{sessions.map((session, index) => {
           const key = sessionKey(session), value = tracking.observations[key], mainTitle = teamSources.get(key);
           return <li key={key} data-tracked-key={key} data-moving={ordering.drag?.key === key}
@@ -57,16 +59,16 @@ export function SessionTrackingMenu({ tracking, catchUp, teams = [], knownSessio
                 const target = sessions[index + (event.key === 'ArrowUp' ? -1 : 1)];
                 if (target) reorder(key, sessionKey(target), event.key === 'ArrowUp' ? 'before' : 'after');
               }}>
-              <span className="lab-tracked-description"><strong className="agent-session-title" data-session-status={value?.activity ?? 'unknown'}>{session.title}</strong>{mainTitle ? <small className="lab-tracked-main" title={`Main session: ${mainTitle}`}>Main: {mainTitle}</small> : null}<small className="agent-session-title" data-session-status={value?.activity}>{observationLabel(value)} · {session.providerId}</small></span>
-              {value?.changed ? <span className="lab-tracked-change" data-attention={value.attention} aria-label={`New content in ${session.title}`}><span aria-hidden="true" />New</span> : null}
-              {sessions.length > 1 ? <span className="lab-tracked-grip" aria-hidden="true" title="Drag to reorder"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="5" cy="3" r="1.2" /><circle cx="11" cy="3" r="1.2" /><circle cx="5" cy="8" r="1.2" /><circle cx="11" cy="8" r="1.2" /><circle cx="5" cy="13" r="1.2" /><circle cx="11" cy="13" r="1.2" /></svg></span> : null}
+              <span className="lab-tracked-description"><strong className="agent-session-title" data-session-status={value?.activity ?? 'unknown'}>{session.title}</strong>{mainTitle ? <small className="lab-tracked-main" title={t('sessions.tracking.mainTitle', { title: mainTitle })}>{t('sessions.tracking.main', { title: mainTitle })}</small> : null}<small className="agent-session-title" data-session-status={value?.activity}>{observationLabel(value, t)} · {session.providerId}</small></span>
+              {value?.changed ? <span className="lab-tracked-change" data-attention={value.attention} aria-label={t('sessions.tracking.newContentIn', { title: session.title })}><span aria-hidden="true" />{t('sessions.tracking.new')}</span> : null}
+              {sessions.length > 1 ? <span className="lab-tracked-grip" aria-hidden="true" title={t('sessions.tracking.reorder')}><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="5" cy="3" r="1.2" /><circle cx="11" cy="3" r="1.2" /><circle cx="5" cy="8" r="1.2" /><circle cx="11" cy="8" r="1.2" /><circle cx="5" cy="13" r="1.2" /><circle cx="11" cy="13" r="1.2" /></svg></span> : null}
             </button>
-          </div>{value?.error ? <p className="lab-control-note" role="alert">{value.error} <button type="button" onClick={() => tracking.retry(key)}>Retry tracking</button></p> : null}</li>;
+          </div>{value?.error ? <p className="lab-control-note" role="alert">{value.error} <button type="button" onClick={() => tracking.retry(key)}>{t('sessions.tracking.retry')}</button></p> : null}</li>;
         })}</ul>
         {tracking.error ? <p className="lab-control-note" role="alert">{tracking.error}</p> : null}
         <span className="agent-visually-hidden" role="status">{announcement}</span>
       </>}
     </SessionPopover>
-    <span className="agent-visually-hidden" role="status">{changes ? `${changes} tracked sessions have new content. ${alertLabel}`.trim() : ''}</span>
+    <span className="agent-visually-hidden" role="status">{changes ? t('sessions.tracking.changed', { count: changes, alert: alertLabel }).trim() : ''}</span>
   </div>;
 }

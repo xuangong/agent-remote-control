@@ -1,10 +1,12 @@
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { reauthenticationUrl, rememberReauthenticationTarget } from '../security-client.js';
 
 export function ReauthenticationNotice({ purpose }: { purpose?: 'permissions' | 'command' } = {}) {
+  const t = useTranslate();
   return <div className="lab-reauthentication" data-purpose={purpose} role="alert">
-    {purpose === 'permissions' ? <><strong>Sign in to change permissions</strong><p>Return to this session, then retry your change.</p></>
-      : purpose === 'command' ? <><strong>Sign in to continue</strong><p>This command changes session permissions, which needs a recent sign-in. Return to this session, then run it again.</p></>
-      : <p>A recent sign-in is required. Try the action again after signing in; it will not run automatically.</p>}
-    <a href={reauthenticationUrl()} onClick={rememberReauthenticationTarget}>Sign in again</a>
+    {purpose === 'permissions' ? <><strong>{t('sessions.reauth.permissionsTitle')}</strong><p>{t('sessions.reauth.permissionsBody')}</p></>
+      : purpose === 'command' ? <><strong>{t('sessions.reauth.commandTitle')}</strong><p>{t('sessions.reauth.commandBody')}</p></>
+      : <p>{t('sessions.reauth.generic')}</p>}
+    <a href={reauthenticationUrl()} onClick={rememberReauthenticationTarget}>{t('sessions.reauth.signInAgain')}</a>
   </div>;
 }

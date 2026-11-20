@@ -1,6 +1,6 @@
 import { useContext, useEffect, useMemo, useState } from 'react';
 import { remoteSessionState, type AgentReplica, type RemoteAgentTransport, type RemoteSessionState } from '@orchardworks/agent-client';
-import { useSessionView } from '@orchardworks/agent-client-web/react';
+import { useSessionView, useTranslate } from '@orchardworks/agent-client-web/react';
 import { ConversationConnections, ConversationConnectionScope } from '../conversation-connections.js';
 import { WorkspaceReady } from '../workspace-access.js';
 import { RecoveryScope } from '../conversation-recovery.js';
@@ -10,6 +10,7 @@ import { sessionKey } from '../session-tree.js';
 
 /** Product retention and account policy compose the neutral session consumer. */
 export function useConversationSession(session: OpenedSession, transport: RemoteAgentTransport, cachedReplica?: AgentReplica, pending = false, following?: { nativePrefixOnly?: boolean; viewId?: string; externalAttachment?: boolean; sessionIntent?: 'history'; attachmentAvailable?: boolean }) {
+  const t = useTranslate();
   const enabled = useContext(WorkspaceReady);
   const operations = useContext(SessionViewOperationsContext);
   let resolved = session, resolving = false, stale = false, historical = following?.sessionIntent === 'history';
@@ -31,7 +32,7 @@ export function useConversationSession(session: OpenedSession, transport: Remote
     const directory = new SessionDirectoryClient(operations.storageScope, undefined, resolved.hostId);
     void directory.attach(resolved.providerId, resolved.nativeSessionId, abort.signal).then(value => {
       if (abort.signal.aborted) return;
-      if (value.nativeSessionId !== undefined && value.nativeSessionId !== resolved.nativeSessionId) throw new Error('The Host returned a different native session.');
+      if (value.nativeSessionId !== undefined && value.nativeSessionId !== resolved.nativeSessionId) throw new Error(t('sessions.succession.differentNative'));
       setAttachment({ session: { ...resolved, agentId: value.agentId }, transport, scope: operations.storageScope });
     }).catch(() => { /* The unresolved current view remains fenced until replay or explicit recovery retries. */ });
     return () => abort.abort();

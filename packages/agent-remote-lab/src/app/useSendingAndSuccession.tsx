@@ -32,8 +32,10 @@ import type { FocusedAskSlice } from './useFocusedAsk.js';
 import type { CommunicationsAndForksSlice } from './useCommunicationsAndForks.js';
 import type { ActiveSessionSlice } from './useActiveSession.js';
 import type { AppInputs } from './types.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 export function useSendingAndSuccession(scope: Pick<AppInputs & ConversationConnectionsSlice & WorkbenchShellSlice & SessionSuccessionBindingSlice & HostAndStackSlice & RequestedSessionSlice & ViewSessionStateSlice & SideNavigationSlice & WorkbenchRecordsSlice & TraceNavigationSlice & RemoteHostStateSlice & SessionOpeningSlice & FocusedAskSlice & CommunicationsAndForksSlice & ActiveSessionSlice, 'accessReady' | 'accessReadyRef' | 'actions' | 'activeAgentId' | 'activeOpened' | 'activeRemoteSession' | 'assertSourceCurrent' | 'baseUrl' | 'boundFork' | 'clientRef' | 'createFork' | 'currentGroupBinding' | 'detachedSideRoot' | 'directory' | 'fixtureAction' | 'forkStore' | 'hostOffline' | 'nativeTakeover' | 'navigationIntent' | 'openSession' | 'openingHandoff' | 'primaryIsBound' | 'remoteHosts' | 'runMutation' | 'selectedHost' | 'sessionEntries' | 'sessionState' | 'setNativeTakeover' | 'setRefusedOffline' | 'stackRoot' | 'state' | 'status' | 'succession' | 'transitionRef' | 'transitioning' | 'transport' | 'userScoped' | 'viewNavigation'>) {
+  const t = useTranslate();
   const { accessReady, accessReadyRef, actions, activeAgentId, activeOpened, activeRemoteSession, assertSourceCurrent, baseUrl, boundFork, clientRef, createFork, currentGroupBinding, detachedSideRoot, directory, fixtureAction, forkStore, hostOffline, nativeTakeover, navigationIntent, openSession, openingHandoff, primaryIsBound, remoteHosts, runMutation, selectedHost, sessionEntries, sessionState, setNativeTakeover, setRefusedOffline, stackRoot, state, status, succession, transitionRef, transitioning, transport, userScoped, viewNavigation } = scope;
 
 
@@ -42,9 +44,9 @@ export function useSendingAndSuccession(scope: Pick<AppInputs & ConversationConn
   function commandClient(): RemoteSessionClient {
     const refusal = commandRefusal({ accessReady: accessReadyRef.current, successionActive: succession.active, nativeConfirmed: !succession.active || succession.isCurrent(),
       clientIsSubmitted: !!submittedClient && clientRef.current === submittedClient });
-    if (refusal === 'access-restoring') throw new Error('Workspace access is restoring.');
-    if (refusal === 'native-unconfirmed') throw new Error('The current native session has not been confirmed.');
-    if (refusal || !submittedClient) throw new RemoteOperationError('session_changed', 'The conversation changed before this action could be sent. Return to its original session to retry.', true);
+    if (refusal === 'access-restoring') throw new Error(t('sessions.relations.accessRestoring'));
+    if (refusal === 'native-unconfirmed') throw new Error(t('sessions.sending.nativeUnconfirmed'));
+    if (refusal || !submittedClient) throw new RemoteOperationError('session_changed', t('sessions.sending.conversationChanged'), true);
     return submittedClient;
   }
 
@@ -84,26 +86,26 @@ export function useSendingAndSuccession(scope: Pick<AppInputs & ConversationConn
     handoff={openingHandoff?.getState(nativeTakeover.owner.generation)} connected={accessReady && !hostOffline && !transitioning}
     onTakeControl={async options => {
       await openingHandoff!.run(nativeTakeover.owner.generation, async progress => {
-        if (!directory || transitionRef.current || !accessReadyRef.current) throw new SessionHandoffRejectedError('Workspace access is restoring or another session is opening.');
+        if (!directory || transitionRef.current || !accessReadyRef.current) throw new SessionHandoffRejectedError(t('sessions.sending.accessOrOpening'));
         const opened = await openSession(nativeTakeover.item, progress.checkOnly ? undefined : nativeTakeover.owner.generation, progress.onRestoring);
-        if (!opened) throw new Error('Session navigation changed before native restoration was confirmed.');
+        if (!opened) throw new Error(t('sessions.conversation.navigationChanged'));
       }, options);
       setNativeTakeover(current => current === nativeTakeover ? undefined : current);
     }} /> : undefined;
 
   function assertSuccessionAccess() {
-    if (!successionAccessible({ accessReady: accessReadyRef.current, dialogInScope: successionDialog?.scope === baseUrl, userScoped, hostAllowsHandoff: handoffHost(successionDialog?.source.hostId) })) throw new Error('Authorized Host access is required to recover this Handoff.');
+    if (!successionAccessible({ accessReady: accessReadyRef.current, dialogInScope: successionDialog?.scope === baseUrl, userScoped, hostAllowsHandoff: handoffHost(successionDialog?.source.hostId) })) throw new Error(t('sessions.sending.handoffNeedsAccess'));
   }
 
   async function executePrimaryCommand(id: string, args: string): Promise<AgentCommandResult> {
     if (id === handoffCommand.id) {
       const initialProvider = handoffProvider(args);
-      if (!canHandoffPrimary || !stackRoot) throw new Error('Handoff is available on the current main conversation with authorized Host access.');
+      if (!canHandoffPrimary || !stackRoot) throw new Error(t('sessions.sending.handoffAvailable'));
       assertSourceCurrent(stackRoot);
       setSuccessionDialog({ scope: baseUrl, source: stackRoot, visible: true, initialProvider, directory: labSessionSuccessionDirectory(new SessionDirectoryClient(baseUrl, undefined, stackRoot.hostId)) });
       return {};
     }
-    if (!state || status !== 'ready' || hostOffline) throw new Error('Wait for this session to finish synchronizing.');
+    if (!state || status !== 'ready' || hostOffline) throw new Error(t('sessions.sending.waitSync'));
     return createFork(state, activeOpened, id, args);
   }
 
@@ -146,7 +148,7 @@ export function useSendingAndSuccession(scope: Pick<AppInputs & ConversationConn
         const roleKey = slot?.intent.kind === 'role' ? slot.intent.roleKey : undefined;
         if (!handoffCompletionMatches({ source, mappedKey: mapped && sessionKey(mapped.binding), receipt: result.record, role: result.role,
           checkpoint: succession.document.roles.find(role => compositionRoleKey(role) === roleKey), pending: successionDialog.resume,
-          verified: succession.successionContextFor(slotId), requireVerified })) throw new Error('The Handoff source view changed before completion.');
+          verified: succession.successionContextFor(slotId), requireVerified })) throw new Error(t('sessions.sending.sourceChanged'));
       };
       assertCompletionView();
       await succession.refreshSettled(result, source);

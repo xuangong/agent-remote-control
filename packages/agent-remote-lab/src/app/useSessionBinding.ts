@@ -26,9 +26,11 @@ import type { ProviderCreationSlice } from './useProviderCreation.js';
 import type { ProviderStateSlice } from './useProviderState.js';
 import type { SharedFeedsAndTpmSlice } from './useSharedFeedsAndTpm.js';
 import type { StackSelectionSlice } from './useStackSelection.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 // Opening a session in the shown Window, binding it to a view, and the entry points that open one.
 export function useSessionBinding(scope: Pick<AppInputs & HostAndStackSlice & ViewSessionStateSlice & SideSelectionSlice & SessionSuccessionBindingSlice & PanelsAndShortcutsSlice & ActiveSessionSlice & WorkbenchRecordsSlice & RequestedSessionSlice & ConversationConnectionsSlice & WorkbenchShellSlice & ViewTargetsSlice & WindowViewActionsSlice & RemoteHostStateSlice & ProviderCreationSlice & ProviderStateSlice & SharedFeedsAndTpmSlice & StackSelectionSlice, 'activeAgentId' | 'ancestors' | 'baseUrl' | 'closeContext' | 'closeInspector' | 'compactLayoutRef' | 'directory' | 'directoryDestination' | 'editWindow' | 'letterRequest' | 'navigation' | 'openedSessions' | 'pendingViewRestore' | 'providerId' | 'replicaFor' | 'selectedHost' | 'sessionEntries' | 'sessionWindows' | 'setDetachedSideRoot' | 'setFailure' | 'setNativeTakeover' | 'setSessionNotice' | 'setSideAnchor' | 'setSideFocus' | 'sharedViewForSlot' | 'sharedWindow' | 'showView' | 'succession' | 'trackedViews' | 'transitionRef' | 'transport' | 'windowSession' | 'windowWorkspace' | 'rememberTrackedView' | 'familyPath' | 'expandedKeys'>) {
+  const t = useTranslate();
   const { activeAgentId, ancestors, baseUrl, closeContext, closeInspector, compactLayoutRef, directory, directoryDestination, editWindow, letterRequest, navigation, openedSessions, pendingViewRestore, providerId, replicaFor, selectedHost, sessionEntries, sessionWindows, setDetachedSideRoot, setFailure, setNativeTakeover, setSessionNotice, setSideAnchor, setSideFocus, sharedViewForSlot, sharedWindow, showView, succession, trackedViews, transitionRef, transport, windowSession, windowWorkspace, rememberTrackedView, familyPath, expandedKeys } = scope;
 
   async function openSession(item: Pick<SessionSummary, 'providerId' | 'nativeSessionId' | 'title'> & { hostId?: string; parentAgentId?: string; parentNativeSessionId?: string }, takeOver?: string, onRestoring?: () => void, letterNavigation = false, restoreView?: () => TrackedSessionView | undefined, sessionIntent?: 'history', keepOriginal?: boolean, primarySlot?: string, placement?: 'primary', targetPrimaryViewId?: string): Promise<boolean> {
@@ -68,7 +70,7 @@ export function useSessionBinding(scope: Pick<AppInputs & HostAndStackSlice & Vi
         : await succession.open(selection, sessionIntent, keepOriginal, primarySlot, takeOver, onRestoring);
       return result;
     } catch (error) {
-      setSessionNotice(sessionConnectionFailure(error, false));
+      setSessionNotice(sessionConnectionFailure(error, false, t));
       if (error instanceof DirectoryError && error.nativeOwner) setNativeTakeover({ item: selection, owner: error.nativeOwner, message: error.message });
       if (takeOver || onRestoring) throw error;
       return false;
@@ -80,7 +82,7 @@ export function useSessionBinding(scope: Pick<AppInputs & HostAndStackSlice & Vi
     const current = windowWorkspace.readWindow(), view = current?.views.find(view => view.id === destination.viewId);
     if (current?.id !== destination.windowId || !view) return false;
     const expectedBinding = JSON.parse(destination.binding) as WindowSessionBinding | null;
-    if (JSON.stringify(view.binding ?? null) !== destination.binding) throw new Error('The target session view changed. Choose a session again.');
+    if (JSON.stringify(view.binding ?? null) !== destination.binding) throw new Error(t('sessions.binding.targetChanged'));
     // Rule 6: a pane of a group shown in Bot mode is a bot and keeps its conversation, so another session opens beside it:
     // a new view in its place, bound as an empty view is, so Track restore, drafts and succession work as usual. A session that
     // is already a bot here is selected instead. Navigation within the bot's own chain (its handoff history) stays in place.
@@ -145,11 +147,11 @@ export function useSessionBinding(scope: Pick<AppInputs & HostAndStackSlice & Vi
       }
       const opened = bindDirectorySession({ ...item, hostId: item.hostId ?? selectedHost.id }, destination);
       showView('workbench'); closeContext(); return await opened;
-    } catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); return false; }
+    } catch (error) { setSessionNotice(sessionConnectionFailure(error, false, t)); return false; }
   }
   async function openPreviewSource(sessionId: string, itemId: string, hostId: string): Promise<void> {
     const source = [...sessionEntries, ...openedSessions].find(item => item.agentId === sessionId && item.hostId === hostId);
-    if (!source) { setFailure("This preview source is not in the current session list. Open its session from the Host first."); return; }
+    if (!source) { setFailure(t('sessions.binding.previewSourceMissing')); return; }
     if (source && source.agentId !== activeAgentId && !await openSession(source)) return;
     window.requestAnimationFrame(() => {
       const entry = [...document.querySelectorAll<HTMLElement>('[data-entry-key]')].find(item => item.dataset.entryKey === itemId);

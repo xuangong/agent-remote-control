@@ -1,4 +1,5 @@
-import { watchList } from '@orchardworks/agent-client';
+import { watchList, type Translate } from '@orchardworks/agent-client';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { SessionListingStatus } from '@orchardworks/agent-remote-protocol';
 import { StarButton } from './SessionFavorites.js';
 import type { SessionStars } from '../hooks/useSessionStars.js';
@@ -34,6 +35,7 @@ interface Props {
 }
 
 export function SessionDirectory({ quickOpen, favorites, searchable = false, directory, providerId, activeAgentId, opened, known = [], sideStore, askStore, hostId = 'local', listingPollMs = 2000, onOpenRelated, busy, revision, onOpen, onSelect, onClose }: Props) {
+  const t = useTranslate();
   const [search, setSearch] = useState('');
   const [listing, setListing] = useState<SessionListingStatus>();
   const [requestingListing, setRequestingListing] = useState(false);
@@ -47,7 +49,7 @@ export function SessionDirectory({ quickOpen, favorites, searchable = false, dir
   const [page, setPage] = useState<SessionCatalogPage | undefined>(directory.cachedPages.get(providerId));
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState<string>();
-  useFeedbackToast('Session list', failure);
+  useFeedbackToast(t('sessions.directory.listToastTitle'), failure);
   const [expired, setExpired] = useState(false);
   const [updates, setUpdates] = useState(false);
   const generation = useRef(0);
@@ -77,7 +79,7 @@ export function SessionDirectory({ quickOpen, favorites, searchable = false, dir
       if (generation.current !== request) return;
       const isExpired = error instanceof DirectoryError && error.code === 'cursor_expired';
       setExpired(isExpired);
-      setFailure(isExpired ? 'This session list expired. Refresh to see the latest sessions.' : error instanceof Error ? error.message : 'Could not load sessions.');
+      setFailure(isExpired ? t('sessions.directory.expired') : error instanceof Error ? error.message : t('sessions.directory.loadFailed'));
     } finally {
       if (generation.current === request) { inFlight.current = false; setLoading(false); }
     }
@@ -114,7 +116,7 @@ export function SessionDirectory({ quickOpen, favorites, searchable = false, dir
         void load();
       }).catch(error => {
         if (retired) return;
-        setFailure(error instanceof Error ? error.message : 'Could not check the session listing.');
+        setFailure(error instanceof Error ? error.message : t('sessions.directory.checkListingFailed'));
         setListing({ ...listing, refreshing: false });
       });
     }, listingPollMs);
@@ -131,7 +133,7 @@ export function SessionDirectory({ quickOpen, favorites, searchable = false, dir
       setListing(status);
       void load();
     } catch (error) {
-      if (generation.current === request) setFailure(error instanceof Error ? error.message : 'Could not start the session listing.');
+      if (generation.current === request) setFailure(error instanceof Error ? error.message : t('sessions.directory.startListingFailed'));
     } finally { if (generation.current === request) setRequestingListing(false); }
   }
 
@@ -176,59 +178,62 @@ export function SessionDirectory({ quickOpen, favorites, searchable = false, dir
     const saved = openedByKey.get(sessionKey(item));
     const current = sessionKey(item) === activeKey;
     const nativeLinks = item.parentNativeSessionId ? links.get(sessionKey({ ...item, nativeSessionId: item.parentNativeSessionId }))?.get(sessionKey(item)) : undefined;
-    const kinds = relationKinds ?? (item.parentNativeSessionId ? ['Subagent', ...(nativeLinks?.kinds ?? [])] : []);
+    const kinds = relationKinds ?? (item.parentNativeSessionId ? [t('sessions.directory.subagent'), ...(nativeLinks?.kinds ?? [])] : []);
     return <><button type="button" className="lab-session-row" aria-current={current ? 'page' : undefined} disabled={busy || (!saved && (related ? !onOpenRelated : summary?.state === 'unavailable'))} onClick={() => { if (saved) onSelect(saved); else if (related) openRelated(item); else if (summary) onOpen(summary); }} title={summary?.workspace}>
       <strong className="agent-session-title" data-session-status={item.status ?? summary?.state}>{item.title || item.nativeSessionId}</strong>
-      <small>{current ? 'Current session · ' : ''}{kinds.length ? kinds.join(' · ') + ' · ' : ''}{item.role ?? summary?.workspace ?? item.providerId}{summary?.model ? ` · ${summary.model}` : ''}</small>
-      <span><i className="lab-session-indicator agent-session-title" data-session-status={item.status ?? summary?.state} aria-hidden="true" />{sessionStatusLabel(item) || (summary ? stateLabel(summary.state) : placeholder ? 'Parent session' : 'Discovered')}{summary ? <time dateTime={summary.updatedAt}>{formatTime(summary.updatedAt)}</time> : null}</span>
+      <small>{current ? `${t('sessions.directory.currentPrefix')} ` : ''}{kinds.length ? kinds.join(' · ') + ' · ' : ''}{item.role ?? summary?.workspace ?? item.providerId}{summary?.model ? ` · ${summary.model}` : ''}</small>
+      <span><i className="lab-session-indicator agent-session-title" data-session-status={item.status ?? summary?.state} aria-hidden="true" />{sessionStatusLabel(item, t) || (summary ? stateLabel(summary.state, t) : placeholder ? t('sessions.directory.parentSession') : t('sessions.directory.discovered'))}{summary ? <time dateTime={summary.updatedAt}>{formatTime(summary.updatedAt)}</time> : null}</span>
     </button>{favorites && !placeholder ? <StarButton session={item} favorites={favorites} /> : null}</>;
   };
   return <>
-    {searchable ? <label className="lab-session-search"><span>Search loaded sessions</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Title, workspace, or ID" /></label> : null}
-    <section className="lab-session-directory" aria-label="Discover sessions">
-      <div className="lab-directory-heading"><h2>Discover sessions</h2><div className="lab-directory-actions">{quickOpen}<button type="button" onClick={() => void load()} disabled={loading || !providerId}>Refresh</button></div></div>
-      <p className="agent-visually-hidden">Roots by activity · Expand to see Subagents, Ask and Side sessions</p>
+    {searchable ? <label className="lab-session-search"><span>{t('sessions.directory.searchLabel')}</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('sessions.directory.searchPlaceholder')} /></label> : null}
+    <section className="lab-session-directory" aria-label={t('sessions.directory.discover')}>
+      <div className="lab-directory-heading"><h2>{t('sessions.directory.discover')}</h2><div className="lab-directory-actions">{quickOpen}<button type="button" onClick={() => void load()} disabled={loading || !providerId}>{t('common.refresh')}</button></div></div>
+      <p className="agent-visually-hidden">{t('sessions.directory.rootsHint')}</p>
       {listing ? <div className="lab-directory-listing">
         <button type="button" onClick={() => void listNativeSessions()} disabled={requestingListing || listing.refreshing}>
-          {listing.refreshing ? 'Listing native sessions…' : 'List native sessions'}
+          {listing.refreshing ? t('sessions.directory.listing') : t('sessions.directory.listNative')}
         </button>
-        <p role="status">{listing.refreshing ? 'Reading native sessions. You can keep using existing sessions.'
-          : listing.error ? `Listing stopped: ${listing.error} Previously found sessions are still available.`
-          : listing.listedAt ? `Last listed ${new Date(listing.listedAt).toLocaleString()}.`
-          : 'Native sessions are listed only when you click List native sessions. Sessions opened here appear automatically.'}</p>
+        <p role="status">{listing.refreshing ? t('sessions.directory.listingReading')
+          : listing.error ? t('sessions.directory.listingStopped', { error: listing.error })
+          : listing.listedAt ? t('sessions.directory.listedAt', { time: new Date(listing.listedAt).toLocaleString() })
+          : t('sessions.directory.listingHint')}</p>
       </div> : null}
-      {updates && !expired ? <button type="button" className="lab-directory-updates" onClick={() => void load()} disabled={loading}>Updates available · Refresh</button> : null}
+      {updates && !expired ? <button type="button" className="lab-directory-updates" onClick={() => void load()} disabled={loading}>{t('sessions.directory.updates')}</button> : null}
       {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
-      {loading ? <p className="lab-control-note" role="status">Loading sessions…</p> : null}
-      {!loading && !failure && discoveredTree.length === 0 ? <p className="lab-control-note">{search.trim() ? 'No matching loaded sessions.' : 'No sessions yet. Create a new session to get started.'}</p> : null}
+      {loading ? <p className="lab-control-note" role="status">{t('sessions.directory.loading')}</p> : null}
+      {!loading && !failure && discoveredTree.length === 0 ? <p className="lab-control-note">{search.trim() ? t('sessions.directory.noMatches') : t('sessions.directory.empty')}</p> : null}
       <SessionTree key={search.trim() ? `search:${search}` : 'all'} defaultExpanded={!!search.trim()} nodes={discoveredTree} activeKey={activeKey} renderRow={renderRow} renderRelated={node => {
         const children = new Set(node.children.map(child => child.key));
         const related = [...(links.get(node.key)?.values() ?? [])].filter(link => !children.has(sessionKey(link.target)) && (matches(node.session) || matches(link.target)));
-        return related.length ? <ul className="lab-session-list lab-session-tree" aria-label={`Related sessions for ${node.session.title}`}>
+        return related.length ? <ul className="lab-session-list lab-session-tree" aria-label={t('sessions.directory.related', { title: node.session.title })}>
           {related.map(link => <li key={sessionKey(link.target)} data-session-key={sessionKey(link.target)}><div className="lab-session-branch">
             <span className="lab-session-toggle-space" />{renderRow(link.target, false, link.kinds)}
           </div></li>)}
         </ul> : null;
       }} />
-      {page?.hasMore ? <button type="button" className="lab-directory-more" disabled={loading || expired} onClick={() => void load(page.nextCursor)}>Load more sessions</button> : null}
+      {page?.hasMore ? <button type="button" className="lab-directory-more" disabled={loading || expired} onClick={() => void load(page.nextCursor)}>{t('sessions.directory.loadMore')}</button> : null}
     </section>
   </>;
 }
 
-function stateLabel(state: SessionSummary['state']): string { return state === 'running' ? 'Working' : state === 'waiting' ? 'Waiting' : state === 'unavailable' ? 'Unavailable' : state === 'idle' ? 'Idle' : 'Unknown'; }
+function stateLabel(state: SessionSummary['state'], t: Translate): string {
+  return state === 'running' ? t('sessions.directory.stateWorking') : state === 'waiting' ? t('sessions.directory.stateWaiting') : state === 'unavailable' ? t('sessions.directory.stateUnavailable') : state === 'idle' ? t('sessions.directory.stateIdle') : t('sessions.directory.stateUnknown');
+}
 function formatTime(value: string): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
 
 export function SessionConfiguration({ directory, providerId, disabled, value, onChange, canBrowse = true }: {
   directory: SessionDirectoryClient; providerId: string; disabled: boolean; value: CreateSessionOptions; onChange(value: CreateSessionOptions): void; canBrowse?: boolean;
 }) {
+  const t = useTranslate();
   return <div className="lab-session-configuration">
     <WorkspaceSelect directory={directory} providerId={providerId} disabled={disabled} canBrowse={canBrowse}
       value={{ workspaceId: value.cwd ? undefined : value.workspaceId, path: value.cwd }}
       onChange={selection => onChange({ ...value, workspaceId: selection.workspaceId, cwd: selection.workspaceId ? undefined : selection.path })} />
-    {providerId === 'dsh' ? <p className="lab-control-note">Model, reasoning effort, and session mode follow DSH settings.</p> : <>
-      {!value.workspaceId ? <><label htmlFor="session-directory">Working directory</label><input id="session-directory" value={value.cwd ?? ''} placeholder="Provider default" disabled={disabled} onChange={(event) => onChange({ ...value, cwd: event.target.value || undefined })} /></> : null}
-      <label htmlFor="session-model">Model</label><input id="session-model" value={value.model ?? ''} placeholder="Provider default" disabled={disabled} onChange={(event) => onChange({ ...value, model: event.target.value || undefined })} />
-      <label htmlFor="session-effort">Reasoning effort</label><select id="session-effort" value={value.reasoningEffort ?? ''} disabled={disabled} onChange={(event) => onChange({ ...value, reasoningEffort: event.target.value || undefined })}><option value="">Provider default</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option></select>
+    {providerId === 'dsh' ? <p className="lab-control-note">{t('sessions.directory.dshNote')}</p> : <>
+      {!value.workspaceId ? <><label htmlFor="session-directory">{t('sessions.directory.workingDirectory')}</label><input id="session-directory" value={value.cwd ?? ''} placeholder={t('sessions.directory.providerDefault')} disabled={disabled} onChange={(event) => onChange({ ...value, cwd: event.target.value || undefined })} /></> : null}
+      <label htmlFor="session-model">{t('sessions.directory.model')}</label><input id="session-model" value={value.model ?? ''} placeholder={t('sessions.directory.providerDefault')} disabled={disabled} onChange={(event) => onChange({ ...value, model: event.target.value || undefined })} />
+      <label htmlFor="session-effort">{t('sessions.directory.effort')}</label><select id="session-effort" value={value.reasoningEffort ?? ''} disabled={disabled} onChange={(event) => onChange({ ...value, reasoningEffort: event.target.value || undefined })}><option value="">{t('sessions.directory.providerDefault')}</option><option value="low">{t('sessions.directory.effortLow')}</option><option value="medium">{t('sessions.directory.effortMedium')}</option><option value="high">{t('sessions.directory.effortHigh')}</option><option value="xhigh">{t('sessions.directory.effortXhigh')}</option></select>
     </>}
   </div>;
 }

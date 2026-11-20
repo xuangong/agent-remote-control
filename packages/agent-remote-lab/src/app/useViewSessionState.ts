@@ -20,8 +20,10 @@ import type { ProviderStateSlice } from './useProviderState.js';
 import type { ConversationConnectionsSlice } from './useConversationConnections.js';
 import type { AppInputs } from './types.js';
 import type { AppLate } from './types.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 export function useViewSessionState(scope: Pick<AppInputs & SessionSuccessionBindingSlice & RequestedSessionSlice & WorkbenchShellSlice & ProviderStateSlice & ConversationConnectionsSlice, 'accessReady' | 'activated' | 'cachedSessionState' | 'cachedState' | 'catalogError' | 'draftStores' | 'missingSessions' | 'replicaRef' | 'requested' | 'selectedHost' | 'setSessionState' | 'sharedWindow' | 'storedSessionState' | 'storedState' | 'succession' | 'transport' | 'userScoped' | 'windowMode' | 'windowWorkspace' | 'withConfirmedTitle'>, late: AppLate) {
+  const t = useTranslate();
   const { accessReady, activated, cachedSessionState, cachedState, catalogError, draftStores, missingSessions, replicaRef, requested, selectedHost, setSessionState, sharedWindow, storedSessionState, storedState, succession, transport, userScoped, windowMode, windowWorkspace, withConfirmedTitle } = scope;
 
   const [mountedViewSessions, setMountedViewSessions] = useState<Record<string, OpenedSession & { viewId: string }>>({});
@@ -38,7 +40,7 @@ export function useViewSessionState(scope: Pick<AppInputs & SessionSuccessionBin
   }
 
   const windowSession = useWindowSessionBridge({ window: sharedWindow, unavailable: windowWorkspace.unavailable, readOnly: windowWorkspace.provisional, readWindow: windowWorkspace.readWindow, operate: windowWorkspace.operate, succession, enabled: accessReady && activated && !windowWorkspace.unavailable && !windowWorkspace.provisional,
-    onError: error => setSessionNotice(sessionConnectionFailure(error, false)) });
+    onError: error => setSessionNotice(sessionConnectionFailure(error, false, t)) });
 
   const sharedSlots = windowSession.slots, sharedFamily = windowSession.family;
 
@@ -98,11 +100,11 @@ export function useViewSessionState(scope: Pick<AppInputs & SessionSuccessionBin
 
   const [failure, setFailure] = useState<string | undefined>(requested.error);
 
-  useFeedbackToast('Session operation', windowMode ? failure : undefined);
+  useFeedbackToast(t('sessions.toast.operation'), windowMode ? failure : undefined);
 
-  useFeedbackToast('Session connection', !windowMode || nativeTakeover ? undefined : sessionNotice?.message, sessionNotice?.tone === 'alert' ? 'error' : 'info');
+  useFeedbackToast(t('sessions.toast.connection'), !windowMode || nativeTakeover ? undefined : sessionNotice?.message, sessionNotice?.tone === 'alert' ? 'error' : 'info');
 
-  useFeedbackToast('Provider catalog', windowMode ? catalogError : undefined);
+  useFeedbackToast(t('sessions.toast.providerCatalog'), windowMode ? catalogError : undefined);
 
   useDeploymentUpdate(userScoped);
   late.setAttachingAgentId = setAttachingAgentId;

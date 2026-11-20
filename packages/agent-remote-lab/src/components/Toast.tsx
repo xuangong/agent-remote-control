@@ -1,4 +1,5 @@
 import { useToastPlacement } from '../hooks/useToastPlacement.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 type ToastTone = 'info' | 'error';
@@ -14,6 +15,7 @@ export const ToastActivity = createContext(true);
 
 /** Transient notifications supplement persistent, actionable feedback at its source. */
 export function ToastProvider({ children }: { children: ReactNode }) {
+  const t = useTranslate();
   const [anchors, setAnchors] = useState<HTMLElement[]>([]);
   const registerAnchor = useCallback((element: HTMLElement) => {
     setAnchors(current => [...current, element]);
@@ -31,7 +33,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const viewport = useToastPlacement(anchors, messages.length > 0);
   const service = useMemo(() => ({ show, dismiss, registerAnchor }), [show, dismiss, registerAnchor]);
   return <ToastContext.Provider value={service}>{children}
-    <section ref={viewport} className="lab-toast-region" aria-label="Notifications">
+    <section ref={viewport} className="lab-toast-region" aria-label={t('sessions.toast.region')}>
       {messages.map(message => <Toast key={`${message.id}:${message.revision}`} value={message} dismiss={dismiss} />)}
     </section>
   </ToastContext.Provider>;
@@ -78,6 +80,7 @@ export function useFeedbackToast(title: string, message: string | undefined, ton
 }
 
 function Toast({ value, dismiss }: { value: ToastMessage; dismiss(id: string): void }) {
+  const t = useTranslate();
   const previousFocus = useRef(document.activeElement);
   const active = useRef(true);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
@@ -98,7 +101,7 @@ function Toast({ value, dismiss }: { value: ToastMessage; dismiss(id: string): v
     if (!value.action || actionRunning.current) return;
     actionRunning.current = true; setPending(true); setActionError(undefined);
     try { await value.action.onClick(); if (active.current) close(); }
-    catch (error) { if (active.current) setActionError(error instanceof Error ? error.message : 'The action could not be completed. Try again.'); }
+    catch (error) { if (active.current) setActionError(error instanceof Error ? error.message : t('sessions.toast.actionFailed')); }
     finally { actionRunning.current = false; if (active.current) setPending(false); }
   };
   useEffect(() => {
@@ -121,12 +124,12 @@ function Toast({ value, dismiss }: { value: ToastMessage; dismiss(id: string): v
     onFocusCapture={() => setFocused(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false); }}
     onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); close(); } }}>
     <div className="lab-toast-heading"><strong>{value.title}</strong>
-      <button type="button" aria-label={`Dismiss notification: ${value.title}`} onClick={close}>×</button>
+      <button type="button" aria-label={t('sessions.toast.dismiss', { title: value.title })} onClick={close}>×</button>
     </div>
     <p>{value.message}</p>
     {value.action ? <button type="button" className="lab-toast-action" disabled={pending} onClick={() => void runAction()}>{value.action.label}</button> : null}
     {actionError ? <p className="lab-toast-action-error" role="alert">{actionError}</p> : null}
-    <span className="lab-toast-countdown" aria-hidden="true">{paused ? 'Auto-dismiss paused' : `Closes in ${Math.ceil(remaining / 1000)}s`}</span>
+    <span className="lab-toast-countdown" aria-hidden="true">{paused ? t('sessions.toast.paused') : t('sessions.toast.closesIn', { seconds: Math.ceil(remaining / 1000) })}</span>
     <div className="lab-toast-progress" aria-hidden="true"><span style={{ width: `${remaining / duration * 100}%` }} /></div>
   </div>;
 }

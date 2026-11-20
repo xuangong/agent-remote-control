@@ -8,7 +8,8 @@ import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
 import { useCallback, useEffect, useLayoutEffect, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
-import { createAgentId, rememberedAgent, rememberAgent, message, openedSessionsKey, openedSessionMetadata } from './helpers.js';
+import { messageWords } from './message-words.js';
+import { createAgentId, rememberedAgent, rememberAgent, openedSessionsKey, openedSessionMetadata } from './helpers.js';
 import type { PanelsAndShortcutsSlice } from './usePanelsAndShortcuts.js';
 import type { ViewTargetsSlice } from './useViewTargets.js';
 import type { RequestedSessionSlice } from './useRequestedSession.js';
@@ -21,8 +22,10 @@ import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
 import type { SessionSuccessionBindingSlice } from './useSessionSuccessionBinding.js';
 import type { AppInputs } from './types.js';
 import type { AppLate } from './types.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 export function useProviderCreation(scope: Pick<AppInputs & PanelsAndShortcutsSlice & ViewTargetsSlice & RequestedSessionSlice & ViewSessionStateSlice & WorkbenchRecordsSlice & RemoteHostStateSlice & ProviderStateSlice & ConversationConnectionsSlice & WorkbenchShellSlice & SessionSuccessionBindingSlice, 'accessReadyRef' | 'activated' | 'activeView' | 'availableProviders' | 'baseUrl' | 'beginCatchUp' | 'clientRef' | 'closeContext' | 'closeInspector' | 'closePage' | 'compactLayout' | 'compactLayoutRef' | 'connectionSummaryRef' | 'contextOpen' | 'creationReservation' | 'directory' | 'dispatchPanels' | 'focusTimelineAfterAttachRef' | 'hostError' | 'hostsLoaded' | 'initialState' | 'inspectorOpen' | 'mountedTransport' | 'navigationGeneration' | 'openedSessions' | 'openedSessionsRef' | 'pageFocusReturn' | 'pageOpen' | 'pendingViewRestore' | 'providerId' | 'providerRequestGenerationRef' | 'providers' | 'remoteHosts' | 'replicaFor' | 'requested' | 'requestedHostId' | 'restoredHostSelection' | 'selectedHost' | 'setAttachingAgentId' | 'setCatalogError' | 'setCatalogStatus' | 'setDetachedSideRoot' | 'setFailure' | 'setLocalProviderId' | 'setOpenedSessions' | 'setProviderName' | 'setProviders' | 'setSelectedHost' | 'setSessionNotice' | 'setSessionState' | 'setState' | 'setTransitioning' | 'setUncertainMutation' | 'sharedWindow' | 'showView' | 'state' | 'succession' | 'traceTabRef' | 'transitionRef' | 'transport' | 'unsubscribeReplicaRef' | 'windowMode' | 'windowSession' | 'workbenchPanelRef' | 'workbenchTabRef'>, late: AppLate) {
+  const t = useTranslate();
   const { accessReadyRef, activated, activeView, availableProviders, baseUrl, beginCatchUp, clientRef, closeContext, closeInspector, closePage, compactLayout, compactLayoutRef, connectionSummaryRef, contextOpen, creationReservation, directory, dispatchPanels, focusTimelineAfterAttachRef, hostError, hostsLoaded, initialState, inspectorOpen, mountedTransport, navigationGeneration, openedSessions, openedSessionsRef, pageFocusReturn, pageOpen, pendingViewRestore, providerId, providerRequestGenerationRef, providers, remoteHosts, replicaFor, requested, requestedHostId, restoredHostSelection, selectedHost, setAttachingAgentId, setCatalogError, setCatalogStatus, setDetachedSideRoot, setFailure, setLocalProviderId, setOpenedSessions, setProviderName, setProviders, setSelectedHost, setSessionNotice, setSessionState, setState, setTransitioning, setUncertainMutation, sharedWindow, showView, state, succession, traceTabRef, transitionRef, transport, unsubscribeReplicaRef, windowMode, windowSession, workbenchPanelRef, workbenchTabRef } = scope;
 
   // Focus inside the page would fall to the document once the page hides; it returns to the Window instead.
@@ -61,7 +64,7 @@ export function useProviderCreation(scope: Pick<AppInputs & PanelsAndShortcutsSl
     } catch (error) {
       if (providerRequestGenerationRef.current !== generation) return;
       setCatalogStatus('error');
-      setCatalogError(message(error, 'Provider list could not be loaded.'));
+      setCatalogError(messageWords(error, t('sessions.providerCreation.listFailed'), t));
     }
   }, [transport]);
 
@@ -83,7 +86,7 @@ export function useProviderCreation(scope: Pick<AppInputs & PanelsAndShortcutsSl
   const creationFacts = { selectedHostId: selectedHost.id, requestedHostId, hosts: remoteHosts, hostsLoaded, hostError: !!hostError,
     hostSelectionRestored: restoredHostSelection.current, providerId, reserved: !!creationReservation.current };
 
-  const creationUnavailableReason = creationUnavailableReasonOf(creationFacts);
+  const creationUnavailableReason = creationUnavailableReasonOf(creationFacts, t);
 
 
   const providerConnectionName = (hostId: string, selectedProviderId: string) => providerConnectionNameOf(hostId, selectedProviderId, providers, remoteHosts);
@@ -102,13 +105,13 @@ export function useProviderCreation(scope: Pick<AppInputs & PanelsAndShortcutsSl
     void transport.fetchSnapshot(agentId).then(async snapshot => {
       if (!accessReadyRef.current || mountedTransport.current !== transport || navigationGeneration.current !== generation) return;
       const agent = snapshot.payload, nativeSessionId = agent.runtimeInfo.sessionId;
-      if (agent.id !== agentId || !nativeSessionId || agent.providerId !== agent.runtimeInfo.providerId) throw new Error('The native session identity could not be confirmed.');
+      if (agent.id !== agentId || !nativeSessionId || agent.providerId !== agent.runtimeInfo.providerId) throw new Error(t('sessions.succession.identityUnconfirmed'));
       const known = openedSessionsRef.current.find(session => session.agentId === agentId);
       const session = { ...known, agentId, providerId: agent.providerId, nativeSessionId, hostId: known?.hostId ?? 'local', title: known?.title ?? 'Conversation' };
       beginCatchUp(replicaFor(agentId), catchUpTarget);
       await windowSession.openAttached(session, restoreLayout);
       if (windowMode) rememberAgent(agentId);
-    }).catch(error => { if (navigationGeneration.current === generation) { setAttachingAgentId(undefined); setSessionNotice(sessionConnectionFailure(error, false)); } });
+    }).catch(error => { if (navigationGeneration.current === generation) { setAttachingAgentId(undefined); setSessionNotice(sessionConnectionFailure(error, false, t)); } });
   }, [baseUrl, transport, replicaFor, beginCatchUp]);
 
 
@@ -199,7 +202,7 @@ export function useProviderCreation(scope: Pick<AppInputs & PanelsAndShortcutsSl
         attach(response.payload.agentId);
       }
     } catch (error) {
-      if (navigationGeneration.current === generation) setFailure(message(error, 'Agent could not be resumed.'));
+      if (navigationGeneration.current === generation) setFailure(messageWords(error, t('sessions.providerCreation.resumeFailed'), t));
     } finally {
       transitionRef.current = false;
       setTransitioning(false);

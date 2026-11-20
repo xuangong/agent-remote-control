@@ -1,4 +1,5 @@
 import { createContext, createElement, forwardRef, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type HTMLAttributes, type ReactNode } from 'react';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 const storageKey = 'agent-remote.conversation-split-ratio';
 const minimumWidth = 320;
@@ -19,6 +20,7 @@ export const ConversationPane = forwardRef<HTMLElement, HTMLAttributes<HTMLEleme
 });
 
 export function ConversationSplit({ compact, start, end, children, preferredRatio: controlledRatio, onRatioChange }: { compact: boolean; start: number; end: number; children: ReactNode; preferredRatio?: number; onRatioChange?(ratio: number): void }) {
+  const t = useTranslate();
   const id = useId();
   const container = useRef<HTMLDivElement>(null);
   const [preferredRatio, setPreferredRatio] = useState(savedRatio);
@@ -61,10 +63,10 @@ export function ConversationSplit({ compact, start, end, children, preferredRati
   return <SplitContext.Provider value={context}><div ref={container} className={`lab-conversation-split${end > 0 ? ' lab-has-side' : ''}`}
     data-resizable={resizable || undefined} style={{ '--lab-conversation-ratio': ratio } as CSSProperties}>
     {children}
-    {resizable ? <div className="lab-conversation-resize" role="separator" tabIndex={0} aria-label="Conversation widths" aria-orientation="vertical"
+    {resizable ? <div className="lab-conversation-resize" role="separator" tabIndex={0} aria-label={t('sessions.split.label')} aria-orientation="vertical"
       aria-controls={`${id}-pane-${start}`} aria-valuemin={Math.round(minimumRatio * 100)} aria-valuemax={Math.round((1 - minimumRatio) * 100)}
-      aria-valuenow={Math.round(ratio * 100)} aria-valuetext={`${Math.round(ratio * 100)}% left, ${Math.round((1 - ratio) * 100)}% right`}
-      title="Drag to resize. Double-click to reset. Arrow keys adjust width." style={{ order: start * 2 + 1 }} data-resizing={dragging || undefined}
+      aria-valuenow={Math.round(ratio * 100)} aria-valuetext={t('sessions.split.value', { left: Math.round(ratio * 100), right: Math.round((1 - ratio) * 100) })}
+      title={t('sessions.split.hint')} style={{ order: start * 2 + 1 }} data-resizing={dragging || undefined}
       onDoubleClick={() => resize(.5, true)}
       onPointerDown={event => {
         if (event.button !== 0 || availableWidth <= 0) return;

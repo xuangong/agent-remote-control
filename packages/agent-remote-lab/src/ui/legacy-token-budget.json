@@ -4,7 +4,7 @@
     "agent-client-web/src/styles.css": 387,
     "agent-remote-lab/src/app.css": 538,
     "agent-remote-lab/src/ask-resize.css": 3,
-    "agent-remote-lab/src/ask.css": 15,
+    "agent-remote-lab/src/ask.css": 0,
     "agent-remote-lab/src/components/assistant/assistant.css": 0,
     "agent-remote-lab/src/components/bot-workspace.css": 0,
     "agent-remote-lab/src/components/call-for-support/call-for-support.css": 15,
@@ -22,7 +22,7 @@
     "agent-remote-lab/src/settings/settings.css": 0,
     "agent-remote-lab/src/session-view-responsive.css": 1,
     "agent-remote-lab/src/shell/shell.css": 66,
-    "agent-remote-lab/src/tpm.css": 33,
+    "agent-remote-lab/src/tpm.css": 0,
     "agent-remote-lab/src/trace.css": 41,
     "agent-remote-lab/src/ui/ui.css": 83
   }

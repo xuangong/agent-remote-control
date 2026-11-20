@@ -151,9 +151,15 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
     const group = windowWorkspace.readGroup(groupId);
     if (!group) return;
     const pin = windowRouteForPin(group, viewId);
-    try { if (pin.request.kind === 'show') await windowWorkspace.operateGroup(groupId, pin.request.edit); }
-    catch (error) { windowActions.setNotice(message(error, 'The assistant was not pinned to a window.')); return; }
-    switchMode('window');
+    try {
+      if (pin.request.kind === 'show') await windowWorkspace.operateGroup(groupId, pin.request.edit);
+      // The Window opens while Bot mode still shows, so Window mode comes up with it rather than empty for a frame.
+      await windowWorkspace.open(pin.route.window);
+    } catch (error) { windowActions.setNotice(message(error, 'The assistant was not pinned to a window.')); return; }
+    // Window mode comes up at the pinned Window, never at another one or none for a frame, and on a phone not under its drawer.
+    closeContext();
+    navigation.setMode('window', { window: pin.route.window });
+    inMode('window', () => searchRuns.current.focusShownMode('window'));
     inMode('window', () => {
       void windowWorkspace.open(pin.route.window).then(() => {
         const open = windowWorkspace.readWindow(), view = open?.id === pin.route.window ? open.views.find(item => item.id === pin.viewId) : undefined;

@@ -77,7 +77,9 @@ export function WorkbenchView({ scope }: { readonly scope: AppScope }) {
         <WindowToolbarRow scope={scope} />
         <SessionWindows scope={scope} />
         <EmptyWindow scope={scope} />
-        <div className="lab-ordinary-workspace" hidden={!!sharedWindow && (!sharedWindow.views.length || compactLayout && !presentedPrimaryViewId)}>
+        {/* While the address names a Window that is still opening, the ordinary workspace waits rather than saying it is empty. */}
+        <div className="lab-ordinary-workspace" hidden={!!sharedWindow && (!sharedWindow.views.length || compactLayout && !presentedPrimaryViewId)
+          || !sharedWindow && windowMode && !windowWorkspace.unavailable && typeof location !== 'undefined' && new URLSearchParams(location.search).has('window')}>
         <WorkspaceNotices scope={scope} />
         <SessionDocks scope={scope} />
       </div>

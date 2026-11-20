@@ -70,8 +70,11 @@ it('E6: a draft stays in the composer when the person changes mode', async () =>
 it('E6: a bot put to sleep gives up its rows in Window mode, and opening it wakes it', async () => {
   const { page, close } = await groupOfTwo();
   await page.getByRole('button', { name: 'Bot mode' }).first().click();
-  await page.getByRole('button', { name: /^Beta/ }).first().click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Sleep' }).click();
+  // Sleep is on the bot's card, in its details beside the conversation (I3b).
+  await page.getByRole('button', { name: /^Beta/ }).first().click();
+  const title = page.locator('[data-workbench-mode="bot"] .lab-assistant-top-bar button.lab-assistant-title');
+  if (await title.getAttribute('aria-expanded') !== 'true') await title.click();
+  await page.locator('.lab-assistant-details .lab-assistant-card-actions').getByRole('button', { name: 'Sleep', exact: true }).click();
   await showsText(page, 'is asleep. Opening it wakes it.');
   await page.getByRole('button', { name: 'Window mode' }).first().click();
   await showsText(page, 'alpha answer');

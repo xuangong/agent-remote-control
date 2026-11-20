@@ -3,7 +3,7 @@ import { ASSISTANT_INVENTORY } from '../fixtures/assistant-inventory.js';
 
 // Every element the conversation showed before I3 is still reachable (I3 plan, section 5): one test per inventory row takes the
 // row's path on the assistant-conversation fixture (open the work line, the step, the card, the receipt, the inspector) and finds
-// the element by role or text. A row without a check fails; rows of I3b wait for that part.
+// the element by role or text. A row without a check fails. Rows of I3b open the details, the sidebar and the Window tiles.
 
 async function open(page: Page, query = '') {
   const params = new URLSearchParams({ mode: 'concise', theme: 'light' });
@@ -28,6 +28,23 @@ async function openStep(page: Page, key: string) {
   if (await toggle.getAttribute('aria-expanded') !== 'true') await press(toggle);
 }
 const requests = (page: Page) => page.locator('.agent-turn-requests');
+/** Bot mode with Chief open and its details beside it (a sheet on a phone). */
+async function openBot(page: Page, query = '') {
+  await page.goto(`/e2e/fixtures/assistant-conversation.html?layout=bot&mode=bot&section=notes&bot=chief&${query}`);
+  await page.locator('.lab-bot-conversation .agent-turn').first().waitFor();
+  const title = page.locator('.lab-assistant-top-bar button.lab-assistant-title');
+  if (await title.getAttribute('aria-expanded') !== 'true') await press(title);
+}
+const details = (page: Page) => page.locator('.lab-assistant-details:visible, dialog.orchard-sheet[open]').first();
+/** A Window of two tiles; the first one. */
+async function openTile(page: Page) {
+  await page.goto('/e2e/fixtures/window-tiles.html?tiles=2');
+  const close = page.locator('#lab-context').getByRole('button', { name: 'Close', exact: false }).first();
+  if (await close.isVisible()) await close.click();
+  const tile = page.locator('.lab-primary-group').first();
+  await tile.locator('.lab-timeline-scroll').getByText('Item 1 of tile-1', { exact: false }).first().waitFor();
+  return tile;
+}
 async function showChanges(card: Locator) {
   const toggle = card.locator('summary', { hasText: /Show what changes|看看要改什么/ });
   if (await toggle.count()) await press(toggle);
@@ -315,12 +332,89 @@ const checks: Record<string, Check> = {
     await expect(page.locator('.lab-earlier-conversation').getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
     await expect(page.getByRole('separator', { name: 'Continued in a new session' })).toHaveCount(2);
   },
+  // I3b: the details panel, the sidebar, the top bar and the Window tiles.
+  H4: async page => {
+    await openBot(page, 'history=1');
+    const sessions = details(page).locator('.lab-assistant-chain');
+    await expect(sessions.locator('li')).toHaveText(['Chiefcurrent', 'Earlier notes', 'Oldest notes']);
+    await expect(sessions.locator('li[aria-current]')).toHaveText('Earlier notes');
+    await expect(details(page).getByRole('link', { name: 'Return to current' })).toBeVisible();
+  },
+  H5: async page => {
+    await openBot(page);
+    await expect(details(page).getByRole('heading', { name: 'Subagent sessions' })).toBeVisible();
+    await expect(details(page).getByRole('button', { name: 'Explore the notes folder' })).toBeVisible();
+  },
+  W1: async page => {
+    const tile = await openTile(page);
+    // The star stands in the tile's header on a wide screen; on a phone it is in the details' Sessions.
+    if (await tile.getByRole('button', { name: /^Star / }).count()) await expect(tile.getByRole('button', { name: /^Star / })).toBeVisible();
+    else {
+      await press(tile.getByRole('button', { name: /^Details of / }));
+      await expect(page.locator('dialog.orchard-sheet[open]').getByRole('button', { name: /^Star / })).toBeVisible();
+      await press(page.locator('dialog.orchard-sheet[open]').getByRole('button', { name: 'Close', exact: false }).first());
+    }
+    await press(tile.getByRole('button', { name: 'More session actions' }));
+    const menu = tile.locator('.lab-session-heading-actions-panel');
+    for (const name of ['Back to previous conversation', 'Forward to next conversation', 'Share session link', 'Quote messages', 'Open in Bot mode']) await expect(menu.getByRole('button', { name })).toBeVisible();
+    // Changing the tile's session: its menu on a wide screen, the navigation's Sessions on a phone.
+    if (await menu.getByText('Sessions', { exact: false }).count()) await expect(menu.getByText('Sessions', { exact: false }).first()).toBeVisible();
+    else await expect(page.getByRole('button', { name: 'Open sessions', exact: true })).toBeVisible();
+  },
+  W2: async page => {
+    const tile = await openTile(page);
+    await press(tile.getByRole('button', { name: /^Details of / }));
+    // Over the window on a wide screen, a sheet on a phone.
+    const panel = page.locator('.lab-tile-details:visible, dialog.orchard-sheet[open]').first();
+    const rows = Object.fromEntries(await panel.locator('.lab-assistant-row').evaluateAll(nodes => nodes.map(row => [row.firstElementChild?.textContent, row.lastElementChild?.textContent])));
+    expect(rows).toMatchObject({ Agent: 'Recorded', Machine: 'Work Mac' });
+    await expect(panel.locator('.lab-assistant-identity')).toContainText('tile-1');
+  },
+  W3: async page => {
+    await openBot(page);
+    const rows = Object.fromEntries(await details(page).locator('.lab-assistant-row').evaluateAll(nodes => nodes.map(row => [row.firstElementChild?.textContent, row.lastElementChild?.textContent])));
+    expect(rows).toMatchObject({ Agent: 'Claude Codebefore: Codex', Machine: 'Mac mini' });
+    await expect(page.locator('.lab-bot-section-head h2')).toContainText('Notes');
+  },
+  W4: async page => {
+    // The sidebar is the phone's home screen.
+    await page.goto('/e2e/fixtures/assistant-conversation.html?layout=bot&mode=bot&section=notes');
+    await page.getByRole('navigation', { name: 'Assistants' }).waitFor();
+    const row = (name: string) => page.getByRole('navigation', { name: 'Assistants' }).getByRole('button', { name, exact: true });
+    await expect(row('Reviewer').locator('.lab-bot-role')).toHaveText('Side');
+    await expect(row('Builder').locator('.lab-bot-label')).toHaveText('Tester');
+    await expect(row('Reviewer').locator('.lab-bot-time')).toBeVisible();
+    await expect(row('Reviewer').locator('.lab-bot-sentence')).toHaveText('Done reading, I have 3 thoughts');
+    await expect(row('Reviewer').locator('.lab-bot-unread')).toBeVisible();
+    await expect(row('Chief').getByLabel('Pinned')).toBeVisible();
+    await expect(page.locator('[data-bot-asks="chief"]')).toContainText('Why the delay?');
+  },
+  W5: async page => {
+    await openBot(page);
+    await expect(page.locator('.lab-assistant-top-bar .lab-assistant-sentence')).toHaveText('Wants to ask you something');
+  },
+  W6: async page => {
+    await openBot(page);
+    const settings = details(page).locator('.lab-assistant-settings');
+    await expect(settings.getByTestId('session-model-button')).toBeVisible();
+    await expect(settings.getByTestId('session-permissions-button')).toBeVisible();
+    await press(settings.getByRole('button', { name: 'Status' }));
+    await expect(settings.getByRole('region', { name: 'Session status' })).toBeVisible();
+    await expect(settings.getByLabel('Planning mode').first()).toBeVisible();
+    // The composer keeps only the message.
+    await expect(page.locator('.lab-bot-conversation .agent-composer').getByTestId('session-model-button')).toHaveCount(0);
+  },
+  W7: async page => {
+    await open(page);
+    await page.locator('summary', { hasText: 'Replica Inspector' }).click();
+    const inspector = page.locator('.fixture-inspector');
+    for (const words of ['Connection', 'Timeline synchronization', 'Pending live', 'Client diagnostics']) await expect(inspector).toContainText(words);
+  },
 };
 
 test.describe('every element of the conversation is reachable', () => {
   for (const row of ASSISTANT_INVENTORY) {
     test(`${row.id}: ${row.before} → ${row.place} (${row.layer})`, async ({ page }) => {
-      test.skip(row.part === 'I3b', 'The details panel and Window tiles are I3b.');
       const check = checks[row.id];
       if (!check) throw new Error(`Inventory row ${row.id} has no check.`);
       await check(page);

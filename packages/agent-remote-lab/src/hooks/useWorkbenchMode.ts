@@ -38,9 +38,14 @@ export function useWorkbenchMode(scope: string) {
       getSnapshot: () => state,
       subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
       initialize: () => { if (!explicit && state.mode === 'bot') write(); persist(); },
-      setMode: (mode: WorkbenchMode) => {
-        if (mode === state.mode) return;
+      /** Shows a mode; Window mode may be shown at a given route (a pinned assistant's Window) in place of the one it kept. */
+      setMode: (mode: WorkbenchMode, route?: WindowRouteFields) => {
+        if (mode === state.mode && !route) return;
         keepWindowRoute();
+        if (mode === 'window' && route) {
+          windowRoute = route;
+          try { conversationSessionStorage.setItem(windowKey, JSON.stringify(windowRoute)); } catch { /* The route stays on this page. */ }
+        }
         state = { ...state, mode }; write(); publish();
       },
       // Choosing a bot from Window mode (Open in Bot mode, search) keeps the Window's place for the way back. On a phone,

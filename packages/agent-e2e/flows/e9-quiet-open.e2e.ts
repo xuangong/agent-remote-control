@@ -18,7 +18,9 @@ async function typeWhileOpening(page: Page, text: string): Promise<void> {
   await expect.poll(() => input(page).isEditable()).toBe(true);
   await input(page).click();
   await page.keyboard.type(text);
-  await page.keyboard.press('Enter');
+  // Return sends under a fine pointer; on a touch screen it makes a new line and the send button sends (I3b).
+  if (await page.evaluate(() => matchMedia('(pointer: coarse)').matches)) await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  else await page.keyboard.press('Enter');
   await page.locator('[data-testid="pending-send"]', { hasText: 'Sending' }).waitFor();
   expect(stack.provider.session('quiet')!.sent).not.toContain(text);
   await page.keyboard.type(' next');

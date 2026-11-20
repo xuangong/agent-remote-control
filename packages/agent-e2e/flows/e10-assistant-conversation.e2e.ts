@@ -5,7 +5,7 @@
 import type { Browser, Page } from '@playwright/test';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startStack, type ScriptedStep, type Stack } from '@orchardworks/agent-e2e/stack';
-import { launchBrowser, openPage, type PageOptions } from './browser.js';
+import { launchBrowser, openPage, openPageIn, type PageOptions } from './browser.js';
 import { send, showsText, waitForEntries } from './page.js';
 
 let stack: Stack; let browser: Browser;
@@ -22,12 +22,20 @@ const turns = (text: string): ScriptedStep[] => text.includes('notes.md') ? [
 
 const workLine = (page: Page) => page.locator('.agent-turn').last().locator('.agent-work-line > button');
 
+/** The assistant's details: over the window from its tile on a wide screen, a sheet on a phone. */
+const details = (page: Page) => page.locator('.lab-tile-details:visible, .lab-assistant-details:visible, dialog.orchard-sheet[open]').first();
+async function openTileDetails(page: Page): Promise<void> {
+  await page.getByRole('button', { name: /^Details of / }).first().click();
+  await details(page).waitFor();
+}
+async function closeDetails(page: Page): Promise<void> {
+  await details(page).getByRole('button', { name: /^Close/ }).first().click();
+}
+
 async function chooseFull(page: Page): Promise<void> {
-  const expand = page.getByRole('button', { name: 'Expand session actions', exact: true });
-  if (await expand.isVisible()) await expand.click();
-  await page.getByRole('button', { name: 'Session view options', exact: true }).first().click();
-  await page.getByRole('group', { name: 'All assistants on this device' }).getByRole('button', { name: 'Full', exact: true }).click();
-  await page.keyboard.press('Escape');
+  await openTileDetails(page);
+  await details(page).getByRole('group', { name: 'All assistants on this device' }).getByRole('button', { name: 'Full', exact: true }).click();
+  await closeDetails(page);
 }
 
 const variants: Array<[string, PageOptions]> = [
@@ -48,11 +56,12 @@ describe.each(variants)('E10 at %s', (_name, view) => {
       await send(page, PROMPT);
       // While the test command runs, one live line says so.
       const live = page.locator('.agent-turn-status [role="status"]');
-      await expect.poll(() => live.textContent(), { timeout: 15_000 }).toBe('Chief is running tests');
+      // A session that is no bot is called by its agent, never by its title (I3b).
+      await expect.poll(() => live.textContent(), { timeout: 15_000 }).toBe('Scripted is running tests');
       // The assistant asks inline, in its turn, with plain choices.
       const card = page.locator('.agent-turn').last().locator('.agent-turn-requests .agent-tool-approval');
       await card.waitFor({ timeout: 15_000 });
-      await expect.poll(() => card.locator('.orchard-approval-prompt').textContent()).toBe('Chief wants to run a command');
+      await expect.poll(() => card.locator('.orchard-approval-prompt').textContent()).toBe('Scripted wants to run a command');
       await card.getByRole('button', { name: 'Allow', exact: true }).click();
       await showsText(page, 'Wrote notes.md with three principles.');
       expect(stack.provider.session('chief')!.sent).toContain(PROMPT);
@@ -73,6 +82,54 @@ describe.each(variants)('E10 at %s', (_name, view) => {
       await step.locator('.agent-tool-toggle').click();
       await expect.poll(() => step.locator('.agent-tool-details').textContent()).toContain('All 3 tests passed');
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      expect(await words.seen()).toEqual([]);
+    } finally { await context.close(); }
+  });
+
+  it('E10: Open in Bot mode, this assistant set to Process in its details for every device of the account, and Pin to a window, with no connection word', async () => {
+    const { context, page, words } = await openPage(browser, stack.sessionUrl('chief'), view);
+    try {
+      await waitForEntries(page, 2);
+      // From its tile, the assistant opens in Bot mode; its group gains a Bot section.
+      await page.getByRole('button', { name: 'More session actions' }).first().click();
+      await page.getByRole('button', { name: 'Open in Bot mode', exact: true }).first().click();
+      const bot = page.locator('[data-workbench-mode="bot"]');
+      await bot.locator('.lab-assistant-top-bar').waitFor();
+      await expect.poll(() => new URL(page.url()).searchParams.get('mode')).toBe('bot');
+      // Its details: a panel beside the conversation, or a sheet from its name on a phone.
+      const title = bot.locator('.lab-assistant-top-bar button.lab-assistant-title');
+      if (await title.getAttribute('aria-expanded') !== 'true') await title.click();
+      const assistantMode = () => details(page).getByRole('group', { name: 'This assistant' });
+      await assistantMode().getByRole('button', { name: 'Process', exact: true }).click();
+      await expect.poll(() => assistantMode().getByRole('button', { name: 'Process', exact: true }).getAttribute('aria-pressed')).toBe('true');
+      // The choice is the account's: it survives a reload and shows on another device.
+      const address = page.url();
+      await page.reload();
+      await bot.locator('.lab-assistant-top-bar').waitFor();
+      if (await title.getAttribute('aria-expanded') !== 'true') await title.click();
+      await expect.poll(() => assistantMode().getByRole('button', { name: 'Process', exact: true }).getAttribute('aria-pressed'), { timeout: 10_000 }).toBe('true');
+      const other = await browser.newContext({ viewport: view.viewport ?? { width: 1280, height: 800 }, ...(view.mobile ? { isMobile: true, hasTouch: true } : {}) });
+      try {
+        const second = await openPageIn(other, address, view);
+        const secondTitle = second.page.locator('[data-workbench-mode="bot"] .lab-assistant-top-bar button.lab-assistant-title');
+        await secondTitle.waitFor();
+        if (await secondTitle.getAttribute('aria-expanded') !== 'true') await secondTitle.click();
+        await expect.poll(() => details(second.page).getByRole('group', { name: 'This assistant' }).getByRole('button', { name: 'Process', exact: true }).getAttribute('aria-pressed'), { timeout: 10_000 }).toBe('true');
+        expect(await second.words.seen()).toEqual([]);
+      } finally { await other.close(); }
+      // Pin to a window shows its tile in Window mode, and Bot mode keeps the assistant for the way back.
+      await details(page).getByRole('button', { name: 'Pin to a window', exact: true }).click();
+      await expect.poll(() => page.locator('[data-workbench-mode="window"]').getAttribute('hidden')).toBeNull();
+      await page.getByRole('button', { name: /^Details of / }).first().waitFor();
+      if (view.mobile) {
+        // On a phone the assistant list is home: the address alone lands there, a conversation opens over it, and Back returns to it.
+        await page.goto(new URL('/', page.url()).href);
+        await bot.getByRole('navigation', { name: 'Assistants' }).waitFor();
+        await bot.locator('.lab-bot-row').filter({ hasText: 'Chief' }).first().click();
+        await bot.locator('.lab-assistant-top-bar').waitFor();
+        await page.goBack();
+        await bot.getByRole('navigation', { name: 'Assistants' }).waitFor();
+      }
       expect(await words.seen()).toEqual([]);
     } finally { await context.close(); }
   });

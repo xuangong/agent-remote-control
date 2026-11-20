@@ -5,6 +5,10 @@ const storageKey = 'agent-remote.sidebar-width';
 const defaultWidth = 260;
 const minWidth = 220;
 const maxWidth = 360;
+/** The navigation rail (60px and its 10px margin) and the shell's own padding, which the sidebar, the stage and the inspector do not share. */
+const frameChrome = 80;
+const minimumStage = 480;
+const inspectorWidth = 320;
 
 /** The saved width, clamped to the allowed range so a width saved under an older range survives as the nearest one. */
 function savedWidth(): number {
@@ -25,9 +29,8 @@ export function useSidebarWidth(inspectorOpen: boolean) {
   useEffect(() => {
     try { localStorage.setItem(storageKey, String(preferredWidth)); } catch { /* Resizing remains available without browser storage. */ }
   }, [preferredWidth]);
-  // The viewport term never binds on desktop today (the sidebar shows only above 1180px, which leaves room for 360px
-  // beside the inspector); it is kept as a guard should those widths change.
-  const maximum = Math.max(minWidth, Math.min(maxWidth, viewport - 480 - (inspectorOpen ? 320 : 0)));
+  // With the rail and the inspector open, the sidebar gives way so that the stage keeps its minimum room.
+  const maximum = Math.max(minWidth, Math.min(maxWidth, viewport - frameChrome - minimumStage - (inspectorOpen ? inspectorWidth : 0)));
   const width = Math.min(preferredWidth, maximum);
   return { width, maximum, setWidth,
     style: { '--lab-sidebar-width': `${width}px` } as CSSProperties };

@@ -46,3 +46,15 @@ it('words the handle in Chinese', async () => {
   expect(handle.getAttribute('aria-label')).toBe('侧边栏宽度');
   expect(handle.getAttribute('aria-valuetext')).toBe('260 像素');
 });
+
+it('gives the sidebar way at the smallest desktop width so the stage keeps its room beside the rail and the inspector', async () => {
+  const innerWidth = window.innerWidth;
+  try {
+    window.innerWidth = 1181;
+    localStorage.setItem('agent-remote.sidebar-width', '360');
+    const open = (await render(<Probe inspector />)).querySelector('[role="separator"]')!;
+    expect(open.getAttribute('aria-valuenow')).toBe('301');
+    const closed = (await render(<Probe />)).querySelector('[role="separator"]')!;
+    expect(closed.getAttribute('aria-valuenow')).toBe('360');
+  } finally { window.innerWidth = innerWidth; }
+});

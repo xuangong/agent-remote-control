@@ -13,6 +13,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./locale": {
+      "types": "./dist/presentation/locale-choice.d.ts",
+      "import": "./dist/presentation/locale-choice.js"
+    },
     "./device-store": {
       "types": "./dist/device-store.d.ts",
       "import": "./dist/device-store.js"

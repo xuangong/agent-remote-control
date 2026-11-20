@@ -6,15 +6,8 @@
  */
 import { messageCatalogue, type MessageKey, type MessageParams, type Translate } from './messages.js';
 
-export interface MessageKeyed {
-  readonly messageKey?: MessageKey;
-  readonly messageParams?: MessageParams;
-}
-
-/** Marks an error with the catalogue key of its message; the error is returned so a throw site stays one expression. */
-export function withMessageKey<E extends Error>(error: E, key: MessageKey, params?: MessageParams): E {
-  return Object.assign(error, params === undefined ? { messageKey: key } : { messageKey: key, messageParams: params });
-}
+export { withMessageKey, type MessageKeyed } from './locale-choice.js';
+import type { MessageKeyed } from './locale-choice.js';
 
 let storedKeys: ReadonlyMap<string, MessageKey> | undefined;
 /** The `client.*` messages without placeholders, by their English text. */

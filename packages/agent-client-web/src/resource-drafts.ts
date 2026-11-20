@@ -1,5 +1,5 @@
 import type { ResourceUploadReceipt } from '@orchardworks/agent-remote-protocol';
-import { localizedError } from './react/localized-error.js';
+import { withMessageKey } from '@orchardworks/agent-client/locale';
 export interface DraftResource { id: string; name: string; file: Blob; status: 'pending' | 'uploading' | 'ready' | 'failed'; progress: number; error?: string; resource?: NonNullable<ResourceUploadReceipt['resource']> }
 export interface Entry { generation?: number; persisted?: boolean; dirty?: boolean; records: Record<string, DraftResource>; hydrated: boolean; storageError?: string; nextLabel: number; revision: number; saving?: Promise<void> }
 export const resourceDraftMemory = new Map<string, Entry>();
@@ -27,7 +27,7 @@ export async function writeResourceDraft(key: string, entry: Entry): Promise<voi
   const snapshot = { records, nextLabel: entry.nextLabel, bytes };
   const db = await database();
   try {
-    if (generation !== resourceDraftGeneration(scope)) throw localizedError('Resource storage owner retired.', 'timeline.storage.retired');
+    if (generation !== resourceDraftGeneration(scope)) throw withMessageKey(new Error('Resource storage owner retired.'), 'timeline.storage.retired');
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction('drafts', 'readwrite'); const store = tx.objectStore('drafts');
       const all = store.getAll(); const keys = store.getAllKeys();
@@ -37,7 +37,7 @@ export async function writeResourceDraft(key: string, entry: Entry): Promise<voi
         if (retainedBytes + bytes > 256 * 1024 * 1024 || !keys.result.includes(key) && keys.result.length >= 32) { tx.abort(); return; }
         if (Object.keys(records).length) store.put(snapshot, key); else store.delete(key);
       };
-      tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error ?? localizedError('Resource draft storage limit reached.', 'timeline.storage.limit'));
+      tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error ?? withMessageKey(new Error('Resource draft storage limit reached.'), 'timeline.storage.limit'));
     });
   } finally { db.close(); }
 }

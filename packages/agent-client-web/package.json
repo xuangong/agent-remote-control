@@ -6,6 +6,11 @@
     "access": "public"
   },
   "type": "module",
+  "sideEffects": [
+    "./dist/page/browser-environment.js",
+    "./src/page/browser-environment.ts",
+    "**/*.css"
+  ],
   "description": "React views and hooks, browser storage and page bindings for the headless remote agent client.",
   "exports": {
     ".": {

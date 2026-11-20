@@ -2,7 +2,7 @@
 import './page/browser-environment.js';
 import { APPEARANCE_STORAGE_KEY, applyAppearance, readAppearance, type Appearance, type AppearancePort } from './theme/appearance.js';
 import { MOTION_STORAGE_KEY, readMotionChoice, reducesMotion, type MotionChoice } from './theme/motion.js';
-import { effectiveLocale, LANGUAGE_STORAGE_KEY, readLanguageChoice, type LanguageChoice, type Locale } from '@orchardworks/agent-client';
+import { effectiveLocale, LANGUAGE_STORAGE_KEY, readLanguageChoice, type LanguageChoice, type Locale } from '@orchardworks/agent-client/locale';
 export { clearImageDraftScope, configureImageDraftPersistence, clearPersistedImageDrafts } from './image-drafts.js';
 export type { ImageDraftBinding, ImageDraftRecipient } from './image-drafts.js';
 export { inspectImageDraft, readImageDraft, writeImageDraft, releaseImageDraft } from './image-drafts.js';

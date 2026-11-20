@@ -1,5 +1,5 @@
 import type { DeviceDatabase, StoredRecord } from '@orchardworks/agent-client';
-import { localizedError } from './react/localized-error.js';
+import { withMessageKey } from '@orchardworks/agent-client/locale';
 /** The one IndexedDB database of this browser origin: composer drafts and images, and the device store of conversations. */
 export const BROWSER_DATABASE = 'agent-remote-image-drafts';
 /** 1: drafts. 2: image bytes in their own store. 3: the device store (`sessions` and `session_index`). */
@@ -38,11 +38,11 @@ export function createBrowserDeviceDatabase(factory: () => IDBFactory | undefine
   const open = (): Promise<IDBDatabase> => {
     if (opened) return opened;
     const idb = factory();
-    if (!idb) return Promise.reject(localizedError('Browser storage is unavailable.', 'timeline.storage.unavailable'));
+    if (!idb) return Promise.reject(withMessageKey(new Error('Browser storage is unavailable.'), 'timeline.storage.unavailable'));
     const pending = new Promise<IDBDatabase>((resolve, reject) => {
       const opening = requestBrowserDatabase(idb);
-      opening.onerror = () => reject(opening.error ?? localizedError('Browser storage is unavailable.', 'timeline.storage.unavailable'));
-      opening.onblocked = () => reject(localizedError('Browser storage is blocked.', 'timeline.storage.blocked'));
+      opening.onerror = () => reject(opening.error ?? withMessageKey(new Error('Browser storage is unavailable.'), 'timeline.storage.unavailable'));
+      opening.onblocked = () => reject(withMessageKey(new Error('Browser storage is blocked.'), 'timeline.storage.blocked'));
       opening.onsuccess = () => {
         const database = opening.result;
         const release = () => { if (opened === pending) opened = undefined; };
@@ -75,7 +75,7 @@ export function createBrowserDeviceDatabase(factory: () => IDBFactory | undefine
           } else { sessions.delete(key); index.delete(key); }
         }
         transaction.oncomplete = () => resolve();
-        transaction.onabort = () => reject(transaction.error ?? localizedError('Browser storage write aborted.', 'timeline.storage.writeAborted'));
+        transaction.onabort = () => reject(transaction.error ?? withMessageKey(new Error('Browser storage write aborted.'), 'timeline.storage.writeAborted'));
       });
     },
     async clear() {

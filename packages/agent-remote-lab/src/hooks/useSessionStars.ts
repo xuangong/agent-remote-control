@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type RemoteAgentTransport, watchList } from '@orchardworks/agent-client';
+import { errorWords, watchList, type RemoteAgentTransport } from '@orchardworks/agent-client';
 import { SessionStarsClient, FavoritesConflict, type FavoriteChange, type FavoritesSnapshot, type StarInput } from '../session-stars-client.js';
 import { sessionKey } from '../session-tree.js';
 import { useFeedbackToast } from '../components/Toast.js';
@@ -33,7 +33,7 @@ export function useSessionStars(baseUrl: string, enabled: boolean, transport?: R
     const controller = new AbortController(); requestController.current = controller;
     setLoading(true);
     try { const value = await service.snapshot(controller.signal); if (current() && generation.current === request) { publish(value); setError(undefined); } }
-    catch (error) { if (current() && generation.current === request) setError(error instanceof Error ? error.message : t('sessions.stars.loadFailed')); }
+    catch (error) { if (current() && generation.current === request) setError(errorWords(error, t, 'sessions.stars.loadFailed')); }
     finally { if (current() && generation.current === request) setLoading(false); }
   }, [service, enabled, lifetime]);
   useEffect(() => { publish(empty()); setConfirmedScope(undefined); }, [service]);
@@ -69,7 +69,7 @@ export function useSessionStars(baseUrl: string, enabled: boolean, transport?: R
       publish(value); return true;
     } catch (error) {
       if (current() && request === generation.current) {
-        setError(error instanceof Error ? error.message : t('sessions.stars.changeUnconfirmed'));
+        setError(errorWords(error, t, 'sessions.stars.changeUnconfirmed'));
         if (error instanceof FavoritesConflict) {
           try { const value = await service.snapshot(controller.signal); if (current() && request === generation.current) publish(value); }
           catch { /* Keep the last confirmed tree and the original failure visible. */ }

@@ -1,7 +1,7 @@
 import type { ConversationConnections } from '../conversation-connections.js';
 import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { RemoteActivityClient, type RemoteActivityState, type RemoteAgentTransport } from '@orchardworks/agent-client';
+import { errorWords, RemoteActivityClient, type RemoteActivityState, type RemoteAgentTransport } from '@orchardworks/agent-client';
 import { observeConversation } from '../conversation-activity.js';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
@@ -351,7 +351,7 @@ function SessionObserver({ session, liveAgentId, baseUrl, transport, connections
         restored: attached => start(attached.agentId),
         failed: error => {
           unavailable.remember(session, error);
-          update(key, { connection: 'disconnected', error: error instanceof Error ? error.message : t('sessions.tracking.connectFailed') });
+          update(key, { connection: 'disconnected', error: errorWords(error, t, 'sessions.tracking.connectFailed') });
         },
       });
     };

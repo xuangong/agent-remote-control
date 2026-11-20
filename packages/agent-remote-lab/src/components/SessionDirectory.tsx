@@ -1,4 +1,4 @@
-import { watchList, type Translate } from '@orchardworks/agent-client';
+import { errorWords, watchList, type Translate } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { SessionListingStatus } from '@orchardworks/agent-remote-protocol';
 import { StarButton } from './SessionFavorites.js';
@@ -79,7 +79,7 @@ export function SessionDirectory({ quickOpen, favorites, searchable = false, dir
       if (generation.current !== request) return;
       const isExpired = error instanceof DirectoryError && error.code === 'cursor_expired';
       setExpired(isExpired);
-      setFailure(isExpired ? t('sessions.directory.expired') : error instanceof Error ? error.message : t('sessions.directory.loadFailed'));
+      setFailure(isExpired ? t('sessions.directory.expired') : errorWords(error, t, 'sessions.directory.loadFailed'));
     } finally {
       if (generation.current === request) { inFlight.current = false; setLoading(false); }
     }
@@ -116,7 +116,7 @@ export function SessionDirectory({ quickOpen, favorites, searchable = false, dir
         void load();
       }).catch(error => {
         if (retired) return;
-        setFailure(error instanceof Error ? error.message : t('sessions.directory.checkListingFailed'));
+        setFailure(errorWords(error, t, 'sessions.directory.checkListingFailed'));
         setListing({ ...listing, refreshing: false });
       });
     }, listingPollMs);
@@ -133,7 +133,7 @@ export function SessionDirectory({ quickOpen, favorites, searchable = false, dir
       setListing(status);
       void load();
     } catch (error) {
-      if (generation.current === request) setFailure(error instanceof Error ? error.message : t('sessions.directory.startListingFailed'));
+      if (generation.current === request) setFailure(errorWords(error, t, 'sessions.directory.startListingFailed'));
     } finally { if (generation.current === request) setRequestingListing(false); }
   }
 

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { AgentCommand, ResourceBinding } from '@orchardworks/agent-remote-protocol';
 import { MarkdownContent } from './MarkdownContent.js';
 import { useTranslate } from './locale.js';
-import { type AgentReplicaState } from '@orchardworks/agent-client';
+import { errorWords, type AgentReplicaState } from '@orchardworks/agent-client';
 
 export interface AgentCommandDetailsProps {
   command: AgentCommand;
@@ -35,7 +35,7 @@ export function AgentCommandDetails({ command, resources, onRequestResource, onR
     if (!binding || !requestRef.current) return;
     setLoading(true);
     void Promise.resolve().then(() => requestRef.current!(binding)).catch((reason: unknown) => {
-      if (current) setError(reason instanceof Error ? reason.message : t('composer.details.loadFailed'));
+      if (current) setError(errorWords(reason, t, 'composer.details.loadFailed'));
     }).finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
   }, [resourceId, revision]);

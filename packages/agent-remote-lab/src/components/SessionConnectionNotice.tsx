@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { translator, type MessageKey, type Translate } from '@orchardworks/agent-client';
+import { errorWords, translator, type MessageKey, type Translate } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { NativeDaemonRecovery } from './NativeSessionCommands.js';
 import { DirectoryError } from '../directory-client.js';
@@ -36,7 +36,7 @@ export function sessionConnectionFailure(error: unknown, retrying: boolean, t: T
     native_request_timeout: 'sessions.connection.nativeRequestTimeout',
     session_binding_unavailable: 'sessions.connection.bindingUnavailable',
   };
-  const description = code && Object.hasOwn(descriptions, code) ? t(descriptions[code]!) : error instanceof Error ? error.message : t('sessions.connection.openFailed');
+  const description = code && Object.hasOwn(descriptions, code) ? t(descriptions[code]!) : errorWords(error, t, 'sessions.connection.openFailed');
   const original = error instanceof Error && error.message.trim() && error.message !== description ? error.message : undefined;
   return { tone: waiting ? 'status' : 'alert',
     message: retrying ? t('sessions.connection.retrying', { message: description }) : waiting ? t('sessions.connection.waitAndReopen', { message: description }) : description,

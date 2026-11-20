@@ -1,3 +1,4 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Translate } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
@@ -39,7 +40,7 @@ export function SessionReferences({ scope, holder, providers, fallback, snapshot
     if (pending) return;
     setPending(label); setError(undefined);
     try { await changeSessionRef(scope, holder, action, ref); return true; }
-    catch (failure) { setError(failure instanceof Error ? failure.message : t('sessions.references.changeFailed')); return false; }
+    catch (failure) { setError(errorWords(failure, t, 'sessions.references.changeFailed')); return false; }
     finally { setPending(undefined); }
   };
   const remove = async (ref: LabSessionRef) => {

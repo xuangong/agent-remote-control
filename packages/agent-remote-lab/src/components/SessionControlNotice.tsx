@@ -1,6 +1,6 @@
 import { useId, useState } from 'react';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { leaseNoticeLabel, leaseView, type AgentReplicaState, type SessionHandoffState } from '@orchardworks/agent-client';
+import { errorWords, leaseNoticeLabel, leaseView, type AgentReplicaState, type SessionHandoffState } from '@orchardworks/agent-client';
 
 import type { SessionTakeControlOptions } from '@orchardworks/agent-client';
 export type TakeControlOptions = SessionTakeControlOptions;
@@ -27,7 +27,7 @@ export function SessionControlNotice({ control, handoff, connected, onTakeContro
     setPending(true); setFailure(undefined);
     try { await onTakeControl(); }
     catch (error) {
-      setFailure({ identity, message: error instanceof Error ? error.message : t('sessions.control.takeFailed') });
+      setFailure({ identity, message: errorWords(error, t, 'sessions.control.takeFailed') });
     } finally { setPending(false); }
   };
   // Every phase of taking over says the same thing to the person who asked for it.

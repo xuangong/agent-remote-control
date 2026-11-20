@@ -1,3 +1,4 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslate } from './locale.js';
 import type { ImageUploadReceipt, MessagePart } from '@orchardworks/agent-remote-protocol';
@@ -214,7 +215,7 @@ export function useImageDraft({ scope: suppliedScope, sessionKey, text, enabled,
           receiptOwners.current.set(image, recipientOwner.token);
         } catch (error) {
           if (!ownsUpload() || current.draft.images[image.imageId] !== image) return;
-          image.status = 'failed'; image.error = error instanceof Error ? error.message : t('composer.imageUploadFailed');
+          image.status = 'failed'; image.error = errorWords(error, t, 'composer.imageUploadFailed');
         }
         changed();
       }

@@ -5,7 +5,7 @@ import type { DraftPart } from './composer-document.js';
 export type UploadResource = (file: Blob, name: string, uploadId: string, options?: ResourceTransferOptions) => Promise<NonNullable<ResourceUploadReceipt['resource']>>;
 import { resourceDraftMemory as memory, readResourceDraft as read, writeResourceDraft as write, resourceDraftGeneration, type Entry } from '../resource-drafts.js';
 import type { ImageDraftRecipient } from '../image-drafts.js';
-import { type ResourceTransferOptions } from '@orchardworks/agent-client';
+import { errorWords, type ResourceTransferOptions } from '@orchardworks/agent-client';
 export function useResourceDraft({ scope, sessionKey, parts, active, limits, upload, recipient, documentHydrated = true }: { scope?: string; sessionKey: string; parts: readonly DraftPart[]; active: boolean; limits?: ResourceInputCapabilities; upload?: UploadResource; recipient?: ImageDraftRecipient; documentHydrated?: boolean }) {
   const t = useTranslate();
   const generation = resourceDraftGeneration(scope ?? 'page');
@@ -77,7 +77,7 @@ export function useResourceDraft({ scope, sessionKey, parts, active, limits, upl
           const resource = await upload(record.file, record.name, id, { signal: abort.signal, onProgress: (loaded, total) => { if (!abort.signal.aborted) { record.progress = total ? loaded / total : 1; notify(); } } });
           if (abort.signal.aborted || recipient && !recipient.isCurrent() || generation !== resourceDraftGeneration(scope ?? 'page')) return;
           record.resource = resource; record.status = 'ready'; record.progress = 1;
-        } catch (error) { if (abort.signal.aborted || recipient && !recipient.isCurrent() || generation !== resourceDraftGeneration(scope ?? 'page')) return; record.status = 'failed'; record.error = error instanceof Error ? error.message : t('composer.resourceUploadFailed'); }
+        } catch (error) { if (abort.signal.aborted || recipient && !recipient.isCurrent() || generation !== resourceDraftGeneration(scope ?? 'page')) return; record.status = 'failed'; record.error = errorWords(error, t, 'composer.resourceUploadFailed'); }
         save(); notify();
       }
     };

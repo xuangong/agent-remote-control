@@ -70,7 +70,7 @@ export function FilePreview({ request, onClose }: { readonly request: FilePrevie
       if (!textTypes.has(mediaType!)) throw new Error(t('timeline.file.unsupported'));
       text = new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(atob(available.contentBase64), character => character.charCodeAt(0)));
       if (text.includes('\0')) throw new Error(t('timeline.file.binary'));
-    } catch (cause) { error = cause instanceof Error ? cause.message : t('timeline.file.notText'); }
+    } catch (cause) { error = errorWords(cause, t, 'timeline.file.notText'); }
   }
   if (available && isImage) return <ImagePreview src={`data:${available.mediaType};base64,${available.contentBase64}`} label={filename}
     status={`${t('timeline.resource.bytes', { count: available.byteLength.toLocaleString() })} · ${t('timeline.file.readOnly')}`} onClose={onClose}

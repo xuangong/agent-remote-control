@@ -1,3 +1,4 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
@@ -50,7 +51,7 @@ export function WorkspaceFolderPicker({ directory, providerId, initialPath, work
       setPage(previous => offset && previous?.path === result.path ? { ...result, folders: [...previous.folders, ...result.folders] } : result);
       setLocation(result.path);
     }).catch(error => {
-      if (!retired) setFailure(controller.signal.aborted ? t('sessions.folders.noResponse') : error instanceof Error ? error.message : t('sessions.folders.loadFailed'));
+      if (!retired) setFailure(controller.signal.aborted ? t('sessions.folders.noResponse') : errorWords(error, t, 'sessions.folders.loadFailed'));
     }).finally(() => { clearTimeout(deadline); if (!retired) setLoading(false); });
     return () => { retired = true; clearTimeout(deadline); controller.abort(); };
   }, [directory, providerId, path, filter, hidden, offset, retry]);
@@ -71,7 +72,7 @@ export function WorkspaceFolderPicker({ directory, providerId, initialPath, work
       if (creation.current !== controller) return;
       setCreateFailure(controller.signal.aborted
         ? t('sessions.folders.notConfirmed')
-        : error instanceof Error ? error.message : t('sessions.folders.createFailed'));
+        : errorWords(error, t, 'sessions.folders.createFailed'));
     } finally {
       clearTimeout(deadline);
       if (creation.current === controller) { creation.current = undefined; setCreating(false); }

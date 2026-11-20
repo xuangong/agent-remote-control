@@ -1,3 +1,4 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
@@ -113,7 +114,7 @@ function UnlinkAction({ fork, onUnlink, onRecover, onComplete, menu = false }: {
     if (inFlight.current) return;
     inFlight.current = true; setPending(true); setError(undefined);
     try { if (recovering) { if (!onRecover) throw new Error(t('sessions.fork.refreshAccess')); await onRecover(fork); } else await onUnlink(fork); onComplete?.(); }
-    catch (error) { setError(error instanceof Error ? error.message : t('sessions.fork.unlinkFailed')); }
+    catch (error) { setError(errorWords(error, t, 'sessions.fork.unlinkFailed')); }
     finally { inFlight.current = false; setPending(false); }
   };
   return <>

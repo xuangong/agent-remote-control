@@ -4,7 +4,7 @@ import { applyConversationLayout, type ConversationLayout } from '../conversatio
 import { flushSync } from 'react-dom';
 import { useEffect, useMemo, useReducer, useRef } from 'react';
 import { nativeSessionRefKey, type SessionSuccessionCurrent, type SessionSuccessionReplay } from '@orchardworks/agent-remote-protocol';
-import { canPruneSession, canonicalJson, classifyFailure, committedRefreshOf, compositionStillChanging, continuesRole, handoffOutcome, latestReplayByRole, nativeNotConfirmed, newerFavoritesHints, reduceRefresh, remoteSessionState, resolveLocator, restoredSourceOf, roleContextOf, sessionSuccessionHistory, settlementOf, sourceStaleness, successionDeadlines, unconfirmedOutcome, watchFeedRefresh, watchPageResume, type AgentReplica, type AgentReplicaState, type RefreshEffect, type RefreshEvent, type RemoteAgentTransport, type RemoteSessionClient, type RemoteSessionState, type RoleProgress, type SessionSuccessionHistoryNavigation, type SourceStaleness } from '@orchardworks/agent-client';
+import { canonicalJson, canPruneSession, classifyFailure, committedRefreshOf, compositionStillChanging, continuesRole, errorWords, handoffOutcome, latestReplayByRole, nativeNotConfirmed, newerFavoritesHints, reduceRefresh, remoteSessionState, resolveLocator, restoredSourceOf, roleContextOf, sessionSuccessionHistory, settlementOf, sourceStaleness, successionDeadlines, unconfirmedOutcome, watchFeedRefresh, watchPageResume, type AgentReplica, type AgentReplicaState, type RefreshEffect, type RefreshEvent, type RemoteAgentTransport, type RemoteSessionClient, type RemoteSessionState, type RoleProgress, type SessionSuccessionHistoryNavigation, type SourceStaleness } from '@orchardworks/agent-client';
 import type { ImageDraftRecipient } from '@orchardworks/agent-client-web/browser';
 import type { ControllerLocation } from '@orchardworks/agent-remote-protocol/model';
 import { SessionDirectoryClient, type OpenedSession, type SuccessionActionResult } from '../directory-client.js';
@@ -307,7 +307,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
         if (!live() || request.signal.aborted || JSON.stringify(slot.intent.target) !== target) return;
         runtime.sides.set(slot.id, session); slot.metadata = compositionSessionMetadata(session);
         runtime.document.editRevision++; save();
-      }).catch(error => { if (live() && !request.signal.aborted) { runtime.error = error instanceof Error ? error.message : t('sessions.succession.sideOpenFailed'); publish(); } })
+      }).catch(error => { if (live() && !request.signal.aborted) { runtime.error = errorWords(error, t, 'sessions.succession.sideOpenFailed'); publish(); } })
         .finally(() => { if (runtime.sideRequests.get(slot.id) === request) runtime.sideRequests.delete(slot.id); });
     }
   }
@@ -492,7 +492,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
       }
     } catch (error) {
       navigationLease?.release();
-      if (current()) { runtime.activeAttempt = undefined; runtime.error = error instanceof Error ? error.message : t('sessions.connection.openFailed');
+      if (current()) { runtime.activeAttempt = undefined; runtime.error = errorWords(error, t, 'sessions.connection.openFailed');
         latest.current.failed(error, { hostId: desired.target.hostId, ...desired.target.native, title: desired.title }); publish(); }
     }
   }
@@ -825,7 +825,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
       if (!runtime.binding.isCurrent()) {
         runtime.binding.retireRecipient();
         try { latest.current.validateTarget?.(runtime.binding.session, runtime.binding.session.viewId, runtime.document); }
-        catch (error) { runtime.error = error instanceof Error ? error.message : t('sessions.succession.locatorUnavailable'); publish(); }
+        catch (error) { runtime.error = errorWords(error, t, 'sessions.succession.locatorUnavailable'); publish(); }
       }
       else runtime.binding.resumeRecipient();
     } else if (runtime.discovered && !runtime.discovering && runtime.desired && !runtime.activeAttempt && runtime.targetUnavailable) void attachDesired(true);

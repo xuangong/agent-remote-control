@@ -1,3 +1,4 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { useToastPlacement } from '../hooks/useToastPlacement.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -101,7 +102,7 @@ function Toast({ value, dismiss }: { value: ToastMessage; dismiss(id: string): v
     if (!value.action || actionRunning.current) return;
     actionRunning.current = true; setPending(true); setActionError(undefined);
     try { await value.action.onClick(); if (active.current) close(); }
-    catch (error) { if (active.current) setActionError(error instanceof Error ? error.message : t('sessions.toast.actionFailed')); }
+    catch (error) { if (active.current) setActionError(errorWords(error, t, 'sessions.toast.actionFailed')); }
     finally { actionRunning.current = false; if (active.current) setPending(false); }
   };
   useEffect(() => {

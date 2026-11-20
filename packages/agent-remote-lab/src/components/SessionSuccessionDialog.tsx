@@ -1,3 +1,4 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
@@ -77,7 +78,7 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
         setDescription(value);
         setTarget(preferredTarget(value, initialProvider));
       } catch (failure) {
-        if (active && mounted.current) setError(failure instanceof Error ? failure.message : t('sessions.handoff.availabilityFailed'));
+        if (active && mounted.current) setError(errorWords(failure, t, 'sessions.handoff.availabilityFailed'));
       }
     })();
     return () => { active = false; };
@@ -123,7 +124,7 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
     } catch (failure) {
       if (mounted.current) {
         setProjection('failed');
-        setError(failure instanceof Error ? failure.message : t('sessions.handoff.refreshFailed'));
+        setError(errorWords(failure, t, 'sessions.handoff.refreshFailed'));
       }
     } finally { projecting.current = false; }
   }
@@ -193,7 +194,7 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
     } catch (failure) {
       if (mounted.current) {
         if (operation.current && !isTerminal(settled.current)) setUncertain(true);
-        setError(failure instanceof Error ? failure.message : t('sessions.handoff.outcomeUnconfirmed'));
+        setError(errorWords(failure, t, 'sessions.handoff.outcomeUnconfirmed'));
       }
     } finally {
       if (action === 'cancel') cancelling.current = false;
@@ -232,7 +233,7 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
     } catch (failure) {
       if (mounted.current) {
         if (isTerminal(settled.current)) { projected.current = false; setProjection('failed'); }
-        setError(failure instanceof Error ? failure.message : t('sessions.handoff.cleanupFailed'));
+        setError(errorWords(failure, t, 'sessions.handoff.cleanupFailed'));
       }
     } finally { closing.current = false; }
   }

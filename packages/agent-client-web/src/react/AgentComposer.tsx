@@ -23,7 +23,7 @@ import { useSendButtonPress } from './useSendButtonPress.js';
 import { usePendingSend } from './usePendingSend.js';
 import { SharedByKey } from './shared-by-key.js';
 import { PendingSendQueue } from './PendingSendQueue.js';
-import { composerAvailability, remoteSessionState, type MessageKey, type RemoteSessionState, type AgentReplicaState, type SessionFacts } from '@orchardworks/agent-client';
+import { composerAvailability, errorWords, remoteSessionState, type MessageKey, type RemoteSessionState, type AgentReplicaState, type SessionFacts } from '@orchardworks/agent-client';
 
 /** A command of the page's own (a console command such as /ask or /handoff): its description's catalogue key says it in the reader's words. */
 export type ConsoleCommand = AgentCommand & { aliases?: readonly string[]; descriptionKey?: MessageKey };
@@ -425,7 +425,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
       }
       if (result.text) currentDraft.feedback = { kind: 'success', message: result.text };
     } catch (error) {
-      currentDraft.feedback = { kind: 'error', message: error instanceof Error ? error.message : t('composer.commandFailed'), commandError: error };
+      currentDraft.feedback = { kind: 'error', message: errorWords(error, t, 'composer.commandFailed'), commandError: error };
     } finally {
       currentDraft.pending = undefined;
       if (mounted.current) refresh((value) => value + 1);
@@ -465,7 +465,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
         currentDraft.commandInterrupted = currentDraft.pending === 'command';
         currentDraft.feedback = { kind: 'success', message: t('composer.cancellationRequested') };
       } catch (error) {
-        currentDraft.feedback = { kind: 'error', message: error instanceof Error ? error.message : t('composer.interruptFailed') };
+        currentDraft.feedback = { kind: 'error', message: errorWords(error, t, 'composer.interruptFailed') };
       } finally {
         currentDraft.interruptPending = false;
         if (mounted.current) refresh((value) => value + 1);
@@ -530,7 +530,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
         imageDraft.rejectAttachments(content, t('composer.imageRejected'));
       }
       if (content && ownsImageEdit() && error && typeof error === 'object' && 'code' in error && error.code === 'invalid_resource_input') resourceDraft.reject(content, t('composer.resourceRejected'));
-      currentDraft.feedback = { kind: 'error', message: error instanceof Error ? error.message : t('composer.actionFailed') };
+      currentDraft.feedback = { kind: 'error', message: errorWords(error, t, 'composer.actionFailed') };
     } finally {
       currentDraft.pending = undefined;
       if (mounted.current) refresh((value) => value + 1);
@@ -611,7 +611,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     {capabilities?.resourceInput ? <input ref={resourceInputRef} type="file" hidden multiple aria-label={t('composer.chooseResources')} onChange={event => {
       const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = '';
       if (filePickerAgent.current !== agentId) return;
-      try { editorRef.current?.insertParts(resourceDraft.add(files)); } catch (error) { currentDraft.feedback = { kind: 'error', message: error instanceof Error ? error.message : t('composer.resourceSelectionFailed') }; refresh(value => value + 1); }
+      try { editorRef.current?.insertParts(resourceDraft.add(files)); } catch (error) { currentDraft.feedback = { kind: 'error', message: errorWords(error, t, 'composer.resourceSelectionFailed') }; refresh(value => value + 1); }
     }} /> : null}
     <PendingSendQueue items={waiting.items} onCancel={waiting.cancel} onRetry={waiting.retry} />
     {/* What the composer says stands above the capsule, where the keyboard never covers it. */}

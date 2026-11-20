@@ -9,7 +9,7 @@ import { ConversationConnectionScope } from '../conversation-connections.js';
 import { SessionLink } from './SessionLink.js';
 import { SessionHeadingActions } from './SessionHeadingActions.js';
 import { SessionControlNotice } from './SessionControlNotice.js';
-import { AgentReplica, sessionHandoffScope, SessionHandoffRejectedError } from '@orchardworks/agent-client';
+import { AgentReplica, errorWords, SessionHandoffRejectedError, sessionHandoffScope } from '@orchardworks/agent-client';
 import type { NativeSessionOwner, NativeSessionRef } from '@orchardworks/agent-remote-protocol';
 import { DirectoryError, nativeSessionMissing, SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import { unavailableSessions } from '../unavailable-sessions.js';
@@ -69,7 +69,7 @@ export function SessionConversation(props: SessionConversationProps) {
     const resolved = operations?.resolveTarget(target, { viewId: props.viewId, nativePrefixOnly: props.nativePrefixOnly });
     if (resolved) { currentTarget = { ...target, ...resolved.target, hostId: resolved.target.hostId ?? 'local' }; historyRoleId = resolved.historyRoleId; }
   } catch (error) {
-    resolutionError = error instanceof Error ? error.message : t('sessions.conversation.locatorUnavailable');
+    resolutionError = errorWords(error, t, 'sessions.conversation.locatorUnavailable');
     synchronizing = error instanceof SessionLocatorSynchronizingError;
     staleLocator = error instanceof SessionLocatorSynchronizingError && error.stale;
   }
@@ -155,7 +155,7 @@ export function SessionConversation(props: SessionConversationProps) {
         const lease = connections?.acquire(value.agentId, props.replicaFor?.(value.agentId) ?? new AgentReplica(), restored);
         setSession(restored); setError('');
         try { await lease?.client.takeControlAfterNativeResume(); } finally { lease?.release(); }
-      }, options); } catch (failure) { if (!abort.signal.aborted) setError(failure instanceof Error ? failure.message : t('sessions.conversation.restoreFailed')); throw failure; }
+      }, options); } catch (failure) { if (!abort.signal.aborted) setError(errorWords(failure, t, 'sessions.conversation.restoreFailed')); throw failure; }
       finally { restorations.current.delete(abort); }
       setNativeOwner(current => current?.targetKey === targetKey && current.owner.generation === owner.generation ? undefined : current);
     }} />{error ? <p role="alert">{error}</p> : null}</> : undefined;
@@ -193,7 +193,7 @@ export function SessionConversation(props: SessionConversationProps) {
       if (stopped || !availability.current.enabled || availability.current.targetKey !== targetKey) return;
       if (props.familyRoot && props.onSessionUnavailable && nativeSessionMissing(error) && !historyRoleId && !currentTarget.parentNativeSessionId
         && sessionKey(currentTarget) === sessionKey(target)) { props.onSessionUnavailable(currentTarget); return; }
-      setError(error instanceof DirectoryError && error.nativeOwner ? '' : error instanceof Error ? error.message : t('sessions.conversation.openFailed'));
+      setError(error instanceof DirectoryError && error.nativeOwner ? '' : errorWords(error, t, 'sessions.conversation.openFailed'));
       setNativeOwner(error instanceof DirectoryError && error.nativeOwner ? { targetKey, owner: error.nativeOwner } : undefined);
     });
     return () => { stopped = true; abort.abort(); };

@@ -1,4 +1,5 @@
 // The succession model and the Window workspace bound to it.
+import { errorWords } from '@orchardworks/agent-client';
 import { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { useWindowSessionRetention } from '../hooks/useWindowSessionRetention.js';
 import { useWindowActions } from '../hooks/useWindowActions.js';
@@ -64,7 +65,7 @@ export function useSessionSuccessionBinding(scope: Pick<AppInputs & ProviderStat
     },
     failed: (error, selection, retrying = false) => {
       if (!retrying && nativeSessionMissing(error)) { markSessionMissing(selection); unavailableSessions(transport).remember(selection, error); }
-      late.setSessionNotice({ ...sessionConnectionFailure(error, retrying, t), successionError: error instanceof Error ? error.message : t('sessions.connection.openFailed') });
+      late.setSessionNotice({ ...sessionConnectionFailure(error, retrying, t), successionError: errorWords(error, t, 'sessions.connection.openFailed') });
       if (error instanceof DirectoryError && error.nativeOwner) late.setNativeTakeover({ item: selection, owner: error.nativeOwner, message: error.message });
     },
   });

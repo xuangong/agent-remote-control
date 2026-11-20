@@ -1,3 +1,4 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
@@ -31,7 +32,7 @@ export function RenameSessionDialog({ favorites, session, onClose, onRenamed }: 
       await favorites.refresh();
       if (mounted.current) onClose();
     } catch (error) {
-      if (mounted.current) setError(error instanceof Error ? error.message : t('sessions.rename.unconfirmed'));
+      if (mounted.current) setError(errorWords(error, t, 'sessions.rename.unconfirmed'));
     } finally { inFlight.current = false; if (mounted.current) setSaving(false); }
   }
   const close = () => { if (!inFlight.current) onClose(); };

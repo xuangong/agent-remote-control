@@ -1,3 +1,4 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { SessionDirectoryClient, SessionWorkspace } from '../directory-client.js';
 import { useFeedbackToast } from './Toast.js';
@@ -31,7 +32,7 @@ export function WorkspaceSelect({ directory, providerId, disabled, value, onChan
       if (!retired) setCatalog({ directory, providerId, workspaces: result.workspaces, loading: false });
     }).catch(error => {
       if (!retired) setCatalog({ directory, providerId, workspaces: [], loading: false,
-        failure: error instanceof Error ? error.message : t('sessions.workspace.loadFailed') });
+        failure: errorWords(error, t, 'sessions.workspace.loadFailed') });
     });
     return () => { retired = true; };
   }, [directory, providerId, retry]);

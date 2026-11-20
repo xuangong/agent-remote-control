@@ -1,3 +1,4 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ProjectedTimelineEntry, SessionExcerpt } from '@orchardworks/agent-remote-protocol';
 import { preparePromptDraft, useTranslate, withoutSessionExcerpts } from '@orchardworks/agent-client-web/react';
@@ -29,7 +30,7 @@ export function usePromptEditOperation(binding: SessionOperationBinding | undefi
   const access = accessRef.current;
   const restored = useMemo(() => {
     try { return { intent: scope && key ? readPrefixEdit(scope, key) : undefined, error: undefined as string | undefined }; }
-    catch (error) { return { intent: undefined, error: error instanceof Error ? error.message : t('sessions.promptEdit.readFailed') }; }
+    catch (error) { return { intent: undefined, error: errorWords(error, t, 'sessions.promptEdit.readFailed') }; }
   }, [identity]);
   const [selected, setSelection] = useState<{ identity: string; lifetime: { active: boolean }; entry: ProjectedTimelineEntry; binding: SessionOperationBinding; access: typeof access; recipient?: ImageDraftRecipient; text: DraftBinding; image: ImageDraftBinding }>();
   const selection = selected?.identity === identity ? selected : undefined;

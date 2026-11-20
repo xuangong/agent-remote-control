@@ -1,3 +1,4 @@
+import { errorWords } from '@orchardworks/agent-client';
 import { createPortal } from 'react-dom';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { NativeSessionCommand, nativeOpenCommand } from './NativeSessionCommands.js';
@@ -74,7 +75,7 @@ export function SessionTransferDialog({ session, sessionIntent, keepOriginal, on
       pending.current = true; setOpening(true);
       if (await onOpen(target)) onClose();
       else setFailure(t('sessions.link.openFailed'));
-    } catch (error) { setFailure(error instanceof Error ? error.message : t('sessions.link.openFailedShort')); }
+    } catch (error) { setFailure(errorWords(error, t, 'sessions.link.openFailedShort')); }
     finally { pending.current = false; setOpening(false); }
   }
   return createPortal(<dialog ref={dialog} className="lab-session-link-dialog" aria-label={title} onKeyDown={event => event.stopPropagation()} onClose={onClose}>

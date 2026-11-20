@@ -4,7 +4,7 @@ import { ComposerMenu, type ComposerMenuEntry } from './ComposerMenu.js';
 import type { ComposerMenuItem } from './composer-menu.js';
 import { AgentSessionUsage } from './AgentSessionUsage.js';
 import { useTranslate } from './locale.js';
-import { remoteSessionState, type RemoteSessionState, type AgentReplicaState, type Translate } from '@orchardworks/agent-client';
+import { errorWords, remoteSessionState, type RemoteSessionState, type AgentReplicaState, type Translate } from '@orchardworks/agent-client';
 
 export type SessionControlView = 'status' | 'model' | 'permissions' | 'actions';
 
@@ -97,7 +97,7 @@ export function AgentSessionSettings({ state, sessionState, children, entries = 
     onPendingChange(true);
     try { await onSelect(setting.id, value); }
     catch (error) {
-      setFailure({ error, message: error instanceof Error ? error.message : t('composer.settings.changeFailed') });
+      setFailure({ error, message: errorWords(error, t, 'composer.settings.changeFailed') });
     } finally {
       inFlight.current = false;
       onPendingChange(false);

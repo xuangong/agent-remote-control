@@ -123,15 +123,15 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
     const forkReference = fork ? <ForkReference fork={fork} onOpen={revealSession} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} /> : null;
     // Quoting happens between the session views of shared Windows.
     const quoteView = !botPresentation && sharedWindow && context.windowViewId && !source.parentNativeSessionId ? context.windowViewId : undefined;
-    // Who answers: the bot's or the session's name, and its avatar, which works while it does.
-    const assistantId = options.bot?.viewId ?? source.viewId;
-    const assistant = { name: source.title || source.nativeSessionId,
-      avatar: <BotPicture id={assistantId} picture={options.bot ? botGroup?.bots?.members[options.bot.viewId]?.picture : undefined} size={26}
-        mood={botWorking(context.state) ? 'working' : 'idle'} /> };
-    // A bot's own process mode is stored with its details; a view in a group without bots chooses only this device's default.
+    // A bot's details (its picture and its own process mode) are stored with its group, in Bot mode and in a Window of bots alike;
+    // a view in a group without bots has none and chooses only this device's default.
     const botGroupId = options.bot?.groupId ?? (windowBot ? sharedWindow!.id : undefined), botViewId = options.bot?.viewId ?? (windowBot ? view!.id : undefined);
+    const botDetails = botGroupId && botViewId ? windowWorkspace.readGroup(botGroupId)?.bots?.members[botViewId] : undefined;
+    // Who answers: the bot's or the session's name, and its avatar, which works while it does.
+    const assistant = { name: source.title || source.nativeSessionId,
+      avatar: <BotPicture id={botViewId ?? source.viewId} picture={botDetails?.picture} size={26} mood={botWorking(context.state) ? 'working' : 'idle'} /> };
     const processAssistant = botGroupId && botViewId ? {
-      details: windowWorkspace.readGroup(botGroupId)?.bots?.members[botViewId],
+      details: botDetails,
       update: (details: WindowBotDetails) => { void windowWorkspace.operateGroup(botGroupId, { type: 'bot.update', viewId: botViewId, details }).catch(error => setSessionNotice(sessionConnectionFailure(error, false))); },
     } : undefined;
     return {

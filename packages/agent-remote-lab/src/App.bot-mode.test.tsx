@@ -104,6 +104,20 @@ it('keeps the same visible Bot editor and content while Access suspends and resu
   } finally { await app.close(); }
 });
 
+it("draws a bot's stored picture at the foot of its answers, in a Window of bots and in Bot mode alike", async () => {
+  const scope = 'http://localhost/bot-picture/', group = botGroup('B');
+  group.bots!.members.B1 = { picture: { shape: 'triangle', color: '#2f6fed' } };
+  seedGroup(scope, group); history.replaceState(null, '', '/?window=B');
+  const app = await mountBotApp(scope, { hosted: true, timeline: [{ providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: 'now', turnId: 'B1-turn',
+    resources: [], collapsed: [], sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }], item: { type: 'assistant_message', text: 'Readable Bot content' } }] });
+  const foot = (root: ParentNode | null) => root?.querySelector<HTMLElement>('.orchard-bubble-row[data-from="theirs"] .orchard-avatar')?.dataset.shape;
+  try {
+    await until(() => expect(foot(app.container.querySelector('[data-view-id="B1"]'))).toBe('triangle'));
+    await app.switchMode('bot'); await act(async () => app.button('B1').click());
+    await until(() => expect(foot(app.container.querySelector('.lab-bot-conversation'))).toBe('triangle'));
+  } finally { await app.close(); }
+});
+
 // A Side (attached) or managed view stays a bot, so the changes that end a bot are deletion, another session, history, becoming an Ask and another scope.
 it.each(['deleted', 'rebound', 'history', 'ask', 'scope'] as const)('does not retain an Access-suspended Bot presentation after %s replacement', async change => {
   const scope = `http://localhost/bot-access-${change}/`; seedGroup(scope, botGroup('B')); history.replaceState(null, '', '/?mode=bot&section=B&bot=B1');

@@ -1,6 +1,6 @@
 # I2: Design system
 
-**State: planned.** I2 is the second Orchard step (roadmap "Next: Orchard"; [Orchard design](../specs/2026-11-20-orchard-im-experience-design.md), "Visual language", "Phone", "Two views of the same assistants", step I2 and Acceptance). It delivers the system that I3 builds Bot mode and Window mode on: tokens, light and dark themes, primitives, avatar generation, the Orchard mark and wordmark, and fixture pages. It does not redesign a screen. The approved values are the CSS of [`mockup.html`](../specs/assets/2026-11-20-orchard/mockup.html) (v9, its `.theme-light` and `.theme-dark` blocks and the `/* v6 */` overrides) and option 1 of [`logo.html`](../specs/assets/2026-11-20-orchard/logo.html) (symbol `t1`, drawing `kid`).
+**State: implemented (2026-11-20), awaiting the owner's review.** I2 is the second Orchard step (roadmap "Next: Orchard"; [Orchard design](../specs/2026-11-20-orchard-im-experience-design.md), "Visual language", "Phone", "Two views of the same assistants", step I2 and Acceptance). It delivers the system that I3 builds Bot mode and Window mode on: tokens, light and dark themes, primitives, avatar generation, the Orchard mark and wordmark, and fixture pages. It does not redesign a screen. The approved values are the CSS of [`mockup.html`](../specs/assets/2026-11-20-orchard/mockup.html) (v9, its `.theme-light` and `.theme-dark` blocks and the `/* v6 */` overrides) and option 1 of [`logo.html`](../specs/assets/2026-11-20-orchard/logo.html) (symbol `t1`, drawing `kid`).
 
 ## 1. For the owner
 
@@ -628,6 +628,51 @@ Follow `.agents/skills/prepare-arc-local/SKILL.md`, and check the instance's own
 ## 10. Results
 
 Filled in per task: suites and counts, the measured contrast table (final hexes for the ≈ tokens), the avatar CPU trace, the deletion mapping and the ratchet's before and after.
+
+**Commits** (on `design/im-session-service`): Task 0 `c84a0c90`, Task 4 `82b75fe7`, Task 1 `a2bd67ab`, Task 2 `f68bcd90`, Task 3 `c0593e21`, Task 5 `0a0c2dc4`, Task 6 `263f7e11`, Task 7 `8d7a2da9`, Task 9 `b3f25ee1`, Task 10 `9702920f`, Task 11 `1c8e943c`, Task 8 `bb21989f`. Task 8 ran after Task 11 so that only its root `package.json` change sends `verify:changed` to the full `pnpm verify`.
+
+**Deploy.** The bot picture schema (Task 4) is a Window workspace interface change: deploy the Relay first, then the website.
+
+**Contrast** (final hexes; the ratio is the worst surface the token promises):
+
+| Token | Light | Dark |
+|---|---|---|
+| `text-secondary` on ground, surface, fill, tint | `#696d75`, 4.53 (ground) | `#9a9da4`, 4.89 (tint) |
+| `on-brand` on `#ff7f45` | `#1d1d1f`, 6.71 | the same |
+| `on-mine` on `mine` | `#ffffff` on `#2a2b30`, 14.1 | `#1d1d20` on `#f2f2f4`, 15.0 |
+| `danger-text` on surface, fill, tint | `#c4321f`, 4.96 | `#ff7a6b`, 5.22 |
+| `focus` on ground, surface (3:1) | `#d9581c`, 3.42 | `#ff7f45`, 6.24 |
+| eye `#16161a` on the palette (3:1) | violet lowest, 4.89 | the same |
+| eye on `avatar-resting` (3:1) | `#c9cbd0`, 11.1 | `#66686e` (mockup `#55575d` was 2.50), above 3 |
+
+The fixture spec found no text node below AA in light, dark and system-dark, in chromium-desktop, chromium-mobile, orchard-phone-chromium and orchard-phone-webkit (390 × 844), with the sheet and the work summary open. A sending bubble keeps full opacity (the mockup's 0.55 would fail AA); its state is the word beside it.
+
+**Motion and touch.** Under reduced motion there is no `animate` element and `getAnimations()` settles to empty (WebKit lists the Lab's 0.01 ms reduced-motion transitions for a frame, so the spec polls for 2 s). With motion, every avatar of 24 px and above that is not resting has one `animate`, smaller ones none, the working avatar bobs, the 64 px mark runs two animations and the 32 px mark none; a hidden page removes them all and a visible one restores them. Every button, switch, radio, link and input on the fixture page is at least 44 × 44 under a coarse pointer, in Chromium and WebKit.
+
+**Avatar CPU** (30 animated 40 px avatars on screen, headless Chromium, `Performance.getMetrics` over 10 s, two runs; still = the same page with motion off):
+
+| CPU | Busy ms/s, moving | Busy ms/s, still | Frames/s moving |
+|---|---|---|---|
+| 1x | 38.6, 32.7 | 5.3, 5.3 | 67, 73 |
+| 4x | 88.7, 59.4 | 5.3, 9.5 | 72, 69 |
+
+At 1x the avatars add 27 to 33 ms of main-thread work per second: 0.45 to 0.55 ms of each 16.7 ms frame, 2.7 to 3.3 % of the budget, under the 5 % line. At 4x they add 50 to 83 ms per second and the frame rate holds. No reduction (fewer concurrent avatars, pausing offscreen ones) was needed in I2; recheck on an iPhone in step 5 of section 9.
+
+**Ratchet.** `ui/ui.css` 120 → 91 (segmented and sheet rules, Task 7) → 83 (avatar rules, Task 11); every other stylesheet is unchanged. `ui/tokens.css` 121 → 78 lines.
+
+**Deletion mapping** (`ui/Avatar.test.tsx`): the stored colour ignored → `avatar.test.ts` "takes the stored shape, colour and gaze", `AssistantAvatar.test.tsx` "draws a stored picture" (and "fills an absent gaze", "keeps the id's own field"); the shape ignored → the first two; an invalid colour accepted → "keeps the id's own field for anything stored that is not a valid shape, colour or gaze"; `aria-hidden` dropped → "is hidden from assistive technology unless a label names it". Each mutation was applied and failed those tests. The initial-letter and ink cases left with the feature.
+
+**Suites.** agent-client-web I2 suites: 159 tests in 11 files, 432 ms of tests (the slowest file, `Sheet.test.tsx`, 96 ms). Lab: `stylesheets.test.ts`, `tokens.test.ts`, `brand-assets.test.ts`, `command-items.test.ts`, `BotRoster.test.tsx`, `WorkbenchModeSwitch.test.tsx`, `Sheet.menu.test.tsx`. Protocol `window-groups.test.ts` 21 tests, Relay `window-workspaces` 28 tests. Components: 498 passed (72 skipped by project), 8.1 min; preview-browser: 73 passed, 136 s; `fixtures:check`, `arch:check` and `compatibility:check` pass. `pnpm verify`: compatibility, architecture, build and typecheck pass; its unit stage stopped once on a Controller git test at 1.01 s under a load average of 110 (563 ms alone on a quiet machine, untouched by I2), and the full `pnpm test` rerun then passed: 11,718 tests in 27 suites.
+
+**Captures.** Before and after of Bot and Window mode: `.tmp/i2-before-*.png`, `.tmp/i2-after-*.png`; they differ only by the avatars and the orange mode switch. The fixture page: `.tmp/i2-fixture-{desktop,phone}-{light,dark,system}.png`; per-section captures per project in `.tmp/i2-components/`.
+
+**Deviations.**
+- `AppearancePort.setChromeColor(color, media)` takes the media the meta belongs to (`light` or `dark`); `chooseAppearance` stores and applies, `applyAppearance` only applies.
+- `SessionChangeLine` takes its text as a string, because a separator's accessible name comes from `aria-label`.
+- The safe areas are `--orchard-safe-area-*` tokens (`env()` by default), which the spec overrides to emulate a home indicator.
+- `avatarWith` also ignores a stored field that is not a valid shape, colour or gaze, so a bad stored value cannot reach the SVG.
+- The Lab cases of the moved tests (a Menu inside the Sheet, the WorkbenchModeSwitch) stay in the Lab, since the Lab owns those components.
+- The fixture page is served by the Lab's Vite server (as in the component tier), not by the built site of `pnpm local`.
 
 ## 11. Open questions, answered
 

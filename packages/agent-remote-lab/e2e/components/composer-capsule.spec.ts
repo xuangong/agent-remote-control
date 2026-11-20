@@ -33,13 +33,14 @@ for (const theme of ['light', 'dark'] as const) test(`the capsule, its buttons a
   await expect(send).toHaveCSS('background-color', await token(page, '--orchard-brand'));
   await expect(send).toHaveCSS('color', await token(page, '--orchard-on-brand'));
   // Left to right: +, the editor, stop (the turn runs), send.
-  const [p, i, s, d] = await Promise.all([plus, input, stop, send].map(async control => (await control.boundingBox())!));
+  const box = async (control: typeof plus) => (await control.boundingBox())!;
+  const [p, i, s, d] = [await box(plus), await box(input), await box(stop), await box(send)];
   expect(p.x + p.width).toBeLessThanOrEqual(i.x + 1);
   expect(i.x + i.width).toBeLessThanOrEqual(s.x + 1);
   expect(s.x + s.width).toBeLessThanOrEqual(d.x + 1);
   // Under a finger every round button is a 44 px target; with a mouse it is drawn at 32 px.
   const coarse = await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
-  for (const box of [p, s, d]) expect(Math.round(Math.min(box.width, box.height))).toBeGreaterThanOrEqual(coarse ? 44 : 32);
+  for (const round of [p, s, d]) expect(Math.round(Math.min(round.width, round.height))).toBeGreaterThanOrEqual(coarse ? 44 : 32);
   // Nothing of the composer covers the conversation while its menu is closed.
   expect(await coveringControls(page)).toEqual([]);
   await plus.click();

@@ -91,7 +91,7 @@ test.describe('in Chinese', () => {
   test('words the Trace page in Chinese and keeps event identifiers as they are', async ({ page }) => {
     await page.goto('/e2e/fixtures/trace-inspection.html');
     await expect(page.getByTestId('prompt-input')).toBeEnabled();
-    if (!await page.getByRole('tab', { name: 'Trace', exact: true }).isVisible()) await toggleViewPanel(page, 'Header');
+    if (!await page.getByRole('tab', { name: 'Trace', exact: true }).isVisible()) await toggleViewPanel(page, 'Header', 'zh');
     await page.getByRole('tab', { name: 'Trace', exact: true }).click();
     const trace = page.getByTestId('trace-view');
     await expect(trace.getByRole('heading', { name: '执行事件' })).toBeVisible();

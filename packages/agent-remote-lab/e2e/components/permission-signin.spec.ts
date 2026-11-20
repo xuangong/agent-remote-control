@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 
 test('permission recovery offers a visible sign-in action inside the panel and returns to the session', async ({ page }, testInfo) => {
   await page.goto('/e2e/fixtures/permission-signin.html?host=studio&provider=codex&session=native-one&redirect=https://evil.example');
+  await page.locator('.agent-composer-capsule').getByRole('button', { name: 'More actions', exact: true }).click();
   await page.getByTestId('session-permissions-button').click();
   const panel = page.getByRole('region', { name: 'Permission settings' });
   await panel.getByLabel('Sandbox', { exact: true }).selectOption('dangerFullAccess');

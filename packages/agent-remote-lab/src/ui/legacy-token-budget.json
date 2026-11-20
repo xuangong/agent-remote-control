@@ -2,7 +2,7 @@
   "description": "Uses of the legacy --ui-*, --obs-* and --agent-* variables per stylesheet (ui/tokens.css defines them and is not counted). stylesheets.test.ts fails when a count differs: lower the budget in the commit that removes uses; it never rises, since new rules use --orchard-*.",
   "budget": {
     "agent-client-web/src/styles.css": 387,
-    "agent-remote-lab/src/app.css": 544,
+    "agent-remote-lab/src/app.css": 538,
     "agent-remote-lab/src/ask-resize.css": 3,
     "agent-remote-lab/src/ask.css": 15,
     "agent-remote-lab/src/components/assistant/assistant.css": 0,

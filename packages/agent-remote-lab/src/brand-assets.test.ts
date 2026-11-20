@@ -28,6 +28,8 @@ it('titles the page Orchard and gives the browser chrome each theme\'s ground', 
   expect(html).toContain(`<meta name="theme-color" media="(prefers-color-scheme: dark)" content="${orchardColors.ground.dark}" />`);
   expect(html).toContain('<meta name="color-scheme" content="light dark" />');
   expect(html).toContain('<link rel="apple-touch-icon" href="/app/icon-192.png" />');
+  // iOS names a home-screen icon from the page title unless this says otherwise; the title changes with the conversation.
+  expect(html).toContain('<meta name="apple-mobile-web-app-title" content="Orchard" />');
 });
 
 it('links only the paths the Relay already serves', () => {

@@ -13,7 +13,8 @@
 
 :root {
   color: var(--ui-label);
-  background: var(--obs-surface);
+  /* The installed app's launch, the overscroll and the margins the browser paints take the theme's ground. */
+  background: var(--orchard-ground);
   font-family: var(--ui-font);
   font-size: var(--ui-size-body);
   -webkit-text-size-adjust: 100%;
@@ -54,7 +55,7 @@ body {
   min-height: 100vh;
   min-height: 100dvh;
   color: var(--obs-text);
-  background: var(--obs-surface);
+  background: var(--orchard-ground);
 }
 
 button,
@@ -1378,9 +1379,7 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
   font-size: 12px; white-space: nowrap; box-shadow: var(--ui-shadow-pane);
 }
 .gateway-recovery button, .gateway-recovery a { min-height: 32px; padding: 4px; font-size: inherit; }
-.gateway-workspace-shell { height: 100dvh; display: grid; grid-template-rows: 42px 1fr 68px; background: var(--obs-canvas); }
-.gateway-workspace-shell > div { border-bottom: 1px solid var(--obs-border); }
-.gateway-workspace-shell > footer { margin: 8px 16px 16px; border: 1px solid var(--obs-border); border-radius: 12px; background: var(--obs-surface); }
+.gateway-workspace-shell { height: 100dvh; background: var(--orchard-ground); }
 
 .lab-cache-settings { padding-top: 16px; border-top: 1px solid var(--obs-border); }
 .lab-cache-setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; }

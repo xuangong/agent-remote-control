@@ -38,3 +38,15 @@ test('resizes the desktop sidebar, retains its width, and supports keyboard rese
   await toggleViewPanel(page, 'Sidebar'); await expect(handle).toHaveCount(0);
   await toggleViewPanel(page, 'Sidebar'); await expect(handle).toBeVisible();
 });
+
+test.describe('in Chinese', () => {
+  test.use({ locale: 'zh-CN' });
+  test('words the sidebar handle in Chinese', async ({ page }, info) => {
+    test.skip(info.project.name !== 'chromium-desktop');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/');
+    const handle = page.getByRole('separator', { name: '侧边栏宽度' });
+    await expect(handle).toHaveAttribute('aria-valuenow', '260');
+    await expect(handle).toHaveAttribute('aria-valuetext', '260 像素');
+  });
+});

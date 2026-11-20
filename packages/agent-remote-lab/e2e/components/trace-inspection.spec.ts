@@ -85,3 +85,22 @@ test('filters trace events, restores list focus, and resets inspection on an epo
   await expect(page.locator('[data-trace-entry-key][aria-current="true"]')).toHaveCount(0);
   await expect(page.getByRole('searchbox', { name: 'Search trace' })).toHaveText('');
 });
+
+test.describe('in Chinese', () => {
+  test.use({ locale: 'zh-CN' });
+  test('words the Trace page in Chinese and keeps event identifiers as they are', async ({ page }) => {
+    await page.goto('/e2e/fixtures/trace-inspection.html');
+    await expect(page.getByTestId('prompt-input')).toBeEnabled();
+    if (!await page.getByRole('tab', { name: 'Trace', exact: true }).isVisible()) await toggleViewPanel(page, 'Header');
+    await page.getByRole('tab', { name: 'Trace', exact: true }).click();
+    const trace = page.getByTestId('trace-view');
+    await expect(trace.getByRole('heading', { name: '执行事件' })).toBeVisible();
+    await trace.getByRole('searchbox', { name: '搜索 Trace' }).fill('pnpm test');
+    const rows = page.locator('[data-trace-entry-key]');
+    await expect(rows).toHaveCount(1);
+    await rows.first().click();
+    const details = page.getByRole('region', { name: 'Trace 条目详情' });
+    await expect(details).toContainText('来源序号');
+    await expect(details).toContainText('/workspace/example');
+  });
+});

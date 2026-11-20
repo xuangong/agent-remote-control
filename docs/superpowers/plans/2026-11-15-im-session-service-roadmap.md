@@ -218,3 +218,31 @@ Shipped from main `b270a227`.
   - the composer is still the old style;
   - production CSS is +59 lines net, from legacy rules still used by compact, TPM and Ask views;
   - a few expanded-detail strings are English only.
+
+## Release 2026-11-21: I4, brand and polish (the Orchard push complete)
+
+Shipped from main `896943fb`. Worker `61702401` with `wrangler.journals-enabled.jsonc`; the rollback target is `bfd082d8`. The Durable Object reported `61702401` within about a minute.
+
+**What shipped:**
+- The composer is the mockup's capsule, with a "+" menu and a round send button.
+- An IM-style navigation:
+  - desktop: a rail with Chats, Assistants, Windows, Search and Settings, plus the avatar and its link dot;
+  - phone: a tab bar with Chats, Assistants, Windows and Me.
+- One Settings page with the groups General, Assistants, Computers (including smart reading per provider), Privacy and data, Advanced, and Account and about. The old settings panel is gone.
+- Orchard access pages, in business words.
+- 2,981 catalogue keys in English and Chinese, following the browser or the user's choice. No stray English remains on the main screens in Chinese.
+- The installed web app opens on the theme's ground.
+- CSS is net 0 against the I2 release.
+
+**Checks:**
+- `pnpm verify` passed.
+- Components: 916 passed. Three failed in the full run: `pairing-keys` (a helper defect, fixed) and `assistant-phone` WebKit (load). All passed rerun on the final tree, 25 of 25.
+- preview-browser 73.
+- Flows E1 to E11 (41), plus WebKit E9 to E11.
+
+**Speed** at 4x CPU and 100 ms against `b270a227`:
+- open to content p95: 401 → 362 ms;
+- first send: 82/86 ms;
+- typed during open: 45/53 ms.
+
+**With I4, steps I1 to I4 and J are all in production.**

@@ -501,3 +501,12 @@ Filled in per task: commits, suites and counts, the T1 and T5 table (control, I3
 1. **English or Chinese words.** The design's sentences are Chinese and the product is English today. I3 writes English in the design's voice (decision 9). A Chinese locale would be a separate step with a string table; say if you want it in I4.
 2. **Narration between steps.** In Concise, an assistant's short remarks between tool calls ("Let me check the tests") fold into the work line, and only the final answer stays as a bubble (decision 1). The alternative keeps every assistant message as a bubble and folds only tool work, which is noisier for Claude Code and Codex turns.
 3. **The default for all assistants is per device** (decision 4). A per-account default would need a new account settings record at the Relay; say if you want it.
+
+## Owner decisions (2026-11-20)
+
+1. **Language follows the browser.** Every user-facing string comes in English and Chinese, chosen from the browser's language. English is the fallback.
+   - The new strings of I3 are written in both languages from the start: status sentences, work lines, approval choices and the session-change line. Chinese uses the design's voice.
+   - A small message catalogue with a pure `t(key, params)` and plural rules is added in I3a, before A2. A unit test fails on a key that is missing in either language.
+   - Existing English strings move to the catalogue screen by screen as I3 touches them. The rest move in I4.
+2. **Concise mode** folds the assistant's short remarks between tool calls into the work line. Only the final answer of a turn stays a bubble.
+3. **The default process mode is stored per device**, as planned. The per-assistant choice is stored per account.

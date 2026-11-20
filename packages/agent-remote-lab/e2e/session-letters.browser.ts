@@ -52,25 +52,44 @@ afterAll(async () => { await new Promise<void>(resolve => server.close(() => res
 function currentSessionView(page: Page) {
   return page.locator('.lab-session-family:not([hidden]) > .lab-session-family-pane:not([hidden])');
 }
-// On narrow screens the session actions sit behind an edge toggle; opening one expands it first.
+// A narrow screen keeps the session actions behind an edge toggle, and every width keeps some behind "More session actions"; opening one reveals it first.
 async function expandSessionActions(primary: Locator) {
   const expand = primary.getByRole('button', { name: 'Expand session actions', exact: true });
   if (await expand.count()) await expand.click();
-}
-async function toggleView(primary: Locator) {
-  await expandSessionActions(primary);
-  await primary.getByRole('button', { name: 'Session view options', exact: true }).click();
+  const more = primary.getByRole('button', { name: 'More session actions', exact: true });
+  if (await more.count() && await more.getAttribute('aria-expanded') === 'false') await more.click();
 }
 
-async function revealHiddenLetterFromSearch(page: Page) {
+// Settings > Assistants holds the device's letters and default process display; the conversation follows them when it is shown again.
+async function openAssistantSettings(page: Page, mobile: boolean) {
+  await (mobile ? page.getByRole('button', { name: 'Me', exact: true }) : page.locator('.lab-rail').getByRole('button', { name: 'Settings', exact: true })).click();
+  await page.locator('.lab-settings-group', { hasText: 'Assistants' }).click();
+  await browserExpect(page.getByRole('switch', { name: 'Team messages', exact: true })).toBeVisible();
+}
+async function backToWindows(page: Page, mobile: boolean) {
+  await (mobile ? page.getByRole('button', { name: 'Windows', exact: true }) : page.locator('.lab-rail').getByRole('button', { name: 'Windows', exact: true })).click();
+  await browserExpect(currentSessionView(page).first()).toBeVisible();
+}
+async function inSettings<T>(page: Page, mobile: boolean, use: () => Promise<T>) {
+  await openAssistantSettings(page, mobile);
+  try { return await use(); } finally { await backToWindows(page, mobile); }
+}
+const setLetters = (page: Page, mobile: boolean, on: boolean) => inSettings(page, mobile, async () => {
+  const letters = page.getByRole('switch', { name: 'Team messages', exact: true });
+  await (on ? letters.check() : letters.uncheck());
+});
+
+async function revealHiddenLetterFromSearch(page: Page, mobile: boolean) {
   const primary = page.locator('.lab-primary-conversation');
   await browserExpect(primary.locator('.agent-communication-letter')).toHaveCount(2);
-  await toggleView(primary);
-  await page.getByRole('checkbox', { name: 'Show letters', exact: true }).uncheck();
-  await toggleView(primary);
+  await setLetters(page, mobile, false);
   await browserExpect(primary.locator('.agent-communication-letter')).toHaveCount(0);
   await expandSessionActions(primary);
   await primary.getByRole('button', { name: 'Search this session', exact: true }).click();
+  // The actions menu stays open over the search field after a choice; Escape closes it and leaves the search.
+  const more = primary.getByRole('button', { name: 'More session actions', exact: true });
+  if (await more.count() && await more.getAttribute('aria-expanded') === 'true') await more.press('Escape');
+  await browserExpect(primary.getByRole('searchbox')).toBeVisible();
   await primary.getByRole('searchbox').fill('Review the transport.');
   await primary.getByLabel('Search scope').selectOption('all');
   const results = primary.locator('.agent-session-search-results button');
@@ -88,10 +107,7 @@ for (const engine of [chromium, webkit]) it(`keeps child navigation at the conte
     await page.goto(url);
     await browserExpect(page).toHaveURL(/[?&]session=parent(?:&|$)/);
     const primary = page.locator('.lab-primary-conversation');
-    await toggleView(primary);
-    await primary.getByRole('group', { name: 'All assistants on this device' }).getByRole('button', { name: 'Concise', exact: true }).click();
-    await toggleView(primary);
-    await browserExpect(primary.locator('.lab-workbench-heading')).toBeHidden();
+    await inSettings(page, true, () => page.getByRole('group', { name: 'Default process display' }).getByRole('button', { name: 'Concise', exact: true }).click());
     const children = primary.locator('details[aria-label="Session subagents"]');
     await browserExpect(children).toHaveCount(1);
     await browserExpect(children).not.toHaveAttribute('open');
@@ -187,73 +203,68 @@ for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(
     const primary = page.locator('.lab-primary-conversation');
     const letters = primary.locator('.agent-communication-letter');
     const activity = primary.getByText('Activity 39. This is the work after receiving the task. A longer paragraph keeps each conversation independently scrollable.', { exact: true });
-    const device = page.getByRole('group', { name: 'All assistants on this device' });
-    const concise = device.getByRole('button', { name: 'Concise', exact: true });
-    const process = device.getByRole('button', { name: 'Process', exact: true });
-    const full = device.getByRole('button', { name: 'Full', exact: true });
-    const showLetters = page.getByRole('checkbox', { name: 'Show letters', exact: true });
-    const expectMode = async (mode: 'concise' | 'process' | 'full') => {
-      await browserExpect(concise).toHaveAttribute('aria-pressed', String(mode === 'concise'));
-      await browserExpect(process).toHaveAttribute('aria-pressed', String(mode === 'process'));
-      await browserExpect(full).toHaveAttribute('aria-pressed', String(mode === 'full'));
-    };
+    const device = page.getByRole('group', { name: 'Default process display' });
+    const modeButton = (mode: 'concise' | 'process' | 'full') => device.getByRole('button', { name: { concise: 'Concise', process: 'Process', full: 'Full' }[mode], exact: true });
+    const expectMode = (mode: 'concise' | 'process' | 'full') => inSettings(page, mobile, async () => {
+      for (const each of ['concise', 'process', 'full'] as const) await browserExpect(modeButton(each)).toHaveAttribute('aria-pressed', String(each === mode));
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    });
+    const chooseMode = (mode: 'concise' | 'process' | 'full') => inSettings(page, mobile, () => modeButton(mode).click());
+    const expectLetters = (on: boolean) => inSettings(page, mobile, () => on
+      ? browserExpect(page.getByRole('switch', { name: 'Team messages', exact: true })).toBeChecked()
+      : browserExpect(page.getByRole('switch', { name: 'Team messages', exact: true })).not.toBeChecked());
     const expectFits = async () => {
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-      const panel = (await primary.getByRole('region', { name: 'Session view options', exact: true }).boundingBox())!;
-      expect(panel.x).toBeGreaterThanOrEqual(0);
-      expect(panel.x + panel.width).toBeLessThanOrEqual(page.viewportSize()!.width);
-      const heading = (await primary.locator(mobile ? '.lab-timeline-tools' : '.lab-workbench-heading').boundingBox())!;
+      const heading = (await primary.locator('.lab-workbench-heading').boundingBox())!;
       expect(heading.x).toBeGreaterThanOrEqual(0);
       expect(heading.x + heading.width).toBeLessThanOrEqual(page.viewportSize()!.width);
     };
     const waitForConversation = async () => {
       await browserExpect(page).toHaveURL(/[?&]session=parent(?:&|$)/);
       await browserExpect(activity).toBeVisible();
-      await toggleView(primary);
     };
     await page.goto(url);
     await waitForConversation();
-    await browserExpect(showLetters).toBeChecked();
+    await expectLetters(true);
     await browserExpect(letters).toHaveCount(2);
     await expectMode('concise');
-    await showLetters.uncheck();
+    await setLetters(page, mobile, false);
     for (const mode of ['concise', 'full', 'process'] as const) {
-      if (mode === 'full') await full.click();
-      if (mode === 'process') await process.click();
+      await chooseMode(mode);
       await expectMode(mode);
-      await browserExpect(showLetters).not.toBeChecked();
+      await expectLetters(false);
       await browserExpect(letters).toHaveCount(0);
       await browserExpect(activity).toBeVisible();
-      await showLetters.check();
-      await browserExpect(showLetters).toBeChecked();
+      await setLetters(page, mobile, true);
+      await expectLetters(true);
       await browserExpect(letters).toHaveCount(2);
       await browserExpect(primary.locator('[data-entry-key$=":reply"] .agent-letter-body')).toHaveText('The transport review is complete.');
       await expectMode(mode);
       await expectFits();
-      await showLetters.uncheck();
+      await setLetters(page, mobile, false);
       await browserExpect(letters).toHaveCount(0);
       await browserExpect(activity).toBeVisible();
       await expectMode(mode);
       if (mode === 'concise') await page.screenshot({ path: `/tmp/arc-letter-toggle-${engine.name()}-${mobile ? 'mobile' : 'desktop'}-hidden.png` });
       await page.reload();
       await waitForConversation();
-      await browserExpect(showLetters).not.toBeChecked();
+      await expectLetters(false);
       await browserExpect(letters).toHaveCount(0);
       await expectMode(mode);
       await expectFits();
     }
-    await showLetters.check();
+    await setLetters(page, mobile, true);
     await browserExpect(letters).toHaveCount(2);
     await expectMode('process');
-    await concise.click();
+    await chooseMode('concise');
     await expectMode('concise');
-    await browserExpect(showLetters).toBeChecked();
+    await expectLetters(true);
     await browserExpect(letters).toHaveCount(2);
-    await full.click();
+    await chooseMode('full');
     await expectMode('full');
     await page.reload();
     await waitForConversation();
-    await browserExpect(showLetters).toBeChecked();
+    await expectLetters(true);
     await browserExpect(letters).toHaveCount(2);
     await expectMode('full');
     await expectFits();
@@ -262,11 +273,11 @@ for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(
       for (const width of [320, 402]) {
         await page.setViewportSize({ width, height: 874 });
         await expectFits();
-        const title = page.locator('.lab-mobile-session-title');
+        const title = primary.locator('.lab-session-heading-title');
         expect((await title.boundingBox())!.width).toBeGreaterThanOrEqual(60);
         await page.screenshot({ path: `/tmp/arc-session-heading-${width}-${engine.name()}.png` });
-        await toggleView(primary);
-        const actions = primary.getByRole('button', { name: /^(Expand|Collapse) session actions$/ });
+        await expandSessionActions(primary);
+        const actions = primary.getByRole('button', { name: /^(More session actions|Collapse session actions)$/ });
         await browserExpect(actions).toHaveAttribute('aria-expanded', 'true');
         await primary.getByRole('button', { name: 'Share session link', exact: true }).click();
         await browserExpect(page.getByRole('dialog', { name: 'Share session', exact: true })).toBeVisible();
@@ -276,23 +287,20 @@ for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(
         await title.click();
         await browserExpect(actions).toHaveAttribute('aria-expanded', 'false');
         expect(await page.evaluate(() => window.scrollX)).toBe(0);
-        await toggleView(primary);
       }
     }
     if (!mobile) {
-      await toggleView(primary);
       await primary.getByRole('button', { name: 'Open letter from /root to /root/review', exact: true }).click();
       const side = page.locator('.lab-side-conversation');
       await browserExpect(side).toBeVisible();
-      await toggleView(primary);
-      await showLetters.uncheck();
+      await setLetters(page, mobile, false);
       await browserExpect(letters).toHaveCount(0);
       // The choice is this device's, so the side hides its letters too, except the one it was opened on.
       await browserExpect(side.locator('.agent-communication-letter')).toHaveCount(1);
       await browserExpect(side.locator('[data-inspected="true"] .agent-communication-letter')).toHaveCount(1);
       await browserExpect(side).toBeVisible();
       await expectMode('full');
-      await showLetters.check();
+      await setLetters(page, mobile, true);
       await browserExpect(letters).toHaveCount(2);
       await browserExpect(side.locator('.agent-communication-letter')).toHaveCount(2);
       await browserExpect(side).toBeVisible();
@@ -309,7 +317,7 @@ for (const engine of [chromium, webkit]) it(`moves letters through available spa
     const errors: string[]=[]; page.on('pageerror', e=>errors.push(e.message));
     await page.goto(url);
     const primary=page.locator('.lab-primary-conversation');
-    await revealHiddenLetterFromSearch(page);
+    await revealHiddenLetterFromSearch(page, false);
     const open=primary.getByRole('button',{name:'Open letter from /root to /root/review',exact:true});
     await browserExpect(open).toBeVisible();
     await open.getByText('/root → /root/review', { exact: true }).click();
@@ -318,9 +326,7 @@ for (const engine of [chromium, webkit]) it(`moves letters through available spa
     await browserExpect(side.locator('[data-inspected="true"]')).toHaveAttribute('data-entry-key',/task$/);
     await primary.getByRole('button', { name: 'Close session search', exact: true }).click();
     await browserExpect(primary.locator('.agent-communication-letter')).toHaveCount(0);
-    await toggleView(primary);
-    await primary.getByRole('checkbox', { name: 'Show letters', exact: true }).check();
-    await toggleView(primary);
+    await setLetters(page, false, true);
     const card=primary.locator('.agent-communication-letter').first();
     await browserExpect(card).toHaveAttribute('data-direction','right');
     await page.waitForTimeout(260);
@@ -370,7 +376,7 @@ for (const engine of [chromium, webkit]) it(`navigates mobile letters in the cur
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(url);
     const primary = page.locator('.lab-primary-conversation');
-    await revealHiddenLetterFromSearch(page);
+    await revealHiddenLetterFromSearch(page, true);
     const current = currentSessionView(page);
     await primary.getByRole('button', { name: 'Open letter from /root to /root/review', exact: true })
       .getByText('/root → /root/review', { exact: true }).click();
@@ -401,9 +407,7 @@ for (const engine of [chromium, webkit]) it(`navigates mobile letters in the cur
     await current.getByRole('button', { name: 'Open letter from /root to /root/review', exact: true }).click();
     await browserExpect(page).toHaveURL(/session=child/);
     // Letters are this device's choice: the child shows only the letter it was opened on until they show again.
-    await toggleView(current);
-    await page.getByRole('checkbox', { name: 'Show letters', exact: true }).check();
-    await toggleView(current);
+    await setLetters(page, true, true);
     await current.getByRole('button', { name: 'Open letter from /root/review to /root', exact: true }).click();
     await browserExpect(page).toHaveURL(/session=parent/);
     await browserExpect(current).toHaveCount(1);

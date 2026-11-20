@@ -50,7 +50,9 @@ for (const engine of [chromium, webkit]) for (const width of [402, 1280]) {
       expect(errors).toEqual([]);
       for (const text of ['Please check the reconnect logs and summarize the findings.', 'OK', 'Finally explain the result.']) {
         await input.fill(text);
-        await input.press('Enter');
+        // A touch screen's Return makes a new line; its send button sends.
+        if (width < 500) await page.getByTestId('prompt-submit').click();
+        else await input.press('Enter');
         await browserExpect(input).toHaveValue('');
       }
       await input.fill('Keep editing while the network recovers');
@@ -59,11 +61,11 @@ for (const engine of [chromium, webkit]) for (const width of [402, 1280]) {
       await browserExpect(page.locator('.agent-pending-state')).toHaveText(['Sending', 'Sending', 'Sending']);
       const geometry = await page.evaluate(() => {
         const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
-        const queue = box('.agent-pending-queue'), composer = box('.agent-composer'), toggle = box('.lab-composer-toggle');
+        const queue = box('.agent-pending-queue'), composer = box('.agent-composer-capsule'), toggle = box('.lab-composer-toggle');
         const messages = document.querySelectorAll('.agent-pending-message');
         const shortText = messages[1]!.querySelector('.agent-pending-state')!.getBoundingClientRect();
         const dismiss = messages[1]!.querySelector('.agent-pending-dismiss span')!.getBoundingClientRect();
-        return { overflow: document.documentElement.scrollWidth > innerWidth, above: queue.bottom <= composer.top, beside: queue.right < toggle.left,
+        return { overflow: document.documentElement.scrollWidth > innerWidth, above: queue.bottom <= composer.top, beside: [...messages].every(message => { const r = message.getBoundingClientRect(); return r.right <= toggle.left || r.left >= toggle.right || r.bottom <= toggle.top || r.top >= toggle.bottom - 1; /* the tab shares its border row with the composer's edge */ }),
           longWidth: messages[0]!.getBoundingClientRect().width, shortWidth: messages[1]!.getBoundingClientRect().width,
           dismissGap: dismiss.left - shortText.right, inputGap: composer.top - shortText.bottom };
 
@@ -74,7 +76,7 @@ for (const engine of [chromium, webkit]) for (const width of [402, 1280]) {
       expect(geometry.dismissGap).toBeGreaterThanOrEqual(0);
       expect(geometry.dismissGap).toBeLessThanOrEqual(6);
       expect(geometry.inputGap).toBeGreaterThanOrEqual(0);
-      expect(geometry.inputGap).toBeLessThanOrEqual(6);
+      expect(geometry.inputGap).toBeLessThanOrEqual(8); // the capsule's own gap
       await page.getByRole('button', { name: 'Cancel pending send', exact: true }).first().click();
       await browserExpect(input).toHaveValue('Keep editing while the network recovers');
       const output = fileURLToPath(new URL('../test-results/pending-send/', import.meta.url));

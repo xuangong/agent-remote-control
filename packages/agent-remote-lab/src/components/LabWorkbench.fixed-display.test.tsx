@@ -33,8 +33,9 @@ it('locks Bot content without changing the Window display or text/image editor o
   expect(container.querySelector<HTMLInputElement>('input[value="preview"]')?.checked).toBe(true);
   await act(async () => toggle(true));
   expect(container.textContent).toContain('Keep this request visible');
-  expect(container.textContent).toContain('A visible failure');
-  expect(container.querySelector('[data-entry-key="recorded:2:reasoning"]')).toBeNull();
+  expect(container.textContent).toContain('1 step failed');
+  // A Trace target opens its turn's work line, whatever the mode.
+  expect(container.querySelector('[data-entry-key="recorded:2:reasoning"]')).not.toBeNull();
   expect(container.querySelector('[aria-label="Session view options"]')).toBeNull();
   expect(container.querySelector('[data-testid="prompt-input"]')).toBe(prompt);
   expect(promptText(prompt)).toBe('Keep my draft');
@@ -66,6 +67,6 @@ it('keeps approval, settings, interrupt and failed delivery controls available i
   expect(setting).toHaveBeenCalledWith('model', 'second');
   await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
   expect(container.textContent).toContain('Delivery could not be confirmed.');
-  expect(container.textContent).toContain('A visible failure');
+  expect(container.textContent).toContain('1 step failed');
   expect(promptText(container.querySelector<HTMLElement>('[data-testid="prompt-input"]')!)).toBe('A useful draft');
 });

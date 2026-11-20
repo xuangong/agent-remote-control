@@ -52,7 +52,7 @@ it('shows the cached earlier conversation at once, then the fetched one, without
   expect(container.textContent).not.toContain('Cached reply');
   expect(f.transport.connect).not.toHaveBeenCalled();
   expect(f.requests).toEqual([['agent-past', 'tail', undefined]]);
-  expect(container.querySelector('[role="separator"]')?.getAttribute('aria-label')).toBe('Earlier conversation');
+  expect([...container.querySelectorAll('[role="separator"]')].map(node => node.getAttribute('aria-label'))).toContain('Earlier conversation');
   expect(container.querySelector('textarea, [contenteditable="true"], [role="textbox"]')).toBeNull();
 });
 

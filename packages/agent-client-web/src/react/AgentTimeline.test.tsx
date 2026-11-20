@@ -61,7 +61,7 @@ describe('AgentTimeline', () => {
     expect(message.textContent!.indexOf('[image #1]')).toBeLessThan(message.textContent!.indexOf('const answer'));
   });
 
-  it.each(['preview', 'simple', 'content'] as const)('limits tunnel actions to content-only eligible entries in %s mode', async mode => {
+  it('limits tunnel actions to messages, plans, todos and decisions, with every step open', async () => {
     const register = vi.fn(async () => ({
       id: 'preview-one', target: 'http://localhost:5173', status: 'active' as const,
       createdAt: 1_789_516_800_000, expiresAt: 1_789_520_400_000, revision: 1,
@@ -83,19 +83,19 @@ describe('AgentTimeline', () => {
       entry(9, { type: 'interaction', request: { kind: 'plan_approval', requestId: 'approve', plan: 'Review http://localhost:5173/approval', allowedActions: ['approve'] },
         response: { kind: 'plan_approval', action: 'approve' } }),
     ]);
-    const container = await render(<TimelineDisplay.Provider value={mode}><AgentTimeline state={{ ...content, agent: {
+    const container = await render(<AgentTimeline processMode="full" state={{ ...content, agent: {
       id: 'agent-one', providerId: 'provider-neutral', createdAt: '2026-09-16T00:00:00Z', updatedAt: '2026-09-16T00:00:00Z',
       status: 'idle', activeTurn: null, pendingInteractions: [],
       capabilities: { history: true, sendMessage: true, steer: false, cancel: true, readResource: true,
         interactions: { question: true, toolApproval: true, planApproval: true } },
       runtimeInfo: { providerId: 'provider-neutral', sessionId: 'native-one', status: 'idle' },
-    } }} previewController={previews} /></TimelineDisplay.Provider>);
+    } }} previewController={previews} />);
 
     expect(Array.from(container.querySelectorAll('.agent-preview-target code'), node => node.textContent)).toEqual([
       'http://localhost:5173/docs', 'http://127.0.0.1:5173/user', 'http://localhost:5173/todo',
       'http://localhost:5173/plan', 'http://localhost:5173/approval',
     ]);
-    expect(container.querySelectorAll('.agent-tool')).toHaveLength(mode === 'content' ? 1 : 3);
+    expect(container.querySelectorAll('.agent-tool')).toHaveLength(3);
     expect(container.querySelector('.agent-message-assistant')?.textContent).toContain('Run http://localhost:5173/docs.');
     expect(register).not.toHaveBeenCalled();
     await act(async () => container.querySelector<HTMLButtonElement>('.agent-preview-target button')?.click());
@@ -188,7 +188,7 @@ describe('AgentTimeline', () => {
   });
 
   it('renders string Markdown for user, assistant, and collapsible reasoning entries', async () => {
-    const container = await render(<AgentTimeline state={state([
+    const container = await render(<AgentTimeline processMode="full" state={state([
       entry(1, { type: 'user_message', text: 'Use **strict** protocol values.' }, [], 'provider-any'),
       entry(2, { type: 'assistant_message', text: 'See [the report](https://example.test/report).' }),
       entry(3, { type: 'reasoning', text: 'Inspect `sequence` before apply.' }),
@@ -205,7 +205,7 @@ describe('AgentTimeline', () => {
 
   it('preserves entry component state when an incremental projection extends its sequence range', async () => {
     const initial = entry(1, { type: 'reasoning', text: 'First fragment.' });
-    const container = await render(<AgentTimeline state={state([initial])} />);
+    const container = await render(<AgentTimeline processMode="full" state={state([initial])} />);
     const toggle = container.querySelector<HTMLButtonElement>('.agent-reasoning-toggle');
     await act(async () => toggle?.click());
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
@@ -216,7 +216,7 @@ describe('AgentTimeline', () => {
       sourceSeqRanges: [{ startSeq: 1, endSeq: 2 }],
       item: { type: 'reasoning' as const, text: 'First fragment. Second fragment.' },
     };
-    await rerender(container, <AgentTimeline state={state([extended])} />);
+    await rerender(container, <AgentTimeline processMode="full" state={state([extended])} />);
 
     expect(container.querySelector('.agent-reasoning-toggle')?.getAttribute('aria-expanded')).toBe('true');
     expect(container.querySelector('.agent-reasoning-content')?.textContent).toContain('Second fragment.');
@@ -224,13 +224,13 @@ describe('AgentTimeline', () => {
 
   it('keeps a stateful timeline item through a replacement that brings the same row, and shows its new content', async () => {
     const epochA = entry(1, { type: 'reasoning', text: 'Epoch A reasoning' });
-    const container = await render(<AgentTimeline state={state([epochA], [], 'epoch-a')} />);
+    const container = await render(<AgentTimeline processMode="full" state={state([epochA], [], 'epoch-a')} />);
     const toggle = container.querySelector<HTMLButtonElement>('.agent-reasoning-toggle');
     await act(async () => toggle?.click());
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
 
     const epochB = { ...epochA, item: { type: 'reasoning' as const, text: 'Epoch B replacement reasoning' } };
-    await rerender(container, <AgentTimeline state={state([epochB], [], 'epoch-b')} />);
+    await rerender(container, <AgentTimeline processMode="full" state={state([epochB], [], 'epoch-b')} />);
 
     expect(container.querySelector('.agent-reasoning-toggle')).toBe(toggle);
     expect(toggle?.getAttribute('aria-expanded')).toBe('true');
@@ -238,28 +238,26 @@ describe('AgentTimeline', () => {
     expect(container.querySelector('.agent-reasoning-content')?.textContent).toContain('Epoch B replacement reasoning');
   });
 
-  it('groups consecutive messages by sender without grouping across another timeline item', async () => {
-    const container = await render(<AgentTimeline state={state([
-      entry(1, { type: 'assistant_message', messageId: 'answer-one', text: 'First answer' }),
-      entry(2, { type: 'assistant_message', messageId: 'answer-two', text: 'Second answer' }),
+  it('stacks the bubbles of one answer, and keeps each prompt and each remark between steps a single bubble', async () => {
+    const container = await render(<AgentTimeline processMode="full" state={state([
+      entry(1, { type: 'user_message', messageId: 'prompt-one', text: 'First prompt' }),
+      entry(2, { type: 'assistant_message', messageId: 'remark', text: 'A remark' }),
       entry(3, { type: 'reasoning', text: 'A separate timeline item' }),
-      entry(4, { type: 'assistant_message', messageId: 'answer-three', text: 'Third answer' }),
-      entry(5, { type: 'user_message', messageId: 'prompt-one', text: 'First prompt' }),
-      entry(6, { type: 'user_message', messageId: 'prompt-two', text: 'Second prompt' }),
+      entry(4, { type: 'assistant_message', messageId: 'answer-one', text: 'First answer' }),
+      entry(5, { type: 'assistant_message', messageId: 'answer-two', text: 'Second answer' }),
+      entry(6, { type: 'assistant_message', messageId: 'answer-three', text: 'Third answer' }),
+      entry(7, { type: 'user_message', messageId: 'prompt-two', text: 'Second prompt' }),
     ])} />);
 
     const messages = [...container.querySelectorAll<HTMLElement>('[data-message-group]')];
-    expect(messages.map((message) => message.dataset.messageGroup)).toEqual([
-      'first', 'last', 'single', 'first', 'last',
-    ]);
     expect(messages.map((message) => message.querySelector('.agent-markdown')?.textContent)).toEqual([
-      'First answer', 'Second answer', 'Third answer',
-      'First prompt', 'Second prompt',
+      'First prompt', 'A remark', 'First answer', 'Second answer', 'Third answer', 'Second prompt',
     ]);
+    expect(messages.map((message) => message.dataset.messageGroup)).toEqual(['single', 'single', 'first', 'middle', 'last', 'single']);
   });
 
   it('renders incremental tool and todo states with text status, not color alone', async () => {
-    const container = await render(<AgentTimeline state={state([
+    const container = await render(<AgentTimeline processMode="full" state={state([
       entry(1, {
         type: 'tool_call', callId: 'call-one', name: 'read', status: 'running', error: null,
         detail: { type: 'read', filePath: '/workspace/AGENTS.md' },
@@ -583,7 +581,7 @@ it('groups trusted quiet checks, preserves human and failed output, and reveals 
   const input = entry(1, { type: 'user_message', text: 'Private automatic input', background: bg('pending') });
   const answer = entry(2, { type: 'assistant_message', text: 'Quiet acknowledgement', background: bg('silent') });
   const human = entry(3, { type: 'user_message', text: '[TPM review] A real question' });
-  const container = await render(<AgentTimeline state={state([input, answer, human])} />);
+  const container = await render(<AgentTimeline processMode="full" state={state([input, answer, human])} />);
   expect(container.textContent).not.toContain('Private automatic input');
   expect(container.textContent).not.toContain('Quiet acknowledgement');
   expect(container.textContent).toContain('A real question');
@@ -594,7 +592,7 @@ it('groups trusted quiet checks, preserves human and failed output, and reveals 
   expect(container.textContent).toContain('Private automatic input');
   expect(container.textContent).toContain('Background check');
   await act(async () => button.click());
-  await rerender(container, <AgentTimeline state={state([input, { ...answer, item: { ...answer.item, background: bg('failed') } },
+  await rerender(container, <AgentTimeline processMode="full" state={state([input, { ...answer, item: { ...answer.item, background: bg('failed') } },
     entry(4, { type: 'assistant_message', text: 'Later stale result', background: bg('silent') })])} />);
   expect(container.textContent).toContain('Quiet acknowledgement');
   expect(container.textContent).toContain('Later stale result');

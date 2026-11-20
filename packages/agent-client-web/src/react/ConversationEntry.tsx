@@ -5,7 +5,7 @@ import { TimelineEntry } from './TimelineEntry.js';
 import { TimelineItemRenderer } from './TimelineItemRenderer.js';
 import { ResourceList } from './ResourceList.js';
 import { PreviewActions, type PreviewController } from './PreviewActions.js';
-import { isContentOnlyItem, TimelineSearchReveal } from './TimelineDisplay.js';
+import { TimelineSearchReveal } from './TimelineDisplay.js';
 import type { MessageGroupPosition } from './timeline-render-model.js';
 import { messageResources } from './message-resources.js';
 import { RuntimeNoticeItem } from './items/ErrorItem.js';
@@ -17,7 +17,8 @@ interface ConversationEntryProps extends Pick<AgentTimelineProps, 'onEditPrompt'
   entry: ProjectedTimelineEntry;
   entryKey: string;
   messageGroup?: MessageGroupPosition;
-  contentOnly: boolean;
+  /** The foot of an answer bubble: the assistant's avatar on the last one, its room on the others. */
+  foot?: 'avatar' | 'space';
   agentId?: string;
   scopeKey: string;
   resources: AgentReplicaState['resources'];
@@ -45,29 +46,42 @@ function sameRow(previous: ConversationEntryProps, next: ConversationEntryProps)
 }
 
 // Unchanged history stays mounted without rebuilding its controls on every delta.
-export const ConversationEntry = memo(function ConversationEntry({ entry, entryKey, messageGroup, contentOnly, agentId,
+export const ConversationEntry = memo(function ConversationEntry({ entry, entryKey, messageGroup, foot, agentId,
   scopeKey, resources, onEditPrompt, onInspectEntry, inspected, searchSelected, resolveSessionLink, onResourceResolve, onResourceRequest,
   previews, extension, noticeExpanded, noticeCount, onToggleNotice, noticeDetailsId, noticeControls, selection, selectionLabel, onSelect }: ConversationEntryProps) {
   const collapsed = noticeExpanded === false;
-  const attachments = useMemo(() => messageResources(entry.item, entry.resources, contentOnly),
-    [entry.item, entry.resources, contentOnly]);
+  // A message lists its attachments by their labels, without the images its prose already shows; a step lists every resource it named.
+  const conversational = isConversational(entry.item);
+  const attachments = useMemo(() => messageResources(entry.item, entry.resources, conversational),
+    [entry.item, entry.resources, conversational]);
   return <TimelineSearchReveal.Provider value={!!searchSelected}><TimelineEntry entryKey={entryKey}
     onEdit={onEditPrompt && !entry.item.background && entry.item.type === 'user_message' && !entry.item.withdrawn && entry.item.messageId && entry.turnId ? () => onEditPrompt(entry) : undefined}
     timestamp={entry.timestamp} sent={entry.item.type === 'user_message'}
-    inspected={inspected || !!searchSelected} searchSelected={!!searchSelected} inspect={!contentOnly && onInspectEntry ? () => onInspectEntry(entryKey) : undefined}
+    inspected={inspected || !!searchSelected} searchSelected={!!searchSelected} inspect={onInspectEntry ? () => onInspectEntry(entryKey) : undefined}
     selection={selection} selectionLabel={selectionLabel} onSelect={onSelect ? extend => onSelect(entryKey, extend) : undefined}>
     {entry.item.type === 'error' && noticeExpanded !== undefined && noticeDetailsId !== undefined
       ? <RuntimeNoticeItem item={entry.item} expanded={noticeExpanded} count={noticeCount} toggle={onToggleNotice}
           detailsId={noticeDetailsId} controls={noticeControls} />
       : <TimelineItemRenderer item={entry.item} entry={entry} messageGroup={messageGroup} resolveSessionLink={resolveSessionLink}
       resources={resources} resourceBindings={entry.resources} resourceScopeKey={scopeKey}
-      onResourceResolve={onResourceResolve} onResourceRequest={onResourceRequest} />}
-    {previews && agentId && entry.item.type !== 'error' && isContentOnlyItem(entry.item) ? <PreviewActions agentId={agentId} itemId={entryKey} text={previewText(entry.item)} controller={previews} /> : null}
-    {!collapsed && !contentOnly ? extension : null}
-    {!collapsed ? <ResourceList bindings={contentOnly ? attachments.bindings : entry.resources} labels={attachments.labels}
+      onResourceResolve={onResourceResolve} onResourceRequest={onResourceRequest} foot={foot} />}
+    {previews && agentId && entry.item.type !== 'error' && previewable(entry.item) ? <PreviewActions agentId={agentId} itemId={entryKey} text={previewText(entry.item)} controller={previews} /> : null}
+    {!collapsed ? extension : null}
+    {!collapsed ? <ResourceList bindings={conversational ? attachments.bindings : entry.resources} labels={attachments.labels}
       resources={resources} onRequest={onResourceRequest} /> : null}
   </TimelineEntry></TimelineSearchReveal.Provider>;
 }, sameRow);
+
+function isConversational(item: AgentReplicaState['timeline']['entries'][number]['item']): boolean {
+  return item.type === 'user_message' || item.type === 'assistant_message' || item.type === 'agent_communication';
+}
+
+const planTools = new Set(['update_plan', 'TodoWrite', 'todo_write', 'EnterPlanMode', 'ExitPlanMode', 'enter_plan_mode', 'exit_plan_mode', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet']);
+/** Items whose text may name a page to preview: messages, letters, plans, todos and decisions. */
+function previewable(item: AgentReplicaState['timeline']['entries'][number]['item']): boolean {
+  if (isConversational(item) || item.type === 'todo' || item.type === 'interaction' || item.type === 'error') return true;
+  return item.type === 'tool_call' && planTools.has(item.name.split('.').at(-1) ?? item.name);
+}
 
 function previewText(item: AgentReplicaState['timeline']['entries'][number]['item']): string {
   switch (item.type) {

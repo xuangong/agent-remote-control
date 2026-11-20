@@ -4,8 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { render, rerender } from '../test/setup.js';
 import { AgentTimeline, type AgentTimelineProps } from './AgentTimeline.js';
-import { TimelineDisplay, type TimelineDisplayMode } from './TimelineDisplay.js';
-import { createReplicaState, timelineEntryKey } from '@orchardworks/agent-client';
+import { createReplicaState, timelineEntryKey, type ProcessMode } from '@orchardworks/agent-client';
 
 const epoch = 'notice-history';
 const messages = [
@@ -27,14 +26,13 @@ function notices(count = 3): ProjectedTimelineEntry[] {
   return messages.slice(0, count).map((message, index) => entry(index + 1, { type: 'error', message }));
 }
 
-function view(entries: ProjectedTimelineEntry[], mode: TimelineDisplayMode = 'preview', searchEntryKey?: string,
+/** Notices are steps of a turn's work: Full shows them in place, Concise behind the closed work line. */
+function view(entries: ProjectedTimelineEntry[], mode: ProcessMode = 'full', searchEntryKey?: string,
   inspection: Pick<AgentTimelineProps, 'onInspectEntry' | 'inspectedEntryKey' | 'searchRequestId' | 'inspectedRequestId'> = {}) {
   const base = createReplicaState();
   const state = { ...base, timeline: { ...base.timeline, epoch, initialized: true, entries,
     nextSeq: (entries.at(-1)?.seqEnd ?? 0) + 1 } };
-  return <TimelineDisplay.Provider value={mode}>
-    <AgentTimeline state={state} showHeader={false} searchEntryKey={searchEntryKey} {...inspection} />
-  </TimelineDisplay.Provider>;
+  return <AgentTimeline state={state} processMode={mode} showHeader={false} searchEntryKey={searchEntryKey} {...inspection} />;
 }
 
 function noticeToggles(container: HTMLElement): HTMLButtonElement[] {
@@ -54,8 +52,8 @@ function renderedEntry(container: HTMLElement, item: ProjectedTimelineEntry): HT
 }
 
 describe('runtime notice groups', () => {
-  it.each(['preview', 'simple', 'content'] as const)('starts three consecutive notices as one quiet closed group in %s mode', async mode => {
-    const container = await render(view(notices(), mode));
+  it('starts three consecutive notices as one quiet closed group', async () => {
+    const container = await render(view(notices()));
     const toggles = noticeToggles(container);
     expect(toggles).toHaveLength(1);
     expect(toggles[0]!.getAttribute('aria-expanded')).toBe('false');
@@ -88,14 +86,14 @@ describe('runtime notice groups', () => {
     expect(toggles[1]!.getAttribute('aria-expanded')).toBe('false');
   });
 
-  it('does not join notices across a non-notice entry hidden by content-only mode', async () => {
+  it('does not join notices across another step', async () => {
     const container = await render(view([
       entry(1, { type: 'error', message: messages[0]! }),
       entry(2, { type: 'tool_call', callId: 'command', name: 'shell', status: 'completed', error: null,
         detail: { type: 'shell', command: 'echo internal' } }),
       entry(3, { type: 'error', message: messages[1]! }),
-    ], 'content'));
-    expect(container.querySelector('.agent-tool')).toBeNull();
+    ]));
+    expect(container.querySelector('.agent-tool')).not.toBeNull();
     expect(noticeToggles(container)).toHaveLength(2);
   });
 
@@ -122,13 +120,14 @@ describe('runtime notice groups', () => {
     for (const message of messages) expect(visibleText(container)).not.toContain(message.split('\n')[0]);
   });
 
-  it.each(['preview', 'content'] as const)('reveals a search hit at its real entry inside a closed group in %s mode', async mode => {
+  it.each(['full', 'concise'] as const)('reveals a search hit at its real entry inside a closed group in %s mode', async mode => {
     const entries = notices();
     const selected = entries[1]!;
     const key = timelineEntryKey(selected);
     const container = await render(view(entries, mode));
-    expect(noticeToggles(container)).toHaveLength(1);
-    expect(noticeToggles(container)[0]!.getAttribute('aria-expanded')).toBe('false');
+    // Concise keeps the whole group behind the closed work line until the hit opens it.
+    expect(noticeToggles(container)).toHaveLength(mode === 'full' ? 1 : 0);
+    if (mode === 'full') expect(noticeToggles(container)[0]!.getAttribute('aria-expanded')).toBe('false');
     await rerender(container, view(entries, mode, key));
     const toggles = noticeToggles(container);
     expect(toggles).toHaveLength(1);
@@ -145,13 +144,13 @@ describe('runtime notice groups', () => {
     const entries = notices();
     const firstKey = timelineEntryKey(entries[0]!);
     const secondKey = timelineEntryKey(entries[1]!);
-    const container = await render(view(entries, 'content', firstKey));
+    const container = await render(view(entries, 'concise', firstKey));
     expect(noticeToggles(container)).toHaveLength(1);
     const toggle = noticeToggles(container)[0]!;
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     await act(async () => toggle.click());
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    await rerender(container, view(entries, 'content', secondKey));
+    await rerender(container, view(entries, 'concise', secondKey));
     expect(noticeToggles(container)[0]!.getAttribute('aria-expanded')).toBe('true');
     const target = renderedEntry(container, entries[1]!)!;
     expect(target.closest('[hidden]')).toBeNull();
@@ -177,13 +176,14 @@ describe('runtime notice groups', () => {
   it('retains each expanded notice as an original timeline anchor with its time and Trace action', async () => {
     const entries = notices();
     const inspect = vi.fn();
-    const container = await render(view(entries, 'preview', undefined, { onInspectEntry: inspect }));
+    const container = await render(view(entries, 'full', undefined, { onInspectEntry: inspect }));
     await act(async () => noticeToggles(container)[0]!.click());
-    const list = container.querySelector('.agent-timeline-entries')!;
+    const steps = container.querySelector('.agent-work-steps')!;
     for (const item of entries) {
       const key = timelineEntryKey(item);
       const rendered = renderedEntry(container, item)!;
-      expect(rendered.parentElement).toBe(list);
+      // Each notice is its own row in place among the turn's steps.
+      expect(rendered.parentElement).toBe(steps);
       expect(container.querySelectorAll(`[data-entry-key="${key}"]`)).toHaveLength(1);
       expect(rendered.querySelector('time')?.getAttribute('datetime')).toBe(item.timestamp);
       const trace = rendered.querySelector<HTMLButtonElement>('button[aria-label="Inspect event in Trace"]');
@@ -196,9 +196,9 @@ describe('runtime notice groups', () => {
   it('reveals a Trace target and reopens its group when inspection moves to another notice', async () => {
     const entries = notices();
     const inspect = vi.fn();
-    const container = await render(view(entries, 'preview', undefined, { onInspectEntry: inspect }));
+    const container = await render(view(entries, 'full', undefined, { onInspectEntry: inspect }));
     expect(noticeToggles(container)[0]!.getAttribute('aria-expanded')).toBe('false');
-    await rerender(container, view(entries, 'preview', undefined, {
+    await rerender(container, view(entries, 'full', undefined, {
       onInspectEntry: inspect, inspectedEntryKey: timelineEntryKey(entries[1]!),
     }));
     expect(noticeToggles(container)[0]!.getAttribute('aria-expanded')).toBe('true');
@@ -208,7 +208,7 @@ describe('runtime notice groups', () => {
     expect(visibleText(firstTarget)).toContain(messages[1]);
     await act(async () => noticeToggles(container)[0]!.click());
     expect(noticeToggles(container)[0]!.getAttribute('aria-expanded')).toBe('false');
-    await rerender(container, view(entries, 'preview', undefined, {
+    await rerender(container, view(entries, 'full', undefined, {
       onInspectEntry: inspect, inspectedEntryKey: timelineEntryKey(entries[2]!),
     }));
     expect(noticeToggles(container)[0]!.getAttribute('aria-expanded')).toBe('true');
@@ -224,8 +224,8 @@ describe('runtime notice groups', () => {
     const target = entries[1]!;
     const key = timelineEntryKey(target);
     const locate = (requestId: number) => source === 'search'
-      ? view(entries, 'content', key, { searchRequestId: requestId })
-      : view(entries, 'preview', undefined, { inspectedEntryKey: key, inspectedRequestId: requestId });
+      ? view(entries, 'concise', key, { searchRequestId: requestId })
+      : view(entries, 'full', undefined, { inspectedEntryKey: key, inspectedRequestId: requestId });
     const container = await render(locate(1));
     expect(noticeToggles(container)[0]!.getAttribute('aria-expanded')).toBe('true');
     await act(async () => noticeToggles(container)[0]!.click());

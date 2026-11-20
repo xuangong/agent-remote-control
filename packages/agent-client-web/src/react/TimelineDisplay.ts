@@ -2,6 +2,9 @@ import { createContext, useContext, useState } from 'react';
 import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 export const TimelineSearchReveal = createContext(false);
 
+/** How each step of an open work line shows: its one-line header (`summary`) or today's preview block (`preview`). */
+export const TimelineStepLevel = createContext<'summary' | 'preview'>('preview');
+
 export type TimelineDisplayMode = 'preview' | 'simple' | 'content';
 export const TimelineDisplay = createContext<TimelineDisplayMode>('preview');
 export const TimelineLettersVisible = createContext(true);
@@ -14,9 +17,9 @@ export function isContentOnlyItem(item: AgentTimelineItem): boolean {
   return item.type === 'tool_call' && planTools.has(item.name.split('.').at(-1) ?? item.name);
 }
 
-/** Explicit choices survive item updates and changes to the default display mode. */
+/** Explicit choices survive item updates and changes of the step level. */
 export function useItemDisclosure() {
-  const mode = useContext(TimelineDisplay);
+  const level = useContext(TimelineStepLevel);
   const revealed = useContext(TimelineSearchReveal);
   const [disclosure, setDisclosure] = useState<{ revealed: boolean; choice?: boolean }>({ revealed });
   // A newly selected search result opens once; readers can still collapse it.
@@ -24,7 +27,7 @@ export function useItemDisclosure() {
   const choice = disclosure.revealed === revealed ? disclosure.choice : revealed ? true : disclosure.choice;
   return {
     expanded: choice ?? revealed,
-    preview: !revealed && choice === undefined && mode !== 'simple',
+    preview: !revealed && choice === undefined && level === 'preview',
     toggle: () => setDisclosure({ revealed, choice: !(choice ?? revealed) }),
   };
 }

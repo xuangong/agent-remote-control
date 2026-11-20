@@ -152,19 +152,19 @@ describe('RendererRegistry', () => {
     const preventExpectedWindowError = (event: ErrorEvent) => event.preventDefault();
     window.addEventListener('error', preventExpectedWindowError);
     try {
-      const container = await render(<AgentTimeline state={failedState} registry={registry} />);
+      const container = await render(<AgentTimeline processMode="full" state={failedState} registry={registry} />);
       const callsAfterFailure = renderer.mock.calls.length;
 
       const unrelatedState = reduceTimelineEvent(failedState, stream(2, {
         type: 'assistant_message', text: 'Unrelated live event', messageId: 'other-answer',
       })).state;
-      await rerender(container, <AgentTimeline state={unrelatedState} registry={registry} />);
+      await rerender(container, <AgentTimeline processMode="full" state={unrelatedState} registry={registry} />);
       expect(renderer).toHaveBeenCalledTimes(callsAfterFailure);
       expect(container.textContent).toContain('Unrelated live event');
       expect(container.querySelector('.agent-extension-error')).not.toBeNull();
 
       const revisedState = applyHistoryPage(unrelatedState, page([projectedTool('completed')], 'after')).state;
-      await rerender(container, <AgentTimeline state={revisedState} registry={registry} />);
+      await rerender(container, <AgentTimeline processMode="full" state={revisedState} registry={registry} />);
 
       expect(container.textContent).toContain('Completed');
       expect(container.textContent).toContain('Extension rendered completed tool');

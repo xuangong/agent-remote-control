@@ -10,6 +10,8 @@ import { CommunicationContent } from '../CommunicationContent.js';
 import type { MessageGroupPosition } from '../timeline-render-model.js';
 import type { MarkdownResourceContext } from '../markdown-resources.js';
 import { SessionExcerptList, SessionReferenceNoteView, withoutSessionExcerpts, withoutSessionReferences } from '../SessionExcerpts.js';
+import { Bubble } from '../../primitives/Bubble.js';
+import { BubbleAvatar, BubbleTime } from '../bubble-foot.js';
 
 type Message = Extract<AgentTimelineItem, { type: 'user_message' | 'assistant_message' }>;
 
@@ -17,14 +19,16 @@ interface MessageItemProps<T extends Message> {
   readonly item: T;
   readonly messageGroup?: MessageGroupPosition;
   readonly resourceContext?: MarkdownResourceContext;
+  /** An answer's last bubble carries the assistant's avatar at its foot; the bubbles before it keep its room. */
+  readonly foot?: 'avatar' | 'space';
 }
 
 export function UserMessageItem({ item, messageGroup, resourceContext }: MessageItemProps<Extract<Message, { type: 'user_message' }>>) {
   return <MessageBubble item={item} messageGroup={messageGroup} resourceContext={resourceContext} />;
 }
 
-export function AssistantMessageItem({ item, messageGroup, resourceContext }: MessageItemProps<Extract<Message, { type: 'assistant_message' }>>) {
-  return <MessageBubble item={item} messageGroup={messageGroup} resourceContext={resourceContext} />;
+export function AssistantMessageItem({ item, messageGroup, resourceContext, foot }: MessageItemProps<Extract<Message, { type: 'assistant_message' }>>) {
+  return <MessageBubble item={item} messageGroup={messageGroup} resourceContext={resourceContext} foot={foot} />;
 }
 
 export function MessageItem({ item }: { readonly item: Message }) {
@@ -33,7 +37,7 @@ export function MessageItem({ item }: { readonly item: Message }) {
     : <AssistantMessageItem item={item} />;
 }
 
-function MessageBubble({ item: message, messageGroup = 'single', resourceContext }: MessageItemProps<Message>) {
+function MessageBubble({ item: message, messageGroup = 'single', resourceContext, foot }: MessageItemProps<Message>) {
   const user = message.type === 'user_message';
   // Quoted excerpts travel at the end of the user's text; they read as attachments of the message.
   // A reference note travels before them and reads as the message's references.
@@ -41,14 +45,16 @@ function MessageBubble({ item: message, messageGroup = 'single', resourceContext
   const { item, note } = quoted.item.type === 'user_message' ? withoutSessionReferences(quoted.item) : { item: quoted.item, note: undefined };
   const excerpts = quoted.excerpts;
   const withdrawn = item.type === 'user_message' && item.withdrawn !== undefined;
-  return <article
+  // A message is a bubble: the person's on the right, the assistant's on the left. Only a background check keeps a kicker, since it was
+  // not the person who wrote it.
+  const article = <article
     className={`agent-timeline-item agent-message agent-message-${user ? 'user' : 'assistant'} agent-message-group-${messageGroup}${withdrawn ? ' agent-message-withdrawn' : ''}`}
     aria-label={withdrawn ? 'User message, not sent' : user ? 'User message' : 'Assistant message'}
     data-message-group={messageGroup}
   >
-    <header className="agent-item-header">
-      <TimelineTitle className="agent-item-kicker">{user ? item.background ? 'Background check' : 'You' : 'Assistant'}</TimelineTitle>
-    </header>
+    {user && item.background ? <header className="agent-item-header">
+      <TimelineTitle className="agent-item-kicker">Background check</TimelineTitle>
+    </header> : null}
     {item.type === 'user_message' && item.content?.some(part => part.type !== 'text')
       ? <div className="agent-message-ordered-content">{item.content.map((part, index) => part.type === 'text'
         ? <Fragment key={index}><span className="agent-message-part-space">{part.text.match(/^\s*/)?.[0]}</span>{part.text.trim() ? <MarkdownContent markdown={part.text} className="agent-message-text-part" resourceContext={resourceContext} /> : null}<span className="agent-message-part-space">{part.text.trim() ? part.text.match(/\s*$/)?.[0] : null}</span></Fragment>
@@ -57,8 +63,12 @@ function MessageBubble({ item: message, messageGroup = 'single', resourceContext
       : item.text || !excerpts.length && !note ? <MarkdownContent markdown={item.text} resourceContext={resourceContext} /> : null}
     <SessionReferenceNoteView note={note} />
     <SessionExcerptList excerpts={excerpts} />
-    {withdrawn ? <WithdrawnNote text={item.text} /> : null}
   </article>;
+  return <>
+    <Bubble from={user ? 'mine' : 'theirs'} className="agent-bubble" avatar={user ? undefined : foot === 'avatar' ? <BubbleAvatar /> : foot === 'space' ? <span className="agent-bubble-avatar-space" /> : undefined}>{article}</Bubble>
+    <BubbleTime side={user ? 'mine' : 'theirs'} />
+    {withdrawn ? <WithdrawnNote text={item.text} /> : null}
+  </>;
 }
 
 function MessageImageTag({ label, locator, context }: { label: string; locator: string; context?: MarkdownResourceContext }) {

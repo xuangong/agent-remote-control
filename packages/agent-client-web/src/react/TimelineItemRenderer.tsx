@@ -24,9 +24,11 @@ export interface TimelineItemRendererProps {
   readonly resourceScopeKey?: string;
   readonly onResourceResolve?: (locator: string, sourceLocator?: string) => Promise<ResourceBinding>;
   readonly onResourceRequest?: (binding: ResourceBinding) => Promise<void | ResourceResponseState>;
+  /** The foot of an answer bubble: the assistant's avatar on the last one, its room on the others. */
+  readonly foot?: 'avatar' | 'space';
 }
 
-export const TimelineItemRenderer = memo(function TimelineItemRenderer({ item, entry, messageGroup, resolveSessionLink, resources, resourceBindings, resourceScopeKey, onResourceResolve, onResourceRequest }: TimelineItemRendererProps) {
+export const TimelineItemRenderer = memo(function TimelineItemRenderer({ item, entry, messageGroup, resolveSessionLink, resources, resourceBindings, resourceScopeKey, onResourceResolve, onResourceRequest, foot }: TimelineItemRendererProps) {
   const markdownResources = useMemo(() => (
     resources && resourceBindings && resourceScopeKey
       ? { scopeKey: resourceScopeKey, resources, bindings: resourceBindings, resolveResource: onResourceResolve, requestResource: onResourceRequest }
@@ -34,7 +36,7 @@ export const TimelineItemRenderer = memo(function TimelineItemRenderer({ item, e
   ), [onResourceRequest, onResourceResolve, resourceBindings, resourceScopeKey, resources]);
   switch (item.type) {
     case 'user_message': return <UserMessageItem item={item} messageGroup={messageGroup} resourceContext={markdownResources} />;
-    case 'assistant_message': return <AssistantMessageItem item={item} messageGroup={messageGroup} resourceContext={markdownResources} />;
+    case 'assistant_message': return <AssistantMessageItem item={item} messageGroup={messageGroup} resourceContext={markdownResources} foot={foot} />;
     case 'agent_communication': return entry ? <CommunicationLetter entry={entry} resourceContext={markdownResources} /> : <AgentCommunicationItem item={item} resourceContext={markdownResources} />;
     case 'reasoning': return <ReasoningItem item={item} />;
     case 'tool_call': return <ToolCallItem item={item} resolveSessionLink={resolveSessionLink} />;

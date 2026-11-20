@@ -12,15 +12,17 @@ import { InteractionPanel } from './InteractionPanel.js';
 import type { QuestionDraft } from './interactions/QuestionCard.js';
 import type { RendererRegistry } from './renderer-registry.js';
 import { ConversationEntry } from './ConversationEntry.js';
-import { createTimelineRenderModel, type TimelineRenderEntry } from './timeline-render-model.js';
-import { groupRuntimeNotices, RuntimeNoticeGroup, useRuntimeNoticeDisclosure, type RuntimeNoticePresentation } from './RuntimeNoticeGroup.js';
-import { BackgroundActivityGroup, groupBackgroundActivity, type BackgroundRow } from './BackgroundActivityGroup.js';
+import type { TimelineRenderEntry } from './timeline-render-model.js';
+import { useRuntimeNoticeDisclosure } from './RuntimeNoticeGroup.js';
 import type { PreviewController } from './PreviewActions.js';
 import { usePreviewController } from './PreviewContext.js';
 import { OutgoingMessageItem } from './OutgoingMessageItem.js';
-import { TimelineDisplay, TimelineLettersVisible, isContentOnlyItem } from './TimelineDisplay.js';
+import { TimelineLettersVisible } from './TimelineDisplay.js';
 import { useTimelineAction } from './useTimelineAction.js';
-import { type AgentReplicaState, timelineEntryKey } from '@orchardworks/agent-client';
+import { TimelineTurn, type TurnRowOptions } from './TimelineTurn.js';
+import { BubbleAvatarContext } from './bubble-foot.js';
+import { LocaleContext, useTranslate } from './locale.js';
+import { type AgentReplicaState, type ProcessMode, type Turn, dayLineLabel, foldTurns, startsDayLine, timelineEntryKey, workDisclosure } from '@orchardworks/agent-client';
 
 export type AgentTimelineState = AgentReplicaState;
 
@@ -53,6 +55,10 @@ export interface AgentTimelineProps {
   readonly resolveSessionLink?: SessionLinkResolver;
   readonly registry?: RendererRegistry;
   readonly showHeader?: boolean;
+  /** How much of each turn's work shows (section 4.2 of the I3 plan); Concise when the host says nothing. */
+  readonly processMode?: ProcessMode;
+  /** Who answers: the name the live line uses and the avatar at the foot of the answers. A host without one shows "Assistant" and no avatar. */
+  readonly assistant?: { readonly name: string; readonly avatar?: ReactNode };
   readonly onOpenChildSession?: (child: AgentChildSessionView) => void | Promise<void>;
   readonly historyLoading?: boolean;
   readonly historyError?: string;
@@ -87,6 +93,8 @@ export function AgentTimeline({
   resolveSessionLink,
   childrenFor,
   showHeader = true,
+  processMode = 'concise',
+  assistant,
   onLoadOlder,
   historyLoading,
   historyError,
@@ -110,8 +118,9 @@ export function AgentTimeline({
 }: AgentTimelineProps) {
   const inheritedPreviewController = usePreviewController();
   const previews = previewController ?? inheritedPreviewController;
-  const contentOnly = useContext(TimelineDisplay) === 'content';
   const lettersVisible = useContext(TimelineLettersVisible);
+  const locale = useContext(LocaleContext);
+  const t = useTranslate();
   const scopeKey = JSON.stringify([state.agent?.id]);
   const editPrompt = useTimelineAction(scopeKey, onEditPrompt);
   const inspectEntry = useTimelineAction(scopeKey, onInspectEntry);
@@ -132,51 +141,62 @@ export function AgentTimeline({
     }
     return prompts;
   }, [state.timeline.entries, state.timeline.hasOlder]);
-  const entries = useMemo(() => {
-    if (!contentOnly && lettersVisible) return state.timeline.entries;
-    return state.timeline.entries.filter(entry => {
-      if (searchEntryKey !== undefined && timelineEntryKey(entry) === searchEntryKey) return true;
-      if (!lettersVisible && entry.item.type === 'agent_communication') return false;
-      return !contentOnly || isContentOnlyItem(entry.item);
-    });
-  }, [contentOnly, lettersVisible, state.timeline.entries, state.timeline.epoch, searchEntryKey]);
-  const renderModel = useMemo(() => createTimelineRenderModel(entries), [entries]);
-  // A range is taken over the entries shown, so hidden activity is never selected unseen.
+  // The fold reads every entry, so a turn keeps its key while letters are hidden; hidden letters only leave the screen.
+  const folded = useMemo(() => foldTurns(state.timeline.entries, state.agent?.activeTurn ?? null, state.agent?.status, state.pendingInteractions.length),
+    [state.timeline.entries, state.agent?.activeTurn, state.agent?.status, state.pendingInteractions.length]);
+  const turns = useMemo(() => lettersVisible ? folded : folded.map(turn => turn.letters.length ? { ...turn, letters: turn.letters.filter(entry =>
+    searchEntryKey !== undefined && timelineEntryKey(entry) === searchEntryKey) } : turn), [folded, lettersVisible, searchEntryKey]);
+  const placement = useMemo(() => turnPlacement(turns), [turns]);
+  // The reader's own toggle of a turn's work line holds until the mode changes; a search or Trace target opens its turn once.
+  const readerScope = JSON.stringify([state.agent?.id, processMode]);
+  const revealRequest = JSON.stringify([searchEntryKey, searchRequestId, inspectedEntryKey, inspectedRequestId]);
+  const [reader, setReader] = useState(() => ({ scope: readerScope, request: '', choices: new Map<string, boolean>(), revealed: new Set<string>() }));
+  let current = reader;
+  if (reader.scope !== readerScope || reader.request !== revealRequest) {
+    const keep = reader.scope === readerScope;
+    const choices = new Map(keep ? reader.choices : []), revealed = new Set(keep ? reader.revealed : []);
+    for (const key of [searchEntryKey, inspectedEntryKey]) {
+      const turn = key === undefined ? undefined : placement.workTurn.get(key);
+      if (turn !== undefined) { choices.set(turn, true); revealed.add(turn); }
+    }
+    current = { scope: readerScope, request: revealRequest, choices, revealed };
+    // Reveal during rendering: the workbench locates search and Trace targets in a layout effect.
+    setReader(current);
+  }
+  const toggleTurn = (key: string, open: boolean) => setReader(previous => {
+    const choices = new Map(previous.scope === readerScope ? previous.choices : []), revealed = new Set(previous.scope === readerScope ? previous.revealed : []);
+    choices.set(key, !open); revealed.delete(key);
+    return { ...previous, scope: readerScope, choices, revealed };
+  });
+  const disclosures = turns.map(turn => workDisclosure(processMode, turn.state, current.choices.get(turn.key), current.revealed.has(turn.key)));
+  // A range is taken over the entries shown, in the order they show: a closed work line's steps are never selected unseen.
+  const shown = turns.flatMap((turn, index) => [...(turn.prompt ? [turn.prompt] : []),
+    ...turn.work.filter(step => step.kind !== 'interaction_receipt' ? disclosures[index]!.line === 'open' : false).flatMap(step => step.entries),
+    ...turn.work.filter(step => step.kind === 'interaction_receipt').flatMap(step => step.entries), ...turn.answer, ...turn.letters]);
   const selectionAnchor = useRef<string>();
   const selectedKeys = entrySelection?.selected;
   if (!selectedKeys) selectionAnchor.current = undefined;
   const selectEntry = useTimelineAction(scopeKey, entrySelection ? (key: string, extend: boolean) => {
-    const order = renderModel.filter(row => isSelectableTimelineItem(row.entry.item)).map(row => row.key);
+    const order = shown.filter(entry => isSelectableTimelineItem(entry.item)).map(timelineEntryKey);
     const anchor = selectionAnchor.current, from = anchor === undefined ? -1 : order.indexOf(anchor), to = order.indexOf(key);
     selectionAnchor.current = key;
     if (extend && from >= 0 && to >= 0) entrySelection.select(order.slice(Math.min(from, to), Math.max(from, to) + 1), true);
     else entrySelection.select([key], !selectedKeys?.has(key));
   } : undefined);
-  const rows = useMemo(() => {
-    const result: Array<ReturnType<typeof groupRuntimeNotices>[number] | Extract<BackgroundRow, { type: 'background' }>> = [];
-    // Every segment shares the full history index so hidden activity still separates notices.
-    const positions = new Map(state.timeline.entries.map((entry, index) => [entry, index]));
-    let ordinary: TimelineRenderEntry[] = [];
-    const flush = () => { result.push(...groupRuntimeNotices(ordinary, positions)); ordinary = []; };
-    for (const row of groupBackgroundActivity(renderModel, createTimelineRenderModel(state.timeline.entries))) {
-      if (row.type === 'entry') ordinary.push(row.value);
-      else { flush(); result.push(row); }
-    }
-    flush(); return result;
-  }, [renderModel, state.timeline.entries, state.timeline.epoch]);
   const notices = useRuntimeNoticeDisclosure(scopeKey, searchEntryKey, inspectedEntryKey, searchRequestId, inspectedRequestId);
-  const renderEntry = ({ entry, key, messageGroup }: TimelineRenderEntry, notice?: RuntimeNoticePresentation) =>
+  const renderEntry = ({ entry, key, messageGroup }: TimelineRenderEntry, options?: TurnRowOptions) =>
     <ConversationEntry key={key} entry={entry} entryKey={key}
-      searchSelected={key === searchEntryKey} messageGroup={messageGroup} contentOnly={contentOnly} agentId={state.agent?.id}
+      searchSelected={key === searchEntryKey} messageGroup={messageGroup} agentId={state.agent?.id}
       scopeKey={scopeKey} resources={state.resources}
       onEditPrompt={editablePrompts.has(entry) ? editPrompt : undefined}
       selection={selectEntry && isSelectableTimelineItem(entry.item) ? selectedKeys ? selectedKeys.has(key) ? 'selected' : 'unselected' : 'available' : undefined}
       selectionLabel={entrySelection?.label} onSelect={selectEntry}
-      onInspectEntry={!contentOnly ? inspectEntry : undefined} inspected={inspectedEntryKey === key}
+      onInspectEntry={inspectEntry} inspected={inspectedEntryKey === key}
       resolveSessionLink={entry.item.type === 'tool_call' ? resolveSessionLink : undefined}
       onResourceResolve={resolveResource} onResourceRequest={requestResource}
-      previews={previews} extension={!contentOnly ? registry?.render(entry.item) : undefined}
-      {...notice} />;
+      previews={previews} extension={registry?.render(entry.item)}
+      {...options} />;
+  const now = Date.now();
   const outgoing = (state.outgoingMessages ?? []).filter(message => message.agentId === state.agent?.id);
   const discovered = useRef({ identity: '', order: new Map<string, number>() });
   const identity = JSON.stringify([state.agent?.providerId, state.agent?.id]);
@@ -207,16 +227,20 @@ export function AgentTimeline({
       onLoadOlder={onLoadOlder}
     /> : timelineStart ?? null}
 
-    <div className="agent-timeline-entries" aria-live="polite">
-      {renderModel.length === 0 && outgoing.length === 0
-        ? timelineStart && !state.timeline.hasOlder ? null : <p className="agent-timeline-empty">{contentOnly ? 'No conversation content in the loaded history.' : 'No timeline activity.'}</p>
-        : rows.map(row => row.type === 'entry' ? renderEntry(row.value) : row.type === 'background' ? <BackgroundActivityGroup key={row.key}
-            entries={row.entries} count={row.count} expanded={notices.isExpanded(row.entries)} toggle={() => notices.toggle(row.entries)} renderEntry={renderEntry} /> : <RuntimeNoticeGroup key={row.key}
-            entries={row.entries} expanded={notices.isExpanded(row.entries)} toggle={() => notices.toggle(row.entries)}
-            renderEntry={renderEntry} />)}
+    <BubbleAvatarContext.Provider value={assistant?.avatar}><div className="agent-timeline-entries" aria-live="polite" data-process-mode={processMode}>
+      {turns.length === 0 && outgoing.length === 0
+        ? timelineStart && !state.timeline.hasOlder ? null : <p className="agent-timeline-empty">No timeline activity.</p>
+        : turns.map((turn, index) => {
+            const previous = turns[index - 1];
+            const start = (turn.prompt ?? turn.work[0]?.entries[0] ?? turn.answer[0] ?? turn.letters[0])?.timestamp;
+            const separator = start && startsDayLine(previous ? lastTimestamp(previous) : undefined, start) ? { label: dayLineLabel(start, now, locale, t), timestamp: start } : undefined;
+            const disclosure = disclosures[index]!;
+            return <TimelineTurn key={turn.key} turn={turn} disclosure={disclosure} separator={separator}
+              onToggle={() => toggleTurn(turn.key, disclosure.line === 'open')} renderEntry={renderEntry} groups={notices} />;
+          })}
       {outgoing.map(message => <OutgoingMessageItem key={message.id} message={message} resourceContext={onResourceResolve && onResourceRequest ? { scopeKey: JSON.stringify([state.agent?.id]), bindings: [], resources: state.resources, resolveResource: onResourceResolve, requestResource: onResourceRequest } : undefined} onRetry={onRetryMessage} onDelete={onDeleteMessage} />)}
       {timelineEnd ?? null}
-    </div>
+    </div></BubbleAvatarContext.Provider>
 
     <AgentChildSessionList childrenFor={childrenFor} key={identity} children={children} label="Session subagents" collapsible onOpenChildSession={onOpenChildSession} />
 
@@ -235,6 +259,22 @@ export function AgentTimeline({
         /></fieldset>)}
     </aside> : null}
   </section></ResourceDownloadContext.Provider>;
+}
+
+/** The turn whose work line holds each step entry: a search or Trace target there opens its turn. */
+function turnPlacement(turns: readonly Turn[]) {
+  const workTurn = new Map<string, string>();
+  for (const turn of turns) for (const step of turn.work) if (step.kind !== 'interaction_receipt') for (const entry of step.entries) workTurn.set(timelineEntryKey(entry), turn.key);
+  return { workTurn };
+}
+
+/** When a turn's last row happened. */
+function lastTimestamp(turn: Turn): string | undefined {
+  let last: import('@orchardworks/agent-remote-protocol').ProjectedTimelineEntry | undefined;
+  for (const entry of [...(turn.prompt ? [turn.prompt] : []), ...turn.work.flatMap(step => step.entries), ...turn.answer, ...turn.letters]) {
+    if (!last || entry.seqStart > last.seqStart) last = entry;
+  }
+  return last?.timestamp;
 }
 
 function HistoryControls({ onLoadOlder, loading = false, error }: { readonly onLoadOlder?: () => void | Promise<void>; loading?: boolean; error?: string }) {

@@ -5,7 +5,7 @@ import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 
 import { render, rerender } from '../../test/setup.js';
 import { ToolCallItem } from './ToolCallItem.js';
-import { TimelineDisplay } from '../TimelineDisplay.js';
+import { TimelineStepLevel } from '../TimelineDisplay.js';
 
 describe('ToolCallItem', () => {
   it('discloses complete tool details and preserves the disclosure while the call updates', async () => {
@@ -32,13 +32,13 @@ describe('ToolCallItem', () => {
     expect(container.querySelector<HTMLElement>('.agent-tool-details')?.hidden).toBe(false);
   });
 
-  it.each(['preview', 'simple'] as const)('keeps failure status visible while disclosing the full error in %s mode', async mode => {
+  it.each(['preview', 'summary'] as const)('keeps failure status visible while disclosing the full error at %s level', async mode => {
     const error = `File is unavailable.\n${Array.from({ length: 20 }, (_, index) => `Diagnostic line ${index}`).join('\n')}`;
     const item: Extract<AgentTimelineItem, { type: 'tool_call' }> = {
       type: 'tool_call', callId: 'read-one', name: 'read', status: 'failed', error,
       detail: { type: 'read', filePath: '/workspace/missing.txt' },
     };
-    const renderItem = (message = error) => <TimelineDisplay.Provider value={mode}><ToolCallItem item={{ ...item, error: message }} /></TimelineDisplay.Provider>;
+    const renderItem = (message = error) => <TimelineStepLevel.Provider value={mode}><ToolCallItem item={{ ...item, error: message }} /></TimelineStepLevel.Provider>;
     const container = await render(renderItem());
 
     const toggle = container.querySelector<HTMLButtonElement>('.agent-tool-toggle')!;
@@ -46,7 +46,7 @@ describe('ToolCallItem', () => {
     expect(toggle.textContent).toContain('Failed');
     expect(container.querySelector('.agent-tool-summary')?.textContent).toBe('/workspace/missing.txt');
     expect(container.querySelector('[role="alert"]')).toBeNull();
-    if (mode === 'simple') expect(container.querySelector('.agent-tool-preview')).toBeNull();
+    if (mode === 'summary') expect(container.querySelector('.agent-tool-preview')).toBeNull();
     else expect(container.querySelector('.agent-tool-preview')?.textContent).toContain('File is unavailable.');
     expect(container.textContent).not.toContain('Diagnostic line 19');
 
@@ -136,11 +136,11 @@ it.each([
   { name: 'independent error', output: 'Starting command', error: 'Connection lost', duplicate: false },
   { name: 'output truncated before full error', output: 'Permission denied', error: 'Permission denied\nCheck access', duplicate: false },
 ])('renders $name without losing diagnostics', async ({ output, error, duplicate }) => {
-  const container = await render(<TimelineDisplay.Provider value="preview"><ToolCallItem item={{
+  const container = await render(<TimelineStepLevel.Provider value="preview"><ToolCallItem item={{
     type: 'tool_call', callId: 'failed-command', name: 'command', status: 'failed', error,
     detail: { type: 'shell', command: 'run-command' },
     result: { content: [{ type: 'text', stream: 'combined', text: output }], exitCode: 1 },
-  }} /></TimelineDisplay.Provider>);
+  }} /></TimelineStepLevel.Provider>);
   const preview = container.querySelector('.agent-tool-preview')!;
   expect(preview.querySelectorAll(':scope > .agent-content-preview')).toHaveLength(duplicate ? 1 : 2);
   await act(async () => container.querySelector<HTMLButtonElement>('.agent-tool-toggle')!.click());

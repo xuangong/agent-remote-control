@@ -51,7 +51,6 @@
   .agent-preview-dock-entry { max-width: 160px; }
   .agent-preview-dock-entry button { min-height: 40px; }
   .lab-timeline-scroll { padding: 0 max(10px, env(safe-area-inset-right)) 8px max(10px, env(safe-area-inset-left)); }
-  .lab-timeline-scroll .agent-message-user { max-width: 92%; }
   .lab-session-control-row { gap: 8px; min-height: 44px; }
   .lab-session-control-row button { min-height: 44px; }
   .lab-composer-dock {

@@ -330,6 +330,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
             {notice ? <p className="lab-control-note" role="alert">{sessionNoticeWords(notice)}</p> : null}
             <AgentTimeline
               state={state}
+              processMode={display === 'content' ? 'concise' : 'full'}
               onEditPrompt={actions.editPrompt}
               onRetryMessage={actions.retryMessage}
               onDeleteMessage={actions.deleteMessage}

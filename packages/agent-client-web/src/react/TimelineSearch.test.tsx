@@ -5,7 +5,6 @@ import { render, rerender, unmount } from '../test/setup.js';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { TimelineSearch } from './TimelineSearch.js';
 import { AgentTimeline } from './AgentTimeline.js';
-import { TimelineDisplay } from './TimelineDisplay.js';
 import { createReplicaState, type AgentReplicaState, findTimelineMatches, type TimelineSearchOptions } from '@orchardworks/agent-client';
 
 const entry = (seq: number, text: string): ProjectedTimelineEntry => ({ providerId: 'recorded', seqStart: seq, seqEnd: seq,
@@ -78,14 +77,16 @@ it('retains partial results on failure and lets readers retry the scan and jump'
   expect(selected).toHaveBeenCalledTimes(2);
 });
 
-it('reveals and expands a matching hidden item without changing Content only for the rest', async () => {
+it('reveals and expands a matching item behind a closed work line, leaving the other steps closed', async () => {
   const reasoning = { ...entry(2, ''), item: { type: 'reasoning' as const, text: 'hidden answer' } };
   const other = { ...entry(3, ''), item: { type: 'reasoning' as const, text: 'unrelated reasoning' } };
   const key = findTimelineMatches('epoch', [reasoning], 'answer', 'reasoning')[0]!.key;
-  const container = await render(<TimelineDisplay.Provider value="content"><AgentTimeline state={state([reasoning, other], false)} searchEntryKey={key} /></TimelineDisplay.Provider>);
+  const container = await render(<AgentTimeline state={state([reasoning, other], false)} processMode="concise" searchEntryKey={key} />);
+  expect(container.querySelector('.agent-work-line button')?.getAttribute('aria-expanded')).toBe('true');
   expect(container.querySelector('.agent-reasoning-toggle')?.getAttribute('aria-expanded')).toBe('true');
   expect(container.querySelector('[data-inspected]')?.textContent).toContain('hidden answer');
-  expect(container.textContent).not.toContain('unrelated reasoning');
+  expect(container.querySelectorAll('.agent-reasoning-toggle')[1]?.getAttribute('aria-expanded')).toBe('false');
+  expect(container.querySelector('.agent-reasoning-content')?.textContent).not.toContain('unrelated reasoning');
   await act(async () => container.querySelector<HTMLButtonElement>('.agent-reasoning-toggle')!.click());
   expect(container.querySelector('.agent-reasoning-toggle')?.getAttribute('aria-expanded')).toBe('false');
 });

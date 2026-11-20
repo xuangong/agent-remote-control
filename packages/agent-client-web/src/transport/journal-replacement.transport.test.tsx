@@ -35,7 +35,7 @@ vi.mock('../react/TimelineEntry.js', async original => {
 
 function Screen({ replica }: { replica: AgentReplica }) {
   const state = useSyncExternalStore(listener => replica.subscribe(listener), () => replica.getState());
-  return <div><AgentTimeline state={state} /><textarea data-testid="composer" defaultValue="" /></div>;
+  return <div><AgentTimeline state={state} processMode="full" /><textarea data-testid="composer" defaultValue="" /></div>;
 }
 const nodesByKey = (container: HTMLElement) => new Map([...container.querySelectorAll<HTMLElement>('.agent-timeline-entry')].map(node => [node.dataset.entryKey!, node]));
 const settle = (ms = 80) => act(async () => { await new Promise(resolve => setTimeout(resolve, ms)); });

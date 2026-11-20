@@ -115,15 +115,14 @@ it.each([
   expect(container.querySelector('details pre')).toBeNull();
 });
 
-it.each(['preview', 'simple', 'content'] as const)('toggles letters independently of %s mode without changing the replica', async (mode: TimelineDisplayMode) => {
+it.each(['concise', 'process', 'full'] as const)('toggles letters independently of %s mode without changing the replica', async mode => {
   const letter = replyEntry('Agent reply.');
   const message = { ...letter, seqStart: 2, seqEnd: 2, item: { type: 'assistant_message' as const, text: 'Assistant answer.' } };
   const state = createReplicaState();
   state.timeline = { ...state.timeline, epoch: 'epoch', initialized: true, entries: [letter, message] };
   const key = timelineEntryKey(letter);
-  const view = (visible: boolean, searchEntryKey?: string) => <TimelineDisplay.Provider value={mode}>
-    <TimelineLettersVisible.Provider value={visible}><AgentTimeline state={state} searchEntryKey={searchEntryKey} inspectedEntryKey={key} /></TimelineLettersVisible.Provider>
-  </TimelineDisplay.Provider>;
+  const view = (visible: boolean, searchEntryKey?: string) =>
+    <TimelineLettersVisible.Provider value={visible}><AgentTimeline state={state} processMode={mode} searchEntryKey={searchEntryKey} inspectedEntryKey={key} /></TimelineLettersVisible.Provider>;
   const container = await render(view(true));
   expect(container.querySelectorAll('.agent-communication-letter')).toHaveLength(1);
   const assistant = container.querySelector('.agent-message-assistant');

@@ -1,6 +1,7 @@
 import { lazy, Suspense, StrictMode } from 'react';
 import { startAppearance } from './appearance.js';
 import { MotionProvider } from '@orchardworks/agent-client-web/primitives';
+import { browserLocale, LocaleContext } from '@orchardworks/agent-client-web/react';
 import { createRoot } from 'react-dom/client';
 
 import { WorkspaceShell } from './components/WorkspaceShell.js';
@@ -37,7 +38,10 @@ const fixtureAction = fixtureEndpoint ? async (
 
 const devbox = document.querySelector('meta[name="agent-remote-devbox"]')?.getAttribute('content') === 'true';
 const shell = <WorkspaceShell />;
+// The conversation speaks the browser's language: Chinese for a Chinese browser, English otherwise.
+const locale = browserLocale();
+document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en';
 // One motion subscription for the page: every avatar and mark reads reduced motion and visibility from it.
-createRoot(root).render(<StrictMode><MotionProvider>{gatewayMode
+createRoot(root).render(<StrictMode><LocaleContext.Provider value={locale}><MotionProvider>{gatewayMode
   ? <GatewayController automaticAccess={devbox}>{(baseUrl, accountAction) => <Suspense fallback={shell}><App baseUrl={baseUrl} accountAction={accountAction} userScoped /></Suspense>}</GatewayController>
-  : <Suspense fallback={shell}><App fixtureAction={fixtureAction} /></Suspense>}</MotionProvider></StrictMode>);
+  : <Suspense fallback={shell}><App fixtureAction={fixtureAction} /></Suspense>}</MotionProvider></LocaleContext.Provider></StrictMode>);

@@ -33,7 +33,7 @@ describe('incremental timeline rendering', () => {
     });
     const base = createReplicaState();
     const state = { ...base, timeline: { ...base.timeline, initialized: true, epoch: 'test', entries, nextSeq: count + 1 } };
-    const container = await render(<AgentTimeline state={state} />);
+    const container = await render(<AgentTimeline state={state} processMode="full" />);
     // Count input visits rather than elapsed time so a busy CI machine cannot change the result.
     expect(reads).toBeLessThan(count * 16);
     expect(container.querySelectorAll('.agent-background-summary')).toHaveLength(count / 2);
@@ -88,7 +88,7 @@ describe('incremental timeline rendering', () => {
     const base = createReplicaState();
     const initial = { ...base, timeline: { ...base.timeline, initialized: true, epoch: 'test', entries, nextSeq: 6 } };
     const inspect = vi.fn();
-    const container = await render(<AgentTimeline state={initial} onInspectEntry={inspect} />);
+    const container = await render(<AgentTimeline state={initial} processMode="full" onInspectEntry={inspect} />);
     await act(async () => container.querySelector<HTMLButtonElement>('.agent-notice-toggle')!.click());
     const historicalRows = [...container.querySelectorAll<HTMLElement>('.agent-timeline-entry')].slice(0, 4);
     expect(historicalRows).toHaveLength(4);
@@ -98,7 +98,7 @@ describe('incremental timeline rendering', () => {
       event: { type: 'timeline', providerId: 'codex', turnId: 'turn', resources: [],
         item: { type: 'assistant_message', messageId: 'live', text: ' continues' } },
     } }).state;
-    await rerender(container, <AgentTimeline state={next} onInspectEntry={inspect} />);
+    await rerender(container, <AgentTimeline state={next} processMode="full" onInspectEntry={inspect} />);
     expect(renders.mock.calls.map(([key]) => key)).toEqual(['codex:5:live']);
     expect(container.textContent).toContain('Current reply continues');
     expect(container.querySelector('.agent-notice-toggle')?.getAttribute('aria-expanded')).toBe('true');

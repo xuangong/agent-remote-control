@@ -95,37 +95,48 @@
 
 .agent-timeline-entries { display: grid; grid-template-columns: minmax(0, 1fr); }
 .agent-timeline-entry { min-width: 0; position: relative; border-bottom: 1px solid var(--agent-rule); }
-.agent-timeline-entry:has(.agent-message-group-first),
-.agent-timeline-entry:has(.agent-message-group-middle) { border-bottom: 0; }
 .agent-timeline-entry::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 2px; background: transparent; }
-.agent-timeline-entry:has(.agent-message-assistant)::before { background: var(--agent-signal); }
 .agent-timeline-item { display: grid; gap: 10px; min-width: 0; padding: 15px 18px; }
 .agent-item-header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px; }
 .agent-item-header > div { display: flex; flex-wrap: wrap; min-width: 0; align-items: baseline; gap: 10px; }
 
-.agent-message-user { background: var(--agent-surface-selected); }
-.agent-message-withdrawn { background: var(--agent-surface-muted); border: 1px dashed var(--agent-rule); color: var(--agent-muted); }
 .agent-message-withdrawn-note { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 8px 0 0; font-size: 12px; color: var(--agent-muted); }
 .agent-message-withdrawn-copy { border: 0; background: none; padding: 0; color: var(--agent-action-text); font: inherit; cursor: pointer; }
 .agent-message-withdrawn-copy:hover { text-decoration: underline; }
 .agent-message-withdrawn-copy:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; border-radius: 2px; }
 @media (pointer: coarse) { .agent-message-withdrawn-copy { min-height: 44px; padding: 0 8px; } }
-.agent-outgoing-message { background: var(--agent-surface-selected); }
-.agent-outgoing-message[data-delivery-state="pending"] > .agent-message { animation: agent-message-pending 1.8s ease-in-out infinite; }
 .agent-message-delivery { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; padding: 0 18px 12px; color: var(--agent-muted); font-size: 12px; }
 .agent-delivery-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .agent-delivery-error { flex-basis: 100%; }
-.agent-outgoing-message[data-delivery-state="failed"] { box-shadow: inset 2px 0 var(--agent-danger); background: color-mix(in srgb, var(--agent-danger) 7%, var(--agent-panel)); }
-.agent-outgoing-message[data-delivery-state="failed"] > .agent-message { background: transparent; }
 .agent-outgoing-message[data-delivery-state="failed"] .agent-message-delivery { color: var(--agent-danger); }
-@keyframes agent-message-pending { 0%, 100% { opacity: .85; } 50% { opacity: .5; } }
-@media (prefers-reduced-motion: reduce) {
-  .agent-outgoing-message[data-delivery-state="pending"] > .agent-message { animation: none; }
-}
 .agent-message .agent-item-kicker { letter-spacing: 0; text-transform: none; }
-.agent-message-group-first { padding-bottom: 4px; border-bottom-left-radius: 3px; border-bottom-right-radius: 3px; }
-.agent-message-group-middle { padding-block: 4px; border-radius: 3px; }
-.agent-message-group-last { padding-top: 4px; border-top-left-radius: 3px; border-top-right-radius: 3px; }
+
+/* The conversation as turns (I3): the person's bubbles on the right, the assistant's on the left with its avatar at the foot of
+   an answer, one work line per turn with its steps in place, and a day line. Orchard tokens only. */
+.agent-turn { display: flex; flex-direction: column; gap: var(--orchard-space-m); box-sizing: border-box; width: 100%; min-width: 0;
+  max-width: calc(var(--orchard-space-column) + 180px); margin-inline: auto; padding-block: var(--orchard-space-s); }
+.agent-turn .agent-timeline-entry { border-bottom: 0; }
+.agent-day-separator { color: var(--orchard-text-secondary); text-align: center;
+  font: var(--orchard-type-caption-weight) var(--orchard-type-caption-size) / var(--orchard-type-caption-leading) var(--orchard-font-text); }
+.orchard-bubble > .agent-message { display: grid; gap: var(--orchard-space-s); margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: inherit; }
+.orchard-bubble-row[data-from="mine"] .agent-markdown, .orchard-bubble-row[data-from="mine"] .agent-markdown a { color: inherit; }
+.orchard-bubble-row:has(.agent-message-group-first, .agent-message-group-middle) { margin-bottom: calc(var(--orchard-space-m) * -0.6); }
+.orchard-bubble:has(> .agent-message-withdrawn) { color: var(--orchard-text-secondary); background: transparent; outline: 1px dashed var(--orchard-separator); outline-offset: -1px; }
+.agent-outgoing-message[data-delivery-state="failed"] .orchard-bubble { outline: 1.5px solid var(--orchard-danger-text); outline-offset: 1px; }
+.agent-bubble-avatar-space { display: inline-block; flex: none; width: 26px; }
+.agent-bubble-time { display: block; margin: 2px 0 0 calc(26px + var(--orchard-space-m)); color: var(--orchard-text-secondary); opacity: 0;
+  font: var(--orchard-type-caption-size) / var(--orchard-type-caption-leading) var(--orchard-font-text); font-variant-numeric: tabular-nums;
+  transition: opacity var(--orchard-duration-fast) var(--orchard-ease-standard); }
+.agent-bubble-time[data-side="mine"] { margin-left: 0; text-align: right; }
+.agent-timeline-entry:is(:hover, :focus-within) .agent-bubble-time { opacity: 1; }
+.agent-work-line.orchard-work-summary { margin-left: calc(26px + var(--orchard-space-m)); }
+.orchard-work-summary-note { margin-left: var(--orchard-space-s); color: var(--orchard-danger-text);
+  font: var(--orchard-type-footnote-size) / var(--orchard-type-footnote-leading) var(--orchard-font-text); }
+.agent-work-steps { display: grid; gap: var(--orchard-space-2xs); min-width: 0; }
+.agent-work-steps .orchard-bubble { max-width: 100%; padding: 0; color: var(--orchard-text-secondary); background: transparent; }
+.agent-work-steps .agent-bubble-avatar-space { display: none; }
+@media (max-width: 1180px) { .agent-bubble-time { display: none; } }
+@media (prefers-reduced-motion: reduce) { .agent-bubble-time { transition: none; } }
 .agent-markdown { min-width: 0; overflow-wrap: anywhere; }
 .agent-markdown > :first-child { margin-top: 0; }
 .agent-markdown > :last-child { margin-bottom: 0; }

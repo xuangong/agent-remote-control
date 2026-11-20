@@ -3,3 +3,4 @@ export * from './messages.js';
 export * from './turns.js';
 export * from './process-mode.js';
 export * from './work-summary.js';
+export * from './day-line.js';

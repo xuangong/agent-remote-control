@@ -552,11 +552,42 @@ Every open whose pane mounts with its session paints content in the mount frame 
 - A turn wraps its rows, so a row whose turn changes (the person's message before it left the window) is rebuilt; every other row keeps its node through a journal replacement.
 - Only the latest answer's avatar moves; earlier answers' avatars rest. A turn is skipped while far off screen (`content-visibility: auto`), except while a search or Trace target is shown, when WebKit would otherwise land the reveal off target. The inspected row's outline is drawn inside the row, since a turn clips its overflow.
 
+### I3b
+
+**Commits** (on `feat/i3b-layout`, from `95d9c028`): B1 `826d10df` (status), `021d4b3f` (names); B2 `a960f35c`; B3 `2a1c4a54` (files), `f1df72b4` (composer settings), `603b0b34` (an avatar at creation), `e2a30564`; B4 `22fbde30`; B5 `5d9b8902`; B6 `797fb875` (Return), `9ac64ff7`; B7 `ef1c4a51`; B8 `08023a1d`, `3de3f249`; B9 `4178884b`; the launcher overlap defect `4275cb64`; I3a's last commits merged in `bcb317ae`; specs re-pointed by the full runs `ad35743e`, `799df246`, `245cbfd4` (E3); found on `pnpm local` and fixed: `47807970` (a long name covered Back on the phone); compatibility `d20c66b3`, `2241dfda`, `c51ac880`, `a735193e`, `3d1d68a9`; these results in the commit after.
+
+**Deploy.** Website only: no protocol, stored field or Relay change. A new assistant's avatar is the existing `picture` field.
+
+**Inventory.** `assistant-inventory.spec.ts` passes every section 5 row, the I3b rows H4, H5 and W1 to W7 included, in chromium-desktop, chromium-mobile, orchard-phone-chromium and orchard-phone-webkit.
+
+**T1 and T5** were not measured for I3b.
+
+**Suites.** `pnpm verify` passes on `c51ac880`: compatibility, architecture, build, typecheck and 12,123 unit tests in 27 suites (agent-client 802, agent-client-web 872, agent-remote-lab 3,301). Components on `2241dfda`: 775 passed, 130 skipped, 8 failed (10.9 min); the 8 were `view-overflow.spec.ts` reading the process mode from `?mode=`, which the fixture now leaves to the Workbench (`?process=`), re-pointed and passing (56 of 56). The first full run, on `d20c66b3`, ran out of its 15 minutes after 46 failures: the I3a re-points not yet merged, Window-mode specs that a phone now opens on the assistant list, and Return on touch screens (all in the mapping doc). `pnpm test:e2e:flows` 39 of 39 in Chromium after E3's re-point (its reading flows waited in the rendered text for rows that arrive below the reader, which `content-visibility` from `c20f4467` leaves out); E1, E6, E9 and E10 with `E2E_BROWSER=webkit`, 17 of 17. `arch:check`, `compatibility:check` and `fixtures:check` pass.
+
+**Ratchet and CSS.** `bot-workspace.css` 99 → 0, `session-dock.css` 62 → 45, `assistant.css` new at 0. Production CSS, measured as for I3a: 4,260 → 4,365 lines (+105: `assistant.css` 61, `session-dock.css` +32, `shell.css` +7, `bot-workspace.css` +5), against the plan's no net growth; the deletions left out below were the offset. Entry chunk 67.8 KB gzip (budget 70), App chunk 588 KB (600).
+
+**Mapping.** `docs/superpowers/specs/2026-11-20-i3-test-mapping.md`, section I3b, with the mutation checks of the new rules.
+
+**Captures.** `.tmp/i3b-screens/`: Bot mode and Window mode with its details at 1440 x 900, and the phone's list, conversation, details sheet and tile stack, light and dark, English and Chinese (28). On `pnpm local` with a real Claude session: `.tmp/local/i3b-{window-tile,window-details,bot,bot-dark,phone-conversation,phone-list}.png` (a tile opened in Bot mode from its details, then the phone's back).
+
+**Deviations.**
+- A starting session reads as working, not as needing the owner.
+- Other sessions rows keep their titles; the tile's menu is the existing More session actions plus Open in Bot mode, and the star stays in the tile header on a wide screen.
+- Not deleted in B8: `SessionSuccessionHistory`, the attributions toggle, the empty-view headers, the docks toggle and the phone's single-visible-tile rule in `SessionWindows.tsx`.
+- Moving a tile to another Window is not offered in the interface; `windowRouteForPin` has the transfer.
+- A handoff does not write the avatar; the generated one follows the view.
+- A group heading has no status word, only its unread dot.
+- The overlap checks of the phone's list, conversation, sheet and stack are in `assistant-phone.spec.ts`; the launcher matrix (1024, 1280, 1440 x 1 to 3 tiles) is in `launcher-layout.spec.ts`.
+- E10's assistant is named "Scripted" by the naming rule; E9 sends with the send button on a touch screen.
+- A tile's sentence does not use the latest reply as Bot mode's row does ("Ready when you are" beside "LOCAL-OK" on `pnpm local`).
+- A bot is still named by its session's title. New assistant and Open in Bot mode take that title from the session, often its first prompt, so `pnpm local` shows the prompt as the bot's name in both modes (see question 4).
+
 ## 11. Open questions for the owner
 
 1. **English or Chinese words.** The design's sentences are Chinese and the product is English today. I3 writes English in the design's voice (decision 9). A Chinese locale would be a separate step with a string table; say if you want it in I4.
 2. **Narration between steps.** In Concise, an assistant's short remarks between tool calls ("Let me check the tests") fold into the work line, and only the final answer stays as a bubble (decision 1). The alternative keeps every assistant message as a bubble and folds only tool work, which is noisier for Claude Code and Codex turns.
 3. **The default for all assistants is per device** (decision 4). A per-account default would need a new account settings record at the Relay; say if you want it.
+4. **A bot's own name.** A bot is named by its session's title, which New assistant and Open in Bot mode take from the session, often its first prompt. A name of its own would be an optional `name` in the bot's details, set at creation (the agent's short name, "Claude 2", until the owner renames it) and shown in both modes, with the session's title as the subtitle. It is a protocol change (Relay first); say if you want it in I4.
 
 ## Owner decisions (2026-11-20)
 

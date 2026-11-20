@@ -8,8 +8,21 @@ export function loadChromium(checkout: string): any {
   return createRequire(join(checkout, 'packages/agent-remote-lab/package.json'))('@playwright/test').chromium;
 }
 
-/** A Window can hold other views beside the one a run opened; a run drives its own, the primary conversation. */
-export const PRIMARY = '.lab-primary-conversation';
+/**
+ * The session a link opens, named as the command line names it (`<hostId>/<providerId>/<nativeSessionId>`); none for a link to a
+ * Window, whose sessions the run created and reads together.
+ */
+export function linkedSession(url: string): string | undefined {
+  const query = new URL(url).searchParams;
+  const host = query.get('host'), provider = query.get('provider'), session = query.get('session');
+  return host && provider && session ? `${host}/${provider}/${session}` : undefined;
+}
+
+/**
+ * The conversation of one session, wherever the page shows it. A Window holds other views beside the one a run opened (several
+ * primary groups side by side, docks, another session's composer); a conversation names the address of its session.
+ */
+export const sessionPane = (address: string): string => `[data-session-address=${JSON.stringify(address)}]`;
 
 /** `ms` is the time from the arrival of the page's document to its first row: the part the product controls. `totalMs` adds the document's own trip, which no code can shorten. */
 export interface Paint { label: string; ms: number; fromDeviceStore: boolean; timedOut?: boolean; totalMs?: number }
@@ -20,6 +33,8 @@ export class PageProbe {
   private readonly rowKeys: string[][] = [];
   private readonly resources: NonNullable<PageReport['resources']> = [];
   private timelinePageAt: number | undefined;
+  /** The conversation this page reads and drives: the session its link opened. None when it opened a Window. */
+  private pane: string | undefined;
   private constructor(readonly page: any, private readonly clockOrigin: number, private readonly cdp: any) {}
 
   static async create(context: any, clockOrigin: number): Promise<PageProbe> {
@@ -37,16 +52,20 @@ export class PageProbe {
   }
 
   /**
-   * Opens a session URL and waits for its first rows. Records a paint: how long the first row took and whether it appeared
-   * before the first timeline page crossed the wire, which is only possible from the device store.
+   * Opens a session URL (or a Window's) and waits for the first rows of its conversation. Records a paint: how long the first row
+   * took and whether it appeared before the first timeline page crossed the wire, which is only possible from the device store.
    */
   async open(url: string, label: string, { rowsDeadlineMs = 60_000 }: { rowsDeadlineMs?: number } = {}): Promise<Paint> {
     this.timelinePageAt = undefined;
+    const session = linkedSession(url);
+    this.pane = session ? sessionPane(session) : undefined;
+    // The observer reads this conversation from the page's first frame, so it is named before the page's own scripts run.
+    await this.page.addInitScript((scope: string | null) => { (window as any).__smokeScope = scope; }, this.pane ?? null);
     const started = Date.now();
     let paint: Paint;
     try {
       await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: rowsDeadlineMs });
-      await this.page.waitForFunction(() => (document.querySelector('.lab-primary-conversation') ?? document).querySelectorAll('.agent-timeline-entry').length > 0, undefined, { timeout: Math.max(1000, rowsDeadlineMs - (Date.now() - started)) });
+      await this.page.waitForFunction(() => (window as any).__smoke.read().entries > 0, undefined, { timeout: Math.max(1000, rowsDeadlineMs - (Date.now() - started)) });
       const firstRowAt: number = await this.page.evaluate(() => (window as any).__smoke.firstRowAt());
       const documentAt: number = await this.page.evaluate(() => performance.timeOrigin + (performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming).responseEnd);
       paint = { label, ms: Math.max(0, Math.round(firstRowAt - documentAt)), totalMs: firstRowAt - started, fromDeviceStore: this.timelinePageAt === undefined || firstRowAt < this.timelinePageAt };
@@ -82,22 +101,35 @@ export class PageProbe {
     return false;
   }
 
+  /** The message input of the conversation this page opened (a Playwright locator). */
+  composer(): any { return this.page.locator(`${this.ownPane()} [data-testid="prompt-input"]`); }
+
   /** Types the text into the composer and submits it. */
   async send(text: string): Promise<void> {
-    const composer = this.page.locator(`${PRIMARY} [data-testid="prompt-input"]`);
-    await composer.click();
+    await this.composer().click();
     await this.page.keyboard.type(text);
-    await this.page.locator(`${PRIMARY} [data-testid="prompt-submit"]`).click();
+    await this.page.locator(`${this.ownPane()} [data-testid="prompt-submit"]`).click();
   }
 
-  assistantCount(): Promise<number> { return this.page.evaluate(() => (document.querySelector('.lab-primary-conversation') ?? document).querySelectorAll('.agent-message-assistant').length); }
+  assistantCount(): Promise<number> { return this.page.evaluate(() => (window as any).__smoke.root().querySelectorAll('.agent-message-assistant').length); }
 
-  /** Waits until the page shows more assistant messages than `before`, containing `needle`. */
-  async waitForReplyContaining(needle: string, deadlineMs: number): Promise<boolean> {
+  /** Waits until the conversation shows an assistant message containing `needle`. */
+  waitForReplyContaining(needle: string, deadlineMs: number): Promise<boolean> { return this.waitForShown('.agent-message-assistant', needle, deadlineMs); }
+
+  /** Waits until the conversation shows a row containing `text`. */
+  waitForText(text: string, deadlineMs: number): Promise<boolean> { return this.waitForShown('.agent-timeline-entry', text, deadlineMs); }
+
+  private async waitForShown(selector: string, needle: string, deadlineMs: number): Promise<boolean> {
     try {
-      await this.page.waitForFunction((word: string) => [...(document.querySelector('.lab-primary-conversation') ?? document).querySelectorAll('.agent-message-assistant')].some(node => (node.textContent ?? '').includes(word)), needle, { timeout: deadlineMs });
+      await this.page.waitForFunction(({ selector, needle }: { selector: string; needle: string }) => [...(window as any).__smoke.root().querySelectorAll(selector)]
+        .some((node: Element) => (node.textContent ?? '').includes(needle)), { selector, needle }, { timeout: deadlineMs });
       return true;
     } catch { return false; }
+  }
+
+  private ownPane(): string {
+    if (!this.pane) throw new Error('This page opened a Window, not a session: it has no conversation of its own to drive.');
+    return this.pane;
   }
 
   /** The rendered rows; none while the page has not loaded far enough to have an observer. */

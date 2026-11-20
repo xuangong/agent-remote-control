@@ -57,8 +57,6 @@ async function withLimits<T>(context: RunContext, recorder: TranscriptRecorder, 
   finally { await proxy.close(); await host.close(); await uplink.close(); }
 }
 
-const showsText = (probe: PageProbe, text: string, timeout: number) => probe.page.waitForFunction((needle: string) => [...document.querySelectorAll('.agent-timeline-entry')].some(node => (node.textContent ?? '').includes(needle)), text, { timeout }).then(() => true, () => false);
-
 async function sessionQuota(context: RunContext, recorder: TranscriptRecorder, schedule: ScheduleStep[], measurements: Record<string, unknown>) {
   const calls = context.random.int(40, 60);
   const churn = context.random.int(8, 14);
@@ -67,18 +65,18 @@ async function sessionQuota(context: RunContext, recorder: TranscriptRecorder, s
   const { value, restart } = await withLimits(context, recorder, schedule, SESSION_LIMITS, 'Smoke M4 session Host', sessions, async (host, proxy) => withContext(context.browser, proxy.origin, async browserContext => {
     const probe = await PageProbe.create(browserContext, recorder.origin);
     await probe.open(host.sessionUrl('heavy').replace(context.instance.origin, proxy.origin), 'open heavy', { rowsDeadlineMs: 90_000 });
-    const historyShown = await showsText(probe, 'M4-HISTORY-END', 60_000);
+    const historyShown = await probe.waitForText('M4-HISTORY-END', 60_000);
     const live = await (async () => { for (let at = 0; at < 100; at += 1) { const open = host.provider.session('heavy'); if (open) return open; await delay(100); } throw new Error('The scripted Host never opened the session.'); })();
     // Three tool calls that run and never finish: the items that exist only live.
     const liveCommands = ['live-tool-1', 'live-tool-2', 'live-tool-3'];
     for (const [at, command] of liveCommands.entries()) live.push(toolCall('scripted', `heavy:live${at + 1}`, { command, running: true }));
     schedule.push({ t: recorder.clock(), action: 'running-tool-calls', detail: { count: liveCommands.length } });
-    await showsText(probe, 'live-tool-3', 30_000);
+    await probe.waitForText('live-tool-3', 30_000);
     const liveKeys = (await probe.rows()).filter(row => liveCommands.some(command => row.text.includes(command))).map(row => row.key);
     // More finished output while they run: each 64 KiB output pushes the journal against its limit.
     for (let at = 0; at < churn; at += 1) { live.push(toolCall('scripted', `heavy:churn${at + 1}`, { command: `churn-${at + 1}` })); await delay(150); }
     schedule.push({ t: recorder.clock(), action: 'churn-outputs', detail: { count: churn, bytes: churn * TOOL_OUTPUT_CHARS } });
-    const churnShown = await showsText(probe, `churn-${churn}`, 60_000);
+    const churnShown = await probe.waitForText(`churn-${churn}`, 60_000);
     await probe.page.waitForTimeout(2000);
     await probe.snapshotKeys();
     const page = await probe.report();
@@ -117,7 +115,7 @@ async function hostQuota(context: RunContext, recorder: TranscriptRecorder, sche
       const probe = await PageProbe.create(browserContext, recorder.origin);
       const from = recorder.transcript().at(-1)?.n ?? 0;
       await probe.open(host.sessionUrl(`bulk${at}`).replace(context.instance.origin, proxy.origin), `open bulk${at}`, { rowsDeadlineMs: 90_000 });
-      const shown = await showsText(probe, `M4-BULK-END-${at}`, 60_000);
+      const shown = await probe.waitForText(`M4-BULK-END-${at}`, 60_000);
       await probe.page.waitForTimeout(1500);
       await probe.snapshotKeys();
       pages.push({ id: `bulk${at}`, shown, keys: (await probe.rows()).length, page: await probe.report(), from });

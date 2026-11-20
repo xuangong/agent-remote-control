@@ -4,14 +4,20 @@ import type { PageRow, PageSample } from '../invariants/types.js';
 
 export const observerSource = `(() => {
   const log = [];
-  // A Window can hold other views beside the one the run opened (a second composer, other rows); the run reads its own, the primary conversation.
-  const root = () => document.querySelector('.lab-primary-conversation') ?? document;
+  // A Window holds other views beside the one the run opened (other primary groups, docks, their composers and rows). The probe
+  // names the conversation of the session it opened in __smokeScope before the page's scripts run, and the observer reads that
+  // conversation only, or nothing while the page does not show it. A page opened on a Window the run created is read whole.
+  const none = document.createDocumentFragment();
+  const root = () => { const scope = window.__smokeScope; return scope ? document.querySelector(scope) ?? none : document; };
+  // The conversation's status: its heading's, or a Window tile's sentence when it says what the assistant is doing (an idle or
+  // unknown tile quotes the latest reply there, which is the model's text, not the product's).
+  const status = '.lab-conversation-status, .lab-tile-sentence:not([data-state="idle"]):not([data-state="unknown"])';
   const unique = list => [...new Set(list)];
   const texts = selector => unique([...root().querySelectorAll(selector)].map(node => node.textContent.trim()).filter(Boolean));
   const read = () => {
     const editor = root().querySelector('[data-testid="prompt-input"]');
     return {
-      labels: texts('.lab-conversation-status'),
+      labels: texts(status),
       loading: texts('.lab-empty-state h3'),
       composer: !editor ? 'absent' : editor.getAttribute('aria-disabled') === 'true' || editor.getAttribute('contenteditable') === 'false' ? 'disabled' : 'enabled',
       messages: root().querySelectorAll('.agent-message').length,
@@ -42,7 +48,7 @@ export const observerSource = `(() => {
     return document.scrollingElement;
   };
   window.__smoke = {
-    log, read, firstRowAt: () => firstRowAt,
+    log, read, root, firstRowAt: () => firstRowAt,
     rows: () => [...root().querySelectorAll('.agent-timeline-entry')].map(node => ({
       key: node.getAttribute('data-entry-key') || '',
       kind: node.querySelector('.agent-message-user') ? 'user_message' : node.querySelector('.agent-message-assistant') ? 'assistant_message' : node.querySelector('.agent-tool-chevron') ? 'tool_call' : 'other',

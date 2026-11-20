@@ -65,6 +65,32 @@ Moving between the modes keeps your place. Opening an assistant from a tile show
 
 Window mode gets the same visual language in the same step as Bot mode (I3), not a restyle afterwards. On the phone, a window becomes a swipeable stack of its tiles.
 
+## Navigation and Settings
+
+Approved by the owner on 2026-11-21. The mockup is in [`assets/2026-11-21-settings/`](assets/2026-11-21-settings/).
+
+**Desktop.** A narrow icon rail at the far left replaces the large Window/Bot switch at the top of the sidebar. From top to bottom it holds:
+- the Orchard mark;
+- **Assistants** (Bot mode);
+- **Windows** (Window mode);
+- Search;
+- **Settings**, at the bottom;
+- the user's avatar, with the device-link dot.
+
+Both modes share the rail. The sidebar carries no mode switch.
+
+**Phone.** The same three destinations form a bottom tab bar: Assistants, Windows and Settings.
+
+**One Settings page.** Groups sit on the left and content on the right; on the phone the groups form a list.
+- **General:** theme (system, light or dark), language (browser, 中文 or English), reduce motion, default view (assistants, windows or last used).
+- **Assistants:** default process mode, notifications, team messages.
+- **Computers:** for each Host, its online state, Controller updates, available agents, the smart-reading switch per provider, the VS Code tunnel and its previews, and pairing a new computer.
+- **Privacy and data:** device cache and support sharing.
+- **Advanced:** layout diagnostics, Trace and Inspector.
+- **Account and about:** account, sign out, versions.
+
+**What stays on the assistant.** Per-assistant settings stay in the assistant's details panel: name, avatar and that assistant's process mode. The Settings page holds only account-wide and device-wide settings, and every setting has exactly one home.
+
 ## Phone
 
 The phone is a first-class target, not a later port (owner, 2026-11-20). Every step is designed and accepted at phone width (390 x 844) as well as desktop:

@@ -1,11 +1,11 @@
 import { expect, type Locator } from '@playwright/test';
 
+/**
+ * Shows an action of the composer's "+" menu (I4): opens the menu with "+" (named More actions) when it is closed, and returns the
+ * item and the trigger that focus comes back to.
+ */
 export async function revealComposerAction(view: Locator, name: string, keyboard = false) {
-  const toolbar = view.locator('.agent-session-toolbar');
-  const direct = toolbar.getByRole('button', { name, exact: true });
-  if (await direct.isVisible()) return { action: direct, trigger: direct };
-
-  const more = toolbar.getByRole('button', { name: 'More actions', exact: true });
+  const more = view.locator('.agent-composer-capsule').getByRole('button', { name: 'More actions', exact: true });
   await expect(more).toBeVisible();
   const menu = view.getByRole('region', { name: 'More actions', exact: true });
   if (!await menu.isVisible()) {
@@ -13,12 +13,7 @@ export async function revealComposerAction(view: Locator, name: string, keyboard
     else await more.click();
   }
   const action = menu.getByRole('button', { name, exact: true });
-  await expect(direct.or(action)).toBeVisible();
-  if (await direct.isVisible()) {
-    await more.press('Escape');
-    await expect(menu).toBeHidden();
-    return { action: direct, trigger: direct };
-  }
+  await expect(action).toBeVisible();
   return { action, trigger: more };
 }
 

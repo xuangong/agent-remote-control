@@ -2,17 +2,21 @@ import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 import { loadLocalResource, type MarkdownResourceContext } from './local-resource.js';
 import { type ImageDraft, type ImageDraftBinding, writeImageDraft, cacheDraftImage, imageDraftScopeGeneration } from '../image-drafts.js';
 import { draftText } from './composer-document.js';
+import { translator, withMessageKey, type MessageKey } from '@orchardworks/agent-client';
+
+/** An error the prompt editor shows: its English message and its catalogue key, so the toast says it in the reader's words. */
+const promptError = (key: MessageKey) => withMessageKey(new Error(translator('en')(key)), key);
 export async function preparePromptDraft(item: Extract<AgentTimelineItem, { type: 'user_message' }>, context: MarkdownResourceContext): Promise<Omit<ImageDraft, 'key' | 'scope'>> {
   const draft: Omit<ImageDraft, 'key' | 'scope'> = { version: 1, parts: [], images: {}, nextLabel: 1 };
   let bytes = 0;
   for (const part of item.content ?? [{ type: 'text', text: item.text }]) {
     if (part.type === 'text') { draft.parts.push({ ...part }); continue; }
-    if (part.type === 'resource') throw new Error('Download the resource and attach it again when editing this prompt.');
+    if (part.type === 'resource') throw promptError('composer.prompt.resourceInEdit');
     const { detail } = await loadLocalResource(context, part.locator);
-    if (!detail || detail.status !== 'available' || !('contentBase64' in detail) || !detail.mediaType || !['image/png', 'image/jpeg', 'image/webp'].includes(detail.mediaType)) throw new Error('An image from this prompt is unavailable. Open the original prompt in the native editor to edit it.');
+    if (!detail || detail.status !== 'available' || !('contentBase64' in detail) || !detail.mediaType || !['image/png', 'image/jpeg', 'image/webp'].includes(detail.mediaType)) throw promptError('composer.prompt.imageUnavailable');
     const blob = new Blob([Uint8Array.from(atob(detail.contentBase64), value => value.charCodeAt(0))], { type: detail.mediaType });
     bytes += blob.size;
-    if (Object.keys(draft.images).length >= 8 || blob.size > 10 * 1024 * 1024 || bytes > 20 * 1024 * 1024) throw new Error('This prompt exceeds the web composer image limits. Edit it in the native editor.');
+    if (Object.keys(draft.images).length >= 8 || blob.size > 10 * 1024 * 1024 || bytes > 20 * 1024 * 1024) throw promptError('composer.prompt.imageLimits');
     const imageId = crypto.randomUUID();
     draft.parts.push({ type: 'image', imageId, label: part.label });
     draft.images[imageId] = { imageId, blob, uploadId: crypto.randomUUID(), status: 'pending', progress: 0 };
@@ -26,7 +30,7 @@ export async function savePromptDraft(binding: ImageDraftBinding, draft: Omit<Im
   if (Object.keys(draft.images).length) {
     const generation = imageDraftScopeGeneration(scope);
     const result = await writeImageDraft({ ...draft, key, scope }, generation);
-    if (result.status !== 'saved') throw new Error('The edited prompt images could not be retained.');
+    if (result.status !== 'saved') throw promptError('composer.prompt.imagesNotRetained');
     for (const image of Object.values(draft.images)) if (image.blob) cacheDraftImage(scope, image.imageId, image.blob, generation);
   }
   return draftText(draft.parts);

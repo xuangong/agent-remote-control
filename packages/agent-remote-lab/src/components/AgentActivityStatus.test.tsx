@@ -44,14 +44,14 @@ describe('composer activity', () => {
     }
     const container = await render(<Session />);
     const interrupt = container.querySelector('[data-testid="cancel-submit"]') as HTMLButtonElement;
-    expect(interrupt.textContent).toBe('Interrupt');
+    expect(interrupt.getAttribute('aria-label')).toBe('Interrupt');
     await act(async () => { interrupt.click(); interrupt.click(); });
     expect(cancel).toHaveBeenCalledTimes(1);
     expect(interrupt.disabled).toBe(true);
-    expect(interrupt.textContent).toBe('Interrupting…');
+    expect(interrupt.getAttribute('aria-label')).toBe('Interrupting…');
     await act(async () => acknowledge());
     expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Working');
-    expect(interrupt.textContent).toBe('Interrupt requested');
+    expect(interrupt.getAttribute('aria-label')).toBe('Interrupt requested');
     expect(interrupt.disabled).toBe(true);
     expect(container.querySelector('textarea')?.value).toBe('Keep this draft');
     await act(async () => (container.querySelector('button') as HTMLButtonElement).click());

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { remoteSessionState, type RemoteSessionState, type AgentReplicaState, type RemoteSessionStatus } from '@orchardworks/agent-client';
+import { remoteSessionState, type RemoteSessionState, type AgentReplicaState, type RemoteSessionStatus, type Translate } from '@orchardworks/agent-client';
+import { useTranslate } from './locale.js';
 
 export interface AgentPlanningControlProps {
   readonly sessionState?: RemoteSessionState;
@@ -9,6 +10,7 @@ export interface AgentPlanningControlProps {
 }
 
 export function AgentPlanningControl({ state, sessionState, sessionStatus, onSetPlanning }: AgentPlanningControlProps) {
+  const t = useTranslate();
   const [target, setTarget] = useState<boolean>();
   const [submitting, setSubmitting] = useState(false);
   const [failure, setFailure] = useState<string>();
@@ -17,7 +19,7 @@ export function AgentPlanningControl({ state, sessionState, sessionStatus, onSet
   const planning = agent?.runtimeInfo.planning;
   const session = sessionState ?? remoteSessionState(state, sessionStatus);
   const connection = session.runtime;
-  const recoveryMessage = planningRecoveryMessage(connection?.state);
+  const recoveryMessage = planningRecoveryMessage(connection?.state, t);
   const supported = agent?.capabilities.planning === true;
   const pending = submitting || target !== undefined || planning?.requested !== undefined;
   const canChange = planning !== undefined && session.operations.set_planning.allowed
@@ -38,31 +40,31 @@ export function AgentPlanningControl({ state, sessionState, sessionStatus, onSet
       await onSetPlanning(requested);
     } catch (error) {
       setTarget(undefined);
-      setFailure(error instanceof Error && error.message ? error.message : 'Planning mode could not be changed.');
+      setFailure(error instanceof Error && error.message ? error.message : t('composer.planning.changeFailed'));
     } finally {
       inFlight.current = false;
       setSubmitting(false);
     }
   }
 
-  return <section className="agent-planning-control" aria-label="Session planning mode">
+  return <section className="agent-planning-control" aria-label={t('composer.planning.region')}>
     <div>
-      <span>{planning?.active ? 'Planning' : planning ? 'Normal chat' : 'Planning mode'}</span>
-      <button type="button" role="switch" aria-label="Planning mode" aria-checked={planning?.active === true} disabled={!canChange} onClick={() => void change()}>{planning?.active ? 'On' : 'Off'}</button>
+      <span>{planning?.active ? t('composer.planning.planning') : planning ? t('composer.planning.normal') : t('composer.planning.mode')}</span>
+      <button type="button" role="switch" aria-label={t('composer.planning.mode')} aria-checked={planning?.active === true} disabled={!canChange} onClick={() => void change()}>{planning?.active ? t('common.on') : t('common.off')}</button>
     </div>
-    <p className="agent-composer-note" role="status">{!supported ? 'Planning is not supported by this session.'
-      : !planning ? 'Waiting for Provider planning state.'
-      : session.readOnly ? 'Read only. Take control to change planning mode.'
-      : recoveryMessage ?? (pending ? 'Waiting for Provider confirmation.'
-      : !canChange ? 'Planning can change only while connected and idle, with no pending interactions.'
-      : 'Provider confirmed. Changes apply to the next message.')}</p>
+    <p className="agent-composer-note" role="status">{!supported ? t('composer.planning.unsupported')
+      : !planning ? t('composer.planning.waitingState')
+      : session.readOnly ? t('composer.planning.readOnly')
+      : recoveryMessage ?? (pending ? t('composer.planning.waitingConfirm')
+      : !canChange ? t('composer.planning.idleOnly')
+      : t('composer.planning.confirmed'))}</p>
     {failure ? <p className="agent-composer-note" role="alert">{failure}</p> : null}
   </section>;
 }
 
-function planningRecoveryMessage(state?: 'connected' | 'reconnecting' | 'restoring' | 'unavailable'): string | undefined {
-  if (state === 'reconnecting') return 'Planning changes are unavailable while the native runtime reconnects.';
-  if (state === 'restoring') return 'Planning changes are unavailable while the native runtime restores this session.';
-  if (state === 'unavailable') return 'Planning changes are unavailable because the native runtime is unavailable.';
+function planningRecoveryMessage(state: 'connected' | 'reconnecting' | 'restoring' | 'unavailable' | undefined, t: Translate): string | undefined {
+  if (state === 'reconnecting') return t('composer.planning.reconnecting');
+  if (state === 'restoring') return t('composer.planning.restoring');
+  if (state === 'unavailable') return t('composer.planning.unavailable');
   return undefined;
 }

@@ -29,12 +29,13 @@ test('keeps status readable and composer actions in one row on a small phone', a
   await expect(page.locator('.lab-app-bar')).toBeHidden();
   await toggleViewPanel(page, 'Header');
   await expect(page.getByTestId('connection-summary').getByText('Ready', { exact: true })).toBeVisible();
-  // At this width the commands button joins the overflow menu, so the row holds Image, Model, More actions and Send.
-  const row = await Promise.all([page.getByRole('button', { name: 'Add images' }), page.getByTestId('session-model-button'), page.getByRole('button', { name: 'More actions' })].map(async button => (await button.boundingBox())!));
+  // The capsule holds "+" (More actions) and Send on one line; the composer's actions are in the + menu.
+  const row = await Promise.all([page.locator('.agent-composer-capsule').getByRole('button', { name: 'More actions' })].map(async button => (await button.boundingBox())!));
   const send = (await page.getByTestId('prompt-submit').boundingBox())!;
   for (const bounds of row) expect(Math.abs(bounds.y + bounds.height / 2 - (send.y + send.height / 2))).toBeLessThanOrEqual(4);
   expect(send.x + send.width).toBeLessThanOrEqual(320);
   expect(send.height).toBeGreaterThanOrEqual(44);
+  await page.locator('.agent-composer-capsule').getByRole('button', { name: 'More actions' }).tap();
   await page.getByTestId('session-model-button').tap();
   await expect(page.getByRole('region', { name: 'Model settings', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Close session controls' }).tap();

@@ -298,9 +298,11 @@ const checks: Record<string, Check> = {
     const line = page.locator('.agent-turn-status');
     await expect(line.getByRole('status')).toHaveText('Chief is running tests');
     await expect(line).toContainText(/working · /);
+    // The elapsed time is in the status line; the composer keeps the label for assistive technology and Interrupt as its stop button.
+    await expect(line).toContainText(/working · \d+/);
     await expect(page.getByTestId('agent-activity-label')).toHaveText('Working');
-    await expect(page.getByTestId('turn-elapsed')).toBeVisible();
     await expect(page.getByTestId('cancel-submit')).toBeVisible();
+    await expect(page.getByTestId('cancel-submit')).toHaveAccessibleName('Interrupt');
   },
   S2: async page => {
     await open(page, 'pending=none');

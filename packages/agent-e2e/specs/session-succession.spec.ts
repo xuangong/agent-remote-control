@@ -385,6 +385,7 @@ test('opaque image bytes survive failed-primary reload and stay with the same ed
     if (await page.getByRole('button', { name: 'Close Context', exact: true }).isVisible()) await page.getByRole('button', { name: 'Close Context', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Retry session', exact: true })).toBeVisible();
     const chooser = page.waitForEvent('filechooser');
+    await page.locator('.agent-composer-capsule').getByRole('button', { name: 'More actions', exact: true }).click();
     await page.getByRole('button', { name: 'Add images', exact: true }).click();
     const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aMioAAAAASUVORK5CYII=', 'base64');
     await (await chooser).setFiles({ name: 'retained.png', mimeType: 'image/png', buffer: bytes });

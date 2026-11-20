@@ -1,16 +1,24 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { AgentSessionSetting, AgentSessionSettingChange } from '@orchardworks/agent-remote-protocol';
-import { AgentActionToolbar, type ComposerAction } from './AgentActionToolbar.js';
+import { ComposerMenu, type ComposerMenuEntry } from './ComposerMenu.js';
+import type { ComposerMenuItem } from './composer-menu.js';
 import { AgentSessionUsage } from './AgentSessionUsage.js';
-import { remoteSessionState, type RemoteSessionState, type AgentReplicaState } from '@orchardworks/agent-client';
+import { useTranslate } from './locale.js';
+import { remoteSessionState, type RemoteSessionState, type AgentReplicaState, type Translate } from '@orchardworks/agent-client';
 
 export type SessionControlView = 'status' | 'model' | 'permissions' | 'actions';
+
+/** The settings' items when the host does not pass `composerMenu`'s: all three, enabled. */
+const SETTINGS_ITEMS: readonly ComposerMenuItem[] = [{ id: 'model', enabled: true }, { id: 'permissions', enabled: true }, { id: 'status', enabled: true }];
 
 interface Props {
   sessionState?: RemoteSessionState;
   state: AgentReplicaState;
   children?: ReactNode;
-  actions?: readonly ComposerAction[];
+  /** The composer's own entries of the + menu (Image, Resource, Command, Queue); the settings' entries follow them. */
+  entries?: readonly ComposerMenuEntry[];
+  /** The settings' items as `composerMenu` gives them (Model, Permissions, Status). */
+  items?: readonly ComposerMenuItem[];
   disabled: boolean;
   readOnly?: boolean;
   view?: SessionControlView;
@@ -21,19 +29,24 @@ interface Props {
   renderError?(error: unknown): ReactNode;
 }
 
-export function AgentSessionSettings({ state, sessionState, children, actions = [], disabled, readOnly = false, view, busy, onView, onPendingChange, onSelect, renderError }: Props) {
+/**
+ * The session's settings where the composer shows them (`settings="inline"`): their entries in the composer's + menu, and the panel
+ * an entry opens above the capsule (Model, Permissions, Status with planning and usage).
+ */
+export function AgentSessionSettings({ state, sessionState, children, entries = [], items = SETTINGS_ITEMS, disabled, readOnly = false, view, busy, onView, onPendingChange, onSelect, renderError }: Props) {
+  const t = useTranslate();
   const id = useId();
   const layer = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLElement>();
   const restoreFocus = () => {
-    const target = trigger.current?.isConnected ? trigger.current : layer.current?.querySelector<HTMLElement>('.agent-toolbar-more');
+    const target = trigger.current?.isConnected ? trigger.current : layer.current?.querySelector<HTMLElement>('.agent-composer-plus');
     target?.focus({ preventScroll: true });
   };
   useEffect(() => {
     if (!view || view === 'actions') return;
     const controls = layer.current;
     const keyboardScope = controls?.closest<HTMLElement>('.agent-composer') ?? controls;
-    trigger.current = controls?.querySelector<HTMLElement>('.agent-session-toolbar [aria-expanded="true"]') ?? undefined;
+    trigger.current = controls?.querySelector<HTMLElement>('.agent-composer-plus') ?? undefined;
     const dismiss = (event: PointerEvent) => { if (event.target instanceof Node && !layer.current?.contains(event.target)) onView(undefined); };
     const escape = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || layer.current?.closest('[hidden], [inert]')) return;
@@ -66,12 +79,12 @@ export function AgentSessionSettings({ state, sessionState, children, actions = 
   }, [agent.id, agent.settingChanges, agent.runtimeInfo.settings, view]);
   const categoryPending = (category: string) => changes.some(change => change.status === 'pending' && change.category === category);
   const categoryUnread = (category: string) => view !== category && changes.some(change => change.status !== 'pending' && readOutcomes[outcomeScope(change)] !== outcomeKey(change) && change.category === category);
-  const categoryLabel = (category: 'model' | 'permissions') => `${category === 'model' ? 'Model' : 'Permissions'}${categoryPending(category) ? ', change pending' : ''}${categoryUnread(category) ? ', unread setting error' : ''}`;
+  const categoryLabel = (category: 'model' | 'permissions') => `${t(category === 'model' ? 'composer.model' : 'composer.permissions')}${categoryPending(category) ? t('composer.changePending') : ''}${categoryUnread(category) ? t('composer.unreadError') : ''}`;
   const session = sessionState ?? remoteSessionState(state, disabled ? 'connecting' : 'ready');
   const disconnected = disabled || !session.synchronized;
   const runtimeConnection = session.runtime;
   const runtimeConnected = runtimeConnection === undefined || runtimeConnection.state === 'connected';
-  const runtimeUnavailable = settingsRecoveryMessage(runtimeConnection?.state);
+  const runtimeUnavailable = settingsRecoveryMessage(runtimeConnection?.state, t);
   const [failure, setFailure] = useState<{ error: unknown; message: string }>();
   const inFlight = useRef(false);
   const canChange = !disabled && !readOnly && !busy && onSelect !== undefined && session.operations.set_session_setting.allowed;
@@ -84,7 +97,7 @@ export function AgentSessionSettings({ state, sessionState, children, actions = 
     onPendingChange(true);
     try { await onSelect(setting.id, value); }
     catch (error) {
-      setFailure({ error, message: error instanceof Error ? error.message : 'Session setting could not be changed.' });
+      setFailure({ error, message: error instanceof Error ? error.message : t('composer.settings.changeFailed') });
     } finally {
       inFlight.current = false;
       onPendingChange(false);
@@ -94,27 +107,34 @@ export function AgentSessionSettings({ state, sessionState, children, actions = 
   const recovery = failure ? renderError?.(failure.error) : undefined;
   const model = shownSettings.find(({ id }) => id === 'model');
   const permissions = shownSettings.filter(({ category }) => category === 'permissions');
-  const modelLabel = model ? selectedLabel(model) : agent.runtimeInfo.model;
-  const permissionLabel = permissions.map(selectedLabel).filter((label) => label !== 'Unavailable').join(' · ');
+  const unavailable = t('common.unavailable');
+  const modelLabel = model ? selectedLabel(model, unavailable) : agent.runtimeInfo.model;
+  const permissionLabel = permissions.map(setting => selectedLabel(setting, unavailable)).filter((label) => label !== unavailable).join(' · ');
+  const shown = (id: ComposerMenuItem['id']) => items.find(item => item.id === id);
+  const settingEntries: ComposerMenuEntry[] = [
+    ...(shown('model') ? [{ id: 'model', label: categoryLabel('model'), testId: 'session-model-button', text: t('composer.model'),
+      title: t('composer.modelTitle', { value: modelLabel ?? unavailable }), expanded: view === 'model', disabled: !shown('model')!.enabled,
+      detail: <span className={categoryPending('model') ? 'agent-setting-pending' : undefined}>{modelLabel && modelLabel !== unavailable ? modelLabel : null}</span>,
+      run: () => onView(view === 'model' ? undefined : 'model') }] : []),
+    ...(shown('permissions') ? [{ id: 'permissions', label: categoryLabel('permissions'), testId: 'session-permissions-button', text: t('composer.permissions'),
+      title: t('composer.permissionsTitle', { value: permissions.length ? permissions.map(setting => selectedLabel(setting, unavailable)).join(' · ') : unavailable }),
+      expanded: view === 'permissions', disabled: !shown('permissions')!.enabled,
+      detail: <span className={categoryPending('permissions') ? 'agent-setting-pending' : undefined}>{permissionLabel || null}</span>,
+      run: () => onView(view === 'permissions' ? undefined : 'permissions') }] : []),
+    ...(shown('status') ? [{ id: 'status', label: t('composer.status'), title: t('composer.statusTitle'), expanded: view === 'status', disabled: !shown('status')!.enabled,
+      run: () => onView(view === 'status' ? undefined : 'status') }] : []),
+  ];
   return <div className="agent-session-controls" ref={layer}>
-    <AgentActionToolbar active={view} overflowOpen={view === 'actions'} onOverflow={open => onView(open ? 'actions' : undefined)} onStatus={() => onView(view === 'status' ? undefined : 'status')}
-      actions={[...actions,
-        { id: 'model', label: categoryLabel('model'), testId: 'session-model-button', priority: 100,
-          title: `Model: ${modelLabel ?? 'Unavailable'}`, expanded: view === 'model',
-          content: <><span className={categoryPending('model') ? 'agent-setting-pending' : undefined}>{modelLabel && modelLabel !== 'Unavailable' ? modelLabel : 'Model'}</span><span aria-hidden="true"> ▾</span></>, run: () => onView(view === 'model' ? undefined : 'model') },
-        { id: 'permissions', label: categoryLabel('permissions'), testId: 'session-permissions-button', priority: 10,
-          title: `Permissions: ${permissions.length ? permissions.map(selectedLabel).join(' · ') : 'Unavailable'}`, expanded: view === 'permissions',
-          content: <><span className={categoryPending('permissions') ? 'agent-setting-pending' : undefined}>{permissionLabel || 'Permissions'}</span><span aria-hidden="true"> ▾</span></>, run: () => onView(view === 'permissions' ? undefined : 'permissions') },
-      ]} />
-    <section hidden={!view || view === 'actions'} className="agent-session-panel" aria-label={view === 'status' ? 'Session status' : `${view === 'model' ? 'Model' : 'Permission'} settings`}>
-      <div className="agent-session-panel-heading"><strong>{view === 'status' ? 'Session status' : view === 'model' ? 'Model settings' : 'Permission settings'}</strong><button type="button" aria-label="Close session controls" onClick={() => { onView(undefined); restoreFocus(); }}>Close</button></div>
+    <ComposerMenu entries={[...entries, ...settingEntries]} open={view === 'actions'} onOpen={open => onView(open ? 'actions' : undefined)} />
+    <section hidden={!view || view === 'actions'} className="agent-session-panel" aria-label={view === 'status' ? t('composer.settings.status') : view === 'model' ? t('composer.settings.model') : t('composer.settings.permissions')}>
+      <div className="agent-session-panel-heading"><strong>{view === 'status' ? t('composer.settings.status') : view === 'model' ? t('composer.settings.model') : t('composer.settings.permissions')}</strong><button type="button" aria-label={t('composer.settings.close')} onClick={() => { onView(undefined); restoreFocus(); }}>{t('common.close')}</button></div>
       {recovery}
       <div hidden={view !== 'status'}>{children}</div>
       {view === 'status' ? <><dl className="agent-session-facts">
-          <dt>Provider</dt><dd>{agent.providerId}</dd><dt>Session</dt><dd>{agent.runtimeInfo.sessionId ?? 'Unavailable'}</dd>
-          <dt>Connection</dt><dd>{disconnected ? 'Unavailable' : connectionLabel(runtimeConnection?.state)}</dd><dt>Runtime</dt><dd>{session.activity}{disconnected || !runtimeConnected ? ' (last known)' : ''}</dd>
-          <dt>Directory</dt><dd>{agent.runtimeInfo.cwd ?? 'Unavailable'}</dd>
-          {settings.map((setting) => <div key={setting.id}><dt>{setting.label}</dt><dd>{selectedLabel({ ...setting, value: setting.value ?? changeFor(setting)?.confirmedValue ?? null })}</dd></div>)}
+          <dt>{t('composer.settings.provider')}</dt><dd>{agent.providerId}</dd><dt>{t('composer.settings.session')}</dt><dd>{agent.runtimeInfo.sessionId ?? unavailable}</dd>
+          <dt>{t('composer.settings.connection')}</dt><dd>{disconnected ? unavailable : connectionLabel(runtimeConnection?.state, t)}</dd><dt>{t('composer.settings.runtime')}</dt><dd>{disconnected || !runtimeConnected ? t('composer.settings.lastKnown', { value: session.activity ?? '' }) : session.activity}</dd>
+          <dt>{t('composer.settings.directory')}</dt><dd>{agent.runtimeInfo.cwd ?? unavailable}</dd>
+          {settings.map((setting) => <div key={setting.id}><dt>{setting.label}</dt><dd>{selectedLabel({ ...setting, value: setting.value ?? changeFor(setting)?.confirmedValue ?? null }, unavailable)}</dd></div>)}
         </dl><AgentSessionUsage usage={agent.lastUsage} lastKnown={disconnected || !runtimeConnected} /></>
         : <>
           {shownSettings.filter(({ category }) => category === view).map((setting) => {
@@ -122,62 +142,62 @@ export function AgentSessionSettings({ state, sessionState, children, actions = 
             const pending = settingChange?.status === 'pending';
             const noteId = `${id}-${setting.id}-change`;
             const original = settings.find(original => original.id === setting.id)!;
-            const actual = selectedLabel({ ...original, value: original.value ?? settingChange?.confirmedValue ?? null });
-            const message = settingChange?.message ?? (settingChange?.status === 'timed_out' ? 'Change was not confirmed in time.' : 'Change could not be applied.');
+            const actual = selectedLabel({ ...original, value: original.value ?? settingChange?.confirmedValue ?? null }, unavailable);
+            const message = settingChange?.message ?? (settingChange?.status === 'timed_out' ? t('composer.settings.notConfirmed') : t('composer.settings.notApplied'));
             const publicRecovery = settingChange && !pending && settingChange.code === 'reauthentication_required'
               ? renderError?.(Object.assign(new Error(message), { code: settingChange.code })) : undefined;
             return <div className="agent-session-setting" key={setting.id} data-setting-state={pending ? 'pending' : undefined}>
               <label htmlFor={`${id}-${setting.id}`}>{setting.label}</label>
               <select id={`${id}-${setting.id}`} aria-label={setting.label} aria-describedby={settingChange ? noteId : undefined} data-testid={`session-setting-${setting.id}`} value={setting.value ?? ''}
                 disabled={!canChange || !setting.mutable} onChange={(event) => void change(setting, event.target.value)}>
-                {!setting.options.some(({ value }) => value === setting.value) ? <option value={setting.value ?? ''}>{setting.value ?? 'Unavailable'}</option> : null}
+                {!setting.options.some(({ value }) => value === setting.value) ? <option value={setting.value ?? ''}>{setting.value ?? unavailable}</option> : null}
                 {setting.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
               {settingChange ? <div id={noteId} className={`agent-composer-note${pending ? ' agent-setting-pending' : ''}`}>
-                {pending ? `Pending. Current: ${actual}.` : publicRecovery ?? message}
+                {pending ? t('composer.settings.pendingCurrent', { value: actual }) : publicRecovery ?? message}
               </div> : null}
               {setting.description ? <span className="agent-composer-note">{setting.description}</span> : null}
               {setting.options.find(({ value }) => value === setting.value)?.description ? <span className="agent-composer-note">{setting.options.find(({ value }) => value === setting.value)?.description}</span> : null}
-              {setting.scope === 'session_and_default' ? <span className="agent-setting-scope">Also changes the default for future sessions.</span> : null}
+              {setting.scope === 'session_and_default' ? <span className="agent-setting-scope">{t('composer.settings.alsoDefault')}</span> : null}
             </div>;
           })}
           {changes.filter(change => change.category === view && !settings.some(setting => setting.id === change.settingId)).map(change => {
             const pending = change.status === 'pending';
-            const message = change.message ?? (change.status === 'timed_out' ? 'Change was not confirmed in time.' : 'Change could not be applied.');
+            const message = change.message ?? (change.status === 'timed_out' ? t('composer.settings.notConfirmed') : t('composer.settings.notApplied'));
             const publicRecovery = !pending && change.code === 'reauthentication_required'
               ? renderError?.(Object.assign(new Error(message), { code: change.code })) : undefined;
             return <div className="agent-session-setting" key={change.settingId} data-setting-state={pending ? 'pending' : undefined}>
               <span>{change.label}</span>
               {pending ? <span className="agent-setting-pending">{change.targetValue}</span> : null}
               <div className={`agent-composer-note${pending ? ' agent-setting-pending' : ''}`}>
-                {pending ? `Pending. Current: ${change.confirmedValue ?? 'Unavailable'}.` : publicRecovery ?? message}
+                {pending ? t('composer.settings.pendingCurrent', { value: change.confirmedValue ?? unavailable }) : publicRecovery ?? message}
               </div>
             </div>;
           })}
-          {settings.some(({ category }) => category === view) ? <p className="agent-composer-note" role="status">{readOnly ? 'Read only. Take control to change session settings.' : busy ? 'Submitting change.' : runtimeUnavailable ?? (disconnected ? 'Disconnected. Values are last known; reconnect to change settings.' : !canChange ? 'Session settings are temporarily unavailable.' : 'Changes apply when confirmed by the Provider.')}</p>
-            : <p className="agent-composer-note">This Provider does not expose these session settings.</p>}
+          {settings.some(({ category }) => category === view) ? <p className="agent-composer-note" role="status">{readOnly ? t('composer.settings.readOnly') : busy ? t('composer.settings.submitting') : runtimeUnavailable ?? (disconnected ? t('composer.settings.disconnected') : !canChange ? t('composer.settings.unavailable') : t('composer.settings.applyOnConfirm'))}</p>
+            : <p className="agent-composer-note">{t('composer.settings.notExposed')}</p>}
         </>}
       {failure && !recovery ? <p role="alert" className="agent-composer-note">{failure.message}</p> : null}
     </section>
   </div>;
 }
 
-function connectionLabel(state?: 'connected' | 'reconnecting' | 'restoring' | 'unavailable'): string {
-  if (state === 'reconnecting') return 'Reconnecting';
-  if (state === 'restoring') return 'Restoring';
-  if (state === 'unavailable') return 'Unavailable';
-  return 'Connected';
+function connectionLabel(state: 'connected' | 'reconnecting' | 'restoring' | 'unavailable' | undefined, t: Translate): string {
+  if (state === 'reconnecting') return t('composer.settings.reconnecting');
+  if (state === 'restoring') return t('composer.settings.restoring');
+  if (state === 'unavailable') return t('common.unavailable');
+  return t('composer.settings.connected');
 }
 
-function settingsRecoveryMessage(state?: 'connected' | 'reconnecting' | 'restoring' | 'unavailable'): string | undefined {
-  if (state === 'reconnecting') return 'Native runtime is reconnecting. Values are last known; changes are temporarily unavailable.';
-  if (state === 'restoring') return 'Native runtime is restoring this session. Values are last known; changes are temporarily unavailable.';
-  if (state === 'unavailable') return 'Native runtime is unavailable. Values are last known; changes are unavailable.';
+function settingsRecoveryMessage(state: 'connected' | 'reconnecting' | 'restoring' | 'unavailable' | undefined, t: Translate): string | undefined {
+  if (state === 'reconnecting') return t('composer.settings.runtimeReconnecting');
+  if (state === 'restoring') return t('composer.settings.runtimeRestoring');
+  if (state === 'unavailable') return t('composer.settings.runtimeUnavailable');
   return undefined;
 }
 
-function selectedLabel(setting: AgentSessionSetting): string {
-  return setting.options.find(({ value }) => value === setting.value)?.label ?? setting.value ?? 'Unavailable';
+function selectedLabel(setting: AgentSessionSetting, unavailable: string): string {
+  return setting.options.find(({ value }) => value === setting.value)?.label ?? setting.value ?? unavailable;
 }
 
 function displayedValue(setting: AgentSessionSetting, change?: AgentSessionSettingChange): string | null {

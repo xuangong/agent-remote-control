@@ -1,5 +1,6 @@
 import type { DraftImage } from '../image-drafts.js';
 import type { DraftPart } from './composer-document.js';
+import { useTranslate } from './locale.js';
 
 export function ImageUploadStatus({ parts, images, connected, onOpen }: {
   parts: readonly DraftPart[];
@@ -7,6 +8,7 @@ export function ImageUploadStatus({ parts, images, connected, onOpen }: {
   connected: boolean;
   onOpen(imageId: string): void;
 }) {
+  const t = useTranslate();
   const ids = [...new Set(parts.flatMap(part => part.type === 'image' ? [part.imageId] : []))];
   const pending = ids.filter(id => images[id]?.status !== 'ready');
   if (!pending.length) return null;
@@ -15,10 +17,10 @@ export function ImageUploadStatus({ parts, images, connected, onOpen }: {
   const total = ids.reduce((sum, id) => sum + (images[id]?.blob?.size ?? 0), 0);
   const loaded = ids.reduce((sum, id) => sum + (images[id]?.blob?.size ?? 0) * (images[id]?.status === 'ready' ? 1 : images[id]?.progress ?? 0), 0);
   const percent = total ? Math.floor(loaded / total * 100) : 0;
-  const label = failed.length ? `${failed.length} image${failed.length === 1 ? '' : 's'} failed · Review`
-    : !connected ? 'Image upload paused'
-      : uploading ? percent >= 100 ? 'Checking images…' : `Uploading image${ids.length === 1 ? '' : 's'} · ${percent}%`
-        : 'Waiting to upload…';
+  const label = failed.length ? t('composer.imagesFailed', { count: failed.length })
+    : !connected ? t('composer.imageUploadPaused')
+      : uploading ? percent >= 100 ? t('composer.checkingImages') : t('composer.uploadingImages', { count: ids.length, percent })
+        : t('composer.waitingToUpload');
   return <div className="agent-image-upload-status" role="status" data-failed={failed.length > 0}>
     <button type="button" onClick={() => onOpen(failed[0] ?? uploading ?? pending[0]!)}>
       <span>{label}</span><span aria-hidden="true">›</span>

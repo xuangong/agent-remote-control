@@ -1,5 +1,6 @@
-import { isUncertainSend, RemoteOperationError } from '@orchardworks/agent-client';
+import { errorWords, isUncertainSend, RemoteOperationError } from '@orchardworks/agent-client';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useTranslate } from './locale.js';
 import { SharedByKey } from './shared-by-key.js';
 
 /** Refusals that mean the session never took the message: it may be sent again. */
@@ -39,8 +40,9 @@ const notifyAll = (queue: Queue) => { for (const member of queue.members) member
 export function usePendingSend<P>(sessionKey: string, visible: boolean, executor: PendingSendExecutor<P>) {
   const self = useRef<Member & { mounted: boolean }>();
   const pageHidden = useRef(false);
-  const latest = useRef({ sessionKey, visible, executor });
-  latest.current = { sessionKey, visible, executor };
+  const t = useTranslate();
+  const latest = useRef({ sessionKey, visible, executor, t });
+  latest.current = { sessionKey, visible, executor, t };
   const [, refresh] = useState(0);
   if (!self.current) self.current = { mounted: true, notify: () => { if (self.current!.mounted) refresh(value => value + 1); } };
   const me = self.current;
@@ -90,7 +92,7 @@ export function usePendingSend<P>(sessionKey: string, visible: boolean, executor
         // Any other failure after dispatch is uncertain and asks the person to check delivery.
         if (item.dispatched && error instanceof RemoteOperationError && NOT_DELIVERED.has(error.code) && !isUncertainSend(error)) item.dispatched = false;
         item.phase = 'error';
-        item.reason = error instanceof Error ? error.message : 'Message could not be sent.';
+        item.reason = error instanceof Error ? errorWords(error, latest.current.t) : latest.current.t('composer.messageNotSent');
       }
     }).finally(() => { item.abort = undefined; item.owner = undefined; notifyAll(queue); });
   }

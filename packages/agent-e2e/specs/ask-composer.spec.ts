@@ -46,7 +46,7 @@ for (const running of [false, true]) test(`Ask exposes shared composer controls 
   await expect(input).toBeEnabled();
   await expect(ask.getByRole('button', { name: 'Hide message input', exact: true })).toBeVisible();
   if (running) await expect(ask.getByTestId('agent-activity-label')).toHaveText('Working');
-  if (running) await expect(ask.getByTestId('turn-elapsed')).toBeVisible();
+  if (running) await expect(ask.locator('.agent-turn-status')).toContainText(/\d+s/);
   const images = await revealComposerAction(ask, 'Add images');
   await expect(images.action).toBeVisible();
   if (await ask.getByRole('region', { name: 'More actions', exact: true }).isVisible()) await page.keyboard.press('Escape');
@@ -81,7 +81,7 @@ for (const running of [false, true]) test(`Ask exposes shared composer controls 
       await expect(trigger).toBeFocused();
     }
     await expect(input).toContainText('Keep this Ask draft');
-    const actions = await ask.locator('.agent-composer-actions').evaluate(element => {
+    const actions = await ask.locator('.agent-composer-capsule').evaluate(element => {
       const parent = element.getBoundingClientRect();
       return [...element.querySelectorAll('button')].filter(button => button.getClientRects().length).every(button => {
         const box = button.getBoundingClientRect();
@@ -89,12 +89,7 @@ for (const running of [false, true]) test(`Ask exposes shared composer controls 
       });
     });
     expect(actions).toBe(true);
-    if (running) {
-      const activity = (await ask.locator('.agent-activity').boundingBox())!;
-      const controls = (await ask.locator('.agent-session-toolbar').boundingBox())!;
-      expect(activity.y + activity.height).toBeLessThanOrEqual(controls.y);
-      await expect(ask.getByRole('button', { name: 'Interrupt', exact: true })).toBeVisible();
-    }
+    if (running) await expect(ask.getByRole('button', { name: 'Interrupt', exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     await ask.screenshot({ path: info.outputPath(`ask-composer-${width}.png`) });
   }

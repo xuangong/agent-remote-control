@@ -13,6 +13,7 @@ test('drags an image atom without opening its preview and still previews on a ta
   await page.goto('/e2e/fixtures/image-input.html');
   const input = page.getByTestId('prompt-input');
   await expect(input).toBeVisible();
+  await page.getByRole('button', { name: 'More actions', exact: true }).click();
   await page.getByRole('button', { name: 'Add images' }).click();
   await page.locator('input[type=file][multiple]').setInputFiles({
     name: 'pixel.png', mimeType: 'image/png',

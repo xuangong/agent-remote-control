@@ -375,23 +375,20 @@ textarea {
 .lab-control-note[role="alert"] { color: var(--obs-danger); }
 .lab-control-note[role="status"] { color: var(--obs-text-secondary); }
 
-.lab-provider-controls button[data-testid="session-create"],
-.agent-composer button[data-testid="prompt-submit"] {
+.lab-provider-controls button[data-testid="session-create"] {
   border-color: var(--obs-action);
   color: var(--obs-surface);
   background: var(--obs-action);
   font-weight: 650;
 }
 
-.lab-provider-controls button[data-testid="session-create"]:hover:not(:disabled),
-.agent-composer button[data-testid="prompt-submit"]:hover:not(:disabled) {
+.lab-provider-controls button[data-testid="session-create"]:hover:not(:disabled) {
   border-color: var(--obs-text);
   color: var(--obs-surface);
   background: var(--obs-text);
 }
 
-.lab-provider-controls button[data-testid="session-create"]:disabled,
-.agent-composer button[data-testid="prompt-submit"]:disabled {
+.lab-provider-controls button[data-testid="session-create"]:disabled {
   border-color: var(--obs-border);
   color: var(--obs-text-secondary);
   background: var(--obs-canvas);
@@ -399,7 +396,6 @@ textarea {
 
 .lab-playback-controls { gap: 7px; }
 .lab-playback-controls button { min-height: 36px; font-size: 12px; }
-.agent-activity button[data-testid="cancel-submit"]:not(:disabled) { border-color: var(--obs-danger); color: var(--obs-danger); }
 
 .lab-main-stage {
   min-width: 0;
@@ -461,15 +457,7 @@ textarea {
 .lab-empty-state p { max-width: 65ch; font-size: 14px; line-height: 1.5; }
 .lab-empty-icon { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 4px; border-radius: 50%; color: var(--obs-action); background: var(--obs-surface-selected); font-size: 20px; }
 
-.lab-composer-dock {
-  position: relative;
-  z-index: 5;
-  padding: 6px clamp(12px, 2cqw, 24px) calc(6px + var(--lab-composer-bottom-inset, env(safe-area-inset-bottom)));
-  border-top: 1px solid var(--obs-border);
-  background: var(--obs-surface);
-}
-
-.lab-composer-dock .agent-composer textarea { min-height: 40px; resize: none; padding: 8px 10px; font-size: 14px; }
+.lab-composer-dock { position: relative; z-index: 5; padding: 4px clamp(12px, 2cqw, 24px) calc(6px + var(--lab-composer-bottom-inset, env(safe-area-inset-bottom))); background: var(--orchard-surface); }
 .lab-composer-dock[data-collapsed] { padding-block: 0; }
 .lab-composer-input-shell { position: relative; width: 100%; max-width: 900px; margin-inline: auto; }
 :is(.lab-shell, .lab-session-view) .lab-composer-dock .lab-composer-toggle {
@@ -486,10 +474,6 @@ textarea {
 @media (pointer: coarse) {
   .lab-composer-toggle::after { content: ''; position: absolute; inset: -28px -9px -1px; }
 }
-.agent-composer-actions { display: flex; align-items: center; gap: 10px; }
-.agent-composer-actions > .agent-composer-note { flex: 1; }
-.agent-composer-actions > button { min-width: 108px; }
-.agent-composer-actions button { min-height: 36px; font-size: 12px; }
 
 .lab-status-row { justify-content: space-between; gap: 9px; color: var(--obs-text-secondary); font-size: 12px; }
 .lab-status-row strong { color: var(--obs-action); text-transform: capitalize; }
@@ -642,8 +626,6 @@ textarea {
   :is(.lab-shell, .lab-session-view) .agent-question-options > label { min-height: 44px; }
   :is(.lab-shell, .lab-session-view) a[href] { display: inline-flex; align-items: center; }
   :is(.lab-shell, .lab-session-view) .agent-session-attributions button { min-width: 0; min-height: 28px; }
-  /* Interrupt stops a running turn; the compact composer row's 30 px would otherwise win over the touch minimum above. */
-  :is(.lab-shell, .lab-session-view) .lab-composer-dock .agent-activity button { min-height: 44px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -731,11 +713,6 @@ textarea {
 .lab-command-details-open { grid-template-columns: minmax(0, 1fr) minmax(280px, 34%); }
 .lab-command-details-open > .lab-workbench-heading-group, .lab-command-details-open > .lab-timeline-stage, .lab-command-details-open > .lab-composer-region { grid-column: 1; }
 .lab-command-details-open > .agent-command-details { grid-column: 2; grid-row: 1 / 4; background: var(--obs-surface); border-left: 1px solid var(--obs-border); }
-.lab-composer-dock .agent-command-menu button:hover:not(:disabled) { color: var(--obs-text); background: var(--agent-panel); }
-.lab-composer-dock .agent-composer-input textarea { width: 100%; box-sizing: border-box; }
-
-.lab-composer-dock .agent-command-menu { background: var(--obs-surface); }
-.lab-composer-dock .agent-command-menu button[aria-selected="true"], .lab-composer-dock .agent-command-menu button:hover:not(:disabled) { background: var(--obs-surface-selected); }
 
 .lab-conversation-path { display: flex; min-width: 0; overflow: hidden; white-space: nowrap; align-items: center; gap: 4px; color: var(--agent-muted); font-size: 12px; }
 .lab-conversation-path button { min-height: 24px; padding: 4px 0; border: 0; background: none; color: var(--agent-action-text); font: inherit; cursor: pointer; }
@@ -775,11 +752,6 @@ textarea {
 .lab-conversation-path > span[aria-current] { flex-shrink: 0; max-width: 45%; }
 .lab-conversation-path > span { max-width: 36ch; display: inline-flex; align-items: center; min-width: 0; gap: 4px; }
 .lab-conversation-path button, .lab-conversation-path [aria-current] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lab-composer-dock .agent-session-controls, .lab-composer-dock .agent-activity { margin: 0; }
-.lab-composer-dock .agent-activity { align-self: start; min-height: 30px; gap: 6px; }
-.lab-composer-dock .agent-activity button { min-height: 30px; }
-.lab-composer-dock .agent-composer-actions { margin-top: 0; }
-.lab-composer-dock .agent-planning-control { max-width: 900px; margin: 0 auto 4px; gap: 4px 12px; }
 .lab-timeline-scroll .agent-markdown :is(ul, ol, pre, blockquote) { margin-block: .5em; }
 .lab-timeline-scroll .agent-markdown :is(h1, h2, h3, h4) { margin-block: .7em .35em; }
 .lab-timeline-scroll .agent-markdown :is(th, td) { padding: 5px 9px; }
@@ -803,26 +775,7 @@ textarea {
 .lab-chat-sessions { position: relative; padding: 0; border: 0; flex-shrink: 0; }
 .lab-chat-sessions-heading { width: auto; padding: 0 6px; gap: 5px; }
 .lab-chat-sessions > .lab-session-tree { position: absolute; z-index: 15; top: calc(100% + 4px); right: 0; width: min(360px, calc(100vw - 24px)); max-height: min(360px, 55dvh); margin: 0; padding: 6px; border: 1px solid var(--obs-border-strong); border-radius: var(--obs-radius-sm); background: var(--obs-surface); box-shadow: var(--obs-overlay-shadow); }
-.lab-composer-dock { border-top: 0; padding-block: 4px calc(6px + var(--lab-composer-bottom-inset, env(safe-area-inset-bottom))); }
-.lab-composer-dock .agent-composer { position: relative; width: 100%; max-width: 900px; margin-inline: auto; display: flex; flex-direction: column; gap: 0; padding: 4px 6px; border: 1px solid var(--obs-control-border); border-radius: 12px; background: var(--obs-surface); }
-.lab-composer-dock .agent-composer textarea { display: block; min-height: 38px; padding: 6px 6px; border: 0; background: transparent; border-radius: 6px; }
-.lab-composer-dock .agent-composer textarea:focus-visible { outline: none; }
-.lab-composer-dock .agent-composer .agent-composer-actions { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 0; }
-.lab-composer-dock .agent-composer-actions > button[data-testid="prompt-submit"] { min-width: 34px; margin-left: auto; padding-inline: 8px; flex-shrink: 0; }
-.lab-composer-dock .agent-composer-actions button { min-height: 30px; padding: 4px 7px; }
-.lab-composer-dock .agent-session-controls { position: static; min-width: 0; }
-.lab-composer-dock .agent-session-toolbar { flex-wrap: nowrap; gap: 2px; }
-.lab-composer-dock .agent-session-toolbar button { border-color: transparent; background: transparent; max-width: 180px; }
-.lab-composer-dock .agent-session-toolbar [aria-expanded="true"] { color: var(--obs-action); background: var(--obs-surface-selected); }
-.lab-composer-dock .agent-session-panel { position: absolute; z-index: 12; bottom: calc(100% + 48px); left: 0; width: min(420px, 100%); margin: 0; background: var(--obs-surface); border-color: var(--obs-border-strong); box-shadow: var(--obs-overlay-shadow); }
-.lab-composer-dock .agent-activity { margin-left: auto; align-self: center; }
-.lab-composer-dock .agent-activity[data-active="false"] { display: none; }
-.lab-composer-dock .agent-activity + button[data-testid="prompt-submit"] { margin-left: auto; }
-.lab-composer-dock .agent-activity[data-active="true"] + button[data-testid="prompt-submit"] { margin-left: 0; }
-.lab-composer-dock .agent-composer > .agent-composer-note[role="status"] { position: absolute; bottom: calc(100% + 6px); right: 0; max-width: 100%; max-height: 100px; overflow: auto; padding: 5px 9px; border: 1px solid var(--obs-border); border-radius: 6px; background: var(--obs-surface); box-shadow: 0 2px 8px color-mix(in oklab, var(--ui-shadow-ink) 8%, transparent); }
-.lab-composer-dock .agent-session-panel .agent-composer-note[role="status"] { position: static; width: auto; height: auto; overflow: visible; clip-path: none; }
-.lab-composer-dock .agent-planning-control { margin-bottom: 12px; }
-.lab-composer-dock .agent-composer-attachments { padding: 2px 6px; }
+.lab-composer-dock .agent-composer { width: 100%; max-width: 900px; margin-inline: auto; }
 @media (max-width: 1180px) {
   .lab-shell, .lab-shell.lab-inspector-open { grid-template-rows: auto minmax(0, 1fr); }
 }
@@ -1454,8 +1407,7 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-session-control[data-native] .lab-session-control-description { color: var(--obs-warning); }
 .lab-session-control[aria-busy="true"] .lab-session-control-description { color: var(--obs-text-secondary); }
 .lab-session-control-error { color: var(--obs-danger); }
-.lab-composer-dock .agent-composer[data-control-readonly] .agent-composer-draft:not([hidden]) { margin-top: 4px; border-top: 1px solid var(--obs-border); padding-top: 5px; }
-.lab-composer-dock .agent-composer[data-control-readonly] :is(textarea, .agent-composer-editor) { max-height: 96px; overflow-y: auto; color: var(--obs-text-secondary); opacity: 1; cursor: text; }
+.lab-composer-dock .agent-composer[data-control-readonly] :is(textarea, .agent-composer-editor) { max-height: 96px; overflow-y: auto; color: var(--orchard-text-secondary); opacity: 1; cursor: text; }
 .lab-composer-dock:has(.agent-composer[data-control-readonly])[data-collapsed] { padding-block: 4px calc(6px + var(--lab-composer-bottom-inset, env(safe-area-inset-bottom))); }
 
 :is(.lab-shell, .lab-session-view) .lab-composer-dock[data-collapsed]:has(.agent-composer[data-control-readonly]) .lab-composer-toggle { bottom: calc(100% - 1px); }
@@ -1467,16 +1419,6 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-host-provider-row > span { display: grid; gap: .2rem; min-width: 0; overflow-wrap: anywhere; }
 .lab-host-provider-row small { font-weight: normal; opacity: .75; }
 
-/* Reserve a compact row above the input frame, beside the collapse control. */
-.lab-composer-dock:not([data-collapsed]) .lab-composer-input-shell:has(.agent-pending-queue) { padding-top: 40px; }
-.lab-composer-dock .agent-pending-queue { position: absolute; bottom: calc(100% + 1px); left: 0; right: 46px; margin: 0; }
-:is(.lab-shell, .lab-session-view) .lab-composer-dock:not([data-collapsed]) .lab-composer-input-shell:has(.agent-pending-queue) .lab-composer-toggle { bottom: calc(100% - 41px); }
-.lab-composer-dock .agent-composer .agent-pending-message button { min-height: 32px; }
-@media (pointer: coarse) {
-  .lab-composer-dock .agent-composer .agent-pending-message button { min-height: 36px; }
-}
-:is(.lab-shell, .lab-session-view) .lab-composer-dock .agent-pending-copy { min-width: 0; }
-:is(.lab-shell, .lab-session-view) .lab-composer-dock .agent-pending-dismiss { min-width: 28px; }
 
 .lab-timeline-controls { display: contents; }
 .lab-timeline-tools { position: absolute; z-index: 7; top: 8px; right: 12px; display: flex; align-items: stretch; max-width: calc(100% - 12px); pointer-events: none; }

@@ -133,6 +133,7 @@ test('hands a bot off to another provider on its Host and keeps its place, conve
   await send(page, 'First on Codex');
   await expectReply(page, 'Studio/codex: First on Codex');
   const bot = page.locator('[data-workbench-mode="bot"]');
+  await bot.locator('.agent-composer-capsule').getByRole('button', { name: 'More actions', exact: true }).click();
   await bot.getByRole('button', { name: 'Open chat commands', exact: true }).click();
   await bot.getByRole('option', { name: /^\/handoff/ }).click();
   const dialog = page.getByRole('dialog', { name: 'Hand off conversation', exact: true });

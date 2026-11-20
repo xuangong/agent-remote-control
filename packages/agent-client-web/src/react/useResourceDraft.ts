@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslate } from './locale.js';
 import type { ResourceInputCapabilities, ResourceUploadReceipt, MessagePart } from '@orchardworks/agent-remote-protocol';
 import type { DraftPart } from './composer-document.js';
 export type UploadResource = (file: Blob, name: string, uploadId: string, options?: ResourceTransferOptions) => Promise<NonNullable<ResourceUploadReceipt['resource']>>;
@@ -6,6 +7,7 @@ import { resourceDraftMemory as memory, readResourceDraft as read, writeResource
 import type { ImageDraftRecipient } from '../image-drafts.js';
 import { type ResourceTransferOptions } from '@orchardworks/agent-client';
 export function useResourceDraft({ scope, sessionKey, parts, active, limits, upload, recipient, documentHydrated = true }: { scope?: string; sessionKey: string; parts: readonly DraftPart[]; active: boolean; limits?: ResourceInputCapabilities; upload?: UploadResource; recipient?: ImageDraftRecipient; documentHydrated?: boolean }) {
+  const t = useTranslate();
   const generation = resourceDraftGeneration(scope ?? 'page');
   const key = JSON.stringify([scope ?? 'page', sessionKey]);
   const entries = useRef(new Map<string, Entry>());
@@ -42,7 +44,7 @@ export function useResourceDraft({ scope, sessionKey, parts, active, limits, upl
       current.persisted = true;
       if (current.revision === revision) current.dirty = false;
       current.storageError = undefined;
-    }).catch(() => { current.dirty = true; current.storageError = 'Resource files are not saved on this device. Keep this page open.'; })
+    }).catch(() => { current.dirty = true; current.storageError = t('composer.resourcesNotSaved'); })
       .finally(() => { if (current.saving === operation) current.saving = undefined; notify(); });
     current.saving = operation;
   }
@@ -53,7 +55,7 @@ export function useResourceDraft({ scope, sessionKey, parts, active, limits, upl
       if (generation !== resourceDraftGeneration(scope)) return;
       if (current.revision === 0) { if (saved) { current.records = saved.records; current.nextLabel = saved.nextLabel; } current.persisted = true; current.dirty = false; }
       for (const record of Object.values(current.records)) { record.status = 'pending'; record.resource = undefined; }
-    }).catch(() => { current.storageError = 'Saved resource files could not be restored. Select them again.'; }).finally(() => { current.hydrated = true; notify(); });
+    }).catch(() => { current.storageError = t('composer.resourcesNotRestored'); }).finally(() => { current.hydrated = true; notify(); });
   }, [key, generation]);
   useEffect(() => {
     if (!documentHydrated || !current.hydrated) return;
@@ -75,7 +77,7 @@ export function useResourceDraft({ scope, sessionKey, parts, active, limits, upl
           const resource = await upload(record.file, record.name, id, { signal: abort.signal, onProgress: (loaded, total) => { if (!abort.signal.aborted) { record.progress = total ? loaded / total : 1; notify(); } } });
           if (abort.signal.aborted || recipient && !recipient.isCurrent() || generation !== resourceDraftGeneration(scope ?? 'page')) return;
           record.resource = resource; record.status = 'ready'; record.progress = 1;
-        } catch (error) { if (abort.signal.aborted || recipient && !recipient.isCurrent() || generation !== resourceDraftGeneration(scope ?? 'page')) return; record.status = 'failed'; record.error = error instanceof Error ? error.message : 'Resource upload failed.'; }
+        } catch (error) { if (abort.signal.aborted || recipient && !recipient.isCurrent() || generation !== resourceDraftGeneration(scope ?? 'page')) return; record.status = 'failed'; record.error = error instanceof Error ? error.message : t('composer.resourceUploadFailed'); }
         save(); notify();
       }
     };
@@ -88,14 +90,14 @@ export function useResourceDraft({ scope, sessionKey, parts, active, limits, upl
     ready: active && (!recipient || recipient.isCurrent()) && generation === resourceDraftGeneration(scope ?? 'page') && current.hydrated && ids.every(id => current.records[id]?.status === 'ready'),
     add(files: readonly File[]): DraftPart[] {
       if (!current.hydrated || !limits) return [];
-      if (ids.length + files.length > limits.maxResources) throw new Error(`A message can contain at most ${limits.maxResources} resources.`);
+      if (ids.length + files.length > limits.maxResources) throw new Error(t('composer.resourceCount', { max: limits.maxResources }));
       const result: DraftPart[] = []; let bytes = ids.reduce((sum, id) => sum + (current.records[id]?.file.size ?? 0), 0);
       for (const file of files) {
-        if (ids.length + result.length >= limits.maxResources || file.size > limits.maxResourceBytes || bytes + file.size > limits.maxMessageBytes) throw new Error('Resources exceed the limit: 8 files, 50 MiB each, 100 MiB total.');
+        if (ids.length + result.length >= limits.maxResources || file.size > limits.maxResourceBytes || bytes + file.size > limits.maxMessageBytes) throw new Error(t('composer.resourceLimits'));
         bytes += file.size;
       }
       const addedBytes = files.reduce((sum, file) => sum + file.size, 0);
-      if (trimCache(addedBytes) + addedBytes > 128 * 1024 * 1024) throw new Error('Unsent resource files fill the local memory budget. Send or remove existing resources before adding more.');
+      if (trimCache(addedBytes) + addedBytes > 128 * 1024 * 1024) throw new Error(t('composer.resourceMemory'));
       for (const id of Object.keys(current.records)) if (!ids.includes(id)) delete current.records[id];
       for (const file of files) { const id = crypto.randomUUID(); current.records[id] = { id, file, name: file.name, status: 'pending', progress: 0 }; result.push({ type: 'resource', resourceId: id, label: `resource #${current.nextLabel++}` }); }
       current.revision++; save(); notify(); return result;

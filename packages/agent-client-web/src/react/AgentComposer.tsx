@@ -7,6 +7,10 @@ import type { AgentCommand, AgentCommandResult, AgentMessageOptions, ResourceBin
 import { AgentCommandDetails } from './AgentCommandDetails.js';
 import { useAgentCommands } from './useAgentCommands.js';
 import { AgentActivityStatus } from './AgentActivityStatus.js';
+import { InterruptButton } from './InterruptButton.js';
+import { ComposerMenu, type ComposerMenuEntry } from './ComposerMenu.js';
+import { composerMenu } from './composer-menu.js';
+import { useTranslate } from './locale.js';
 import { ComposerEditor, type ComposerEditorHandle } from './ComposerEditor.js';
 import { useResourceDraft, type UploadResource } from './useResourceDraft.js';
 import { ImageUploadStatus } from './ImageUploadStatus.js';
@@ -19,7 +23,6 @@ import { useSendButtonPress } from './useSendButtonPress.js';
 import { usePendingSend } from './usePendingSend.js';
 import { SharedByKey } from './shared-by-key.js';
 import { PendingSendQueue } from './PendingSendQueue.js';
-import { AgentActionToolbar, type ComposerAction } from './AgentActionToolbar.js';
 import { composerAvailability, remoteSessionState, type RemoteSessionState, type AgentReplicaState, type SessionFacts } from '@orchardworks/agent-client';
 
 export interface PendingFirstInputContext {
@@ -43,6 +46,8 @@ export interface AgentComposerProps {
   mutationBlocked?: boolean;
   readOnlyLabel?: string;
   readOnlyNotice?: ReactNode;
+  /** Whom the message goes to: the placeholder says "Message {recipient}…". */
+  recipient?: string;
   /** Retain ownership controls while hiding the preserved draft. */
   readOnlyCollapsed?: boolean;
   state?: AgentReplicaState;
@@ -120,7 +125,8 @@ interface Draft {
   feedback?: { kind: 'success' | 'error'; message: string; delivery?: boolean; commandError?: unknown };
 }
 
-export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly: draftOnlyRequested = false, opening = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, state, sessionControls, settings = 'inline', renderSessionSettingError, renderCommandError, sessionKey, host, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent, sendLater }: AgentComposerProps) {
+export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly: draftOnlyRequested = false, opening = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, recipient, readOnlyCollapsed = false, state, sessionControls, settings = 'inline', renderSessionSettingError, renderCommandError, sessionKey, host, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent, sendLater }: AgentComposerProps) {
+  const t = useTranslate();
   const draftOnly = draftOnlyRequested;
   const pendingFirstInputContext = firstInputContext !== undefined;
   const controlId = `composer-${useId().replace(/:/gu, '')}`;
@@ -187,7 +193,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   const activitySession = draftOnly ? remoteSessionState(undefined, session.connection) : session;
   const capabilities = state?.agent?.capabilities;
   // Only a business reason blocks input (target T4). A send goes now, or waits in the queue until the session is ready.
-  const availability = composerAvailability({ session, host, replica: state });
+  const availability = composerAvailability({ session, host, replica: state }, t);
   const dispatch = availability.input === 'enabled' && !draftOnly && !mutationBlocked && !forcedReadOnly && agentId !== '' ? availability.dispatch : undefined;
   const sendNow = dispatch === 'now';
   // A stand-in view (`opening`) keeps the editor and takes a plain message into the queue, which the pane that
@@ -211,10 +217,10 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   const ownershipReadOnly = forcedReadOnly && Boolean(readOnlyNotice);
   const hideDraft = ownershipReadOnly && (readOnlyCollapsed || (!hasContent && !attachments && !currentDraft.selectedSkill));
   const imageSendReady = (!hasImages || !pendingFirstInputContext && imageDraft.ready) && (!hasResources || resourceDraft.ready);
-  const firstInputImageNotice = 'The first message must contain only text. Images can be sent after the previous history is included.';
+  const firstInputImageNotice = t('composer.imagesAfterHistory');
   const isCommand = !hasAttachments && text.trimStart().startsWith('/');
   const nativeCommandsEnabled = !draftOnly && !mutationBlocked && !readOnly && capabilities?.commands === true;
-  const readOnlyHint = 'This session is read-only. Direct input is disabled.';
+  const readOnlyHint = t('composer.readOnlyHint');
   const wantsCommands = !draftOnly && !currentDraft.commandsDismissed && Boolean((!readOnly && isCommand) || currentDraft.commandsOpen);
   const directory = useAgentCommands(agentId, ready && wantsCommands && nativeCommandsEnabled, onListCommands);
   const commandQuery = !readOnly && isCommand ? text.trimStart().slice(1) : '';
@@ -235,15 +241,15 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
 
   // While the Host is offline, text can still be sent to wait for it; images, files and commands need the Host itself.
   const laterMode = !!sendLater && !mutationBlocked && !forcedReadOnly;
-  const laterBlocked = !laterMode ? undefined : hasAttachments ? 'Images and files cannot wait for the Host. Send them when it is back.'
-    : isCommand || currentDraft.selectedSkill ? 'Commands need the Host. Send them when it is back.' : undefined;
+  const laterBlocked = !laterMode ? undefined : hasAttachments ? t('composer.laterAttachments')
+    : isCommand || currentDraft.selectedSkill ? t('composer.laterCommands') : undefined;
   const dispatchReady = sendNow && !operationBusy;
   const sendAllowed = sendNow;
   const queueAllowed = ready && session.operations.queue_message.allowed;
   const latest = useRef({ waitsWhileOpening, agentId, draftOnly, mutationBlocked, dispatchReady, sendAllowed, queueAllowed, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient });
   latest.current = { waitsWhileOpening, agentId, draftOnly, mutationBlocked, dispatchReady, sendAllowed, queueAllowed, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient };
   // A message that waits for a session that cannot take it does not stay Sending, and is never sent unasked later.
-  const unsendable = availability.input === 'disabled' && !draftOnly ? availability.words : draftOnly && !waitsWhileOpening && !laterMode && agentId !== '' ? 'This session could not be opened.' : undefined;
+  const unsendable = availability.input === 'disabled' && !draftOnly ? availability.words : draftOnly && !waitsWhileOpening && !laterMode && agentId !== '' ? t('composer.openFailed') : undefined;
   useEffect(() => { if (unsendable) waiting.hold(unsendable); }, [unsendable, agentId, waiting.items.length]);
   const richPreparations = useRef(new Map<AbortController, ImageDraftRecipient>());
   for (const [abort, owner] of richPreparations.current) {
@@ -270,11 +276,11 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     signal.addEventListener('abort', abortPreparation, { once: true });
     if (selectedRecipient) richPreparations.current.set(preparation, selectedRecipient);
     const checkRecipient = () => {
-      if (latest.current.draftOnly || latest.current.mutationBlocked || latest.current.agentId !== agentId) throw new Error('Native attachment is unavailable.');
+      if (latest.current.draftOnly || latest.current.mutationBlocked || latest.current.agentId !== agentId) throw new Error(t('composer.attachmentUnavailable'));
       if (containsImages && latest.current.pendingFirstInputContext) throw new Error(firstInputImageNotice);
       signal.throwIfAborted(); preparation.signal.throwIfAborted();
       if (selectedRecipient && (!selectedRecipient.isCurrent() || latest.current.imageRecipient?.identity !== selectedRecipient.identity
-        || latest.current.imageRecipient?.lifetime !== selectedRecipient.lifetime)) throw new Error('The image recipient changed. Retry for the current connection.');
+        || latest.current.imageRecipient?.lifetime !== selectedRecipient.lifetime)) throw new Error(t('composer.recipientChanged'));
     };
     try {
     checkRecipient();
@@ -283,7 +289,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     const textSend = latest.current.onSendMessage;
     const attachments: Record<string, Awaited<ReturnType<UploadImage>>> = {};
     for (const [id, image] of Object.entries(images)) {
-      if (!image.blob) throw new Error('Local image bytes are missing. Copy the message and attach the image again.');
+      if (!image.blob) throw new Error(t('composer.imageBytesMissingSend'));
       attachments[id] = await upload(image.blob, image.uploadId, { signal: preparation.signal });
       checkRecipient();
     }
@@ -416,7 +422,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
       }
       if (result.text) currentDraft.feedback = { kind: 'success', message: result.text };
     } catch (error) {
-      currentDraft.feedback = { kind: 'error', message: error instanceof Error ? error.message : 'Native command failed.', commandError: error };
+      currentDraft.feedback = { kind: 'error', message: error instanceof Error ? error.message : t('composer.commandFailed'), commandError: error };
     } finally {
       currentDraft.pending = undefined;
       if (mounted.current) refresh((value) => value + 1);
@@ -435,7 +441,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
       // The message now shows as waiting in the conversation; the composer is ready for the next one.
       if (currentDraft.text === submitted) { if (richEnabled) imageDraft.setText(''); else { currentDraft.text = ''; if (currentAgent.current === agentId) onDraftChange?.(''); } }
     } catch (error) {
-      currentDraft.feedback = { kind: 'error', message: error instanceof Error && error.message ? error.message : 'The message could not wait for the Host.' };
+      currentDraft.feedback = { kind: 'error', message: error instanceof Error && error.message ? error.message : t('composer.laterFailed') };
     } finally {
       currentDraft.pending = undefined;
       if (mounted.current) refresh((value) => value + 1);
@@ -454,9 +460,9 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
         await onCancel();
         currentDraft.interruptedTurnId = activeTurnId;
         currentDraft.commandInterrupted = currentDraft.pending === 'command';
-        currentDraft.feedback = { kind: 'success', message: 'Cancellation requested.' };
+        currentDraft.feedback = { kind: 'success', message: t('composer.cancellationRequested') };
       } catch (error) {
-        currentDraft.feedback = { kind: 'error', message: error instanceof Error ? error.message : 'Interrupt failed.' };
+        currentDraft.feedback = { kind: 'error', message: error instanceof Error ? error.message : t('composer.interruptFailed') };
       } finally {
         currentDraft.interruptPending = false;
         if (mounted.current) refresh((value) => value + 1);
@@ -466,7 +472,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     if (readOnly) return;
     if (hasImages && blockFirstInputImages()) return;
     if (kind === 'queue' && latest.current.pendingFirstInputContext) return;
-    if (hasAttachments && currentDraft.selectedSkill) { currentDraft.feedback = { kind: 'error', message: 'Remove the selected skill before sending attachments.' }; refresh(value => value + 1); return; }
+    if (hasAttachments && currentDraft.selectedSkill) { currentDraft.feedback = { kind: 'error', message: t('composer.removeSkillFirst') }; refresh(value => value + 1); return; }
     if (currentDraft.selectedSkill && !showCommands) {
       if (kind !== 'send' || nativeBusy || !ready || busy) return;
       await executeCommand(currentDraft.selectedSkill, currentDraft.text);
@@ -480,7 +486,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
       if (kind === 'send' && command?.kind === 'skill') chooseCommand(command);
       else if (kind === 'send' && command) await executeCommand(command, match?.[2] ?? '');
       else {
-        currentDraft.feedback = { kind: 'error', message: directory.error ?? 'Unknown or unavailable native command. Open / to refresh the command list.' };
+        currentDraft.feedback = { kind: 'error', message: directory.error ?? t('composer.unknownCommand') };
         refresh((value) => value + 1);
       }
       return;
@@ -514,14 +520,14 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
         if (hasResources) resourceDraft.clear();
         if (richEnabled) imageDraft.setText(''); else { currentDraft.text = ''; if (currentAgent.current === agentId) onDraftChange?.(''); }
       }
-      currentDraft.feedback = { kind: 'success', message: kind === 'send' ? 'Message sent.' : 'Message queued by Provider.', delivery: true };
+      currentDraft.feedback = { kind: 'success', message: kind === 'send' ? t('composer.messageSent') : t('composer.messageQueued'), delivery: true };
       if (currentAgent.current === agentId) focusRequested.current = agentId;
     } catch (error) {
       if (content && ownsImageEdit() && error && typeof error === 'object' && 'code' in error && error.code === 'invalid_image_input') {
-        imageDraft.rejectAttachments(content, 'The Host could not use this image. Retry the upload, replace it, or remove it.');
+        imageDraft.rejectAttachments(content, t('composer.imageRejected'));
       }
-      if (content && ownsImageEdit() && error && typeof error === 'object' && 'code' in error && error.code === 'invalid_resource_input') resourceDraft.reject(content, 'The Host could not use this resource. Retry the upload or remove it.');
-      currentDraft.feedback = { kind: 'error', message: error instanceof Error ? error.message : 'Agent command failed.' };
+      if (content && ownsImageEdit() && error && typeof error === 'object' && 'code' in error && error.code === 'invalid_resource_input') resourceDraft.reject(content, t('composer.resourceRejected'));
+      currentDraft.feedback = { kind: 'error', message: error instanceof Error ? error.message : t('composer.actionFailed') };
     } finally {
       currentDraft.pending = undefined;
       if (mounted.current) refresh((value) => value + 1);
@@ -559,66 +565,116 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     void run('send');
   }
 
-  const toolbarActions: ComposerAction[] = [];
-  if (richEnabled && (imageDraftBinding || capabilities?.imageInput)) toolbarActions.push({ id: 'images', label: 'Add images', content: 'Image', priority: 20,
-    title: pendingFirstInputContext ? firstInputImageNotice : undefined,
-    disabled: (agentId === '' && !draftOnly) || readOnly || busy || pendingFirstInputContext,
+  // The "+" menu (I4): which items show and which can be used is one rule; here they get their words and actions.
+  const showsSettings = Boolean(state?.agent) && !draftOnly && settings !== 'none';
+  const menu = composerMenu({
+    images: richEnabled && Boolean(imageDraftBinding || capabilities?.imageInput),
+    resources: Boolean(capabilities?.resourceInput),
+    resourceUpload: Boolean(onUploadResource) && resourceDraft.hydrated,
+    target: agentId !== '' || draftOnly,
+    ready, readOnly, busy, firstInputPending: pendingFirstInputContext,
+    consoleCommands: consoleCommands.length > 0,
+    queue: !canQueue ? 'none' : session.operations.queue_message.allowed ? 'allowed' : 'refused',
+    draft: { content: hasContent, command: isCommand, skill: Boolean(selectedSkill), imagesReady: imageSendReady, waiting: waiting.items.length,
+      sendable: Boolean(capabilities?.sendMessage) && Boolean(onSendMessage || onSendMessageContent) },
+    settings: showsSettings,
+  });
+  const item = (id: string) => menu.find(entry => entry.id === id);
+  const menuEntries: ComposerMenuEntry[] = [];
+  const image = item('image'), resource = item('resource'), command = item('command'), queue = item('queue');
+  if (image) menuEntries.push({ id: 'images', label: t('composer.addImages'), text: t('composer.image'), icon: <MenuIcon kind="image" />,
+    ...(image.note ? { detail: t(image.note), title: t(image.note) } : {}), disabled: !image.enabled,
     run: () => { filePickerAgent.current = agentId; editorRef.current?.captureSelection(); fileInputRef.current?.click(); } });
-  if (capabilities?.resourceInput) toolbarActions.push({ id: 'resources', label: 'Add resources', content: 'Resource', priority: 19,
-    title: pendingFirstInputContext ? 'Resources can be sent after the previous history is included.' : undefined,
-    disabled: !ready || readOnly || busy || pendingFirstInputContext || !onUploadResource || !resourceDraft.hydrated,
+  if (resource) menuEntries.push({ id: 'resources', label: t('composer.addResources'), text: t('composer.resource'), icon: <MenuIcon kind="file" />,
+    ...(resource.note ? { detail: t(resource.note), title: t(resource.note) } : {}), disabled: !resource.enabled,
     run: () => { filePickerAgent.current = agentId; editorRef.current?.captureSelection(); resourceInputRef.current?.click(); } });
-  toolbarActions.push({ id: 'commands', label: 'Open chat commands', content: '/',
-    disabled: !ready || busy || (readOnly && consoleCommands.length === 0),
+  if (command) menuEntries.push({ id: 'commands', label: t('composer.openCommands'), text: t('composer.command'), icon: <MenuIcon kind="command" />,
+    disabled: !command.enabled, expanded: currentDraft.commandsOpen === true,
     run: () => { currentDraft.commandsOpen = !currentDraft.commandsOpen; currentDraft.commandsDismissed = false; refresh(value => value + 1); focusInput(); } });
-  if (canQueue) toolbarActions.push({ id: 'queue', label: pending === 'queue' ? 'Queueing…' : 'Queue for next turn', content: pending === 'queue' ? 'Queueing…' : 'Queue', testId: 'queue-submit',
-    title: pendingFirstInputContext ? 'The first message must use immediate delivery.' : 'Let the native Provider handle this after the current turn',
-    disabled: pendingFirstInputContext || !session.operations.queue_message.allowed || waiting.items.length > 0 || !ready || !capabilities?.sendMessage || !hasContent || !imageSendReady || isCommand || Boolean(selectedSkill) || busy || (!onSendMessage && !onSendMessageContent),
-    run: () => void run('queue') });
+  if (queue) menuEntries.push({ id: 'queue', label: pending === 'queue' ? t('composer.queueing') : t('composer.queue'), testId: 'queue-submit', icon: <MenuIcon kind="queue" />,
+    ...(queue.note ? { detail: t(queue.note), title: t(queue.note) } : {}), disabled: !queue.enabled, run: () => void run('queue') });
+  const setMenuView = (view: SessionControlView | undefined) => { currentDraft.view = view; refresh(value => value + 1); };
+  // A draft-only stand-in reports no activity of its own (as the activity status reads it), so it never offers stop.
+  const working = activitySession.activity === 'running', waitingForAnswer = activitySession.activity === 'waiting';
+  const sendDisabled = !canSubmit || readOnly || busy || hasImages && pendingFirstInputContext || (selectedSkill ? nativeBusy || !onExecuteCommand
+    : !hasContent || (!imageSendReady && !canWait) || (!isCommand && (capabilities?.sendMessage === false || (!onSendMessage && !onSendMessageContent && !canWait))));
+  const sendIcon = pending === 'send' ? <span aria-hidden="true">…</span>
+    : <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+  const placeholder = ownershipReadOnly ? '' : forcedReadOnly ? readOnlyLabel ?? t('composer.recordingReadOnly') : readOnly && !laterMode ? readOnlyHint
+    : blocked && !laterMode ? availability.words : agentId !== '' || draftOnly || laterMode ? recipient ? t('composer.placeholderTo', { name: recipient }) : t('composer.placeholder') : t('composer.noTarget');
 
-  return <section ref={composerRef} className="agent-composer" aria-label="Live provider controls" aria-busy={busy || richEnabled && !imageDraft.hydrated} data-control-readonly={ownershipReadOnly || undefined}>
+  return <section ref={composerRef} className="agent-composer" aria-label={t('composer.region')} aria-busy={busy || richEnabled && !imageDraft.hydrated} data-control-readonly={ownershipReadOnly || undefined}>
     {richEnabled ? <input ref={fileInputRef} type="file" hidden multiple accept="image/png,image/jpeg,image/webp" onChange={event => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; if (filePickerAgent.current === agentId) editorRef.current?.insertParts(addImageFiles(files)); }} /> : null}
-    {capabilities?.resourceInput ? <input ref={resourceInputRef} type="file" hidden multiple aria-label="Choose resources" onChange={event => {
+    {capabilities?.resourceInput ? <input ref={resourceInputRef} type="file" hidden multiple aria-label={t('composer.chooseResources')} onChange={event => {
       const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = '';
       if (filePickerAgent.current !== agentId) return;
-      try { editorRef.current?.insertParts(resourceDraft.add(files)); } catch (error) { currentDraft.feedback = { kind: 'error', message: error instanceof Error ? error.message : 'Resource selection failed.' }; refresh(value => value + 1); }
+      try { editorRef.current?.insertParts(resourceDraft.add(files)); } catch (error) { currentDraft.feedback = { kind: 'error', message: error instanceof Error ? error.message : t('composer.resourceSelectionFailed') }; refresh(value => value + 1); }
     }} /> : null}
     <PendingSendQueue items={waiting.items} onCancel={waiting.cancel} onRetry={waiting.retry} />
+    {/* What the composer says stands above the capsule, where the keyboard never covers it. */}
+    {laterBlocked ? <p className="agent-composer-note" role="status">{laterBlocked}</p> : null}
+    {waiting.items[0]?.phase === 'error' ? <p className="agent-composer-note" role="alert">
+      {waiting.items[0].reason}{waiting.items[0].dispatched ? ` ${t('composer.checkConversation')}` : ''}
+    </p> : null}
+    {richEnabled && imageDraft.storageError ? <div className="agent-composer-note agent-draft-storage-status" role="status">
+      <span>{imageDraft.storageError}</span>
+      <button type="button" onClick={imageDraft.retryStorage} disabled={imageDraft.storageBusy} aria-label={t('composer.retryDraftStorage')}>{t('common.retry')}</button>
+    </div> : null}
+    {richEnabled && imageDraft.error ? <p className="agent-composer-note" role="alert">{imageDraft.error}</p> : null}
+    {hasImages && pendingFirstInputContext && feedback?.message !== firstInputImageNotice ? <p className="agent-composer-note" role="status">{firstInputImageNotice}</p> : null}
+    {hasResources ? <div className="agent-resource-draft-list" aria-label={t('composer.resourceUploads')}>{resourceDraft.items.map(({ id, label, record }) => <div className="agent-resource-draft" key={id}>
+      <span><strong>[{label}]</strong> {record?.name ?? t('composer.fileUnavailable')} {record ? <small>{t('composer.bytes', { size: record.file.size.toLocaleString() })} · {record.status === 'uploading' ? t('composer.uploading', { percent: Math.round(record.progress * 100) }) : record.status === 'ready' ? t('composer.uploadReady') : record.status === 'failed' ? t('composer.uploadFailed') : t('composer.uploadPending')}</small> : null}</span>
+      {record?.error ? <span role="alert">{record.error}</span> : null}
+      {record?.status === 'failed' ? <button type="button" disabled={!ready || busy} onClick={() => resourceDraft.retry(id)}>{t('composer.retryResource', { label })}</button> : null}
+      <button type="button" disabled={busy || readOnly} aria-label={t('composer.removeResource', { label })} onClick={() => imageDraft.setParts(imageDraft.parts.filter(part => part.type !== 'resource' || part.resourceId !== id))}>{t('common.remove')}</button>
+    </div>)}</div> : null}
+    {hasResources && (draftScope || imageDraftBinding?.scope) && !resourceDraft.storageError ? <p role="status" className="agent-composer-note">{imageDraft.storageSaved && !resourceDraft.storageBusy ? t('composer.resourceDraftSaved') : t('composer.resourceDraftSaving')}</p> : null}
+    {hasResources && resourceDraft.storageError ? <p role="status" className="agent-composer-note">{resourceDraft.storageError}</p> : null}
+    {hasResources && !ready ? <p role="status" className="agent-composer-note">{t('composer.resourcesWait')}</p> : null}
+    {!ownershipReadOnly && !draftOnly && agentId === '' ? <p className="agent-composer-note">{t('composer.noTarget')}</p> : null}
+    {feedback && !(feedback.delivery && state?.outgoingMessages !== undefined) ? commandRecovery != null ? <div className="agent-composer-note">{commandRecovery}</div>
+      : <p className="agent-composer-note" role={feedback.kind === 'error' ? 'alert' : 'status'}>{feedback.message}</p> : null}
     <div className="agent-composer-input">
     {forcedReadOnly ? readOnlyNotice : null}
     {showCommands ? <div className="agent-command-menu">
-      {directory.status === 'loading' && nativeCommandsEnabled ? <p role="status">Loading native commands…</p> : null}
-      {directory.status === 'failed' && nativeCommandsEnabled ? <><p role="alert">{directory.error}</p><button type="button" data-testid="retry-commands" onClick={directory.retry}>Retry</button></> : null}
-      {commands.length === 0 ? <p>{capabilities?.commands !== true ? 'This Provider does not expose native commands.' : 'No matching native commands.'}</p>
-        : <div role="listbox" id={`${controlId}-commands`} aria-label="Native commands">{commands.map((command, index) => <button
+      {directory.status === 'loading' && nativeCommandsEnabled ? <p role="status">{t('composer.loadingCommands')}</p> : null}
+      {directory.status === 'failed' && nativeCommandsEnabled ? <><p role="alert">{directory.error}</p><button type="button" data-testid="retry-commands" onClick={directory.retry}>{t('common.retry')}</button></> : null}
+      {commands.length === 0 ? <p>{capabilities?.commands !== true ? t('composer.noCommands') : t('composer.noMatchingCommands')}</p>
+        : <div role="listbox" id={`${controlId}-commands`} aria-label={t('composer.nativeCommands')}>{commands.map((command, index) => <button
           type="button" role="option" aria-selected={index === commandIndex} id={`${controlId}-command-${index}`} key={command.id}
           onMouseDown={(event) => event.preventDefault()} onClick={() => chooseCommand(command)}>
           <strong>/{command.name}</strong><span className="agent-command-description" title={command.description}>{command.shortDescription || command.description}</span>
-          {consoleCommands.some((local) => local.id === command.id) ? <small className="agent-command-kind">Console</small>
-            : command.kind !== 'command' ? <small className="agent-command-kind">{command.kind === 'skill' ? 'Skill' : 'Prompt'}</small> : null}
+          {consoleCommands.some((local) => local.id === command.id) ? <small className="agent-command-kind">{t('composer.kindConsole')}</small>
+            : command.kind !== 'command' ? <small className="agent-command-kind">{command.kind === 'skill' ? t('composer.kindSkill') : t('composer.kindPrompt')}</small> : null}
         </button>)}</div>}
     </div> : null}
     <div className="agent-composer-draft" hidden={hideDraft}>
     {firstInputContext ? <p className="agent-composer-note" role="status">
-      {firstInputContext.state === 'pending' ? 'History from the previous session will be included with your first message.'
-        : firstInputContext.state === 'restoring' ? 'Checking history from the previous session…'
-        : firstInputContext.state === 'unavailable' ? 'History delivery could not be checked. Images remain paused until it is confirmed.'
-        : 'History delivery is not yet confirmed. Images remain paused.'}
-      {firstInputContext.onRetry && ['unavailable', 'unknown', 'dispatching', 'accepted'].includes(firstInputContext.state) ? <> <button type="button" onClick={firstInputContext.onRetry}>Check again</button></> : null}
+      {firstInputContext.state === 'pending' ? t('composer.historyPending')
+        : firstInputContext.state === 'restoring' ? t('composer.historyChecking')
+        : firstInputContext.state === 'unavailable' ? t('composer.historyUnavailable')
+        : t('composer.historyUnconfirmed')}
+      {firstInputContext.onRetry && ['unavailable', 'unknown', 'dispatching', 'accepted'].includes(firstInputContext.state) ? <> <button type="button" onClick={firstInputContext.onRetry}>{t('composer.checkAgain')}</button></> : null}
     </p> : null}
     {attachments}
-    {selectedSkill ? <div className="agent-composer-attachments" aria-label="Selected skill">
+    {selectedSkill ? <div className="agent-composer-attachments" aria-label={t('composer.selectedSkill')}>
       <span className="agent-skill-tag">
-        <button type="button" aria-label={`View skill ${selectedSkill.name}`} onClick={() => {
+        <button type="button" aria-label={t('composer.viewSkill', { name: selectedSkill.name })} onClick={() => {
           if (onInspectCommand) onInspectCommand(selectedSkill);
           else { currentDraft.inspectedSkill = selectedSkill; refresh((value) => value + 1); }
         }}><span aria-hidden="true">⌘</span> <span>{selectedSkill.name}</span></button>
-        <button type="button" aria-label={`Remove skill ${selectedSkill.name}`} disabled={busy || readOnly} onClick={() => { currentDraft.selectedSkill = undefined; refresh((value) => value + 1); focusInput(); }}>×</button>
+        <button type="button" aria-label={t('composer.removeSkill', { name: selectedSkill.name })} disabled={busy || readOnly} onClick={() => { currentDraft.selectedSkill = undefined; refresh((value) => value + 1); focusInput(); }}>×</button>
       </span>
-      {nativeBusy ? <span className="agent-composer-note">This Provider can invoke skills when the current turn finishes.</span> : null}
+      {nativeBusy ? <span className="agent-composer-note">{t('composer.skillAfterTurn')}</span> : null}
     </div> : null}
-    <label htmlFor={`${controlId}-input`} className="agent-visually-hidden">Message</label>
-    {richEnabled ? <ComposerEditor key={editorIdentity} ref={editorRef} id={`${controlId}-input`} parts={imageDraft.parts} images={imageDraft.images}
+    <div className="agent-composer-capsule">
+    {!ownershipReadOnly ? showsSettings && state?.agent ? <AgentSessionSettings entries={menuEntries} items={menu} sessionState={session} key={agentId} state={state} disabled={false} readOnly={forcedReadOnly} view={currentDraft.view} busy={busy}
+        onView={setMenuView}
+        onPendingChange={(value) => { currentDraft.settingPending = value; if (mounted.current) refresh((count) => count + 1); }}
+        onSelect={onSetSessionSetting && !mutationBlocked ? async (id, value) => { if (latest.current.draftOnly || latest.current.mutationBlocked || latest.current.agentId !== agentId) return; await onSetSessionSetting(id, value); } : undefined} renderError={renderSessionSettingError}>{sessionControls}</AgentSessionSettings>
+      : <div className="agent-session-controls"><ComposerMenu entries={menuEntries} open={currentDraft.view === 'actions'} onOpen={open => setMenuView(open ? 'actions' : undefined)} /></div> : null}
+    <label htmlFor={`${controlId}-input`} className="agent-visually-hidden">{t('composer.message')}</label>
+    {richEnabled ? <ComposerEditor key={editorIdentity} ref={editorRef} id={`${controlId}-input`} parts={imageDraft.parts} images={imageDraft.images} placeholder={placeholder} label={t('composer.message')}
       disabled={(blocked || agentId === '') && !draftOnly && !laterMode || readOnly && !laterMode || busy} onChange={parts => { imageDraft.setParts(parts); currentDraft.commandIndex = 0; currentDraft.commandsDismissed = false; currentDraft.feedback = undefined; }}
       onFiles={addImageFiles} onImport={importImageParts} onRetry={imageId => { if (!blockFirstInputImages()) imageDraft.retry(imageId); }} onKeyDown={handleKeyDown}
       describedBy={`${controlId}-hint`} controls={showCommands && commands.length > 0 ? `${controlId}-commands` : undefined}
@@ -635,54 +691,29 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
       onCompositionEnd={() => { composing.current = false; }}
       disabled={!ownershipReadOnly && ((blocked || agentId === '') && !draftOnly && !laterMode || readOnly && !laterMode || busy)}
       readOnly={ownershipReadOnly}
-      placeholder={ownershipReadOnly ? '' : forcedReadOnly ? readOnlyLabel ?? 'This recording is read-only.' : readOnly && !laterMode ? readOnlyHint : blocked && !laterMode ? availability.words : agentId !== '' || draftOnly || laterMode ? 'Message…' : 'Open or attach to an Agent first.'}
+      placeholder={placeholder}
       aria-describedby={`${controlId}-hint`}
       aria-controls={showCommands && commands.length > 0 ? `${controlId}-commands` : undefined}
       aria-activedescendant={showCommands && commands.length > 0 ? `${controlId}-command-${commandIndex}` : undefined}
     />}
-    </div>
-    </div>
-    <p id={`${controlId}-hint`} hidden={forcedReadOnly} className={`agent-composer-note${readOnly && !laterMode ? '' : ' agent-visually-hidden'}`}>{readOnly && !laterMode ? readOnlyHint : <>{nativeBusy ? 'Enter to send now' : 'Enter to send'} · Shift+Enter or hold Send for a new line · / for commands</>}</p>
-    {!ownershipReadOnly ? <div className="agent-composer-actions">
-      {state?.agent && !draftOnly && settings !== 'none' ? <AgentSessionSettings actions={toolbarActions} sessionState={session} key={agentId} state={state} disabled={false} readOnly={forcedReadOnly} view={currentDraft.view} busy={busy}
-        onView={(view) => { currentDraft.view = view; refresh((value) => value + 1); }}
-        onPendingChange={(value) => { currentDraft.settingPending = value; if (mounted.current) refresh((count) => count + 1); }}
-        onSelect={onSetSessionSetting && !mutationBlocked ? async (id, value) => { if (latest.current.draftOnly || latest.current.mutationBlocked || latest.current.agentId !== agentId) return; await onSetSessionSetting(id, value); } : undefined} renderError={renderSessionSettingError}>{sessionControls}</AgentSessionSettings> : <div className="agent-session-controls">
-          <AgentActionToolbar actions={toolbarActions} overflowOpen={currentDraft.view === 'actions'}
-            onOverflow={open => { currentDraft.view = open ? 'actions' : undefined; refresh(value => value + 1); }} />
-        </div>}
-      <AgentActivityStatus sessionState={activitySession} host={host} visible={activityVisible} state={draftOnly ? undefined : state}
-        commandPending={pending === 'command'}
-        interruptDisabled={!canInterrupt || currentDraft.interruptPending === true || (pending !== undefined && pending !== 'command') || !onCancel}
-        interruptLabel={currentDraft.interruptPending ? 'Interrupting…' : interruptRequested ? 'Interrupt requested' : 'Interrupt'}
+    {!ownershipReadOnly ? <>
+      <InterruptButton shown={working || waitingForAnswer || pending === 'command'}
+        disabled={!canInterrupt || currentDraft.interruptPending === true || (pending !== undefined && pending !== 'command') || !onCancel}
+        label={currentDraft.interruptPending ? t('composer.interrupting') : interruptRequested ? t('composer.interruptRequested') : t('composer.interrupt')}
+        title={state?.agent?.capabilities.cancel ? t('composer.interruptTitle') : t('composer.interruptUnavailable')}
         onInterrupt={() => void run('cancel')} />
-      {laterMode ? <button type="button" data-testid="prompt-submit" aria-label={pending === 'send' ? 'Sending…' : sendLater!.label} title={laterBlocked ?? `${sendLater!.label} · Hold for a new line`}
-        disabled={busy || !hasContent || !!laterBlocked} {...sendButtonPress}><span aria-hidden="true">{pending === 'send' ? '…' : '↑'}</span></button>
-      : <button type="button" data-testid="prompt-submit" aria-label={pending === 'send' ? 'Sending…' : 'Send message'} title={hasImages && pendingFirstInputContext ? firstInputImageNotice : `${nativeBusy ? 'Send input to the active native turn' : 'Start a new native turn'} · Hold for a new line`} disabled={!canSubmit || readOnly || busy || hasImages && pendingFirstInputContext || (selectedSkill ? nativeBusy || !onExecuteCommand : !hasContent || (!imageSendReady && !canWait) || (!isCommand && (capabilities?.sendMessage === false || (!onSendMessage && !onSendMessageContent && !canWait))))} {...sendButtonPress}><span aria-hidden="true">{pending === 'send' ? '…' : '↑'}</span></button>}
-    </div> : null}
-    {laterBlocked ? <p className="agent-composer-note" role="status">{laterBlocked}</p> : null}
-    {waiting.items[0]?.phase === 'error' ? <p className="agent-composer-note" role="alert">
-      {waiting.items[0].reason}{waiting.items[0].dispatched ? ' Check the conversation before dismissing this message to continue the queue.' : ''}
-    </p> : null}
-    {richEnabled && imageDraft.storageError ? <div className="agent-composer-note agent-draft-storage-status" role="status">
-      <span>{imageDraft.storageError}</span>
-      <button type="button" onClick={imageDraft.retryStorage} disabled={imageDraft.storageBusy} aria-label="Retry draft storage">Retry</button>
-    </div> : null}
-    {richEnabled && imageDraft.error ? <p className="agent-composer-note" role="alert">{imageDraft.error}</p> : null}
-    {hasImages && pendingFirstInputContext && feedback?.message !== firstInputImageNotice ? <p className="agent-composer-note" role="status">{firstInputImageNotice}</p> : null}
-    {hasResources ? <div className="agent-resource-draft-list" aria-label="Resource uploads">{resourceDraft.items.map(({ id, label, record }) => <div className="agent-resource-draft" key={id}>
-      <span><strong>[{label}]</strong> {record?.name ?? 'File unavailable'} {record ? <small>{record.file.size.toLocaleString()} bytes · {record.status === 'uploading' ? `Uploading ${Math.round(record.progress * 100)}%` : record.status === 'ready' ? 'Ready' : record.status}</small> : null}</span>
-      {record?.error ? <span role="alert">{record.error}</span> : null}
-      {record?.status === 'failed' ? <button type="button" disabled={!ready || busy} onClick={() => resourceDraft.retry(id)}>Retry {label}</button> : null}
-      <button type="button" disabled={busy || readOnly} aria-label={`Remove ${label}`} onClick={() => imageDraft.setParts(imageDraft.parts.filter(part => part.type !== 'resource' || part.resourceId !== id))}>Remove</button>
-    </div>)}</div> : null}
-    {hasResources && (draftScope || imageDraftBinding?.scope) && !resourceDraft.storageError ? <p role="status" className="agent-composer-note">{imageDraft.storageSaved && !resourceDraft.storageBusy ? 'Resource draft saved on this device.' : 'Saving resource draft…'}</p> : null}
-    {hasResources && resourceDraft.storageError ? <p role="status" className="agent-composer-note">{resourceDraft.storageError}</p> : null}
-    {hasResources && !ready ? <p role="status" className="agent-composer-note">Resources stay in your draft until the session is ready.</p> : null}
+      {laterMode ? <button type="button" className="agent-composer-send" data-testid="prompt-submit" aria-label={pending === 'send' ? t('composer.sending') : sendLater!.label} title={laterBlocked ?? t('composer.sendLaterTitle', { label: sendLater!.label })}
+        disabled={busy || !hasContent || !!laterBlocked} {...sendButtonPress}>{sendIcon}</button>
+      : <button type="button" className="agent-composer-send" data-testid="prompt-submit" aria-label={pending === 'send' ? t('composer.sending') : t('composer.send')} title={hasImages && pendingFirstInputContext ? firstInputImageNotice : nativeBusy ? t('composer.sendTitleBusy') : t('composer.sendTitle')}
+        disabled={sendDisabled} {...sendButtonPress}>{sendIcon}</button>}
+    </> : null}
+    </div>
+    </div>
+    {/* The activity is said on screen by the timeline's status line; assistive technology hears it here. */}
+    {!ownershipReadOnly ? <div className="agent-visually-hidden"><AgentActivityStatus sessionState={activitySession} host={host} visible={activityVisible} state={draftOnly ? undefined : state} commandPending={pending === 'command'} /></div> : null}
     {hasImages ? <ImageUploadStatus parts={imageDraft.parts} images={imageDraft.images} connected={ready} onOpen={imageId => editorRef.current?.openImage(imageId)} /> : null}
-    {!ownershipReadOnly && !draftOnly && agentId === '' ? <p className="agent-composer-note">Open or attach to an Agent first.</p> : null}
-    {feedback && !(feedback.delivery && state?.outgoingMessages !== undefined) ? commandRecovery != null ? <div className="agent-composer-note">{commandRecovery}</div>
-      : <p className="agent-composer-note" role={feedback.kind === 'error' ? 'alert' : 'status'}>{feedback.message}</p> : null}
+    </div>
+    <p id={`${controlId}-hint`} hidden={forcedReadOnly} className={`agent-composer-note${readOnly && !laterMode ? '' : ' agent-visually-hidden'}`}>{readOnly && !laterMode ? readOnlyHint : nativeBusy ? t('composer.hintBusy') : t('composer.hint')}</p>
     {!draftOnly && !onInspectCommand && currentDraft.inspectedSkill && state ? <AgentCommandDetails key={`${agentId}:${currentDraft.inspectedSkill.id}`}
       command={currentDraft.inspectedSkill} resources={state.resources} onRequestResource={onRequestResource}
       onResolveResource={onResolveResource} resourceScopeKey={JSON.stringify([agentId, currentDraft.inspectedSkill.id])}
@@ -690,3 +721,11 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   </section>;
 }
 
+/** The small line icons of the "+" menu's items. */
+function MenuIcon({ kind }: { kind: 'image' | 'file' | 'command' | 'queue' }) {
+  const path = kind === 'image' ? 'M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5zM4.5 16l4.5-4.5 4 4 2.5-2.5 4 4M15.5 8.5h.01'
+    : kind === 'file' ? 'M14 3.5H7.5A2 2 0 0 0 5.5 5.5v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8L14 3.5zM14 3.5V8h4.5'
+    : kind === 'command' ? 'M15 4 9 20'
+    : 'M5 7h14M5 12h14M5 17h8';
+  return <svg viewBox="0 0 24 24" width="18" height="18"><path d={path} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+}

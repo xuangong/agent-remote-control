@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslate } from './locale.js';
 import type { ImageUploadReceipt, MessagePart } from '@orchardworks/agent-remote-protocol';
 import { readImageDraft, writeImageDraft, imageDraftScopeGeneration, cacheDraftImage, lookupDraftImage, retainDraftImages, restoreCachedDraftImage, type ImageDraft, type DraftImage, type ImageDraftBinding, type ImageDraftRecipient, type ImageDraftStorageSnapshot, type ImageDraftWriteResult, type ImageDraftReplacement, registerImageDraftWriter, flushReleasedImageDraftWriters, imageDraftRetention } from '../image-drafts.js';
 import { draftText, normalizeDraftParts, snapshotContent, type DraftPart } from './composer-document.js';
@@ -8,6 +9,7 @@ interface DraftEntry { draft: ImageDraft; inputText: string; revision: number; h
 export function useImageDraft({ scope: suppliedScope, sessionKey, text, enabled, active, upload, binding, recipient, onTextChange }: {
   scope?: string; binding?: ImageDraftBinding; recipient?: ImageDraftRecipient; sessionKey: string; text: string; enabled: boolean; active: boolean; upload?: UploadImage; onTextChange(text: string): void;
 }) {
+  const t = useTranslate();
   const entries = useRef(new Map<string, DraftEntry>());
   const scope = binding?.scope ?? suppliedScope;
   const key = binding?.key ?? JSON.stringify([scope ?? 'memory', sessionKey]);
@@ -68,8 +70,8 @@ export function useImageDraft({ scope: suppliedScope, sessionKey, text, enabled,
     const savedRevision = current.revision;
     let failed = false;
     current.saving = writeImageDraft(snapshot, current.generation)
-      .then(result => { current.result = result; if (result.status === 'saved') { current.savedRevision = savedRevision; current.storageError = undefined; } else { current.storageError = 'Images were not saved because this storage owner retired.'; } })
-      .catch(() => { failed = true; current.dirty = true; current.storageError = 'Images are not saved on this device. Keep this page open.'; })
+      .then(result => { current.result = result; if (result.status === 'saved') { current.savedRevision = savedRevision; current.storageError = undefined; } else { current.storageError = t('composer.imagesRetired'); } })
+      .catch(() => { failed = true; current.dirty = true; current.storageError = t('composer.imagesNotSaved'); })
       .finally(() => { current.saving = undefined; if (current.dirty && !failed) flush(); notify(); });
   }
   function persist(immediate = false): void {
@@ -107,7 +109,7 @@ export function useImageDraft({ scope: suppliedScope, sessionKey, text, enabled,
         const savedContent = saved.parts.some(part => part.type !== 'text' || part.text.length > 0);
         current.draft = !savedContent && current.inputText ? { ...saved, parts: [{ type: 'text', text: current.inputText }] } : saved;
         for (const image of Object.values(saved.images)) {
-          if (!image.blob) { image.status = 'unavailable'; image.error = 'Local image bytes are missing. Replace or remove this image.'; image.attachment = undefined; }
+          if (!image.blob) { image.status = 'unavailable'; image.error = t('composer.imageBytesMissing'); image.attachment = undefined; }
           else { cacheDraftImage(scope ?? '', image.imageId, image.blob, current.generation); if (image.status === 'uploading' || image.status === 'ready') image.status = 'pending'; }
         }
         if (mounted.current && currentKey.current === entryKey) callbacks.current.onTextChange(draftText(current.draft.parts));
@@ -212,7 +214,7 @@ export function useImageDraft({ scope: suppliedScope, sessionKey, text, enabled,
           receiptOwners.current.set(image, recipientOwner.token);
         } catch (error) {
           if (!ownsUpload() || current.draft.images[image.imageId] !== image) return;
-          image.status = 'failed'; image.error = error instanceof Error ? error.message : 'Image upload failed.';
+          image.status = 'failed'; image.error = error instanceof Error ? error.message : t('composer.imageUploadFailed');
         }
         changed();
       }
@@ -233,8 +235,8 @@ export function useImageDraft({ scope: suppliedScope, sessionKey, text, enabled,
     const parts: DraftPart[] = [];
     current.error = undefined;
     for (const blob of files) {
-      if (!['image/png', 'image/jpeg', 'image/webp'].includes(blob.type)) { current.error = 'Unsupported image format. Choose PNG, JPEG, or WebP.'; break; }
-      if (blob.size > 10 * 1024 * 1024 || bytes + blob.size > 20 * 1024 * 1024 || count + parts.length >= 8) { current.error = 'Images exceed the limit: 8 images, 10 MiB each, 20 MiB total.'; break; }
+      if (!['image/png', 'image/jpeg', 'image/webp'].includes(blob.type)) { current.error = t('composer.imageFormat'); break; }
+      if (blob.size > 10 * 1024 * 1024 || bytes + blob.size > 20 * 1024 * 1024 || count + parts.length >= 8) { current.error = t('composer.imageLimits'); break; }
       const imageId = crypto.randomUUID();
       cacheDraftImage(scope ?? '', imageId, blob, current.generation);
       current.draft.images[imageId] = { imageId, blob, uploadId: crypto.randomUUID(), status: 'pending', progress: 0 };
@@ -247,7 +249,7 @@ export function useImageDraft({ scope: suppliedScope, sessionKey, text, enabled,
   return {
     hydrated: current.hydrated && !current.restoring && !current.readFailed,
     parts: current.draft.parts, images, error: current.error,
-    storageError: current.readFailed ? 'Saved draft could not be restored.' : hasImages ? current.storageError : undefined,
+    storageError: current.readFailed ? t('composer.draftNotRestored') : hasImages ? current.storageError : undefined,
     storageBusy: Boolean(current.restoring || current.saving || current.timer || current.dirty), retryStorage,
     storageSaved: Boolean(scope && current.hydrated && !current.readFailed && !current.storageError && current.savedRevision === current.revision),
     ready: current.draft.parts.every(part => part.type !== 'image' || eligible(images[part.imageId])),
@@ -256,7 +258,7 @@ export function useImageDraft({ scope: suppliedScope, sessionKey, text, enabled,
     async retain(isCurrent: () => boolean): Promise<boolean> {
       const snapshot = await flushStorage(current.revision, () => mounted.current && documentCurrent() && currentKey.current === entryKey && isCurrent());
       if (snapshot.status === 'cancelled') return false;
-      if (snapshot.status !== 'ready' || snapshot.savedRevision !== snapshot.revision) throw new Error('Draft could not be saved. Keep this page open and retry.');
+      if (snapshot.status !== 'ready' || snapshot.savedRevision !== snapshot.revision) throw new Error(t('composer.draftNotSaved'));
       return true;
     },
     digests() { return Object.fromEntries(Object.values(images).flatMap(image => eligible(image) && image.attachment ? [[image.attachment.attachmentId, image.attachment.sha256]] : [])); },
@@ -293,18 +295,18 @@ export function useImageDraft({ scope: suppliedScope, sessionKey, text, enabled,
       current.error = undefined;
       for (const part of parts) {
         if (part.type === 'text') { result.push(part); continue; }
-        if (part.type === 'resource') { current.error = 'Use the Resource picker to attach a file to this draft.'; notify(); continue; }
+        if (part.type === 'resource') { current.error = t('composer.useResourcePicker'); notify(); continue; }
         if (current.draft.parts.filter(value => value.type === 'image').length + result.filter(value => value.type === 'image').length >= 8) { current.error = 'A message can contain at most 8 images.'; notify(); break; }
         const blob = images[part.imageId]?.blob ?? lookupDraftImage(scope ?? '', part.imageId);
         const extraBytes = referencedIds.has(part.imageId) ? 0 : blob?.size ?? 0;
-        if (bytes + extraBytes > 20 * 1024 * 1024) { current.error = 'Images exceed the limit: 8 images, 10 MiB each, 20 MiB total.'; notify(); break; }
+        if (bytes + extraBytes > 20 * 1024 * 1024) { current.error = t('composer.imageLimits'); notify(); break; }
         if (images[part.imageId]) result.push(part);
         else if (imported.has(part.imageId)) result.push(imported.get(part.imageId)!);
         else if (blob) {
           const added = addFiles([blob]);
           if (!added.length) break;
           imported.set(part.imageId, added[0]!); result.push(...added);
-        } else { current.error = 'Copied image bytes are unavailable. Select the original file again.'; notify(); continue; }
+        } else { current.error = t('composer.copiedImageMissing'); notify(); continue; }
         referencedIds.add(part.imageId); bytes += extraBytes;
       }
       return result;

@@ -7,6 +7,7 @@ import { keymap } from 'prosemirror-keymap';
 import { history, redo, undo } from 'prosemirror-history';
 import type { DraftImage } from '../image-drafts.js';
 import { normalizeDraftParts, type DraftPart } from './composer-document.js';
+import { useTranslate } from './locale.js';
 import { ImagePreview } from './ImagePreview.js';
 import { isCoarsePointer, returnKeyAction } from './return-key.js';
 
@@ -38,8 +39,11 @@ interface Props {
   onImport(parts: readonly DraftPart[]): DraftPart[] | Promise<DraftPart[]>; onRetry(imageId: string): void;
   onKeyDown(event: globalThis.KeyboardEvent): void;
   describedBy?: string; controls?: string; activeDescendant?: string;
+  /** The editor's accessible name and its placeholder, in the reader's words. */
+  label?: string; placeholder?: string;
 }
 export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function ComposerEditor(props, ref) {
+  const t = useTranslate();
   const container = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView>();
   const latest = useRef(props); latest.current = props;
@@ -87,7 +91,7 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
     if (!container.current) return;
     const editor = new EditorView(container.current, {
       state: EditorState.create({ schema, doc: toDocument(latest.current.parts), plugins: [history(), keymap({ 'Mod-z': undo, 'Mod-y': redo, 'Mod-Shift-z': redo, 'Shift-Enter': (state, dispatch) => { dispatch?.(state.tr.insertText('\n')); return true; } }), keymap(baseKeymap)] }),
-      attributes: { id: props.id, role: 'textbox', 'aria-label': 'Message', 'aria-multiline': 'true', 'data-testid': 'prompt-input', enterkeyhint: isCoarsePointer() ? 'enter' : 'send', class: 'agent-composer-editor', 'data-placeholder': 'Message…' },
+      attributes: { id: props.id, role: 'textbox', 'aria-label': latest.current.label ?? 'Message', 'aria-multiline': 'true', 'data-testid': 'prompt-input', enterkeyhint: isCoarsePointer() ? 'enter' : 'send', class: 'agent-composer-editor', 'data-placeholder': latest.current.placeholder ?? 'Message…' },
       editable: () => !latest.current.disabled,
       dispatchTransaction(transaction) {
         if (bookmark.current) bookmark.current = bookmark.current.map(transaction.mapping);
@@ -195,11 +199,14 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
       element.dataset.state = image?.status ?? 'unavailable';
       element.style.setProperty('--image-upload-progress', `${Math.round((image?.progress ?? 0) * 100)}%`);
       const label = props.parts.find(part => part.type === 'image' && part.imageId === element.dataset.imageId);
-      const state = image?.status === 'uploading' ? `${Math.round(image.progress * 100)}%` : image?.status === 'ready' ? 'Ready' : image?.status ?? 'Unavailable';
-      element.title = image?.error ?? `${label?.type === 'image' ? label.label : 'Image'}: ${state}`;
+      const state = image?.status === 'uploading' ? `${Math.round(image.progress * 100)}%` : image?.status === 'ready' ? t('composer.uploadReady')
+        : image?.status === 'pending' ? t('composer.uploadPending') : image?.status === 'failed' ? t('composer.uploadFailed') : t('common.unavailable');
+      element.title = image?.error ?? t('composer.imageState', { label: label?.type === 'image' ? label.label : t('composer.imageLabel'), state });
       element.setAttribute('aria-label', element.title);
     }
     editor.dom.setAttribute('aria-disabled', String(props.disabled));
+    if (props.label) editor.dom.setAttribute('aria-label', props.label);
+    if (props.placeholder !== undefined) editor.dom.setAttribute('data-placeholder', props.placeholder);
     for (const [attribute, value] of [['aria-describedby', props.describedBy], ['aria-controls', props.controls], ['aria-activedescendant', props.activeDescendant]] as const) {
       if (value) editor.dom.setAttribute(attribute, value); else editor.dom.removeAttribute(attribute);
     }
@@ -212,8 +219,8 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
   }
   const image = selected ? props.images[selected] : undefined;
   const selectedPart = props.parts.find(part => part.type === 'image' && part.imageId === selected);
-  const imageStatus = image?.status === 'ready' ? 'Ready to send' : image?.status === 'uploading' ? `Uploading ${Math.round(image.progress * 100)}%`
-    : image?.status === 'pending' ? 'Waiting to upload' : image?.status === 'failed' ? 'Upload failed' : 'Image unavailable';
+  const imageStatus = image?.status === 'ready' ? t('composer.imageReadyToSend') : image?.status === 'uploading' ? t('composer.uploading', { percent: Math.round(image.progress * 100) })
+    : image?.status === 'pending' ? t('composer.imageWaiting') : image?.status === 'failed' ? t('composer.imageFailedState') : t('composer.imageUnavailable');
   function closePreview(): void {
     setPreviewOpen(false);
     const editor = view.current;
@@ -224,11 +231,11 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
   }
   return <>
     <div ref={container} className="agent-composer-editor-container" />
-    {selected && previewOpen ? <ImagePreview blob={image?.blob} label={selectedPart?.type === 'image' ? selectedPart.label : 'Image'}
+    {selected && previewOpen ? <ImagePreview blob={image?.blob} label={selectedPart?.type === 'image' ? selectedPart.label : t('composer.imageLabel')}
       status={imageStatus} error={image?.error} progress={image?.status === 'uploading' ? image.progress : undefined} onClose={closePreview} actions={<>
-        <button type="button" className="agent-image-preview-remove" disabled={props.disabled} onClick={() => { setPreviewOpen(false); remove(selected); }}>Remove</button>
-        <button type="button" disabled={props.disabled} onClick={() => { replacing.current = selected; bookmark.current = view.current?.state.selection.getBookmark(); replaceInput.current?.click(); }}>Replace</button>
-        {image?.status === 'failed' ? <button type="button" className="agent-image-preview-retry" disabled={props.disabled || !image.blob} onClick={() => props.onRetry(selected)}>Retry</button> : null}
+        <button type="button" className="agent-image-preview-remove" disabled={props.disabled} onClick={() => { setPreviewOpen(false); remove(selected); }}>{t('common.remove')}</button>
+        <button type="button" disabled={props.disabled} onClick={() => { replacing.current = selected; bookmark.current = view.current?.state.selection.getBookmark(); replaceInput.current?.click(); }}>{t('composer.replaceImage')}</button>
+        {image?.status === 'failed' ? <button type="button" className="agent-image-preview-retry" disabled={props.disabled || !image.blob} onClick={() => props.onRetry(selected)}>{t('common.retry')}</button> : null}
       </>} /> : null}
     <input ref={replaceInput} hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={event => {
       const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = '';

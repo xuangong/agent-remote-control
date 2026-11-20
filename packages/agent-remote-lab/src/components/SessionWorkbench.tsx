@@ -1,5 +1,5 @@
 import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-client-web/browser';
-import { isUncertainSend, sessionFiles, timelineEntryKey, remoteSessionState, sessionActivityLabel, sessionNotice, sessionNoticeWords, type RemoteSessionState, type SessionDescription, type SessionAttribution, type SessionFacts, type SessionNotice } from '@orchardworks/agent-client';
+import { errorWords, isUncertainSend, sessionFiles, timelineEntryKey, remoteSessionState, sessionActivityLabel, sessionNotice, sessionNoticeWords, type RemoteSessionState, type SessionDescription, type SessionAttribution, type SessionFacts, type SessionNotice, type MessageKey } from '@orchardworks/agent-client';
 import { SessionControlNotice } from './SessionControlNotice.js';
 import { SessionViewFrame } from './SessionViewFrame.js';
 import { useFeedbackToast, useToastAnchor } from './Toast.js';
@@ -82,7 +82,7 @@ export function SessionWorkbench({ assistant, details, conversationTitle, sessio
   const readOnly = recordingReadOnly || controlReadOnly;
   // The composer presents failures of its own setting and command controls where they happen.
   const { actions: suppliedFeedbackActions, reauthenticate } = useActionFeedback(suppliedActions, state?.agent?.id, isAuthenticationError,
-    renderCommandError ? ['Change session setting', 'Run command'] : ['Change session setting']);
+    renderCommandError ? ['composer.action.setting', 'composer.action.command'] : ['composer.action.setting']);
   const actions: LabWorkbenchActions = draftOnly ? {} : readOnly || mutationBlocked ? { searchTimeline: suppliedFeedbackActions.searchTimeline, loadSearchMatch: suppliedFeedbackActions.loadSearchMatch, loadOlder: suppliedFeedbackActions.loadOlder, requestResource: suppliedFeedbackActions.requestResource, resolveResource: suppliedFeedbackActions.resolveResource, deleteMessage: suppliedFeedbackActions.deleteMessage } : session.synchronized ? { ...suppliedFeedbackActions,
     retryMessage: session.operations.send_message.allowed ? suppliedFeedbackActions.retryMessage : undefined,
     editPrompt: session.operations.send_message.allowed ? suppliedFeedbackActions.editPrompt : undefined,
@@ -113,13 +113,13 @@ export function SessionWorkbench({ assistant, details, conversationTitle, sessio
   const facts: SessionFacts = { session, host, replica: state };
   const notice = sessionNotice(facts);
   const activity = session.activity;
-  const activityLabel = sessionActivityLabel(facts) ?? '';
+  const t = useTranslate();
+  const activityLabel = sessionActivityLabel(facts, false, t) ?? '';
   const timelineNotice = notice && (notice.kind === 'unavailable' || notice.kind === 'agent_unavailable' || notice.kind === 'failed' && !failureInTimeline) ? notice : undefined;
   const hasTarget = (draftSessionKey ?? attachingAgentId) !== undefined;
-  const hostNotice = notice?.kind === 'host_offline' && !(state === undefined && loadingNotice) ? sessionNoticeWords(notice) : undefined;
+  const hostNotice = notice?.kind === 'host_offline' && !(state === undefined && loadingNotice) ? sessionNoticeWords(notice, t) : undefined;
   const viewOptions = <SessionViewOptions key={displayScope} process={process} lettersVisible={lettersVisible} onLettersVisibleChange={setLettersVisible} />;
   // The assistant's details: what its place and its presentation know, with this conversation's process mode, settings and files.
-  const t = useTranslate();
   const filePreview = useContext(FilePreviewContext);
   const detailsShown = !!detailsHost?.open && visible && (detailsHost.surface === 'sheet' || !!detailsHost.slot);
   const files = useMemo(() => detailsShown && state ? sessionFiles(state.timeline.entries) : [], [detailsShown, state?.timeline.entries]);
@@ -161,7 +161,7 @@ export function SessionWorkbench({ assistant, details, conversationTitle, sessio
       leading={headingMode === 'inline' ? <>{headingStart}{workspaceLink}{viewOptions}<span className="lab-heading-search-slot" ref={setHeadingSearchTarget} /></> : undefined}
       trailing={headingMode === 'inline' ? <>{sessionManager}<span className="lab-conversation-status">{activityLabel}</span></> : undefined}>
         {conversationPath}
-        <h2 hidden={!!conversationPath} className="agent-session-title" data-session-status={activity}>{hasReplica || hasTarget ? 'Conversation' : 'Ready for a session'}</h2>
+        <h2 hidden={!!conversationPath} className="agent-session-title" data-session-status={activity}>{hasReplica || hasTarget ? t('assistants.conversation') : t('composer.view.ready')}</h2>
         {headingMode === 'inline' ? toggle : null}
     </SessionHeading>}
     {details}
@@ -187,7 +187,7 @@ export function SessionWorkbench({ assistant, details, conversationTitle, sessio
       </div>
       <div ref={composerTouchBoundary} className="lab-composer-input-shell">
         <button ref={toastToggleAnchor} type="button" className="lab-composer-toggle" aria-controls={composerId} aria-expanded={!composerHidden}
-          aria-label={composerHidden ? 'Show message input' : 'Hide message input'} title={composerHidden ? 'Show message input' : 'Hide message input'}
+          aria-label={composerHidden ? t('composer.view.showInput') : t('composer.view.hideInput')} title={composerHidden ? t('composer.view.showInput') : t('composer.view.hideInput')}
           onClick={() => setComposerHidden(hidden => !hidden)}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d={composerHidden ? 'm7 14 5-5 5 5' : 'm7 10 5 5 5-5'} />
@@ -206,7 +206,8 @@ export function SessionWorkbench({ assistant, details, conversationTitle, sessio
             pendingFirstInputContext={pendingFirstInputContext}
             readOnly={readOnly}
             readOnlyCollapsed={composerHidden}
-            readOnlyLabel={controlReadOnly && !recordingReadOnly ? 'Read only' : undefined}
+            readOnlyLabel={controlReadOnly && !recordingReadOnly ? t('composer.view.readOnly') : undefined}
+            recipient={assistantChrome || tileChrome ? assistant?.name : undefined}
             readOnlyNotice={nativeTakeover ?? (!draftOnly && !recordingReadOnly && controlReadOnly && state?.sessionControl ? <SessionControlNotice handoff={handoff ?? session.handoff} control={state.sessionControl} connected={sessionStatus === 'ready'} onTakeControl={suppliedActions.takeControl} /> : undefined)}
             consoleCommands={!readOnly && !mutationBlocked && sessionStatus === 'ready' ? consoleCommands : []}
             onExecuteConsoleCommand={!readOnly && !mutationBlocked && sessionStatus === 'ready' ? onExecuteConsoleCommand : undefined}
@@ -253,34 +254,35 @@ export function SessionWorkbench({ assistant, details, conversationTitle, sessio
 
 const noAuthenticationError = () => false;
 /** Stream capacity explains what frees a slot, and a paused session says how it resumes; other interruptions only reconnect. */
-function useActionFeedback(actions: LabWorkbenchActions, sessionId: string | undefined, isAuthenticationError: (error: unknown) => boolean, presentedInline: readonly string[]): { actions: LabWorkbenchActions; reauthenticate: boolean } {
+function useActionFeedback(actions: LabWorkbenchActions, sessionId: string | undefined, isAuthenticationError: (error: unknown) => boolean, presentedInline: readonly MessageKey[]): { actions: LabWorkbenchActions; reauthenticate: boolean } {
+  const t = useTranslate();
   const activeSession = useRef(sessionId);
   activeSession.current = sessionId;
-  const [failure, setFailure] = useState<{ title: string; message: string; reauthenticate: boolean }>();
-  useFeedbackToast(failure?.title ?? 'Session action', failure?.reauthenticate ? undefined : failure?.message);
+  const [failure, setFailure] = useState<{ title: MessageKey; message: string; reauthenticate: boolean }>();
+  useFeedbackToast(t(failure?.title ?? 'composer.action.session'), failure?.reauthenticate ? undefined : failure?.message);
   useEffect(() => setFailure(undefined), [sessionId]);
   /** `recorded` tells the failures the conversation shows itself, which need no toast. */
-  function report<Args extends unknown[], Result>(title: string, action: ((...args: Args) => Result) | undefined, recorded: (error: unknown) => boolean = () => false) {
+  function report<Args extends unknown[], Result>(title: MessageKey, action: ((...args: Args) => Result) | undefined, recorded: (error: unknown) => boolean = () => false) {
     return action ? async (...args: Args): Promise<Awaited<Result>> => {
       setFailure(undefined);
       try { return await action(...args); }
       catch (error) {
-        if (activeSession.current === sessionId && !recorded(error)) setFailure({ title, message: error instanceof Error ? error.message : 'The action could not be confirmed. Check its status before retrying.', reauthenticate: isAuthenticationError(error) });
+        if (activeSession.current === sessionId && !recorded(error)) setFailure({ title, message: error instanceof Error ? errorWords(error, t) : t('composer.action.unconfirmed'), reauthenticate: isAuthenticationError(error) });
         throw error;
       }
     } : undefined;
   }
   // An uncertain send stays on its outgoing message, which says in plain words what to check and what Retry does next.
   const reportedActions = useMemo(() => ({ ...actions,
-    sendMessage: report('Send message', actions.sendMessage, isUncertainSend), sendMessageContent: report('Send message', actions.sendMessageContent, isUncertainSend),
-    retryMessage: report('Retry message', actions.retryMessage, isUncertainSend),
-    steer: report('Steer session', actions.steer), cancel: report('Stop work', actions.cancel),
-    respondToInteraction: report('Submit response', actions.respondToInteraction),
-    setPlanning: report('Change session mode', actions.setPlanning), setSessionSetting: report('Change session setting', actions.setSessionSetting),
-    listCommands: report('Load commands', actions.listCommands), executeCommand: report('Run command', actions.executeCommand),
-    loadOlder: report('Load conversation history', actions.loadOlder),
-    editPrompt: report('Edit prompt', actions.editPrompt),
-  }), [actions, sessionId]);
+    sendMessage: report('composer.action.send', actions.sendMessage, isUncertainSend), sendMessageContent: report('composer.action.send', actions.sendMessageContent, isUncertainSend),
+    retryMessage: report('composer.action.retry', actions.retryMessage, isUncertainSend),
+    steer: report('composer.action.steer', actions.steer), cancel: report('composer.action.stop', actions.cancel),
+    respondToInteraction: report('composer.action.respond', actions.respondToInteraction),
+    setPlanning: report('composer.action.mode', actions.setPlanning), setSessionSetting: report('composer.action.setting', actions.setSessionSetting),
+    listCommands: report('composer.action.commands', actions.listCommands), executeCommand: report('composer.action.command', actions.executeCommand),
+    loadOlder: report('composer.action.history', actions.loadOlder),
+    editPrompt: report('composer.action.edit', actions.editPrompt),
+  }), [actions, sessionId, t]);
   return { actions: reportedActions, reauthenticate: failure?.reauthenticate === true && !presentedInline.includes(failure.title) };
 }
 
@@ -296,6 +298,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
     searchTriggerTarget?: HTMLElement | null;
     runtimeMutationDisabled: boolean; nativeTakeover?: boolean;
   }) {
+  const t = useTranslate();
   const searchScope = JSON.stringify([state?.agent?.id, state?.timeline.epoch]);
   const [openSearchScope, setOpenSearchScope] = useState<string>();
   const [searchSelection, setSearchSelection] = useState<{ scope: string; key: string; request: number }>();
@@ -349,7 +352,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
   const hasReplica = state !== undefined;
   const isAttaching = !hasReplica && hasTarget;
   const searchButton = state?.timeline.initialized ? <button ref={searchTrigger} type="button" className="lab-timeline-search-trigger"
-    hidden={searchOpen && !searchTriggerTarget} aria-label="Search this session" title="Search this session" aria-expanded={searchOpen}
+    hidden={searchOpen && !searchTriggerTarget} aria-label={t('composer.view.search')} title={t('composer.view.search')} aria-expanded={searchOpen}
     onClick={() => { if (searchOpen) closeSearch(); else setOpenSearchScope(searchScope); }}>
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg>
   </button> : null;
@@ -363,7 +366,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
         searchPanel={searchOpen && state ? <TimelineSearch key={searchScope} state={state} search={actions.searchTimeline} onClose={closeSearch} onClearSelection={() => setSearchSelection(undefined)}
           onSelect={async (match, signal) => {
             if (actions.loadSearchMatch) await scroll.loadOlder(() => actions.loadSearchMatch!(match, { signal }));
-            else if (!state.timeline.entries.some(entry => entry.seqStart === match.seq)) throw new Error('This result loads when the session is ready.');
+            else if (!state.timeline.entries.some(entry => entry.seqStart === match.seq)) throw new Error(t('composer.view.searchLater'));
             signal.throwIfAborted();
             setSearchSelection(previous => ({ scope: searchScope, key: match.key, request: (previous?.request ?? 0) + 1 }));
           }} /> : null}>
@@ -376,7 +379,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
       <div className="lab-timeline-scroll" data-testid="timeline" ref={scroll.viewportRef} tabIndex={0} onScroll={scroll.onScroll} onWheel={scroll.onWheel} onPointerDown={scroll.onPointerDown} onKeyDown={scroll.onKeyDown} onFocus={scroll.onFocus} onTouchStart={scroll.onTouchStart} onTouchMove={scroll.onTouchMove}>
         <div className="lab-conversation-content" ref={scroll.contentRef}>
           {hasReplica ? <>
-            {notice ? <p className="lab-control-note" role="alert">{sessionNoticeWords(notice)}</p> : null}
+            {notice ? <p className="lab-control-note" role="alert">{sessionNoticeWords(notice, t)}</p> : null}
             <AgentTimeline
               state={state}
               assistant={assistant}
@@ -418,11 +421,11 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
             {timelineEnd ? <div className="agent-timeline-entries lab-timeline-end">{timelineEnd}</div> : null}
           </> : <div className="lab-empty-state">
             <span className="lab-empty-icon" aria-hidden="true">↗</span>
-            <h3>Start with a Provider</h3>
-            <p>Open a registered Agent to observe its Timeline, interactions, and durable resources.</p>
+            <h3>{t('composer.view.emptyTitle')}</h3>
+            <p>{t('composer.view.emptyDetail')}</p>
           </div>}
         </div>
       </div>
-      {scroll.showLatest ? <button className="lab-back-to-latest" type="button" onClick={scroll.scrollToLatest}>Back to latest <span aria-hidden="true">↓</span></button> : null}
+      {scroll.showLatest ? <button className="lab-back-to-latest" type="button" onClick={scroll.scrollToLatest}>{t('composer.view.latest')} <span aria-hidden="true">↓</span></button> : null}
     </div>;
 });

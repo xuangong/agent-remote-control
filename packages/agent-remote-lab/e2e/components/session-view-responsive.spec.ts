@@ -20,12 +20,11 @@ test('composer height stays stable from opening through ready and reconnect with
       await page.getByRole('spinbutton', { name: 'View width' }).fill(String(width));
       const view = page.locator('[data-placement="primary"]');
       const composer = view.locator('.agent-composer');
-      const status = view.getByTestId('agent-activity-label');
       const input = view.getByTestId('prompt-input');
       const draft = () => input.evaluate(element => element instanceof HTMLTextAreaElement ? element.value : element.textContent);
       await expectNoConnectionWords(view);
       await expect(composer).not.toContainText('Open or attach to an Agent first.');
-      await expect(input).toHaveCSS('font-size', width <= 760 ? '16px' : '14px');
+      await expect(input).toHaveCSS('font-size', width <= 760 ? '16px' : '14.5px');
       const expectedDraft = query.includes('emptyDraft') ? '' : 'A draft kept while the view resizes';
       expect(await draft()).toBe(expectedDraft);
       const suffix = `${width}-${query.replaceAll('&', '-') || 'draft'}`;
@@ -33,7 +32,9 @@ test('composer height stays stable from opening through ready and reconnect with
       const opening = (await composer.boundingBox())!;
       const timeline = (await view.getByTestId('timeline').boundingBox())!;
       await page.getByRole('checkbox', { name: 'Draft only', exact: true }).uncheck();
-      await expect(status).toBeHidden();
+      // An idle session has no activity: the composer's out-of-sight status says so, and no stop button shows.
+      await expect(view.getByTestId('agent-activity')).toHaveAttribute('data-active', 'false');
+      await expect(view.getByTestId('cancel-submit')).toBeHidden();
       await view.screenshot({ path: testInfo.outputPath(`composer-ready-${suffix}.png`) });
       expect(await draft()).toBe(expectedDraft);
       expect(Math.abs((await composer.boundingBox())!.height - opening.height)).toBeLessThan(1);
@@ -115,7 +116,7 @@ test('native takeover stays reachable before a snapshot in narrow Session Views'
 async function composerGeometry(view: Locator) {
   return view.evaluate(element => {
     const frame = element.querySelector('.lab-session-view')!.getBoundingClientRect();
-    return ['.agent-composer', '.agent-composer-actions', '.agent-session-controls', '.agent-activity', '[data-testid="prompt-submit"]'].map(selector => {
+    return ['.agent-composer', '.agent-composer-capsule', '.agent-composer-plus', '[data-testid="prompt-submit"]'].map(selector => {
       const rect = element.querySelector(selector)!.getBoundingClientRect();
       return [rect.x - frame.x, rect.y - frame.y, rect.width, rect.height].map(value => Math.round(value));
     });
@@ -133,9 +134,11 @@ test('composed Session Views keep the same controls and responsive layout at equ
     await page.getByRole('spinbutton', { name: 'View height' }).fill(String(height));
     for (const view of await views.all()) {
       // Wait for container-query typography to settle before measuring menu effects.
-      await expect(view.getByTestId('prompt-input')).toHaveCSS('font-size', width > 760 ? '14px' : '16px');
+      await expect(view.getByTestId('prompt-input')).toHaveCSS('font-size', width > 760 ? '14.5px' : '16px');
       await expect(view.getByRole('button', { name: 'Hide message input', exact: true })).toBeVisible();
-      await expect(view.getByTestId('turn-elapsed')).toBeVisible();
+      // The turn's time shows in the timeline's status line; the stop button stands beside send while it runs.
+      await expect(view.locator('.agent-turn-status')).toContainText(/\d+s/);
+      await expect(view.getByTestId('cancel-submit')).toBeVisible();
       for (const name of ['Add images', 'Open chat commands', 'Model', 'Permissions']) {
         const { action, trigger } = await revealComposerAction(view, name, true);
         await expect(action).toBeVisible();
@@ -148,7 +151,7 @@ test('composed Session Views keep the same controls and responsive layout at equ
       }
       const contained = await view.evaluate(element => {
         const frame = element.querySelector('.lab-session-view')!.getBoundingClientRect();
-        return [...element.querySelectorAll('.agent-composer-actions button')].filter(button => button.getClientRects().length).every(button => {
+        return [...element.querySelectorAll('.agent-composer-capsule button')].filter(button => button.getClientRects().length).every(button => {
           const rect = button.getBoundingClientRect();
           return rect.left >= frame.left && rect.right <= frame.right + 1 && rect.top >= frame.top && rect.bottom <= frame.bottom + 1;
         });
@@ -210,13 +213,11 @@ test('direct commands close session settings in a wide Session View', async ({ p
   await page.goto('/e2e/fixtures/session-view-responsive.html');
   await page.getByRole('spinbutton', { name: 'View width' }).fill('900');
   const view = page.locator('[data-placement="popup"]');
-  const commands = view.locator('.agent-session-toolbar').getByRole('button', { name: 'Open chat commands', exact: true });
-  await expect(commands).toBeVisible();
   const before = (await view.getByTestId('timeline').boundingBox())!;
   await activateComposerAction(view, 'Model', true);
   const settings = view.getByRole('region', { name: 'Model settings', exact: true });
   await expect(settings).toBeVisible();
-  await commands.click();
+  await activateComposerAction(view, 'Open chat commands');
   await expect(settings).toBeHidden();
   await expect(view.getByRole('listbox', { name: 'Native commands' })).toBeVisible();
   expect((await view.getByTestId('timeline').boundingBox())!.height).toBe(before.height);

@@ -26,7 +26,8 @@ it.each(['page', 'dialog'] as const)('Escape dismisses only the focused settings
   const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
   await act(async () => triggers[1]!.dispatchEvent(escape));
   expect([...triggers].map(trigger => trigger.getAttribute('aria-expanded'))).toEqual(['true', 'false']);
-  expect(document.activeElement).toBe(triggers[1]);
+  // The panel's way back is the composer's "+", which shows while its menu's items stay out of sight.
+  expect(document.activeElement).toBe(container.querySelectorAll('.agent-composer-plus')[1]);
   expect(escape.defaultPrevented).toBe(true);
 });
 
@@ -52,7 +53,8 @@ it('dismisses settings from another control in the same composer without affecti
   const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
   await act(async () => { action.focus(); action.dispatchEvent(escape); });
   expect([...triggers].map(trigger => trigger.getAttribute('aria-expanded'))).toEqual(['true', 'false']);
-  expect(document.activeElement).toBe(triggers[1]);
+  // The panel's way back is the composer's "+", which shows while its menu's items stay out of sight.
+  expect(document.activeElement).toBe(container.querySelectorAll('.agent-composer-plus')[1]);
   expect(escape.defaultPrevented).toBe(true);
 });
 

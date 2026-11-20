@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { activateComposerAction } from '../composer-actions';
 
-test('narrow composed views keep actions on one row and expose overflow without losing the draft', async ({ page }, info) => {
+test('narrow composed views keep the capsule on one row and open the + menu without losing the draft', async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/e2e/fixtures/session-view-responsive.html');
   await page.getByRole('spinbutton', { name: 'View width' }).fill('320');
@@ -39,8 +39,8 @@ test('narrow composed views keep actions on one row and expose overflow without 
     await page.getByRole('spinbutton', { name: 'View width' }).fill(String(width));
     await expect.poll(() => view.evaluate(element => {
       const send = element.querySelector('[data-testid="prompt-submit"]')!.getBoundingClientRect();
-      const toolbar = element.querySelector('.agent-session-toolbar')!;
-      return [...toolbar.querySelectorAll('button')].filter(button => button.getClientRects().length)
+      // "+" (and stop while a turn runs) stand on the send button's line, to its left.
+      return [...element.querySelectorAll('.agent-composer-capsule :is(.agent-composer-plus, .agent-composer-stop)')].filter(button => button.getClientRects().length)
         .every(button => { const box = button.getBoundingClientRect(); return Math.abs(box.y + box.height / 2 - send.y - send.height / 2) < 1 && box.right <= send.x; });
     })).toBe(true);
     await expect(send).toBeVisible();
@@ -51,17 +51,19 @@ test('narrow composed views keep actions on one row and expose overflow without 
   await expect(menu).toBeHidden();
   await expect(more).toBeFocused();
   await expect(view.getByTestId('prompt-input')).toContainText('A draft kept while the view resizes');
+  // The menu is the same at every width: it stays open across a resize and closes back to "+".
   await more.click();
   await page.getByRole('spinbutton', { name: 'View width' }).fill('900');
   await expect(more).toHaveAttribute('aria-expanded', 'true');
-  await more.click();
+  // Escape closes the menu from inside the composer (focus left it for the width field).
+  await more.focus();
+  await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
-  const status = view.getByRole('button', { name: 'Status', exact: true });
-  await expect(status).toBeFocused();
-  await expect(status).toHaveAttribute('aria-expanded', 'false');
-  await page.getByRole('spinbutton', { name: 'View width' }).fill('900');
-  await view.getByRole('button', { name: 'Model', exact: true }).click();
-  await view.getByRole('button', { name: 'Open chat commands', exact: true }).click();
+  await expect(more).toBeFocused();
+  // Opening one of the composer's popovers closes the other: a setting's panel, then the command list.
+  await activateComposerAction(view, 'Model');
+  await expect(view.getByRole('region', { name: 'Model settings' })).toBeVisible();
+  await activateComposerAction(view, 'Open chat commands');
   await expect(view.getByRole('region', { name: 'Model settings' })).toBeHidden();
   await expect(view.getByRole('listbox', { name: 'Native commands' })).toBeVisible();
   await view.getByTestId('prompt-input').press('Escape');

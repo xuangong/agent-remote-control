@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=', 'base64');
 async function upload(page: Page) {
+  await page.getByRole('button', { name: 'More actions', exact: true }).click();
   await page.getByRole('button', { name: 'Add images' }).click();
   await page.locator('input[type=file][multiple]').setInputFiles({ name: 'pixel.png', mimeType: 'image/png', buffer: png });
 }
@@ -96,6 +97,7 @@ test('opens the image across the viewport with readable status and keyboard dism
 test('zooms an uploaded image blob and resets it without changing the draft', async ({ page }) => {
   const imageBytes = await readFile(new URL('../fixtures/markdown-wide.png', import.meta.url));
   const editor = page.getByTestId('prompt-input');
+  await page.getByRole('button', { name: 'More actions', exact: true }).click();
   await page.getByRole('button', { name: 'Add images' }).click();
   await page.locator('input[type=file][multiple]').setInputFiles({ name: 'diagram.png', mimeType: 'image/png', buffer: imageBytes });
   const tag = editor.locator('[data-image-id]');

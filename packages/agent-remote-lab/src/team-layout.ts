@@ -1,5 +1,6 @@
 import type { Team } from '@orchardworks/agent-remote-protocol';
 import type { SessionWindowTarget } from './hooks/useSessionWindows.js';
+import { keyedError } from './team-words.js';
 
 /** Teams supply a layout preset; the workspace owns navigation and window lifetime. */
 export function teamLayoutTargets(team: Team, compact: boolean): { main: SessionWindowTarget; dock: SessionWindowTarget[]; groupRoot?: SessionWindowTarget } {
@@ -10,7 +11,7 @@ export function teamLayoutTargets(team: Team, compact: boolean): { main: Session
   });
   if (compact) {
     const leader = ready.find(member => member.role === 'leader' && member.creation === 'ready');
-    if (!leader) throw new Error('The Leader session has no current execution locator. Check its status in the Team list.');
+    if (!leader) throw keyedError('team.layout.leaderLocator');
     return { main: target(leader), dock: [] };
   }
   const leader = ready.find(member => member.role === 'leader' && member.creation === 'ready');

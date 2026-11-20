@@ -1,6 +1,7 @@
 import type { SessionEntry } from './session-tree.js';
 import { compositionSelection, type CompositionDocument } from './session-composition-model.js';
 import type { SideSelections } from './side-tree.js';
+import { keyedError } from './team-words.js';
 
 export interface TrackedSessionView {
   primary: SessionEntry;
@@ -27,14 +28,14 @@ export class TrackedSessionViews {
   private edit() { this.document.editRevision++; this.changed(); }
   entry(entryId: string) { return this.document.tracks.find(entry => entry.entryId === entryId); }
   bind(entryId: string, slotId: string): void {
-    if (!this.document.slots.some(slot => slot.id === slotId)) throw new Error('Tracked view is unavailable.');
+    if (!this.document.slots.some(slot => slot.id === slotId)) throw keyedError('team.tracked.viewUnavailable');
     const existing = this.entry(entryId);
     if (existing?.slotId === slotId) return;
     if (existing) existing.slotId = slotId; else this.document.tracks.push({ entryId, slotId });
     this.edit();
   }
   select(entryId?: string): void {
-    if (entryId && !this.entry(entryId)) throw new Error('Tracked view is unavailable.');
+    if (entryId && !this.entry(entryId)) throw keyedError('team.tracked.viewUnavailable');
     if (this.document.selectedTrack === entryId) return;
     this.document.selectedTrack = entryId; this.edit();
   }
@@ -53,7 +54,7 @@ export class TrackedSessionViews {
     if (!entry) return;
     const ids = new Set(this.document.slots.map(slot => slot.id));
     if (!ids.has(view.primarySlot) || Object.entries(view.selections).some(([source, target]) => !ids.has(source) || target !== null && !ids.has(target))
-      || view.focus && !ids.has(view.focus) || view.anchor && !ids.has(view.anchor)) throw new Error('Tracked layout contains an unavailable view.');
+      || view.focus && !ids.has(view.focus) || view.anchor && !ids.has(view.anchor)) throw keyedError('team.tracked.layoutInvalid');
     if (JSON.stringify(entry.view) === JSON.stringify(view)) return;
     entry.view = structuredClone(view); this.edit();
   }

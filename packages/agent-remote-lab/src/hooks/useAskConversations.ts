@@ -4,6 +4,8 @@ import type { WindowLayoutAuthority } from '../window-workspace-context.js';
 import { askFeatureView, openFeatureView, projectFeatureBinding } from '../window-feature-views.js';
 import { clearCacheOnClose, conversationSessionStorage, storageKeys } from '../conversation-storage.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
+import { errorWords, keyedError } from '../team-words.js';
 import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-client';
 import { SessionDirectoryClient, type CreateSessionOptions, type OpenedSession } from '../directory-client.js';
 import { ForkStore, currentForkSource, referenceForkContext, type SessionFork } from '../session-forks.js';
@@ -33,6 +35,7 @@ export function isAskAttached(entry?: AskEntry): boolean {
 interface AskOpenOptions { existingOnly?: boolean; synchronize?: () => Promise<void>; restoring?: AbortController; associationOwner: string }
 
 export function useAskConversations(document: CompositionDocument, transport: RemoteAgentTransport, directory?: SessionDirectoryClient, selectedHostId = 'local', onCreated?: () => void, resolveExecution?: (source: OpenedSession) => SessionEntry, authority?: WindowLayoutAuthority) {
+  const t = useTranslate();
   const baseUrl = document.scope;
   const shared = useRef(authority); shared.current = authority;
   // Read the latest resolver: a wait for a synchronizing locator outlives the render that started it.
@@ -94,8 +97,8 @@ export function useAskConversations(document: CompositionDocument, transport: Re
     } catch { inputFailures.add(key); return []; }
   }
   function saveInputs(key: string, inputs: AskInput[]) {
-    if (!storage) throw new Error('Ask could not save the question. Enable browser storage before sending.');
-    if (inputFailures.has(key)) throw new Error('The original Ask questions could not be read. Restore browser storage before changing this queue.');
+    if (!storage) throw new Error(t('team.ask.error.storage'));
+    if (inputFailures.has(key)) throw new Error(t('team.ask.error.queueUnreadable'));
     if (inputs.length) storage.setItem(inputsKey(key), JSON.stringify(inputs));
     else storage.removeItem(inputsKey(key));
   }
@@ -143,7 +146,7 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       const view = sharedView(key);
       if (expanded) {
         const source = current.resolveViewId?.(owner.sourceSlot) ?? owner.sourceSlot;
-        if (!current.window.views.some(view => view.id === source)) throw new Error('The Ask source view is unavailable in this Window.');
+        if (!current.window.views.some(view => view.id === source)) throw new Error(t('team.ask.error.sourceViewGone'));
         pendingOpenViews.current.add(key);
         const target = entries.get(key)?.record?.target;
         const slot = document.slots.find(slot => slot.id === owner.sourceSlot);
@@ -169,7 +172,7 @@ export function useAskConversations(document: CompositionDocument, transport: Re
   function setEnabled(source: OpenedSession, enabled: boolean, associationOwnerId: string) {
     const key = keyFor(source, associationOwnerId), owner = associationOwner(key)!;
     try { saveCompositionAskEnabled(document, key, enabled, () => owners.current.active && association.generation === recoveryGeneration(baseUrl)); }
-    catch { update(key, { error: 'Ask could not save this preference. Restore browser storage and retry.' }); return false; }
+    catch { update(key, { error: t('team.ask.error.preferenceNotSaved') }); return false; }
     edited(key); owner.enabled = enabled; document.editRevision++; persist(() => owners.current.active);
     if (!enabled) { setOpen(key, false); resumeRequested.current.delete(key); preparations.current.get(key)?.abort(); }
     refresh(value => value + 1);
@@ -255,14 +258,14 @@ export function useAskConversations(document: CompositionDocument, transport: Re
     const input = entry?.inputs?.find(input => input.id === id);
     if (!input) return;
     if (input.owner?.recordId !== entry.record.id || input.owner?.target !== sessionKey(entry.record.target!)) {
-      update(key, { error: 'The saved question belongs to an unconfirmed or different Ask recipient. Restore the original Ask or discard this saved question.' });
+      update(key, { error: t('team.ask.error.recipientDiffers') });
       return;
     }
     // The visible conversation owns the outbox and its recovery subscription.
     // Once handed off, uncertain delivery is retried explicitly in that outbox.
     const remaining = entry!.inputs!.filter(input => input.id !== id);
     try { saveInputs(key, remaining); }
-    catch { update(key, { error: 'Ask could not hand off the saved question. Free browser storage and retry.' }); return; }
+    catch { update(key, { error: t('team.ask.error.handoffFailed') }); return; }
     const sent = send(input.text, input.id);
     update(key, { inputs: remaining });
     void sent.catch(() => {});
@@ -272,7 +275,7 @@ export function useAskConversations(document: CompositionDocument, transport: Re
     if (!entry?.inputs?.some(input => input.id === id)) return;
     const remaining = entry.inputs.filter(input => input.id !== id);
     try { saveInputs(key, remaining); }
-    catch { update(key, { error: 'Ask could not discard the saved question. Free browser storage and retry.' }); return; }
+    catch { update(key, { error: t('team.ask.error.discardFailed') }); return; }
     update(key, { inputs: remaining });
   }
   function confirmInputOwners(key: string, record: SessionFork) {
@@ -324,7 +327,7 @@ export function useAskConversations(document: CompositionDocument, transport: Re
     const projectedCandidates = projected ? candidates.filter(record => record.target && sessionKey(record.target) === sessionKey(projected)) : [];
     const projectedRecord = projected && (isAskAttached(entry) && retained && projectedCandidates.some(record => record.id === retained.id) ? retained : projectedCandidates.at(-1))
       || projectedWindowRecord(key, entry.source);
-    if (projected && !projectedRecord) return { ...entry, record: undefined, attached: false, attachedParticipant: undefined, error: 'The Ask record for this Window binding is unavailable. Refresh session relations and retry.' };
+    if (projected && !projectedRecord) return { ...entry, record: undefined, attached: false, attachedParticipant: undefined, error: t('team.ask.error.recordUnavailable') };
     const latest = projectedRecord || (isAskAttached(entry) && expanded(key)
       ? retained ?? records.find(record => record.id === entry.record!.id) : candidates.at(-1) ?? retained);
     if (latest) {
@@ -354,7 +357,7 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       participant = askOwnerKey(latest);
       await open(undefined, source, '', false, { restoring: preparation, associationOwner });
     }).catch(error => {
-      if (ownsRestore() && !preparation.signal.aborted) update(key, { error: error instanceof Error ? error.message : 'Ask could not restore. Retry to reconnect.' });
+      if (ownsRestore() && !preparation.signal.aborted) update(key, { error: errorWords(t, error, 'team.ask.error.restoreFailed') });
     }).finally(() => {
       if (windows.controllers.get(key) !== preparation) return;
       const current = ownsRestore();
@@ -366,7 +369,7 @@ export function useAskConversations(document: CompositionDocument, transport: Re
     return () => preparation.abort();
   }
   async function open(sourceState: AgentReplicaState | undefined, source: OpenedSession, args: string, clean: boolean, { synchronize, restoring, associationOwner, existingOnly }: AskOpenOptions) {
-    if (!restoring && !setEnabled(source, true, associationOwner)) throw new Error('Ask could not save this preference. Restore browser storage and retry.');
+    if (!restoring && !setEnabled(source, true, associationOwner)) throw new Error(t('team.ask.error.preferenceNotSaved'));
     const key = keyFor(source, associationOwner);
     const epoch = association.epochs.get(key);
     let entry = entryFor(source, associationOwner);
@@ -386,10 +389,10 @@ export function useAskConversations(document: CompositionDocument, transport: Re
         resumeRequested.current.add(key);
         return {};
       }
-      throw new Error('Ask is already opening.');
+      throw new Error(t('team.ask.error.alreadyOpening'));
     }
-    if (clean && entry.inputs?.length) throw new Error('Wait for the saved Ask question to send before clearing.');
-    if (!directory) throw new Error('Open the source session before starting Ask.');
+    if (clean && entry.inputs?.length) throw new Error(t('team.ask.error.waitForQueue'));
+    if (!directory) throw new Error(t('team.ask.error.openSourceFirst'));
     const textBinding = draftBinding(key);
     const draftAtStart = textBinding.store.get(textBinding.key);
     update(key, { busy: true, restoring: !!restoring, error: undefined });
@@ -400,8 +403,8 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       && askOwnerKey(entries.get(key)) === askOwnerKey({ record: participant });
     const requireCurrent = () => {
       preparation.signal.throwIfAborted();
-      if (!ownsEntry()) throw new Error('The Ask participant changed. Retry the current Ask.');
-      if (associationOwner && !association.saved) throw new Error('Ask could not retain its association owner. Free browser storage and retry.');
+      if (!ownsEntry()) throw new Error(t('team.ask.error.participantChanged'));
+      if (associationOwner && !association.saved) throw new Error(t('team.ask.error.ownerNotRetained'));
     };
     const question: AskInput | undefined = args.trim() ? { id: crypto.randomUUID(), text: args.trim() } : undefined;
     let queued = false;
@@ -416,7 +419,7 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       queued = true;
     };
     const settleRetired = () => {
-      if (question && !queued) throw new Error('Ask could not retain the submitted question. Retry from the submitting draft.');
+      if (question && !queued) throw new Error(t('team.ask.error.questionNotRetained'));
       return {};
     };
     let finishPreparation!: () => void;
@@ -436,11 +439,11 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       let record = entry.pending ?? (!clean ? entry.record : undefined);
       const pendingCreation = !clean && record === entry.pending && !!record?.creationKey && !record.remote;
       if (restoring && !record?.target || existingOnly && !record?.target && !pendingCreation || entry.restoreOnly && !clean && !record) {
-        throw new Error('The saved Ask session is not available yet. Retry to reconnect.');
+        throw new Error(t('team.ask.error.sessionNotAvailable'));
       }
       if (!record) {
         const agent = sourceState?.agent;
-        if (!agent?.runtimeInfo.sessionId) throw new Error('Open the source session before starting Ask.');
+        if (!agent?.runtimeInfo.sessionId) throw new Error(t('team.ask.error.openSourceFirst'));
         const options: CreateSessionOptions = { conversationKind: 'ask', sourceNativeSessionId: source.nativeSessionId,
           ...(agent.cwd ? { cwd: agent.cwd } : {}), ...(agent.model ? { model: agent.model } : {}),
           ...(agent.capabilities.planning ? { planning: agent.runtimeInfo.planning?.active === true } : {}) };
@@ -455,7 +458,7 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       restoringCurrent = !!entry.record && askParticipantKey(record) === askParticipantKey(entry.record);
       record = record.remote ? record : checkedAskOperation(store, record);
       if (existingOnly && !record.target && record.creationKey !== entry.pending?.creationKey) {
-        throw new Error('The original Ask creation changed. Retry after restoring its saved operation.');
+        throw new Error(t('team.ask.error.creationChanged'));
       }
       if (restoringCurrent) update(key, { attached: false, attachedParticipant: undefined });
       const savedTarget = record.target;
@@ -464,8 +467,8 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       const locator = savedTarget ? await currentExecution(savedTarget, preparation.signal) ?? savedTarget : record.source;
       requireCurrent();
       const following = savedTarget && sessionKey(locator) !== sessionKey(savedTarget);
-      if (following && !record.configured && !record.remote) throw new Error('The original Ask configuration is incomplete. Recover it before following its current session.');
-      if (!locator.providerId || !locator.nativeSessionId) throw new Error('The saved Ask native locator is unavailable. Retry after restoring its identity.');
+      if (following && !record.configured && !record.remote) throw new Error(t('team.ask.error.configIncomplete'));
+      if (!locator.providerId || !locator.nativeSessionId) throw new Error(t('team.ask.error.locatorMissing'));
       const hostId = locator.hostId ?? 'local';
       const target = hostId === selectedHostId ? directory : new SessionDirectoryClient(baseUrl, undefined, hostId);
       const operation = record;
@@ -476,7 +479,7 @@ export function useAskConversations(document: CompositionDocument, transport: Re
         requireCurrent();
         if (!operation.remote) checkedAskOperation(store, operation);
         if (result.nativeSessionId !== undefined && result.nativeSessionId !== locator.nativeSessionId) {
-          throw new Error('The attached Ask native identity does not match its saved target. Retry the original Ask.');
+          throw new Error(t('team.ask.error.identityMismatch'));
         }
       } else {
         // A late successful create may retain evidence on its original pending operation.
@@ -486,7 +489,7 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       const bound = savedTarget ? { ...savedTarget, ...locator, agentId: result.agentId }
         : { agentId: result.agentId, nativeSessionId: result.nativeSessionId ?? result.agentId,
           providerId: operation.source.providerId, hostId: operation.source.hostId ?? 'local', title: 'Ask', createdAt: operation.capturedAt };
-      if (!bound.agentId || !bound.nativeSessionId) throw new Error('The Ask attachment identity could not be confirmed. Retry the original Ask.');
+      if (!bound.agentId || !bound.nativeSessionId) throw new Error(t('team.ask.error.attachmentUnconfirmed'));
       if (windowRecords.current.has(operation.id)) windowRecords.current.set(operation.id, { ...operation, target: bound });
       else if (!following) store.bind(operation.id, bound);
       // Retention above is independent of permission to configure or mutate the current window.
@@ -501,7 +504,7 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       if (!record.remote) checkedAskOperation(store, record);
       if (!windowRecords.current.has(record.id)) store.finishCreation(record.id);
       record = readRecord(record);
-      if (askParticipantKey(record) !== askParticipantKey(participant)) throw new Error('The Ask participant changed. Retry the current Ask.');
+      if (askParticipantKey(record) !== askParticipantKey(participant)) throw new Error(t('team.ask.error.participantChanged'));
       if (shared.current) bindingProjections.current.set(key, record.target!);
       update(key, { record, pending: undefined, attached: true, attachedParticipant: askParticipantKey(record), executionTarget: bound, restoreOnly: false });
       participant = record;
@@ -511,10 +514,10 @@ export function useAskConversations(document: CompositionDocument, transport: Re
     } catch (error) {
       if (!ownsEntry()) return settleRetired();
       if (preparation.signal.aborted) {
-        if (!(error instanceof Error && error.name === 'AbortError')) update(key, { error: error instanceof Error ? error.message : 'Ask could not retain its creation result. Retry to reconnect.' });
+        if (!(error instanceof Error && error.name === 'AbortError')) update(key, { error: errorWords(t, error, 'team.ask.error.resultNotRetained') });
         return settleRetired();
       }
-      update(key, { ...(restoringCurrent ? { attached: false, attachedParticipant: undefined } : {}), error: error instanceof Error ? error.message : 'Ask could not open. Retry to reconnect.' });
+      update(key, { ...(restoringCurrent ? { attached: false, attachedParticipant: undefined } : {}), error: errorWords(t, error, 'team.ask.error.openFailed') });
       if (queued) return {};
       throw error;
     } finally {
@@ -645,14 +648,14 @@ function askOwnerKey(entry?: Pick<AskEntry, 'pending' | 'record'>): string | und
 function checkedAskOperation(store: ForkStore, expected: SessionFork): SessionFork {
   const raw = store.getLocalForEffect(expected.id);
   if (!raw || expected.target && (!raw.target || sessionKey(raw.target) !== sessionKey(expected.target))) {
-    throw new Error('The original Ask context is unavailable. Retry after restoring browser storage.');
+    throw keyedError('team.ask.error.contextUnavailable');
   }
   return raw;
 }
 function checkedAskCreation(store: ForkStore, expected: SessionFork): void {
   const raw = checkedAskOperation(store, expected);
   if (!expected.creationKey || askCreationEvidence(raw) !== askCreationEvidence(expected)) {
-    throw new Error('The original Ask creation changed. Retry after restoring its saved operation.');
+    throw keyedError('team.ask.error.creationChanged');
   }
 }
 function askCreationEvidence(record: SessionFork): string {

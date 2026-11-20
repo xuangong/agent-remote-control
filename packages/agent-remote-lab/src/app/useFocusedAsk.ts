@@ -4,12 +4,14 @@ import { windowBindingKey } from '../window-composition.js';
 import { useSessionRelations } from '../hooks/useSessionRelations.js';
 import type { SourceStaleness, AgentReplicaState } from '@orchardworks/agent-client';
 import { useRef } from 'react';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
+import { errorWords, keyedError } from '../team-words.js';
 import { compositionSession, compositionSelection } from '../session-composition.js';
 import type { OpenedSession } from '../directory-client.js';
 import { sessionKey } from '../session-tree.js';
 import type { LabSessionRef } from '../session-references.js';
 import { sideLinkVisible, type SessionFork } from '../session-forks.js';
-import { message, viewKey } from './helpers.js';
+import { viewKey } from './helpers.js';
 import { askUnavailableReason } from '../state/ask-visibility.js';
 import type { HostAndStackSlice } from './useHostAndStack.js';
 import type { SideSelectionSlice } from './useSideSelection.js';
@@ -27,6 +29,7 @@ import type { AppLate } from './types.js';
 
 export function useFocusedAsk(scope: Pick<AppInputs & HostAndStackSlice & SideSelectionSlice & SessionOpeningSlice & WorkbenchRecordsSlice & ActiveSessionSlice & SessionSuccessionBindingSlice & ViewSessionStateSlice & ConversationConnectionsSlice & RequestedSessionSlice & WorkbenchShellSlice & RemoteHostStateSlice, 'accessReady' | 'accessReadyRef' | 'ask' | 'askView' | 'baseUrl' | 'connections' | 'detachedSideRoot' | 'directory' | 'directoryView' | 'expandedKeys' | 'familyPath' | 'forkStore' | 'initialState' | 'mountedTransport' | 'remoteHosts' | 'replicas' | 'sessionEntries' | 'setFailure' | 'sharedSlots' | 'sharedWindow' | 'sideFocus' | 'stackPath' | 'stackRange' | 'stackRoot' | 'state' | 'succession' | 'toast' | 'transitioning' | 'transport' | 'userScoped' | 'visibleStackRoot' | 'windowWorkspace'>, late: AppLate) {
   const { accessReady, accessReadyRef, ask, askView, baseUrl, connections, detachedSideRoot, directory, directoryView, expandedKeys, familyPath, forkStore, initialState, mountedTransport, remoteHosts, replicas, sessionEntries, setFailure, sharedSlots, sharedWindow, sideFocus, stackPath, stackRange, stackRoot, state, succession, toast, transitioning, transport, userScoped, visibleStackRoot, windowWorkspace } = scope;
+  const t = useTranslate();
 
   const focusedWindow = stackPath.find(session => viewKey(session) === sideFocus) ?? stackPath[stackRange.end];
 
@@ -66,13 +69,13 @@ export function useFocusedAsk(scope: Pick<AppInputs & HostAndStackSlice & SideSe
     const mappings = succession.document.windowBindings?.filter(entry => entry.slotId === slotId) ?? [];
     if (!mappings.length) return;
     const owner = mappings[0]!;
-    if (mappings.some(entry => entry.windowId !== owner.windowId || entry.viewId !== owner.viewId)) throw new Error('The session view has conflicting group owners.');
+    if (mappings.some(entry => entry.windowId !== owner.windowId || entry.viewId !== owner.viewId)) throw keyedError('team.view.conflictingOwners');
     const group = windowWorkspace.readGroup(owner.windowId);
-    if (!group) throw new Error(windowWorkspace.deletedWindowIds.includes(owner.windowId) ? 'This session view was deleted.' : 'The session group is unavailable.');
+    if (!group) throw keyedError(windowWorkspace.deletedWindowIds.includes(owner.windowId) ? 'team.view.deleted' : 'team.view.groupUnavailable');
     const view = group.window.views.find(view => view.id === owner.viewId);
     const binding = view?.binding;
     const mapped = binding && succession.document.windowBindings?.find(entry => entry.windowId === owner.windowId && entry.viewId === owner.viewId && entry.bindingKey === windowBindingKey(binding));
-    if (!binding || mapped?.slotId !== slotId || !succession.document.slots.some(slot => slot.id === slotId)) throw new Error('This session view was removed or rebound.');
+    if (!binding || mapped?.slotId !== slotId || !succession.document.slots.some(slot => slot.id === slotId)) throw keyedError('team.view.rebound');
     return { groupId: owner.windowId, viewId: owner.viewId, binding };
   }
 
@@ -104,7 +107,7 @@ export function useFocusedAsk(scope: Pick<AppInputs & HostAndStackSlice & SideSe
 
   const focusedAskUnavailable = askUnavailableReason({ hasSource: !!focusedAskSession, hasDirectory: !!directory, accessReady, transitioning,
     controllerOffline: remoteHosts.find(host => host.id === focusedAskSession?.hostId)?.online === false, hasTarget: !!focusedAskEntry?.record?.target,
-    staleness: focusedAskSession ? sourceStale(focusedAskSession) : undefined, hasAgentState: !!focusedAskState?.agent });
+    staleness: focusedAskSession ? sourceStale(focusedAskSession) : undefined, hasAgentState: !!focusedAskState?.agent }, t);
 
   const canOpenFocusedAsk = !!focusedAskSession && !focusedAskUnavailable;
 
@@ -116,16 +119,16 @@ export function useFocusedAsk(scope: Pick<AppInputs & HostAndStackSlice & SideSe
   async function unlinkSide(record: SessionFork): Promise<void> {
     await refreshRelations.setLinked(record, false);
     const unlinked = forkStore.get(record.id);
-    toast?.show(`unlink-side:${record.id}`, 'Side session unlinked', 'The conversation is still available as an independent session.', 'info', {
-      label: 'Undo', onClick: async () => { await refreshRelations.setLinked(unlinked, true); },
+    toast?.show(`unlink-side:${record.id}`, t('team.toast.sideUnlinkedTitle'), t('team.toast.sideUnlinkedMessage'), 'info', {
+      label: t('team.toast.undo'), onClick: async () => { await refreshRelations.setLinked(unlinked, true); },
     });
   }
 
   /** A removed source also leaves its source's Sides, so the conversation stands on its own. */
   async function removedReference(ref: LabSessionRef, restore: () => Promise<void>, fork: SessionFork | undefined): Promise<void> {
     if (ref.origin === 'source' && fork && sideLinkVisible(fork)) await refreshRelations.setLinked(fork, false).catch(() => undefined);
-    toast?.show(`reference:${ref.providerId}/${ref.nativeSessionId}`, 'Reference removed', 'The agent hears about it with your next message.', 'info', {
-      label: 'Undo', onClick: async () => { await restore(); },
+    toast?.show(`reference:${ref.providerId}/${ref.nativeSessionId}`, t('team.toast.referenceRemovedTitle'), t('team.toast.referenceRemovedMessage'), 'info', {
+      label: t('team.toast.undo'), onClick: async () => { await restore(); },
     });
   }
 
@@ -139,7 +142,7 @@ export function useFocusedAsk(scope: Pick<AppInputs & HostAndStackSlice & SideSe
   }
 
   function assertSourceCurrent(source: OpenedSession): void {
-    if (!accessReadyRef.current || mountedTransport.current !== transport || !sourceCurrent(source)) throw new Error('The source session changed. Wait for its current native identity before continuing.');
+    if (!accessReadyRef.current || mountedTransport.current !== transport || !sourceCurrent(source)) throw new Error(t('team.ask.error.sourceChanged'));
   }
 
   function openAsk(source: OpenedSession, sourceState: AgentReplicaState | undefined, clean = false) {
@@ -150,13 +153,13 @@ export function useFocusedAsk(scope: Pick<AppInputs & HostAndStackSlice & SideSe
       if (!existingOnly) { assertSourceCurrent(source); return; }
       const slot = succession.document.slots.find(slot => slot.id === viewKey(source));
       if (!accessReadyRef.current || mountedTransport.current !== transport || !slot || sessionKey(compositionSelection(slot)) !== sessionKey(source)) {
-        throw new Error('The Ask source reference changed. Wait for its current identity before retrying.');
+        throw new Error(t('team.ask.error.sourceReferenceChanged'));
       }
     };
-    try { requireSource(); } catch (error) { setFailure(message(error, 'Ask could not open.')); return; }
+    try { requireSource(); } catch (error) { setFailure(errorWords(t, error, 'team.ask.error.couldNotOpen')); return; }
     void ask.open(sourceState, source, '', clean, { associationOwner, existingOnly, synchronize: async () => {
       requireSource(); await refreshRelations(); requireSource();
-    } }).catch(error => setFailure(message(error, 'Ask could not open.')));
+    } }).catch(error => setFailure(errorWords(t, error, 'team.ask.error.couldNotOpen')));
   }
   late.addressSession = addressSession;
   return { focusedWindow, focusedFamilyWindow, focusedFamilyIndex, primaryExpanded, addressSession, focusedMenuSession, focusedSessionKey, focusedMenuStatus, focusedAskSession, focusedAskEntry, currentGroupBinding, sourceStateFor, focusedAskState, focusedAskUnavailable, canOpenFocusedAsk, refreshRelations, pendingSideSources, unlinkSide, removedReference, restoredReference, sourceCurrent, assertSourceCurrent, openAsk };

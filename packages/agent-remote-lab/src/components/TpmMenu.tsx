@@ -4,13 +4,17 @@ import { ShortcutPlacement } from '../shell/shortcut-placement.js';
 import type { useTpmWork } from '../hooks/useTpmWork.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 import { groupTpmWorks, type TpmMainSession } from '../tpm-main-sessions.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
+import { enumWords, errorWords } from '../team-words.js';
 
-export const tpmPhaseLabel = { clarifying: 'Clarifying', ready: 'Ready', implementing: 'Implementing', validating: 'Validating', completed: 'Completed' };
+export const tpmPhaseWords = { clarifying: 'team.tpm.phase.clarifying', ready: 'team.tpm.phase.ready', implementing: 'team.tpm.phase.implementing',
+  validating: 'team.tpm.phase.validating', completed: 'team.tpm.phase.completed' } as const;
 
 export function TpmMenu({ tpm, main, mainSessions, visible, triggerRef, inert, open, onOpenChange }: {
   mainSessions?: ReadonlyMap<string, TpmMainSession>; open: boolean; onOpenChange(open: boolean): void;
   tpm: ReturnType<typeof useTpmWork>; main?: SessionEntry; visible: boolean; triggerRef: RefObject<HTMLButtonElement>; inert: boolean;
 }) {
+  const t = useTranslate();
   const placement = useContext(ShortcutPlacement), floating = placement === 'floating';
   const { root, style, handlers, edge } = useTrackingPosition('agent-remote:tpm-position', undefined, { enabled: floating });
   const rootProps = floating ? { style, ...handlers, 'data-edge': edge, className: 'lab-tracking-floating lab-tpm-floating' }
@@ -40,18 +44,18 @@ export function TpmMenu({ tpm, main, mainSessions, visible, triggerRef, inert, o
   const renderWork = (item: (typeof tpm.works)[number]) => <li key={item.key}>
         <button type="button" className="lab-session-row" data-tpm-work={item.key} aria-current={tpm.selected === item.key && tpm.expanded ? true : undefined} data-open={tpm.windows.includes(item.key) || undefined} onClick={() => { void tpm.open(item.key); }}>
           <span className="lab-tracked-description"><strong title={item.work.title}>{item.work.title}</strong>
-            <small><span data-tpm-phase={item.work.phase}>{tpmPhaseLabel[item.work.phase]}</span>{item.work.archived && item.work.phase !== 'completed' ? ' · Stopped' : item.work.paused && item.work.phase !== 'completed' ? ' · Paused' : ''} · {item.work.providerId}</small>
+            <small><span data-tpm-phase={item.work.phase}>{enumWords(t, tpmPhaseWords, item.work.phase)}</span>{item.work.archived && item.work.phase !== 'completed' ? ` · ${t('team.tpm.stopped')}` : item.work.paused && item.work.phase !== 'completed' ? ` · ${t('team.tpm.paused')}` : ''} · {item.work.providerId}</small>
             {item.work.summary ? <small className="lab-tpm-summary">{item.work.summary}</small> : null}
           </span>
-          <span className="lab-tpm-markers">{!item.work.archived && !item.work.paused && item.work.phase !== 'completed' ? item.work.waiting === 'user' ? <span className="lab-tpm-needs-user">Needs you</span> : item.work.waiting === 'main_session' ? <small>Waiting on main</small> : null : null}
-            {item.unread ? <span className="lab-tracked-change" aria-label={`New activity in ${item.work.title}`}><span aria-hidden="true" />New</span> : null}
-            {!item.online ? <small>Host offline</small> : item.work.health ? <small className="lab-tpm-health">{item.work.health}</small> : null}</span>
+          <span className="lab-tpm-markers">{!item.work.archived && !item.work.paused && item.work.phase !== 'completed' ? item.work.waiting === 'user' ? <span className="lab-tpm-needs-user">{t('team.tpm.needsYou')}</span> : item.work.waiting === 'main_session' ? <small>{t('team.tpm.waitingOnMain')}</small> : null : null}
+            {item.unread ? <span className="lab-tracked-change" aria-label={t('team.tpm.newActivityIn', { title: item.work.title })}><span aria-hidden="true" />{t('common.new')}</span> : null}
+            {!item.online ? <small>{t('team.tpm.hostOffline')}</small> : item.work.health ? <small className="lab-tpm-health">{item.work.health}</small> : null}</span>
         </button>
       </li>;
   const labels = new Map(mainSessions);
   if (main) labels.set(sessionKey(main), { ...labels.get(sessionKey(main)), ...main });
-  const renderGroups = (items: typeof tpm.works) => groupTpmWorks(items, labels).map(group => <section key={group.key} className="lab-tpm-group" aria-label={`Main session: ${group.main.title}`}>
-    <header className="lab-tpm-group-heading"><h3 title={group.main.title}>{group.main.title}</h3><span aria-label={`${group.works.length} TPM sessions`}>{group.works.length}</span>
+  const renderGroups = (items: typeof tpm.works) => groupTpmWorks(items, labels).map(group => <section key={group.key} className="lab-tpm-group" aria-label={t('team.tpm.mainSessionNamed', { title: group.main.title })}>
+    <header className="lab-tpm-group-heading"><h3 title={group.main.title}>{group.main.title}</h3><span aria-label={t('team.tpm.sessionCount', { count: group.works.length })}>{group.works.length}</span>
       <small>{group.hostName} · {group.main.providerId}</small>
       {group.main.workspace ? <small title={group.main.workspace}>{group.main.workspace}</small> : null}
     </header>
@@ -62,24 +66,24 @@ export function TpmMenu({ tpm, main, mainSessions, visible, triggerRef, inert, o
       if (floating) handlers.onKeyDown?.(event);
       if (event.key === 'Escape' && open && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); close(); }
     }}>
-    <button ref={triggerRef} type="button" className="lab-session-popover-trigger" aria-label="TPM works" aria-expanded={open} aria-controls={id}
-      title={floating ? 'TPM works · Drag to move, or focus and use arrow keys' : 'TPM works'} onClick={() => { onOpenChange(!open); if (!open) void tpm.refresh(); }}>
+    <button ref={triggerRef} type="button" className="lab-session-popover-trigger" aria-label={t('team.tpm.works')} aria-expanded={open} aria-controls={id}
+      title={floating ? t('team.tpm.worksDraggable') : t('team.tpm.works')} onClick={() => { onOpenChange(!open); if (!open) void tpm.refresh(); }}>
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2" /><path d="M9 3h6v3H9zM9 11l2 2 4-4M9 17h6" /></svg>
       <span>TPM</span><span className="lab-tpm-count">{activeWorks.length}</span>
-      {unread ? <span className="lab-tracking-badge" aria-label={`${unread} works with new activity`} /> : needsUser ? <span className="lab-tracking-attention" aria-label="A TPM needs you" /> : null}
+      {unread ? <span className="lab-tracking-badge" aria-label={t('team.tpm.worksWithActivity', { count: unread })} /> : needsUser ? <span className="lab-tracking-attention" aria-label={t('team.tpm.oneNeedsYou')} /> : null}
     </button>
-    {open && visible ? <section ref={panel} id={id} tabIndex={-1} className="lab-session-popover-panel lab-tpm-panel" aria-label="TPM works">
-      <div className="lab-directory-heading"><h2>TPM works</h2><button type="button" aria-label="Close TPM works" onClick={close}>×</button></div>
-      {tpm.loading && !tpm.works.length ? <p className="lab-control-note" role="status">Loading TPM works…</p> : !activeWorks.length ? <p className="lab-control-note">{supported ? (archivedWorks.length ? 'No active TPM sessions.' : 'No TPM works yet.') : 'TPM is unavailable on these Controllers.'}</p> : null}
+    {open && visible ? <section ref={panel} id={id} tabIndex={-1} className="lab-session-popover-panel lab-tpm-panel" aria-label={t('team.tpm.works')}>
+      <div className="lab-directory-heading"><h2>{t('team.tpm.works')}</h2><button type="button" aria-label={t('team.tpm.closeWorks')} onClick={close}>×</button></div>
+      {tpm.loading && !tpm.works.length ? <p className="lab-control-note" role="status">{t('team.tpm.loadingWorks')}</p> : !activeWorks.length ? <p className="lab-control-note">{supported ? (archivedWorks.length ? t('team.tpm.noActive') : t('team.tpm.noWorks')) : t('team.tpm.unavailable')}</p> : null}
       {renderGroups(activeWorks)}
-      {archivedWorks.length ? <details className="lab-tpm-archived"><summary>Archived ({archivedWorks.length})</summary>{renderGroups(archivedWorks)}</details> : null}
+      {archivedWorks.length ? <details className="lab-tpm-archived"><summary>{t('team.tpm.archived', { count: archivedWorks.length })}</summary>{renderGroups(archivedWorks)}</details> : null}
       {Object.entries(tpm.catalogs).filter(([, catalog]) => catalog.error).map(([host, catalog]) => <p key={host} className="lab-control-note" role="alert">{catalog.error}</p>)}
-      {main ? <p className="lab-control-note" data-creation-source title={main.title}>For: <strong>{main.title}</strong></p> : null}
-      {canCreate ? <button type="button" className="lab-tpm-create-trigger" aria-label="Create TPM work" disabled={!!tpm.busy} onClick={() => {
+      {main ? <p className="lab-control-note" data-creation-source title={main.title}>{t('team.for')} <strong>{main.title}</strong></p> : null}
+      {canCreate ? <button type="button" className="lab-tpm-create-trigger" aria-label={t('team.tpm.createWork')} disabled={!!tpm.busy} onClick={() => {
         if (!main) return;
         setFailure(undefined);
-        void tpm.create(main).catch(error => setFailure(error instanceof Error ? error.message : 'Could not create the TPM session.'));
-      }}>{tpm.busy === 'create' ? 'Creating…' : 'New TPM session'}</button> : supported ? <p className="lab-control-note">Choose a supported main session to create a TPM.</p> : null}
+        void tpm.create(main).catch(error => setFailure(errorWords(t, error, 'team.tpm.createFailed')));
+      }}>{tpm.busy === 'create' ? t('team.tpm.creating') : t('team.tpm.newSession')}</button> : supported ? <p className="lab-control-note">{t('team.tpm.chooseMain')}</p> : null}
       {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
     </section> : null}
   </div>;

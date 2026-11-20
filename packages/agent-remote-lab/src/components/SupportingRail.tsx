@@ -6,6 +6,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 export interface SupportingRailProps {
   id: string;
@@ -30,6 +31,7 @@ const focusableSelector = [
 ].join(',');
 
 export function SupportingRail({ id, label, className, compact, collapsible = false, open, triggerRef, onClose, children }: SupportingRailProps): ReactElement | null {
+  const t = useTranslate();
   const railRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const restoreFocusRef = useRef(false);
@@ -84,10 +86,10 @@ export function SupportingRail({ id, label, className, compact, collapsible = fa
     onKeyDown={handleKeyDown}
   >
     {compact ? <div className="lab-rail-mobile-heading">
-      <strong>{label === 'Context' ? 'Sessions & Hosts' : label}</strong>
+      <strong>{label === 'Context' ? t('team.rail.sessionsAndHosts') : label}</strong>
       <button ref={closeRef} className="lab-rail-close" type="button" onClick={close}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
-        <span className="agent-visually-hidden">Close {label}</span>
+        <span className="agent-visually-hidden">{t('team.rail.close', { label })}</span>
       </button>
     </div> : null}
     {children}

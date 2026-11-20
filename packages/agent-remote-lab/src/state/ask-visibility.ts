@@ -16,6 +16,7 @@
  *   the Controller offline; an Ask that already has a target is never unavailable; otherwise the staleness of its
  *   source, or "connecting" when the source has no agent state yet.
  */
+import { translator, type MessageKey, type Translate } from '@orchardworks/agent-client';
 import { resolveAskPresentation } from '../ask-presentation.js';
 
 export interface AskSourceOwner { readonly id: string; readonly sourceSlot: string }
@@ -60,22 +61,23 @@ export function askRestoreAllowed(facts: { readonly accessReady: boolean; readon
 
 export type AskSourceStaleness = 'inactive' | 'view' | 'connecting' | 'agent' | 'native';
 
-const stalenessReason: Record<AskSourceStaleness | '', string | undefined> = {
+const stalenessReason: Record<AskSourceStaleness | '', MessageKey | undefined> = {
   '': undefined,
-  inactive: 'waiting for this page to restore its sessions',
-  view: 'this view now shows another session',
-  connecting: 'waiting for the session to connect',
-  agent: 'waiting for the session to reattach',
-  native: 'waiting for the session to continue its current conversation',
+  inactive: 'team.ask.unavailable.inactive',
+  view: 'team.ask.unavailable.view',
+  connecting: 'team.ask.unavailable.connecting',
+  agent: 'team.ask.unavailable.agent',
+  native: 'team.ask.unavailable.native',
 };
 
 export function askUnavailableReason(facts: { readonly hasSource: boolean; readonly accessReady: boolean; readonly hasDirectory: boolean;
   readonly transitioning: boolean; readonly controllerOffline: boolean; readonly hasTarget: boolean;
-  readonly staleness: AskSourceStaleness | undefined; readonly hasAgentState: boolean }): string | undefined {
+  readonly staleness: AskSourceStaleness | undefined; readonly hasAgentState: boolean }, t: Translate = translator('en')): string | undefined {
   if (!facts.hasSource) return undefined;
-  if (!facts.hasDirectory || !facts.accessReady) return 'waiting for access';
-  if (facts.transitioning) return 'waiting for the session switch to finish';
-  if (facts.controllerOffline) return 'its Controller is offline';
+  if (!facts.hasDirectory || !facts.accessReady) return t('team.ask.unavailable.access');
+  if (facts.transitioning) return t('team.ask.unavailable.switch');
+  if (facts.controllerOffline) return t('team.ask.unavailable.offline');
   if (facts.hasTarget) return undefined;
-  return stalenessReason[facts.staleness ?? (facts.hasAgentState ? '' : 'connecting')];
+  const reason = stalenessReason[facts.staleness ?? (facts.hasAgentState ? '' : 'connecting')];
+  return reason && t(reason);
 }

@@ -7,6 +7,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TpmCreate, TpmList, TpmWork } from '@orchardworks/agent-remote-protocol';
 import type { SessionTodoDecision } from '@orchardworks/agent-remote-protocol';
 import { watchList, type TpmActionInput } from '@orchardworks/agent-client';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
+import { errorWords } from '../team-words.js';
 import type { OpenedSession } from '../directory-client.js';
 import type { SessionEntry } from '../session-tree.js';
 
@@ -30,7 +32,6 @@ function withTodoDetail(work: TpmWork, detail?: TpmWork): TpmWork {
   if (!work.detailsOmitted || !detail?.todo || work.todoRevision !== detail.todo.revision) return work;
   return { ...work, todo: detail.todo, document: detail.document, acceptance: detail.acceptance };
 }
-function message(error: unknown): string { return error instanceof Error ? error.message : 'TPM operation failed.'; }
 function accessDenied(error: unknown): boolean {
   return !!error && typeof error === 'object' && 'status' in error && [401, 403, 404].includes(Number(error.status));
 }
@@ -43,6 +44,8 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
   presentedSource?: { windowId: string; viewId: string },
   /** Whether the TPM list is open: with an open TPM workspace, what keeps catalogs refreshing closely. */
   listOpen = false) {
+  const t = useTranslate();
+  const message = (error: unknown): string => errorWords(t, error, 'team.tpm.operationFailed');
   const storageKey = storageScope ? `agent-remote:recovery:${storageScope}:tpm-windows` : undefined;
   const shared = useRef(authority); shared.current = authority;
   const [restored] = useState(() => authority ? [] : readWindows(storageKey));
@@ -192,7 +195,7 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
       try {
         const work = await requestedService.tpmWork(item.hostId, item.work.id);
         if (!authorized(item.hostId, requestedService) || detailPromises.current.get(key) !== promise) return;
-        if (work.detailsOmitted || work.revision < (find(key)?.work.revision ?? item.work.revision)) throw new Error('This work changed while its details were loading. Retry to load the current plan.');
+        if (work.detailsOmitted || work.revision < (find(key)?.work.revision ?? item.work.revision)) throw new Error(t('team.tpm.error.workChanged'));
         latest.current.details = { ...latest.current.details, [key]: work };
         setDetails(latest.current.details);
       } catch (error) {
@@ -255,7 +258,7 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
         if (!authorized(item.hostId, requestedService)) return;
         const session = await latest.current.attach({ hostId: item.hostId, providerId: currentWork.providerId, nativeSessionId: currentWork.tpmNativeSessionId!, title: currentWork.title });
         const observed = find(key)?.work;
-        if (session.providerId !== currentWork.providerId || session.nativeSessionId !== currentWork.tpmNativeSessionId) throw new Error('The Controller returned a different TPM session.');
+        if (session.providerId !== currentWork.providerId || session.nativeSessionId !== currentWork.tpmNativeSessionId) throw new Error(t('team.tpm.error.differentSession'));
         if (authorized(item.hostId, requestedService) && attachmentPromises.current.get(key) === promise
           && observed?.providerId === currentWork.providerId && observed.tpmNativeSessionId === currentWork.tpmNativeSessionId) setSessions(current => ({ ...current, [key]: session }));
       } catch (error) { if (authorized(item.hostId, requestedService) && attachmentPromises.current.get(key) === promise) setAttachmentErrors(current => ({ ...current, [key]: message(error) })); }
@@ -311,11 +314,11 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
     return !!host?.online && host.access !== 'shared' && !!catalog?.supported && !catalog.error && !!catalog.supportedProviders?.includes(main.providerId);
   }, [service, enabled]);
   const create = useCallback(async (main: SessionEntry, title?: string, requirement?: string) => {
-    if (!canCreate(main) || !service) throw new Error('TPM creation is unavailable for this session.');
-    if (mutation.current) throw new Error('Wait for the current TPM operation.');
+    if (!canCreate(main) || !service) throw new Error(t('team.tpm.error.creationUnavailable'));
+    if (mutation.current) throw new Error(t('team.tpm.error.waitForOperation'));
     const sourceWindow = shared.current?.readWindow?.() ?? shared.current?.window;
     const sourceViewId = latest.current.presentedSource?.viewId ?? sourceWindow?.selectedViewId;
-    if (sourceWindow && !sourceViewId) throw new Error('The TPM source view is unavailable in this Window.');
+    if (sourceWindow && !sourceViewId) throw new Error(t('team.tpm.error.sourceViewGone'));
     const sourceView = sourceWindow && sourceViewId ? { windowId: sourceWindow.id, viewId: sourceViewId } : undefined;
     mutation.current = true; setBusy('create'); setError(undefined);
     try {
@@ -324,7 +327,7 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
       const operationId = creationIntents.current.get(intent) ?? crypto.randomUUID();
       creationIntents.current.set(intent, operationId);
       const work = await service.tpmCreate(hostId, { providerId: main.providerId, mainNativeSessionId: main.nativeSessionId, ...(title?.trim() ? { title: title.trim() } : {}), ...(requirement?.trim() ? { requirement: requirement.trim() } : {}), operationId });
-      if (!authorized(hostId, service)) throw new Error('Workspace access changed before the TPM result arrived.');
+      if (!authorized(hostId, service)) throw new Error(t('team.tpm.error.accessChanged'));
       creationIntents.current.delete(intent);
       update(hostId, work);
       await open(tpmKey(hostId, work.id), false, sourceView);
@@ -334,12 +337,12 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
   }, [canCreate, service, update, open, authorized]);
   const mutate = useCallback(async (key: string, input: { action: Exclude<TpmAction, 'delegate' | 'undelegate'> } | { action: 'set_delegated'; delegated: boolean } | { action: 'rename'; title: string } | { action: 'confirm_todo'; confirmation: SessionTodoDecision } | { action: 'resolve'; intentId: string; resolution: 'accepted' | 'rejected'; nativeSessionId?: string }) => {
     const item = find(key);
-    if (!service || !enabled || !item?.online) throw new Error('The TPM Controller is unavailable.');
-    if (mutation.current) throw new Error('Wait for the current TPM operation.');
+    if (!service || !enabled || !item?.online) throw new Error(t('team.tpm.error.controllerUnavailable'));
+    if (mutation.current) throw new Error(t('team.tpm.error.waitForOperation'));
     mutation.current = true; setBusy(key); setError(undefined);
     try {
       const work = await service.tpmAction(item.hostId, item.work.id, { ...input, revision: item.work.revision, operationId: crypto.randomUUID() });
-      if (!authorized(item.hostId, service)) throw new Error('Workspace access changed before the TPM result arrived.');
+      if (!authorized(item.hostId, service)) throw new Error(t('team.tpm.error.accessChanged'));
       update(item.hostId, work);
       return work;
     } catch (error) {

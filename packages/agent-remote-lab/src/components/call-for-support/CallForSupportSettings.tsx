@@ -1,26 +1,29 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CallForSupportConflictError, RemoteCallForSupportClient } from '@orchardworks/agent-client';
+import { CallForSupportConflictError, RemoteCallForSupportClient, type Translate } from '@orchardworks/agent-client';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
+import { errorWords } from '../../team-words.js';
 import type { CallForSupportProfile, CallForSupportProfileInput } from '@orchardworks/agent-remote-protocol';
 import { workspaceFetch } from '../../workspace-access.js';
 import { ProfileEditor, type SupportProvider } from './ProfileEditor.js';
 import './call-for-support.css';
 
 interface Host { id: string; name: string; providers?: SupportProvider[] }
-const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Call For Support is unavailable.';
+const errorMessage = (t: Translate, error: unknown) => errorWords(t, error, 'team.support.unavailable');
 /** Every provider any Host offers, once. */
 export function supportProviders(hosts: readonly Host[]): SupportProvider[] {
   const providers = new Map<string, SupportProvider>();
   for (const host of hosts) for (const provider of host.providers ?? []) if (!providers.has(provider.providerId)) providers.set(provider.providerId, provider);
   return [...providers.values()];
 }
-const summary = (profile: CallForSupportProfile) => [
-  `${profile.mandate.supporters.length} ${profile.mandate.supporters.length === 1 ? 'configuration' : 'configurations'}, up to ${profile.mandate.maxSupporters} at a time`,
-  profile.mandate.approval === 'every_roster' ? 'you approve every roster' : 'rosters within the profile start at once',
-  ...(profile.enableByDefault ? ['on by default'] : []),
+const summary = (t: Translate, profile: CallForSupportProfile) => [
+  t('team.support.configurations', { count: profile.mandate.supporters.length, max: profile.mandate.maxSupporters }),
+  profile.mandate.approval === 'every_roster' ? t('team.support.approvalEvery') : t('team.support.approvalMandate'),
+  ...(profile.enableByDefault ? [t('team.support.onByDefault')] : []),
 ].join(' · ');
 
 /** Settings → Call For Support: the account's support profiles. */
 export function CallForSupportSettings({ baseUrl, enabled, hosts }: { baseUrl: string; enabled: boolean; hosts: Host[] }) {
+  const t = useTranslate();
   const client = useMemo(() => new RemoteCallForSupportClient(baseUrl, workspaceFetch), [baseUrl]);
   const [profiles, setProfiles] = useState<CallForSupportProfile[]>();
   const [editing, setEditing] = useState<CallForSupportProfile | 'new'>(), [deleting, setDeleting] = useState<string>();
@@ -31,13 +34,13 @@ export function CallForSupportSettings({ baseUrl, enabled, hosts }: { baseUrl: s
       setProfiles(next); setLoadError('');
       // An open edit continues from the current revision; the editor keeps the user's changes.
       setEditing(current => current && current !== 'new' ? next.find(profile => profile.id === current.id) : current);
-    } catch (failure) { setLoadError(errorMessage(failure)); }
+    } catch (failure) { setLoadError(errorMessage(t, failure)); }
   };
   useEffect(() => { setProfiles(undefined); if (enabled) void reload(); }, [client, enabled]);
   async function run(action: () => Promise<void>) {
     setBusy(true); setError('');
     try { await action(); return true; }
-    catch (failure) { setError(failure instanceof CallForSupportConflictError ? 'The profile changed elsewhere. It was reloaded; apply your change again.' : errorMessage(failure)); if (failure instanceof CallForSupportConflictError) await reload(); return false; }
+    catch (failure) { setError(failure instanceof CallForSupportConflictError ? t('team.support.conflict') : errorMessage(t, failure)); if (failure instanceof CallForSupportConflictError) await reload(); return false; }
     finally { setBusy(false); }
   }
   async function save(input: CallForSupportProfileInput) {
@@ -47,21 +50,21 @@ export function CallForSupportSettings({ baseUrl, enabled, hosts }: { baseUrl: s
   if (!enabled) return null;
   const providers = supportProviders(hosts);
   return <div className="lab-display-settings lab-support-settings">
-    <h2>Call For Support</h2>
-    <p className="lab-support-muted">Profiles describe kinds of support a session can call for: who coordinates, which supporters, where they work and how much they may use.</p>
-    {profiles === undefined && !loadError ? <p role="status">Loading support profiles…</p> : null}
+    <h2>{t('team.support.title')}</h2>
+    <p className="lab-support-muted">{t('team.support.profilesIntro')}</p>
+    {profiles === undefined && !loadError ? <p role="status">{t('team.support.loadingProfiles')}</p> : null}
     {profiles?.length ? <ul className="lab-support-profiles">{profiles.map(profile => <li key={profile.id}>
-      <div><strong>{profile.name}</strong><small>{summary(profile)}</small>{profile.description ? <small>{profile.description}</small> : null}</div>
+      <div><strong>{profile.name}</strong><small>{summary(t, profile)}</small>{profile.description ? <small>{profile.description}</small> : null}</div>
       <div className="lab-support-actions">
-        <button type="button" disabled={busy} onClick={() => { setError(''); setEditing(profile); }}>Edit</button>
+        <button type="button" disabled={busy} onClick={() => { setError(''); setEditing(profile); }}>{t('common.edit')}</button>
         {deleting === profile.id
-          ? <><button type="button" disabled={busy} onClick={() => setDeleting(undefined)}>Keep</button><button type="button" disabled={busy} onClick={() => void run(async () => { setProfiles((await client.profile({ type: 'delete', id: profile.id, revision: profile.revision })).profiles); setDeleting(undefined); })}>Delete profile</button></>
-          : <button type="button" disabled={busy} aria-label={`Delete ${profile.name}`} onClick={() => setDeleting(profile.id)}>Delete</button>}
+          ? <><button type="button" disabled={busy} onClick={() => setDeleting(undefined)}>{t('team.support.keep')}</button><button type="button" disabled={busy} onClick={() => void run(async () => { setProfiles((await client.profile({ type: 'delete', id: profile.id, revision: profile.revision })).profiles); setDeleting(undefined); })}>{t('team.support.deleteProfile')}</button></>
+          : <button type="button" disabled={busy} aria-label={t('team.support.deleteNamed', { name: profile.name })} onClick={() => setDeleting(profile.id)}>{t('common.delete')}</button>}
       </div>
-    </li>)}</ul> : profiles ? <p className="lab-control-note">No support profiles yet.</p> : null}
-    <button type="button" disabled={busy || profiles === undefined || profiles.length >= 32 || !providers.length} onClick={() => { setError(''); setEditing('new'); }}>New support profile</button>
-    {!providers.length ? <p className="lab-control-note">Connect a Host to choose providers for supporters.</p> : null}
-    {loadError ? <p role="alert">{loadError} <button type="button" onClick={() => void reload()}>Retry</button></p> : null}
+    </li>)}</ul> : profiles ? <p className="lab-control-note">{t('team.support.noProfiles')}</p> : null}
+    <button type="button" disabled={busy || profiles === undefined || profiles.length >= 32 || !providers.length} onClick={() => { setError(''); setEditing('new'); }}>{t('team.support.newProfile')}</button>
+    {!providers.length ? <p className="lab-control-note">{t('team.support.connectHost')}</p> : null}
+    {loadError ? <p role="alert">{loadError} <button type="button" onClick={() => void reload()}>{t('common.retry')}</button></p> : null}
     {error && !editing ? <p role="alert">{error}</p> : null}
     {editing ? <ProfileEditor profile={editing === 'new' ? undefined : editing} providers={providers} hosts={hosts} busy={busy} error={error}
       onSave={input => void save(input)} onClose={() => { setEditing(undefined); setError(''); }} /> : null}

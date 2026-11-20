@@ -1,5 +1,6 @@
 import { createContext, useCallback, useEffect, useState } from 'react';
 import type { AgentCommand, AgentCommandResult } from '@orchardworks/agent-remote-protocol';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 export const TeamViewCommand = { id: 'console:team', name: 'team', kind: 'command', description: 'Toggle Team view; use /team on or /team off', inputHint: '[on|off]' } satisfies AgentCommand;
 export const TeamViewScope = createContext<((args: string) => Promise<AgentCommandResult>) | undefined>(undefined);
@@ -11,6 +12,7 @@ function preference(): boolean {
 
 /** The Team preference controls its management entry, never session placement or work lifetime. */
 export function useTeamVisibility() {
+  const t = useTranslate();
   const [visible, setChoice] = useState(preference);
   useEffect(() => {
     const refresh = () => setChoice(preference());
@@ -23,11 +25,11 @@ export function useTeamVisibility() {
   }, []);
   const execute = useCallback(async (args: string): Promise<AgentCommandResult> => {
     const arg = args.trim().toLowerCase();
-    if (!['', 'on', 'off', 'enable', 'disable'].includes(arg)) throw new Error('Use /team, /team on, or /team off.');
+    if (!['', 'on', 'off', 'enable', 'disable'].includes(arg)) throw new Error(t('team.team.command.usage'));
     const next = arg ? arg === 'on' || arg === 'enable' : !visible;
     setVisible(next);
-    return { text: `Team view ${next ? 'shown' : 'hidden'}.` };
-  }, [visible, setVisible]);
-  const controls = <label><span>Team view</span><input aria-label="Team view" type="checkbox" checked={visible} onChange={event => setVisible(event.target.checked)} /></label>;
+    return { text: next ? t('team.team.command.shown') : t('team.team.command.hidden') };
+  }, [visible, setVisible, t]);
+  const controls = <label><span>{t('team.team.view')}</span><input aria-label={t('team.team.view')} type="checkbox" checked={visible} onChange={event => setVisible(event.target.checked)} /></label>;
   return { visible, setVisible, execute, controls };
 }

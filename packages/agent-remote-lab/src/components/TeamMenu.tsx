@@ -1,4 +1,7 @@
 import { createPortal } from 'react-dom';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
+import type { Translate } from '@orchardworks/agent-client';
+import { enumWords, errorWords, memberActivityWords, memberRoleWords, messageStatusWords, teamStatusWords } from '../team-words.js';
 import { useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { RemoteTeamClient, watchList } from '@orchardworks/agent-client';
 import type { Team, TeamAction, TeamSource } from '@orchardworks/agent-remote-protocol';
@@ -26,10 +29,11 @@ interface Props {
 }
 /** How often the Team roster refreshes while someone looks at it or a Team is forming, and otherwise. */
 export const TEAM_REFRESH_MS = 4_000, TEAM_IDLE_REFRESH_MS = 30_000;
-const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Team operation failed.';
+const errorMessage = (t: Translate, error: unknown) => errorWords(t, error, 'team.team.operationFailed');
 const isCurrentMember = (member: Team['members'][number], current: Props['currentSession']) => !!current
   && member.hostId === (current.hostId ?? 'local') && member.providerId === current.providerId && member.nativeSessionId === current.nativeSessionId;
 export function TeamMenu(props: Props) {
+  const t = useTranslate();
   const { baseUrl, enabled, visible = true, hosts, source } = props;
   const client = useMemo(() => new RemoteTeamClient(baseUrl, workspaceFetch), [baseUrl]);
   const layout = useWindowLayout();
@@ -65,7 +69,7 @@ export function TeamMenu(props: Props) {
     let stopped = false, inFlight = false;
     const load = async () => { if (stopped || inFlight || document.visibilityState === 'hidden') return; inFlight = true;
       try { await refresh(); }
-      catch (error) { if (!stopped) setLoadError(errorMessage(error)); } finally { inFlight = false; if (!stopped) setLoading(false); }
+      catch (error) { if (!stopped) setLoadError(errorMessage(t, error)); } finally { inFlight = false; if (!stopped) setLoading(false); }
     };
     loader.current = load;
     setLoading(true);
@@ -122,7 +126,7 @@ export function TeamMenu(props: Props) {
   async function run(action: () => Promise<void>) {
     if (mutating.current) return false;
     mutating.current = true; ++generation.current; setBusy(true); setError('');
-    try { await action(); return true; } catch (error) { if (currentClient.current === client) setError(errorMessage(error)); return false; }
+    try { await action(); return true; } catch (error) { if (currentClient.current === client) setError(errorMessage(t, error)); return false; }
     finally { ++generation.current; mutating.current = false; setBusy(false); }
   }
   async function change(input: TeamAction) {
@@ -146,15 +150,15 @@ export function TeamMenu(props: Props) {
       const binding = current?.id === origin.windowId ? current.views.find(view => view.id === origin.viewId)?.binding : undefined;
       if (!binding || binding.hostId !== input.source.hostId || binding.providerId !== input.source.providerId || binding.nativeSessionId !== input.source.nativeSessionId) return;
     }
-    if (!await currentPresentation.current.onOpen(created, sourceViewId)) throw new Error('The Team layout could not be opened. Retry after the main session is ready.');
+    if (!await currentPresentation.current.onOpen(created, sourceViewId)) throw new Error(t('team.team.layoutNotOpened'));
     setSelected(created.id); setOpen(false); setRevealing(false);
   }
   async function openTeam(team: Team, sourceViewId?: string) {
-    if (!await props.onOpen(team, sourceViewId)) throw new Error('The Team layout could not be opened. Retry after the main session is ready.');
+    if (!await props.onOpen(team, sourceViewId)) throw new Error(t('team.team.layoutNotOpened'));
     setSelected(team.id); setOpen(false); setRevealing(false);
   }
   async function openSession(target: TeamSource) {
-    if (!await props.onOpenSession(target)) throw new Error('The session could not be opened.');
+    if (!await props.onOpenSession(target)) throw new Error(t('team.team.sessionNotOpened'));
     setOpen(false); setRevealing(false);
   }
   function groups(archived: boolean) {
@@ -175,36 +179,37 @@ export function TeamMenu(props: Props) {
   const attention = teams.some(team => team.status === 'active' && (team.callForSupport?.roster?.status === 'pending' || team.callForSupport?.status === 'paused_budget'));
   return <>
     <div ref={root} data-hidden={!visible || undefined} aria-hidden={!visible || undefined} {...rootProps} onKeyDown={event => { if (floating) handlers.onKeyDown?.(event); if (event.key === 'Escape') { setOpen(false); trigger.current?.focus(); } }}>
-      <button ref={trigger} className="lab-session-popover-trigger" aria-expanded={open} aria-label={attention ? 'Teams, a decision is waiting' : 'Teams'} onClick={() => { setOpen(!open); setRevealing(false); void refresh().catch(error => setError(errorMessage(error))); }}><span>Team</span><span className="lab-team-count">{teams.filter(item => item.status !== 'archived').length}</span>{attention ? <span className="lab-support-badge" data-tone="warning" aria-hidden="true">!</span> : null}</button>
-      {open ? <section className="lab-session-popover-panel lab-tpm-panel" aria-label="Teams">
-        <div className="lab-directory-heading"><h2>Teams</h2><button onClick={() => setOpen(false)} aria-label="Close Teams">×</button></div>
-        {loading && !teams.length ? <p role="status">Loading teams…</p> : null}
+      <button ref={trigger} className="lab-session-popover-trigger" aria-expanded={open} aria-label={attention ? t('team.team.menuWaiting') : t('team.team.menu')} onClick={() => { setOpen(!open); setRevealing(false); void refresh().catch(error => setError(errorMessage(t, error))); }}><span>Team</span><span className="lab-team-count">{teams.filter(item => item.status !== 'archived').length}</span>{attention ? <span className="lab-support-badge" data-tone="warning" aria-hidden="true">!</span> : null}</button>
+      {open ? <section className="lab-session-popover-panel lab-tpm-panel" aria-label={t('team.team.menu')}>
+        <div className="lab-directory-heading"><h2>{t('team.team.menu')}</h2><button onClick={() => setOpen(false)} aria-label={t('team.team.closeMenu')}>×</button></div>
+        {loading && !teams.length ? <p role="status">{t('team.team.loading')}</p> : null}
         {groups(false)}
-        {!teams.some(item => item.status !== 'archived') ? <p className="lab-control-note">Start with a Leader. Discuss the work, then add members.</p> : null}
-        {teams.some(item => item.status === 'archived') ? <details><summary>Archived</summary>{groups(true)}</details> : null}
-        {pendingCreate?.source || source ? <p className="lab-control-note" data-creation-source>For: <strong>{(pendingCreate?.source ?? source)!.title}</strong></p> : null}
+        {!teams.some(item => item.status !== 'archived') ? <p className="lab-control-note">{t('team.team.empty')}</p> : null}
+        {teams.some(item => item.status === 'archived') ? <details><summary>{t('team.team.archived')}</summary>{groups(true)}</details> : null}
+        {pendingCreate?.source || source ? <p className="lab-control-note" data-creation-source>{t('team.for')} <strong>{(pendingCreate?.source ?? source)!.title}</strong></p> : null}
         {source && source.hostId !== 'local' && rosterClient === client ? <SupportSession baseUrl={baseUrl} source={source} teams={teams} teamClient={client} busy={busy}
           run={action => run(action)} onTeam={team => { setTeams(current => [...current.filter(value => value.id !== team.id), team]); setRosterClient(client); }} /> : null}
-        <button type="button" disabled={busy || !(pendingCreate?.source ?? source) || !hosts.some(host => host.id === (pendingCreate?.source ?? source)?.hostId && host.teamManagement && host.online)} onClick={() => void run(create)}>{pendingCreate ? 'Check previous creation' : 'New team'}</button>
-        {!source || source.hostId === 'local' ? <p className="lab-control-note">Open a session on a connected Host to create a Team.</p> : null}
+        <button type="button" disabled={busy || !(pendingCreate?.source ?? source) || !hosts.some(host => host.id === (pendingCreate?.source ?? source)?.hostId && host.teamManagement && host.online)} onClick={() => void run(create)}>{pendingCreate ? t('team.team.checkPreviousCreation') : t('team.team.new')}</button>
+        {!source || source.hostId === 'local' ? <p className="lab-control-note">{t('team.team.needHost')}</p> : null}
         {error || loadError ? <p role="alert">{error || loadError}</p> : null}
       </section> : null}
     </div>
   </>;
 }
 
-const memberRole = (team: Team, member: Team['members'][number]) => member.role === 'requester' ? 'Worker'
-  : member.role === 'leader' ? (team.callForSupport ? 'Coordinator' : 'Leader') : team.callForSupport ? 'Supporter' : 'Member';
+const memberRole = (t: Translate, team: Team, member: Team['members'][number]) => member.role === 'requester' ? t('team.team.roleWorker')
+  : member.role === 'leader' ? (team.callForSupport ? t('team.team.roleCoordinator') : t('team.team.roleLeader')) : team.callForSupport ? t('team.team.roleSupporter') : t('team.team.roleMember');
 
 function TeamSessionNavigation({ team, hosts, busy, currentSession, onOpen }: {
   team: Team; hosts: Host[]; busy: boolean; currentSession: Props['currentSession']; onOpen(target: TeamSource & { teamId?: string; teamMemberId?: string }): void;
 }) {
-  return <nav className="lab-team-session-navigation" aria-label={`${team.title} sessions`}>
+  const t = useTranslate();
+  return <nav className="lab-team-session-navigation" aria-label={t('team.team.sessionsOf', { title: team.title })}>
     {team.members.filter(member => member.creation !== 'abandoned').map(member => <button key={member.id} type="button"
       disabled={busy || member.creation !== 'ready' && member.creation !== 'released' || !member.nativeSessionId}
       aria-current={isCurrentMember(member, currentSession) ? 'page' : undefined}
       onClick={() => onOpen({ teamId: team.id, teamMemberId: member.id, hostId: member.hostId, providerId: member.providerId, nativeSessionId: member.nativeSessionId!, title: member.name })}>
-      <span>{member.name}</span><small>{memberRole(team, member)} · {hosts.find(host => host.id === member.hostId)?.name ?? member.hostId}{member.creation === 'released' ? ' · Released' : member.creation !== 'ready' ? ' · Not ready' : !member.nativeSessionId ? ' · Execution unavailable' : ''}</small>
+      <span>{member.name}</span><small>{memberRole(t, team, member)} · {hosts.find(host => host.id === member.hostId)?.name ?? member.hostId}{member.creation === 'released' ? ` · ${t('team.team.released')}` : member.creation !== 'ready' ? ` · ${t('team.team.notReady')}` : !member.nativeSessionId ? ` · ${t('team.team.executionUnavailable')}` : ''}</small>
     </button>)}
   </nav>;
 }
@@ -212,6 +217,7 @@ function TeamSessionNavigation({ team, hosts, busy, currentSession, onOpen }: {
 function TeamListItem({ team, selected, busy, onOpen, onRename, navigation, management }: {
   team: Team; selected: boolean; busy: boolean; onOpen(): void; onRename(title: string): Promise<boolean>; navigation?: ReactNode; management: ReactNode;
 }) {
+  const t = useTranslate();
   const [editing, setEditing] = useState(false), [title, setTitle] = useState('');
   const renameButton = useRef<HTMLButtonElement>(null);
   function close() { setEditing(false); renameButton.current?.focus(); }
@@ -219,10 +225,10 @@ function TeamListItem({ team, selected, busy, onOpen, onRename, navigation, mana
     <div className="lab-team-list-row">
       <button type="button" className="lab-session-row" aria-current={selected || undefined} onClick={onOpen}>
         <span className="lab-tracked-description"><strong>{team.title}</strong><small>{team.callForSupport
-          ? `Support · ${team.callForSupport.status === 'paused_budget' ? 'paused' : `${team.callForSupport.calls.filter(call => call.status === 'open' || call.status === 'queued').length} open`}${team.callForSupport.roster?.status === 'pending' ? ' · roster waits for you' : ''} · ${usageText(team.callForSupport.usage)}`
-          : `${team.members.length} ${team.members.length === 1 ? 'worker' : 'workers'}`}{team.status !== 'active' ? ` · ${team.status}` : ''}</small></span>
+          ? `${team.callForSupport.status === 'paused_budget' ? t('team.team.supportPaused') : t('team.team.supportOpen', { count: team.callForSupport.calls.filter(call => call.status === 'open' || call.status === 'queued').length })}${team.callForSupport.roster?.status === 'pending' ? ` · ${t('team.team.rosterWaits')}` : ''} · ${usageText(team.callForSupport.usage, t)}`
+          : t('team.team.workers', { count: team.members.length })}{team.status !== 'active' ? ` · ${enumWords(t, teamStatusWords, team.status)}` : ''}</small></span>
       </button>
-      <button ref={renameButton} type="button" className="lab-team-rename" disabled={busy} aria-label="Rename Team" title={`Rename ${team.title}`} onClick={() => { setTitle(team.title); setEditing(true); }}>Rename</button>
+      <button ref={renameButton} type="button" className="lab-team-rename" disabled={busy} aria-label={t('team.team.renameTeam')} title={t('team.team.renameNamed', { title: team.title })} onClick={() => { setTitle(team.title); setEditing(true); }}>{t('common.rename')}</button>
     </div>
     {editing ? <form className="lab-team-form lab-team-rename-form" onKeyDown={event => {
       if (event.key === 'Escape') { event.stopPropagation(); if (!busy) close(); }
@@ -232,8 +238,8 @@ function TeamListItem({ team, selected, busy, onOpen, onRename, navigation, mana
       if (title.trim() === team.title) { close(); return; }
       void onRename(title.trim()).then(ok => { if (ok) close(); });
     }}>
-      <label>Team name<input autoFocus disabled={busy} value={title} maxLength={256} required onChange={event => setTitle(event.target.value)} /></label>
-      <div><button type="button" disabled={busy} onClick={close}>Cancel</button><button disabled={busy || !title.trim()}>Save</button></div>
+      <label>{t('team.team.name')}<input autoFocus disabled={busy} value={title} maxLength={256} required onChange={event => setTitle(event.target.value)} /></label>
+      <div><button type="button" disabled={busy} onClick={close}>{t('common.cancel')}</button><button disabled={busy || !title.trim()}>{t('common.save')}</button></div>
     </form> : null}
     {navigation}
     {management}
@@ -243,25 +249,26 @@ function TeamListItem({ team, selected, busy, onOpen, onRename, navigation, mana
 function TeamManagement({ baseUrl, team, hosts, busy, failure, onChange, onOpenSession }: {
   baseUrl: string; team: Team; hosts: Host[]; busy: boolean; failure?: string; onChange(input: TeamAction): Promise<boolean>; onOpenSession(target: TeamSource & { teamId?: string; teamMemberId?: string }): void;
 }) {
+  const t = useTranslate();
   const [adding, setAdding] = useState(false);
   const recovery = [...team.messages.filter(message => ['unknown', 'dispatching', 'rejected'].includes(message.status)
     || message.status === 'accepted' && !['started', 'handled'].includes(message.acceptance ?? '')), ...(team.unresolvedReceipts ?? [])];
-  return <details className="lab-team-management"><summary>Manage team</summary>
+  return <details className="lab-team-management"><summary>{t('team.team.manage')}</summary>
     <div className="lab-team-actions">
-      <button disabled={busy || team.status !== 'active'} onClick={() => setAdding(!adding)}>Add member</button>
-      <button disabled={busy || team.status === 'archiving'} onClick={() => void onChange({teamId:team.id,action:team.status === 'archived' ? 'restore' : 'archive'})}>{team.status === 'archived' ? 'Restore' : team.status === 'archiving' ? 'Archiving…' : 'Archive'}</button>
-      <button disabled={busy} onClick={() => onOpenSession(team.source)}>Open main session</button>
+      <button disabled={busy || team.status !== 'active'} onClick={() => setAdding(!adding)}>{t('team.team.addMember')}</button>
+      <button disabled={busy || team.status === 'archiving'} onClick={() => void onChange({teamId:team.id,action:team.status === 'archived' ? 'restore' : 'archive'})}>{team.status === 'archived' ? t('team.team.restore') : team.status === 'archiving' ? t('team.team.archiving') : t('team.team.archive')}</button>
+      <button disabled={busy} onClick={() => onOpenSession(team.source)}>{t('team.team.openMain')}</button>
     </div>
     {adding ? <AddTeamMember baseUrl={baseUrl} failure={failure} teamId={team.id} hosts={hosts.filter(host => host.teamManagement)} busy={busy} onChange={onChange} onClose={() => setAdding(false)} /> : null}
     <ul className="lab-team-members">{team.members.filter(member => member.creation !== 'abandoned').map(member => <li key={member.id}>
       <button disabled={busy || member.creation !== 'ready' || !member.nativeSessionId} onClick={() => onOpenSession({teamId:team.id,teamMemberId:member.id,hostId:member.hostId,providerId:member.providerId,nativeSessionId:member.nativeSessionId!,title:member.name})}>{member.name}</button>
-      <small>{member.role} · {hosts.find(host => host.id === member.hostId)?.name ?? member.hostId} · {member.activity}</small>
-      {member.responsibility || member.cwd || member.summary ? <details><summary>Details</summary>{member.responsibility}{member.cwd ? <p>{member.cwd}</p> : null}{member.summary ? <p>{member.summary}</p> : null}</details> : null}
-      {member.creation === 'ready' && !member.nativeSessionId ? <p>The current execution locator is unavailable. History and drafts are preserved.</p> : null}
-      {member.creation !== 'ready' ? <div><p>{member.error ?? 'Session creation is pending.'}</p><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'retry_creation',memberId:member.id})}>Check creation</button><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'abandon_creation',memberId:member.id})}>Abandon slot</button></div> : null}
+      <small>{enumWords(t, memberRoleWords, member.role)} · {hosts.find(host => host.id === member.hostId)?.name ?? member.hostId} · {enumWords(t, memberActivityWords, member.activity)}</small>
+      {member.responsibility || member.cwd || member.summary ? <details><summary>{t('common.details')}</summary>{member.responsibility}{member.cwd ? <p>{member.cwd}</p> : null}{member.summary ? <p>{member.summary}</p> : null}</details> : null}
+      {member.creation === 'ready' && !member.nativeSessionId ? <p>{t('team.team.locatorUnavailable')}</p> : null}
+      {member.creation !== 'ready' ? <div><p>{member.error ?? t('team.team.creationPending')}</p><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'retry_creation',memberId:member.id})}>{t('team.team.checkCreation')}</button><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'abandon_creation',memberId:member.id})}>{t('team.team.abandonSlot')}</button></div> : null}
     </li>)}</ul>
-    {team.status === 'archiving' ? <p className="lab-control-note" role="status">New dispatches stopped. Waiting for members to settle. Open their sessions to resolve approvals or stop ongoing work.</p> : null}
-    {recovery.length > 0 ? <details className="lab-team-recovery"><summary>Delivery status</summary>{recovery.map(message => <div key={message.id}>{!('text' in message) ? <><p>Delivery {message.id} to {team.members.find(member => member.id === message.to)?.name ?? message.to}</p>{message.resolvedTarget ? <small>Recorded recipient: {message.resolvedTarget.nativeSessionId}</small> : null}</> : null}<p>{message.status}: {'text' in message ? message.text.slice(0,160) : 'Original message body is unavailable.'}</p><small>{message.error ?? 'Awaiting a native receipt. Do not repeat this message.'}</small>{message.status !== 'rejected' ? <><p>Inspect the receiving session before resolving.</p><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'resolve_message',messageId:message.id,outcome:'accepted'})}>Confirm received</button><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'resolve_message',messageId:message.id,outcome:'rejected'})}>Confirm not executed</button></> : null}</div>)}</details> : null}
+    {team.status === 'archiving' ? <p className="lab-control-note" role="status">{t('team.team.archivingNote')}</p> : null}
+    {recovery.length > 0 ? <details className="lab-team-recovery"><summary>{t('team.team.deliveryStatus')}</summary>{recovery.map(message => <div key={message.id}>{!('text' in message) ? <><p>{t('team.team.deliveryTo', { id: message.id, name: team.members.find(member => member.id === message.to)?.name ?? message.to })}</p>{message.resolvedTarget ? <small>{t('team.team.recordedRecipient', { id: message.resolvedTarget.nativeSessionId })}</small> : null}</> : null}<p>{enumWords(t, messageStatusWords, message.status)}: {'text' in message ? message.text.slice(0,160) : t('team.team.bodyUnavailable')}</p><small>{message.error ?? t('team.team.awaitingReceipt')}</small>{message.status !== 'rejected' ? <><p>{t('team.team.inspectReceiver')}</p><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'resolve_message',messageId:message.id,outcome:'accepted'})}>{t('team.team.confirmReceived')}</button><button disabled={busy} onClick={() => void onChange({teamId:team.id,action:'resolve_message',messageId:message.id,outcome:'rejected'})}>{t('team.team.confirmNotExecuted')}</button></> : null}</div>)}</details> : null}
   </details>;
 }
 
@@ -272,6 +279,7 @@ function AddTeamMember({ baseUrl, teamId, hosts, busy, failure, onChange, onClos
   const operation = useRef<{ signature: string; id: string }>();
   const dialog = useRef<HTMLDialogElement>(null), label = useId();
   const [error, setError] = useState('');
+  const t = useTranslate();
   useEffect(() => {
     const focus = document.activeElement as HTMLElement | null;
     dialog.current?.showModal();
@@ -282,28 +290,28 @@ function AddTeamMember({ baseUrl, teamId, hosts, busy, failure, onChange, onClos
   useEffect(() => { setWorkspace(undefined); }, [directory, provider]);
   const selection = workspace?.directory === directory && workspace.providerId === provider ? workspace.value : {};
   const cwd = selection.path ?? '';
-  const pathError = cwd.length > 2048 ? 'Choose a folder with a path no longer than 2,048 characters.' : '';
+  const pathError = cwd.length > 2048 ? t('team.team.pathTooLong') : '';
   const canAdd = !busy && !!host?.online && !!provider && !!cwd && !pathError;
   return createPortal(<dialog ref={dialog} className="lab-favorite-dialog" data-team-dialog aria-labelledby={label}
     onKeyDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}
     onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
-    <header><h2 id={label}>Add member</h2><button type="button" aria-label="Close member editor" disabled={busy} onClick={onClose}>×</button></header>
+    <header><h2 id={label}>{t('team.team.addMember')}</h2><button type="button" aria-label={t('team.team.closeEditor')} disabled={busy} onClick={onClose}>×</button></header>
     <form onSubmit={event => {
       event.preventDefault(); if (!canAdd) return;
-      const fields = {hostId,providerId:provider,name:name.trim() || host?.name || 'Member',cwd,responsibility};
+      const fields = {hostId,providerId:provider,name:name.trim() || host?.name || t('team.team.defaultMemberName'),cwd,responsibility};
       const signature = JSON.stringify(fields);
       if (operation.current?.signature !== signature) operation.current = { signature, id: crypto.randomUUID() };
       setError('');
-      void onChange({action:'add_member',teamId,operationId:operation.current.id,...fields}).then(ok => { if (ok) onClose(); else setError('The member could not be added. Retry to check the same request.'); });
+      void onChange({action:'add_member',teamId,operationId:operation.current.id,...fields}).then(ok => { if (ok) onClose(); else setError(t('team.team.memberNotAdded')); });
     }}>
-    <label>Host<select disabled={busy} value={hostId} onChange={event => {setHostId(event.target.value);}}>{hosts.map(host => <option key={host.id} value={host.id} disabled={!host.online}>{host.name}{!host.online ? ' · Offline' : ''}</option>)}</select></label>
-    <label>Provider<select disabled={busy} value={provider} onChange={event => {setProviderId(event.target.value);}}>{providers.map(provider => <option key={provider.providerId} value={provider.providerId}>{provider.displayName}</option>)}</select></label>
-    <label>Name<input disabled={busy} maxLength={256} value={name} placeholder="Optional" onChange={event => setName(event.target.value)} /></label>
+    <label>{t('team.team.host')}<select disabled={busy} value={hostId} onChange={event => {setHostId(event.target.value);}}>{hosts.map(host => <option key={host.id} value={host.id} disabled={!host.online}>{host.name}{!host.online ? ` · ${t('common.offline')}` : ''}</option>)}</select></label>
+    <label>{t('team.team.provider')}<select disabled={busy} value={provider} onChange={event => {setProviderId(event.target.value);}}>{providers.map(provider => <option key={provider.providerId} value={provider.providerId}>{provider.displayName}</option>)}</select></label>
+    <label>{t('team.tpm.name')}<input disabled={busy} maxLength={256} value={name} placeholder={t('team.team.optional')} onChange={event => setName(event.target.value)} /></label>
     <WorkspaceSelect directory={directory} providerId={provider} disabled={busy || !host?.online} value={selection} required
       onChange={value => setWorkspace({ directory, providerId: provider, value })} />
     {pathError ? <p role="alert">{pathError}</p> : null}
-    <label>Responsibility<textarea disabled={busy} maxLength={2048} value={responsibility} placeholder="Can be discussed with the Leader after joining" onChange={event => setResponsibility(event.target.value)} /></label>
+    <label>{t('team.team.responsibility')}<textarea disabled={busy} maxLength={2048} value={responsibility} placeholder={t('team.team.responsibilityPlaceholder')} onChange={event => setResponsibility(event.target.value)} /></label>
     {failure || error ? <p role="alert">{failure || error}</p> : null}
-    <footer><button type="button" disabled={busy} onClick={onClose}>Cancel</button><button className="lab-favorite-primary" disabled={!canAdd}>Add member</button></footer>
+    <footer><button type="button" disabled={busy} onClick={onClose}>{t('common.cancel')}</button><button className="lab-favorite-primary" disabled={!canAdd}>{t('team.team.addMember')}</button></footer>
   </form></dialog>, document.body);
 }

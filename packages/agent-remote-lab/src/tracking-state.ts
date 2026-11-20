@@ -1,6 +1,6 @@
 import { clearCacheOnClose, conversationLocalStorage } from './conversation-storage.js';
 import type { AgentStatus, TimelineCursor } from '@orchardworks/agent-remote-protocol';
-import type { RemoteSessionStatus } from '@orchardworks/agent-client';
+import { translator, type RemoteSessionStatus, type Translate } from '@orchardworks/agent-client';
 import { validSessionStar, starKey, type SessionStar } from '@orchardworks/agent-remote-protocol/model';
 export interface SessionObservation { connection: RemoteSessionStatus; activity?: AgentStatus; background?: import('@orchardworks/agent-remote-protocol').BackgroundActivity; cursor?: TimelineCursor; changed?: boolean; attention?: 'pending' | 'idle'; error?: string; agentId?: string }
 export const MAX_TRACKED_SESSIONS = 8;
@@ -110,10 +110,10 @@ export function patchTrackedSessions(scope: string, patches: readonly TrackedSes
     return { status: 'saved', sessions, revision: expectedRevision + 1, retention: clearCacheOnClose() ? 'page' : 'local' };
   } catch { return { status: 'failed', retention: 'page' }; }
 }
-export function observationLabel(value?: SessionObservation): string {
-  if (!value) return 'Connecting';
-  if (value.connection === 'unavailable') return 'Unavailable';
-  if (value.error) return 'Connection failed';
-  if (value.connection !== 'ready') return value.connection === 'disconnected' ? 'Disconnected' : 'Connecting';
-  return value.activity === 'starting' ? 'Starting' : value.activity === 'running' ? 'Working' : value.activity === 'waiting' ? 'Waiting' : value.activity === 'failed' ? 'Failed' : value.activity === 'closed' ? 'Closed' : 'Ready';
+export function observationLabel(value?: SessionObservation, t: Translate = translator('en')): string {
+  if (!value) return t('team.observation.connecting');
+  if (value.connection === 'unavailable') return t('team.observation.unavailable');
+  if (value.error) return t('team.observation.failed');
+  if (value.connection !== 'ready') return value.connection === 'disconnected' ? t('team.observation.disconnected') : t('team.observation.connecting');
+  return value.activity === 'starting' ? t('team.observation.starting') : value.activity === 'running' ? t('team.observation.working') : value.activity === 'waiting' ? t('team.observation.waiting') : value.activity === 'failed' ? t('team.observation.activityFailed') : value.activity === 'closed' ? t('team.observation.closed') : t('team.observation.ready');
 }

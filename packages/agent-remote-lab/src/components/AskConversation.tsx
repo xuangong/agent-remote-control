@@ -1,6 +1,8 @@
 import { useBoundDraft, type DraftBinding } from '../draft-store.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
+import { keyedError } from '../team-words.js';
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type RefObject, type ReactNode } from 'react';
-import type { AgentReplica, RemoteAgentTransport } from '@orchardworks/agent-client';
+import { storedWords, type AgentReplica, type RemoteAgentTransport } from '@orchardworks/agent-client';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 import { isAskAttached, askParticipantKey, type AskEntry, type AskInput, type AskInputSender } from '../hooks/useAskConversations.js';
 import { useConversationSession } from '../hooks/useConversationSession.js';
@@ -32,6 +34,7 @@ function AskConversationContent({ docked, dockControls, onAdditionalWidthChange,
   storageScope: string; triggerRef: RefObject<HTMLButtonElement>; entry: AskEntry; replica?: AgentReplica; transport: RemoteAgentTransport;
   draftBinding: DraftBinding; onClose(): void; onToggleEnabled(): void; onClean(): void; onRetry(): void; onSendInput(id: string, send: AskInputSender): void; onDiscardInput(id: string): void;
 }) {
+  const t = useTranslate();
   const shared = useWindowLayout();
   const titleInteraction = useContext(SessionTitleInteractionContext);
   const presentedViewId = useContext(WindowPresentationContext) ?? shared?.window.selectedViewId;
@@ -69,21 +72,21 @@ function AskConversationContent({ docked, dockControls, onAdditionalWidthChange,
     };
   }, [triggerRef]);
   const tools = <div className="lab-ask-controls"><SessionHeadingActions sessionKey={storageScope} alwaysCollapsed>{dockControls}
-    <button type="button" aria-label="Clean Ask" title="Start a fresh Ask conversation" disabled={busy || !!entry.inputs?.length} onClick={onClean}>Clean</button>
+    <button type="button" aria-label={t('team.ask.clean')} title={t('team.ask.cleanTitle')} disabled={busy || !!entry.inputs?.length} onClick={onClean}>{t('team.ask.cleanButton')}</button>
     </SessionHeadingActions>
-    <button type="button" aria-label="Minimize Ask" title="Minimize Ask" onClick={close}>×</button>
+    <button type="button" aria-label={t('team.ask.minimize')} title={t('team.ask.minimize')} onClick={close}>×</button>
   </div>;
-  const notice = <>{entry.inputs?.length ? <div className="lab-ask-waiting" role="status">Waiting to send: {entry.inputs.map(input => <div key={input.id}>
-      {input.text}<button type="button" aria-label="Discard saved question" onClick={() => onDiscardInput(input.id)}>Discard</button>
+  const notice = <>{entry.inputs?.length ? <div className="lab-ask-waiting" role="status">{t('team.ask.waitingToSend')} {entry.inputs.map(input => <div key={input.id}>
+      {input.text}<button type="button" aria-label={t('team.ask.discardQuestion')} onClick={() => onDiscardInput(input.id)}>{t('team.ask.discard')}</button>
     </div>)}</div> : null}
-    {entry.error ? <div className="lab-ask-error" role="alert">{entry.error}<button type="button" disabled={busy} onClick={onRetry}>Retry</button></div> : null}</>;
+    {entry.error ? <div className="lab-ask-error" role="alert">{storedWords(entry.error, t)}<button type="button" disabled={busy} onClick={onRetry}>{t('common.retry')}</button></div> : null}</>;
   return <div className="lab-ask-viewport"><section className="lab-ask-window lab-session-pane-selection" role="dialog" aria-label="Ask" aria-modal="false" tabIndex={-1} ref={panel}
     data-selected={selected || undefined} aria-current={selected ? 'true' : undefined}>
     {isAskAttached(entry) ? <AskChat key={askParticipantKey(entry.record!)} record={entry.record!} executionTarget={entry.executionTarget} inputs={entry.error ? undefined : entry.inputs} onSendInput={onSendInput} replica={replica} transport={transport}
       storageScope={storageScope} navigation={navigation} onToggleEnabled={onToggleEnabled} busy={busy} draftBinding={draftBinding} tools={tools} notice={notice} onAdditionalWidthChange={onAdditionalWidthChange} {...storageBindings} /> : <>
       <header className="lab-ask-heading"><strong {...titleInteraction}>Ask</strong>{tools}</header>
       {notice}
-      {busy || !entry.error ? <div className="lab-ask-opening" role="status">{busy ? 'Opening Ask…' : 'Ask about this conversation.'}</div> : null}
+      {busy || !entry.error ? <div className="lab-ask-opening" role="status">{busy ? t('team.ask.opening') : t('team.ask.prompt')}</div> : null}
       <AskDraft binding={draftBinding} />
     </>}
     <AskResize />
@@ -109,7 +112,7 @@ function AskChat({ storageScope, record, executionTarget, inputs, onSendInput, r
     sessionPresentation={context => context.isRoot ? { headingMode: 'inline', headingStart: <SessionLink session={context.session} />, sessionManager: tools, composerNotice: notice } : {}}
     consoleCommands={[askCommand]} onExecuteConsoleCommand={async (_id, args) => {
       if (args.trim()) {
-        if (!sendMessage.current) throw new Error('Wait for Ask to finish synchronizing.');
+        if (!sendMessage.current) throw keyedError('team.ask.waitForSync');
         await sendMessage.current(args.trim());
       } else onToggleEnabled();
       return {};
@@ -117,6 +120,7 @@ function AskChat({ storageScope, record, executionTarget, inputs, onSendInput, r
 }
 
 function AskDraft({ binding }: { binding: DraftBinding }) {
+  const t = useTranslate();
   const draft = useBoundDraft(binding);
-  return <textarea className="lab-ask-draft" aria-label="Ask draft" rows={2} placeholder="Ask anything…" value={draft.text} onChange={event => draft.set(event.target.value)} />;
+  return <textarea className="lab-ask-draft" aria-label={t('team.ask.draft')} rows={2} placeholder={t('team.ask.draftPlaceholder')} value={draft.text} onChange={event => draft.set(event.target.value)} />;
 }

@@ -300,7 +300,7 @@ export const sessions: AreaMessages<typeof english> = {
   'sessions.manager.current': '当前',
   'sessions.manager.subagent': '子代理',
   'sessions.manager.parent': '上级',
-  'sessions.agentControl.intro': '指定一段会话来整理这个窗口。Agent 用 agent-remote-controller window 以你的身份来整理窗口。',
+  'sessions.agentControl.intro': '指定一段会话来整理这个窗口。Agent 用 {command} 以你的身份来整理窗口。',
   'sessions.agentControl.checking': '正在查看整理者…',
   'sessions.agentControl.manager': '整理者：{name}',
   'sessions.agentControl.unassigned': '未指定',

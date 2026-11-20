@@ -8,7 +8,7 @@
 import { useState, type ComponentProps } from 'react';
 import { createRoot } from 'react-dom/client';
 import { PROTOCOL_VERSION, type AgentInteractionRequest } from '@orchardworks/agent-remote-protocol';
-import { createReplicaState, type AgentReplicaState, type RemoteSessionStatus } from '@orchardworks/agent-client';
+import { createReplicaState, translator, type AgentReplicaState, type RemoteSessionStatus } from '@orchardworks/agent-client';
 import { buildEveryKindConversation, buildTailPage, TimelineRows } from '@orchardworks/agent-client/testing';
 import { bindAppearance } from '@orchardworks/agent-client-web/browser';
 import { browserLocale, LocaleProvider } from '@orchardworks/agent-client-web/react';
@@ -79,7 +79,7 @@ export function EveryKindWorkbench({ selected, setSelected, respond, setInspecte
   return <LabWorkbench state={state} sessionStatus={status} draftSessionKey="every-kind"
       assistant={{ name: SAMPLE.names[0]!, avatar: <AssistantAvatar id="chief" picture={{ shape: 'triangle', color: '#ff8a3d', gaze: 1 }} size={26} mood="working" /> }}
       onInspectEntry={key => setInspected(key)}
-      entrySelection={{ selected, label: 'Quote', select(keys, value) { const next = new Set(selected); for (const key of keys) if (value) next.add(key); else next.delete(key); setSelected(next); } }}
+      entrySelection={{ selected, label: translator(locale)('sessions.quotes.quote'), select(keys, value) { const next = new Set(selected); for (const key of keys) if (value) next.add(key); else next.delete(key); setSelected(next); } }}
       timelineStart={<EarlierConversation baseUrl="http://fixture/" transport={earlierTransport} directory={earlierDirectory}
         sessions={[{ hostId: 'local', providerId: 'claude', nativeSessionId: 'earlier', title: SAMPLE.earlier }, { hostId: 'local', providerId: 'claude', nativeSessionId: 'oldest', title: SAMPLE.oldest }]}
         readCached={() => undefined} />}

@@ -300,7 +300,7 @@ export const sessions = {
   'sessions.manager.current': 'Current',
   'sessions.manager.subagent': 'Subagent',
   'sessions.manager.parent': 'Parent',
-  'sessions.agentControl.intro': 'Name the session that arranges this Window. Agents arrange Windows with agent-remote-controller window, signed in as you.',
+  'sessions.agentControl.intro': 'Name the session that arranges this Window. Agents arrange Windows with {command}, signed in as you.',
   'sessions.agentControl.checking': 'Checking manager…',
   'sessions.agentControl.manager': 'Manager: {name}',
   'sessions.agentControl.unassigned': 'Unassigned',

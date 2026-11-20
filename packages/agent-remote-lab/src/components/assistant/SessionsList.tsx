@@ -1,11 +1,11 @@
 import { errorWords } from '@orchardworks/agent-client';
-import { useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { useContext, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { controllerPath } from '@orchardworks/agent-remote-protocol/model';
 import type { SessionSuccessionHistoryNavigation } from '@orchardworks/agent-client';
 import type { AgentChildSessionView } from '@orchardworks/agent-client-web/react';
-import { useTranslate } from '@orchardworks/agent-client-web/react';
+import { LocaleContext, useTranslate } from '@orchardworks/agent-client-web/react';
 import { knownTitle, sessionKey, type SessionEntry } from '../../session-tree.js';
-import { replyTime } from '../../reply-time.js';
+import { dateLocale, replyTime } from '../../reply-time.js';
 import { SessionLink } from '../SessionLink.js';
 import { Icon } from '../../ui/Icon.js';
 
@@ -34,6 +34,7 @@ type Row = { session: SessionEntry; current: boolean; intent?: 'history' };
  */
 export function SessionsList({ sessions }: { sessions: AssistantSessions }) {
   const t = useTranslate();
+  const locale = useContext(LocaleContext);
   const navigation = sessions.chain?.navigation;
   const [pending, setPending] = useState(false), [error, setError] = useState<string>();
   const opening = useRef(false);
@@ -63,7 +64,7 @@ export function SessionsList({ sessions }: { sessions: AssistantSessions }) {
         const title = knownTitle(session) ?? session.nativeSessionId;
         const onScreen = !!shown && sessionKey(session) === sessionKey(shown);
         return <SessionRow key={sessionKey(session)} title={title} onScreen={onScreen}
-          meta={[onScreen && sessions.time ? replyTime(sessions.time) : undefined, current ? t('details.current') : t('details.earlierSession')]}
+          meta={[onScreen && sessions.time ? replyTime(sessions.time, undefined, dateLocale(locale), t) : undefined, current ? t('details.current') : t('details.earlierSession')]}
           heading={onScreen ? <span className="lab-assistant-session-title" title={session.title}>{title}</span> : link(session, title, intent)}>
           {onScreen && sessions.directory ? <Copyable label={t('details.directory')} value={sessions.directory} /> : null}
           <Copyable label={t('details.sessionId')} value={onScreen && sessions.sessionId ? sessions.sessionId : session.nativeSessionId} />
@@ -74,7 +75,7 @@ export function SessionsList({ sessions }: { sessions: AssistantSessions }) {
     {navigation?.history ? <p className="lab-assistant-return">{link(navigation.current, t('details.returnToCurrent'))}</p> : null}
     {sessions.subagents?.length ? <><h4>{t('details.subagents')}</h4><ul className="lab-assistant-chain lab-assistant-subagents">
       {sessions.subagents.map(child => <SessionRow key={child.nativeSessionId} title={child.title || child.nativeSessionId}
-        meta={[child.createdAt ? replyTime(Date.parse(child.createdAt)) : undefined, childState(child.status, t)]}
+        meta={[child.createdAt ? replyTime(Date.parse(child.createdAt), undefined, dateLocale(locale), t) : undefined, childState(child.status, t)]}
         heading={<button type="button" className="lab-assistant-session-title" onClick={() => void sessions.openSubagent?.(child)}>{child.title || child.nativeSessionId}</button>}>
         <Copyable label={t('details.sessionId')} value={child.nativeSessionId} />
       </SessionRow>)}

@@ -27,11 +27,11 @@ export async function englishWords(page: Page, options: { skip?: readonly string
       const rect = element.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0 || element.classList.contains('agent-visually-hidden');
     };
-    // Code-like tokens are not words: identifiers, file names, paths, versions and anything with a digit.
-    const codeLike = (token: string) => /[\d_/\\.@:#=]/.test(token) || /[a-z][A-Z]/.test(token) || /^[A-Z]{2,}s?$/.test(token) && token.length <= 5;
+    // Code-like tokens are not words: identifiers, file names, paths, versions, key combinations and anything with a digit.
+    const codeLike = (token: string) => /[\d_/\\.@:#=+]/.test(token) || /[a-z][A-Z]/.test(token) || /^[A-Z]{2,}s?$/.test(token) && token.length <= 5;
     const found = new Set<string>();
     const scan = (text: string, where: string) => {
-      for (const piece of text.split(/[\s,，。！？、；：（）()[\]{}"“”'‘’·…<>«»|]+/u)) {
+      for (const piece of text.split(/[\s,，。！？、；：（）()[\]{}"“”'‘’·…<>«»|「」『』]+/u)) {
         const token = piece.replace(/^[.!?:;]+|[.!?:;]+$/g, '');
         if (!/[A-Za-z]/.test(token) || codeLike(token)) continue;
         for (const word of token.match(/[A-Za-z][A-Za-z'’-]*/g) ?? []) {

@@ -14,8 +14,10 @@ export function AgentControl({ client, windowId, current, active }: {
 }) {
   const t = useTranslate();
   const manager = useWindowManager(client, windowId, active);
+  const intro = t('sessions.agentControl.intro', { command: '\u0000' }).split('\u0000');
   return <>
-    <p className="lab-window-note">{t('sessions.agentControl.intro')}</p>
+    {/* The command is code: it stays as typed, in the code face. */}
+    <p className="lab-window-note">{intro[0]}<code>agent-remote-controller window</code>{intro[1]}</p>
     {manager.status === 'loading' ? <p role="status">{t('sessions.agentControl.checking')}</p> : manager.status === 'error' ? <p role="alert">{errorWords(manager.error, t, 'sessions.agentControl.failed')} <button type="button" onClick={manager.refresh}>{t('common.retry')}</button></p>
       : <p className="lab-window-note">{t('sessions.agentControl.manager', { name: manager.manager?.title || manager.manager?.nativeSessionId || t('sessions.agentControl.unassigned') })}</p>}
     <div className="lab-window-actions">

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useContext, type ReactNode } from 'react';
 import type { WindowBotDetails, WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
 import { AssistantAvatar } from '@orchardworks/agent-client-web/primitives';
 import type { AvatarMood } from '@orchardworks/agent-client-web/theme';
@@ -6,8 +6,8 @@ import { projectChats, type BotRosterModel, type BotRow } from '../bot-roster.js
 import type { BotPlace } from '../workbench-mode.js';
 import { sessionKey } from '../session-tree.js';
 import { Icon } from '../ui/Icon.js';
-import { replyTime } from '../reply-time.js';
-import { useTranslate } from '@orchardworks/agent-client-web/react';
+import { dateLocale, replyTime } from '../reply-time.js';
+import { LocaleContext, useTranslate } from '@orchardworks/agent-client-web/react';
 
 /** A bot's avatar: generated from its view id, which survives a handoff, unless its stored picture overrides it. */
 export function BotPicture({ id, picture, size = 26, mood = 'idle' }: Pick<WindowBotDetails, 'picture'> & { id: string; size?: number; mood?: AvatarMood }) {
@@ -22,7 +22,8 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
   /** Words beside the name, such as Hidden in Chats. */ marks?: ReactNode; /** A control after the row, such as Show in Chats. */ extra?: ReactNode }) {
   const t = useTranslate();
   const name = row.name, destination: BotPlace = { kind: 'bot', groupId: row.groupId, viewId: row.viewId };
-  const time = row.reply ? replyTime(row.reply.replyAt) : undefined;
+  const locale = useContext(LocaleContext);
+  const time = row.reply ? replyTime(row.reply.replyAt, undefined, dateLocale(locale), t) : undefined;
   // Like a chat list, an unsent draft shows where the latest reply would; the bot on screen has it in its composer.
   const draft = !current && row.draft ? row.draft.replace(/\s+/g, ' ').trim() : undefined;
   // The sentence says what the assistant is doing; a draft takes the place of a quiet one (its latest reply, or ready).

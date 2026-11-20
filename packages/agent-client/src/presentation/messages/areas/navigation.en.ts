@@ -141,4 +141,5 @@ export const navigation = {
   'navigation.status.needsYou': 'Needs you: {count}',
   'navigation.gateway.accessUnavailable': 'Access service is unavailable.',
   'navigation.gateway.accessExpired': 'Access response expired.',
+  'navigation.time.yesterday': 'Yesterday',
 } as const satisfies Readonly<Record<string, Message>>;

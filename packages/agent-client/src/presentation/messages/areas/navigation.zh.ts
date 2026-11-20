@@ -141,4 +141,5 @@ export const navigation: AreaMessages<typeof english> = {
   'navigation.status.needsYou': '需要你：{count}',
   'navigation.gateway.accessUnavailable': '访问服务暂时用不了。',
   'navigation.gateway.accessExpired': '访问响应已过期。',
+  'navigation.time.yesterday': '昨天',
 };

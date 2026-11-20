@@ -25,7 +25,8 @@ export class SessionStarsClient {
     const response = await this.fetcher(new URL('v1/stars', this.baseUrl), { method, credentials: 'same-origin', cache: 'no-store',
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(12000)]) : AbortSignal.timeout(12000),
       ...(body ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) });
-    const value = await response.json();
+    // A proxy's HTML page or an empty body reads as no answer: the checks below say the request failed or the answer is invalid.
+    const value = await response.json().catch(() => undefined);
     if (!response.ok) throw typeof value?.error === 'string' ? new Error(value.error) : withMessageKey(new Error('Favorites could not be updated. Try again.'), 'client.view.favoritesFailed');
     if (!Array.isArray(value?.stars) || !value.stars.every((item: unknown) => validSessionStar(item) && 'available' in item && typeof item.available === 'boolean' && 'online' in item && typeof item.online === 'boolean')) throw withMessageKey(new Error('The favorites response is invalid.'), 'client.view.favoritesInvalid');
     return value.stars;
@@ -34,7 +35,7 @@ export class SessionStarsClient {
     const response = await this.fetcher(new URL('v1/favorites', this.baseUrl), { method: command ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store',
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(12000)]) : AbortSignal.timeout(12000),
       ...(command ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(command) } : {}) });
-    const value = await response.json();
+    const value = await response.json().catch(() => undefined);
     if (!response.ok) {
       const message = typeof value?.error === 'string' ? value.error : 'Favorites could not be updated. Try again.';
       if (response.status === 409) throw new FavoritesConflict(message);

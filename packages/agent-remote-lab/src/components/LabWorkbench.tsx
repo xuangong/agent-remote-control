@@ -56,6 +56,7 @@ export function LabWorkbench({ draftBinding, displayBinding, operationBinding, s
   } : relationships;
   const workspace = useMemo(() => providerId && reportedSession && cwd ? { providerId, nativeSessionId: reportedSession, cwd } : undefined, [providerId, reportedSession, cwd]);
   return <SessionWorkspaceContext.Provider value={workspace}><SessionWorkbench {...props}
+    sessionAddress={identity ? `${identity.hostId ?? 'local'}/${identity.providerId}/${identity.nativeSessionId}` : undefined}
     sessionDescription={sessionDescription} onNavigateAttribution={props.onNavigateAttribution ?? descriptions?.navigate}
     readOnly={props.readOnly || promptEdit.recoveringDraft}
     actions={{ ...props.actions, ...(promptEdit.editPrompt ? { editPrompt: promptEdit.editPrompt } : {}) }}

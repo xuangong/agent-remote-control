@@ -545,6 +545,27 @@ it.each([true, false])('groups Host, Provider, cwd and native Session ID in Info
   expect(rows.slice(0, 4)).toEqual(['HostMac Studiohost-id', 'Providerrecorded', `cwd${cached ? '/saved/workspace' : 'Not available in saved history'}`, 'Session IDnative-id']);
 });
 
+it.each([['host-id', 'host-id/recorded/native-id'], [undefined, 'local/recorded/native-id']])('names the session it shows by its address, as session links do (Host %s)', async (hostId, address) => {
+  const session = { ...(hostId ? { hostId } : {}), providerId: 'recorded', nativeSessionId: 'native-id', title: 'Saved session' };
+  const state = { ...replicaState, timeline: { ...replicaState.timeline, entries: [{ providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-11-21T00:00:00Z',
+    sourceSeqRanges: [], collapsed: [], resources: [], item: { type: 'assistant_message' as const, text: 'READY' } }] } };
+  const view = await render(<LabWorkbench sessionIdentity={session} state={state} sessionStatus="ready" actions={{}} />);
+  const named = [...view.querySelectorAll('[data-session-address]')];
+  expect(named.map(node => node.getAttribute('data-session-address'))).toEqual([address]);
+  // The whole conversation is under the name: its rows and its composer.
+  const rows = view.querySelectorAll('.agent-timeline-entry').length;
+  expect(rows).toBeGreaterThan(0);
+  expect(named[0]!.querySelectorAll('.agent-timeline-entry')).toHaveLength(rows);
+  expect(named[0]!.querySelector('[data-testid="prompt-input"]')).not.toBeNull();
+  await unmount(view);
+});
+
+it('names no session when it shows none', async () => {
+  const view = await render(<LabWorkbench state={replicaState} sessionStatus="ready" actions={{}} />);
+  expect(view.querySelector('[data-session-address]')).toBeNull();
+  await unmount(view);
+});
+
 it('leaves an uncertain retry to the message, which says what to check, and reports other retry failures', async () => {
   const outgoing = { id: 'outgoing-1', agentId: replicaState.agent!.id, text: 'Deploy the fix', status: 'unconfirmed' as const, afterKey: 'epoch-start:epoch',
     retryRequiresNewOperation: true, error: 'This message may not have arrived. If it is not in the conversation, Retry sends it again.' };

@@ -127,6 +127,7 @@ export const windows: AreaMessages<typeof english> = {
   'windows.error.pendingWindow': '没完成的新建窗口无法恢复。新建别的窗口之前，请先保留它已保存的请求。',
   'windows.error.scopeChanged': '分组的范围或权限变了。',
   'windows.error.unsettledDeletion': '这个分组有一次删除还没完成。',
+  'windows.error.operationRejected': '窗口操作被拒绝了。',
   'windows.error.groupUnavailable': '这个分组用不了。',
   'windows.error.leaseChanged': '分组的范围或租约变了。',
   'windows.error.readGroupFirst': '应用布局之前，先读取一个可用的分组。',

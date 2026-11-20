@@ -255,6 +255,11 @@ export const client: AreaMessages<typeof english> = {
   'client.creation.hostOffline': '这台 Host 离线了。重新连上它，或换一台 Host。',
   'client.creation.noProviders': '这台 Host 上没有可用的 provider。检查已安装的 Agent 和 provider 设置。',
   'client.creation.handoffBlocked': '交接这段对话之前，先发送或删除待发的消息。',
+  'client.creation.retryKeepsReservation': '重试会沿用同一个会话名额和设置。',
+  'client.creation.resumedTitle': '恢复的会话',
+  'client.siteUpdate.title': '有新版本了',
+  'client.siteUpdate.body': '这个网站有新版本了。离开这一页时会自动加载，也可以现在刷新。',
+  'client.siteUpdate.reload': '刷新',
 
   'client.notification.needsInput': '会话需要你的回复',
   'client.notification.completed': '会话完成了',

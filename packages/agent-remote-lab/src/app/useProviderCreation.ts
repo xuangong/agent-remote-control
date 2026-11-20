@@ -193,7 +193,7 @@ export function useProviderCreation(scope: Pick<AppInputs & PanelsAndShortcutsSl
         const target = hostId === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, hostId);
         const response = await target.attach(persistence.providerId, persistence.sessionId);
         if (navigationGeneration.current !== generation) return;
-        const resumed = resumedSession(session, persistence, response);
+        const resumed = resumedSession(session, persistence, response, t);
         rememberSession(resumed); await windowSession.openAttached(resumed);
       } else {
         const response = await transport.resumeAgent(createAgentId(), persistence);

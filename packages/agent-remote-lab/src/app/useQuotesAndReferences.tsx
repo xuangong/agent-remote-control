@@ -6,7 +6,7 @@ import { windowSessionBinding } from '../window-workspace.js';
 import { type SessionEntry, sessionKey } from '../session-tree.js';
 import { EarlierConversation } from '../components/EarlierConversation.js';
 import { useCallback, useRef } from 'react';
-import { errorWords, timelineEntryKey, type AgentReplicaState } from '@orchardworks/agent-client';
+import { errorWords, keyedError, timelineEntryKey, type AgentReplicaState } from '@orchardworks/agent-client';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import type { LabWorkbenchActions } from '../components/LabWorkbench.js';
 import { SessionAsk } from '../components/SessionAsk.js';
@@ -33,7 +33,7 @@ import type { WindowViewActionsSlice } from './useWindowViewActions.js';
 import type { TraceNavigationSlice } from './useTraceNavigation.js';
 import type { AppInputs } from './types.js';
 
-import { sessionQuotaMessage, sessionQuotaReached } from '../state/agent-creation.js';
+import { sessionQuotaReached } from '../state/agent-creation.js';
 import { quoteCreationId, quoteLanding, quoteSessionOptions, quoteStart, reloadedConversationMessage } from '../state/quote-flow.js';
 import { askRestoreAllowed } from '../state/ask-visibility.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
@@ -69,7 +69,7 @@ export function useQuotesAndReferences(scope: Pick<AppInputs & RequestedSessionS
     const agent = sourceState.agent;
     if (!directory || !agent) throw new Error(t('sessions.quoteFlow.cannotCreate'));
     const target = (source.hostId ?? 'local') === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, source.hostId);
-    if (sessionQuotaReached(remoteHosts.find(host => host.id === source.hostId)?.sessionQuota)) throw new Error(sessionQuotaMessage);
+    if (sessionQuotaReached(remoteHosts.find(host => host.id === source.hostId)?.sessionQuota)) throw keyedError('client.creation.quotaReached');
     const options = quoteSessionOptions(agent, source.providerId);
     let created: { agentId: string; nativeSessionId?: string };
     try { created = await target.create(source.providerId, operationId, options); }

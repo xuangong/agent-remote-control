@@ -128,6 +128,7 @@ export const windows = {
   'windows.error.pendingWindow': 'The pending Window creation cannot be recovered. Preserve its saved request before creating another Window.',
   'windows.error.scopeChanged': 'The group scope or access changed.',
   'windows.error.unsettledDeletion': 'This group has an unsettled deletion.',
+  'windows.error.operationRejected': 'Window operation rejected.',
   'windows.error.groupUnavailable': 'This group is unavailable.',
   'windows.error.leaseChanged': 'The group scope or lease changed.',
   'windows.error.readGroupFirst': 'Read an available group before applying its layout.',

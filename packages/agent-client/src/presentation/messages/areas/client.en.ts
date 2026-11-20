@@ -255,6 +255,11 @@ export const client = {
   'client.creation.hostOffline': 'This Host is offline. Reconnect it or select another Host.',
   'client.creation.noProviders': 'No providers available on this Host. Check installed agents and provider settings.',
   'client.creation.handoffBlocked': 'Send or remove pending messages before handing off this conversation.',
+  'client.creation.retryKeepsReservation': 'Retry keeps the same session reservation and settings.',
+  'client.creation.resumedTitle': 'Resumed session',
+  'client.siteUpdate.title': 'Update available',
+  'client.siteUpdate.body': 'A newer version of this site is available. It loads when you leave this page, or you can reload now.',
+  'client.siteUpdate.reload': 'Reload',
 
   'client.notification.needsInput': 'Session needs your input',
   'client.notification.completed': 'Session completed',

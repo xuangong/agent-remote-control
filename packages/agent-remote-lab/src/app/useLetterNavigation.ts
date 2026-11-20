@@ -87,7 +87,7 @@ export function useLetterNavigation(scope: Pick<AppInputs & WorkbenchShellSlice 
       let pair = communicationResolver(source, snapshots)(entry);
       // A child opened directly may not have its parent's native reference in view yet.
       if ((!pair.sender || !pair.recipient) && source.parentNativeSessionId) {
-        const parent = await attachParticipant({ hostId: source.hostId, providerId: source.providerId, nativeSessionId: source.parentNativeSessionId, title: 'Parent conversation' });
+        const parent = await attachParticipant({ hostId: source.hostId, providerId: source.providerId, nativeSessionId: source.parentNativeSessionId, title: t('sessions.fallbackTitle.parent') });
         const lease = await observe(parent);
         for (;;) {
           check();

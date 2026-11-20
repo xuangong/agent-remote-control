@@ -38,7 +38,7 @@ export function useChildSessions(scope: Pick<AppInputs & WorkbenchRecordsSlice &
     const parentId = parentState?.agent?.runtimeInfo.sessionId;
     const parentAgent = parentState?.agent;
     if (!parentAgent || !parentId || !directory) throw new Error(t('sessions.children.parentUnavailable'));
-    let origin: OpenedSession = viewSession(source ?? activeOpened ?? { agentId: parentAgent.id, providerId: parentAgent.providerId, nativeSessionId: parentId, hostId: 'local', title: 'Parent conversation' });
+    let origin: OpenedSession = viewSession(source ?? activeOpened ?? { agentId: parentAgent.id, providerId: parentAgent.providerId, nativeSessionId: parentId, hostId: 'local', title: t('sessions.fallbackTitle.parent') });
     assertSourceCurrent(origin);
     const known = knownChildOf(sessionEntries, child.nativeSessionId, origin);
     if (childOpensBeside({ sharedWindow: !!sharedWindow, compact: !!compactLayoutRef.current })) {

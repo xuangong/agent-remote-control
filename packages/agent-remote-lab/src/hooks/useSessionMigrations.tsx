@@ -106,7 +106,7 @@ export function useSessionMigrations(options: {
     setRemaining(5); setFailure(undefined); setFollowing(opening.current);
     if (!pending || requested !== pending.id) return;
     let remainingMs = 5000; let previousTick = Date.now(); let submitting = false; let canceled = false;
-    const source: OpenedSession = { ...pending.from, title: loaded.find(session => sessionKey(session) === sessionKey(pending.from))?.title ?? 'Original conversation' };
+    const source: OpenedSession = { ...pending.from, title: loaded.find(session => sessionKey(session) === sessionKey(pending.from))?.title ?? t('sessions.fallbackTitle.original') };
     const resetClock = () => { previousTick = Date.now(); };
     document.addEventListener('visibilitychange', resetClock);
     window.addEventListener('pageshow', resetClock);
@@ -120,7 +120,7 @@ export function useSessionMigrations(options: {
     }, 250);
     return () => { canceled = true; clearInterval(timer); document.removeEventListener('visibilitychange', resetClock); window.removeEventListener('pageshow', resetClock); };
   }, [pending?.id, requested, scope]);
-  const original = pending ? { ...pending.from, title: loaded.find(session => sessionKey(session) === sessionKey(pending.from))?.title ?? 'Original conversation' } : previous;
+  const original = pending ? { ...pending.from, title: loaded.find(session => sessionKey(session) === sessionKey(pending.from))?.title ?? t('sessions.fallbackTitle.original') } : previous;
   const originalUrl = original ? new URL(sessionUrl(original)) : undefined;
   originalUrl?.searchParams.set('keepOriginal', '1');
   const needsPromptRestore = pending && options.needsPromptRestore?.(pending);

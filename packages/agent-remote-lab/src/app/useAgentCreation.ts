@@ -77,10 +77,10 @@ export function useAgentCreation(scope: Pick<AppInputs & HostAndStackSlice & Vie
       dispatchPanels({ type: 'sessionPanel.set', panel: 'list' });
     } catch (error) {
       const outcome = classifyCreationFailure({ code: error instanceof DirectoryError ? error.code : undefined, directoryError: error instanceof DirectoryError, hasDirectory: !!directory,
-        reservationHeld: !!creationReservation.current, bot, botSessionCreated: botSession, message: errorWords(error, t, 'sessions.creation.failed') });
+        reservationHeld: !!creationReservation.current, bot, botSessionCreated: botSession, message: errorWords(error, t, 'sessions.creation.failed') }, t);
       if (outcome.partialNotice) {
         const notice = sessionConnectionFailure(error, false, t);
-        setSessionNotice({ ...notice, operation: t('sessions.connection.createSession'), message: partialCreationMessage(notice.message) });
+        setSessionNotice({ ...notice, operation: t('sessions.connection.createSession'), message: partialCreationMessage(notice.message, t) });
       }
       if (outcome.releasesReservation) { creationReservation.current = undefined; setCreationLocked(false); }
       // Before the session exists the sheet shows why; after, the roster shows the group's creation state and its Retry.

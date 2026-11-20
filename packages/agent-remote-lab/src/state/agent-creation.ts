@@ -19,6 +19,7 @@
  *   nothing else is opening.
  * - `resumedSession`: the resumed session keeps what is known of the opened one and takes the Host's answer.
  */
+import { translator, type Translate } from '@orchardworks/agent-client';
 export interface CreationReservation { readonly bot?: true }
 
 export function mayCreate(facts: { readonly providerId: string | undefined; readonly unavailableReason: string | undefined;
@@ -36,7 +37,6 @@ export function planningOption(wanted: boolean, providerId: string): { planning?
 }
 
 const refusedForContent = ['invalid_request', 'workspace_not_found', 'provider_not_found', 'session_quota_exceeded', 'operation_conflict'];
-const partialCreationNote = 'Creation may have partially completed. Inspect the native session list before creating a new intent. Retry keeps the same reservation.';
 
 export interface CreationFailure {
   /** The reservation is released: the next attempt is a new one. */
@@ -50,17 +50,17 @@ export interface CreationFailure {
 }
 
 export function classifyCreationFailure(facts: { readonly code?: string; readonly directoryError: boolean; readonly hasDirectory: boolean;
-  readonly reservationHeld: boolean; readonly bot: boolean; readonly botSessionCreated: boolean; readonly message: string }): CreationFailure {
+  readonly reservationHeld: boolean; readonly bot: boolean; readonly botSessionCreated: boolean; readonly message: string }, t: Translate = translator('en')): CreationFailure {
   const code = facts.directoryError ? facts.code : undefined;
   const partialNotice = code === 'native_file_limit';
   const releasesReservation = code !== undefined && refusedForContent.includes(code);
-  const failure = `${facts.message}${facts.hasDirectory && !releasesReservation && facts.reservationHeld ? ' Retry keeps the same session reservation and settings.' : ''}`;
+  const failure = facts.hasDirectory && !releasesReservation && facts.reservationHeld ? `${facts.message} ${t('client.creation.retryKeepsReservation')}` : facts.message;
   if (facts.bot) return { releasesReservation, partialNotice, ...(facts.botSessionCreated ? {} : { botSheetFailure: failure }) };
   return { releasesReservation, partialNotice, ...(partialNotice ? {} : { failure }) };
 }
 
-export function partialCreationMessage(base: string): string {
-  return `${base} ${partialCreationNote}`;
+export function partialCreationMessage(base: string, t: Translate = translator('en')): string {
+  return `${base} ${t('client.creation.partialNote')}`;
 }
 
 export function mayResume(facts: { readonly hasPersistence: boolean; readonly isChild: boolean; readonly opening: boolean }): boolean {
@@ -69,14 +69,13 @@ export function mayResume(facts: { readonly hasPersistence: boolean; readonly is
 
 export function resumedSession<Opened extends { readonly title: string; readonly hostId?: string }>(
   opened: Opened | undefined, persistence: { readonly providerId: string; readonly sessionId: string },
-  response: { readonly agentId: string; readonly nativeSessionId?: string },
+  response: { readonly agentId: string; readonly nativeSessionId?: string }, t: Translate = translator('en'),
 ) {
   const hostId = opened?.hostId ?? 'local';
   return { ...opened, agentId: response.agentId, providerId: persistence.providerId, nativeSessionId: response.nativeSessionId ?? persistence.sessionId,
-    hostId, title: opened?.title ?? 'Resumed session' };
+    hostId, title: opened?.title ?? t('client.creation.resumedTitle') };
 }
 
-export const sessionQuotaMessage = 'Session creation limit reached. Existing sessions remain available. Ask the owner to raise your limit.';
 
 /** A Host that reports a quota refuses another session once its used count reaches the limit. */
 export function sessionQuotaReached(quota: { readonly used: number; readonly limit: number } | undefined): boolean {

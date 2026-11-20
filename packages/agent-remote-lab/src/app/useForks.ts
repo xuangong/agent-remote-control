@@ -1,4 +1,4 @@
-import { errorWords } from '@orchardworks/agent-client';
+import { errorWords, keyedError } from '@orchardworks/agent-client';
 import { type AgentCommandResult } from '@orchardworks/agent-remote-protocol';
 import { sessionKey } from '../session-tree.js';
 import type { AgentReplicaState } from '@orchardworks/agent-client';
@@ -7,7 +7,7 @@ import { sideNavigationSource, sideNavigationTarget, sideLinkVisible, referenceF
 import { configureFork, sendForkInput } from '../fork-actions.js';
 import { viewKey } from './helpers.js';
 import type { AppInputs } from './types.js';
-import { sessionQuotaMessage, sessionQuotaReached } from '../state/agent-creation.js';
+import { sessionQuotaReached } from '../state/agent-creation.js';
 import { copiesConversation, firstInputPending, forkCommandRoute, forkCreateOptions, forkedSession, forkKey, forkSettings, needsWorkspaceLookup, selectsSideAfterFork, withForkContext, workspaceOptions } from '../state/fork-plan.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
 import type { SessionSuccessionBindingSlice } from './useSessionSuccessionBinding.js';
@@ -74,7 +74,7 @@ export function useForks(scope: Pick<AppInputs & WorkbenchShellSlice & SessionSu
       const key = forkKey(sessionKey(source), id, args);
       let record = forkReservation.current?.key === key ? forkStore.get(forkReservation.current.record.id) : forkStore.all().find((fork) => fork.creationKey === key);
       if (!record) {
-        if (sessionQuotaReached(remoteHosts.find((host) => host.id === source.hostId)?.sessionQuota)) throw new Error(sessionQuotaMessage);
+        if (sessionQuotaReached(remoteHosts.find((host) => host.id === source.hostId)?.sessionQuota)) throw keyedError('client.creation.quotaReached');
         const context = copiesConversation(id) ? await captureForkContext(transport, source) : referenceForkContext(source);
         const settings = forkSettings(agent.runtimeInfo.settings ?? []);
         const placed = needsWorkspaceLookup(source) ? workspaceOptions(agent.cwd, (await target.workspaces(source.providerId)).workspaces)

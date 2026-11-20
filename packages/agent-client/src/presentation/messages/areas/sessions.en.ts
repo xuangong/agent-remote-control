@@ -601,4 +601,7 @@ export const sessions = {
   'sessions.letter.sourceChanged': 'The source view changed. Open the letter again.',
   'sessions.toast.region': 'Notifications',
   'sessions.console.track': 'Toggle Track view; use /track on or /track off',
+  'sessions.fallbackTitle.original': 'Original conversation',
+  'sessions.fallbackTitle.parent': 'Parent conversation',
+  'sessions.fallbackTitle.current': 'Current session',
 } as const satisfies Readonly<Record<string, Message>>;

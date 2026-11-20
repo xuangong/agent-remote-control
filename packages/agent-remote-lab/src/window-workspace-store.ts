@@ -266,7 +266,7 @@ export class WindowWorkspaceStore {
             if (++conflicts >= 3) { this.publish('offline', 'The Window is changing on another page. Saving will retry.'); this.scheduleRetry(); return; }
             continue;
           }
-          this.settle(edit, new Error(commit.result.message ?? 'Window operation rejected.')); continue;
+          this.settle(edit, commit.result.message ? new Error(commit.result.message) : keyedError('windows.error.operationRejected')); continue;
         }
         this.retryAttempt = 0; this.settle(edit);
       } catch (error) {

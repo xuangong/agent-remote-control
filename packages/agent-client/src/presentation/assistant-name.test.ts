@@ -1,28 +1,40 @@
 import { describe, expect, it } from 'vitest';
-import { agentName, assistantName, assistantNames } from './assistant-name.js';
+import { ASSISTANT_NAME_IDS, assistantName, assistantNames } from './assistant-name.js';
 import { ASSISTANT_NAME_VECTORS } from './assistant-name.vectors.js';
+import { translator } from './messages.js';
 
 describe('assistantNames', () => {
-  it.each(ASSISTANT_NAME_VECTORS)('$name', ({ assistants, names }) => {
-    const named = assistantNames(assistants);
-    expect(assistants.map(assistant => named.get(assistant.key))).toEqual(names);
+  it.each(ASSISTANT_NAME_VECTORS)('$name', ({ assistants, names, locale }) => {
+    const called = assistantNames(assistants, translator(locale ?? 'en'));
+    expect(assistants.map(assistant => called.get(assistant.key))).toEqual(names);
+  });
+
+  it('gives every assistant of an account a different name, the same in each language and order', () => {
+    const keys = Array.from({ length: 60 }, (_, index) => `group-${index % 7}/view-${index}`);
+    for (const locale of ['en', 'zh'] as const) {
+      const called = assistantNames(keys.map(key => ({ key })), translator(locale));
+      expect(new Set(called.values()).size).toBe(keys.length);
+      const reversed = assistantNames([...keys].reverse().map(key => ({ key })), translator(locale));
+      for (const key of keys) expect(reversed.get(key)).toBe(called.get(key));
+    }
+  });
+
+  it('has twenty-five names, each in English and Chinese', () => {
+    expect(ASSISTANT_NAME_IDS).toHaveLength(25);
+    for (const locale of ['en', 'zh'] as const) {
+      const names = ASSISTANT_NAME_IDS.map(id => translator(locale)(`name.${id}`));
+      expect(new Set(names).size).toBe(25);
+      for (const name of names) expect(name).not.toMatch(/^name\./);
+    }
+    expect(['dango', 'gummies', 'nest', 'pebbles', 'hatch'].map(id => translator('zh')(`name.${id}` as `name.${typeof ASSISTANT_NAME_IDS[number]}`))).toEqual(['团团', '软糖', '窝', '石子', '孵']);
   });
 });
 
 describe('assistantName', () => {
-  it('names one assistant among those shown with it, and alone by default', () => {
-    const together = [{ key: 'a', providerId: 'claude' }, { key: 'b', providerId: 'claude' }];
-    expect(assistantName(together[1]!, together)).toBe('Claude 2');
-    expect(assistantName(together[1]!)).toBe('Claude');
-    expect(assistantName({ key: 'c', providerId: 'claude' }, together)).toBe('Claude 3');
-  });
-
-  it('is a name, never a prompt: no plain session is called by more than its agent and a number', () => {
-    for (const { assistants } of ASSISTANT_NAME_VECTORS) {
-      const named = assistantNames(assistants);
-      for (const assistant of assistants.filter(item => !item.bot?.trim())) {
-        expect(named.get(assistant.key)).toMatch(new RegExp(`^${agentName(assistant.providerId, assistant.providerName)}( \\d+)?$`));
-      }
-    }
+  it('names one assistant among the others of its account, and alone by default', () => {
+    const account = [{ key: 'aa' }, { key: 'cd' }];
+    expect(assistantName(account[1]!, account)).toBe('Pebbles');
+    expect(assistantName(account[1]!)).toBe('Nest');
+    expect(assistantName({ key: 'da' }, account)).toBe('Hatch');
   });
 });

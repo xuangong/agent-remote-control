@@ -1,21 +1,27 @@
+import type { Locale } from './messages.js';
 import type { NamedAssistant } from './assistant-name.js';
 
-/** Assistants shown together and the names they are called by, row by row. Read by `assistant-name.test.ts`. */
-export interface AssistantNameVector { readonly name: string; readonly assistants: readonly NamedAssistant[]; readonly names: readonly string[] }
+/** Assistants of one account and the names they are called by, row by row, in `locale` (English by default). Read by `assistant-name.test.ts`. */
+export interface AssistantNameVector { readonly name: string; readonly assistants: readonly NamedAssistant[]; readonly names: readonly string[]; readonly locale?: Locale }
 
-const plain = (key: string, providerId: string, providerName?: string): NamedAssistant => ({ key, providerId, ...(providerName ? { providerName } : {}) });
-const bot = (key: string, name: string, providerId = 'claude'): NamedAssistant => ({ key, bot: name, providerId });
+const unnamed = (key: string): NamedAssistant => ({ key });
+const named = (key: string, name: string): NamedAssistant => ({ key, name });
+// Keys and the names they pick: `a` Berry (20), `b` Nest (2), `aa`, `cd` and `da` Nest (2), Pebbles follows Nest, Cocoa follows Berry.
+const ENGLISH_LIST = ['Dango', 'Gummies', 'Nest', 'Pebbles', 'Hatch', 'Mochi', 'Bean', 'Puff', 'Sprout', 'Pudding', 'Acorn', 'Bun', 'Peach',
+  'Plum', 'Button', 'Marble', 'Muffin', 'Nori', 'Tofu', 'Biscuit', 'Berry', 'Cocoa', 'Taro', 'Cloud', 'Pinecone'];
 
 export const ASSISTANT_NAME_VECTORS: readonly AssistantNameVector[] = [
-  { name: 'a bot is called by its own name', assistants: [bot('a', 'Chief')], names: ['Chief'] },
-  { name: 'a plain Claude session is Claude, never its prompt', assistants: [plain('a', 'claude', 'Claude Code')], names: ['Claude'] },
-  { name: 'Codex and Copilot by their short names', assistants: [plain('a', 'codex', 'Codex CLI'), plain('b', 'copilot', 'GitHub Copilot CLI')], names: ['Codex', 'Copilot'] },
-  { name: 'an unknown agent by its display name', assistants: [plain('a', 'recorded', 'Recorded')], names: ['Recorded'] },
-  { name: 'an unknown agent without a display name by its id', assistants: [plain('a', 'dsh')], names: ['Dsh'] },
-  { name: 'two plain sessions of one agent are numbered in order', assistants: [plain('a', 'claude'), plain('b', 'claude')], names: ['Claude', 'Claude 2'] },
-  { name: 'numbering is per agent', assistants: [plain('a', 'claude'), plain('b', 'codex'), plain('c', 'claude'), plain('d', 'codex')], names: ['Claude', 'Codex', 'Claude 2', 'Codex 2'] },
-  { name: 'bots are not numbered and keep their names', assistants: [bot('a', 'Builder'), plain('b', 'claude'), bot('c', 'Reviewer')], names: ['Builder', 'Claude', 'Reviewer'] },
-  { name: 'a plain session never takes a bot\'s name', assistants: [bot('a', 'Claude'), plain('b', 'claude'), plain('c', 'claude')], names: ['Claude', 'Claude 2', 'Claude 3'] },
-  { name: 'a number never repeats a bot\'s name', assistants: [bot('a', 'Claude 2'), plain('b', 'claude'), plain('c', 'claude')], names: ['Claude 2', 'Claude', 'Claude 3'] },
-  { name: 'a bot with an empty name is a plain session', assistants: [bot('a', '  ', 'codex')], names: ['Codex'] },
+  { name: 'a stored name is the name', assistants: [named('a', 'Chief')], names: ['Chief'] },
+  { name: 'an assistant without a name is called by the name its key picks', assistants: [unnamed('a')], names: ['Berry'] },
+  { name: 'the same assistant in Chinese', assistants: [unnamed('a')], names: ['莓莓'], locale: 'zh' },
+  { name: 'keys that pick one name take it and the names after it in the order of their keys, whatever order they come in',
+    assistants: [unnamed('da'), unnamed('aa'), unnamed('cd')], names: ['Hatch', 'Nest', 'Pebbles'] },
+  { name: 'a name another assistant stores is not given again', assistants: [named('x', 'Nest'), unnamed('b')], names: ['Nest', 'Pebbles'] },
+  { name: 'a stored name takes its name in the other language too', assistants: [named('x', '窝'), unnamed('b')], names: ['窝', 'Pebbles'] },
+  { name: 'names are compared without case or surrounding spaces', assistants: [named('x', ' berry '), unnamed('a')], names: ['berry', 'Cocoa'] },
+  { name: 'a blank stored name is no name', assistants: [named('a', '   ')], names: ['Berry'] },
+  { name: 'stored names may repeat; generated ones never do', assistants: [named('x', 'Chief'), named('y', 'Chief'), unnamed('aa'), unnamed('cd')],
+    names: ['Chief', 'Chief', 'Nest', 'Pebbles'] },
+  { name: 'when every name is taken, the name its key picks is numbered', assistants: [...ENGLISH_LIST.map((name, index) => named(`n${index}`, name)), unnamed('a')],
+    names: [...ENGLISH_LIST, 'Berry 2'] },
 ];

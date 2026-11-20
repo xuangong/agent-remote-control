@@ -9,6 +9,7 @@ import { SessionDirectoryClient } from '../../src/directory-client.js';
 import { replicaState } from '../../src/test/fixtures.js';
 import '../../src/session-view-styles.js';
 import { trackFocusModality } from '../../src/focus-modality.js';
+import { openInWindowMode } from './window-mode.js';
 
 const stopTrackingFocus = trackFocusModality(document);
 if (import.meta.hot) import.meta.hot.dispose(stopTrackingFocus);
@@ -101,6 +102,7 @@ const entries = longConversation ? Array.from({ length: 30 }, (_, index) => ({ p
 const app = (accountAction: ReactNode) => <App baseUrl={baseUrl} userScoped transport={transport} directory={directory} hostService={hostService}
   initialState={{ ...replicaState, agent: { ...replicaState.agent!, status }, timeline: { ...replicaState.timeline, hasOlder: false, ...(longConversation ? { entries, nextSeq: entries.length + 1 } : {}) } }} initialSessionStatus="ready"
   accountAction={accountAction} />;
+openInWindowMode();
 createRoot(document.getElementById('root')!).render(new URLSearchParams(location.search).has('gateway')
   ? <GatewayController>{(_baseUrl, accountAction) => app(accountAction)}</GatewayController>
   : app(<><span className="gateway-account-identity">Alice Example</span><button>Security</button><button>Sign out</button></>));

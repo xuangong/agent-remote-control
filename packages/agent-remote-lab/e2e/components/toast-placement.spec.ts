@@ -4,7 +4,8 @@ async function raiseCommandErrorToast(page: import('@playwright/test').Page) {
   await page.goto('/e2e/fixtures/toast-placement.html');
   const input = page.getByTestId('prompt-input');
   await input.fill('Run the refused command');
-  await input.press('Enter');
+  // The send button sends under any pointer; Return makes a new line on a touch screen.
+  await page.getByTestId('prompt-submit').click();
   const toast = page.locator('.lab-toast').filter({ hasText: 'The command was refused by the fixture.' });
   await expect(toast).toBeVisible({ timeout: 10_000 });
   await toast.hover(); // Pause the countdown while checking viewport transitions.

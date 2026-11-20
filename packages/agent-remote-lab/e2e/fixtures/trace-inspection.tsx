@@ -4,6 +4,7 @@ import { PROTOCOL_VERSION, type ProjectedTimelineEntry } from '@orchardworks/age
 import { App, type LabTransport } from '../../src/App.js';
 import { replicaState } from '../../src/test/fixtures.js';
 import '../../src/session-view-styles';
+import { openInWindowMode } from './window-mode.js';
 
 function entry(seq: number): ProjectedTimelineEntry {
   return { providerId: 'recorded', turnId: 'turn-inspect', seqStart: seq, seqEnd: seq, timestamp: '2026-09-17T07:00:00Z',
@@ -82,4 +83,5 @@ function Fixture() {
 }
 
 window.history.replaceState(null, '', `${window.location.pathname}?agent=agent-1`);
+openInWindowMode();
 createRoot(document.getElementById('root')!).render(<Fixture />);

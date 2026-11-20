@@ -11,7 +11,7 @@ for (const width of [320, 390, 844, 1440]) {
     await page.setViewportSize({ width, height: 850 });
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.goto('/e2e/fixtures/view-overflow.html?view=previews&mode=concise');
+    await page.goto('/e2e/fixtures/view-overflow.html?view=previews&process=concise');
     await expect(page.locator('.agent-tool')).toHaveCount(0);
     await expect(page.locator('.agent-tool-preview')).toHaveCount(0);
     await openDisplayOptions(page);

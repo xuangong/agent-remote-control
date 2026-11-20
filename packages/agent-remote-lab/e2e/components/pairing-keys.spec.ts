@@ -17,7 +17,8 @@ for (const purpose of ['host-only', 'gateway-setup'] as const) {
       records[0]!.status = 'revoked';
       await route.fulfill({ json: { ok: true } });
     });
-    await page.goto('/');
+    // Window mode, whose sidebar holds this; a phone's home is the assistant list.
+    await page.goto('/?mode=window');
     const compact = testInfo.project.name === 'chromium-mobile';
     const context = compact ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-sessions-page');
     if (compact) await context.getByRole('button', { name: 'Settings', exact: true }).click();

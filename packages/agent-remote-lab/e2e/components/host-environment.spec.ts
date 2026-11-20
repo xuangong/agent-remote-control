@@ -16,7 +16,8 @@ test('filters execution environments without confusing same-name Hosts or overfl
       : { items: [], workspaces: [], models: [], revision: '1', nextCursor: null };
     return route.fulfill({ json });
   });
-  await page.goto('/');
+  // Window mode, whose sidebar holds this; a phone's home is the assistant list.
+  await page.goto('/?mode=window');
   await showNewSession(page);
   const context = testInfo.project.name === 'chromium-mobile' ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-sessions-page');
   const search = context.getByRole('searchbox', { name: 'Find an execution environment' });

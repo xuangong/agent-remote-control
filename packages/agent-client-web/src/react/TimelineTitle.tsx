@@ -1,4 +1,5 @@
 import { createContext, type ReactNode, useContext, useEffect, useRef } from 'react';
+import { useTranslate } from './locale.js';
 
 export interface TimelineTime {
   readonly timestamp: string;
@@ -17,6 +18,7 @@ export function TimelineTitle({ children, className, disclose }: {
   readonly className?: string;
   readonly disclose?: () => void;
 }) {
+  const t = useTranslate();
   const time = useContext(TimelineTimeContext);
   const pendingClick = useRef<ReturnType<typeof setTimeout>>();
   const cancelClick = () => {
@@ -27,7 +29,7 @@ export function TimelineTitle({ children, className, disclose }: {
   const titleClass = `agent-timeline-title${className ? ` ${className}` : ''}`;
   if (!time) return <span className={titleClass}>{children}</span>;
 
-  const hint = `Double-click to ${time.visible ? 'hide' : 'show'} all local timestamps (Alt+T)`;
+  const hint = t(time.visible ? 'timeline.time.hide' : 'timeline.time.show');
   const label = <span className="agent-time-title-label" title={hint}
     onMouseDown={event => { if (isDesktopTimeline() && event.detail > 1) event.preventDefault(); }}
     onClick={event => {
@@ -52,6 +54,6 @@ export function TimelineTitle({ children, className, disclose }: {
       <span className="agent-time-title-mobile">{children}</span>
     </>}
     <time className="agent-title-time" dateTime={time.timestamp} hidden={!time.visible}
-      aria-label={`${time.date} ${time.time} (local time)`}>{time.date} {time.time}</time>
+      aria-label={t('timeline.time.local', { date: time.date, time: time.time })}>{time.date} {time.time}</time>
   </span>;
 }

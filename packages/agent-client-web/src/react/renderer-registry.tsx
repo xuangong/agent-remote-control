@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from 'react';
 import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
+import { useTranslate } from './locale.js';
 
 export type TimelineDetailRenderer = (item: AgentTimelineItem) => ReactNode;
 
@@ -65,10 +66,15 @@ class ExtensionErrorBoundary extends Component<ExtensionErrorBoundaryProps, { re
 
   render(): ReactNode {
     if (this.state.failed) {
-      return <span className="agent-extension-error" role="status">Detail renderer unavailable</span>;
+      return <ExtensionUnavailable />;
     }
     return this.props.children;
   }
+}
+
+function ExtensionUnavailable() {
+  const t = useTranslate();
+  return <span className="agent-extension-error" role="status">{t('timeline.extension.unavailable')}</span>;
 }
 
 function sameSemanticValue(left: unknown, right: unknown): boolean {

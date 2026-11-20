@@ -8,6 +8,8 @@ import { canPreviewImage } from './ResourceCard.js';
 import { useNearViewport } from './useNearViewport.js';
 
 export type { MarkdownResourceContext } from './local-resource.js';
+import { useTranslate } from './locale.js';
+import { errorWords } from './localized-error.js';
 import { cachedLocalResourceBinding, loadLocalResource, type MarkdownResourceContext } from './local-resource.js';
 interface HastNode {
   type?: string;
@@ -54,6 +56,7 @@ export function MarkdownResourceImage({
   readonly context?: MarkdownResourceContext;
   readonly sourceLocator?: string;
 }) {
+  const t = useTranslate();
   const preview = useContext(FilePreviewContext);
   const imageNode = node as HastNode | undefined;
   const candidate = typeof imageNode?.data?.imageResourceLocator === 'string'
@@ -92,7 +95,7 @@ export function MarkdownResourceImage({
       if (current) setResult({ key, binding, detail, resources: context.resources });
     }).catch((error: unknown) => {
       if (current) setResult(previous => ({ key, binding: previous?.key === key ? previous.binding : undefined,
-        failure: error instanceof Error && error.message ? error.message : 'Image resource is unavailable.' }));
+        failure: errorWords(error, t, 'timeline.resource.imageUnavailable') }));
     });
     return () => { current = false; };
   }, [!!context, live, key, locator, sourceLocator, near, settled]);
@@ -104,12 +107,12 @@ export function MarkdownResourceImage({
     ? `data:${detail.mediaType};base64,${detail.contentBase64}` : undefined;
   const reason = failure ?? (detail?.status === 'unavailable' ? detail.reason
     : detail?.status === 'failed' ? detail.message
-    : binding?.status === 'unavailable' ? 'Image resource is unavailable.'
-    : detail?.status === 'available' && !canPreviewImage(detail.mediaType) ? 'This resource is not a supported image.' : undefined);
+    : binding?.status === 'unavailable' ? t('timeline.resource.imageUnavailable')
+    : detail?.status === 'available' && !canPreviewImage(detail.mediaType) ? t('timeline.resource.notImage') : undefined);
   const frame = <MarkdownImageFrame key={key} frameRef={frameRef} src={src} alt={alt ?? locator} failure={reason}
     dimensions={detail?.status === 'available' ? detail.imageDimensions : undefined} />;
   return !imageNode?.data?.linked ? <>
-    <button type="button" className="agent-resource-image-open" aria-label={`Open image: ${alt ?? locator}`} disabled={!src && !preview}
+    <button type="button" className="agent-resource-image-open" aria-label={t('timeline.resource.openImage', { title: alt ?? locator })} disabled={!src && !preview}
       onClick={() => { if (src) setOpenedKey(key); else preview?.open({ locator, sourceLocator, context }); }}>{frame}</button>
     {openedKey === key && src ? <ImagePreview src={src} label={alt ?? locator} onClose={() => setOpenedKey(undefined)} /> : null}
   </> : frame;

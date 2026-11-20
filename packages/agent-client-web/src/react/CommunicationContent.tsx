@@ -3,6 +3,7 @@ import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 import { MarkdownContent } from './MarkdownContent.js';
 import type { MarkdownResourceContext } from './markdown-resources.js';
 import { TimelineTimeContext } from './TimelineTitle.js';
+import { useTranslate } from './locale.js';
 
 // Recognize only a complete leading envelope; retain the original item for search and navigation.
 const envelopePrefix = /^(Message Type:[ \t]*[A-Z][A-Z0-9_]*[ \t]*\r?\nTask name:[ \t]*\S[^\r\n]*\r?\nSender:[ \t]*\S[^\r\n]*\r?\nPayload:)(?:[ \t]*\r?\n|[ \t]?)/;
@@ -20,6 +21,7 @@ export function CommunicationContent({ item, timestamp, resourceContext, heading
   resourceContext?: MarkdownResourceContext;
   heading?: ReactNode;
 }) {
+  const t = useTranslate();
   const time = useContext(TimelineTimeContext);
   const content = useMemo(() => {
     const match = envelopePrefix.exec(item.text);
@@ -33,7 +35,7 @@ export function CommunicationContent({ item, timestamp, resourceContext, heading
     <div className="agent-letter-body"><MarkdownContent markdown={content.payload} resourceContext={resourceContext} /></div>
     {dateTime || content.header ? <div className="agent-letter-footer">
       <details className="agent-letter-details">
-        <summary>Details</summary>
+        <summary>{t('common.details')}</summary>
         <div className="agent-letter-metadata">
           {dateTime ? <time dateTime={dateTime}>{time ? `${time.date} ${time.time}` : dateTime}</time> : null}
           {content.header ? <pre>{content.header}</pre> : null}

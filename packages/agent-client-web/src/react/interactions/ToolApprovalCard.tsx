@@ -56,22 +56,22 @@ export function ToolApprovalCard({ request, onResponse, pending, failure, assist
         <ToolApprovalDetails request={request} />
         <div className="agent-interaction-actions agent-approval-actions">
           {scopes.map(scope => <button key={scope} type="button" data-decision="allow" data-scope={scope} disabled={pending}
-            onClick={() => void onResponse({ kind: 'tool_approval', decision: 'allow', scope })}>{`Allow ${scope === 'once' ? 'once' : 'for session'}`}</button>)}
-          {request.allowedDecisions.includes('cancel') ? <button type="button" disabled={pending} data-decision="cancel" onClick={() => void onResponse({ kind: 'tool_approval', decision: 'cancel' })}>Cancel</button> : null}
-          {request.allowedDecisions.includes('deny') ? <button type="button" data-decision="deny" disabled={pending} onClick={() => void onResponse({ kind: 'tool_approval', decision: 'deny' })}>Deny</button> : null}
+            onClick={() => void onResponse({ kind: 'tool_approval', decision: 'allow', scope })}>{t(scope === 'once' ? 'timeline.approval.allowOnce' : 'timeline.approval.allowSession')}</button>)}
+          {request.allowedDecisions.includes('cancel') ? <button type="button" disabled={pending} data-decision="cancel" onClick={() => void onResponse({ kind: 'tool_approval', decision: 'cancel' })}>{t('common.cancel')}</button> : null}
+          {request.allowedDecisions.includes('deny') ? <button type="button" data-decision="deny" disabled={pending} onClick={() => void onResponse({ kind: 'tool_approval', decision: 'deny' })}>{t('timeline.approval.deny')}</button> : null}
         </div>
         {policies?.length ? <details className="agent-approval-rules">
-          <summary>Rules for future requests <span className="agent-approval-rule-count">{policies.length}</span></summary>
+          <summary>{t('timeline.approval.rules')} <span className="agent-approval-rule-count">{policies.length}</span></summary>
           <ul>{policies.map((policy, index) => <li key={policy.policyId}>
             <p id={`${id}-rule-${index}`}>{policy.description}</p>
             <div className="agent-interaction-actions"><button type="button" disabled={pending}
               aria-describedby={`${id}-rule-${index}`} data-policy-id={policy.policyId}
-              onClick={() => void onResponse({ kind: 'tool_approval', decision: 'allow', scope: 'policy', policyId: policy.policyId })}>Apply rule</button></div>
+              onClick={() => void onResponse({ kind: 'tool_approval', decision: 'allow', scope: 'policy', policyId: policy.policyId })}>{t('timeline.approval.applyRule')}</button></div>
           </li>)}</ul>
         </details> : null}
       </ApprovalChanges>
     </div>
-    {pending ? <p className="agent-approval-submitting" role="status">Submitting…</p> : null}
+    {pending ? <p className="agent-approval-submitting" role="status">{t('timeline.interaction.submitting')}</p> : null}
     {failure ? <p className="agent-form-error" role="alert">{failure}</p> : null}
   </section>;
 }

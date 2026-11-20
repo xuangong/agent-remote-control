@@ -1,5 +1,6 @@
 import { useEffect, useState, type Ref } from 'react';
 import type { ImageDimensions } from '@orchardworks/agent-remote-protocol';
+import { useTranslate } from './locale.js';
 
 export function MarkdownImageFrame({ src, alt, dimensions, failure, frameRef }: {
   readonly src?: string;
@@ -8,12 +9,13 @@ export function MarkdownImageFrame({ src, alt, dimensions, failure, frameRef }: 
   readonly failure?: string;
   readonly frameRef?: Ref<HTMLSpanElement>;
 }) {
+  const t = useTranslate();
   const [retainedDimensions, setRetainedDimensions] = useState(dimensions);
   const [decoded, setDecoded] = useState<{ src: string; failed: boolean }>();
   useEffect(() => { if (dimensions) setRetainedDimensions(dimensions); }, [dimensions]);
   const size = dimensions ?? retainedDimensions;
   const result = decoded?.src === src ? decoded : undefined;
-  const reason = failure ?? (result?.failed ? 'The image could not be decoded.' : undefined);
+  const reason = failure ?? (result?.failed ? t('timeline.image.undecodable') : undefined);
   const state = reason ? 'failed' : src && result ? 'loaded' : 'loading';
   return <span
     ref={frameRef}
@@ -29,8 +31,8 @@ export function MarkdownImageFrame({ src, alt, dimensions, failure, frameRef }: 
       onLoad={() => setDecoded({ src, failed: false })}
       onError={() => setDecoded({ src, failed: true })} />}
     {state !== 'loaded' && <span className="agent-markdown-image-status" role={reason ? 'img' : 'status'}
-      aria-label={reason ? `${alt}: ${reason}` : `Loading image: ${alt}`} title={reason ?? alt}>
-      <span aria-hidden="true">{reason ? 'Image unavailable' : 'Loading image…'}</span>
+      aria-label={reason ? `${alt}: ${reason}` : t('timeline.image.loadingNamed', { alt })} title={reason ?? alt}>
+      <span aria-hidden="true">{reason ? t('timeline.image.unavailable') : t('timeline.image.loading')}</span>
     </span>}
   </span>;
 }

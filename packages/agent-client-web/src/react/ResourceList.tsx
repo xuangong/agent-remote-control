@@ -2,6 +2,7 @@ import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol'
 import { useEffect, useRef, useState } from 'react';
 import type { ResourceBinding } from '@orchardworks/agent-remote-protocol';
 
+import { useTranslate } from './locale.js';
 import { canPreviewImage, ResourceCard } from './ResourceCard.js';
 import { type AgentReplicaState } from '@orchardworks/agent-client';
 
@@ -13,6 +14,7 @@ export interface ResourceListProps {
 }
 
 export function ResourceList({ bindings, resources, labels, onRequest }: ResourceListProps) {
+  const t = useTranslate();
   const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set());
   const [failures, setFailures] = useState<Readonly<Record<string, string>>>({});
   const requestedImages = useRef(new Set<string>());
@@ -29,7 +31,7 @@ export function ResourceList({ bindings, resources, labels, onRequest }: Resourc
     } catch (error) {
       setFailures((current) => ({
         ...current,
-        [binding.resourceId]: error instanceof Error && error.message ? error.message : 'Resource request failed.',
+        [binding.resourceId]: error instanceof Error && error.message ? error.message : t('timeline.resource.requestFailed'),
       }));
     } finally {
       setPending((current) => {
@@ -53,8 +55,8 @@ export function ResourceList({ bindings, resources, labels, onRequest }: Resourc
   });
 
   if (bindings.length === 0) return null;
-  return <section className="agent-resources" aria-label="Referenced resources">
-    <h4>Resources</h4>
+  return <section className="agent-resources" aria-label={t('timeline.resource.referenced')}>
+    <h4>{t('timeline.resource.heading')}</h4>
     <ul>{bindings.map((binding) => <ResourceCard
       key={`${binding.resourceId}-${binding.locator}`}
       binding={binding}

@@ -1,4 +1,6 @@
 import { createContext, useContext } from 'react';
+import type { Translate } from '@orchardworks/agent-client';
+import { useTranslate } from './locale.js';
 import { splitSessionExcerpts, splitSessionReferences, type AgentTimelineItem, type SessionExcerpt, type SessionReferenceNote } from '@orchardworks/agent-remote-protocol';
 
 /** Opens the session an excerpt was quoted from; without it, an excerpt only names its source. */
@@ -33,18 +35,19 @@ export function withoutSessionReferences(item: UserMessage): { item: UserMessage
 
 /** The references a message told its agent about, each opening its session where the page can. */
 export function SessionReferenceNoteView({ note }: { note?: SessionReferenceNote }) {
+  const t = useTranslate();
   const navigate = useContext(SessionExcerptNavigation);
   if (!note) return null;
-  return <p className="agent-session-references" aria-label="Session references">
-    <span className="agent-session-excerpt-kicker">References</span>
+  return <p className="agent-session-references" aria-label={t('timeline.references.label')}>
+    <span className="agent-session-excerpt-kicker">{t('timeline.references.heading')}</span>
     {note.references.length ? note.references.map(reference => {
       const [hostId, providerId, ...rest] = reference.address.split('/');
-      const title = reference.title || 'Untitled session';
+      const title = reference.title || t('timeline.excerpt.untitled');
       const source = { ...(hostId && hostId !== 'local' ? { hostId } : {}), providerId: providerId ?? '', nativeSessionId: rest.join('/'), title };
       return navigate && source.providerId && source.nativeSessionId
         ? <button key={reference.address} type="button" title={reference.address} onClick={() => void navigate(source)}>{title}</button>
         : <span key={reference.address} title={reference.address}>{title}</span>;
-    }) : <span>None</span>}
+    }) : <span>{t('common.none')}</span>}
   </p>;
 }
 
@@ -54,23 +57,24 @@ export function excerptMessageCount(excerpt: SessionExcerpt): number {
 
 /** Quoted excerpts read as attachments of the message, collapsed to their source until opened. */
 export function SessionExcerptList({ excerpts }: { excerpts: readonly SessionExcerpt[] }) {
+  const t = useTranslate();
   const navigate = useContext(SessionExcerptNavigation);
   if (!excerpts.length) return null;
-  return <ul className="agent-session-excerpts" aria-label="Quoted excerpts">
+  return <ul className="agent-session-excerpts" aria-label={t('timeline.excerpt.label')}>
     {excerpts.map(excerpt => {
       const count = excerptMessageCount(excerpt);
       return <li key={excerpt.id}><details className="agent-session-excerpt">
         <summary>
-          <span className="agent-session-excerpt-kicker">Quoted</span>
-          <span className="agent-session-excerpt-title">{excerpt.source.title || 'Untitled session'}</span>
-          <span className="agent-session-excerpt-count">{count} {count === 1 ? 'message' : 'messages'}{excerpt.segments.length > 1 ? ` in ${excerpt.segments.length} parts` : ''}</span>
+          <span className="agent-session-excerpt-kicker">{t('timeline.excerpt.quoted')}</span>
+          <span className="agent-session-excerpt-title">{excerpt.source.title || t('timeline.excerpt.untitled')}</span>
+          <span className="agent-session-excerpt-count">{t('timeline.excerpt.messages', { count })}{excerpt.segments.length > 1 ? ` ${t('timeline.excerpt.parts', { count: excerpt.segments.length })}` : ''}</span>
         </summary>
         <div className="agent-session-excerpt-body">
-          {navigate ? <button type="button" className="agent-session-excerpt-open" onClick={() => void navigate(excerpt.source)}>Open source session</button> : null}
+          {navigate ? <button type="button" className="agent-session-excerpt-open" onClick={() => void navigate(excerpt.source)}>{t('timeline.excerpt.openSource')}</button> : null}
           {excerpt.segments.map((segment, index) => <ol key={index} className="agent-session-excerpt-segment">
             {segment.map((row, rowIndex) => <li key={rowIndex} data-role={row.role}>
-              <span className="agent-session-excerpt-role">{row.role === 'user' ? 'User' : row.role === 'assistant' ? 'Assistant' : 'Tool'}</span>
-              <span className="agent-session-excerpt-text">{row.role === 'tool' ? toolSummary(row.text) : row.text}</span>
+              <span className="agent-session-excerpt-role">{t(row.role === 'user' ? 'timeline.excerpt.user' : row.role === 'assistant' ? 'timeline.excerpt.assistant' : 'timeline.excerpt.tool')}</span>
+              <span className="agent-session-excerpt-text">{row.role === 'tool' ? toolSummary(row.text, t) : row.text}</span>
             </li>)}
           </ol>)}
         </div>
@@ -79,9 +83,9 @@ export function SessionExcerptList({ excerpts }: { excerpts: readonly SessionExc
   </ul>;
 }
 
-function toolSummary(text: string): string {
+function toolSummary(text: string, t: Translate): string {
   try {
     const value = JSON.parse(text) as { name?: unknown; status?: unknown };
-    return [typeof value.name === 'string' ? value.name : 'Tool call', typeof value.status === 'string' ? value.status : ''].filter(Boolean).join(' · ');
-  } catch { return 'Tool call'; }
+    return [typeof value.name === 'string' ? value.name : t('timeline.excerpt.toolCall'), typeof value.status === 'string' ? value.status : ''].filter(Boolean).join(' · ');
+  } catch { return t('timeline.excerpt.toolCall'); }
 }

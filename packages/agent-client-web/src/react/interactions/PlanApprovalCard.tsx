@@ -1,5 +1,6 @@
 import { useId, useState } from 'react';
 import type { AgentInteractionRequest, AgentInteractionResponse } from '@orchardworks/agent-remote-protocol';
+import type { Translate } from '@orchardworks/agent-client';
 
 import { Pill } from '../../primitives/Pill.js';
 import { MarkdownContent } from '../MarkdownContent.js';
@@ -34,13 +35,13 @@ export function PlanApprovalCard({ request, onResponse, pending, failure, assist
       <ApprovalChanges>
         <MarkdownContent markdown={request.plan} />
         {request.allowedActions.includes('reject') ? <label className="agent-plan-feedback">
-          <span>Revision feedback</span>
-          <textarea value={feedback} onChange={(event) => setFeedback(event.target.value)} disabled={pending} placeholder="What should the Agent change?" rows={3} />
-          <small>Add feedback to request a revised plan.</small>
+          <span>{t('timeline.receipt.revisionFeedback')}</span>
+          <textarea value={feedback} onChange={(event) => setFeedback(event.target.value)} disabled={pending} placeholder={t('timeline.plan.feedbackPlaceholder')} rows={3} />
+          <small>{t('timeline.plan.feedbackHint')}</small>
         </label> : null}
         <div className="agent-interaction-actions">
           {request.allowedActions.map((action) => <button key={action} type="button" data-action={action} disabled={pending}
-            onClick={() => void respond(action)}>{pending ? 'Submitting…' : planActionLabel(action, feedback.trim().length > 0)}</button>)}
+            onClick={() => void respond(action)}>{pending ? t('timeline.interaction.submitting') : planActionLabel(action, feedback.trim().length > 0, t)}</button>)}
         </div>
       </ApprovalChanges>
     </div>
@@ -48,10 +49,10 @@ export function PlanApprovalCard({ request, onResponse, pending, failure, assist
   </section>;
 }
 
-function planActionLabel(action: Extract<AgentInteractionRequest, { kind: 'plan_approval' }>['allowedActions'][number], hasFeedback: boolean): string {
+function planActionLabel(action: Extract<AgentInteractionRequest, { kind: 'plan_approval' }>['allowedActions'][number], hasFeedback: boolean, t: Translate): string {
   switch (action) {
-    case 'approve': return 'Approve';
-    case 'approve_and_resume': return 'Approve and execute';
-    case 'reject': return hasFeedback ? 'Request changes' : 'Request revision';
+    case 'approve': return t('timeline.plan.approve');
+    case 'approve_and_resume': return t('timeline.plan.approveAndExecute');
+    case 'reject': return t(hasFeedback ? 'timeline.plan.requestChanges' : 'timeline.plan.requestRevision');
   }
 }

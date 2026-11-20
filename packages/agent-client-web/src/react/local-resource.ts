@@ -1,5 +1,6 @@
 import type { ResourceBinding, ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import { type AgentReplicaState } from '@orchardworks/agent-client';
+import { localizedError } from './localized-error.js';
 
 export interface MarkdownResourceContext {
   readonly scopeKey: string;
@@ -31,7 +32,7 @@ export async function loadLocalResource(
     const binding = cachedLocalResourceBinding(context, locator, sourceLocator);
     const detail = binding && context.resources[binding.resourceId];
     if (!binding || !detail || detail.status !== 'unavailable' && !(detail.status === 'available' && 'contentBase64' in detail)) {
-      throw new Error('Resource is not cached. Reconnect to load it.');
+      throw localizedError('Resource is not cached. Reconnect to load it.', 'timeline.resource.notCached');
     }
     onResolved?.(binding);
     return { binding, detail };

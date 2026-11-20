@@ -260,7 +260,7 @@ export function AgentTimeline({
   }
   children.sort((a, b) => (Date.parse(a.createdAt ?? '') - Date.parse(b.createdAt ?? ''))
     || discovered.current.order.get(a.nativeSessionId)! - discovered.current.order.get(b.nativeSessionId)!);
-  return <ResourceDownloadContext.Provider value={onDownloadResource}><section className="agent-remote-surface" aria-label="Agent timeline">
+  return <ResourceDownloadContext.Provider value={onDownloadResource}><section className="agent-remote-surface" aria-label={t('timeline.label')}>
 
     {state.timeline.hasOlder ? <HistoryControls loading={historyLoading} error={historyError}
       key={JSON.stringify([state.agent?.id])}
@@ -270,7 +270,7 @@ export function AgentTimeline({
     <ProcessModeContext.Provider value={processMode}><BubbleAvatarContext.Provider value={assistant?.avatar}><div className="agent-timeline-entries" aria-live="polite" data-process-mode={processMode}
       data-revealing={searchEntryKey !== undefined || inspectedEntryKey !== undefined || undefined}>
       {turns.length === 0 && outgoing.length === 0
-        ? timelineStart && !state.timeline.hasOlder ? null : <p className="agent-timeline-empty">No timeline activity.</p>
+        ? timelineStart && !state.timeline.hasOlder ? null : <p className="agent-timeline-empty">{t('timeline.empty')}</p>
         : turns.map((turn, index) => {
             const disclosure = disclosures[index]!;
             return <TimelineTurn key={turn.key} turn={turn} disclosure={disclosure} separator={separators[index]}
@@ -284,7 +284,7 @@ export function AgentTimeline({
       {timelineEnd ?? null}
     </div></BubbleAvatarContext.Provider></ProcessModeContext.Provider>
 
-    <AgentChildSessionList childrenFor={childrenFor} key={identity} children={children} label="Session subagents" collapsible onOpenChildSession={onOpenChildSession} />
+    <AgentChildSessionList childrenFor={childrenFor} key={identity} children={children} label={t('timeline.subagents')} collapsible onOpenChildSession={onOpenChildSession} />
 
   </section></ResourceDownloadContext.Provider>;
 }
@@ -333,6 +333,7 @@ function lastTimestamp(turn: Turn): string | undefined {
 }
 
 function HistoryControls({ onLoadOlder, loading = false, error }: { readonly onLoadOlder?: () => void | Promise<void>; loading?: boolean; error?: string }) {
+  const t = useTranslate();
   const inFlight = useRef(false);
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<string>();
@@ -345,7 +346,7 @@ function HistoryControls({ onLoadOlder, loading = false, error }: { readonly onL
     try {
       await onLoadOlder();
     } catch (error) {
-      setFailure(error instanceof Error && error.message ? error.message : 'Earlier activity could not be loaded.');
+      setFailure(error instanceof Error && error.message ? error.message : t('timeline.history.failed'));
     } finally {
       inFlight.current = false;
       setPending(false);
@@ -359,7 +360,7 @@ function HistoryControls({ onLoadOlder, loading = false, error }: { readonly onL
       disabled={!onLoadOlder || pending || loading}
       aria-busy={pending || loading}
       onClick={() => { void loadOlder(); }}
-    >{pending || loading ? 'Loading earlier activity…' : 'Load earlier activity'}</button>
+    >{t(pending || loading ? 'timeline.history.loading' : 'timeline.history.load')}</button>
     {failure || error ? <p className="agent-history-error" role="alert">{failure ?? error}</p> : null}
   </div>;
 }

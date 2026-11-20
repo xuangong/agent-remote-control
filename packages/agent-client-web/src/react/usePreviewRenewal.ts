@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslate } from './locale.js';
 import { watchPagePolling, PreviewRequestError, type HttpPreviewClient, type PreviewRegistration } from '@orchardworks/agent-client';
 
 interface RenewalIssue { message: string; terminal: boolean }
@@ -9,6 +10,7 @@ export function previewRegistrationKey(hostId: string, id: string): string { ret
 
 export function usePreviewRenewal(client: HttpPreviewClient, hostId: string, canManage: boolean,
   entries: readonly RetainedPreview[], registrations: readonly PreviewRegistration[], refresh: () => Promise<void>) {
+  const t = useTranslate();
   const retained = new Map<string, RetainedPreview>();
   if (canManage) for (const entry of entries) {
     const registration = entry.registration ?? registrations.find(value => value.id === entry.id);
@@ -49,8 +51,7 @@ export function usePreviewRenewal(client: HttpPreviewClient, hostId: string, can
           else due.set(id, Date.now() + 5000);
           setErrors(previous => ({ ...previous, [id]: {
             terminal: removed,
-            message: removed ? 'This preview registration is no longer available or has been unregistered. Close and open it again.'
-              : 'Preview renewal is waiting for the connection. Retrying automatically…',
+            message: removed ? t('timeline.preview.renewalGone') : t('timeline.preview.renewalWaiting'),
           } }));
         }).finally(() => {
           window.clearTimeout(deadline);
@@ -74,7 +75,7 @@ export function usePreviewRenewal(client: HttpPreviewClient, hostId: string, can
       window.removeEventListener('pageshow', wake);
       for (const request of pending.values()) request.abort();
     };
-  }, [client, hostId, canManage, refresh, hasRetained]);
+  }, [client, hostId, canManage, refresh, hasRetained, t]);
 
   useEffect(() => { if (document.visibilityState !== 'hidden') reconcile.current(); }, [entries, registrations, canManage]);
   return errors;

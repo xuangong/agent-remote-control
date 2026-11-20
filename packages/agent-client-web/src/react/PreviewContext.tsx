@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { PreviewController } from './PreviewActions.js';
 import { previewRegistrationKey, usePreviewRenewal } from './usePreviewRenewal.js';
 import { PreviewBrowser } from './PreviewBrowser.js';
+import { useTranslate } from './locale.js';
 import { PreviewWorkspaceContext } from './PreviewWorkspace.js';
 import { FilePreviewProvider } from './FilePreviewScope.js';
 import { watchList, type HttpPreviewClient, type PinnedPreviewName, type PreviewRegistration, type PreviewRegistrationRequest } from '@orchardworks/agent-client';
@@ -29,6 +30,7 @@ const DockContext = createContext<{
 export function PreviewProvider({ client, hostId, canManage, polling = true, enabled = true, children }: {
   readonly client: HttpPreviewClient; readonly hostId: string; readonly canManage: boolean; readonly polling?: boolean; readonly enabled?: boolean; readonly children: ReactNode;
 }) {
+  const t = useTranslate();
   const scopeRef = useRef({ client, hostId, version: 0, request: 0 });
   if (scopeRef.current.client !== client || scopeRef.current.hostId !== hostId) {
     scopeRef.current = { client, hostId, version: scopeRef.current.version + 1, request: 0 };
@@ -69,7 +71,7 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, ena
     let timedOut = false;
     const deadline = setTimeout(() => {
       timedOut = true;
-      controller.abort(new Error('Preview state refresh timed out. Retrying automatically.'));
+      controller.abort(new Error(t('timeline.preview.refreshTimedOut')));
     }, 12_000);
     snapshots.set(controller, deadline);
     try {
@@ -88,14 +90,14 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, ena
           pinnedNames: current.version === scope.version ? current.pinnedNames : undefined,
           routing: current.version === scope.version ? current.routing : undefined,
           loading: false,
-          error: message(cause, 'Preview state is unavailable. Retry after checking the Host connection.'),
+          error: message(cause, t('timeline.preview.stateUnavailable')),
         }));
       }
     } finally {
       clearTimeout(deadline);
       snapshots.delete(controller);
     }
-  }, [client, hostId, scope, snapshots, enabled]);
+  }, [client, hostId, scope, snapshots, enabled, t]);
 
   useEffect(() => {
     setState({ version: scope.version, registrations: [], loading: true });
@@ -120,14 +122,14 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, ena
       // Registration can finish before the Controller's data tunnel connects.
       const signal = AbortSignal.timeout(10_000);
       while (!signal.aborted) {
-        if (scopeRef.current !== scope) throw new Error('The preview Host changed. Retry from the current Host.');
+        if (scopeRef.current !== scope) throw new Error(t('timeline.preview.hostChanged'));
         const snapshot = await client.snapshot(hostId, signal).catch(error => { if (!signal.aborted) throw error; });
         if (!snapshot) break;
         const ready = snapshot.registrations.find(value => value.id === registration.id && value.status === 'active' && value.availability === 'online' && !value.pendingUnregister);
         if (ready) { await refresh(); return registration; }
         await new Promise(resolve => setTimeout(resolve, 200));
       }
-      throw new Error('The preview is registered, but its tunnel is still connecting. Open it again shortly.');
+      throw new Error(t('timeline.preview.tunnelConnecting'));
     },
     unpinName: async nameId => { await client.unpinName(hostId, nameId); await refresh(); },
     pinName: async (id, pinned) => { await client.pinName(hostId, id, pinned); await refresh(); },
@@ -135,13 +137,13 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, ena
       await client.unregister(remoteHostId ?? hostId, id);
       if (scopeRef.current === scope) updateBrowsers(current => current.map(entry => entry.id === id && entry.version === scope.version
         && (entry.hostId ?? hostId) === (remoteHostId ?? hostId)
-        ? { ...entry, error: 'This preview has been unregistered.' } : entry));
+        ? { ...entry, error: t('timeline.preview.hasBeenUnregistered') } : entry));
       await refresh();
     },
     getTunnelUrl: async (id: string, target: string) => {
-      if (scopeRef.current !== scope) throw new Error('The preview Host changed. Retry from the current Host.');
+      if (scopeRef.current !== scope) throw new Error(t('timeline.preview.hostChanged'));
       const url = await client.tunnelUrl(hostId, id, target, AbortSignal.timeout(20_000));
-      if (scopeRef.current !== scope) throw new Error('The preview Host changed. Retry from the current Host.');
+      if (scopeRef.current !== scope) throw new Error(t('timeline.preview.hostChanged'));
       return url;
     },
     open: async (id: string, target: string, agentId?: string, remote?: { hostId: string; registration: PreviewRegistration }) => {
@@ -161,7 +163,7 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, ena
         }
       };
       const deadline = window.setTimeout(() => {
-        if (!request.signal.aborted) { update({ error: 'Preview access timed out. Close and open it again.' }); request.abort(); }
+        if (!request.signal.aborted) { update({ error: t('timeline.preview.timedOut') }); request.abort(); }
       }, 20_000);
       try {
         const handoff = await client.open(remote?.hostId ?? hostId, id, target, request.signal);
@@ -170,11 +172,11 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, ena
         if (!request.signal.aborted) update({ url });
         return url;
       } catch (error) {
-        if (!request.signal.aborted) update({ error: message(error, 'Preview access is unavailable. Close and open it again.') });
+        if (!request.signal.aborted) update({ error: message(error, t('timeline.preview.accessUnavailable')) });
         return '';
       } finally { window.clearTimeout(deadline); if (requests.get(key) === request) requests.delete(key); }
     },
-  }), [canManage, client, currentState, hostId, refresh, scope, requests, updateBrowsers]);
+  }), [canManage, client, currentState, hostId, refresh, scope, requests, updateBrowsers, t]);
 
   const browserOpen = currentBrowsers.some(entry => entry.key === activeKey);
   return <Context.Provider value={enabled ? value : undefined}><DockContext.Provider value={{ browsers: currentBrowsers, activeKey, resume: resumeBrowser, close: closeBrowser }}>
@@ -184,11 +186,11 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, ena
     {currentBrowsers.map(browser => {
       const selected = browser.registration ?? currentState.registrations.find(item => item.id === browser.id);
       const renewal = renewalIssues[previewRegistrationKey(browser.hostId ?? hostId, browser.id)];
-      const unavailable = selected?.pendingUnregister || selected?.status === 'unregistered' ? 'This preview has been unregistered.'
+      const unavailable = selected?.pendingUnregister || selected?.status === 'unregistered' ? t('timeline.preview.hasBeenUnregistered')
         : renewal?.terminal ? renewal.message
-        : !selected && !currentState.loading && !canManage ? 'This preview registration is no longer available. Close and open it again.' : undefined;
-      const notice = renewal?.message ?? (!selected || selected.status === 'expired' ? 'Renewing preview registration…'
-        : selected.availability !== 'online' ? 'Controller offline. The preview will reconnect automatically.' : undefined);
+        : !selected && !currentState.loading && !canManage ? t('timeline.preview.registrationGone') : undefined;
+      const notice = renewal?.message ?? (!selected || selected.status === 'expired' ? t('timeline.preview.renewing')
+        : selected.availability !== 'online' ? t('timeline.preview.reconnecting') : undefined);
       return <PreviewBrowser container={container} key={browser.key} browserKey={browser.key} visible={activeKey === browser.key}
         url={browser.url} target={browser.target} notice={notice} error={unavailable ?? browser.error} returnFocus={browser.returnFocus}
         onMinimize={minimizeBrowser} onClose={() => closeBrowser(browser.key)} />;
@@ -197,17 +199,18 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, ena
 }
 
 export function PreviewDock({ sessionId }: { readonly sessionId?: string }) {
+  const t = useTranslate();
   const context = useContext(DockContext);
   const entries = context?.browsers.filter(entry => entry.sessionId === sessionId && entry.key !== context.activeKey) ?? [];
   if (!context || entries.length === 0) return null;
-  return <aside className="agent-preview-dock" aria-label="Session previews">
+  return <aside className="agent-preview-dock" aria-label={t('timeline.preview.dock')}>
     {entries.map(entry => <span className="agent-preview-dock-entry" key={entry.key}>
-      <button type="button" data-preview-key={entry.key} aria-label={`Resume preview: ${entry.target}`} title={`Resume preview: ${entry.target}`}
+      <button type="button" data-preview-key={entry.key} aria-label={t('timeline.preview.resume', { target: entry.target })} title={t('timeline.preview.resume', { target: entry.target })}
         onClick={() => context.resume(entry.key)}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg>
         <span>{new URL(entry.target).host}</span>
       </button>
-      <button type="button" aria-label={`Close preview: ${entry.target}`} title="Close preview" onClick={() => context.close(entry.key)}>×</button>
+      <button type="button" aria-label={t('timeline.preview.closeNamed', { target: entry.target })} title={t('timeline.preview.close')} onClick={() => context.close(entry.key)}>×</button>
     </span>)}
   </aside>;
 }

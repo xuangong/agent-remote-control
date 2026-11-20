@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { CopyTunnelUrl } from './CopyTunnelUrl.js';
+import { useTranslate } from './locale.js';
 import { type PinnedPreviewName, type PreviewPathMode, type PreviewRegistration, type PreviewRegistrationRequest } from '@orchardworks/agent-client';
 
 
@@ -48,9 +49,10 @@ function trimUrlProse(candidate: string): string {
 export function PreviewActions({ agentId, itemId, text, controller }: {
   readonly agentId: string; readonly itemId: string; readonly text: string; readonly controller: PreviewController;
 }) {
+  const t = useTranslate();
   const targets = discoverLoopbackTargets(text);
   if (targets.length === 0) return null;
-  return <aside className="agent-preview-actions" aria-label="Local previews">
+  return <aside className="agent-preview-actions" aria-label={t('timeline.preview.local')}>
     {targets.map(target => <PreviewTarget key={target} agentId={agentId} itemId={itemId} target={target} controller={controller} />)}
   </aside>;
 }
@@ -58,6 +60,7 @@ export function PreviewActions({ agentId, itemId, text, controller }: {
 function PreviewTarget({ agentId, itemId, target, controller }: {
   readonly agentId: string; readonly itemId: string; readonly target: string; readonly controller: PreviewController;
 }) {
+  const t = useTranslate();
   const [pathMode, setPathMode] = useState<PreviewPathMode>('strip');
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<string>();
@@ -75,14 +78,14 @@ function PreviewTarget({ agentId, itemId, target, controller }: {
       const registered = await controller.register(agentId, { target, itemId, pathMode });
       if (pathMode === 'strip') await controller.open(registered.id, target, agentId);
     }
-    catch (error) { setFailure(message(error, 'Preview registration failed. Check that the Controller is online and the target is reachable.')); }
+    catch (error) { setFailure(message(error, t('timeline.preview.registerFailed'))); }
     finally { setPending(false); }
   }
   async function open(): Promise<void> {
     if (!registration) return;
     setPending(true); setFailure(undefined);
     try { await controller.open(registration.id, target, agentId); }
-    catch (error) { setFailure(message(error, 'Preview access could not be prepared. Retry after checking Host access.')); }
+    catch (error) { setFailure(message(error, t('timeline.preview.accessFailed'))); }
     finally { setPending(false); }
   }
   async function getTunnelUrl(): Promise<string> {
@@ -97,33 +100,33 @@ function PreviewTarget({ agentId, itemId, target, controller }: {
     if (!registration) return;
     setPending(true); setFailure(undefined);
     try { await controller.unregister(registration.id); }
-    catch (error) { setFailure(message(error, 'Preview could not be unregistered. Retry from the Host preview list.')); }
+    catch (error) { setFailure(message(error, t('timeline.preview.unregisterFailed'))); }
     finally { setPending(false); }
   }
 
-  const state = registration?.pendingUnregister ? 'Unregister pending'
-    : registration?.status === 'expired' ? 'Expired'
-    : registration?.status === 'unregistered' ? 'Unregistered'
-    : registration?.availability === 'controller_offline' ? 'Controller offline'
-    : registration?.status === 'active' ? 'Registered' : undefined;
+  const state = registration?.pendingUnregister ? t('timeline.preview.unregisterPending')
+    : registration?.status === 'expired' ? t('timeline.preview.expired')
+    : registration?.status === 'unregistered' ? t('timeline.preview.unregistered')
+    : registration?.availability === 'controller_offline' ? t('timeline.preview.controllerOffline')
+    : registration?.status === 'active' ? t('timeline.preview.registered') : undefined;
   return <div className="agent-preview-target">
     <code>{target}</code>
     {!registration || registration.status !== 'active' ? <>
       {state ? <span className="agent-preview-state">{state}</span> : null}
-      {controller.routing !== 'subdomain' && <label>Path mode <select value={pathMode} disabled={pending} onChange={event => setPathMode(event.target.value as PreviewPathMode)}>
-        <option value="strip">Root-mounted app</option><option value="preserve">Configured preview base</option>
+      {controller.routing !== 'subdomain' && <label>{t('timeline.preview.pathMode')} <select value={pathMode} disabled={pending} onChange={event => setPathMode(event.target.value as PreviewPathMode)}>
+        <option value="strip">{t('timeline.preview.rootMounted')}</option><option value="preserve">{t('timeline.preview.configuredBase')}</option>
       </select></label>}
-      <button type="button" disabled={pending || !controller.canManage} onClick={() => void register()}>{pending ? 'Registering…' : registration?.status === 'expired' ? 'Register again' : 'Open preview'}</button>
+      <button type="button" disabled={pending || !controller.canManage} onClick={() => void register()}>{pending ? t('timeline.preview.registering') : registration?.status === 'expired' ? t('timeline.preview.registerAgain') : t('timeline.preview.open')}</button>
     </> : <>
       <span className="agent-preview-state">{state}</span>
-      <button className="agent-preview-open" type="button" disabled={pending || registration.pendingUnregister || registration.availability !== 'online'} onClick={event => { event.currentTarget.focus({ preventScroll: true }); void open(); }}>{pending ? 'Opening…' : 'Open preview'}</button>
+      <button className="agent-preview-open" type="button" disabled={pending || registration.pendingUnregister || registration.availability !== 'online'} onClick={event => { event.currentTarget.focus({ preventScroll: true }); void open(); }}>{pending ? t('timeline.opening') : t('timeline.preview.open')}</button>
     </>}
     {controller.getTunnelUrl ? <CopyTunnelUrl disabled={pending || !controller.canManage || registration?.pendingUnregister || (registration?.status === 'active' && registration.availability !== 'online')}
       getUrl={getTunnelUrl} /> : null}
-    {registration?.status === 'active' && controller.canManage ? <button type="button" disabled={pending || registration.pendingUnregister} onClick={() => void unregister()}>Unregister</button> : null}
+    {registration?.status === 'active' && controller.canManage ? <button type="button" disabled={pending || registration.pendingUnregister} onClick={() => void unregister()}>{t('timeline.preview.unregister')}</button> : null}
     {controller.routing !== 'subdomain' && <small>{effectiveMode === 'preserve'
-      ? `This app must be configured with /p/${registration?.id ?? '<registration-id>'}/ as its base. Register first to get the ID.`
-      : 'Root paths are adapted for supported apps; arbitrary application URLs may still require configuration.'}</small>}
+      ? t('timeline.preview.baseNote', { id: registration?.id ?? '<registration-id>' })
+      : t('timeline.preview.rootNote')}</small>}
     {failure ? <p role="alert">{failure}</p> : null}
   </div>;
 }

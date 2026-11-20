@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
+import { useTranslate } from './locale.js';
 import { useImageDismiss, type ImageDismissMotion } from './useImageDismiss.js';
 
 interface Point { x: number; y: number }
@@ -13,6 +14,7 @@ const distance = (points: Point[]) => points.length < 2 ? 0 : Math.hypot(points[
 export function ImageViewport({ src, label, onClose, onDismissMotion }: {
   src: string; label: string; onClose(): void; onDismissMotion(motion: ImageDismissMotion): void;
 }) {
+  const t = useTranslate();
   const stage = useRef<HTMLDivElement>(null);
   const [natural, setNatural] = useState<Size>();
   const [bounds, setBounds] = useState<Size>({ width: 0, height: 0 });
@@ -133,7 +135,7 @@ export function ImageViewport({ src, label, onClose, onDismissMotion }: {
   }, []);
 
   return <div className="agent-image-viewport">
-    <div ref={stage} className="agent-image-preview-stage" tabIndex={0} role="group" aria-label="Image canvas"
+    <div ref={stage} className="agent-image-preview-stage" tabIndex={0} role="group" aria-label={t('timeline.image.canvas')}
       data-zoomed={view.zoom > 1} data-dragging={dragging} aria-busy={!natural && !failed}
       onPointerDown={event => {
         if (!ready || dismiss.closing() || (event.pointerType === 'mouse' && event.button !== 0) || pointers.current.size >= 2) return;
@@ -178,14 +180,14 @@ export function ImageViewport({ src, label, onClose, onDismissMotion }: {
         onLoad={event => {
           const image = event.currentTarget;
           setNatural({ width: image.naturalWidth, height: image.naturalHeight });
-        }} onError={() => setFailed(true)} /> : <span role="alert">This image cannot be previewed.</span>}
-      {!natural && !failed ? <span role="status">Loading image…</span> : null}
+        }} onError={() => setFailed(true)} /> : <span role="alert">{t('timeline.image.cannotPreview')}</span>}
+      {!natural && !failed ? <span role="status">{t('timeline.image.loading')}</span> : null}
     </div>
-    <div className="agent-image-preview-controls" role="group" aria-label="Image zoom">
-      <button type="button" aria-label="Zoom out" title="Zoom out" disabled={!ready || view.zoom <= 1} onClick={() => zoomTo(current.current.zoom / 1.5)}>−</button>
-      <span className="agent-image-preview-scale" aria-label="Zoom level">{ready ? `${Math.round(fit * view.zoom * 100)}%` : '—'}</span>
-      <button type="button" aria-label="Zoom in" title="Zoom in" disabled={!ready || view.zoom >= maximum} onClick={() => zoomTo(current.current.zoom * 1.5)}>+</button>
-      <button type="button" aria-label="Reset zoom" title="Fit to screen" disabled={!ready} onClick={() => change(fitted)}>Fit</button>
+    <div className="agent-image-preview-controls" role="group" aria-label={t('timeline.image.zoom')}>
+      <button type="button" aria-label={t('timeline.image.zoomOut')} title={t('timeline.image.zoomOut')} disabled={!ready || view.zoom <= 1} onClick={() => zoomTo(current.current.zoom / 1.5)}>−</button>
+      <span className="agent-image-preview-scale" aria-label={t('timeline.image.zoomLevel')}>{ready ? `${Math.round(fit * view.zoom * 100)}%` : '—'}</span>
+      <button type="button" aria-label={t('timeline.image.zoomIn')} title={t('timeline.image.zoomIn')} disabled={!ready || view.zoom >= maximum} onClick={() => zoomTo(current.current.zoom * 1.5)}>+</button>
+      <button type="button" aria-label={t('timeline.image.resetZoom')} title={t('timeline.image.fit')} disabled={!ready} onClick={() => change(fitted)}>{t('timeline.image.fitShort')}</button>
     </div>
   </div>;
 }

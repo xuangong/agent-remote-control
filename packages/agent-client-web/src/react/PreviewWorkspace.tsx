@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type CSSProperties, type HTMLAttributes } from 'react';
 
+import { useTranslate } from './locale.js';
 import { FilePreviewOutlet, FilePreviewProvider, FilePreviewScope, useFilePreviewWorkspace } from './FilePreviewScope.js';
 
 export const PreviewWorkspaceContext = createContext<{
@@ -16,6 +17,7 @@ export function PreviewWorkspace(props: PreviewWorkspaceProps) {
 }
 
 function PreviewWorkspaceContent({ children, className, style, resourceScope, ...props }: PreviewWorkspaceProps) {
+  const t = useTranslate();
   const context = useContext(PreviewWorkspaceContext);
   const container = useRef<HTMLDivElement | null>(null);
   const [fraction, setFraction] = useState(0.5);
@@ -47,9 +49,9 @@ function PreviewWorkspaceContent({ children, className, style, resourceScope, ..
     <FilePreviewOutlet />
     {open ? <>
       {dragging ? <div className="agent-preview-resize-shield" /> : null}
-      <div className="agent-preview-divider" role="separator" aria-label="Resize conversation and preview" aria-orientation="vertical"
+      <div className="agent-preview-divider" role="separator" aria-label={t('timeline.preview.resize')} aria-orientation="vertical"
         aria-valuemin={Math.round(minimum * 100)} aria-valuemax={Math.round((1 - minimum) * 100)} aria-valuenow={Math.round((1 - displayedFraction) * 100)} tabIndex={0}
-        title="Drag to resize · Double-click to reset" onDoubleClick={() => setFraction(0.5)}
+        title={t('timeline.preview.resizeHint')} onDoubleClick={() => setFraction(0.5)}
         onPointerDown={event => {
           if (event.button !== 0) return;
           event.preventDefault(); event.currentTarget.focus({ preventScroll: true });

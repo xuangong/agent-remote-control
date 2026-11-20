@@ -5,6 +5,7 @@ import { ContentPreview } from './ContentPreview.js';
 import type { AgentInteractionRequest, AgentInteractionResponse } from '@orchardworks/agent-remote-protocol';
 
 import { MarkdownContent } from '../MarkdownContent.js';
+import { useTranslate } from '../locale.js';
 
 interface CompletedQuestionItemProps {
   readonly request: Extract<AgentInteractionRequest, { kind: 'question' }>;
@@ -12,6 +13,7 @@ interface CompletedQuestionItemProps {
 }
 
 export function CompletedQuestionItem({ request, response }: CompletedQuestionItemProps) {
+  const t = useTranslate();
   const { expanded: showQuestions, preview, toggle } = useItemDisclosure();
   const answersId = useId();
   const rows = request.questions.map((question) => {
@@ -19,10 +21,10 @@ export function CompletedQuestionItem({ request, response }: CompletedQuestionIt
     return { question, answer, answered: Boolean(answer?.redacted || answer?.selectedValues.length || answer?.customText) };
   });
   const answeredCount = rows.filter(({ answered }) => answered).length;
-  const status = response.dismissed ? 'Dismissed' : answeredCount === rows.length ? 'Answered' : answeredCount ? 'Partially answered' : 'No answers';
+  const status = t(response.dismissed ? 'receipt.dismissed' : answeredCount === rows.length ? 'receipt.answered' : answeredCount ? 'timeline.question.partlyAnswered' : 'receipt.unanswered');
   const count = !response.dismissed && answeredCount < rows.length
-    ? `${answeredCount} of ${rows.length} answered`
-    : `${rows.length} ${rows.length === 1 ? 'question' : 'questions'}`;
+    ? t('receipt.answeredOf', { answered: answeredCount, total: rows.length })
+    : t('receipt.questions', { count: rows.length });
 
   return <article className="agent-item agent-interaction-completed agent-question-completed">
     <header className="agent-question-receipt-header">
@@ -35,7 +37,7 @@ export function CompletedQuestionItem({ request, response }: CompletedQuestionIt
         <span className="agent-question-receipt-count">{count}</span>
       </div>
       <button className="agent-question-context-toggle" type="button" aria-expanded={showQuestions} aria-controls={answersId} onClick={toggle}>
-        {showQuestions ? 'Hide questions' : 'Show questions'}
+        {t(showQuestions ? 'timeline.question.hide' : 'timeline.question.show')}
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d={showQuestions ? 'M3 7.5L6 4.5L9 7.5' : 'M3 4.5L6 7.5L9 4.5'} stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </button>
     </header>
@@ -44,10 +46,10 @@ export function CompletedQuestionItem({ request, response }: CompletedQuestionIt
         <dt>{question.header}</dt>
         <dd>
           {preview ? <ContentPreview text={question.prompt} /> : null}
-          {answered && (question.sensitive || answer?.redacted) ? <span className="agent-answer-hidden">Hidden answer</span> : null}
+          {answered && (question.sensitive || answer?.redacted) ? <span className="agent-answer-hidden">{t('timeline.question.hidden')}</span> : null}
           {!question.sensitive && !answer?.redacted && answer?.selectedValues.length ? <ul>{answer.selectedValues.map((value) => <li key={value}>{question.options.find((option) => option.value === value)?.label ?? value}</li>)}</ul> : null}
           {!question.sensitive && !answer?.redacted && answer?.customText ? <p className="agent-answer-custom">{answer.customText}</p> : null}
-          {!answered ? <span className="agent-answer-empty">{response.dismissed ? 'Dismissed' : 'No answer provided'}</span> : null}
+          {!answered ? <span className="agent-answer-empty">{t(response.dismissed ? 'receipt.dismissed' : 'timeline.question.noAnswer')}</span> : null}
           <div className="agent-completed-question-context" hidden={!showQuestions}>
             <MarkdownContent markdown={question.prompt} />
             {question.description ? <MarkdownContent markdown={question.description} className="agent-completed-question-description" /> : null}

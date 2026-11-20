@@ -1,4 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { useTranslate } from '../react/locale.js';
 import { Pill } from './Pill.js';
 
 /**
@@ -9,6 +10,7 @@ import { Pill } from './Pill.js';
 export function Sheet({ open, title, onClose, detent = 'medium', children }: {
   open: boolean; title: string; onClose(): void; detent?: 'content' | 'medium' | 'large'; children: ReactNode;
 }) {
+  const t = useTranslate();
   const dialog = useRef<HTMLDialogElement>(null);
   const heading = useId();
   const pressedBackdrop = useRef(false);
@@ -43,7 +45,7 @@ export function Sheet({ open, title, onClose, detent = 'medium', children }: {
       pressedBackdrop.current = false;
     }}>
     <div className="orchard-sheet-grabber" aria-hidden="true" />
-    <header className="orchard-sheet-header"><h2 id={heading}>{title}</h2><Pill className="orchard-sheet-close" aria-label="Close" onClick={() => onClose()}>
+    <header className="orchard-sheet-header"><h2 id={heading}>{title}</h2><Pill className="orchard-sheet-close" aria-label={t('common.close')} onClick={() => onClose()}>
       <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M4 4l8 8M12 4l-8 8" /></svg>
     </Pill></header>
     <div className="orchard-sheet-body">{children}</div>

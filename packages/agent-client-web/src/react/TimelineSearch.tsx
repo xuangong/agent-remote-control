@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SessionViewActions } from './session-view-actions.js';
+import { useTranslate } from './locale.js';
 import { type AgentReplicaState, findTimelineMatches, type TimelineSearchMatch, type TimelineSearchProgress, type TimelineSearchScope, timelineEntryKey } from '@orchardworks/agent-client';
 
 interface SearchState extends TimelineSearchProgress {
@@ -17,6 +18,7 @@ export function TimelineSearch({ state, search, onSelect, onClose, onClearSelect
   onClose(options?: { restoreFocus?: boolean }): void;
   onClearSelection?(): void;
 }) {
+  const t = useTranslate();
   const [query, setQuery] = useState('');
   const [scope, setScope] = useState<TimelineSearchScope>('messages');
   const needle = query.trim();
@@ -30,8 +32,8 @@ export function TimelineSearch({ state, search, onSelect, onClose, onClearSelect
   const panel = useRef<HTMLElement>(null);
   const scan = useRef<AbortController>();
   const jump = useRef<AbortController>();
-  const latest = useRef({ state, search, onSelect, onClose, onClearSelection });
-  latest.current = { state, search, onSelect, onClose, onClearSelection };
+  const latest = useRef({ state, search, onSelect, onClose, onClearSelection, t });
+  latest.current = { state, search, onSelect, onClose, onClearSelection, t };
   const canSearch = !!search;
 
   useEffect(() => {
@@ -69,7 +71,7 @@ export function TimelineSearch({ state, search, onSelect, onClose, onClearSelect
       } })).then(value => {
         if (!controller.signal.aborted) setProgress({ ...value, query: needle, scope, phase: 'complete' });
       }, error => {
-        if (!controller.signal.aborted) setProgress(previous => ({ ...previous, phase: 'error', error: error instanceof Error ? error.message : 'History search failed.' }));
+        if (!controller.signal.aborted) setProgress(previous => ({ ...previous, phase: 'error', error: error instanceof Error ? error.message : latest.current.t('timeline.search.failed') }));
       });
     }, 250);
     return () => { clearTimeout(timer); controller.abort(); };
@@ -96,7 +98,7 @@ export function TimelineSearch({ state, search, onSelect, onClose, onClearSelect
       await latest.current.onSelect(match, controller.signal);
       if (!controller.signal.aborted) setShowResults(false);
     } catch (error) {
-      if (!controller.signal.aborted) setJumpError(error instanceof Error ? error.message : 'This result could not be opened.');
+      if (!controller.signal.aborted) setJumpError(error instanceof Error ? error.message : latest.current.t('timeline.search.openFailed'));
     } finally { if (!controller.signal.aborted) setJumping(false); }
   }
   function move(direction: number) {
@@ -104,36 +106,36 @@ export function TimelineSearch({ state, search, onSelect, onClose, onClearSelect
     if (match) void choose(match);
   }
 
-  return <section ref={panel} className="agent-session-search" aria-label="Search this session" onKeyDown={event => {
+  return <section ref={panel} className="agent-session-search" aria-label={t('timeline.search.panel')} onKeyDown={event => {
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose(); }
   }}>
     <div className="agent-session-search-input">
-      <input autoFocus type="search" aria-label="Search session history" placeholder="Search this session…" value={query}
+      <input autoFocus type="search" aria-label={t('timeline.search.input')} placeholder={t('timeline.search.placeholder')} value={query}
         onChange={event => { setQuery(event.target.value); setShowResults(true); }}
         onKeyDown={event => {
           if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); move(event.shiftKey ? -1 : 1); }
         }} />
-      <button type="button" aria-label="Previous search result" title="Previous result (Shift+Enter)" disabled={!matches.length || jumping} onClick={() => move(-1)}>↑</button>
-      <button type="button" aria-label="Next search result" title="Next result (Enter)" disabled={!matches.length || jumping} onClick={() => move(1)}>↓</button>
-      <button type="button" aria-label="Close session search" onClick={() => onClose()}>×</button>
+      <button type="button" aria-label={t('timeline.search.previous')} title={t('timeline.search.previousHint')} disabled={!matches.length || jumping} onClick={() => move(-1)}>↑</button>
+      <button type="button" aria-label={t('timeline.search.next')} title={t('timeline.search.nextHint')} disabled={!matches.length || jumping} onClick={() => move(1)}>↓</button>
+      <button type="button" aria-label={t('timeline.search.close')} onClick={() => onClose()}>×</button>
     </div>
-    <select aria-label="Search scope" value={scope} onChange={event => { setScope(event.target.value as TimelineSearchScope); setShowResults(true); }}>
-      <option value="messages">User / Assistant messages</option><option value="all">All activity</option>
-      <option value="tools">Tool calls</option><option value="reasoning">Reasoning</option>
+    <select aria-label={t('timeline.search.scope')} value={scope} onChange={event => { setScope(event.target.value as TimelineSearchScope); setShowResults(true); }}>
+      <option value="messages">{t('timeline.search.messages')}</option><option value="all">{t('timeline.search.all')}</option>
+      <option value="tools">{t('timeline.search.tools')}</option><option value="reasoning">{t('timeline.search.reasoning')}</option>
     </select>
     {needle ? <>
       <div className="agent-session-search-status">
         <button type="button" disabled={!matches.length} aria-expanded={showResults} onClick={() => setShowResults(value => !value)}>
-          {index >= 0 ? `${index + 1} / ` : ''}{matches.length} matching {matches.length === 1 ? 'message' : 'messages'}
+          {index >= 0 ? `${index + 1} / ` : ''}{t('timeline.search.matches', { count: matches.length })}
         </button>
-        <span role="status">{jumping ? 'Loading result…' : phase === 'scanning' ? `Searching history… ${progress.scanned} checked`
-          : phase === 'complete' ? 'All available history searched' : 'Partial results'}</span>
+        <span role="status">{jumping ? t('timeline.search.loadingResult') : phase === 'scanning' ? t('timeline.search.scanning', { count: progress.scanned })
+          : phase === 'complete' ? t('timeline.search.complete') : t('timeline.search.partial')}</span>
         {phase === 'scanning' ? <button type="button" onClick={() => {
           scan.current?.abort(); setProgress(previous => ({ ...previous, phase: 'partial' }));
-        }}>Stop</button> : phase !== 'complete' && canSearch ? <button type="button" onClick={() => setRetry(value => value + 1)}>Retry</button> : null}
+        }}>{t('common.stop')}</button> : phase !== 'complete' && canSearch ? <button type="button" onClick={() => setRetry(value => value + 1)}>{t('common.retry')}</button> : null}
       </div>
       {progress.error || jumpError ? <p className="agent-history-error" role="alert">{jumpError ?? progress.error}</p> : null}
-      {phase === 'partial' && !canSearch ? <p className="agent-session-search-note">Only loaded history is available until the session reconnects.</p> : null}
+      {phase === 'partial' && !canSearch ? <p className="agent-session-search-note">{t('timeline.search.loadedOnly')}</p> : null}
       {showResults && matches.length > 0 ? <ol className="agent-session-search-results">
         {matches.slice(0, limit).map(match => <li key={match.key}>
           <button type="button" aria-current={match.key === selected || undefined} disabled={jumping} onClick={() => { void choose(match); }}>
@@ -141,9 +143,9 @@ export function TimelineSearch({ state, search, onSelect, onClose, onClearSelect
             <span><SearchSnippet text={match.snippet} query={needle} /></span>
           </button>
         </li>)}
-        {matches.length > limit ? <li><button type="button" onClick={() => setLimit(value => value + 30)}>Show more results</button></li> : null}
+        {matches.length > limit ? <li><button type="button" onClick={() => setLimit(value => value + 30)}>{t('timeline.search.more')}</button></li> : null}
       </ol> : null}
-    </> : <p className="agent-session-search-note">Search the selected message types across available history.</p>}
+    </> : <p className="agent-session-search-note">{t('timeline.search.hint')}</p>}
   </section>;
 }
 

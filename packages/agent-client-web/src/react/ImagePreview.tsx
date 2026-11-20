@@ -2,6 +2,7 @@ import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, 
 import { createPortal } from 'react-dom';
 import { ImageViewport } from './ImageViewport.js';
 import { FilePreviewContext } from './FilePreviewContext.js';
+import { useTranslate } from './locale.js';
 import type { ImageDismissMotion } from './useImageDismiss.js';
 
 interface ImagePreviewProps {
@@ -18,7 +19,9 @@ interface ImagePreviewProps {
 // Portal events must not change conversation focus, follow mode, or history loading.
 function containPreviewEvent(event: SyntheticEvent): void { event.stopPropagation(); }
 
-export function ImagePreview({ blob, src, label = 'Image', status, error, progress, actions, onClose }: ImagePreviewProps) {
+export function ImagePreview({ blob, src, label: labelProp, status, error, progress, actions, onClose }: ImagePreviewProps) {
+  const t = useTranslate();
+  const label = labelProp ?? t('timeline.resource.image');
   const dialog = useRef<HTMLDialogElement>(null);
   const scope = useContext(FilePreviewContext)?.scopeKey;
   const openedScope = useRef(scope);
@@ -49,7 +52,7 @@ export function ImagePreview({ blob, src, label = 'Image', status, error, progre
     return () => URL.revokeObjectURL(value);
   }, [blob, src]);
   function close(): void { dialog.current?.close(); onClose(); }
-  return createPortal(<dialog ref={dialog} aria-label="Image preview" aria-description={label} className="agent-image-preview"
+  return createPortal(<dialog ref={dialog} aria-label={t('timeline.image.preview')} aria-description={label} className="agent-image-preview"
     onFocus={containPreviewEvent} onBlur={containPreviewEvent}
     onTouchStart={containPreviewEvent} onTouchMove={containPreviewEvent} onTouchEnd={containPreviewEvent} onTouchCancel={containPreviewEvent}
     onPointerDown={containPreviewEvent} onPointerMove={containPreviewEvent} onPointerUp={containPreviewEvent} onPointerCancel={containPreviewEvent}
@@ -71,13 +74,13 @@ export function ImagePreview({ blob, src, label = 'Image', status, error, progre
       if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) close();
     }}>
     <div className="agent-image-preview-backdrop" aria-hidden="true" />
-    <button type="button" className="agent-image-preview-close" onClick={close} aria-label="Close image preview">×</button>
+    <button type="button" className="agent-image-preview-close" onClick={close} aria-label={t('timeline.image.close')}>×</button>
     {url ? <ImageViewport key={url} src={url} label={label} onClose={close} onDismissMotion={showMotion} />
-      : <div className="agent-image-preview-stage"><span>{blob || src ? 'Loading image…' : 'Local image unavailable. Replace it to continue.'}</span></div>}
+      : <div className="agent-image-preview-stage"><span>{blob || src ? t('timeline.image.loading') : t('timeline.image.localUnavailable')}</span></div>}
     {status || error || actions ? <footer className="agent-image-preview-footer">
       <div className="agent-image-preview-status" data-error={Boolean(error)}>
         {status ? <span role="status">{status}</span> : null}
-        {progress !== undefined ? <progress aria-label="Image upload progress" max={1} value={progress} /> : null}
+        {progress !== undefined ? <progress aria-label={t('timeline.image.progress')} max={1} value={progress} /> : null}
         {error ? <p role="alert">{error}</p> : null}
       </div>
       {actions ? <div className="agent-image-preview-actions">{actions}</div> : null}

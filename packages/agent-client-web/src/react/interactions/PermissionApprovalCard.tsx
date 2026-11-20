@@ -26,8 +26,8 @@ export function PermissionApprovalCard({ request, onResponse, pending, failure, 
       <ApprovalChanges>
         <ul className="agent-permission-list">{request.permissions.map((permission, index) => <li key={index}><strong>{permission.access} · {permission.resource}</strong><code>{permission.target}</code></li>)}</ul>
         <div className="agent-interaction-actions">
-          {request.allowScopes.map(option => <button key={option} type="button" disabled={pending} data-scope={option} onClick={() => void onResponse({ kind: 'permission_approval', decision: 'allow', scope: option })}>Allow for {option}</button>)}
-          <button type="button" disabled={pending} data-decision="deny" onClick={() => void onResponse({ kind: 'permission_approval', decision: 'deny' })}>Deny</button>
+          {request.allowScopes.map(option => <button key={option} type="button" disabled={pending} data-scope={option} onClick={() => void onResponse({ kind: 'permission_approval', decision: 'allow', scope: option })}>{t(option === 'turn' ? 'timeline.approval.allowTurn' : 'timeline.approval.allowSession')}</button>)}
+          <button type="button" disabled={pending} data-decision="deny" onClick={() => void onResponse({ kind: 'permission_approval', decision: 'deny' })}>{t('timeline.approval.deny')}</button>
         </div>
       </ApprovalChanges>
     </div>

@@ -5,6 +5,7 @@ import { HighlightStyle, LanguageDescription, syntaxHighlighting } from '@codemi
 import { languages } from '@codemirror/language-data';
 import { search, searchKeymap } from '@codemirror/search';
 import { tags } from '@lezer/highlight';
+import { useTranslate } from './locale.js';
 
 /**
  * CodeMirror's default highlight style with its colors folded into the `--agent-syntax-*` variables, so a host can
@@ -30,11 +31,12 @@ export const readOnlyHighlight = HighlightStyle.define([
 export default function ReadOnlyCode({ text, filename, wrap, line }: {
   readonly text: string; readonly filename: string; readonly wrap: boolean; readonly line?: number;
 }) {
+  const t = useTranslate();
   const parent = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const view = new EditorView({ parent: parent.current!, state: EditorState.create({ doc: text, extensions: [
       EditorState.readOnly.of(true), EditorView.editable.of(false),
-      EditorView.contentAttributes.of({ tabindex: '0', 'aria-label': `Read-only source: ${filename}` }),
+      EditorView.contentAttributes.of({ tabindex: '0', 'aria-label': t('timeline.code.readOnly', { filename }) }),
       lineNumbers(), highlightActiveLineGutter(), syntaxHighlighting(readOnlyHighlight),
       search({ top: true }), keymap.of(searchKeymap),
       ...(wrap ? [EditorView.lineWrapping] : []),
@@ -74,7 +76,7 @@ export default function ReadOnlyCode({ text, filename, wrap, line }: {
       view.dispatch({ selection: { anchor: position }, effects: EditorView.scrollIntoView(position, { y: 'center' }) });
     }
     return () => { disposed = true; view.destroy(); };
-  }, [text, filename, wrap, line]);
+  }, [text, filename, wrap, line, t]);
   return <div ref={parent} className="agent-file-code" />;
 }
 

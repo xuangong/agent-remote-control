@@ -1,8 +1,10 @@
 import { useState } from 'react';
+import { useTranslate } from './locale.js';
 
 export function CopyTunnelUrl({ getUrl, disabled }: {
   readonly getUrl: () => Promise<string>; readonly disabled?: boolean;
 }) {
+  const t = useTranslate();
   const [pending, setPending] = useState(false);
   const [copied, setCopied] = useState(false);
   const [failure, setFailure] = useState<string>();
@@ -26,17 +28,17 @@ export function CopyTunnelUrl({ getUrl, disabled }: {
     } catch {
       try { if (preparation) url = await preparation; } catch { /* Preparation failed before a URL was issued. */ }
       setFallbackUrl(url);
-      setFailure(url ? 'Copy failed. Select and copy the URL below.' : 'Tunnel URL unavailable. Check the Host connection and retry.');
+      setFailure(t(url ? 'timeline.tunnel.copyFailed' : 'timeline.tunnel.unavailable'));
     } finally { setPending(false); }
   }
 
   return <>
     <button className="agent-preview-copy" type="button" disabled={disabled || pending}
-      title="Copy a tunnel link. Sign in to Agent Remote to open it."
-      onClick={() => void copy()}>{pending ? 'Copying…' : 'Copy tunnel URL'}</button>
-    {copied ? <small role="status">Copied</small> : null}
+      title={t('timeline.tunnel.hint')}
+      onClick={() => void copy()}>{t(pending ? 'timeline.tunnel.copying' : 'timeline.tunnel.copy')}</button>
+    {copied ? <small role="status">{t('common.copied')}</small> : null}
     {failure ? <p role="alert">{failure}</p> : null}
-    {fallbackUrl ? <input className="agent-preview-copy-url" aria-label="Tunnel URL" readOnly value={fallbackUrl}
+    {fallbackUrl ? <input className="agent-preview-copy-url" aria-label={t('timeline.tunnel.url')} readOnly value={fallbackUrl}
       onFocus={event => event.currentTarget.select()} /> : null}
   </>;
 }

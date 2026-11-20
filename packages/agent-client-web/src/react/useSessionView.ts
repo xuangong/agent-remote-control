@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { QuestionDraft } from './interactions/QuestionCard.js';
 import type { SessionViewActions } from './session-view-actions.js';
+import { localizedError } from './localized-error.js';
 import type { ImageDraftRecipient } from '../image-drafts.js';
 import { remoteSessionState, type RemoteSessionState, AgentReplica, RemoteSessionClient, type AgentReplicaState, type RemoteAgentTransport } from '@orchardworks/agent-client';
 
@@ -65,7 +66,7 @@ export function useSessionView({ agentId, transport, source, cachedReplica, pend
     && access.current === authority && authority.enabled && authority.connect && !authority.pending
     && selection.current.agentId === agentId && selection.current.connections === connections && selection.current.cachedReplica === cachedReplica;
   function assertViewAuthority(): void {
-    if (!viewCurrent()) throw new Error('The original session view is no longer current.');
+    if (!viewCurrent()) throw localizedError('The original session view is no longer current.', 'timeline.action.viewChanged');
   }
   const messageActions: SessionViewActions = {
     deleteMessage: id => { if (!active) return; assertViewAuthority(); active.deleteMessage(id); },

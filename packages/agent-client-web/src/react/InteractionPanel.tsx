@@ -29,7 +29,8 @@ export interface InteractionPanelProps {
  * actions in a tinted card that keeps their inputs. Responding, pending and failure words are the same for every kind.
  */
 export function InteractionPanel(props: InteractionPanelProps) {
-  return <fieldset className="agent-interaction-lock" disabled={props.readOnly || props.waitingForConnection || !props.onResponse}><InteractionContent {...props} />{props.waitingForConnection && !props.readOnly ? <p role="status">Waiting for connection to respond.</p> : null}</fieldset>;
+  const t = useTranslate();
+  return <fieldset className="agent-interaction-lock" disabled={props.readOnly || props.waitingForConnection || !props.onResponse}><InteractionContent {...props} />{props.waitingForConnection && !props.readOnly ? <p role="status">{t('timeline.interaction.waiting')}</p> : null}</fieldset>;
 }
 
 function Voiced({ sentence, children }: { sentence: string; children: ReactNode }) {
@@ -51,20 +52,20 @@ function InteractionContent({ request, onResponse, questionDraft, onQuestionDraf
     try {
       await onResponse(request.requestId, response);
     } catch (error) {
-      setFailure(error instanceof Error && error.message ? error.message : 'Interaction response failed.');
+      setFailure(error instanceof Error && error.message ? error.message : t('timeline.interaction.failed'));
       inFlight.current = false;
       setPending(false);
     }
   }
 
   if (request.kind === 'form') {
-    return <Voiced sentence={t('approval.form', { name })}><FormCard request={request} onResponse={respond} pending={pending} disabled={readOnly || !onResponse} failure={readOnly || waitingForConnection ? undefined : onResponse ? failure : 'Interaction unavailable. It can be answered when the session is ready.'} /></Voiced>;
+    return <Voiced sentence={t('approval.form', { name })}><FormCard request={request} onResponse={respond} pending={pending} disabled={readOnly || !onResponse} failure={readOnly || waitingForConnection ? undefined : onResponse ? failure : t('timeline.interaction.notReady')} /></Voiced>;
   }
 
   if (!onResponse && !readOnly && !waitingForConnection) {
     return <section className="agent-interaction agent-interaction-unavailable" role="status">
-      <strong>Interaction unavailable</strong>
-      <p>The host cannot respond to this {interactionKindLabel(request.kind)} request.</p>
+      <strong>{t('timeline.interaction.unavailable')}</strong>
+      <p>{t('timeline.interaction.cannotRespond', { kind: t(interactionKindKey(request.kind)) })}</p>
     </section>;
   }
 
@@ -74,8 +75,8 @@ function InteractionContent({ request, onResponse, questionDraft, onQuestionDraf
     && request.allowScopes.length === 0
   ) {
     return <section className="agent-interaction agent-interaction-invalid" role="alert">
-      <strong>Invalid interaction request</strong>
-      <p>Allow was offered with no approval scope.</p>
+      <strong>{t('timeline.interaction.invalid')}</strong>
+      <p>{t('timeline.interaction.noScope')}</p>
     </section>;
   }
 
@@ -93,20 +94,20 @@ function InteractionContent({ request, onResponse, questionDraft, onQuestionDraf
     default: {
       const unsupported = request as { kind?: unknown };
       return <section className="agent-interaction agent-interaction-unsupported" role="status">
-        <strong>Unsupported interaction</strong>
-        <p>{typeof unsupported.kind === 'string' ? unsupported.kind : 'unknown'}</p>
+        <strong>{t('timeline.interaction.unsupported')}</strong>
+        <p>{typeof unsupported.kind === 'string' ? unsupported.kind : t('common.unknown').toLowerCase()}</p>
       </section>;
     }
   }
 }
 
-function interactionKindLabel(kind: AgentInteractionRequest['kind']): string {
+function interactionKindKey(kind: AgentInteractionRequest['kind']) {
   switch (kind) {
-    case 'form': return 'form';
-    case 'permission_approval': return 'permission approval';
-    case 'external_action': return 'external action';
-    case 'question': return 'question';
-    case 'plan_approval': return 'plan approval';
-    case 'tool_approval': return 'tool approval';
+    case 'form': return 'timeline.interaction.kind.form' as const;
+    case 'permission_approval': return 'timeline.interaction.kind.permission' as const;
+    case 'external_action': return 'timeline.interaction.kind.external' as const;
+    case 'question': return 'timeline.interaction.kind.question' as const;
+    case 'plan_approval': return 'timeline.interaction.kind.plan' as const;
+    case 'tool_approval': return 'timeline.interaction.kind.tool' as const;
   }
 }

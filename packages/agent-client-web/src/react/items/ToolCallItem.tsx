@@ -4,15 +4,17 @@ import { Fragment, useId, useState } from 'react';
 import { useItemDisclosure } from '../TimelineDisplay.js';
 import { ToolResultPreview } from './ToolResultPreview.js';
 import { ContentPreview } from './ContentPreview.js';
+import { useTranslate } from '../locale.js';
 import type { AgentTimelineItem, AgentToolDetail, AgentToolResult } from '@orchardworks/agent-remote-protocol';
 
-const statusLabels = {
-  running: 'Running', completed: 'Completed', failed: 'Failed', canceled: 'Canceled',
+const statusKeys = {
+  running: 'timeline.state.running', completed: 'timeline.state.completed', failed: 'timeline.state.failed', canceled: 'timeline.state.canceled',
 } as const;
 
 export type SessionLinkResolver = (nativeSessionId: string) => { href: string; title?: string; open(): Promise<void> } | undefined;
 
 export function ToolCallItem({ item, resolveSessionLink }: { readonly item: Extract<AgentTimelineItem, { type: 'tool_call' }>; resolveSessionLink?: SessionLinkResolver }) {
+  const t = useTranslate();
   const { expanded, preview, toggle } = useItemDisclosure();
   const detailsId = useId();
   const error = distinctToolError(item.error, item.result);
@@ -32,7 +34,7 @@ export function ToolCallItem({ item, resolveSessionLink }: { readonly item: Extr
           if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
           event.preventDefault();
           setFailure(undefined);
-          void destination.open().catch(error => setFailure(error instanceof Error ? error.message : 'This session could not be opened.'));
+          void destination.open().catch(error => setFailure(error instanceof Error ? error.message : t('timeline.tool.sessionUnavailable')));
         }}>{title}</a> : <span>{title}</span>}
       </Fragment>;
     })}
@@ -42,7 +44,7 @@ export function ToolCallItem({ item, resolveSessionLink }: { readonly item: Extr
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
       setFailure(undefined);
-      void target.open().catch(error => setFailure(error instanceof Error ? error.message : 'This session could not be opened.'));
+      void target.open().catch(error => setFailure(error instanceof Error ? error.message : t('timeline.tool.sessionUnavailable')));
     }}>{reference.title}</a>
     {offset >= 0 ? summary.slice(offset + reference.title.length) : ''}
   </span> : null;
@@ -51,7 +53,7 @@ export function ToolCallItem({ item, resolveSessionLink }: { readonly item: Extr
       {linkedSummary ? <div className="agent-tool-toggle agent-tool-linked">
         <button type="button" className="agent-tool-name-toggle" aria-expanded={expanded} aria-controls={detailsId} onClick={toggle}>{toggleLabel}</button>
         {linkedSummary}
-        <span className="agent-state-label">{statusLabels[item.status]}</span>
+        <span className="agent-state-label">{t(statusKeys[item.status])}</span>
       </div> : <button
         className="agent-tool-toggle"
         type="button"
@@ -62,7 +64,7 @@ export function ToolCallItem({ item, resolveSessionLink }: { readonly item: Extr
         <span className="agent-tool-chevron" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
         <TimelineTitle disclose={toggle}><strong>{item.name}</strong></TimelineTitle>
         <span className={`agent-tool-summary${item.detail.type === 'other' ? ' agent-tool-description' : ''}`}>{toolSummary(item.detail)}</span>
-        <span className="agent-state-label">{statusLabels[item.status]}</span>
+        <span className="agent-state-label">{t(statusKeys[item.status])}</span>
       </button>}
     </header>
     {preview ? <div className="agent-tool-preview">
@@ -70,7 +72,7 @@ export function ToolCallItem({ item, resolveSessionLink }: { readonly item: Extr
       {item.result ? <ToolResultPreview result={item.result} fileEdit={item.detail.type === 'edit' || item.detail.type === 'write'} search={item.detail.type === 'search'} /> : null}
       {error ? <ContentPreview text={error} /> : null}
       <button className="agent-preview-expand" type="button" aria-controls={detailsId} aria-expanded={false} onClick={toggle}>
-        {item.error ? 'Show error details' : item.result ? 'Show full result' : 'Show details'}
+        {t(item.error ? 'timeline.tool.showError' : item.result ? 'timeline.tool.showResult' : 'timeline.tool.showDetails')}
       </button>
     </div> : null}
     <div id={detailsId} className="agent-tool-details" hidden={!expanded}>
@@ -103,18 +105,21 @@ function toolSummary(detail: AgentToolDetail): string {
   }
 }
 
+const detailTypeKeys = { read: 'timeline.tool.read', edit: 'timeline.tool.edit', write: 'timeline.tool.write' } as const;
+
 export function ToolCallDetails({ detail }: { readonly detail: AgentToolDetail }) {
+  const t = useTranslate();
   switch (detail.type) {
     case 'shell':
       return <div className="agent-tool-detail"><code>{detail.command}</code>{detail.cwd ? <small>{detail.cwd}</small> : null}</div>;
     case 'read':
     case 'edit':
     case 'write':
-      return <div className="agent-tool-detail"><span>{detail.type}</span><code>{detail.filePath}</code></div>;
+      return <div className="agent-tool-detail"><span>{t(detailTypeKeys[detail.type])}</span><code>{detail.filePath}</code></div>;
     case 'search':
-      return <div className="agent-tool-detail"><span>query</span><code>{detail.query}</code></div>;
+      return <div className="agent-tool-detail"><span>{t('timeline.tool.query')}</span><code>{detail.query}</code></div>;
     case 'fetch':
-      return <div className="agent-tool-detail"><span>URL</span><code>{detail.url}</code></div>;
+      return <div className="agent-tool-detail"><span>{t('timeline.tool.url')}</span><code>{detail.url}</code></div>;
     case 'other':
       return <p className="agent-tool-detail">{detail.description}{detail.sessionReferences?.length ? ` ${detail.sessionReferences.map(reference => reference.title).join(', ')}` : ''}</p>;
   }

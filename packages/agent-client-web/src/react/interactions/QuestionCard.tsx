@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useTranslate } from '../locale.js';
 import type { AgentInteractionRequest, AgentInteractionResponse } from '@orchardworks/agent-remote-protocol';
 
 export interface QuestionAnswerDraft {
@@ -22,6 +23,7 @@ export interface QuestionCardProps {
 }
 
 export function QuestionCard({ request, onResponse, pending, failure, readOnly = false, draft: controlledDraft, onDraftChange }: QuestionCardProps) {
+  const t = useTranslate();
   const [localDraft, setLocalDraft] = useState<QuestionDraft>({ answers: {} });
   const [error, setError] = useState<string>();
   const tabsRef = useRef<Array<HTMLButtonElement | null>>([]);
@@ -69,7 +71,7 @@ export function QuestionCard({ request, onResponse, pending, failure, readOnly =
     const missing = request.questions.findIndex((question) => question.required && !isAnswered(draft.answers[question.questionId]));
     if (missing >= 0) {
       navigate(missing);
-      setError(`${request.questions[missing]!.header} requires an answer.`);
+      setError(t('timeline.question.requiresAnswer', { header: request.questions[missing]!.header }));
       return;
     }
     setError(undefined);
@@ -82,8 +84,8 @@ export function QuestionCard({ request, onResponse, pending, failure, readOnly =
   }
 
   return <form className="agent-interaction agent-question" onSubmit={submit} aria-busy={pending}>
-    <header><span className="agent-item-kicker">INPUT REQUIRED</span><h3>Agent questions</h3></header>
-    <div hidden={readOnly} className="agent-question-tabs" role="tablist" aria-label="Questions">
+    <header><span className="agent-item-kicker">{t('timeline.question.kicker')}</span><h3>{t('timeline.question.heading')}</h3></header>
+    <div hidden={readOnly} className="agent-question-tabs" role="tablist" aria-label={t('timeline.question.tabs')}>
       {request.questions.map((question, index) => <button
         key={question.questionId}
         ref={(element) => { tabsRef.current[index] = element; }}
@@ -92,7 +94,7 @@ export function QuestionCard({ request, onResponse, pending, failure, readOnly =
         role="tab"
         aria-controls={`${request.requestId}-${question.questionId}-panel`}
         aria-selected={activeIndex === index}
-        aria-label={`${index + 1}. ${question.header}${isAnswered(draft.answers[question.questionId]) ? ', answered' : ''}`}
+        aria-label={t(isAnswered(draft.answers[question.questionId]) ? 'timeline.question.tabAnswered' : 'timeline.question.tab', { position: index + 1, header: question.header })}
         data-answered={isAnswered(draft.answers[question.questionId])}
         tabIndex={activeIndex === index ? 0 : -1}
         disabled={pending}
@@ -130,7 +132,7 @@ export function QuestionCard({ request, onResponse, pending, failure, readOnly =
             <span><strong>{option.label}</strong>{option.description ? <small>{option.description}</small> : null}</span>
           </label>)}
           {question.allowCustomText ? <label className="agent-question-custom">
-            <span>Custom response</span>
+            <span>{t('timeline.question.custom')}</span>
             <input name={`${question.questionId}-custom`} type={question.sensitive ? 'password' : 'text'} autoComplete={question.sensitive ? 'off' : undefined} value={answer.customText ?? ''} onChange={(event) => changeAnswer(question.questionId, { ...answer, customText: event.target.value })} />
           </label> : null}
         </div>
@@ -138,14 +140,14 @@ export function QuestionCard({ request, onResponse, pending, failure, readOnly =
     })}
     {error ?? failure ? <p className="agent-form-error" role="alert">{error ?? failure}</p> : null}
     <div hidden={readOnly} className="agent-interaction-actions">
-      {activeIndex > 0 ? <button type="button" disabled={pending} onClick={() => navigate(activeIndex - 1)}>Previous</button> : null}
-      {activeIndex < request.questions.length - 1 ? <button type="button" disabled={pending} onClick={() => navigate(activeIndex + 1)}>Next</button> : null}
-      <button type="submit" disabled={pending}>{pending ? 'Submitting…' : 'Submit response'}</button>
+      {activeIndex > 0 ? <button type="button" disabled={pending} onClick={() => navigate(activeIndex - 1)}>{t('common.previous')}</button> : null}
+      {activeIndex < request.questions.length - 1 ? <button type="button" disabled={pending} onClick={() => navigate(activeIndex + 1)}>{t('common.next')}</button> : null}
+      <button type="submit" disabled={pending}>{pending ? t('timeline.interaction.submitting') : t('timeline.question.submit')}</button>
       {request.questions.every(({ allowDismiss }) => allowDismiss) ? <button
         type="button"
         disabled={pending}
         onClick={async () => { await onResponse({ kind: 'question', answers: [], dismissed: true }); }}
-      >Dismiss</button> : null}
+      >{t('common.dismiss')}</button> : null}
     </div>
   </form>;
 }

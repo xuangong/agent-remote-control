@@ -3,7 +3,9 @@ import { Fragment, useContext, useState } from 'react';
 import { FilePreviewContext } from '../FilePreviewContext.js';
 import { ImagePreview } from '../ImagePreview.js';
 import { loadLocalResource } from '../local-resource.js';
+import { errorWords } from '../localized-error.js';
 import { TimelineTitle } from '../TimelineTitle.js';
+import { useTranslate } from '../locale.js';
 import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 import { MarkdownContent } from '../MarkdownContent.js';
 import { CommunicationContent } from '../CommunicationContent.js';
@@ -38,6 +40,7 @@ export function MessageItem({ item }: { readonly item: Message }) {
 }
 
 function MessageBubble({ item: message, messageGroup = 'single', resourceContext, foot }: MessageItemProps<Message>) {
+  const t = useTranslate();
   const user = message.type === 'user_message';
   // Quoted excerpts travel at the end of the user's text; they read as attachments of the message.
   // A reference note travels before them and reads as the message's references.
@@ -49,11 +52,11 @@ function MessageBubble({ item: message, messageGroup = 'single', resourceContext
   // not the person who wrote it.
   const article = <article
     className={`agent-timeline-item agent-message agent-message-${user ? 'user' : 'assistant'} agent-message-group-${messageGroup}${withdrawn ? ' agent-message-withdrawn' : ''}`}
-    aria-label={withdrawn ? 'User message, not sent' : user ? 'User message' : 'Assistant message'}
+    aria-label={t(withdrawn ? 'timeline.message.notSent' : user ? 'timeline.message.user' : 'timeline.message.assistant')}
     data-message-group={messageGroup}
   >
     {user && item.background ? <header className="agent-item-header">
-      <TimelineTitle className="agent-item-kicker">Background check</TimelineTitle>
+      <TimelineTitle className="agent-item-kicker">{t('timeline.message.backgroundCheck')}</TimelineTitle>
     </header> : null}
     {item.type === 'user_message' && item.content?.some(part => part.type !== 'text')
       ? <div className="agent-message-ordered-content">{item.content.map((part, index) => part.type === 'text'
@@ -72,6 +75,7 @@ function MessageBubble({ item: message, messageGroup = 'single', resourceContext
 }
 
 function MessageImageTag({ label, locator, context }: { label: string; locator: string; context?: MarkdownResourceContext }) {
+  const t = useTranslate();
   const preview = useContext(FilePreviewContext);
   const [blob, setBlob] = useState<Blob>();
   const [error, setError] = useState<string>();
@@ -82,13 +86,13 @@ function MessageImageTag({ label, locator, context }: { label: string; locator: 
     setLoading(true); setError(undefined);
     try {
       const { detail } = await loadLocalResource(context, locator);
-      if (!detail || detail.status !== 'available' || !('contentBase64' in detail) || !detail.mediaType?.startsWith('image/')) throw new Error('Image preview is unavailable.');
+      if (!detail || detail.status !== 'available' || !('contentBase64' in detail) || !detail.mediaType?.startsWith('image/')) throw new Error(t('timeline.message.imageUnavailable'));
       setBlob(new Blob([Uint8Array.from(atob(detail.contentBase64), value => value.charCodeAt(0))], { type: detail.mediaType }));
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Image preview is unavailable.'); }
+    } catch (reason) { setError(errorWords(reason, t, 'timeline.message.imageUnavailable')); }
     finally { setLoading(false); }
   }
-  return <><button type="button" className="agent-image-tag" aria-label={`Preview ${label}`} aria-busy={loading} disabled={!context || loading}
-    title={error ?? `Preview ${label}`} onClick={() => void open()}>[{label}]</button>
+  return <><button type="button" className="agent-image-tag" aria-label={t('timeline.message.preview', { label })} aria-busy={loading} disabled={!context || loading}
+    title={error ?? t('timeline.message.preview', { label })} onClick={() => void open()}>[{label}]</button>
     {error ? <span role="alert">{error}</span> : null}
     {blob ? <ImagePreview blob={blob} label={label} onClose={() => setBlob(undefined)} /> : null}</>;
 }
@@ -98,19 +102,21 @@ export function AgentCommunicationItem({ item, resourceContext }: {
   item: Extract<AgentTimelineItem, { type: 'agent_communication' }>;
   resourceContext?: MarkdownResourceContext;
 }) {
-  return <article className="agent-timeline-item agent-message agent-message-assistant agent-message-group-single" aria-label="Agent communication">
+  const t = useTranslate();
+  return <article className="agent-timeline-item agent-message agent-message-assistant agent-message-group-single" aria-label={t('timeline.message.agent')}>
     <CommunicationContent item={item} resourceContext={resourceContext} />
   </article>;
 }
 
 /** Input removed from the native queue when the work was stopped; it never reached the agent. */
 function WithdrawnNote({ text }: { readonly text: string }) {
+  const t = useTranslate();
   const [copied, setCopied] = useState(false);
   return <p className="agent-message-withdrawn-note" role="note">
-    <span>Not sent. The work was stopped before this message ran.</span>
+    <span>{t('timeline.message.withdrawn')}</span>
     {text.trim() && typeof navigator !== 'undefined' && navigator.clipboard
       ? <button type="button" className="agent-message-withdrawn-copy" onClick={() => { void navigator.clipboard.writeText(text).then(() => setCopied(true), () => {}); }}>
-        {copied ? 'Copied' : 'Copy text'}
+        {t(copied ? 'common.copied' : 'timeline.message.copyText')}
       </button> : null}
   </p>;
 }

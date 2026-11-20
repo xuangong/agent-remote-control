@@ -1,4 +1,5 @@
 import { TimelineEntryIndex } from './timeline-entry-index.js';
+import { useTranslate } from './locale.js';
 import { useCallback, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type PointerEvent, type TouchEvent, type WheelEvent } from 'react';
 import { captureReadingText, readingTextTop, type ReadingTextAnchor } from './reading-text-anchor.js';
 
@@ -12,6 +13,7 @@ export interface TimelineReadingContinuity { identity: string; positions: Timeli
 interface TimelineHistoryLoading { hasOlder: boolean; cursor?: string; load(): void | Promise<void> }
 
 export function useTimelineScroll(identity: string, visible = true, positions?: TimelineReadingPositions, continuity?: TimelineReadingContinuity, history?: TimelineHistoryLoading, contentRevision: unknown = Symbol(), scrollOrigin: 'top' | 'bottom' = 'top') {
+  const t = useTranslate();
   const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const entryIndex = useRef(new TimelineEntryIndex());
@@ -274,7 +276,7 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
     const promise = Promise.resolve().then(() => {
       if (currentIdentity.current === requestIdentity && loading.current?.promise === promise) return action();
     }).catch((error: unknown) => {
-      if (currentIdentity.current === requestIdentity && loading.current?.promise === promise) setHistoryState({ identity: requestIdentity, pending: false, error: error instanceof Error ? error.message : 'Earlier activity could not be loaded.' });
+      if (currentIdentity.current === requestIdentity && loading.current?.promise === promise) setHistoryState({ identity: requestIdentity, pending: false, error: error instanceof Error ? error.message : t('timeline.history.failed') });
       throw error;
     }).finally(() => {
       if (loading.current?.promise !== promise) return;

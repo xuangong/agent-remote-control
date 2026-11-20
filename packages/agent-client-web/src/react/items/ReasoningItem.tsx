@@ -1,11 +1,13 @@
 import { TimelineTitle } from '../TimelineTitle.js';
 import { useId } from 'react';
+import { useTranslate } from '../locale.js';
 import { useItemDisclosure } from '../TimelineDisplay.js';
 import { ContentPreview } from './ContentPreview.js';
 import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 import { MarkdownContent } from '../MarkdownContent.js';
 
 export function ReasoningItem({ item }: { readonly item: Extract<AgentTimelineItem, { type: 'reasoning' }> }) {
+  const t = useTranslate();
   const { expanded, preview, toggle } = useItemDisclosure();
   const contentId = useId();
   return <article className="agent-timeline-item agent-reasoning">
@@ -16,7 +18,7 @@ export function ReasoningItem({ item }: { readonly item: Extract<AgentTimelineIt
       aria-controls={contentId}
       onClick={toggle}
     >
-      <TimelineTitle disclose={toggle}>Reasoning trace</TimelineTitle><span aria-hidden="true">{expanded ? '−' : '+'}</span>
+      <TimelineTitle disclose={toggle}>{t('timeline.reasoning')}</TimelineTitle><span aria-hidden="true">{expanded ? '−' : '+'}</span>
     </button>
     {preview ? <ContentPreview text={item.text} /> : null}
     <div id={contentId} className="agent-reasoning-details" hidden={!expanded}>{expanded ? <MarkdownContent markdown={item.text} className="agent-reasoning-content" /> : null}</div>

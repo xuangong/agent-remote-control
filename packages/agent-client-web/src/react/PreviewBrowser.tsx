@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { usePreviewVisibility } from './usePreviewVisibility.js';
+import { useTranslate } from './locale.js';
 
 export function PreviewBrowser({ url, target, error, notice, returnFocus, onClose, onMinimize, visible, browserKey, container }: {
   readonly container?: HTMLElement | null;
@@ -8,6 +9,7 @@ export function PreviewBrowser({ url, target, error, notice, returnFocus, onClos
   readonly visible: boolean; readonly browserKey: string; readonly onMinimize: () => void;
   readonly url?: string; readonly target: string; readonly error?: string; readonly returnFocus?: HTMLElement; readonly onClose: () => void;
 }) {
+  const t = useTranslate();
   const dialog = useRef<HTMLDialogElement>(null);
   const iframe = useRef<HTMLIFrameElement>(null);
   const history = useRef({ urls: [] as string[], index: -1, navigating: false });
@@ -32,7 +34,7 @@ export function PreviewBrowser({ url, target, error, notice, returnFocus, onClos
 
   useEffect(() => {
     if (!loading || !url || error) return;
-    const timer = window.setTimeout(() => setFailure('The page is taking too long to load. Try reloading, or check the local application.'), 20_000);
+    const timer = window.setTimeout(() => setFailure(t('timeline.preview.slow')), 20_000);
     return () => window.clearTimeout(timer);
   }, [loading, url, error]);
 
@@ -68,7 +70,7 @@ export function PreviewBrowser({ url, target, error, notice, returnFocus, onClos
     if (!frame) return;
     try {
       if (frame.location.href === 'about:blank') {
-        setFailure('This page could not be embedded. Check the application’s frame policy, then reload.');
+        setFailure(t('timeline.preview.notEmbeddable'));
         setLoading(false); return;
       }
       const document = frame.document;
@@ -110,7 +112,7 @@ export function PreviewBrowser({ url, target, error, notice, returnFocus, onClos
       // Isolated tunnel origins intentionally cannot expose their DOM to the workbench.
       setLoading(false);
       if (url && new URL(url).origin !== window.location.origin) setFailure(undefined);
-      else setFailure('This page left the preview origin. Reload to return to the local application.');
+      else setFailure(t('timeline.preview.leftOrigin'));
     }
   }
 
@@ -133,25 +135,25 @@ export function PreviewBrowser({ url, target, error, notice, returnFocus, onClos
   }
 
   return createPortal(<dialog ref={dialog} className="agent-preview-browser"
-    aria-label="Local preview browser" onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); onClose(); } }} onCancel={event => { event.preventDefault(); onClose(); }}>
+    aria-label={t('timeline.preview.label')} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); onClose(); } }} onCancel={event => { event.preventDefault(); onClose(); }}>
     <div className="agent-preview-browser-layout">
       <header className="agent-preview-browser-toolbar">
-        <nav aria-label="Preview navigation">
-          <button type="button" aria-label="Back" title="Back" disabled={!navigation.back || loading || !!error} onClick={() => navigate(-1)}><BrowserIcon name="back" /></button>
-          <button type="button" aria-label="Forward" title="Forward" disabled={!navigation.forward || loading || !!error} onClick={() => navigate(1)}><BrowserIcon name="forward" /></button>
-          <button type="button" aria-label="Reload preview" title="Reload preview" disabled={!url || !!error} onClick={reload}><BrowserIcon name="reload" /></button>
+        <nav aria-label={t('timeline.preview.navigation')}>
+          <button type="button" aria-label={t('common.back')} title={t('common.back')} disabled={!navigation.back || loading || !!error} onClick={() => navigate(-1)}><BrowserIcon name="back" /></button>
+          <button type="button" aria-label={t('timeline.preview.forward')} title={t('timeline.preview.forward')} disabled={!navigation.forward || loading || !!error} onClick={() => navigate(1)}><BrowserIcon name="forward" /></button>
+          <button type="button" aria-label={t('timeline.preview.reload')} title={t('timeline.preview.reload')} disabled={!url || !!error} onClick={reload}><BrowserIcon name="reload" /></button>
         </nav>
-        <div className="agent-preview-browser-address" aria-label="Preview address" title={`${target} → ${navigation.address || 'Opening…'}`}>
-          <span className="agent-preview-source-address">{target}</span><span className="agent-preview-address-arrow">→</span><span className="agent-preview-mapped-address">{navigation.address || 'Opening…'}</span>
+        <div className="agent-preview-browser-address" aria-label={t('timeline.preview.address')} title={`${target} → ${navigation.address || t('timeline.opening')}`}>
+          <span className="agent-preview-source-address">{target}</span><span className="agent-preview-address-arrow">→</span><span className="agent-preview-mapped-address">{navigation.address || t('timeline.opening')}</span>
         </div>
-        <button type="button" aria-label="Minimize preview" title="Minimize preview" onClick={onMinimize}><BrowserIcon name="minimize" /></button>
-        <button type="button" aria-label="Close preview" title="Close preview" onClick={onClose} autoFocus><BrowserIcon name="close" /></button>
+        <button type="button" aria-label={t('timeline.preview.minimize')} title={t('timeline.preview.minimize')} onClick={onMinimize}><BrowserIcon name="minimize" /></button>
+        <button type="button" aria-label={t('timeline.preview.close')} title={t('timeline.preview.close')} onClick={onClose} autoFocus><BrowserIcon name="close" /></button>
       </header>
       <div className="agent-preview-browser-content" aria-busy={loading && !error && !failure}>
         {notice && !error && !failure ? <p className="agent-preview-browser-message" role="status">{notice}</p> : null}
         {error || failure ? <p className="agent-preview-browser-message" role="alert">{error || failure}</p> : null}
-        {loading && !error && !failure ? <p className="agent-preview-browser-loading" role="status">{url ? 'Loading preview…' : 'Opening preview…'}</p> : null}
-        {url && !error ? <iframe ref={iframe} src={url} title="Local preview" onLoad={loaded} referrerPolicy="no-referrer"
+        {loading && !error && !failure ? <p className="agent-preview-browser-loading" role="status">{t(url ? 'timeline.preview.loading' : 'timeline.preview.opening')}</p> : null}
+        {url && !error ? <iframe ref={iframe} src={url} title={t('timeline.preview.frame')} onLoad={loaded} referrerPolicy="no-referrer"
           sandbox="allow-scripts allow-same-origin allow-forms allow-downloads" allow="fullscreen" /> : null}
       </div>
     </div>

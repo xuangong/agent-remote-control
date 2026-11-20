@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { ResourceBinding } from '@orchardworks/agent-remote-protocol';
 
 import { ImagePreview } from './ImagePreview.js';
+import { useTranslate } from './locale.js';
 import { type AgentReplicaState } from '@orchardworks/agent-client';
 
 export interface ResourceCardProps {
@@ -13,8 +14,8 @@ export interface ResourceCardProps {
   readonly onRequest?: () => Promise<void>;
 }
 
-const statusLabels = {
-  pending: 'Pending', available: 'Available', failed: 'Failed', unavailable: 'Unavailable',
+const statusKeys = {
+  pending: 'timeline.state.pending', available: 'timeline.resource.available', failed: 'timeline.state.failed', unavailable: 'common.unavailable',
 } as const;
 
 const imageMediaTypes = new Map([
@@ -30,22 +31,23 @@ const inertPreviewMediaTypes = new Set([
 ]);
 
 export function ResourceCard({ binding, detail, label, pending, failure, onRequest }: ResourceCardProps) {
+  const t = useTranslate();
   const [failedPreview, setFailedPreview] = useState<string>();
   const [openedImage, setOpenedImage] = useState<string>();
   const status = detail?.status ?? binding.status;
   const mediaType = detail?.status === 'available' ? detail.mediaType.split(';', 1)[0]?.trim().toLowerCase() : undefined;
   const filename = resourceFilename(binding.locator);
-  const title = label?.trim() || filename || (mediaType?.startsWith('image/') ? 'Image' : 'Attachment');
+  const title = label?.trim() || filename || (t(mediaType?.startsWith('image/') ? 'timeline.resource.image' : 'timeline.resource.attachment'));
   const imageUrl = detail?.status === 'available' && 'contentBase64' in detail && canPreviewImage(detail.mediaType)
     ? resourceDataUrl(detail.mediaType, detail.contentBase64) : undefined;
   return <li className={`agent-state-${status}`} aria-busy={pending}>
-    <div><code>{title}</code><span className="agent-state-label">{statusLabels[status]}</span></div>
-    {detail?.status === 'available' ? <small>{detail.mediaType} · {detail.byteLength} bytes</small> : null}
+    <div><code>{title}</code><span className="agent-state-label">{t(statusKeys[status])}</span></div>
+    {detail?.status === 'available' ? <small>{detail.mediaType} · {t('timeline.resource.bytes', { count: detail.byteLength })}</small> : null}
     {detail?.status === 'failed' ? <small role="alert">{detail.message}</small> : null}
     {detail?.status === 'unavailable' ? <small>{detail.reason}</small> : null}
     {failure ? <small role="alert">{failure}</small> : null}
-    {imageUrl ? failedPreview === imageUrl ? <small role="alert">Image preview unavailable. Download the resource to view it.</small> : <button
-      type="button" className="agent-resource-image-open" aria-label={`Open image: ${title}`} onClick={() => setOpenedImage(imageUrl)}>
+    {imageUrl ? failedPreview === imageUrl ? <small role="alert">{t('timeline.resource.previewUnavailable')}</small> : <button
+      type="button" className="agent-resource-image-open" aria-label={t('timeline.resource.openImage', { title })} onClick={() => setOpenedImage(imageUrl)}>
       <img className="agent-resource-image" src={imageUrl} alt={title} loading="lazy" decoding="async"
         onError={() => setFailedPreview(imageUrl)} />
     </button> : null}
@@ -56,18 +58,18 @@ export function ResourceCard({ binding, detail, label, pending, failure, onReque
         href={resourceDataUrl(detail.mediaType, detail.contentBase64)}
         target="_blank"
         rel="noreferrer"
-      >Open resource</a> : null}
+      >{t('timeline.resource.open')}</a> : null}
       <a
         data-resource-download={binding.resourceId}
         href={resourceDataUrl(detail.mediaType, detail.contentBase64)}
         download={filename ?? fallbackDownloadName(mediaType)}
-      >Download resource</a>
+      >{t('timeline.resource.downloadFile')}</a>
     </div> : status === 'available' ? <button
       type="button"
       data-resource-id={binding.resourceId}
       disabled={!onRequest || pending}
       onClick={async () => { await onRequest?.(); }}
-    >{pending ? 'Loading resource…' : 'Load resource'}</button> : null}
+    >{t(pending ? 'timeline.resource.loading' : 'timeline.resource.load')}</button> : null}
   </li>;
 }
 

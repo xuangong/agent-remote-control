@@ -3,18 +3,21 @@ import { FILE_FRAME_MESSAGE, FILE_FRAME_PATH, FILE_FRAME_SANDBOX } from '@orchar
 import { FilePreviewContext, type FilePreviewRequest } from './FilePreviewContext.js';
 import { createFilePreviewResourceContext } from './file-preview-resources.js';
 import { loadLocalResource } from './local-resource.js';
+import { errorWords } from './localized-error.js';
 import { MarkdownContent } from './MarkdownContent.js';
 import { canPreviewImage } from './ResourceCard.js';
 import { ImagePreview } from './ImagePreview.js';
 import { renderHtmlPreview } from './html-preview.js';
 import type { MarkdownResourceContext } from './local-resource.js';
 import { usePreviewVisibility } from './usePreviewVisibility.js';
+import { useTranslate } from './locale.js';
 
 const ReadOnlyCode = lazy(() => import('./ReadOnlyCode.js'));
 type Loaded = Awaited<ReturnType<typeof loadLocalResource>>;
 const textTypes = new Set(['text/plain', 'text/markdown', 'text/x-markdown', 'text/html', 'application/json', 'image/svg+xml']);
 
 export function FilePreview({ request, onClose }: { readonly request: FilePreviewRequest; readonly onClose: () => void }) {
+  const t = useTranslate();
   const dialog = useRef<HTMLDialogElement>(null);
   const [attempt, retry] = useState(0);
   const [wrap, setWrap] = useState(true);
@@ -37,15 +40,15 @@ export function FilePreview({ request, onClose }: { readonly request: FilePrevie
     let current = true;
     setLoading(true); setFailure(undefined); setResult(undefined);
     const deadline = window.setTimeout(() => {
-      current = false; setLoading(false); setFailure('The file request timed out. Check the Host connection and retry.');
+      current = false; setLoading(false); setFailure(t('timeline.file.timedOut'));
     }, 20_000);
     void loadLocalResource(request.context, target.locator, request.sourceLocator, undefined, attempt > 0).then(value => {
       if (current) { setResult({ request, value }); setLoading(false); window.clearTimeout(deadline); }
     }).catch(error => {
-      if (current) { setFailure(error instanceof Error ? error.message : 'The file could not be loaded.'); setLoading(false); window.clearTimeout(deadline); }
+      if (current) { setFailure(errorWords(error, t, 'timeline.file.loadFailed')); setLoading(false); window.clearTimeout(deadline); }
     });
     return () => { current = false; window.clearTimeout(deadline); };
-  }, [request, target.locator, attempt]);
+  }, [request, target.locator, attempt, t]);
 
   const detail = result?.request === request ? result.value.detail : undefined;
   const available = detail?.status === 'available' && 'contentBase64' in detail && typeof detail.contentBase64 === 'string'
@@ -61,39 +64,39 @@ export function FilePreview({ request, onClose }: { readonly request: FilePrevie
   usePreviewVisibility(dialog, !isImage, `file:${request.context.scopeKey}:${request.locator}`);
   let text: string | undefined;
   let error = failure ?? (detail?.status === 'unavailable' ? detail.reason : detail?.status === 'failed' ? detail.message
-    : !loading && !available ? 'This file is unavailable. Check the path and Host connection, then retry.' : undefined);
+    : !loading && !available ? t('timeline.file.unavailable') : undefined);
   if (available && !isImage) {
     try {
-      if (!textTypes.has(mediaType!)) throw new Error('This file type cannot be previewed.');
+      if (!textTypes.has(mediaType!)) throw new Error(t('timeline.file.unsupported'));
       text = new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(atob(available.contentBase64), character => character.charCodeAt(0)));
-      if (text.includes('\0')) throw new Error('Binary files cannot be previewed as text.');
-    } catch (cause) { error = cause instanceof Error ? cause.message : 'This file is not readable UTF-8 text.'; }
+      if (text.includes('\0')) throw new Error(t('timeline.file.binary'));
+    } catch (cause) { error = cause instanceof Error ? cause.message : t('timeline.file.notText'); }
   }
   if (available && isImage) return <ImagePreview src={`data:${available.mediaType};base64,${available.contentBase64}`} label={filename}
-    status={`${available.byteLength.toLocaleString()} bytes · Read only`} onClose={onClose}
-    actions={<button type="button" aria-label="Refresh file" title="Read file again" disabled={loading} onClick={() => retry(value => value + 1)}>Refresh file</button>} />;
-  return <dialog ref={dialog} className="agent-preview-browser agent-file-preview" aria-label="File preview" tabIndex={-1} autoFocus
+    status={`${t('timeline.resource.bytes', { count: available.byteLength.toLocaleString() })} · ${t('timeline.file.readOnly')}`} onClose={onClose}
+    actions={<button type="button" aria-label={t('timeline.file.refresh')} title={t('timeline.file.readAgain')} disabled={loading} onClick={() => retry(value => value + 1)}>{t('timeline.file.refresh')}</button>} />;
+  return <dialog ref={dialog} className="agent-preview-browser agent-file-preview" aria-label={t('timeline.file.preview')} tabIndex={-1} autoFocus
     onCancel={event => { event.preventDefault(); onClose(); }} onKeyDown={event => {
       if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); onClose(); }
     }}>
     <div className="agent-preview-browser-layout">
       <header className="agent-preview-browser-toolbar">
         <div className="agent-file-heading"><strong>{filename}</strong><small title={request.locator}>{request.locator}</small></div>
-        {text !== undefined && format ? <button type="button" className="agent-file-mode" aria-label={source ? `Show rendered ${format}` : `Show ${format} source`}
-          onClick={() => setMode({ request, source: !source })}>{source ? 'Preview' : 'Source'}</button> : null}
-        {text !== undefined && !renderedMarkdown && !renderedHtml ? <button type="button" aria-label="Wrap lines" title="Wrap lines" aria-pressed={wrap} onClick={() => setWrap(value => !value)}>↵</button> : null}
-        <button type="button" aria-label="Refresh file" title="Read file again" disabled={loading} onClick={() => retry(value => value + 1)}>↻</button>
-        <button type="button" aria-label="Close file preview" title="Close file preview" onClick={onClose}>×</button>
+        {text !== undefined && format ? <button type="button" className="agent-file-mode" aria-label={t(source ? 'timeline.file.showRendered' : 'timeline.file.showSource', { format })}
+          onClick={() => setMode({ request, source: !source })}>{t(source ? 'timeline.file.previewMode' : 'timeline.file.sourceMode')}</button> : null}
+        {text !== undefined && !renderedMarkdown && !renderedHtml ? <button type="button" aria-label={t('timeline.file.wrap')} title={t('timeline.file.wrap')} aria-pressed={wrap} onClick={() => setWrap(value => !value)}>↵</button> : null}
+        <button type="button" aria-label={t('timeline.file.refresh')} title={t('timeline.file.readAgain')} disabled={loading} onClick={() => retry(value => value + 1)}>↻</button>
+        <button type="button" aria-label={t('timeline.file.close')} title={t('timeline.file.close')} onClick={onClose}>×</button>
       </header>
       <div className="agent-file-body" data-rendered-markdown={renderedMarkdown || undefined} data-rendered-html={renderedHtml || undefined} aria-busy={loading}>
-        {loading ? <p className="agent-file-message" role="status">Loading file…</p>
-          : error ? <div className="agent-file-message" role="alert"><p>{error}</p><button type="button" onClick={() => retry(value => value + 1)}>Retry</button></div>
+        {loading ? <p className="agent-file-message" role="status">{t('timeline.file.loading')}</p>
+          : error ? <div className="agent-file-message" role="alert"><p>{error}</p><button type="button" onClick={() => retry(value => value + 1)}>{t('common.retry')}</button></div>
           : text !== undefined ? renderedMarkdown
             ? <MarkdownContent markdown={text} className="agent-file-markdown" resourceContext={resourceContext} sourceLocator={target.locator} />
-            : renderedHtml ? <HtmlFileContent key={attempt} html={text} title={`Rendered HTML: ${filename}`} resourceContext={resourceContext} sourceLocator={target.locator} fresh={attempt > 0} />
-            : <Suspense fallback={<p role="status" className="agent-file-message">Opening source…</p>}><ReadOnlyCode text={text} filename={filename} wrap={wrap} line={target.line} /></Suspense> : null}
+            : renderedHtml ? <HtmlFileContent key={attempt} html={text} title={t('timeline.file.renderedHtml', { filename })} resourceContext={resourceContext} sourceLocator={target.locator} fresh={attempt > 0} />
+            : <Suspense fallback={<p role="status" className="agent-file-message">{t('timeline.file.openingSource')}</p>}><ReadOnlyCode text={text} filename={filename} wrap={wrap} line={target.line} /></Suspense> : null}
       </div>
-      <footer className="agent-file-footer"><span>Read only</span><span>{available ? `${available.byteLength.toLocaleString()} bytes` : 'Local resource'}</span></footer>
+      <footer className="agent-file-footer"><span>{t('timeline.file.readOnly')}</span><span>{available ? t('timeline.resource.bytes', { count: available.byteLength.toLocaleString() }) : t('timeline.file.localResource')}</span></footer>
     </div>
   </dialog>;
 }
@@ -111,6 +114,7 @@ const FILE_FRAME_READY_MS = 1_000;
 function HtmlFileContent({ html, title, resourceContext, sourceLocator, fresh }: {
   readonly html: string; readonly title: string; readonly resourceContext: MarkdownResourceContext; readonly sourceLocator: string; readonly fresh: boolean;
 }) {
+  const t = useTranslate();
   const preview = useContext(FilePreviewContext);
   const frame = useRef<HTMLIFrameElement>(null);
   const [phase, setPhase] = useState<'loading' | 'ready' | 'static'>('loading');
@@ -150,10 +154,10 @@ function HtmlFileContent({ html, title, resourceContext, sourceLocator, fresh }:
     sent.current = true;
     frame.current?.contentWindow?.postMessage({ type: FILE_FRAME_MESSAGE, html: copy }, '*');
   }, [phase, copy]);
-  if (phase === 'static') return copy === undefined ? <p className="agent-file-message" role="status">Rendering HTML…</p>
+  if (phase === 'static') return copy === undefined ? <p className="agent-file-message" role="status">{t('timeline.file.renderingHtml')}</p>
     : <iframe className="agent-file-html" title={title} srcDoc={copy} referrerPolicy="no-referrer" sandbox="allow-popups allow-popups-to-escape-sandbox" />;
   return <>
-    {phase === 'loading' || !copy ? <p className="agent-file-message" role="status">Rendering HTML…</p> : null}
+    {phase === 'loading' || !copy ? <p className="agent-file-message" role="status">{t('timeline.file.renderingHtml')}</p> : null}
     <iframe ref={frame} className="agent-file-html" title={title} src={FILE_FRAME_PATH} referrerPolicy="no-referrer" hidden={phase === 'loading' || !copy}
       sandbox={FILE_FRAME_SANDBOX} onLoad={() => {
         window.setTimeout(() => setPhase(value => value === 'loading' ? 'static' : value), FILE_FRAME_READY_MS);

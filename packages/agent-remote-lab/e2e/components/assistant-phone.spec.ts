@@ -26,6 +26,20 @@ async function swipe(target: Locator, from: { x: number; y: number }, to: { x: n
   }, { from, to });
 }
 
+test('a long name is cut short in the top bar, which leaves Back and the conversation\'s tools reachable', async ({ page }) => {
+  await home(page, '&section=notes&bot=chief&longName=1');
+  const bar = page.locator('.lab-assistant-top-bar');
+  const back = bar.getByRole('button', { name: 'Back to assistants', exact: true });
+  const title = bar.locator('button.lab-assistant-title');
+  await expect(title).toBeVisible();
+  const [backBox, titleBox, toolsBox] = await Promise.all([back.boundingBox(), title.boundingBox(), bar.locator('.lab-assistant-top-bar-trailing').boundingBox()]);
+  expect(titleBox!.x).toBeGreaterThanOrEqual(backBox!.x + backBox!.width - 1);
+  expect(titleBox!.x + titleBox!.width).toBeLessThanOrEqual(toolsBox!.x + 1);
+  expect(await title.locator('.lab-assistant-name').evaluate(node => node.scrollWidth > node.clientWidth)).toBe(true);
+  await back.click();
+  await expect(page.locator('.lab-bot-roster')).toBeVisible();
+});
+
 for (const theme of ['light', 'dark'] as const) {
   test(`the list is home; a conversation opens full screen and Back, the browser and an edge swipe return to the list where it was, ${theme}`, async ({ page }, testInfo) => {
     await page.emulateMedia({ colorScheme: theme });

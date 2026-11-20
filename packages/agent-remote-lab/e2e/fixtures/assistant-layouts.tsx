@@ -20,10 +20,12 @@ export const ASSISTANTS = [
 ] as const;
 // ?assistants=N adds quiet assistants after the three, for a list that scrolls.
 const extra = Math.max(0, Number(new URLSearchParams(location.search).get('assistants') ?? 0) - ASSISTANTS.length);
+// ?longName=1 gives Chief a long name, as a bot whose session is titled by its first prompt has.
+const chiefName = new URLSearchParams(location.search).has('longName') ? 'Reply with the words LOCAL and OK joined by a hyphen, and nothing else' : 'Chief';
 const quiet = Array.from({ length: extra }, (_, index) => ({ id: `helper-${index + 1}`, title: `Helper ${index + 1}` }));
 // Chief is pinned and has an Ask; Builder carries a label; Reviewer is Chief's Side, so its row shows the role tag.
 const views = [...ASSISTANTS, ...quiet].map(item => item.id === 'reviewer' ? { ...createWindowView(item.id, binding(item.id, item.title), 'attached'), attachedTo: 'chief' }
-  : createWindowView(item.id, binding(item.id, item.title), 'primary'));
+  : createWindowView(item.id, binding(item.id, item.id === 'chief' ? chiefName : item.title), 'primary'));
 views.push({ ...createWindowView('chief-ask', { ...binding('chief-ask', 'Why the delay?') }, 'float'), bindingPolicy: 'managed', closeWith: 'chief', feature: { kind: 'ask', id: 'ask-1' } });
 const initialGroup: WindowGroup = {
   window: { schemaVersion: 3, id: 'notes', revision: 0, title: 'Notes', selectedPrimaryViewId: 'chief', selectedViewId: 'chief', views },

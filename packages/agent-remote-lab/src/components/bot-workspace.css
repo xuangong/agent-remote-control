@@ -88,9 +88,10 @@
 }
 @media (prefers-reduced-motion: reduce) { .lab-bot-row, .lab-bot-ask { transition: none; } }
 
-/* The conversation's top bar: a title pill with the avatar, the name and its sentence, centred between the bar's ends. */
+/* The conversation's top bar: a title pill with the avatar, the name and its sentence, centred between the bar's ends. The ends
+   keep their controls whole; a long name is cut short instead. */
 .lab-assistant-top-bar { display: flex; flex: none; align-items: center; gap: var(--orchard-space-m); box-sizing: border-box; min-height: 58px; padding: var(--orchard-space-s) var(--orchard-space-l); }
-.lab-assistant-top-bar-leading, .lab-assistant-top-bar-trailing { display: flex; flex: 1 1 0; align-items: center; gap: var(--orchard-space-xs); min-width: 0; }
+.lab-assistant-top-bar-leading, .lab-assistant-top-bar-trailing { display: flex; flex: 1 1 0; align-items: center; gap: var(--orchard-space-xs); min-width: max-content; }
 .lab-assistant-top-bar-trailing { justify-content: flex-end; }
 .lab-assistant-heading { flex: 0 1 auto; min-width: 0; margin: 0; font: inherit; }
 .lab-assistant-title { display: inline-flex; align-items: center; gap: var(--orchard-space-m); box-sizing: border-box; max-width: 100%; min-height: 44px;

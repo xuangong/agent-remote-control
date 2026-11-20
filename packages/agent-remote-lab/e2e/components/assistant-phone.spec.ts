@@ -36,6 +36,14 @@ test('a long name is cut short in the top bar, which leaves Back and the convers
   expect(titleBox!.x).toBeGreaterThanOrEqual(backBox!.x + backBox!.width - 1);
   expect(titleBox!.x + titleBox!.width).toBeLessThanOrEqual(toolsBox!.x + 1);
   expect(await title.locator('.lab-assistant-name').evaluate(node => node.scrollWidth > node.clientWidth)).toBe(true);
+  // Its details sheet keeps a long session title on one cut row, never wider than the screen.
+  await title.click();
+  const sheet = page.locator('dialog.orchard-sheet[open]');
+  await expect(sheet.locator('ol.lab-assistant-chain li').first()).toBeVisible();
+  expect(await sheet.locator('.lab-assistant-details-body').evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(1);
+  const card = await sheet.locator('.lab-assistant-card').boundingBox();
+  expect(card!.x + card!.width).toBeLessThanOrEqual(390);
+  await sheet.getByRole('button', { name: 'Close', exact: false }).first().click();
   await back.click();
   await expect(page.locator('.lab-bot-roster')).toBeVisible();
 });

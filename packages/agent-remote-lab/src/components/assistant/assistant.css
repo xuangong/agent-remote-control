@@ -1,5 +1,5 @@
 /* The details of an assistant: its name card on the brand tint, then grouped sections on the fill (I3 plan, section 4.5). */
-.lab-assistant-details-body { display: grid; gap: var(--orchard-space-l); min-width: 0; color: var(--orchard-text); font-size: var(--orchard-type-footnote-size); }
+.lab-assistant-details-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--orchard-space-l); min-width: 0; color: var(--orchard-text); font-size: var(--orchard-type-footnote-size); }
 .lab-assistant-card.orchard-card { display: grid; justify-items: center; gap: var(--orchard-space-xs); padding: var(--orchard-space-3xl) var(--orchard-space-xl) var(--orchard-space-2xl); text-align: center; }
 .lab-assistant-card-avatar { display: inline-flex; padding: var(--orchard-space-xs); border: 0; border-radius: var(--orchard-radius-card); background: transparent; }
 button.lab-assistant-card-avatar { cursor: pointer; }
@@ -31,7 +31,7 @@ input.lab-assistant-card-name { width: 100%; background: var(--orchard-surface);
 .lab-assistant-value[data-online="false"] .lab-assistant-online { background: var(--orchard-ink-faint); }
 /* Sessions: one compact row each (title, time, state); its chevron shows the working directory, ID and links. */
 .lab-assistant-sessions { display: grid; gap: var(--orchard-space-s); min-width: 0; }
-.lab-assistant-sessions :is(ol, ul) { display: grid; margin: 0; padding: 0 var(--orchard-space-l); border-radius: var(--orchard-radius-group); background: var(--orchard-fill); list-style: none; }
+.lab-assistant-sessions :is(ol, ul) { display: grid; grid-template-columns: minmax(0, 1fr); margin: 0; padding: 0 var(--orchard-space-l); border-radius: var(--orchard-radius-group); background: var(--orchard-fill); list-style: none; }
 .lab-assistant-chain li + li { border-top: 0.5px solid var(--orchard-separator); }
 .lab-assistant-session { display: flex; align-items: center; gap: var(--orchard-space-s); min-width: 0; min-height: 40px; }
 .lab-assistant-session-title { flex: 1; min-width: 0; overflow: hidden; padding: 0; border: 0; background: none; color: var(--orchard-text); font: inherit; text-align: left; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }

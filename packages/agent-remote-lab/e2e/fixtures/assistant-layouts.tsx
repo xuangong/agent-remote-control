@@ -29,7 +29,11 @@ export const ASSISTANTS = [
 // ?assistants=N adds quiet assistants after the three, for a list that scrolls.
 const extra = Math.max(0, Number(new URLSearchParams(location.search).get('assistants') ?? 0) - ASSISTANTS.length);
 // ?longName=1 gives Chief a long name, as a bot whose session is titled by its first prompt has.
-const chiefName = new URLSearchParams(location.search).has('longName') ? 'Reply with the words LOCAL and OK joined by a hyphen, and nothing else' : SAMPLE.names[0]!;
+// ?longName=1 also titles Chief's session with its first prompt, as a real session often is.
+const longName = new URLSearchParams(location.search).has('longName');
+const LONG = 'Reply with the words LOCAL and OK joined by a hyphen, and nothing else';
+const chiefName = longName ? LONG : SAMPLE.names[0]!;
+const currentTitle = longName ? LONG : SAMPLE.current;
 const quiet = Array.from({ length: extra }, (_, index) => ({ id: `helper-${index + 1}`, title: SAMPLE.helper(index + 1) }));
 // Chief is pinned and has an Ask; Builder carries a label; Reviewer is Chief's Side, so its row shows the role tag.
 const views = [...ASSISTANTS, ...quiet].map(item => item.id === 'reviewer' ? { ...createWindowView(item.id, binding(item.id, item.title), 'attached'), attachedTo: 'chief' }
@@ -43,8 +47,8 @@ const initialGroup: WindowGroup = {
 };
 const sessionOf = (id: string, title: string) => ({ hostId: 'mac', providerId: 'claude', nativeSessionId: id, title });
 /** Chief's handoff chain (?history=1 shows the earlier session, with Return to current) and its subagents. */
-const chain = (history: boolean) => ({ roleKey: 'chief', history, session: history ? sessionOf('chief-earlier', SAMPLE.earlier) : sessionOf('chief-session', SAMPLE.current),
-  current: sessionOf('chief-session', SAMPLE.current), ...(history ? { ancestors: [sessionOf('chief-oldest', SAMPLE.oldest)] } : { predecessor: sessionOf('chief-earlier', SAMPLE.earlier), ancestors: [sessionOf('chief-oldest', SAMPLE.oldest)] }) });
+const chain = (history: boolean) => ({ roleKey: 'chief', history, session: history ? sessionOf('chief-earlier', SAMPLE.earlier) : sessionOf('chief-session', currentTitle),
+  current: sessionOf('chief-session', currentTitle), ...(history ? { ancestors: [sessionOf('chief-oldest', SAMPLE.oldest)] } : { predecessor: sessionOf('chief-earlier', SAMPLE.earlier), ancestors: [sessionOf('chief-oldest', SAMPLE.oldest)] }) });
 
 /** Bot mode with the assistants of `initialGroup`; `conversation` renders the conversation of the assistant shown. */
 export function BotFixture({ conversation }: { conversation(props: { assistant: { name: string; avatar: ReactNode }; visible: boolean; headingMode: 'assistant';

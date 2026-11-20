@@ -38,6 +38,8 @@ export function SessionHeadingActions({ children, sessionKey, alwaysCollapsed = 
     <button ref={trigger} type="button" className="lab-session-heading-actions-trigger"
       aria-label={t('sessions.heading.moreActions')} title={t('sessions.heading.moreActions')} aria-expanded={open} aria-controls={id}
       onClick={() => setOpen(value => !value)}>···</button>
-    <div ref={panel} id={id} className="lab-session-heading-actions-panel" hidden={alwaysCollapsed && !open}>{children}</div>
+    {/* An action that opens its own place (the search field) closes the menu, which would otherwise stand over it. */}
+    <div ref={panel} id={id} className="lab-session-heading-actions-panel" hidden={alwaysCollapsed && !open}
+      onClick={event => { if (event.target instanceof Element && event.target.closest('[data-menu-close]')) setOpen(false); }}>{children}</div>
   </div>;
 }

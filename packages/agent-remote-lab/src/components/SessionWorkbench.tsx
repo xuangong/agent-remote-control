@@ -351,7 +351,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
   }, [visible, selectedSearchKey, searchSelection?.request]);
   const hasReplica = state !== undefined;
   const isAttaching = !hasReplica && hasTarget;
-  const searchButton = state?.timeline.initialized ? <button ref={searchTrigger} type="button" className="lab-timeline-search-trigger"
+  const searchButton = state?.timeline.initialized ? <button ref={searchTrigger} type="button" className="lab-timeline-search-trigger" data-menu-close
     hidden={searchOpen && !searchTriggerTarget} aria-label={t('composer.view.search')} title={t('composer.view.search')} aria-expanded={searchOpen}
     onClick={() => { if (searchOpen) closeSearch(); else setOpenSearchScope(searchScope); }}>
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg>

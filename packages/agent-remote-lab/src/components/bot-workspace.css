@@ -84,7 +84,10 @@
 .lab-bot-other > summary h2 { display: inline-flex; }
 .lab-bot-other > summary h2::before { content: '›'; display: inline-block; width: 1em; transition: transform var(--orchard-duration-fast) var(--orchard-ease-standard); }
 .lab-bot-other[open] > summary h2::before { transform: rotate(90deg); }
-@media (pointer: coarse) { .lab-bot-ask { min-height: 44px; } }
+@media (pointer: coarse) {
+  .lab-bot-ask { min-height: 44px; }
+  .lab-bot-section-head h2 > button { min-width: 44px; min-height: 44px; }
+}
 @media (prefers-reduced-motion: reduce) { .lab-bot-row, .lab-bot-ask { transition: none; } }
 
 /* The conversation's top bar: a title pill with the avatar, the name and its sentence, centred between the bar's ends. */

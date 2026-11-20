@@ -15,8 +15,11 @@ export async function coveringControls(page: Page, content = '.lab-timeline-scro
       return rect.width > 0 && rect.height > 0 && !element.closest('[hidden], [inert]');
     });
     if (!areas.length) return ['no conversation text'];
+    // Behind an open modal (a sheet) nothing can cover its content: only the modal's own controls count then.
+    const modal = document.querySelector('dialog:modal');
     const controls = [...document.querySelectorAll('button, a[href], input, select, textarea, summary, [role="button"], [tabindex]:not([tabindex="-1"])')]
-      .filter(element => !element.closest('.lab-toast-region, [inert], [aria-hidden="true"]') && getComputedStyle(element).visibility !== 'hidden');
+      .filter(element => !element.closest('.lab-toast-region, [inert], [aria-hidden="true"]') && getComputedStyle(element).visibility !== 'hidden')
+      .filter(element => !modal || modal.contains(element));
     const found = new Set<string>();
     for (const timeline of areas) {
       const scroller = timeline.getBoundingClientRect();

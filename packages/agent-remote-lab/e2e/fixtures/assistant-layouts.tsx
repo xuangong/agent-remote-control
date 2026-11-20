@@ -17,9 +17,12 @@ export const ASSISTANTS = [
   { id: 'builder', title: 'Builder', picture: { shape: 'circle', color: '#3d8bff', gaze: 2 }, activity: 'running' },
   { id: 'reviewer', title: 'Reviewer', picture: { shape: 'sideways', color: '#8b6cff', gaze: 3 }, activity: 'idle', reply: 'Done reading, I have 3 thoughts' },
 ] as const;
+// ?assistants=N adds quiet assistants after the three, for a list that scrolls.
+const extra = Math.max(0, Number(new URLSearchParams(location.search).get('assistants') ?? 0) - ASSISTANTS.length);
+const quiet = Array.from({ length: extra }, (_, index) => ({ id: `helper-${index + 1}`, title: `Helper ${index + 1}` }));
 const initialGroup: WindowGroup = {
   window: { schemaVersion: 3, id: 'notes', revision: 0, title: 'Notes', selectedPrimaryViewId: 'chief', selectedViewId: 'chief',
-    views: ASSISTANTS.map(item => createWindowView(item.id, binding(item.id, item.title), 'primary')) },
+    views: [...ASSISTANTS, ...quiet].map(item => createWindowView(item.id, binding(item.id, item.title), 'primary')) },
   bots: { rank: 'm', members: Object.fromEntries(ASSISTANTS.map(item => [item.id, { picture: item.picture }])) },
 };
 
@@ -53,7 +56,7 @@ export function BotFixture({ conversation }: { conversation(props: { assistant: 
     return target ? { slotId: next.viewId, titleInteraction: undefined, props: { target, visible: true } } as unknown as SessionSurfaceDescriptor : undefined;
   };
   const mount: NonNullable<BotWorkspaceProps['mount']> = ({ descriptor }) => {
-    const assistant = ASSISTANTS.find(item => item.id === descriptor.slotId)!;
+    const assistant = ASSISTANTS.find(item => item.id === descriptor.slotId) ?? { ...ASSISTANTS[2], id: descriptor.slotId, title: descriptor.slotId };
     const picture = readGroup('notes')?.bots?.members[assistant.id]?.picture;
     return <>{conversation({ visible: descriptor.props.visible !== false, headingMode: 'assistant', details: { id: assistant.id, name: assistant.title, ...(picture ? { picture } : {}) },
       assistant: { name: assistant.title, avatar: <AssistantAvatar id={assistant.id} {...(picture ? { picture } : {})} size={26} mood={assistant.activity === 'running' ? 'working' : 'idle'} /> } })}</>;

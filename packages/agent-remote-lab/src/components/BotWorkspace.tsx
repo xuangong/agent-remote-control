@@ -155,6 +155,8 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
     }
   }, [phoneChat, phone]);
   function back() { returning.current = true; navigation.back(); }
+  // A phone goes back from a conversation by a swipe from its left edge, as a native navigation stack does.
+  const edgeSwipe = useRef<{ x: number; y: number }>();
   /** Opening a sleeping bot wakes it for every device. */
   function open(next: BotPlace) {
     if (next.kind === 'bot' && workspace.readGroup(next.groupId)?.bots?.members[next.viewId]?.asleep) void actions.wake(next);
@@ -202,7 +204,12 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
         </div>} /></div>
       <footer className="lab-bot-sidebar-foot"><DeviceLinkSlot shown={visible} /></footer>
     </aside>
-    <section className="lab-bot-conversation orchard-panel" aria-label="Bot conversation" hidden={phone && !showConversation}>
+    <section className="lab-bot-conversation orchard-panel" aria-label="Bot conversation" hidden={phone && !showConversation}
+      onTouchStart={event => { const touch = event.touches[0]; edgeSwipe.current = phone && touch && touch.clientX <= 24 ? { x: touch.clientX, y: touch.clientY } : undefined; }}
+      onTouchEnd={event => {
+        const start = edgeSwipe.current, touch = event.changedTouches[0]; edgeSwipe.current = undefined;
+        if (start && touch && touch.clientX - start.x > 80 && Math.abs(touch.clientY - start.y) < 48) back();
+      }}>
       {conversation ? <SharedTopBar ref={title} place={place} row={botRow} project={projectRoster} name={name}
         detailsOpen={detailsShown} detailsId={detailsId} onToggleDetails={descriptor ? () => setDetailsOpen(open => !open) : undefined}
         leading={phone ? <Button ref={backButton} variant="plain" className="lab-bot-back" aria-label={t('assistants.back')} onClick={back}><Icon name="chevron-left" size={20} />{t('assistants.backShort')}</Button>

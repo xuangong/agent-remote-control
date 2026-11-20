@@ -213,6 +213,8 @@ const en = {
   'tile.menu': 'More actions for {name}',
   'tile.star': 'Star',
   'tile.unstar': 'Remove star',
+  'tiles.pages': 'Tiles of this window',
+  'tiles.page': 'Tile {position} of {count}: {title}',
 
   // This device's own link to the service: the page's one connection indicator.
   'device.offline': 'Offline. Messages will be sent when this device is back online.',
@@ -405,6 +407,8 @@ const zh: Readonly<Record<MessageKey, Message>> = {
   'tile.menu': '{name} 的更多操作',
   'tile.star': '加星标',
   'tile.unstar': '取消星标',
+  'tiles.pages': '这个窗口的卡片',
+  'tiles.page': '第 {position}/{count} 张：{title}',
 
   'device.offline': '这台设备离线了，恢复联网后消息会自动发出。',
   'device.signIn': '请重新登录，才能继续发送。',

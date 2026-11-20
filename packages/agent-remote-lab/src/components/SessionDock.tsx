@@ -10,6 +10,7 @@ import type { WindowBotDetails } from '@orchardworks/agent-remote-protocol';
 import type { SessionStatesView } from '@orchardworks/agent-client';
 import { BotPicture, botMood } from './BotRoster.js';
 import { useSharedFeed } from '../shared-feeds.js';
+import { TileStack } from './assistant/TileStack.js';
 
 const defaultWidth = 440, minimumWidth = 320, maximumWidth = 1600;
 interface DockItem { id: string; title: string; host: HTMLElement; visible: boolean; width: number; additionalWidth?: number; folded?: boolean }
@@ -211,6 +212,8 @@ export function FoldedBotCard({ label, fold: given, controls, onRestore }: { lab
 interface SessionDockRailProps {
   children?: ReactNode; minimizedHeader?: ReactNode; mainTitle?: string; minimumBaseWidth?: number; onCreateView?(): void;
   compact?: boolean; primaryGroups?: readonly PrimarySessionGroupPane[];
+  /** A phone stacks the primary groups side by side, one per screen, swiped through (TileStack). */
+  stack?: boolean;
   onSelectPrimaryGroup?(id: string): void;
   onResizePrimaryGroup?(id: string, width: number): void;
   onCollapsePrimaryGroup?(id: string, collapsed: boolean): void;
@@ -218,7 +221,7 @@ interface SessionDockRailProps {
   /** The × of a folded bot's card: removing the bot from its group, after a confirmation. */
   onRemovePrimaryGroup?(id: string): void;
 }
-export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main session', minimumBaseWidth = minimumWidth, onCreateView, compact = false, primaryGroups, onSelectPrimaryGroup, onResizePrimaryGroup, onCollapsePrimaryGroup, onClosePrimaryGroup, onRemovePrimaryGroup }: SessionDockRailProps) {
+export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main session', minimumBaseWidth = minimumWidth, onCreateView, compact = false, stack = false, primaryGroups, onSelectPrimaryGroup, onResizePrimaryGroup, onCollapsePrimaryGroup, onClosePrimaryGroup, onRemovePrimaryGroup }: SessionDockRailProps) {
   const dock = useContext(Context);
   const rail = useRef<HTMLDivElement>(null);
   const shared = useWindowLayout();
@@ -252,8 +255,11 @@ export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main s
     return () => observer.disconnect();
   }, []);
   const baseWidth = Math.max(minimumBaseWidth, preferredBaseWidth ?? width - defaultWidth);
-  return <div ref={rail} className="lab-session-dock-rail" data-docked={shown.length > 0 || primaryGroups && !compact || undefined} data-docks-hidden={docksHidden || undefined} data-primary-groups={primaryGroups ? true : undefined} data-compact={compact || undefined}>
-    {primaryGroups ? primaryGroups.map((group, index) => <PrimaryGroupPane key={group.id} group={group} compact={compact} minimizedHeader={index === 0 ? minimizedHeader : undefined} onSelect={onSelectPrimaryGroup} onResize={onResizePrimaryGroup} onCollapse={onCollapsePrimaryGroup} onClose={onClosePrimaryGroup} onRemove={onRemovePrimaryGroup} />) : <div className="lab-session-dock-base" data-minimized={minimized || undefined} style={shown.length ? { flexBasis: minimized ? 44 : baseWidth } : undefined}>
+  return <div ref={rail} className="lab-session-dock-rail" data-stack={primaryGroups && stack && compact || undefined} data-docked={shown.length > 0 || primaryGroups && !compact || undefined} data-docks-hidden={docksHidden || undefined} data-primary-groups={primaryGroups ? true : undefined} data-compact={compact || undefined}>
+    {primaryGroups && stack && compact ? <TileStack selectedId={primaryGroups.find(group => group.selected)?.id} onSelect={id => onSelectPrimaryGroup?.(id)}
+      tiles={primaryGroups.map((group, index) => ({ id: group.id, title: group.title, node: <PrimaryGroupPane group={group} compact stacked minimizedHeader={index === 0 ? minimizedHeader : undefined}
+        onSelect={onSelectPrimaryGroup} onResize={onResizePrimaryGroup} onCollapse={onCollapsePrimaryGroup} onClose={onClosePrimaryGroup} onRemove={onRemovePrimaryGroup} /> }))} />
+    : primaryGroups ? primaryGroups.map((group, index) => <PrimaryGroupPane key={group.id} group={group} compact={compact} minimizedHeader={index === 0 ? minimizedHeader : undefined} onSelect={onSelectPrimaryGroup} onResize={onResizePrimaryGroup} onCollapse={onCollapsePrimaryGroup} onClose={onClosePrimaryGroup} onRemove={onRemovePrimaryGroup} />) : <div className="lab-session-dock-base" data-minimized={minimized || undefined} style={shown.length ? { flexBasis: minimized ? 44 : baseWidth } : undefined}>
       <div ref={content} id={contentId} className="lab-session-dock-main-content" hidden={minimized}>{children}</div>
       {minimized ? minimizedHeader : null}
       {minimized ? <button ref={restore} type="button" className="lab-session-main-restore" aria-label={`Restore main session: ${mainTitle}`} title={`Restore main session: ${mainTitle}`} aria-expanded={false} aria-controls={contentId}
@@ -268,8 +274,8 @@ export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main s
   </div>;
 }
 
-function PrimaryGroupPane({ group, compact, minimizedHeader, onSelect, onResize, onCollapse, onClose, onRemove }: {
-  group: PrimarySessionGroupPane; compact: boolean; minimizedHeader?: ReactNode;
+function PrimaryGroupPane({ group, compact, stacked = false, minimizedHeader, onSelect, onResize, onCollapse, onClose, onRemove }: {
+  group: PrimarySessionGroupPane; compact: boolean; stacked?: boolean; minimizedHeader?: ReactNode;
   onSelect?: SessionDockRailProps['onSelectPrimaryGroup'];
   onResize?: SessionDockRailProps['onResizePrimaryGroup'];
   onCollapse?: SessionDockRailProps['onCollapsePrimaryGroup'];
@@ -283,7 +289,7 @@ function PrimaryGroupPane({ group, compact, minimizedHeader, onSelect, onResize,
     onSelect?.(group.id);
   };
   return <section className="lab-primary-group" data-session-family-shell data-primary-group-id={group.id} data-selected={group.selected || undefined}
-    data-minimized={minimized || undefined} hidden={compact && !group.selected} aria-label={`Primary group: ${group.title}`}
+    data-minimized={minimized || undefined} hidden={compact && !stacked && !group.selected} aria-label={`Primary group: ${group.title}`}
     style={compact ? undefined : { width: minimized ? group.fold ? FOLDED_BOT_WIDTH : 44 : group.width + (group.additionalWidth ?? 0) }}
     onPointerDownCapture={select} onFocusCapture={select}>
     <div id={contentId} className="lab-primary-group-content" hidden={minimized}>{group.content}</div>

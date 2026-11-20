@@ -206,3 +206,15 @@
 .lab-tile-details.orchard-panel { position: absolute; z-index: 30; top: 56px; right: var(--orchard-space-m); bottom: var(--orchard-space-m); display: flex; flex-direction: column; gap: var(--orchard-space-m);
   box-sizing: border-box; width: min(300px, calc(100% - 16px)); overflow: auto; padding: var(--orchard-space-xl); box-shadow: var(--orchard-elevation-floating); }
 .lab-tile-details[hidden] { display: none; }
+/* A window on a phone: its tiles side by side, one per screen, with a page indicator in a row of its own. */
+.lab-session-dock-rail[data-stack] { display: flex; flex-direction: column; }
+.lab-tile-stack { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+.lab-tile-stack-track { display: flex; flex: 1; min-height: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; scrollbar-width: none; }
+.lab-tile-stack-track::-webkit-scrollbar { display: none; }
+.lab-tile-stack-page { display: flex; flex: 0 0 100%; min-width: 0; min-height: 0; scroll-snap-align: start; scroll-snap-stop: always; }
+.lab-tile-stack-page > .lab-primary-group { flex: 1 1 auto; width: 100%; }
+.lab-tile-stack-pages { display: flex; flex: none; justify-content: center; gap: 0; padding: 0 0 var(--orchard-safe-area-bottom); background: var(--orchard-surface); }
+.lab-tile-stack-pages > button { display: grid; place-items: center; min-width: 32px; min-height: 28px; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.lab-tile-stack-pages > button > span { width: 7px; height: 7px; border-radius: 50%; background: var(--orchard-fill-strong); }
+.lab-tile-stack-pages > button[aria-current] > span { background: var(--orchard-text-strong); }
+@media (pointer: coarse) { .lab-tile-stack-pages > button { min-width: 44px; min-height: 44px; } }

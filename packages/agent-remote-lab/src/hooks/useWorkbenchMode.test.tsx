@@ -52,3 +52,33 @@ it.each([
   expect(mode.mode).toBe('window'); expect(workspace.window).toEqual(saved.window); expect(location.search).toBe('?debug=1&window=a'); expect(operations).not.toHaveBeenCalled();
   expect(sessionStorage.getItem(key)).toBe('a'); expect(localStorage.getItem(`${key}:last-window`)).toBe('a');
 });
+
+// The phone (I3 plan, B6): the assistant list is home, and opening a conversation from it is a history entry.
+function phone() { vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(max-width: 760px)' || query === '(max-width: 1180px)', addEventListener() {}, removeEventListener() {} })); }
+it('lands on the assistant list on a phone without a route, whatever the stored mode', async () => {
+  phone(); localStorage.setItem('agent-remote:workbench-mode', 'window');
+  sessionStorage.setItem('agent-remote:recovery:scope:bot-place', JSON.stringify({ place: { kind: 'bot', groupId: 's', viewId: 'v' }, rosterVisible: false }));
+  const read = await mount();
+  expect(read().mode).toBe('bot'); expect(read().rosterVisible).toBe(true); expect(read().place).toEqual({ kind: 'bot', groupId: 's', viewId: 'v' });
+  vi.unstubAllGlobals();
+});
+it('still opens a window, or an assistant, that the address names on a phone', async () => {
+  phone(); history.replaceState(null, '', '/?window=w'); let read = await mount(); expect(read().mode).toBe('window');
+  await act(async () => root!.unmount()); root = undefined;
+  history.replaceState(null, '', '/?mode=bot&section=s&bot=v'); read = await mount(); expect(read().mode).toBe('bot'); expect(read().rosterVisible).toBe(false);
+  vi.unstubAllGlobals();
+});
+it('opens a conversation from the phone list as a history entry, and Back or the system back returns to the list', async () => {
+  phone(); history.replaceState(null, '', '/?mode=bot'); const read = await mount();
+  const entries = history.length;
+  await act(async () => read().select({ kind: 'bot', groupId: 's', viewId: 'v' }));
+  expect(history.length).toBe(entries + 1); expect(read().rosterVisible).toBe(false); expect(location.search).toBe('?mode=bot&section=s&bot=v');
+  // The system back gesture: the browser pops the entry.
+  await act(async () => { history.back(); await new Promise(resolve => addEventListener('popstate', resolve, { once: true })); });
+  expect(read().rosterVisible).toBe(true); expect(read().place).toEqual({ kind: 'bot', groupId: 's', viewId: 'v' });
+  // The top bar's Back pops it too.
+  await act(async () => read().select({ kind: 'bot', groupId: 's', viewId: 'w' }));
+  await act(async () => { read().back(); await new Promise(resolve => addEventListener('popstate', resolve, { once: true })); });
+  expect(read().rosterVisible).toBe(true);
+  vi.unstubAllGlobals();
+});

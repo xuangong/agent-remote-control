@@ -47,7 +47,7 @@ async function search(container: ParentNode, text: string) {
   await act(async () => { await new Promise(resolve => setTimeout(resolve)); });
 }
 const releaseAndSettle = (app: Awaited<ReturnType<typeof mountBotApp>>) => act(async () => { app.releaseInspect(); await new Promise(resolve => setTimeout(resolve, 20)); });
-const currentBot = (container: ParentNode) => container.querySelector('[aria-label="Bots"] [aria-current="true"]')?.getAttribute('aria-label');
+const currentBot = (container: ParentNode) => container.querySelector('[aria-label="Assistants"] [aria-current="true"]')?.getAttribute('aria-label');
 
 it('opens with Control-K from the composer, switches Windows and opens pages, and closes on Escape', async () => {
   const scope = 'http://localhost/palette-window/';

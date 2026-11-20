@@ -37,7 +37,7 @@ async function open(name: string, groups: Parameters<typeof seedGroup>[1][], pla
   return app;
 }
 const row = (app: Awaited<ReturnType<typeof open>>, group: string, view: string) =>
-  app.container.querySelector<HTMLButtonElement>(`nav[aria-label="Bots"] [data-bot-place='${JSON.stringify([group, view])}']`);
+  app.container.querySelector<HTMLButtonElement>(`nav[aria-label="Assistants"] [data-bot-place='${JSON.stringify([group, view])}']`);
 
 it('labels a bot from its menu, shows the label beside its name, and clears it', async () => {
   const app = await open('bot-menu-label', [botGroup('A')], '/?mode=bot&section=A&bot=A1');
@@ -68,7 +68,7 @@ it('gives a group formed from sessions its bot details in the same change as the
     const sent = mutate.mock.calls.slice(before).map(([, mutation]) => mutation.operation);
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ type: 'batch', operations: [{ type: 'bots.add' }, { type: 'bot.update', viewId: 'B1', details: { label: 'Lead' } }] });
-    const sections = [...app.container.querySelectorAll('nav[aria-label="Bots"] .lab-bot-section-head h2')].map(heading => heading.textContent);
+    const sections = [...app.container.querySelectorAll('nav[aria-label="Assistants"] .lab-bot-section-head h2')].map(heading => heading.textContent);
     expect(sections.slice(0, 2)).toEqual(['A', 'B']);
   } finally { await app.close(); }
 });
@@ -135,7 +135,7 @@ it('puts a bot to sleep: quiet and dimmed in the roster, with Undo, and opening 
     await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ asleep: true }));
     const asleep = () => row(app, 'A', 'A1')!;
     expect(asleep().getAttribute('data-asleep')).toBe('true');
-    expect(asleep().querySelector('.lab-bot-status')?.textContent).toBe('Asleep');
+    expect(asleep().querySelector('.lab-bot-sentence')?.textContent).toBe('Resting. Wakes when you need it');
     expect(new URL(location.href).searchParams.get('bot')).toBeNull();
     expect(app.container.querySelector('.lab-bot-notice')?.textContent).toContain('asleep');
     await act(async () => visibleButton(app.container, 'Undo').click());

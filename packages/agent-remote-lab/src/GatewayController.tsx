@@ -1,4 +1,5 @@
 import { relayLinkView, watchPageResume, type ChannelLink } from '@orchardworks/agent-client';
+import { DeviceLinkContext, type DeviceLink } from './device-link.js';
 import { deviceStore } from '@orchardworks/agent-client/device-store';
 import { controllerPath, readControllerLocation } from '@orchardworks/agent-remote-protocol/model';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -39,6 +40,13 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
   // The page's one connection indicator: this device's link to the Relay, after the usual grace for a quick socket swap.
   const link = relayLinkView({ accessReady: ready, needsSignIn, channel: channelLink, browserOnline });
   const notice = useRecoveryNotice('device-link', link.state !== 'online', !!access);
+  // The indicator sits in the foot of the sidebar on screen; a page without one shows it at the top.
+  const [claims, setClaims] = useState(0);
+  const claim = useMemo(() => (shown: boolean) => {
+    if (!shown) return () => {};
+    setClaims(count => count + 1);
+    return () => setClaims(count => count - 1);
+  }, []);
   useEffect(() => {
     let stopped = false;
     let expiry: ReturnType<typeof setTimeout> | undefined;
@@ -203,13 +211,16 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
     <button type="button" disabled={!ready} onClick={event => { securityTrigger.current = event.currentTarget; setSecurityOpen(true); }}>Security</button>
     <button type="button" onClick={() => void logout()}>Sign out</button>
   </>;
-  if (access) return <WorkspaceReady.Provider value={ready}><RelayLinkReport.Provider value={relayLinkReporter}>
+  const signIn = { href: '/auth/login' + returnPath.slice(1), onClick: rememberTarget };
+  const retryLink = () => { setAttempt(value => value + 1); reopenLink.current?.(); };
+  const deviceLink: DeviceLink = { claim, ...(notice && !securityOpen ? { notice: { state: link.state === 'sign_in' ? 'sign_in' : 'offline', signIn, retry: retryLink } } : {}) };
+  if (access) return <WorkspaceReady.Provider value={ready}><RelayLinkReport.Provider value={relayLinkReporter}><DeviceLinkContext.Provider value={deviceLink}>
     <div className="gateway-private" key={access.basePath} hidden={securityOpen} {...(securityOpen ? { inert: '' } : {})}>{children(new URL(access.basePath, window.location.origin).href, accountAction, ready)}</div>
     {securityOpen ? <SecurityPanel onClose={closeSecurity} onSignedOut={signedOut} /> : null}
-    {notice && !securityOpen ? <div className="gateway-recovery" role="status">
-      {link.state === 'sign_in' ? <>Sign in again to keep sending. <a href={'/auth/login' + returnPath.slice(1)} onClick={rememberTarget}>Sign in</a></> : <>Offline. Messages will be sent when this device is back online. <button type="button" onClick={() => { setAttempt(value => value + 1); reopenLink.current?.(); }}>Retry</button></>}
+    {notice && !securityOpen && !claims ? <div className="gateway-recovery" role="status">
+      {link.state === 'sign_in' ? <>Sign in again to keep sending. <a href={signIn.href} onClick={signIn.onClick}>Sign in</a></> : <>Offline. Messages will be sent when this device is back online. <button type="button" onClick={retryLink}>Retry</button></>}
     </div> : null}
-  </RelayLinkReport.Provider></WorkspaceReady.Provider>;
+  </DeviceLinkContext.Provider></RelayLinkReport.Provider></WorkspaceReady.Provider>;
   if (access === undefined && previousWorkspacePath()) return <WorkspaceShell />;
   return entry(access === undefined ? 'checking' : failed ? 'unavailable' : 'signin');
 }

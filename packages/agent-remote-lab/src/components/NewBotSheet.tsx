@@ -3,11 +3,12 @@ import type { CreateSessionOptions, SessionDirectoryClient } from '../directory-
 import { Sheet } from '@orchardworks/agent-client-web/primitives';
 import { Button } from '../ui/Button.js';
 import { WorkspaceSelect } from './WorkspaceSelect.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 export interface NewBotChoice { id: string; name: string; disabled?: boolean }
 
 /**
- * Bot mode's New bot: where the session runs (Host, provider, workspace), nothing more; model and permissions are set in
+ * Bot mode's New assistant: where the session runs (Host, provider, workspace), nothing more; model and permissions are set in
  * its composer like any conversation's. Starting it creates the session and a group named after it, which then follows
  * the session's title until renamed.
  */
@@ -20,10 +21,11 @@ export function NewBotSheet({ open, onClose, hosts, hostId, onHostChange, provid
   directory?: SessionDirectoryClient; options: CreateSessionOptions; onOptionsChange(options: CreateSessionOptions): void; canBrowse: boolean;
   unavailableReason?: string; starting: boolean; failure?: string; onStart(): void;
 }) {
+  const t = useTranslate();
   const hostField = useId(), providerField = useId();
   const ready = !!providerId && providers.some(provider => provider.id === providerId) && !unavailableReason;
-  return <Sheet open={open} title="New bot" detent="content" onClose={() => { if (!starting) onClose(); }}>
-    <form className="lab-new-bot" aria-label="New bot" onSubmit={event => { event.preventDefault(); if (ready && !starting) onStart(); }}>
+  return <Sheet open={open} title={t('assistants.new')} detent="content" onClose={() => { if (!starting) onClose(); }}>
+    <form className="lab-new-bot" aria-label={t('assistants.new')} onSubmit={event => { event.preventDefault(); if (ready && !starting) onStart(); }}>
       <div className="lab-new-bot-fields">
         {hosts.length > 1 ? <div className="lab-new-bot-field"><label htmlFor={hostField}>Host</label>
           <select id={hostField} aria-label="Host" value={hostId} disabled={starting} onChange={event => onHostChange(event.target.value)}>

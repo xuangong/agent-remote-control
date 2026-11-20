@@ -12,6 +12,7 @@ import { useSessionAttention } from '../hooks/useSessionAttention.js';
 import { useSessionTracking } from '../hooks/useSessionTracking.js';
 import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { compositionSelection } from '../session-composition.js';
 import { SessionDirectoryClient } from '../directory-client.js';
 import { viewKey } from './helpers.js';
@@ -157,8 +158,15 @@ export function useAttentionAndRoster(scope: Pick<AppInputs & WorkbenchShellSlic
   const botRoster = projectBotRoster(windowWorkspace.groups, otherSessions.sessions, { status: () => 'unknown', supportTeam: teamId => supportTeams.has(teamId),
     current: currentBotSession, earlier: earlierBotSessions });
 
+  const t = useTranslate();
+  /** A Host as the Relay last said, named as the Hosts list names it. */
+  const hostFacts = (shared: SharedFeedsSnapshot) => (hostId: string) => {
+    const online = shared.states?.host(hostId)?.online ?? remoteHosts.find(host => host.id === hostId)?.online;
+    const name = remoteHosts.find(host => host.id === hostId)?.name;
+    return online === undefined ? undefined : { online, ...(name ? { name } : {}) };
+  };
   const projectSharedRoster = (shared: SharedFeedsSnapshot) => projectBotRoster(windowWorkspace.groups, otherSessions.sessions, {
-    status: session => sessionActivity(session, tracking.liveObservations, shared.states), supportTeam: teamId => supportTeams.has(teamId),
+    status: session => sessionActivity(session, tracking.liveObservations, shared.states), supportTeam: teamId => supportTeams.has(teamId), host: hostFacts(shared), t,
     current: currentBotSession, earlier: earlierBotSessions, reply: session => shared.states?.reply(session), unread: (session, replyAt) => !!shared.reads?.unread(session, replyAt),
     draft: session => shared.drafts?.draft(session)?.text, waiting: session => (shared.outbox?.entries(session).length ?? 0) > 0 });
 

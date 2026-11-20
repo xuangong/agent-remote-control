@@ -15,6 +15,7 @@ import { moveSessionHost } from './SessionDock.js';
 import { SessionConversation, type SessionConversationProps } from './SessionConversation.js';
 import { hiddenConversationUnchanged } from './conversation-props.js';
 import { ToastActivity } from './Toast.js';
+import { AssistantDetailsHostContext } from './assistant/details-host.js';
 
 interface ConversationPresentation {
   visible: boolean;
@@ -38,6 +39,8 @@ export interface SessionConversationSurfacesProps {
 interface CapturedDescriptor extends SessionSurfaceDescriptor {
   track: ContextType<typeof TrackViewScope>; ask: ContextType<typeof AskViewScope>;
   tpm: ContextType<typeof TpmViewScope>; team: ContextType<typeof TeamViewScope>;
+  /** Where the assistant's details open, in either mode. */
+  details: ContextType<typeof AssistantDetailsHostContext>;
 }
 interface Registration { mode: WorkbenchMode; active: boolean; destination: HTMLElement; descriptor: CapturedDescriptor }
 interface SurfaceEntry {
@@ -181,7 +184,7 @@ const ConversationSurface = memo(function ConversationSurface({ registry, entry,
       <SessionTitleInteractionContext.Provider value={descriptor.titleInteraction}>
         <TrackViewScope.Provider value={descriptor.track}><AskViewScope.Provider value={descriptor.ask}>
           <TpmViewScope.Provider value={descriptor.tpm}><TeamViewScope.Provider value={descriptor.team}>
-            <ConversationGate {...props} />
+            <AssistantDetailsHostContext.Provider value={descriptor.details}><ConversationGate {...props} /></AssistantDetailsHostContext.Provider>
           </TeamViewScope.Provider></TpmViewScope.Provider>
         </AskViewScope.Provider></TrackViewScope.Provider>
       </SessionTitleInteractionContext.Provider>
@@ -194,13 +197,14 @@ export function SessionConversationMount({ mode, descriptor, active }: { mode: W
   const layout = useContext(WindowLayoutContext), bridge = useContext(WindowSessionBridgeContext);
   const presentedViewId = useContext(WindowPresentationContext), titleInteraction = useContext(SessionTitleInteractionContext);
   const track = useContext(TrackViewScope), ask = useContext(AskViewScope), tpm = useContext(TpmViewScope), team = useContext(TeamViewScope);
+  const details = useContext(AssistantDetailsHostContext);
   const destination = useRef<HTMLDivElement>(null), token = useRef(Symbol('conversation destination'));
   const captured: CapturedDescriptor = mode === 'window' ? { ...descriptor,
     layout: descriptor.layout ?? layout, bridge: descriptor.bridge ?? bridge,
     presentedViewId: descriptor.presentedViewId ?? presentedViewId, titleInteraction: descriptor.titleInteraction ?? titleInteraction,
-    track, ask, tpm, team,
+    track, ask, tpm, team, details,
   } : { ...descriptor, layout: undefined, bridge: undefined, presentedViewId: undefined, titleInteraction: undefined,
-    track: undefined, ask: undefined, tpm: undefined, team: undefined,
+    track: undefined, ask: undefined, tpm: undefined, team: undefined, details,
     props: { ...descriptor.props, familyRoot: false },
   };
   useLayoutEffect(() => {

@@ -1,4 +1,5 @@
 import { botViews, hasBotAppearance, windowSessionIdentity, type WindowBotDetails, type WindowGroup, type WindowSessionBinding, type WindowView } from '@orchardworks/agent-remote-protocol';
+import { assistantStatus, type AssistantStatus, type Translate } from '@orchardworks/agent-client';
 import { windowActivity, type SessionActivityStatus } from './session-activity-status.js';
 import { sessionKey, type SessionEntry } from './session-tree.js';
 
@@ -13,6 +14,8 @@ export interface BotRow {
   /** The session that drives the bot now: after a handoff, its successor; otherwise the view's own session. */
   session: BotSessionRef;
   details: WindowBotDetails; role?: BotRole; asks: BotAsk[]; status?: 'Needs you' | 'Working' | 'Failed';
+  /** The session's activity, and what the assistant is doing in one sentence (needs you, working, Host offline, resting…). */
+  activity: SessionActivityStatus; assistant: AssistantStatus;
   /** The bot's latest reply, as its Host reported it, and whether the owner has not seen it yet. */
   reply?: { replyAt: number; preview: string }; unread?: true;
   /** What the owner typed for the bot and has not sent, on any device. */
@@ -39,6 +42,10 @@ export interface BotRosterOptions {
   draft?(session: BotSessionRef): string | undefined;
   /** Whether messages to a session wait in the outbox for its Host. */
   waiting?(session: BotSessionRef): boolean;
+  /** Whether a Host is online and its name, as far as this page knows. */
+  host?(hostId: string): { online: boolean; name?: string } | undefined;
+  /** The words of the reader's locale for the assistants' sentences; English by default. */
+  t?: Translate;
 }
 /** A rank after every group's: groups keep catalog order in Bot mode, but bot details still carry one. */
 export function appendedRank(groups: readonly WindowGroup[]): string {
@@ -111,12 +118,14 @@ export function projectBotRoster(groups: readonly WindowGroup[], directory: read
       const candidates = chain.flatMap(owner => {
         const reply = options.reply?.(owner); return reply ? [{ owner, reply }] : [];
       }).sort((a, b) => b.reply.replyAt - a.reply.replyAt);
-      const latest = candidates[0], reply = latest?.reply, draft = options.draft?.(session);
-      return { groupId: group.window.id, viewId: view.id, binding: view.binding, session, details, status: botActivityLabel(activities[index]),
+      const latest = candidates[0], reply = latest?.reply, draft = options.draft?.(session), waiting = options.waiting?.(session) ?? false;
+      const host = options.host?.(session.hostId), activity = activities[index]!;
+      const assistant = assistantStatus({ activity, ...(host ? { host } : {}), asleep: !!details.asleep, waitingToSend: waiting, ...(reply ? { replyPreview: reply.preview } : {}) }, options.t);
+      return { groupId: group.window.id, viewId: view.id, binding: view.binding, session, details, status: botActivityLabel(activity), activity, assistant,
         ...(botRole(view, options.supportTeam) ? { role: botRole(view, options.supportTeam)! } : {}),
         asks: asks.filter(ask => ask.closeWith === view.id).map(ask => ({ viewId: ask.id, title: ask.binding?.title ?? 'Ask' })),
         ...(reply ? { reply } : {}), ...(latest && options.unread?.(latest.owner, latest.reply.replyAt) ? { unread: true as const } : {}),
-        ...(draft?.trim() ? { draft } : {}), ...(options.waiting?.(session) ? { waiting: true as const } : {}) };
+        ...(draft?.trim() ? { draft } : {}), ...(waiting ? { waiting: true as const } : {}) };
     });
     const hidden = botViews(group).filter(view => members[view.id]?.hidden).map(view => view.id);
     return [{ groupId: group.window.id, title: group.window.title, rows, hidden, status: botActivityLabel(windowActivity(activities)),

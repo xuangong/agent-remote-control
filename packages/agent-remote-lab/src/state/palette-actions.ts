@@ -47,7 +47,7 @@ export function paletteActions(facts: PaletteFacts, runs: PaletteRuns): CommandI
     ({ id: `action:${id}`, kind: 'action', title, run, ...(keys ? { shortcut: keys.shown, keyShortcuts: keys.aria } : {}) });
   const panel = (id: string, title: string, target: SessionPanel) => action(id, title, () => { runs.toWindow(); runs.showPanel(target); });
   return [
-    ...(!facts.windowMode && facts.hasDirectory ? [action('new-bot', 'New bot', runs.newBot)] : []),
+    ...(!facts.windowMode && facts.hasDirectory ? [action('new-bot', 'New assistant', runs.newBot)] : []),
     action('new-session', 'New session', () => { runs.toWindow(); runs.newSessionPanel(); }),
     action('new-window', 'New Window', runs.inWindow(runs.createWindow)),
     ...(facts.windowEditable ? [action('new-session-view', 'New session view', runs.inWindow(runs.addSessionView, true))] : []),

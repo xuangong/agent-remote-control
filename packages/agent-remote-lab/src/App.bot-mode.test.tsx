@@ -31,7 +31,7 @@ it('keeps Window A/A2 and both display settings while Bot B1 shares its exact vi
   await act(async () => app.workspace().open('B'));
   await until(() => expect([...app.container.querySelectorAll<HTMLElement>('.lab-window-mode [role="textbox"]')].some(input => promptText(input) === 'B1 draft')).toBe(true));
   await app.switchMode('bot');
-  expect(app.container.querySelector('[aria-label="Bots"] [aria-current="true"]')?.getAttribute('aria-label')).toBe('B1');
+  expect(app.container.querySelector('[aria-label="Assistants"] [aria-current="true"]')?.getAttribute('aria-label')).toBe('B1');
   expect(promptText(app.container.querySelector<HTMLElement>('.lab-bot-conversation [role="textbox"]')!)).toBe('B1 draft');
   expect(app.workspace().readGroup('B')!.window.views.map(view => view.display)).toEqual(bDisplay);
   await app.close();
@@ -47,7 +47,7 @@ it('restores independent bot selection and mode on reload and ignores corrupt pr
   await act(async () => app.button('A1').click());
   await app.close(); history.replaceState(null, '', '/');
   app = await mountBotApp(scope);
-  await until(() => expect(app.container.querySelector('[aria-label="Bots"] [aria-current="true"]')?.getAttribute('aria-label')).toBe('A1'));
+  await until(() => expect(app.container.querySelector('[aria-label="Assistants"] [aria-current="true"]')?.getAttribute('aria-label')).toBe('A1'));
   expect(app.button('Bot mode').getAttribute('aria-pressed')).toBe('true');
   await app.close(); localStorage.setItem('agent-remote:workbench-mode', 'broken'); history.replaceState(null, '', '/');
   app = await mountBotApp(scope);
@@ -71,7 +71,7 @@ it('opens section-only routes without restoring stale session query parameters',
   const scope = 'http://localhost/bot-section/'; const group = botGroup('B'); group.presentation = { window: false };
   seedGroup(scope, group); history.replaceState(null, '', '/?mode=bot&section=B&session=stale&provider=recorded&host=local');
   const app = await mountBotApp(scope);
-  await until(() => expect(app.container.querySelector('[aria-label="Bots"]')).not.toBeNull());
+  await until(() => expect(app.container.querySelector('[aria-label="Assistants"]')).not.toBeNull());
   expect(app.attachments).not.toContain('stale');
   expect(app.container.querySelector('[data-window-id="B"]')).toBeNull();
   await app.close();
@@ -271,7 +271,7 @@ it('shows Windows, In this Window and Shortcuts in the desktop sidebar, and sess
   } finally { await app.close(); }
 });
 
-it('moves the floating entries into the sidebar while it is visible', async () => {
+it('moves the entries into the sidebar while it is visible, and into the Window toolbar while it is hidden', async () => {
   const scope = 'http://localhost/window-shortcuts/'; seedGroup(scope, botGroup('A'));
   // Team shows by default; TPM (coarse pointers only) and Ask are turned on here so every entry the fixture can show is covered.
   localStorage.setItem('agent-remote:tpm-view', 'true'); localStorage.setItem('agent-remote:ask-view', 'true');
@@ -286,11 +286,15 @@ it('moves the floating entries into the sidebar while it is visible', async () =
     expect(app.container.querySelector('.lab-window-floating:not([data-hidden])')).toBeNull();
     const apple = /Mac|iPhone|iPad/.test(navigator.platform);
     await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', code: 'Backslash', metaKey: apple, ctrlKey: !apple, bubbles: true, cancelable: true })); });
-    expect(app.container.querySelector('.lab-window-floating:not([data-hidden])')).not.toBeNull();
+    // A row of the Window's toolbar holds them: tiles that fill the width leave no margin to float in.
+    const toolbar = () => app.container.querySelector('.lab-window-toolbar .lab-toolbar-launchers')!;
+    expect(toolbar().querySelector('.lab-launcher-window:not([data-hidden])')).not.toBeNull();
+    expect(app.container.querySelector('.lab-tracking-floating')).toBeNull();
     for (const label of triggers) {
       const trigger = app.container.querySelector(`button[aria-label="${label}"]`);
       expect(trigger, label).not.toBeNull();
       expect(trigger!.closest('#lab-context'), label).toBeNull();
+      expect(trigger!.closest('.lab-toolbar-launchers'), label).toBe(toolbar());
     }
   } finally { await app.close(); }
 });
@@ -310,10 +314,10 @@ it('keeps the Team entry mounted, with its panel open, when the sidebar is hidde
     expect(trigger.getAttribute('aria-expanded')).toBe('true');
     await backslash();
     expect(context().hidden).toBe(true);
-    // The same element floats now: a remount would drop the open panel (and a pending Team creation with it).
+    // The same element moves to the Window's toolbar: a remount would drop the open panel (and a pending Team creation with it).
     expect(app.container.querySelector('button[aria-label="Teams"]')).toBe(trigger);
     expect(trigger.closest('#lab-context')).toBeNull();
-    expect(trigger.closest('.lab-team-floating')).not.toBeNull();
+    expect(trigger.closest('.lab-toolbar-launchers .lab-launcher-team')).not.toBeNull();
     expect(trigger.getAttribute('aria-expanded')).toBe('true');
     // The moved control keeps the focus it had.
     expect(document.activeElement).toBe(trigger);

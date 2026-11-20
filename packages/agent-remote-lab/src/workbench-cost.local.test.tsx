@@ -25,7 +25,7 @@ it('measures shared states frames and bot switches in a large workbench', { time
   const renders = vi.spyOn(conversation, 'SessionConversation');
   const app = await mountBotApp(scope, { hosted: true });
   await app.switchMode('bot');
-  await until(() => expect(app.container.querySelectorAll('nav[aria-label="Bots"] .lab-bot-row').length).toBeGreaterThanOrEqual(120));
+  await until(() => expect(app.container.querySelectorAll('nav[aria-label="Assistants"] .lab-bot-row').length).toBeGreaterThanOrEqual(120));
   await act(async () => app.button('G0s0').click());
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 300)); });
   const session = (id: string) => ({ hostId: 'local', providerId: 'recorded', nativeSessionId: id });

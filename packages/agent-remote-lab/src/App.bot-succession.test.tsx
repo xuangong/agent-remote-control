@@ -180,7 +180,7 @@ it('projects a verified B to C onto the same view and draft owners while hidden 
   expect(app.workspace().window).toEqual(beforeWindow);
   expect(app.succession().document.slots.find(slot => slot.id === slotId)!.owners).toEqual(owners);
   expect(app.workspace().readGroup('B')!.window.views[0]!.display).toEqual(display);
-  expect(app.container.querySelector('[aria-label="Bots"] [aria-current="true"]')?.getAttribute('data-bot-place')).toBe('["B","B1"]');
+  expect(app.container.querySelector('[aria-label="Assistants"] [aria-current="true"]')?.getAttribute('data-bot-place')).toBe('["B","B1"]');
   expect(() => operations.resolveTarget(botTarget('B1'), { viewId: slotId })).toThrow();
   await act(async () => app.releaseMessages());
   await until(() => expect(app.attachments).toContain('C'));

@@ -16,21 +16,20 @@ it('follows bots through the shared channel without a stream each and reminds of
   const notices: Array<{ title: string; options: NotificationOptions }> = [];
   vi.stubGlobal('Notification', class { static permission = 'granted'; close() {} constructor(readonly title: string, readonly options: NotificationOptions) { notices.push(this); } });
   const app = await mountBotApp(scope, { hosted: true });
-  // A working bot shows typing dots in place of the word; screen readers still hear it.
-  const status = (name: string) => { const row = [...app.container.querySelectorAll<HTMLElement>('[aria-label="Bots"] .lab-bot-row')]
-    .find(item => item.querySelector('.lab-bot-name')?.textContent === name);
-    return row?.querySelector('.lab-bot-typing') ? 'Working' : row?.querySelector('.lab-bot-status')?.textContent ?? ''; };
+  // Each row says its bot's state in one sentence; screen readers hear it too.
+  const status = (name: string) => [...app.container.querySelectorAll<HTMLElement>('[aria-label="Assistants"] .lab-bot-row')]
+    .find(item => item.querySelector('.lab-bot-name')?.textContent === name)?.querySelector('.lab-bot-sentence')?.getAttribute('data-state') ?? '';
   try {
     await until(() => expect(app.workspace().window?.id).toBe('A'));
     await app.switchMode('bot');
     await act(async () => app.button('A1').click());
     await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
     await act(async () => app.emitStates({ snapshot: true, hosts: [host], states: [state('A1', 'running'), state('A2', 'running')] }));
-    await until(() => expect(status('A2')).toBe('Working'));
+    await until(() => expect(status('A2')).toBe('working'));
     // No bot is followed through a stream of its own.
     expect(app.activityListeners.size).toBe(0);
     await act(async () => app.emitStates({ states: [state('A1', 'idle', { replyAt: 5, preview: 'Done.' }), state('A2', 'waiting')] }));
-    await until(() => expect(status('A2')).toBe('Needs you'));
+    await until(() => expect(status('A2')).toBe('needs_you'));
     // A1 is on screen: no reminder for it.
     await until(() => expect(notices.map(notice => [notice.title, notice.options.body])).toEqual([['Session needs your input', 'A2']]));
     await act(async () => app.emitStates({ states: [state('A2', 'running')] }));
@@ -43,7 +42,7 @@ it("shows each bot's latest reply and time, a dot while it is unread, and marks 
   const scope = 'http://localhost/u/bot-unread/';
   seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?window=A');
   const app = await mountBotApp(scope, { hosted: true });
-  const row = (name: string) => [...app.container.querySelectorAll<HTMLElement>('[aria-label="Bots"] .lab-bot-row')]
+  const row = (name: string) => [...app.container.querySelectorAll<HTMLElement>('[aria-label="Assistants"] .lab-bot-row')]
     .find(item => item.querySelector('.lab-bot-name')?.textContent === name);
   try {
     await until(() => expect(app.workspace().window?.id).toBe('A'));
@@ -53,7 +52,7 @@ it("shows each bot's latest reply and time, a dot while it is unread, and marks 
       app.emitReads({ snapshot: true, since: today.getTime() - 60_000, reads: [] });
       app.emitStates({ snapshot: true, hosts: [host], states: [state('A1', 'idle', { replyAt: today.getTime(), preview: 'Release notes are ready.' }), state('A2', 'idle', { replyAt: today.getTime() - 120_000, preview: 'Old news.' })] });
     });
-    await until(() => expect(row('A1')?.querySelector('.lab-bot-preview')?.textContent).toBe('Release notes are ready.'));
+    await until(() => expect(row('A1')?.querySelector('.lab-bot-sentence')?.textContent).toBe('Release notes are ready.'));
     expect(row('A1')!.querySelector('.lab-bot-time')!.textContent).toBe(today.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }));
     // A1 replied after positions started and was never read: a dot, never a number. A2's reply came before.
     expect(row('A1')!.dataset.unread).toBe('true');
@@ -74,12 +73,12 @@ it("shows each bot's latest reply and time, a dot while it is unread, and marks 
   } finally { await app.close(); }
 });
 
-it('shows the live line while a bot works, in its conversation, and dots in its row', async () => {
+it('shows the live line while a bot works, in its conversation, and says it in its row and its top bar', async () => {
   const scope = 'http://localhost/u/bot-typing/';
   seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?window=A');
   const app = await mountBotApp(scope, { hosted: true });
   const typing = () => app.container.querySelector('.lab-bot-conversation .agent-turn-status [role="status"]');
-  const row = (name: string) => [...app.container.querySelectorAll<HTMLElement>('[aria-label="Bots"] .lab-bot-row')].find(item => item.querySelector('.lab-bot-name')?.textContent === name);
+  const row = (name: string) => [...app.container.querySelectorAll<HTMLElement>('[aria-label="Assistants"] .lab-bot-row')].find(item => item.querySelector('.lab-bot-name')?.textContent === name);
   try {
     await until(() => expect(app.workspace().window?.id).toBe('A'));
     await app.switchMode('bot');
@@ -95,10 +94,12 @@ it('shows the live line while a bot works, in its conversation, and dots in its 
     await until(() => expect(typing()).not.toBeNull());
     await act(async () => app.emitStatus('agent-A1', 'idle'));
     await until(() => expect(typing()).toBeNull());
-    // A working bot's row shows the dots in place of the word.
-    await act(async () => app.emitStates({ snapshot: true, hosts: [host], states: [state('A2', 'running', { replyAt: 1, preview: 'Looking.' })] }));
-    await until(() => expect(row('A2')?.querySelector('.lab-bot-typing')).not.toBeNull());
-    expect(row('A2')!.querySelector('.lab-bot-status')).toBeNull();
-    expect(row('A2')!.getAttribute('aria-description')).toContain('Working');
+    // A working bot's row says so in its sentence, and its avatar works; the top bar says the same sentence as the row.
+    await act(async () => app.emitStates({ snapshot: true, hosts: [host], states: [state('A1', 'waiting'), state('A2', 'running', { replyAt: 1, preview: 'Looking.' })] }));
+    await until(() => expect(row('A2')?.querySelector('.lab-bot-sentence')?.textContent).toBe('Working on it'));
+    expect(row('A2')!.querySelector<HTMLElement>('.orchard-avatar')?.dataset.mood).toBe('working');
+    expect(row('A2')!.getAttribute('aria-description')).toContain('Working on it');
+    await until(() => expect(app.container.querySelector('.lab-assistant-top-bar .lab-assistant-sentence')?.textContent).toBe(row('A1')!.querySelector('.lab-bot-sentence')!.textContent));
+    expect(app.container.querySelector('.lab-assistant-top-bar .lab-assistant-sentence')?.textContent).toBe('Wants to ask you something');
   } finally { await app.close(); }
 });

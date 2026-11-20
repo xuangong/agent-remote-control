@@ -56,7 +56,7 @@ test('soak: bot switches, sends, mode switches and a Host leaving and coming bac
     }
     await page.goto(`${fixture.origin}/?mode=bot`);
     const bot = page.locator('[data-workbench-mode="bot"]');
-    const row = (name: string) => bot.getByRole('navigation', { name: 'Bots', exact: true }).getByRole('button', { name, exact: true });
+    const row = (name: string) => bot.getByRole('navigation', { name: 'Assistants', exact: true }).getByRole('button', { name, exact: true });
     await expect(row(names[0]!)).toBeVisible({ timeout: 30_000 });
     const cdp = await context.newCDPSession(page);
     await cdp.send('Performance.enable');

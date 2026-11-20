@@ -12,7 +12,7 @@ const laptop = { name: 'Laptop', providers: [{ providerId: 'claude', displayName
 // Two Controllers, two devices and a Handoff take longer than one page.
 test.describe.configure({ timeout: 120_000 });
 type Fixture = Awaited<ReturnType<typeof crossHostFixture>>;
-const bots = (page: Page) => page.locator('[data-workbench-mode="bot"]').getByRole('navigation', { name: 'Bots', exact: true });
+const bots = (page: Page) => page.locator('[data-workbench-mode="bot"]').getByRole('navigation', { name: 'Assistants', exact: true });
 const conversation = (page: Page) => page.locator('[data-workbench-mode="bot"]').getByRole('region', { name: 'Bot conversation', exact: true });
 const composer = (page: Page) => page.locator('[data-workbench-mode="bot"]').getByTestId('prompt-input').locator('visible=true');
 const row = (page: Page, name: string) => bots(page).getByRole('button', { name, exact: true });
@@ -33,7 +33,7 @@ async function openBots(page: Page, fixture: Fixture) {
 }
 /** A phone shows the list or a chat: back to the list, where the rows are. */
 async function showList(page: Page) {
-  const back = page.locator('[data-workbench-mode="bot"]').getByRole('button', { name: 'Back to bots', exact: true });
+  const back = page.locator('[data-workbench-mode="bot"]').getByRole('button', { name: 'Back to assistants', exact: true });
   // A page that is still loading shows neither yet.
   await expect.poll(async () => await back.isVisible() || await bots(page).isVisible(), { timeout: 20_000 }).toBe(true);
   if (await back.isVisible()) await back.click();
@@ -59,7 +59,7 @@ async function info(page: Page): Promise<string> {
 }
 const replies = (page: Page) => conversation(page).locator('.agent-message-assistant');
 async function expectReply(page: Page, text: string) { await expect(replies(page).filter({ hasText: text })).toHaveCount(1, { timeout: 20_000 }); }
-const preview = (page: Page, name: string): Locator => row(page, name).locator('.lab-bot-preview');
+const preview = (page: Page, name: string): Locator => row(page, name).locator('.lab-bot-sentence');
 
 let fixture: Fixture;
 test.beforeEach(async () => { fixture = await crossHostFixture([studio, laptop]); });

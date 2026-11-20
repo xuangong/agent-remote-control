@@ -90,7 +90,7 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
     if (!root || root.hidden || root.contains(document.activeElement)) return;
     const shown = (element: HTMLElement) => !element.closest('[hidden], [inert]');
     const target = [...root.querySelectorAll<HTMLElement>('button[aria-label="Search"]')].find(shown)
-      ?? [...root.querySelectorAll<HTMLElement>('.ui-toolbar-title[tabindex="-1"], #lab-workbench')].find(shown);
+      ?? [...root.querySelectorAll<HTMLElement>('button.lab-assistant-title, .ui-toolbar-title[tabindex="-1"], #lab-workbench')].find(shown);
     target?.focus({ preventScroll: true });
   }
 

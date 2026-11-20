@@ -1,10 +1,11 @@
 // The assistant's conversation on builder states (I3 plan, Task A8): a turn of every item kind, a running turn, every pending
 // interaction, outgoing messages, older history and an earlier session in the chain, inside the Lab's workbench.
+// ?layout=bot shows it in Bot mode's three panels with two more assistants (I3 plan, Task B2).
 // ?mode=concise|process|full sets this device's process mode; ?theme=light|dark|system the appearance; ?width=phone narrows the
 // page; ?status=connecting makes requests wait for the connection; ?respond=none leaves them unanswerable; ?pending=none answers
 // every request, so the last turn runs with its live line; ?older=1 leaves older pages of this session to load. The words follow
 // the browser's language.
-import { useState } from 'react';
+import { useState, type ComponentProps } from 'react';
 import { createRoot } from 'react-dom/client';
 import { PROTOCOL_VERSION, type AgentInteractionRequest } from '@orchardworks/agent-remote-protocol';
 import { createReplicaState, type AgentReplicaState, type RemoteSessionStatus } from '@orchardworks/agent-client';
@@ -17,6 +18,7 @@ import { EarlierConversation, type EarlierTransport } from '../../src/components
 import { ReplicaInspector } from '../../src/components/ReplicaInspector.js';
 import { ToastProvider } from '../../src/components/Toast.js';
 import '../../src/session-view-styles';
+import { BotFixture } from './assistant-layouts.js';
 
 const params = new URLSearchParams(location.search);
 const appearance = bindAppearance(document, localStorage);
@@ -56,12 +58,23 @@ const earlierDirectory = () => ({ attach: async (_providerId: string, nativeSess
   return { agentId: `agent-${nativeSessionId}` };
 } });
 
-function Fixture() {
+function Conversation() {
   const [selected, setSelected] = useState<ReadonlySet<string>>();
   const [inspected, setInspected] = useState<string>();
   const respond = params.get('respond') === 'none' ? undefined : () => new Promise<void>(() => {});
   return <ToastProvider><div className="lab-shell fixture-assistant" style={{ display: 'block', height: '100dvh' }}>
-    <LabWorkbench state={state} sessionStatus={status} draftSessionKey="every-kind"
+    <EveryKindWorkbench selected={selected} setSelected={setSelected} respond={respond} setInspected={setInspected} />
+    <details className="fixture-inspector"><summary>Replica Inspector</summary>
+      <p data-testid="inspected">{inspected ?? ''}</p>
+      <ReplicaInspector state={state} sessionStatus={status} providerName="Claude Code" />
+    </details>
+  </div></ToastProvider>;
+}
+
+/** Chief's conversation: every kind of entry, as the Lab's workbench shows it. */
+export function EveryKindWorkbench({ selected, setSelected, respond, setInspected, ...props }: { selected?: ReadonlySet<string>; setSelected(keys: ReadonlySet<string>): void;
+  respond?: () => Promise<void>; setInspected(key: string): void } & Partial<ComponentProps<typeof LabWorkbench>>) {
+  return <LabWorkbench state={state} sessionStatus={status} draftSessionKey="every-kind"
       assistant={{ name: 'Chief', avatar: <AssistantAvatar id="chief" picture={{ shape: 'triangle', color: '#ff8a3d', gaze: 1 }} size={26} mood="working" /> }}
       onInspectEntry={key => setInspected(key)}
       entrySelection={{ selected, label: 'Quote', select(keys, value) { const next = new Set(selected); for (const key of keys) if (value) next.add(key); else next.delete(key); setSelected(next); } }}
@@ -72,12 +85,14 @@ function Fixture() {
         ...(respond ? { respondToInteraction: respond } : {}),
         sendMessage: async () => {}, retryMessage: async () => {}, deleteMessage: () => {}, editPrompt: async () => {}, cancel: async () => {},
         loadOlder: async () => { await new Promise(resolve => setTimeout(resolve, 300)); throw new Error('Earlier activity could not be loaded.'); },
-      }} />
-    <details className="fixture-inspector"><summary>Replica Inspector</summary>
-      <p data-testid="inspected">{inspected ?? ''}</p>
-      <ReplicaInspector state={state} sessionStatus={status} providerName="Claude Code" />
-    </details>
-  </div></ToastProvider>;
+      }} {...props} />;
+}
+
+function Fixture() {
+  const [selected, setSelected] = useState<ReadonlySet<string>>();
+  const respond = params.get('respond') === 'none' ? undefined : () => new Promise<void>(() => {});
+  if (params.get('layout') === 'bot') return <ToastProvider><BotFixture conversation={extra => <EveryKindWorkbench selected={selected} setSelected={setSelected} respond={respond} setInspected={() => {}} {...extra} />} /></ToastProvider>;
+  return <Conversation />;
 }
 
 createRoot(document.getElementById('root')!).render(<LocaleContext.Provider value={locale}><MotionProvider><Fixture /></MotionProvider></LocaleContext.Provider>);

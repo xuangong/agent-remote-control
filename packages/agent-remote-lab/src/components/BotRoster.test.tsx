@@ -11,7 +11,7 @@ it('renders accessible metadata and fallback Host identity without hidden member
   const model = projectBotRoster([group], [{ ...botTarget('Other'), hostId: 'host-a' }, { ...botTarget('Other'), hostId: 'host-b' }], { status: () => 'offline' });
   let selected: BotPlace | undefined;
   const container = await render(<BotRoster model={model} place={{ kind: 'bot', groupId: 'A', viewId: 'A1' }} onSelect={place => { selected = place; }} directoryControls={<button>Refresh</button>} />);
-  expect(container.querySelector('nav[aria-label="Bots"]')).not.toBeNull();
+  expect(container.querySelector('nav[aria-label="Assistants"]')).not.toBeNull();
   expect(container.textContent).toContain('Reviewer'); expect(container.textContent).not.toContain('A2');
   expect(container.textContent).not.toMatch(/Failed|New result/);
   expect(container.textContent).toContain('host-a'); expect(container.textContent).toContain('host-b');
@@ -22,7 +22,7 @@ it('renders accessible metadata and fallback Host identity without hidden member
   expect([...container.querySelectorAll('h2,h3')].at(-1)?.textContent).toBe('Other sessions');
 });
 
-it('shows a bot like a teammate: name, role and label as tags, status, Asks under it, and Host details only in its tooltip', async () => {
+it('shows a bot like a teammate: name, role and label as tags, its sentence, Asks under it, and Host details only in its tooltip', async () => {
   const group = botGroup('A');
   group.window.views[0] = { ...group.window.views[0]!, feature: { kind: 'tpm', id: 'work', metadata: { hostId: 'local' } }, bindingPolicy: 'managed' };
   group.window.views.push({ id: 'ask', binding: { ...botTarget('asked'), title: 'Why the delay?' }, closeWith: 'A1', feature: { kind: 'ask', id: 'ask-1' }, bindingPolicy: 'managed',
@@ -35,11 +35,11 @@ it('shows a bot like a teammate: name, role and label as tags, status, Asks unde
   expect(row.querySelector('.lab-bot-name')?.textContent).toBe('A1');
   expect(row.querySelector('.lab-bot-role')?.textContent).toBe('TPM');
   expect(row.querySelector('.lab-bot-label')?.textContent).toBe('Release');
-  expect(row.querySelector('.lab-bot-status')?.textContent).toBe('Needs you');
-  expect(row.querySelector('.lab-bot-status')?.getAttribute('data-attention')).toBe('true');
+  expect(row.querySelector('.lab-bot-sentence')?.textContent).toBe('Wants to ask you something');
+  expect(row.querySelector('.lab-bot-sentence')?.getAttribute('data-state')).toBe('needs_you');
   expect(row.textContent).not.toContain('recorded');
   expect(row.title).toBe('Lab server · recorded');
-  expect(row.getAttribute('aria-description')).toBe('TPM · Release · Needs you');
+  expect(row.getAttribute('aria-description')).toBe('TPM · Release · Wants to ask you something');
   const asks = container.querySelector('[data-bot-asks="A1"]')!;
   expect(asks.textContent).toBe('Why the delay?');
   await act(async () => asks.querySelector('button')!.click());
@@ -50,14 +50,14 @@ it('keeps Other sessions folded with their Refresh controls inside, and names an
   const empty = botGroup('E'); empty.window.views = []; empty.window.selectedPrimaryViewId = null; empty.window.selectedViewId = null;
   const model = projectBotRoster([empty], [botTarget('loose')], { status: () => 'idle' });
   const container = await render(<BotRoster model={model} onSelect={() => {}} directoryControls={<button type="button">Refresh</button>} />);
-  expect(container.textContent).toContain('No bots in this group yet.');
+  expect(container.textContent).toContain('No assistants in this group yet.');
   const other = container.querySelector<HTMLDetailsElement>('details.lab-bot-other')!;
   expect(other.open).toBe(false);
   expect(other.querySelector('summary')?.textContent).toBe('Other sessions');
   expect(other.textContent).toContain('Refresh');
 });
 
-it("shows a bot's unsent draft where its latest reply would be, except for the bot on screen", async () => {
+it("shows a bot's unsent draft where its latest reply would be, except for the bot on screen, and after a sentence that asks for something", async () => {
   const group = botGroup('A');
   const model = projectBotRoster([group], [], { status: binding => binding.nativeSessionId === 'A2' ? 'waiting' : 'idle',
     reply: () => ({ replyAt: Date.now(), preview: 'Release notes are ready.' }), draft: binding => `Draft of ${binding.nativeSessionId}\nsecond line` });
@@ -65,14 +65,17 @@ it("shows a bot's unsent draft where its latest reply would be, except for the b
   // The bot on screen shows its reply: its draft is right below, in its composer.
   const current = visibleButton(container, 'A1');
   expect(current.querySelector('.lab-bot-draft')).toBeNull();
-  expect(current.querySelector('.lab-bot-preview')?.textContent).toBe('Release notes are ready.');
-  // Another bot shows its draft in place of the reply, after a status that asks for something.
+  expect(current.querySelector('.lab-bot-sentence')?.textContent).toBe('Release notes are ready.');
+  // Another bot shows its draft after a sentence that asks for something, and in place of a quiet one.
   const other = visibleButton(container, 'A2');
-  expect(other.querySelector('.lab-bot-status')?.textContent).toBe('Needs you');
+  expect(other.querySelector('.lab-bot-sentence')?.textContent).toBe('Wants to ask you something');
   expect(other.querySelector('.lab-bot-draft-label')?.textContent).toBe('Draft');
   expect(other.querySelector('.lab-bot-draft')?.textContent).toBe('DraftDraft of A2 second line');
-  expect(other.querySelector('.lab-bot-preview:not(.lab-bot-draft)')).toBeNull();
   expect(other.getAttribute('aria-description')).toContain('Draft: Draft of A2 second line');
+  const quiet = projectBotRoster([group], [], { status: () => 'idle', reply: () => ({ replyAt: Date.now(), preview: 'Release notes are ready.' }), draft: () => 'Ship it' });
+  const quietRow = visibleButton(await render(<BotRoster model={quiet} onSelect={() => {}} directoryControls={null} />), 'A2');
+  expect(quietRow.querySelector('.lab-bot-sentence')).toBeNull();
+  expect(quietRow.querySelector('.lab-bot-draft')?.textContent).toBe('DraftShip it');
 });
 
 it('says a bot has messages waiting to send when nothing more urgent shows', async () => {
@@ -80,10 +83,10 @@ it('says a bot has messages waiting to send when nothing more urgent shows', asy
   const model = projectBotRoster([group], [], { status: binding => binding.nativeSessionId === 'A2' ? 'waiting' : 'idle', waiting: () => true });
   const container = await render(<BotRoster model={model} onSelect={() => {}} directoryControls={null} />);
   const quiet = visibleButton(container, 'A1'), urgent = visibleButton(container, 'A2');
-  expect(quiet.querySelector('.lab-bot-status')?.textContent).toBe('Waiting to send');
-  expect(quiet.querySelector('.lab-bot-status')?.getAttribute('data-outbox')).toBe('true');
-  expect(quiet.getAttribute('aria-description')).toContain('Waiting to send');
-  expect(urgent.querySelector('.lab-bot-status')?.textContent).toBe('Needs you');
+  expect(quiet.querySelector('.lab-bot-sentence')?.textContent).toBe('Will send when it is ready');
+  expect(quiet.querySelector('.lab-bot-sentence')?.getAttribute('data-state')).toBe('waiting_to_send');
+  expect(quiet.getAttribute('aria-description')).toContain('Will send when it is ready');
+  expect(urgent.querySelector('.lab-bot-sentence')?.textContent).toBe('Wants to ask you something');
 });
 
 it("offers a bot's own actions as a context menu on its row, at the pointer or from the keyboard, on desktop only", async () => {
@@ -138,4 +141,27 @@ it('draws each bot\'s avatar from its view id, lets a stored picture win and sho
   expect([avatar('A1').dataset.mood, avatar('A2').dataset.mood]).toEqual(['needs_you', 'working']);
   expect(avatar('A3').dataset.mood).toBe('resting');
   expect(fill('A3')).toBe('var(--orchard-avatar-resting)');
+});
+
+it("says each assistant's state in one sentence with its avatar's mood, the unread dot and the reply time, in the reader's language", async () => {
+  const group = botGroup('A');
+  group.window.views.push({ ...group.window.views[0]!, id: 'A3', binding: botTarget('A3') });
+  group.bots!.members = { A3: { asleep: true } };
+  const replyAt = Date.now() - 60_000;
+  const model = (t?: Parameters<typeof projectBotRoster>[2]['t']) => projectBotRoster([group], [], {
+    status: binding => binding.nativeSessionId === 'A1' ? 'running' : 'idle', host: () => ({ online: true, name: 'Mac mini' }),
+    reply: binding => binding.nativeSessionId === 'A2' ? { replyAt, preview: 'Done reading, I have 3 thoughts' } : undefined, unread: () => true, ...(t ? { t } : {}) });
+  const container = await render(<BotRoster model={model()} onSelect={() => {}} directoryControls={null} />);
+  const row = (name: string) => visibleButton(container, name);
+  expect([row('A1'), row('A2'), row('A3')].map(item => [item.querySelector('.lab-bot-sentence')?.textContent, item.querySelector<HTMLElement>('.orchard-avatar')?.dataset.mood]))
+    .toEqual([['Working on it', 'working'], ['Done reading, I have 3 thoughts', 'idle'], ['Resting. Wakes when you need it', 'resting']]);
+  expect(row('A2').querySelector('.lab-bot-unread')).not.toBeNull();
+  expect(row('A2').getAttribute('data-unread')).toBe('true');
+  expect(row('A2').querySelector('.lab-bot-time')?.textContent).toBeTruthy();
+  expect(row('A2').getAttribute('aria-description')).toMatch(/^Done reading, I have 3 thoughts · Unread · /);
+  // The sentences of a Chinese reader are the design's voice.
+  const { translator } = await import('@orchardworks/agent-client');
+  const chinese = await render(<BotRoster model={model(translator('zh'))} onSelect={() => {}} directoryControls={null} />);
+  expect(visibleButton(chinese, 'A1').querySelector('.lab-bot-sentence')?.textContent).toBe('在忙，稍等～');
+  expect(visibleButton(chinese, 'A3').querySelector('.lab-bot-sentence')?.textContent).toBe('在休息，需要时自动醒来');
 });

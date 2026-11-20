@@ -6,7 +6,7 @@ import { botActivityLabel, botRole } from '../bot-roster.js';
 import { SessionOutboxMessages } from '../components/OutboxMessages.js';
 import { BotPicture, botDisplayName } from '../components/BotRoster.js';
 import { sessionActivity } from '../session-activity-status.js';
-import type { SessionAttribution, AgentReplicaState } from '@orchardworks/agent-client';
+import { assistantName, type SessionAttribution, type AgentReplicaState } from '@orchardworks/agent-client';
 import { labSessionSuccessionDirectory } from '../session-succession-directory.js';
 import type { FamilySessionPresentationContext } from '../components/SessionFamily.js';
 import { SessionSuccessionHistory } from '../components/SessionSuccessionHistory.js';
@@ -129,7 +129,12 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
     const botDetails = botGroupId && botViewId ? windowWorkspace.readGroup(botGroupId)?.bots?.members[botViewId] : undefined;
     // Who answers: the bot's or the session's name, and its avatar, which works while it does. The avatar is the one the
     // roster draws for the same Window view: its stored picture, or the picture of its view id.
-    const assistant = { name: source.title || source.nativeSessionId,
+    // Who answers is called by a name, never by the session's title: a bot by its own name, a plain session by its agent,
+    // numbered among the plain sessions of the Window it shows in.
+    const providerName = (providerId: string, hostId = source.hostId) => remoteHosts.find(item => item.id === hostId)?.providers?.find(provider => provider.providerId === providerId)?.displayName;
+    const botBinding = botGroupId && botViewId ? windowWorkspace.readGroup(botGroupId)?.window.views.find(item => item.id === botViewId)?.binding : undefined;
+    const together = !botPresentation && sharedWindow ? sharedWindow.views.filter(isBotView).map(item => ({ key: item.id, providerId: item.binding.providerId, providerName: providerName(item.binding.providerId, item.binding.hostId) })) : [];
+    const assistant = { name: botBinding ? botDisplayName(botBinding) : assistantName({ key: view?.id ?? source.viewId, providerId: source.providerId, providerName: providerName(source.providerId) }, together),
       avatar: <BotPicture id={botViewId ?? view?.id ?? source.viewId} picture={botDetails?.picture} size={26} mood={botWorking(context.state) ? 'working' : 'idle'} /> };
     const processAssistant = botGroupId && botViewId ? {
       details: botDetails,
@@ -138,7 +143,8 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
     return {
       assistant,
       processAssistant,
-      headingMode: compactLayout ? 'toolbar' as const : 'inline' as const,
+      // Bot mode's top bar is the conversation's heading; a Window tile keeps its own.
+      headingMode: botPresentation ? 'assistant' as const : compactLayout ? 'toolbar' as const : 'inline' as const,
       state: botPresentation ? context.state : forkDisplayState(context.state, fork),
       questionDrafts: questionDrafts[source.agentId] ?? {},
       onQuestionDraftChange: (requestId: string, draft: QuestionDraft) => setQuestionDrafts(current => ({

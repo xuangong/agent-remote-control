@@ -8,6 +8,7 @@ import { sessionKey } from '../session-tree.js';
 import { Icon } from '../ui/Icon.js';
 import { Menu, MenuPanel, type MenuEntry } from '../ui/Menu.js';
 import { replyTime } from '../reply-time.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 /** The name a bot is known by. A label or role never replaces it. */
 export function botDisplayName(binding: WindowSessionBinding): string {
@@ -28,42 +29,41 @@ export function botPlaceKey(place: BotPlace): string {
 function BotMember({ row, current, compact, hostName, onSelect, onContextMenu }: { row: BotRow; current: boolean; compact: boolean; hostName(hostId: string): string; onSelect(place: BotPlace): void;
   /** Opens the bot's own actions at a pointer, or at the row from the keyboard. */
   onContextMenu?(row: HTMLElement, point?: { x: number; y: number }): void }) {
+  const t = useTranslate();
   const name = botDisplayName(row.binding), destination: BotPlace = { kind: 'bot', groupId: row.groupId, viewId: row.viewId };
-  // The role and label are tags beside the name, like a job title; screen readers hear them after the name.
-  // A sleeping bot is quiet: it says Asleep, unless it waits for the owner, which it still says (dimmed with the row).
-  // Messages that wait for the bot's Host show when nothing more urgent does.
-  const status = row.details.asleep && row.status !== 'Needs you' ? 'Asleep' : row.status ?? (row.waiting ? 'Waiting to send' : undefined);
   const time = row.reply ? replyTime(row.reply.replyAt) : undefined;
   // Like a chat list, an unsent draft shows where the latest reply would; the bot on screen has it in its composer.
   const draft = !current && row.draft ? row.draft.replace(/\s+/g, ' ').trim() : undefined;
-  const description = [row.role, row.details.label, status, row.unread ? 'Unread' : undefined, draft ? `Draft: ${draft}` : row.reply?.preview, time].filter(Boolean).join(' · ');
+  // The sentence says what the assistant is doing; a draft takes the place of a quiet one (its latest reply, or ready).
+  const quiet = row.assistant.state === 'idle' || row.assistant.state === 'unknown';
+  const sentence = draft && quiet ? undefined : row.assistant.sentence || undefined;
+  // The role and label are tags beside the name, like a job title; screen readers hear them after the name.
+  const description = [row.role, row.details.label, sentence, draft ? `${t('assistants.draft')}: ${draft}` : undefined, row.unread ? t('assistants.unread') : undefined, time].filter(Boolean).join(' · ');
   return <div className="lab-bot-member">
     <button type="button" className="lab-bot-row" aria-label={name} aria-description={description || undefined}
-      title={`${hostName(row.binding.hostId)} · ${row.binding.providerId}`}
+      title={`${hostName(row.binding.hostId)} · ${row.binding.providerId}`} data-state={row.assistant.state}
       data-bot-place={botPlaceKey(destination)} data-asleep={row.details.asleep || undefined} data-unread={row.unread || undefined} aria-current={current || undefined} onClick={() => onSelect(destination)}
       onContextMenu={onContextMenu ? event => { event.preventDefault(); onContextMenu(event.currentTarget, { x: event.clientX, y: event.clientY }); } : undefined}
       onKeyDown={onContextMenu ? event => {
         if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return;
         event.preventDefault(); onContextMenu(event.currentTarget);
       } : undefined}>
-      <BotPicture id={row.viewId} picture={row.details.picture} size={compact ? 36 : 26} mood={botMood(row.status, row.details.asleep)} />
+      <BotPicture id={row.viewId} picture={row.details.picture} size={compact ? 44 : 40} mood={row.assistant.mood} />
       <span className="lab-bot-row-text">
         <span className="lab-bot-name-line"><strong className="lab-bot-name">{name}</strong>
           {row.role ? <span className="lab-bot-role">{row.role}</span> : null}
           {row.details.label ? <span className="lab-bot-label">{row.details.label}</span> : null}
           {time ? <span className="lab-bot-time" aria-hidden="true">{time}</span> : null}</span>
-        {/* Like a chat list: the status that asks for something, then the latest reply; an unread one is a dot, never a number. */}
-        {status || row.reply || draft ? <span className="lab-bot-summary">
-          {status === 'Working' ? <TypingDots />
-            : status ? <span className="lab-bot-status" data-attention={status === 'Needs you' || undefined} data-failed={status === 'Failed' || undefined} data-outbox={status === 'Waiting to send' || undefined}>{status}</span> : null}
-          {draft ? <span className="lab-bot-preview lab-bot-draft" aria-hidden="true"><span className="lab-bot-draft-label">Draft</span>{draft}</span>
-            : row.reply ? <span className="lab-bot-preview" aria-hidden="true">{row.reply.preview}</span> : null}
-          {row.unread ? <span className="lab-bot-unread" aria-hidden="true" /> : null}
+        {/* One sentence of what the assistant is doing; an unread reply is a dot, never a number. */}
+        {sentence || draft || row.unread ? <span className="lab-bot-summary" aria-hidden="true">
+          {sentence ? <span className="lab-bot-sentence" data-state={row.assistant.state}>{sentence}</span> : null}
+          {draft ? <span className="lab-bot-draft"><span className="lab-bot-draft-label">{t('assistants.draft')}</span>{draft}</span> : null}
+          {row.unread ? <span className="lab-bot-unread" /> : null}
         </span> : null}
       </span>
-      {row.details.pinned ? <span className="lab-bot-pinned" aria-label="Pinned">⌖</span> : null}
+      {row.details.pinned ? <span className="lab-bot-pinned" aria-label={t('assistants.pinned')}>⌖</span> : null}
     </button>
-    {row.asks.length ? <ul className="lab-bot-asks" data-bot-asks={row.viewId} aria-label={`Asks of ${name}`}>
+    {row.asks.length ? <ul className="lab-bot-asks" data-bot-asks={row.viewId} aria-label={t('assistants.asks', { name })}>
       {/* An Ask opens inside its bot's conversation. */}
       {row.asks.map(ask => <li key={ask.viewId}><button type="button" className="lab-bot-ask" onClick={() => onSelect(destination)}>
         <Icon name="question" size={14} /><span>{ask.title}</span></button></li>)}
@@ -85,26 +85,27 @@ export function BotRoster({ model, place, onSelect, directoryControls, hostName 
   /** The actions of a group's header menu, beside its title. */
   groupActions?(section: BotSection): readonly MenuEntry[];
 }) {
+  const t = useTranslate();
   const [context, setContext] = useState<{ row: BotRow; section: BotSection; element: HTMLElement; point?: { x: number; y: number } }>();
   const contextMenu = (row: BotRow, section: BotSection) => rowActions && !compact
     ? (element: HTMLElement, point?: { x: number; y: number }) => setContext({ row, section, element, ...(point ? { point } : {}) }) : undefined;
-  return <nav aria-label="Bots" className="lab-bot-roster-list">
+  return <nav aria-label={t('assistants.title')} className="lab-bot-roster-list">
     {context ? <MenuPanel label={`Bot actions: ${botDisplayName(context.row.binding)}`} items={rowActions!(context.row, context.section)} host={document.body}
       focus={context.point ? 'menu' : 'first'} anchor={() => context.element} {...(context.point ? { point: context.point } : {})}
       onClose={restoreFocus => { setContext(undefined); if (restoreFocus) context.element.focus(); }} /> : null}
     {model.sections.map(section => <section key={section.groupId} className="lab-bot-section" aria-labelledby={`bot-section-${section.groupId}`}>
       <div className="lab-bot-section-head">
         <h2 id={`bot-section-${section.groupId}`}><button type="button" onClick={() => onSelect({ kind: 'section', groupId: section.groupId })}>{section.title}</button>
-          {section.unread ? <span className="lab-bot-section-unread" role="img" aria-label="Unread" /> : null}
+          {section.unread ? <span className="lab-bot-section-unread" role="img" aria-label={t('assistants.unread')} /> : null}
           {section.status ? <small>{section.status}</small> : null}</h2>
-        {groupActions ? <Menu label={`Group actions: ${section.title}`} items={groupActions(section)} /> : null}
+        {groupActions ? <Menu label={t('assistants.groupActions', { group: section.title })} items={groupActions(section)} /> : null}
       </div>
-      {!section.rows.length ? <p className="lab-bot-empty">{section.hidden.length ? 'Its bots are hidden in Bot mode.' : 'No bots in this group yet.'}</p> : null}
+      {!section.rows.length ? <p className="lab-bot-empty">{section.hidden.length ? t('assistants.hiddenEmpty') : t('assistants.empty')}</p> : null}
       {section.rows.map(row => <BotMember key={row.viewId} row={row} compact={compact} hostName={hostName} onSelect={onSelect} onContextMenu={contextMenu(row, section)}
         current={place?.kind === 'bot' && place.groupId === row.groupId && place.viewId === row.viewId} />)}
     </section>)}
     <details className="lab-bot-section lab-bot-other">
-      <summary><h2>Other sessions</h2></summary>
+      <summary><h2>{t('assistants.other')}</h2></summary>
       {model.other.map(session => { const destination: BotPlace = { kind: 'session', session }; const host = hostName(session.hostId ?? 'local');
         return <button key={sessionKey(session)} type="button" className="lab-bot-row"
           aria-label={`${session.title || session.nativeSessionId} · ${host} · ${session.providerId}`}
@@ -114,9 +115,4 @@ export function BotRoster({ model, place, onSelect, directoryControls, hostName 
       {directoryControls}
     </details>
   </nav>;
-}
-
-/** Three small dots where a row says the bot is working. */
-function TypingDots() {
-  return <span className="lab-bot-typing" aria-hidden="true"><span /><span /><span /></span>;
 }

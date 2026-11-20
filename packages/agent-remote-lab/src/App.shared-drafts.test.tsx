@@ -46,7 +46,7 @@ it('shows the draft of a bot that is not on screen in its row', async () => {
   const scope = 'http://localhost/u/bot-draft-rows/';
   seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?window=A');
   const app = await mountBotApp(scope, { hosted: true });
-  const row = (name: string) => [...app.container.querySelectorAll<HTMLElement>('[aria-label="Bots"] .lab-bot-row')]
+  const row = (name: string) => [...app.container.querySelectorAll<HTMLElement>('[aria-label="Assistants"] .lab-bot-row')]
     .find(item => item.querySelector('.lab-bot-name')?.textContent === name);
   try {
     await until(() => expect(app.workspace().window?.id).toBe('A'));

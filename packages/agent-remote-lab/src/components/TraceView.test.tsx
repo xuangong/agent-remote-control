@@ -2,6 +2,7 @@ import { act, useState } from 'react';
 import { describe, expect, it } from 'vitest';
 import type { AgentReplicaState } from '@orchardworks/agent-client';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
+import { LocaleContext } from '@orchardworks/agent-client-web/react';
 import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
 import { TraceView } from './TraceView.js';
@@ -175,4 +176,15 @@ it('defers hidden trace creation and freezes hidden rows until the next reveal',
   expect(container.textContent).toContain('Finished.');
   await act(async () => update({ visible: true, state: next }));
   expect(container.textContent).not.toContain('Finished.');
+});
+
+it('words the trace page in Chinese and keeps event identifiers as they are', async () => {
+  const container = await render(<LocaleContext.Provider value="zh"><TraceView state={state} /></LocaleContext.Provider>);
+  expect(container.querySelector('[aria-label="规范化时间线的 Trace"]')).not.toBeNull();
+  expect(container.textContent).toContain('执行事件');
+  expect(container.textContent).toContain('已加载 2 / 2');
+  expect(container.textContent).toContain('read_file');
+  await act(async () => button(container, 'read_file').click());
+  expect(container.textContent).toContain('来源序号');
+  expect(container.textContent).not.toContain('Source sequences');
 });

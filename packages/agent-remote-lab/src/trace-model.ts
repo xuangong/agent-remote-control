@@ -1,14 +1,21 @@
 import type { AgentTimelineItem, ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
+import type { MessageKey, Translate } from '@orchardworks/agent-client';
 
 export interface TraceEntryRequest { readonly key: string; readonly requestId: number; readonly align?: 'start' | 'center' }
 
-export const traceItemLabels: Record<AgentTimelineItem['type'], string> = {
-  agent_communication: 'Agent communication', user_message: 'User message', assistant_message: 'Assistant message', reasoning: 'Reasoning update',
-  tool_call: 'Tool call', todo: 'Task list', interaction: 'Completed interaction', error: 'Agent error', compaction: 'Context compacted',
+const traceItemLabelKeys: Record<AgentTimelineItem['type'], MessageKey> = {
+  agent_communication: 'diagnostics.event.agentCommunication', user_message: 'diagnostics.event.userMessage', assistant_message: 'diagnostics.event.assistantMessage',
+  reasoning: 'diagnostics.event.reasoning', tool_call: 'diagnostics.event.toolCall', todo: 'diagnostics.event.todo', interaction: 'diagnostics.event.interaction',
+  error: 'diagnostics.event.error', compaction: 'diagnostics.event.compaction',
 };
 
-export function traceItemLabel(item: AgentTimelineItem): string {
-  return item.type === 'tool_call' ? item.name : traceItemLabels[item.type];
+/** Each event type's label, in the page's language, by the type's identifier. */
+export function traceItemLabels(t: Translate): Record<AgentTimelineItem['type'], string> {
+  return Object.fromEntries(Object.entries(traceItemLabelKeys).map(([type, key]) => [type, t(key)])) as Record<AgentTimelineItem['type'], string>;
+}
+
+export function traceItemLabel(item: AgentTimelineItem, t: Translate): string {
+  return item.type === 'tool_call' ? item.name : t(traceItemLabelKeys[item.type]);
 }
 
 export function traceItemSummary(item: AgentTimelineItem): string {
@@ -38,8 +45,8 @@ export function traceItemStatus(item: AgentTimelineItem): string | undefined {
 
 export function traceSequence(start: number, end: number): string { return start === end ? `#${start}` : `#${start}–${end}`; }
 
-export function traceSourceRanges(entry: ProjectedTimelineEntry): string {
-  return entry.sourceSeqRanges.map(range => range.startSeq === range.endSeq ? `${range.startSeq}` : `${range.startSeq}–${range.endSeq}`).join(', ') || 'Not recorded';
+export function traceSourceRanges(entry: ProjectedTimelineEntry, t: Translate): string {
+  return entry.sourceSeqRanges.map(range => range.startSeq === range.endSeq ? `${range.startSeq}` : `${range.startSeq}–${range.endSeq}`).join(', ') || t('diagnostics.notRecorded');
 }
 
 export function traceSessionReferences(item: AgentTimelineItem) {

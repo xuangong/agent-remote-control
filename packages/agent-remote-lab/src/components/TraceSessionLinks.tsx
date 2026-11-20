@@ -3,10 +3,13 @@ import { useState } from 'react';
 import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 import type { SessionLinkResolver } from '@orchardworks/agent-client-web/react';
 import { traceSessionReferences } from '../trace-model.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
+import { errorWords } from '../window-errors.js';
 
 export function TraceSessionLinks({ item, resolveSessionLink }: { item: AgentTimelineItem; resolveSessionLink?: SessionLinkResolver }) {
+  const t = useTranslate();
   const [failure, setFailure] = useState<string>();
-  useFeedbackToast('Session link', failure);
+  useFeedbackToast(t('diagnostics.sessionLink.title'), failure);
   const references = traceSessionReferences(item);
   if (!references.length) return null;
   return <div className="lab-trace-session-links">
@@ -17,7 +20,7 @@ export function TraceSessionLinks({ item, resolveSessionLink }: { item: AgentTim
         if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
         setFailure(undefined);
-        void destination.open().catch(error => setFailure(error instanceof Error ? error.message : 'This session could not be opened.'));
+        void destination.open().catch(error => setFailure(errorWords(error, t, 'diagnostics.sessionLink.failed')));
       }}>{title}</a> : <span key={reference.nativeSessionId} title={reference.nativeSessionId}>{title}</span>;
     })}
     {failure ? <p role="alert">{failure}</p> : null}

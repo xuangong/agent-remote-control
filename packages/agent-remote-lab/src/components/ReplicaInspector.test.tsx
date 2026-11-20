@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { LocaleContext } from '@orchardworks/agent-client-web/react';
 import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
 import { ReplicaInspector } from './ReplicaInspector.js';
@@ -48,5 +49,18 @@ describe('ReplicaInspector', () => {
     expect(container.textContent).toContain('epoch-old');
     expect(container.textContent).toContain('timeline_recovery_failed');
     expect(container.textContent).toContain('6');
+  });
+});
+
+describe('ReplicaInspector in Chinese', () => {
+  it('words its headings and connection state in Chinese and keeps identifiers as they are', async () => {
+    const state = { ...replicaState, diagnostics: [{ code: 'timeline_recovery_failed', message: 'Retrying Timeline recovery.', recoverable: true }] };
+    const container = await render(<LocaleContext.Provider value="zh"><ReplicaInspector state={state} sessionStatus="disconnected" /></LocaleContext.Provider>);
+    expect(container.querySelector('[aria-label="Replica Inspector"]')).not.toBeNull();
+    expect(container.textContent).toContain('Agent 快照');
+    expect(container.textContent).toContain('时间线同步');
+    expect(container.textContent).toContain('重连中');
+    expect(container.textContent).toContain('timeline_recovery_failed');
+    expect(container.textContent).not.toContain('Timeline synchronization');
   });
 });

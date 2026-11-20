@@ -3,7 +3,7 @@ import { FILE_FRAME_MESSAGE, FILE_FRAME_PATH, FILE_FRAME_SANDBOX } from '@orchar
 import { FilePreviewContext, type FilePreviewRequest } from './FilePreviewContext.js';
 import { createFilePreviewResourceContext } from './file-preview-resources.js';
 import { loadLocalResource } from './local-resource.js';
-import { errorWords } from './localized-error.js';
+import { errorWordsOr } from './localized-error.js';
 import { MarkdownContent } from './MarkdownContent.js';
 import { canPreviewImage } from './ResourceCard.js';
 import { ImagePreview } from './ImagePreview.js';
@@ -45,7 +45,7 @@ export function FilePreview({ request, onClose }: { readonly request: FilePrevie
     void loadLocalResource(request.context, target.locator, request.sourceLocator, undefined, attempt > 0).then(value => {
       if (current) { setResult({ request, value }); setLoading(false); window.clearTimeout(deadline); }
     }).catch(error => {
-      if (current) { setFailure(errorWords(error, t, 'timeline.file.loadFailed')); setLoading(false); window.clearTimeout(deadline); }
+      if (current) { setFailure(errorWordsOr(error, t, 'timeline.file.loadFailed')); setLoading(false); window.clearTimeout(deadline); }
     });
     return () => { current = false; window.clearTimeout(deadline); };
   }, [request, target.locator, attempt, t]);

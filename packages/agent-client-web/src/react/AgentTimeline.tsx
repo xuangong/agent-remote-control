@@ -23,6 +23,7 @@ import { TimelineTurn, type TurnRowOptions } from './TimelineTurn.js';
 import { BubbleAvatarContext } from './bubble-foot.js';
 import { LocaleContext, useTranslate } from './locale.js';
 import { TurnStatus } from './TurnStatus.js';
+import { errorWordsOr } from './localized-error.js';
 import { type AgentReplicaState, type ProcessMode, type Turn, dayLineLabel, foldTurns, startsDayLine, timelineEntryKey, workDisclosure } from '@orchardworks/agent-client';
 
 export type AgentTimelineState = AgentReplicaState;
@@ -346,7 +347,7 @@ function HistoryControls({ onLoadOlder, loading = false, error }: { readonly onL
     try {
       await onLoadOlder();
     } catch (error) {
-      setFailure(error instanceof Error && error.message ? error.message : t('timeline.history.failed'));
+      setFailure(errorWordsOr(error, t, 'timeline.history.failed'));
     } finally {
       inFlight.current = false;
       setPending(false);

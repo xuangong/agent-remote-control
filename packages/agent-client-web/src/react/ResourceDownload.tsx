@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useTranslate } from './locale.js';
+import { errorWordsOr } from './localized-error.js';
 export type DownloadResource = (resourceId: string) => Promise<{ blob: Blob; name: string; sha256: string }>;
 export const ResourceDownloadContext = createContext<DownloadResource | undefined>(undefined);
 export function ResourceDownload({ resourceId, label, name, byteLength, sha256 }: { resourceId: string; label: string; name: string; byteLength: number; sha256: string }) {
@@ -18,7 +19,7 @@ export function ResourceDownload({ resourceId, label, name, byteLength, sha256 }
       const url = URL.createObjectURL(result.blob); const link = document.createElement('a');
       link.href = url; link.download = name; link.hidden = true; document.body.append(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (reason) { if (selected === owner.current) setError(reason instanceof Error ? reason.message : t('timeline.resource.downloadFailed')); }
+    } catch (reason) { if (selected === owner.current) setError(errorWordsOr(reason, t, 'timeline.resource.downloadFailed')); }
     finally { if (selected === owner.current) setBusy(false); }
   }
   return <span className="agent-resource-download">

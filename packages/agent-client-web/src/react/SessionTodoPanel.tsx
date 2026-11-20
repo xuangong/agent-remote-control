@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SessionTodoDecision, SessionTodoList } from '@orchardworks/agent-remote-protocol';
 import { MarkdownContent } from './MarkdownContent.js';
 import { useTranslate } from './locale.js';
+import { errorWordsOr } from './localized-error.js';
 
 export interface SessionTodoPanelProps {
   list: SessionTodoList;
@@ -32,7 +33,7 @@ export function SessionTodoPanel({ list, disabled, context, onConfirm }: Session
     if (!current || !request || !onConfirm || disabled || inFlight.current) return;
     inFlight.current = true; setBusy(true); setError(undefined);
     try { await onConfirm({ revision: list.revision, stepId: current.id, requestId: request.id, decision }); }
-    catch (error) { setError(error instanceof Error ? error.message : t('timeline.todoPanel.saveFailed')); }
+    catch (error) { setError(errorWordsOr(error, t, 'timeline.todoPanel.saveFailed')); }
     finally { inFlight.current = false; setBusy(false); }
   }
   return <details ref={root} className="agent-session-todo" onKeyDown={event => {

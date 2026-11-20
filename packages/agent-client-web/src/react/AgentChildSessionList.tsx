@@ -1,6 +1,7 @@
 import { useRef, useState, type ReactNode } from 'react';
 import type { AgentChildSession } from '@orchardworks/agent-remote-protocol';
 import { useTranslate } from './locale.js';
+import { errorWordsOr } from './localized-error.js';
 
 export type AgentChildSessionView = Pick<AgentChildSession, 'nativeSessionId' | 'title'> & Partial<AgentChildSession>;
 
@@ -29,7 +30,7 @@ export function AgentChildSessionList({ children, childrenFor, label: labelProp,
     setOpening(child.nativeSessionId);
     setFailure(undefined);
     try { await onOpenChildSession(child); }
-    catch (error) { setFailure(error instanceof Error ? error.message : t('timeline.child.openFailed')); }
+    catch (error) { setFailure(errorWordsOr(error, t, 'timeline.child.openFailed')); }
     finally { inFlight.current = false; setOpening(undefined); }
   }
   if (children.length === 0) return null;

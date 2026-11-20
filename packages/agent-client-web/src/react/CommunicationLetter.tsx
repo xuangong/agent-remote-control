@@ -4,6 +4,7 @@ import { CommunicationNavigationContext } from './CommunicationNavigation.js';
 import { CommunicationContent, CommunicationTitle } from './CommunicationContent.js';
 import type { MarkdownResourceContext } from './markdown-resources.js';
 import { useTranslate } from './locale.js';
+import { errorWordsOr } from './localized-error.js';
 
 export function CommunicationLetter({ entry, resourceContext }: { entry: ProjectedTimelineEntry; resourceContext?: MarkdownResourceContext }) {
   const t = useTranslate();
@@ -18,7 +19,7 @@ export function CommunicationLetter({ entry, resourceContext }: { entry: Project
     if (!navigation || inFlight.current) return;
     inFlight.current = true; setPending(true); setFailure(undefined);
     try { await navigation.open(entry); }
-    catch (error) { setFailure(error instanceof Error ? error.message : t('timeline.letter.openFailed')); }
+    catch (error) { setFailure(errorWordsOr(error, t, 'timeline.letter.openFailed')); }
     finally { inFlight.current = false; setPending(false); }
   }
   return <div className="agent-letter-position"><article className="agent-communication-letter" aria-label={t('timeline.message.agent')} data-direction={direction} aria-busy={pending}

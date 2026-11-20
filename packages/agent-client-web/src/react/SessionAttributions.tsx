@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { type SessionAttribution, type SessionDescription } from '@orchardworks/agent-client';
 import { useTranslate } from './locale.js';
+import { errorWordsOr } from './localized-error.js';
 
 export interface SessionAttributionsProps {
   description?: SessionDescription;
@@ -44,7 +45,7 @@ export function SessionAttributions({ description, onNavigate, children }: Sessi
     } catch (error) {
       if (currentScope.current !== scope || request.current !== currentRequest) return;
       setFeedback({ scope, rowId: attribution.id, pending: false,
-        error: error instanceof Error && error.message.trim() ? error.message : t('timeline.attributions.openFailed') });
+        error: errorWordsOr(error, t, 'timeline.attributions.openFailed') });
     }
   }
 

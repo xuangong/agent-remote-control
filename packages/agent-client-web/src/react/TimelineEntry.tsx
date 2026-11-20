@@ -1,7 +1,7 @@
 import { type CSSProperties, type ReactNode, useMemo, useState } from 'react';
 import { useTimelineTimeSwipe } from './useTimelineTimeSwipe.js';
 import { isDesktopTimeline, TimelineTimeContext } from './TimelineTitle.js';
-import { errorWords } from './localized-error.js';
+import { errorWordsOr } from './localized-error.js';
 import { useTranslate } from './locale.js';
 import { toggleTimelineTime, useTimelineTimeVisibility } from './timeline-time-visibility.js';
 
@@ -30,7 +30,7 @@ export function TimelineEntry({ onEdit, entryKey, timestamp, sent, inspected, se
   const [editing, setEditing] = useState(false);
   const [editError, setEditError] = useState<string>();
   const editButton = onEdit ? <button type="button" data-prompt-edit-action className="agent-edit-prompt" aria-label={t('timeline.entry.edit')} title={t('timeline.entry.editHint')} disabled={editing} onClick={() => {
-    setEditing(true); setEditError(undefined); void onEdit().catch(error => setEditError(errorWords(error, t, 'timeline.entry.editFailed'))).finally(() => setEditing(false));
+    setEditing(true); setEditError(undefined); void onEdit().catch(error => setEditError(errorWordsOr(error, t, 'timeline.entry.editFailed'))).finally(() => setEditing(false));
   }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 4-5 5 5 5M4 9h10a6 6 0 0 1 0 12" /></svg></button> : null;
   const timeVisible = useTimelineTimeVisibility();
   const localTime = useMemo(() => {

@@ -1,6 +1,7 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
+import { LocaleContext } from '@orchardworks/agent-client-web/react';
 import { MobileDisplaySettings } from './MobileDisplaySettings.js';
 
 let fullscreenElement: Element | null;
@@ -52,4 +53,11 @@ describe('MobileDisplaySettings', () => {
     expect(button(container, 'Enter full screen')).toBeUndefined();
     expect(container.querySelector('details')).toBeNull();
   });
+});
+
+it('speaks Chinese when the device does', async () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
+  const view = await render(<LocaleContext.Provider value="zh"><MobileDisplaySettings /></LocaleContext.Provider>);
+  expect(view.querySelector('h2')?.textContent).toBe('显示');
+  expect(view.textContent).toContain('不带地址栏打开');
 });

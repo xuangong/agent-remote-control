@@ -113,11 +113,11 @@ describe.each(variants)('E10 at %s', (_name, view) => {
       if (view.mobile) {
         // On a phone the assistant list is home: the address alone lands there, a conversation opens over it, and Back returns to it.
         await page.goto(new URL('/', page.url()).href);
-        await bot.getByRole('navigation', { name: 'Assistants' }).waitFor();
+        await bot.getByRole('navigation', { name: 'Chats' }).waitFor();
         await bot.locator('.lab-bot-row').filter({ hasText: botName }).first().click();
         await bot.locator('.lab-assistant-top-bar').waitFor();
         await page.goBack();
-        await bot.getByRole('navigation', { name: 'Assistants' }).waitFor();
+        await bot.getByRole('navigation', { name: 'Chats' }).waitFor();
       }
       expect(await words.seen()).toEqual([]);
     } finally { await context.close(); }

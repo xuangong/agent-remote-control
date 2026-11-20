@@ -152,25 +152,10 @@ for (const viewport of [{ width: 393, height: 852 }, { width: 320, height: 568 }
     const scrollBox = (await scroll.boundingBox())!;
     expect(scrollBox.y + scrollBox.height).toBeLessThanOrEqual(before!.y);
     await expect(rail.getByRole('navigation', { name: 'Sidebar sections' })).toBeInViewport();
-    await rail.getByRole('button', { name: 'Settings', exact: true }).click();
-    expect(await scroll.evaluate(element => element.scrollTop)).toBe(0);
-    await assertPanelWidth('Settings');
-    const updates = rail.getByRole('button', { name: /Controller updates/ });
-    await expect(updates).toBeVisible();
-    await updates.click();
-    await assertPanelWidth('Settings with Controller updates');
-    const vscode = rail.getByRole('region', { name: 'Host VS Code tunnel' });
-    await expect(vscode).toBeVisible();
-    const checkbox = vscode.getByRole('checkbox');
-    await checkbox.check();
-    expect((await checkbox.boundingBox())!.height).toBeLessThanOrEqual(22);
-    await expect(vscode.getByRole('button', { name: 'Start tunnel' })).toBeEnabled();
-    await page.screenshot({ path: info.outputPath('settings.png') });
+    // Settings, Controller updates and the VS Code tunnel are Settings pages now (specs of the Settings page), not drawer panels.
+    await expect(rail.getByRole('button', { name: 'Settings', exact: true })).toHaveCount(0);
     await rail.getByRole('button', { name: 'Favorites', exact: true }).click();
     await assertPanelWidth('Favorites');
-    await expect(rail.getByRole('button', { name: /Controller updates/ })).toBeHidden();
-    await rail.getByRole('button', { name: 'Settings', exact: true }).click();
-    await expect(updates).toHaveAttribute('aria-expanded', 'true');
     await rail.getByRole('button', { name: 'Sessions', exact: true }).click();
     expect(await scroll.evaluate(element => element.scrollTop)).toBe(0);
     await rail.locator('.lab-host-disclosure > summary').click();

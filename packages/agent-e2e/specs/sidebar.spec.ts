@@ -7,15 +7,14 @@ test('keeps discovery, creation and management easy to reach while retaining for
   const desktop = info.project.name === 'chromium-desktop';
   // Desktop opens the session panels as pages from the sidebar; compact layouts keep them in the Context drawer's tabs.
   const rail = desktop ? page.locator('#lab-sessions-page') : page.locator('#lab-context');
-  const show = async (entry: 'Sessions' | 'Settings') => {
-    if (desktop) await openSessionsPage(page, entry === 'Sessions' ? 'All sessions' : 'Settings');
+  const show = async (entry: 'Sessions') => {
+    if (desktop) await openSessionsPage(page, 'All sessions');
     else await rail.getByRole('button', { name: entry, exact: true }).click();
   };
   if (desktop) await show('Sessions');
   const discover = rail.getByRole('region', { name: 'Discover sessions' });
   await expect(discover.locator('.lab-session-row').first()).toBeVisible();
   await expect(rail.getByTestId('session-create')).toBeHidden();
-  await expect(rail.getByRole('button', { name: 'Pair Agent Host' })).toBeHidden();
   const search = rail.getByRole('searchbox', { name: 'Search loaded sessions' });
   await search.fill('no-matching-session-xyz');
   await expect(discover).toContainText('No matching loaded sessions.');
@@ -25,9 +24,7 @@ test('keeps discovery, creation and management easy to reach while retaining for
   await expect(rail.getByTestId('session-create')).toBeVisible();
   await expect(discover).toBeHidden();
   await rail.getByLabel('Working directory', { exact: true }).fill('/tmp/sidebar-draft');
-  await show('Settings');
-  await expect(rail.getByRole('button', { name: 'Pair Agent Host' })).toBeVisible();
-  await expect(rail.getByTestId('session-create')).toBeHidden();
+  // Settings is its own page now (the rail's Settings); the sessions panels keep their drafts.
   await show('Sessions');
   await showNewSession(page);
   await expect(rail.getByLabel('Working directory', { exact: true })).toHaveValue('/tmp/sidebar-draft');
@@ -66,7 +63,7 @@ test('keeps long session lists in one scroll area and reveals each panel from it
   expect(await scroll.evaluate(element => element.scrollTop)).toBe(0);
   await openSessionsPage(page);
   await scroll.evaluate(element => { element.scrollTop = element.scrollHeight; });
-  await openSessionsPage(page, 'Settings');
+  await openSessionsPage(page, 'Favorites');
   expect(await scroll.evaluate(element => element.scrollTop)).toBe(0);
   await openSessionsPage(page);
   const list = rail.locator('.lab-session-list');

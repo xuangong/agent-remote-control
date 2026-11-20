@@ -42,7 +42,11 @@ test('reserves the notch once above navigation and keeps controls inside each ro
     expect(sessions.y).toBe(insets.top);
     expect(sessions.x).toBeGreaterThanOrEqual(insets.left);
     const composer = (await page.locator('.lab-composer-dock').first().boundingBox())!;
-    expect(composer.y + composer.height).toBeCloseTo(size.height, 1);
+    // A phone's tab bar stands under the composer (and under the home indicator); a wide screen has the rail instead.
+    const bar = page.locator('.lab-tab-bar');
+    const floor = await bar.isVisible() ? (await bar.boundingBox())!.y : size.height;
+    if (await bar.isVisible()) expect((await bar.boundingBox())!.y + (await bar.boundingBox())!.height).toBeCloseTo(size.height, 1);
+    expect(composer.y + composer.height).toBeCloseTo(floor, 1);
     const send = (await page.getByTestId('prompt-submit').boundingBox())!;
     expect(send.y + send.height).toBeLessThanOrEqual(size.height - insets.bottom);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -80,7 +84,8 @@ test('keeps composer controls inside the standalone viewport before native recov
     const bounds = (await dock.boundingBox())!;
     expect(frame.y).toBeGreaterThanOrEqual(0);
     expect(frame.y + frame.height).toBeLessThanOrEqual(viewportBottom - 34);
-    expect(bounds.y + bounds.height).toBeCloseTo(viewportBottom, 1);
+    const bar = page.locator('.lab-tab-bar');
+    expect(bounds.y + bounds.height).toBeCloseTo(await bar.isVisible() ? (await bar.boundingBox())!.y : viewportBottom, 1);
   };
   await expectVisibleComposer();
   const before = (await dock.boundingBox())!;

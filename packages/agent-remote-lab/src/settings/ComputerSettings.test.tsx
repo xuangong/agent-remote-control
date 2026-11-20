@@ -23,7 +23,7 @@ it('leads with how many computers are online and opens a computer as a page that
   await openHost(container, 'Studio Mac');
   expect(container.querySelector('.lab-host-page h2')?.textContent).toBe('Studio Mac');
   expect(container.querySelector('.lab-host-page-head p')?.textContent).toContain('Online · darwin · arm64 · Controller 0.3.0');
-  await act(async () => button(container, 'Back').click());
+  await act(async () => button(container, 'Computers').click());
   await vi.waitFor(() => expect(container.querySelector('.lab-host-page')).toBeNull());
 });
 

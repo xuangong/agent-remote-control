@@ -28,6 +28,8 @@ import type { AppInputs } from './types.js';
 export function useCommandSearch(scope: Pick<AppInputs & SessionSuccessionBindingSlice & PanelsAndShortcutsSlice & WorkbenchShellSlice & WindowModeActionsSlice & ActiveSessionSlice & RequestedSessionSlice & RemoteHostStateSlice & ProviderStateSlice & SharedFeedsAndTpmSlice & WindowViewActionsSlice & AttentionAndRosterSlice, 'baseUrl' | 'botRoster' | 'closePage' | 'desktopContextVisible' | 'directory' | 'favorites' | 'inMode' | 'initialState' | 'modeSteps' | 'navigation' | 'openNewBot' | 'openNewSessionPanel' | 'providers' | 'queuedModeSteps' | 'remoteHosts' | 'searchOpen' | 'searchRuns' | 'sessionEntries' | 'setWindowOverviewOpen' | 'sharedWindow' | 'showPanel' | 'switchMode' | 'toggleSidebar' | 'userScoped' | 'windowMode' | 'windowOverviewSupported' | 'windowWorkspace' | 'openInBotMode' | 'pinToWindow'>) {
   const { baseUrl, botRoster, closePage, desktopContextVisible, directory, favorites, inMode, initialState, modeSteps, navigation, openNewBot, openNewSessionPanel, providers, queuedModeSteps, remoteHosts, searchOpen, searchRuns, sessionEntries, setWindowOverviewOpen, sharedWindow, showPanel, switchMode, toggleSidebar, userScoped, windowMode, windowOverviewSupported, windowWorkspace, openInBotMode, pinToWindow } = scope;
 
+  const t = useTranslate();
+
   const windowConfirmed = !!initialState || windowWorkspace.unavailable || windowWorkspace.hasActiveWindow && !windowWorkspace.provisional;
 
   useEffect(() => {
@@ -42,18 +44,17 @@ export function useCommandSearch(scope: Pick<AppInputs & SessionSuccessionBindin
     [searchOpen, windowWorkspace.windows, windowWorkspace.window, windowWorkspace.readGroup]);
 
   const windowItems = useMemo(() => byRecentUse(baseUrl, searchCatalog).map((window): CommandItem => ({ id: `window:${window.id}`, kind: 'window', title: window.title,
-    subtitle: windowSummary(window.views, viewId => !!windowWorkspace.readGroup(window.id)?.bots?.members[viewId]?.asleep),
+    subtitle: windowSummary(window.views, viewId => !!windowWorkspace.readGroup(window.id)?.bots?.members[viewId]?.asleep, t),
     run: () => { const runs = searchRuns.current; runs.switchMode('window'); runs.inMode('window', () => void searchRuns.current.openWindowFromSearch(window.id)); } })),
-  [baseUrl, searchCatalog, windowWorkspace.readGroup]);
+  [baseUrl, searchCatalog, windowWorkspace.readGroup, t]);
 
   const sessionItems = useMemo(() => !searchOpen ? [] : commandSessions(sessionEntries, favorites.stars, searchCatalog.flatMap(window => window.views.flatMap(view => view.binding ? [view.binding] : [])))
-    .map((session): CommandItem => { const subtitle = sessionSubtitle(session, remoteHosts, providers);
+    .map((session): CommandItem => { const subtitle = sessionSubtitle(session, remoteHosts, providers, t);
       return { id: `session:${sessionKey(session)}`, kind: 'session', title: session.title, ...(subtitle ? { subtitle } : {}),
         run: () => { const runs = searchRuns.current; runs.switchMode('window'); runs.inMode('window', () => void searchRuns.current.openSessionFromSearch(session), true); } }; }),
-  [searchOpen, sessionEntries, favorites.stars, searchCatalog, remoteHosts, providers]);
+  [searchOpen, sessionEntries, favorites.stars, searchCatalog, remoteHosts, providers, t]);
 
   /** The palette's items, built from what the page already knows, and only while it is open. */
-  const t = useTranslate();
   function commandItems(): CommandItem[] {
     const toWindow = () => switchMode('window');
     const selectedTile = sharedWindow?.views.find(view => view.id === sharedWindow.selectedViewId);

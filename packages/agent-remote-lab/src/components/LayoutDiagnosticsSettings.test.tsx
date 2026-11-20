@@ -1,6 +1,7 @@
 import { act, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
+import { LocaleContext } from '@orchardworks/agent-client-web/react';
 import { clearLayoutDiagnostics, getLayoutDiagnosticsStatus } from '../layout-diagnostics.js';
 import { LayoutDiagnosticsSettings } from './LayoutDiagnosticsSettings.js';
 
@@ -30,4 +31,11 @@ it('keeps the report selectable when clipboard access fails and recording surviv
   await act(async () => [...view.querySelectorAll('button')].find(button => button.textContent === 'Clear report')!.click());
   expect(getLayoutDiagnosticsStatus().hasRecording).toBe(false);
   expect(view.querySelector('textarea')).toBeNull();
+});
+
+it('speaks Chinese when the device does', async () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: false }));
+  const view = await render(<LocaleContext.Provider value="zh"><LayoutDiagnosticsSettings /></LocaleContext.Provider>);
+  expect(view.querySelector('h2')?.textContent).toBe('布局诊断');
+  expect(view.textContent).toContain('记录布局变化');
 });

@@ -35,23 +35,14 @@ async function favoriteAction(page: Page, row: Locator, action: 'Track' | 'Untra
   await page.getByRole('button', { name: action, exact: true }).click();
 }
 
-test('aligns the desktop account and keeps long favorite titles on one line with reachable actions', async ({ page }, testInfo) => {
+test('keeps long favorite titles on one line with reachable actions', async ({ page }, testInfo) => {
   await setup(page, '关闭所有agent-remote-controller进程并检查每个会话的状态');
   const mobile = testInfo.project.name.includes('mobile');
   if (mobile) await page.getByRole('button', { name: 'Favorites', exact: true }).click();
   else {
     await showSessions(page);
-    const view = page.getByRole('button', { name: 'View options', exact: true });
-    await view.click();
-    const options = page.getByRole('region', { name: 'View options', exact: true });
-    await options.getByText('Header', { exact: true }).click();
-    await options.press('Escape');
-    const header = page.locator('.lab-app-bar');
-    const identity = header.getByLabel('Account', { exact: true });
-    const security = header.getByRole('button', { name: 'Security', exact: true });
-    await expect(identity).toBeVisible();
-    const a = (await identity.boundingBox())!, b = (await security.boundingBox())!;
-    expect(Math.abs(a.y + a.height / 2 - b.y - b.height / 2)).toBeLessThan(2);
+    // The account is in Settings > Account, not in the app bar or the sidebar.
+    await expect(page.locator('.lab-app-bar').getByLabel('Account', { exact: true })).toHaveCount(0);
     await expect(page.locator('#lab-context').getByRole('button', { name: 'Security', exact: true })).toHaveCount(0);
     await openSessionsPage(page, 'Favorites');
   }

@@ -70,4 +70,4 @@ const transport: RemoteAgentTransport & Pick<HttpWebSocketTransport, 'listProvid
 const hostService = { hosts: async () => ({ hosts: [{ id: 'host', name: 'Work Mac', online: true, providers: [{ providerId: 'recorded', displayName: 'Recorded' }] }] }),
   pair: async () => { throw new Error('Pairing is not used'); } };
 createRoot(document.getElementById('root')!).render(<App baseUrl={baseUrl} userScoped transport={transport} directory={directory} hostService={hostService}
-  accountAction={<><span className="gateway-account-identity">Alice Example</span><button>Security</button><button>Sign out</button></>} />);
+  account={{ name: 'Alice Example', ready: true, openSecurity: () => {}, signOut: () => {} }} />);

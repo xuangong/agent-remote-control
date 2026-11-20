@@ -24,15 +24,15 @@ afterAll(async () => { await browser?.close(); await stack?.close(); });
 
 it('E1: a key generated in the page pairs a second Controller, and its Host shows online', async () => {
   const { context, page } = await openPage(browser, stack.origin + '/');
-  await openSettings(page);
-  await page.getByRole('button', { name: 'Pair Agent Host', exact: true }).click();
+  await openSettings(page, 'Computers');
+  await page.getByRole('button', { name: 'Pair a computer', exact: true }).click();
   await page.getByRole('button', { name: 'Generate pairing key', exact: true }).click();
   const configuration = await page.getByLabel('Agent Host configuration').inputValue();
   const key = /AGENT_HOST_REMOTE_KEY='([^']+)'/.exec(configuration)?.[1];
   expect(key).toBeTruthy();
   const paired = await stack.pairController({ key: key!, name: 'Second Host', installationId: 'e2e-second', sessions: { second: { title: 'On the second Host', history: [{ role: 'user', text: 'Hi' }, { role: 'assistant', text: 'Hi from the second Host' }] } } });
   try {
-    await showsText(page, '2 Hosts online');
+    await showsText(page, '2 computers online');
     await page.goto(paired.sessionUrl('second'), { waitUntil: 'domcontentloaded' });
     await showsText(page, 'Hi from the second Host');
   } finally { await paired.close(); }

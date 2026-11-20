@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { openSessionsPage, selectConnectedHost } from './all-sessions';
+import { openSessionsPage, openSettingsPage, selectConnectedHost } from './all-sessions';
 import { sessionLinkFixture } from './session-link-fixture';
 import { showNewSession } from './session-navigation';
 
@@ -130,10 +130,8 @@ test('confirmed device protection clears disk copies across tabs without interru
     await second.getByTestId('prompt-input').fill('Other tab draft');
     await second.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
     await page.bringToFront();
-    if ((page.viewportSize()?.width ?? 1280) <= 1180) {
-      await page.getByRole('button', { name: 'Open sessions', exact: true }).click();
-      await page.getByRole('button', { name: 'Settings', exact: true }).click();
-    } else await page.getByRole('button', { name: 'Sidebar settings' }).click();
+    // Settings > Privacy and data, from the rail (the Me tab on a phone).
+    await openSettingsPage(page, 'Privacy and data');
     const toggle = page.getByRole('switch', { name: 'Clear chat cache on close' });
     await expect(toggle).not.toBeChecked();
     await toggle.click();

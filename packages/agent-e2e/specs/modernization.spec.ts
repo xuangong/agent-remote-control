@@ -1,4 +1,4 @@
-import { openSessionsPage } from './all-sessions';
+import { backToWindows, openSessionsPage, openSettingsPage } from './all-sessions';
 import { showNewSession, showSessions } from './session-navigation';
 import { toggleViewPanel } from './view-options';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -158,8 +158,7 @@ test('keeps command feedback visible in compact layout', async ({ page }, testIn
   test.skip(testInfo.project.name !== 'chromium-mobile');
   const browserErrors = collectBrowserErrors(page);
   await openRecordedSession(page);
-  await toggleViewPanel(page, 'Sidebar');
-  if (testInfo.project.name === 'chromium-mobile') await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await openSettingsPage(page, 'Advanced');
   await page.getByTestId('playback-advance').click();
 
   const feedback = page.getByText('Recorded observation advanced.');
@@ -248,10 +247,10 @@ test('renders default control boundaries with three-to-one contrast', async ({ p
   test.skip(testInfo.project.name !== 'chromium-desktop');
   const browserErrors = collectBrowserErrors(page);
   await openRecordedSession(page);
-  const settings = await openSessionsPage(page, 'Settings');
+  const settings = await openSettingsPage(page, 'Advanced');
   await settings.getByTestId('playback-advance').click();
-  // The Settings and New session pages cover the Window, so the conversation's controls are measured back in the Window.
-  await settings.getByRole('button', { name: 'Back to Window', exact: true }).click();
+  // The Settings page covers the Window, so the conversation's controls are measured back in the Window.
+  await backToWindows(page);
   await expect(settings).toBeHidden();
 
   const assertBoundaries = async (controls: Record<string, Locator>) => {
@@ -293,10 +292,9 @@ test('provides coarse-pointer controls at least forty-four pixels wide and high'
   const resourceLinks = page.getByRole('link', { name: /resource/ });
   await expect(resourceLinks.first()).toBeVisible();
   await assertMinimumSize(resourceLinks, 44);
-  await toggleViewPanel(page, 'Sidebar');
-  if (testInfo.project.name === 'chromium-mobile') await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await openSettingsPage(page, 'Advanced');
   await page.getByTestId('playback-advance').click();
-  await page.getByRole('button', { name: 'Close Context' }).click();
+  await backToWindows(page);
 
   await assertMinimumSize(page.getByLabel('Live provider controls').locator('button'), 44);
   await assertMinimumSize(page.locator('.agent-interaction button'), 44);

@@ -1,8 +1,8 @@
 import { expect, test } from '@playwright/test';
-import { openSessionsPage } from '../all-sessions';
+import { openSettingsPage } from '../all-sessions';
 
 for (const purpose of ['host-only', 'gateway-setup'] as const) {
-  test(`creates and revokes a ${purpose} invitation without retaining its secret`, async ({ page }, testInfo) => {
+  test(`creates and revokes a ${purpose} invitation without retaining its secret`, async ({ page }) => {
     const records: Array<{ id: string; purpose: string; createdAt: string; expiresAt: string; status: string }> = [];
     await page.route('**/v1/remote/pairings', async route => {
       if (route.request().method() === 'POST') {
@@ -19,11 +19,8 @@ for (const purpose of ['host-only', 'gateway-setup'] as const) {
     });
     // Window mode, whose sidebar holds this; a phone's home is the assistant list.
     await page.goto('/?mode=window');
-    const compact = testInfo.project.name === 'chromium-mobile';
-    const context = compact ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-sessions-page');
-    if (compact) await context.getByRole('button', { name: 'Settings', exact: true }).click();
-    else await openSessionsPage(page, 'Settings');
-    await context.getByRole('button', { name: 'Pair Agent Host', exact: true }).click();
+    const context = await openSettingsPage(page, 'Computers');
+    await context.getByRole('button', { name: 'Pair a computer', exact: true }).click();
     await expect(context.getByLabel('Pairing purpose', { exact: true })).toHaveValue('host-only');
     if (purpose === 'gateway-setup') await context.getByLabel('Pairing purpose', { exact: true }).selectOption(purpose);
     await context.getByRole('button', { name: 'Generate pairing key', exact: true }).click();

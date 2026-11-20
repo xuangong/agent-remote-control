@@ -85,7 +85,7 @@ test('retains an in-flight send and a later draft through mode switches without 
     await composer(page, 'window').fill('One original in-flight send');
     await expect(modeRegion(page, 'window').getByTestId('prompt-submit')).toBeEnabled();
     await composer(page, 'window').press('Enter'); await waiting;
-    await mode(page, 'bot'); await modeRegion(page, 'bot').getByRole('navigation', { name: 'Assistants', exact: true }).getByRole('button', { name: 'New session', exact: true }).click();
+    await mode(page, 'bot'); await modeRegion(page, 'bot').getByRole('navigation', { name: 'Chats', exact: true }).getByRole('button', { name: 'New session', exact: true }).click();
     await expectDraft(composer(page, 'bot'), 'One original in-flight send');
     await expect(modeRegion(page, 'bot').getByTestId('prompt-submit')).toBeDisabled();
     await screenshot(page, 'in-flight-bot');
@@ -134,7 +134,7 @@ test('keeps Window A while selecting another group, handles section-only routes 
     await withBotDetails(client, bId);
     await page.goto(`${fixture.url}/?window=${aId}`); await showWindowConversation(page);
     const before = await client.inspect(aId); await mode(page, 'bot');
-    const bot = modeRegion(page, 'bot'); await bot.getByRole('navigation', { name: 'Assistants', exact: true }).getByRole('button', { name: 'Bot B', exact: true }).click();
+    const bot = modeRegion(page, 'bot'); await bot.getByRole('navigation', { name: 'Chats', exact: true }).getByRole('button', { name: 'Bot B', exact: true }).click();
     await expect(bot.getByRole('heading', { name: 'Bot B', exact: true })).toBeVisible();
     expect((await client.inspect(aId)).window).toEqual(before.window);
     await composer(page, 'bot').fill('B draft independent of A'); await page.reload();
@@ -144,7 +144,7 @@ test('keeps Window A while selecting another group, handles section-only routes 
     await mode(page, 'bot'); await expectDraft(composer(page, 'bot'), 'B draft independent of A');
     await mutate(client, bId, { type: 'view.close', viewId: 'B1' });
     await expect(bot.getByRole('alert')).toContainText('unavailable');
-    await expect(bot.getByRole('navigation', { name: 'Assistants', exact: true }).getByRole('button', { name: 'Bot B', exact: true })).toHaveCount(0);
+    await expect(bot.getByRole('navigation', { name: 'Chats', exact: true }).getByRole('button', { name: 'Bot B', exact: true })).toHaveCount(0);
     await expect(bot.getByTestId('prompt-input').locator('visible=true')).toHaveCount(0);
     await screenshot(page, 'removed-selected-bot');
     await expect(bot.locator('.lab-bot-roster')).toBeVisible();
@@ -161,7 +161,7 @@ test('keeps Window A while selecting another group, handles section-only routes 
     await expect(modeRegion(page, 'bot')).toBeVisible();
     await expect(modeRegion(page, 'window')).toBeHidden();
     await expect(page).toHaveURL(url => url.searchParams.get('mode') === 'bot' && url.searchParams.get('section') === sectionId && !url.searchParams.has('window'));
-    await expect(bot.getByRole('navigation', { name: 'Assistants', exact: true }).getByRole('button', { name: 'Bot C', exact: true })).toBeVisible();
+    await expect(bot.getByRole('navigation', { name: 'Chats', exact: true }).getByRole('button', { name: 'Bot C', exact: true })).toBeVisible();
     expect(captured.creates).toHaveLength(createsBefore); expect(captured.attaches.slice(attachesBefore)).not.toContain('stale');
     expect(captured.sends).toHaveLength(0); await screenshot(page, 'bot-only-group-route');
   } finally { await page.close(); await fixture.close(); }
@@ -180,7 +180,7 @@ for (const change of ['hidden', 'ineligible'] as const) {
       const group = await client.inspect(id), view = group.window.views.find(view => view.binding)!;
       await withBotDetails(client, id);
       await mode(page, 'bot');
-      const bot = modeRegion(page, 'bot'); await bot.getByRole('navigation', { name: 'Assistants', exact: true }).getByRole('button', { name: 'New session', exact: true }).click();
+      const bot = modeRegion(page, 'bot'); await bot.getByRole('navigation', { name: 'Chats', exact: true }).getByRole('button', { name: 'New session', exact: true }).click();
       await expectDraft(composer(page, 'bot'), ''); const beforeUrl = page.url();
       if (change === 'hidden') await mutate(client, id, { type: 'bot.update', viewId: view.id, details: { hidden: true } });
       else {
@@ -200,16 +200,12 @@ for (const change of ['hidden', 'ineligible'] as const) {
   });
 }
 async function mode(page: Page, value: 'window' | 'bot') {
+  // The rail (the tab bar on a phone) carries both modes: Chats is Bot mode, Windows is Window mode.
   const region = modeRegion(page, value === 'bot' ? 'window' : 'bot');
-  let button: Locator;
-  if (value === 'bot') {
-    const trigger = region.getByRole('button', { name: 'View options', exact: true });
-    await expect(trigger).toBeVisible();
-    if (await trigger.getAttribute('aria-expanded') !== 'true') await trigger.click();
-    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    button = region.getByRole('region', { name: 'View options', exact: true }).getByRole('button', { name: 'Bot mode', exact: true });
-  } else button = region.getByRole('button', { name: 'Window mode', exact: true }).locator('visible=true');
-  await button.click(); await expect(modeRegion(page, value)).toBeVisible();
+  const rail = page.locator('.lab-rail'), tabs = page.locator('.lab-tab-bar');
+  const name = value === 'bot' ? 'Chats' : 'Windows';
+  await (await rail.isVisible() ? rail : tabs).getByRole('button', { name, exact: true }).click();
+  await expect(modeRegion(page, value)).toBeVisible();
   await expect(region).toBeHidden(); await expect(region).toHaveAttribute('inert', '');
 }
 /** Wide pages with a visible sidebar list Windows there; otherwise the floating Window capsule opens its panel. */
@@ -302,7 +298,7 @@ test('selects the Window pane through timeline clicks and composer focus while B
     await pane.getByTestId('prompt-input').focus();
     await expect.poll(async () => (await client.inspect(id)).window.selectedViewId).toBe(first.id);
     await mutate(client, id, { type: 'view.select', viewId: 'B2' }); await page.reload(); await mode(page, 'bot');
-    const bot = modeRegion(page, 'bot'); await bot.getByRole('navigation', { name: 'Assistants', exact: true }).getByRole('button', { name: 'New session', exact: true }).click();
+    const bot = modeRegion(page, 'bot'); await bot.getByRole('navigation', { name: 'Chats', exact: true }).getByRole('button', { name: 'New session', exact: true }).click();
     await composer(page, 'bot').fill('Bot interaction keeps the second Window pane');
     await bot.locator('.agent-message-assistant').last().click();
     expect((await client.inspect(id)).window.selectedViewId).toBe('B2');
@@ -335,7 +331,7 @@ test('keeps an offline queue hidden, dispatches once on return and preserves the
   await modeRegion(page, 'window').getByTestId('prompt-submit').click();
   await expect(modeRegion(page, 'window').getByTestId('pending-send')).toContainText('One queued offline send');
   await composer(page, 'window').fill('Later editable draft'); await mode(page, 'bot');
-  const nav = modeRegion(page, 'bot').getByRole('navigation', { name: 'Assistants', exact: true });
+  const nav = modeRegion(page, 'bot').getByRole('navigation', { name: 'Chats', exact: true });
   await nav.getByRole('button', { name: 'New session', exact: true }).click();
   await expectDraft(composer(page, 'bot'), 'Later editable draft');
   await expect(modeRegion(page, 'bot').getByTestId('pending-send')).toContainText('One queued offline send');
@@ -353,7 +349,7 @@ test('keeps an offline queue hidden, dispatches once on return and preserves the
 
 test('keeps normal question, approval and error controls visible in fixed Bot content', async ({ page }) => {
   const { agentId } = await openRecordedBot(page); await mode(page, 'bot');
-  const bot = modeRegion(page, 'bot'); await bot.getByRole('navigation', { name: 'Assistants', exact: true }).getByRole('button', { name: 'New session', exact: true }).click();
+  const bot = modeRegion(page, 'bot'); await bot.getByRole('navigation', { name: 'Chats', exact: true }).getByRole('button', { name: 'New session', exact: true }).click();
   const origin = new URL(page.url()).origin;
   const advance = await page.request.post(`/v1/lab/recorded/${encodeURIComponent(agentId)}/advance`, { headers: { origin } }); expect(advance.ok()).toBe(true);
   await bot.getByLabel('Stable (Recommended)').check(); await bot.getByRole('button', { name: 'Submit response', exact: true }).click();
@@ -398,7 +394,7 @@ test('reads long Bot labels with independent roster and conversation scrolling',
     const label = 'A readable label that wraps naturally across the available roster width. '.repeat(2).slice(0, 120);
     await mutate(client, id, { type: 'bot.update', viewId: original.id, details: { label, picture: { shape: 'squircle', color: '#35836b', gaze: 2 }, pinned: true } });
     await mode(page, 'bot');
-    const bot = modeRegion(page, 'bot'), nav = bot.getByRole('navigation', { name: 'Assistants', exact: true });
+    const bot = modeRegion(page, 'bot'), nav = bot.getByRole('navigation', { name: 'Chats', exact: true });
     const row = nav.locator('[data-bot-place]').filter({ hasText: label }); await expect(row).toHaveCount(1); await row.click();
     await expect(row).toHaveAccessibleName(title);
     // The stored picture wins over the generated avatar: its shape and its colour.
@@ -438,7 +434,7 @@ test('keeps Handoff modal and progress reachable across Bot and Window without r
     await page.goto(`${fixture.origin}/?window=${aId}`); await showWindowConversation(page);
     await composer(page, 'window').fill('Window A draft');
     await mode(page, 'bot');
-    const bot = modeRegion(page, 'bot'), nav = bot.getByRole('navigation', { name: 'Assistants', exact: true });
+    const bot = modeRegion(page, 'bot'), nav = bot.getByRole('navigation', { name: 'Chats', exact: true });
     await nav.getByRole('button', { name: 'Bot source S', exact: true }).click();
     await composer(page, 'bot').fill('Retained Bot source draft');
     await expect(bot.getByTestId('prompt-submit')).toBeEnabled();
@@ -527,7 +523,7 @@ for (const [width, height] of [[1440, 900], [1181, 800], [1180, 800], [390, 844]
     await composer(page, 'window').fill('Keep this draft across modes');
     await composer(page, 'window').evaluate(element => { (element as HTMLElement).dataset.task4Editor = 'retained'; });
     await mode(page, 'bot');
-    const bot = modeRegion(page, 'bot'), row = bot.getByRole('navigation', { name: 'Assistants', exact: true }).getByRole('button', { name: 'New session', exact: true });
+    const bot = modeRegion(page, 'bot'), row = bot.getByRole('navigation', { name: 'Chats', exact: true }).getByRole('button', { name: 'New session', exact: true });
     await expect(row).toBeVisible(); await row.focus(); await row.press('Enter');
     await expect(bot.getByRole('heading', { name: 'New session', exact: true })).toBeFocused();
     await expect(composer(page, 'bot')).toHaveAttribute('data-task4-editor', 'retained');

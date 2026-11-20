@@ -1,3 +1,4 @@
+import { openSettingsPage } from './all-sessions';
 import { clickSessionAction } from './session-actions';
 import { expect, test } from '@playwright/test';
 import { showNewSession } from './session-navigation';
@@ -25,8 +26,8 @@ test('global View stays usable while the main composition is minimized', async (
   await expect(primary).toBeHidden(); await expect(view).toBeVisible();
   await view.click(); await options.getByRole('checkbox', { name: 'Sidebar', exact: true }).check();
   await options.press('Escape');
-  await page.getByRole('button', { name: 'Sidebar settings', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Controller settings', exact: true })).toBeVisible();
+  await openSettingsPage(page);
+  await expect(page.locator('.lab-settings').first()).toBeVisible();
   await expect(primary).toBeHidden();
   await view.click(); await options.getByRole('checkbox', { name: 'Sidebar', exact: true }).uncheck();
   await options.getByRole('checkbox', { name: 'Header', exact: true }).check();

@@ -1,3 +1,4 @@
+import { openSettingsPage } from './all-sessions';
 import { showNewSession } from './session-navigation';
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
@@ -57,7 +58,7 @@ test('drives live DSH messages, tools, approval, todo, and replay only through v
   await expect(page.locator('article.agent-tool').filter({ hasText: 'bash' }).filter({ hasText: 'Completed' })).toBeVisible({ timeout: 180_000 });
   await expectAssistant(page, 'LIVE_DSH_APPROVAL_DONE');
 
-  await page.getByRole('button', { name: 'Sidebar settings', exact: true }).click();
+  await openSettingsPage(page, 'Advanced');
   await page.getByTestId('playback-stop-reader').click();
   await expect(page.getByText('Provider resource reader stopped.')).toBeVisible();
 

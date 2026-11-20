@@ -1,3 +1,4 @@
+import { backToWindows, openSettingsPage } from './all-sessions';
 import { expect, test, type Locator } from '@playwright/test';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-session-runtime';
 
@@ -87,11 +88,13 @@ for (const width of [320, 390, 844]) {
         await drawer.getByLabel('Workspace', { exact: true }).selectOption('');
         await drawer.getByLabel('Working directory', { exact: true }).fill(`/projects/${longValue}`);
         await expectContained(drawer);
-        await drawer.getByRole('button', { name: 'Settings', exact: true }).click();
-        await drawer.getByRole('button', { name: 'Pair Agent Host', exact: true }).click();
-        await expectContained(drawer);
+        // Settings > Computers is its own page, from the Me tab; the tab bar leads back to the Window and its sessions.
+        const settings = await openSettingsPage(page, 'Computers');
+        await settings.getByRole('button', { name: 'Pair a computer', exact: true }).click();
+        await expectContained(settings);
         await page.screenshot({ path: testInfo.outputPath(`${provider.providerId}-settings.png`) });
-        await drawer.getByRole('button', { name: 'Pair Agent Host', exact: true }).click();
+        await backToWindows(page);
+        await page.getByRole('button', { name: 'Open sessions', exact: true }).click();
         await drawer.getByRole('button', { name: 'Sessions', exact: true }).click();
         expect(requests).toContain(`/remote/catalog:${provider.providerId}`);
         expect(requests).toContain(`/remote/workspaces:${provider.providerId}`);

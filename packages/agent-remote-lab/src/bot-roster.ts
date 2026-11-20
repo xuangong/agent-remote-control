@@ -1,11 +1,11 @@
 import { botViews, hasBotAppearance, windowSessionIdentity, type WindowBotDetails, type WindowGroup, type WindowSessionBinding, type WindowView } from '@orchardworks/agent-remote-protocol';
-import { assistantStatus, type AssistantStatus, type Translate } from '@orchardworks/agent-client';
+import { assistantStatus, translator, type AssistantStatus, type Translate } from '@orchardworks/agent-client';
 import type { SessionActivityStatus } from './session-activity-status.js';
 import { sessionKey, type SessionEntry } from './session-tree.js';
 import { accountNames, type AccountNames } from './assistant-names.js';
 
-/** A bot's position, shown as a tag beside its name like a job title; ordinary bots have none. */
-export type BotRole = 'Side' | 'Team Leader' | 'Team member' | 'Support' | 'TPM';
+/** A bot's position, shown as a tag beside its name like a job title, in the reader's words; ordinary bots have none. */
+export type BotRole = string;
 /** An Ask: the only secondary level, listed under the bot it belongs to. */
 export interface BotAsk { viewId: string; title: string }
 /** A native session, wherever it runs. */
@@ -72,14 +72,14 @@ export function sortDirectorySessions(entries: readonly DatedSessionEntry[]): Da
 }
 
 /** The role a bot's view carries: from its feature (Team, Support, TPM) or, for a Side, from being attached to its source. */
-export function botRole(view: WindowView, supportTeam?: (teamId: string) => boolean): BotRole | undefined {
-  if (view.feature?.kind === 'tpm') return 'TPM';
+export function botRole(view: WindowView, supportTeam?: (teamId: string) => boolean, t: Translate = translator('en')): BotRole | undefined {
+  if (view.feature?.kind === 'tpm') return t('navigation.roleTpm');
   if (view.feature?.kind === 'team') {
     const role = view.feature.metadata?.role;
-    if (role === 'leader') return supportTeam?.(view.feature.id) ? 'Support' : 'Team Leader';
-    if (role === 'member') return 'Team member';
+    if (role === 'leader') return supportTeam?.(view.feature.id) ? t('navigation.roleSupport') : t('navigation.roleTeamLeader');
+    if (role === 'member') return t('navigation.roleTeamMember');
   }
-  if (view.placement === 'attached') return 'Side';
+  if (view.placement === 'attached') return t('navigation.roleSide');
 }
 
 
@@ -128,7 +128,7 @@ export function projectBotRoster(groups: readonly WindowGroup[], directory: read
       const host = options.host?.(session.hostId), activity = activities[index]!;
       const assistant = assistantStatus({ activity, ...(host ? { host } : {}), asleep: !!details.asleep, waitingToSend: waiting, ...(reply ? { replyPreview: reply.preview } : {}) }, options.t);
       return { groupId: group.window.id, viewId: view.id, binding: view.binding, name: names.view(group.window.id, view.id), session, details, activity, assistant,
-        ...(botRole(view, options.supportTeam) ? { role: botRole(view, options.supportTeam)! } : {}),
+        ...(botRole(view, options.supportTeam, options.t) ? { role: botRole(view, options.supportTeam, options.t)! } : {}),
         asks: asks.filter(ask => ask.closeWith === view.id).map(ask => ({ viewId: ask.id, title: ask.binding?.title ?? 'Ask' })),
         ...(reply ? { reply } : {}), ...(latest && options.unread?.(latest.owner, latest.reply.replyAt) ? { unread: true as const } : {}),
         ...(draft?.trim() ? { draft } : {}), ...(waiting ? { waiting: true as const } : {}),

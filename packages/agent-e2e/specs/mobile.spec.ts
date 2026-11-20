@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { backToWindows, openSettingsPage } from './all-sessions';
 import { toggleViewPanel } from './view-options';
 import { showNewSession } from './session-navigation';
 
@@ -106,7 +107,6 @@ test('keeps drawer dismissal reachable after scrolling and preserves the chat dr
   await expect(drawer).toBeVisible();
   expect((await drawer.boundingBox())!.width).toBe(390);
   await expect(drawer.getByTestId('session-create')).toBeHidden();
-  await expect(drawer.getByRole('button', { name: 'Pair Agent Host', exact: true })).toBeHidden();
   await expect(drawer.getByRole('searchbox')).toBeVisible();
   await drawer.getByRole('searchbox').fill('no-matching-session-xyz');
   await expect(drawer.locator('.lab-session-row')).toHaveCount(0);
@@ -186,38 +186,39 @@ for (const width of [320, 390]) {
       online: true, managed: true, access: 'owner', credentialRotation: true,
       providers: [{ providerId: 'codex', displayName: 'Codex' }],
     }] } }));
-    await page.getByRole('button', { name: 'Open sessions', exact: true }).tap();
-    const drawer = page.getByRole('dialog', { name: 'Context', exact: true });
-    await drawer.getByRole('button', { name: 'Settings', exact: true }).tap();
-    await drawer.getByRole('button', { name: 'Retry Hosts', exact: true }).tap();
-    await expect(drawer.locator('#remote-host option')).toContainText(['Lab server', 'DevelopmentWorkstation']);
-    await drawer.getByRole('combobox', { name: 'Connected Host' }).selectOption('phone-host');
-    await drawer.getByRole('button', { name: 'Rotate credential', exact: true }).tap();
+    // Settings > Computers, from the Me tab: the list of computers, then pairing, then a computer's own page.
+    const settings = await openSettingsPage(page, 'Computers');
+    await expect(settings.locator('.lab-host-card')).toContainText('DevelopmentWorkstation');
     // Only the creation is mocked; the history list the panel reads first keeps its own shape.
     await page.route('**/v1/remote/pairings', route => route.request().method() !== 'POST' ? route.fallback() : route.fulfill({ json: {
       id: 'pairing-phone', purpose: 'host', status: 'unused',
       key: 'arc_test_' + 'x'.repeat(64), expiresAt: new Date(Date.now() + 60000).toISOString(),
       serverUrl: 'https://agents.example.test', command: 'AGENT_HOST_REMOTE_KEY=arc_test_' + 'x'.repeat(64) + ' agent-remote-controller start',
     } }));
-    await drawer.getByRole('button', { name: 'Pair Agent Host', exact: true }).tap();
+    await settings.getByRole('button', { name: 'Pair a computer', exact: true }).tap();
     const created = page.waitForResponse(response => response.url().endsWith('/v1/remote/pairings') && response.request().method() === 'POST');
-    await drawer.getByRole('button', { name: 'Generate pairing key', exact: true }).tap();
+    await settings.getByRole('button', { name: 'Generate pairing key', exact: true }).tap();
     await created;
-    // The install commands have long unbroken lines; they must scroll inside the drawer.
-    await expect(drawer.locator('pre, code').filter({ hasText: 'agent-remote-controller start' }).first()).toBeAttached();
+    // The install commands have long unbroken lines; they must scroll inside the page.
+    await expect(settings.locator('pre, code').filter({ hasText: 'agent-remote-controller start' }).first()).toBeAttached();
     await page.screenshot({ path: testInfo.outputPath('settings-pairing.png') });
-    expect(await drawer.evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
-    const controls = await drawer.locator('button:visible, select:visible, textarea:visible').evaluateAll(elements => elements.map(element => {
-      const rect = element.getBoundingClientRect(); return { left: rect.left, right: rect.right };
-    }));
-    for (const bounds of controls) { expect(bounds.left).toBeGreaterThanOrEqual(0); expect(bounds.right).toBeLessThanOrEqual(width); }
+    const fits = async () => {
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+      const controls = await settings.locator('button:visible, select:visible, textarea:visible').evaluateAll(elements => elements.map(element => {
+        const rect = element.getBoundingClientRect(); return { left: rect.left, right: rect.right };
+      }));
+      for (const bounds of controls) { expect(bounds.left).toBeGreaterThanOrEqual(0); expect(bounds.right).toBeLessThanOrEqual(width); }
+    };
+    await fits();
+    await settings.locator('.lab-host-open').first().tap();
+    await settings.getByRole('button', { name: 'Rotate credential', exact: true }).tap();
+    await fits();
   });
 }
 
+/** Settings > General, where this device's display (full screen) is chosen; the Me tab leads there. */
 async function openSettings(page: Page) {
-  await page.getByRole('button', { name: 'Open sessions', exact: true }).tap();
-  await page.getByRole('button', { name: 'Settings', exact: true }).tap();
-  return page.getByRole('region', { name: 'Controller settings', exact: true });
+  return openSettingsPage(page, 'General');
 }
 
 test('enters and exits browser fullscreen while preserving the current conversation', async ({ page }, testInfo) => {
@@ -228,7 +229,7 @@ test('enters and exits browser fullscreen while preserving the current conversat
   await settings.getByRole('button', { name: 'Enter full screen', exact: true }).tap();
   await expect.poll(() => page.evaluate(() => document.fullscreenElement === document.documentElement)).toBe(true);
   await expect(settings.getByRole('button', { name: 'Exit full screen', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Close Context', exact: true }).tap();
+  await backToWindows(page);
   await expect(page.getByTestId('prompt-input')).toHaveText('Keep this fullscreen draft');
   await expect.poll(async () => (await page.locator('.lab-shell').boundingBox())!.height).toBe(await page.evaluate(() => visualViewport!.height));
   await openSettings(page);

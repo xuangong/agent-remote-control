@@ -1,11 +1,12 @@
 import { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AgentCommand, AgentCommandResult } from '@orchardworks/agent-remote-protocol';
+import type { AgentCommandResult } from '@orchardworks/agent-remote-protocol';
+import type { ConsoleCommand } from '@orchardworks/agent-client-web/react';
 import type { SessionEntry } from '../session-tree.js';
 import { SessionAttentionNotifications } from '../session-notifications.js';
 import type { SessionObservation } from '../tracking-state.js';
 import type { WorkbenchMode } from '../workbench-mode.js';
 
-export const TrackViewCommand = { id: 'console:track', name: 'track', kind: 'command', description: 'Toggle Track view; use /track on or /track off', inputHint: '[on|off]' } satisfies AgentCommand;
+export const TrackViewCommand = { id: 'console:track', name: 'track', kind: 'command', description: 'Toggle Track view; use /track on or /track off', descriptionKey: 'sessions.console.track', inputHint: '[on|off]' } satisfies ConsoleCommand;
 export const TrackViewScope = createContext<((args: string) => Promise<AgentCommandResult>) | undefined>(undefined);
 const trackKey = 'agent-remote:track-view';
 const notificationKey = 'agent-remote:desktop-notifications';

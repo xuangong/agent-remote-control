@@ -12,7 +12,7 @@ const laptop = { name: 'Laptop', providers: [{ providerId: 'claude', displayName
 // Two Controllers, two devices and a Handoff take longer than one page.
 test.describe.configure({ timeout: 120_000 });
 type Fixture = Awaited<ReturnType<typeof crossHostFixture>>;
-const bots = (page: Page) => page.locator('[data-workbench-mode="bot"]').getByRole('navigation', { name: 'Assistants', exact: true });
+const bots = (page: Page) => page.locator('[data-workbench-mode="bot"]').getByRole('navigation', { name: 'Chats', exact: true });
 const conversation = (page: Page) => page.locator('[data-workbench-mode="bot"]').getByRole('region', { name: 'Bot conversation', exact: true });
 const composer = (page: Page) => page.locator('[data-workbench-mode="bot"]').getByTestId('prompt-input').locator('visible=true');
 const row = (page: Page, name: string) => bots(page).getByRole('button', { name, exact: true });

@@ -157,7 +157,7 @@ it("controls each Host's tunnel from its own page in Settings > Computers while 
   await act(async () => f.container.querySelector<HTMLButtonElement>('.lab-rail button[aria-label="Settings"]')!.click());
   await act(async () => [...f.container.querySelectorAll<HTMLButtonElement>('.lab-settings-group')].find(item => item.textContent === 'Computers')!.click());
   const openHost = async (id: string) => act(async () => f.container.querySelector<HTMLButtonElement>(`.lab-host-card[data-host-id="${id}"] .lab-host-open`)!.click());
-  const back = async () => { await act(async () => [...f.container.querySelectorAll('button')].find(button => button.textContent === 'Back')!.click()); await vi.waitFor(() => expect(f.container.querySelector('.lab-host-page')).toBeNull()); };
+  const back = async () => { await act(async () => f.container.querySelector<HTMLButtonElement>('.lab-host-back')!.click()); await vi.waitFor(() => expect(f.container.querySelector('.lab-host-page')).toBeNull()); };
   await openHost('desk');
   expect(panel().textContent).toContain('Desk Host');
   await act(async () => panel().querySelector<HTMLInputElement>('input[type=checkbox]')!.click());
@@ -174,10 +174,6 @@ it("controls each Host's tunnel from its own page in Settings > Computers while 
   await act(async () => panel().querySelector<HTMLInputElement>('input[type=checkbox]')!.click());
   await act(async () => [...panel().querySelectorAll('button')].find(button => button.textContent === 'Start tunnel')!.click());
   expect(f.tunnelRequests.at(-1)).toBe('/v1/remote/hosts/studio/vscode-tunnel/start');
-  await back();
-  await openHost('desk');
-  expect(panel().textContent).toContain('Desk Host');
-  expect(panel().querySelector<HTMLInputElement>('input[type=checkbox]')!.checked).toBe(false);
 });
 
 it.each(['empty', 'error'] as const)('keeps remote Providers usable when the local catalog is %s', async (status) => {

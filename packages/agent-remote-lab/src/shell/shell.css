@@ -15,6 +15,9 @@
 @media (max-width: 1180px) { .lab-frame > .lab-shell { inset-inline-start: var(--lab-rail-width); }
   .lab-frame > .lab-shell:not([hidden]) { inset-inline-end: 0; } }
 
+/* Under the tab bar the home indicator is the bar's, so the composer above it pads nothing for it. */
+.lab-frame[data-tab-bar] > .lab-shell { --lab-composer-bottom-inset: 0px; }
+
 /* The icon rail: a narrow floating panel at the far left; buttons are 42 px, 44 px under a coarse pointer. */
 .lab-rail.orchard-panel.orchard-panel { flex: none; align-self: stretch; box-sizing: border-box; width: 60px; margin: var(--orchard-space-l) 0 var(--orchard-space-l) var(--orchard-space-l); padding: var(--orchard-space-l) 0; }
 .lab-rail nav { display: flex; flex-direction: column; align-items: center; gap: var(--orchard-space-s); height: 100%; }

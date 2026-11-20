@@ -11,7 +11,8 @@ import { PROTOCOL_VERSION, type AgentInteractionRequest } from '@orchardworks/ag
 import { createReplicaState, type AgentReplicaState, type RemoteSessionStatus } from '@orchardworks/agent-client';
 import { buildEveryKindConversation, buildTailPage, TimelineRows } from '@orchardworks/agent-client/testing';
 import { bindAppearance } from '@orchardworks/agent-client-web/browser';
-import { browserLocale, LocaleContext } from '@orchardworks/agent-client-web/react';
+import { browserLocale, LocaleProvider } from '@orchardworks/agent-client-web/react';
+import { deviceChoices } from '../../src/device-choices.js';
 import { AssistantAvatar, MotionProvider } from '@orchardworks/agent-client-web/primitives';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { EarlierConversation, type EarlierTransport } from '../../src/components/EarlierConversation.js';
@@ -96,4 +97,4 @@ function Fixture() {
   return <Conversation />;
 }
 
-createRoot(document.getElementById('root')!).render(<LocaleContext.Provider value={locale}><MotionProvider><Fixture /></MotionProvider></LocaleContext.Provider>);
+createRoot(document.getElementById('root')!).render(<LocaleProvider language={deviceChoices().language}><MotionProvider><Fixture /></MotionProvider></LocaleProvider>);

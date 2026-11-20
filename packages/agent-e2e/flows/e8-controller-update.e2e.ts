@@ -6,7 +6,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import { startStack, type Stack } from '@orchardworks/agent-e2e/stack';
 import { launchBrowser, openPage } from './browser.js';
-import { openSettings, showsText } from './page.js';
+import { openComputer, openSettings, showsText } from './page.js';
 
 const release = {
   protocolVersion: PROTOCOL_VERSION, version: '0.2.0', revision: 'b'.repeat(40), sha256: 'c'.repeat(64),
@@ -23,7 +23,8 @@ afterAll(async () => { await browser?.close(); await stack?.close(); });
 it('E8: the page offers the newer release, installs it on the Host, and shows the Host updated after the Controller restarts', async () => {
   const { context, page } = await openPage(browser, stack.sessionUrl('work'));
   await showsText(page, 'Start');
-  await openSettings(page);
+  await openSettings(page, 'Computers');
+  await openComputer(page, 'E2E Host');
   await page.getByRole('button', { name: /Controller updates/ }).click();
   await showsText(page, 'Latest version: 0.2.0');
   expect(await page.getByRole('region', { name: 'Host name' }).first().innerText()).toContain('E2E Host');

@@ -11,6 +11,7 @@ import { HostProviders } from '../components/HostProviders.js';
 import { HostSecurityActions } from '../components/HostSecurityActions.js';
 import { HostVscodeTunnel } from '../components/HostVscodeTunnel.js';
 import { VscodeTunnelScope, type VscodeTunnelService } from '../vscode-tunnel.js';
+import { Icon } from '../ui/Icon.js';
 import { usePhoneLayout } from '../hooks/usePhoneLayout.js';
 import { computerItems } from './settings-groups.js';
 import { SettingsRow, SettingsSection } from './SettingsRow.js';
@@ -60,7 +61,7 @@ function HostPage({ host, services, visible, onBack }: { host: RemoteHost; servi
   const subtitle = [host.environment?.os.name ?? host.controller?.platform, host.environment?.os.arch ?? host.controller?.arch, host.controller ? t('settings.computer.version', { version: host.controller.version }) : undefined].filter(Boolean).join(' · ');
   return <div className="lab-host-page" data-host-id={host.id}>
     <div className="lab-host-page-head">
-      <Pill onClick={onBack}>{t('common.back')}</Pill>
+      <Pill className="lab-host-back" onClick={onBack}><Icon name="chevron-left" size={16} />{t('settings.computers.back')}</Pill>
       <div><h2>{host.name}</h2><p><span className="lab-host-dot-lead" data-host-state={host.online ? 'online' : 'offline'} aria-hidden="true" />{host.online ? t('settings.computer.online') : t('settings.computer.offline')}{subtitle ? ` · ${subtitle}` : ''}</p></div>
     </div>
     <SettingsSection title={t('settings.computer.system')}><div className="lab-setting-legacy"><HostEnvironmentDetails host={host} /></div></SettingsSection>

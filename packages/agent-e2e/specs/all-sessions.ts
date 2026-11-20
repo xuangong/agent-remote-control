@@ -2,8 +2,8 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import { showSessions } from './session-navigation';
 import { toggleViewPanel } from './view-options';
 
-/** Opens a sessions page on desktop (All sessions, Favorites or Settings), showing the sidebar first if it is hidden, and returns the page; on compact layouts the panels stay in the Context dialog. */
-export async function openSessionsPage(page: Page, entry: 'All sessions' | 'Favorites' | 'Settings' = 'All sessions'): Promise<Locator> {
+/** Opens a sessions page on desktop (All sessions or Favorites), showing the sidebar first if it is hidden, and returns the page; on compact layouts the panels stay in the Context dialog. */
+export async function openSessionsPage(page: Page, entry: 'All sessions' | 'Favorites' = 'All sessions'): Promise<Locator> {
   const rail = page.locator('#lab-context');
   await expect(page.locator('.lab-shell')).toBeVisible();
   // The sidebar starts hidden when the page opens with a session (opening one later keeps it); show it, and retry until it is visible.
@@ -11,11 +11,37 @@ export async function openSessionsPage(page: Page, entry: 'All sessions' | 'Favo
     if (!await rail.isVisible()) await toggleViewPanel(page, 'Sidebar');
     await expect(rail).toBeVisible({ timeout: 1000 });
   }).toPass();
-  if (entry === 'Settings') await rail.getByRole('button', { name: 'Sidebar settings', exact: true }).click();
-  else await rail.getByRole('navigation', { name: 'Shortcuts' }).getByRole('button', { name: entry, exact: true }).click();
+  await rail.getByRole('navigation', { name: 'Shortcuts' }).getByRole('button', { name: entry, exact: true }).click();
   const sessions = page.locator('#lab-sessions-page');
   await sessions.waitFor({ state: 'visible' });
   return sessions;
+}
+
+/**
+ * Opens Settings from the rail (the Me tab on a phone), then a group of its list when one is named, and returns the page. The groups
+ * are General, Assistants, Computers, Privacy and data, Advanced, and Account and about.
+ */
+export async function openSettingsPage(page: Page, group?: string): Promise<Locator> {
+  const rail = page.locator('.lab-rail'), tabs = page.locator('.lab-tab-bar');
+  await expect(rail.or(tabs)).toBeVisible();
+  if (await rail.isVisible()) await rail.getByRole('button', { name: 'Settings', exact: true }).click();
+  else await tabs.getByRole('button', { name: 'Me', exact: true }).click();
+  const settings = page.locator('.lab-settings').first();
+  await settings.waitFor({ state: 'visible' });
+  if (group) {
+    const back = page.locator('.lab-settings-head').getByRole('button').first();
+    if (await back.isVisible()) await back.click();
+    await page.locator('.lab-settings-group').filter({ has: page.locator('strong', { hasText: new RegExp(`^${group}$`) }) }).click();
+  }
+  return settings;
+}
+
+/** Returns from Settings (or the directory) to the Window by the rail's, or the tab bar's, Windows. */
+export async function backToWindows(page: Page): Promise<void> {
+  const rail = page.locator('.lab-rail'), tabs = page.locator('.lab-tab-bar');
+  if (await rail.isVisible()) await rail.getByRole('button', { name: 'Windows', exact: true }).click();
+  else await tabs.getByRole('button', { name: 'Windows', exact: true }).click();
+  await expect(page.locator('.lab-page')).toBeHidden();
 }
 
 /** Shows the session list on any layout: the All sessions page on desktop, the Context dialog's Sessions tab on compact layouts. Returns what holds it. */

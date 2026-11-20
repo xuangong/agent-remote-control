@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
+import type { AccountFacts } from '../../src/account.js';
 import { createRoot } from 'react-dom/client';
-import type { ReactNode } from 'react';
 import { GatewayController } from '../../src/GatewayController.js';
 import type { HttpWebSocketTransport, RemoteAgentTransport, RemoteTransportListener } from '@orchardworks/agent-client';
 import type { AgentStatus } from '@orchardworks/agent-remote-protocol';
@@ -99,10 +99,11 @@ const status = requestedStatus === 'waiting' || requestedStatus === 'idle' ? req
 const entries = longConversation ? Array.from({ length: 30 }, (_, index) => ({ providerId: 'recorded', seqStart: index + 1, seqEnd: index + 1, timestamp: '2026-09-20T00:00:00Z',
   sourceSeqRanges: [{ startSeq: index + 1, endSeq: index + 1 }], collapsed: [], resources: [],
   item: { type: 'assistant_message' as const, messageId: `message-${index + 1}`, text: `Item ${index + 1}. ${'Readable conversation text that must stay uncovered. '.repeat(4)}` } })) : [];
-const app = (accountAction: ReactNode) => <App baseUrl={baseUrl} userScoped transport={transport} directory={directory} hostService={hostService}
+const aliceAccount: AccountFacts = { name: 'Alice Example', ready: true, openSecurity: () => {}, signOut: () => {} };
+const app = (account?: AccountFacts) => <App baseUrl={baseUrl} userScoped transport={transport} directory={directory} hostService={hostService}
   initialState={{ ...replicaState, agent: { ...replicaState.agent!, status }, timeline: { ...replicaState.timeline, hasOlder: false, ...(longConversation ? { entries, nextSeq: entries.length + 1 } : {}) } }} initialSessionStatus="ready"
-  accountAction={accountAction} />;
+  {...(account ? { account } : {})} />;
 openInWindowMode();
 createRoot(document.getElementById('root')!).render(new URLSearchParams(location.search).has('gateway')
-  ? <GatewayController>{(_baseUrl, accountAction) => app(accountAction)}</GatewayController>
-  : app(<><span className="gateway-account-identity">Alice Example</span><button>Security</button><button>Sign out</button></>));
+  ? <GatewayController>{(_baseUrl, account) => app(account)}</GatewayController>
+  : app(aliceAccount));

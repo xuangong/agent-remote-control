@@ -171,7 +171,7 @@ export function BotWorkspace({ visible, covered = false, compact, scope, workspa
           </div>)}
         </div>} /></div>
     </aside>
-    <section className="lab-bot-conversation orchard-panel" aria-label="Bot conversation" hidden={phone && !showConversation}
+    <section className="lab-bot-conversation orchard-panel" aria-label={t('navigation.botConversation')} hidden={phone && !showConversation}
       onTouchStart={event => { const touch = event.touches[0]; edgeSwipe.current = phone && touch && touch.clientX <= 24 ? { x: touch.clientX, y: touch.clientY } : undefined; }}
       onTouchEnd={event => {
         const start = edgeSwipe.current, touch = event.changedTouches[0]; edgeSwipe.current = undefined;

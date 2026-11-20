@@ -1,6 +1,6 @@
 import { showNewSession, showSessions } from './session-navigation';
 import { toggleViewPanel } from './view-options';
-import { openSessionsPage } from './all-sessions';
+import { backToWindows, openSettingsPage } from './all-sessions';
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
@@ -157,20 +157,14 @@ function contextRail(page: Page, testInfo: TestInfo): Locator {
   return isCompact(testInfo) ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-sessions-page');
 }
 
-async function openContextForFixture(page: Page, testInfo: TestInfo): Promise<Locator> {
-  if (isCompact(testInfo)) {
-    await showSessions(page);
-    await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  } else await openSessionsPage(page, 'Settings');
-  return contextRail(page, testInfo);
+/** The lab's scenario controls are under Settings > Advanced. */
+async function openContextForFixture(page: Page, _testInfo: TestInfo): Promise<Locator> {
+  return openSettingsPage(page, 'Advanced');
 }
 
-/** Returns to the conversation: compact layouts close the Context dialog; desktop leaves the Settings page that covers the Window. */
-async function closeContextForFixture(page: Page, testInfo: TestInfo): Promise<void> {
-  if (isCompact(testInfo)) { await page.getByRole('button', { name: 'Close Context' }).click(); return; }
-  const sessions = page.locator('#lab-sessions-page');
-  await sessions.getByRole('button', { name: 'Back to Window', exact: true }).click();
-  await expect(sessions).toBeHidden();
+/** Returns to the conversation: Settings covers the Window until the rail's Windows (the tab bar's on a phone) goes back. */
+async function closeContextForFixture(page: Page, _testInfo: TestInfo): Promise<void> {
+  await backToWindows(page);
 }
 
 async function openInspector(page: Page, testInfo: TestInfo): Promise<Locator> {

@@ -25,8 +25,9 @@ function usageText(used: number, total: number): string {
   return usedText.endsWith(unit) ? `${usedText.slice(0, -3)} / ${totalText}` : `${usedText} / ${totalText}`;
 }
 const lastSegment = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
-const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
+/** The fallback for a status read that failed without saying why; the card shows it through the catalogue. */
+const STATUS_UNAVAILABLE = '';
 interface HostReading { status?: HostStatus; error?: string }
 
 /** Reads the status of every online Host that offers it, while the page is visible; a failed read keeps the last figures. */
@@ -47,7 +48,7 @@ function useHostStatuses(service: Pick<HostPairingService, 'hostStatus'>, hosts:
         if (reading.has(id)) continue;
         reading.add(id);
         read(id).then(status => update(id, () => ({ status })),
-          (error: unknown) => update(id, previous => ({ ...previous, error: error instanceof Error ? error.message : 'Status unavailable.' })))
+          (error: unknown) => update(id, previous => ({ ...previous, error: error instanceof Error ? error.message : STATUS_UNAVAILABLE })))
           .finally(() => reading.delete(id));
       }
     };
@@ -58,30 +59,32 @@ function useHostStatuses(service: Pick<HostPairingService, 'hostStatus'>, hosts:
   return readings;
 }
 
-function Meter({ label, value, total, text, title }: { label: string; value: number; total: number; text: string; title?: string }) {
+function Meter({ label, name, value, total, text, title }: { label: string; name?: string; value: number; total: number; text: string; title?: string }) {
   const share = total > 0 ? Math.min(1, value / total) : 0, percent = Math.round(share * 100);
-  return <div className="lab-host-meter" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}
+  return <div className="lab-host-meter" role="meter" aria-label={name ?? label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}
     title={title} data-warning={share >= WARNING_SHARE || undefined}>
-    <div className="lab-host-meter-line"><span>{label.replace(/ disk$/, '')}</span><span className="lab-host-meter-value">{text}</span></div>
+    <div className="lab-host-meter-line"><span>{label}</span><span className="lab-host-meter-value">{text}</span></div>
     <div className="lab-host-bar" aria-hidden="true"><i style={{ width: `${percent}%` }} /></div>
   </div>;
 }
 
 /** The open sessions as a count, then by state, with the ones that need their owner stressed. */
 function Sessions({ sessions }: { sessions: HostStatus['sessions'] }) {
+  const t = useTranslate();
   const total = sessions.running + sessions.waiting + sessions.idle + sessions.failed;
-  const parts: ReactNode[] = [sessions.running ? `${sessions.running} working` : null, sessions.waiting ? <em>{sessions.waiting} needs you</em> : null,
-    sessions.idle ? `${sessions.idle} idle` : null, sessions.failed ? `${sessions.failed} failed` : null].filter(part => part !== null);
+  const parts: ReactNode[] = [sessions.running ? t('hosts.sessionsWorking', { count: sessions.running }) : null, sessions.waiting ? <em>{t('hosts.sessionsNeedYou', { count: sessions.waiting })}</em> : null,
+    sessions.idle ? t('hosts.sessionsIdle', { count: sessions.idle }) : null, sessions.failed ? t('hosts.sessionsFailed', { count: sessions.failed }) : null].filter(part => part !== null);
   return <div className="lab-host-sessions">
-    <strong>{total}</strong> <span>{total === 1 ? 'session' : 'sessions'}</span>
+    <strong>{total}</strong> <span>{t('hosts.sessionNoun', { count: total })}</span>
     {parts.length ? <> <small>{parts.map((part, index) => <Fragment key={index}>{index ? ' · ' : null}{part}</Fragment>)}</small></> : null}
   </div>;
 }
 
 function HostCard({ host, reading, onOpenHost }: { host: RemoteHost; reading?: HostReading; onOpenHost(id: string): void }) {
+  const t = useTranslate();
   const status = reading?.status, shared = host.access === 'shared';
   const subtitle = [host.environment?.os.name ?? host.controller?.platform, host.environment?.os.arch ?? host.controller?.arch,
-    host.controller ? `Controller ${host.controller.version}` : undefined].filter(Boolean).join(' · ');
+    host.controller ? t('settings.computer.version', { version: host.controller.version }) : undefined].filter(Boolean).join(' · ');
   return <article className="lab-host-card" data-host-id={host.id} data-online={host.online || undefined}>
     <button type="button" className="lab-host-open" onClick={() => onOpenHost(host.id)}>
       <span className="lab-host-dot" aria-hidden="true" />
@@ -90,22 +93,22 @@ function HostCard({ host, reading, onOpenHost }: { host: RemoteHost; reading?: H
     </button>
     {host.online && status ? <Sessions sessions={status.sessions} /> : null}
     {host.online && status?.cpu || host.online && status?.memory || host.online && status?.disks ? <div className="lab-host-meters">
-      {status.cpu ? <Meter label="CPU" value={status.cpu.usage} total={1} text={`${Math.round(status.cpu.usage * 100)}% · ${plural(status.cpu.cores, 'core')}`} /> : null}
-      {status.memory ? <Meter label="Memory" value={status.memory.used} total={status.memory.total} text={usageText(status.memory.used, status.memory.total)} /> : null}
-      {status.disks?.map(disk => <Meter key={disk.path} label={`${disk.kind === 'home' ? 'Home' : lastSegment(disk.path)} disk`} title={disk.path}
+      {status.cpu ? <Meter label="CPU" value={status.cpu.usage} total={1} text={`${Math.round(status.cpu.usage * 100)}% · ${t('hosts.cores', { count: status.cpu.cores })}`} /> : null}
+      {status.memory ? <Meter label={t('hosts.memory')} value={status.memory.used} total={status.memory.total} text={usageText(status.memory.used, status.memory.total)} /> : null}
+      {status.disks?.map(disk => <Meter key={disk.path} label={disk.kind === 'home' ? t('hosts.home') : lastSegment(disk.path)} name={t('hosts.disk', { name: disk.kind === 'home' ? t('hosts.home') : lastSegment(disk.path) })} title={disk.path}
         value={disk.used} total={disk.total} text={usageText(disk.used, disk.total)} />)}
     </div> : null}
-    {!host.online ? <p className="lab-host-note">Offline</p>
+    {!host.online ? <p className="lab-host-note">{t('settings.computer.offline')}</p>
       : !host.sessionControl ? <p className="lab-host-note" role="status" data-update-required>
-        {shared ? 'Update required: the owner must update this Controller before its sessions open.'
+        {shared ? t('hosts.updateSharedOwner')
           : !host.controller && host.providers?.some(provider => provider.providerId === 'dsh')
-            ? 'Update required: this Host cannot send or open sessions from here until its DSH agent-remote plugin is updated on that machine.'
-            : <>Update required: this Controller cannot send or open sessions from here until it is updated. Use Update, or on that machine run <code>agent-remote-controller update --check</code> and follow it.</>}
-        {!shared && host.controller ? <Button className="lab-host-update" onClick={() => onOpenHost(host.id)}>Update</Button> : null}</p>
-      : !host.hostStatus ? <p className="lab-host-note">{shared ? 'Sessions show once the owner updates the Controller.' : 'Update the Controller to see CPU, memory and disks.'}
-        {!shared ? <Button className="lab-host-update" onClick={() => onOpenHost(host.id)}>Update</Button> : null}</p>
-      : shared && status ? <p className="lab-host-note">Shared with you: sessions only.</p> : null}
-    {host.online && reading?.error ? <p className="lab-host-note" role="status">{reading.error}</p> : null}
+            ? t('hosts.updateDsh')
+            : <>{t('hosts.updateControllerBefore')}<code>agent-remote-controller update --check</code>{t('hosts.updateControllerAfter')}</>}
+        {!shared && host.controller ? <Button className="lab-host-update" onClick={() => onOpenHost(host.id)}>{t('hosts.updateAction')}</Button> : null}</p>
+      : !host.hostStatus ? <p className="lab-host-note">{shared ? t('hosts.sharedNeedsUpdate') : t('hosts.needsUpdateToSee')}
+        {!shared ? <Button className="lab-host-update" onClick={() => onOpenHost(host.id)}>{t('hosts.updateAction')}</Button> : null}</p>
+      : shared && status ? <p className="lab-host-note">{t('hosts.sharedSessionsOnly')}</p> : null}
+    {host.online && reading?.error ? <p className="lab-host-note" role="status">{reading.error || t('hosts.statusUnavailable')}</p> : null}
   </article>;
 }
 
@@ -124,6 +127,6 @@ export function HostOverview({ hosts, service, visible, compact = false, lead, o
     {pairing ? <div className="lab-host-pairing-panel"><PairingKeys service={service} /></div> : null}
     {hosts.length ? <div className="lab-host-grid" data-compact={compact || undefined}>
       {hosts.map(host => <HostCard key={host.id} host={host} reading={readings[host.id]} onOpenHost={onOpenHost} />)}
-    </div> : <p className="lab-host-empty">No Hosts paired yet. Pair a Host to see it here.</p>}
+    </div> : <p className="lab-host-empty">{t('hosts.empty')}</p>}
   </section>;
 }

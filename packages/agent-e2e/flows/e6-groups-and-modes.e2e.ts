@@ -4,7 +4,7 @@ import type { Browser, Page } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { startStack, type Stack } from '@orchardworks/agent-e2e/stack';
 import { launchBrowser, openPage } from './browser.js';
-import { composerOf, showSidebar, showsText } from './page.js';
+import { composerOf, goTo, showSidebar, showsText } from './page.js';
 
 let stack: Stack; let browser: Browser;
 beforeAll(async () => {
@@ -42,10 +42,10 @@ it('E6: a group is built by adding a second session to the Window', async () => 
 it('E6: Bot mode lists the group, opens one bot, and Window mode shows both panes again', async () => {
   const { page, close } = await groupOfTwo();
   const beta = await assistantOf(page, 'beta answer');
-  await page.getByRole('button', { name: 'Bot mode' }).first().click();
+  await goTo(page, 'Chats');
   await botRow(page, beta).click();
   await showsText(page, 'beta answer');
-  await page.getByRole('button', { name: 'Window mode' }).first().click();
+  await goTo(page, 'Windows');
   await showsText(page, 'alpha answer');
   await showsText(page, 'beta answer');
   await close();
@@ -63,10 +63,10 @@ it('E6: a draft stays in the composer when the person changes mode', async () =>
   const { page, close } = await groupOfTwo();
   await composerOf(page).first().fill('A draft that is not sent');
   const alpha = await assistantOf(page, 'alpha answer');
-  await page.getByRole('button', { name: 'Bot mode' }).first().click();
+  await goTo(page, 'Chats');
   await botRow(page, alpha).click();
   await showsText(page, 'alpha answer');
-  await page.getByRole('button', { name: 'Window mode' }).first().click();
+  await goTo(page, 'Windows');
   await showsText(page, 'alpha answer');
   const texts = await page.getByRole('textbox', { name: 'Message', exact: true }).allTextContents();
   expect(texts).toContain('A draft that is not sent');
@@ -76,7 +76,7 @@ it('E6: a draft stays in the composer when the person changes mode', async () =>
 it('E6: a bot put to sleep gives up its rows in Window mode, and opening it wakes it', async () => {
   const { page, close } = await groupOfTwo();
   const beta = await assistantOf(page, 'beta answer');
-  await page.getByRole('button', { name: 'Bot mode' }).first().click();
+  await goTo(page, 'Chats');
   // Sleep is in the bot's card menu, in its details beside the conversation (I3c).
   await botRow(page, beta).click();
   const title = page.locator('[data-workbench-mode="bot"] .lab-assistant-top-bar button.lab-assistant-title');
@@ -84,13 +84,13 @@ it('E6: a bot put to sleep gives up its rows in Window mode, and opening it wake
   await page.locator('.lab-assistant-details .lab-assistant-card-actions').getByRole('button', { name: /^More actions for / }).click();
   await page.getByRole('menuitem', { name: 'Sleep', exact: true }).click();
   await showsText(page, 'is asleep. Opening it wakes it.');
-  await page.getByRole('button', { name: 'Window mode' }).first().click();
+  await goTo(page, 'Windows');
   await showsText(page, 'alpha answer');
   await page.waitForFunction(() => !document.body.innerText.includes('beta answer'));
-  await page.getByRole('button', { name: 'Bot mode' }).first().click();
+  await goTo(page, 'Chats');
   await botRow(page, beta).click();
   await showsText(page, 'beta answer');
-  await page.getByRole('button', { name: 'Window mode' }).first().click();
+  await goTo(page, 'Windows');
   await showsText(page, 'alpha answer');
   await showsText(page, 'beta answer');
   await close();

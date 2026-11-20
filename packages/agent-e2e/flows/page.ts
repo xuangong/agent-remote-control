@@ -46,24 +46,13 @@ export async function closeDetails(page: Page): Promise<void> {
 }
 
 /**
- * Chooses how much of each turn's work shows, for every assistant on this device: from the session's view options where its
- * heading has them, else from the details of the tile or the assistant.
+ * Chooses how much of each turn's work shows, for every assistant on this device: Settings > Assistants, then back to where the person was.
  */
 export async function chooseProcessMode(page: Page, mode: 'Concise' | 'Process' | 'Full'): Promise<void> {
-  const expand = page.getByRole('button', { name: 'Expand session actions', exact: true });
-  if (await expand.isVisible()) await expand.click();
-  const options = page.getByRole('button', { name: 'Session view options', exact: true }).first();
-  const details = page.getByRole('button', { name: /^Details of / }).first();
-  await options.or(details).first().waitFor();
-  if (await options.isVisible()) {
-    await options.click();
-    await page.getByRole('group', { name: 'All assistants on this device' }).getByRole('button', { name: mode, exact: true }).click();
-    await page.keyboard.press('Escape');
-    return;
-  }
-  await details.click();
-  await assistantDetails(page).getByRole('group', { name: 'All assistants on this device' }).getByRole('button', { name: mode, exact: true }).click();
-  await assistantDetails(page).getByRole('button', { name: /^Close/ }).first().click();
+  const here = await page.locator('.lab-rail [aria-current="page"], .lab-tab-bar [aria-current="page"]').first().evaluate(node => node.getAttribute('aria-label') ?? node.textContent?.trim() ?? '');
+  await openSettings(page, 'Assistants');
+  await page.getByRole('group', { name: 'Default process display', exact: true }).getByRole('button', { name: mode, exact: true }).click();
+  await goTo(page, here === 'Chats' ? 'Chats' : 'Windows');
 }
 
 export async function showTrace(page: Page): Promise<void> {
@@ -71,24 +60,47 @@ export async function showTrace(page: Page): Promise<void> {
   await page.getByRole('tab', { name: 'Trace', exact: true }).click();
 }
 
-/** The sidebar rail: shown at once on an empty Window, hidden when the page opened with a session until View options turns it on. */
-async function showRail(page: Page): Promise<void> {
-  await page.locator('.lab-shell').waitFor();
-  const rail = page.locator('#lab-context');
-  if (await rail.waitFor({ state: 'visible', timeout: 1500 }).then(() => true, () => false)) return;
-  await toggleViewPanel(page, 'Sidebar');
-  await rail.waitFor({ state: 'visible' });
+/** The destination buttons of the page: the desktop's rail, or the phone's tab bar, whichever this width shows. */
+const destinations = (page: Page) => page.locator('.lab-rail, .lab-tab-bar').first();
+
+/**
+ * Goes to a destination of the rail (Chats, Assistants, Windows, Settings) or, on a phone, of the tab bar (Me holds Settings). The words are
+ * the page's, English or Chinese. On a phone a conversation hides the tab bar: Back returns to the list first.
+ */
+export async function goTo(page: Page, destination: 'Chats' | 'Assistants' | 'Windows' | 'Settings' | '聊天' | '助手' | '窗口' | '设置'): Promise<void> {
+  const bar = destinations(page);
+  await bar.waitFor({ state: 'attached' });
+  if (!await bar.isVisible()) await page.locator('.lab-bot-back').first().click();
+  await bar.waitFor({ state: 'visible' });
+  const phone = await bar.evaluate(node => node.classList.contains('lab-tab-bar'));
+  const me = destination === 'Settings' || destination === '设置';
+  if (phone) await bar.locator('.lab-tab').filter({ hasText: me ? /^(Me|我)$/ : destination }).click();
+  else await bar.getByRole('button', { name: destination, exact: true }).click();
 }
 
-/** Opens the Settings page from the sidebar rail, showing the rail first when a session hides it. */
-export async function openSettings(page: Page): Promise<void> {
-  await showRail(page);
-  await page.getByRole('button', { name: 'Sidebar settings', exact: true }).click();
+/** Opens the Settings page (Me on a phone), and a group of it when one is named (its name in the page's language). */
+export async function openSettings(page: Page, group?: string): Promise<void> {
+  await goTo(page, 'Settings');
+  if (group) await chooseSetting(page, group);
+}
+
+/** Chooses a group of the Settings page from its list: a column beside it on the desktop, the list under Me on a phone. */
+export async function chooseSetting(page: Page, group: string): Promise<void> {
+  // On a phone an open group is a screen of its own: its Back returns to the list.
+  const back = page.locator('.lab-settings-head').getByRole('button').first();
+  if (await back.isVisible()) await back.click();
+  await page.locator('.lab-settings-group').filter({ has: page.locator('strong', { hasText: new RegExp(`^${group}$`) }) }).click();
+}
+
+/** Opens a computer's page from Settings > Computers, by the name its card shows. */
+export async function openComputer(page: Page, name: string): Promise<void> {
+  await page.locator('.lab-host-card').filter({ hasText: name }).locator('.lab-host-open').click();
+  await page.locator('.lab-host-page').waitFor();
 }
 
 /** Opens All sessions from the sidebar rail. */
 export async function openAllSessions(page: Page): Promise<void> {
-  await showRail(page);
+  await showSidebar(page);
   await page.locator('#lab-context').getByRole('navigation', { name: 'Shortcuts' }).getByRole('button', { name: 'All sessions', exact: true }).click();
 }
 

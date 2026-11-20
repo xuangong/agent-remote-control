@@ -54,7 +54,7 @@ for (const theme of ['light', 'dark'] as const) {
     await home(page, `&assistants=24&theme=${theme}`);
     await expect(page.locator('.lab-bot-conversation')).toBeHidden();
     expect(await contrastFailures(page)).toEqual([]);
-    expect(await coveringControls(page, '.lab-bot-roster-list')).toEqual([]);
+    expect(await coveringControls(page, '.lab-bot-roster')).toEqual([]);
     await page.screenshot({ path: testInfo.outputPath(`phone-list-${theme}.png`) });
     const roster = page.locator('.lab-bot-roster');
     await roster.evaluate(node => { node.scrollTop = 0; });

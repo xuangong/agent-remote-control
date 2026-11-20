@@ -3,6 +3,7 @@ import type { RemoteHost } from '../components/HostPairing.js';
 import { sessionKey } from '../session-tree.js';
 import type { Appearance } from '@orchardworks/agent-client-web/browser';
 import type { CommandItem } from './command-search.js';
+import { translator, type Translate } from '@orchardworks/agent-client';
 
 /** A session the palette lists: its identity and title, as All sessions opens it. */
 export interface CommandSession { hostId: string; providerId: string; nativeSessionId: string; title: string; parentNativeSessionId?: string }
@@ -21,9 +22,9 @@ export function commandSessions(...sources: readonly (readonly SessionSource[])[
 }
 
 /** "Host · Provider": the Host's name ("Lab server" for this server) and the provider's name when the Host reports it. */
-export function sessionSubtitle(session: Pick<CommandSession, 'hostId' | 'providerId'>, hosts: readonly RemoteHost[], localProviders: readonly Pick<AgentProviderDescriptor, 'providerId' | 'displayName'>[]): string | undefined {
+export function sessionSubtitle(session: Pick<CommandSession, 'hostId' | 'providerId'>, hosts: readonly RemoteHost[], localProviders: readonly Pick<AgentProviderDescriptor, 'providerId' | 'displayName'>[], t: Translate = translator('en')): string | undefined {
   const host = hosts.find(candidate => candidate.id === session.hostId);
-  const name = host?.name ?? (session.hostId === 'local' ? 'Lab server' : undefined);
+  const name = host?.name ?? (session.hostId === 'local' ? t('team.host.labServer') : undefined);
   if (!name) return undefined;
   const provider = (host?.providers ?? (session.hostId === 'local' ? localProviders : [])).find(item => item.providerId === session.providerId);
   return provider ? `${name} · ${provider.displayName}` : name;

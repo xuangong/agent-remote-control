@@ -13,6 +13,13 @@ import type { SessionSurfaceDescriptor } from '../../src/components/SessionConve
 import type { AssistantRef } from '../../src/components/assistant/AssistantDetails.js';
 import { AssistantNamesContext } from '../../src/components/assistant/names-context.js';
 import { accountNames } from '../../src/assistant-names.js';
+import { HttpPreviewClient } from '@orchardworks/agent-client';
+import { NavigationRail } from '../../src/shell/NavigationRail.js';
+import { TabBar } from '../../src/shell/TabBar.js';
+import { AssistantDirectory } from '../../src/components/assistant/AssistantDirectory.js';
+import { SettingsPage, type SettingsContext } from '../../src/settings/SettingsPage.js';
+import { usePhoneLayout } from '../../src/hooks/usePhoneLayout.js';
+import type { RemoteHost } from '../../src/components/HostPairing.js';
 
 const binding = (id: string, title: string) => ({ hostId: 'mac', providerId: 'claude', nativeSessionId: `${id}-session`, title });
 /** The sample data in the reader's language: a Chinese fixture shows Chinese sample data, an English one English. */
@@ -50,7 +57,24 @@ const sessionOf = (id: string, title: string) => ({ hostId: 'mac', providerId: '
 const chain = (history: boolean) => ({ roleKey: 'chief', history, session: history ? sessionOf('chief-earlier', SAMPLE.earlier) : sessionOf('chief-session', currentTitle),
   current: sessionOf('chief-session', currentTitle), ...(history ? { ancestors: [sessionOf('chief-oldest', SAMPLE.oldest)] } : { predecessor: sessionOf('chief-earlier', SAMPLE.earlier), ancestors: [sessionOf('chief-oldest', SAMPLE.oldest)] }) });
 
-/** Bot mode with the assistants of `initialGroup`; `conversation` renders the conversation of the assistant shown. */
+const hosts: RemoteHost[] = [
+  { id: 'mac', name: 'Mac mini', online: true, managed: true, credentialRotation: true, providers: [{ providerId: 'claude', displayName: 'Claude Code' }, { providerId: 'codex', displayName: 'Codex' }],
+    controller: { version: '0.3.0', platform: 'darwin', arch: 'arm64', nodeMajor: 22 } as RemoteHost['controller'] },
+  { id: 'studio', name: 'Studio', online: false, managed: true, access: 'shared', providers: [{ providerId: 'claude', displayName: 'Claude Code' }] },
+];
+const noService = async () => { throw new Error('This fixture has no Relay.'); };
+/** What the Settings page reads in a fixture: a signed-in account, two computers and no Relay. */
+const settingsContext: SettingsContext = {
+  facts: { account: true, supportAvailable: false, notificationsAvailable: !matchMedia('(pointer: coarse)').matches },
+  account: { name: SAMPLE.names[0]!, email: 'chief@example.com', ready: true, openSecurity: () => {}, signOut: () => {} }, baseUrl: 'http://fixture/',
+  notifications: { enabled: true, available: true, permission: 'granted', requestFailed: false, request: () => {}, set: () => {} },
+  openTrace: () => {}, openInspector: () => {},
+  computers: { hosts, loaded: true, previewClient: new HttpPreviewClient('http://fixture/'),
+    tunnelService: { status: noService, start: noService, stop: noService }, openPreviewSource: () => {}, onRevoked: () => {},
+    service: { hosts: async () => ({ hosts }), pair: noService, smartReading: async () => ({ providers: ['claude'] }), setSmartReading: async (_host: string, provider: string, enabled: boolean) => ({ providers: enabled ? ['claude', provider] : [] }) } },
+};
+
+/** Bot mode with the assistants of `initialGroup`, the rail (or the phone's tab bar) beside it and Settings or the directory over it; `conversation` renders the conversation of the assistant shown. */
 export function BotFixture({ conversation }: { conversation(props: { assistant: { name: string; avatar: ReactNode }; visible: boolean; headingMode: 'assistant';
   details: Partial<AssistantRef>; childrenFor(): readonly { nativeSessionId: string; title: string }[] }): ReactNode }) {
   const [groups, setGroups] = useState<WindowGroup[]>([initialGroup]);
@@ -70,6 +94,9 @@ export function BotFixture({ conversation }: { conversation(props: { assistant: 
     reply: session => { const reply = ASSISTANTS.find(item => `${item.id}-session` === session.nativeSessionId && 'reply' in item); return reply && 'reply' in reply ? { replyAt: Date.now() - 120_000, preview: reply.reply } : undefined; },
     unread: () => true, host: () => ({ online: true, name: 'Mac mini' }), t,
   });
+  const phone = usePhoneLayout();
+  const everyone = projectBotRoster(groups, [], { status: session => (ASSISTANTS.find(item => `${item.id}-session` === session.nativeSessionId)?.activity ?? 'unknown') as SessionActivityStatus, host: () => ({ online: true, name: 'Mac mini' }), t, everyone: true });
+  const go = (target: Parameters<typeof navigation.open>[0]) => navigation.open(target, navigation.page ? 'replace' : 'push');
   const place = navigation.place;
   const group = place?.kind === 'bot' || place?.kind === 'section' ? readGroup(place.groupId) : undefined;
   const view = place?.kind === 'bot' ? group?.window.views.find(item => item.id === place.viewId) : undefined;
@@ -89,10 +116,19 @@ export function BotFixture({ conversation }: { conversation(props: { assistant: 
       childrenFor: () => assistant.id === 'chief' ? [{ nativeSessionId: 'chief-explore', title: SAMPLE.subagent }] : [],
       assistant: { name: assistant.title, avatar: <AssistantAvatar id={assistant.id} {...(picture ? { picture } : {})} size={26} mood={assistant.activity === 'running' ? 'working' : 'idle'} /> } })}</>;
   };
+  const page = navigation.page;
   return <AssistantNamesContext.Provider value={accountNames(groups, t)}><div className="lab-shell fixture-assistant" style={{ display: 'block', height: '100dvh' }}>
-    <BotWorkspace visible compact={matchMedia('(max-width: 1180px)').matches} scope="fixture" workspace={workspace} navigation={navigation} selected={selected} roster={roster}
-      directory={{ sessions: [], sources: [], refresh: async () => {}, loadMore: async () => {} }} describeConversation={describeConversation} mount={mount}
-      onSearch={() => {}} onNewBot={() => {}} hostName={() => 'Mac mini'}
-      botInfo={() => ({ host: 'Mac mini', online: true, provider: 'Claude Code', earlier: ['Codex'] })} />
+    <div className="lab-frame" data-rail={!phone || undefined} data-tab-bar={phone || undefined} style={{ height: '100dvh' }}>
+      {phone ? <TabBar current={navigation.destination} onGo={go} /> : <NavigationRail current={navigation.destination} onGo={go} onSearch={() => {}} searchKeys="⌘K" accountName={SAMPLE.names[0]!} />}
+      <BotWorkspace visible covered={!!page} compact={matchMedia('(max-width: 1180px)').matches} scope="fixture" workspace={workspace} navigation={navigation} selected={selected} roster={roster}
+        directory={{ sessions: [], sources: [], refresh: async () => {}, loadMore: async () => {} }} describeConversation={describeConversation} mount={mount}
+        onNewBot={() => {}} hostName={() => 'Mac mini'}
+        botInfo={() => ({ host: 'Mac mini', online: true, provider: 'Claude Code', earlier: ['Codex'] })} />
+      <main className="lab-page" data-workbench-mode="page" data-page={page?.destination} hidden={!page}>
+        {page?.destination === 'assistants' ? <AssistantDirectory model={everyone} workspace={workspace} hostName={() => 'Mac mini'} onOpen={navigation.select} onNew={() => {}} /> : null}
+        {page?.destination === 'settings' ? <SettingsPage context={settingsContext} group={page.group} phone={phone}
+          onGroup={next => next ? navigation.open({ destination: 'settings', group: next }, phone ? 'push' : 'replace') : navigation.closePage()} /> : null}
+      </main>
+    </div>
   </div></AssistantNamesContext.Provider>;
 }

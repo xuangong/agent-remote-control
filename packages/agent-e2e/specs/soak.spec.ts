@@ -56,7 +56,7 @@ test('soak: bot switches, sends, mode switches and a Host leaving and coming bac
     }
     await page.goto(`${fixture.origin}/?mode=bot`);
     const bot = page.locator('[data-workbench-mode="bot"]');
-    const row = (name: string) => bot.getByRole('navigation', { name: 'Assistants', exact: true }).getByRole('button', { name, exact: true });
+    const row = (name: string) => bot.getByRole('navigation', { name: 'Chats', exact: true }).getByRole('button', { name, exact: true });
     await expect(row(names[0]!)).toBeVisible({ timeout: 30_000 });
     const cdp = await context.newCDPSession(page);
     await cdp.send('Performance.enable');
@@ -85,12 +85,11 @@ test('soak: bot switches, sends, mode switches and a Host leaving and coming bac
       }
     };
     const mode = async (value: 'window' | 'bot') => {
-      const region = page.locator(`[data-workbench-mode="${value === 'bot' ? 'window' : 'bot'}"]`);
-      if (value === 'bot') {
-        const trigger = region.getByRole('button', { name: 'View options', exact: true });
-        if (await trigger.getAttribute('aria-expanded') !== 'true') await trigger.click();
-        await region.getByRole('region', { name: 'View options', exact: true }).getByRole('button', { name: 'Bot mode', exact: true }).click();
-      } else await region.getByRole('button', { name: 'Window mode', exact: true }).locator('visible=true').click();
+      // The rail (the tab bar on a phone) carries both modes.
+      const rail = page.locator('.lab-rail'), tabs = page.locator('.lab-tab-bar');
+      const name = value === 'bot' ? 'Chats' : 'Windows';
+      if (await rail.isVisible()) await rail.getByRole('button', { name, exact: true }).click();
+      else await tabs.getByRole('button', { name, exact: true }).click();
       await expect(page.locator(`[data-workbench-mode="${value}"]`)).toBeVisible();
     };
     const send = async (page: Page, text: string) => {

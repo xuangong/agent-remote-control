@@ -60,3 +60,4 @@
 .lab-host-page-head { display: flex; align-items: center; gap: var(--orchard-space-l); }
 .lab-host-page-head h2 { margin: 0; color: var(--orchard-text-strong); font: var(--orchard-type-headline-weight) var(--orchard-type-headline-size) / 1.3 var(--orchard-font-text); }
 .lab-host-page-head p { display: flex; align-items: center; margin: 0; color: var(--orchard-text-secondary); font-size: var(--orchard-type-footnote-size); }
+.lab-host-back.lab-host-back { gap: var(--orchard-space-2xs); }

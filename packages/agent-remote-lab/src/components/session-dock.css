@@ -3,25 +3,23 @@
 .lab-session-dock-rail[data-docked] { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; }
 .lab-session-dock-base { flex: 1 1 0; min-width: 0; min-height: 0; height: 100%; position: relative; }
 .lab-session-dock-rail[data-docked] > .lab-session-dock-base { flex-grow: 0; flex-shrink: 0; }
-.lab-session-dock-pane { position: relative; flex: none; min-width: 320px; height: 100%; background: var(--obs-surface); }
-/* Hidden docks keep their sessions attached but take no width; the resize handle is inside the pane. */
-.lab-session-dock-pane[hidden] { display: none; }
+.lab-session-dock-pane { position: relative; flex: none; min-width: 320px; height: 100%; background: var(--orchard-surface); }
 /* Separators must not consume the width assigned to the session panes. */
-.lab-session-dock-pane::after, .lab-primary-group::after { content: ''; position: absolute; top: 0; bottom: 0; width: 1px; background: var(--obs-border); pointer-events: none; z-index: 1; }
+.lab-session-dock-pane::after, .lab-primary-group::after { content: ''; position: absolute; top: 0; bottom: 0; width: 1px; background: var(--orchard-separator); pointer-events: none; z-index: 1; }
 .lab-session-dock-pane::after { left: 0; }
 .lab-primary-group::after { right: 0; }
 .lab-session-dock-rail[data-dock-reordering] > .lab-session-dock-pane { transition: transform 200ms cubic-bezier(.2,.8,.2,1); }
 .lab-session-dock-rail[data-dock-reordering] > .lab-session-dock-pane[data-dragging] {
   z-index: 60; transition: none; cursor: grabbing;
-  box-shadow: 0 4px 20px color-mix(in oklab, var(--ui-shadow-ink) 16%, transparent), inset 0 0 0 1px var(--obs-action);
+  box-shadow: 0 4px 20px color-mix(in oklab, var(--orchard-shadow-ink) 16%, transparent), inset 0 0 0 1px var(--orchard-focus);
 }
 .lab-session-dock-pane [data-session-title-draggable], .lab-session-dock-pane [data-session-title-draggable] .agent-session-title,
 [data-session-title-draggable] .lab-tpm-title-button { touch-action: none; cursor: grab; user-select: none; }
-[data-session-title-draggable]:focus-visible { outline: 2px solid var(--obs-action); outline-offset: 2px; border-radius: 3px; }
+[data-session-title-draggable]:focus-visible { outline: 2px solid var(--orchard-focus); outline-offset: 2px; border-radius: 3px; }
 .lab-session-dock-pane[data-dragging] [data-session-title-draggable],
 .lab-session-dock-pane[data-dragging] [data-session-title-draggable] * { cursor: grabbing; }
 @media (prefers-reduced-motion: reduce) {
-  .lab-session-dock-rail[data-dock-reordering] > .lab-session-dock-pane { transition: none; }
+  .lab-session-dock-rail[data-dock-reordering] > .lab-session-dock-pane, .lab-session-dock-add { transition: none; }
 }
 .lab-session-dock-content { position: absolute; inset: 0; min-width: 0; min-height: 0; }
 /* The Window rail owns pane scrolling; floating families keep their own viewport. */
@@ -32,17 +30,16 @@
 .lab-session-dock-content .lab-ask-resize-footer { display: none; }
 .lab-ask-controls .lab-session-dock-toggle { display: inline-flex; align-items: center; justify-content: center; padding: 6px; min-width: 30px; flex: none; }
 .lab-session-dock-resize { position: absolute; inset: 0 0 0 auto; width: 6px; z-index: 50; cursor: col-resize; touch-action: none; outline: none; }
-.lab-session-dock-resize::before { content: ''; position: absolute; inset: 0 2px; background: var(--obs-border); }
-.lab-session-dock-resize:is(:hover, :focus-visible)::before { background: var(--obs-action); }
-.lab-session-dock-resize:focus-visible { outline: 2px solid var(--obs-action); outline-offset: -2px; }
+.lab-session-dock-resize::before { content: ''; position: absolute; inset: 0 2px; background: var(--orchard-fill-strong); }
+.lab-session-dock-resize:is(:hover, :focus-visible)::before { background: var(--orchard-focus); }
+.lab-session-dock-resize:focus-visible { outline: 2px solid var(--orchard-focus); outline-offset: -2px; }
 
 .lab-session-dock-main-content { height: 100%; min-width: 0; min-height: 0; }
-.lab-session-dock-main-content[hidden] { display: none; }
-.lab-session-dock-base[data-minimized] { display: flex; flex-direction: column; position: sticky; left: 0; z-index: 51; background: var(--obs-surface); border-right: 1px solid var(--obs-border); }
+.lab-session-dock-base[data-minimized] { display: flex; flex-direction: column; position: sticky; left: 0; z-index: 51; background: var(--orchard-surface); border-right: 1px solid var(--orchard-separator); }
 .lab-session-main-minimize { display: inline-flex; align-items: center; justify-content: center; flex: none; padding: 6px; }
-.lab-session-main-restore { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 16px; width: 100%; height: 100%; padding: 14px 8px; border: 0; border-radius: 0; background: transparent; color: var(--obs-text-secondary); cursor: pointer; overflow: hidden; }
-.lab-session-main-restore:hover { background: var(--obs-surface-selected); color: var(--obs-text); }
-.lab-session-main-restore:focus-visible { outline: 2px solid var(--obs-action); outline-offset: -3px; }
+.lab-session-main-restore { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 16px; width: 100%; height: 100%; padding: 14px 8px; border: 0; border-radius: 0; background: transparent; color: var(--orchard-text-secondary); cursor: pointer; overflow: hidden; }
+.lab-session-main-restore:hover { background: var(--orchard-fill); color: var(--orchard-text); }
+.lab-session-main-restore:focus-visible { outline: 2px solid var(--orchard-focus); outline-offset: -3px; }
 .lab-session-main-restore svg { flex: none; }
 .lab-session-main-label { font-size: 11px; font-weight: 600; }
 .lab-session-main-title { writing-mode: vertical-rl; font-size: 12px; max-height: calc(100% - 90px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -50,51 +47,49 @@
 .lab-minimized-view-slot .lab-view-options-trigger { width: 43px; min-height: 40px; padding: 0; justify-content: center; }
 .lab-minimized-view-slot .lab-view-options-trigger > span { display: none; }
 
-.lab-session-dock-add { flex: 0 0 32px; align-self: flex-start; margin: 8px 4px; padding: 4px; border: 0; background: transparent; color: var(--obs-text-secondary); font-size: 22px; }
+.lab-session-dock-add { flex: 0 0 32px; align-self: flex-start; width: 32px; height: 32px; margin: 0; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--orchard-text-secondary); font-size: 20px; line-height: 1; transition: background-color var(--orchard-duration-fast) var(--orchard-ease-standard); }
+.lab-session-dock-add:hover { color: var(--orchard-text); background: var(--orchard-fill); }
 /* Compact layouts already identify the selected pane by showing it in the foreground. */
 @media (min-width: 1181px) {
   /* Persistent selection is separate from keyboard focus and consumes no pane width. */
   .lab-session-pane-selection[data-selected]::before,
   .lab-primary-group[data-selected]:is([data-minimized], :not(:has(.lab-session-family)))::before {
     content: ''; position: absolute; inset: 0; z-index: 40; pointer-events: none;
-    border: 1px solid color-mix(in oklab, var(--obs-action) 55%, var(--obs-border));
+    border: 1px solid color-mix(in oklab, var(--orchard-focus) 55%, var(--orchard-separator));
     border-radius: inherit;
   }
   .lab-session-pane-selection :is(.lab-session-heading, .lab-ask-heading, .lab-empty-session-heading) { transition: background-color 140ms ease; }
   .lab-session-pane-selection[data-selected] :is(.lab-session-heading, .lab-ask-heading, .lab-empty-session-heading),
   .lab-primary-group[data-selected]:not(:has(.lab-session-family)) .lab-empty-session-heading {
-    background: color-mix(in oklab, var(--obs-action) 6%, var(--obs-surface));
+    background: color-mix(in oklab, var(--orchard-focus) 6%, var(--orchard-surface));
   }
 }
 @media (prefers-reduced-motion: reduce) {
   .lab-session-pane-selection :is(.lab-session-heading, .lab-ask-heading, .lab-empty-session-heading) { transition: none; }
 }
-.lab-empty-session-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px; border-bottom: 1px solid var(--obs-border); }
+.lab-empty-session-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px; border-bottom: 1px solid var(--orchard-separator); }
 .lab-empty-session-heading > strong { flex: 1; min-width: 0; }
 .lab-empty-session-heading > div { display: flex; align-items: center; gap: 4px; }
-.lab-empty-session-body { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; color: var(--obs-text-secondary); text-align: center; }
+.lab-empty-session-body { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; color: var(--orchard-text-secondary); text-align: center; }
 .lab-empty-session-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .lab-primary-group-content > .lab-empty-session-view { display: flex; flex-direction: column; height: 100%; }
-.lab-session-open-target { display: flex; gap: 5px; padding: 8px 16px; min-width: 0; color: var(--obs-text-secondary); font-size: 12px; border-bottom: 1px solid var(--obs-border); }
-.lab-session-open-target strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--obs-text); font-weight: 500; }
+.lab-session-open-target { display: flex; gap: 5px; padding: 8px 16px; min-width: 0; color: var(--orchard-text-secondary); font-size: 12px; border-bottom: 1px solid var(--orchard-separator); }
+.lab-session-open-target strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--orchard-text); font-weight: 500; }
 
-.lab-primary-group { position: relative; flex: none; min-width: 0; min-height: 0; height: 100%; background: var(--obs-surface); }
+.lab-primary-group { position: relative; flex: none; min-width: 0; min-height: 0; height: 100%; background: var(--orchard-surface); }
 .lab-primary-group[data-minimized] { display: flex; flex-direction: column; }
 .lab-primary-group-content { height: 100%; min-width: 0; min-height: 0; }
-.lab-primary-group-content[hidden], .lab-primary-group[hidden] { display: none; }
-.lab-primary-group-minimize { position: absolute; top: 4px; right: 6px; z-index: 52; width: 28px; height: 28px; padding: 0; border-color: transparent; background: var(--obs-surface); color: var(--obs-text-secondary); }
+.lab-primary-group-minimize { position: absolute; top: 4px; right: 6px; z-index: 52; width: 28px; height: 28px; padding: 0; border-color: transparent; background: var(--orchard-surface); color: var(--orchard-text-secondary); }
 /* The group control shares the last visible heading without covering its actions. */
 .lab-primary-group:has(> .lab-primary-group-minimize):not(:has(.lab-ask-viewport:not([hidden]))) > .lab-primary-group-content > .lab-session-family > .lab-session-family-pane:not([hidden]):not(:has(~ .lab-session-family-pane:not([hidden]))) .lab-session-heading-trailing { padding-inline-end: 34px; }
 .lab-primary-group:has(> .lab-primary-group-minimize):not(:has(.lab-ask-viewport:not([hidden]))) > .lab-primary-group-content > .lab-empty-session-view > .lab-empty-session-heading { padding-inline-end: 42px; }
-.lab-primary-group-close { flex: none; width: 100%; min-height: 36px; padding: 4px; border-color: transparent; color: var(--obs-text-secondary); }
 .lab-session-dock-rail[data-compact] > .lab-primary-group { flex: 1 1 0; width: 100%; }
 .lab-session-dock-rail[data-compact] > .lab-primary-group::after { display: none; }
 
 .lab-window-workbench:not([hidden]) { display: flex; flex-direction: column; min-height: 0; }
 .lab-window-workbench > .lab-ordinary-workspace:not([hidden]) { display: flex; flex: 1; flex-direction: column; min-height: 0; }
-.lab-window-workbench > .lab-ordinary-workspace[hidden] { display: none; }
 .lab-window-workbench .lab-session-dock-rail { flex: 1; height: auto; min-height: 0; }
-.lab-window-empty { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; color: var(--obs-text-secondary); }
+.lab-window-empty { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; color: var(--orchard-text-secondary); }
 .lab-window-empty p { margin: 0; }
 
 .lab-primary-group:has(.lab-ask-viewport:not([hidden])) > .lab-primary-group-minimize { visibility: hidden; }
@@ -107,20 +102,20 @@
 /* A folded bot: a slim card standing where its pane was, like a collapsed sidebar in a native app. Its conversation is
    released; the status comes from the shared channel. */
 .lab-folded-bot { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; padding: 12px 6px;
-  border: 0; border-radius: 0; background: transparent; color: var(--ui-label); cursor: pointer; overflow: hidden;
-  transition: background-color var(--ui-duration-short) var(--ui-ease); }
-.lab-folded-bot:hover { background: var(--ui-row-hover); }
-.lab-folded-bot:active { background: var(--ui-fill-strong); }
-.lab-folded-bot:focus-visible { outline: 2px solid var(--ui-focus-ring); outline-offset: -3px; }
+  border: 0; border-radius: 0; background: transparent; color: var(--orchard-text-strong); cursor: pointer; overflow: hidden;
+  transition: background-color var(--orchard-duration-fast) var(--orchard-ease-standard); }
+.lab-folded-bot:hover { background: var(--orchard-fill); }
+.lab-folded-bot:active { background: var(--orchard-fill-strong); }
+.lab-folded-bot:focus-visible { outline: 2px solid var(--orchard-focus); outline-offset: -3px; }
 .lab-folded-bot-picture { position: relative; flex: none; display: inline-flex; }
-.lab-folded-bot-status { position: absolute; right: -2px; bottom: -2px; width: 10px; height: 10px; border: 2px solid var(--ui-background); border-radius: 50%;
-  background: var(--ui-status-working); }
-.lab-folded-bot-status[data-attention] { background: var(--ui-status-attention); }
-.lab-folded-bot-status[data-failed] { background: var(--ui-status-failure); }
-.lab-folded-bot-name { writing-mode: vertical-rl; max-height: calc(100% - 120px); overflow: hidden; color: var(--ui-label); font: 600 12px/1.2 var(--ui-font);
+.lab-folded-bot-status { position: absolute; right: -2px; bottom: -2px; width: 10px; height: 10px; border: 2px solid var(--orchard-surface); border-radius: 50%;
+  background: var(--orchard-online); }
+.lab-folded-bot-status[data-attention] { background: var(--orchard-brand); }
+.lab-folded-bot-status[data-failed] { background: var(--orchard-danger-text); }
+.lab-folded-bot-name { writing-mode: vertical-rl; max-height: calc(100% - 120px); overflow: hidden; color: var(--orchard-text-strong); font: 600 12px/1.2 var(--orchard-font-text);
   text-overflow: ellipsis; white-space: nowrap; }
-.lab-folded-bot-role { writing-mode: vertical-rl; padding: 6px 1px; border-radius: 4px; background: var(--ui-fill); color: var(--ui-label-secondary);
-  font: 500 10px/1.2 var(--ui-font); white-space: nowrap; }
+.lab-folded-bot-role { writing-mode: vertical-rl; padding: 6px 1px; border-radius: 4px; background: var(--orchard-fill); color: var(--orchard-text-secondary);
+  font: 500 10px/1.2 var(--orchard-font-text); white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .lab-folded-bot { transition: none; } }
 .lab-folded-bot[data-asleep] .lab-folded-bot-name { opacity: .5; }
 
@@ -128,7 +123,7 @@
 .lab-session-dock-pane[data-folded] { min-width: 0; }
 .lab-ask-window[data-folded] > :not(.lab-folded-bot, .lab-folded-remove) { display: none !important; }
 .lab-ask-viewport[data-presentation="floating"] > .lab-ask-window[data-folded] { width: 64px; height: min(var(--ask-height, 560px), 360px); }
-.lab-folded-remove { flex: none; width: 100%; min-height: 36px; padding: 4px; border: 0; border-radius: 0; background: transparent; color: var(--obs-text-secondary); }
+.lab-folded-remove { flex: none; width: 100%; min-height: 36px; padding: 4px; border: 0; border-radius: 0; background: transparent; color: var(--orchard-text-secondary); }
 /* A folded bot at work: its status dot breathes, as its row's typing dots do. */
 .lab-folded-bot-status:not([data-attention], [data-failed]) { animation: lab-folded-working 1.6s ease-in-out infinite; }
 @keyframes lab-folded-working { 50% { opacity: .4; } }
@@ -144,7 +139,7 @@
   gap: var(--orchard-space-l); padding: var(--orchard-space-l); scroll-padding-inline: var(--orchard-space-l); background: var(--lab-canvas);
 }
 .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > :is(.lab-primary-group, .lab-session-dock-pane) {
-  isolation: isolate; border-radius: var(--lab-card-radius); background: var(--orchard-surface); box-shadow: var(--orchard-elevation-flat);
+  isolation: isolate; border-radius: var(--lab-card-radius); box-shadow: var(--orchard-elevation-flat);
 }
 /* The hairline between panes gives way to the gap; the same pseudo-element rounds the card's corners. */
 .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > :is(.lab-primary-group, .lab-session-dock-pane)::after {
@@ -159,28 +154,22 @@
 /* A pane's selection follows its card's corners. */
 .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) .lab-session-pane-selection { border-radius: var(--lab-card-radius); }
 /* A pane is resized from the gap after it; the line shows under the pointer or keyboard focus. */
-.lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > * > .lab-session-dock-resize { inset: 10px -7px 10px auto; width: 6px; }
+.lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > * > .lab-session-dock-resize { inset: 10px -7px 10px auto; }
 .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > * > .lab-session-dock-resize::before {
-  inset: 0 2px; border-radius: 1px; background: transparent; transition: background-color var(--orchard-duration-fast) var(--orchard-ease-standard);
+  border-radius: 1px; background: transparent; transition: background-color var(--orchard-duration-fast) var(--orchard-ease-standard);
 }
 .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > * > .lab-session-dock-resize:is(:hover, :focus-visible)::before { background: var(--orchard-focus); }
 /* A folded card's × (removing the bot from its group, after asking) shows under the pointer or keyboard focus, at its foot. */
 .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) :is(.lab-folded-remove, .lab-primary-group-close) {
   position: absolute; left: 50%; bottom: 8px; z-index: 2; width: 24px; height: 24px; min-height: 24px; margin-left: -12px; padding: 0;
-  border-radius: 50%; color: var(--orchard-text-secondary); background: var(--orchard-fill); opacity: 0; transition: opacity var(--orchard-duration-fast) var(--orchard-ease-standard);
+  border: 0; border-radius: 50%; color: var(--orchard-text-secondary); background: var(--orchard-fill); opacity: 0; transition: opacity var(--orchard-duration-fast) var(--orchard-ease-standard);
 }
 .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > :is(:hover, :focus-within) :is(.lab-folded-remove, .lab-primary-group-close) { opacity: 1; }
 .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) :is(.lab-folded-remove, .lab-primary-group-close):hover { color: var(--orchard-danger-text); }
 .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) .lab-folded-bot { padding-top: 14px; }
 .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) .lab-folded-bot-name { max-height: calc(100% - 140px); }
-/* New session view: a quiet round button at the end of the canvas. */
-.lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > .lab-session-dock-add {
-  flex: 0 0 32px; width: 32px; height: 32px; margin: 0; padding: 0; border-radius: 50%; color: var(--orchard-text-secondary); font-size: 20px; line-height: 1;
-  transition: background-color var(--orchard-duration-fast) var(--orchard-ease-standard);
-}
-.lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > .lab-session-dock-add:hover { color: var(--orchard-text); background: var(--orchard-fill); }
 @media (prefers-reduced-motion: reduce) {
-  .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) :is(.lab-folded-remove, .lab-primary-group-close, .lab-session-dock-add),
+  .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) :is(.lab-folded-remove, .lab-primary-group-close),
   .lab-window-workbench .lab-session-dock-rail[data-primary-groups]:not([data-compact]) > * > .lab-session-dock-resize::before { transition: none; }
 }
 @media (forced-colors: active) {
@@ -222,7 +211,6 @@
 .lab-tile-sentence[data-state="failed"] { color: var(--orchard-danger-text); }
 .lab-tile-details.orchard-panel { position: absolute; z-index: 30; top: 56px; right: var(--orchard-space-m); bottom: var(--orchard-space-m); display: flex; flex-direction: column; gap: var(--orchard-space-m);
   box-sizing: border-box; width: min(300px, calc(100% - 16px)); overflow: auto; padding: var(--orchard-space-xl); box-shadow: var(--orchard-elevation-floating); }
-.lab-tile-details[hidden] { display: none; }
 /* A window on a phone: its tiles side by side, one per screen, with a page indicator in a row of its own. */
 .lab-session-dock-rail[data-stack] { display: flex; flex-direction: column; }
 .lab-tile-stack { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }

@@ -29,7 +29,7 @@ describe('initial panels', () => {
 
 describe('a change of layout', () => {
   it('closes the drawer, the inspector and, entering compact, the page', () => {
-    const open = run(desktop, { type: 'page.open', panel: 'settings' }, { type: 'inspector.open' });
+    const open = run(desktop, { type: 'page.open', panel: 'favorites' }, { type: 'inspector.open' });
     const narrowed = run(open, { type: 'compact.changed', compact: true });
     expect(narrowed).toMatchObject({ compact: true, contextOpen: false, inspectorOpen: false, sessionsPage: false });
   });
@@ -86,9 +86,9 @@ describe('showing every panel or none', () => {
 
 describe('the sessions page and the session chooser', () => {
   it('shows a panel as a page on desktop and as the drawer on compact layouts', () => {
-    expect(run(desktop, { type: 'panel.show', panel: 'hosts' })).toMatchObject({ sessionsPage: true, sessionPanel: 'hosts', contextOpen: false, activeView: 'workbench' });
-    const drawer = run(compact, { type: 'inspector.open' }, { type: 'view.show', view: 'trace' }, { type: 'panel.show', panel: 'settings' });
-    expect(drawer).toMatchObject({ contextOpen: true, inspectorOpen: false, sessionsPage: false, sessionPanel: 'settings', activeView: 'workbench' });
+    expect(run(desktop, { type: 'panel.show', panel: 'favorites' })).toMatchObject({ sessionsPage: true, sessionPanel: 'favorites', contextOpen: false, activeView: 'workbench' });
+    const drawer = run(compact, { type: 'inspector.open' }, { type: 'view.show', view: 'trace' }, { type: 'panel.show', panel: 'favorites' });
+    expect(drawer).toMatchObject({ contextOpen: true, inspectorOpen: false, sessionsPage: false, sessionPanel: 'favorites', activeView: 'workbench' });
   });
 
   it('asks for a favorites refresh whenever the favorites panel opens', () => {
@@ -139,7 +139,7 @@ describe('what the Window can show', () => {
     expect(contextVisible(run(desktop, { type: 'desktopSidebar.toggle' }))).toBe(true);
   });
 
-  it.each([['list', 'All sessions'], ['favorites', 'Favorites'], ['new', 'New session'], ['hosts', 'Hosts'], ['settings', 'Settings']] as const)('titles the %s page', (panel, title) => {
+  it.each([['list', 'All sessions'], ['favorites', 'Favorites'], ['new', 'New session']] as const)('titles the %s page', (panel, title) => {
     expect(sessionsPageTitle(panel)).toBe(title);
   });
 });

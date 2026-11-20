@@ -1,3 +1,4 @@
+import { writeDeviceProcessMode } from './hooks/useProcessMode.js';
 import 'fake-indexeddb/auto';
 import { type ComponentProps } from 'react';
 import { WebSocket } from 'ws';
@@ -33,19 +34,15 @@ it('keeps post-upgrade view preferences and owners when opening the same Window 
   const original = structuredClone(succession.desired!.slot), owner = succession.ownerFor(original.id);
   await act(async () => ask.toggle(succession.binding!.session, owner));
   const primary = () => visibleQuery(f.view, '.lab-primary-conversation')!;
-  // A tile's view options are in its details, over the window.
-  const details = () => primary().querySelector<HTMLButtonElement>('.lab-tile-details-toggle')!;
-  await act(async () => details().click());
-  const deviceChoice = (name: string) => [...primary().querySelectorAll<HTMLButtonElement>('.lab-tile-details [role="group"][aria-label="All assistants on this device"] button')].find(button => button.textContent === name)!;
-  await act(async () => deviceChoice('Full').click());
+  // The device's process default is chosen in Settings > Assistants, and every tab follows it.
+  await act(async () => writeDeviceProcessMode('full'));
   await f.newTab('D', windowId);
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('D'));
   expect(succession.desired?.slot.id).toBe(original.id);
   expect(succession.desired?.slot.owners).toEqual(original.owners);
   expect(succession.ownerFor(original.id)).toBe(owner);
   expect(ask.isEnabled(succession.binding!.session, owner)).toBe(true);
-  if (details().getAttribute('aria-expanded') !== 'true') await act(async () => details().click());
-  expect(deviceChoice('Full').getAttribute('aria-pressed')).toBe('true');
+  expect(localStorage.getItem('agent-remote:process-mode')).toBe('full');
   expect(f.frames.filter(frame => frame.message && ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message.type))).toEqual([]);
 });
 

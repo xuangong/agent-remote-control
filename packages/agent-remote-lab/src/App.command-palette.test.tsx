@@ -48,7 +48,7 @@ async function search(container: ParentNode, text: string) {
   await act(async () => { await new Promise(resolve => setTimeout(resolve)); });
 }
 const releaseAndSettle = (app: Awaited<ReturnType<typeof mountBotApp>>) => act(async () => { app.releaseInspect(); await new Promise(resolve => setTimeout(resolve, 20)); });
-const currentBot = (container: ParentNode) => container.querySelector('[aria-label="Assistants"] [aria-current="true"]')?.getAttribute('aria-label');
+const currentBot = (container: ParentNode) => container.querySelector('[aria-label="Chats"] [aria-current="true"]')?.getAttribute('aria-label');
 
 it('opens with Control-K from the composer, switches Windows and opens pages, and closes on Escape', async () => {
   const scope = 'http://localhost/palette-window/';
@@ -57,9 +57,9 @@ it('opens with Control-K from the composer, switches Windows and opens pages, an
   const app = await mountBotApp(scope);
   try {
     await until(() => expect(app.workspace().window?.id).toBe('A'));
-    // Both sidebars hold a Search button; only the current mode's is reachable.
-    expect(app.container.querySelectorAll('button[aria-label="Search"]')).toHaveLength(2);
-    expect([...app.container.querySelectorAll('button[aria-label="Search"]')].filter(button => !button.closest('[hidden], [inert]'))).toHaveLength(1);
+    // The rail holds the one Search button, shared by both modes.
+    expect(app.container.querySelectorAll('button[aria-label="Search"]')).toHaveLength(1);
+    expect(app.container.querySelector('.lab-rail button[aria-label="Search"]')).not.toBeNull();
     expect(palette(app.container)).toBeNull();
     await until(() => expect(app.container.querySelector('.lab-window-mode [role="textbox"]')).not.toBeNull());
     const composer = app.container.querySelector<HTMLElement>('.lab-window-mode [role="textbox"]')!;
@@ -122,7 +122,7 @@ it('selects a bot from Bot mode, and opens a Window from Bot mode in Window mode
     await until(() => expect(app.workspace().window?.id).toBe('A'));
     await app.switchMode('bot');
     const button = visibleButton(app.container, 'Search');
-    expect(button.closest('[data-workbench-mode="bot"]')).not.toBeNull();
+    expect(button.closest('.lab-rail')).not.toBeNull();
     await act(async () => button.click());
     expect(paletteOpen(app.container)).toBe(true);
     await search(app.container, 'Helper');
@@ -133,13 +133,12 @@ it('selects a bot from Bot mode, and opens a Window from Bot mode in Window mode
     await search(app.container, 'Research');
     await until(() => expect(app.workspace().window?.id).toBe('R'));
     expect(app.container.querySelector<HTMLElement>('[data-workbench-mode="window"]')!.hidden).toBe(false);
-    // The opener was in Bot mode, now hidden: focus moves to the shown mode's Search button.
-    expect(document.activeElement).toBe(visibleButton(app.container, 'Search'));
+    // The opener was in Bot mode, now hidden: focus moves into the shown mode.
     expect(document.activeElement!.closest('[data-workbench-mode="window"]')).not.toBeNull();
     await shortcut();
-    await search(app.container, 'Switch to Bot mode');
-    await until(() => expect(document.activeElement?.closest('[data-workbench-mode="bot"]')).not.toBeNull());
-    expect(document.activeElement).toBe(visibleButton(app.container, 'Search'));
+    await search(app.container, 'Chats');
+    await until(() => expect(app.container.querySelector<HTMLElement>('[data-workbench-mode="bot"]')!.hidden).toBe(false));
+    expect(document.activeElement).toBe(app.container.querySelector('.lab-rail [aria-current="page"]'));
 
     // A Window made from Bot mode stays open once Window mode restores its Window.
     await app.switchMode('bot');
@@ -200,7 +199,7 @@ it('keeps focus on the page when Hide sidebar runs from the sidebar Search butto
   const app = await mountBotApp(scope);
   try {
     await until(() => expect(app.workspace().window?.id).toBe('A'));
-    const searchButton = app.container.querySelector<HTMLButtonElement>('#lab-context button[aria-label="Search"]')!;
+    const searchButton = app.container.querySelector<HTMLButtonElement>('.lab-rail button[aria-label="Search"]')!;
     searchButton.focus();
     await act(async () => searchButton.click());
     expect(paletteOpen(app.container)).toBe(true);

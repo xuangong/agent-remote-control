@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
+import { translator } from '@orchardworks/agent-client';
 import { paletteActions, type PaletteFacts, type PaletteRuns } from './palette-actions.js';
 
 const facts = (overrides: Partial<PaletteFacts> = {}): PaletteFacts => ({
@@ -11,7 +12,7 @@ function recorder() {
   const runs: PaletteRuns = {
     toWindow: () => { calls.push('toWindow'); },
     inWindow: (step, confirmed = false) => () => { calls.push(`inWindow${confirmed ? ':confirmed' : ''}`); step(); },
-    switchMode: mode => { calls.push(`mode:${mode}`); },
+    go: destination => { calls.push(`go:${destination}`); },
     newBot: () => { calls.push('newBot'); },
     newSessionPanel: () => { calls.push('newSessionPanel'); },
     createWindow: () => { calls.push('createWindow'); },
@@ -33,8 +34,8 @@ const run = (id: string, given: Partial<PaletteFacts> = {}) => {
 
 describe('which actions the palette offers', () => {
   it('offers the full Window mode set to a signed-in person', () => {
-    expect(ids({})).toEqual(['action:new-session', 'action:new-window', 'action:new-session-view', 'action:all-sessions', 'action:favorites', 'action:settings',
-      'action:toggle-sidebar', 'action:bot-mode', 'action:all-windows']);
+    expect(ids({})).toEqual(['action:new-session', 'action:new-window', 'action:new-session-view', 'action:all-sessions', 'action:favorites',
+      'action:toggle-sidebar', 'action:chats', 'action:assistants', 'action:windows', 'action:settings', 'action:all-windows']);
   });
 
   it.each([
@@ -53,10 +54,17 @@ describe('which actions the palette offers', () => {
     expect(ids(given).includes(has)).toBe(!not);
   });
 
-  it('offers the other mode', () => {
-    expect(ids({ windowMode: true })).toContain('action:bot-mode');
-    expect(ids({ windowMode: false })).toContain('action:window-mode');
-    expect(ids({ windowMode: false })).not.toContain('action:bot-mode');
+  it('offers Chats, Assistants, Windows and Settings by name in either mode, and no mode switch', () => {
+    for (const windowMode of [true, false]) {
+      const items = paletteActions(facts({ windowMode }), recorder().runs);
+      expect(items.filter(item => ['chats', 'assistants', 'windows', 'settings'].some(id => item.id === `action:${id}`)).map(item => item.title)).toEqual(['Chats', 'Assistants', 'Windows', 'Settings']);
+      expect(items.some(item => /Switch to/.test(item.title))).toBe(false);
+    }
+  });
+
+  it('speaks the reader\'s language', () => {
+    const items = paletteActions({ ...facts(), t: translator('zh') }, recorder().runs);
+    expect(items.find(item => item.id === 'action:chats')?.title).toBe('聊天');
   });
 
   it('names the sidebar toggle by what it will do and shows the platform shortcut', () => {
@@ -64,7 +72,7 @@ describe('which actions the palette offers', () => {
     expect(shown).toMatchObject({ title: 'Hide sidebar', shortcut: '⌘\\', keyShortcuts: 'Meta+\\' });
     const [hidden] = paletteActions(facts({ sidebarShown: false, apple: false }), recorder().runs).filter(item => item.id === 'action:toggle-sidebar');
     expect(hidden).toMatchObject({ title: 'Show sidebar', shortcut: 'Ctrl+\\', keyShortcuts: 'Control+\\' });
-    const mode = paletteActions(facts({ apple: false }), recorder().runs).find(item => item.id === 'action:bot-mode');
+    const mode = paletteActions(facts({ apple: false }), recorder().runs).find(item => item.id === 'action:chats');
     expect(mode).toMatchObject({ shortcut: 'Ctrl+Alt+2', keyShortcuts: 'Control+Alt+2' });
   });
 });
@@ -73,7 +81,6 @@ describe('what each action does first', () => {
   it('switches to Window mode before showing a panel, the new-session form or the overview', () => {
     expect(run('action:all-sessions')).toEqual(['toWindow', 'panel:list']);
     expect(run('action:favorites')).toEqual(['toWindow', 'panel:favorites']);
-    expect(run('action:settings')).toEqual(['toWindow', 'panel:settings']);
     expect(run('action:new-session')).toEqual(['toWindow', 'newSessionPanel']);
     expect(run('action:all-windows')).toEqual(['toWindow', 'overview']);
   });
@@ -83,9 +90,8 @@ describe('what each action does first', () => {
     expect(run('action:new-session-view')).toEqual(['inWindow:confirmed', 'addSessionView']);
   });
 
-  it('switches modes and toggles the sidebar directly', () => {
-    expect(run('action:bot-mode')).toEqual(['mode:bot']);
-    expect(run('action:window-mode', { windowMode: false })).toEqual(['toWindow']);
+  it('goes to a destination and toggles the sidebar directly', () => {
+    for (const destination of ['chats', 'assistants', 'windows', 'settings']) expect(run(`action:${destination}`)).toEqual([`go:${destination}`]);
     expect(run('action:toggle-sidebar')).toEqual(['toggleSidebar']);
     expect(run('action:new-bot', { windowMode: false })).toEqual(['newBot']);
   });

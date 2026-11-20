@@ -1,4 +1,4 @@
-// The All sessions, Favorites, Hosts and Settings page.
+// The All sessions and Favorites page.
 import { FavoritesHeading } from '../../components/SessionFavorites.js';
 import { Toolbar } from '../../ui/Toolbar.js';
 import { IconButton } from '../../ui/IconButton.js';
@@ -18,7 +18,7 @@ export function SessionsPage({ scope }: { readonly scope: Pick<AppScope, 'closeP
         <Toolbar className="lab-sessions-page-toolbar" title={userScoped && sessionPanel === 'favorites' ? <FavoritesHeading loading={favorites.loading} /> : sessionsPageTitle} titleRef={sessionsPageTitleRef} titleFocusable
           leading={<><div ref={setPageViewTarget} data-pane-selection-ignore className="lab-global-view-slot" /><IconButton icon="chevron-left" label="Back to Window" onClick={closePage} /></>}
           trailing={<div ref={setPageActionsTarget} className="lab-page-actions" />} />
-        {sessionPanel !== 'settings' && sessionPanel !== 'hosts' ? <div className="lab-session-open-target" role="status">Open in: <strong>{directoryView?.binding?.title ?? (directoryView ? 'Empty session view' : sidebarWindow?.target?.title ?? (sidebarWindow ? 'Empty session view' : 'Main session'))}</strong></div> : null}
+        <div className="lab-session-open-target" role="status">Open in: <strong>{directoryView?.binding?.title ?? (directoryView ? 'Empty session view' : sidebarWindow?.target?.title ?? (sidebarWindow ? 'Empty session view' : 'Main session'))}</strong></div>
         <div className="lab-sessions-page-body">{sessionPanelContent}</div>
       </section> : null}
   </>;

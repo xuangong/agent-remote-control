@@ -2,7 +2,7 @@
 import { attentionDestination, attentionSets, botDirectorySources as botDirectorySourcesOf, keySignature, readableSessions as readableSessionsOf } from '../state/attention-targets.js';
 import { windowPrimaryViewId } from '@orchardworks/agent-remote-protocol';
 import { useOtherSessions, type OtherSessionSource } from '../hooks/useOtherSessions.js';
-import { projectBotRoster } from '../bot-roster.js';
+import { projectBotRoster, type BotRosterOptions } from '../bot-roster.js';
 import { sharedReminders } from '../bot-attention.js';
 import { useSharedFeedOf, type SharedFeedsSnapshot } from '../shared-feeds.js';
 import { sessionActivity } from '../session-activity-status.js';
@@ -165,10 +165,13 @@ export function useAttentionAndRoster(scope: Pick<AppInputs & WorkbenchShellSlic
     const name = remoteHosts.find(host => host.id === hostId)?.name;
     return online === undefined ? undefined : { online, ...(name ? { name } : {}) };
   };
-  const projectSharedRoster = (shared: SharedFeedsSnapshot) => projectBotRoster(windowWorkspace.groups, otherSessions.sessions, {
+  const rosterOptions = (shared: SharedFeedsSnapshot): BotRosterOptions => ({
     status: session => sessionActivity(session, tracking.liveObservations, shared.states), supportTeam: teamId => supportTeams.has(teamId), host: hostFacts(shared), t,
     current: currentBotSession, earlier: earlierBotSessions, reply: session => shared.states?.reply(session), unread: (session, replyAt) => !!shared.reads?.unread(session, replyAt),
     draft: session => shared.drafts?.draft(session)?.text, waiting: session => (shared.outbox?.entries(session).length ?? 0) > 0 });
+  const projectSharedRoster = (shared: SharedFeedsSnapshot) => projectBotRoster(windowWorkspace.groups, otherSessions.sessions, rosterOptions(shared));
+  /** The directory: every assistant of the account, the hidden and resting ones included. */
+  const projectSharedDirectory = (shared: SharedFeedsSnapshot) => projectBotRoster(windowWorkspace.groups, [], { ...rosterOptions(shared), everyone: true });
 
   // A conversation on screen, with the page visible, is read up to its latest reply on every device. In Bot mode it
   // continues into the session before a handoff, whose last reply may still be the latest.
@@ -202,7 +205,7 @@ export function useAttentionAndRoster(scope: Pick<AppInputs & WorkbenchShellSlic
 
   const selectedBotStatus = useSharedFeedOf(sharedFeeds, shared => selectedBotSessionRef ? sessionActivity(selectedBotSessionRef, tracking.liveObservations, shared.states) : undefined);
   late.tracking = tracking;
-  return { attention, tracking, openTrackedSession, windowSessionStatus, otherSessions, supportTeams, botRoster, projectSharedRoster, selectedBotStatus };
+  return { attention, tracking, openTrackedSession, windowSessionStatus, otherSessions, supportTeams, botRoster, projectSharedRoster, projectSharedDirectory, selectedBotStatus };
 }
 
 export type AttentionAndRosterSlice = ReturnType<typeof useAttentionAndRoster>;

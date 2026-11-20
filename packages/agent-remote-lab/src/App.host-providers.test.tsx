@@ -146,7 +146,7 @@ it('uses the remote Host descriptor when opening an existing session', async () 
   expect(f.container.querySelector('[data-testid="connection-summary"]')?.textContent).not.toContain('Online');
 });
 
-it('controls the selected Host tunnel while keeping another Host session open', async () => {
+it("controls each Host's tunnel from its own page in Settings > Computers while another Host's session stays open", async () => {
   vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, onchange: null, addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn() }));
   const f = await setup('ready', true);
   await f.selectHost('desk');
@@ -154,14 +154,18 @@ it('controls the selected Host tunnel while keeping another Host session open', 
   await act(async () => [...f.container.querySelectorAll<HTMLButtonElement>('.lab-session-row')].find(button => button.textContent?.includes('Existing Codex'))!.click());
   const panel = () => f.container.querySelector<HTMLElement>('[aria-label="Host VS Code tunnel"]')!;
   expect(panel()).toBeNull();
-  await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Sidebar settings"]')!.click());
+  await act(async () => f.container.querySelector<HTMLButtonElement>('.lab-rail button[aria-label="Settings"]')!.click());
+  await act(async () => [...f.container.querySelectorAll<HTMLButtonElement>('.lab-settings-group')].find(item => item.textContent === 'Computers')!.click());
+  const openHost = async (id: string) => act(async () => f.container.querySelector<HTMLButtonElement>(`.lab-host-card[data-host-id="${id}"] .lab-host-open`)!.click());
+  const back = async () => { await act(async () => [...f.container.querySelectorAll('button')].find(button => button.textContent === 'Back')!.click()); await vi.waitFor(() => expect(f.container.querySelector('.lab-host-page')).toBeNull()); };
+  await openHost('desk');
   expect(panel().textContent).toContain('Desk Host');
   await act(async () => panel().querySelector<HTMLInputElement>('input[type=checkbox]')!.click());
-
-  const connectedHost = f.container.querySelector<HTMLSelectElement>('#remote-host')!;
-  await act(async () => { connectedHost.value = 'studio'; connectedHost.dispatchEvent(new Event('change', { bubbles: true })); });
+  await back();
+  await openHost('studio');
   expect(panel().textContent).toContain('Studio Host');
   expect(panel().textContent).not.toContain('Desk Host');
+  // The conversation open on Desk Host is untouched by looking at another Host's page.
   expect(f.container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Codex CLI · Desk Host');
   expect(panel().querySelector<HTMLInputElement>('input[type=checkbox]')!.checked).toBe(false);
   f.tunnelRequests.length = 0;
@@ -170,8 +174,8 @@ it('controls the selected Host tunnel while keeping another Host session open', 
   await act(async () => panel().querySelector<HTMLInputElement>('input[type=checkbox]')!.click());
   await act(async () => [...panel().querySelectorAll('button')].find(button => button.textContent === 'Start tunnel')!.click());
   expect(f.tunnelRequests.at(-1)).toBe('/v1/remote/hosts/studio/vscode-tunnel/start');
-
-  await act(async () => { connectedHost.value = 'desk'; connectedHost.dispatchEvent(new Event('change', { bubbles: true })); });
+  await back();
+  await openHost('desk');
   expect(panel().textContent).toContain('Desk Host');
   expect(panel().querySelector<HTMLInputElement>('input[type=checkbox]')!.checked).toBe(false);
 });
@@ -262,7 +266,7 @@ it('lets conversation history leave an offline Host for a visited session on ano
   expect(f.container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Studio Host');
 });
 
-it('keeps the session list ahead of Host details and Previews in the wide sidebar', async () => {
+it('keeps the session list after Host details in the wide sidebar, with Previews and the tunnel on the Host page', async () => {
   const f = await setup('ready', true);
   await f.selectHost('desk');
   const content = f.container.querySelector<HTMLElement>('.lab-sidebar-content')!;
@@ -272,7 +276,6 @@ it('keeps the session list ahead of Host details and Previews in the wide sideba
   expect(details.contains(hosts.querySelector('#host-environment-filter'))).toBe(true);
   expect(content.querySelector('[aria-label="Host VS Code tunnel"]')).toBeNull();
   const list = content.querySelector<HTMLElement>('.lab-directory-panel')!;
-  const previews = content.querySelector<HTMLElement>('[aria-label="Host previews"]')!;
+  expect(content.querySelector('[aria-label="Host previews"]')).toBeNull();
   expect(hosts.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(list.compareDocumentPosition(previews) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });

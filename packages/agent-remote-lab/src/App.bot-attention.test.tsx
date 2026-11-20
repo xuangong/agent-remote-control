@@ -17,7 +17,7 @@ it('follows bots through the shared channel without a stream each and reminds of
   vi.stubGlobal('Notification', class { static permission = 'granted'; close() {} constructor(readonly title: string, readonly options: NotificationOptions) { notices.push(this); } });
   const app = await mountBotApp(scope, { hosted: true });
   // Each row says its bot's state in one sentence; screen readers hear it too.
-  const status = (name: string) => [...app.container.querySelectorAll<HTMLElement>('[aria-label="Assistants"] .lab-bot-row')]
+  const status = (name: string) => [...app.container.querySelectorAll<HTMLElement>('[aria-label="Chats"] .lab-bot-row')]
     .find(item => item.querySelector('.lab-bot-name')?.textContent === name)?.querySelector('.lab-bot-sentence')?.getAttribute('data-state') ?? '';
   try {
     await until(() => expect(app.workspace().window?.id).toBe('A'));
@@ -42,7 +42,7 @@ it("shows each bot's latest reply and time, a dot while it is unread, and marks 
   const scope = 'http://localhost/u/bot-unread/';
   seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?window=A');
   const app = await mountBotApp(scope, { hosted: true });
-  const row = (name: string) => [...app.container.querySelectorAll<HTMLElement>('[aria-label="Assistants"] .lab-bot-row')]
+  const row = (name: string) => [...app.container.querySelectorAll<HTMLElement>('[aria-label="Chats"] .lab-bot-row')]
     .find(item => item.querySelector('.lab-bot-name')?.textContent === name);
   try {
     await until(() => expect(app.workspace().window?.id).toBe('A'));
@@ -59,12 +59,10 @@ it("shows each bot's latest reply and time, a dot while it is unread, and marks 
     expect(row('A1')!.querySelector('.lab-bot-unread')).not.toBeNull();
     expect(row('A1')!.textContent).not.toMatch(/\b1\b/);
     expect(row('A2')!.dataset.unread).toBeUndefined();
-    expect(app.container.querySelector('#bot-section-A .lab-bot-section-unread')).not.toBeNull();
     // Opening A1 marks it read up to its reply, for every device.
     await act(async () => row('A1')!.click());
     await until(() => expect(app.markedReads).toEqual([{ nativeSessionId: 'A1', readAt: today.getTime() }]));
     await until(() => expect(row('A1')!.dataset.unread).toBeUndefined());
-    expect(app.container.querySelector('#bot-section-A .lab-bot-section-unread')).toBeNull();
     // A newer reply while A1 is on screen is read at once; one marked on another device clears A2's dot here.
     await act(async () => app.emitStates({ states: [state('A2', 'idle', { replyAt: today.getTime() + 1_000, preview: 'New from A2.' })] }));
     await until(() => expect(row('A2')!.dataset.unread).toBe('true'));
@@ -78,7 +76,7 @@ it('shows the live line while a bot works, in its conversation, and says it in i
   seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?window=A');
   const app = await mountBotApp(scope, { hosted: true });
   const typing = () => app.container.querySelector('.lab-bot-conversation .agent-turn-status [role="status"]');
-  const row = (name: string) => [...app.container.querySelectorAll<HTMLElement>('[aria-label="Assistants"] .lab-bot-row')].find(item => item.querySelector('.lab-bot-name')?.textContent === name);
+  const row = (name: string) => [...app.container.querySelectorAll<HTMLElement>('[aria-label="Chats"] .lab-bot-row')].find(item => item.querySelector('.lab-bot-name')?.textContent === name);
   try {
     await until(() => expect(app.workspace().window?.id).toBe('A'));
     await app.switchMode('bot');

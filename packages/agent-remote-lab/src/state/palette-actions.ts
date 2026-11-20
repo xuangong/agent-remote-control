@@ -9,10 +9,12 @@
  * - Offered only when they can work: New bot in Bot mode with a directory; New session view with an open, available
  *   Window; Favorites for signed-in people; Hide or Show sidebar where the layout has a sidebar; All Windows when the
  *   overview is supported.
- * - The mode switch offers the other mode, with the platform's own shortcut text.
+ * - Chats, Assistants, Windows and Settings are offered by name; Chats and Windows carry the platform's mode shortcut text.
  */
 import type { CommandItem } from '../shell/command-search.js';
 import type { SessionPanel } from './panels.js';
+import { translator, type Translate } from '@orchardworks/agent-client';
+import type { Destination } from '../destinations.js';
 
 export interface PaletteFacts {
   readonly windowMode: boolean;
@@ -29,13 +31,16 @@ export interface PaletteFacts {
   readonly canOpenInBotMode?: boolean;
   /** The assistant shown in Bot mode, which pins to a window. */
   readonly canPinToWindow?: boolean;
+  /** The words of the reader's locale; English by default. */
+  readonly t?: Translate;
 }
 
 export interface PaletteRuns {
   toWindow(): void;
   /** Runs a step in Window mode, switching to it first; a confirmed step also waits for a confirmed Window. */
   inWindow(step: () => void, confirmed?: boolean): () => void;
-  switchMode(mode: 'window' | 'bot'): void;
+  /** Goes to a destination of the rail: Chats, Assistants, Windows or Settings. */
+  go(destination: Destination): void;
   newBot(): void;
   newSessionPanel(): void;
   createWindow(): void;
@@ -48,7 +53,7 @@ export interface PaletteRuns {
 }
 
 export function paletteActions(facts: PaletteFacts, runs: PaletteRuns): CommandItem[] {
-  const { apple } = facts;
+  const { apple } = facts, t = facts.t ?? translator('en');
   const action = (id: string, title: string, run: () => void, keys?: { shown: string; aria: string }): CommandItem =>
     ({ id: `action:${id}`, kind: 'action', title, run, ...(keys ? { shortcut: keys.shown, keyShortcuts: keys.aria } : {}) });
   const panel = (id: string, title: string, target: SessionPanel) => action(id, title, () => { runs.toWindow(); runs.showPanel(target); });
@@ -62,11 +67,12 @@ export function paletteActions(facts: PaletteFacts, runs: PaletteRuns): CommandI
     ...(facts.windowEditable ? [action('new-session-view', 'New session view', runs.inWindow(runs.addSessionView, true))] : []),
     panel('all-sessions', 'All sessions', 'list'),
     ...(facts.userScoped ? [panel('favorites', 'Favorites', 'favorites')] : []),
-    panel('settings', 'Settings', 'settings'),
     ...(facts.canToggleSidebar ? [action('toggle-sidebar', facts.sidebarShown ? 'Hide sidebar' : 'Show sidebar', runs.toggleSidebar,
       apple ? { shown: '⌘\\', aria: 'Meta+\\' } : { shown: 'Ctrl+\\', aria: 'Control+\\' })] : []),
-    facts.windowMode ? action('bot-mode', 'Switch to Bot mode', () => runs.switchMode('bot'), apple ? { shown: '⌥⌘2', aria: 'Alt+Meta+2' } : { shown: 'Ctrl+Alt+2', aria: 'Control+Alt+2' })
-      : action('window-mode', 'Switch to Window mode', runs.toWindow, apple ? { shown: '⌥⌘1', aria: 'Alt+Meta+1' } : { shown: 'Ctrl+Alt+1', aria: 'Control+Alt+1' }),
+    action('chats', t('navigation.palette.chats'), () => runs.go('chats'), apple ? { shown: '⌥⌘2', aria: 'Alt+Meta+2' } : { shown: 'Ctrl+Alt+2', aria: 'Control+Alt+2' }),
+    action('assistants', t('navigation.palette.assistants'), () => runs.go('assistants')),
+    action('windows', t('navigation.palette.windows'), () => runs.go('windows'), apple ? { shown: '⌥⌘1', aria: 'Alt+Meta+1' } : { shown: 'Ctrl+Alt+1', aria: 'Control+Alt+1' }),
+    action('settings', t('navigation.palette.settings'), () => runs.go('settings')),
     ...(facts.windowOverviewSupported ? [action('all-windows', 'All Windows', () => { runs.toWindow(); runs.openWindowOverview(); })] : []),
   ];
 }

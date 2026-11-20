@@ -160,27 +160,12 @@ export function useViewModel(scope: Pick<AppInputs & SessionSuccessionBindingSli
   // The Host, provider, directory and new-session panels: written once, placed in the compact drawer or on the desktop page.
   // On desktop the page itself is the Favorites region, and its toolbar the Favorites heading: the section inside it carries no second name or heading.
   const sessionPanelContent = <div className="lab-sidebar-content">
-      {sessionPanel === 'settings' ? <section className="lab-mobile-settings" aria-label="Controller settings">
-        <MobileDisplaySettings />
-        <CachePrivacySettings />
-        <CallForSupportSettings baseUrl={baseUrl} enabled={accessReady && !!directory} hosts={remoteHosts} />
-        <LayoutDiagnosticsSettings />
-      </section> : null}
       {userScoped && sessionPanel === 'favorites' ? <section className="lab-session-directory lab-favorites-section" aria-label={compactLayout ? 'Favorites' : undefined}>{compactLayout ? <div className="lab-directory-heading"><h2><FavoritesHeading loading={favorites.loading} /></h2></div> : null}<FavoritesList favorites={favorites} tracking={tracking} trackedOnly={trackedOnly} onFilterChange={setTrackedOnly} activeKey={focusedSessionKey} busy={transitioning && !sidebarWindow} onOpen={item => void openDirectorySession(item)} /></section> : null}
-      {directory && userScoped && sessionPanel === 'hosts' ? <HostOverview hosts={remoteHosts} service={hostClient} visible={windowMode && (compactLayout ? contextOpen : pageOpen)}
-        compact={compactLayout} actionsTarget={compactLayout ? undefined : pageActionsTarget}
-        onOpenHost={id => { const host = remoteHosts.find(item => item.id === id); if (host) selectHost(host); if (compactLayout) dispatchPanels({ type: 'sessionPanel.set', panel: 'settings' }); else openPage('settings'); }} /> : null}
-      {directory && sessionPanel !== 'favorites' && sessionPanel !== 'hosts' ? <HostPairing compact={sessionPanel === 'list'} managementVisible={sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning && !sidebarWindow} hosts={selectableHosts} hostError={hostError ?? requestedHostUnavailableReason(creationFacts)} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
-      {sessionPanel === 'settings' ? selectedRemoteHost?.id === previewHost?.id ? <HostVscodeTunnel key={selectedRemoteHost?.id} />
-        : <VscodeTunnelScope service={vscodeTunnelClient} host={selectedRemoteHost} polling={windowMode && (compactLayout ? contextOpen : pageOpen)}>
-          <HostVscodeTunnel key={selectedRemoteHost?.id} />
-        </VscodeTunnelScope> : null}
-      {directory && userScoped ? <div hidden={sessionPanel !== 'settings'}><ControllerUpdates service={hostClient} hosts={remoteHosts} /></div> : null}
+      {directory ? <HostPairing compact={sessionPanel === 'list'} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning && !sidebarWindow} hosts={selectableHosts} hostError={hostError ?? requestedHostUnavailableReason(creationFacts)} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
       <div className="lab-directory-panel" hidden={sessionPanel !== 'list'}>
       {directory || providerChoiceList.length > 1 ? <label className="lab-browse-provider">Browse provider<select aria-label="Browse provider" value={selectedProviderChoice?.selectionId ?? ''} disabled={creationLocked || transitioning && !sidebarWindow || providerChoiceList.length === 0} onChange={(event) => selectProvider(event.target.value)}>{providerChoiceList.length === 0 ? <option value="">No providers available</option> : null}{providerChoiceList.map((provider) => <option key={provider.selectionId} value={provider.selectionId}>{provider.displayName}</option>)}</select></label> : null}
       {directory ? <SessionDirectory quickOpen={<button type="button" className="lab-session-scan-trigger" aria-label="Scan session QR code" onClick={() => setScanOpen(true)}>Scan</button>} favorites={favorites} searchable directory={directory} providerId={providerId} activeAgentId={focusedMenuSession?.agentId} opened={openedSessions} known={sessionEntries} sideStore={forkStore} askStore={ask.store} hostId={selectedHost.id} onOpenRelated={(item) => void openDirectorySession(item)} busy={!sidebarWindow && (transitioning || remoteHosts.find((host) => host.id === selectedHost.id)?.online === false)} revision={directoryRevision} onOpen={(item) => void openDirectorySession(item)} onSelect={(item) => void openDirectorySession(item)} onClose={(agentId) => setOpenedSessions((current) => current.filter((item) => item.agentId !== agentId))} /> : null}
       </div>
-      {sessionPanel === 'list' ? <HostPreviewGroups client={previewClient} hosts={remoteHosts} activeHostId={previewHost?.access !== 'shared' ? previewHost?.id : undefined} polling={windowMode && (compactLayout ? contextOpen : pageOpen)} onOpen={() => { if (compactLayout) { dispatchPanels({ type: 'context.close', focusInPage: false }); closeInspector(); } }} onOpenSource={(sessionId, itemId, hostId) => void openPreviewSource(sessionId, itemId, hostId)} /> : null}
       <div hidden={sessionPanel !== 'new'}>
       <ProviderSessionControls
         providers={providerChoiceList}
@@ -198,13 +183,6 @@ export function useViewModel(scope: Pick<AppInputs & SessionSuccessionBindingSli
         onCreateSession={() => void createAgent()}
         onResumeSession={activeRemoteSession || activeOpened?.parentAgentId || activeOpened?.parentNativeSessionId ? undefined : () => void resumeAgent()}
       >{directory ? <SessionConfiguration directory={directory} providerId={providerId} canBrowse={remoteHosts.find(host => host.id === selectedHost.id)?.access !== 'shared'} value={sessionOptions} disabled={transitioning || creationLocked || !!creationUnavailableReason} onChange={setSessionOptions} /> : null}</ProviderSessionControls>
-      </div>
-      <div hidden={sessionPanel !== 'settings'}>
-      {clientActions.advanceFixture || clientActions.rehydrateFixture || clientActions.stopReader ? <RecordedPlaybackControls
-        onAdvance={clientActions.advanceFixture}
-        onRehydrate={clientActions.rehydrateFixture}
-        onStopReader={clientActions.stopReader}
-      /> : null}
       </div>
       {sessionNotice && !nativeTakeover && compactLayout && contextOpen ? <SessionConnectionNotice notice={sessionNotice} action={successionNotice ? successionRetry : undefined} /> : null}
       {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}

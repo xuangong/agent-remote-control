@@ -170,12 +170,16 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
     emitTitle(session: SessionTitleUpdate) { for (const listener of titleListeners) listener(session); },
     button: (label: string) => visibleButton(container, label),
     /** A bot's row in Bot mode's list, by its place: for a bot whose name the test does not set. */
-    row: (groupId: string, viewId: string) => container.querySelector<HTMLButtonElement>(`nav[aria-label="Assistants"] [data-bot-place='${JSON.stringify([groupId, viewId])}']`)!,
-    async switchMode(mode: 'window' | 'bot') {
-      const label = mode === 'bot' ? 'Bot mode' : 'Window mode';
-      if (!visibleButton(container, label)) await act(async () => visibleButton(container, 'View options').click());
-      await act(async () => visibleButton(container, label).click());
+    row: (groupId: string, viewId: string) => container.querySelector<HTMLButtonElement>(`nav[aria-label="Chats"] [data-bot-place='${JSON.stringify([groupId, viewId])}']`)!,
+    /** Goes to a destination of the rail (or of the phone's tab bar): Chats, Assistants, Windows or Settings. */
+    async go(destination: 'Chats' | 'Assistants' | 'Windows' | 'Settings') {
+      const tab = destination === 'Settings' ? 'Me' : destination;
+      const target = container.querySelector<HTMLButtonElement>(`.lab-rail button[aria-label="${destination}"]`)
+        ?? [...container.querySelectorAll<HTMLButtonElement>('.lab-tab')].find(item => item.textContent === tab);
+      if (!target) throw new Error(`No ${destination} in the rail or the tab bar`);
+      await act(async () => target.click());
     },
+    async switchMode(mode: 'window' | 'bot') { await this.go(mode === 'bot' ? 'Chats' : 'Windows'); },
     async close() { await unmount(container); workspaceSpy.mockRestore(); successionSpy.mockRestore(); },
   };
 }

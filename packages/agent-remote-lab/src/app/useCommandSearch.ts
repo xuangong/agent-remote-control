@@ -6,6 +6,7 @@ import { windowSummary } from '../window-summary.js';
 import { windowCatalog } from '../hooks/useWindowActions.js';
 import { byRecentUse } from '../window-recency.js';
 import { useEffect, useMemo } from 'react';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { sessionKey } from '../session-tree.js';
 import type { CommandItem } from '../shell/command-search.js';
 import { appearanceItems, commandSessions, sessionSubtitle } from '../shell/command-items.js';
@@ -52,16 +53,17 @@ export function useCommandSearch(scope: Pick<AppInputs & SessionSuccessionBindin
   [searchOpen, sessionEntries, favorites.stars, searchCatalog, remoteHosts, providers]);
 
   /** The palette's items, built from what the page already knows, and only while it is open. */
+  const t = useTranslate();
   function commandItems(): CommandItem[] {
     const toWindow = () => switchMode('window');
     const selectedTile = sharedWindow?.views.find(view => view.id === sharedWindow.selectedViewId);
     const botPlace = navigation.place?.kind === 'bot' ? navigation.place : undefined;
     const actions = paletteActions({ windowMode, hasDirectory: !!directory, userScoped, windowEditable: !!sharedWindow && !windowWorkspace.unavailable,
-      sidebarShown: desktopContextVisible, canToggleSidebar: !!toggleSidebar, windowOverviewSupported, apple: applePlatform(),
+      sidebarShown: desktopContextVisible, canToggleSidebar: !!toggleSidebar, windowOverviewSupported, apple: applePlatform(), t,
       canOpenInBotMode: !!sharedWindow && !!selectedTile && isBotView(selectedTile), canPinToWindow: !!botPlace }, {
       openInBotMode: () => { if (sharedWindow && selectedTile) void openInBotMode(sharedWindow.id, selectedTile.id); },
       pinToWindow: () => { if (botPlace) void pinToWindow(botPlace.groupId, botPlace.viewId); },
-      toWindow, switchMode, newBot: openNewBot, newSessionPanel: openNewSessionPanel, showPanel, toggleSidebar: () => toggleSidebar?.(),
+      toWindow, go: destination => { if (destination === 'chats') switchMode('bot'); else if (destination === 'windows') switchMode('window'); else navigation.open({ destination }, navigation.page ? 'replace' : 'push'); }, newBot: openNewBot, newSessionPanel: openNewSessionPanel, showPanel, toggleSidebar: () => toggleSidebar?.(),
       inWindow: (step, confirmed = false) => () => { toWindow(); inMode('window', step, confirmed); },
       createWindow: () => searchRuns.current.createWindowFromMenu(),
       addSessionView: () => { closePage(); searchRuns.current.addSessionView(); },

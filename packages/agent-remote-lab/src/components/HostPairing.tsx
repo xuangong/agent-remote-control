@@ -2,8 +2,6 @@ import type { HostProviderChange, HostProviderSettings, CodexDaemonRestart, Code
 import { hostDisplayLabel, hostEnvironmentLabels, matchesHostEnvironment } from './host-environment.js';
 import { useFeedbackToast } from './Toast.js';
 import { useState } from 'react';
-import { PairingKeys } from './PairingKeys.js';
-import { HostSecurityActions } from './HostSecurityActions.js';
 
 export interface HostProvider { providerId: string; displayName: string; daemonControl?: true; sessionRename?: true; sessionReferences?: true; referenceNotes?: true; sessionCommands?: true }
 export interface RemoteHost {
@@ -43,30 +41,65 @@ export interface HostPairingService {
   stop?(hostId: string): Promise<{ results: HostStopResult[] }>;
 }
 
-export function HostPairing({ service, selectedHostId, selectionLocked, onSelect, hosts, hostError, onRetryHosts, onNewSession, managementVisible = true, compact = false }: {
-  compact?: boolean;
-  managementVisible?: boolean;
-  service: HostPairingService; selectedHostId: string; selectionLocked?: boolean; onSelect(host: RemoteHost): void; hosts: RemoteHost[]; hostError?: string; onRetryHosts(): void; onNewSession?(): void;
-}) {
-  const [filter, setFilter] = useState('');
-  const matchingHosts = hosts.filter(host => matchesHostEnvironment(host, filter));
-  const [revokeTarget, setRevokeTarget] = useState<RemoteHost>();
-  const [revoking, setRevoking] = useState(false);
-  const selectedHost = hosts.find(host => host.id === selectedHostId);
-  const quota = selectedHost?.sessionQuota;
-  const quotaExhausted = quota !== undefined && quota.used >= quota.limit;
-  const [failure, setFailure] = useState<string>();
-  useFeedbackToast('Host connection', failure ?? hostError);
-  const [showPairing, setShowPairing] = useState(service.invitation !== undefined);
+/** What a Host reports about where it runs: its tags, the detection details and whether the reader owns it. */
+export function HostEnvironmentDetails({ host }: { host: RemoteHost }) {
+  return <>
+    <div className="lab-host-environment" aria-label="Host environment">
+      {host.environment ? <>
+        <div className="lab-host-environment-tags">{hostEnvironmentLabels(host).map((label, index) => <span key={`${index}:${label}`}>{label}</span>)}</div>
+        <details><summary>Detection details</summary>
+          <dl><dt>System release</dt><dd>{host.environment.os.release}</dd>
+            <dt>Primary shell</dt><dd>{host.environment.shell.name ?? 'Unknown'} · {host.environment.shell.source}</dd>
+            <dt>WSL / Container</dt><dd>{[host.environment.wsl, host.environment.container].map(value => value === null ? 'Unknown' : value ? 'Yes' : 'No').join(' / ')}</dd>
+            <dt>Browsers</dt><dd>{host.environment.browsers.map(item => `${item.name}: ${detectionLabel(item.status)}`).join(', ') || 'Unknown'}</dd>
+            <dt>Shells</dt><dd>{host.environment.shells.map(item => `${item.name}: ${detectionLabel(item.status)}`).join(', ') || 'Unknown'}</dd>
+            <dt>VS Code</dt><dd>{detectionLabel(host.environment.vscode.status)}</dd>
+          </dl>
+          <p>Detected at {new Date(host.environment.detectedAt).toLocaleString()}. Restart the Controller to refresh. Installed software does not imply a running desktop or remote browser control.</p>
+        </details>
+      </> : <small>Environment unknown · This Host has not reported detection results.</small>}
+    </div>
+    {host.access ? <p className="lab-control-note">{host.access === 'shared' ? 'Shared with you' : 'You own this Host'}</p> : null}
+  </>;
+}
 
+/** Revoke Host with its confirmation, for a Host the reader owns and a service that can revoke. */
+export function HostRevoke({ host, service, onRevoked }: { host: RemoteHost; service: HostPairingService; onRevoked(): void }) {
+  const [confirming, setConfirming] = useState(false);
+  const [revoking, setRevoking] = useState(false);
+  const [failure, setFailure] = useState<string>();
+  useFeedbackToast('Host connection', failure);
   async function revoke(): Promise<void> {
-    if (!revokeTarget || !service.revoke || revoking) return;
+    if (!service.revoke || revoking) return;
     setRevoking(true);
     setFailure(undefined);
-    try { await service.revoke(revokeTarget.id); setRevokeTarget(undefined); onRetryHosts(); }
+    try { await service.revoke(host.id); setConfirming(false); onRevoked(); }
     catch (error) { setFailure(error instanceof Error ? error.message : 'Could not revoke the Host.'); }
     finally { setRevoking(false); }
   }
+  if (!host.managed || host.access === 'shared' || !service.revoke) return null;
+  return <>
+    <button type="button" onClick={() => setConfirming(true)}>Revoke Host</button>
+    {confirming ? <div role="group" aria-label="Confirm Host revocation">
+      <p>Revoke {host.name}? Its remote connections will close. Running work may continue. Use Stop work first to request cancellation. Pair it again to restore access.</p>
+      <button type="button" disabled={revoking} onClick={() => void revoke()}>{revoking ? 'Revoking…' : 'Confirm revoke'}</button>
+      <button type="button" disabled={revoking} onClick={() => setConfirming(false)}>Cancel</button>
+    </div> : null}
+    {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
+  </>;
+}
+
+/** The Host select of the sessions panels: the connected Host, a filter, its environment and the creation allowance. */
+export function HostPairing({ selectedHostId, selectionLocked, onSelect, hosts, hostError, onRetryHosts, onNewSession, compact = false }: {
+  compact?: boolean;
+  selectedHostId: string; selectionLocked?: boolean; onSelect(host: RemoteHost): void; hosts: RemoteHost[]; hostError?: string; onRetryHosts(): void; onNewSession?(): void;
+}) {
+  const [filter, setFilter] = useState('');
+  const matchingHosts = hosts.filter(host => matchesHostEnvironment(host, filter));
+  const selectedHost = hosts.find(host => host.id === selectedHostId);
+  const quota = selectedHost?.sessionQuota;
+  const quotaExhausted = quota !== undefined && quota.used >= quota.limit;
+  useFeedbackToast('Host connection', hostError);
 
   const hostFilter = <>
     <label htmlFor="host-environment-filter">Find an execution environment</label>
@@ -75,24 +108,7 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
       onChange={event => setFilter(event.target.value)} />
     {filter.trim() ? <small role="status">{matchingHosts.length ? `${matchingHosts.length} matching Hosts` : 'No matching Hosts'}</small> : null}
   </>;
-  const environment = <>
-    {selectedHost ? <div className="lab-host-environment" aria-label="Host environment">
-      {selectedHost.environment ? <>
-        <div className="lab-host-environment-tags">{hostEnvironmentLabels(selectedHost).map((label, index) => <span key={`${index}:${label}`}>{label}</span>)}</div>
-        <details><summary>Detection details</summary>
-          <dl><dt>System release</dt><dd>{selectedHost.environment.os.release}</dd>
-            <dt>Primary shell</dt><dd>{selectedHost.environment.shell.name ?? 'Unknown'} · {selectedHost.environment.shell.source}</dd>
-            <dt>WSL / Container</dt><dd>{[selectedHost.environment.wsl, selectedHost.environment.container].map(value => value === null ? 'Unknown' : value ? 'Yes' : 'No').join(' / ')}</dd>
-            <dt>Browsers</dt><dd>{selectedHost.environment.browsers.map(item => `${item.name}: ${detectionLabel(item.status)}`).join(', ') || 'Unknown'}</dd>
-            <dt>Shells</dt><dd>{selectedHost.environment.shells.map(item => `${item.name}: ${detectionLabel(item.status)}`).join(', ') || 'Unknown'}</dd>
-            <dt>VS Code</dt><dd>{detectionLabel(selectedHost.environment.vscode.status)}</dd>
-          </dl>
-          <p>Detected at {new Date(selectedHost.environment.detectedAt).toLocaleString()}. Restart the Controller to refresh. Installed software does not imply a running desktop or remote browser control.</p>
-        </details>
-      </> : <small>Environment unknown · This Host has not reported detection results.</small>}
-    </div> : null}
-    {selectedHost?.access ? <p className="lab-control-note">{selectedHost.access === 'shared' ? 'Shared with you' : 'You own this Host'}</p> : null}
-  </>;
+  const environment = selectedHost ? <HostEnvironmentDetails host={selectedHost} /> : null;
 
   return <section className={`lab-host-pairing${compact ? ' lab-host-pairing-compact' : ''}`} aria-label="Remote Hosts">
     <div className="lab-directory-heading"><h2>Hosts</h2><button type="button" onClick={onRetryHosts}>Retry Hosts</button></div>
@@ -105,20 +121,8 @@ export function HostPairing({ service, selectedHostId, selectionLocked, onSelect
     </select>
     {compact ? <details className="lab-host-disclosure"><summary>Filter &amp; Host details{filter.trim() ? <span>Filtered</span> : null}</summary><div>{hostFilter}{environment}</div></details> : environment}
     {quota ? <p className="lab-control-note" role="status">Session creation allowance used: {quota.used} / {quota.limit}. This total does not reset when sessions finish.{quotaExhausted ? ' Creation limit reached. Existing sessions remain available.' : ''}</p> : null}
-    <div hidden={!managementVisible}>
-    {selectedHost?.managed && selectedHost.access !== 'shared' && service.revoke ? <button type="button" onClick={() => setRevokeTarget(selectedHost)}>Revoke Host</button> : null}
-    {revokeTarget ? <div role="group" aria-label="Confirm Host revocation">
-      <p>Revoke {revokeTarget.name}? Its remote connections will close. Running work may continue. Use Stop work first to request cancellation. Pair it again to restore access.</p>
-      <button type="button" disabled={revoking} onClick={() => void revoke()}>{revoking ? 'Revoking…' : 'Confirm revoke'}</button>
-      <button type="button" disabled={revoking} onClick={() => setRevokeTarget(undefined)}>Cancel</button>
-    </div> : null}
-    {selectedHost ? <HostSecurityActions key={selectedHost.id} host={selectedHost} service={service} visible={managementVisible} /> : null}
     {onNewSession ? <button type="button" disabled={quotaExhausted} onClick={onNewSession}>New session</button> : null}
-    <button type="button" className="lab-pair-host" onClick={() => setShowPairing((value) => !value)} aria-expanded={showPairing}>Pair Agent Host</button>
-    </div>
     {hostError ? <p className="lab-control-note" role="alert">{hostError}</p> : null}
-    {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
-    {managementVisible && showPairing ? <PairingKeys service={service} /> : null}
   </section>;
 }
 

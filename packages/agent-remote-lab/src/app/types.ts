@@ -66,9 +66,10 @@ export interface AppActions extends LabWorkbenchActions {
   stopReader?(): void | Promise<void>;
 }
 
+import type { AccountFacts } from '../account.js';
 export interface AppProps {
   baseUrl?: string;
-  accountAction?: ReactNode;
+  account?: AccountFacts;
   userScoped?: boolean;
   transport?: LabTransport;
   directory?: SessionDirectoryClient;
@@ -114,7 +115,7 @@ export interface AppInputs {
   readonly initialProviderName?: string;
   readonly actions?: AppActions;
   readonly fixtureAction?: AppProps['fixtureAction'];
-  readonly accountAction?: ReactNode;
+  readonly account?: AccountFacts;
   readonly userScoped: boolean;
 }
 

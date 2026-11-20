@@ -1,0 +1,62 @@
+/* The page over a mode: Settings (its groups beside the chosen group) or the Assistants directory, on the warm ground like Bot mode.
+   At phone width one panel fills the screen above the tab bar. */
+.lab-page { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: var(--orchard-space-l); box-sizing: border-box; min-width: 0; min-height: 0; padding: var(--orchard-space-l); overflow: hidden;
+  background: var(--orchard-ground); color: var(--orchard-text); font: var(--orchard-type-body-size) / var(--orchard-type-body-leading) var(--orchard-font-text); }
+.lab-page[hidden] { display: none; }
+.lab-page[data-page="assistants"] { grid-template-columns: minmax(0, 1fr); }
+.lab-page > .orchard-panel.orchard-panel { display: flex; flex-direction: column; overflow: auto; }
+.lab-page :focus-visible { outline: 2px solid var(--orchard-focus); outline-offset: 2px; }
+.lab-page h1 { margin: 0; color: var(--orchard-text-strong); font: var(--orchard-type-title-weight) var(--orchard-type-title-size) / var(--orchard-type-title-leading) var(--orchard-font-text); }
+@media (max-width: 760px) {
+  .lab-page { position: fixed; inset-inline: 0; top: var(--lab-viewport-top, 0px); grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0; }
+}
+
+/* The groups of Settings: icon and name; on the phone each also says what it holds and drills in. */
+.lab-settings-sidebar.orchard-panel.orchard-panel { gap: var(--orchard-space-m); padding: var(--orchard-space-xl) var(--orchard-space-m); }
+.lab-settings-sidebar .lab-sidebar-title { padding: 0 var(--orchard-space-m) var(--orchard-space-s); }
+.lab-settings-list { display: flex; flex-direction: column; gap: var(--orchard-space-2xs); }
+.lab-settings-group.lab-settings-group { display: flex; align-items: center; gap: var(--orchard-space-l); width: 100%; min-height: 44px; padding: var(--orchard-space-m) var(--orchard-space-l); border: 0; border-radius: var(--orchard-radius-row);
+  color: var(--orchard-text); background: transparent; font: inherit; text-align: start; -webkit-tap-highlight-color: transparent; }
+.lab-settings-group.lab-settings-group:hover:not(:disabled) { color: var(--orchard-text-strong); background: var(--orchard-fill); }
+.lab-settings-group.lab-settings-group[aria-current="page"] { color: var(--orchard-text-strong); background: var(--orchard-tint); }
+.lab-settings-group[aria-current="page"] > svg:first-child { color: var(--orchard-brand); }
+.lab-settings-group-text { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.lab-settings-group-text small { overflow: hidden; color: var(--orchard-text-secondary); font-size: var(--orchard-type-footnote-size); text-overflow: ellipsis; white-space: nowrap; }
+.lab-settings-me .lab-settings-group.lab-settings-group { min-height: 56px; background: var(--orchard-fill); }
+.lab-settings-me .lab-settings-list { gap: var(--orchard-space-s); }
+.lab-settings-account { display: flex; align-items: center; gap: var(--orchard-space-l); margin: var(--orchard-space-l) 0; }
+.lab-settings-initial { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--orchard-fill-strong); color: var(--orchard-text-strong); font-weight: 600; }
+.lab-settings-me .lab-device-link { margin: 0 0 var(--orchard-space-l); }
+
+/* The chosen group: a heading, then cards of rows (name and help on the left, the control on the right). */
+.lab-settings-body { display: flex; flex-direction: column; gap: var(--orchard-space-2xl); max-width: 720px; width: 100%; margin-inline: auto; padding-bottom: var(--orchard-space-3xl); }
+.lab-settings-head { display: flex; align-items: center; gap: var(--orchard-space-m); }
+.lab-settings-head p { margin: 0; color: var(--orchard-text-secondary); font-size: var(--orchard-type-footnote-size); }
+.lab-setting-section { display: flex; flex-direction: column; gap: var(--orchard-space-m); min-width: 0; }
+.lab-setting-section-title { margin: 0; padding: 0 var(--orchard-space-l); color: var(--orchard-text-secondary); font: var(--orchard-type-footnote-weight) var(--orchard-type-footnote-size) / 1.4 var(--orchard-font-text); }
+.lab-setting-card.orchard-card { display: flex; flex-direction: column; padding: 0; overflow: hidden; background: var(--orchard-fill); }
+.lab-setting-row { display: flex; align-items: center; justify-content: space-between; gap: var(--orchard-space-2xl); min-height: 52px; padding: var(--orchard-space-l) var(--orchard-space-2xl); }
+.lab-setting-row + .lab-setting-row { border-top: 1px solid var(--orchard-separator); }
+.lab-setting-text { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.lab-setting-text > strong { color: var(--orchard-text-strong); font-weight: 600; }
+.lab-setting-text > small, .lab-setting-note { color: var(--orchard-text-secondary); font-size: var(--orchard-type-footnote-size); }
+.lab-setting-note { margin: 0; padding: var(--orchard-space-l) var(--orchard-space-2xl); }
+.lab-setting-control { flex: none; max-width: 60%; }
+.lab-setting-legacy { padding: var(--orchard-space-l) var(--orchard-space-2xl); min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .lab-setting-row { flex-wrap: wrap; }
+  .lab-setting-control { max-width: 100%; }
+}
+
+/* Settings > Computers. */
+.lab-host-overview-head { display: flex; align-items: center; justify-content: space-between; gap: var(--orchard-space-l); margin-bottom: var(--orchard-space-l); }
+.lab-host-lead { display: flex; align-items: center; gap: var(--orchard-space-m); margin: 0; color: var(--orchard-text-strong); font-weight: 600; }
+.lab-host-dot-lead { flex: none; width: 8px; height: 8px; margin-inline-end: var(--orchard-space-s); border-radius: 50%; background: var(--orchard-ink-faint); }
+.lab-host-lead > .lab-host-dot-lead { margin-inline-end: 0; }
+.lab-host-dot-lead[data-host-state="online"] { background: var(--orchard-online); }
+.lab-host-dot-lead[data-host-state="partial"] { background: var(--orchard-brand); }
+.lab-host-dot-lead[data-host-state="offline"] { background: var(--orchard-danger-text); }
+.lab-host-page { display: flex; flex-direction: column; gap: var(--orchard-space-2xl); }
+.lab-host-page-head { display: flex; align-items: center; gap: var(--orchard-space-l); }
+.lab-host-page-head h2 { margin: 0; color: var(--orchard-text-strong); font: var(--orchard-type-headline-weight) var(--orchard-type-headline-size) / 1.3 var(--orchard-font-text); }
+.lab-host-page-head p { display: flex; align-items: center; margin: 0; color: var(--orchard-text-secondary); font-size: var(--orchard-type-footnote-size); }

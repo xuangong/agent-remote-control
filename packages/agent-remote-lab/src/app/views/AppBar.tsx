@@ -1,8 +1,8 @@
-// The brand, account actions, connection summary and the Workbench and Trace tabs.
+// The brand, connection summary and the Workbench and Trace tabs.
 import type { AppScope } from '../types.js';
 
-export function AppBar({ scope }: { readonly scope: Pick<AppScope, 'accountAction' | 'activeAgentId' | 'activeView' | 'attach' | 'backgroundInert' | 'closePage' | 'connectionAgentId' | 'connectionProviderName' | 'connectionStatusLabel' | 'connectionSummaryRef' | 'directory' | 'handleViewKeyDown' | 'headerHidden' | 'openSession' | 'openedSessions' | 'setHeaderViewTarget' | 'showView' | 'state' | 'traceTabRef' | 'transitioning' | 'windowWorkspace' | 'workbenchTabRef'> }) {
-  const { accountAction, activeAgentId, activeView, attach, backgroundInert, closePage, connectionAgentId, connectionProviderName, connectionStatusLabel, connectionSummaryRef, directory, handleViewKeyDown, headerHidden, openSession, openedSessions, setHeaderViewTarget, showView, state, traceTabRef, transitioning, windowWorkspace, workbenchTabRef } = scope;
+export function AppBar({ scope }: { readonly scope: Pick<AppScope, 'activeAgentId' | 'activeView' | 'attach' | 'backgroundInert' | 'closePage' | 'connectionAgentId' | 'connectionProviderName' | 'connectionStatusLabel' | 'connectionSummaryRef' | 'directory' | 'handleViewKeyDown' | 'headerHidden' | 'openSession' | 'openedSessions' | 'setHeaderViewTarget' | 'showView' | 'state' | 'traceTabRef' | 'transitioning' | 'windowWorkspace' | 'workbenchTabRef'> }) {
+  const { activeAgentId, activeView, attach, backgroundInert, closePage, connectionAgentId, connectionProviderName, connectionStatusLabel, connectionSummaryRef, directory, handleViewKeyDown, headerHidden, openSession, openedSessions, setHeaderViewTarget, showView, state, traceTabRef, transitioning, windowWorkspace, workbenchTabRef } = scope;
   return <>
     <header className="lab-app-bar" hidden={headerHidden || windowWorkspace.unavailable}>
       <div className="lab-brand">
@@ -12,7 +12,6 @@ export function AppBar({ scope }: { readonly scope: Pick<AppScope, 'accountActio
           <h1>Agent conversations</h1>
         </div>
       </div>
-      {accountAction ? <div className="gateway-account-actions">{accountAction}</div> : null}
       <details
         ref={connectionSummaryRef}
         className="lab-session-summary"

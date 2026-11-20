@@ -2,7 +2,7 @@ import { act, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { CodexDaemonStatus } from '@orchardworks/agent-remote-protocol';
 import { render } from '../test/setup.js';
-import { HostSecurityActions } from './HostSecurityActions.js';
+import { HostCodexDaemon } from './HostCodexDaemon.js';
 import type { HostPairingService, RemoteHost } from './HostPairing.js';
 
 const host: RemoteHost = { id: 'host-one', name: 'Desktop', online: true, managed: true, access: 'owner',
@@ -20,7 +20,7 @@ async function click(container: HTMLElement, text: string) {
   await act(async () => button!.click());
 }
 it('requires confirmation, identifies all affected sessions, and disables duplicate restart', async () => {
-  const f = fixture(); const container = await render(<HostSecurityActions host={host} service={f.service} />);
+  const f = fixture(); const container = await render(<HostCodexDaemon host={host} service={f.service} />);
   await click(container, 'Restart Codex daemon');
   expect(container.textContent).toContain('Desktop');
   expect(container.textContent).toContain('Running tasks will be interrupted');
@@ -37,7 +37,7 @@ it('requires confirmation, identifies all affected sessions, and disables duplic
 it('queries after a lost acknowledgement without replaying restart', async () => {
   const f = fixture(); const command = f.service.codexDaemon!;
   f.service.codexDaemon = vi.fn(async (id, input) => { const result = await command(id, input); if (input) throw new Error('Host disconnected'); return result; });
-  const container = await render(<HostSecurityActions host={host} service={f.service} />);
+  const container = await render(<HostCodexDaemon host={host} service={f.service} />);
   await click(container, 'Restart Codex daemon'); await click(container, 'Confirm restart');
   expect(container.textContent).toContain('Check status');
   await click(container, 'Check status');
@@ -48,13 +48,13 @@ it('shows the Controller-provided safe failure reason', async () => {
   const f = fixture();
   const message = 'Refreshing the Codex daemon and updater requires Codex CLI 0.156.0 or newer. Update Codex before restarting through the Controller. No lifecycle command was dispatched.';
   f.setState({ revision, phase: 'failed', updatedAt: 1, message });
-  const container = await render(<HostSecurityActions host={host} service={f.service} />);
+  const container = await render(<HostCodexDaemon host={host} service={f.service} />);
   expect(container.querySelector('[role="status"]')?.textContent).toBe(message);
 });
 it.each(['shared', 'unsupported', 'offline'] as const)('does not dispatch restart for %s Hosts', async kind => {
   const f = fixture();
   const target = { ...host, ...(kind === 'shared' ? { access: 'shared' as const } : kind === 'unsupported' ? { providers: [] } : { online: false }) };
-  const container = await render(<HostSecurityActions host={target} service={f.service} />);
+  const container = await render(<HostCodexDaemon host={target} service={f.service} />);
   const button = [...container.querySelectorAll('button')].find(value => value.textContent === 'Restart Codex daemon');
   expect(!button || button.disabled).toBe(true);
   expect(f.service.codexDaemon).not.toHaveBeenCalled();
@@ -69,7 +69,7 @@ it('polls pending outcomes only while the management panel is visible and the pa
   f.setState({ revision, phase: 'restarting', operationId: crypto.randomUUID(), updatedAt: 0 });
   function Panel() {
     const [visible, setVisible] = useState(true);
-    return <><button onClick={() => setVisible(value => !value)}>Toggle panel</button><HostSecurityActions host={host} service={f.service} visible={visible} /></>;
+    return <><button onClick={() => setVisible(value => !value)}>Toggle panel</button><HostCodexDaemon host={host} service={f.service} visible={visible} /></>;
   }
   const container = await render(<Panel />);
   expect(f.service.codexDaemon).toHaveBeenCalledTimes(1);
@@ -98,7 +98,7 @@ it('polls pending outcomes only while the management panel is visible and the pa
 
 it('tracks a fifteen-minute restart to completion without dispatching it again', async () => {
   vi.useFakeTimers();
-  const f = fixture(); const container = await render(<HostSecurityActions host={host} service={f.service} />);
+  const f = fixture(); const container = await render(<HostCodexDaemon host={host} service={f.service} />);
   await click(container, 'Restart Codex daemon'); await click(container, 'Confirm restart');
   await act(async () => { await vi.advanceTimersByTimeAsync(15 * 60000); });
   expect(container.textContent).toContain('Restarting Codex daemon');
@@ -113,7 +113,7 @@ it('bounds extended status polling and permits an explicit status check afterwar
   vi.useFakeTimers();
   const f = fixture();
   f.setState({ revision, phase: 'restarting', operationId: crypto.randomUUID(), updatedAt: 0 });
-  const container = await render(<HostSecurityActions host={host} service={f.service} />);
+  const container = await render(<HostCodexDaemon host={host} service={f.service} />);
   await act(async () => { await vi.advanceTimersByTimeAsync(16 * 60000 + 3000); });
   const requests = vi.mocked(f.service.codexDaemon!).mock.calls.length;
   await act(async () => { await vi.advanceTimersByTimeAsync(60000); });

@@ -391,7 +391,7 @@ it.each(['B', 'D'])('restores the selected Window owner while a new %s Window ke
   await settleApp(() => { expect(succession.document.focus).toBe(slot.id); expect(sideDraft()).toBe('Independent B draft'); });
   expect(succession.document.slots.find(value => value.id === slot.id)?.owners).toEqual(owners);
   expect(succession.ownerFor(slot.id)).toBe(askOwner);
-  await act(async () => f.view.querySelector<HTMLButtonElement>('button[aria-label="Windows"]')!.click());
+  await act(async () => f.view.querySelector<HTMLButtonElement>(':is(.lab-launcher, .lab-window-floating, .lab-toolbar-launchers, #lab-context) button[aria-label="Windows"]')!.click());
   const createWindow = [...f.view.querySelectorAll<HTMLButtonElement>('.lab-window-panel button')].find(button => button.textContent === 'New Window')!;
   expect(createWindow).toBeDefined();
   await act(async () => createWindow.click());

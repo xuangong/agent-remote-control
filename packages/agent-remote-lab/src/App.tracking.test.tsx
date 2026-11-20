@@ -87,11 +87,11 @@ it('scopes App reminders to the current Bot roster and routes clicks by its curr
     await until(() => expect(notices).toHaveLength(3));
     const windowBefore = structuredClone(app.workspace().window);
     await act(async () => notices[1]!.onclick!());
-    await until(() => expect(app.container.querySelector('[aria-label="Assistants"] [aria-current="true"]')?.getAttribute('aria-label')).toBe('B1'));
+    await until(() => expect(app.container.querySelector('[aria-label="Chats"] [aria-current="true"]')?.getAttribute('aria-label')).toBe('B1'));
     expect(app.workspace().window).toEqual(windowBefore);
     await act(async () => app.workspace().operateGroup('B', { type: 'bot.update', viewId: 'B1', details: { hidden: true } }));
     await act(async () => notices[2]!.onclick!());
-    expect(app.container.querySelector('[aria-label="Assistants"] [aria-current="true"]')).toBeNull();
+    expect(app.container.querySelector('[aria-label="Chats"] [aria-current="true"]')).toBeNull();
     expect(app.workspace().window).toEqual(windowBefore); expect(readTrackedSessions(scope)).toEqual([tracked]);
     await app.switchMode('window');
     await emit(tracked, 'idle', 6); expect(notices).toHaveLength(3);

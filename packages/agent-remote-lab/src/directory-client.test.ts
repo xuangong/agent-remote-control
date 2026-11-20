@@ -153,3 +153,20 @@ it('keeps Handoff description and all action requests scoped to one Host and ope
 it('exposes only the Relay origin as the install target for a tenant-scoped client', () => {
   expect(new RemoteHostClient('https://private.example:8443/u/tenant/').serverUrl).toBe('https://private.example:8443');
 });
+
+it('reads and writes the smart reading choice of a Host, sending the body of a PUT', async () => {
+  const requests: Array<{ method?: string; path?: string; body: string }> = [];
+  stubMemoryFetch(({ method, path, body }) => { requests.push({ method, path, body }); return { json: { providers: method === 'PUT' ? ['codex'] : [] } }; });
+  const client = new RemoteHostClient('https://relay.example/u/tenant/');
+  expect(await client.smartReading('host/one')).toEqual({ providers: [] });
+  expect(await client.setSmartReading('host/one', 'codex', true)).toEqual({ providers: ['codex'] });
+  expect(requests).toEqual([
+    { method: 'GET', path: '/u/tenant/v1/remote/hosts/host%2Fone/smart-reading', body: '' },
+    { method: 'PUT', path: '/u/tenant/v1/remote/hosts/host%2Fone/smart-reading', body: '{"providerId":"codex","enabled":true}' }]);
+});
+
+it('throws the refusal of smart reading with its code and status', async () => {
+  stubMemoryFetch(() => ({ status: 409, json: { code: 'journals_unavailable', error: 'This Relay does not keep session journals.' } }));
+  const client = new RemoteHostClient('https://relay.example/u/tenant/');
+  await expect(client.setSmartReading('host', 'codex', true)).rejects.toMatchObject({ code: 'journals_unavailable', status: 409 });
+});

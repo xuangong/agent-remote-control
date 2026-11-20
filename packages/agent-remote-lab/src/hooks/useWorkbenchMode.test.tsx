@@ -82,3 +82,48 @@ it('opens a conversation from the phone list as a history entry, and Back or the
   expect(read().rosterVisible).toBe(true);
   vi.unstubAllGlobals();
 });
+
+// Settings and the directory over a mode (I4 plan, decision 9): the mode keeps its place underneath, and the way back returns to it.
+it('opens Settings over a chat and returns to the same chat, in the address too', async () => {
+  history.replaceState(null, '', '/?mode=bot&section=s&bot=v&debug=1'); const read = await mount();
+  expect(read().destination).toEqual({ destination: 'chats' });
+  await act(async () => read().open({ destination: 'settings', group: 'computers' }, 'push'));
+  expect(read().destination).toEqual({ destination: 'settings', group: 'computers' }); expect(read().mode).toBe('bot');
+  expect(new URL(location.href).searchParams.get('page')).toBe('settings'); expect(new URL(location.href).searchParams.get('group')).toBe('computers');
+  expect(new URL(location.href).searchParams.get('bot')).toBe('v'); expect(new URL(location.href).searchParams.get('debug')).toBe('1');
+  await act(async () => read().setMode('bot'));
+  expect(read().page).toBeUndefined(); expect(location.search).toBe('?debug=1&mode=bot&section=s&bot=v'); expect(read().place).toEqual({ kind: 'bot', groupId: 's', viewId: 'v' });
+});
+it('opens an address that names Settings or the directory, and follows the back gesture out of a page', async () => {
+  history.replaceState(null, '', '/?window=w&page=settings&group=privacy'); const read = await mount();
+  expect(read().destination).toEqual({ destination: 'settings', group: 'privacy' }); expect(read().mode).toBe('window');
+  await act(async () => { history.replaceState(null, '', '/?window=w'); dispatchEvent(new PopStateEvent('popstate')); });
+  expect(read().destination).toEqual({ destination: 'windows' });
+  await act(async () => { history.pushState(null, '', '/?window=w&page=assistants'); dispatchEvent(new PopStateEvent('popstate')); });
+  expect(read().destination).toEqual({ destination: 'assistants' });
+});
+it('opens the directory at a group for an address that names a group of Bot mode and no assistant', async () => {
+  history.replaceState(null, '', '/?mode=bot&section=s'); const read = await mount();
+  expect(read().destination).toEqual({ destination: 'assistants' }); expect(read().place).toEqual({ kind: 'section', groupId: 's' });
+});
+it('leaves a page pushed on the phone with the history Back, and a page opened in place up to its list', async () => {
+  phone(); const read = await mount(); await act(async () => read().setMode('bot'));
+  await act(async () => read().open({ destination: 'settings' }, 'push')); await act(async () => read().open({ destination: 'settings', group: 'general' }, 'push'));
+  const depth = history.length;
+  await act(async () => { read().closePage(); await new Promise(resolve => setTimeout(resolve, 20)); });
+  expect(read().destination).toEqual({ destination: 'settings' }); expect(history.length).toBe(depth);
+  await act(async () => read().open({ destination: 'settings', group: 'general' }, 'replace'));
+  history.replaceState(null, '', location.href);
+  await act(async () => read().closePage());
+  expect(read().destination).toEqual({ destination: 'settings' });
+  await act(async () => read().closePage());
+  expect(read().destination).toEqual({ destination: 'chats' });
+});
+it('opens in the mode the default view names, and on the last used mode otherwise', async () => {
+  localStorage.setItem('agent-remote:default-view', 'chats'); localStorage.setItem('agent-remote:workbench-mode', 'window');
+  let read = await mount(); expect(read().mode).toBe('bot'); await act(async () => root!.unmount()); history.replaceState(null, '', '/');
+  localStorage.setItem('agent-remote:default-view', 'windows'); localStorage.setItem('agent-remote:workbench-mode', 'bot');
+  read = await mount(); expect(read().mode).toBe('window'); await act(async () => root!.unmount()); history.replaceState(null, '', '/');
+  localStorage.removeItem('agent-remote:default-view');
+  read = await mount(); expect(read().mode).toBe('bot');
+});

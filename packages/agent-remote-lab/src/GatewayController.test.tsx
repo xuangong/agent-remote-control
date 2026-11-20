@@ -4,8 +4,13 @@ import type { ChannelLink } from '@orchardworks/agent-client';
 import { SESSION_CONNECTION_PATTERN } from '@orchardworks/agent-e2e/faults/connection-words.mjs';
 import { render } from './test/setup.js';
 import { GatewayController } from './GatewayController.js';
+import type { AccountFacts } from './account.js';
 import { rememberWorkspaceAccess, forgetWorkspaceAccess, RelayLinkReport } from './workspace-access.js';
 beforeEach(() => { localStorage.clear(); sessionStorage.clear(); });
+/** The account facts as buttons, standing in for the Settings page that reads them. */
+const accountButtons = (account?: AccountFacts) => account ? <>
+  <span className="gateway-account-identity" aria-label="Account" title={[account.name, account.email, `User: ${account.id}`].filter(Boolean).join(' · ')}>{account.name || account.email || account.id}</span>
+  <button type="button" disabled={!account.ready} onClick={account.openSecurity}>Security</button><button type="button" onClick={account.signOut}>Sign out</button></> : null;
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 it('opens automatic local access despite an earlier sign-out and does not offer interactive account controls', async () => {
@@ -13,7 +18,7 @@ it('opens automatic local access despite an earlier sign-out and does not offer 
   const basePath = '/u/' + 'a'.repeat(64) + '/';
   const fetcher = vi.fn(async () => Response.json({ user: { id: 'devbox', name: 'Devbox' }, basePath, expiresAt: Date.now() + 120000 }));
   vi.stubGlobal('fetch', fetcher);
-  const view = await render(<GatewayController automaticAccess>{(baseUrl, accountAction, ready) => <><p>{ready ? baseUrl : 'Restoring'}</p>{accountAction}</>}</GatewayController>);
+  const view = await render(<GatewayController automaticAccess>{(baseUrl, account, ready) => <><p>{ready ? baseUrl : 'Restoring'}</p>{accountButtons(account)}</>}</GatewayController>);
   expect(view.textContent).toBe(window.location.origin + basePath);
   expect(view.querySelector('button, a')).toBeNull();
   expect(fetcher).toHaveBeenCalledWith('/auth/status', expect.any(Object));
@@ -93,7 +98,7 @@ it('logs out through the relay and removes the private controller', async () => 
     requests.push(url);
     return Response.json({ basePath: '/u/' + 'a'.repeat(64) + '/', expiresAt: Date.now() + 5000 });
   });
-  const view = await render(<GatewayController>{(_baseUrl, accountAction) => <><p>Private controller</p>{accountAction}</>}</GatewayController>);
+  const view = await render(<GatewayController>{(_baseUrl, account) => <><p>Private controller</p>{accountButtons(account)}</>}</GatewayController>);
   const logout = [...view.querySelectorAll('button')].find(button => button.textContent === 'Sign out');
   expect(logout).toBeDefined();
   await act(async () => logout!.click());
@@ -134,7 +139,7 @@ it('preserves visible access after a long freeze and restores the same draft and
   await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
   expect(view.querySelector('input')).toBe(input);
   expect(input.closest('[hidden], [inert]')).toBeNull();
-  expect(view.textContent).not.toContain('Opening your workspace');
+  expect(view.textContent).not.toContain('Opening Orchard…');
   await act(async () => { completeRefresh(Response.json({ basePath, expiresAt: Date.now() + 120000, refreshAfterMs: 60000 })); });
   expect(view.querySelector('input')).toBe(input);
   expect(input.value).toBe('unsent draft');
@@ -193,11 +198,11 @@ it('offers a bounded retry when the initial access check hangs and ignores its l
     .mockResolvedValue(Response.json({}, { status: 401 }));
   vi.stubGlobal('fetch', fetcher);
   const view = await render(<GatewayController>{() => <p>Private controller</p>}</GatewayController>);
-  expect(view.querySelector('[role="status"]')?.textContent).toBe('Checking access…');
+  expect(view.querySelector('[role="status"]')?.textContent).toBe('Opening Orchard…');
   await act(async () => { await vi.advanceTimersByTimeAsync(12_001); });
-  expect(view.querySelector('h1')?.textContent).toBe('Connection interrupted');
+  expect(view.querySelector('h1')?.textContent).toBe('Can’t reach Orchard right now');
   await act(async () => view.querySelector<HTMLButtonElement>('.arc-access-action')!.click());
-  expect(view.querySelector('h1')?.textContent).toBe('Sign in to continue');
+  expect(view.querySelector('h1')?.textContent).toBe('Sign in to Orchard');
   await act(async () => finishFirst(Response.json({ basePath: '/u/' + 'a'.repeat(64) + '/', expiresAt: Date.now() + 120000 })));
   expect(view.textContent).not.toContain('Private controller');
 });
@@ -222,7 +227,7 @@ it('manages browser sessions without unmounting drafts and clears private state 
     if (url === '/auth/audit') return Response.json({ events: [] });
     return Response.json({ ok: true, current: true });
   });
-  const view = await render(<GatewayController>{(_baseUrl, accountAction) => <><input aria-label="Draft" defaultValue="unsent" />{accountAction}</>}</GatewayController>);
+  const view = await render(<GatewayController>{(_baseUrl, account) => <><input aria-label="Draft" defaultValue="unsent" />{accountButtons(account)}</>}</GatewayController>);
   const draft = view.querySelector('input')!;
   const recoveryKey = `agent-remote:recovery:${new URL('/u/' + 'a'.repeat(64) + '/', window.location.origin).href}:drafts`;
   sessionStorage.setItem(recoveryKey, 'private draft');
@@ -260,7 +265,7 @@ it('renews frozen access as soon as the page is shown without waiting for old ti
 });
 it('shows the Account identity without exposing authentication material', async () => {
   vi.stubGlobal('fetch', async () => Response.json({ basePath: '/u/' + 'a'.repeat(64) + '/', expiresAt: Date.now()+60000, user: { id: 'alice', name: 'Alice Example', email: 'alice@example.com' } }));
-  const view = await render(<GatewayController>{(_baseUrl, accountAction) => <><p>Conversation</p>{accountAction}</>}</GatewayController>);
+  const view = await render(<GatewayController>{(_baseUrl, account) => <><p>Conversation</p>{accountButtons(account)}</>}</GatewayController>);
   expect(view.textContent).toContain('Alice Example');
   expect(view.querySelector('[aria-label="Account"]')?.getAttribute('title')).toContain('alice@example.com');
 });

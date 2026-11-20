@@ -12,7 +12,7 @@
  * - Reading and window state are not owned here; see window-composition and the Window workspace.
  */
 
-export type SessionPanel = 'list' | 'favorites' | 'new' | 'settings' | 'hosts';
+export type SessionPanel = 'list' | 'favorites' | 'new';
 export type MainView = 'workbench' | 'trace';
 
 export interface PanelsState {
@@ -135,5 +135,5 @@ export function windowStageVisible(state: PanelsState, windowMode: boolean): boo
 
 /** The title of the sessions page for a panel. */
 export function sessionsPageTitle(panel: SessionPanel): string {
-  return panel === 'list' ? 'All sessions' : panel === 'favorites' ? 'Favorites' : panel === 'new' ? 'New session' : panel === 'hosts' ? 'Hosts' : 'Settings';
+  return panel === 'list' ? 'All sessions' : panel === 'favorites' ? 'Favorites' : 'New session';
 }

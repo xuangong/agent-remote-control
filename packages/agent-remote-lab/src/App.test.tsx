@@ -40,35 +40,37 @@ describe('App', () => {
     window.localStorage.removeItem(lettersKey);
     try {
       const container = await render(<App initialState={letterState} initialSessionStatus="ready" actions={{}} />);
-      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
-      const letters = container.querySelector<HTMLInputElement>('[aria-label="Show letters"]');
-      const device = container.querySelector<HTMLElement>('[role="group"][aria-label="All assistants on this device"]')!;
-      const choice = (name: string) => [...device.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === name)!;
-      expect(letters).not.toBeNull();
-      expect(letters!.checked).toBe(true);
       expect(container.querySelector('.agent-communication-letter')).not.toBeNull();
+      await openAssistantSettings(container);
+      const choice = (name: string) => [...processDefault(container).querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === name)!;
+      expect(lettersSwitch(container).getAttribute('aria-checked')).toBe('true');
       for (const mode of ['Concise', 'Process', 'Full'] as const) {
         await act(async () => choice(mode).click());
-        await act(async () => letters!.click());
+        await act(async () => lettersSwitch(container).click());
         expect(choice(mode).getAttribute('aria-pressed')).toBe('true');
-        expect(letters!.checked).toBe(false);
+        expect(lettersSwitch(container).getAttribute('aria-checked')).toBe('false');
+        await backToWindows(container);
         expect(container.querySelector('.agent-communication-letter')).toBeNull();
-        await act(async () => letters!.click());
+        await openAssistantSettings(container);
+        await act(async () => lettersSwitch(container).click());
         expect(choice(mode).getAttribute('aria-pressed')).toBe('true');
+        await backToWindows(container);
         expect(container.querySelector('.agent-communication-letter')).not.toBeNull();
+        await openAssistantSettings(container);
       }
-      await act(async () => letters!.click());
+      await act(async () => lettersSwitch(container).click());
       for (const mode of ['Concise', 'Full'] as const) {
         await act(async () => choice(mode).click());
-        expect(letters!.checked).toBe(false);
-        expect(container.querySelector('.agent-communication-letter')).toBeNull();
+        expect(lettersSwitch(container).getAttribute('aria-checked')).toBe('false');
       }
+      await backToWindows(container);
+      expect(container.querySelector('.agent-communication-letter')).toBeNull();
       await unmount(container);
       const restored = await render(<App initialState={letterState} initialSessionStatus="ready" actions={{}} />);
       expect(restored.querySelector('.agent-communication-letter')).toBeNull();
-      await act(async () => restored.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
-      expect(restored.querySelector<HTMLInputElement>('[aria-label="Show letters"]')!.checked).toBe(false);
-      expect(restored.querySelector('[role="group"][aria-label="All assistants on this device"] [aria-pressed="true"]')?.textContent).toBe('Full');
+      await openAssistantSettings(restored);
+      expect(lettersSwitch(restored).getAttribute('aria-checked')).toBe('false');
+      expect(processDefault(restored).querySelector('[aria-pressed="true"]')?.textContent).toBe('Full');
     } finally { window.localStorage.removeItem(modeKey); window.localStorage.removeItem(lettersKey); }
   });
 
@@ -85,14 +87,17 @@ describe('App', () => {
       const show = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Show in Conversation')!;
       await act(async () => show.click());
       expect(container.querySelector('[data-inspected="true"] .agent-communication-letter')).not.toBeNull();
-      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
-      expect(container.querySelector('[role="group"][aria-label="All assistants on this device"] [aria-pressed="true"]')?.textContent).toBe('Concise');
-      expect(container.querySelector<HTMLInputElement>('[aria-label="Show letters"]')!.checked).toBe(false);
+      await openAssistantSettings(container);
+      expect(processDefault(container).querySelector('[aria-pressed="true"]')?.textContent).toBe('Concise');
+      expect(lettersSwitch(container).getAttribute('aria-checked')).toBe('false');
       expect(window.localStorage.getItem(lettersKey)).toBe('false');
       // Showing letters and hiding them again leaves the letter Trace opened on the screen while it is the target.
-      await act(async () => container.querySelector<HTMLInputElement>('[aria-label="Show letters"]')!.click());
+      await act(async () => lettersSwitch(container).click());
+      await backToWindows(container);
       expect(container.querySelectorAll('.agent-communication-letter')).toHaveLength(1);
-      await act(async () => container.querySelector<HTMLInputElement>('[aria-label="Show letters"]')!.click());
+      await openAssistantSettings(container);
+      await act(async () => lettersSwitch(container).click());
+      await backToWindows(container);
       expect(container.querySelector('[data-inspected="true"] .agent-communication-letter')).not.toBeNull();
       expect(window.localStorage.getItem(lettersKey)).toBe('false');
     } finally { window.localStorage.removeItem(modeKey); window.localStorage.removeItem(lettersKey); }
@@ -113,8 +118,9 @@ describe('App', () => {
       });
       await act(async () => container.querySelector<HTMLButtonElement>('.agent-session-search-results button')!.click());
       expect(container.querySelector('[data-inspected="true"] .agent-communication-letter')).not.toBeNull();
-      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
-      await act(async () => container.querySelector<HTMLInputElement>('[aria-label="Show letters"]')!.click());
+      await openAssistantSettings(container);
+      await act(async () => lettersSwitch(container).click());
+      await backToWindows(container);
       expect(container.querySelector('.agent-communication-letter')).toBeNull();
     } finally { window.localStorage.removeItem(lettersKey); }
   });
@@ -135,12 +141,12 @@ describe('App', () => {
       await act(async () => show.click());
       expect(tab(container, 'Workbench').getAttribute('aria-selected')).toBe('true');
       expect(container.querySelector('[data-inspected="true"] .agent-reasoning')).not.toBeNull();
-      await openSessionViewOptions(container);
-      expect(container.querySelector('[role="group"][aria-label="All assistants on this device"] [aria-pressed="true"]')?.textContent).toBe('Concise');
+      await openAssistantSettings(container);
+      expect(processDefault(container).querySelector('[aria-pressed="true"]')?.textContent).toBe('Concise');
     } finally { window.localStorage.removeItem(key); }
   });
 
-  it('chooses the process mode for every assistant on this device from View, exclusively, and keeps it after remount', async () => {
+  it('chooses the process mode for every assistant on this device from Settings, exclusively, and keeps it after remount', async () => {
     const initialState = { ...replicaState, timeline: { ...replicaState.timeline, entries: [
       { type: 'user_message' as const, text: 'The requirement.' },
       { type: 'reasoning' as const, text: 'Execution details.' },
@@ -151,16 +157,18 @@ describe('App', () => {
       const container = await render(<App initialState={initialState} initialSessionStatus="ready" actions={{}} />);
       // Concise: the prompt and the answer; the reasoning is behind the work line.
       expect(container.querySelectorAll('.agent-timeline-entry')).toHaveLength(2);
-      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!.click());
-      const device = container.querySelector<HTMLElement>('[role="group"][aria-label="All assistants on this device"]')!;
-      const choice = (name: string) => [...device.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === name)!;
+      await openAssistantSettings(container);
+      const choice = (name: string) => [...processDefault(container).querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === name)!;
       await act(async () => choice('Full').click());
-      expect([...device.querySelectorAll('button')].filter(button => button.getAttribute('aria-pressed') === 'true').map(button => button.textContent)).toEqual(['Full']);
+      expect([...processDefault(container).querySelectorAll('button')].filter(button => button.getAttribute('aria-pressed') === 'true').map(button => button.textContent)).toEqual(['Full']);
+      await backToWindows(container);
       expect(container.querySelectorAll('.agent-timeline-entry')).toHaveLength(3);
       expect(container.querySelector('.agent-content-preview')?.textContent).toContain('Execution details.');
       const restored = await render(<App initialState={initialState} initialSessionStatus="ready" actions={{}} />);
       expect(restored.querySelectorAll('.agent-timeline-entry')).toHaveLength(3);
+      await openAssistantSettings(container);
       await act(async () => choice('Concise').click());
+      await backToWindows(container);
       expect(container.querySelectorAll('.agent-timeline-entry')).toHaveLength(2);
       expect(container.querySelector('.agent-message-user')?.textContent).toContain('The requirement.');
       expect(container.querySelector('.agent-message-assistant')?.textContent).toContain('The summary.');
@@ -401,6 +409,9 @@ describe('App', () => {
     const state = { ...replicaState, agent: { ...replicaState.agent!, providerId } };
     const fixtureAction = vi.fn().mockResolvedValue(undefined);
     const container = await render(<App initialState={state} initialSessionStatus="ready" fixtureAction={fixtureAction} />);
+    // The controls of a recorded fixture are under Settings > Advanced.
+    await act(async () => container.querySelector<HTMLButtonElement>('.lab-rail button[aria-label="Settings"]')!.click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('.lab-settings-group')].find(item => item.querySelector('strong')?.textContent === 'Advanced')!.click());
     const advance = container.querySelector<HTMLButtonElement>('[data-testid="playback-advance"]');
     if (providerId === 'recorded') {
       expect(advance).not.toBeNull();
@@ -1112,6 +1123,14 @@ it('shows stored conversation content in the first render on a cached lease, wit
   } finally { fetcher.mockRestore(); setWorkspaceReady(path, true); localStorage.removeItem('agent-remote:workspace-access'); }
 });
 
+/** Settings > Assistants, where the device's process default and team messages are chosen, from the rail. */
+async function openAssistantSettings(container: ParentNode): Promise<void> {
+  await act(async () => container.querySelector<HTMLButtonElement>('.lab-rail button[aria-label="Settings"]')!.click());
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('.lab-settings-group')].find(item => item.querySelector('strong')?.textContent === 'Assistants')!.click());
+}
+const backToWindows = async (container: ParentNode) => act(async () => container.querySelector<HTMLButtonElement>('.lab-rail button[aria-label="Windows"]')!.click());
+const lettersSwitch = (container: ParentNode) => [...container.querySelectorAll<HTMLButtonElement>('[role="switch"]')].find(item => item.textContent === 'Team messages')!;
+const processDefault = (container: ParentNode) => container.querySelector<HTMLElement>('[role="group"][aria-label="Default process display"]')!;
 async function openSessionViewOptions(container: ParentNode): Promise<void> {
   const button = container.querySelector<HTMLButtonElement>('button[aria-label="Session view options"]')!;
   if (button.getAttribute('aria-expanded') !== 'true') await act(async () => button.click());

@@ -26,7 +26,7 @@ it('asks for a missing session once across mode switches, state frames, bot swit
   expect(first).toBeLessThanOrEqual(2);
 
   await app.switchMode('bot');
-  await until(() => expect(app.container.querySelectorAll('nav[aria-label="Assistants"] .lab-bot-row').length).toBeGreaterThanOrEqual(2));
+  await until(() => expect(app.container.querySelectorAll('nav[aria-label="Chats"] .lab-bot-row').length).toBeGreaterThanOrEqual(2));
   for (let index = 0; index < 10; index++) await act(async () => app.emitStates({ hosts: [{ hostId: 'local', online: true }],
     states: [{ hostId: 'local', providerId: 'recorded', nativeSessionId: 'G1', state: index % 2 ? 'idle' : 'running', ageMs: 0 }] }));
   for (let index = 0; index < 3; index++) {

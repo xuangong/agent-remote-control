@@ -1,8 +1,9 @@
 import './host-overview.css';
 import { Fragment, useEffect, useState, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
 import type { HostStatus } from '@orchardworks/agent-remote-protocol';
 import { Button } from '../ui/Button.js';
+import { Pill } from '@orchardworks/agent-client-web/primitives';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { Icon } from '../ui/Icon.js';
 import type { HostPairingService, RemoteHost } from './HostPairing.js';
 import { PairingKeys } from './PairingKeys.js';
@@ -110,17 +111,16 @@ function HostCard({ host, reading, onOpenHost }: { host: RemoteHost; reading?: H
 
 /**
  * Every Host with its open sessions and, for its owner, CPU, memory and disks. A card opens the Host's settings.
- * Pair a Host sits in `actionsTarget` (the desktop page toolbar) when given, otherwise in the page's own heading;
- * `null` is a toolbar that has not mounted yet.
+ * `lead` is the line above the cards (how many are online); Pair a computer opens the pairing keys.
  */
-export function HostOverview({ hosts, service, visible, compact = false, actionsTarget, onOpenHost }: {
-  hosts: readonly RemoteHost[]; service: HostPairingService; visible: boolean; compact?: boolean; actionsTarget?: HTMLElement | null; onOpenHost(id: string): void;
+export function HostOverview({ hosts, service, visible, compact = false, lead, onOpenHost }: {
+  hosts: readonly RemoteHost[]; service: HostPairingService; visible: boolean; compact?: boolean; lead?: ReactNode; onOpenHost(id: string): void;
 }) {
+  const t = useTranslate();
   const readings = useHostStatuses(service, hosts, visible);
   const [pairing, setPairing] = useState(false);
-  const pair = <Button className="lab-host-pair" aria-expanded={pairing} onClick={() => setPairing(value => !value)}>Pair a Host</Button>;
-  return <section className="lab-host-overview" aria-label={actionsTarget === undefined ? 'Hosts' : undefined}>
-    {actionsTarget ? createPortal(pair, actionsTarget) : actionsTarget === undefined ? <div className="lab-directory-heading"><h2>Hosts</h2>{pair}</div> : null}
+  return <section className="lab-host-overview" aria-label={t('settings.group.computers')}>
+    <div className="lab-host-overview-head">{lead}<Pill className="lab-host-pair" aria-expanded={pairing} onClick={() => setPairing(value => !value)}>{t('settings.computers.pair')}</Pill></div>
     {pairing ? <div className="lab-host-pairing-panel"><PairingKeys service={service} /></div> : null}
     {hosts.length ? <div className="lab-host-grid" data-compact={compact || undefined}>
       {hosts.map(host => <HostCard key={host.id} host={host} reading={readings[host.id]} onOpenHost={onOpenHost} />)}

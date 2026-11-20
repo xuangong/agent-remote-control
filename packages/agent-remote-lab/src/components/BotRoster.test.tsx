@@ -11,7 +11,7 @@ it('renders accessible metadata and fallback Host identity without hidden member
   const model = projectBotRoster([group], [{ ...botTarget('Other'), hostId: 'host-a' }, { ...botTarget('Other'), hostId: 'host-b' }], { status: () => 'offline' });
   let selected: BotPlace | undefined;
   const container = await render(<BotRoster model={model} place={{ kind: 'bot', groupId: 'A', viewId: 'A1' }} onSelect={place => { selected = place; }} directoryControls={<button>Refresh</button>} />);
-  expect(container.querySelector('nav[aria-label="Assistants"]')).not.toBeNull();
+  expect(container.querySelector('nav[aria-label="Chats"]')).not.toBeNull();
   expect(container.textContent).toContain('Reviewer'); expect(container.textContent).not.toContain('A2');
   expect(container.textContent).not.toMatch(/Failed|New result/);
   expect(container.textContent).toContain('host-a'); expect(container.textContent).toContain('host-b');
@@ -59,11 +59,11 @@ it('calls a bot by its stored name or a generated one, never by its session\'s t
   expect(names[1]).toBe(projectBotRoster([group], [], { status: () => 'idle' }).sections[0]!.rows[1]!.name);
 });
 
-it('keeps Other sessions folded with their Refresh controls inside, and names an empty group plainly', async () => {
+it('keeps Other sessions folded with their Refresh controls inside, and says an empty list plainly', async () => {
   const empty = botGroup('E'); empty.window.views = []; empty.window.selectedPrimaryViewId = null; empty.window.selectedViewId = null;
   const model = projectBotRoster([empty], [botTarget('loose')], { status: () => 'idle' });
   const container = await render(<BotRoster model={model} onSelect={() => {}} directoryControls={<button type="button">Refresh</button>} />);
-  expect(container.textContent).toContain('No assistants in this group yet.');
+  expect(container.textContent).toContain('No chats yet. Start one from Assistants.');
   const other = container.querySelector<HTMLDetailsElement>('details.lab-bot-other')!;
   expect(other.open).toBe(false);
   expect(other.querySelector('summary')?.textContent).toBe('Other sessions');
@@ -142,4 +142,15 @@ it("says each assistant's state in one sentence with its avatar's mood, the unre
   const chinese = await render(<BotRoster model={model(translator('zh'))} onSelect={() => {}} directoryControls={null} />);
   expect(visibleButton(chinese, 'A1').querySelector('.lab-bot-sentence')?.textContent).toBe('在忙，稍等～');
   expect(visibleButton(chinese, 'A3').querySelector('.lab-bot-sentence')?.textContent).toBe('在休息，需要时自动醒来');
+});
+
+it('lists the assistants flat, pinned first and then by latest reply, with no group headings', async () => {
+  const first = botGroup('A'), second = botGroup('B');
+  second.bots!.members.B2 = { name: 'B2', pinned: true };
+  const replies: Record<string, number> = { A1: 10, B1: 30 };
+  const model = projectBotRoster([first, second], [], { status: () => 'idle', reply: session => replies[session.nativeSessionId] ? { replyAt: replies[session.nativeSessionId]!, preview: 'ok' } : undefined });
+  const container = await render(<BotRoster model={model} onSelect={() => {}} directoryControls={null} />);
+  expect([...container.querySelectorAll('.lab-bot-chats .lab-bot-name')].map(name => name.textContent)).toEqual(['B2', 'B1', 'A1', 'A2']);
+  expect(container.querySelector('.lab-bot-section-head')).toBeNull();
+  expect([...container.querySelectorAll('h2')].map(heading => heading.textContent)).toEqual(['Other sessions']);
 });

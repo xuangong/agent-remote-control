@@ -25,9 +25,11 @@ export interface BotRow {
   draft?: string;
   /** Messages to the bot wait in the outbox for its Host. */
   waiting?: true;
+  /** Only in the directory: the bot is hidden in Bot mode (itself, or its whole group), so Chats does not list it. */
+  hiddenInChats?: true;
 }
 /** `hidden` lists the views of this group's bots hidden in Bot mode, which the group can show again. */
-export interface BotSection { groupId: string; title: string; rows: BotRow[]; hidden: string[]; unread?: true }
+export interface BotSection { groupId: string; title: string; rows: BotRow[]; hidden: string[]; unread?: true; /** Only in the directory: the group is hidden in Bot mode. */ hiddenInChats?: true }
 export interface BotRosterModel { sections: BotSection[]; other: SessionEntry[] }
 export interface BotRosterOptions {
   status(session: BotSessionRef): SessionActivityStatus;
@@ -51,6 +53,8 @@ export interface BotRosterOptions {
   t?: Translate;
   /** The names the account's assistants are called by; by default those of `groups`. */
   names?: AccountNames;
+  /** The assistant directory: every group and every bot, the hidden ones marked rather than left out. */
+  everyone?: boolean;
 }
 /** A rank after every group's: groups keep catalog order in Bot mode, but bot details still carry one. */
 export function appendedRank(groups: readonly WindowGroup[]): string {
@@ -85,10 +89,11 @@ export function botRole(view: WindowView, supportTeam?: (teamId: string) => bool
  */
 export function projectBotRoster(groups: readonly WindowGroup[], directory: readonly SessionEntry[], options: BotRosterOptions): BotRosterModel {
   const names = options.names ?? accountNames(groups, options.t);
-  const shownGroups = groups.filter(hasBotAppearance);
+  const everyone = options.everyone === true;
+  const shownGroups = everyone ? groups : groups.filter(hasBotAppearance);
   const candidatesOf = new Map(shownGroups.map(group => {
     const members = group.bots?.members ?? {};
-    const candidates = botViews(group).map((view, order) => ({ view, order, details: members[view.id] ?? {} })).filter(item => !item.details.hidden);
+    const candidates = botViews(group).map((view, order) => ({ view, order, details: members[view.id] ?? {} })).filter(item => everyone || !item.details.hidden);
     candidates.sort((a, b) => Number(!!b.details.pinned) - Number(!!a.details.pinned)
       || (a.details.rank && b.details.rank ? lexical(a.details.rank, b.details.rank) : a.details.rank ? -1 : b.details.rank ? 1 : 0) || a.order - b.order);
     return [group, candidates] as const;
@@ -126,12 +131,25 @@ export function projectBotRoster(groups: readonly WindowGroup[], directory: read
         ...(botRole(view, options.supportTeam) ? { role: botRole(view, options.supportTeam)! } : {}),
         asks: asks.filter(ask => ask.closeWith === view.id).map(ask => ({ viewId: ask.id, title: ask.binding?.title ?? 'Ask' })),
         ...(reply ? { reply } : {}), ...(latest && options.unread?.(latest.owner, latest.reply.replyAt) ? { unread: true as const } : {}),
-        ...(draft?.trim() ? { draft } : {}), ...(waiting ? { waiting: true as const } : {}) };
+        ...(draft?.trim() ? { draft } : {}), ...(waiting ? { waiting: true as const } : {}),
+        ...(everyone && (details.hidden || !hasBotAppearance(group)) ? { hiddenInChats: true as const } : {}) };
     });
     const hidden = botViews(group).filter(view => members[view.id]?.hidden).map(view => view.id);
     return [{ groupId: group.window.id, title: group.window.title, rows, hidden,
-      ...(rows.some(row => row.unread) ? { unread: true as const } : {}) }];
+      ...(rows.some(row => row.unread) ? { unread: true as const } : {}), ...(everyone && !hasBotAppearance(group) ? { hiddenInChats: true as const } : {}) }];
   });
   const grouped = new Set(groups.flatMap(group => group.window.views.flatMap(view => view.binding ? [sessionKey(view.binding)] : [])));
   return { sections, other: sortDirectorySessions(directory.filter(entry => !grouped.has(sessionKey(entry)))) };
+}
+
+/**
+ * Chats (design "Organised as an IM product"): the assistants Bot mode shows as one list, with no group headings: pinned
+ * first, then by the time of the latest reply, newest first; an assistant that never replied comes after those that did,
+ * in roster order. Hidden assistants are never in it.
+ */
+export function projectChats(model: BotRosterModel): { rows: BotRow[]; other: SessionEntry[] } {
+  const rows = model.sections.flatMap(section => section.rows).map((row, order) => ({ row, order }));
+  rows.sort((a, b) => Number(!!b.row.details.pinned) - Number(!!a.row.details.pinned)
+    || (b.row.reply?.replyAt ?? -1) - (a.row.reply?.replyAt ?? -1) || a.order - b.order);
+  return { rows: rows.map(item => item.row), other: model.other };
 }

@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { createWindowView, type WindowGroup, type WindowSessionBinding, type WindowView } from '@orchardworks/agent-remote-protocol';
-import { projectBotRoster } from './bot-roster.js';
+import { projectBotRoster, projectChats } from './bot-roster.js';
 import type { SessionActivityStatus } from './session-activity-status.js';
 
 const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: id });
@@ -119,4 +119,29 @@ it("follows a bot's current session after a handoff and keeps the latest reply o
   replies.after = { replyAt: 9, preview: 'Picked it up.' };
   expect(projectBotRoster(groups, [], { status: () => 'idle', current: () => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'after' }), reply: session => replies[session.nativeSessionId] })
     .sections[0]!.rows[0]!.reply).toEqual({ replyAt: 9, preview: 'Picked it up.' });
+});
+
+it('lists Chats flat: pinned first, then by latest reply, never a hidden assistant, then Other sessions', () => {
+  const first = group('first', ['quiet', 'old', 'pinned'].map(id => createWindowView(id, binding(id))));
+  first.bots!.members = { pinned: { pinned: true }, old: {} };
+  const second = group('second', ['new', 'gone'].map(id => createWindowView(id, binding(id))), 'n');
+  second.bots!.members.gone = { hidden: true };
+  const replies: Record<string, number> = { old: 10, new: 30 };
+  const model = projectBotRoster([first, second], ['loose'].map(binding), { status: () => 'idle', reply: session => replies[session.nativeSessionId] ? { replyAt: replies[session.nativeSessionId]!, preview: '' } : undefined });
+  const chats = projectChats(model);
+  expect(chats.rows.map(row => row.viewId)).toEqual(['pinned', 'new', 'old', 'quiet']);
+  expect(chats.other.map(session => session.nativeSessionId)).toEqual(['loose']);
+});
+
+it('lists every assistant in the directory by group in catalog order, marking those Chats does not show', () => {
+  const shown = group('shown', ['a', 'b'].map(id => createWindowView(id, binding(id))));
+  shown.bots!.members.b = { hidden: true, asleep: true };
+  const hiddenGroup = { ...group('hidden-group', [createWindowView('c', binding('c'))], 'b'), presentation: { bots: false as const } };
+  const windowOnly = group('window-only', [createWindowView('d', binding('d'))], 'c'); delete windowOnly.bots;
+  const everyone = projectBotRoster([shown, hiddenGroup, windowOnly], [], { status: () => 'idle', everyone: true });
+  expect(everyone.sections.map(section => [section.groupId, section.hiddenInChats ?? false, section.rows.map(row => [row.viewId, row.hiddenInChats ?? false])])).toEqual([
+    ['shown', false, [['a', false], ['b', true]]], ['hidden-group', true, [['c', true]]], ['window-only', false, [['d', false]]]]);
+  expect(everyone.sections[0]!.rows[1]!.details.asleep).toBe(true);
+  // The Chats projection of the same groups leaves the group hidden in Bot mode out.
+  expect(projectBotRoster([shown, hiddenGroup, windowOnly], [], { status: () => 'idle' }).sections.map(section => section.groupId)).toEqual(['shown', 'window-only']);
 });

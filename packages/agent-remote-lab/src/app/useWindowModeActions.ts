@@ -86,13 +86,13 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
     modeSteps.current.push({ mode, run, confirmed }); setQueuedModeSteps(value => value + 1);
   }
 
-  /** Focuses the shown mode's Search button, else its main heading, unless focus is already inside it. */
+  /** Focuses the shown mode's main heading, else the rail's (or tab bar's) current destination, unless focus is already inside it. */
   function focusShownMode(mode: WorkbenchMode) {
     const root = document.querySelector<HTMLElement>(`[data-workbench-mode="${mode}"]`);
     if (!root || root.hidden || root.contains(document.activeElement)) return;
     const shown = (element: HTMLElement) => !element.closest('[hidden], [inert]');
-    const target = [...root.querySelectorAll<HTMLElement>('button[aria-label="Search"]')].find(shown)
-      ?? [...root.querySelectorAll<HTMLElement>('button.lab-assistant-title, .ui-toolbar-title[tabindex="-1"], #lab-workbench')].find(shown);
+    const target = [...root.querySelectorAll<HTMLElement>('button.lab-assistant-title, .ui-toolbar-title[tabindex="-1"], #lab-workbench')].find(shown)
+      ?? document.querySelector<HTMLElement>('.lab-rail [aria-current="page"], .lab-tab-bar [aria-current="page"]') ?? undefined;
     target?.focus({ preventScroll: true });
   }
 

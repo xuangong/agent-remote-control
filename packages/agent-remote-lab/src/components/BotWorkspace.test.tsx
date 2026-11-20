@@ -62,7 +62,7 @@ it('keeps the compact retained editor when access pauses a valid Bot', async () 
 
 it('compact Back restores the roster row and preserves the same editor without focusing it', async () => {
   vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(max-width: 1180px)' || query === '(max-width: 760px)', addEventListener() {}, removeEventListener() {} }));
-  const scope = 'http://localhost/bot-compact/'; seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?mode=bot&section=A');
+  const scope = 'http://localhost/bot-compact/'; seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?mode=bot');
   const app = await mountBotApp(scope);
   await act(async () => app.button('A1').click());
   await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
@@ -70,7 +70,7 @@ it('compact Back restores the roster row and preserves the same editor without f
   expect(document.activeElement).not.toBe(input);
   await act(async () => { setPromptText(input, 'retained'); input.dispatchEvent(new Event('input', { bubbles: true })); });
   await act(async () => app.button('Back to assistants').click());
-  expect(document.activeElement).toBe(app.button('A1'));
+  await until(() => expect(document.activeElement).toBe(app.button('A1')));
   await act(async () => app.button('A1').click());
   expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).toBe(input);
   expect(promptText(input)).toBe('retained');
@@ -79,7 +79,7 @@ it('compact Back restores the roster row and preserves the same editor without f
 
 it('goes back to the assistant list from a chat on a phone with ‹ Assistants, at the place it left', async () => {
   vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(max-width: 1180px)' || query === '(max-width: 760px)', addEventListener() {}, removeEventListener() {} }));
-  const scope = 'http://localhost/bot-phone-back/'; seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?mode=bot&section=A');
+  const scope = 'http://localhost/bot-phone-back/'; seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?mode=bot');
   const app = await mountBotApp(scope);
   try {
     const roster = () => app.container.querySelector<HTMLElement>('.lab-bot-roster')!;
@@ -179,9 +179,11 @@ it('shows the shared sidebar header with the wordmark and a top bar above the co
   try {
     await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
     const roster = app.container.querySelector<HTMLElement>('.lab-bot-roster')!;
-    expect(roster.querySelector('.lab-sidebar-header nav[aria-label="Workbench mode"] [aria-pressed="true"]')?.textContent).toBe('Bot mode');
+    // The rail carries the modes and Search: the sidebar's header holds the wordmark and the + action only.
+    expect(roster.querySelector('.lab-sidebar-header nav, .lab-sidebar-header [aria-label="Search"]')).toBeNull();
     expect(roster.querySelector('.lab-sidebar-header-actions button[aria-label="New assistant"]')).not.toBeNull();
-    expect(roster.querySelector('.lab-sidebar-top .orchard-wordmark')?.textContent).toBe('orchard');
+    expect(roster.querySelector('.lab-sidebar-header .orchard-wordmark')?.textContent).toBe('orchard');
+    expect(app.container.querySelector('.lab-rail [aria-current="page"]')?.getAttribute('aria-label')).toBe('Chats');
     expect(app.container.querySelector('.lab-bot-conversation header.lab-assistant-top-bar h2 button.lab-assistant-title')?.getAttribute('aria-label')).toBe('A1');
     // The panels stay: the shell shortcut that hid the sidebar has nothing to hide in Bot mode.
     await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', code: 'Backslash', ctrlKey: !/Mac/.test(navigator.platform), metaKey: /Mac/.test(navigator.platform), bubbles: true, cancelable: true })); });
@@ -189,7 +191,7 @@ it('shows the shared sidebar header with the wordmark and a top bar above the co
   } finally { await app.close(); }
 });
 
-it('keeps the Assistants heading outside the roster and visually hidden, on desktop and on a phone', async () => {
+it('keeps the Chats heading outside the roster and visually hidden, on desktop and on a phone', async () => {
   const listeners = new Set<(event: MediaQueryListEvent) => void>();
   let compact = false;
   vi.stubGlobal('matchMedia', (query: string) => ({ get matches() { return compact && (query === '(max-width: 1180px)' || query === '(max-width: 760px)'); }, media: query,
@@ -201,7 +203,7 @@ it('keeps the Assistants heading outside the roster and visually hidden, on desk
     await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
     const main = app.container.querySelector<HTMLElement>('.lab-bot-workspace')!;
     const title = () => main.firstElementChild as HTMLElement;
-    expect(title().tagName).toBe('H1'); expect(title().textContent).toBe('Assistants');
+    expect(title().tagName).toBe('H1'); expect(title().textContent).toBe('Chats');
     expect(title().classList.contains('agent-visually-hidden')).toBe(true);
     expect(main.querySelector('.lab-bot-roster h1')).toBeNull();
     await act(async () => { compact = true; listeners.forEach(listener => listener({ matches: true } as MediaQueryListEvent)); });
@@ -214,23 +216,31 @@ it('keeps the Assistants heading outside the roster and visually hidden, on desk
   } finally { await app.close(); }
 });
 
-it('hides a group in Bot mode or Window mode from its roster header', async () => {
+it('hides a group in Bot mode or Window mode from its header in the directory, which still lists it, and Chats leaves it out', async () => {
   const scope = 'http://localhost/bot-group-actions/'; seedGroup(scope, botGroup('A')); seedGroup(scope, botGroup('B', false)); history.replaceState(null, '', '/?mode=bot');
   const app = await mountBotApp(scope);
   try {
-    const roster = () => app.container.querySelector<HTMLElement>('nav[aria-label="Assistants"]')!;
+    await until(() => expect(app.container.querySelector('nav[aria-label="Chats"] [data-bot-place]')).not.toBeNull());
+    await app.go('Assistants');
+    const directory = () => app.container.querySelector<HTMLElement>('.lab-directory')!;
     const choose = async (group: string, label: string) => {
-      await act(async () => roster().querySelector<HTMLButtonElement>(`button[aria-label="Group actions: ${group}"]`)!.click());
+      await act(async () => directory().querySelector<HTMLButtonElement>(`button[aria-label="Group actions: ${group}"]`)!.click());
       await act(async () => [...document.querySelectorAll<HTMLElement>(`[role="menu"][aria-label="Group actions: ${group}"] [role="menuitem"]`)].find(item => item.textContent === label)!.click());
     };
-    await until(() => expect(roster().querySelector('button[aria-label="Group actions: B"]')).not.toBeNull());
+    await until(() => expect(directory().querySelector('button[aria-label="Group actions: B"]')).not.toBeNull());
     await choose('A', 'Hide in Window mode');
     await until(() => expect(app.workspace().readGroup('A')?.presentation).toEqual({ window: false }));
     await choose('A', 'Show in Window mode');
     await until(() => expect(app.workspace().readGroup('A')?.presentation).toBeUndefined());
     await choose('B', 'Hide in Bot mode');
     await until(() => expect(app.workspace().readGroup('B')?.presentation).toEqual({ bots: false }));
-    await until(() => expect(roster().querySelector('button[aria-label="Group actions: B"]')).toBeNull());
-    expect(roster().textContent).not.toContain('B1');
+    await until(() => expect(directory().textContent).toContain('Hidden in Chats'));
+    const hiddenNames = [...directory().querySelectorAll('#directory-group-B .lab-bot-name')].map(name => name.textContent!);
+    expect(hiddenNames).toHaveLength(2);
+    await app.go('Chats');
+    for (const name of hiddenNames) expect(app.container.querySelector('nav[aria-label="Chats"]')!.textContent).not.toContain(name);
+    await app.go('Assistants');
+    await choose('B', 'Show in Chats');
+    await until(() => expect(app.workspace().readGroup('B')?.presentation).toBeUndefined());
   } finally { await app.close(); }
 });

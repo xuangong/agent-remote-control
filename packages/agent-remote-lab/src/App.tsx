@@ -50,10 +50,10 @@ function AppContent({
   initialProviderName,
   actions,
   fixtureAction,
-  accountAction,
+  account,
   userScoped = false,
 }: AppProps) {
-  const inputs: AppInputs = { baseUrl, injectedTransport, injectedDirectory, hostService, initialState, initialSessionStatus, initialProviderName, actions, fixtureAction, accountAction, userScoped };
+  const inputs: AppInputs = { baseUrl, injectedTransport, injectedDirectory, hostService, initialState, initialSessionStatus, initialProviderName, actions, fixtureAction, account, userScoped };
   const late = {} as AppLate;
   const scope1 = { ...inputs, ...useWorkbenchShell(inputs) };
   const scope2 = { ...scope1, ...useRequestedSession(scope1) };

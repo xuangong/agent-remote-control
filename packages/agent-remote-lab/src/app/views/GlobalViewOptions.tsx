@@ -1,12 +1,11 @@
 // The View options control, placed in the view target that currently shows.
-import { WorkbenchModeSwitch } from '../../components/WorkbenchModeSwitch.js';
 import { ViewOptions } from '../../components/ViewOptions.js';
 import type { AppScope } from '../types.js';
 
-export function GlobalViewOptions({ scope }: { readonly scope: Pick<AppScope, 'activeView' | 'askView' | 'attention' | 'compactLayout' | 'contextVisible' | 'desktopContextVisible' | 'dispatchPanels' | 'headerHidden' | 'headerViewTarget' | 'inspectorOpen' | 'minimizedViewTarget' | 'mobileViewTarget' | 'navigation' | 'pageOpen' | 'pageViewTarget' | 'sessionViewTarget' | 'setAllPanelsVisible' | 'sidebarViewTarget' | 'supportingRailOpen' | 'teamView' | 'toggleContext' | 'tpmView' | 'traceViewTarget' | 'userScoped' | 'viewTriggerRef' | 'windowMode' | 'windowToolbarShown' | 'windowToolbarViewTarget' | 'windowView'> }) {
-  const { activeView, askView, attention, compactLayout, contextVisible, desktopContextVisible, dispatchPanels, headerHidden, headerViewTarget, inspectorOpen, minimizedViewTarget, mobileViewTarget, navigation, pageOpen, pageViewTarget, sessionViewTarget, setAllPanelsVisible, sidebarViewTarget, supportingRailOpen, teamView, toggleContext, tpmView, traceViewTarget, userScoped, viewTriggerRef, windowMode, windowToolbarShown, windowToolbarViewTarget, windowView } = scope;
+export function GlobalViewOptions({ scope }: { readonly scope: Pick<AppScope, 'activeView' | 'askView' | 'attention' | 'compactLayout' | 'contextVisible' | 'desktopContextVisible' | 'dispatchPanels' | 'headerHidden' | 'headerViewTarget' | 'inspectorOpen' | 'minimizedViewTarget' | 'mobileViewTarget' | 'pageOpen' | 'pageViewTarget' | 'sessionViewTarget' | 'setAllPanelsVisible' | 'sidebarViewTarget' | 'supportingRailOpen' | 'teamView' | 'toggleContext' | 'tpmView' | 'traceViewTarget' | 'userScoped' | 'viewTriggerRef' | 'windowMode' | 'windowToolbarShown' | 'windowToolbarViewTarget' | 'windowView'> }) {
+  const { activeView, askView, attention, compactLayout, contextVisible, desktopContextVisible, dispatchPanels, headerHidden, headerViewTarget, inspectorOpen, minimizedViewTarget, mobileViewTarget, pageOpen, pageViewTarget, sessionViewTarget, setAllPanelsVisible, sidebarViewTarget, supportingRailOpen, teamView, toggleContext, tpmView, traceViewTarget, userScoped, viewTriggerRef, windowMode, windowToolbarShown, windowToolbarViewTarget, windowView } = scope;
   return <>
-    <ViewOptions modeControls={<WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} />} attentionControls={<>
+    <ViewOptions attentionControls={<>
       {askView.controls}
       {windowView.controls}{userScoped ? attention.controls : null}{tpmView.controls}{teamView.controls}
     </>} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget

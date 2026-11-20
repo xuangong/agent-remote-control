@@ -1,5 +1,6 @@
 import { relayLinkView, watchPageResume, type ChannelLink } from '@orchardworks/agent-client';
 import { DeviceLinkContext, type DeviceLink } from './device-link.js';
+import type { AccountFacts } from './account.js';
 import { deviceStore } from '@orchardworks/agent-client/device-store';
 import { controllerPath, readControllerLocation } from '@orchardworks/agent-remote-protocol/model';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -15,7 +16,7 @@ import { RelayLinkReport, WorkspaceReady, scopeFor, confirmWorkspaceAccess, read
 const jsonPost = { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' };
 const navigateToLogin = (url: string) => window.location.replace(url);
 export function GatewayController({ children, navigate = navigateToLogin, automaticAccess = false }: {
-  children(baseUrl: string, accountAction: ReactNode, ready: boolean): ReactNode;
+  children(baseUrl: string, account: AccountFacts | undefined, ready: boolean): ReactNode;
   navigate?(url: string): void;
   /** The dedicated local Devbox supplies access without an interactive account. */
   automaticAccess?: boolean;
@@ -206,16 +207,16 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
     setSecurityOpen(false);
     requestAnimationFrame(() => securityTrigger.current?.focus());
   }
-  const accountAction = automaticAccess ? null : <>
-    {access?.user ? <span className="gateway-account-identity" aria-label="Account" title={[access.user.name, access.user.email, `User: ${access.user.id}`].filter(Boolean).join(' · ')}><span aria-hidden="true">◉</span> {access.user.name || access.user.email || access.user.id}</span> : null}
-    <button type="button" disabled={!ready} onClick={event => { securityTrigger.current = event.currentTarget; setSecurityOpen(true); }}>Security</button>
-    <button type="button" onClick={() => void logout()}>Sign out</button>
-  </>;
+  // The account's facts for the Settings page: who it is, Security and Sign out. The Devbox has no interactive account.
+  const account: AccountFacts | undefined = automaticAccess ? undefined : {
+    ...(access?.user?.name ? { name: access.user.name } : {}), ...(access?.user?.email ? { email: access.user.email } : {}), ...(access?.user ? { id: access.user.id } : {}),
+    ready, openSecurity: () => { securityTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : undefined; setSecurityOpen(true); }, signOut: () => void logout(),
+  };
   const signIn = { href: '/auth/login' + returnPath.slice(1), onClick: rememberTarget };
   const retryLink = () => { setAttempt(value => value + 1); reopenLink.current?.(); };
   const deviceLink: DeviceLink = { claim, ...(notice && !securityOpen ? { notice: { state: link.state === 'sign_in' ? 'sign_in' : 'offline', signIn, retry: retryLink } } : {}) };
   if (access) return <WorkspaceReady.Provider value={ready}><RelayLinkReport.Provider value={relayLinkReporter}><DeviceLinkContext.Provider value={deviceLink}>
-    <div className="gateway-private" key={access.basePath} hidden={securityOpen} {...(securityOpen ? { inert: '' } : {})}>{children(new URL(access.basePath, window.location.origin).href, accountAction, ready)}</div>
+    <div className="gateway-private" key={access.basePath} hidden={securityOpen} {...(securityOpen ? { inert: '' } : {})}>{children(new URL(access.basePath, window.location.origin).href, account, ready)}</div>
     {securityOpen ? <SecurityPanel onClose={closeSecurity} onSignedOut={signedOut} /> : null}
     {notice && !securityOpen && !claims ? <div className="gateway-recovery" role="status">
       {link.state === 'sign_in' ? <>Sign in again to keep sending. <a href={signIn.href} onClick={signIn.onClick}>Sign in</a></> : <>Offline. Messages will be sent when this device is back online. <button type="button" onClick={retryLink}>Retry</button></>}

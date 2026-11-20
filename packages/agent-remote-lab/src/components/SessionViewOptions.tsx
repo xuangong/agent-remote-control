@@ -6,12 +6,10 @@ import { useSessionMenuLayer } from '../hooks/useSessionMenuLayer.js';
 import type { ProcessModeChoice } from '../hooks/useProcessMode.js';
 
 /**
- * The conversation's view options: how much of each turn's work shows, for this assistant (when the view is one) and for
- * every assistant on this device, and whether letters between agents show.
+ * The conversation's view options: how much of each turn's work shows for this assistant. The default for every assistant
+ * on this device, and whether letters between agents show, are in Settings > Assistants.
  */
-export function SessionViewOptions({ process, lettersVisible, onLettersVisibleChange }: {
-  process: ProcessModeChoice; lettersVisible: boolean; onLettersVisibleChange(visible: boolean): void;
-}) {
+export function SessionViewOptions({ process }: { process: ProcessModeChoice; /** Still passed by the conversation's host. */ lettersVisible?: boolean; onLettersVisibleChange?(visible: boolean): void }) {
   const t = useTranslate();
   const [open, setOpen] = useState(false);
   const id = useId();
@@ -27,6 +25,7 @@ export function SessionViewOptions({ process, lettersVisible, onLettersVisibleCh
     document.addEventListener('pointerdown', dismiss);
     return () => document.removeEventListener('pointerdown', dismiss);
   }, [open]);
+  if (!process.chooseForAssistant) return null;
   const options = PROCESS_MODES.map(mode => ({ value: mode, label: t(`process.${mode}` as const) }));
   return <div className="lab-session-view-options" ref={container}
     onBlur={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}
@@ -51,14 +50,6 @@ export function SessionViewOptions({ process, lettersVisible, onLettersVisibleCh
         <span id={`${id}-assistant`}>{t('process.assistant')}</span>
         <SegmentedControl<ProcessMode> label={t('process.assistant')} options={options} value={process.mode} onChange={process.chooseForAssistant} />
       </div> : null}
-      <div className="lab-process-choice">
-        <span id={`${id}-device`}>{t('process.device')}</span>
-        <SegmentedControl<ProcessMode> label={t('process.device')} options={options} value={process.device} onChange={process.chooseForDevice} />
-      </div>
-      <label className="lab-session-letters-option"><span>{t('process.letters')}</span>
-        <input type="checkbox" aria-label={t('process.letters')} checked={lettersVisible}
-          onChange={event => onLettersVisibleChange(event.target.checked)} />
-      </label>
     </section> : null}
   </div>;
 }

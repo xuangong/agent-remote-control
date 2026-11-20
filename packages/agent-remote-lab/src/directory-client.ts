@@ -111,7 +111,7 @@ export class RemoteHostClient implements HostPairingService {
   constructor(private readonly baseUrl: string) {}
   private async request<T>(path: string, method = 'GET', requestBody?: unknown, timeoutMs?: number): Promise<T> {
     const response = await workspaceFetch(new URL(`v1/remote/${path}`, this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`), { method, ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
-      ...(method === 'POST' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(requestBody ?? {}) } : {}) });
+      ...(method === 'POST' || method === 'PUT' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(requestBody ?? {}) } : {}) });
     const body = await response.json();
     if (!response.ok) throw new DirectoryError(body.code === 'reauthentication_required' ? 'A recent sign-in is required.' : body.error ?? 'Remote Host service is unavailable.', body.code, response.status, typeof body.requestId === 'string' ? body.requestId : undefined);
     return body as T;
@@ -164,4 +164,16 @@ export class RemoteHostClient implements HostPairingService {
     return { results: value.results };
   }
   async revoke(hostId: string): Promise<void> { await this.request(`hosts/${encodeURIComponent(hostId)}/revoke`, 'POST'); }
+  /** The providers of a Host whose sessions the Relay reads ahead of an open conversation (the owner's choice). */
+  async smartReading(hostId: string): Promise<{ providers: string[] }> {
+    const value = await this.request<{ providers?: unknown }>(`hosts/${encodeURIComponent(hostId)}/smart-reading`);
+    if (!Array.isArray(value.providers) || !value.providers.every(item => typeof item === 'string')) throw new Error('The smart reading choice could not be verified.');
+    return { providers: value.providers };
+  }
+  /** Turns smart reading on or off for one provider of a Host; a refusal (no journals, not the owner) is thrown with its status. */
+  async setSmartReading(hostId: string, providerId: string, enabled: boolean): Promise<{ providers: string[] }> {
+    const value = await this.request<{ providers?: unknown }>(`hosts/${encodeURIComponent(hostId)}/smart-reading`, 'PUT', { providerId, enabled });
+    if (!Array.isArray(value.providers) || !value.providers.every(item => typeof item === 'string')) throw new Error('The smart reading choice could not be verified.');
+    return { providers: value.providers };
+  }
 }

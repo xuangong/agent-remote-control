@@ -14,12 +14,10 @@
 .lab-bot-conversation .lab-composer-dock { padding-top: var(--orchard-space-2xl); border-top: 0; }
 .lab-bot-workspace :focus-visible { outline: 2px solid var(--orchard-focus); outline-offset: 2px; }
 
-/* The sidebar: the wordmark, the mode switch with Search and New assistant, the assistants, and this device's link in its foot. */
-.lab-sidebar-top { display: grid; gap: var(--orchard-space-m); padding: 0 var(--orchard-space-xs) var(--orchard-space-s); }
+/* The sidebar: the wordmark with New assistant, then the chats. The rail carries the modes, Search and this device's link. */
 .lab-sidebar-brand { padding: var(--orchard-space-xs) var(--orchard-space-s) 0; }
-.lab-sidebar-top > .lab-sidebar-header { padding: 0; }
-.lab-bot-sidebar-foot { position: sticky; bottom: 0; margin-top: auto; padding: var(--orchard-space-m) 0; background: var(--orchard-surface); }
-.lab-bot-sidebar-foot:not(:has(.lab-device-link)) { padding: 0 0 var(--orchard-space-m); }
+.lab-bot-chats { display: flex; flex-direction: column; }
+.lab-bot-section-unread { flex: none; align-self: center; width: 7px; height: 7px; margin-inline-start: var(--orchard-space-m); border-radius: 50%; background: var(--orchard-brand); }
 .lab-device-link { display: flex; flex-wrap: wrap; align-items: center; gap: var(--orchard-space-s); margin: 0; padding: var(--orchard-space-m) var(--orchard-space-l);
   border-radius: var(--orchard-radius-group); background: var(--orchard-fill); color: var(--orchard-text); font-size: var(--orchard-type-footnote-size); line-height: 1.4; }
 .lab-device-link :is(button, a) { padding: 0; border: 0; background: none; color: var(--orchard-text-strong); font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
@@ -32,13 +30,8 @@
 /* A group's title with its actions menu beside it, not inside the heading, so the heading reads as the group's name. */
 .lab-bot-section-head { display: flex; align-items: center; gap: var(--orchard-space-xs); }
 .lab-bot-section-head > h2 { flex: 1; min-width: 0; }
-.lab-bot-section h2 button { padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 600; }
-/* A section header is one line, as in native lists: a long group name (one named after its first message) is truncated. */
-.lab-bot-section-head > h2 > button { flex: 0 1 auto; min-width: 0; overflow: hidden; text-align: start; text-overflow: ellipsis; white-space: nowrap; }
-.lab-bot-section-head > h2 > small { flex: none; }
 .lab-bot-section small, .lab-bot-empty { color: var(--orchard-text-secondary); font-size: var(--orchard-type-footnote-size); }
 .lab-bot-empty { margin: var(--orchard-space-l); line-height: 1.5; }
-.lab-bot-section-unread { flex: none; align-self: center; width: 7px; height: 7px; margin-inline-end: auto; border-radius: 50%; background: var(--orchard-brand); }
 
 /* An assistant's row: its avatar, its name with the role and label tags and the reply time, then one sentence of what it is
    doing; the selected one takes the brand's tint, an unread reply is a dot. The hover rule outranks the global button:hover. */
@@ -84,7 +77,6 @@
 .lab-bot-other[open] > summary h2::before { transform: rotate(90deg); }
 @media (pointer: coarse) {
   .lab-bot-ask { min-height: 44px; }
-  .lab-bot-section-head h2 > button { min-width: 44px; min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) { .lab-bot-row, .lab-bot-ask { transition: none; } }
 
@@ -167,3 +159,12 @@ button.lab-assistant-title:is(:hover, [aria-expanded="true"]):not(:disabled) { b
   .lab-bot-workspace[data-phone][data-navigation] > :is(.lab-bot-conversation, .lab-bot-roster) { animation: none; }
   .lab-bot-workspace * { scroll-behavior: auto; }
 }
+
+/* The Assistants directory: one wide panel of groups; a hidden or resting assistant says so, and a hidden one offers Show in Chats. */
+.lab-directory.orchard-panel.orchard-panel { gap: var(--orchard-space-xl); padding: var(--orchard-space-xl) var(--orchard-space-m) var(--orchard-space-3xl); }
+.lab-directory-head { display: flex; align-items: center; justify-content: space-between; gap: var(--orchard-space-l); padding: 0 var(--orchard-space-l); }
+.lab-directory-groups { display: flex; flex-direction: column; gap: var(--orchard-space-m); max-width: 760px; width: 100%; margin-inline: auto; }
+.lab-directory-group[data-focus] { border-radius: var(--orchard-radius-row); background: var(--orchard-tint); }
+.lab-directory-group .lab-bot-member { display: flex; align-items: center; gap: var(--orchard-space-m); }
+.lab-directory-group .lab-bot-member > .lab-bot-row { flex: 1; min-width: 0; width: auto; }
+.lab-directory-show { flex: none; }

@@ -110,8 +110,9 @@ it("opens a Side from a bot in Bot mode, as a bot of the same group beside it", 
   await until(() => expect(app.container.querySelector('.lab-bot-row[aria-current="true"]')?.getAttribute('data-bot-place')).toBe(JSON.stringify(['B', sideB.id])));
   await until(() => expect(app.container.querySelector('.lab-bot-row[aria-current="true"]')?.getAttribute('aria-label')).toBe(app.hostedGroups.get('B')!.bots!.members[sideB.id]?.name));
   expect(app.container.querySelector('.lab-bot-row[aria-current="true"]')?.getAttribute('aria-label')).not.toBe('Fork of B1');
-  const section = app.container.querySelector('#bot-section-B')!.closest('section')!;
-  expect(section.contains(app.container.querySelector('.lab-bot-row[aria-current="true"]'))).toBe(true);
+  // The directory lists it in B's group.
+  await app.go('Assistants');
+  expect(app.container.querySelector('#directory-group-B')!.querySelector(`[data-bot-place='${JSON.stringify(['B', sideB.id])}']`)).not.toBeNull();
   expect(app.sendMessages).toHaveLength(0);
   await app.close();
 });
@@ -188,7 +189,7 @@ it('projects a verified B to C onto the same view and draft owners while hidden 
   expect(app.workspace().window).toEqual(beforeWindow);
   expect(app.succession().document.slots.find(slot => slot.id === slotId)!.owners).toEqual(owners);
   expect(app.workspace().readGroup('B')!.window.views[0]!.display).toEqual(display);
-  expect(app.container.querySelector('[aria-label="Assistants"] [aria-current="true"]')?.getAttribute('data-bot-place')).toBe('["B","B1"]');
+  expect(app.container.querySelector('[aria-label="Chats"] [aria-current="true"]')?.getAttribute('data-bot-place')).toBe('["B","B1"]');
   expect(() => operations.resolveTarget(botTarget('B1'), { viewId: slotId })).toThrow();
   await act(async () => app.releaseMessages());
   await until(() => expect(app.attachments).toContain('C'));

@@ -39,5 +39,5 @@ const devbox = document.querySelector('meta[name="agent-remote-devbox"]')?.getAt
 const shell = <WorkspaceShell />;
 // One motion subscription for the page: every avatar and mark reads reduced motion and visibility from it.
 createRoot(root).render(<StrictMode><MotionProvider port={browserMotionPort(window, choices.motion)}>{gatewayMode
-  ? <GatewayController automaticAccess={devbox}>{(baseUrl, accountAction) => <Suspense fallback={shell}><App baseUrl={baseUrl} accountAction={accountAction} userScoped /></Suspense>}</GatewayController>
+  ? <GatewayController automaticAccess={devbox}>{(baseUrl, account) => <Suspense fallback={shell}><App baseUrl={baseUrl} {...(account ? { account } : {})} userScoped /></Suspense>}</GatewayController>
   : <Suspense fallback={shell}><App fixtureAction={fixtureAction} /></Suspense>}</MotionProvider></StrictMode>);

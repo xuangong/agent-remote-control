@@ -9,6 +9,7 @@ import type { BotRosterModel, BotRow } from '../bot-roster.js';
 import type { BotPlace } from '../workbench-mode.js';
 import { BotRoster, botPlaceKey } from './BotRoster.js';
 import { useSharedFeed, type SharedFeedsSnapshot } from '../shared-feeds.js';
+import { projectShared, useSharedRoster } from './shared-roster.js';
 import { useBotActions, type BotInfo } from './BotActions.js';
 import { AsleepNotice } from './AsleepNotice.js';
 import { SessionConversationMount, type SessionSurfaceDescriptor } from './SessionConversationSurfaces.js';
@@ -16,18 +17,17 @@ import { SidebarHeader } from '../shell/SidebarHeader.js';
 import { IconButton } from '../ui/IconButton.js';
 import { Button } from '../ui/Button.js';
 import { Icon } from '../ui/Icon.js';
-import type { MenuEntry } from '../ui/Menu.js';
-import { botViews, hasBotAppearance, hasWindowAppearance, type BotPicture } from '@orchardworks/agent-remote-protocol';
+import { botViews, type BotPicture } from '@orchardworks/agent-remote-protocol';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import type { BotSection } from '../bot-roster.js';
 import { AssistantTopBar } from './assistant/AssistantTopBar.js';
 import { AssistantDetailsHostContext, type AssistantDetailsHost } from './assistant/details-host.js';
-import { DeviceLinkSlot } from './assistant/DeviceLinkSlot.js';
 import { useAssistantNames } from './assistant/names-context.js';
 import './bot-workspace.css';
 
 export interface BotWorkspaceProps {
   visible: boolean; compact: boolean; scope: string;
+  /** Settings or the directory is over this workspace: it keeps its conversation and its draft, but is out of sight and reach. */
+  covered?: boolean;
   workspace: ReturnType<typeof useWindowWorkspace>;
   navigation: ReturnType<typeof useWorkbenchMode>;
   selected: ReturnType<typeof useBotWorkspace>;
@@ -42,8 +42,6 @@ export interface BotWorkspaceProps {
   describeConversation(place: BotPlace): SessionSurfaceDescriptor | undefined;
   /** Mounts a described conversation; the Workbench's surfaces by default. */
   mount?: ComponentType<ComponentProps<typeof SessionConversationMount>>;
-  /** Opens search; the roster's header offers it. */
-  onSearch?(): void;
   /** A Host's display name for a Host ID. */
   hostName?(hostId: string): string;
   /** Opens New bot, which starts a session in a group of its own. */
@@ -54,12 +52,17 @@ export interface BotWorkspaceProps {
   onPinToWindow?(place: { groupId: string; viewId: string }): void;
 }
 
+/** Whether a conversation shows: at phone width one screen shows at a time, the list as home, and an unavailable assistant leaves the list on screen. */
+export function botConversationShown(facts: { place?: BotPlace; phone: boolean; rosterVisible: boolean; unavailable: boolean }): boolean {
+  return !!facts.place && facts.place.kind !== 'section' && !facts.unavailable && (!facts.phone || !facts.rosterVisible);
+}
+
 /**
  * Bot mode: three floating panels on the warm ground, the assistants, the conversation and its details (I3 plan, B2).
  * The details are closed by default below the compact width; at phone width one screen shows at a time, the list as home,
  * and the details open as a sheet.
  */
-export function BotWorkspace({ visible, compact, scope, workspace, navigation, selected, roster, projectRoster, directory, describeConversation, mount: Mount = SessionConversationMount, onSearch, hostName = id => id, botInfo, onNewBot, onPinToWindow }: BotWorkspaceProps) {
+export function BotWorkspace({ visible, covered = false, compact, scope, workspace, navigation, selected, roster, projectRoster, directory, describeConversation, mount: Mount = SessionConversationMount, hostName = id => id, botInfo, onNewBot, onPinToWindow }: BotWorkspaceProps) {
   const t = useTranslate();
   const names = useAssistantNames();
   const phone = usePhoneLayout();
@@ -72,7 +75,7 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
   const conversation = !!place && place.kind !== 'section';
   const descriptor = conversation ? describeConversation(place) : undefined;
   const unavailable = phone && !!selected.error && !descriptor;
-  const showConversation = conversation && !unavailable && (!phone || !navigation.rosterVisible);
+  const showConversation = botConversationShown({ ...(place ? { place } : {}), phone, rosterVisible: navigation.rosterVisible, unavailable });
   const availabilityNotice = selected.loading ? <p role="status">Opening bot…</p> : selected.error && place?.kind !== 'session'
     ? <p role="alert">{selected.error} <button type="button" onClick={() => void selected.retry()}>Retry</button></p> : null;
   const creation = workspace.sectionCreationState, saving = creation.state === 'saving';
@@ -105,23 +108,6 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
       [...root.current?.querySelectorAll<HTMLButtonElement>('[data-bot-place]') ?? []].find(row => row.dataset.botPlace === key)?.focus({ preventScroll: true });
     } else if (keyboardOpen.current && showConversation) { keyboardOpen.current = false; title.current?.focus({ preventScroll: true }); }
   }, [visible, key, showConversation, navigation.rosterVisible]);
-  /** A group's appearance in either mode, from its header menu; a group always stays visible in one of them. */
-  function groupActions(section: BotSection): MenuEntry[] {
-    const group = workspace.readGroup(section.groupId);
-    if (!group) return [];
-    const change = (operation: Parameters<typeof workspace.operateGroup>[1]) => {
-      const requestScope = scope; setError(undefined);
-      void workspace.operateGroup(section.groupId, operation).catch(reason => { if (currentScope.current === requestScope) setError(reason instanceof Error ? reason.message : String(reason)); });
-    };
-    const hidden = actions.groupMenu(section);
-    return [
-      hasWindowAppearance(group)
-        ? { label: 'Hide in Window mode', icon: 'eye-off', disabled: !hasBotAppearance(group), onSelect: () => change({ type: 'window.remove' }) }
-        : { label: 'Show in Window mode', icon: 'sidebar', onSelect: () => change({ type: 'window.add' }) },
-      { label: 'Hide in Bot mode', icon: 'eye-off', disabled: !hasWindowAppearance(group), onSelect: () => change({ type: 'bots.hide' }) },
-      ...hidden.length ? [{ kind: 'separator' as const }, ...hidden] : [],
-    ];
-  }
   // A phone moves between the list and a chat like a navigation stack: the chat pushes in, Back pops to the list at the
   // place it left. Hiding the list drops its scroll position, so it is kept here.
   const [motion, setMotion] = useState<'push' | 'pop'>();
@@ -158,8 +144,8 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
   // An assistant is called by its name, never by its session's title (often its first prompt).
   const name = place?.kind === 'session' ? names.session(place.session)
     : place?.kind === 'bot' ? botRow?.name ?? names.view(place.groupId, place.viewId) : '';
-  return <main ref={root} className="lab-bot-workspace" hidden={!visible} {...(!visible ? { inert: '' } : {})} data-workbench-mode="bot" data-compact={compact || undefined} data-phone={phone || undefined}
-    data-details={detailsShown && !phone || undefined}
+  return <main ref={root} className="lab-bot-workspace" hidden={!visible || covered} {...(!visible || covered ? { inert: '' } : {})} data-workbench-mode="bot" data-compact={compact || undefined} data-phone={phone || undefined}
+    data-details={detailsShown && !phone || undefined} data-chat={phone && showConversation || undefined}
     data-navigation={phone ? motion : undefined}
     onClickCapture={() => { if (phone && !showConversation && rosterElement.current) rosterScroll.current = rosterElement.current.scrollTop; }}
     onPointerDown={event => event.stopPropagation()} onFocus={event => event.stopPropagation()}
@@ -167,15 +153,15 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
       if (event.defaultPrevented || event.nativeEvent.isComposing || event.key !== 'Escape') return;
       if (phone && showConversation) { event.preventDefault(); back(); }
     }}>
-    <h1 className="lab-bot-title agent-visually-hidden">{t('assistants.title')}</h1>
+    <h1 className="lab-bot-title agent-visually-hidden">{t('navigation.chats')}</h1>
     <aside ref={rosterElement} id={rosterId} className="lab-bot-roster orchard-panel" hidden={phone && showConversation}>
-      <SidebarHeader brand mode={navigation.mode} onModeChange={navigation.setMode} onSearch={onSearch} actions={onNewBot ? <IconButton icon="plus" label={t('assistants.new')} onClick={onNewBot} /> : undefined} />
+      <SidebarHeader brand actions={onNewBot ? <IconButton icon="plus" label={t('assistants.new')} onClick={onNewBot} /> : undefined} />
       {unavailable ? availabilityNotice : null}
       {saving ? <p className="lab-bot-notice" role="status">Saving the new group…</p> : null}
       {error || creation.error ? <p className="lab-bot-notice" role="alert">{error ?? creation.error}</p> : null}
       {creation.state === 'unknown' ? <p className="lab-bot-notice" role="status">The new group is not confirmed. <button type="button" onClick={() => void retryGroup()}>Retry</button></p> : null}
       {actions.notice}
-      <div className="lab-bot-roster-scroll" onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><SharedBotRoster model={roster} project={projectRoster} place={place} onSelect={open} hostName={hostName} groupActions={groupActions} compact={phone}
+      <div className="lab-bot-roster-scroll" onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><SharedBotRoster model={roster} project={projectRoster} place={place} onSelect={open} hostName={hostName} compact={phone}
         directoryControls={<div className="lab-bot-directory-controls">
           {directory.sources.map(source => <div key={source.id}><small>{hostName(source.hostId)} · {source.providerId}</small>
             {!source.online ? <p>Host offline</p> : null}{source.loading ? <p role="status">Loading sessions…</p> : null}
@@ -184,7 +170,6 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
             {source.hasMore && !source.expired ? <button type="button" disabled={!source.online || source.loading} onClick={() => void directory.loadMore(source.id)}>Load more</button> : null}
           </div>)}
         </div>} /></div>
-      <footer className="lab-bot-sidebar-foot"><DeviceLinkSlot shown={visible} /></footer>
     </aside>
     <section className="lab-bot-conversation orchard-panel" aria-label="Bot conversation" hidden={phone && !showConversation}
       onTouchStart={event => { const touch = event.touches[0]; edgeSwipe.current = phone && touch && touch.clientX <= 24 ? { x: touch.clientX, y: touch.clientY } : undefined; }}
@@ -211,21 +196,9 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
   </main>;
 }
 
-/** One projection of the roster per frame of the shared feeds, read by the list and the top bar alike. */
-const sharedProjections = new WeakMap<SharedFeedsSnapshot, { project(shared: SharedFeedsSnapshot): BotRosterModel; model: BotRosterModel }>();
-function projectShared(project: (shared: SharedFeedsSnapshot) => BotRosterModel, shared: SharedFeedsSnapshot): BotRosterModel {
-  const cached = sharedProjections.get(shared);
-  if (cached?.project === project) return cached.model;
-  const model = project(shared);
-  sharedProjections.set(shared, { project, model });
-  return model;
-}
-
 /** The roster on screen: it follows the shared feeds itself, so their frames render it and not the workspace around it. */
 function SharedBotRoster({ model, project, ...props }: ComponentProps<typeof BotRoster> & { project?(shared: SharedFeedsSnapshot): BotRosterModel }) {
-  const shared = useSharedFeed(snapshot => project ? snapshot : undefined);
-  const projected = useMemo(() => project && shared ? projectShared(project, shared) : model, [project, shared, model]);
-  return <BotRoster model={projected} {...props} />;
+  return <BotRoster model={useSharedRoster(model, project)} {...props} />;
 }
 
 /** The conversation's top bar says the same sentence as the assistant's row, from the same shared feeds. */

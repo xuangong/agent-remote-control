@@ -54,7 +54,7 @@ async function open(name: string, groups: Parameters<typeof seedGroup>[1][], pla
   return app;
 }
 const row = (app: Awaited<ReturnType<typeof open>>, group: string, view: string) =>
-  app.container.querySelector<HTMLButtonElement>(`nav[aria-label="Assistants"] [data-bot-place='${JSON.stringify([group, view])}']`);
+  app.container.querySelector<HTMLButtonElement>(`nav[aria-label="Chats"] [data-bot-place='${JSON.stringify([group, view])}']`);
 
 it('labels a bot from its card, shows the label beside its name, and clears it', async () => {
   const app = await open('bot-menu-label', [botGroup('A')], '/?mode=bot&section=A&bot=A1');
@@ -87,7 +87,9 @@ it('gives a group formed from sessions its bot details in the same change as the
     const sent = mutate.mock.calls.slice(before).map(([, mutation]) => mutation.operation);
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ type: 'batch', operations: [{ type: 'bots.add' }, { type: 'bot.update', viewId: 'B1', details: { label: 'Lead', name } }] });
-    const sections = [...app.container.querySelectorAll('nav[aria-label="Assistants"] .lab-bot-section-head h2')].map(heading => heading.textContent);
+    // The group A and B keep their places: the directory lists them in catalog order.
+    await app.go('Assistants');
+    const sections = [...app.container.querySelectorAll('.lab-directory .lab-bot-section-head h2')].map(heading => heading.firstChild?.textContent);
     expect(sections.slice(0, 2)).toEqual(['A', 'B']);
   } finally { await app.close(); }
 });
@@ -107,8 +109,11 @@ it('hides a bot in Bot mode while it stays a pane of its Window, with Undo, and 
     expect(app.container.querySelector('.lab-bot-notice')).toBeNull();
     await choose('card', 'Hide in Bot mode');
     await until(() => expect(row(app, 'A', 'A1')).toBeNull());
-    await choose('Group actions: A', 'Show hidden bots');
+    // The directory still lists it, marked, and shows it in Chats again.
+    await app.go('Assistants');
+    await act(async () => visibleButton(app.container.querySelector('.lab-directory')!, 'Show in Chats').click());
     await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ name: 'A1' }));
+    await app.go('Chats');
     await until(() => expect(row(app, 'A', 'A1')).not.toBeNull());
   } finally { await app.close(); }
 });
@@ -199,7 +204,7 @@ const reference = (overrides: Partial<AssistantRef> = {}): AssistantRef => ({
 it("renders each section from the assistant's state, in order, in the reader's language", async () => {
   const container = await render(<AssistantDetails assistant={reference()} surface="panel" onClose={() => {}} />);
   expect([...container.querySelectorAll('.lab-assistant-section > h3')].map(heading => heading.textContent))
-    .toEqual(['Notifications', 'Process', 'Where it works', 'Sessions', 'Model and settings', 'Files']);
+    .toEqual(['Process', 'Where it works', 'Sessions', 'Model and settings', 'Files']);
   expect(container.querySelector('.lab-assistant-card-name')?.textContent).toBe('Chief');
   // One line of its role; its actions are in the card's ⋯ menu when none stands visible.
   expect(container.querySelector('.lab-assistant-card-role')?.textContent).toBe('Side · Reviewer');
@@ -215,10 +220,11 @@ it("renders each section from the assistant's state, in order, in the reader's l
   expect(container.querySelector('.lab-assistant-identity')?.textContent).toContain('/Users/me/notes');
   expect(container.querySelector('.lab-assistant-identity')?.textContent).toContain('session-7');
   expect(container.querySelector('[aria-label="This assistant"] [aria-pressed="true"]')?.textContent).toBe('Process');
-  expect(container.querySelector('[aria-label="All assistants on this device"] [aria-pressed="true"]')?.textContent).toBe('Concise');
+  // The device's default, notifications and letters are in Settings > Assistants, not on the assistant.
+  expect(container.querySelector('[aria-label="All assistants on this device"], [role="switch"]')).toBeNull();
   expect(container.querySelector('.lab-assistant-files')?.textContent).toBe('notes.mdedited+3 −1');
   const chinese = await render(<LocaleContext.Provider value="zh"><AssistantDetails assistant={reference({ files: [] })} surface="panel" onClose={() => {}} /></LocaleContext.Provider>);
-  expect([...chinese.querySelectorAll('.lab-assistant-section > h3')].map(heading => heading.textContent)).toEqual(['通知', '过程显示', '它在哪里工作', '会话', '模型', '文件']);
+  expect([...chinese.querySelectorAll('.lab-assistant-section > h3')].map(heading => heading.textContent)).toEqual(['过程显示', '它在哪里工作', '会话', '模型', '文件']);
   expect(chinese.querySelector('.lab-assistant-empty')?.textContent).toBe(translator('zh')('details.noFiles'));
 });
 
@@ -236,8 +242,7 @@ it('lists the chain newest first, marks the current session and offers Return to
   expect(opened).toEqual(['s3']);
 });
 
-it("chooses the process mode for this assistant, keeping its other details, and this device's default and notifications", async () => {
-  vi.stubGlobal('Notification', class { static permission = 'granted'; static requestPermission = async () => 'granted'; });
+it("chooses the process mode for this assistant, keeping its other details, and offers no device default or notifications", async () => {
   const group = botGroup('A'); group.bots!.members.A1 = { name: 'A1', label: 'Reviewer' };
   const app = await open('bot-details-process', [group], '/?mode=bot&section=A&bot=A1');
   try {
@@ -245,14 +250,9 @@ it("chooses the process mode for this assistant, keeping its other details, and 
     await until(() => expect(details().querySelector('[aria-label="This assistant"]')).not.toBeNull());
     await act(async () => visibleButton(details().querySelector('[aria-label="This assistant"]')!, 'Full').click());
     await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ name: 'A1', label: 'Reviewer', process: 'full' }));
-    await act(async () => visibleButton(details().querySelector('[aria-label="All assistants on this device"]')!, 'Process').click());
-    expect(localStorage.getItem('agent-remote:process-mode')).toBe('process');
-    // Notifications are this device's, shared by every assistant: on by default, the switch turns them off.
-    const toggle = () => [...details().querySelectorAll<HTMLButtonElement>('[role="switch"]')].find(item => item.textContent === 'When it finishes or needs you')!;
-    expect(toggle().getAttribute('aria-checked')).toBe('true');
-    await act(async () => toggle().click());
-    expect(localStorage.getItem('agent-remote:desktop-notifications')).toBe('false');
-    expect(toggle().getAttribute('aria-checked')).toBe('false');
+    expect(details().querySelector('[aria-label="All assistants on this device"]')).toBeNull();
+    expect(details().querySelector('.lab-assistant-section[aria-labelledby$="notifications"]')).toBeNull();
+    expect(localStorage.getItem('agent-remote:process-mode')).toBeNull();
   } finally { await app.close(); }
 });
 

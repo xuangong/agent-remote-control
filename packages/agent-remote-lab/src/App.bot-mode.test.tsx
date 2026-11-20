@@ -1,7 +1,7 @@
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createWindowView } from '@orchardworks/agent-remote-protocol';
-import { botGroup, botTarget, mountBotApp, seedGroup, until } from './test/bot-mode-fixtures.js';
+import { botGroup, botTarget, mountBotApp, seedGroup, until, visibleButton } from './test/bot-mode-fixtures.js';
 import * as workspaceHooks from './hooks/useWindowWorkspace.js';
 import * as trackingHooks from './hooks/useSessionTracking.js';
 import { promptText, setPromptText } from './test/setup.js';
@@ -31,7 +31,7 @@ it('keeps Window A/A2 and both display settings while Bot B1 shares its exact vi
   await act(async () => app.workspace().open('B'));
   await until(() => expect([...app.container.querySelectorAll<HTMLElement>('.lab-window-mode [role="textbox"]')].some(input => promptText(input) === 'B1 draft')).toBe(true));
   await app.switchMode('bot');
-  expect(app.container.querySelector('[aria-label="Assistants"] [aria-current="true"]')?.getAttribute('data-bot-place')).toBe(JSON.stringify(['B', 'B1']));
+  expect(app.container.querySelector('[aria-label="Chats"] [aria-current="true"]')?.getAttribute('data-bot-place')).toBe(JSON.stringify(['B', 'B1']));
   expect(promptText(app.container.querySelector<HTMLElement>('.lab-bot-conversation [role="textbox"]')!)).toBe('B1 draft');
   expect(app.workspace().readGroup('B')!.window.views.map(view => view.display)).toEqual(bDisplay);
   await app.close();
@@ -47,8 +47,8 @@ it('restores independent bot selection and mode on reload and ignores corrupt pr
   await act(async () => app.button('A1').click());
   await app.close(); history.replaceState(null, '', '/');
   app = await mountBotApp(scope);
-  await until(() => expect(app.container.querySelector('[aria-label="Assistants"] [aria-current="true"]')?.getAttribute('aria-label')).toBe('A1'));
-  expect(app.button('Bot mode').getAttribute('aria-pressed')).toBe('true');
+  await until(() => expect(app.container.querySelector('[aria-label="Chats"] [aria-current="true"]')?.getAttribute('aria-label')).toBe('A1'));
+  expect(app.container.querySelector('.lab-rail [aria-current="page"]')?.getAttribute('aria-label')).toBe('Chats');
   await app.close(); localStorage.setItem('agent-remote:workbench-mode', 'broken'); history.replaceState(null, '', '/');
   app = await mountBotApp(scope);
   expect(app.container.querySelector('[data-workbench-mode="window"]')?.hasAttribute('hidden')).toBe(false);
@@ -67,11 +67,12 @@ it('keeps mode navigation available when the Window is unavailable', async () =>
   await app.close();
 });
 
-it('opens section-only routes without restoring stale session query parameters', async () => {
+it('opens section-only routes in the directory at that group, without restoring stale session query parameters', async () => {
   const scope = 'http://localhost/bot-section/'; const group = botGroup('B'); group.presentation = { window: false };
   seedGroup(scope, group); history.replaceState(null, '', '/?mode=bot&section=B&session=stale&provider=recorded&host=local');
   const app = await mountBotApp(scope);
-  await until(() => expect(app.container.querySelector('[aria-label="Assistants"]')).not.toBeNull());
+  await until(() => expect(app.container.querySelector('.lab-directory #directory-group-B')).not.toBeNull());
+  expect(app.container.querySelector('.lab-rail [aria-current="page"]')?.getAttribute('aria-label')).toBe('Assistants');
   expect(app.attachments).not.toContain('stale');
   expect(app.container.querySelector('[data-window-id="B"]')).toBeNull();
   await app.close();
@@ -149,7 +150,7 @@ it.each(['deleted', 'rebound', 'history', 'ask', 'scope'] as const)('does not re
   } finally { await app.close(); }
 });
 
-it('puts the mode switch and the New menu at the top of the Window sidebar, not in the app bar', async () => {
+it('puts the title and the New menu at the top of the Window sidebar, and the modes and Search in the rail, not in the app bar', async () => {
   const scope = 'http://localhost/sidebar-header/'; seedGroup(scope, botGroup('A'));
   history.replaceState(null, '', '/?window=A');
   const app = await mountBotApp(scope);
@@ -157,8 +158,9 @@ it('puts the mode switch and the New menu at the top of the Window sidebar, not 
     await until(() => expect(app.container.querySelector('#lab-context .lab-sidebar-header')).not.toBeNull());
     await until(() => expect(app.workspace().window?.id).toBe('A'));
     const header = app.container.querySelector('#lab-context .lab-sidebar-header')!;
-    expect(header.querySelector('nav[aria-label="Workbench mode"] [aria-pressed="true"]')?.textContent).toBe('Window mode');
-    expect(app.container.querySelector('.lab-app-bar nav[aria-label="Workbench mode"]')).toBeNull();
+    expect(header.querySelector('.lab-sidebar-title')?.textContent).toBe('Windows');
+    expect(app.container.querySelector('nav[aria-label="Workbench mode"]')).toBeNull();
+    expect(app.container.querySelector('.lab-rail [aria-current="page"]')?.getAttribute('aria-label')).toBe('Windows');
     const newSessionPanel = () => app.container.querySelector('#lab-sessions-page .lab-provider-controls')!;
     expect(newSessionPanel().closest('[hidden]')).not.toBeNull();
     const open = async () => act(async () => (header.querySelector('button[aria-label="New"]') as HTMLButtonElement).click());
@@ -249,9 +251,8 @@ it('shows Windows, In this Window and Shortcuts in the desktop sidebar, and sess
     expect(rail().querySelector('nav[aria-label="Session views"]')).not.toBeNull();
     expect(rail().querySelector('nav[aria-label="Shortcuts"]')).not.toBeNull();
     expect(rail().querySelector('section[aria-label="Discover sessions"]')).toBeNull();
-    expect(rail().querySelector('footer.lab-sidebar-footer')).not.toBeNull();
-    // The footer counts the Lab server, which has local providers here, as the Hosts select does.
-    await until(() => expect(rail().querySelector('.lab-sidebar-hosts')?.textContent).toBe('1 Host online'));
+    // The Hosts summary and Settings have left the sidebar: Settings is in the rail and the summary in Settings > Computers.
+    expect(rail().querySelector('footer')).toBeNull();
     await act(async () => app.button('All sessions').click());
     const page = app.container.querySelector<HTMLElement>('#lab-sessions-page')!;
     expect(page.hidden).toBe(false);
@@ -536,7 +537,7 @@ it('opens a tile in Bot mode, keeping the Window route, and pins it back with it
     await act(async () => tile.click());
     await until(() => expect(app.workspace().readGroup('B')?.bots).toBeDefined());
     await until(() => expect(app.container.querySelector('[data-workbench-mode="bot"]')?.hasAttribute('hidden')).toBe(false));
-    await until(() => expect(app.container.querySelector('[aria-label="Assistants"] [aria-current="true"]')?.getAttribute('data-bot-place')).toBe(JSON.stringify(['B', viewId])));
+    await until(() => expect(app.container.querySelector('[aria-label="Chats"] [aria-current="true"]')?.getAttribute('data-bot-place')).toBe(JSON.stringify(['B', viewId])));
     expect(new URL(location.href).searchParams.get('section')).toBe('B');
     // A draft typed in Bot mode goes with the assistant.
     await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
@@ -555,7 +556,7 @@ it('opens a tile in Bot mode, keeping the Window route, and pins it back with it
     await until(() => expect(app.workspace().readGroup('B')?.window.selectedViewId).toBe(viewId));
     await until(() => expect([...app.container.querySelectorAll<HTMLElement>('.lab-window-mode [role="textbox"]')].some(input => promptText(input) === 'Kept across modes')).toBe(true));
     await app.switchMode('bot');
-    expect(app.container.querySelector('[aria-label="Assistants"] [aria-current="true"]')?.getAttribute('data-bot-place')).toBe(JSON.stringify(['B', viewId]));
+    expect(app.container.querySelector('[aria-label="Chats"] [aria-current="true"]')?.getAttribute('data-bot-place')).toBe(JSON.stringify(['B', viewId]));
   } finally { await app.close(); }
 });
 
@@ -569,5 +570,74 @@ it('pins a bot whose group is hidden from Window mode by showing its group there
     await until(() => expect(app.workspace().readGroup('A')?.presentation).toBeUndefined());
     await until(() => expect(app.workspace().window?.id).toBe('A'));
     await until(() => expect(app.workspace().readGroup('A')?.window.selectedViewId).toBe('A1'));
+  } finally { await app.close(); }
+});
+
+
+// Navigation (I4 plan, decisions 9 to 13): every address keeps its meaning, and Settings or the directory sit over a mode that keeps its place.
+const rail = (app: Awaited<ReturnType<typeof mountBotApp>>) => app.container.querySelector('.lab-rail [aria-current="page"]')?.getAttribute('aria-label');
+it.each([
+  ['a Window link', '/?mode=window&window=A', 'Windows'],
+  ['an assistant link', '/?mode=bot&section=A&bot=A1', 'Chats'],
+  ['a session link', '/?mode=bot&host=local&provider=recorded&session=A1', 'Chats'],
+  ['a bare window link', '/?window=A', 'Windows'],
+] as const)('opens %s in the same place as before', async (_name, url, destination) => {
+  const scope = `http://localhost/links-${destination}-${url.length}/`; seedGroup(scope, botGroup('A')); history.replaceState(null, '', url);
+  const app = await mountBotApp(scope);
+  try {
+    await until(() => expect(rail(app)).toBe(destination));
+    if (destination === 'Chats') await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
+    else await until(() => expect(app.workspace().window?.id).toBe('A'));
+    expect(new URL(location.href).searchParams.get('page')).toBeNull();
+  } finally { await app.close(); }
+});
+
+it('keeps the chat and its draft over Settings and the directory, and returns to the same chat', async () => {
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }));
+  const scope = 'http://localhost/bot-over-settings/'; seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?mode=bot&section=A&bot=A1');
+  const app = await mountBotApp(scope);
+  try {
+    await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
+    const editor = app.container.querySelector<HTMLElement>('.lab-bot-conversation [role="textbox"]')!;
+    await act(async () => { setPromptText(editor, 'half-written'); editor.dispatchEvent(new Event('input', { bubbles: true })); });
+    await app.go('Settings');
+    expect(rail(app)).toBe('Settings');
+    expect(new URL(location.href).searchParams.get('page')).toBe('settings');
+    expect(app.container.querySelector<HTMLElement>('[data-workbench-mode="bot"]')!.hidden).toBe(true);
+    expect(app.container.querySelector('.lab-settings h1')?.textContent).toBe('General');
+    await app.go('Assistants');
+    expect(rail(app)).toBe('Assistants');
+    expect(app.container.querySelector('.lab-directory')).not.toBeNull();
+    await act(async () => app.button('A2').click());
+    expect(rail(app)).toBe('Chats');
+    expect(new URL(location.href).searchParams.get('bot')).toBe('A2');
+    await app.go('Settings');
+    await app.go('Chats');
+    expect(new URL(location.href).searchParams.get('page')).toBeNull();
+    expect(app.container.querySelector<HTMLElement>('[data-workbench-mode="bot"]')!.hidden).toBe(false);
+    await act(async () => app.button('A1').click());
+    await until(() => expect(promptText(app.container.querySelector<HTMLElement>('.lab-bot-conversation [role="textbox"]')!)).toBe('half-written'));
+  } finally { await app.close(); }
+});
+
+it('on a phone, leaves a pushed conversation by the back gesture, then Settings, and keeps the tab bar off the conversation', async () => {
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(max-width: 1180px)' || query === '(max-width: 760px)', media: query, addEventListener() {}, removeEventListener() {} }));
+  const scope = 'http://localhost/bot-phone-nav/'; seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?mode=bot');
+  const app = await mountBotApp(scope);
+  try {
+    await until(() => expect(app.container.querySelector('.lab-tab-bar')).not.toBeNull());
+    expect(app.container.querySelector('.lab-rail')).toBeNull();
+    await act(async () => app.button('A1').click());
+    expect(app.container.querySelector('.lab-bot-workspace')!.hasAttribute('data-chat')).toBe(true);
+    await act(async () => { history.back(); await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(app.container.querySelector('.lab-bot-workspace')!.hasAttribute('data-chat')).toBe(false);
+    await app.go('Settings');
+    expect(app.container.querySelector('.lab-settings-me')).not.toBeNull();
+    await act(async () => [...app.container.querySelectorAll<HTMLButtonElement>('.lab-settings-group')].find(item => item.querySelector('strong')?.textContent === 'General')!.click());
+    expect(app.container.querySelector('.lab-settings h1')?.textContent).toBe('General');
+    await act(async () => { history.back(); await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(app.container.querySelector('.lab-settings-me')).not.toBeNull();
+    await act(async () => { history.back(); await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(app.container.querySelector('.lab-page')!.hasAttribute('hidden')).toBe(true);
   } finally { await app.close(); }
 });

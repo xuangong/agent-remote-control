@@ -25,7 +25,7 @@ async function largeWorkbench(name: string) {
   // App calls this once per render.
   const appRenders = vi.spyOn(botWorkspaceHooks, 'useBotWorkspace');
   const app = await mountBotApp(scope, { hosted: true });
-  const rows = () => [...app.container.querySelectorAll<HTMLButtonElement>('nav[aria-label="Assistants"] .lab-bot-row')];
+  const rows = () => [...app.container.querySelectorAll<HTMLButtonElement>('nav[aria-label="Chats"] .lab-bot-row')];
   const open = async (bot: string) => {
     await act(async () => app.button(bot).click());
     // Not the fixture's three seconds: before stage 6 a switch took longer than that here.

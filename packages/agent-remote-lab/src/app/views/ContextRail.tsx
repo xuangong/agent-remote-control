@@ -2,12 +2,13 @@
 import { WindowWorkspaces } from '../../components/WindowWorkspaces.js';
 import { SupportingRail } from '../../components/SupportingRail.js';
 import { SidebarHeader } from '../../shell/SidebarHeader.js';
-import { SidebarFooter } from '../../shell/SidebarFooter.js';
 import { Menu } from '../../ui/Menu.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { AppScope } from '../types.js';
 
-export function ContextRail({ scope }: { readonly scope: Pick<AppScope, 'askSidebarSlot' | 'closePage' | 'compactLayout' | 'confirmBotRemoval' | 'contextFromSessions' | 'contextVisible' | 'createWindowFromMenu' | 'creatingWindow' | 'desktopContextVisible' | 'dispatchPanels' | 'favorites' | 'hostsLoaded' | 'menuCurrentBinding' | 'navigation' | 'openNewSessionPanel' | 'openPage' | 'openSearch' | 'pageOpen' | 'selectableHosts' | 'sessionPanel' | 'sessionPanelContent' | 'sessionsTriggerRef' | 'setSidebarViewTarget' | 'setWindowOverviewOpen' | 'shortcutSidebarSlot' | 'supportTeams' | 'userScoped' | 'viewTriggerRef' | 'windowActions' | 'windowOverviewAvailable' | 'windowSessionStatus' | 'windowToolbarShown' | 'windowWorkspace'> }) {
-  const { askSidebarSlot, closePage, compactLayout, confirmBotRemoval, contextFromSessions, contextVisible, createWindowFromMenu, creatingWindow, desktopContextVisible, dispatchPanels, favorites, hostsLoaded, menuCurrentBinding, navigation, openNewSessionPanel, openPage, openSearch, pageOpen, selectableHosts, sessionPanel, sessionPanelContent, sessionsTriggerRef, setSidebarViewTarget, setWindowOverviewOpen, shortcutSidebarSlot, supportTeams, userScoped, viewTriggerRef, windowActions, windowOverviewAvailable, windowSessionStatus, windowToolbarShown, windowWorkspace } = scope;
+export function ContextRail({ scope }: { readonly scope: Pick<AppScope, 'askSidebarSlot' | 'closePage' | 'compactLayout' | 'confirmBotRemoval' | 'contextFromSessions' | 'contextVisible' | 'createWindowFromMenu' | 'creatingWindow' | 'desktopContextVisible' | 'dispatchPanels' | 'favorites' | 'menuCurrentBinding' | 'openNewSessionPanel' | 'openPage' | 'pageOpen' | 'sessionPanel' | 'sessionPanelContent' | 'sessionsTriggerRef' | 'setSidebarViewTarget' | 'setWindowOverviewOpen' | 'shortcutSidebarSlot' | 'supportTeams' | 'userScoped' | 'viewTriggerRef' | 'windowActions' | 'windowOverviewAvailable' | 'windowSessionStatus' | 'windowToolbarShown' | 'windowWorkspace'> }) {
+  const t = useTranslate();
+  const { askSidebarSlot, closePage, compactLayout, confirmBotRemoval, contextFromSessions, contextVisible, createWindowFromMenu, creatingWindow, desktopContextVisible, dispatchPanels, favorites, menuCurrentBinding, openNewSessionPanel, openPage, pageOpen, sessionPanel, sessionPanelContent, sessionsTriggerRef, setSidebarViewTarget, setWindowOverviewOpen, shortcutSidebarSlot, supportTeams, userScoped, viewTriggerRef, windowActions, windowOverviewAvailable, windowSessionStatus, windowToolbarShown, windowWorkspace } = scope;
   return <>
     <SupportingRail
       id="lab-context"
@@ -19,7 +20,7 @@ export function ContextRail({ scope }: { readonly scope: Pick<AppScope, 'askSide
       triggerRef={compactLayout && contextFromSessions ? sessionsTriggerRef : viewTriggerRef}
       onClose={() => dispatchPanels({ type: 'context.close', focusInPage: false })}
     >
-      {!compactLayout ? <SidebarHeader mode={navigation.mode} onModeChange={navigation.setMode} onSearch={openSearch} actions={<Menu label="New" icon="plus" items={[
+      {!compactLayout ? <SidebarHeader title={t('navigation.windows')} actions={<Menu label="New" icon="plus" items={[
         { label: 'New session', onSelect: openNewSessionPanel },
         { label: 'New Window', disabled: creatingWindow, onSelect: createWindowFromMenu },
       ]} />} /> : null}
@@ -30,8 +31,6 @@ export function ContextRail({ scope }: { readonly scope: Pick<AppScope, 'askSide
       {compactLayout ? <nav className="lab-session-panel-actions" aria-label="Sidebar sections">
         <button type="button" aria-pressed={sessionPanel === 'list'} onClick={() => dispatchPanels({ type: 'sessionPanel.set', panel: 'list' })}>Sessions</button>
         {userScoped ? <button type="button" aria-pressed={sessionPanel === 'favorites'} onClick={() => { dispatchPanels({ type: 'sessionPanel.set', panel: 'favorites' }); void favorites.refresh(); }}>Favorites</button> : null}
-        {userScoped ? <button type="button" aria-pressed={sessionPanel === 'hosts'} onClick={() => dispatchPanels({ type: 'sessionPanel.set', panel: 'hosts' })}>Hosts</button> : null}
-        <button type="button" aria-pressed={sessionPanel === 'settings'} onClick={() => dispatchPanels({ type: 'sessionPanel.set', panel: 'settings' })}>Settings</button>
       </nav> : null}
       {compactLayout ? sessionPanelContent : <>
         <div className="lab-sidebar-scroll">
@@ -47,7 +46,6 @@ export function ContextRail({ scope }: { readonly scope: Pick<AppScope, 'askSide
             <div ref={askSidebarSlot} className="lab-movable-slot" />
           </nav>
         </div>
-        <SidebarFooter hosts={selectableHosts} loaded={hostsLoaded} onHosts={() => openPage(userScoped ? 'hosts' : 'list')} hostsCurrent={pageOpen && sessionPanel === 'hosts'} onSettings={() => openPage('settings')} settingsCurrent={pageOpen && sessionPanel === 'settings'} />
       </>}
       {compactLayout && sessionPanel !== 'new' ? <footer className="lab-session-panel-footer"><button type="button" onClick={() => dispatchPanels({ type: 'sessionPanel.set', panel: 'new' })}><span aria-hidden="true">＋</span> New session</button></footer> : null}
     </SupportingRail>

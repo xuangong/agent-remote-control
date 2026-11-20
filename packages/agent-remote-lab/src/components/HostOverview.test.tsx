@@ -114,24 +114,19 @@ it('opens a Host from its card', async () => {
   expect(opened).toEqual(['homelab']);
 });
 
-it('pairs a new Host from the page toolbar on desktop', async () => {
-  const toolbar = document.createElement('div');
-  document.body.append(toolbar);
-  const container = await render(<HostOverview hosts={[homelab]} service={service(async () => status)} visible onOpenHost={() => {}} actionsTarget={toolbar} />);
-  const pair = toolbar.querySelector<HTMLButtonElement>('button.lab-host-pair')!;
-  expect(pair.textContent).toBe('Pair a Host');
-  expect(container.querySelector('.lab-directory-heading')).toBeNull();
+it('pairs a new computer from the head of the list', async () => {
+  const container = await render(<HostOverview hosts={[homelab]} service={service(async () => status)} visible onOpenHost={() => {}} lead={<p className="lab-host-lead">1 computer online</p>} />);
+  const pair = container.querySelector<HTMLButtonElement>('.lab-host-overview-head button.lab-host-pair')!;
+  expect(pair.textContent).toBe('Pair a computer');
+  expect(container.querySelector('.lab-host-overview-head .lab-host-lead')?.textContent).toBe('1 computer online');
   expect(container.querySelector('.lab-pairing-details')).toBeNull();
   await act(async () => pair.click());
   expect(pair.getAttribute('aria-expanded')).toBe('true');
   expect(container.querySelector('.lab-pairing-details')).not.toBeNull();
-  toolbar.remove();
 });
 
-it('stacks the cards with two-column figures on a phone, with pairing in the heading', async () => {
+it('stacks the cards with two-column figures on a phone', async () => {
   const container = await render(<HostOverview hosts={[homelab]} service={service(async () => status)} visible compact onOpenHost={() => {}} />);
-  expect(container.querySelector('.lab-directory-heading h2')?.textContent).toBe('Hosts');
-  expect(container.querySelector('.lab-directory-heading button.lab-host-pair')).not.toBeNull();
   expect(container.querySelector<HTMLElement>('.lab-host-grid')?.dataset.compact).toBe('true');
 });
 

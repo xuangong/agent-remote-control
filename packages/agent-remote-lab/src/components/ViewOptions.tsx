@@ -4,7 +4,6 @@ import { createPortal } from 'react-dom';
 interface ViewOptionsProps {
   target?: HTMLElement | null;
   attentionControls?: ReactNode;
-  modeControls?: ReactNode;
   triggerRef: RefObject<HTMLButtonElement>;
   headerVisible: boolean;
   sidebarVisible: boolean;
@@ -17,7 +16,7 @@ interface ViewOptionsProps {
   onToggleInspector(): void;
 }
 
-export function ViewOptions({ attentionControls, modeControls, target, triggerRef, headerVisible, sidebarVisible, inspectorVisible, compact, inert, onSetAllVisible, onToggleHeader, onToggleSidebar, onToggleInspector }: ViewOptionsProps) {
+export function ViewOptions({ attentionControls, target, triggerRef, headerVisible, sidebarVisible, inspectorVisible, compact, inert, onSetAllVisible, onToggleHeader, onToggleSidebar, onToggleInspector }: ViewOptionsProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const focusedControl = useRef<string>();
@@ -60,7 +59,6 @@ export function ViewOptions({ attentionControls, modeControls, target, triggerRe
       <span>View</span>
     </button>
     {open ? <section id="lab-view-options-panel" className="lab-view-options-panel" aria-label="View options" tabIndex={-1} data-view-control="panel">
-      {modeControls}
       <div className="lab-view-options-heading">
         <p>Panels</p>
         <div className="lab-view-options-actions">

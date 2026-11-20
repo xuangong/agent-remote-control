@@ -1,6 +1,7 @@
 import { act, StrictMode, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { useSessionAttention, TrackViewScope } from './useSessionAttention.js';
+import { AssistantSettings } from '../settings/AssistantSettings.js';
 import { LabWorkbench } from '../components/LabWorkbench.js';
 import { replicaState } from '../test/fixtures.js';
 import { render, unmount } from '../test/setup.js';
@@ -36,6 +37,7 @@ function Harness() {
   return <TrackViewScope.Provider value={attention.executeTrack}>
     <div data-testid="track" hidden={!attention.trackVisible}>Track</div>
     {attention.controls}
+    <AssistantSettings items={['processMode', 'notifications', 'letters']} notifications={attention.notifications} />
     <LabWorkbench state={replicaState} sessionStatus="ready" actions={{ sendMessage: async () => { throw new Error('Local command must not send a message'); } }} />
   </TrackViewScope.Provider>;
 }

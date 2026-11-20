@@ -1,14 +1,13 @@
 import { act } from 'react';
 import { expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
-import { HostPairing, type PairingPurpose, type HostPairingService } from './HostPairing.js';
+import type { PairingPurpose, HostPairingService } from './HostPairing.js';
+import { PairingKeys } from './PairingKeys.js';
 
 const invitation = { id: 'new', key: 'private-secret', purpose: 'host-only' as const, createdAt: '2026-01-01T00:00:00Z', expiresAt: '2099-01-01T00:00:00Z', serverUrl: 'https://relay.example' };
 const record = (id: string, status: 'unused' | 'used' | 'obsolete' | 'revoked') => ({ id, purpose: 'host-only' as const, status, createdAt: invitation.createdAt, expiresAt: invitation.expiresAt, ...(status === 'used' ? { hostId: 'studio-id', hostName: 'Studio', usedAt: '2026-01-02T00:00:00Z' } : {}) });
 async function open(service: HostPairingService) {
-  const view = await render(<HostPairing service={service} selectedHostId="local" hosts={[]} onSelect={() => undefined} onRetryHosts={() => undefined} />);
-  await act(async () => button(view, 'Pair Agent Host').click());
-  return view;
+  return render(<PairingKeys service={service} />);
 }
 function button(view: HTMLElement, label: string) { return [...view.querySelectorAll('button')].find(item => item.textContent === label)!; }
 
@@ -63,8 +62,6 @@ it('shows secret-free history, limits revoke to unused keys and explains deletio
 it('clears the displayed secret after revoking its invitation', async () => {
   let status = 'unused' as 'unused' | 'revoked';
   const view = await open({ invitation, hosts: async () => ({ hosts: [] }), pair: async () => invitation, pairings: async () => ({ pairings: [record('new', status)], availablePurposes: ['host-only'] }), revokePairing: async () => { status = 'revoked'; } });
-  // The cached invitation opens the panel immediately, so open() toggled it closed.
-  await act(async () => button(view, 'Pair Agent Host').click());
   await act(async () => button(view, 'Revoke key').click());
   await act(async () => button(view, 'Confirm key revocation').click());
   expect(view.querySelector('textarea')).toBeNull();
@@ -91,7 +88,7 @@ it('treats an expired unused key as obsolete and offers no revocation', async ()
 it('clears a consumed invitation when history is refreshed', async () => {
   let status = 'unused' as 'unused' | 'used';
   const service: HostPairingService = { invitation, hosts: async () => ({ hosts: [] }), pair: async () => invitation, pairings: async () => ({ pairings: [record('new', status)] }) };
-  const view = await render(<HostPairing service={service} selectedHostId="local" hosts={[]} onSelect={() => undefined} onRetryHosts={() => undefined} />);
+  const view = await render(<PairingKeys service={service} />);
   expect(view.querySelector<HTMLTextAreaElement>('textarea')?.value).toContain('private-secret');
   status = 'used';
   await act(async () => button(view, 'Refresh keys').click());
@@ -113,13 +110,6 @@ it('shows a history loading error and recovers through explicit refresh', async 
   expect(view.querySelector('[role="alert"]')).toBeNull();
   expect(view.textContent).toContain('Studio');
   expect(view.querySelector('option[value="gateway-setup"]')).not.toBeNull();
-});
-
-it('does not request history or show invitation management when management is hidden', async () => {
-  const pairings = vi.fn(async () => ({ pairings: [record('used', 'used')] }));
-  const view = await render(<HostPairing managementVisible={false} service={{ invitation, hosts: async () => ({ hosts: [] }), pair: async () => invitation, pairings }} selectedHostId="local" hosts={[]} onSelect={() => undefined} onRetryHosts={() => undefined} />);
-  expect(view.querySelector('[aria-label="Pairing key history"]')).toBeNull();
-  expect(pairings).not.toHaveBeenCalled();
 });
 
 it('waits for the current history request before allowing creation', async () => {

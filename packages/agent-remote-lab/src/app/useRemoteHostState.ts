@@ -11,11 +11,11 @@ import type { ViewSessionStateSlice } from './useViewSessionState.js';
 import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';
 import type { ProviderStateSlice } from './useProviderState.js';
 
-export function useRemoteHostState(scope: Pick<RequestedSessionSlice & WorkbenchShellSlice & PanelsAndShortcutsSlice & ViewSessionStateSlice & WorkbenchRecordsSlice & ProviderStateSlice, 'accessReady' | 'compactLayout' | 'contextOpen' | 'creationLocked' | 'desktopContextVisible' | 'directory' | 'hostClient' | 'localProviderId' | 'pageOpen' | 'providers' | 'restoredHostSelection' | 'selectedHost' | 'setCreatePlanning' | 'setSelectedHost' | 'setSessionOptions' | 'status' | 'transitioning' | 'transport'>) {
-  const { accessReady, compactLayout, contextOpen, creationLocked, desktopContextVisible, directory, hostClient, localProviderId, pageOpen, providers, restoredHostSelection, selectedHost, setCreatePlanning, setSelectedHost, setSessionOptions, status, transitioning, transport } = scope;
+export function useRemoteHostState(scope: Pick<RequestedSessionSlice & WorkbenchShellSlice & PanelsAndShortcutsSlice & ViewSessionStateSlice & WorkbenchRecordsSlice & ProviderStateSlice, 'accessReady' | 'compactLayout' | 'contextOpen' | 'creationLocked' | 'desktopContextVisible' | 'directory' | 'hostClient' | 'localProviderId' | 'navigation' | 'pageOpen' | 'providers' | 'restoredHostSelection' | 'selectedHost' | 'setCreatePlanning' | 'setSelectedHost' | 'setSessionOptions' | 'status' | 'transitioning' | 'transport'>) {
+  const { accessReady, compactLayout, contextOpen, creationLocked, desktopContextVisible, directory, hostClient, localProviderId, navigation, pageOpen, providers, restoredHostSelection, selectedHost, setCreatePlanning, setSelectedHost, setSessionOptions, status, transitioning, transport } = scope;
 
 
-  const { hosts: remoteHosts, loaded: hostsLoaded, error: hostError, retry: retryHosts } = useRemoteHosts(hostClient, accessReady && directory !== undefined, (compactLayout ? contextOpen : desktopContextVisible || pageOpen) || status !== 'ready' || creationLocked, selectedHost.id);
+  const { hosts: remoteHosts, loaded: hostsLoaded, error: hostError, retry: retryHosts } = useRemoteHosts(hostClient, accessReady && directory !== undefined, (compactLayout ? contextOpen : desktopContextVisible || pageOpen) || navigation.page?.destination === 'settings' || status !== 'ready' || creationLocked, selectedHost.id);
 
   const currentHost = remoteHosts.find((host) => host.id === selectedHost.id);
 

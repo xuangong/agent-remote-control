@@ -4,7 +4,7 @@ function displayState() {
   return {
     fullscreen: document.fullscreenElement !== null && document.fullscreenElement !== undefined,
     supported: document.fullscreenEnabled === true && typeof document.documentElement.requestFullscreen === 'function',
-    standalone: window.matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true,
+    standalone: window.matchMedia?.('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true,
   };
 }
 
@@ -13,13 +13,13 @@ export function MobileDisplaySettings() {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState(false);
   useEffect(() => {
-    const standalone = window.matchMedia('(display-mode: standalone)');
+    const standalone = window.matchMedia?.('(display-mode: standalone)');
     const update = () => setDisplay(displayState());
     document.addEventListener('fullscreenchange', update);
-    standalone.addEventListener('change', update);
+    standalone?.addEventListener('change', update);
     return () => {
       document.removeEventListener('fullscreenchange', update);
-      standalone.removeEventListener('change', update);
+      standalone?.removeEventListener('change', update);
     };
   }, []);
 

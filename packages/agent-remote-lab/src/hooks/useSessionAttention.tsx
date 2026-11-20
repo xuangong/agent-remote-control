@@ -90,19 +90,9 @@ export function useSessionAttention(scope: string, active: boolean, onOpen: (ses
   const observe = useCallback((session: SessionEntry, value: SessionObservation) => { void notifier.observe(session, value); }, [notifier]);
   const controls = <>
     <label><span>Track view</span><input type="checkbox" checked={trackVisible} onChange={event => setTrackVisible(event.target.checked)} /></label>
-    {!mobile ? <>
-      <label><span>Session notifications</span><input type="checkbox" checked={notificationChoice} disabled={notificationPermission === 'unsupported'} onChange={event => {
-        save(notificationKey, event.target.checked); setNotificationChoice(event.target.checked);
-        if (event.target.checked) void requestPermission();
-      }} /></label>
-      {notificationChoice && notificationPermission === 'default' ? <button type="button" onClick={() => void requestPermission()}>Allow browser notifications</button> : null}
-      {notificationPermission === 'denied' ? <small>Notifications are blocked. Allow them in this site’s browser settings.</small> : null}
-      {notificationPermission === 'unsupported' ? <small>Browser notifications are unavailable. Use Track view for reminders.</small> : null}
-      {permissionError ? <small>Permission could not be requested. Try Allow browser notifications again.</small> : null}
-    </> : null}
   </>;
   /** This device's session notifications, for an assistant's details: one choice that every assistant shares. */
-  const notifications = { enabled: notificationChoice, available: !mobile && notificationPermission !== 'unsupported', set(value: boolean) {
+  const notifications = { enabled: notificationChoice, available: !mobile && notificationPermission !== 'unsupported', permission: notificationPermission, requestFailed: permissionError, request: () => void requestPermission(), set(value: boolean) {
     save(notificationKey, value); setNotificationChoice(value);
     if (value) void requestPermission();
   } };

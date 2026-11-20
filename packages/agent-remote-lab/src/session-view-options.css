@@ -33,7 +33,6 @@
 .lab-session-view-options-panel label { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; margin: 0; padding: 6px 7px; border-radius: 5px; cursor: pointer; }
 .lab-session-view-options-panel label:hover, .lab-session-view-options-panel label:focus-within { background: var(--obs-surface-selected); }
 .lab-session-view .lab-session-view-options-panel input { flex: 0 0 auto; width: 14px; height: 14px; min-width: 14px; min-height: 14px; margin: 0; accent-color: var(--obs-action); }
-.lab-session-view-options-panel .lab-session-letters-option { margin-top: 5px; border-top: 1px solid var(--obs-border); border-radius: 0; padding-top: 10px; }
 .lab-session-heading-actions, .lab-session-heading-actions-panel { display: contents; }
 .lab-session-heading-actions-trigger { display: none; }
 @container session-view (max-width: 760px) {

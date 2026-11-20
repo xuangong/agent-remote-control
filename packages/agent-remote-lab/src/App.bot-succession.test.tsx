@@ -105,7 +105,11 @@ it("opens a Side from a bot in Bot mode, as a bot of the same group beside it", 
   await until(() => expect(app.hostedGroups.get('B')!.window.views.find(view => view.binding?.nativeSessionId === 'S')).toMatchObject({ placement: 'attached', attachedTo: 'B1' }));
   expect(app.hostedGroups.get('A')).toEqual(other);
   // Bot mode opens it: the Side is the current bot, listed in B's section.
-  await until(() => expect(app.container.querySelector('.lab-bot-row[aria-current="true"]')?.getAttribute('aria-label')).toBe('Fork of B1'));
+  // The Side is called by the name stored with it when it was made, never by the fork's title.
+  const sideB = app.hostedGroups.get('B')!.window.views.find(view => view.binding?.nativeSessionId === 'S')!;
+  await until(() => expect(app.container.querySelector('.lab-bot-row[aria-current="true"]')?.getAttribute('data-bot-place')).toBe(JSON.stringify(['B', sideB.id])));
+  await until(() => expect(app.container.querySelector('.lab-bot-row[aria-current="true"]')?.getAttribute('aria-label')).toBe(app.hostedGroups.get('B')!.bots!.members[sideB.id]?.name));
+  expect(app.container.querySelector('.lab-bot-row[aria-current="true"]')?.getAttribute('aria-label')).not.toBe('Fork of B1');
   const section = app.container.querySelector('#bot-section-B')!.closest('section')!;
   expect(section.contains(app.container.querySelector('.lab-bot-row[aria-current="true"]'))).toBe(true);
   expect(app.sendMessages).toHaveLength(0);
@@ -119,7 +123,11 @@ it('opens a Side from a bot of the shown Window in Bot mode, and offers none to 
   await until(() => expect(leaves.get('A1')?.consoleCommands?.map(command => command.id)).toContain('console:side'));
   await act(async () => { await leaves.get('A1')!.onExecuteConsoleCommand!('console:side', ''); });
   await until(() => expect(app.hostedGroups.get('A')!.window.views.find(view => view.binding?.nativeSessionId === 'S')).toMatchObject({ placement: 'attached', attachedTo: 'A1' }));
-  await until(() => expect(app.container.querySelector('.lab-bot-row[aria-current="true"]')?.getAttribute('aria-label')).toBe('Fork of A1'));
+  // The Side is called by the name stored with it when it was made, never by the fork's title.
+  const sideA = app.hostedGroups.get('A')!.window.views.find(view => view.binding?.nativeSessionId === 'S')!;
+  await until(() => expect(app.container.querySelector('.lab-bot-row[aria-current="true"]')?.getAttribute('data-bot-place')).toBe(JSON.stringify(['A', sideA.id])));
+  await until(() => expect(app.container.querySelector('.lab-bot-row[aria-current="true"]')?.getAttribute('aria-label')).toBe(app.hostedGroups.get('A')!.bots!.members[sideA.id]?.name));
+  expect(app.container.querySelector('.lab-bot-row[aria-current="true"]')?.getAttribute('aria-label')).not.toBe('Fork of A1');
   // A session listed under Other sessions has no group for a Side to join.
   const other = [...app.container.querySelectorAll<HTMLButtonElement>('.lab-bot-other .lab-bot-row')].find(button => button.getAttribute('aria-label')?.startsWith('Other'));
   expect(other).toBeDefined();
@@ -152,7 +160,7 @@ it.each(['deleted', 'rebound'] as const)('rejects a %s Bot source after its choo
   vi.spyOn(SessionDirectoryClient.prototype, 'prepareSuccession').mockImplementation(async input => { prepared.push(input.nativeSessionId); return response(input.operationId, 'unknown'); });
   const app = await setup(`bot-handoff-${change}`); await openHandoff();
   const changed = structuredClone(app.hostedGroups.get('B')!); changed.window.revision++;
-  if (change === 'deleted') changed.window.views = changed.window.views.filter(view => view.id !== 'B1');
+  if (change === 'deleted') { changed.window.views = changed.window.views.filter(view => view.id !== 'B1'); if (changed.bots) delete changed.bots.members.B1; }
   else changed.window.views[0]!.binding = botTarget('replacement');
   app.hostedGroups.set('B', changed);
   await act(async () => app.workspace().refreshGroups());
@@ -198,7 +206,7 @@ it.each(['deleted', 'rebound'] as const)('fences a %s hidden leaf while its orig
   await until(() => expect(app.sendMessages).toHaveLength(1));
   await act(async () => app.button('A1').click());
   const changed = structuredClone(app.hostedGroups.get('B')!); changed.window.revision++;
-  if (change === 'deleted') changed.window.views = changed.window.views.filter(view => view.id !== 'B1');
+  if (change === 'deleted') { changed.window.views = changed.window.views.filter(view => view.id !== 'B1'); if (changed.bots) delete changed.bots.members.B1; }
   else changed.window.views[0]!.binding = botTarget('replacement');
   app.hostedGroups.set('B', changed);
   await act(async () => app.workspace().refreshGroups());
@@ -235,7 +243,7 @@ it.each(['same successor', 'unrelated rebind', 'deleted view', 'wrong operation'
     await until(() => expect(app.workspace().readGroup('B')!.window.views[0]!.binding?.nativeSessionId).toBe('C'));
     if (outcome === 'unrelated rebind' || outcome === 'deleted view') {
       const group = structuredClone(app.hostedGroups.get('B')!); group.window.revision++;
-      if (outcome === 'deleted view') group.window.views = group.window.views.filter(view => view.id !== 'B1');
+      if (outcome === 'deleted view') { group.window.views = group.window.views.filter(view => view.id !== 'B1'); if (group.bots) delete group.bots.members.B1; }
       else group.window.views[0]!.binding = botTarget('unrelated');
       app.hostedGroups.set('B', group);
       await act(async () => app.workspace().refreshGroups());

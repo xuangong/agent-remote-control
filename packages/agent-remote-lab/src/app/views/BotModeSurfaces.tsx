@@ -1,14 +1,13 @@
 // The Bot mode workspace and its sheets.
 import { BotWorkspace } from '../../components/BotWorkspace.js';
 import { NewBotSheet } from '../../components/NewBotSheet.js';
-import { botDisplayName } from '../../components/BotRoster.js';
 import { SessionConversationMount } from '../../components/SessionConversationSurfaces.js';
 import type { RemoteHost } from '../../components/HostPairing.js';
 import { RemoveBotSheet } from '../../components/RemoveBotSheet.js';
 import type { AppScope } from '../types.js';
 
-export function BotModeSurfaces({ scope }: { readonly scope: Pick<AppScope, 'baseUrl' | 'botHandoff' | 'botRoster' | 'compactLayout' | 'createAgent' | 'creationUnavailableReason' | 'describeBot' | 'describeBotConversation' | 'directory' | 'navigation' | 'newBot' | 'openNewBot' | 'openSearch' | 'otherSessions' | 'pinToWindow' | 'projectSharedRoster' | 'providerChoiceList' | 'providerId' | 'remoteHosts' | 'removingBot' | 'retainedHandoff' | 'selectHost' | 'selectProvider' | 'selectableHosts' | 'selectedBot' | 'selectedHost' | 'selectedProviderChoice' | 'sessionOptions' | 'setNewBot' | 'setRemovingBot' | 'setSessionOptions' | 'sharedWindow' | 'successionProgress' | 'transitioning' | 'windowMode' | 'windowWorkspace'> }) {
-  const { baseUrl, botHandoff, botRoster, compactLayout, createAgent, creationUnavailableReason, describeBot, describeBotConversation, directory, navigation, newBot, openNewBot, openSearch, otherSessions, pinToWindow, projectSharedRoster, providerChoiceList, providerId, remoteHosts, removingBot, retainedHandoff, selectHost, selectProvider, selectableHosts, selectedBot, selectedHost, selectedProviderChoice, sessionOptions, setNewBot, setRemovingBot, setSessionOptions, sharedWindow, successionProgress, transitioning, windowMode, windowWorkspace } = scope;
+export function BotModeSurfaces({ scope }: { readonly scope: Pick<AppScope, 'assistantNames' | 'baseUrl' | 'botHandoff' | 'botRoster' | 'compactLayout' | 'createAgent' | 'creationUnavailableReason' | 'describeBot' | 'describeBotConversation' | 'directory' | 'navigation' | 'newBot' | 'openNewBot' | 'openSearch' | 'otherSessions' | 'pinToWindow' | 'projectSharedRoster' | 'providerChoiceList' | 'providerId' | 'remoteHosts' | 'removingBot' | 'retainedHandoff' | 'selectHost' | 'selectProvider' | 'selectableHosts' | 'selectedBot' | 'selectedHost' | 'selectedProviderChoice' | 'sessionOptions' | 'setNewBot' | 'setRemovingBot' | 'setSessionOptions' | 'sharedWindow' | 'successionProgress' | 'transitioning' | 'windowMode' | 'windowWorkspace'> }) {
+  const { assistantNames, baseUrl, botHandoff, botRoster, compactLayout, createAgent, creationUnavailableReason, describeBot, describeBotConversation, directory, navigation, newBot, openNewBot, openSearch, otherSessions, pinToWindow, projectSharedRoster, providerChoiceList, providerId, remoteHosts, removingBot, retainedHandoff, selectHost, selectProvider, selectableHosts, selectedBot, selectedHost, selectedProviderChoice, sessionOptions, setNewBot, setRemovingBot, setSessionOptions, sharedWindow, successionProgress, transitioning, windowMode, windowWorkspace } = scope;
   return <>
     {botHandoff ? successionProgress : null}{retainedHandoff ? <div hidden {...{ inert: '' }}><SessionConversationMount mode="bot" active={false} descriptor={retainedHandoff} /></div> : null}
     <BotWorkspace visible={!windowMode} compact={compactLayout} scope={baseUrl} workspace={windowWorkspace} navigation={navigation} selected={selectedBot} roster={botRoster} projectRoster={projectSharedRoster} directory={otherSessions} describeConversation={describeBotConversation} onSearch={openSearch}
@@ -16,7 +15,7 @@ export function BotModeSurfaces({ scope }: { readonly scope: Pick<AppScope, 'bas
       onNewBot={directory ? openNewBot : undefined} onPinToWindow={place => void pinToWindow(place.groupId, place.viewId)} />
     {removingBot && windowMode && sharedWindow?.id === removingBot.windowId && sharedWindow.views.some(view => view.id === removingBot.viewId) ? (() => {
       const view = sharedWindow.views.find(item => item.id === removingBot.viewId)!;
-      return <RemoveBotSheet name={view.binding ? botDisplayName(view.binding) : 'Session view'} window={sharedWindow} viewId={view.id}
+      return <RemoveBotSheet name={view.binding ? assistantNames.view(sharedWindow.id, view.id) : 'Session view'} window={sharedWindow} viewId={view.id}
         onCancel={() => setRemovingBot(undefined)}
         onRemove={() => { windowWorkspace.authority?.operate({ type: 'view.close', viewId: view.id }); setRemovingBot(undefined); }} />;
     })() : null}

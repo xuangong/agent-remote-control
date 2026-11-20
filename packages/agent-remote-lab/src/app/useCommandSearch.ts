@@ -3,7 +3,6 @@ import { isBotView } from '@orchardworks/agent-remote-protocol';
 import { drainModeSteps } from '../state/mode-steps.js';
 import { paletteActions } from '../state/palette-actions.js';
 import { windowSummary } from '../window-summary.js';
-import { botDisplayName } from '../components/BotRoster.js';
 import { windowCatalog } from '../hooks/useWindowActions.js';
 import { byRecentUse } from '../window-recency.js';
 import { useEffect, useMemo } from 'react';
@@ -69,7 +68,7 @@ export function useCommandSearch(scope: Pick<AppInputs & SessionSuccessionBindin
       openWindowOverview: () => setWindowOverviewOpen(true) });
     // Each session is one item: a bot in Bot mode, a session (opened in Window mode) otherwise.
     const bots = windowMode ? [] : botRoster.sections.flatMap(section => section.rows.map((row): CommandItem => ({ id: `bot:${row.groupId}/${row.viewId}`, kind: 'bot',
-      title: botDisplayName(row.binding), subtitle: section.title, ...(row.details.label ? { keywords: [row.details.label] } : {}),
+      title: row.name, subtitle: section.title, ...(row.details.label ? { keywords: [row.details.label] } : {}),
       run: () => {
         const switching = windowMode;
         navigation.select({ kind: 'bot', groupId: row.groupId, viewId: row.viewId });

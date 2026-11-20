@@ -10,10 +10,6 @@ import { Menu, type MenuEntry } from '../ui/Menu.js';
 import { replyTime } from '../reply-time.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 
-/** The name a bot is known by. A label or role never replaces it. */
-export function botDisplayName(binding: WindowSessionBinding): string {
-  return binding.title || binding.nativeSessionId;
-}
 /** A bot's avatar: generated from its view id, which survives a handoff, unless its stored picture overrides it. */
 export function BotPicture({ id, picture, size = 26, mood = 'idle' }: Pick<WindowBotDetails, 'picture'> & { id: string; size?: number; mood?: AvatarMood }) {
   return <AssistantAvatar id={id} {...(picture ? { picture } : {})} size={size} mood={mood} />;
@@ -24,7 +20,7 @@ export function botPlaceKey(place: BotPlace): string {
 
 function BotMember({ row, current, compact, hostName, onSelect }: { row: BotRow; current: boolean; compact: boolean; hostName(hostId: string): string; onSelect(place: BotPlace): void }) {
   const t = useTranslate();
-  const name = botDisplayName(row.binding), destination: BotPlace = { kind: 'bot', groupId: row.groupId, viewId: row.viewId };
+  const name = row.name, destination: BotPlace = { kind: 'bot', groupId: row.groupId, viewId: row.viewId };
   const time = row.reply ? replyTime(row.reply.replyAt) : undefined;
   // Like a chat list, an unsent draft shows where the latest reply would; the bot on screen has it in its composer.
   const draft = !current && row.draft ? row.draft.replace(/\s+/g, ' ').trim() : undefined;

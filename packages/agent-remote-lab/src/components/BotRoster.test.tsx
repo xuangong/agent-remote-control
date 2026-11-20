@@ -7,7 +7,7 @@ import { render } from '../test/setup.js';
 import type { BotPlace } from '../workbench-mode.js';
 
 it('renders accessible metadata and fallback Host identity without hidden members or invented results', async () => {
-  const group = botGroup('A'); group.bots!.members = { A1: { label: 'Reviewer', picture: { shape: 'squircle', color: '#123456' } }, A2: { hidden: true } };
+  const group = botGroup('A'); group.bots!.members = { A1: { name: 'A1', label: 'Reviewer', picture: { shape: 'squircle', color: '#123456' } }, A2: { hidden: true } };
   const model = projectBotRoster([group], [{ ...botTarget('Other'), hostId: 'host-a' }, { ...botTarget('Other'), hostId: 'host-b' }], { status: () => 'offline' });
   let selected: BotPlace | undefined;
   const container = await render(<BotRoster model={model} place={{ kind: 'bot', groupId: 'A', viewId: 'A1' }} onSelect={place => { selected = place; }} directoryControls={<button>Refresh</button>} />);
@@ -27,7 +27,7 @@ it('shows a bot like a teammate: name, role and label as tags, its sentence, Ask
   group.window.views[0] = { ...group.window.views[0]!, feature: { kind: 'tpm', id: 'work', metadata: { hostId: 'local' } }, bindingPolicy: 'managed' };
   group.window.views.push({ id: 'ask', binding: { ...botTarget('asked'), title: 'Why the delay?' }, closeWith: 'A1', feature: { kind: 'ask', id: 'ask-1' }, bindingPolicy: 'managed',
     placement: 'float', width: 440, collapsed: false, display: { mode: 'content', lettersVisible: true } });
-  group.bots!.members = { A1: { label: 'Release' } };
+  group.bots!.members = { A1: { name: 'A1', label: 'Release' } };
   const model = projectBotRoster([group], [], { status: binding => binding.nativeSessionId === 'A1' ? 'waiting' : 'idle' });
   let selected: BotPlace | undefined;
   const container = await render(<BotRoster model={model} hostName={id => id === 'local' ? 'Lab server' : id} onSelect={place => { selected = place; }} directoryControls={null} />);
@@ -44,6 +44,19 @@ it('shows a bot like a teammate: name, role and label as tags, its sentence, Ask
   expect(asks.textContent).toBe('Why the delay?');
   await act(async () => asks.querySelector('button')!.click());
   expect(selected).toEqual({ kind: 'bot', groupId: 'A', viewId: 'A1' });
+});
+
+it('calls a bot by its stored name or a generated one, never by its session\'s title', async () => {
+  const group = botGroup('A');
+  group.window.views = group.window.views.map(view => ({ ...view, binding: { ...view.binding!, title: 'Reply with the words LOCAL and OK' } }));
+  group.bots!.members = { A1: { name: 'Pebbles' } };
+  const model = projectBotRoster([group], [], { status: () => 'idle' });
+  const container = await render(<BotRoster model={model} onSelect={() => {}} directoryControls={null} />);
+  const names = [...container.querySelectorAll('.lab-bot-row .lab-bot-name')].map(name => name.textContent);
+  expect(names[0]).toBe('Pebbles');
+  expect(names[1]).toBeTruthy();
+  expect(names).not.toContain('Reply with the words LOCAL and OK');
+  expect(names[1]).toBe(projectBotRoster([group], [], { status: () => 'idle' }).sections[0]!.rows[1]!.name);
 });
 
 it('keeps Other sessions folded with their Refresh controls inside, and names an empty group plainly', async () => {
@@ -92,7 +105,7 @@ it('says a bot has messages waiting to send when nothing more urgent shows', asy
 it('draws each bot\'s avatar from its view id, lets a stored picture win and shows its mood', async () => {
   const group = botGroup('A');
   group.window.views.push({ ...group.window.views[0]!, id: 'A2', binding: botTarget('A2') }, { ...group.window.views[0]!, id: 'A3', binding: botTarget('A3') });
-  group.bots!.members = { A1: { picture: { shape: 'triangle', color: '#22b3c2', gaze: 2 } }, A2: { picture: { shape: 'sideways', color: '#ff6fa8' } }, A3: { asleep: true } };
+  group.bots!.members = { A1: { name: 'A1', picture: { shape: 'triangle', color: '#22b3c2', gaze: 2 } }, A2: { name: 'A2', picture: { shape: 'sideways', color: '#ff6fa8' } }, A3: { name: 'A3', asleep: true } };
   const model = projectBotRoster([group], [], { status: binding => binding.nativeSessionId === 'A1' ? 'waiting' : binding.nativeSessionId === 'A2' ? 'running' : 'idle' });
   const container = await render(<BotRoster model={model} onSelect={() => {}} directoryControls={null} />);
   const avatar = (name: string) => visibleButton(container, name).querySelector<HTMLElement>('.orchard-avatar')!;
@@ -111,7 +124,7 @@ it('draws each bot\'s avatar from its view id, lets a stored picture win and sho
 it("says each assistant's state in one sentence with its avatar's mood, the unread dot and the reply time, in the reader's language", async () => {
   const group = botGroup('A');
   group.window.views.push({ ...group.window.views[0]!, id: 'A3', binding: botTarget('A3') });
-  group.bots!.members = { A3: { asleep: true } };
+  group.bots!.members = { A1: { name: 'A1' }, A2: { name: 'A2' }, A3: { name: 'A3', asleep: true } };
   const replyAt = Date.now() - 60_000;
   const model = (t?: Parameters<typeof projectBotRoster>[2]['t']) => projectBotRoster([group], [], {
     status: binding => binding.nativeSessionId === 'A1' ? 'running' : 'idle', host: () => ({ online: true, name: 'Mac mini' }),

@@ -7,7 +7,6 @@ import type { BotPlace } from '../workbench-mode.js';
 import type { MenuEntry } from '../ui/Menu.js';
 import { Sheet } from '@orchardworks/agent-client-web/primitives';
 import { Button } from '../ui/Button.js';
-import { botDisplayName } from './BotRoster.js';
 import { RemoveBotSheet } from './RemoveBotSheet.js';
 
 /** Where a bot runs, for its details. App knows the Hosts, the providers and the bot's handoff chain. */
@@ -53,7 +52,7 @@ export function useBotActions({ scope, workspace, onSelect, onError }: {
     setNotice(undefined);
     if (!await update(row, { ...row.details, hidden: true })) return;
     onSelect({ kind: 'section', groupId: row.groupId });
-    setNotice({ text: `Hidden in Bot mode: “${botDisplayName(row.binding)}” stays in its Window.`, undo: async () => {
+    setNotice({ text: `Hidden in Bot mode: “${row.name}” stays in its Window.`, undo: async () => {
       setNotice(undefined);
       const current = workspace.readGroup(row.groupId)?.bots?.members[row.viewId] ?? {};
       if (await update(row, without(current, 'hidden'))) onSelect({ kind: 'bot', groupId: row.groupId, viewId: row.viewId });
@@ -64,7 +63,7 @@ export function useBotActions({ scope, workspace, onSelect, onError }: {
     setNotice(undefined);
     if (!await update(row, { ...row.details, asleep: true })) return;
     onSelect({ kind: 'section', groupId: row.groupId });
-    setNotice({ text: `“${botDisplayName(row.binding)}” is asleep. Opening it wakes it.`, undo: async () => {
+    setNotice({ text: `“${row.name}” is asleep. Opening it wakes it.`, undo: async () => {
       setNotice(undefined);
       if (await wake(row)) onSelect({ kind: 'bot', groupId: row.groupId, viewId: row.viewId });
     } });
@@ -99,6 +98,13 @@ export function useBotActions({ scope, workspace, onSelect, onError }: {
     const current = workspace.readGroup(row.groupId)?.bots?.members[row.viewId] ?? {};
     void update(row, { ...current, picture });
   }
+  /** The assistant's own name, for every device; an empty name keeps the one it has. */
+  function rename(row: Pick<BotRow, 'groupId' | 'viewId'>, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const current = workspace.readGroup(row.groupId)?.bots?.members[row.viewId] ?? {};
+    void update(row, { ...current, name: trimmed });
+  }
   function groupMenu(section: BotSection): MenuEntry[] {
     if (!section.hidden.length) return [];
     return [{ label: 'Show hidden bots', icon: 'list', onSelect: () => {
@@ -110,7 +116,7 @@ export function useBotActions({ scope, workspace, onSelect, onError }: {
   }
 
   const close = () => { if (!busy) setOpen(undefined); };
-  const row = open?.row, name = row ? botDisplayName(row.binding) : '';
+  const row = open?.row, name = row?.name ?? '';
   const sheets: ReactNode = !open || !row ? null
     : open.kind === 'label' ? <Sheet open title="Label" detent="content" onClose={close}>
       <form className="lab-bot-sheet-form" onSubmit={event => void saveLabel(event, draft.trim() || undefined)}>
@@ -127,5 +133,5 @@ export function useBotActions({ scope, workspace, onSelect, onError }: {
       onCancel={close} onRemove={() => void remove()} />;
   const noticeLine: ReactNode = notice ? <p className="lab-bot-notice" role="status">{notice.text}
     {notice.undo ? <button type="button" onClick={() => void notice.undo!()}>Undo</button> : null}</p> : null;
-  return { cardActions, setPicture, groupMenu, wake, sheets, notice: noticeLine, clearNotice: () => setNotice(undefined) };
+  return { cardActions, setPicture, rename, groupMenu, wake, sheets, notice: noticeLine, clearNotice: () => setNotice(undefined) };
 }

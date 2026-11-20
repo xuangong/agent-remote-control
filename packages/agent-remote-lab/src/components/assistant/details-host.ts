@@ -1,6 +1,7 @@
 import { createContext } from 'react';
 import type { WindowBotDetails } from '@orchardworks/agent-remote-protocol';
 import type { MenuEntry } from '../../ui/Menu.js';
+import type { CardAction } from './AssistantCard.js';
 
 /** Where an assistant runs, as its place knows it: the Host's name and whether it is online, the agent and the agents before a handoff. */
 export interface AssistantWhere { readonly host: string; readonly online?: boolean; readonly provider: string; readonly earlier: readonly string[] }
@@ -16,10 +17,13 @@ export interface AssistantDetailsHost {
   readonly slot?: HTMLElement | null;
   readonly open: boolean;
   setOpen(open: boolean): void;
-  /** The card's actions, which the assistant's place owns: Label…, Sleep or Wake, Hide, Remove, Pin to a window or Open in Bot mode. */
+  /** The card's actions, which the assistant's place owns: one visible (Pin to a window), the others in its ⋯ menu (Label…, Sleep or Wake, Hide, Remove). */
+  readonly action?: CardAction;
   readonly actions?: readonly MenuEntry[];
   /** Stores a new avatar for the assistant, on every device. */
   readonly setPicture?: (picture: NonNullable<WindowBotDetails['picture']>) => void;
+  /** Stores the assistant's own name, on every device; absent where it cannot be stored (a session in no group). */
+  readonly rename?: (name: string) => void;
   readonly where?: AssistantWhere;
   /** A place in the host's top bar for the conversation's own tools (its search). */
   readonly tools?: HTMLElement | null;

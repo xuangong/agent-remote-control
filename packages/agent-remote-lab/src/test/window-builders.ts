@@ -13,8 +13,8 @@ export function buildWindow(views: readonly WindowView[], selectedViewId: string
   return { schemaVersion: 3, id: 'W', revision: 0, title: 'W', views: [...views], selectedViewId, selectedPrimaryViewId: selectedViewId, ...overrides } as WorkspaceWindow;
 }
 
-/** A group with bot details: `asleep` lists the bots put to sleep. */
+/** A group with bot details, each bot named as its session is titled: `asleep` lists the bots put to sleep. */
 export function buildGroup(window: WorkspaceWindow, options: { asleep?: readonly string[]; bots?: boolean; presentation?: WindowGroup['presentation'] } = {}): WindowGroup {
-  const members = Object.fromEntries(window.views.map(view => [view.id, options.asleep?.includes(view.id) ? { asleep: true } : {}]));
+  const members = Object.fromEntries(window.views.map(view => [view.id, { ...(view.binding ? { name: view.binding.title } : {}), ...(options.asleep?.includes(view.id) ? { asleep: true } : {}) }]));
   return { window, ...(options.bots === false ? {} : { bots: { rank: 0, members } as never }), ...(options.presentation ? { presentation: options.presentation } : {}) } as WindowGroup;
 }

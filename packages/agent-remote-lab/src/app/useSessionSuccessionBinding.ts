@@ -3,11 +3,13 @@ import { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { useWindowSessionRetention } from '../hooks/useWindowSessionRetention.js';
 import { useWindowActions } from '../hooks/useWindowActions.js';
 import { teamViewTarget } from '../team-view-binding.js';
-import type { Team } from '@orchardworks/agent-remote-protocol';
+import type { Team, WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
 import { DraftStore } from '../draft-store.js';
 import { useSessionSuccession } from '../hooks/useSessionSuccession.js';
 import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
+import { accountNames, withAssistantNames } from '../assistant-names.js';
 import { DirectoryError, nativeSessionMissing, SessionDirectoryClient } from '../directory-client.js';
 import { unavailableSessions } from '../unavailable-sessions.js';
 import { sessionKey } from '../session-tree.js';
@@ -89,7 +91,11 @@ export function useSessionSuccessionBinding(scope: Pick<AppInputs & ProviderStat
     for (const id of workspaceController.deletedWindowIds) windowRetention.forgetWindow(id);
   }, [workspaceController.deletedWindowIds, windowRetention]);
 
+  // Every assistant of the account is called by one name on every device; a bot's first edit stores the generated one.
+  const t = useTranslate();
+  const assistantNames = useMemo(() => accountNames(workspaceController.groups, t), [workspaceController.groups, t]);
   const windowWorkspace = { ...workspaceController,
+    operateGroup: (id: string, operation: WindowGroupOperation) => workspaceController.operateGroup(id, withAssistantNames(workspaceController.readGroup(id), operation, assistantNames)),
     ...(initialState ? { window: undefined, authority: undefined, sessionBridge: undefined, unavailable: false, provisional: false } : {}),
   };
 
@@ -100,7 +106,7 @@ export function useSessionSuccessionBinding(scope: Pick<AppInputs & ProviderStat
 
   // One set of Window actions for the sidebar's Windows list and the Window toolbar: one busy state, one notice, shown as a toast.
   const windowActions = useWindowActions(windowWorkspace, baseUrl);
-  return { succession, sharedWindow, windowWorkspace, windowActions };
+  return { succession, sharedWindow, windowWorkspace, windowActions, assistantNames };
 }
 
 export type SessionSuccessionBindingSlice = ReturnType<typeof useSessionSuccessionBinding>;

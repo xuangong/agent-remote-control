@@ -1,4 +1,6 @@
 import { act, useReducer } from 'react';
+import { AssistantNamesContext } from './assistant/names-context.js';
+import { accountNames } from '../assistant-names.js';
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { applyWindowOperation, createWindowView, type WindowGroup, type WindowOperation, type WindowSessionBinding, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
@@ -438,10 +440,13 @@ it('lists the group\'s bots by name, role and place, with Sides beside their sou
     createWindowView('old', binding('f', 'Earlier run', { sessionIntent: 'history' })),
   ];
   const window: WorkspaceWindow = { schemaVersion: 3, id: 'release', title: 'Release', revision: 1, selectedPrimaryViewId: 'main', selectedViewId: 'main', views };
-  const group = { window, bots: { rank: 'm', members: { main: { label: 'Owner' }, sleepy: { asleep: true as const } } } } as unknown as WindowGroup;
+  // The bots are named as their sessions are titled; the list reads the account's names.
+  const group = { window, bots: { rank: 'm', members: { main: { name: 'Release check', label: 'Owner' }, side: { name: 'Edge cases' }, dock: { name: 'Docs writer' }, tpm: { name: 'Delivery' },
+    lead: { name: 'Reviewer' }, sleepy: { name: 'Backups', asleep: true as const } } } } as unknown as WindowGroup;
   const workspace = { window, group, windows: [window], groups: [group], readGroup: () => group, hasActiveWindow: true, unavailable: false, operate: vi.fn() } as unknown as ReturnType<typeof useWindowWorkspace>;
   const status = (session: WindowSessionBinding) => session.nativeSessionId === 'c' ? 'running' as const : session.nativeSessionId === 'e' ? 'waiting' as const : 'idle' as const;
-  const container = await render(<WindowWorkspaces workspace={workspace} placement="sidebar" sessionStatus={status} supportTeam={teamId => teamId === 'support'} />);
+  const container = await render(<AssistantNamesContext.Provider value={accountNames([group])}>
+    <WindowWorkspaces workspace={workspace} placement="sidebar" sessionStatus={status} supportTeam={teamId => teamId === 'support'} /></AssistantNamesContext.Provider>);
   const rows = [...container.querySelectorAll<HTMLElement>('nav[aria-label="Session views"] [data-window-view-row]')];
   const read = (row: HTMLElement) => ({ id: row.dataset.windowViewRow, depth: row.dataset.depth, name: row.querySelector('strong')?.textContent,
     tags: [...row.querySelectorAll('.lab-bot-role, .lab-bot-label')].map(tag => tag.textContent), detail: row.querySelector('small')?.textContent ?? null });

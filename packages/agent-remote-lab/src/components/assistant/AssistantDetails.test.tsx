@@ -33,9 +33,13 @@ async function choose(menu: string, label: string) {
     return;
   }
   await until(() => expect(document.querySelector('.lab-assistant-details .lab-assistant-card-actions')).not.toBeNull());
-  const action = [...document.querySelectorAll<HTMLButtonElement>('.lab-assistant-details .lab-assistant-card-actions button')].find(button => button.textContent === label);
-  if (!action) throw new Error(`No card action ${label}`);
-  await act(async () => action.click());
+  // One action stands on the card; the others are in its ⋯ menu.
+  const shown = [...document.querySelectorAll<HTMLButtonElement>('.lab-assistant-details .lab-assistant-card-actions .lab-assistant-action')].find(button => button.textContent === label);
+  if (shown) { await act(async () => shown.click()); return; }
+  await act(async () => document.querySelector<HTMLButtonElement>('.lab-assistant-details .lab-assistant-card-actions button[aria-label^="More actions for"]')!.click());
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menu"] [role="menuitem"]')].find(entry => entry.textContent === label);
+  if (!item) throw new Error(`No card action ${label}`);
+  await act(async () => item.click());
 }
 const sheet = () => document.querySelector<HTMLDialogElement>('dialog.orchard-sheet[open]');
 async function type(input: HTMLInputElement, value: string) {
@@ -59,13 +63,13 @@ it('labels a bot from its card, shows the label beside its name, and clears it',
     expect(sheet()?.querySelector('h2')?.textContent).toBe('Label');
     await type(sheet()!.querySelector<HTMLInputElement>('input[aria-label="Label"]')!, 'Reviewer');
     await act(async () => visibleButton(sheet()!, 'Save').click());
-    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ label: 'Reviewer' }));
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ name: 'A1', label: 'Reviewer' }));
     expect(sheet()).toBeNull();
     expect(row(app, 'A', 'A1')?.querySelector('.lab-bot-label')?.textContent).toBe('Reviewer');
     await choose('card', 'Label…');
     expect(sheet()!.querySelector<HTMLInputElement>('input[aria-label="Label"]')!.value).toBe('Reviewer');
     await act(async () => visibleButton(sheet()!, 'Remove label').click());
-    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({}));
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ name: 'A1' }));
   } finally { await app.close(); }
 });
 
@@ -74,13 +78,15 @@ it('gives a group formed from sessions its bot details in the same change as the
   try {
     const mutate = vi.mocked(WindowWorkspaceClient.prototype.mutate);
     const before = mutate.mock.calls.length;
+    // The bot has no stored name: its first edit stores the one it is called by.
+    const name = row(app, 'B', 'B1')?.getAttribute('aria-label');
     await choose('card', 'Label…');
     await type(sheet()!.querySelector<HTMLInputElement>('input[aria-label="Label"]')!, 'Lead');
     await act(async () => visibleButton(sheet()!, 'Save').click());
-    await until(() => expect(app.workspace().readGroup('B')?.bots?.members.B1).toEqual({ label: 'Lead' }));
+    await until(() => expect(app.workspace().readGroup('B')?.bots?.members.B1).toEqual({ label: 'Lead', name }));
     const sent = mutate.mock.calls.slice(before).map(([, mutation]) => mutation.operation);
     expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ type: 'batch', operations: [{ type: 'bots.add' }, { type: 'bot.update', viewId: 'B1', details: { label: 'Lead' } }] });
+    expect(sent[0]).toMatchObject({ type: 'batch', operations: [{ type: 'bots.add' }, { type: 'bot.update', viewId: 'B1', details: { label: 'Lead', name } }] });
     const sections = [...app.container.querySelectorAll('nav[aria-label="Assistants"] .lab-bot-section-head h2')].map(heading => heading.textContent);
     expect(sections.slice(0, 2)).toEqual(['A', 'B']);
   } finally { await app.close(); }
@@ -90,19 +96,19 @@ it('hides a bot in Bot mode while it stays a pane of its Window, with Undo, and 
   const app = await open('bot-menu-hide', [botGroup('A')], '/?mode=bot&section=A&bot=A1');
   try {
     await choose('card', 'Hide in Bot mode');
-    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ hidden: true }));
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ name: 'A1', hidden: true }));
     await until(() => expect(row(app, 'A', 'A1')).toBeNull());
     expect(app.workspace().readGroup('A')?.window.views.some(view => view.id === 'A1')).toBe(true);
     expect(new URL(location.href).searchParams.get('bot')).toBeNull();
     expect(app.container.querySelector('.lab-bot-notice')?.textContent).toContain('Hidden in Bot mode');
     await act(async () => visibleButton(app.container, 'Undo').click());
-    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({}));
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ name: 'A1' }));
     await until(() => expect(row(app, 'A', 'A1')).not.toBeNull());
     expect(app.container.querySelector('.lab-bot-notice')).toBeNull();
     await choose('card', 'Hide in Bot mode');
     await until(() => expect(row(app, 'A', 'A1')).toBeNull());
     await choose('Group actions: A', 'Show hidden bots');
-    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({}));
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ name: 'A1' }));
     await until(() => expect(row(app, 'A', 'A1')).not.toBeNull());
   } finally { await app.close(); }
 });
@@ -146,33 +152,33 @@ it('puts a bot to sleep: quiet and dimmed in the roster, with Undo, and opening 
   const app = await open('bot-menu-sleep', [botGroup('A')], '/?mode=bot&section=A&bot=A1');
   try {
     await choose('card', 'Sleep');
-    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ asleep: true }));
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ name: 'A1', asleep: true }));
     const asleep = () => row(app, 'A', 'A1')!;
     expect(asleep().getAttribute('data-asleep')).toBe('true');
     expect(asleep().querySelector('.lab-bot-sentence')?.textContent).toBe('Resting. Wakes when you need it');
     expect(new URL(location.href).searchParams.get('bot')).toBeNull();
     expect(app.container.querySelector('.lab-bot-notice')?.textContent).toContain('asleep');
     await act(async () => visibleButton(app.container, 'Undo').click());
-    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({}));
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ name: 'A1' }));
     await choose('card', 'Sleep');
     await until(() => expect(asleep().getAttribute('data-asleep')).toBe('true'));
     // Opening a sleeping bot wakes it.
     await act(async () => asleep().click());
-    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({}));
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ name: 'A1' }));
     await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
   } finally { await app.close(); }
 });
 
 it('shows a bot that fell asleep while open as asleep, with Wake, and releases its conversation', async () => {
-  const group = botGroup('A'); group.bots!.members.A1 = { asleep: true };
+  const group = botGroup('A'); group.bots!.members.A1 = { name: 'A1', asleep: true };
   const scope = 'http://localhost/bot-asleep-open/'; seedGroup(scope, group);
   history.replaceState(null, '', '/?mode=bot&section=A&bot=A1');
   const app = await mountBotApp(scope, { hosted: true });
   try {
     await until(() => expect(app.container.querySelector('.lab-bot-asleep')).not.toBeNull());
-    expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ asleep: true });
+    expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ name: 'A1', asleep: true });
     await act(async () => visibleButton(app.container.querySelector('.lab-bot-asleep')!, 'Wake').click());
-    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({}));
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ name: 'A1' }));
     await until(() => expect(app.container.querySelector('.lab-bot-asleep')).toBeNull());
   } finally { await app.close(); }
 });
@@ -181,7 +187,7 @@ const reference = (overrides: Partial<AssistantRef> = {}): AssistantRef => ({
   id: 'chief', picture: { shape: 'triangle', color: '#ff8a3d', gaze: 1 }, name: 'Chief', label: 'Reviewer', role: 'Side',
   actions: [{ label: 'Label…', onSelect: () => {} }, { label: 'Sleep', onSelect: () => {} }],
   where: { host: 'Mac mini', online: false, provider: 'Claude Code', earlier: ['Codex'] },
-  sessions: { directory: '/Users/me/notes', sessionId: 'session-7' },
+  sessions: { session: { hostId: 'local', providerId: 'claude', nativeSessionId: 's7', title: 'Release notes' }, directory: '/Users/me/notes', sessionId: 'session-7' },
   process: { mode: 'process', device: 'concise', chooseForAssistant: () => {}, chooseForDevice: () => {} },
   letters: { visible: true, set: () => {} },
   notifications: { enabled: true, available: true, set: () => {} },
@@ -193,19 +199,26 @@ const reference = (overrides: Partial<AssistantRef> = {}): AssistantRef => ({
 it("renders each section from the assistant's state, in order, in the reader's language", async () => {
   const container = await render(<AssistantDetails assistant={reference()} surface="panel" onClose={() => {}} />);
   expect([...container.querySelectorAll('.lab-assistant-section > h3')].map(heading => heading.textContent))
-    .toEqual(['Where it works', 'Process', 'Notifications', 'Model and settings', 'Files']);
+    .toEqual(['Notifications', 'Process', 'Where it works', 'Sessions', 'Model and settings', 'Files']);
   expect(container.querySelector('.lab-assistant-card-name')?.textContent).toBe('Chief');
-  expect(container.querySelector('.lab-assistant-card-tags')?.textContent).toBe('SideReviewer');
-  expect([...container.querySelectorAll('.lab-assistant-card-actions button')].map(button => button.textContent)).toEqual(['Label…', 'Sleep']);
+  // One line of its role; its actions are in the card's ⋯ menu when none stands visible.
+  expect(container.querySelector('.lab-assistant-card-role')?.textContent).toBe('Side · Reviewer');
+  expect(container.querySelector('.lab-assistant-card-actions button[aria-label="More actions for Chief"]')).not.toBeNull();
+  expect(container.querySelector('.lab-assistant-card-actions .lab-assistant-action')).toBeNull();
   const rows = Object.fromEntries([...container.querySelectorAll('.lab-assistant-row')].map(row => [row.firstElementChild?.textContent, row.lastElementChild?.textContent]));
-  expect(rows).toMatchObject({ Agent: 'Claude Codebefore: Codex', Machine: 'Mac minioffline' });
+  expect(rows).toEqual({ Agent: 'Claude Codebefore: Codex', Machine: 'Mac minioffline' });
+  // A session is one compact row; its chevron shows its working directory and ID.
+  const session = container.querySelector('.lab-assistant-chain li')!;
+  expect(session.querySelector('.lab-assistant-session-title')?.textContent).toBe('Release notes');
+  expect(container.querySelector('.lab-assistant-identity')).toBeNull();
+  await act(async () => session.querySelector<HTMLButtonElement>('button[aria-label="More about Release notes"]')!.click());
   expect(container.querySelector('.lab-assistant-identity')?.textContent).toContain('/Users/me/notes');
   expect(container.querySelector('.lab-assistant-identity')?.textContent).toContain('session-7');
   expect(container.querySelector('[aria-label="This assistant"] [aria-pressed="true"]')?.textContent).toBe('Process');
   expect(container.querySelector('[aria-label="All assistants on this device"] [aria-pressed="true"]')?.textContent).toBe('Concise');
   expect(container.querySelector('.lab-assistant-files')?.textContent).toBe('notes.mdedited+3 −1');
   const chinese = await render(<LocaleContext.Provider value="zh"><AssistantDetails assistant={reference({ files: [] })} surface="panel" onClose={() => {}} /></LocaleContext.Provider>);
-  expect([...chinese.querySelectorAll('.lab-assistant-section > h3')].map(heading => heading.textContent)).toEqual(['它在哪里工作', '过程显示', '通知', '模型', '文件']);
+  expect([...chinese.querySelectorAll('.lab-assistant-section > h3')].map(heading => heading.textContent)).toEqual(['通知', '过程显示', '它在哪里工作', '会话', '模型', '文件']);
   expect(chinese.querySelector('.lab-assistant-empty')?.textContent).toBe(translator('zh')('details.noFiles'));
 });
 
@@ -215,7 +228,8 @@ it('lists the chain newest first, marks the current session and offers Return to
   const container = await render(<SessionsList sessions={{ chain: { open: async session => { opened.push(session.nativeSessionId); return true; },
     navigation: { roleKey: 'role', history: true, session: entry('s2', 'Second'), current: entry('s3', 'Third'), predecessor: entry('s1', 'First'), ancestors: [] } } }} />);
   const items = [...container.querySelectorAll('.lab-assistant-chain li')];
-  expect(items.map(item => item.textContent)).toEqual(['Thirdcurrent', 'Second', 'First']);
+  expect(items.map(item => item.querySelector('.lab-assistant-session-title')?.textContent)).toEqual(['Third', 'Second', 'First']);
+  expect(items.map(item => item.querySelector('.lab-assistant-session small')?.textContent)).toEqual(['current', 'earlier', 'earlier']);
   expect(items[1]!.getAttribute('aria-current')).toBe('true');
   const back = [...container.querySelectorAll('a')].find(link => link.textContent === 'Return to current')!;
   await act(async () => back.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
@@ -224,13 +238,13 @@ it('lists the chain newest first, marks the current session and offers Return to
 
 it("chooses the process mode for this assistant, keeping its other details, and this device's default and notifications", async () => {
   vi.stubGlobal('Notification', class { static permission = 'granted'; static requestPermission = async () => 'granted'; });
-  const group = botGroup('A'); group.bots!.members.A1 = { label: 'Reviewer' };
+  const group = botGroup('A'); group.bots!.members.A1 = { name: 'A1', label: 'Reviewer' };
   const app = await open('bot-details-process', [group], '/?mode=bot&section=A&bot=A1');
   try {
     const details = () => app.container.querySelector<HTMLElement>('.lab-assistant-details')!;
     await until(() => expect(details().querySelector('[aria-label="This assistant"]')).not.toBeNull());
     await act(async () => visibleButton(details().querySelector('[aria-label="This assistant"]')!, 'Full').click());
-    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ label: 'Reviewer', process: 'full' }));
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ name: 'A1', label: 'Reviewer', process: 'full' }));
     await act(async () => visibleButton(details().querySelector('[aria-label="All assistants on this device"]')!, 'Process').click());
     expect(localStorage.getItem('agent-remote:process-mode')).toBe('process');
     // Notifications are this device's, shared by every assistant: on by default, the switch turns them off.
@@ -252,5 +266,38 @@ it("changes an assistant's avatar from its card, for every device", async () => 
     await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1?.picture?.shape).toBe('sideways'));
     await act(async () => details().querySelector<HTMLButtonElement>('button[aria-label="Teal"]')!.click());
     await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1?.picture).toMatchObject({ shape: 'sideways', color: '#22b3c2' }));
+  } finally { await app.close(); }
+});
+
+it("renames an assistant from its card: a click edits the name, Enter stores it for every device and Escape keeps it", async () => {
+  const app = await open('bot-details-rename', [botGroup('A')], '/?mode=bot&section=A&bot=A1');
+  try {
+    const details = () => app.container.querySelector<HTMLElement>('.lab-assistant-details')!;
+    await until(() => expect(details().querySelector('button[aria-label="Rename A1"]')).not.toBeNull());
+    await act(async () => details().querySelector<HTMLButtonElement>('button[aria-label="Rename A1"]')!.click());
+    const field = () => details().querySelector<HTMLInputElement>('input[aria-label="Name"]')!;
+    expect(field().value).toBe('A1');
+    await type(field(), 'Pebbles');
+    await act(async () => field().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1?.name).toBe('Pebbles'));
+    await until(() => expect(row(app, 'A', 'A1')?.getAttribute('aria-label')).toBe('Pebbles'));
+    await act(async () => details().querySelector<HTMLButtonElement>('button[aria-label="Rename Pebbles"]')!.click());
+    await type(field(), 'Something else');
+    await act(async () => field().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(details().querySelector('input[aria-label="Name"]')).toBeNull();
+    expect(app.workspace().readGroup('A')?.bots?.members.A1?.name).toBe('Pebbles');
+  } finally { await app.close(); }
+});
+
+it('calls a bot without a name by its generated name, never its title, and stores that name with its first edit', async () => {
+  const group = botGroup('A'); group.bots!.members = {};
+  const app = await open('bot-details-generated', [group], '/?mode=bot&section=A&bot=A1');
+  try {
+    const shown = row(app, 'A', 'A1')?.getAttribute('aria-label');
+    expect(shown).toBeTruthy();
+    expect(shown).not.toBe('A1');
+    expect(app.container.querySelector('.lab-assistant-details .lab-assistant-card-name')?.textContent).toBe(shown);
+    await choose('card', 'Sleep');
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ name: shown, asleep: true }));
   } finally { await app.close(); }
 });

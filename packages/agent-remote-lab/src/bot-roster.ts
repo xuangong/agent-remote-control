@@ -2,6 +2,7 @@ import { botViews, hasBotAppearance, windowSessionIdentity, type WindowBotDetail
 import { assistantStatus, type AssistantStatus, type Translate } from '@orchardworks/agent-client';
 import type { SessionActivityStatus } from './session-activity-status.js';
 import { sessionKey, type SessionEntry } from './session-tree.js';
+import { accountNames, type AccountNames } from './assistant-names.js';
 
 /** A bot's position, shown as a tag beside its name like a job title; ordinary bots have none. */
 export type BotRole = 'Side' | 'Team Leader' | 'Team member' | 'Support' | 'TPM';
@@ -11,6 +12,8 @@ export interface BotAsk { viewId: string; title: string }
 export interface BotSessionRef { hostId: string; providerId: string; nativeSessionId: string }
 export interface BotRow {
   groupId: string; viewId: string; binding: WindowSessionBinding;
+  /** The name the assistant is called by: its stored name or its generated one, never its session's title. */
+  name: string;
   /** The session that drives the bot now: after a handoff, its successor; otherwise the view's own session. */
   session: BotSessionRef;
   details: WindowBotDetails; role?: BotRole; asks: BotAsk[];
@@ -46,6 +49,8 @@ export interface BotRosterOptions {
   host?(hostId: string): { online: boolean; name?: string } | undefined;
   /** The words of the reader's locale for the assistants' sentences; English by default. */
   t?: Translate;
+  /** The names the account's assistants are called by; by default those of `groups`. */
+  names?: AccountNames;
 }
 /** A rank after every group's: groups keep catalog order in Bot mode, but bot details still carry one. */
 export function appendedRank(groups: readonly WindowGroup[]): string {
@@ -79,6 +84,7 @@ export function botRole(view: WindowView, supportTeam?: (teamId: string) => bool
  * session once, bots ordered by pin, rank and place, Asks under their bot. Sessions in no group are Other sessions.
  */
 export function projectBotRoster(groups: readonly WindowGroup[], directory: readonly SessionEntry[], options: BotRosterOptions): BotRosterModel {
+  const names = options.names ?? accountNames(groups, options.t);
   const shownGroups = groups.filter(hasBotAppearance);
   const candidatesOf = new Map(shownGroups.map(group => {
     const members = group.bots?.members ?? {};
@@ -116,7 +122,7 @@ export function projectBotRoster(groups: readonly WindowGroup[], directory: read
       const latest = candidates[0], reply = latest?.reply, draft = options.draft?.(session), waiting = options.waiting?.(session) ?? false;
       const host = options.host?.(session.hostId), activity = activities[index]!;
       const assistant = assistantStatus({ activity, ...(host ? { host } : {}), asleep: !!details.asleep, waitingToSend: waiting, ...(reply ? { replyPreview: reply.preview } : {}) }, options.t);
-      return { groupId: group.window.id, viewId: view.id, binding: view.binding, session, details, activity, assistant,
+      return { groupId: group.window.id, viewId: view.id, binding: view.binding, name: names.view(group.window.id, view.id), session, details, activity, assistant,
         ...(botRole(view, options.supportTeam) ? { role: botRole(view, options.supportTeam)! } : {}),
         asks: asks.filter(ask => ask.closeWith === view.id).map(ask => ({ viewId: ask.id, title: ask.binding?.title ?? 'Ask' })),
         ...(reply ? { reply } : {}), ...(latest && options.unread?.(latest.owner, latest.reply.replyAt) ? { unread: true as const } : {}),

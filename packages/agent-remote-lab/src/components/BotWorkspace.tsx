@@ -7,7 +7,7 @@ import { useVisualViewport } from '../hooks/useVisualViewport.js';
 import { usePhoneLayout } from '../hooks/usePhoneLayout.js';
 import type { BotRosterModel, BotRow } from '../bot-roster.js';
 import type { BotPlace } from '../workbench-mode.js';
-import { BotRoster, botDisplayName, botPlaceKey } from './BotRoster.js';
+import { BotRoster, botPlaceKey } from './BotRoster.js';
 import { useSharedFeed, type SharedFeedsSnapshot } from '../shared-feeds.js';
 import { useBotActions, type BotInfo } from './BotActions.js';
 import { AsleepNotice } from './AsleepNotice.js';
@@ -19,11 +19,11 @@ import { Icon } from '../ui/Icon.js';
 import type { MenuEntry } from '../ui/Menu.js';
 import { botViews, hasBotAppearance, hasWindowAppearance, type BotPicture } from '@orchardworks/agent-remote-protocol';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { assistantName } from '@orchardworks/agent-client';
 import type { BotSection } from '../bot-roster.js';
 import { AssistantTopBar } from './assistant/AssistantTopBar.js';
 import { AssistantDetailsHostContext, type AssistantDetailsHost } from './assistant/details-host.js';
 import { DeviceLinkSlot } from './assistant/DeviceLinkSlot.js';
+import { useAssistantNames } from './assistant/names-context.js';
 import './bot-workspace.css';
 
 export interface BotWorkspaceProps {
@@ -61,6 +61,7 @@ export interface BotWorkspaceProps {
  */
 export function BotWorkspace({ visible, compact, scope, workspace, navigation, selected, roster, projectRoster, directory, describeConversation, mount: Mount = SessionConversationMount, onSearch, hostName = id => id, botInfo, onNewBot, onPinToWindow }: BotWorkspaceProps) {
   const t = useTranslate();
+  const names = useAssistantNames();
   const phone = usePhoneLayout();
   const root = useVisualViewport(), title = useRef<HTMLButtonElement>(null), keyboardOpen = useRef(false), returning = useRef(false);
   const [error, setError] = useState<string>();
@@ -89,9 +90,9 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
   const info = place?.kind === 'bot' ? botInfo?.(place) : undefined;
   const detailsHost: AssistantDetailsHost = {
     surface: phone ? 'sheet' : 'panel', slot: detailsSlot, tools: toolsSlot, open: detailsShown, setOpen: setDetailsOpen,
-    ...(botRow && botSection ? { actions: [...actions.cardActions(botRow, botSection.title),
-      ...(onPinToWindow ? [{ label: t('card.pin'), icon: 'window' as const, onSelect: () => onPinToWindow({ groupId: botRow.groupId, viewId: botRow.viewId }) }] : [])],
-      setPicture: (picture: BotPicture) => actions.setPicture(botRow, picture) } : {}),
+    ...(botRow && botSection ? { actions: actions.cardActions(botRow, botSection.title),
+      ...(onPinToWindow ? { action: { label: t('card.pin'), icon: 'window' as const, onSelect: () => onPinToWindow({ groupId: botRow.groupId, viewId: botRow.viewId }) } } : {}),
+      setPicture: (picture: BotPicture) => actions.setPicture(botRow, picture), rename: (name: string) => actions.rename(botRow, name) } : {}),
     ...(info ? { where: info } : {}),
   };
   // Choosing another bot dismisses a notice about the last one.
@@ -154,9 +155,9 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
       navigation.select(bot ? { kind: 'bot', groupId: id, viewId: bot.id } : { kind: 'section', groupId: id });
     } catch (reason) { if (currentScope.current === requestScope) setError(reason instanceof Error ? reason.message : String(reason)); }
   }
-  // A session that is no bot is called by its agent, never by its title (often its first prompt).
-  const name = place?.kind === 'session' ? assistantName({ key: botPlaceKey(place), providerId: place.session.providerId })
-    : selected.view ? botDisplayName(selected.view.binding) : descriptor?.props.target.title ?? selected.group?.window.title ?? '';
+  // An assistant is called by its name, never by its session's title (often its first prompt).
+  const name = place?.kind === 'session' ? names.session(place.session)
+    : place?.kind === 'bot' ? botRow?.name ?? names.view(place.groupId, place.viewId) : '';
   return <main ref={root} className="lab-bot-workspace" hidden={!visible} {...(!visible ? { inert: '' } : {})} data-workbench-mode="bot" data-compact={compact || undefined} data-phone={phone || undefined}
     data-details={detailsShown && !phone || undefined}
     data-navigation={phone ? motion : undefined}
@@ -234,5 +235,5 @@ const SharedTopBar = forwardRef<HTMLButtonElement, Omit<ComponentProps<typeof As
   const shared = useSharedFeed(snapshot => project && row ? snapshot : undefined);
   const current = useMemo(() => row && project && shared ? projectShared(project, shared).sections.find(section => section.groupId === row.groupId)?.rows.find(item => item.viewId === row.viewId) ?? row : row, [row, project, shared]);
   const id = place.kind === 'bot' ? place.viewId : place.kind === 'session' ? `${place.session.providerId}:${place.session.nativeSessionId}` : place.groupId;
-  return <AssistantTopBar ref={ref} id={id} picture={current?.details.picture} name={current ? botDisplayName(current.binding) : name} status={current?.assistant} {...props} />;
+  return <AssistantTopBar ref={ref} id={id} picture={current?.details.picture} name={current ? current.name : name} status={current?.assistant} {...props} />;
 });

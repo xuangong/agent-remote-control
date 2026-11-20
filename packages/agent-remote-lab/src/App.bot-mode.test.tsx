@@ -19,7 +19,7 @@ it('keeps Window A/A2 and both display settings while Bot B1 shares its exact vi
   const before = structuredClone(app.workspace().window);
   const bDisplay = structuredClone(app.workspace().readGroup('B')!.window.views.map(view => view.display));
   await app.switchMode('bot');
-  await act(async () => app.button('B1').click());
+  await act(async () => app.row('B', 'B1').click());
   await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
   const editor = app.container.querySelector<HTMLElement>('.lab-bot-conversation [role="textbox"]')!;
   await act(async () => { setPromptText(editor, 'B1 draft'); editor.dispatchEvent(new Event('input', { bubbles: true })); });
@@ -31,7 +31,7 @@ it('keeps Window A/A2 and both display settings while Bot B1 shares its exact vi
   await act(async () => app.workspace().open('B'));
   await until(() => expect([...app.container.querySelectorAll<HTMLElement>('.lab-window-mode [role="textbox"]')].some(input => promptText(input) === 'B1 draft')).toBe(true));
   await app.switchMode('bot');
-  expect(app.container.querySelector('[aria-label="Assistants"] [aria-current="true"]')?.getAttribute('aria-label')).toBe('B1');
+  expect(app.container.querySelector('[aria-label="Assistants"] [aria-current="true"]')?.getAttribute('data-bot-place')).toBe(JSON.stringify(['B', 'B1']));
   expect(promptText(app.container.querySelector<HTMLElement>('.lab-bot-conversation [role="textbox"]')!)).toBe('B1 draft');
   expect(app.workspace().readGroup('B')!.window.views.map(view => view.display)).toEqual(bDisplay);
   await app.close();
@@ -116,9 +116,9 @@ it.each([['a stored picture', true], ['no bot details', false]] as const)("draws
     await until(() => expect(foot(app.container.querySelector('[data-view-id="B1"]'))).toBeDefined());
     const windowFace = foot(app.container.querySelector('[data-view-id="B1"]'));
     if (details) expect(windowFace).toMatch(/^triangle /);
-    await app.switchMode('bot'); await act(async () => app.button('B1').click());
+    await app.switchMode('bot'); await act(async () => app.row('B', 'B1').click());
     await until(() => expect(foot(app.container.querySelector('.lab-bot-conversation'))).toBe(windowFace));
-    expect(face(app.button('B1').querySelector<HTMLElement>('.orchard-avatar'))).toBe(windowFace);
+    expect(face(app.row('B', 'B1').querySelector<HTMLElement>('.orchard-avatar'))).toBe(windowFace);
   } finally { await app.close(); }
 });
 
@@ -134,6 +134,8 @@ it.each(['deleted', 'rebound', 'history', 'ask', 'scope'] as const)('does not re
     if (change === 'scope') await act(async () => app.setScope(`${scope}other/`));
     else {
       const group = structuredClone(app.hostedGroups.get('B')!); group.window.revision++;
+      // A group keeps details only for its bots, so a view that stops being one loses its details too.
+      if ((change === 'deleted' || change === 'history' || change === 'ask') && group.bots) delete group.bots.members.B1;
       if (change === 'deleted') group.window.views = group.window.views.filter(view => view.id !== 'B1');
       else if (change === 'history') group.window.views[0]!.binding = { ...group.window.views[0]!.binding!, sessionIntent: 'history' };
       else if (change === 'ask') { group.window.views[0]!.feature = { kind: 'ask', id: 'ask-1' }; group.window.views[0]!.bindingPolicy = 'managed'; }
@@ -534,7 +536,7 @@ it('opens a tile in Bot mode, keeping the Window route, and pins it back with it
     await act(async () => tile.click());
     await until(() => expect(app.workspace().readGroup('B')?.bots).toBeDefined());
     await until(() => expect(app.container.querySelector('[data-workbench-mode="bot"]')?.hasAttribute('hidden')).toBe(false));
-    await until(() => expect(app.container.querySelector('[aria-label="Assistants"] [aria-current="true"]')?.getAttribute('aria-label')).toBe(viewId));
+    await until(() => expect(app.container.querySelector('[aria-label="Assistants"] [aria-current="true"]')?.getAttribute('data-bot-place')).toBe(JSON.stringify(['B', viewId])));
     expect(new URL(location.href).searchParams.get('section')).toBe('B');
     // A draft typed in Bot mode goes with the assistant.
     await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
@@ -553,7 +555,7 @@ it('opens a tile in Bot mode, keeping the Window route, and pins it back with it
     await until(() => expect(app.workspace().readGroup('B')?.window.selectedViewId).toBe(viewId));
     await until(() => expect([...app.container.querySelectorAll<HTMLElement>('.lab-window-mode [role="textbox"]')].some(input => promptText(input) === 'Kept across modes')).toBe(true));
     await app.switchMode('bot');
-    expect(app.container.querySelector('[aria-label="Assistants"] [aria-current="true"]')?.getAttribute('aria-label')).toBe(viewId);
+    expect(app.container.querySelector('[aria-label="Assistants"] [aria-current="true"]')?.getAttribute('data-bot-place')).toBe(JSON.stringify(['B', viewId]));
   } finally { await app.close(); }
 });
 

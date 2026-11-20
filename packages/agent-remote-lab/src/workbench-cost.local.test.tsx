@@ -14,7 +14,7 @@ const log = (line: string) => appendFileSync(output, line + '\n');
 function largeGroup(index: number): WindowGroup {
   const id = `G${index}`;
   const views = Array.from({ length: 10 }, (_, bot) => createWindowView(`${id}v${bot}`, botTarget(`${id}s${bot}`), 'primary'));
-  return { window: { schemaVersion: 3, id, revision: 0, title: id, selectedPrimaryViewId: views[0]!.id, selectedViewId: views[0]!.id, views }, bots: { rank: `r${String(index).padStart(3, '0')}`, members: {} } };
+  return { window: { schemaVersion: 3, id, revision: 0, title: id, selectedPrimaryViewId: views[0]!.id, selectedViewId: views[0]!.id, views }, bots: { rank: `r${String(index).padStart(3, '0')}`, members: Object.fromEntries(views.map(view => [view.id, { name: view.binding!.title }])) } };
 }
 afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
 

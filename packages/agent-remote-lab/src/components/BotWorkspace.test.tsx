@@ -30,10 +30,11 @@ it.each(['deleted', 'hidden', 'ineligible'] as const)('shows the compact roster 
     await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
     const beforeUrl = location.href, editor = app.container.querySelector('.lab-bot-conversation [role="textbox"]')!;
     const group = structuredClone(app.hostedGroups.get('A')!); group.window.revision++;
-    if (change === 'deleted') group.window.views = group.window.views.filter(view => view.id !== 'A1');
+    // A group keeps details only for its bots, so a view that stops being one loses its details too.
+    if (change === 'deleted') { group.window.views = group.window.views.filter(view => view.id !== 'A1'); delete group.bots!.members.A1; }
     else if (change === 'hidden') group.bots!.members.A1 = { hidden: true };
     // A Side or a managed view stays a bot; a history view is no bot.
-    else group.window.views[0]!.binding = { ...group.window.views[0]!.binding!, sessionIntent: 'history' };
+    else { group.window.views[0]!.binding = { ...group.window.views[0]!.binding!, sessionIntent: 'history' }; delete group.bots!.members.A1; }
     app.hostedGroups.set('A', group); await act(async () => app.workspace().refreshGroups());
     await until(() => expect(editor.isConnected).toBe(false));
     expect(app.container.querySelector<HTMLElement>('.lab-bot-roster')!.hidden).toBe(false);
@@ -124,7 +125,7 @@ it('starts a new bot in its own group, named after its session, and opens its co
   } finally { await app.close(); }
 });
 
-it('names a new bot and the group it started once its session is named, and leaves a renamed group alone', async () => {
+it('names the group a new bot started once its session is named, keeps the bot\'s own name, and leaves a renamed group alone', async () => {
   const scope = 'http://localhost/bot-titles/';
   const started = (id: string, title: string): WindowGroup => ({ window: { schemaVersion: 3, id, revision: 0, title, selectedPrimaryViewId: 'main', selectedViewId: 'main',
     views: [createWindowView('main', { ...botTarget(`${id}-session`), title: 'New session' }, 'primary')] }, bots: { rank: id.toLowerCase(), members: {} } });
@@ -133,10 +134,14 @@ it('names a new bot and the group it started once its session is named, and leav
   const app = await mountBotApp(scope, { hosted: true });
   try {
     await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
+    // The bot keeps its name: a session's title names its group and its conversation, never the assistant.
+    const name = () => app.container.querySelector(`[data-bot-place='${JSON.stringify(['G', 'main'])}'] .lab-bot-name`)?.textContent;
+    const before = name();
     await act(async () => app.emitTitle({ hostId: 'local', providerId: 'recorded', nativeSessionId: 'G-session', title: 'Fix the build', revision: 1 }));
     await until(() => expect(app.workspace().readGroup('G')?.window.title).toBe('Fix the build'));
     expect(app.workspace().readGroup('G')?.window.views[0]?.binding?.title).toBe('Fix the build');
-    await until(() => expect(app.container.querySelector(`[data-bot-place='${JSON.stringify(['G', 'main'])}'] .lab-bot-name`)?.textContent).toBe('Fix the build'));
+    expect(before).toBeTruthy();
+    expect(name()).toBe(before);
     await act(async () => app.container.querySelector<HTMLButtonElement>(`[data-bot-place='${JSON.stringify(['R', 'main'])}']`)!.click());
     await act(async () => app.emitTitle({ hostId: 'local', providerId: 'recorded', nativeSessionId: 'R-session', title: 'Ship notes', revision: 1 }));
     await until(() => expect(app.workspace().readGroup('R')?.window.views[0]?.binding?.title).toBe('Ship notes'));

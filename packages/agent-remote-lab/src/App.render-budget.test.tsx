@@ -12,7 +12,7 @@ function largeGroup(index: number): WindowGroup {
   const id = `G${index}`;
   const views = Array.from({ length: BOTS }, (_, bot) => createWindowView(`${id}v${bot}`, botTarget(`${id}s${bot}`), 'primary'));
   return { window: { schemaVersion: 3, id, revision: 0, title: id, selectedPrimaryViewId: views[0]!.id, selectedViewId: views[0]!.id, views },
-    bots: { rank: `r${String(index).padStart(3, '0')}`, members: {} } };
+    bots: { rank: `r${String(index).padStart(3, '0')}`, members: Object.fromEntries(views.map(view => [view.id, { name: view.binding!.title }])) } };
 }
 const session = (nativeSessionId: string) => ({ hostId: 'local', providerId: 'recorded', nativeSessionId });
 

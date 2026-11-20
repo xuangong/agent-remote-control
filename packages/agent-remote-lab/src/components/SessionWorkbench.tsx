@@ -123,12 +123,14 @@ export function SessionWorkbench({ assistant, details, conversationTitle, sessio
   const detailsShown = !!detailsHost?.open && visible && (detailsHost.surface === 'sheet' || !!detailsHost.slot);
   const files = useMemo(() => detailsShown && state ? sessionFiles(state.timeline.entries) : [], [detailsShown, state?.timeline.entries]);
   const reportedSession = state?.agent?.runtimeInfo.sessionId;
+  const lastTurn = detailsShown ? Date.parse(state?.timeline.entries.at(-1)?.timestamp ?? '') || undefined : undefined;
   const assistantRef: AssistantRef | undefined = detailsShown ? {
     id: details?.id ?? displayScope ?? 'assistant', name: details?.name ?? assistant?.name ?? t('conversation.assistant'), ...details,
-    ...(detailsHost?.actions ? { actions: detailsHost.actions } : {}), ...(detailsHost?.where ? { where: detailsHost.where } : {}),
-    ...(detailsHost?.setPicture ? { setPicture: detailsHost.setPicture } : {}),
+    ...(detailsHost?.action ? { action: detailsHost.action } : {}), ...(detailsHost?.actions ? { actions: detailsHost.actions } : {}),
+    ...(detailsHost?.where ? { where: detailsHost.where } : {}), ...(detailsHost?.setPicture ? { setPicture: detailsHost.setPicture } : {}),
+    ...(detailsHost?.rename ? { rename: detailsHost.rename } : {}),
     process, letters: { visible: lettersVisible, set: setLettersVisible },
-    sessions: { ...details?.sessions, ...(state?.agent?.cwd ? { directory: state.agent.cwd } : {}), ...(reportedSession ? { sessionId: reportedSession } : {}),
+    sessions: { ...details?.sessions, ...(lastTurn ? { time: lastTurn } : {}), ...(state?.agent?.cwd ? { directory: state.agent.cwd } : {}), ...(reportedSession ? { sessionId: reportedSession } : {}),
       subagents: reportedSession ? childrenFor?.(reportedSession) ?? [] : [], ...(onOpenChildSession ? { openSubagent: onOpenChildSession } : {}),
       tools: <>{details?.sessions?.tools}{workspaceLink}</> },
     ...(state?.agent && !draftOnly ? { settings: <ModelSettings state={state} sessionState={session} readOnly={readOnly || mutationBlocked}

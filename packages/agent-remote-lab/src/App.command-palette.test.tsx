@@ -28,7 +28,8 @@ const windowGroup = (id: string, title: string): WindowGroup => { const group = 
 /** A Bot section whose first bot has a name of its own. */
 const section = (id: string, title: string, bot: string): WindowGroup => {
   const group = botGroup(id);
-  return { ...group, window: { ...group.window, title, views: [createWindowView(`${id}1`, { ...botTarget(`${id}1`), title: bot }, 'primary'), ...group.window.views.slice(1)] } };
+  return { ...group, window: { ...group.window, title, views: [createWindowView(`${id}1`, { ...botTarget(`${id}1`), title: bot }, 'primary'), ...group.window.views.slice(1)] },
+    bots: { ...group.bots!, members: { ...group.bots!.members, [`${id}1`]: { name: bot } } } };
 };
 const palette = (container: ParentNode) => container.querySelector<HTMLDialogElement>('dialog[aria-label="Search"]')!;
 /** The palette is mounted only while it is open. */

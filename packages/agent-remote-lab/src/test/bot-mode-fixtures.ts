@@ -15,7 +15,8 @@ export const botTarget = (id: string) => ({ hostId: 'local', providerId: 'record
 export function botGroup(id: string, section = true): WindowGroup {
   return { window: { schemaVersion: 3, id, revision: 0, title: id, selectedPrimaryViewId: `${id}2`, selectedViewId: `${id}2`,
     views: [createWindowView(`${id}1`, botTarget(`${id}1`), 'primary'), createWindowView(`${id}2`, botTarget(`${id}2`), 'primary')] },
-    ...(section ? { bots: { rank: id.toLowerCase(), members: {} } } : {}) };
+    // Its bots are named as their sessions are titled, so a test finds a bot by the name it reads.
+    ...(section ? { bots: { rank: id.toLowerCase(), members: { [`${id}1`]: { name: `${id}1` }, [`${id}2`]: { name: `${id}2` } } } } : {}) };
 }
 export function seedGroup(scope: string, group: WindowGroup) {
   localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${group.window.id}`, JSON.stringify(group));
@@ -168,6 +169,8 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
     /** A native title the Host reports for a session, as the Relay pushes it. */
     emitTitle(session: SessionTitleUpdate) { for (const listener of titleListeners) listener(session); },
     button: (label: string) => visibleButton(container, label),
+    /** A bot's row in Bot mode's list, by its place: for a bot whose name the test does not set. */
+    row: (groupId: string, viewId: string) => container.querySelector<HTMLButtonElement>(`nav[aria-label="Assistants"] [data-bot-place='${JSON.stringify([groupId, viewId])}']`)!,
     async switchMode(mode: 'window' | 'bot') {
       const label = mode === 'bot' ? 'Bot mode' : 'Window mode';
       if (!visibleButton(container, label)) await act(async () => visibleButton(container, 'View options').click());

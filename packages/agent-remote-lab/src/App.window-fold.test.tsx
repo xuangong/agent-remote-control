@@ -60,7 +60,7 @@ it("folds a bot's dock into a slim card on close and restores it", async () => {
 
 it("folds a bot's Side on close, lists it in the sidebar, and asks before the sidebar removes a bot", async () => {
   const group = botGroup('A');
-  group.window.views.push({ ...createWindowView('S', botTarget('S'), 'attached'), attachedTo: 'A2' });
+  group.window.views.push({ ...createWindowView('S', botTarget('S'), 'attached'), attachedTo: 'A2' }); group.bots!.members.S = { name: 'S' };
   const scope = 'http://localhost/window-fold-side/'; seedGroup(scope, group); history.replaceState(null, '', '/?window=A');
   const app = await mountBotApp(scope, { hosted: true });
   const collapsed = () => app.workspace().readGroup('A')?.window.views.find(view => view.id === 'S')?.collapsed;

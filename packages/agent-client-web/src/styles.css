@@ -63,11 +63,6 @@
   text-transform: uppercase;
 }
 
-.agent-presence { width: 7px; height: 7px; border-radius: 50%; background: var(--agent-muted); }
-.agent-presence.agent-state-running { background: var(--agent-running); box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent-running) 16%, transparent); }
-.agent-presence.agent-state-idle { background: var(--agent-success); }
-.agent-presence.agent-state-failed { background: var(--agent-danger); }
-
 .agent-load-older {
   width: 100%;
   padding: 7px 12px;

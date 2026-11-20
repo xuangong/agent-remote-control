@@ -16,7 +16,6 @@
   --ui-control-border: light-dark(#7c7c80, #8e8e93);
   --ui-fill: light-dark(rgb(120 120 128 / 0.12), rgb(118 118 128 / 0.24));
   --ui-fill-strong: light-dark(rgb(120 120 128 / 0.2), rgb(118 118 128 / 0.36));
-  --ui-segment-selected: light-dark(#ffffff, #636366); /* The raised segment of a segmented control, lighter than its track */
 
   --ui-accent: #0071e3;
   --ui-accent-text: light-dark(#0066cc, #409cff);
@@ -53,12 +52,10 @@
 
   --ui-radius-control: 6px;
   --ui-radius-pane: 10px;
-  --ui-radius-input: 18px; /* Capsule inputs such as the composer */
   --ui-radius-sheet: 16px;
 
   --ui-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
   --ui-font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  --ui-size-large-title: 26px;
   --ui-size-title: 20px;
   --ui-size-headline: 15px;
   --ui-size-body: 14px;
@@ -66,13 +63,11 @@
   --ui-size-caption: 11px;
 
   --ui-duration-short: 150ms;
-  --ui-duration: 220ms;
   --ui-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --ui-ease-spring: cubic-bezier(0.16, 1, 0.3, 1); /* An ease-out curve without overshoot, for sheets and panels */
 }
 :root[data-theme="light"] { color-scheme: light; }
 :root[data-theme="dark"] { color-scheme: dark; }
 
 @media (prefers-reduced-motion: reduce) {
-  :root { --ui-duration-short: 0ms; --ui-duration: 0ms; }
+  :root { --ui-duration-short: 0ms; }
 }

@@ -69,7 +69,6 @@
   padding: 6px; border: 1px solid var(--obs-border); border-radius: 10px;
   background: var(--obs-surface); box-shadow: 0 8px 24px color-mix(in oklab, var(--ui-shadow-ink) 14%, transparent);
 }
-.lab-session-heading-actions[data-always-collapsed] > .lab-session-heading-actions-panel[hidden] { display: none; }
 .lab-timeline-tools .lab-session-heading-actions[data-always-collapsed] { position: static; }
 @media (pointer: coarse) {
   .lab-session-heading-actions[data-always-collapsed] > .lab-session-heading-actions-trigger { width: 44px; min-height: 44px; }
@@ -94,7 +93,6 @@
   .lab-global-view-slot .lab-view-options-trigger { width: 44px; }
   .lab-global-view-slot .lab-view-options-trigger > span { display: none; }
 }
-
 
 .lab-session-heading > .lab-session-heading-title { gap: 6px; }
 .lab-session-heading-title > .agent-session-attributions-toggle { flex: 0 0 auto; }

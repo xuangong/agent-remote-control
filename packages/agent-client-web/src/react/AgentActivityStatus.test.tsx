@@ -12,7 +12,6 @@ describe('the activity line says the business label of each row, and never a con
     if (row.label === undefined) expect(label.hidden).toBe(true);
     else expect(label.textContent).toBe(row.label);
     expect(container.textContent).not.toMatch(T5_PATTERN);
-    const offline = container.querySelector('.agent-presence')!.classList.contains('agent-state-notice');
-    expect(offline).toBe(row.notice !== undefined);
+    expect(container.querySelector('.agent-activity')!.hasAttribute('data-notice')).toBe(row.notice !== undefined);
   });
 });

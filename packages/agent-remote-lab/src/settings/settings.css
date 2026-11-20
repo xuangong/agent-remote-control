@@ -2,7 +2,6 @@
    At phone width one panel fills the screen above the tab bar. */
 .lab-page { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: var(--orchard-space-l); box-sizing: border-box; min-width: 0; min-height: 0; padding: var(--orchard-space-l); overflow: hidden;
   background: var(--orchard-ground); color: var(--orchard-text); font: var(--orchard-type-body-size) / var(--orchard-type-body-leading) var(--orchard-font-text); }
-.lab-page[hidden] { display: none; }
 .lab-page[data-page="assistants"] { grid-template-columns: minmax(0, 1fr); }
 .lab-page > .orchard-panel.orchard-panel { display: flex; flex-direction: column; overflow: auto; }
 .lab-page :focus-visible { outline: 2px solid var(--orchard-focus); outline-offset: 2px; }

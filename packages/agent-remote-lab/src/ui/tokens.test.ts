@@ -106,7 +106,6 @@ it.each([['light', light], ['dark', dark]] as const)('keeps %s text readable on 
   for (const syntax of syntaxColors) for (const surface of ['--ui-background', '--ui-background-elevated']) {
     expect(contrast(tokens.get(syntax)!, tokens.get(surface)!), `${syntax} on ${surface}`).toBeGreaterThanOrEqual(4.5);
   }
-  expect(contrast(tokens.get('--ui-label')!, tokens.get('--ui-segment-selected')!), 'label on the selected segment').toBeGreaterThanOrEqual(4.5);
   // The Send button and the Session View's --agent-on-signal set the surface color on the action fill, --ui-accent-text.
   expect(contrast(tokens.get('--ui-background')!, tokens.get('--ui-accent-text')!), 'surface ink on the action fill').toBeGreaterThanOrEqual(4.5);
   // app.css mixes --agent-setting-pending-surface from the attention color at 8% over --obs-surface, which is --ui-background.
@@ -137,7 +136,7 @@ it.each([['light', light], ['dark', dark]] as const)('keeps %s state colors read
 
 it('turns motion off when the system asks for reduced motion', () => {
   const reduced = block(reducedAt);
-  expect(Object.fromEntries(reduced)).toMatchObject({ '--ui-duration-short': '0ms', '--ui-duration': '0ms' });
+  expect(Object.fromEntries(reduced)).toMatchObject({ '--ui-duration-short': '0ms' });
 });
 
 const app = readFileSync(new URL('../app.css', import.meta.url), 'utf8');

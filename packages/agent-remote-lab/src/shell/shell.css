@@ -88,7 +88,6 @@
 
 /* The All sessions page: the sidebar panels shown in place of the Window on desktop. */
 .lab-sessions-page { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; background: var(--ui-background); }
-.lab-sessions-page[hidden] { display: none; }
 .lab-sessions-page-body { flex: 1; min-height: 0; overflow: auto; }
 .lab-sessions-page-body > .lab-sidebar-content { max-width: 720px; margin: 0 auto; padding: 16px 20px 32px; }
 
@@ -186,7 +185,7 @@
 @media (pointer: coarse) { .lab-toolbar-launchers .lab-launcher button.lab-session-popover-trigger { min-height: 44px; } }
 .lab-launcher-bar { display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; padding-block: 2px 8px; }
 .lab-launcher-bar:not(:has(.lab-launcher:not([hidden], [data-hidden="true"]))) { display: none; }
-.lab-launcher[hidden], .lab-launcher[data-hidden="true"] { display: none; }
+.lab-launcher[data-hidden="true"] { display: none; }
 .lab-launcher, .lab-launcher .lab-session-popover { position: static; min-width: 0; }
 .lab-launcher button.lab-session-popover-trigger {
   --tracking-edge-color: var(--orchard-separator); justify-content: flex-start; min-height: 44px; padding: 8px 12px;

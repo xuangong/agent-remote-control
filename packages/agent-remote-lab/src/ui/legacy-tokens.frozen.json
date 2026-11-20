@@ -13,7 +13,6 @@
     "--ui-control-border": "#7c7c80",
     "--ui-fill": "rgb(120 120 128 / 0.12)",
     "--ui-fill-strong": "rgb(120 120 128 / 0.2)",
-    "--ui-segment-selected": "#ffffff",
     "--ui-accent": "#0071e3",
     "--ui-accent-text": "#0066cc",
     "--ui-accent-hover": "#0064c8",
@@ -41,20 +40,16 @@
     "--ui-shadow-overlay": "0 12px 40px rgb(0 0 0 / 0.16), 0 0 0 0.5px rgb(0 0 0 / 0.1)",
     "--ui-radius-control": "6px",
     "--ui-radius-pane": "10px",
-    "--ui-radius-input": "18px",
     "--ui-radius-sheet": "16px",
     "--ui-font": "-apple-system, BlinkMacSystemFont, \"SF Pro Text\", \"Segoe UI\", system-ui, sans-serif",
     "--ui-font-mono": "ui-monospace, \"SF Mono\", SFMono-Regular, Menlo, Consolas, \"Liberation Mono\", monospace",
-    "--ui-size-large-title": "26px",
     "--ui-size-title": "20px",
     "--ui-size-headline": "15px",
     "--ui-size-body": "14px",
     "--ui-size-callout": "13px",
     "--ui-size-caption": "11px",
     "--ui-duration-short": "150ms",
-    "--ui-duration": "220ms",
-    "--ui-ease": "cubic-bezier(0.2, 0.8, 0.2, 1)",
-    "--ui-ease-spring": "cubic-bezier(0.16, 1, 0.3, 1)"
+    "--ui-ease": "cubic-bezier(0.2, 0.8, 0.2, 1)"
   },
   "dark": {
     "--ui-background": "#1c1c1e",
@@ -69,7 +64,6 @@
     "--ui-control-border": "#8e8e93",
     "--ui-fill": "rgb(118 118 128 / 0.24)",
     "--ui-fill-strong": "rgb(118 118 128 / 0.36)",
-    "--ui-segment-selected": "#636366",
     "--ui-accent": "#0071e3",
     "--ui-accent-text": "#409cff",
     "--ui-accent-hover": "#0064c8",
@@ -97,19 +91,15 @@
     "--ui-shadow-overlay": "0 12px 40px rgb(0 0 0 / 0.5), 0 0 0 0.5px rgb(255 255 255 / 0.12)",
     "--ui-radius-control": "6px",
     "--ui-radius-pane": "10px",
-    "--ui-radius-input": "18px",
     "--ui-radius-sheet": "16px",
     "--ui-font": "-apple-system, BlinkMacSystemFont, \"SF Pro Text\", \"Segoe UI\", system-ui, sans-serif",
     "--ui-font-mono": "ui-monospace, \"SF Mono\", SFMono-Regular, Menlo, Consolas, \"Liberation Mono\", monospace",
-    "--ui-size-large-title": "26px",
     "--ui-size-title": "20px",
     "--ui-size-headline": "15px",
     "--ui-size-body": "14px",
     "--ui-size-callout": "13px",
     "--ui-size-caption": "11px",
     "--ui-duration-short": "150ms",
-    "--ui-duration": "220ms",
-    "--ui-ease": "cubic-bezier(0.2, 0.8, 0.2, 1)",
-    "--ui-ease-spring": "cubic-bezier(0.16, 1, 0.3, 1)"
+    "--ui-ease": "cubic-bezier(0.2, 0.8, 0.2, 1)"
   }
 }

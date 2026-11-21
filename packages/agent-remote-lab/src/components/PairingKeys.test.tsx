@@ -23,6 +23,9 @@ it('defaults to Host only and requires choosing Gateway token + CLI setup explic
   expect(pair).toHaveBeenLastCalledWith('gateway-setup');
   expect(view.textContent).toContain('Gateway token + CLI setup');
   expect(view.querySelector<HTMLTextAreaElement>('textarea')?.value).toContain('private-secret');
+  // A key that has not expired shows its deadline and can be copied.
+  expect(view.querySelector('[role="status"]')?.textContent).toContain('Pair before');
+  expect(button(view, 'Copy configuration').disabled).toBe(false);
 });
 
 it('does not offer Gateway setup when the server supports only Host pairing', async () => {

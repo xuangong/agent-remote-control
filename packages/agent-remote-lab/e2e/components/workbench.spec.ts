@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from '@playwright/test';
-import { SESSION_CONNECTION_PATTERN } from '../faults/connection-words.mjs';
+import { SESSION_CONNECTION_PATTERN } from '@orchardworks/agent-e2e/faults/connection-words.mjs';
 
 test.use({ launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] } });
 
@@ -33,7 +33,7 @@ test('keeps the composer fixed and accepting drafts through session recovery', a
   expect(await geometry()).toEqual(syncing);
 });
 
-test('starts at the latest content and follows streaming growth and composer resizing', async ({ page }) => {
+test('starts at the latest content and follows streaming growth and composer resizing', async ({ page }, testInfo) => {
   const timeline = page.getByTestId('timeline');
   await expect.poll(() => bottomDistance(timeline)).toBeLessThan(3);
   await timeline.evaluate(element => {
@@ -55,9 +55,12 @@ test('starts at the latest content and follows streaming growth and composer res
   await expect(timeline).toHaveAttribute('data-scroll-writes', '0');
   await input.press('Shift+Enter');
   await expect(input).toHaveValue('first\nsecond\nthird\nfourth\nfifth\n');
-  await input.press('Enter');
-  await expect(input).toHaveValue('');
-  await expect(input).toBeFocused();
+  // On a coarse pointer Enter adds a line (returnKeyAction); only a hardware keyboard on desktop sends.
+  if (!testInfo.project.use.hasTouch) {
+    await input.press('Enter');
+    await expect(input).toHaveValue('');
+    await expect(input).toBeFocused();
+  }
 });
 
 test('protects earlier reading from live updates and resumes following on request', async ({ page }) => {

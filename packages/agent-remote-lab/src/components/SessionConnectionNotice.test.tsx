@@ -12,6 +12,7 @@ it('shows an attach deadline as unconfirmed waiting with optional diagnostic det
   expect(container.querySelector('details')?.open).toBe(false);
   expect(container.querySelector('details')?.textContent).toContain('session_attach_timeout');
   expect(container.querySelector('details')?.textContent).toContain('request-1');
+  expect(container.querySelector('details')?.textContent).toContain('504');
 });
 
 it('keeps confirmed native failures distinct from waiting, including during automatic retry', async () => {

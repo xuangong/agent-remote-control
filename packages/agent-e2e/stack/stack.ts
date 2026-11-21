@@ -21,7 +21,7 @@ import { scriptedProvider, type ScriptedProviderOptions } from './scripted-provi
 
 const WORKBENCH_DIST = resolve(import.meta.dirname, '../../agent-remote-lab/dist');
 
-export interface StackOptions extends Omit<ScriptedProviderOptions, 'succession'> {
+export interface StackOptions extends Omit<ScriptedProviderOptions, 'succession' | 'workspaceRoot'> {
   /** Where the built Workbench is; the default is the checkout's. */
   webDist?: string;
   installationId?: string;
@@ -42,6 +42,11 @@ export interface StackOptions extends Omit<ScriptedProviderOptions, 'succession'
    * the Controller again as the new version.
    */
   controllerUpdate?: { runningVersion: string; release: ControllerRelease };
+  /**
+   * Lets the page browse the stack's `workspace` folder, create a folder in it and start a session there: the Controller's execution policy
+   * allows the folder and the scripted provider offers it as its workspace.
+   */
+  workspaces?: boolean;
   /** Gives the Controller its Team state, so the page can create a Team whose Leader is one of the scripted sessions. */
   teams?: boolean;
 }
@@ -60,7 +65,7 @@ export async function startStack(options: StackOptions = {}) {
   const origin = `http://127.0.0.1:${port}`;
   const workspace = await realpath(await mkdtemp(join(state, 'workspace-')));
   const successor = options.succession ? { workspace, ...(options.succession.beforeCreate ? { beforeCreate: options.succession.beforeCreate } : {}) } : undefined;
-  const provider = scriptedProvider({ ...options, succession: successor });
+  const provider = scriptedProvider({ ...options, succession: successor, ...(options.workspaces ? { workspaceRoot: workspace } : {}) });
   const otherProviders = (options.otherProviders ?? []).map(other => scriptedProvider({ ...other, succession: successor }));
   const webDist = options.webDist ?? WORKBENCH_DIST;
   const update = options.controllerUpdate;
@@ -83,8 +88,8 @@ export async function startStack(options: StackOptions = {}) {
     const identity = runningVersion ? { version: runningVersion, revision: 'a'.repeat(40), platform: process.platform, arch: process.arch, nodeMajor: Number(process.versions.node.split('.')[0]), remoteUpdate: true } : undefined;
     controller = createAgentHost({ ...(options.teams ? { team: { stateDirectory: join(state, 'teams') } } : {}), ...(identity ? { controller: { identity, stateDir: join(state, 'controller'),
       restart: async (version: string) => { updates.restarts.push(version); }, release: async () => update!.release,
-      install: async (release: ControllerRelease) => { updates.installed.push(release.version); } } } : {}), ...(options.succession ? { succession: { controllerId: installationId, stateDirectory: join(state, 'succession'), enrollment: true as const },
-      executionPolicy: { defaultWorkspace: workspace, allowedWorkspaceRoots: [workspace], lockPermissions: false } } : {}), preview: { stateDirectory: join(state, 'controller') }, registrations: [provider.registration, ...otherProviders.map(other => other.registration)], installationId, name: 'E2E Host', uplink: { url: `ws://127.0.0.1:${port}/ws/remote-host`, remoteKey: credential ?? connection.remoteKey, onCredential: async issued => { credential = issued; } } });
+      install: async (release: ControllerRelease) => { updates.installed.push(release.version); } } } : {}), ...(options.succession ? { succession: { controllerId: installationId, stateDirectory: join(state, 'succession'), enrollment: true as const } } : {}),
+      ...(options.succession || options.workspaces ? { executionPolicy: { defaultWorkspace: workspace, allowedWorkspaceRoots: [workspace], lockPermissions: false } } : {}), preview: { stateDirectory: join(state, 'controller') }, registrations: [provider.registration, ...otherProviders.map(other => other.registration)], installationId, name: 'E2E Host', uplink: { url: `ws://127.0.0.1:${port}/ws/remote-host`, remoteKey: credential ?? connection.remoteKey, onCredential: async issued => { credential = issued; } } });
     hostId = (await controller.ready).hostId;
   };
   const stopController = async () => { const running = controller; controller = undefined; await running?.close(); };
@@ -101,7 +106,7 @@ export async function startStack(options: StackOptions = {}) {
   }
 
   return {
-    origin, provider, otherProviders, state,
+    origin, provider, otherProviders, state, workspace,
     /** The address of a scripted session's page; the Controller must be registered. */
     sessionUrl: (nativeSessionId: string, providerId: string = provider.providerId) => origin + controllerPath({ hostId, providerId, nativeSessionId }),
     get hostId() { return hostId; },

@@ -1,10 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
-import { openSessionsPage } from './all-sessions';
+import { openSessionsPage } from '../all-sessions';
 
 /** The Track capsule, floating or (while the desktop sidebar shows) in the sidebar's Shortcuts. `.lab-tracking-floating` is also the class of the floating Window, Team and TPM capsules. */
 const track = (page: Page) => page.locator('.lab-tracking-floating, .lab-sidebar-shortcut-track').filter({ has: page.getByRole('button', { name: 'Tracked sessions', exact: true }) });
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, testInfo) => {
+  // A phone's home is the assistant list and its Sessions are reached through the Orchard tabs; these pages are the desktop shell.
+  test.skip(testInfo.project.name.includes('mobile'), 'The phone shell does not show the desktop sidebar these pages exercise.');
   await page.addInitScript(() => {
     localStorage.setItem('agent-remote:track-view', 'true');
     localStorage.setItem('agent-remote:tpm-view', 'false');
@@ -47,17 +49,18 @@ test('moves the tracking button without opening it and keeps the menu inside the
   const restored = (await button.boundingBox())!;
   expect(Math.abs(restored.x - moved.x)).toBeLessThan(2);
   expect(Math.abs(restored.y - moved.y)).toBeLessThan(2);
+  await button.focus();
+  const before = (await button.boundingBox())!;
+  await button.press('ArrowUp');
+  expect((await button.boundingBox())!.y).toBeLessThan(before.y);
+  await expect(button).toHaveAttribute('aria-expanded', 'false');
+  // A narrow window docks the button; it stays inside the visible area.
   await page.setViewportSize({ width: 280, height: 400 });
   await expect.poll(async () => {
     const box = (await button.boundingBox())!;
     const bottom = await page.evaluate(() => visualViewport ? visualViewport.offsetTop + visualViewport.height : innerHeight);
     return box.y + box.height <= bottom;
   }).toBe(true);
-  await button.focus();
-  const before = (await button.boundingBox())!;
-  await button.press('ArrowUp');
-  expect((await button.boundingBox())!.y).toBeLessThan(before.y);
-  await expect(button).toHaveAttribute('aria-expanded', 'false');
 });
 
 test('shares sidebar and title favorites while retaining only local activity tracking', async ({ page }, testInfo) => {

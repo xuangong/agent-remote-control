@@ -1019,6 +1019,9 @@ it('shows recovery waiting without a failure alert and clears it after a success
     const container = await render(<App transport={labTransport({ connect, fetchSnapshot: async agentId => ({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: { ...replicaState.agent!, id: agentId, providerId: 'codex', runtimeInfo: { providerId: 'codex', sessionId: 'native', status: 'idle' } } }) })} />);
     expect(container.querySelector('.lab-session-notice [role="status"]')?.textContent).toContain('may still be opening');
     expect(container.querySelector('.lab-session-notice [role="alert"]')).toBeNull();
+    // The window shell also raises the notice as a toast, so it is seen when the notice is out of view.
+    expect(container.querySelector('.lab-toast')?.textContent).toContain('Session connection');
+    expect(container.querySelector('.lab-toast')?.textContent).toContain('may still be opening');
     expect(connect).not.toHaveBeenCalled();
     await act(async () => vi.advanceTimersByTimeAsync(5000));
     expect(connect).toHaveBeenCalledWith('restored', expect.any(Object));

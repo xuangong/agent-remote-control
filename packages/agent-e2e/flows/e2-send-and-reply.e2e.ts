@@ -71,3 +71,22 @@ it('E2: a message sent while the Controller is away is queued, then delivered on
   expect(stack.provider.session('welcome')!.sent.filter(text => text === 'Sent while away')).toHaveLength(1);
   await context.close();
 });
+
+// WebKit's offline emulation does not cut an open WebSocket, so the device never loses its connection there.
+it.skipIf(process.env.E2E_BROWSER === 'webkit')('E2: a message typed while the device is offline waits, then is sent once when the device is back', async () => {
+  const { context, page } = await openPage(browser, stack.sessionUrl('welcome'));
+  await waitForEntries(page, 2);
+  // A phone wakes without a network: the page is shown again before its connections notice.
+  await context.setOffline(true);
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+  await send(page, 'Typed offline');
+  await page.waitForFunction(() => [...document.querySelectorAll('.agent-outgoing-message')].some(node => /Typed offline[\s\S]*Sending/.test(node.textContent ?? '')));
+  expect(stack.provider.session('welcome')!.sent).not.toContain('Typed offline');
+  await context.setOffline(false);
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+  await showsText(page, 'Echo: Typed offline');
+  await expect.poll(() => page.locator('.agent-outgoing-message').count()).toBe(0);
+  expect(await userRows(page, 'Typed offline').count()).toBe(1);
+  expect(stack.provider.session('welcome')!.sent.filter(text => text === 'Typed offline')).toHaveLength(1);
+  await context.close();
+});

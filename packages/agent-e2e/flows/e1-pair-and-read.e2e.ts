@@ -1,11 +1,14 @@
 // E1 of the target architecture: pair a Controller with a key the page generated, see its Host online, open a session from the directory
-// and read it (messages, tool calls, reasoning, markdown), and open Trace on the same session.
+// and read it (messages, tool calls, reasoning, markdown), and open Trace on the same session; and start a new session in a folder
+// made from Browse.
+import { stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Browser } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { recording as claudeRecording } from '@orchardworks/agent-provider-claude/recordings';
 import { recordedHistory, startStack, type Stack } from '@orchardworks/agent-e2e/stack';
 import { launchBrowser, openPage, rowTexts } from './browser.js';
-import { chooseProcessMode, openAllSessions, openSettings, showTrace, showsText, timelineEntries, waitForEntries } from './page.js';
+import { chooseProcessMode, openAllSessions, openSettings, send, showSidebar, showTrace, showsText, timelineEntries, waitForEntries } from './page.js';
 
 const markdown = '## Summary\n\n- **bold** item\n- `code` item\n\n```ts\nconst answer = 42;\n```';
 let stack: Stack; let browser: Browser;
@@ -75,4 +78,36 @@ it('E1: reasoning reads in the conversation and Trace lists the same events', as
   await showsText(page, 'Reasoning update');
   await showsText(page, '3 / 3 loaded');
   await context.close();
+});
+
+it('E1: a new session starts in a folder made from Browse and answers its first message', async () => {
+  // Its own stack: an execution policy that allows the folder makes the Controller check the workspace of every session it lists.
+  const folders = await startStack({ providerId: 'claude', displayName: 'Claude Code', workspaces: true });
+  try {
+    const { context, page } = await openPage(browser, folders.origin + '/');
+    const rail = await showSidebar(page);
+    await rail.getByRole('button', { name: 'New', exact: true }).click();
+    await page.getByRole('menu', { name: 'New', exact: true }).getByRole('menuitem', { name: 'New session', exact: true }).click();
+    await page.getByLabel('Connected Host').selectOption(folders.hostId);
+    await page.getByTestId('provider-select').selectOption(JSON.stringify([folders.hostId, 'claude']));
+    await page.getByRole('button', { name: 'Browse…' }).click();
+    const picker = page.getByRole('dialog', { name: 'Choose a workspace folder' });
+    await expect.poll(() => picker.getByLabel('Folder path').inputValue()).toBe(folders.workspace);
+    await picker.getByRole('button', { name: 'New folder', exact: true }).click();
+    await picker.getByLabel('New folder name').fill('Fresh project');
+    await picker.getByRole('button', { name: 'Create folder', exact: true }).click();
+    const folder = join(folders.workspace, 'Fresh project');
+    await expect.poll(() => picker.getByLabel('Folder path').inputValue()).toBe(folder);
+    expect((await stat(folder)).isDirectory()).toBe(true);
+    await picker.getByRole('button', { name: 'Select folder' }).click();
+    await expect.poll(() => page.getByLabel('Working directory', { exact: true }).inputValue()).toBe(folder);
+    await page.getByTestId('session-create').click();
+    await page.getByTestId('prompt-input').waitFor();
+    await expect.poll(() => page.getByTestId('prompt-input').isEnabled()).toBe(true);
+    const started = folders.provider.known().find(id => id.startsWith('claude-new-'))!;
+    expect(folders.provider.startedIn(started)).toBe(folder);
+    await send(page, 'Hello from the new folder');
+    await showsText(page, 'Echo: Hello from the new folder');
+    await context.close();
+  } finally { await folders.close(); }
 });

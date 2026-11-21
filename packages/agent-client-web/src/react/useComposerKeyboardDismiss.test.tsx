@@ -295,6 +295,24 @@ it('preserves assistive Send activation after suppressing a drag click', async (
   expect(send).toHaveBeenCalledWith(draft);
 });
 
+it('lets the next tap activate a control after a drag that the browser followed with no click', async () => {
+  const { container, send } = await composer();
+  const button = container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
+  button.setPointerCapture = vi.fn();
+  await pointer(button, 'pointerdown');
+  await touch(button, 'touchstart');
+  await pointer(button, 'pointermove', 130);
+  await touch(button, 'touchmove', 100, 130);
+  await pointer(button, 'pointerup', 130);
+  await touch(button, 'touchend', 100, 130, 0);
+  // A touch drag ends without a click, so nothing consumes the suppression the drag set.
+  await act(async () => container.querySelector<HTMLElement>('[data-testid="prompt-input"]')!.focus());
+  await pointer(button, 'pointerdown');
+  await pointer(button, 'pointerup');
+  await click(button);
+  expect(send).toHaveBeenCalledWith(draft);
+});
+
 it('leaves the expanded command menu scrollable while its editor stays focused', async () => {
   const { container, editor } = await composer();
   await click(container.querySelector('[aria-label="Open chat commands"]')!);

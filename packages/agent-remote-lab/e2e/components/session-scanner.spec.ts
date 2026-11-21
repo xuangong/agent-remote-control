@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { openSessionsPage } from './all-sessions';
+import { openSessionsPage } from '../all-sessions.js';
 
 /** The Scan button sits in the session directory: on the All sessions page on desktop, in the Sessions panel on compact layouts. */
 async function showScan(page: Page) {
@@ -11,16 +11,14 @@ async function showScan(page: Page) {
 }
 
 async function setup(page: Page) {
-  await page.route('**/v1/stars', route => route.fulfill({ json: { stars: [] } }));
+  await page.route('**/v1/favorites', route => route.fulfill({ json: { revision: 0, folders: [], stars: [] } }));
   await page.route('**/v1/remote/hosts/host/vscode-tunnel', route => route.fulfill({ json: { status: 'stopped', processAlive: false, revision: 0 } }));
   await page.route('**/v1/remote/hosts/host/previews', route => route.fulfill({ json: { revision: 1, registrations: [] } }));
-  await page.goto('/e2e/fixtures/session-stars.html');
-  if ((page.viewportSize()?.width ?? 1280) <= 1180) {
-    await page.getByRole('button', { name: 'View options', exact: true }).click();
-    await page.getByLabel('Header', { exact: true }).check();
-    await page.getByRole('button', { name: 'View options', exact: true }).click();
-  }
-  await page.getByRole('button', { name: 'Share session link' }).click();
+  await page.goto('/e2e/fixtures/session-stars.html?switching&control');
+  // On a compact screen the session actions fold behind a tab at the edge of the conversation.
+  const share = page.getByRole('button', { name: 'Share session link' });
+  if (!await share.isVisible()) await page.getByRole('button', { name: 'Expand session actions', exact: true }).click();
+  await share.click();
 }
 
 async function camera(page: Page, delayed = false) {
@@ -42,7 +40,7 @@ async function ended(page: Page) {
   await expect.poll(() => page.evaluate(() => (window as unknown as { scanStream: MediaStream }).scanStream.getTracks().every(track => track.readyState === 'ended'))).toBe(true);
 }
 
-test('keeps the transfer compact and releases active or late camera access when closing', async ({ page }, info) => {
+test('keeps the share dialog compact', async ({ page }, info) => {
   await setup(page);
   const dialog = page.getByRole('dialog', { name: 'Share session', exact: true });
   await expect(dialog.getByAltText('Session QR code')).toBeVisible();
@@ -53,6 +51,14 @@ test('keeps the transfer compact and releases active or late camera access when 
   await dialog.getByRole('button', { name: 'Close session link' }).click();
   await (await showScan(page)).scrollIntoViewIfNeeded();
   await page.screenshot({ path: info.outputPath('discover-scan.png') });
+});
+
+// The camera tests feed the scanner a canvas stream; WebKit's headless build never starts playing it (the scanner stays on "Starting camera"),
+// so they run on Chromium. The paste-a-link path below runs in both.
+test('releases active or late camera access when closing', async ({ page, browserName }) => {
+  test.skip(browserName === 'webkit', 'WebKit does not play a synthetic canvas stream.');
+  await setup(page);
+  await page.getByRole('button', { name: 'Close session link' }).click();
   await camera(page);
   const scanner = page.getByRole('dialog', { name: 'Scan session', exact: true });
   await expect(scanner.getByText('Point your camera at a session QR code.')).toBeVisible();
@@ -64,7 +70,8 @@ test('keeps the transfer compact and releases active or late camera access when 
   await ended(page);
 });
 
-test('pauses the camera on backgrounding and explains denied permission', async ({ page }) => {
+test('pauses the camera on backgrounding and explains denied permission', async ({ page, browserName }) => {
+  test.skip(browserName === 'webkit', 'WebKit does not play a synthetic canvas stream.');
   await setup(page);
   await page.getByRole('button', { name: 'Close session link' }).click();
   await camera(page);
@@ -98,7 +105,7 @@ test('rejects a foreign QR link without leaving the current session', async ({ p
 });
 
 test('opens the shared scanner from the mobile title without opening the sidebar', async ({ page }, info) => {
-  test.skip(!info.project.name.includes('mobile'), 'The title shortcut is mobile navigation.');
+  test.skip(!info.project.use.isMobile, 'The title shortcut is mobile navigation.');
   await setup(page);
   await page.getByRole('button', { name: 'Close session link' }).click();
   await page.evaluate(() => Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true,

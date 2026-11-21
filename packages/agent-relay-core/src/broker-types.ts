@@ -43,6 +43,8 @@ export type Host = {
   smartReading?: string[];
   /** The Controller publishes session journals on this connection; set when the Relay acknowledges it, never persisted. */
   journal?: JournalConnection;
+  /** The Controller takes the sessions pages show (`journal_shown`) on this journal connection; set on registration, never persisted. */
+  journalShown?: true;
   /** The Controller offered session control and the Relay acknowledged it: the Relay owns the leases of this Host's streams. Set on registration, never persisted. */
   control?: true;
   teamManagement?: true;

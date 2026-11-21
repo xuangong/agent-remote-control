@@ -20,6 +20,7 @@ import type { ControllerIdentity, ControllerRelease, ControllerUpdateStatus } fr
 import { createAttachmentLedger } from './session-core/attachment-ledger.js';
 import { createProviderRegistry } from './session-core/provider-registry.js';
 import { createIdleSessions } from './idle-sessions.js';
+import { createShownSessions } from './session-core/shown-sessions.js';
 import { createHostStatusReader, hostStatusPaths } from './host-status.js';
 import { allowedWorkspace, protectHostDirectory } from './execution-policy.js';
 import { SessionRoles, type SessionRole } from './session-role-succession.js';
@@ -161,7 +162,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       // A Controller with no journal-capable provider does not ask for the grant, and a Relay without it never offers one.
       ...(runtime.journals.capable() ? { journal: {
         available: (writer: { send(json: string): void } | undefined) => { fence.whenCurrent(current, () => runtime.journals.available(writer)); },
-        receive: (message: JournalRelayMessage) => { fence.whenCurrent(current, () => runtime.journals.receive(message)); } } } : {}),
+        receive: (message: JournalRelayMessage) => { fence.whenCurrent(current, () => runtime.journals.receive(message)); },
+        shown: (sessionKeys: readonly string[]) => { fence.whenCurrent(current, () => runtime.sessionsShown(sessionKeys)); } } } : {}),
       sessionStates: runtime.sessionStates,
       providers: describeProviders(), ...(options.providerDiscovery ? { providerChanges: { current: describeProviders, subscribe: options.providerDiscovery.subscribe } } : {}), url: config.url, remoteKey: config.remoteKey,
       onCredential: config.onCredential ? credential => fence.persistCredential(current, config.onCredential!, credential) : undefined,
@@ -341,6 +343,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       .map(async ({ directory }) => (await directory.workspaces()).map(workspace => workspace.path)))).flat()) });
   const pending = new Set<Promise<unknown>>();
   const idle = createIdleSessions({ graceMs: options.idleGraceMs, reconcileMs: options.idleReconcileMs });
+  const shown = createShownSessions({ bindings: () => sessions.all(), show: idle.show });
   const cancelTimeoutMs = positiveTimeout(options.cancelTimeoutMs ?? 5000);
   const shutdownTimeoutMs = positiveTimeout(options.shutdownTimeoutMs ?? 5000);
   const admission = createAdmission();
@@ -495,7 +498,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     return enrollment.control(request, context);
   };
   Object.assign(ctx, {
-    options, admission, relay, sessions, idle, operationCache, hostStatus, cancelTimeoutMs, successionReady, successionService, succession, successionBoundary,
+    options, admission, relay, sessions, idle, shown, operationCache, hostStatus, cancelTimeoutMs, successionReady, successionService, succession, successionBoundary,
     tpm, team, enrollment, sessionRefs, roles, workerSupport, ledger, successionConfig, nativeSuccession,
     providers, journals, terminalRefresh, automationAccess, sessionCatalog, create, controlRequest, genericSuccessionSource,
     nativePrefixExtensions: successionWiring.nativePrefixExtensions,
@@ -504,6 +507,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   } satisfies SessionCoreContext);
   for (const value of providers.all()) successionWiring.bindProvider(value);
   return { relay, sessionStates, journals, sessionCatalog, callSession, callRole, ...(sessionRefs ? { sessionRefs } : {}), ...(outbox ? { outbox } : {}), executionRouting: successionService?.executionRouting, roleRouting: successionService?.roleRouting, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
+    sessionsShown: sessionKeys => shown.update(sessionKeys),
     // An owner-confirmed update closes admission immediately. Shutdown and the launcher bound cleanup time; session state must not indefinitely defer it.
     beginControllerRestart: () => admission.beginDrain(),
     cancelControllerRestart() { admission.cancelDrain(); },

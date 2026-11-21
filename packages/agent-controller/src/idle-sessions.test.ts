@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createIdleSessions } from './idle-sessions.js';
 afterEach(() => vi.useRealTimers());
 
@@ -157,4 +157,59 @@ it('never waits more than 15 minutes between failed checks', async () => {
   expect(gaps(times).at(-1)).toBe(900_000);
   expect(Math.max(...gaps(times))).toBe(900_000);
   expect(gaps(times).slice(8, 11)).toEqual([512_000, 900_000, 900_000]);
+});
+
+describe('a session a page shows', () => {
+  it('is kept past any grace, and waits its whole grace once no page shows it (residency R1, R3)', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] });
+    const release = vi.fn(async () => {});
+    const idle = createIdleSessions({ graceMs: 1000 });
+    idle.watch('a', () => true, release);
+    idle.show('a', true);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(release).not.toHaveBeenCalled();
+    expect(idle.hasDemand('a')).toBe(true);
+    idle.expire('a');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(release).not.toHaveBeenCalled();
+    idle.show('a', false);
+    expect(idle.hasDemand('a')).toBe(false);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(release).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(release).toHaveBeenCalledTimes(1);
+    idle.close();
+  });
+
+  it('stays shown when its watch is replaced by a restoration', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] });
+    const release = vi.fn(async () => {});
+    const idle = createIdleSessions({ graceMs: 1000 });
+    idle.watch('a', () => true, release);
+    idle.show('a', true);
+    idle.watch('a', () => true, release);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(release).not.toHaveBeenCalled();
+    idle.close();
+  });
+});
+
+describe('the release grace of one session', () => {
+  it('replaces the default grace: released at 300 ms, not at 299 ms (residency R3, R4)', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] });
+    const release = vi.fn(async () => {});
+    const idle = createIdleSessions({ graceMs: 1000 });
+    idle.watch('a', () => true, release, undefined, 300);
+    await vi.advanceTimersByTimeAsync(299);
+    expect(release).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(release).toHaveBeenCalledTimes(1);
+    idle.close();
+  });
+
+  it.each([0, -1, 1.5, Number.NaN])('refuses %s with a RangeError', grace => {
+    const idle = createIdleSessions();
+    expect(() => idle.watch('a', () => true, async () => {}, undefined, grace)).toThrow(RangeError);
+    idle.close();
+  });
 });

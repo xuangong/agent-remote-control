@@ -1,5 +1,11 @@
+import { decideResidency } from './session-core/residency.js';
+
 interface Entry {
   users: number;
+  /** A page shows the session (`show`). */
+  shown: boolean;
+  /** Its release grace, or the default one. */
+  graceMs: number;
   idleSince: number;
   safe(): boolean;
   release(): Promise<void>;
@@ -12,7 +18,12 @@ interface Entry {
   reconcile?: (isCurrent: () => boolean) => Promise<boolean>;
 }
 
-/** Host-local leases survive uplink replacement; elapsed grace uses a monotonic clock. */
+/**
+ * Idle sessions: which sessions keep their runtime, and when one that nothing keeps is released. The decision is the residency rule
+ * (`session-core/residency.ts`): a session a page shows or something holds is kept; one that nothing keeps is released after its own
+ * release grace (`watch`), or the default grace. Host-local leases and the shown state survive uplink replacement; elapsed grace uses a
+ * monotonic clock.
+ */
 export function createIdleSessions(options: { graceMs?: number; reconcileMs?: number } = {}) {
   const graceMs = options.graceMs ?? 5 * 60_000;
   if (!Number.isSafeInteger(graceMs) || graceMs < 1) throw new RangeError('Idle grace must be a positive integer.');
@@ -36,14 +47,17 @@ export function createIdleSessions(options: { graceMs?: number; reconcileMs?: nu
     for (const entry of entries.values()) {
       if (entry.dormant || entry.releasing) continue;
       if (entry.checking) { entry.idleSince = now; continue; }
-      let safe = false;
-      try { safe = !entry.users && entry.safe(); } catch { /* Unknown native state must retain the connection. */ }
-      if (!safe) {
+      let releasable = false;
+      if (!entry.shown && !entry.users) {
+        try { releasable = entry.safe(); } catch { /* Unknown native state must retain the connection. */ }
+      }
+      const decision = decideResidency({ shown: entry.shown, held: entry.users > 0, releasable, unkeptMs: now - entry.idleSince, graceMs: entry.graceMs });
+      if (decision === 'keep') {
         entry.idleSince = now;
-        if (!entry.users && entry.reconcile && !reconciling && now >= entry.retryAt) {
+        if (!entry.shown && !entry.users && entry.reconcile && !reconciling && now >= entry.retryAt) {
           entry.checking = true;
           const revision = entry.revision;
-          const isCurrent = () => !closed && connected && !entry.users && entry.revision === revision;
+          const isCurrent = () => !closed && connected && !entry.users && !entry.shown && entry.revision === revision;
           reconciling = Promise.resolve().then(() => isCurrent() ? entry.reconcile!(isCurrent) : false)
             .catch(() => false).then(confirmed => {
               if (!isCurrent()) return;
@@ -54,7 +68,7 @@ export function createIdleSessions(options: { graceMs?: number; reconcileMs?: nu
         }
         continue;
       }
-      if (now - entry.idleSince < graceMs) continue;
+      if (decision === 'wait') continue;
       // Begin closing synchronously so a new lease waits for this exact generation.
       const releasing = entry.release();
       entry.releasing = releasing;
@@ -63,10 +77,12 @@ export function createIdleSessions(options: { graceMs?: number; reconcileMs?: nu
     }
   }
   return {
-    watch(id: string, safe: () => boolean, release: () => Promise<void>, reconcile?: (isCurrent: () => boolean) => Promise<boolean>) {
+    /** Watches a session with its release rule; `releaseGraceMs` replaces the default grace for it. Holders and the shown state carry over. */
+    watch(id: string, safe: () => boolean, release: () => Promise<void>, reconcile?: (isCurrent: () => boolean) => Promise<boolean>, releaseGraceMs = graceMs) {
+      if (!Number.isSafeInteger(releaseGraceMs) || releaseGraceMs < 1) throw new RangeError('Release grace must be a positive integer.');
       const existing = entries.get(id);
       if (existing) reset(existing);
-      const entry: Entry = { users: existing?.users ?? 0, idleSince: 0, safe, release, dormant: false,
+      const entry: Entry = { users: existing?.users ?? 0, shown: existing?.shown ?? false, graceMs: releaseGraceMs, idleSince: 0, safe, release, dormant: false,
         revision: 0, retryAt: 0, failures: 0, reconcile };
       reset(entry);
       entries.set(id, entry);
@@ -85,10 +101,18 @@ export function createIdleSessions(options: { graceMs?: number; reconcileMs?: nu
         if (current) { current.users -= 1; reset(current); }
       };
     },
-    hasDemand(id: string) { return (entries.get(id)?.users ?? 0) > 0; },
+    /** Whether a page shows the session; a change restarts its grace. */
+    show(id: string, shown: boolean) {
+      const entry = entries.get(id);
+      if (!entry || entry.shown === shown) return;
+      entry.shown = shown;
+      reset(entry);
+    },
+    /** Something holds the session, or a page shows it. */
+    hasDemand(id: string) { const entry = entries.get(id); return !!entry && (entry.users > 0 || entry.shown); },
     touch(id: string) { const entry = entries.get(id); if (entry) reset(entry); },
-    /** A session nobody holds ends its idle grace now: the next sweep releases it when it is safe to. */
-    expire(id: string) { const entry = entries.get(id); if (entry && !entry.users) entry.idleSince = Number.NEGATIVE_INFINITY; },
+    /** A session nobody holds and no page shows ends its idle grace now: the next sweep releases it when it is safe to. */
+    expire(id: string) { const entry = entries.get(id); if (entry && !entry.users && !entry.shown) entry.idleSince = Number.NEGATIVE_INFINITY; },
     async wait(id: string) { await entries.get(id)?.releasing; },
     setConnected(value: boolean) {
       if (connected === value) return;

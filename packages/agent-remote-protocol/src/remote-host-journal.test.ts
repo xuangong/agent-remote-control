@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { JOURNAL_FILL_MAX_ITEMS, JOURNAL_MESSAGE_MAX_BYTES, JOURNAL_PUBLISH_MAX_ENTRIES } from './remote-host-journal.js';
+import { JOURNAL_FILL_MAX_ITEMS, JOURNAL_MESSAGE_MAX_BYTES, JOURNAL_PUBLISH_MAX_ENTRIES, JOURNAL_SHOWN_MAX_SESSIONS } from './remote-host-journal.js';
 import { decodeRemoteHostUplinkMessage, encodeRemoteHostUplinkMessage } from './remote-host-uplink.js';
 
 const SESSION = 'codex:thread-1';
@@ -116,5 +116,17 @@ describe('journal uplink envelopes', () => {
   ])('rejects %s', (_name, value) => {
     expect(decodeRemoteHostUplinkMessage(JSON.stringify(value)).status).toBe('rejected');
     expect(encodeRemoteHostUplinkMessage(value as never).status).toBe('rejected');
+  });
+});
+
+describe('the sessions pages show', () => {
+  it('names each shown session once, up to as many as a Relay binds, and may name none', () => {
+    const shown = (sessionKeys: string[]) => message({ type: 'journal_shown', sessionKeys });
+    expect(decodeRemoteHostUplinkMessage(JSON.stringify(shown([SESSION, 'claude:thread-2']))).status).toBe('ok');
+    expect(decodeRemoteHostUplinkMessage(JSON.stringify(shown([]))).status).toBe('ok');
+    expect(decodeRemoteHostUplinkMessage(JSON.stringify(shown(Array.from({ length: JOURNAL_SHOWN_MAX_SESSIONS }, (_, at) => `codex:${at}`)))).status).toBe('ok');
+    expect(decodeRemoteHostUplinkMessage(JSON.stringify(shown(Array.from({ length: JOURNAL_SHOWN_MAX_SESSIONS + 1 }, (_, at) => `codex:${at}`)))).status).toBe('rejected');
+    expect(decodeRemoteHostUplinkMessage(JSON.stringify(shown([SESSION, SESSION]))).status).toBe('rejected');
+    expect(encodeRemoteHostUplinkMessage(shown(['']) as never).status).toBe('rejected');
   });
 });

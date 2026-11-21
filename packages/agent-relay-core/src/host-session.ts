@@ -50,6 +50,8 @@ export interface HostSessionGrants {
   callForSupportRequested?: false | string[];
   statusRequested?: boolean; outboxRequested?: boolean;
   journalRequested?: 0 | typeof JOURNAL_VERSION;
+  /** The Controller takes the sessions pages show (`journalShown=1`), with the journal grant. */
+  shownRequested?: boolean;
   controlRequested?: boolean;
 }
 
@@ -64,6 +66,8 @@ export interface HostSessionPorts {
   journals: HostJournals | undefined;
   /** A Host's journal accepted a publication; the served sessions follow it. */
   journalPublished: (hostId: string, sessionKey: string, result: Parameters<NonNullable<Parameters<typeof createJournalConnection>[0]['published']>>[1]) => void;
+  /** A Host finished registering on a connection; what the Relay tells a new connection follows. */
+  hostReady?(host: Host): void;
   deletion: JournalDeletion;
   previews: ReturnType<typeof createHostPreviews>;
   teams: Pick<TeamBroker, 'hostCall'>;
@@ -75,7 +79,7 @@ export interface HostSessionPorts {
 export type HostSession = ReturnType<typeof createHostSession>;
 
 export function createHostSession(ports: HostSessionPorts) {
-  const { brokerState, options, accountBacked, heartbeat, now, scheduler, ids, journals, journalPublished, deletion, previews, teams, views, expiry, keyHash } = ports;
+  const { brokerState, options, accountBacked, heartbeat, now, scheduler, ids, journals, journalPublished, deletion, previews, teams, views, expiry, keyHash, hostReady } = ports;
   const { receiveSessionStates } = views;
   const setTimeout = scheduler.setTimeout.bind(scheduler);
   const clearTimeout = scheduler.clearTimeout.bind(scheduler);
@@ -123,7 +127,7 @@ export function createHostSession(ports: HostSessionPorts) {
     diagnostic(host, {event:'host_disconnected',reason,closeCode,heartbeatAgeMs,wasClean,pendingRequests:[...host.pending.values()].filter(p=>!p.diagnostic).length,streams:host.streams.size});
     previews.disconnect(host.id); host.tunnelToken = undefined;
     host.socket = undefined; host.ready = false; host.sessionStates = undefined;
-    host.journal?.close(); host.journal = undefined; host.control = undefined;
+    host.journal?.close(); host.journal = undefined; host.journalShown = undefined; host.control = undefined;
     notifySessionStates();
     for (const [requestId, pending] of host.pending) {
       clearTimeout(pending.timer);
@@ -141,7 +145,7 @@ export function createHostSession(ports: HostSessionPorts) {
     host.streams.clear();
   }
   function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, grants: HostSessionGrants) {
-    const { enrollmentRequested, teamRequested = false, resourcesRequested = false, recipientsRequested = false, inboxRequested = false, statesRequested = false, successionRequested = false, callForSupportRequested = false, statusRequested = false, outboxRequested = false, journalRequested = 0, controlRequested = false } = grants;
+    const { enrollmentRequested, teamRequested = false, resourcesRequested = false, recipientsRequested = false, inboxRequested = false, statesRequested = false, successionRequested = false, callForSupportRequested = false, statusRequested = false, outboxRequested = false, journalRequested = 0, shownRequested = false, controlRequested = false } = grants;
     let host: Host | undefined;
     let pendingCredential: {hash: string; value: DeviceCredential} | undefined;
     let issuing: Promise<void> | undefined;
@@ -201,10 +205,12 @@ export function createHostSession(ports: HostSessionPorts) {
       if (retired || host.socket !== socket) return;
       host.ready = true;
       host.control = controlRequested ? true : undefined;
+      host.journalShown = shownRequested && host.journal ? true : undefined;
       if (brokerState.journalDeletions.length > 0) deletion.drain();
       host.hostStatus = statusRequested ? true : undefined;
       if (statesRequested) host.sessionStates ??= { states: new Map() };
       notifySessionStates();
+      try { hostReady?.(host); } catch { /* What follows a registration never fails it. */ }
       if (!heartbeatStarted) {
         heartbeatStarted = true; lastHeartbeatAck = now(); heartbeatTimer = setTimeout(sendHeartbeat, heartbeat.intervalMs);
         diagnostic(host, {event:'host_registered'});

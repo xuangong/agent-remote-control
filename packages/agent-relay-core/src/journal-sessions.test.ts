@@ -303,3 +303,54 @@ describe('a journal that cannot be read', () => {
     expect(f.unserved).toEqual(['host-1/codex:a']);
   });
 });
+
+describe('the sessions pages show', () => {
+  function build() {
+    const changed: string[] = [];
+    const sessions = createJournalSessions({
+      journals: { status: async () => ({ cursor: { epoch: 'epoch-1', seq: 0 }, head: { snapshot: headSnapshot, observedAt: 1 } }), page: async () => undefined, unserve: () => undefined },
+      gate: { readingEnabled: () => true, served: () => true, loadServed: async () => undefined },
+      requestFill: async () => ({}) as never,
+      requestOlder: async () => ({ olderAvailable: false }),
+      scheduler: { setTimeout: () => 0, clearTimeout: () => undefined },
+      shownChanged: hostId => { changed.push(hostId); },
+    });
+    const open = (hostId: string, sessionKey: string, observation?: 'activity') => {
+      const stream = sessions.attach({ hostId, providerId: 'codex', sessionKey, publicAgentId: 'agent', client: socket().client, hostStreams: { open: () => new Promise<HostStream>(() => undefined) }, readNativeOwner: async () => undefined });
+      stream.receive(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate', ...(observation ? { observation } : {}) }));
+      return stream;
+    };
+    return { sessions, changed, open };
+  }
+
+  it('are the sessions of a Host with a stream that negotiated for content, and not one that observes activity', () => {
+    const { sessions, open } = build();
+    open('host-1', 'codex:a');
+    open('host-1', 'codex:b', 'activity');
+    open('host-2', 'codex:c');
+    expect(sessions.shown('host-1')).toEqual(['codex:a']);
+    expect(sessions.shown('host-2')).toEqual(['codex:c']);
+  });
+
+  it('change when the first page starts showing a session and when the last one stops, not in between', () => {
+    const { sessions, changed, open } = build();
+    const first = open('host-1', 'codex:a');
+    const second = open('host-1', 'codex:a');
+    expect(changed).toEqual(['host-1']);
+    first.close();
+    expect(changed).toEqual(['host-1']);
+    expect(sessions.shown('host-1')).toEqual(['codex:a']);
+    second.close();
+    expect(changed).toEqual(['host-1', 'host-1']);
+    expect(sessions.shown('host-1')).toEqual([]);
+    second.close();
+    expect(changed).toHaveLength(2);
+  });
+
+  it('do not change for a stream that closes before it negotiated, or for an activity observer', () => {
+    const { changed, sessions, open } = build();
+    sessions.attach({ hostId: 'host-1', providerId: 'codex', sessionKey: 'codex:a', publicAgentId: 'agent', client: socket().client, hostStreams: { open: () => new Promise<HostStream>(() => undefined) }, readNativeOwner: async () => undefined }).close();
+    open('host-1', 'codex:b', 'activity').close();
+    expect(changed).toEqual([]);
+  });
+});

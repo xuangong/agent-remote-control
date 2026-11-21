@@ -8,7 +8,7 @@ import { PairingPurpose } from './pairing.js';
 import { ControllerIdentity } from './controller-release.js';
 import { HostEnvironment } from './host-environment.js';
 import { HostSessionStates } from './session-states.js';
-import { JournalAck, JournalFill, JournalFillRequest, JournalOlderDone, JournalOlderRequest, JournalOpen, JournalOpened, JournalOpenRefused, JournalPublish, JournalRefused, JournalRequestRefused, JournalUnserve, validJournalMessage } from './remote-host-journal.js';
+import { JournalAck, JournalFill, JournalFillRequest, JournalOlderDone, JournalOlderRequest, JournalOpen, JournalOpened, JournalOpenRefused, JournalPublish, JournalRefused, JournalRequestRefused, JournalShown, JournalUnserve, validJournalMessage } from './remote-host-journal.js';
 
 import type { WireDecodeResult, WireEncodeResult } from './codec.js';
 
@@ -84,6 +84,8 @@ export const RemoteHostUplinkMessage = Type.Union([
   Type.Object({ uplinkVersion: version, type: Type.Literal('journal_refused'), ...JournalRefused.properties }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('journal_fill_request'), ...JournalFillRequest.properties }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('journal_older_request'), ...JournalOlderRequest.properties }, object),
+  // Only to a Controller that asked with journalShown=1, after the Relay acknowledged journal: 1.
+  Type.Object({ uplinkVersion: version, type: Type.Literal('journal_shown'), ...JournalShown.properties }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('heartbeat'), nonce: heartbeatNonce }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('heartbeat_ack'), nonce: heartbeatNonce }, object),
   Type.Object({ ...rpc, type: Type.Literal('rpc_request'), method: Type.Union([Type.Literal('GET'), Type.Literal('POST')]),
@@ -99,11 +101,13 @@ export const RemoteHostUplinkMessage = Type.Union([
 
 export type RemoteHostUplinkMessage = Static<typeof RemoteHostUplinkMessage>;
 export type RemoteHostUplinkBrokerMessage = Extract<RemoteHostUplinkMessage,
-  { type: 'team_response' | 'outbox_response' | 'journal_opened' | 'journal_open_refused' | 'journal_ack' | 'journal_refused' | 'journal_fill_request' | 'journal_older_request' | 'outbox_ready' | 'credential_issued' | 'registered' | 'heartbeat' | 'rpc_request' | 'rpc_cancel' | 'stream_open' | 'stream_message' | 'stream_close' }>;
+  { type: 'team_response' | 'outbox_response' | 'journal_opened' | 'journal_open_refused' | 'journal_ack' | 'journal_refused' | 'journal_fill_request' | 'journal_older_request' | 'journal_shown' | 'outbox_ready' | 'credential_issued' | 'registered' | 'heartbeat' | 'rpc_request' | 'rpc_cancel' | 'stream_open' | 'stream_message' | 'stream_close' }>;
 
 /** The journal messages the Relay sends to a Controller that holds the journal grant. */
 export type JournalRelayMessage = Extract<RemoteHostUplinkMessage,
   { type: 'journal_opened' | 'journal_open_refused' | 'journal_ack' | 'journal_refused' | 'journal_fill_request' | 'journal_older_request' }>;
+/** The sessions pages show, which the Relay sends to a Controller that asked for them. */
+export type JournalShownMessage = Extract<RemoteHostUplinkMessage, { type: 'journal_shown' }>;
 
 export function decodeRemoteHostUplinkMessage(json: string): WireDecodeResult<RemoteHostUplinkMessage> {
   let value: unknown;

@@ -182,6 +182,8 @@ export interface AgentHostRuntime {
   executeOperation(scope: string): SessionWireOperationExecutor;
   acquireSession(agentId: string): Promise<RemoteHostSessionLease | undefined>;
   setRelayConnected(connected: boolean): void;
+  /** The complete set of this Host's sessions that pages show (`journal_shown`), as journal session keys; they stay resident. */
+  sessionsShown(sessionKeys: readonly string[]): void;
   beginControllerRestart(): boolean;
   cancelControllerRestart(): void;
   resolveSession(agentId: string): ReturnType<AgentRemoteRelay['requireAgent']> | undefined;

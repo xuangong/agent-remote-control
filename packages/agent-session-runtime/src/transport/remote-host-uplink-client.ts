@@ -111,11 +111,13 @@ export interface RemoteHostUplinkClientOptions {
   /**
    * Publishes session journals. The client asks the Relay for the grant; `available` is called with a writer once the
    * Relay acknowledged it, with undefined when it did not and again with undefined when the connection ends, and
-   * `receive` with every journal message the Relay sends while the grant holds. The owner validates what it writes.
+   * `receive` with every journal message the Relay sends while the grant holds. The owner validates what it writes. With `shown`, the
+   * client also asks for the sessions pages show (`journalShown=1`), and `shown` is called with each complete set the Relay sends.
    */
   readonly journal?: {
     available(writer: { send(json: string): void } | undefined): void;
     receive(message: JournalRelayMessage): void;
+    shown?(sessionKeys: readonly string[]): void;
   };
 }
 
@@ -205,6 +207,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     if (options.outbox) endpoint.searchParams.set('outbox', '1');
     endpoint.searchParams.set('control', '1');
     if (options.journal) endpoint.searchParams.set('journal', String(JOURNAL_VERSION));
+    if (options.journal?.shown) endpoint.searchParams.set('journalShown', '1');
     if (options.teamManagement) { endpoint.searchParams.set('team', '1'); endpoint.searchParams.set('teamInbox', '1'); endpoint.searchParams.set('teamRecipients', '1'); endpoint.searchParams.set('teamSuccession', '1'); endpoint.searchParams.set('teamResources', '1'); if (options.callForSupport) { endpoint.searchParams.set('callForSupport', '1'); for (const providerId of options.readOnlyProviders ?? []) endpoint.searchParams.append('readOnlyProvider', providerId); } }
     const socket: UplinkSocket = (options.connect ?? connectWebSocket)(endpoint, { authorization: `Bearer ${remoteKey}`, maxPayload: UPLINK_MAX_FRAME_BYTES, handshakeTimeout: registrationTimeout });
     let registered = false;
@@ -398,6 +401,11 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       if (isJournalRelayMessage(decoded.value)) {
         if (!journalWriter) { retire({ reason: 'protocol_error' }); return; }
         options.journal!.receive(decoded.value);
+        return;
+      }
+      if (decoded.value.type === 'journal_shown') {
+        if (!journalWriter || !options.journal?.shown) { retire({ reason: 'protocol_error' }); return; }
+        options.journal.shown(decoded.value.sessionKeys);
         return;
       }
       if (decoded.value.type === 'outbox_response') {

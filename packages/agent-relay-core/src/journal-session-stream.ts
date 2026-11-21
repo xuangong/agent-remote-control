@@ -59,6 +59,8 @@ export interface JournalSessionStreamOptions {
   /** Asks the Controller who holds the session natively, when it refused a message for that; undefined when nobody does or it cannot say. */
   readNativeOwner(): Promise<NativeSessionOwner | undefined>;
   scheduler: BrokerScheduler;
+  /** Told that the stream shows the session's conversation (`true`, at a negotiation for content, not activity) and that it stopped (`false`, at its end). */
+  shown?(shown: boolean): void;
 }
 
 export interface JournalSessionStream {
@@ -123,6 +125,8 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
   const held: Array<{ raw: string; bytes: number; requestId?: string }> = [];
   /** Messages that arrived while negotiation was being answered; they are handled in order once it is done. */
   const queued: Array<{ raw: string; bytes: number }> = [];
+  /** The stream negotiated for the session's content, so a page shows the conversation until the stream ends. */
+  let showing = false;
   let activitySnapshot: AgentSnapshotPayload | undefined;
   let activityCursor: TimelineCursor | undefined;
   let lastActivity: string | undefined;
@@ -165,6 +169,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
   function shutdown(code?: number, reason?: string): void {
     if (isPhase('closed')) return;
     phase = 'closed';
+    if (showing) { showing = false; options.shown?.(false); }
     scheduler.clearTimeout(activityTimer);
     activityTimer = undefined;
     const stream = hostStream;
@@ -421,6 +426,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
       phase = 'negotiating';
       activityOnly = message.observation === 'activity';
       keyed = message.itemKeys === true && !activityOnly;
+      if (!activityOnly) { showing = true; options.shown?.(true); }
       negotiate().catch(readFailure);
       return;
     }

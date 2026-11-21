@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { AgentSession } from '@orchardworks/agent-provider-sdk';
+import type { AgentProviderBehaviour, AgentSession } from '@orchardworks/agent-provider-sdk';
+import { codexBehaviour } from '@orchardworks/agent-provider-codex';
 
 import { createAdmission } from './admission.js';
 import { createAttachment } from './attachment.js';
@@ -12,7 +13,7 @@ type Release = () => Promise<void>;
 type Reconcile = (isCurrent: () => boolean) => Promise<boolean>;
 
 /** A session core context whose ports record what the attachment does to them, in order. */
-function attachmentHarness(options: { sink?: (diagnostic: { event: string; agentId: string; providerId: string }) => void } = {}) {
+function attachmentHarness(options: { sink?: (diagnostic: { event: string; agentId: string; providerId: string }) => void; idleGraceMs?: number; behaviour?: AgentProviderBehaviour } = {}) {
   const log: string[] = [];
   const live = new Map<string, LiveStub>();
   const admission = createAdmission();
@@ -20,7 +21,8 @@ function attachmentHarness(options: { sink?: (diagnostic: { event: string; agent
   const ledger = createAttachmentLedger();
   const retained = new Map<string, number>();
   const released = new Map<string, number>();
-  const watched = new Map<string, { release: Release; reconcile?: Reconcile }>();
+  const watched = new Map<string, { release: Release; reconcile?: Reconcile; graceMs?: number }>();
+  const shownApplied: string[] = [];
   const nativeSession = () => ({ dispose: vi.fn(async () => { log.push('session.dispose'); }) }) as unknown as AgentSession & { dispose: ReturnType<typeof vi.fn> };
   const hooks = {
     open: async (_id: string): Promise<AgentSession> => nativeSession(),
@@ -45,7 +47,7 @@ function attachmentHarness(options: { sink?: (diagnostic: { event: string; agent
   };
   const nativeIdOf = new Map<string, string>();
   const ctx = {
-    options: { onSessionLifecycleDiagnostic: options.sink },
+    options: { onSessionLifecycleDiagnostic: options.sink, ...(options.idleGraceMs === undefined ? {} : { idleGraceMs: options.idleGraceMs }) },
     admission, sessions, ledger, relay,
     idle: {
       retain: (id: string) => {
@@ -56,9 +58,10 @@ function attachmentHarness(options: { sink?: (diagnostic: { event: string; agent
       hasDemand: () => false,
       touch: (id: string) => { log.push(`idle.touch:${id}`); },
       wait: async (id: string) => { log.push(`idle.wait:${id}`); },
-      watch: (id: string, _safe: () => boolean, release: Release, reconcile?: Reconcile) => { watched.set(id, { release, reconcile }); },
+      watch: (id: string, _safe: () => boolean, release: Release, reconcile?: Reconcile, graceMs?: number) => { watched.set(id, { release, reconcile, graceMs }); },
     },
-    providers: { require: () => ({ directory }) },
+    shown: { apply: (binding: { agentId: string }) => { shownApplied.push(binding.agentId); } },
+    providers: { require: () => ({ adapter: { descriptor: { providerId: 'claude', displayName: 'Claude', ...(options.behaviour ? { behaviour: options.behaviour } : {}) } }, directory }) },
     terminalRefresh: { releaseJournal: vi.fn(async (binding: { agentId: string }) => { log.push(`journal.release:${binding.agentId}`); }) },
     journals: { attach: vi.fn(() => true) },
     roles: { extensions: async () => undefined },
@@ -76,7 +79,7 @@ function attachmentHarness(options: { sink?: (diagnostic: { event: string; agent
     nativeIdOf.set(agentId, nativeSessionId);
     return attachment.project('claude', agentId, nativeSessionId, parentNativeSessionId, undefined, false, 'host:takeover', qualifiedResult);
   };
-  return { attachment, project, admission, sessions, relay, directory, hooks, log, live, retained, released, watched, ctx, nativeSession };
+  return { attachment, project, admission, sessions, relay, directory, hooks, log, live, retained, released, watched, shownApplied, ctx, nativeSession };
 }
 
 describe('acquiring a session', () => {
@@ -209,5 +212,23 @@ describe('releasing an idle session', () => {
     const { entry } = await idleRelease(sink);
     await expect(entry.reconcile!(() => true)).resolves.toBe(true);
     expect(sink).toHaveBeenCalledWith({ event: 'session_idle_reconciled', agentId: 'agent-1', providerId: 'claude' });
+  });
+});
+
+describe('watching an attached session', () => {
+  it("gives it the release grace its provider declares, and marks it shown when a page shows it (residency R1, R4)", async () => {
+    const h = attachmentHarness({ behaviour: codexBehaviour('shared') });
+    await h.project('agent-1', 'native-1');
+    expect(h.watched.get('agent-1')?.graceMs).toBe(10_000);
+    expect(h.shownApplied).toEqual(['agent-1']);
+  });
+
+  it('gives it five minutes when its provider declares nothing, and the configured grace whatever the provider declares', async () => {
+    const undeclared = attachmentHarness();
+    await undeclared.project('agent-1', 'native-1');
+    expect(undeclared.watched.get('agent-1')?.graceMs).toBe(300_000);
+    const configured = attachmentHarness({ behaviour: codexBehaviour('shared'), idleGraceMs: 60 });
+    await configured.project('agent-1', 'native-1');
+    expect(configured.watched.get('agent-1')?.graceMs).toBe(60);
   });
 });

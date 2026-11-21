@@ -31,9 +31,9 @@ import { createHostPreviews } from './host-previews.js';
 import type { TunnelSocket } from '@orchardworks/agent-remote-tunnel';
 import { defaultBrokerScheduler, RELAY_SOCKET_OPEN, type BrokerRequestContext, type RelaySocket } from './transport.js';
 import { createHostJournals, type JournalReadRequest } from './host-journals.js';
-import { createJournalSessions } from './journal-sessions.js';
+import { createJournalSessions, journalSessionKey } from './journal-sessions.js';
 import { json, rejectUpgrade, HOST_STREAM_LIMIT } from './http-replies.js';
-import { BrokerError, type Binding, type HostBrokerOptions } from './broker-types.js';
+import { BrokerError, type Binding, type Host, type HostBrokerOptions } from './broker-types.js';
 
 export type { HostBrokerOptions, RemoteHostBrokerState, VisibleHostStates } from './broker-types.js';
 export { USER_STREAM_LIMIT } from './http-replies.js';
@@ -117,17 +117,35 @@ export function createHostBroker(options: HostBrokerOptions) {
     },
     requestFill: async (hostId, sessionKey, itemKeys, read) => requireJournal(hostId).requestFill(sessionKey, itemKeys, read),
     requestOlder: async (hostId, sessionKey, limit, beforeItemKey) => requireJournal(hostId).requestOlder(sessionKey, limit, beforeItemKey),
+    shownChanged: hostId => { const host = brokerState.hosts.get(hostId); if (host) showSessions(host); },
   });
   const deletion = createJournalDeletion({ state: brokerState, journals, scheduler, diagnostics: options.diagnostics, timeoutMs: options.journalDeletionTimeoutMs ?? 30_000 });
   const credentialExpiry = createExpiry({ scheduler, now });
   const hostViews = createHostViews({ brokerState, access, accountBacked, ownerSubject: options.ownerSubject, now });
   const { sessionStates, visibleHosts } = hostViews;
   const hostSession = createHostSession({ brokerState, options, accountBacked, heartbeat, now, scheduler, ids, journals, deletion, previews, teams, views: hostViews, expiry: credentialExpiry, keyHash,
-    journalPublished: (hostId, sessionKey, result) => journalSessions?.published(hostId, sessionKey, result) });
+    journalPublished: (hostId, sessionKey, result) => journalSessions?.published(hostId, sessionKey, result), hostReady: host => showSessions(host) });
   const { register, rpc, send, diagnostic, disconnected, notifySessionStates } = hostSession;
   const sessionBindings = createSessionBindings({ brokerState, access, succession, rpc, ids, now, scheduler, enrollmentEnabled: !!options.successionEnrollment, savedAssociations: options.initialState?.associations,
     ownerSubject: options.ownerSubject, rpcTimeoutMs: options.rpcTimeoutMs });
   const { runtimeAgentId, sessionRead, recoverBinding, waitForCreation, userMutation, sharedCatalog } = sessionBindings;
+  /**
+   * Visibility: tells a Host's Controller the complete set of its sessions that pages show (`journal_shown`), when it registers and
+   * whenever the set changes, and attaches each shown session the Controller does not hold on this connection, so that every session a
+   * page shows is resident and live. Only a Controller that asked for the set is told.
+   */
+  function showSessions(host: Host): void {
+    if (!host.ready || !host.journalShown || !journalSessions) return;
+    const sessionKeys = journalSessions.shown(host.id);
+    try { send(host, { uplinkVersion: 2, type: 'journal_shown', sessionKeys }); }
+    catch { return; }
+    const shown = new Set(sessionKeys);
+    for (const binding of brokerState.bindings.values()) {
+      if (binding.hostId !== host.id || binding.generation === host.generation || !shown.has(journalSessionKey(binding.providerId, binding.nativeSessionId))) continue;
+      // A session the Controller refuses stays read from its journal; the page's own open says why.
+      void recoverBinding(host, binding).catch(() => undefined);
+    }
+  }
   const bridgeLookups = new Map<string, Promise<ControllerRelease>>();
   function readUpgradeBridge(version: string, refresh = false): Promise<ControllerRelease> {
     if (refresh) bridgeLookups.delete(version);

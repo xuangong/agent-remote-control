@@ -4,6 +4,7 @@ import type { AgentRemoteHttpResult, AgentRemoteRelay, OperationCache, RemoteHos
 
 import type { createHostStatusReader } from '../host-status.js';
 import type { createIdleSessions } from '../idle-sessions.js';
+import type { ShownSessions } from './shown-sessions.js';
 import type { SessionSuccessionBoundary } from '../session-succession-boundary.js';
 import type { SessionSuccessionContextStore } from '../session-succession-context.js';
 import type { SessionSuccessionEnrollment } from '../session-succession-enrollment.js';
@@ -36,8 +37,8 @@ export interface SuccessionHandle {
   coordinator: SessionSuccessionCoordinator;
 }
 
-/** The part of the idle sessions the session core uses: it holds, waits on, watches and touches sessions; the host alone expires, connects and closes them. */
-export type IdleLeases = Pick<ReturnType<typeof createIdleSessions>, 'retain' | 'hasDemand' | 'watch' | 'wait' | 'touch'>;
+/** The part of the idle sessions the session core uses: it holds, waits on, watches, shows and touches sessions; the host alone expires, connects and closes them. */
+export type IdleLeases = Pick<ReturnType<typeof createIdleSessions>, 'retain' | 'hasDemand' | 'watch' | 'wait' | 'touch' | 'show'>;
 
 /**
  * What the modules of the session core share. The host runtime builds one context and hands it to each module's factory; a module reads
@@ -54,6 +55,8 @@ export interface SessionCoreContext {
   readonly relay: AgentRemoteRelay;
   readonly sessions: BoundSessions<ReturnType<AgentRemoteRelay['requireAgent']>>;
   readonly idle: IdleLeases;
+  /** The sessions pages show (`shown-sessions.ts`). */
+  readonly shown: ShownSessions;
   readonly operationCache: OperationCache;
   readonly hostStatus: ReturnType<typeof createHostStatusReader>;
   readonly cancelTimeoutMs: number;

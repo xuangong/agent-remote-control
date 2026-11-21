@@ -14,17 +14,19 @@ async function until(check: () => boolean): Promise<void> {
   throw new Error('Timed out.');
 }
 
-async function connect(options: { acknowledge: boolean; journal: boolean }) {
+async function connect(options: { acknowledge: boolean; journal: boolean; shown?: boolean }) {
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await new Promise<void>(resolve => server.once('listening', resolve));
   closeables.push(() => new Promise<void>(resolve => { for (const socket of server.clients) socket.terminate(); server.close(() => resolve()); }));
   let asked: string | null = null;
+  let askedShown: string | null = null;
   let relaySocket: WebSocket | undefined;
   let connections = 0;
   const received: Array<Record<string, unknown>> = [];
   server.on('connection', (socket, request) => {
     connections += 1;
     asked = new URL(request.url!, 'http://relay').searchParams.get('journal');
+    askedShown = new URL(request.url!, 'http://relay').searchParams.get('journalShown');
     relaySocket = socket;
     socket.on('message', data => {
       const message = JSON.parse(data.toString());
@@ -36,12 +38,14 @@ async function connect(options: { acknowledge: boolean; journal: boolean }) {
   closeables.push(() => relay.close());
   const available: Array<{ send(json: string): void } | undefined> = [];
   const messages: JournalRelayMessage[] = [];
+  const shown: string[][] = [];
   const client = createRemoteHostUplinkClient({ relay, installationId: 'machine', name: 'Machine', remoteKey: 'key', providers: [], reconnectBaseDelayMs: 5, reconnectMaxDelayMs: 10,
     url: `ws://127.0.0.1:${(server.address() as { port: number }).port}/ws/remote-host`, resolveSession: () => undefined, control: async () => ({ status: 404, body: '{}' }),
-    ...(options.journal ? { journal: { available: writer => { available.push(writer); }, receive: message => { messages.push(message); } } } : {}) });
+    ...(options.journal ? { journal: { available: writer => { available.push(writer); }, receive: message => { messages.push(message); },
+      ...(options.shown ? { shown: (sessionKeys: readonly string[]) => { shown.push([...sessionKeys]); } } : {}) } } : {}) });
   closeables.push(() => client.close());
   await client.ready;
-  return { client, available, messages, received, connections: () => connections, asked: () => asked, relaySocket: () => relaySocket! };
+  return { client, available, messages, shown, received, connections: () => connections, asked: () => asked, askedShown: () => askedShown, relaySocket: () => relaySocket! };
 }
 
 describe('the journal grant on the Host uplink', () => {
@@ -107,5 +111,24 @@ describe('the journal grant on the Host uplink', () => {
     relaySocket().send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 } }));
     await until(() => available.length >= 3);
     expect(available[1]).toBeUndefined();
+  });
+});
+
+describe('the sessions pages show', () => {
+  it('are asked for only by a journal owner that takes them, and each complete set reaches it', async () => {
+    expect((await connect({ acknowledge: true, journal: true })).askedShown()).toBeNull();
+    const { askedShown, shown, messages, relaySocket } = await connect({ acknowledge: true, journal: true, shown: true });
+    expect(askedShown()).toBe('1');
+    relaySocket().send(JSON.stringify({ uplinkVersion: 2, type: 'journal_shown', sessionKeys: ['codex:thread-1', 'claude:thread-2'] }));
+    relaySocket().send(JSON.stringify({ uplinkVersion: 2, type: 'journal_shown', sessionKeys: [] }));
+    await until(() => shown.length === 2);
+    expect(shown).toEqual([['codex:thread-1', 'claude:thread-2'], []]);
+    expect(messages).toEqual([]);
+  });
+
+  it('end a connection whose Relay sends them unasked, as any message outside the grant does', async () => {
+    const { connections, relaySocket } = await connect({ acknowledge: true, journal: true });
+    relaySocket().send(JSON.stringify({ uplinkVersion: 2, type: 'journal_shown', sessionKeys: ['codex:thread-1'] }));
+    await until(() => connections() === 2);
   });
 });

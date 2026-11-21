@@ -40,7 +40,7 @@ describe('S2 a session a page shows', () => {
     expect(page.liveTexts()).toContain('Reply to FROM-TERMINAL');
   });
 
-  it.fails("stays resident past the idle grace, so another client's turn still reaches the page live (O47)", async () => {
+  it("stays resident past the idle grace, so another client's turn still reaches the page live (O47)", async () => {
     const { cli, page } = await shown();
     await vi.advanceTimersByTimeAsync(6 * MINUTE);
     expect(cli.native('thread-1').clients).toBe(1);
@@ -50,7 +50,7 @@ describe('S2 a session a page shows', () => {
     expect(page.liveTexts()).toContain('Reply to FROM-TERMINAL');
   });
 
-  it.fails('is let go a short grace after no page shows it, so the CLI unloads it within its own unload time of the page closing (O47)', async () => {
+  it('is let go a short grace after no page shows it, so the CLI unloads it within its own unload time of the page closing (O47)', async () => {
     const { cli, page } = await shown();
     page.close();
     await vi.advanceTimersByTimeAsync(daemon.concurrency.unloadAfterLastClientMs! + SHORT_GRACE_MS);

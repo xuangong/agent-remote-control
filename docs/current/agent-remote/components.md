@@ -14,15 +14,15 @@ checked against the code; the test mapping follows test titles and their asserti
 |---|---:|---:|---:|---:|
 | Journal: window decision and quota | 24 | 3 | 3 | 0 |
 | Relay session control | 19 | 4 | 4 | 0 |
-| Relay host-session | 22 | 6 | 6 | 0 |
-| Controller session core | 20 | 8 | 8 | 0 |
+| Relay host-session | 23 | 6 | 6 | 0 |
+| Controller session core | 23 | 8 | 8 | 0 |
 | Controller publisher | 20 | 4 | 4 | 0 |
 | Codex and Claude adapter item identity | 18 | 4 | 3 | 1 |
 | Client replica and send state | 25 | 7 | 7 | 0 |
 | Client session presentation | 18 | 4 | 4 | 0 |
 | Timeline turns, process mode and work line | 21 | 3 | 3 | 0 |
 | Provider behaviour declaration (B1, 2026-11-21) | 6 | 0 | 0 | 0 |
-| **All** | **193** | **43** | **42** | **1** |
+| **All** | **197** | **43** | **42** | **1** |
 
 Every clause now names the tests that prove it. The 43 gaps were closed on 2026-11-21 (section "Gaps closed" below): 42 by a
 unit test, a vector row or a seam test with mock data, each under 300 ms and each failing when the rule it proves is broken (by a
@@ -273,6 +273,7 @@ The header says the module owns one Host's connection: the registration handshak
 - C20. Request answers are matched by request id; an answer on a replaced generation is never resolved, and outbox or Team answers are delivered only on the connection and generation that asked.
 - C21. Every timer of a connection (registration, heartbeat, deadlines, expiry) is cleared on close, error, shutdown and revocation.
 - C22. A connection whose credential expires or is revoked is retired before waiting for its pending heartbeat deadline.
+- C23. Visibility (O47): a Controller that asked with `journalShown=1` on a journal connection is sent `journal_shown`, the complete set of its sessions that pages show, once it registered and at every change, which happens when the first content stream of a session starts and when the last one ends (an activity observer does not count); each shown session it does not hold on that connection is attached again. A Controller that did not ask is sent nothing (`broker.ts` `showSessions`, `journal-sessions.ts` `shown`).
 
 | Clause | Test(s) that prove it |
 |---|---|
@@ -298,6 +299,7 @@ The header says the module owns one Host's connection: the registration handshak
 | C20 | `host-session.test.ts` > "delivers an outbox answer only on the connection and generation that asked", "sends a request, matches its response by id, and refuses the 129th pending request" (unrelated id ignored in "marks a silent Host offline..."); a response on a replaced generation rejected: "closes the older connection of a Host that registers again, and fails what began on it" |
 | C21 | `host-session.test.ts` > "clears the heartbeat timers on %s" (close, error, close all), "closes the browser streams of a Host that disconnects, and clears them and their opening deadlines"; `broker-heartbeat.test.ts` > "clears heartbeat timers on %s", "clears outstanding heartbeats when the device is revoked" |
 | C22 | `host-session.test.ts` > "retires a device whose credential expires before waiting for its pending heartbeat deadline" |
+| C23 | `broker-journal-shown.test.ts` > "tells a Controller that asked which sessions pages show: none at registration, then each change as pages open and close", "does not count a page that only observes activity", "tells a Controller that did not ask nothing, so a Controller from before visibility keeps its connection", "attaches a shown session again on the Controller that replaced the one holding it, so it stays resident"; `journal-sessions.test.ts` > "the sessions pages show" (3 tests); S2 `session-residency.integration.test.ts` |
 
 Gaps: none. Closed 2026-11-21: C11, C17 with C5's routing, C14's other deadlines, C15 and C19 on the `stream_message` path, C10,
 C16, C2, and the inline gaps of C12 (the default) and C18 (the close-code mapping). C10's text was corrected: a disconnect clears the
@@ -323,7 +325,7 @@ Module: `agent-controller/src/session-core/` (`attachment.ts`, `idle-release.ts`
 - C8. An idle session is released only when the Controller is open, the session is certain (no unsettled operation, no unfinished family check), its binding is complete, its directory allows it, its runtime says it can be released idle, and no child bound under it has a runtime or a holder (`mayReleaseIdle`, `hasHeldChild` for one provider only).
 - C9. An uncertain session is reconciled first (directory can reconcile, runtime releasable, no held child); a successful check clears the uncertainty but never settles or replays the unknown operation (`mayReconcileIdle`, `attachment.ts` `watch`).
 - C10. Transcript divergence: a native update counts as another writer's only when it is more than 2000 ms after this process's last write (`DIVERGENCE_TOLERANCE_MS`); a diverged session may be released only when nothing runs for it and its transcript was quiet for 30 s (`DIVERGENCE_QUIET_MS`) (`transcript-divergence.ts`, wired in `stdio-directory.ts` as `divergedAt`, `canReleaseSession`, `checkDivergence`).
-- C11. Idle grace: a session with no lease and a safe state is released after `graceMs` (default 5 minutes, `idle-sessions.ts`); every lease, touch, reconnect or unsafe observation restarts the full grace; the grace is suspended while the uplink is disconnected; a returning lease waits for a started release and never causes a second release; a failed release retries after a new grace.
+- C11. Idle grace: a session no page shows, with no lease and a safe state, is released after its release grace (C22; `graceMs` replaces it when the Controller is configured with one, default 5 minutes, `idle-sessions.ts`); every lease, touch, reconnect, unsafe observation or change of what pages show restarts the full grace; the grace is suspended while the uplink is disconnected; a returning lease waits for a started release and never causes a second release; a failed release retries after a new grace.
 
 ### Limits
 - C12. `graceMs` and `reconcileMs` (default 60 s) must be positive safe integers, else `RangeError` (`idle-sessions.ts`). Reconcile backoff doubles per failure, capped at 10 failures and 15 minutes; one reconcile runs at a time.
@@ -339,6 +341,9 @@ Module: `agent-controller/src/session-core/` (`attachment.ts`, `idle-release.ts`
 ### Guarantees
 - C19. `all` lists bindings in the order made and is a snapshot; `family` is the session, its children and grandchildren of one provider, in bind order; `live` omits bindings with no runtime; `bindingOf` throws `invalid_operation_target` for an unbound runtime.
 - C20. A release goes in the order journal, runtime, directory, and a restored session keeps the same binding; a repeated attach keeps one projection; a stop cancels every live session and reports cancelled, unsupported and failed apart, bounded by the cancel deadline.
+- C21. Residency (`session-core/residency.ts`, O47): a session a page shows is kept whatever else is true of it; one an operation or a Controller stream holds, or that cannot be released now, is kept; one that nothing keeps waits its whole grace from the last moment something kept it and is released at the grace, not before. A shown session counts as demand: the terminal refresh leaves it alone and `expire` does not end its grace.
+- C22. The release grace follows the provider's declared behaviour, never its id: a CLI that keeps a session loaded after its last client (`unloadAfterLastClientMs`) gets the page-return grace, 10 s, so Codex unloads a session within 80 s of the last page closing; otherwise a subscription 15 s, a shared process 60 s, a process of its own 5 minutes (also an adapter that declares nothing).
+- C23. The shown set (`session-core/shown-sessions.ts`) is the complete set the Relay last sent (`journal_shown`); it replaces the one before, marks every bound session, and is applied to a session bound later when it is attached.
 
 | Clause | Test(s) that prove it |
 |---|---|
@@ -362,6 +367,9 @@ Module: `agent-controller/src/session-core/` (`attachment.ts`, `idle-release.ts`
 | C18 | `session-core/control-routes.test.ts` > "is not failed by a diagnostic sink that throws"; "records a started and a completed diagnostic, with the status and a digest of the native session, never the session itself"; `host-journal.test.ts` > lifecycle `session_idle_released` is observed; `session-core/attachment.test.ts` > "releasing an idle session" > "is not changed by a lifecycle diagnostic sink that throws", "confirms a reconciliation although the sink throws" |
 | C19 | `session-core/bound-sessions.test.ts` > "lists bindings in the order they were made, as a snapshot"; "returns a session's family: itself, its children and grandchildren in the order they were bound, of one provider only"; "returns the family of a session that is not bound as the children bound under it"; "pairs a binding with its runtime and leaves out bindings with none"; "finds the binding a runtime belongs to"; "throws the invalid_operation_target error for a runtime that has no binding" |
 | C20 | `host.test.ts` > "releases an idle shared projection after grace and restores the same binding over real uplink streams"; `host-journal.test.ts` (journal published before the idle release; see "idle release" test at line 83); `session-core/control-routes.test.ts` > "cancels every live session and reports cancelled, unsupported and failed apart"; `host.test.ts` > "keeps one projection for repeated attach and rejects child ownership changes"; the order: `session-core/attachment.test.ts` > "releasing an idle session" > "closes the journal, then the runtime, then the directory, and reports the release last", "releases a diverged session in the same order before a send continues from it, then reads it again" |
+| C21 | `residency.test.ts` > the `RESIDENCY_VECTORS` rows (R1 to R3, at the grace and a millisecond either side); `idle-sessions.test.ts` > "a session a page shows" > "is kept past any grace, and waits its whole grace once no page shows it (residency R1, R3)", "stays shown when its watch is replaced by a restoration"; S2 `session-residency.integration.test.ts` > "stays resident past the idle grace, so another client's turn still reaches the page live (O47)" |
+| C22 | `residency.test.ts` > the `RELEASE_GRACE_VECTORS` rows, "follows what each adapter declares: Codex through its daemon 10 s, Claude Code and an undeclared adapter five minutes (R4)", "lets Codex unload a session within 80 s of the last page closing: the grace and Codex's own 70 s (R4)"; `idle-sessions.test.ts` > "the release grace of one session" (300 ms and 299 ms, and the `RangeError`s); `session-core/attachment.test.ts` > "watching an attached session" (2 tests); S2 `session-residency.integration.test.ts` > "is let go a short grace after no page shows it, so the CLI unloads it within its own unload time of the page closing (O47)" |
+| C23 | `session-core/shown-sessions.test.ts` (4 tests); `agent-session-runtime/src/transport/remote-host-uplink-journal.test.ts` > "the sessions pages show" (2 tests) |
 
 Gaps: none. Closed 2026-11-21: C5, C10's wiring, C11's default, C12, C13's bound of 512, C17, C18 and C20, by unit tests on a stub
 session-core context (`session-core/attachment.test.ts`), the managed stdio directory with a stub provider state
@@ -763,7 +771,7 @@ Each test fails today for the reason its open item names; the change that closes
 
 | Open item | Test | What fails today |
 |---|---|---|
-| O47 | `agent-remote-seams/tests/S2/session-residency.integration.test.ts` > "stays resident past the idle grace, so another client's turn still reaches the page live (O47)", "is let go a short grace after no page shows it, so the CLI unloads it within its own unload time of the page closing (O47)" | the Controller lets the shown session go after 5 minutes, and holds an unshown one for 5 minutes |
+| O47 (closed, now plain tests) | `agent-remote-seams/tests/S2/session-residency.integration.test.ts` > "stays resident past the idle grace, so another client's turn still reaches the page live (O47)", "is let go a short grace after no page shows it, so the CLI unloads it within its own unload time of the page closing (O47)" | before the change: the Controller let the shown session go after 5 minutes, and held an unshown one for 5 minutes |
 | O48 | `agent-remote-seams/tests/S2/writer-elsewhere.integration.test.ts` > "stays readable from its journal, says the CLI's reason, offers a retry and no take-over, and goes live again after it (O48)" | the page's open is refused (409 `session_in_use`) |
 | O49 | `agent-controller/src/transcript-fork.test.ts` > "shows the terminal's branch, which native history shows, when both turns end within the tolerance (O49)" | the 2,000 ms rule misses the fork, so the Controller keeps the page's branch |
 | Gap 4 (O53) | `agent-controller/src/resume-deadline.test.ts` > "is given up at the declared deadline with a typed timeout, and frees the binding for the next open (gap 4)" | nothing answers the hung resume, and the next open waits behind it |

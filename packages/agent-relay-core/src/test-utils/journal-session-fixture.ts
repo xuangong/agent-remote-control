@@ -116,8 +116,8 @@ export async function startRelay(options: RelayOptions = {}) {
   closers.push(() => broker.close());
 
   /** The Host's Controller, connected with `journal=1` unless `journal` is false. It answers the attach of the session and the streams the Relay opens. */
-  async function connectController(behavior: { /** False: a Controller from before session control moved to the Relay, which does not offer it. */ control?: false; journal?: boolean; answerStreams?: boolean; attach?: { status: number; body: unknown }; holdAttach?: boolean; strictNegotiate?: boolean } = {}) {
-    const prepared = await broker.prepareUpgrade(new Request(`https://relay.example/ws/remote-host${`${behavior.journal === false ? '?' : '?journal=1&'}${behavior.control === false ? 'legacy=1' : 'control=1'}`}`, { headers: { authorization: 'Bearer arc_fixture' } }));
+  async function connectController(behavior: { /** False: a Controller from before session control moved to the Relay, which does not offer it. */ control?: false; journal?: boolean; /** The Controller asks for the sessions pages show. */ shown?: true; answerStreams?: boolean; attach?: { status: number; body: unknown }; holdAttach?: boolean; strictNegotiate?: boolean } = {}) {
+    const prepared = await broker.prepareUpgrade(new Request(`https://relay.example/ws/remote-host${`${behavior.journal === false ? '?' : '?journal=1&'}${behavior.shown ? 'journalShown=1&' : ''}${behavior.control === false ? 'legacy=1' : 'control=1'}`}`, { headers: { authorization: 'Bearer arc_fixture' } }));
     if (!prepared || prepared instanceof Response) throw new Error('Host upgrade rejected');
     const pair = socketPair(closers);
     const inbox = collect(pair.native);

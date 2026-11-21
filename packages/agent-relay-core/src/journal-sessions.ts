@@ -30,6 +30,8 @@ export interface JournalSessionsOptions {
   /** Asks the Host's Controller to read older history and publish it; rejects when it is offline or cannot. */
   requestOlder(hostId: string, sessionKey: string, limit: number, beforeItemKey: string): Promise<{ olderAvailable: boolean }>;
   scheduler: BrokerScheduler;
+  /** Told when a session of the Host starts or stops being shown by any page (`shown`). */
+  shownChanged?(hostId: string): void;
 }
 
 export interface JournalSessionAttachment {
@@ -56,6 +58,8 @@ export interface JournalSessions {
   attach(attachment: JournalSessionAttachment): JournalSessionStream;
   /** Delivers what a stored publication changed to the streams subscribed to the session. */
   published(hostId: string, sessionKey: string, result: JournalPublished): void;
+  /** The Host's sessions that a page shows now: at least one stream negotiated for its content and has not ended. */
+  shown(hostId: string): string[];
 }
 
 /** What the streams of one session share. */
@@ -66,6 +70,8 @@ interface SharedSession {
   /** The browser sockets of the session's streams, to close them when the session stops being served. */
   clients: Map<JournalSessionStream, Pick<RelaySocket, 'close'>>;
   streams: Set<JournalSessionStream>;
+  /** How many of the streams show the conversation (negotiated for content). */
+  showing: number;
   /** True once a Controller said it holds no history older than the journal; reset by a replacement. */
   olderExhausted: boolean;
   /** How many replacements the journal had; an answer about older history that began before one says nothing about the new epoch. */
@@ -120,7 +126,7 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
     attach(attachment) {
       const { hostId, providerId, sessionKey } = attachment;
       const key = keyOf(hostId, sessionKey);
-      const shared: SharedSession = sessions.get(key) ?? { hostId, providerId, sessionKey, clients: new Map(), streams: new Set<JournalSessionStream>(), olderExhausted: false, replacements: 0, fillTail: Promise.resolve(), pending: 0 };
+      const shared: SharedSession = sessions.get(key) ?? { hostId, providerId, sessionKey, clients: new Map(), streams: new Set<JournalSessionStream>(), showing: 0, olderExhausted: false, replacements: 0, fillTail: Promise.resolve(), pending: 0 };
       sessions.set(key, shared);
       const reads: JournalReads = {
         status: () => options.journals.status(hostId, sessionKey),
@@ -148,7 +154,14 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
         noHead: () => options.journals.unserve(hostId, sessionKey),
         readFailed: () => options.journals.unserve(hostId, sessionKey),
       };
-      const stream = createJournalSessionStream({ publicAgentId: attachment.publicAgentId, client: attachment.client, reads, hostStreams: attachment.hostStreams, readNativeOwner: attachment.readNativeOwner, scheduler: options.scheduler });
+      const shown = (on: boolean) => {
+        shared.showing += on ? 1 : -1;
+        if (shared.showing === (on ? 1 : 0)) {
+          try { options.shownChanged?.(hostId); }
+          catch { /* Telling the Controller never affects the stream. */ }
+        }
+      };
+      const stream = createJournalSessionStream({ publicAgentId: attachment.publicAgentId, client: attachment.client, reads, hostStreams: attachment.hostStreams, readNativeOwner: attachment.readNativeOwner, scheduler: options.scheduler, shown });
       shared.streams.add(stream);
       shared.clients.set(stream, attachment.client);
       return {
@@ -161,6 +174,10 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
           release(key, shared);
         },
       };
+    },
+
+    shown(hostId) {
+      return [...sessions.values()].filter(shared => shared.hostId === hostId && shared.showing > 0).map(shared => shared.sessionKey);
     },
 
     published(hostId, sessionKey, result) {

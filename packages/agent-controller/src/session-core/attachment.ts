@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
-import { AgentOperationRejectedError, serializeAgentEmptyCreationResult } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, resolveAgentProviderBehaviour, serializeAgentEmptyCreationResult } from '@orchardworks/agent-provider-sdk';
 import type { RemoteHostSessionLease, SessionWireAgent } from '@orchardworks/agent-session-runtime';
 
 import { directoryNativeEffect } from '../directory-mutation.js';
 import { NativeSessionOwnerError } from '../native-session-owner.js';
 import { pendingReferenceNote } from '../session-refs.js';
 import { hasHeldChild, mayReconcileIdle, mayReleaseIdle } from './idle-release.js';
+import { releaseGraceMs } from './residency.js';
 import { withReferenceNotes } from '../session-reference-notes.js';
 import type { SessionCoreContext } from './context.js';
 import { boundedSourceIdentity, HostRequestError } from './requests.js';
@@ -23,7 +24,8 @@ import type { SessionBinding as Binding } from './types.js';
  * - `acquireSession` holds a runtime for its caller: it holds the parent of a child first, waits for a release in progress, and releases a diverged, quiet
  *   session so it is read again before a send continues from it. The returned lease releases the runtime and its parent once.
  * - `watch` gives an idle session its release rule (`idle-release.ts`): released when it may be, journal first, then the runtime, then the directory; and
- *   reconciled first when its state is uncertain.
+ *   reconciled first when its state is uncertain. Its release grace is the provider's (`residency.ts`), and it is kept while a page shows it
+ *   (`shown-sessions.ts`).
  * - `lifecycle` reports a release, a restoration or a reconciliation to the diagnostic sink, which can never change a session's lifetime.
  *
  * The attachment owns no state of its own; the bindings and idle sessions are read through the context, and the prepared sessions belong to the attachment ledger.
@@ -35,7 +37,9 @@ export function createAttachment(ctx: SessionCoreContext) {
     catch { /* Diagnostics cannot change session lifetime. */ }
   }
   function watch(binding: Binding) {
-    const { admission, sessions, idle, liveAgent, ledger, providers, relay, terminalRefresh } = ctx;
+    const { admission, sessions, idle, liveAgent, ledger, providers, relay, terminalRefresh, shown, options } = ctx;
+    // The release grace follows what the provider declares of its CLI (`residency.ts`, R4); a configured grace replaces it for every provider.
+    const graceMs = options.idleGraceMs ?? releaseGraceMs(resolveAgentProviderBehaviour(providers.require(binding.providerId).adapter.descriptor));
     const childHeld = () => hasHeldChild(sessions.all(), binding, child => !!liveAgent(child.agentId) || idle.hasDemand(child.agentId));
     idle.watch(binding.agentId, () => mayReleaseIdle({
       closed: admission.closed, uncertain: ledger.isUncertain(binding.agentId), pending: sessions.isPending(binding.providerId, binding.nativeSessionId),
@@ -60,7 +64,8 @@ export function createAttachment(ctx: SessionCoreContext) {
       ledger.clearUncertain(binding.agentId);
       lifecycle('session_idle_reconciled', binding);
       return true;
-    });
+    }, graceMs);
+    shown.apply(binding);
   }
   async function releaseIfDiverged(binding: Binding): Promise<void> {
     const { liveAgent, providers, relay, terminalRefresh } = ctx;

@@ -128,7 +128,7 @@ export function createSocketEdge(ports: SocketEdgePorts) {
           teamRequested: asked('team'), resourcesRequested: asked('teamResources'), recipientsRequested: asked('teamRecipients'), inboxRequested: asked('teamInbox'),
           statesRequested: !asked('sessionStates') ? false : asked('sessionReplyFacts') ? 2 : 1, successionRequested: asked('teamSuccession'),
           callForSupportRequested: asked('callForSupport') && readOnlyProviders(url.searchParams.getAll('readOnlyProvider')), statusRequested: asked('hostStatus'), outboxRequested: asked('outbox'),
-          journalRequested: url.searchParams.get('journal') === String(JOURNAL_VERSION) ? JOURNAL_VERSION : 0, controlRequested: asked('control') });
+          journalRequested: url.searchParams.get('journal') === String(JOURNAL_VERSION) ? JOURNAL_VERSION : 0, shownRequested: asked('journalShown'), controlRequested: asked('control') });
       } };
     }
     const match = /^\/v1\/sessions\/([^/]+)\/events$/.exec(url.pathname);

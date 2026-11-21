@@ -27,6 +27,8 @@ export const JOURNAL_ITEMS_PER_ENTRY_MAX = 5000;
 export const JOURNAL_FILL_MAX_ITEMS = 64;
 /** The most items one older-history read asks for. */
 export const JOURNAL_OLDER_MAX_LIMIT = 200;
+/** The most sessions one `journal_shown` names: as many as a Relay binds. */
+export const JOURNAL_SHOWN_MAX_SESSIONS = 4096;
 
 const object = { additionalProperties: false } as const;
 const identity = Type.String({ minLength: 1, maxLength: 512 });
@@ -112,6 +114,12 @@ export const JournalRefused = Type.Object({ sessionKey, generation, sequence: Sa
 export const JournalFillRequest = Type.Object({ requestId, sessionKey, itemKeys: Type.Array(itemKey, { minItems: 1, maxItems: JOURNAL_FILL_MAX_ITEMS }) }, object);
 /** `beforeItemKey` is the journal's oldest item that is not live-only: the Controller answers with the complete items older than it. */
 export const JournalOlderRequest = Type.Object({ requestId, sessionKey, beforeItemKey: itemKey, limit: Type.Integer({ minimum: 1, maximum: JOURNAL_OLDER_MAX_LIMIT }) }, object);
+/**
+ * The sessions of this Host that pages show now: each has a page reading its conversation from the journal. The set is complete and
+ * replaces the one before; the Relay sends it when the Controller registers and whenever it changes, to a Controller that asked for it
+ * (`journalShown=1`). The Controller keeps a shown session attached, so its CLI's events keep reaching the page.
+ */
+export const JournalShown = Type.Object({ sessionKeys: Type.Array(sessionKey, { maxItems: JOURNAL_SHOWN_MAX_SESSIONS }) }, object);
 
 const encoder = new (globalThis as unknown as { TextEncoder: new () => { encode(value: string): Uint8Array } }).TextEncoder();
 const distinct = (keys: readonly string[]) => new Set(keys).size === keys.length;
@@ -126,6 +134,7 @@ export function validJournalMessage(message: { type: string }): boolean {
     }
     case 'journal_fill': return distinct((message as unknown as Static<typeof JournalFill>).items.map(({ row }) => row.itemKey));
     case 'journal_fill_request': return distinct((message as unknown as Static<typeof JournalFillRequest>).itemKeys);
+    case 'journal_shown': return distinct((message as unknown as Static<typeof JournalShown>).sessionKeys);
     default: return true;
   }
 }

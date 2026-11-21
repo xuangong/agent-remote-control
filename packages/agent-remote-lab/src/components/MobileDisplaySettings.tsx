@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
+import { runsInstalled } from '../installed-app.js';
 
 function displayState() {
   return {
     fullscreen: document.fullscreenElement !== null && document.fullscreenElement !== undefined,
     supported: document.fullscreenEnabled === true && typeof document.documentElement.requestFullscreen === 'function',
-    standalone: window.matchMedia?.('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true,
+    standalone: runsInstalled(),
   };
 }
 

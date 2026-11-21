@@ -8,7 +8,10 @@ import { GatewayController } from './GatewayController.js';
 import { previousWorkspacePath } from './workspace-access.js';
 import { startDeviceStore } from './device-store-start.js';
 import { loadChunkWithRecovery } from './chunk-recovery.js';
+import { keepInstalledAppStorage } from './installed-app.js';
 const gatewayMode = document.querySelector('meta[name="agent-remote-auth"]')?.getAttribute('content') === 'gateway';
+// The installed app asks to keep its storage before it reads any, so a week away does not cost it its conversations or pending messages.
+void keepInstalledAppStorage();
 // The application chunk waits at most a second for the stored conversations, so its first render already reads them.
 const storedConversations = Promise.race([startDeviceStore(gatewayMode), new Promise<void>(resolve => setTimeout(resolve, 1000))]);
 const loadApp = () => loadChunkWithRecovery(() => Promise.all([import('./App.js'), storedConversations]).then(([module]) => ({ default: module.App })));

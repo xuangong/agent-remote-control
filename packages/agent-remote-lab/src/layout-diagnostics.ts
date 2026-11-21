@@ -1,4 +1,5 @@
 import type { WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
+import { runsInstalled } from './installed-app.js';
 
 // Diagnostics are opt-in and page-local. Never read text, URLs, session IDs or storage.
 const limits = { maxSamples: 800, frameWindowMs: 3000, recordingMs: 600_000 };
@@ -120,7 +121,7 @@ export function startLayoutDiagnostics() {
     statusBarStyle: document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')?.getAttribute('content') ?? null,
     viewportMeta: document.querySelector('meta[name="viewport"]')?.getAttribute('content') ?? null,
     screen: { width: screen.width, height: screen.height },
-    standalone: matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true,
+    standalone: runsInstalled(),
     coarsePointer: matchMedia('(pointer: coarse)').matches,
   };
   safeAreaProbe = document.createElement('div');

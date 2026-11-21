@@ -211,3 +211,9 @@ Each step preserves behaviour, keeps `arch:check` at 0 failing findings and chan
 | 9 | On next touch: the turn parts, the Bot mode panels, a fixture page per layout (3.3), Codex `session.ts`, the `gateway.ts` routes (3.6) | The owning suites | per touch |
 
 **Decision point.** After step 6, measure the next parallel wave with this document's method. Steps 7 and 8 add eleven modules; take them if feature tasks still share Workbench files.
+
+## Owner decision (2026-11-22)
+
+Item 1 is approved, including the change to the compatibility rule on line 9 of `AGENTS.md`. Task branches no longer update the compatibility digest. It is regenerated and checked once a branch is merged to `main`, and a merge driver handles any conflict that remains. The release gates are unchanged.
+
+Item 1 is implemented after the two tasks now in flight (the provider kit and the phone/platform gaps) are merged, so those tasks are not caught by a rule change halfway through. Items 2 to 5 follow in the document's order.

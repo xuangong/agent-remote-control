@@ -22,7 +22,7 @@ checked against the code; the test mapping follows test titles and their asserti
 | Client session presentation | 19 | 4 | 4 | 0 |
 | Timeline turns, process mode and work line | 21 | 3 | 3 | 0 |
 | Provider behaviour declaration (B1, 2026-11-21) | 6 | 0 | 0 | 0 |
-| **All** | **200** | **43** | **42** | **1** |
+| **All** | **199** | **43** | **42** | **1** |
 
 Every clause now names the tests that prove it. The 43 gaps were closed on 2026-11-21 (section "Gaps closed" below): 42 by a
 unit test, a vector row or a seam test with mock data, each under 300 ms and each failing when the rule it proves is broken (by a

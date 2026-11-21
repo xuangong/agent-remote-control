@@ -20,6 +20,7 @@
     "verify:changed": "sh scripts/verify-changed.sh",
     "task:start": "sh scripts/task-start.sh",
     "postmerge": "node scripts/postmerge.mjs",
+    "open-items": "node scripts/open-items.mjs",
     "prepare": "node scripts/git-setup.mjs",
     "test:unit": "node scripts/run-tests.mjs unit-package",
     "test:inventory": "node scripts/test-inventory.mjs",

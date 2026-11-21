@@ -77,6 +77,18 @@ it('leaves Escape available to the outer composition when focus has moved outsid
   expect(escape.defaultPrevented).toBe(false);
 });
 
+it('closes an open settings panel when the person presses outside it, not when they press inside it', async () => {
+  const container = await render(<><Controls /><p data-testid="conversation">The conversation</p></>);
+  const trigger = container.querySelector<HTMLButtonElement>('[data-testid="session-model-button"]')!;
+  await act(async () => { trigger.click(); });
+  expect(trigger.getAttribute('aria-expanded')).toBe('true');
+  const panel = container.querySelector<HTMLElement>('.agent-session-panel')!;
+  await act(async () => { panel.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); });
+  expect(trigger.getAttribute('aria-expanded')).toBe('true');
+  await act(async () => { container.querySelector('[data-testid="conversation"]')!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); });
+  expect(trigger.getAttribute('aria-expanded')).toBe('false');
+});
+
 it('dismisses settings from another control in the same composer without affecting other composers', async () => {
   const container = await render(<>{[0, 1].map(index => <section key={index} className="agent-composer">
     <Controls /><button type="button" aria-label={`Composer action ${index}`}>/</button>

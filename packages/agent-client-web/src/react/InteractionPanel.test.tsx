@@ -80,6 +80,15 @@ describe('InteractionPanel', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[data-action="approve"]')!.click());
     expect(respond).toHaveBeenLastCalledWith('plan', { kind: 'plan_approval', action: 'approve' });
   });
+  it.each([
+    ['approve', 'allow', 'approve'], ['approve_and_resume', 'allow', 'approve_and_resume'], ['approve', 'not-now', 'reject'],
+  ] as const)('on a plan that allows %s, the %s choice sends %s', async (allowed, choice, action) => {
+    const respond = vi.fn().mockResolvedValue(undefined);
+    const plan: AgentInteractionRequest = { kind: 'plan_approval', requestId: 'plan', plan: 'Review all steps', allowedActions: [allowed, 'reject'] };
+    const container = await render(<InteractionPanel request={plan} onResponse={respond} />);
+    await act(async () => container.querySelector<HTMLButtonElement>(`[data-choice="${choice}"]`)!.click());
+    expect(respond).toHaveBeenCalledExactlyOnceWith('plan', { kind: 'plan_approval', action });
+  });
 });
 
 function button(container: HTMLElement, text: string): HTMLButtonElement {

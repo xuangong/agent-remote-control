@@ -220,6 +220,18 @@ describe('ResourceIngestor acquisition lifecycle', () => {
       .toMatchObject({ status: 'available', byteLength: pngBytes.byteLength });
   });
 
+  it('serves a settled resource again from its stored bytes, for every later read, without asking the Provider reader', async () => {
+    const ingestor = createIngestor();
+    let reads = 0;
+    const acquisition = ingestor.acquire({ agentId: 'agent-1', locator: 'artifacts/lab-proof.txt', reader: async () => { reads += 1; return availablePng(); } });
+    const binding = await acquisition?.settled;
+    const first = ingestor.readResponse('read-1', 'agent-1', binding!.resourceId).payload.state;
+    const later = ingestor.readResponse('read-2', 'agent-1', binding!.resourceId).payload.state;
+    expect(first).toMatchObject({ status: 'available', byteLength: pngBytes.byteLength });
+    expect(later).toEqual(first);
+    expect(reads).toBe(1);
+  });
+
   it('keeps Provider unavailability visible and does not expose it through another Agent', async () => {
     const ingestor = createIngestor();
     const acquisition = ingestor.acquire({

@@ -620,6 +620,22 @@ describe('absorbing a replacement by item key', () => {
     expect(read.state.timeline.entries.map(row => row.item.type === 'assistant_message' ? row.item.text : '')).toEqual(['A', 'Waits']);
   });
 
+  it('ignores any page of an epoch the replacement already retired, and shows only the new epoch rows', () => {
+    const replaced = applyHistoryPage(held(assistant('a', 'Before the replacement', 1)), page('after', [], { epoch: 'epoch-two', reset: true, staleCursor: true }));
+    expect(replaced.status).toBe('replaced');
+    const read = applyHistoryPage(replaced.state, tail([assistant('b', 'Authoritative rehydrated Timeline.', 1)], 'epoch-two'));
+    expect(read.state.timeline.entries.map(row => row.item.type === 'assistant_message' ? row.item.text : '')).toEqual(['Authoritative rehydrated Timeline.']);
+    expect(read.state.retiredEpochs).toContain('epoch-one');
+    for (const flags of [{ reset: true, staleCursor: true }, { gap: true }, {}]) {
+      const late = applyHistoryPage(read.state, page('after', [], { epoch: 'epoch-one', ...flags }));
+      expect(late.status).toBe('stale_epoch');
+      expect(late.state).toBe(read.state);
+    }
+    const lateTail = applyHistoryPage(read.state, tail([assistant('a', 'Before the replacement', 1)], 'epoch-one'));
+    expect(lateTail.status).toBe('stale_epoch');
+    expect(lateTail.state).toBe(read.state);
+  });
+
   it('absorbs rows without keys, which key by position and identity, through one transition and never an empty state', () => {
     const state = applyHistoryPage(createReplicaState(), page('tail', [entry(1, 1, { type: 'user_message', text: 'Old' })])).state;
     const marked = applyTimelineReplacement(state, 'epoch-two');

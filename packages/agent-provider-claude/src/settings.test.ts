@@ -34,6 +34,7 @@ it('publishes confirmed model choices, rejects stale choices, and changes permis
     expect(native.changes).toEqual([]);
     await expect(session.sendMessage('racing')).rejects.toThrow(/setting/);
     confirm(); await changing;
+    expect(native.changes).toEqual(['sonnet']);
     expect((await session.runtimeInfo()).model).toBe('sonnet');
     native.setModels([]);
     await expect(session.setSessionSetting!('model', 'sonnet')).rejects.toThrow(/Unavailable/);

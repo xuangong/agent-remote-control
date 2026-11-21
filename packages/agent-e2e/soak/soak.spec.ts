@@ -2,11 +2,11 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { createWindowView } from '@orchardworks/agent-remote-protocol';
-import { crossHostFixture } from './cross-host-fixture';
+import { crossHostFixture } from './hosts.js';
 
-// Stage 7's soak (see performance/README.md): not part of the suite. Run on purpose, for example
-// ARC_SOAK_MINUTES=60 npx playwright test e2e/soak.spec.ts --project=chromium-desktop
-// Two Controllers whose native sessions answer at once; nothing runs a model.
+// Stage 7's soak (see packages/agent-remote-lab/performance/README.md): not part of any test tier. Run it on purpose from packages/agent-e2e, for example
+// ARC_SOAK_MINUTES=60 pnpm exec playwright test --config=soak/playwright.config.ts
+// Two Controllers whose native sessions answer at once; nothing runs a model. The built Workbench (`pnpm --filter @orchardworks/agent-remote-lab build`) is served by the fixture's own Gateway.
 const minutes = Number(process.env.ARC_SOAK_MINUTES ?? 0);
 // Sends stop halfway: conversations grow with each message, so only the quiet half can show a leak.
 const sendMinutes = Number(process.env.ARC_SOAK_SEND_MINUTES ?? minutes / 2);
@@ -56,18 +56,32 @@ test('soak: bot switches, sends, mode switches and a Host leaving and coming bac
     }
     await page.goto(`${fixture.origin}/?mode=bot`);
     const bot = page.locator('[data-workbench-mode="bot"]');
+    // The page calls each assistant by a name it generated, so a bot is found by what is behind its row: open every row once
+    // and read which native session the conversation on screen belongs to (`data-native-session` holds `provider/id`).
+    const rows = bot.getByRole('navigation', { name: 'Chats', exact: true }).getByRole('button').and(page.locator('[data-bot-place]'));
+    await expect(rows).toHaveCount(names.length, { timeout: 30_000 });
+    const nameOf = new Map<string, string>();
+    for (let index = 0; index < names.length; index++) {
+      await rows.nth(index).click();
+      const open = bot.locator('[data-native-session]:visible').first();
+      await expect(open).toBeVisible();
+      nameOf.set((await open.getAttribute('data-native-session'))!, (await rows.nth(index).getAttribute('aria-label'))!);
+    }
     const row = (name: string) => bot.getByRole('navigation', { name: 'Chats', exact: true }).getByRole('button', { name, exact: true });
-    await expect(row(names[0]!)).toBeVisible({ timeout: 30_000 });
+    const session = (label: string) => { const [host, index] = label.toLowerCase().split(' '); return `${host === 'studio' ? 'codex' : 'claude'}/${host}-${index}`; };
+    const rowOf = (label: string) => row(nameOf.get(session(label))!);
+    expect(nameOf.size).toBe(names.length);
     const cdp = await context.newCDPSession(page);
     await cdp.send('Performance.enable');
     const samples: Sample[] = [];
     const conversation = bot.getByRole('region', { name: 'Bot conversation', exact: true });
+    const firstPane = bot.locator(`[data-native-session=${JSON.stringify(session(names[0]!))}]`);
     const sample = async (minute: number) => {
       // Every sample is taken on the same screen, the first bot with its history shown, so samples compare like with
       // like: which bot is on screen changes the DOM by thousands of nodes, as the bots that received messages are longer.
-      await row(names[0]!).click();
-      await expect(conversation.getByRole('heading', { name: names[0]!, exact: true })).toBeVisible();
-      await expect(conversation.locator('.agent-message-assistant').filter({ hasText: 'Studio answer 19' })).toHaveCount(1, { timeout: 30_000 });
+      await rowOf(names[0]!).click();
+      await expect(firstPane).toBeVisible();
+      await expect(firstPane.locator('.agent-message-assistant').filter({ hasText: 'Studio answer 19' })).toHaveCount(1, { timeout: 30_000 });
       await page.waitForTimeout(1_000);
       await cdp.send('HeapProfiler.collectGarbage');
       const { metrics } = await cdp.send('Performance.getMetrics');
@@ -106,7 +120,7 @@ test('soak: bot switches, sends, mode switches and a Host leaving and coming bac
       const minute = elapsed();
       if (minute >= nextSample) { await sample(Math.round(minute)); nextSample += 1; }
       const name = names[step % names.length]!;
-      await row(name).click();
+      await rowOf(name).click();
       // Every fourth switch sends a message, which its Host answers (unless that Host is away).
       if (minute < sendMinutes && step % 4 === 3 && !(laptopAway && name.startsWith('Laptop'))) { await send(page, `Soak message ${step}`); sends++; }
       // Every 24 switches (about two minutes) the page goes to Window mode and back.
@@ -121,12 +135,16 @@ test('soak: bot switches, sends, mode switches and a Host leaving and coming bac
     await sample(minutes);
     // Budgets: once sends stop and the conversations stop growing, a few minutes in, the heap and the DOM stay flat while
     // switching, mode changes and the Host's absences go on; requests per minute stay flat; sockets stay bounded; no errors.
+    // The growth budgets compare the end with the quiet half five minutes after sends stop and need ten more minutes to compare requests: a
+    // shorter run (ARC_SOAK_MINUTES=2 checks that the spec still works against today's page) is judged on sockets and errors only.
     const quiet = samples.find(item => item.minute >= sendMinutes + 5) ?? samples[0]!, last = samples.at(-1)!;
-    expect(last.heapMB, JSON.stringify(samples)).toBeLessThanOrEqual(quiet.heapMB * 1.1);
-    expect(last.nodes, JSON.stringify(samples)).toBeLessThanOrEqual(quiet.nodes * 1.1);
-    const perMinute = (from: Sample, to: Sample) => (to.requests - from.requests) / Math.max(1, to.minute - from.minute);
-    const early = samples.find(item => item.minute >= quiet.minute + 10) ?? last, late = samples.find(item => item.minute >= last.minute - 10) ?? quiet;
-    expect(perMinute(late, last), JSON.stringify(samples)).toBeLessThanOrEqual(perMinute(quiet, early) * 1.25);
+    if (minutes >= 2 * (5 + 10 + 1)) {
+      expect(last.heapMB, JSON.stringify(samples)).toBeLessThanOrEqual(quiet.heapMB * 1.1);
+      expect(last.nodes, JSON.stringify(samples)).toBeLessThanOrEqual(quiet.nodes * 1.1);
+      const perMinute = (from: Sample, to: Sample) => (to.requests - from.requests) / Math.max(1, to.minute - from.minute);
+      const early = samples.find(item => item.minute >= quiet.minute + 10) ?? last, late = samples.find(item => item.minute >= last.minute - 10) ?? quiet;
+      expect(perMinute(late, last), JSON.stringify(samples)).toBeLessThanOrEqual(perMinute(quiet, early) * 1.25);
+    }
     expect(Math.max(...samples.map(item => item.sockets))).toBeLessThanOrEqual(12);
     expect(errors).toEqual([]);
   } finally { await fixture.close(); }

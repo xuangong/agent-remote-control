@@ -62,6 +62,18 @@ describe('InteractionItem', () => {
     expect(answer?.closest('[hidden]')).toBeNull();
   });
 
+  it.each([
+    ['approve', 'Plan approved'], ['approve_and_resume', 'Plan approved, carrying on'], ['reject', 'Asked for changes to the plan'],
+  ] as const)('says in its own words that a plan was answered with %s', async (action, words) => {
+    const container = await render(<TimelineItemRenderer item={{
+      type: 'interaction',
+      request: { kind: 'plan_approval', requestId: 'plan', plan: 'Execute the verified plan.', allowedActions: ['approve', 'approve_and_resume', 'reject'] },
+      response: { kind: 'plan_approval', action },
+    }} />);
+    expect(container.querySelector('.agent-receipt-toggle')?.textContent).toContain(words);
+    expect(container.querySelector('.agent-receipt-toggle')?.textContent).not.toContain(action === 'approve' ? 'carrying on' : action === 'reject' ? 'Plan approved' : 'Asked for');
+  });
+
   it('keeps the complete reviewed plan, decision, and revision feedback in read-only history', async () => {
     const container = await render(<TimelineItemRenderer item={{
       type: 'interaction',

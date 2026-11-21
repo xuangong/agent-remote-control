@@ -11,6 +11,7 @@ test('narrow composed views keep the capsule on one row and open the + menu with
   await expect(more).toBeVisible();
   await expect(view.getByTestId('prompt-input')).toContainText('A draft kept while the view resizes');
   const before = (await view.getByTestId('timeline').boundingBox())!;
+  const composerBefore = (await view.locator('.agent-composer').boundingBox())!;
   await more.click();
   const menu = view.getByRole('region', { name: 'More actions', exact: true });
   await expect(menu).toBeVisible();
@@ -20,6 +21,13 @@ test('narrow composed views keep the capsule on one row and open the + menu with
   await more.click();
   await menu.getByRole('button', { name: 'Permissions', exact: true }).click();
   await expect(view.getByRole('region', { name: 'Permission settings' })).toBeVisible();
+  // The panel stands above the composer over the conversation: the composer keeps its height and its place.
+  const panel = (await view.getByRole('region', { name: 'Permission settings' }).boundingBox())!;
+  const composerAfter = (await view.locator('.agent-composer').boundingBox())!;
+  expect(composerAfter.height).toBeCloseTo(composerBefore.height, 0);
+  expect(composerAfter.y).toBeCloseTo(composerBefore.y, 0);
+  expect(panel.y + panel.height).toBeLessThanOrEqual(composerAfter.y + 1);
+  expect(panel.x + panel.width).toBeLessThanOrEqual(composerAfter.x + composerAfter.width + 1);
   await page.keyboard.press('Escape');
   await expect(view.getByRole('region', { name: 'Permission settings' })).toBeHidden();
   await expect(more).toBeFocused();

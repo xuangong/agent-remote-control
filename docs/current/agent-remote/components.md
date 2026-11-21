@@ -845,10 +845,10 @@ Run on 2026-11-22 on this machine:
 
 | CLI (installed) | N1 recordings | N2 declaration | N3 recorder | N4, N5 |
 |---|---|---|---|---|
-| Codex 0.171.0 | fails: made with 0.169.0 | pass (0.171.0) | 11 of 12; `plan-mode` drifted: the plan item's id lost its `-plan` suffix (keys still equal live and read again) | pass: the active-writer refusal is `-32600` with the exact words and no structured code; `no active turn to steer`; input id echoed; no unknown notification |
+| Codex 0.171.0 | pass, after recording again on 0.171.0 (was 0.169.0) | pass (0.171.0) | 12 of 12; on 0.169.0, `plan-mode` had drifted: a new plan item's id is now its own id, no longer `<turn>-plan` (keys still equal live and read again) | pass: the active-writer refusal is `-32600` with the exact words and no structured code; `no active turn to steer`; input id echoed; no unknown notification |
 | Claude Code 2.1.319 | pass | pass | 19 of 19, and the terminal fork | pass: input uuid kept in the transcript; no unknown message or record |
 | Copilot runtime 1.0.109 (the pinned 1.0.83 package is a loader that runs it) | pass, after recording again on 1.0.109 | pass, `verifiedVersion` 1.0.109 (was none) | 8 of 8 | pass: `checkInUse` refuses a second client, typed `writer_elsewhere`; ten `model.*` event types the SDK does not declare, now listed as known |
 | OpenCode 2.0.25 | none recorded | pass, `verifiedVersion` 2.0.25 (was none) | n/a | pass: no unknown event type in two turns |
 
-Open: the Codex recordings are recorded again on 0.171.0 in a reviewed step (`RECORD_JOURNAL_FIXTURES=1 pnpm test:native:codex`, the golden rows, and the S2 transcripts that `settled` feeds, whose content digests change). Not checked natively: Codex's 70 s unload in the shared daemon, the limit signals (the scripted models send none), Claude Code's fork beyond the terminal test.
+Continuity across the Codex plan id change: none is lost. Codex stores a plan item's id, so a session written before the change reads back with its old `<turn>-plan` id and an existing journal reopens unchanged, with no replacement (checked natively on this machine: a plan written by Codex 0.170.0 and read again by 0.171.0 keeps its key); only new plan items take the new id, equal live and read again. Not checked natively: Codex's 70 s unload in the shared daemon, the limit signals (the scripted models send none), Claude Code's fork beyond the terminal test.
 

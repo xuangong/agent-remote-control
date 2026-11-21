@@ -118,9 +118,11 @@ rejects the new registration envelope. On the machine of an already registered H
 and succeeds when an entry written after the deploy names the deployed `workerVersionId`; the release
 notes record the entry it printed. At the deadline it exits 1 and says what it saw: fresh entries still
 on the previous version (the Durable Object has not switched yet), only entries older than the deploy,
-or nothing. Entries older than the deploy are never readiness evidence. A new page can meet the
-previous Relay in the meantime; the client then uses no feature the Relay's `ready` frame does not
-announce. Keep the existing Controller running until this check passes;
+or nothing. Entries older than the deploy are never readiness evidence. Meanwhile a page of either
+release can meet the other release's Relay: the session wire stays compatible both ways by the release
+skew rule of S3 (`seams.md`), whose seam test plays the decoders of the release in production
+(`agent-remote-seams/tests/S3/fixtures/release-<commit>.json`); record that fixture again from the new
+release once it is in production. Keep the existing Controller running until this check passes;
 if an attempted upgrade rolls back, verify Relay readiness before retrying.
 See [Cloudflare code updates](https://developers.cloudflare.com/durable-objects/platform/known-issues/#code-updates).
 

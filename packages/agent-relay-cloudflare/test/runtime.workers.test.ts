@@ -19,7 +19,7 @@ it('serves hosted assets and health, authenticates browser login, and transports
   const built = await f.request('/assets/main.js');
   expect(built.status).toBe(200);
   expect(built.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
-  for (const path of ['/install.sh', '/install.ps1', '/favicon.svg', '/app/manifest.webmanifest', '/app/icon-192.png', '/app/icon-512.png']) {
+  for (const path of ['/install.sh', '/install.ps1', '/favicon.svg', '/favicon.ico', '/app/favicon-32.png', '/app/manifest.webmanifest', '/app/icon-192.png', '/app/icon-512.png']) {
     const asset = await f.request(path);
     expect(asset.status).toBe(200);
     expect(await asset.text()).toBe('asset');

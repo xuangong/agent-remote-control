@@ -34,7 +34,7 @@ it('titles the page Orchard and gives the browser chrome each theme\'s ground', 
 
 it('links only the paths the Relay already serves', () => {
   // gateway-static.ts and worker.ts serve exactly these brand paths; a new one would need both allowlists.
-  const served = ['/favicon.svg', '/app/manifest.webmanifest', '/app/icon-192.png', '/app/icon-512.png'];
+  const served = ['/favicon.svg', '/favicon.ico', '/app/favicon-32.png', '/app/manifest.webmanifest', '/app/icon-192.png', '/app/icon-512.png'];
   const linked = [...html.matchAll(/<link [^>]*href="([^"]+)"/g)].map(match => match[1]!);
   expect(linked.filter(path => !served.includes(path))).toEqual([]);
 });

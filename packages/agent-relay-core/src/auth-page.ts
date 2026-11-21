@@ -25,6 +25,6 @@ export function accessPanel(input: {
 export function accessDocument(input: { locale: AccessLocale; title: AccessWordKey; body: string; script?: string; noscript?: string }): { html: string; styleHash: string; scriptHash?: string } {
   const css = accessPageStyle;
   const { script } = input;
-  const html = `<!doctype html><html lang="${htmlLang(input.locale)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>${escapeHtml(accessWord(input.locale, input.title))}</title><style>${css}</style></head><body>${input.body}${script ? `<script>${script}</script>` : ''}</body></html>`;
+  const html = `<!doctype html><html lang="${htmlLang(input.locale)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48"><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="apple-touch-icon" href="/app/icon-192.png"><title>${escapeHtml(accessWord(input.locale, input.title))}</title><style>${css}</style></head><body>${input.body}${script ? `<script>${script}</script>` : ''}</body></html>`;
   return { html, styleHash: sha256(css), ...(script ? { scriptHash: sha256(script) } : {}) };
 }

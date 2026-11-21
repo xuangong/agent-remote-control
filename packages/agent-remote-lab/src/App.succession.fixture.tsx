@@ -13,6 +13,7 @@ import { replicaState } from './test/fixtures.js';
 import { render, unmount } from './test/setup.js';
 import * as workbenchComponents from './components/LabWorkbench.js';
 import { WorkspaceReady } from './workspace-access.js';
+import { TeamRefresh, type TeamRefreshPeriods } from './components/TeamMenu.js';
 import type { FavoritesSnapshot } from './session-stars-client.js';
 
 
@@ -73,7 +74,7 @@ export function committed(from = 'A', to = 'B', revision = 2, roleId = 'primary'
       receipt: { ...request, to: native(to, providerId), phase: 'committed', committedRevision: revision, startedAt: 'now', updatedAt: 'now',
         prepared: { ...request, to: native(to, providerId), workspace, associationRevision: 1, participants: [], capture: { epoch: 'epoch', seq: 1, capturedAt: 'now' } } } } };
 }
-export async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: string | null, strict = false, flags = '', setup?: { stateRetryMs?: number; otherWindows?: WorkspaceWindow[]; hostService?: ComponentProps<typeof App>['hostService']; beforeWindowMutation?(mutation: WindowMutation): Promise<void>; windowDocument?: WorkspaceWindow; persistPrompt?: boolean; successionCommit?(): SuccessionActionResult; successionPrepare?(body: Record<string, unknown>): Promise<SuccessionActionResult>; teams?(): Team[]; chain?: SessionSuccessionReplay[]; replayFailure?: string; selected?: string; providerId?: string; userScoped?: boolean; favorites?: FavoritesSnapshot; liveActivity?: boolean; holdRelationsInitially?: boolean; holdReplayInitially?: boolean; holdTimelineInitially?: boolean; holdSnapshotInitially?: boolean; holdAccessInitially?: boolean; nativeConnection?: 'connected' | 'restoring'; preserveNativeState?: boolean; children?: AgentChildSession[]; timeline?: ProjectedTimelineEntry[]; nativeStatus?: 'idle' | 'running'; successionDescription?: SuccessionDescription; successionStatus?(): SuccessionActionResult; attachmentFailure?(body: Record<string, unknown>): { status: number; payload: unknown } | undefined; seed?(scope: string, source: OpenedSession): void | Promise<void> }) {
+export async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: string | null, strict = false, flags = '', setup?: { stateRetryMs?: number; teamRefresh?: TeamRefreshPeriods; otherWindows?: WorkspaceWindow[]; hostService?: ComponentProps<typeof App>['hostService']; beforeWindowMutation?(mutation: WindowMutation): Promise<void>; windowDocument?: WorkspaceWindow; persistPrompt?: boolean; successionCommit?(): SuccessionActionResult; successionPrepare?(body: Record<string, unknown>): Promise<SuccessionActionResult>; teams?(): Team[]; chain?: SessionSuccessionReplay[]; replayFailure?: string; selected?: string; providerId?: string; userScoped?: boolean; favorites?: FavoritesSnapshot; liveActivity?: boolean; holdRelationsInitially?: boolean; holdReplayInitially?: boolean; holdTimelineInitially?: boolean; holdSnapshotInitially?: boolean; holdAccessInitially?: boolean; nativeConnection?: 'connected' | 'restoring'; preserveNativeState?: boolean; children?: AgentChildSession[]; timeline?: ProjectedTimelineEntry[]; nativeStatus?: 'idle' | 'running'; successionDescription?: SuccessionDescription; successionStatus?(): SuccessionActionResult; attachmentFailure?(body: Record<string, unknown>): { status: number; payload: unknown } | undefined; seed?(scope: string, source: OpenedSession): void | Promise<void> }) {
   configureImageDraftPersistence(() => setup?.persistPrompt === true);
   const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
   const hostedWindows = new Map<string, WorkspaceWindow>();
@@ -271,7 +272,7 @@ export async function failureFixture(advanceDuringRecovery = false, nativeIdenti
   let setAccessReady!: (ready: boolean) => void;
   function Access() {
     const [ready, setReady] = useState(true); setAccessReady = setReady;
-    return <WorkspaceReady.Provider value={ready}>{app}</WorkspaceReady.Provider>;
+    return <WorkspaceReady.Provider value={ready}>{setup?.teamRefresh ? <TeamRefresh.Provider value={setup.teamRefresh}>{app}</TeamRefresh.Provider> : app}</WorkspaceReady.Provider>;
   }
   let view = await render(strict ? <StrictMode><Access /></StrictMode> : <Access />);
   cleanups.push(() => unmount(view));

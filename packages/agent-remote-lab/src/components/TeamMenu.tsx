@@ -2,7 +2,7 @@ import { createPortal } from 'react-dom';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { Translate } from '@orchardworks/agent-client';
 import { enumWords, memberActivityWords, memberRoleWords, messageStatusWords, teamStatusWords } from '../team-words.js';
-import { useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { errorWords, RemoteTeamClient, watchList } from '@orchardworks/agent-client';
 import type { Team, TeamAction, TeamSource } from '@orchardworks/agent-remote-protocol';
 import { workspaceFetch } from '../workspace-access.js';
@@ -27,8 +27,11 @@ interface Props {
   onOpen(team: Team, sourceViewId?: string): Promise<boolean>; onOpenSession(target: TeamSource & { teamId?: string; teamMemberId?: string }): Promise<boolean>;
   onTeamsChange?(baseUrl: string, teams: Team[]): void;
 }
-/** How often the Team roster refreshes while someone looks at it or a Team is forming, and otherwise. */
-export const TEAM_REFRESH_MS = 4_000, TEAM_IDLE_REFRESH_MS = 30_000;
+/** How often the Team roster refreshes while someone looks at it or a Team is forming (`watchingMs`), and otherwise (`idleMs`). */
+export interface TeamRefreshPeriods { watchingMs: number; idleMs: number }
+export const TEAM_REFRESH_PERIODS: TeamRefreshPeriods = { watchingMs: 4_000, idleMs: 30_000 };
+/** The periods the roster refreshes at; a page keeps `TEAM_REFRESH_PERIODS`, and a test passes shorter ones instead of waiting them out. */
+export const TeamRefresh = createContext<TeamRefreshPeriods>(TEAM_REFRESH_PERIODS);
 const errorMessage = (t: Translate, error: unknown) => errorWords(error, t, 'team.team.operationFailed');
 const isCurrentMember = (member: Team['members'][number], current: Props['currentSession']) => !!current
   && member.hostId === (current.hostId ?? 'local') && member.providerId === current.providerId && member.nativeSessionId === current.nativeSessionId;
@@ -81,13 +84,14 @@ export function TeamMenu(props: Props) {
   // roles and attention twice a minute instead of polling every few seconds on every open page (stage 6).
   const forming = !!pendingCreate || teams.some(team => team.status === 'active' && team.members.some(member => member.creation === 'reserved'));
   const watching = open || revealing || forming || !!props.following;
+  const periods = useContext(TeamRefresh);
   useEffect(() => {
     if (!enabled) return;
     // Something to follow just appeared (a member's conversation opened, a Team began forming): refresh at once.
     if (watching) void loader.current?.();
-    const timer = setInterval(() => void loader.current?.(), watching ? TEAM_REFRESH_MS : TEAM_IDLE_REFRESH_MS);
+    const timer = setInterval(() => void loader.current?.(), watching ? periods.watchingMs : periods.idleMs);
     return () => clearInterval(timer);
-  }, [client, enabled, baseUrl, watching]);
+  }, [client, enabled, baseUrl, watching, periods]);
   useEffect(() => {
     // Temporary access or catalog failures must not discard the last confirmed retention set.
     if (!enabled || rosterClient !== client) return;

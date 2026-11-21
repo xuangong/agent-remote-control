@@ -335,7 +335,8 @@ it('edits a real App managed Team window into its retained origin owner and admi
   const description: SuccessionDescription = { role: { ...prefix.projection.role, revision: 1, current: native('X') }, targets: [{ providerId: 'recorded', displayName: 'Recorded' }], eligibility: { status: 'ready' } };
   const prompt: ProjectedTimelineEntry = { providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-10-15T00:00:00Z', turnId: preparation.turnId, collapsed: [], resources: [], sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }], item: { type: 'user_message', messageId: preparation.messageId, text: 'Selected member prompt' } };
   const textKey = `session:${JSON.stringify(['host', 'recorded', 'X'])}`;
-  const f = await failureFixture(false, 'A', false, '', { chain, teams: () => [team], timeline: [prompt], persistPrompt: true, successionDescription: description,
+  // The roster refreshes every 50 ms instead of every 4 s, so the successor's seat shows without waiting out the real period.
+  const f = await failureFixture(false, 'A', false, '', { teamRefresh: { watchingMs: 50, idleMs: 30_000 }, chain, teams: () => [team], timeline: [prompt], persistPrompt: true, successionDescription: description,
     async successionPrepare(body) {
       prefix.projection.receipt.operationId = String(body.operationId); prefix.projection.receipt.prepared!.operationId = String(body.operationId);
       return { role: description.role, record: { ...prefix.projection.receipt, phase: 'ready', committedRevision: undefined } };

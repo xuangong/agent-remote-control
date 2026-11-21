@@ -4,9 +4,11 @@ import { SessionDirectoryClient, DirectoryError } from './directory-client.js';
 import { botGroup, mountBotApp, seedGroup, until, visibleButton } from './test/bot-mode-fixtures.js';
 
 // Stage 7: a session its Host reported missing is not asked for again by what the page does around it (see the stage 7 plan).
-afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); localStorage.clear(); });
 
 it('asks for a missing session once across mode switches, state frames, bot switches, page resumes and an access pause', { timeout: 60_000 }, async () => {
+  // The page's timers run on a fake clock: the test gives it time to ask again without waiting that time out.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
   const scope = 'http://localhost/u/attach-budget/';
   seedGroup(scope, botGroup('G'));
   history.replaceState(null, '', '/?window=G');
@@ -20,7 +22,7 @@ it('asks for a missing session once across mode switches, state frames, bot swit
   const app = await mountBotApp(scope, { hosted: true, missing: ['G2'] });
   const missing = () => [...asked, ...app.attachments].filter(id => id === 'G2').length;
   await until(() => expect(missing()).toBeGreaterThanOrEqual(1));
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 200)); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
   // The Window's binding and its conversation open the selected view together, so a page asks at most twice as it loads.
   const first = missing();
   expect(first).toBeLessThanOrEqual(2);
@@ -42,7 +44,7 @@ it('asks for a missing session once across mode switches, state frames, bot swit
   await act(async () => window.dispatchEvent(new Event('online')));
   await act(async () => app.setAccessReady(false));
   await act(async () => app.setAccessReady(true));
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 300)); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(300); });
   expect(missing()).toBe(first);
 
   // An explicit Retry asks again.

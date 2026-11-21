@@ -14,6 +14,9 @@ export const lacksText = (page: Page, text: string, timeout = 25_000) => page.wa
  */
 export const holdsText = (page: Page, text: string, timeout = 25_000) => page.waitForFunction(needle => !!document.body.textContent?.includes(needle), text, { timeout });
 
+/** The composer holds exactly `text`. */
+export const showsInput = (page: Page, text: string, timeout = 25_000) => page.waitForFunction(expected => document.querySelector('[data-testid="prompt-input"]')?.textContent === expected, text, { timeout });
+
 export async function send(page: Page, text: string): Promise<void> {
   await page.locator('[data-testid="prompt-input"]').click();
   await page.keyboard.type(text);

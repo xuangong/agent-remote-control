@@ -7,6 +7,10 @@
  * start the Controller alone (its provider keeps its sessions); `restartRelay` stops the Relay and starts it again on the same port and
  * state, and the Controller reconnects by itself. `close` stops everything and removes the state. Nothing reads the user's home, their
  * Controller or any credential; each stack has its own state directory and invitation.
+ *
+ * With `signIn` the Relay is a Gateway that signs people in through an issuer instead of signing the local user in: a fresh browser
+ * context is signed out, a page opened on a session asks to sign in, and the issuer's page (or, with `automaticSignIn`, its redirect)
+ * returns to the session as the owner `alice`. The Controller is paired through an invitation made as that owner.
  */
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
@@ -17,6 +21,7 @@ import { controllerPath } from '@orchardworks/agent-remote-protocol/model';
 import type { ControllerRelease } from '@orchardworks/agent-remote-protocol';
 import { createDevboxServer } from '@orchardworks/agent-relay-node/devbox';
 import { actAsLocalUser } from './owner.js';
+import { createSignInGateway } from './gateway.js';
 import { scriptedProvider, type ScriptedProviderOptions } from './scripted-provider.js';
 
 const WORKBENCH_DIST = resolve(import.meta.dirname, '../../agent-remote-lab/dist');
@@ -49,6 +54,12 @@ export interface StackOptions extends Omit<ScriptedProviderOptions, 'succession'
   workspaces?: boolean;
   /** Gives the Controller its Team state, so the page can create a Team whose Leader is one of the scripted sessions. */
   teams?: boolean;
+  /**
+   * Starts a Gateway Relay with a sign-in issuer instead of the Devbox Relay (see the contract above). `automaticSignIn` makes the issuer
+   * redirect to the callback without showing its page; the stack's `gateway.automaticSignIn` changes it later. This Relay keeps no durable
+   * state: no journals (so no smart reading, and sessions are read live from the Controller), no `journalLimits`, and no `restartRelay`.
+   */
+  signIn?: { automaticSignIn?: boolean };
 }
 
 async function freePort(): Promise<number> {
@@ -71,9 +82,11 @@ export async function startStack(options: StackOptions = {}) {
   const update = options.controllerUpdate;
   const controllerReleases = update ? { latest: async () => update.release, version: async () => update.release } : undefined;
   const relayOptions = { origin, stateDir: join(state, 'relay'), webDist, journals: true, ...(options.journalLimits ? { journalLimits: options.journalLimits } : {}), ...(controllerReleases ? { controllerReleases } : {}) };
-  let relay = await createDevboxServer(relayOptions);
-  await relay.listen(port, '127.0.0.1');
-  let connection = await relay.getConnection();
+  const gateway = options.signIn ? await createSignInGateway({ origin, webDist, ...(options.signIn.automaticSignIn ? { automaticSignIn: true } : {}),
+    ...(controllerReleases ? { controllerReleases } : {}) }) : undefined;
+  const startRelay = async () => { const started = gateway ? await gateway.createRelay() : await createDevboxServer(relayOptions); await started.listen(port, '127.0.0.1'); return started; };
+  let relay = await startRelay();
+  let connection = gateway ? await gateway.invitation() : await (relay as Awaited<ReturnType<typeof createDevboxServer>>).getConnection();
   let controller: AgentHost | undefined;
   const installationId = options.installationId ?? 'e2e-controller';
 
@@ -95,8 +108,12 @@ export async function startStack(options: StackOptions = {}) {
   const stopController = async () => { const running = controller; controller = undefined; await running?.close(); };
   await startController();
 
-  const asOwner = <T>(call: Parameters<typeof actAsLocalUser<T>>[1]) => actAsLocalUser(origin, call);
-  if (options.smartReading !== false) {
+  const asOwner = async <T>(call: Parameters<typeof actAsLocalUser<T>>[1]): Promise<T> => {
+    if (!gateway) return actAsLocalUser(origin, call);
+    const owner = await gateway.signInOwner();
+    try { return await call(owner.request); } finally { await owner.close(); }
+  };
+  if (options.smartReading !== false && !gateway) {
     await asOwner(async request => {
       for (const each of [provider, ...otherProviders]) {
         const response = await request('PUT', `v1/remote/hosts/${hostId}/smart-reading`, { providerId: each.providerId, enabled: true });
@@ -137,8 +154,10 @@ export async function startStack(options: StackOptions = {}) {
         async close() { await host.close(); await paired.registration.directory.close?.(); },
       };
     },
-    async restartRelay() { await relay.close(); relay = await createDevboxServer(relayOptions); await relay.listen(port, '127.0.0.1'); },
-    async close() { await stopController(); await relay.close(); await Promise.all([provider, ...otherProviders].map(each => each.registration.directory.close?.())); await rm(state, { recursive: true, force: true }); },
+    /** The sign-in issuer of a stack started with `signIn`. */
+    gateway,
+    async restartRelay() { if (gateway) throw new Error('The sign-in Relay keeps no state to restart from.'); await relay.close(); relay = await startRelay(); },
+    async close() { await stopController(); await relay.close(); await gateway?.close(); await Promise.all([provider, ...otherProviders].map(each => each.registration.directory.close?.())); await rm(state, { recursive: true, force: true }); },
   };
 }
 export type Stack = Awaited<ReturnType<typeof startStack>>;

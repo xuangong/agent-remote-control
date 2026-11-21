@@ -12,6 +12,6 @@ export function authenticationFailure(origin: string, reason: 'denied' | 'unavai
   const page = accessDocument({ locale, title: 'page.signIn', body: accessPanel({ state, view, host: new URL(origin).host, actions, error: true }) });
   return new Response(page.html, { status: reason === 'denied' ? 401 : reason === 'capacity' ? 429 : 503, headers: {
     'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff',
-    'content-security-policy': `default-src 'none'; style-src 'sha256-${page.styleHash}'; base-uri 'none'; frame-ancestors 'none'`,
+    'content-security-policy': `default-src 'none'; img-src 'self'; style-src 'sha256-${page.styleHash}'; base-uri 'none'; frame-ancestors 'none'`,
   } });
 }

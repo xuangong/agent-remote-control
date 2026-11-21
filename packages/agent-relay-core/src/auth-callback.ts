@@ -69,6 +69,6 @@ else {
   const page = accessDocument({ locale, title: 'page.signIn', script, body: accessPanel({ state: 'verifying', view, host: new URL(origin).host, actions, switching: true, noscript: accessWord(locale, 'noscript') }) });
   return new Response(page.html, { status: 200, headers: {
     'content-type': 'text/html; charset=utf-8',
-    'content-security-policy': `default-src 'none'; style-src 'sha256-${page.styleHash}'; script-src 'sha256-${page.scriptHash}'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'`,
+    'content-security-policy': `default-src 'none'; img-src 'self'; style-src 'sha256-${page.styleHash}'; script-src 'sha256-${page.scriptHash}'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'`,
   } });
 }

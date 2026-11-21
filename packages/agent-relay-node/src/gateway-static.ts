@@ -15,7 +15,7 @@ export async function createGatewayStaticPages(directory: string, options?: { or
       response.end(index); return true;
     }
     if (path === FILE_FRAME_PATH) { response.writeHead(200, fileFrameHeaders); response.end(fileFrameDocument); return true; }
-    if (!path.startsWith('/assets/') && !['/install.sh', '/install.ps1', '/favicon.svg', '/app/manifest.webmanifest', '/app/icon-192.png', '/app/icon-512.png'].includes(path)) return false;
+    if (!path.startsWith('/assets/') && !['/install.sh', '/install.ps1', '/favicon.svg', '/favicon.ico', '/app/favicon-32.png', '/app/manifest.webmanifest', '/app/icon-192.png', '/app/icon-512.png'].includes(path)) return false;
     let file: string;
     try { file = await realpath(resolve(root, '.' + decodeURIComponent(path))); } catch { return false; }
     if (!file.startsWith(root + sep) || !(await stat(file)).isFile()) return false;

@@ -86,6 +86,6 @@ for(const button of document.querySelectorAll('[data-decision]'))button.addEvent
     body: accessPanel({ state: 'cli', view: card, host: new URL(origin).host, actions, extra: note, after: status }) });
   return new Response(page.html, { status: view.state === 'unavailable' ? 410 : 200, headers: {
     'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff',
-    'content-security-policy': `default-src 'none'; style-src 'sha256-${page.styleHash}'; ${script ? `script-src 'sha256-${page.scriptHash}'; connect-src 'self'; ` : ''}base-uri 'none'; frame-ancestors 'none'; form-action 'none'`,
+    'content-security-policy': `default-src 'none'; img-src 'self'; style-src 'sha256-${page.styleHash}'; ${script ? `script-src 'sha256-${page.scriptHash}'; connect-src 'self'; ` : ''}base-uri 'none'; frame-ancestors 'none'; form-action 'none'`,
   } });
 }

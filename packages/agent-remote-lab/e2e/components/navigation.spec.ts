@@ -117,3 +117,19 @@ test('the rail opens search and offers the account with the device-link dot', as
   await page.keyboard.press('Escape');
   await expect(page.locator('.lab-rail-popover')).toHaveCount(0);
 });
+
+test('the tab bar stays while the Window shell is hidden, whatever its drawer state, and steps aside only when that drawer shows', async ({ page }) => {
+  test.skip(!phone(page), 'The tab bar is the phone\'s.');
+  await page.goto(url());
+  await expect(page.locator('.lab-bot-roster')).toBeVisible();
+  // The Window-mode shell stays mounted but hidden in Chats, and keeps its last drawer state.
+  await page.evaluate(() => {
+    const shell = document.createElement('main');
+    shell.className = 'lab-shell lab-window-mode lab-supporting-open';
+    shell.hidden = true;
+    document.querySelector('.lab-frame')!.append(shell);
+  });
+  await expect(page.locator('.lab-tab-bar')).toBeVisible();
+  await page.evaluate(() => { (document.querySelector('.lab-frame > .lab-shell') as HTMLElement).hidden = false; });
+  await expect(page.locator('.lab-tab-bar')).toBeHidden();
+});

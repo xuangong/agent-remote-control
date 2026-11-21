@@ -95,6 +95,10 @@ describe('the access pages', () => {
       expect(policy).toContain(`style-src 'sha256-${hashOf(style)}'`);
       if (script) expect(policy).toContain(`script-src 'sha256-${hashOf(script)}'`);
       else expect(policy).not.toContain('script-src');
+      // The tab shows the Orchard mark: the icons are linked, and the policy lets the page load them from its own origin.
+      expect(html).toContain('<link rel="icon" href="/favicon.ico"');
+      expect(html).toContain('<link rel="icon" type="image/svg+xml" href="/favicon.svg">');
+      expect(policy).toContain("img-src 'self'");
     });
 
     it('escapes what a command line names itself and keeps the code readable', async () => {

@@ -101,3 +101,21 @@ it('shows the live line while a bot works, in its conversation, and says it in i
     expect(app.container.querySelector('.lab-assistant-top-bar .lab-assistant-sentence')?.textContent).toBe('Wants to ask you something');
   } finally { await app.close(); }
 });
+
+it("shows the state of a session this page does not observe in the Windows list, from the shared channel", async () => {
+  const scope = 'http://localhost/u/window-list-states/';
+  seedGroup(scope, botGroup('A')); seedGroup(scope, botGroup('B')); history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope, { hosted: true });
+  const row = () => app.container.querySelector<HTMLElement>('[data-window-row="B"]');
+  try {
+    await until(() => expect(app.workspace().window?.id).toBe('A'));
+    await until(() => expect(row()).not.toBeNull());
+    await act(async () => app.emitStates({ snapshot: true, hosts: [host], states: [state('B1', 'idle')] }));
+    expect(row()!.querySelector('.lab-bot-status[data-attention]')).toBeNull();
+    await act(async () => app.emitStates({ states: [state('B1', 'waiting')] }));
+    await until(() => expect(row()!.querySelector('.lab-bot-status[data-attention]')?.textContent).toBe('Needs you'));
+    await act(async () => app.emitStates({ states: [state('B1', 'running')] }));
+    await until(() => expect(row()!.querySelector('.lab-bot-status')?.textContent).toBe('Working'));
+    expect(row()!.querySelector('.lab-bot-status[data-attention]')).toBeNull();
+  } finally { await app.close(); }
+});

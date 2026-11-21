@@ -141,6 +141,16 @@ it('defaults to the source provider even when the Host lists another target firs
   expect(state.prepare.mock.calls[0]![0].targetProviderId).toBe('opencode');
 }, 5000);
 
+it('prepares the handoff for the provider the person chose, not the source provider', async () => {
+  const state = await setup({ description: { ...description, targets: [...description.targets, { providerId: 'codex', displayName: 'Codex' }] } });
+  state.prepare.mockImplementation(async input => response(input.operationId, 'ready'));
+  state.action.mockImplementation(async (_action, id) => response(id, 'committed'));
+  const select = document.querySelector('select')!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, 'codex'); select.dispatchEvent(new Event('change', { bubbles: true })); });
+  await act(async () => button('Hand off').click());
+  expect(state.prepare.mock.calls[0]![0]).toMatchObject({ providerId: 'opencode', nativeSessionId: 'A', targetProviderId: 'codex' });
+}, 5000);
+
 it('matches an explicit claude alias to the available provider', async () => {
   await setup({ initialProvider: 'claude', description: { ...description, targets: [...description.targets, { providerId: 'claude-code', displayName: 'Claude Code' }] } });
   expect(document.querySelector('select')?.value).toBe('claude-code');

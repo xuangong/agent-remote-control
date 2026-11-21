@@ -27,6 +27,20 @@ it('copies and encodes the explicit history selection without changing native id
   expect(navigator.clipboard.writeText).toHaveBeenCalledWith(value);
 });
 
+it('draws the QR code from the very link it shows and copies, which names the session and not the sharer\'s Window', async () => {
+  history.replaceState(null, '', '/?window=sharer-window');
+  toDataURL.mockResolvedValue('data:image/png;base64,test');
+  await render(<SessionTransferDialog session={session} onClose={() => {}} />);
+  await act(async () => { await vi.dynamicImportSettled(); });
+  const dialog = document.querySelector('dialog')!;
+  const value = dialog.querySelector('input')!.value;
+  expect(toDataURL).toHaveBeenCalledWith(value, expect.anything());
+  expect(new URL(value).searchParams.get('session')).toBe('session');
+  expect(new URL(value).searchParams.has('window')).toBe(false);
+  expect(dialog.querySelector('img')?.getAttribute('alt')).toBe('Session QR code');
+  history.replaceState(null, '', '/');
+});
+
 async function showFailedQR() {
   toDataURL.mockRejectedValue(new Error('Rendering unavailable'));
   await render(<SessionTransferDialog session={session} onClose={() => {}} />);
@@ -68,4 +82,31 @@ it.each([
   const dialog = document.querySelector('dialog')!;
   expect([...dialog.querySelectorAll('summary')].map(summary => summary.textContent)).toContain('Open on Host');
   expect(dialog.querySelector<HTMLInputElement>('.lab-native-session-command input')?.value).toBe(command);
+});
+
+async function paste(link: string, onOpen: (target: unknown) => Promise<boolean>, onClose = () => {}) {
+  await render(<SessionTransferDialog onOpen={onOpen as never} onClose={onClose} />);
+  const input = document.querySelector<HTMLInputElement>('#session-transfer-paste')!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, link); input.dispatchEvent(new Event('input', { bubbles: true })); });
+  await act(async () => { input.form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+  return [...document.querySelectorAll('dialog')].at(-1)!;
+}
+const own = (query: string) => `${window.location.origin}/?${query}`;
+
+it('opens the session of a pasted link of this site and closes the scanner', async () => {
+  const onOpen = vi.fn(async () => true), onClose = vi.fn();
+  await paste(own('host=host&provider=codex&session=shared&window=sharer'), onOpen, onClose);
+  expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ hostId: 'host', providerId: 'codex', nativeSessionId: 'shared' }));
+  expect(onClose).toHaveBeenCalled();
+});
+
+it('refuses a link of another site without opening anything, and says when the session could not be opened', async () => {
+  const onOpen = vi.fn(async () => false), onClose = vi.fn();
+  const foreign = await paste('https://elsewhere.example/?host=host&provider=codex&session=shared', onOpen, onClose);
+  expect(onOpen).not.toHaveBeenCalled();
+  expect(foreign.querySelector('[role="alert"]')).not.toBeNull();
+  const failed = await paste(own('host=host&provider=codex&session=shared'), onOpen, onClose);
+  expect(onOpen).toHaveBeenCalledOnce();
+  expect(onClose).not.toHaveBeenCalled();
+  expect(failed.querySelector('[role="alert"]')).not.toBeNull();
 });

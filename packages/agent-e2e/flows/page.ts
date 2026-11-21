@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import type { ScriptedRow } from '@orchardworks/agent-e2e/stack';
+import { actAsLocalUser, type ScriptedProviderOptions, type ScriptedRow, type Stack } from '@orchardworks/agent-e2e/stack';
 import { SESSION_CONNECTION_PATTERN, sessionConnectionWordsIn } from '@orchardworks/agent-e2e/faults/connection-words.mjs';
 
 /** The page's own words and controls, so a flow reads as what a person does. Selectors live here and nowhere else. */
@@ -215,4 +215,17 @@ export async function watchWords(page: Page): Promise<{ seen(): Promise<string[]
       return [...new Set(texts.flatMap(text => sessionConnectionWordsIn(text)))];
     },
   };
+}
+
+/**
+ * A second Controller paired as an installed one is: the page's own pairing endpoint issues the key (the flow that types it in is E1's),
+ * and the Controller connects with it as a Host of its own. `close()` stops it.
+ */
+export async function pairSecondHost(stack: Stack, host: { name: string; installationId: string } & ScriptedProviderOptions) {
+  const key = await actAsLocalUser(stack.origin, async request => {
+    const response = await request('POST', 'v1/remote/pairings', {});
+    if (!response.ok) throw new Error(`The Relay did not issue a pairing key (${response.status} ${await response.text()}).`);
+    return (await response.json() as { key: string }).key;
+  });
+  return stack.pairController({ key, ...host });
 }

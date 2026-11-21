@@ -16,7 +16,7 @@
  * active turn until the turn ends, as a real provider does, and a denied approval ends it.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { parseAgentPreparedTextInput, serializeAgentPreparedTextInput, type AgentInteractionResponse, type AgentProviderAdapter, type AgentToolDetail, type AgentSessionNativeEvidence, type ProviderObservation, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import { AgentRuntimeError, parseAgentPreparedTextInput, serializeAgentPreparedTextInput, type AgentInteractionResponse, type AgentProviderAdapter, type AgentToolDetail, type AgentSessionNativeEvidence, type ProviderObservation, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory, AgentHostProviderRegistration } from '@orchardworks/agent-remote-controller';
 import { NativeSessionOwnerError, type NativeOwnerIdentity } from '@orchardworks/agent-remote-controller/testing';
 import { ScriptedSession } from '@orchardworks/agent-remote-fixtures';
@@ -105,7 +105,7 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
 
   const open = (nativeSessionId: string): ScriptedSession => {
     const saved = known.get(nativeSessionId);
-    if (!saved) throw new Error(`No scripted session ${nativeSessionId}.`);
+    if (!saved) throw new AgentRuntimeError('native_session_unavailable', `No scripted session ${nativeSessionId}.`);
     saved.diverged = false;
     const items: ProviderStreamItem[] = [...saved.history.map((entry, at) => observation(nativeSessionId, entry, at + 1, 'history')), { type: 'history_boundary' }];
     const base = new ScriptedSession(providerId, nativeSessionId, items);
@@ -267,6 +267,8 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
     known: () => [...known.keys()],
     /** The working directory the page chose for a session it created, by native session id. */
     startedIn: (nativeSessionId: string) => startedIn.get(nativeSessionId),
+    /** The Host loses the session, as a deleted or never saved native session is lost: the directory no longer lists it and opening it is refused. */
+    forget(nativeSessionId: string) { known.delete(nativeSessionId); },
     /** Rows a terminal appends to the native history while the Controller's session does not see them; the provider reports the divergence. */
     terminalWrite(nativeSessionId: string, ...rows: ScriptedRow[]) {
       const saved = known.get(nativeSessionId);

@@ -121,6 +121,15 @@ it("follows a bot's current session after a handoff and keeps the latest reply o
     .sections[0]!.rows[0]!.reply).toEqual({ replyAt: 9, preview: 'Picked it up.' });
 });
 
+it("keeps the latest reply of a handed-off bot on a device that did not hand it off, from the sessions its chain lists", () => {
+  const groups = [group('A', [createWindowView('a1', binding('after'), 'primary')])];
+  const replies: Record<string, { replyAt: number; preview: string }> = { before: { replyAt: 7, preview: 'Said on the first provider.' } };
+  const earlier = (windowId: string, viewId: string) => windowId === 'A' && viewId === 'a1' ? [{ hostId: 'host', providerId: 'recorded', nativeSessionId: 'before' }] : [];
+  const row = (options: { earlier?: typeof earlier }) => projectBotRoster(groups, [], { status: () => 'idle', reply: session => replies[session.nativeSessionId], ...options }).sections[0]!.rows[0]!;
+  expect(row({}).reply).toBeUndefined();
+  expect(row({ earlier }).reply).toEqual({ replyAt: 7, preview: 'Said on the first provider.' });
+});
+
 it('lists Chats flat: pinned first, then by latest reply, never a hidden assistant, then Other sessions', () => {
   const first = group('first', ['quiet', 'old', 'pinned'].map(id => createWindowView(id, binding(id))));
   first.bots!.members = { pinned: { pinned: true }, old: {} };

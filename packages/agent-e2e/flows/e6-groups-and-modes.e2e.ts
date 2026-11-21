@@ -1,9 +1,9 @@
 // E6 of the target architecture: a group of sessions built in a Window, the Bot and Window modes over the same sessions, folding and waking a
 // pane, and a draft that stays in the composer when the person changes mode.
-import type { Browser, Page } from '@playwright/test';
+import type { Browser, BrowserContext, Page } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { startStack, type Stack } from '@orchardworks/agent-e2e/stack';
-import { launchBrowser, openPage } from './browser.js';
+import { launchBrowser, openPage, openPageIn } from './browser.js';
 import { composerOf, goTo, showSidebar, showsText } from './page.js';
 
 let stack: Stack; let browser: Browser;
@@ -21,7 +21,7 @@ const assistantOf = (page: Page, answer: string) => page.locator('.lab-session-f
 const botRow = (page: Page, name: string) => page.locator('[data-workbench-mode="bot"]').getByRole('button', { name, exact: true }).first();
 
 /** Alpha open, and Beta added to the same Window from All sessions. */
-async function groupOfTwo(): Promise<{ page: Page; close(): Promise<void> }> {
+async function groupOfTwo(): Promise<{ context: BrowserContext; page: Page; close(): Promise<void> }> {
   const { context, page } = await openPage(browser, stack.sessionUrl('alpha'));
   await showsText(page, 'alpha answer');
   const rail = await showSidebar(page);
@@ -29,7 +29,7 @@ async function groupOfTwo(): Promise<{ page: Page; close(): Promise<void> }> {
   await page.getByRole('button', { name: 'Choose session' }).first().click();
   await page.locator('#lab-sessions-page').getByText('Beta', { exact: true }).first().click();
   await showsText(page, 'beta answer');
-  return { page, close: () => context.close() };
+  return { context, page, close: () => context.close() };
 }
 
 it('E6: a group is built by adding a second session to the Window', async () => {
@@ -51,11 +51,17 @@ it('E6: Bot mode lists the group, opens one bot, and Window mode shows both pane
   await close();
 });
 
-it('E6: a folded pane gives up its rows and the other pane stays', async () => {
-  const { page, close } = await groupOfTwo();
+it('E6: a folded pane gives up its rows and the other pane stays, on a second page of the same Window too', async () => {
+  const { context, page, close } = await groupOfTwo();
+  // A second page on the Window's address shows the same group, and the fold made on the first reaches it.
+  const { page: other } = await openPageIn(context, page.url());
+  await showsText(other, 'alpha answer');
+  await showsText(other, 'beta answer');
   await page.getByRole('button', { name: 'Minimize primary group: Alpha' }).first().click();
   await page.waitForFunction(() => !document.body.innerText.includes('alpha answer'));
   await showsText(page, 'beta answer');
+  await other.waitForFunction(() => !document.body.innerText.includes('alpha answer'));
+  await showsText(other, 'beta answer');
   await close();
 });
 

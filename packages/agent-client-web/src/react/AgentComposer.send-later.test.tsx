@@ -32,6 +32,18 @@ it('sends text later from a draft-only composer and clears the draft once it wai
   expect(send).toHaveBeenLastCalledWith('And then the release notes');
 });
 
+it('keeps what the person typed meanwhile when the message that was waiting to be kept settles', async () => {
+  let settle!: () => void;
+  const send = vi.fn(() => new Promise<void>(resolve => { settle = resolve; }));
+  const view = await setup({ sendLater: { label: 'Send when Mac mini is back', send } });
+  await view.type('One queued offline send');
+  await view.enter();
+  expect(send).toHaveBeenCalledTimes(1);
+  await view.type('Later editable draft');
+  await act(async () => settle());
+  expect(view.input().value).toBe('Later editable draft');
+});
+
 it('sends later while the Host is offline even if the session still looks attached', async () => {
   const send = vi.fn(async () => {}), sendMessage = vi.fn(async () => {});
   const view = await setup({ draftOnly: false, onSendMessage: sendMessage, sendLater: { label: 'Send when Mac mini is back', send } });

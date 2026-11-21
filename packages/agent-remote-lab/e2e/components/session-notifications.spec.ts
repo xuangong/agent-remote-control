@@ -1,10 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
-import type { SessionAttentionNotifications } from '../src/session-notifications';
+import type { SessionAttentionNotifications } from '../../src/session-notifications';
 
 type NotificationFixture = { notifier: SessionAttentionNotifications; notices: { title: string; onclick?: () => void; options: NotificationOptions }[]; focused: number; opened: string[] };
 const session = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Research' };
 async function setup(page: Page, displayed: boolean) {
-  await page.goto('/');
+  await page.goto('/e2e/fixtures/orchard-primitives.html');
   return page.evaluateHandle(async ({ session, displayed }) => {
     const url = '/src/session-notifications.ts';
     const { SessionAttentionNotifications } = await import(/* @vite-ignore */ url);

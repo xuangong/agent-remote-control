@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  identityFindings, inputIdentityFindings, liveOnlyFindings, recordedItems, rereadOrderFindings, usageLimitFindings, writerElsewhereFindings,
+  identityFindings, inputIdentityFindings, liveOnlyFindings, recordedItems, rereadOrderFindings, unknownEventFindings, usageLimitFindings, writerElsewhereFindings,
   type ProviderNativeLimit, type ProviderNativeTurn,
 } from './conformance-checks.js';
-import { AgentSessionInUseError, UNDECLARED_PROVIDER_BEHAVIOUR, type AgentProviderBehaviour, type ProviderObservation } from './index.js';
+import { AgentSessionInUseError, UNDECLARED_PROVIDER_BEHAVIOUR, unknownNativeEventLine, type AgentProviderBehaviour, type ProviderObservation } from './index.js';
 
 /** A timeline row of item `key` in turn `turnId`, as an adapter emits it. */
 const row = (key: string, turnId?: string, options: { liveOnly?: true; type?: 'assistant_message' | 'todo' | 'error'; delivery?: 'live' | 'history'; clientId?: string } = {}): ProviderObservation => ({
@@ -85,5 +85,16 @@ describe('the checks of the provider conformance kit', () => {
     expect(writerElsewhereFindings(new AgentSessionInUseError('Busy.'), declaring)).toHaveLength(1);
     expect(writerElsewhereFindings(new Error('thread already has an active writer'), declaring)).toHaveLength(1);
     expect(writerElsewhereFindings(undefined, declared({}))).toEqual([]);
+  });
+
+  it('find an unknown event that became a row, one dropped silently, and one reported where the CLI sent none (K7)', () => {
+    const turn = (rows: ProviderObservation[], diagnostics: string[], unknownSent: number): ProviderNativeTurn => ({ live: rows, reread: [], diagnostics, unknownSent });
+    const known = [row('a', 't1')];
+    const reported = unknownNativeEventLine('test', 'hologram', 'live');
+    expect(unknownEventFindings('test', turn(known, [reported, 'another line'], 1), turn(known, [], 0))).toEqual([]);
+    expect(unknownEventFindings('test', turn([...known, row('hologram', 't1', { type: 'error' })], [reported], 1), turn(known, [], 0))).toHaveLength(1);
+    expect(unknownEventFindings('test', turn(known, [], 1), turn(known, [], 0))).toEqual(['unknown events: test reported 0 diagnostics for 1 events of a kind it does not know, so some were dropped silently']);
+    expect(unknownEventFindings('test', turn(known, [reported], 1), turn(known, [reported], 0))).toHaveLength(1);
+    expect(unknownEventFindings('test', turn(known, [], 0), turn(known, [], 0))).toEqual(['unknown events: the native fake sent no event of a kind the adapter does not know']);
   });
 });

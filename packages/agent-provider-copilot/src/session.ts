@@ -1,5 +1,5 @@
 import { RESOURCE_INPUT_CAPABILITIES, resourceInputText, projectResourceInputText } from '@orchardworks/agent-provider-sdk';
-import { AgentOperationRejectedError, prepareAgentOperation, bindAgentSessionTools } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, prepareAgentOperation, bindAgentSessionTools, unknownNativeEventLine } from '@orchardworks/agent-provider-sdk';
 import { randomUUID } from 'node:crypto';
 import { open } from 'node:fs/promises';
 import { constants } from 'node:fs';
@@ -8,6 +8,7 @@ import { IMAGE_INPUT_CAPABILITIES, type AgentInputPart, validateCommandDirectory
 import type { CopilotAgentProviderOptions } from './provider.js';
 import { Channel, deadline } from './channel.js';
 import { Projector, provider, record } from './projector.js';
+import { knownCopilotEvent } from './native-kinds.js';
 import {copilotLimitResetsAt, copilotUsageLimited} from './usage-limit.js';
 import { CopilotChildSession } from './child-session.js';
 import {isNativeInteraction} from './interaction-mapping.js';
@@ -148,7 +149,9 @@ export class CopilotAgentSession implements AgentSession {
   private emitRuntime() { this.emit({type: 'runtime_updated', provider, runtimeInfo: structuredClone({...this.info, status: this.info.status})}); }
   private accept(event: SessionEvent, delivery: 'history' | 'live'): void {
     if (this.closed || this.seen.has(event.id)) return; this.seen.add(event.id);
-    
+    // An event of a type this adapter does not know is one diagnostic and no row (gap 10).
+    if (!knownCopilotEvent(event.type)) { try { this.options.onDiagnostic?.(unknownNativeEventLine(provider, event.type, delivery)); } catch { /* Diagnostics cannot interrupt native observation. */ } return; }
+
     if (event.type === 'session.binary_asset') this.images.register(event.data);
     const d = record(event.data); const owner = event.agentId ?? (typeof d.parentToolCallId === 'string' ? d.parentToolCallId : undefined);
     if (delivery === 'live') {

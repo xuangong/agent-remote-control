@@ -50,3 +50,22 @@ it('notes unverified native versions and a launcher that predates version report
     expect.objectContaining({ code: 'unverified_native_version', severity: 'notice', message: expect.stringContaining('codex 0.163.0 is newer than 0.162.0') }),
   ]);
 });
+
+it('counts the events of a kind an adapter does not know, by provider and kind, and notes them for an hour (gap 10)', () => {
+  const f = health();
+  f.health.unknownNativeEvent('codex', 'thread/hologram/updated');
+  f.health.unknownNativeEvent('codex', 'thread/hologram/updated');
+  f.advance(1000);
+  f.health.unknownNativeEvent('claude', 'system/hologram');
+  const snapshot = f.health.snapshot();
+  expect(snapshot.unknownNativeEvents).toEqual([
+    { providerId: 'codex', kind: 'thread/hologram/updated', count: 2, lastAt: 1_000_000 },
+    { providerId: 'claude', kind: 'system/hologram', count: 1, lastAt: 1_001_000 },
+  ]);
+  expect(snapshot.warnings).toEqual([{ code: 'unknown_native_events', severity: 'notice', count: 3,
+    message: 'Agents sent 3 events of a kind this Controller does not know in the last hour (codex thread/hologram/updated, claude system/hologram). They are not shown; a newer Controller may show them.' }]);
+  f.advance(60 * 60_000);
+  expect(f.health.snapshot().unknownNativeEvents).toEqual([{ providerId: 'claude', kind: 'system/hologram', count: 1, lastAt: 1_001_000 }]);
+  f.advance(1);
+  expect(f.health.snapshot()).toMatchObject({ unknownNativeEvents: [], warnings: [] });
+});

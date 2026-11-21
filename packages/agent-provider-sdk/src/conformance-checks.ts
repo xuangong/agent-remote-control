@@ -1,3 +1,4 @@
+import { readUnknownNativeEvent } from './native-events.js';
 import { AgentSessionInUseError } from './provider.js';
 import type { AgentLiveOnlyKind, AgentProviderBehaviour, AgentRereadBehaviour } from './behaviour.js';
 import type { JournalRecording } from './journal-recording.js';
@@ -21,6 +22,8 @@ import type { AgentRuntimeInfo, AgentStreamEvent, ProviderObservation } from './
  *   that code and reports `runtimeInfo.usageLimit`, with the reset time when the CLI gives one; one that types it not fails it untyped.
  * - K6 Writer elsewhere: an adapter that declares the `failures.inUse` reason `writer_elsewhere` raises the CLI's refusal of a second
  *   writer as `AgentSessionInUseError` with that reason.
+ * - K7 Unknown native events (gap 10, `native-events.ts`): an event of a kind the adapter does not know is one diagnostic
+ *   (`native_event_unknown`) each time it arrives, never a row and never a silent drop.
  */
 
 /** One item of a recorded side, in the order items first appear, as the journal groups rows: its key, type, turn and marks. */
@@ -169,4 +172,21 @@ export function writerElsewhereFindings(refusal: unknown, behaviour: AgentProvid
   if (refusal instanceof AgentSessionInUseError && refusal.reason === 'writer_elsewhere') return [];
   const seen = refusal instanceof Error ? `${refusal.name}${refusal instanceof AgentSessionInUseError ? ` (${refusal.reason ?? 'no reason'})` : ''}` : String(refusal);
   return [`failures.inUse writer_elsewhere: the CLI's refusal of a second writer reached the Controller as ${seen}`];
+}
+
+/** What a turn shows, row by row, without the times and source keys a play draws afresh: kind, item type, identity and text. */
+const rowShape = ({ event, itemIdentity }: ProviderObservation): string => [event.type, event.type === 'timeline' ? event.item.type : '', itemIdentity?.key ?? '',
+  itemIdentity?.liveOnly ? 'live-only' : '', event.type === 'timeline' && 'text' in event.item ? event.item.text : ''].join('|');
+const journalShape = (turn: ProviderNativeTurn) => JSON.stringify({ live: turn.live.map(rowShape), reread: turn.reread.map(rowShape) });
+
+/** K7: the same turn with and without events the adapter does not know: the same rows, and one diagnostic for each such event. */
+export function unknownEventFindings(providerId: string, withUnknown: ProviderNativeTurn, without: ProviderNativeTurn): string[] {
+  const findings: string[] = [];
+  if (withUnknown.unknownSent < 1) findings.push('unknown events: the native fake sent no event of a kind the adapter does not know');
+  if (journalShape(withUnknown) !== journalShape(without)) findings.push(`unknown events: an event of a kind ${providerId} does not know changed the rows: ${journalShape(withUnknown)} instead of ${journalShape(without)}`);
+  const reported = (turn: ProviderNativeTurn) => turn.diagnostics.flatMap(line => { const unknown = readUnknownNativeEvent(line); return unknown?.providerId === providerId ? [unknown] : []; });
+  const seen = reported(withUnknown).length;
+  if (seen !== withUnknown.unknownSent) findings.push(`unknown events: ${providerId} reported ${seen} diagnostics for ${withUnknown.unknownSent} events of a kind it does not know${seen < withUnknown.unknownSent ? ', so some were dropped silently' : ''}`);
+  if (reported(without).length > 0) findings.push(`unknown events: ${providerId} reported events of a kind it does not know where the CLI sent none: ${reported(without).map(({ kind }) => kind).join(', ')}`);
+  return findings;
 }

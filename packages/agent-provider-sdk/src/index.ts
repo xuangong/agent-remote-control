@@ -11,6 +11,7 @@ export * from './session-tools.js';
 export * from './native-evidence.js';
 export * from './item-identity.js';
 export * from './behaviour.js';
+export * from './native-events.js';
 
 export type { BackgroundActivity } from './background-activity.js';
 

@@ -1,5 +1,5 @@
 import {
-  AgentRuntimeError, AgentSessionInUseError, type AgentMessageOptions, type AgentPersistenceHandle, type AgentProviderAdapter, type AgentProviderBehaviour, type AgentRuntimeInfo,
+  AgentRuntimeError, AgentSessionInUseError, unknownNativeEventLine, type AgentMessageOptions, type AgentPersistenceHandle, type AgentProviderAdapter, type AgentProviderBehaviour, type AgentRuntimeInfo,
   type ProviderObservation, type ProviderStreamItem,
 } from '@orchardworks/agent-provider-sdk';
 import type { RemoteSessionSummary } from '@orchardworks/agent-session-runtime';
@@ -35,7 +35,8 @@ import { ScriptedSession } from './journal-scripted-session.js';
  *   session reports `runtimeInfo.usageLimit { resetsAt }` until a turn runs again.
  * - S7 Faults mid-turn, on the next turn: `crash()` fails it with `native_exited` and ends the session's stream; `hang()` stops it after its
  *   user message.
- * - S8 `unknownEvent(kind)`: until healed, every history read and every turn carries an item of a kind the adapter does not know.
+ * - S8 `unknownEvent(kind)`: until healed, every history read and every turn carries an event of a kind the adapter does not know, which
+ *   the simulated adapter reports as one diagnostic each time (`native_event_unknown`, the rule of gap 10), and never as a row.
  * - S9 Time runs only on the injected clock, so fake timers drive every delay.
  */
 
@@ -97,9 +98,9 @@ export function simulatedCli(options: SimulatedCliOptions) {
   const timeline = (delivery: 'history' | 'live', item: Item): ProviderObservation => observation(delivery,
     { type: 'timeline', provider: providerId, turnId: item.turnId, item: { type: item.type, text: item.text, messageId: item.key, ...(item.clientId ? { clientMessageId: item.clientId } : {}) } }, item);
   const keepsClientIds = behaviour.input.identity === 'echoes_client_id';
-  /** A well-formed observation of an item kind the adapter does not know, as a CLI update could add one (S8). */
-  const unknown = (delivery: 'history' | 'live', kind: string, turnId: string): ProviderObservation => ({
-    ...observation(delivery, { type: 'timeline', provider: providerId, turnId, item: { type: kind, text: 'from a newer CLI' } as never }), itemIdentity: { key: `${turnId}:${kind}`, completes: true } });
+  /** An event of a kind the adapter does not know, as a CLI update could add one: a diagnostic of the simulated adapter, never a row (S8). */
+  const diagnostics: string[] = [];
+  const unknown = (delivery: 'history' | 'live', kind: string): void => { diagnostics.push(unknownNativeEventLine(providerId, kind, delivery)); };
 
   /** Leaves a session that lost its last client loaded for the declared unload time (S1). */
   function left(native: Native): void {
@@ -123,8 +124,8 @@ export function simulatedCli(options: SimulatedCliOptions) {
     usageLimit: { resetsAt: number } | undefined;
     constructor(readonly native: Native) {
       const items = history(native);
-      const newer = turnFaults.unknownKind ? [unknown('history', turnFaults.unknownKind, 'history-newer')] : [];
-      super(providerId, native.id, [...items.map(item => timeline('history', item)), ...newer, { type: 'history_boundary' }]);
+      if (turnFaults.unknownKind) unknown('history', turnFaults.unknownKind);
+      super(providerId, native.id, [...items.map(item => timeline('history', item)), { type: 'history_boundary' }]);
       this.branch = [...items];
     }
     override async runtimeInfo(): Promise<AgentRuntimeInfo> {
@@ -161,7 +162,7 @@ export function simulatedCli(options: SimulatedCliOptions) {
       clock.setTimeout(() => {
         if (this.closed) return;
         const reply: Item = { key: `${turnId}:reply`, type: 'assistant_message', text: `Reply to ${text}`, turnId };
-        if (unknownKind) this.push(unknown('live', unknownKind, turnId));
+        if (unknownKind) unknown('live', unknownKind);
         this.push(timeline('live', reply));
         this.push(observation('live', { type: 'turn_completed', provider: providerId, turnId }));
         this.running = undefined;
@@ -250,6 +251,8 @@ export function simulatedCli(options: SimulatedCliOptions) {
       };
       return { adapter, directory: createManagedStdioDirectory(providerId, options.displayName ?? 'Simulated CLI', provider, []) };
     },
+    /** The diagnostic lines the simulated adapter reported. */
+    diagnostics: () => [...diagnostics],
     /** What the CLI holds of a session now. */
     native(id: string) {
       const native = nativeOf(id);

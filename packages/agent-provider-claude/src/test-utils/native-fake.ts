@@ -71,7 +71,7 @@ export function claudeNativeFake(): ProviderNativeFake {
         if (unknown) { unknownSent += 1; first.native.push(UNKNOWN_MESSAGE); }
         first.native.push(assistant('assistant-2', 'msg-2', 'Reply to Next'));
         first.native.push(result('result-2', input.uuid!));
-        await first.seen.until(() => first.seen.events().some(event => event.type === 'turn_completed'), 'the end of the live turn');
+        await first.seen.until(() => first.seen.liveEvents().some(event => event.type === 'turn_completed'), 'the end of the live turn');
       } finally { await first.session.dispose(); await first.seen.done; }
       // Claude Code keeps the uuid a message was sent with as its record's (FL1); the catalog gives each record the turn it belongs to.
       transcript.push(user(inputId, 'Next'), inTurn(assistant('assistant-2', 'msg-2', 'Reply to Next'), inputId));
@@ -91,7 +91,7 @@ export function claudeNativeFake(): ProviderNativeFake {
         const input = (await native.nextInput()).value as SDKUserMessage;
         native.push({ type: 'rate_limit_event', session_id: SESSION, uuid: 'limit', rate_limit_info: { status: 'rejected', resetsAt: resetsAtS, rateLimitType: 'five_hour' } });
         native.push(result('limited', input.uuid!, true));
-        await seen.until(() => seen.events().some(event => event.type === 'turn_failed'), 'the failed turn');
+        await seen.until(() => seen.liveEvents().some(event => event.type === 'turn_failed'), 'the failed turn');
         return { events: seen.events(), runtime: await session.runtimeInfo(), resetsAt: resetsAtS * 1000 };
       } finally { await session.dispose(); await seen.done; }
     },

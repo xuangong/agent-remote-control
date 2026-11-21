@@ -8,7 +8,7 @@ import { CodexEventProjector, type CodexEventProjectorOptions } from './projecto
 export function projectCodexThreadHistory(
   response: unknown,
   threadId: string,
-  options: Pick<CodexEventProjectorOptions, 'images' | 'cwd'> = {},
+  options: Pick<CodexEventProjectorOptions, 'images' | 'cwd' | 'diagnostic'> = {},
 ): ProviderObservation[] {
   const thread = readThread(response, threadId);
   const projector = new CodexEventProjector(threadId, { ...options, cwd: options.cwd ?? readString(thread.cwd), delivery: 'history' });

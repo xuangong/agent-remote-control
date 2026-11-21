@@ -1,5 +1,5 @@
 import { RESOURCE_INPUT_CAPABILITIES } from '@orchardworks/agent-provider-sdk';
-import { AgentOperationRejectedError, bindAgentSessionToolNamespaces, prepareAgentOperation } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, bindAgentSessionToolNamespaces, prepareAgentOperation, unknownNativeEventLine } from '@orchardworks/agent-provider-sdk';
 import {ClaudeNativeProcess} from './native-process.js';
 import { claudeMessageContent } from './message-content.js';
 import { randomUUID } from 'node:crypto';
@@ -12,6 +12,7 @@ import { ClaudeInteractions } from './interactions.js';
 import { ClaudeUsage } from './usage.js';
 import { ClaudeImageRegistry } from './images.js';
 import { ClaudeEventProjector } from './projector.js';
+import { unknownClaudeMessage, unknownClaudeRecord } from './native-kinds.js';
 import { discoverClaudeCommands } from './commands.js';
 import { ClaudeChildren } from './children.js';
 import { createClaudeCatalog, type ClaudeCatalog, type ClaudeTimelineMessage } from './catalog.js';
@@ -161,8 +162,8 @@ export class ClaudeAgentSession implements AgentSession {
     this.images = new ClaudeImageRegistry(config.sessionId);
     this.projector = new ClaudeEventProjector(config.sessionId, 'live', this.images);
     const history = new ClaudeEventProjector(config.sessionId, 'history', this.images);
-    this.history = messages.flatMap(message => history.project(message).map(observation => message.turnId && observation.type === 'observation'
-      && observation.event.type !== 'runtime_updated' && observation.event.type !== 'thread_started' ? { ...observation, event: { ...observation.event, turnId: message.turnId } } : observation));
+    this.history = messages.flatMap(message => this.known(message, 'history') ? history.project(message).map(observation => message.turnId && observation.type === 'observation'
+      && observation.event.type !== 'runtime_updated' && observation.event.type !== 'thread_started' ? { ...observation, event: { ...observation.event, turnId: message.turnId } } : observation) : []);
     this.children = new ClaudeChildren(config.sessionId, config.cwd,
       options.catalog ?? createClaudeCatalog(options.env ?? {}, this.timeout), () => this.runtimeUpdated());
     this.nativeEvidence = new ClaudeNativeEvidence({ id: config.sessionId, cwd: config.cwd ?? process.cwd(), options,
@@ -694,11 +695,20 @@ export class ClaudeAgentSession implements AgentSession {
     this.native.close();
   }
 
+  /** Whether the adapter knows a native message or transcript record; one it does not know is a diagnostic and no row (gap 10). */
+  private known(message: unknown, delivery: 'live' | 'history'): boolean {
+    const kind = delivery === 'live' ? unknownClaudeMessage(message) : unknownClaudeRecord(message);
+    if (kind === undefined) return true;
+    try { this.options.onDiagnostic?.(unknownNativeEventLine('claude', kind, delivery, kind === '(unreadable)' ? 'unreadable' : 'unknown_kind')); } catch { /* Diagnostics cannot interrupt native observation. */ }
+    return false;
+  }
+
   private async consume(): Promise<void> {
     try {
       for await (const message of this.native) {
         if (this.disposed) break;
         this.lastWriteAt = Date.now();
+        if (!this.known(message, 'live')) continue;
         if (message.type === 'system' && message.subtype === 'background_tasks_changed') this.backgroundTasks = (message as { tasks?: Array<{ ambient?: unknown }> }).tasks?.filter(task => !task.ambient).length ?? 0;
         if (message.type === 'rate_limit_event') { this.noteRateLimit(message.rate_limit_info); continue; }
         if (message.session_id && message.session_id !== this.config.sessionId) throw new Error('Claude returned a different native session identity.');

@@ -12,6 +12,8 @@ export interface ControllerHealthSnapshot {
   windowMinutes: number;
   requestFailures: Array<{ operation: string; status: number; code?: string; count: number; lastAt: number }>;
   nativeExits: Array<{ providerId: string; outcome: string; count: number; lastAt: number }>;
+  /** Events of a kind an adapter does not know (gap 10), which it reported as diagnostics and showed nowhere. */
+  unknownNativeEvents: Array<{ providerId: string; kind: string; count: number; lastAt: number }>;
   uplinkDrops: { count: number; lastAt?: number };
   natives: Array<{ providerId: string; version: string; verified: string; newer: boolean }>;
   launcher: { managed: boolean; version?: string };
@@ -33,6 +35,7 @@ export function createControllerHealth(options: { natives(): Array<{ providerId:
   const startedAt = now();
   type Entry = { at: number; kind: 'request'; operation: string; status: number; code?: string }
     | { at: number; kind: 'native_exit'; providerId: string; outcome: string }
+    | { at: number; kind: 'unknown_event'; providerId: string; eventKind: string }
     | { at: number; kind: 'uplink_drop' };
   let events: Entry[] = [];
   const record = (entry: Entry) => {
@@ -45,6 +48,8 @@ export function createControllerHealth(options: { natives(): Array<{ providerId:
       if (status >= 400) record({ at: now(), kind: 'request', operation, status, ...(code ? { code } : {}) });
     },
     nativeExit(providerId: string, outcome: string) { record({ at: now(), kind: 'native_exit', providerId, outcome }); },
+    /** An adapter reported an event of a kind it does not know (`native_event_unknown`). */
+    unknownNativeEvent(providerId: string, eventKind: string) { record({ at: now(), kind: 'unknown_event', providerId, eventKind }); },
     uplinkDrop() { record({ at: now(), kind: 'uplink_drop' }); },
     snapshot(): ControllerHealthSnapshot {
       const at = now(), hour = recent(at - windowMs);
@@ -62,6 +67,8 @@ export function createControllerHealth(options: { natives(): Array<{ providerId:
       const requestFailures = group(requests, entry => JSON.stringify([entry.operation, entry.status, entry.code ?? null]),
         entry => ({ operation: entry.operation, status: entry.status, ...(entry.code ? { code: entry.code } : {}) }));
       const nativeExits = group(exits, entry => JSON.stringify([entry.providerId, entry.outcome]), entry => ({ providerId: entry.providerId, outcome: entry.outcome }));
+      const unknown = hour.filter((entry): entry is Extract<Entry, { kind: 'unknown_event' }> => entry.kind === 'unknown_event');
+      const unknownNativeEvents = group(unknown, entry => JSON.stringify([entry.providerId, entry.eventKind]), entry => ({ providerId: entry.providerId, kind: entry.eventKind }));
       const natives = options.natives().flatMap(native => {
         const verified = verifiedNativeVersions[native.providerId];
         return native.version && verified ? [{ providerId: native.providerId, version: native.version, verified, newer: compareVersions(native.version, verified) > 0 }] : [];
@@ -82,9 +89,11 @@ export function createControllerHealth(options: { natives(): Array<{ providerId:
         message: `The connection to the Relay dropped ${drops.length} times in the last hour. Sessions reconnect automatically; frequent drops point to the network or the Relay.` });
       if (options.launcher.managed && !options.launcher.version) warnings.push({ code: 'legacy_launcher', severity: 'notice',
         message: 'The service launcher predates launcher updates. After a Controller update it is replaced on disk, and the new launcher runs from the next service restart, for example after signing in again or restarting the computer.' });
+      if (unknown.length) warnings.push({ code: 'unknown_native_events', severity: 'notice', count: unknown.length,
+        message: `Agents sent ${unknown.length} ${unknown.length === 1 ? 'event' : 'events'} of a kind this Controller does not know in the last hour (${unknownNativeEvents.slice(0, 5).map(entry => `${entry.providerId} ${entry.kind}`).join(', ')}). They are not shown; a newer Controller may show them.` });
       for (const native of natives) if (native.newer) warnings.push({ code: 'unverified_native_version', severity: 'notice',
         message: `${native.providerId} ${native.version} is newer than ${native.verified}, the latest version verified with this Controller.` });
-      return { generatedAt: at, startedAt, windowMinutes: windowMs / 60_000, requestFailures, nativeExits,
+      return { generatedAt: at, startedAt, windowMinutes: windowMs / 60_000, requestFailures, nativeExits, unknownNativeEvents,
         uplinkDrops: { count: drops.length, ...(drops.length ? { lastAt: drops.at(-1)!.at } : {}) }, natives, launcher: options.launcher, warnings };
     },
   };

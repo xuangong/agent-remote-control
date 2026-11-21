@@ -16,10 +16,13 @@ describe('Codex parent-session collaboration observations', () => {
     expect(projector.projectNotification('item/started', { threadId: 'parent', item })).toMatchObject({ event: { item: { type: 'tool_call', callId: 'activity', status: 'running', detail: { type: 'other', description: 'Agent /review: interacted' } } } });
     expect(projector.projectNotification('item/completed', { threadId: 'other', item })).toBeNull();
   });
-  it('does not treat known goal and discovery notifications as agent errors', () => {
-    const projector = new CodexEventProjector('parent');
+  it('does not treat known goal and discovery notifications as agent errors, and reports only an unknown one', () => {
+    const diagnostics: string[] = [];
+    const projector = new CodexEventProjector('parent', { diagnostic: line => diagnostics.push(line) });
     for (const method of ['thread/goal/cleared', 'thread/goal/updated', 'skills/changed', 'thread/queue/changed', 'item/mcpToolCall/progress']) expect(projector.projectNotification(method, { threadId: 'parent' })).toBeNull();
-    expect(projector.projectNotification('unknown/new', { threadId: 'parent' })).toMatchObject({ event: { item: { type: 'error', message: expect.stringContaining('Unsupported') } } });
+    expect(diagnostics).toEqual([]);
+    expect(projector.projectNotification('unknown/new', { threadId: 'parent' })).toBeNull();
+    expect(diagnostics.map(line => JSON.parse(line))).toEqual([{ event: 'native_event_unknown', providerId: 'codex', kind: 'unknown/new', delivery: 'live', reason: 'unknown_kind' }]);
   });
 });
 

@@ -1,7 +1,9 @@
 import { OpenCode, type OpenCodeClient, type V2Event } from '@opencode/client';
 import { createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
-import { AgentRuntimeError } from '@orchardworks/agent-provider-sdk';
+import { AgentRuntimeError, unknownNativeEventLine } from '@orchardworks/agent-provider-sdk';
+
+import { knownOpenCodeEvent } from './native-kinds.js';
 
 export interface OpenCodeAgentProviderOptions {
   serverUrl?: string;
@@ -116,6 +118,8 @@ export class OpenCodeTransport {
           if (combined.aborted) break;
           arm(45000);
           if (!ready) { ready = true; attempt = 0; this.eventConnected = true; this.broadcast(subscriber => subscriber.connected()); }
+          // An event of a type this adapter does not know is one diagnostic, never a row and never a refresh (gap 10).
+          if (!knownOpenCodeEvent((event as { type?: unknown }).type)) { this.diagnostic(unknownNativeEventLine('opencode', (event as { type?: unknown }).type, 'live')); continue; }
           this.broadcast(subscriber => subscriber.receive(event));
         }
       } catch { this.diagnostic('OpenCode event connection interrupted; reconciling native state on reconnect.'); }

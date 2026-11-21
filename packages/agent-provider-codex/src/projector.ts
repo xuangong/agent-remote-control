@@ -1,4 +1,4 @@
-import { projectResourceInputText } from '@orchardworks/agent-provider-sdk';
+import { projectResourceInputText, unknownNativeEventLine } from '@orchardworks/agent-provider-sdk';
 import { createHash, randomUUID } from 'node:crypto';
 
 import { codexToolResult } from './tool-result.js';
@@ -32,7 +32,10 @@ import {
 } from './native.js';
 
 const PROVIDER_ID = 'codex';
-const MAX_UNSUPPORTED_MESSAGE_LENGTH = 640;
+/**
+ * Notifications of the app-server protocol (codex-cli 0.171.0) that are not part of the conversation. Every other method the projector
+ * does not handle is a notification it does not know: one diagnostic, never a row (gap 10, `agent-provider-sdk/src/native-events.ts`).
+ */
 const NON_TIMELINE_NOTIFICATION_METHODS = new Set([
   'account/rateLimits/updated',
   'rawResponseItem/completed',
@@ -69,7 +72,10 @@ export interface CodexEventProjectorOptions {
   delivery?: 'history' | 'live';
   images?: CodexImageRegistry;
   cwd?: string;
-  /** Receives one JSON line for a native notice that is not part of the conversation, such as a failing MCP server at start-up. */
+  /**
+   * Receives one JSON line for a native notice that is not part of the conversation, such as a failing MCP server at start-up, and for
+   * each notification or item of a kind the projector does not know or cannot read.
+   */
   diagnostic?: (line: string) => void;
 }
 
@@ -161,7 +167,7 @@ export class CodexEventProjector {
     if (NON_TIMELINE_NOTIFICATION_METHODS.has(method)) return null;
     if (method === 'thread/started') {
       if (!isRecord(params) || !isRecord(params.thread) || !readString(params.thread.id)) {
-        return this.invalidNotification(method, params);
+        return this.invalidNotification(method);
       }
       const startedThreadId = readString(params.thread.id);
       if (startedThreadId !== this.threadId) return null;
@@ -174,9 +180,9 @@ export class CodexEventProjector {
     const turnId = readTurnId(params);
 
     if (method === 'mcpServer/startupStatus/updated' || method === 'hook/started' || method === 'hook/completed') {
-      if (!isRecord(params)) return this.invalidNotification(method, params, turnId);
+      if (!isRecord(params)) return this.invalidNotification(method);
       const status = method === 'mcpServer/startupStatus/updated' ? params.status : isRecord(params.run) ? params.run.status : undefined;
-      if (typeof status !== 'string') return this.invalidNotification(method, params, turnId);
+      if (typeof status !== 'string') return this.invalidNotification(method);
       // The native runtime announces its start-up again at every start and history never holds it.
       if (status === 'failed') {
         const name = readString(params.name) ?? (isRecord(params.run) ? readString(params.run.eventName) : undefined) ?? method;
@@ -201,10 +207,10 @@ export class CodexEventProjector {
       || method === 'item/plan/delta'
     ) {
       return this.projectTextDelta(method, params, turnId)
-        ?? this.invalidNotification(method, params, turnId);
+        ?? this.invalidNotification(method);
     }
     if (method === 'item/started' || method === 'item/completed') {
-      if (!readItem(params) || !readItemId(params)) return this.invalidNotification(method, params, turnId);
+      if (!readItem(params) || !readItemId(params)) return this.invalidNotification(method);
       return this.projectItemLifecycle(method, params, turnId);
     }
     if (method === 'turn/started') {
@@ -214,27 +220,27 @@ export class CodexEventProjector {
         ? nativeStart * 1_000 : undefined;
       return id ? this.observation(`turn:${id}:started`, {
         type: 'turn_started', provider: PROVIDER_ID, turnId: id,
-      }, startedAt) : this.invalidNotification(method, params, turnId);
+      }, startedAt) : this.invalidNotification(method);
     }
     if (method === 'turn/completed') {
       return this.projectTurnCompleted(params, turnId)
-        ?? this.invalidNotification(method, params, turnId);
+        ?? this.invalidNotification(method);
     }
     if (method === 'turn/plan/updated') {
       return this.projectPlan(params, turnId)
-        ?? this.invalidNotification(method, params, turnId);
+        ?? this.invalidNotification(method);
     }
     if (method === 'thread/tokenUsage/updated') {
       return this.projectUsage(params, turnId)
-        ?? this.invalidNotification(method, params, turnId);
+        ?? this.invalidNotification(method);
     }
     if (method === 'error' && isRecord(params)) {
       const message = readErrorMessage(params.error) ?? readString(params.message);
-      if (!message) return this.invalidNotification(method, params, turnId);
+      if (!message) return this.invalidNotification(method);
       if (turnId && params.willRetry === false) return this.projectTurnFailure(message, turnId);
       return this.errorItem(`error:${turnId ?? this.threadId}:${message}`, message, turnId);
     }
-    return this.errorItem(`unsupported:notification:${method}:${nativeFingerprint(params)}`, unsupportedMessage(`Unsupported Codex notification ${method}`, params), turnId);
+    return this.unknownEvent(method, 'unknown_kind');
   }
 
   projectHistoryItem(item: unknown, turnId?: string, occurredAt?: number): ProviderObservation | null {
@@ -301,8 +307,6 @@ export class CodexEventProjector {
     }
     const mapped = this.mapItem(item, lifecycle);
     if (!mapped) return null;
-    // An item type this adapter does not know is reported once, when it completes, as history reports it.
-    if (mapped.type === 'error' && lifecycle === 'started') return null;
     if (itemType === 'contextCompaction') {
       if (lifecycle === 'started') this.loadingCompactions.add(itemId); else this.loadingCompactions.delete(itemId);
     }
@@ -317,7 +321,6 @@ export class CodexEventProjector {
       case 'tool_call': return identity(`tool:${id}`, mapped.status !== 'running');
       case 'agent_communication': return identity(`comm:${id}`, true);
       case 'compaction': return identity(`compaction:${id}`, lifecycle === 'completed');
-      case 'error': return identity(`error:unsupported-item:${id}`, true);
       case 'reasoning': return identity(`reasoning:${id}`, true);
       case 'assistant_message': return identity(`assistant:${id}`, true);
       default: throw new Error(`Codex item ${readString(item.type)} has no timeline identity`);
@@ -475,10 +478,7 @@ export class CodexEventProjector {
       const text = readString(item.text);
       return text ? { type: 'assistant_message', text, messageId: id } : null;
     }
-    return {
-      type: 'error',
-      message: unsupportedMessage(`Unsupported Codex item type ${type}`, item),
-    };
+    return this.unknownEvent(`item:${type}`, 'unknown_kind');
   }
 
   private mapCommand(item: JsonObject, lifecycle: 'started' | 'completed'): AgentToolCallTimelineItem {
@@ -610,12 +610,15 @@ export class CodexEventProjector {
     return this.observation(sourceKey, { type: 'timeline', provider: PROVIDER_ID, turnId, item: { type: 'error', message } }, undefined, errorIdentity(message));
   }
 
-  private invalidNotification(
-    method: string,
-    params: unknown,
-    turnId?: string,
-  ): ProviderObservation {
-    return this.errorItem(`invalid:notification:${method}:${nativeFingerprint(params)}`, unsupportedMessage(`Invalid Codex notification ${method}`, params), turnId);
+  /** A notification of a known method whose shape the projector cannot read: a diagnostic, never a row. */
+  private invalidNotification(method: string): null {
+    return this.unknownEvent(method, 'unreadable');
+  }
+
+  /** An event of a kind the projector does not know, or cannot read, is one diagnostic and no row (gap 10). */
+  private unknownEvent(kind: string, reason: 'unknown_kind' | 'unreadable'): null {
+    try { this.diagnostic?.(unknownNativeEventLine(PROVIDER_ID, kind, this.delivery, reason)); } catch { /* Diagnostics cannot interrupt native observation. */ }
+    return null;
   }
 }
 
@@ -627,20 +630,4 @@ function identity(key: string, completes = false, liveOnly = false): ProviderIte
 /** An error that native history does not hold: live-only, keyed by its message. */
 export function errorIdentity(message: string): ProviderItemIdentity {
   return identity(`error:${createHash('sha256').update(message).digest('hex').slice(0, 16)}`, true, true);
-}
-
-function unsupportedMessage(prefix: string, details: unknown): string {
-  const message = `${prefix}: ${stringifyJson(details)}`;
-  if (message.length <= MAX_UNSUPPORTED_MESSAGE_LENGTH) return message;
-  return `${message.slice(0, MAX_UNSUPPORTED_MESSAGE_LENGTH - 1)}…`;
-}
-
-function nativeFingerprint(value: unknown): string {
-  const text = stringifyJson(value);
-  let hash = 2_166_136_261;
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index);
-    hash = Math.imul(hash, 16_777_619);
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0');
 }

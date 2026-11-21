@@ -372,7 +372,7 @@ export class CodexAppServerSession implements AgentSession {
     child.olderHistoryCursor = isRecord(history) ? readString(history.historyCursor) : undefined;
     child.bufferedNotifications.push(...buffered);
     child.finishBootstrap(
-      projectCodexThreadHistory(history, child.threadId!, { images: child.images, cwd: child.config.cwd }),
+      projectCodexThreadHistory(history, child.threadId!, { images: child.images, cwd: child.config.cwd, diagnostic: line => child.transport.diagnose(line) }),
       collectCodexThreadHistoryItems(history, child.threadId!),
       undefined, false, history,
     );
@@ -386,7 +386,7 @@ export class CodexAppServerSession implements AgentSession {
     const generation = this.interactionGeneration;
     const page = await readCodexHistoryPage(transport, this.threadId!, { cursor, metadata: { thread: { id: this.threadId } } });
     const observations = await this.communicationHistory.supplement(page,
-      projectCodexThreadHistory(page, this.threadId!, { images: this.images, cwd: this.config.cwd }));
+      projectCodexThreadHistory(page, this.threadId!, { images: this.images, cwd: this.config.cwd, diagnostic: line => transport.diagnose(line) }));
     if (this.disposed || transport !== this.transport || generation !== this.interactionGeneration) throw new Error('Codex history belongs to an old connection. Retry after recovery.');
     this.runtime.inspectHistory(this.threadId!, page);
     return { observations,
@@ -427,7 +427,7 @@ export class CodexAppServerSession implements AgentSession {
       this.preReadyEvents.length = 0;
       for (const pending of this.pendingInteractions.values()) this.emitInteractionRequested(pending.request);
       this.finishBootstrap(
-        projectCodexThreadHistory(history, this.threadId!, { images: this.images, cwd: this.config.cwd }),
+        projectCodexThreadHistory(history, this.threadId!, { images: this.images, cwd: this.config.cwd, diagnostic: line => this.transport.diagnose(line) }),
         collectCodexThreadHistoryItems(history, this.threadId!),
         priorText, false, history,
       );
@@ -537,7 +537,7 @@ export class CodexAppServerSession implements AgentSession {
     session.olderHistoryCursor = history.historyCursor;
     session.runtime.inspectHistory(session.threadId!, history);
     session.finishBootstrap(
-      projectCodexThreadHistory(history, session.threadId!, { images: session.images, cwd: session.config.cwd }),
+      projectCodexThreadHistory(history, session.threadId!, { images: session.images, cwd: session.config.cwd, diagnostic: line => session.transport.diagnose(line) }),
       collectCodexThreadHistoryItems(history, session.threadId!), undefined, false, history,
     );
     return session;
@@ -591,7 +591,7 @@ export class CodexAppServerSession implements AgentSession {
     session.olderHistoryCursor = history.historyCursor;
     session.runtime.inspectHistory(session.threadId!, history);
     session.finishBootstrap(
-      projectCodexThreadHistory(history, session.threadId!, { images: session.images, cwd: session.config.cwd }),
+      projectCodexThreadHistory(history, session.threadId!, { images: session.images, cwd: session.config.cwd, diagnostic: line => session.transport.diagnose(line) }),
       collectCodexThreadHistoryItems(history, session.threadId!),
       undefined, false, history,
     );
@@ -712,7 +712,7 @@ export class CodexAppServerSession implements AgentSession {
     }
     session.runtime.inspectHistory(handle.sessionId, history);
     session.finishBootstrap(
-      projectCodexThreadHistory(history, handle.sessionId, { images: session.images, cwd: session.config.cwd }),
+      projectCodexThreadHistory(history, handle.sessionId, { images: session.images, cwd: session.config.cwd, diagnostic: line => session.transport.diagnose(line) }),
       collectCodexThreadHistoryItems(history, handle.sessionId),
       undefined, false, history,
     );
@@ -1362,7 +1362,7 @@ export class CodexAppServerSession implements AgentSession {
     this.restoreInteractions();
     this.refreshInputCapabilities();
     this.bufferedNotifications.push(...buffered);
-    const history = projectCodexThreadHistory(snapshot, this.threadId, { images: this.images, cwd: this.config.cwd });
+    const history = projectCodexThreadHistory(snapshot, this.threadId, { images: this.images, cwd: this.config.cwd, diagnostic: line => this.transport.diagnose(line) });
     const items = collectCodexThreadHistoryItems(snapshot, this.threadId);
     this.finishBootstrap(history, items, undefined, true, snapshot);
     this.emitRuntimeUpdate(this.activeTurnId ?? null);

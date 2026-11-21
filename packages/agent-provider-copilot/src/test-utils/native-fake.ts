@@ -14,11 +14,15 @@ const handle = { providerId: 'copilot', sessionId: SESSION, opaque: JSON.stringi
 const UNKNOWN_TYPE = 'session.hologram_updated';
 
 interface NativeEvent { id: string; timestamp: string; parentId: null; type: string; data: Record<string, unknown> }
-let sequence = 0;
-const event = (type: string, data: Record<string, unknown> = {}): NativeEvent => ({ id: `event-${++sequence}`, timestamp: new Date(1_795_000_000_000 + sequence * 1000).toISOString(), parentId: null, type, data });
-/** The events of one turn of the CLI: the person's message, a reply, and the turn's end. */
-const turnEvents = (text: string, reply: string, messageId: string) => [event('user.message', { content: text }), event('assistant.turn_start', { turnId: '0' }),
-  event('assistant.message', { messageId, content: reply }), event('assistant.turn_end', { turnId: '0' }), event('assistant.idle', {})];
+/** The events one play of the CLI emits, numbered from one, so two plays of the same turn name their events alike. */
+function events() {
+  let sequence = 0;
+  const event = (type: string, data: Record<string, unknown> = {}): NativeEvent => ({ id: `event-${++sequence}`, timestamp: new Date(1_795_000_000_000 + sequence * 1000).toISOString(), parentId: null, type, data });
+  /** The events of one turn of the CLI: the person's message, a reply, and the turn's end. */
+  const turn = (text: string, reply: string, messageId: string) => [event('user.message', { content: text }), event('assistant.turn_start', { turnId: '0' }),
+    event('assistant.message', { messageId, content: reply }), event('assistant.turn_end', { turnId: '0' }), event('assistant.idle', {})];
+  return { event, turn };
+}
 
 /** A Copilot CLI session as the client sees it: its history, the handler of its live events, and what a send makes the CLI do. */
 function nativeSession(history: NativeEvent[], onSend: (emit: (value: NativeEvent) => void) => void) {
@@ -57,12 +61,14 @@ export function copilotNativeFake(): ProviderNativeFake {
   return {
     async turn({ unknown }) {
       let unknownSent = 0;
-      const history = [...turnEvents('Hello', 'Hi', 'message-1')];
-      if (unknown) history.splice(2, 0, event(UNKNOWN_TYPE, { detail: 'from a newer CLI' }));
-      const live = turnEvents('Next', 'Reply to Next', 'message-2');
+      const { event, turn } = events();
+      const history = [...turn('Hello', 'Hi', 'message-1')];
+      const live = turn('Next', 'Reply to Next', 'message-2');
+      const strange = [event(UNKNOWN_TYPE, { detail: 'from a newer CLI' }), event(UNKNOWN_TYPE, { detail: 'from a newer CLI' })];
+      if (unknown) history.splice(2, 0, strange[0]!);
       const native = nativeCopilot(history, { onSend: emit => {
         emit(live[0]!); emit(live[1]!);
-        if (unknown) { unknownSent += 1; emit(event(UNKNOWN_TYPE, { detail: 'from a newer CLI' })); }
+        if (unknown) { unknownSent += 1; emit(strange[1]!); }
         for (const value of live.slice(2)) emit(value);
         history.push(...live);
       } });
@@ -72,7 +78,7 @@ export function copilotNativeFake(): ProviderNativeFake {
       try {
         await seen.boundary();
         await session.sendMessage('Next');
-        await seen.until(() => seen.events().some(value => value.type === 'turn_completed'), 'the end of the live turn');
+        await seen.until(() => seen.liveEvents().some(value => value.type === 'turn_completed'), 'the end of the live turn');
       } finally { await session.dispose(); await seen.done; }
       const again = await native.provider.resumeSession(handle);
       if (unknown) unknownSent += 1;
@@ -83,6 +89,7 @@ export function copilotNativeFake(): ProviderNativeFake {
 
     async usageLimit() {
       // `session.error` with `errorType` `rate_limit`, and the seconds until the reset in the `auto_mode_switch.requested` that follows.
+      const { event } = events();
       const native = nativeCopilot([], { onSend: emit => {
         emit(event('user.message', { content: 'Over the limit' }));
         emit(event('assistant.turn_start', { turnId: '0' }));

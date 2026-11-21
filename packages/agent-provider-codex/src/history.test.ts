@@ -39,25 +39,17 @@ describe('projectCodexThreadHistory', () => {
       .toThrow('Codex thread/read returned other instead of thread-1');
   });
 
-  it('keeps unsupported history items visible with bounded details', () => {
+  it('reports a history item of a type it does not know as one diagnostic, naming the type only, and shows no row for it (gap 10)', () => {
+    const diagnostics: string[] = [];
     const history = projectCodexThreadHistory({
       thread: { id: 'thread-1', turns: [{
         id: 'turn-1', completedAt: 2,
-        items: [{ type: 'futureTool', id: 'future-1', payload: 'z'.repeat(2_000) }],
+        items: [{ type: 'futureTool', id: 'future-1', payload: 'z'.repeat(2_000) }, { type: 'agentMessage', id: 'agent-1', text: 'Hi' }],
       }] },
-    }, 'thread-1');
+    }, 'thread-1', { diagnostic: line => diagnostics.push(line) });
 
-    expect(history).toHaveLength(1);
-    expect(history[0]).toMatchObject({
-      delivery: 'history', sourceKey: 'item:future-1:completed',
-      event: { type: 'timeline', item: { type: 'error' } },
-    });
-    const event = history[0]?.event;
-    if (event?.type !== 'timeline' || event.item.type !== 'error') {
-      throw new Error('Expected an unsupported history item diagnostic');
-    }
-    expect(event.item.message).toContain('futureTool');
-    expect(event.item.message.length).toBeLessThanOrEqual(640);
+    expect(history.map(({ itemIdentity }) => itemIdentity?.key)).toEqual(['assistant:agent-1']);
+    expect(diagnostics.map(line => JSON.parse(line))).toEqual([{ event: 'native_event_unknown', providerId: 'codex', kind: 'item:futureTool', delivery: 'history', reason: 'unknown_kind' }]);
   });
 });
 

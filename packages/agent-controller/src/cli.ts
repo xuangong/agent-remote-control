@@ -6,6 +6,7 @@ import { createDaemonMonitor } from './codex-daemon-monitor.js';
 import { restartCodexDaemon, supportsCodexDaemonControl } from './codex-daemon-runner.js';
 import { controllerIdentity, pruneControllerPackages, refreshInstalledLauncher, requestLauncherRestart } from './controller-update.js';
 import { createControllerHealth } from './controller-health.js';
+import { readUnknownNativeEvent } from '@orchardworks/agent-provider-sdk';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { appendFileSync, realpathSync } from 'node:fs';
@@ -190,6 +191,8 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   const providerDiscovery = await createHostProviderDiscovery({ stateDir, env: environment,
     onDiagnostic: (line) => {
       writeDiagnostic(line, diagnosticSecrets);
+      const unknown = readUnknownNativeEvent(line);
+      if (unknown) health.unknownNativeEvent(unknown.providerId, unknown.kind);
       if (line.includes('"event":"native_process_exited"')) {
         try { const exit = JSON.parse(line) as { providerId?: unknown; outcome?: unknown }; if (typeof exit.providerId === 'string' && typeof exit.outcome === 'string') health.nativeExit(exit.providerId, exit.outcome); }
         catch { /* Health only counts well-formed exits. */ }

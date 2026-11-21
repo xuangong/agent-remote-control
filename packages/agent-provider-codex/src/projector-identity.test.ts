@@ -113,17 +113,18 @@ describe('Codex item identity', () => {
     expect(projector.projectNotification('error', { threadId: THREAD, turnId: TURN, error: { message: 'Other words' }, willRetry: true })!.itemIdentity!.key).not.toBe(first.itemIdentity!.key);
   });
 
-  it('keys a failed turn the same in both paths, and an item type it does not know once, when it completes', () => {
-    const projector = new CodexEventProjector(THREAD);
+  it('keys a failed turn the same in both paths, and gives an item type it does not know no row, live or in history (gap 10)', () => {
+    const diagnostics: string[] = [];
+    const projector = new CodexEventProjector(THREAD, { diagnostic: line => diagnostics.push(line) });
     const failure = projector.projectTurnFailure('boom', TURN);
     expect(failure.itemIdentity).toEqual({ key: `turn-error:${TURN}`, completes: true });
     const [fromHistory] = projectCodexThreadHistory({ thread: { id: THREAD, turns: [{ id: TURN, status: 'failed', error: { message: 'boom' }, items: [] }] } }, THREAD);
     expect(fromHistory!.itemIdentity).toEqual(failure.itemIdentity);
     const unknown = { type: 'futureTool', id: 'future-1' };
     expect(projector.projectNotifications(...lifecycle('item/started', unknown))).toEqual([]);
-    const [completed] = projector.projectNotifications(...lifecycle('item/completed', unknown));
-    expect(completed!.itemIdentity).toEqual({ key: 'error:unsupported-item:future-1', completes: true });
-    expect(projectCodexThreadHistory({ thread: { id: THREAD, turns: [{ id: TURN, items: [unknown] }] } }, THREAD)[0]!.itemIdentity).toEqual(completed!.itemIdentity);
+    expect(projector.projectNotifications(...lifecycle('item/completed', unknown))).toEqual([]);
+    expect(projectCodexThreadHistory({ thread: { id: THREAD, turns: [{ id: TURN, items: [unknown] }] } }, THREAD, { diagnostic: line => diagnostics.push(line) })).toEqual([]);
+    expect(diagnostics.map(line => JSON.parse(line)).map(({ kind, delivery }) => `${delivery} ${kind}`)).toEqual(['live item:futureTool', 'live item:futureTool', 'history item:futureTool']);
   });
 
   it('keys an agent communication by comm: and an image by image:, equal live and in history', () => {

@@ -163,15 +163,12 @@ describe('CodexEventProjector', () => {
     ['turn/completed', { threadId: 'thread-1', turn: {} }],
     ['turn/plan/updated', { threadId: 'thread-1', turnId: 'turn-1' }],
     ['thread/tokenUsage/updated', { threadId: 'thread-1', turnId: 'turn-1', tokenUsage: {} }],
-  ])('projects malformed known notification %s as a visible diagnostic', (method, params) => {
-    const projector = new CodexEventProjector('thread-1');
+  ])('reports a malformed known notification %s as an unreadable event, with no row (gap 10)', (method, params) => {
+    const diagnostics: string[] = [];
+    const projector = new CodexEventProjector('thread-1', { diagnostic: line => diagnostics.push(line) });
 
-    expect(projector.projectNotification(method, params)).toMatchObject({
-      event: {
-        type: 'timeline',
-        item: { type: 'error', message: expect.stringContaining(`Invalid Codex notification ${method}`) },
-      },
-    });
+    expect(projector.projectNotification(method, params)).toBeNull();
+    expect(diagnostics.map(line => JSON.parse(line))).toEqual([{ event: 'native_event_unknown', providerId: 'codex', kind: method, delivery: 'live', reason: 'unreadable' }]);
   });
 
   it('projects plan deltas as one appendable assistant message', () => {
@@ -314,32 +311,16 @@ describe('CodexEventProjector', () => {
     expect(projector.projectNotification('thread/compacted', { threadId: 'thread-1', turnId: 'turn-1' })).toBeNull();
   });
 
-  it('projects unsupported notifications and live items as bounded diagnostics', () => {
-    const projector = new CodexEventProjector('thread-1');
-    const notification = projector.projectNotification('thread/futureState/updated', {
-      threadId: 'thread-1', futureState: 'x'.repeat(2_000),
-    });
-    const item = projector.projectNotification('item/completed', {
-      threadId: 'thread-1', turnId: 'turn-1',
-      item: { type: 'futureTool', id: 'future-1', payload: 'y'.repeat(2_000) },
-    });
-
-    expect(notification).toMatchObject({
-      event: { type: 'timeline', item: { type: 'error' } },
-    });
-    expect(item).toMatchObject({
-      event: { type: 'timeline', item: { type: 'error' } },
-    });
-    if (notification?.event.type !== 'timeline' || notification.event.item.type !== 'error') {
-      throw new Error('Expected an unsupported notification diagnostic');
-    }
-    if (item?.event.type !== 'timeline' || item.event.item.type !== 'error') {
-      throw new Error('Expected an unsupported item diagnostic');
-    }
-    expect(notification.event.item.message).toContain('thread/futureState/updated');
-    expect(notification.event.item.message.length).toBeLessThanOrEqual(640);
-    expect(item.event.item.message).toContain('futureTool');
-    expect(item.event.item.message.length).toBeLessThanOrEqual(640);
+  it('reports a notification and an item of a kind it does not know as diagnostics that name the kind only, with no row (gap 10)', () => {
+    const diagnostics: string[] = [];
+    const projector = new CodexEventProjector('thread-1', { diagnostic: line => diagnostics.push(line) });
+    expect(projector.projectNotification('thread/futureState/updated', { threadId: 'thread-1', futureState: 'x'.repeat(2_000) })).toBeNull();
+    expect(projector.projectNotification('item/completed', { threadId: 'thread-1', turnId: 'turn-1', item: { type: 'futureTool', id: 'future-1', payload: 'y'.repeat(2_000) } })).toBeNull();
+    expect(diagnostics.map(line => JSON.parse(line))).toEqual([
+      { event: 'native_event_unknown', providerId: 'codex', kind: 'thread/futureState/updated', delivery: 'live', reason: 'unknown_kind' },
+      { event: 'native_event_unknown', providerId: 'codex', kind: 'item:futureTool', delivery: 'live', reason: 'unknown_kind' },
+    ]);
+    expect(diagnostics.join('\n')).not.toContain('xxx');
   });
 });
 

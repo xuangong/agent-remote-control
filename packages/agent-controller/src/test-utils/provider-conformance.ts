@@ -73,6 +73,7 @@ async function faultHarness(behaviour: AgentProviderBehaviour): Promise<Provider
     },
     history: () => cli.native(SESSION).history,
     nativeClients: () => cli.native(SESSION).clients,
+    diagnostics: () => cli.diagnostics(),
     advance: async ms => { await vi.advanceTimersByTimeAsync(ms); },
     faults: cli.faults,
     writeElsewhere: ({ text, turnMs, retryAfterMs }) => cli.externalWriter(SESSION, { text, turnMs,

@@ -67,7 +67,7 @@ export function codexNativeFake(): ProviderNativeFake {
       try {
         await seen.boundary();
         await session.sendMessage('Next', { inputId });
-        await seen.until(() => seen.events().some(event => event.type === 'turn_completed'), 'the end of the live turn');
+        await seen.until(() => seen.liveEvents().some(event => event.type === 'turn_completed'), 'the end of the live turn');
       } finally { await session.dispose(); await seen.done; }
       const again = await native.provider.resumeSession(handle);
       const reread = followSession(again);
@@ -86,7 +86,7 @@ export function codexNativeFake(): ProviderNativeFake {
         native.notify('account/rateLimits/updated', { rateLimits: { limitId: 'codex', primary: { usedPercent: 100, windowDurationMins: 300, resetsAt: resetsAtS }, secondary: null } });
         native.notify('turn/started', { turn: { id: 'turn-1', status: 'inProgress' } });
         native.notify('turn/completed', { turn: { id: 'turn-1', status: 'failed', error: { message: 'You have hit your usage limit.', codexErrorInfo: 'usageLimitExceeded', additionalDetails: null } } });
-        await seen.until(() => seen.events().some(event => event.type === 'turn_failed'), 'the failed turn');
+        await seen.until(() => seen.liveEvents().some(event => event.type === 'turn_failed'), 'the failed turn');
         return { events: seen.events(), runtime: await session.runtimeInfo(), resetsAt: resetsAtS * 1000 };
       } finally { await session.dispose(); await seen.done; }
     },

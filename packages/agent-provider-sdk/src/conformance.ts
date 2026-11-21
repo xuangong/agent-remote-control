@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { AgentProviderBehaviour } from './behaviour.js';
+import { readUnknownNativeEvent } from './native-events.js';
 import {
-  identityFindings, inputIdentityFindings, liveOnlyFindings, rereadOrderFindings, usageLimitFindings, writerElsewhereFindings,
+  identityFindings, inputIdentityFindings, liveOnlyFindings, rereadOrderFindings, unknownEventFindings, usageLimitFindings, writerElsewhereFindings,
   type ProviderNativeLimit, type ProviderNativeTurn,
 } from './conformance-checks.js';
 import { journalObservation, type JournalRecording } from './journal-recording.js';
@@ -23,7 +24,8 @@ export * from './conformance-checks.js';
  * - Part 2, faults through the port: the Controller beside the CLI simulator playing the declaration meets a slow resume, a hung resume,
  *   a usage limit, a crash and a hang in the middle of a turn, an item kind it does not know and a writer elsewhere, and each surfaces as
  *   the declared typed failure, the declared deadline, or no row.
- * - Part 3, the declared behaviour: the adapter, driven by a fake of its CLI, does what it declares (K3 to K6).
+ * - Part 3, the declared behaviour: the adapter, driven by a fake of its CLI, does what it declares (K3 to K6), and follows the one rule
+ *   for events of a kind it does not know (K7), which every adapter follows, journal-capable or not (`runUnknownEventRule`).
  *
  * A subject names what the adapter brings: its declaration, its recordings and its native fake. The ports are what only the
  * Controller has: the journal's window decision and the Controller beside the simulator (`agent-controller`'s test support).
@@ -75,6 +77,8 @@ export interface ProviderFaultHarness {
   /** What the CLI holds: the texts of the history a reread shows, and how many clients of this process the session has. */
   history(): string[];
   nativeClients(): number;
+  /** The diagnostic lines the simulated adapter reported. */
+  diagnostics(): string[];
   /** Moves the fake clock. */
   advance(ms: number): Promise<void>;
   /** The simulator's knobs (S6 to S8 of `simulated-cli.ts`). */
@@ -119,6 +123,8 @@ export function followSession(session: AgentSession) {
     /** Every journal observation so far, history and live. */
     journal: () => observations().filter(journalObservation),
     events: () => observations().map(({ event }) => event),
+    /** The events that came live, after the history. */
+    liveEvents: () => observations().filter(({ delivery }) => delivery === 'live').map(({ event }) => event),
     async until(condition: () => boolean, what: string, timeoutMs = 2000): Promise<void> {
       const deadline = Date.now() + timeoutMs;
       while (!condition()) {
@@ -182,11 +188,26 @@ export function runProviderConformance(subject: ProviderConformanceSubject, port
         if (!subject.native.writerElsewhere) throw new Error('The native fake does not play the CLI refusing a second writer.');
         expect(writerElsewhereFindings(await subject.native.writerElsewhere(), behaviour)).toEqual([]);
       });
+
+      unknownEventRule(subject);
     });
 
     describe('part 2: faults through the port, played by the CLI simulator from the declaration', () => {
       runFaults(behaviour, ports);
     });
+  });
+}
+
+/** The rule for events of a kind the adapter does not know (K7), for an adapter that is not journal-capable too. */
+export function runUnknownEventRule(subject: Pick<ProviderConformanceSubject, 'name' | 'providerId' | 'native'>): void {
+  describe(`provider conformance: ${subject.name}`, () => { unknownEventRule(subject); });
+}
+
+function unknownEventRule(subject: Pick<ProviderConformanceSubject, 'providerId' | 'native'>): void {
+  it('reports an event of a kind it does not know as one diagnostic, never a row and never a silent drop (gap 10, K7)', async () => {
+    const without = await subject.native.turn({ inputId: CONFORMANCE_INPUT_ID, unknown: false });
+    const withUnknown = await subject.native.turn({ inputId: CONFORMANCE_INPUT_ID, unknown: true });
+    expect(unknownEventFindings(subject.providerId, withUnknown, without)).toEqual([]);
   });
 }
 
@@ -293,14 +314,14 @@ function runFaults(behaviour: AgentProviderBehaviour, ports: ProviderConformance
     expect(h.history().slice(-2)).toEqual(['Again', 'Reply to Again']);
   });
 
-  // Gap 10: the simulator plays an adapter that turns an unknown item kind into a row, as Codex did; the rule makes it a diagnostic.
-  it.fails('keeps the rows it knows when the CLI sends an item of a kind the adapter does not know, and shows none for it (gap 10)', async () => {
+  it('keeps the rows it knows when the CLI sends an event of a kind the adapter does not know, shows none for it, and has it reported (gap 10)', async () => {
     const h = await start();
     h.faults.unknownEvent('hologram');
     expect(await h.open()).toMatchObject({ status: 200 });
     await h.send('Next');
     await h.advance(h.turnMs);
     expect(await h.shown()).toEqual(['Hello', 'Hi', 'Next', 'Reply to Next']);
+    expect(h.diagnostics().map(line => readUnknownNativeEvent(line)?.delivery)).toEqual(['history', 'live']);
   });
 
   const refusesWriters = concurrency.model === 'single_writer' || concurrency.model === 'shared_clients' && concurrency.probe === 'lock_file';

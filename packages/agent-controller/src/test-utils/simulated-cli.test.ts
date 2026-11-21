@@ -202,7 +202,7 @@ describe('the simulated CLI', () => {
     expect(texts(await drained(hanging))).toEqual(['Hang']);
   });
 
-  it('sends an item of a kind the adapter does not know in every history read and turn until healed (S8)', async () => {
+  it('reports an event of a kind the adapter does not know in every history read and turn until healed, as a diagnostic and never a row (S8)', async () => {
     fakeTimers();
     const cli = simulatedCli({ behaviour: sharedDaemon, sessions: { 'thread-1': ['Hello', 'Hi'] }, turnMs: 100 });
     cli.faults.unknownEvent('hologram');
@@ -210,9 +210,14 @@ describe('the simulated CLI', () => {
     await session.sendMessage('Show');
     await vi.advanceTimersByTimeAsync(100);
     const kinds = (await drained(session)).flatMap(({ event }) => event.type === 'timeline' ? [event.item.type] : []);
-    expect(kinds).toEqual(['user_message', 'assistant_message', 'hologram', 'user_message', 'hologram', 'assistant_message']);
+    expect(kinds).toEqual(['user_message', 'assistant_message', 'user_message', 'assistant_message']);
+    expect(cli.diagnostics().map(line => JSON.parse(line))).toEqual([
+      { event: 'native_event_unknown', providerId: 'simulated', kind: 'hologram', delivery: 'history', reason: 'unknown_kind' },
+      { event: 'native_event_unknown', providerId: 'simulated', kind: 'hologram', delivery: 'live', reason: 'unknown_kind' },
+    ]);
     cli.faults.heal();
-    expect((await drained(await open(cli))).some(({ event }) => event.type === 'timeline' && event.item.type === 'hologram')).toBe(false);
+    await drained(await open(cli));
+    expect(cli.diagnostics()).toHaveLength(2);
   });
 
   it('declares the behaviour it plays, so a Controller reads it as an adapter states it (S9 runs every test above on fake timers)', () => {

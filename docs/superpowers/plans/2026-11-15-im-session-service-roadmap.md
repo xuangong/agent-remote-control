@@ -297,3 +297,16 @@ No expected failures remain in the simulator suite.
 - `pnpm verify` exit 0 (12,941 tests);
 - flows 55 of 55;
 - `smoke:quick` M1, M2, M4 and M7 passed.
+
+## Next after the provider boundary and the module split: I5, UI/UX and IM completeness (owner, 2026-11-22)
+
+The last push brings the UI/UX and the IM experience to a finished state on both the PC and the phone.
+
+| Area | Done when |
+|---|---|
+| **Installable app** | On the PC, Orchard installs as a PWA (Chrome and Edge install prompt; Safari "Add to Dock"). On the phone, it is added to the home screen and opens standalone. Requirements: a complete manifest with maskable and monochrome icons, iOS meta tags and an `apple-touch-icon` at 180 px, a service worker serving the app shell for offline start and update-on-reload, theme colour following the appearance, and an "Install Orchard" entry in Settings when the browser offers it. |
+| **Notifications and badges** | "Needs you" and "finished" reach the person when the app is in the background. This uses Web Push on the PC and on iOS 16.4+ home-screen apps, with the subscription per device in Settings > Assistants. The app badge (`setAppBadge`) shows a dot for unread or needs-you, never a count. Push needs Relay work and a decision on the push service. |
+| **IM completeness audit** | Every row of "Organised as an IM product" in the Orchard design works end to end on desktop and phone: chats by activity, pin and mute, drafts per chat, contacts with add-new and presence, groups and workspaces, search across chats and messages, notifications, message actions (copy, quote, resend, retract and edit where allowed), delivery states, typing and working indicators, and multi-device sync of drafts and reads. Each gap is fixed or recorded as a decision. |
+| **UI/UX finish** | A pass over every screen in both themes and both languages, on desktop and phone: no leftover legacy styling, no stray English in Chinese, empty, loading and error states in the Orchard voice, keyboard shortcuts on the PC, focus order and accessibility, and motion that respects reduced motion. Each screen is checked against the approved mockups. |
+
+Order: the provider boundary (B3, B5 and the phone/platform gaps) first, then the module split for parallel work, then I5. Within I5 the order is: installable app, then the IM audit and its fixes, then notifications and badges, then the UI/UX finish pass.

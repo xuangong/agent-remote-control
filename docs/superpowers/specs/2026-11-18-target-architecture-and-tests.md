@@ -908,3 +908,63 @@ HEAD after the final slice (24c9ca76 for the tests, the instance built from it):
 - `test:e2e:flows`, E3 'the reader keeps their line when a Controller restart replaces the journal...': the reader's row moved 6,119 px (to the newest row) after the send that follows the restart. It failed in the gate and in 1 of 3 reruns, with the same number; no product source changed since the sweep gate, where it passed. Open as O40. Closed after the gate: a product defect, fixed and pinned (O40 in section 10).
 
 **Gate after O40 and O41** (2026-11-19, HEAD d4ca75b4 plus this record): `pnpm test` with enforcement exit 0 (11,386 passed, 22 skipped, 330 s); `test:e2e:flows` 3 of 3 (31 each) after the 20-run streak; `test:e2e` 283 passed, 67 skipped, 0 failed (9.1 min); `smoke:quick` seed 7484, 4 of 4 (M1, M2, M4, M7) on the instance with journals; `arch:check` 0 failing findings, 22 documented exceptions; `compatibility:update`, then `check`.
+
+
+## 12. Check after the Orchard steps (2026-11-21)
+
+Steps I1 to I4 and J, the Orchard IM experience, changed the client a great deal. This section re-checks the completion criteria of this restructuring at HEAD `48e63edd`.
+
+### Architecture
+
+`pnpm arch:check` reports 0 failing findings and the same 22 documented exceptions: 2 `layer`, 8 `dist-import` and the rest as in 11.5.
+
+The new modules follow the target shape: pure rules with vector tables, and thin React shells.
+
+| Module | Rules |
+|---|---|
+| `agent-client/src/client/session-presentation` | notice, composer availability, activity label |
+| `agent-client/src/presentation` | turns, process mode, work summary, assistant name, the message catalogue |
+| `agent-client-web/src/theme` | tokens, contrast, avatar recipes, motion |
+| Lab `destinations` and `settings/settings-groups` | rail destination and the Settings groups |
+
+The source files over 1,000 lines are the same five as in 11.5; none is new.
+
+### Per-change scope for the new modules
+
+| Change | Tests | Time |
+|---|---:|---:|
+| Session presentation rule (`session-presentation.test.ts`) | 35 | 1.5 s |
+| Turns, process mode and assistant name | 99 | 1.2 s |
+| Navigation destinations and Settings groups | 35 | 1.7 s |
+| All of `agent-client` | 824 | 2.6 s |
+| All of `agent-client-web` | 910 | 11 s |
+| The seam suites (`agent-remote-seams`) | 406 | 10 s |
+
+### Totals and slow tests
+
+- **`pnpm verify`** (I4 gate, `.tmp/i4/full2-verify.log`) passed 12,318 tests, failed 0 and skipped 22. After O44 and O45 it passed 12,329 and exited 0.
+- **Mock-data tiers.** Of 10,187 tests:
+  - 247 run over 300 ms, which is 2.4 percent (3.7 percent at the 11.4 measurement);
+  - 15 run over 1 s. Each is either on the allowlist (still 11 entries, each with its reason) or re-measured under 1 s alone.
+- **The enforced reporter** passed.
+
+### E2E and smoke
+
+- **E2E flows: 43 tests.** They cover the main flows E1 to E11, plus the cases that local runs found. New flows:
+  - E9: quiet open, including a 2 s Relay delay;
+  - E10: the assistant conversation;
+  - E11: navigation and Settings.
+- **`smoke:quick`** (journals on, seed 68421, HEAD `315a88cf`): M1, M2, M4 and M7 pass, and every invariant is exercised.
+- **What the smoke run found before it passed:**
+  - **The harness assumed a single primary conversation** (fixed). With several primary groups in a Window it read another session's pane, so its earlier passes of M1 and M4 had checked the wrong session. Now:
+    - every conversation carries `data-native-session`;
+    - the harness reads only the session it opened;
+    - the component test `smoke-probe.spec.ts` checks the harness's own `PageProbe` against a fixture with two primary groups and a dock, in the per-step gate.
+  - **O44, a product defect, fixed and pinned.** At a 300 ms round trip, a message typed during the stand-in-to-Window handoff was held as "could not be opened" and never sent. It is pinned by `SessionConversation.opening`, `AgentComposer.pending` and an E9 flow with a delayed Relay.
+  - **O45, a harness gap, fixed.** The default Concise mode hid tool rows, so the mid-turn checks did not run.
+
+### Lesson for the process
+
+Each Orchard step ran the unit, component and e2e tiers, but not the smoke tier. A layout change broke the smoke harness unnoticed, and a latency-only defect reached production.
+
+The smoke selectors are now checked in the per-step gate. `smoke:quick` runs before each release that changes the client or the Relay, as section 5.7 intended.

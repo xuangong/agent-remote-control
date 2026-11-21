@@ -55,6 +55,8 @@ The shell (socket handling, React hooks, process spawning) stays thin and gets f
 
 Unit and integration tests **must** use mock data. If a test needs the whole stack to check one rule, that is a missing module, not a reason to start the stack.
 
+A component spec runs in the two Chromium projects, unless it is a `phone-*.spec.ts` written for exactly 390 x 844. To run it in WebKit or in the phone projects, name them in its first line, `// Component projects: webkit-desktop, orchard-phone-webkit`; `playwright.components.config.ts` selects by that line, so a new spec never edits it.
+
 ## 3. Mock data that stays honest
 
 - **Build, don't copy.** Use the builders in each package's `./testing` entry (for example `agent-client/testing`: `buildSuccessionReplay`, `buildSuccessionChain`, `buildRoleEvidence`) and in `agent-remote-fixtures`. Inline wire literals drift from the protocol; builders are typed against it.

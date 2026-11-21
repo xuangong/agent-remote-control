@@ -1,6 +1,7 @@
 import { nativePrefixResumeHandle, successionResumeHandle } from './local-succession-preparation.js';
 import { resolveAgentNativePrefixCapability, serializeAgentEmptyCreationResult, type AgentNativePrefixTarget } from '@orchardworks/agent-provider-sdk';
 import {acquireNativeSession, inspectNativeOwner, NativeSessionOwnerError, type NativeSessionLease, type NativeOwnerDiagnostic, type NativeOwnerIdentity, type NativeHandoffGrant} from './native-session-owner.js';
+import { diverged, mayReleaseDiverged } from './transcript-divergence.js';
 import { randomUUID } from 'node:crypto';
 import type {RemoteSessionSummary} from '@orchardworks/agent-session-runtime';
 import type { AgentHistoryQuery, AgentPersistenceHandle, AgentProviderAdapter, AgentSession, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
@@ -260,13 +261,13 @@ export function createManagedStdioDirectory(
     // A runtime that keeps the conversation in memory continues from its own last message, so a transcript another process wrote to is
     // not seen by it: such a session, once nothing runs for it, is released and read again.
     ...(provider.sessionState ? {
-      divergedAt: (id: string) => { const state = provider.sessionState!(id), native = listedAt.get(id); return state && native !== undefined && native > state.writtenAt + 2000 ? state.writtenAt : undefined; },
-      canReleaseSession: (id: string) => { const state = provider.sessionState!(id), native = listedAt.get(id); return !!state?.quiet && native !== undefined && native > state.writtenAt + 2000 && Date.now() - native >= 30_000; },
+      divergedAt: (id: string) => { const state = provider.sessionState!(id); return state && diverged(listedAt.get(id), state.writtenAt) ? state.writtenAt : undefined; },
+      canReleaseSession: (id: string) => mayReleaseDiverged(provider.sessionState!(id), listedAt.get(id), Date.now()),
       async checkDivergence(id: string) {
         const native = await provider.sessionNativeUpdatedAt?.(id);
         if (native !== undefined) listedAt.set(id, native);
         const state = provider.sessionState!(id);
-        return !!state?.quiet && native !== undefined && native > state.writtenAt + 2000;
+        return !!state?.quiet && diverged(native, state.writtenAt);
       },
     } : {}),
     list() { if (closed) throw new Error(`${displayName} directory is closed.`); return discovery ??= discover().finally(() => { discovery = undefined; }); },

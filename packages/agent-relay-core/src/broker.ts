@@ -127,8 +127,10 @@ export function createHostBroker(options: HostBrokerOptions) {
     journalPublished: (hostId, sessionKey, result) => journalSessions?.published(hostId, sessionKey, result), hostReady: host => showSessions(host) });
   const { register, rpc, send, diagnostic, disconnected, notifySessionStates } = hostSession;
   const sessionBindings = createSessionBindings({ brokerState, access, succession, rpc, ids, now, scheduler, enrollmentEnabled: !!options.successionEnrollment, savedAssociations: options.initialState?.associations,
-    ownerSubject: options.ownerSubject, rpcTimeoutMs: options.rpcTimeoutMs });
-  const { runtimeAgentId, sessionRead, recoverBinding, waitForCreation, userMutation, sharedCatalog } = sessionBindings;
+    ownerSubject: options.ownerSubject, rpcTimeoutMs: options.rpcTimeoutMs,
+    readableWithoutController: async binding => !!journalSessions && await journalSessions.serves(binding.hostId, binding.providerId, journalSessionKey(binding.providerId, binding.nativeSessionId)).catch(() => false),
+    nativeRefusalChanged: (binding, refusal) => journalSessions?.refused(binding.hostId, journalSessionKey(binding.providerId, binding.nativeSessionId), refusal) });
+  const { runtimeAgentId, sessionRead, recoverBinding, waitForCreation, userMutation, sharedCatalog, nativeRefusal } = sessionBindings;
   /**
    * Visibility: tells a Host's Controller the complete set of its sessions that pages show (`journal_shown`), when it registers and
    * whenever the set changes, and attaches each shown session the Controller does not hold on this connection, so that every session a
@@ -177,7 +179,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     throw new BrokerError(404, 'route_not_found', 'Unknown Remote Host route.');
   }
   const socketEdge = createSocketEdge({ brokerState, options, now, ids, scheduler, origin, hostStreamLimit, sessionAllowed, requireHost, permitted, keyHash, track, credentialExpiry,
-    register, send, diagnostic, journalSessions, runtimeAgentId, recoverBinding, activeStreamCount,
+    register, send, diagnostic, journalSessions, runtimeAgentId, recoverBinding, nativeRefusal, activeStreamCount,
     admitClientMessages: createClientAdmission({ now, owner }) });
   const routes: RouteGroup[] = [
     createControllerRoutes({ access, brokerState, rpc, successionAction: succession.action, options }),

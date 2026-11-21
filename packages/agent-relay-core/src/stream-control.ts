@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   decodeClientMessage, isSessionMutation, PROTOCOL_VERSION,
-  type ClientMessage, type NativeSessionOwner, type ServerMessage,
+  type ClientMessage, type NativeRefusal, type NativeSessionOwner, type ServerMessage,
 } from '@orchardworks/agent-remote-protocol';
 import {
   initialSessionControl, transition, viewOf, type SessionControlEvent,
@@ -12,6 +12,8 @@ export interface StreamControlOptions {
   send(message: ServerMessage): void;
   /** Asks the Controller who holds the session natively; undefined when nobody does or it cannot say. */
   readNativeOwner(): Promise<NativeSessionOwner | undefined>;
+  /** Asks the Relay to attach a session the CLI refused again; its outcome arrives through `nativeRefused`. */
+  retryNative?(): void;
 }
 
 export interface StreamControl {
@@ -25,6 +27,8 @@ export interface StreamControl {
   holder(): Promise<NativeSessionOwner | undefined>;
   /** The Controller refused a message of this stream; a refusal for a terminal's ownership revokes the grant. */
   controllerRefused(code: string, nativeOwner?: NativeSessionOwner): void;
+  /** Whether the CLI refuses the Controller as a client of the session now, and why; none clears it. */
+  nativeRefused(refusal?: NativeRefusal): void;
   /** A frame of the Controller session on a stream that passes through the Relay: announces the grant after the Snapshot and reads refusals. */
   controllerFrame(raw: string, forward: (raw: string) => void): void;
 }
@@ -55,6 +59,7 @@ export function createStreamControl(options: StreamControlOptions): StreamContro
         void control.holder().catch(() => undefined).then(found => { apply({ type: 'holder', revision: reply.revision, ...(found ? { owner: found } : {}) }); });
         return false;
       }
+      case 'retry_native': sendState(reply.requestId); options.retryNative?.(); return true;
       case 'pass': return false;
       case 'none': return false;
     }
@@ -73,6 +78,7 @@ export function createStreamControl(options: StreamControlOptions): StreamContro
     controllerRefused(code, nativeOwner) {
       apply({ type: 'refused', code, ...(nativeOwner ? { owner: nativeOwner } : {}), fresh: randomUUID() });
     },
+    nativeRefused(refusal) { apply({ type: 'native_refusal', ...(refusal ? { refusal } : {}) }); },
     admitRaw(raw) {
       let frame: { type?: unknown; payload?: { requestId?: unknown } };
       try { frame = JSON.parse(raw); } catch { return false; }

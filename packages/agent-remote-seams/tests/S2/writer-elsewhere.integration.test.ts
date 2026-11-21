@@ -1,7 +1,7 @@
 import { codexBehaviour } from '@orchardworks/agent-provider-codex';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { fakeTime, simulatedStack } from './support/simulated-stack.js';
+import { fakeTime, simulatedStack, until } from './support/simulated-stack.js';
 
 /**
  * S2, a session whose writer is elsewhere: a process outside the CLI's shared clients writes it, so the CLI refuses the Controller. The CLI
@@ -31,7 +31,7 @@ async function writtenElsewhere() {
 }
 
 describe('S2 a session written by a process outside the CLI', () => {
-  it.fails("stays readable from its journal, says the CLI's reason, offers a retry and no take-over, and goes live again after it (O48)", async () => {
+  it("stays readable from its journal, says the CLI's reason, offers a retry and no take-over, and goes live again after it (O48)", async () => {
     const { attach, openPage, agentId, separate, cli } = await writtenElsewhere();
     const opened = await attach();
     expect(opened).toMatchObject({ status: 200, body: { agentId } });
@@ -46,8 +46,26 @@ describe('S2 a session written by a process outside the CLI', () => {
     await vi.advanceTimersByTimeAsync(MINUTE);
     expect(await separate).toBe('written');
     expect((await attach()).status).toBe(200);
-    await vi.advanceTimersByTimeAsync(2000);
     expect(cli.native('thread-1').clients).toBe(1);
-    expect(page.liveTexts()).toContain('Reply to SEPARATE');
+    await until(() => page.liveTexts().includes('Reply to SEPARATE'), "the separate process's turn on the page");
+  });
+
+  it("is read-only with the CLI's reason, and the page's Retry asks the CLI again and takes control once the writer left (O48)", async () => {
+    const { attach, openPage, agentId, separate, cli } = await writtenElsewhere();
+    expect((await attach()).status).toBe(200);
+    const page = await openPage(agentId);
+    await until(() => page.control() !== undefined, 'the control state');
+    expect(page.control()).toEqual({ agentId, revision: expect.any(String), access: 'read_only', available: false, nativeRefusal: { reason: 'writer_elsewhere' } });
+    page.acquire('retry-1');
+    await until(() => page.frames.some(frame => frame.type === 'session_control' && frame.payload.requestId === 'retry-1'), 'the answer to the first retry');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(page.control()).toMatchObject({ access: 'read_only', available: false, nativeRefusal: { reason: 'writer_elsewhere' } });
+    expect(cli.native('thread-1').clients).toBe(0);
+    await vi.advanceTimersByTimeAsync(MINUTE);
+    expect(await separate).toBe('written');
+    page.acquire('retry-2');
+    await until(() => page.control()?.access === 'control', 'control after the writer left');
+    expect(page.control()).toEqual({ agentId, revision: expect.any(String), access: 'control', available: true, token: expect.any(String) });
+    expect(cli.native('thread-1').clients).toBe(1);
   });
 });

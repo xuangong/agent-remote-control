@@ -13,9 +13,10 @@ function fixture() {
   };
   return {provider, session, directory: createCodexSessionDirectory(provider, []), release: () => {occupied = false;}};
 }
-it('offers explicit takeover without stopping the private writer on open', async () => {
+it("reports a writer elsewhere as Codex refuses it on open, and offers no takeover that would stop that process", async () => {
   const f = fixture();
-  await expect(f.directory.open('native')).rejects.toMatchObject({code: 'native_session_owned', owner: {kind: 'native_cli', generation}});
+  await expect(f.directory.open('native')).rejects.toBeInstanceOf(AgentSessionInUseError);
+  expect(f.provider.inspectSessionOwner).not.toHaveBeenCalled();
   expect(f.provider.releaseSessionOwner).not.toHaveBeenCalled();
 });
 it('releases the confirmed writer and resumes the same ID as shared', async () => {

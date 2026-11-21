@@ -13,16 +13,16 @@ checked against the code; the test mapping follows test titles and their asserti
 | Component | Clauses | Gaps when written | Closed by a test | Not tested, with the reason |
 |---|---:|---:|---:|---:|
 | Journal: window decision and quota | 24 | 3 | 3 | 0 |
-| Relay session control | 19 | 4 | 4 | 0 |
+| Relay session control | 20 | 4 | 4 | 0 |
 | Relay host-session | 23 | 6 | 6 | 0 |
 | Controller session core | 23 | 8 | 8 | 0 |
 | Controller publisher | 20 | 4 | 4 | 0 |
 | Codex and Claude adapter item identity | 18 | 4 | 3 | 1 |
 | Client replica and send state | 25 | 7 | 7 | 0 |
-| Client session presentation | 18 | 4 | 4 | 0 |
+| Client session presentation | 19 | 4 | 4 | 0 |
 | Timeline turns, process mode and work line | 21 | 3 | 3 | 0 |
 | Provider behaviour declaration (B1, 2026-11-21) | 6 | 0 | 0 | 0 |
-| **All** | **197** | **43** | **42** | **1** |
+| **All** | **200** | **43** | **42** | **1** |
 
 Every clause now names the tests that prove it. The 43 gaps were closed on 2026-11-21 (section "Gaps closed" below): 42 by a
 unit test, a vector row or a seam test with mock data, each under 300 ms and each failing when the rule it proves is broken (by a
@@ -206,6 +206,7 @@ Module: `packages/agent-relay-core/src/domain/session-control/session-control.ts
 - C17. The first state is sent at most once by Snapshot; a refused acquire never removes a granted token.
 - C18. The table reads its arguments and writes nothing to them; the owner object is not shared with the event or the state.
 - C19. The two session paths (the journal session stream and the Host-session proxy in `host-session.ts` / `socket-edge.ts`) answer control and refuse a mutation without a live grant themselves, and a mutation with the token goes on to the Controller.
+- C20. Native refusal (O48): when the CLI refuses the Controller as a client of the session for its own reason (`nativeRefusal`, another process writes it), the stream is read-only and unavailable and is told the reason; the token is kept and a mutation is refused; an `acquire` with the current revision answers with the state and asks the Relay to attach the session again (`retry_native`); clearing the refusal gives control back under the same revision. The refusal is the Relay's per binding (`session-bindings.ts`): an attach or recovery refused with a reason records it, one that succeeds clears it, and every journal-served stream of the session follows. An attach of a session the Relay reads from its journal is answered with its binding despite the refusal; one it cannot read is refused with the reason in fixed words. Nothing offers a take-over.
 
 | Clause | Test(s) that prove it |
 |---|---|
@@ -228,6 +229,7 @@ Module: `packages/agent-relay-core/src/domain/session-control/session-control.ts
 | C17 | `session-control.test.ts` rows "a later Snapshot says nothing", "a refused acquire does not take away a held token" |
 | C18 | `session-control.test.ts` > "reads its arguments and writes nothing to them", "does not share the owner object with the event or the state" |
 | C19 | `journal-session-stream.test.ts` > "answers control and refuses a mutation without a live grant itself, never opening the Controller stream", "shows the native owner and revokes control when opening the session is refused for it", "learns the owner after a refusal at delivery, which names none, by asking the Controller once"; `broker-journal-sessions.test.ts` > "shows the native owner and revokes control when the first operation is refused for it, and keeps serving reads". The Host-session proxy path: `host-session.test.ts` > "host session browser streams through the Relay" > "forwards the Controller frames of a stream with a lease, and shows the lease after the Snapshot and after an ownership refusal", "sends a frame of a stream without a lease as it is, addressed with the public session id" |
+| C20 | `session-control.test.ts` > "a session the CLI refuses as a client (O48)" (7 rows and the view); `broker-native-refusal.test.ts` (3 tests: the binding answered and the page told why, a Retry that asks the Controller again and gives control, a refusal of a session without a journal); S2 `writer-elsewhere.integration.test.ts` (2 tests, with the CLI simulator) |
 
 Gaps: none. Closed 2026-11-21: C5's `submissionId`, C13 (fresh ids, as a property of the shell), the Host-session proxy path of C19,
 and the wire shape of `session_control`: the Relay's frames were checked against the transcripts, but the client read only hand-written
@@ -334,7 +336,7 @@ Module: `agent-controller/src/session-core/` (`attachment.ts`, `idle-release.ts`
 
 ### Errors and refusals
 - C15. Every malformed request is a `HostRequestError` 400 `invalid_request`; nothing is read from a request before it is validated; unknown routes and non-JSON bodies are refused.
-- C16. `failureResponse`: typed errors keep their status and code; a failed GET is `catalog_unavailable`, a failed attach `session_attach_failed`, anything else `mutation_outcome_unknown`; generic answers carry only the class and code of the cause, never its text. `operationErrorStatus`: conflict 409, capacity 429, unknown outcome / closed cache / native file limit / bad clock 503, others 400.
+- C16. `failureResponse`: typed errors keep their status and code (a session in use keeps the CLI's `reason` and `retryAfterMs`, O48); a failed GET is `catalog_unavailable`, a failed attach `session_attach_failed`, anything else `mutation_outcome_unknown`; generic answers carry only the class and code of the cause, never its text. `operationErrorStatus`: conflict 409, capacity 429, unknown outcome / closed cache / native file limit / bad clock 503, others 400.
 - C17. A provider returning another native identity is closed and refused; a Controller that closed meanwhile disposes what it opened and answers 503 `host_closed`; a disabled provider is refused with `provider_disabled` unless the session is already live under the same identity (uplink recovery).
 - C18. Diagnostics (request diagnostics, `session_idle_*` lifecycle events) can never fail a request or change a session's lifetime; a request diagnostic carries a digest of the native session id, never the id.
 
@@ -362,7 +364,7 @@ Module: `agent-controller/src/session-core/` (`attachment.ts`, `idle-release.ts`
 | C13 | `session-core/requests.test.ts` > "bounds the source identity to 256 characters"; "refuses a title that is empty, too long or holds control characters, a session address and unknown fields"; `session-core/attachment.test.ts` > "an identity chosen after a qualified source create" > "accepts %i characters" (511, 512), "fails the attach for %s" (513 characters, blank, empty), "does not apply the bound when the source is not qualified" |
 | C14 | `session-core/control-routes.test.ts` > "repeats a native start failure instead of starting the session again, until a takeover asks"; `native-start-backoff.test.ts` (backoff policy) |
 | C15 | `session-core/requests.test.ts` > "needs a non-empty string field, and a JSON object body"; "needs a provider, an operation and a proposed identity"; "needs the proposed identity, a provider and a native session"; "takes a prompt edit only as a complete native prompt identity that is not also a source"; "stops with an operation identity only"; `session-core/control-routes.test.ts` > "refuses a request no route knows, and a malformed body" |
-| C16 | `session-core/requests.test.ts` > "maps the operation cache codes to statuses"; the `it.each` under "answering a failure"; "shows the owner of a refused native session"; "answers any other failure generically, and records its class and code, never its text"; "records the class of an error that is not an Error, and ignores a code that is not a plain identifier"; `session-core/control-routes.test.ts` > "records the class of a generic failure, never its text" |
+| C16 | `session-core/requests.test.ts` > "maps the operation cache codes to statuses"; the `it.each` under "answering a failure"; "says why the CLI refused a session in use, and when to try again, when the adapter knows (O48)"; `codex-takeover.test.ts` > "reports a writer elsewhere as Codex refuses it on open, and offers no takeover that would stop that process"; "shows the owner of a refused native session"; "answers any other failure generically, and records its class and code, never its text"; "records the class of an error that is not an Error, and ignores a code that is not a plain identifier"; `session-core/control-routes.test.ts` > "records the class of a generic failure, never its text" |
 | C17 | `session-core/control-routes.test.ts` > "refuses a provider that is disabled, unless the session is already live under that identity"; `session-core/attachment.test.ts` > "attaching a native session" > "closes and refuses a provider that returns another native identity", "disposes what it opened and answers 503 host_closed when the Controller closed meanwhile" |
 | C18 | `session-core/control-routes.test.ts` > "is not failed by a diagnostic sink that throws"; "records a started and a completed diagnostic, with the status and a digest of the native session, never the session itself"; `host-journal.test.ts` > lifecycle `session_idle_released` is observed; `session-core/attachment.test.ts` > "releasing an idle session" > "is not changed by a lifecycle diagnostic sink that throws", "confirms a reconciliation although the sink throws" |
 | C19 | `session-core/bound-sessions.test.ts` > "lists bindings in the order they were made, as a snapshot"; "returns a session's family: itself, its children and grandchildren in the order they were bound, of one provider only"; "returns the family of a session that is not bound as the children bound under it"; "pairs a binding with its runtime and leaves out bindings with none"; "finds the binding a runtime belongs to"; "throws the invalid_operation_target error for a runtime that has no binding" |
@@ -616,6 +618,7 @@ Module: `agent-client/src/client/session-presentation.ts` and `agent-client/src/
 - C16. Without a business fact the outputs are no notice, an enabled composer and a business label or none.
 - C17. A refused (`unavailable`) session is never treated as recovering, so input is not held for a reconnect that will not happen.
 - C18. A send over a restored replica waits and is dispatched only once the first server page confirms the state (R3 consumed by the composer).
+- C19. R6 (O48): a session the CLI refuses as a client (`cli_refused`: another process writes it, or a turn runs) is read-only with the CLI's reason in words, its composer is disabled for that reason, and the Workbench's control notice offers Retry, which asks for control again, never a take-over.
 
 | Clause | Test(s) that prove it |
 |---|---|
@@ -637,6 +640,7 @@ Module: `agent-client/src/client/session-presentation.ts` and `agent-client/src/
 | C16 | `session-presentation.test.ts` > "gives no notice, an enabled composer and a business label or none when no business fact is present" |
 | C17 | `session-state.test.ts` > "does not treat a refused session as recovering, so input is not held for a reconnect that will not happen" |
 | C18 | `agent-remote-seams/tests/S6/client-replica-to-renderer.integration.test.tsx` > "takes a send over a restored replica, shows it as Sending, and sends it only after the first server page confirms the state"; `AgentComposer.pending.test.tsx` > "waits for confirmed control, and holds a waiting message as Not sent when a terminal takes the session, sending it only on Retry" |
+| C19 | `lease-view.test.ts` > "a session the CLI refuses as a client (O48)"; `session-presentation.test.ts` vector row "ready, the CLI refuses: a writer elsewhere" and "has a row for every reason that disables the composer" (eight now); `agent-remote-lab/src/components/SessionWorkbench.test.tsx` > "says the CLI's reason for refusing a session and offers a Retry, never a take-over (O48)" |
 
 Gaps: none. Closed 2026-11-21: C3, C4, C7 and C14. For C7 the seven reasons each had a row already (`other_controller` is "ready,
 another Controller has control", `failed` is "ready, failed with a runtime failure"); the gap list counted four. Not a clause: R3 in
@@ -772,6 +776,6 @@ Each test fails today for the reason its open item names; the change that closes
 | Open item | Test | What fails today |
 |---|---|---|
 | O47 (closed, now plain tests) | `agent-remote-seams/tests/S2/session-residency.integration.test.ts` > "stays resident past the idle grace, so another client's turn still reaches the page live (O47)", "is let go a short grace after no page shows it, so the CLI unloads it within its own unload time of the page closing (O47)" | before the change: the Controller let the shown session go after 5 minutes, and held an unshown one for 5 minutes |
-| O48 | `agent-remote-seams/tests/S2/writer-elsewhere.integration.test.ts` > "stays readable from its journal, says the CLI's reason, offers a retry and no take-over, and goes live again after it (O48)" | the page's open is refused (409 `session_in_use`) |
+| O48 (closed, now plain tests) | `agent-remote-seams/tests/S2/writer-elsewhere.integration.test.ts` > "stays readable from its journal, says the CLI's reason, offers a retry and no take-over, and goes live again after it (O48)", and the Retry test beside it | before the change: the page's open was refused (409 `session_in_use`) |
 | O49 | `agent-controller/src/transcript-fork.test.ts` > "shows the terminal's branch, which native history shows, when both turns end within the tolerance (O49)" | the 2,000 ms rule misses the fork, so the Controller keeps the page's branch |
 | Gap 4 (O53) | `agent-controller/src/resume-deadline.test.ts` > "is given up at the declared deadline with a typed timeout, and frees the binding for the next open (gap 4)" | nothing answers the hung resume, and the next open waits behind it |

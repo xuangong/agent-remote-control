@@ -1,7 +1,7 @@
 import { codexBehaviour } from '@orchardworks/agent-provider-codex';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { fakeTime, simulatedStack } from './support/simulated-stack.js';
+import { fakeTime, simulatedStack, until } from './support/simulated-stack.js';
 
 /**
  * S2, residency of a session a page shows: the Relay serves the page from the session's journal, and the session stays live only while
@@ -35,9 +35,8 @@ describe('S2 a session a page shows', () => {
   it("shows another client's turn live while the page has just opened it", async () => {
     const { cli, page } = await shown();
     const written = cli.externalWriter('thread-1', { text: 'FROM-TERMINAL' });
-    await vi.advanceTimersByTimeAsync(1000 + LIVE_MS);
+    await until(() => page.liveTexts().includes('Reply to FROM-TERMINAL'), "the other client's turn on the page", 1000 + LIVE_MS);
     expect(await written).toBe('written');
-    expect(page.liveTexts()).toContain('Reply to FROM-TERMINAL');
   });
 
   it("stays resident past the idle grace, so another client's turn still reaches the page live (O47)", async () => {
@@ -45,9 +44,8 @@ describe('S2 a session a page shows', () => {
     await vi.advanceTimersByTimeAsync(6 * MINUTE);
     expect(cli.native('thread-1').clients).toBe(1);
     const written = cli.externalWriter('thread-1', { text: 'FROM-TERMINAL' });
-    await vi.advanceTimersByTimeAsync(1000 + LIVE_MS);
+    await until(() => page.liveTexts().includes('Reply to FROM-TERMINAL'), "the other client's turn on the page", 1000 + LIVE_MS);
     expect(await written).toBe('written');
-    expect(page.liveTexts()).toContain('Reply to FROM-TERMINAL');
   });
 
   it('is let go a short grace after no page shows it, so the CLI unloads it within its own unload time of the page closing (O47)', async () => {

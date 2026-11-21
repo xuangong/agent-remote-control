@@ -16,6 +16,15 @@ const table: Array<{ name: string; control: Control; state: LeaseState; readOnly
   { name: 'read-only with nobody holding it', control: { access: 'read_only', available: true }, state: 'read_only', readOnly: true, checking: false, native: false, notice: 'Ready to take control', activity: undefined },
 ];
 
+describe('a session the CLI refuses as a client (O48)', () => {
+  it('is read-only with the reason, and not native: nothing takes it over', () => {
+    expect(leaseView({ access: 'read_only', available: false, nativeRefusal: { reason: 'writer_elsewhere', retryAfterMs: 5000 } }))
+      .toEqual({ state: 'cli_refused', readOnly: true, checking: false, native: false, refusal: 'writer_elsewhere' });
+    expect(leaseNoticeLabel('cli_refused', undefined, 'writer_elsewhere')).toMatch(/active writer.*retry/);
+    expect(leaseNoticeLabel('cli_refused', undefined, 'turn_running')).toMatch(/running a turn.*Retry/);
+  });
+});
+
 describe('the lease view table', () => {
   it.each(table.map(row => [row.name, row] as const))('%s', (_name, row) => {
     expect(leaseView(row.control)).toEqual({ state: row.state, readOnly: row.readOnly, checking: row.checking, native: row.native });

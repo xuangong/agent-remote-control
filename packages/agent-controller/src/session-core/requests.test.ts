@@ -170,6 +170,12 @@ describe('answering a failure', () => {
     expect(response.cause).toBeUndefined();
   });
 
+  it("says why the CLI refused a session in use, and when to try again, when the adapter knows (O48)", () => {
+    expect(answer(new AgentSessionInUseError('Another process writes it.', { reason: 'writer_elsewhere', retryAfterMs: 5000 })).body)
+      .toEqual({ code: 'session_in_use', error: 'Another process writes it.', reason: 'writer_elsewhere', retryAfterMs: 5000 });
+    expect(answer(new AgentSessionInUseError('In use.')).body).toEqual({ code: 'session_in_use', error: 'In use.' });
+  });
+
   it('shows the owner of a refused native session', () => {
     const owner = { kind: 'native_cli' as const, generation: '0f3c2a1e-5b6d-4c7e-8f90-a1b2c3d4e5f6' };
     expect(answer(new NativeSessionOwnerError('native_session_owned', 'owned', owner)).body.nativeOwner).toEqual(owner);

@@ -64,7 +64,9 @@ export interface OutgoingMessage {
 }
 
 export interface AgentReplicaState {
-  readonly sessionControl?: { readonly access: 'control' | 'read_only' | 'checking'; readonly available: boolean; readonly revision?: string; readonly nativeOwner?: {readonly kind: 'native_cli' | 'controller'; readonly generation: string} };
+  readonly sessionControl?: { readonly access: 'control' | 'read_only' | 'checking'; readonly available: boolean; readonly revision?: string; readonly nativeOwner?: {readonly kind: 'native_cli' | 'controller'; readonly generation: string};
+    /** The CLI refuses the Controller as a client of the session, for this reason (another process writes it); read-only until a retry succeeds. */
+    readonly nativeRefusal?: { readonly reason: 'writer_elsewhere' | 'turn_running'; readonly retryAfterMs?: number } };
 
   readonly agent: AgentSnapshotPayload | null;
   readonly timeline: TimelineReplicaState;

@@ -1,7 +1,7 @@
 import type { JournalHead, JournalPageRequest, JournalPageResult, JournalRow } from '@orchardworks/agent-remote-journal';
 import {
   decodeClientMessage, encodeServerMessage, JOURNAL_FILL_MAX_ITEMS, JOURNAL_OLDER_MAX_LIMIT, PROTOCOL_VERSION,
-  type AgentSnapshotPayload, type AgentStatus, type BackgroundActivity, type ClientMessage, type HistoryPage, type NativeSessionOwner, type ServerMessage, type TimelineCursor,
+  type AgentSnapshotPayload, type AgentStatus, type BackgroundActivity, type ClientMessage, type HistoryPage, type NativeRefusal, type NativeSessionOwner, type ServerMessage, type TimelineCursor,
 } from '@orchardworks/agent-remote-protocol';
 
 import type { JournalPublished, JournalStatus } from './host-journals.js';
@@ -61,6 +61,10 @@ export interface JournalSessionStreamOptions {
   scheduler: BrokerScheduler;
   /** Told that the stream shows the session's conversation (`true`, at a negotiation for content, not activity) and that it stopped (`false`, at its end). */
   shown?(shown: boolean): void;
+  /** The CLI's refusal of the Controller as a client of the session when the stream negotiates, if any (O48). */
+  nativeRefusal?(): NativeRefusal | undefined;
+  /** Asks the Relay to attach the refused session again, when the page asks for control; the outcome arrives through `nativeRefused`. */
+  retryNative?(): void;
 }
 
 export interface JournalSessionStream {
@@ -68,6 +72,8 @@ export interface JournalSessionStream {
   receive(raw: string): void;
   /** What a stored publication changed in the session's journal. */
   deliver(result: JournalPublished): void;
+  /** The CLI refuses the Controller as a client of the session, and why, or no longer does: the stream's control state follows. */
+  nativeRefused(refusal: NativeRefusal | undefined): void;
   /** The browser stream ended. */
   close(): void;
 }
@@ -109,7 +115,8 @@ function activityStatus(snapshot: AgentSnapshotPayload): AgentStatus {
  */
 export function createJournalSessionStream(options: JournalSessionStreamOptions): JournalSessionStream {
   const { publicAgentId, client, reads, hostStreams, scheduler } = options;
-  const control = createStreamControl({ agentId: publicAgentId, send: message => sendServer(message), readNativeOwner: options.readNativeOwner });
+  const control = createStreamControl({ agentId: publicAgentId, send: message => sendServer(message), readNativeOwner: options.readNativeOwner,
+    ...(options.retryNative ? { retryNative: options.retryNative } : {}) });
   let phase: Phase = 'new';
   const isPhase = (expected: Phase): boolean => phase === expected;
   let activityOnly = false;
@@ -270,6 +277,8 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
       observe(status.head.snapshot, status.cursor);
     } else {
       sendServer(snapshotMessage('agent_snapshot', status.head));
+      const refusal = options.nativeRefusal?.();
+      if (refusal) control.nativeRefused(refusal);
       control.announce();
     }
     if (!isPhase('negotiating')) return;
@@ -487,5 +496,5 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     }
   }
 
-  return { receive, deliver, close: () => shutdown() };
+  return { receive, deliver, nativeRefused: refusal => { if (!isPhase('closed')) control.nativeRefused(refusal); }, close: () => shutdown() };
 }

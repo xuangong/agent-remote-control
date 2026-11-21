@@ -142,7 +142,9 @@ export function failureResponse(error: unknown, request: { method: string; path:
   if (error instanceof AgentOperationRejectedError) return { result: json(operationErrorStatus(error.code), { error: error.message, code: error.code }) };
   if (error instanceof NativeSessionOwnerError) return { result: json(409, { error: error.message, code: error.code, ...(error.owner ? { nativeOwner: error.owner } : {}) }) };
   if (error instanceof AgentRuntimeError) return { result: json(error.code === 'native_session_unavailable' ? 404 : 503, { error: error.message, code: error.code }) };
-  if (error instanceof AgentSessionInUseError) return { result: json(409, { error: error.message, code: 'session_in_use' }) };
+  // The CLI's own reason and wait travel with the refusal, so the Relay and the page can say why and when to try again (O48).
+  if (error instanceof AgentSessionInUseError) return { result: json(409, { error: error.message, code: 'session_in_use', ...(error.reason ? { reason: error.reason } : {}),
+    ...(error.retryAfterMs === undefined ? {} : { retryAfterMs: error.retryAfterMs }) }) };
   if (error instanceof HostExecutionPolicyError) return { result: json(403, { error: error.message, code: 'local_execution_policy' }) };
   if (error instanceof WorkspaceFolderError) return { result: json(error.status, { error: error.message, code: error.code }) };
   if (error instanceof OperationCacheError) return { result: json(operationErrorStatus(error.code), { error: error.message, code: error.code }) };

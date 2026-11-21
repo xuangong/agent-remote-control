@@ -6,7 +6,7 @@ import type { BrokerAssociationState } from './succession-associations.js';
 import type { BoundedSuccessionAssociationFreeze, NativePrefixSuccessionAssociationFreeze } from '@orchardworks/agent-remote-protocol';
 import type { SuccessionAssociationAuthority } from '@orchardworks/agent-remote-protocol';
 import type { SourceRelation } from '@orchardworks/agent-remote-protocol/model';
-import type { NativeSessionOwner } from '@orchardworks/agent-remote-protocol';
+import type { NativeRefusal, NativeSessionOwner } from '@orchardworks/agent-remote-protocol';
 import type { RelayIds } from './relay-ids.js';
 import type { DiagnosticJournal } from './diagnostic-journal.js';
 import type { controllerReleases } from './controller-releases.js';
@@ -68,7 +68,9 @@ export type Host = {
 export type Binding = { hostId: string; providerId: string; nativeSessionId: string; agentId: string; generation: number;
   creatorSubject?: string; parentNativeSessionId?: string; sourceRelation?: SourceRelation; recovery?: Promise<void> };
 export class BrokerError extends Error {
-  constructor(readonly status: number, readonly code: string, message: string, readonly creationRejected = false, readonly requestId?: string, readonly nativeOwner?: NativeSessionOwner) { super(message); }
+  constructor(readonly status: number, readonly code: string, message: string, readonly creationRejected = false, readonly requestId?: string, readonly nativeOwner?: NativeSessionOwner,
+    /** The CLI refused the Controller as a client of the session, for this reason (O48). */
+    readonly nativeRefusal?: NativeRefusal) { super(message); }
 }
 export interface RemoteHostBrokerState {
   teams?: SavedTeam[];

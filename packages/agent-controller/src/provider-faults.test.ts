@@ -21,10 +21,12 @@ async function start(turnMs = 100) {
 }
 
 describe('a provider CLI that refuses or stalls a resume', () => {
-  it("surfaces Codex's single writer as the session being in use, in fixed business words, and opens once the writer leaves", async () => {
+  it("surfaces Codex's single writer as the session being in use, with the CLI's reason in fixed words and no take-over, and opens once the writer leaves", async () => {
     const { cli, relay, open } = await start();
     const separate = cli.externalWriter('thread-1', { text: 'From another process', separate: true });
-    expect(await open()).toMatchObject({ status: 409, body: { code: 'session_in_use', error: 'This session is in use by another native client. Close that client, then reopen the session.' } });
+    const refused = await open();
+    expect(refused).toMatchObject({ status: 409, body: { code: 'session_in_use', error: 'Another process is the active writer of this session, and its CLI lets one process write at a time. The conversation stays readable here; retry once that process has finished.' } });
+    expect(refused.body).not.toHaveProperty('nativeOwner');
     expect(await separate).toBe('written');
     expect((await open()).status).toBe(200);
     await relay.settled();

@@ -1,5 +1,5 @@
 import {SESSION_CAPACITY_CLOSE_CODE} from '../session-channel-wire.js';
-import type {NativeSessionOwner} from '../session-control.js';
+import type {NativeRefusal, NativeSessionOwner} from '../session-control.js';
 /** Public attach failures use fixed copy rather than arbitrary native error text. */
 const sessionErrors: Readonly<Record<string, string>> = {
   native_file_limit: 'The shared Codex daemon reached its file descriptor limit. Review active work before restarting it on the Host computer.',
@@ -29,12 +29,28 @@ const sessionErrors: Readonly<Record<string, string>> = {
   workspace_unavailable: 'The session workspace is unavailable to the Controller. Check its local workspace settings.',
 };
 
-export function sessionAttachFailure(body: string): { code: string; error: string; nativeOwner?: NativeSessionOwner } {
-  let code: unknown, owner: unknown;
-  try { const value = JSON.parse(body); code = value?.code; owner = value?.nativeOwner; } catch { /* Older Hosts may return a non-JSON failure. */ }
+/** The fixed words of a session in use, by the reason the CLI gave. */
+const inUseErrors: Readonly<Record<NativeRefusal['reason'], string>> = {
+  writer_elsewhere: 'Another process is the active writer of this session, and its CLI lets one process write at a time. The conversation stays readable here; retry once that process has finished.',
+  turn_running: 'The CLI is running a turn of this session and takes no other client meanwhile. Retry once the turn has ended.',
+};
+
+/** The CLI's own reason for refusing a session in use, and when to try again, when the Host gives valid ones. */
+export function nativeRefusalOf(value: unknown): NativeRefusal | undefined {
+  const candidate = value as { reason?: unknown; retryAfterMs?: unknown } | undefined;
+  if (candidate?.reason !== 'writer_elsewhere' && candidate?.reason !== 'turn_running') return undefined;
+  const wait = candidate.retryAfterMs;
+  return { reason: candidate.reason, ...(Number.isSafeInteger(wait) && (wait as number) >= 0 ? { retryAfterMs: wait as number } : {}) };
+}
+
+export function sessionAttachFailure(body: string): { code: string; error: string; nativeOwner?: NativeSessionOwner; nativeRefusal?: NativeRefusal } {
+  let code: unknown, owner: unknown, value: unknown;
+  try { value = JSON.parse(body); code = (value as { code?: unknown } | null)?.code; owner = (value as { nativeOwner?: unknown } | null)?.nativeOwner; } catch { /* Older Hosts may return a non-JSON failure. */ }
   const candidate = owner as Partial<NativeSessionOwner> | undefined;
   const nativeOwner = candidate && (candidate.kind === 'native_cli' || candidate.kind === 'controller') && typeof candidate.generation === 'string' && /^[a-f\d-]{36}$/i.test(candidate.generation)
     ? {kind: candidate.kind, generation: candidate.generation} : undefined;
+  const nativeRefusal = code === 'session_in_use' ? nativeRefusalOf(value) : undefined;
+  if (nativeRefusal) return { code: 'session_in_use', error: inUseErrors[nativeRefusal.reason], nativeRefusal };
   if (typeof code === 'string' && Object.hasOwn(sessionErrors, code)) return { code, error: sessionErrors[code]!, ...(['native_session_owned','native_session_released','native_owner_changed'].includes(code) && nativeOwner ? {nativeOwner} : {}) };
   return { code: 'session_attach_failed', error: sessionErrors.session_attach_failed! };
 }

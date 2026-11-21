@@ -30,8 +30,10 @@ export function SessionControlNotice({ control, handoff, connected, onTakeContro
       setFailure({ identity, message: errorWords(error, t, 'sessions.control.takeFailed') });
     } finally { setPending(false); }
   };
+  // A session the CLI refuses (another process writes it) says the CLI's reason and offers a retry, never a take-over (O48).
+  const refused = lease.state === 'cli_refused';
   // Every phase of taking over says the same thing to the person who asked for it.
-  const label = phase ? t('sessions.control.taking') : leaseNoticeLabel(lease.state, t);
+  const label = phase ? t('sessions.control.taking') : leaseNoticeLabel(lease.state, t, lease.refusal);
   const description = !phase && native ? t('sessions.control.interruptNote')
     : !phase && !connected ? t('sessions.control.waitReady') : undefined;
   return <div className="lab-session-control" data-read-only="true" data-native={native || undefined} aria-busy={!!phase}>
@@ -42,8 +44,8 @@ export function SessionControlNotice({ control, handoff, connected, onTakeContro
       </span>
       {control.access === 'read_only' && onTakeControl ? <button type="button" disabled={!!phase || !connected}
         aria-describedby={description ? descriptionId : undefined}
-        aria-label={phase ? label : unknown ? t('sessions.control.checkStatusLabel') : native ? t('sessions.control.interruptLabel') : t('sessions.control.takeControl')}
-        onClick={() => void takeControl()}>{phase ? t('sessions.control.wait') : unknown ? t('sessions.control.checkStatus') : currentFailure ? t('common.retry') : native ? t('sessions.control.interruptAndTake') : t('sessions.control.takeControl')}</button> : null}
+        aria-label={phase ? label : refused ? t('common.retry') : unknown ? t('sessions.control.checkStatusLabel') : native ? t('sessions.control.interruptLabel') : t('sessions.control.takeControl')}
+        onClick={() => void takeControl()}>{phase ? t('sessions.control.wait') : unknown ? t('sessions.control.checkStatus') : refused || currentFailure ? t('common.retry') : native ? t('sessions.control.interruptAndTake') : t('sessions.control.takeControl')}</button> : null}
     </div>
     {description ? <p id={descriptionId} className="lab-session-control-description">{description}</p> : null}
     {currentFailure ? <p className="lab-session-control-error" role="alert">{currentFailure.message}</p> : null}

@@ -68,7 +68,7 @@ describe('the words of a session in Chinese', () => {
 describe('the order of the notice and the reasons of the composer', () => {
   it('has a row for every reason that disables the composer', () => {
     const reasons = new Set(SESSION_PRESENTATION_VECTORS.flatMap(row => row.composer.input === 'disabled' ? [row.composer.reason] : []));
-    const all: ComposerBlock[] = ['read_only', 'terminal_in_control', 'other_controller', 'ended', 'failed', 'unavailable', 'unsupported'];
+    const all: ComposerBlock[] = ['read_only', 'terminal_in_control', 'other_controller', 'cli_refused', 'ended', 'failed', 'unavailable', 'unsupported'];
     expect([...reasons].sort()).toEqual([...all].sort());
   });
 

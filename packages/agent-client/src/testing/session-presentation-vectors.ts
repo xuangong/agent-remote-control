@@ -25,6 +25,7 @@ export const CONTROL = {
   readOnly: { access: 'read_only', available: true, revision: 'r1' },
   nativeCli: { access: 'read_only', available: true, revision: 'r2', nativeOwner: { kind: 'native_cli', generation: 'g1' } },
   otherController: { access: 'read_only', available: true, revision: 'r2', nativeOwner: { kind: 'controller', generation: 'g1' } },
+  writerElsewhere: { access: 'read_only', available: false, revision: 'r1', nativeRefusal: { reason: 'writer_elsewhere' } },
 } as const satisfies Record<string, NonNullable<ControlFact>>;
 
 export interface ReplicaFacts {
@@ -120,6 +121,10 @@ export const SESSION_PRESENTATION_VECTORS: readonly SessionPresentationVector[] 
   // 8. Read-only, nobody owns it.
   { name: 'ready, read-only lease, no owner', facts: buildSessionFacts('ready', { snapshot: idle, control: CONTROL.readOnly }),
     notice: { kind: 'read_only' }, composer: disabled('read_only', 'Ready to take control'), label: 'Ready' },
+  // 8b. The CLI refuses the Controller: another process writes the session (O48). Read-only with the CLI's reason, no take-over.
+  { name: 'ready, the CLI refuses: a writer elsewhere', facts: buildSessionFacts('ready', { snapshot: idle, control: CONTROL.writerElsewhere }),
+    notice: { kind: 'cli_refused', reason: 'writer_elsewhere' },
+    composer: disabled('cli_refused', 'Another process is the active writer of this session, and its CLI lets one process write at a time. It stays readable here; retry once that process has finished.'), label: 'Ready' },
   // 9. Ended and failed.
   { name: 'ready, closed', facts: buildSessionFacts('ready', { snapshot: agent('closed'), control: CONTROL.granted }),
     notice: { kind: 'ended' }, composer: disabled('ended', 'This session has ended.'), label: 'Closed' },

@@ -1,5 +1,5 @@
 import type { JournalPageRequest, JournalPageResult } from '@orchardworks/agent-remote-journal';
-import type { NativeSessionOwner } from '@orchardworks/agent-remote-protocol';
+import type { NativeRefusal, NativeSessionOwner } from '@orchardworks/agent-remote-protocol';
 
 import type { HostJournals, JournalFilled, JournalPublished, JournalReadRequest } from './host-journals.js';
 import type { HostStreamOpener } from './journal-host-stream.js';
@@ -43,6 +43,10 @@ export interface JournalSessionAttachment {
   hostStreams: HostStreamOpener;
   /** Asks the Controller who holds the session natively; see `JournalSessionStreamOptions`. */
   readNativeOwner(): Promise<NativeSessionOwner | undefined>;
+  /** The CLI's refusal of the Controller as a client of the session now, if any; see `JournalSessionStreamOptions`. */
+  nativeRefusal?(): NativeRefusal | undefined;
+  /** Asks the Relay to attach the refused session again; see `JournalSessionStreamOptions`. */
+  retryNative?(): void;
 }
 
 export interface JournalSessions {
@@ -60,6 +64,8 @@ export interface JournalSessions {
   published(hostId: string, sessionKey: string, result: JournalPublished): void;
   /** The Host's sessions that a page shows now: at least one stream negotiated for its content and has not ended. */
   shown(hostId: string): string[];
+  /** Tells the streams of a session that the CLI refuses the Controller as its client, and why, or that it no longer does. */
+  refused(hostId: string, sessionKey: string, refusal: NativeRefusal | undefined): void;
 }
 
 /** What the streams of one session share. */
@@ -161,12 +167,14 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
           catch { /* Telling the Controller never affects the stream. */ }
         }
       };
-      const stream = createJournalSessionStream({ publicAgentId: attachment.publicAgentId, client: attachment.client, reads, hostStreams: attachment.hostStreams, readNativeOwner: attachment.readNativeOwner, scheduler: options.scheduler, shown });
+      const stream = createJournalSessionStream({ publicAgentId: attachment.publicAgentId, client: attachment.client, reads, hostStreams: attachment.hostStreams, readNativeOwner: attachment.readNativeOwner, scheduler: options.scheduler, shown,
+        ...(attachment.nativeRefusal ? { nativeRefusal: attachment.nativeRefusal } : {}), ...(attachment.retryNative ? { retryNative: attachment.retryNative } : {}) });
       shared.streams.add(stream);
       shared.clients.set(stream, attachment.client);
       return {
         receive: stream.receive,
         deliver: stream.deliver,
+        nativeRefused: stream.nativeRefused,
         close() {
           stream.close();
           shared.streams.delete(stream);
@@ -174,6 +182,14 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
           release(key, shared);
         },
       };
+    },
+
+    refused(hostId, sessionKey, refusal) {
+      const shared = sessions.get(keyOf(hostId, sessionKey));
+      for (const stream of [...shared?.streams ?? []]) {
+        try { stream.nativeRefused(refusal); }
+        catch { /* One stream's failure does not stop the others. */ }
+      }
     },
 
     shown(hostId) {

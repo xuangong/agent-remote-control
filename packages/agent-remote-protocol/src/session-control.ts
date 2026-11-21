@@ -9,6 +9,12 @@ export type SessionControlClientKind = Static<typeof SessionControlClientKind>;
 
 export const NativeSessionOwner = Strict({ kind: Type.Union([Type.Literal('native_cli'), Type.Literal('controller')]), generation: Id });
 export type NativeSessionOwner = Static<typeof NativeSessionOwner>;
+/**
+ * The CLI refused the Controller as a client of the session, for its own reason: another process is the session's writer
+ * (`writer_elsewhere`), or a turn runs (`turn_running`). The session is read-only until a retry succeeds; nothing can take it over.
+ */
+export const NativeRefusal = Strict({ reason: Type.Union([Type.Literal('writer_elsewhere'), Type.Literal('turn_running')]), retryAfterMs: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })) });
+export type NativeRefusal = Static<typeof NativeRefusal>;
 
 export const SessionControlState = Strict({
   agentId: Id, revision: Id,
@@ -16,6 +22,7 @@ export const SessionControlState = Strict({
   available: Type.Boolean(),
   ownerKind: Type.Optional(SessionControlClientKind),
   nativeOwner: Type.Optional(NativeSessionOwner),
+  nativeRefusal: Type.Optional(NativeRefusal),
   token: Type.Optional(Id),
 });
 export type SessionControlState = Static<typeof SessionControlState>;

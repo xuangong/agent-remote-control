@@ -68,6 +68,17 @@ it('shows native ownership before the first snapshot while keeping the draft and
   expect(send).not.toHaveBeenCalled();
 });
 
+it("says the CLI's reason for refusing a session and offers a Retry, never a take-over (O48)", async () => {
+  const takeControl = vi.fn(async () => {});
+  const container = await render(<SessionControlNotice connected control={{ access: 'read_only', available: false, nativeRefusal: { reason: 'writer_elsewhere' } }} onTakeControl={takeControl} />);
+  expect(container.textContent).toContain('Another process is the active writer of this session');
+  expect(container.textContent).not.toMatch(/take over|interrupt/i);
+  const retry = container.querySelector<HTMLButtonElement>('[aria-label="Retry"]')!;
+  expect(retry.textContent).toBe('Retry');
+  await act(async () => retry.click());
+  expect(takeControl).toHaveBeenCalledOnce();
+});
+
 it('does not infer native takeover from a disconnected draft without an owner', async () => {
   const takeControl = vi.fn(async () => {});
   const container = await render(<LabWorkbench draftOnly sessionStatus="disconnected" actions={{ takeControl }} />);

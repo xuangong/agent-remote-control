@@ -14,6 +14,8 @@ export const client: AreaMessages<typeof english> = {
   'client.lease.nativeCli': '命令行正在控制',
   'client.lease.otherController': '另一个 Controller 正在控制',
   'client.lease.readOnly': '随时可以接手',
+  'client.lease.writerElsewhere': '另一个进程正在写这段会话（它的 CLI 一次只让一个进程写）。这里仍可阅读，那个进程结束后再重试。',
+  'client.lease.turnRunning': 'CLI 正在运行这段会话的一轮，期间不接受其他客户端。这一轮结束后再重试。',
 
   'client.notice.hostOffline': '{host} 离线了，回来后消息会送达～',
   'client.notice.theHost': '这台 Host',

@@ -37,3 +37,17 @@ describe('session attach failure', () => {
     expect(failure.error).not.toContain('content');
   });
 });
+
+describe('a session in use', () => {
+  it("keeps the CLI's reason and wait, with words that name the active writer and offer a retry, never a take-over (O48)", () => {
+    const failure = sessionAttachFailure(JSON.stringify({ code: 'session_in_use', error: 'thread 1 already has an active writer', reason: 'writer_elsewhere', retryAfterMs: 5000 }));
+    expect(failure).toEqual({ code: 'session_in_use', error: expect.stringMatching(/active writer.*retry/), nativeRefusal: { reason: 'writer_elsewhere', retryAfterMs: 5000 } });
+    expect(failure).not.toHaveProperty('nativeOwner');
+    expect(sessionAttachFailure(JSON.stringify({ code: 'session_in_use', reason: 'turn_running' })).nativeRefusal).toEqual({ reason: 'turn_running' });
+  });
+
+  it('keeps the fixed words of a refusal without a reason it knows, and drops a wait it cannot vouch for', () => {
+    expect(sessionAttachFailure(JSON.stringify({ code: 'session_in_use', reason: 'busy' }))).toEqual({ code: 'session_in_use', error: 'This session is in use by another native client. Close that client, then reopen the session.' });
+    expect(sessionAttachFailure(JSON.stringify({ code: 'session_in_use', reason: 'writer_elsewhere', retryAfterMs: -1 })).nativeRefusal).toEqual({ reason: 'writer_elsewhere' });
+  });
+});

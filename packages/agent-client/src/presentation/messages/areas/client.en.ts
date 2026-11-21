@@ -14,6 +14,8 @@ export const client = {
   'client.lease.nativeCli': 'Native CLI has control',
   'client.lease.otherController': 'Another Controller has control',
   'client.lease.readOnly': 'Ready to take control',
+  'client.lease.writerElsewhere': 'Another process is the active writer of this session, and its CLI lets one process write at a time. It stays readable here; retry once that process has finished.',
+  'client.lease.turnRunning': 'The CLI is running a turn of this session and takes no other client meanwhile. Retry once the turn has ended.',
 
   'client.notice.hostOffline': '{host} is offline. Messages will be delivered when it is back.',
   'client.notice.theHost': 'The Host',

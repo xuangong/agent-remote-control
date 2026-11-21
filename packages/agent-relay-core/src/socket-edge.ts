@@ -50,13 +50,14 @@ export interface SocketEdgePorts {
   journalSessions: ReturnType<typeof createJournalSessions> | undefined;
   runtimeAgentId: SessionBindings['runtimeAgentId'];
   recoverBinding: SessionBindings['recoverBinding'];
+  nativeRefusal: SessionBindings['nativeRefusal'];
   activeStreamCount(subject: string): number;
   admitClientMessages: ReturnType<typeof createClientAdmission>;
 }
 
 export function createSocketEdge(ports: SocketEdgePorts) {
   const { brokerState, options, now, ids, scheduler, origin, hostStreamLimit, sessionAllowed, requireHost, permitted, keyHash, track, credentialExpiry,
-    register, send, diagnostic, journalSessions, runtimeAgentId, recoverBinding, activeStreamCount, admitClientMessages } = ports;
+    register, send, diagnostic, journalSessions, runtimeAgentId, recoverBinding, nativeRefusal, activeStreamCount, admitClientMessages } = ports;
   const setTimeout = scheduler.setTimeout.bind(scheduler);
   const clearTimeout = scheduler.clearTimeout.bind(scheduler);
   /**
@@ -99,6 +100,9 @@ export function createSocketEdge(ports: SocketEdgePorts) {
       const stream = journalSessions!.attach({
         hostId: host.id, providerId: binding.providerId, sessionKey: journalSessionKey(binding.providerId, binding.nativeSessionId), publicAgentId: binding.agentId, client,
         readNativeOwner: () => readNativeOwner(host, binding),
+        // The CLI's refusal of the Controller, and a retry of the attach it refused, which tells every stream of the session the outcome.
+        nativeRefusal: () => nativeRefusal(binding.agentId),
+        retryNative: () => { void (async () => { requireHost(host.id); await recoverBinding(host, binding, true); })().catch(() => undefined); },
         hostStreams: createHostStreamOpener({
           streams: host.streams, publicAgentId: binding.agentId, runtimeAgentId: () => runtimeAgentId(host, binding), subject,
           authorized: () => { const end = expiry(); return end === undefined || end > now(); },

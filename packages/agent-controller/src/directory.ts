@@ -228,11 +228,11 @@ export function createCodexSessionDirectory(
       let session: AgentSession;
       try { session = await resume(); }
       catch (error) {
-        if (!(error instanceof AgentSessionInUseError) || !provider.releaseSessionOwner) throw error;
+        // A writer elsewhere is Codex's own single-writer rule: the refusal says so, and nothing offers to stop that process (O48).
+        if (!(error instanceof AgentSessionInUseError) || !provider.releaseSessionOwner || !options?.takeOver) throw error;
         const owner = await provider.inspectSessionOwner?.(nativeSessionId);
         if (!owner) throw error;
         const identity = {kind: 'native_cli' as const, generation: owner.generation};
-        if (!options?.takeOver) throw new NativeSessionOwnerError('native_session_owned', 'This session is open in a private Codex client. Interrupt it and resume the same session with shared control.', identity);
         if (options.takeOver !== owner.generation) throw new NativeSessionOwnerError('native_owner_changed', 'The Codex writer changed. Check the session before taking over again.', identity);
         try { await provider.releaseSessionOwner(nativeSessionId, options.takeOver); }
         catch (failure) {

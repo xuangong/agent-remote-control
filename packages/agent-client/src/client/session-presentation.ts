@@ -1,5 +1,5 @@
 import type { AgentReplicaState } from '../replica/types.js';
-import { leaseNoticeLabel, leaseView, type LeaseState } from './lease-view.js';
+import { leaseNoticeLabel, leaseView, type NativeRefusalReason } from './lease-view.js';
 import type { RemoteSessionState } from './session-state.js';
 import { translator, type Translate } from '../presentation/messages.js';
 
@@ -16,6 +16,8 @@ import { translator, type Translate } from '../presentation/messages.js';
  * - R3. A send goes now exactly when the session is synchronized, the control check is over and `send_message` is allowed.
  * - R4. An offline Host is a notice and leaves the composer enabled.
  * - R5. The words for a native owner come from `leaseNoticeLabel`.
+ * - R6. A session the CLI refuses as a client (`cli_refused`: another process writes it) is read-only with the CLI's reason; its
+ *   composer is disabled and nothing offers to take it over (O48).
  */
 
 export interface SessionFacts {
@@ -33,6 +35,8 @@ export type SessionNotice =
   | { readonly kind: 'terminal_in_control' }
   | { readonly kind: 'other_controller' }
   | { readonly kind: 'read_only' }
+  /** The CLI refuses the Controller as a client of the session, for this reason (O48). */
+  | { readonly kind: 'cli_refused'; readonly reason?: NativeRefusalReason }
   /** The Relay refused the session for good (`refuseDisconnected`), or a non-recoverable diagnostic. */
   | { readonly kind: 'unavailable'; readonly message: string }
   /** The adapter reports the native runtime unavailable. Sends wait (owner decision 1). */
@@ -42,7 +46,7 @@ export type SessionNotice =
 const ITS_HOST = 'its Host';
 const AGENT_UNAVAILABLE = /^The agent is not available on (.+)\.$/;
 
-export type ComposerBlock = 'read_only' | 'terminal_in_control' | 'other_controller' | 'ended' | 'failed' | 'unavailable' | 'unsupported';
+export type ComposerBlock = 'read_only' | 'terminal_in_control' | 'other_controller' | 'cli_refused' | 'ended' | 'failed' | 'unavailable' | 'unsupported';
 export type ComposerAvailability =
   /** `dispatch: 'now'` when a send may go to the session at once; otherwise it waits in the send queue. */
   | { readonly input: 'enabled'; readonly dispatch: 'now' | 'when_ready' }
@@ -55,9 +59,11 @@ function lastFailure(replica: AgentReplicaState | undefined): string | undefined
   return [...(replica?.diagnostics ?? [])].reverse().find(diagnostic => !diagnostic.recoverable)?.message.trim() || undefined;
 }
 
-function leaseNotice(state: LeaseState): SessionNotice | undefined {
+function leaseNotice(control: SessionFacts['session']['control']): SessionNotice | undefined {
+  const { state, refusal } = leaseView(control);
   return state === 'native_cli' ? { kind: 'terminal_in_control' }
     : state === 'other_controller' ? { kind: 'other_controller' }
+    : state === 'cli_refused' ? { kind: 'cli_refused', ...(refusal ? { reason: refusal } : {}) }
     : state === 'read_only' ? { kind: 'read_only' } : undefined;
 }
 
@@ -73,7 +79,7 @@ export function sessionNotice(facts: SessionFacts): SessionNotice | undefined {
   }
   if (session.activity === 'closed') return { kind: 'ended' };
   if (host?.online === false) return host.name ? { kind: 'host_offline', hostName: host.name } : { kind: 'host_offline' };
-  const lease = leaseNotice(leaseView(session.control).state);
+  const lease = leaseNotice(session.control);
   if (lease) return lease;
   if (session.runtime?.state === 'unavailable') return { kind: 'agent_unavailable', message: `The agent is not available on ${host?.name ?? ITS_HOST}.` };
   return undefined;
@@ -87,6 +93,7 @@ export function sessionNoticeWords(notice: SessionNotice, t: Translate = transla
     case 'terminal_in_control': return leaseNoticeLabel('native_cli', t);
     case 'other_controller': return leaseNoticeLabel('other_controller', t);
     case 'read_only': return leaseNoticeLabel('read_only', t);
+    case 'cli_refused': return leaseNoticeLabel('cli_refused', t, notice.reason);
     // The client's own default words are translated; a failure the agent, the Relay or a Controller described stays as sent.
     case 'failed': return notice.message === FAILED ? t('client.notice.failedNoDetails') : notice.message;
     case 'unavailable': return notice.message === UNAVAILABLE ? t('client.notice.unavailable') : notice.message;
@@ -102,7 +109,7 @@ export function composerAvailability(facts: SessionFacts, t: Translate = transla
   const { session } = facts;
   const notice = sessionNotice(facts);
   const blocking = session.connection === 'unavailable' || notice?.kind === 'failed' || notice?.kind === 'ended' ? notice
-    : leaseNotice(leaseView(session.control).state);
+    : leaseNotice(session.control);
   if (blocking) return { input: 'disabled', reason: blocking.kind as ComposerBlock, words: sessionNoticeWords(blocking, t) };
   if (facts.replica?.agent?.capabilities.sendMessage === false) return { input: 'disabled', reason: 'unsupported', words: t('client.notice.unsupported') };
   // `send_message` is allowed only once the session is synchronized and its control check granted control (R3).

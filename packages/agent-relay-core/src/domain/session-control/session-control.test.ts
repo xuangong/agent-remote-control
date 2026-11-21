@@ -82,3 +82,27 @@ describe('the view a browser is told', () => {
     expect(viewOf({ ...holding('t1', 'r2'), owner })).toEqual({ revision: 'r2', available: false, access: 'read_only', nativeOwner: owner });
   });
 });
+
+describe('a session the CLI refuses as a client (O48)', () => {
+  const refusal = { reason: 'writer_elsewhere' as const, retryAfterMs: 5000 };
+  const refused = (state: SessionControlState): SessionControlState => ({ ...state, refusal });
+  const native: Row[] = [
+    { name: 'a refusal is recorded, keeps the revision and the token, and is told to an announced browser', state: holding(), event: { type: 'native_refusal', refusal }, next: refused(holding()), reply: { kind: 'state' } },
+    { name: 'a refusal before the first announcement is recorded and told by the announcement', state: initialSessionControl('r1'), event: { type: 'native_refusal', refusal }, next: { revision: 'r1', refusal, announced: false }, reply: { kind: 'none' } },
+    { name: 'the same refusal again says nothing', state: refused(holding()), event: { type: 'native_refusal', refusal: { ...refusal } }, next: refused(holding()), reply: { kind: 'none' } },
+    { name: 'a mutation with the kept token is refused as read-only while refused', state: refused(holding()), event: { type: 'mutation', requestId: 'm1', token: 't1' }, next: refused(holding()), reply: readOnly('m1') },
+    { name: 'an acquire of a refused session answers with its state and asks for a retry', state: refused(fresh()), event: { type: 'acquire', requestId: 'q1', revision: 'r1', fresh: 't1' }, next: refused(holding()), reply: { kind: 'retry_native', requestId: 'q1' } },
+    { name: 'clearing the refusal gives control back under the same revision, with the kept token', state: refused(holding()), event: { type: 'native_refusal' }, next: holding(), reply: { kind: 'state' } },
+    { name: 'a refused acquire on another revision is still refused as changed', state: refused(fresh()), event: { type: 'acquire', requestId: 'q1', revision: 'old', fresh: 't1' }, next: refused(fresh()), reply: changed('q1') },
+  ];
+  it.each(native.map(row => [row.name, row] as const))('%s', (_name, row) => {
+    const result = transition(row.state, row.event);
+    expect(result.state).toEqual(row.next);
+    expect(result.reply).toEqual(row.reply);
+  });
+
+  it('is told to the browser as read-only and unavailable, with the reason and no token or owner', () => {
+    expect(viewOf(refused(holding()))).toEqual({ revision: 'r1', available: false, access: 'read_only', nativeRefusal: refusal });
+    expect(viewOf(holding())).toEqual({ revision: 'r1', available: true, access: 'control', token: 't1' });
+  });
+});

@@ -617,8 +617,8 @@ export class RemoteSessionClient {
 
   private publishControl(): void {
     if (!this.control) return;
-    const { access, available, revision, nativeOwner } = this.control;
-    this.replica.setSessionControl({ access, available, revision, nativeOwner });
+    const { access, available, revision, nativeOwner, nativeRefusal } = this.control;
+    this.replica.setSessionControl({ access, available, revision, nativeOwner, ...(nativeRefusal ? { nativeRefusal } : {}) });
   }
 
   private receive(generation: number, message: RemoteServerMessage): void {

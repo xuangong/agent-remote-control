@@ -1,5 +1,5 @@
 import { sessionIdentityMessage } from './session-identity.js';
-import { isCreationSource, type CreationSource, isNativeSessionRef, nativeSessionRefKey } from '@orchardworks/agent-remote-protocol';
+import { isCreationSource, type CreationSource, isNativeSessionRef, nativeSessionRefKey, type NativeRefusal } from '@orchardworks/agent-remote-protocol';
 import { isDeepStrictEqual } from 'node:util';
 import { type BrokerAssociationState } from './succession-associations.js';
 import { createHash } from 'node:crypto';
@@ -29,6 +29,10 @@ import { type BrokerScheduler } from './transport.js';
  * - A caller's deadline does not cancel a creation: `waitForCreation` answers 504 and the creation continues, so a retry finds it.
  * - A subject other than the owner may attach and create only on a shared Host, only its own sessions, within its session quota.
  * - Session reads go to the Controller under the runtime's own identity and come back under the public one.
+ * - Native refusal (O48): when the CLI refuses the Controller as a client of a session for its own reason (`session_in_use` with a
+ *   reason, such as another process writing it), the refusal is kept for the binding and told (`nativeRefusalChanged`); an attach or
+ *   a recovery that succeeds clears it. An attach of a bound session that the Relay can read without the Controller (its journal) is
+ *   answered with the binding despite such a refusal, so the page reads it, read-only, and is told why.
  *
  * Owns the runtime ledgers (the runtime identity of a binding, in-flight attachments and creations, reserved slots). The saved
  * records are `BrokerState`'s. Ports: `rpc` of the host session, `Access`, the succession guards, `RelayIds`, the scheduler.
@@ -47,11 +51,15 @@ export interface SessionBindingPorts {
   savedAssociations: RemoteHostBrokerState['associations'];
   ownerSubject: string | undefined;
   rpcTimeoutMs: number | undefined;
+  /** Whether a page can read the session without its Controller: the Relay serves it from its journal. */
+  readableWithoutController?(binding: Binding): Promise<boolean>;
+  /** Told when the CLI starts or stops refusing the Controller as a client of a bound session. */
+  nativeRefusalChanged?(binding: Binding, refusal: NativeRefusal | undefined): void;
 }
 export type SessionBindings = ReturnType<typeof createSessionBindings>;
 
 export function createSessionBindings(ports: SessionBindingPorts) {
-  const { brokerState, access, succession, rpc, ids, now, scheduler, enrollmentEnabled, savedAssociations, ownerSubject, rpcTimeoutMs } = ports;
+  const { brokerState, access, succession, rpc, ids, now, scheduler, enrollmentEnabled, savedAssociations, ownerSubject, rpcTimeoutMs, readableWithoutController, nativeRefusalChanged } = ports;
   const { owner, requireAccess, sessionAllowed } = access;
   const { assertCapacity: assertAssociationCapacity, assertCreationOpen: assertAssociationCreationOpen, source: associationSource, rpc: associationRpc } = succession;
   const setTimeout = scheduler.setTimeout.bind(scheduler);
@@ -63,6 +71,14 @@ export function createSessionBindings(ports: SessionBindingPorts) {
   const attachmentRequests = new Map<string, Promise<Binding>>();
   const creations = new Map<string, { fingerprint: string; result: Promise<Binding> }>();
   const sharedCreates = new Map<string, { fingerprint: string; result: Promise<Binding> }>();
+  /** The refusal of the CLI for each binding it refuses now, by public agent id. */
+  const nativeRefusals = new Map<string, NativeRefusal>();
+  function refused(binding: Binding, refusal: NativeRefusal | undefined): void {
+    const previous = nativeRefusals.get(binding.agentId);
+    if (previous?.reason === refusal?.reason && previous?.retryAfterMs === refusal?.retryAfterMs) return;
+    if (refusal) nativeRefusals.set(binding.agentId, refusal); else nativeRefusals.delete(binding.agentId);
+    try { nativeRefusalChanged?.(binding, refusal); } catch { /* Telling the streams never changes the binding. */ }
+  }
   for (const binding of brokerState.bindings.values()) attached.set(JSON.stringify([binding.hostId, binding.providerId, binding.nativeSessionId]), Promise.resolve(binding));
   for (const [key, value] of brokerState.completedCreations) creations.set(key, { fingerprint: value.fingerprint, result: Promise.resolve(brokerState.bindings.get(value.agentId)!) });
   function runtimeAgentId(host: Host, binding: Binding): string {
@@ -117,7 +133,8 @@ export function createSessionBindings(ports: SessionBindingPorts) {
         if (brokerState.bindings.get(binding.agentId) !== binding) throw new BrokerError(404, 'session_unavailable', 'The session binding was revoked.');
         if (result.status >= 300) {
           const failure = sessionAttachFailure(result.body);
-          throw new BrokerError(result.status, failure.code, failure.error, false, result.requestId, failure.nativeOwner);
+          if (failure.nativeRefusal) refused(binding, failure.nativeRefusal);
+          throw new BrokerError(result.status, failure.code, failure.error, false, result.requestId, failure.nativeOwner, failure.nativeRefusal);
         }
         if (host.generation !== generation) throw new BrokerError(503, 'host_reconnected', 'The Remote Host changed while the session was reattaching.');
         let agentId = binding.agentId;
@@ -137,6 +154,7 @@ export function createSessionBindings(ports: SessionBindingPorts) {
           binding.generation = generation;
           return { value: undefined, unchanged: true, publish() {} };
         });
+        refused(binding, undefined);
       })();
       void binding.recovery.finally(() => { binding.recovery = undefined; }).catch(() => undefined);
     }
@@ -267,7 +285,7 @@ export function createSessionBindings(ports: SessionBindingPorts) {
         if (result.status >= 300) {
           if (attaching) {
             const failure = sessionAttachFailure(result.body);
-            throw new BrokerError(result.status, failure.code, failure.error, false, result.requestId, failure.nativeOwner);
+            throw new BrokerError(result.status, failure.code, failure.error, false, result.requestId, failure.nativeOwner, failure.nativeRefusal);
           }
           let detail: Record<string, unknown> = {};
           try { detail = JSON.parse(result.body); } catch { /* Preserve the status if the host did not return JSON. */ }
@@ -358,11 +376,21 @@ export function createSessionBindings(ports: SessionBindingPorts) {
         result = operation(); attachmentRequests.set(requestKey, result);
         void result.finally(() => { if (attachmentRequests.get(requestKey) === result) attachmentRequests.delete(requestKey); }).catch(() => undefined);
       }
-      const binding = await result;
+      let binding: Binding;
+      try { binding = await result; }
+      catch (error) {
+        // A CLI that refuses the Controller for its own reason leaves a session the Relay can read without it readable: the page
+        // opens it from its journal, read-only, and is told why (O48).
+        const bound = brokerState.nativeBindings.get(key);
+        if (!(error instanceof BrokerError) || !error.nativeRefusal || !bound || bound.parentNativeSessionId !== parentNativeSessionId || !await readableWithoutController?.(bound)) throw error;
+        assertMutationAccess();
+        refused(bound, error.nativeRefusal);
+        return bound;
+      }
       if (binding.parentNativeSessionId !== parentNativeSessionId) {
         throw new BrokerError(409, 'session_binding_conflict', 'The native session parent conflicts with its existing binding.');
       }
-      assertMutationAccess(); await recoverBinding(host, binding); return binding;
+      assertMutationAccess(); await recoverBinding(host, binding); refused(binding, undefined); return binding;
     }
     let existing = creations.get(key);
     if (existing && existing.fingerprint !== fingerprint) throw new BrokerError(409, 'request_conflict', 'This request identity was already used with different settings.');
@@ -533,5 +561,7 @@ export function createSessionBindings(ports: SessionBindingPorts) {
   }
   /** The Relay shuts down: its saved records and the runtime ledgers are dropped. */
   function clear() { runtimeBindings.clear(); attached.clear(); creations.clear(); }
-  return { runtimeAgentId, sessionRead, recoverBinding, mutate, waitForCreation, userMutation, sharedCatalog, hasCreation: (key: string) => creations.has(key), forgetHost, clear };
+  return { runtimeAgentId, sessionRead, recoverBinding, mutate, waitForCreation, userMutation, sharedCatalog, hasCreation: (key: string) => creations.has(key), forgetHost, clear,
+    /** The CLI's refusal of the Controller for a bound session, while it lasts. */
+    nativeRefusal: (agentId: string): NativeRefusal | undefined => nativeRefusals.get(agentId) };
 }

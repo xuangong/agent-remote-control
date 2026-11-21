@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { directory, indexIsCurrent, parseItem, readItems, renderIndex, writeIndex } from './open-items.mjs';
 
 const item = ({ id = 'O7', title = 'A title', found = 'M11', owner = 'M12', status = 'open' } = {}) =>
@@ -63,7 +64,7 @@ test('writing the index replaces only its generated part, once, and a new item f
 });
 
 test('the repository\'s item files all parse, and their index lists each once', () => {
-  const repository = new URL('../..', import.meta.url).pathname;
+  const repository = fileURLToPath(new URL('../..', import.meta.url));
   const items = readItems(repository);
   assert.ok(items.length >= 60);
   assert.equal(new Set(items.map(({ id }) => id)).size, items.length);

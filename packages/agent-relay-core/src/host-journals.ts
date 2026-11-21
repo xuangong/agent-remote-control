@@ -11,12 +11,15 @@ import { systemIds, type RelayIds } from './relay-ids.js';
 const CACHE_MAX_JOURNALS = 64;
 /** The estimated size of the journals kept in memory, for the whole Relay. */
 const CACHE_MAX_BYTES = 128 * 1024 * 1024;
-/** A session's estimated size above which a growing entry is refused once its bodies are evicted as far as they can be. */
-const SESSION_MAX_BYTES = 64 * 1024 * 1024;
-/** The estimated size of all journals of a Host above which a growing entry is refused. */
-const HOST_MAX_BYTES = 1024 * 1024 * 1024;
-/** Live-only items kept per session; beyond it the oldest complete ones are removed. An open one is never removed, so open items can keep the count above this. */
-const LIVE_ONLY_MAX_ITEMS = 2000;
+/** The safety bounds on growth a journal service has when its options give none. */
+export const HOST_JOURNAL_LIMITS = {
+  /** A session's estimated size above which a growing entry is refused once its bodies are evicted as far as they can be. */
+  sessionBytes: 64 * 1024 * 1024,
+  /** The estimated size of all journals of a Host above which a growing entry is refused. */
+  hostBytes: 1024 * 1024 * 1024,
+  /** Live-only items kept per session; beyond it the oldest complete ones are removed. An open one is never removed, so open items can keep the count above this. */
+  liveOnlyItems: 2000,
+} as const;
 /** Turns whose bodies stay resident. */
 const RETAIN_TURNS = 50;
 /** Items whose bodies stay resident at least, so that the default tail of a conversation never needs a fill. */
@@ -205,9 +208,9 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     maxBytes: wholeNumber('Journal cache bytes', options.cache?.maxBytes ?? CACHE_MAX_BYTES),
   };
   const limits = {
-    sessionBytes: wholeNumber('Journal session bytes', options.limits?.sessionBytes ?? SESSION_MAX_BYTES),
-    hostBytes: wholeNumber('Journal Host bytes', options.limits?.hostBytes ?? HOST_MAX_BYTES),
-    liveOnlyItems: wholeNumber('Journal live-only items', options.limits?.liveOnlyItems ?? LIVE_ONLY_MAX_ITEMS),
+    sessionBytes: wholeNumber('Journal session bytes', options.limits?.sessionBytes ?? HOST_JOURNAL_LIMITS.sessionBytes),
+    hostBytes: wholeNumber('Journal Host bytes', options.limits?.hostBytes ?? HOST_JOURNAL_LIMITS.hostBytes),
+    liveOnlyItems: wholeNumber('Journal live-only items', options.limits?.liveOnlyItems ?? HOST_JOURNAL_LIMITS.liveOnlyItems),
   };
   /** Live-only items are carried by every replacement, so their bytes are capped to leave the room a window needs (one message, or half a small session). */
   const liveOnlyBytesMax = limits.sessionBytes - Math.min(JOURNAL_MESSAGE_MAX_BYTES, Math.floor(limits.sessionBytes / 2));

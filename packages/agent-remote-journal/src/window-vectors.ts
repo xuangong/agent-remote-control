@@ -103,6 +103,7 @@ export const windowVectors: readonly WindowVector[] = [
   { name: 'an open live-only item with other content is a replacement: open_item', held: [done('a'), liveOpen('x', 'typing')], window: [done('a'), liveOpen('x', 'typed')], expect: replace('open_item') },
   { name: 'a live-only item whose body was evicted is a replacement: changed', held: [done('a'), evicted(tool('t', 'running'))], window: [done('a'), tool('t', 'running')], expect: replace('changed') },
   { name: 'a live-only item that changes kind is a replacement: changed', held: [done('a'), tool('x', 'same')], window: [done('a'), board('x', 'same')], expect: replace('changed') },
+  { name: 'an extension of any size is appended when no room is given', held: [done('a')], window: [done('a'), done('b', 'x'.repeat(1_000_000))], expect: extend(['b']) },
   { name: 'an extension that does not fit the room is a replacement: changed', held: [done('a')], window: [done('a'), done('b')], room: { resident: 100, roomBytes: 150 }, expect: replace('changed') },
 ];
 

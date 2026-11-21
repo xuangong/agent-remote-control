@@ -193,6 +193,19 @@ describe('a journal connection', () => {
     expect(events).toEqual(['journal_quota_exceeded']);
   });
 
+  it('refuses a publication the Host quota does not allow, as the same quota_exceeded frame, while the session alone is far below its own limit', async () => {
+    const events: string[] = [];
+    const journals = createHostJournals({ store: new MemoryJournalStore(), limits: { hostBytes: 6000 } });
+    const f = fixture({ journals, diagnostic: event => events.push(event) });
+    const other = await journals.open('host-1', 'codex:other-thread', 'controller-2', {}) as { generation: number };
+    expect((await journals.publish('host-1', 'codex:other-thread', other.generation, [{ sequence: 1, op: 'append', row: row('o1', 'o'.repeat(1500)) }])).refusal).toBeUndefined();
+    await f.open();
+    await f.publish([{ sequence: 1, op: 'append', row: row('m1', 'm'.repeat(2000)) }]);
+    expect(f.sent.at(-1)).toMatchObject({ type: 'journal_refused', sequence: 1, reason: 'quota_exceeded' });
+    expect(f.sent.filter(message => message.type === 'journal_ack').every(message => message.watermark === 0)).toBe(true);
+    expect(events).toEqual(['journal_quota_exceeded']);
+  });
+
   it('reports live-only items the journal removed beyond its cap once they are complete', async () => {
     const events: string[] = [];
     const journals = createHostJournals({ store: new MemoryJournalStore(), limits: { liveOnlyItems: 1 } });

@@ -82,3 +82,14 @@ test('answers every recorded call of the partition contract through Durable Obje
   await replayPartitionContract(api, contract as PartitionContractStep[]);
 });
 
+
+test('bounds a session of a Host partition to 12 MiB and the Host to 1 GiB', async () => {
+  expect(JOURNAL_PARTITION_LIMITS).toEqual({ sessionBytes: 12 * 1024 * 1024, hostBytes: 1024 * 1024 * 1024 });
+  const f = partitions();
+  await f.call('host-1', 'open', 'host-1', SESSION, 'controller-1');
+  const refused = await f.call('host-1', 'publish', 'host-1', SESSION, 1, [{ sequence: 1, op: 'append', row: row('big', 'x'.repeat(12 * 1024 * 1024 + 1)) }]);
+  expect(refused.refusal).toMatchObject({ sequence: 1, reason: 'quota_exceeded' });
+  await f.call('host-2', 'open', 'host-2', SESSION, 'controller-1');
+  const kept = await f.call('host-2', 'publish', 'host-2', SESSION, 1, [{ sequence: 1, op: 'append', row: row('fits', 'x'.repeat(11 * 1024 * 1024)) }]);
+  expect(kept.refusal).toBeUndefined();
+});

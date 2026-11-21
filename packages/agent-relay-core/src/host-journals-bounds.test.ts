@@ -2,7 +2,7 @@ import { MemoryJournalStore, type JournalStore } from '@orchardworks/agent-remot
 import type { JournalPublishEntry } from '@orchardworks/agent-remote-protocol';
 import { describe, expect, it } from 'vitest';
 
-import { createHostJournals, type HostJournals, type HostJournalsOptions, type JournalOpened } from './host-journals.js';
+import { createHostJournals, HOST_JOURNAL_LIMITS, type HostJournals, type HostJournalsOptions, type JournalOpened } from './host-journals.js';
 
 const HOST = 'host-1';
 const SESSION = 'codex:thread-1';
@@ -250,6 +250,72 @@ describe('a quota refusal and the live-only cap', () => {
     const completed = await journals.publish(HOST, SESSION, 1, [complete(5, 'l1')]);
     expect(completed.droppedLiveOnly).toBe(true);
     expect((await store.load(KEY))!.items.map(item => item.itemKey)).toEqual(['l2', 'l3', 'm1']);
+  });
+});
+
+describe('the default limits', () => {
+  const liveRows = (count: number): JournalPublishEntry[] => Array.from({ length: count }, (_, at) => [live(at * 2 + 1, `l${at}`), complete(at * 2 + 2, `l${at}`)]).flat();
+
+  it('keeps 2000 live-only items and removes the oldest beyond that', async () => {
+    const { journals, store } = fixture();
+    await open(journals, HOST, SESSION);
+    const atCap = await journals.publish(HOST, SESSION, 1, liveRows(2000));
+    expect(atCap.droppedLiveOnly).toBeUndefined();
+    expect((await store.load(KEY))!.items).toHaveLength(2000);
+    const over = await journals.publish(HOST, SESSION, 1, [live(4001, 'l2000'), complete(4002, 'l2000')]);
+    expect(over.droppedLiveOnly).toBe(true);
+    const kept = (await store.load(KEY))!.items.map(item => item.itemKey);
+    expect(kept).toHaveLength(2000);
+    expect([kept[0], kept.at(-1)]).toEqual(['l1', 'l2000']);
+  });
+
+  it('has the documented defaults: 64 MiB a session, 1 GiB a Host, 2000 live-only items', () => {
+    expect(HOST_JOURNAL_LIMITS).toEqual({ sessionBytes: 64 * 1024 * 1024, hostBytes: 1024 * 1024 * 1024, liveOnlyItems: 2000 });
+  });
+
+  it.each([[0, true], [1, false]])('admits a publication that needs the room the Host default leaves, and refuses one byte more (%i byte over: admitted %s)', async (over, admitted) => {
+    const entry = append(1, 'm1', 'hello');
+    // What the journal counts for the session before and after the entry, measured on a Host with no other session.
+    const probe = new MemoryJournalStore();
+    const probed = createHostJournals({ store: probe });
+    await open(probed, HOST, SESSION);
+    const before = (await probe.catalog.list(`${HOST}:`))[0]!.bytes;
+    const needed = before + new TextEncoder().encode(JSON.stringify(entry)).length;
+    const memory = new MemoryJournalStore();
+    // Another session of the Host holds all but `needed` bytes of the Host's 1 GiB; no data of that size exists.
+    const other = { sessionKey: `${HOST}:codex:other`, hasHead: false, bytes: 1024 * 1024 * 1024 - needed + over };
+    const store: JournalStore = { load: key => memory.load(key), apply: changes => memory.apply(changes), delete: key => memory.delete(key),
+      catalog: { list: async prefix => [...(await memory.catalog.list(prefix)).filter(listing => listing.sessionKey !== other.sessionKey), ...(other.sessionKey.startsWith(prefix) ? [other] : [])], deletePrefix: prefix => memory.catalog.deletePrefix(prefix) } };
+    const journals = createHostJournals({ store });
+    await open(journals, HOST, SESSION);
+    const result = await journals.publish(HOST, SESSION, 1, [entry]);
+    if (admitted) expect(result.refusal).toBeUndefined();
+    else expect(result.refusal).toEqual({ sequence: 1, reason: 'quota_exceeded' });
+  });
+
+  // 17 MiB: the cap is 17 MiB less one message (8 MiB), not less half the session (8.5 MiB), so 9 MiB of live-only items stay.
+  it('caps the live-only bytes at the session limit less one message of 8 MiB when the session is larger than 16 MiB', async () => {
+    const MiB = 1024 * 1024;
+    const { journals, store } = fixture({ limits: { sessionBytes: 17 * MiB } });
+    await open(journals, HOST, SESSION);
+    const row = (at: number) => [{ sequence: at * 2 + 1, op: 'append' as const, row: { ...rowOf(`l${at}`, 'x'.repeat(Math.floor(2.2 * MiB)), 0), liveOnly: true } }, complete(at * 2 + 2, `l${at}`)];
+    for (let at = 0; at < 4; at += 1) expect((await journals.publish(HOST, SESSION, 1, row(at))).droppedLiveOnly).toBeUndefined();
+    expect((await store.load(KEY))!.items).toHaveLength(4);
+    const over = await journals.publish(HOST, SESSION, 1, row(4));
+    expect(over.droppedLiveOnly).toBe(true);
+    expect((await store.load(KEY))!.items.map(item => item.itemKey)).toEqual(['l1', 'l2', 'l3', 'l4']);
+  });
+
+  // A live-only row of 400 characters takes about 730 bytes. The cap is half a small session (no more than one message below
+  // the session limit), so the rows kept at 10,000, 20,000 and 40,000 bytes are the rows that fit in 5,000, 10,000 and 20,000.
+  it.each([[10_000, 6], [20_000, 13], [40_000, 27]])('keeps the live-only rows that fit in half of a %i-byte session: %i', async (sessionBytes, kept) => {
+    const { journals, store } = fixture({ limits: { sessionBytes } });
+    await open(journals, HOST, SESSION);
+    for (let at = 0; at < 80; at += 1) {
+      const result = await journals.publish(HOST, SESSION, 1, [{ sequence: at * 2 + 1, op: 'append', row: { ...rowOf(`l${at}`, 'x'.repeat(400), 0), liveOnly: true } }, complete(at * 2 + 2, `l${at}`)]);
+      expect(result.refusal).toBeUndefined();
+    }
+    expect((await store.load(KEY))!.items).toHaveLength(kept);
   });
 });
 

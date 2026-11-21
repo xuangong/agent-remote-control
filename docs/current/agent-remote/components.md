@@ -37,7 +37,7 @@ The clause tables also marked some partial gaps inline (a default value, a close
 | `agent-relay-core/src/domain/session-control/session-control.orderings.test.ts` | Relay session control C4, C6 to C12, C17: every order of four events on one page (14,641 orders), every interleaving of two pages with a terminal's refusal at any point (140 orders); a broken order prints its sequence |
 | `agent-client/src/replica/send-state.orderings.test.ts` | Client replica and send state C4 to C10: every order of four events reaching one pending message (6,561 orders) |
 | `agent-controller/src/transcript-divergence.test.ts` | Controller session core C10, at its bounds: 1,999, 2,000 and 2,001 ms after the last write; 29,999, 30,000 and 30,001 ms of quiet |
-| `agent-controller/src/provider-faults.test.ts` with `test-utils/faulty-provider.ts` | Controller session core C16 and C17 against a provider CLI that misbehaves: Codex's single writer is surfaced as `session_in_use` in fixed words, a slow resume within the deadline opens, a hung resume is refused at the Relay's deadline, an item kind the adapter does not know is dropped and the known rows kept. Two gaps it shows: no error says how long to wait after a usage limit (`AgentRuntimeError` names none), and nothing on the Controller's side gives up a hung resume, which holds the binding until it answers |
+| `agent-controller/src/provider-faults.test.ts` with the CLI simulator (`test-utils/simulated-cli.ts`, which replaced `faulty-provider.ts`) | Controller session core C16 and C17 against a provider CLI that misbehaves: Codex's single writer is surfaced as `session_in_use` in fixed words, a slow resume within the deadline opens, a hung resume is refused at the Relay's deadline, a usage limit is named in fixed words (`native_usage_limited`) but not when it resets, an item kind the adapter does not know is dropped and the known rows kept. The hung resume that holds the binding is pinned as an expected failure in `resume-deadline.test.ts` |
 
 ## Gaps closed
 
@@ -731,3 +731,39 @@ Module: `agent-provider-sdk/src/behaviour.ts` (`AgentProviderBehaviour`, `resolv
 | C6 | Codex `behaviour.test.ts` (three tests, with the refusal of a writer elsewhere); Claude, Copilot, OpenCode and DSH `behaviour.test.ts`; Copilot `provider.test.ts` > "refuses to resume a native session held outside the managed Controller" (the reason) |
 
 Gaps: none.
+
+## CLI simulator (test support)
+Module: `agent-controller/src/test-utils/simulated-cli.ts` (`simulatedCli`), exported to the seams as `@orchardworks/agent-remote-controller/testing/simulated-cli`. A native CLI at the provider port, played from the behaviour an adapter declares, with the faults of section 3.1 of `docs/superpowers/specs/2026-11-21-requirements-vs-external-dependencies.md` as knobs (step B2). Tests: `agent-controller/src/test-utils/simulated-cli.test.ts`.
+
+### Clauses
+- S1. Each resume makes the Controller's process one client of the session until that session is disposed; a session is loaded while it has a client and for the declared `unloadAfterLastClientMs` after its last client leaves.
+- S2. A send runs a turn: the user message and `turn_started` at once, the reply and `turn_completed` after `turnMs`; its items reach history when it ends.
+- S3. Another client of shared clients (`externalWriter`) is seen live by attached clients when `othersVisible` is `live`, reaches history, and loads the session while it runs.
+- S4. A writer elsewhere (`single_writer`, or `separate` beside shared clients) is refused while the session is loaded; otherwise it holds the writer for its turn, and a resume meanwhile is refused with `AgentSessionInUseError` reason `writer_elsewhere`.
+- S5. Fork on divergence: a write elsewhere continues the newest branch as it was when the write began; a reread shows the branch written last; a resident client continues its own branch.
+- S6. Resume faults: slow, hung (once or until healed), and a usage limit typed `native_usage_limited` with `resetsAt` until that time.
+- S7. Mid-turn faults on the next turn: a crash fails it with `native_exited` and ends the stream; a hang leaves it running after its user message.
+- S8. An unknown item kind, in every history read and turn until healed.
+- S9. Every delay runs on the injected clock, the global timers by default, so fake timers drive it.
+
+| Clause | Test(s) that prove it |
+|---|---|
+| S1 | `simulated-cli.test.ts` > "keeps a session loaded while this process is its client and for the declared unload time after (S1)", "unloads a session at once when the CLI declares no unload time (S1)" |
+| S2 | "runs a send as a turn whose items reach history when it ends, and reads history back at the next resume (S2)" |
+| S3 | "shows another client's turn live to this process's client, and loads the session while it runs (S3)" |
+| S4 | "refuses a writer elsewhere while the session is loaded, and refuses a resume while one writes (S4)", "refuses every writer elsewhere for a single writer that this process holds (S4)" |
+| S5 | "forks a transcript two writers write at once: a reread shows the newest branch, the resident client keeps its own (S5)" |
+| S6 | "answers a slow resume after its delay, and a hung one only once healed (S6)", "refuses a resume with a typed usage limit until the limit resets (S6)" |
+| S7 | "fails a turn whose CLI exits with native_exited and ends the stream, and leaves a hung turn running (S7)" |
+| S8 | "sends an item of a kind the adapter does not know in every history read and turn until healed (S8)" |
+| S9 | every test above runs on fake timers; "declares the behaviour it plays, so a Controller reads it as an adapter states it" |
+
+### Gaps reproduced in the simulator, as expected failures (`it.fails`)
+Each test fails today for the reason its open item names; the change that closes the item turns it into a plain test.
+
+| Open item | Test | What fails today |
+|---|---|---|
+| O47 | `agent-remote-seams/tests/S2/session-residency.integration.test.ts` > "stays resident past the idle grace, so another client's turn still reaches the page live (O47)", "is let go a short grace after no page shows it, so the CLI unloads it within its own unload time of the page closing (O47)" | the Controller lets the shown session go after 5 minutes, and holds an unshown one for 5 minutes |
+| O48 | `agent-remote-seams/tests/S2/writer-elsewhere.integration.test.ts` > "stays readable from its journal, says the CLI's reason, offers a retry and no take-over, and goes live again after it (O48)" | the page's open is refused (409 `session_in_use`) |
+| O49 | `agent-controller/src/transcript-fork.test.ts` > "shows the terminal's branch, which native history shows, when both turns end within the tolerance (O49)" | the 2,000 ms rule misses the fork, so the Controller keeps the page's branch |
+| Gap 4 (O53) | `agent-controller/src/resume-deadline.test.ts` > "is given up at the declared deadline with a typed timeout, and frees the binding for the next open (gap 4)" | nothing answers the hung resume, and the next open waits behind it |

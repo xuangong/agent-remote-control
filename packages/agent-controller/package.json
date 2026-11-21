@@ -39,6 +39,10 @@
       "types": "./dist/test-utils/relay-session-harness.d.ts",
       "import": "./dist/test-utils/relay-session-harness.js"
     },
+    "./testing/simulated-cli": {
+      "types": "./dist/test-utils/simulated-cli.d.ts",
+      "import": "./dist/test-utils/simulated-cli.js"
+    },
     "./succession-host-testing": {
       "types": "./dist/succession-host-testing.d.ts",
       "import": "./dist/succession-host-testing.js"

@@ -68,7 +68,8 @@ describe('Codex Lab composition', () => {
     const executable = fakeExecutable('codex-cli 0.162.0');
     const composition = await createCodexValidationServer({ executable });
     try {
-      expect(composition.relay.listProviders()).toEqual([{ providerId: 'codex', displayName: 'Codex (fixture)', sessionExtensions: { instructions: true, tools: true, toolNamespaces: 'creation' }, sessionAccess: { readOnly: true }, sessionHostAccess: true }]);
+      expect(composition.relay.listProviders()).toEqual([{ providerId: 'codex', displayName: 'Codex (fixture)', sessionExtensions: { instructions: true, tools: true, toolNamespaces: 'creation' }, sessionAccess: { readOnly: true }, sessionHostAccess: true,
+        behaviour: expect.objectContaining({ concurrency: { model: 'single_writer', probe: 'lock_file', othersVisible: 'never' } }) }]);
     } finally {
       await composition.close();
     }

@@ -552,7 +552,7 @@ export function createSessionBindings(ports: SessionBindingPorts) {
   /** The Host's bindings and creation records leave with the Host; called inside the publish of the revoke commit. */
   function forgetHost(hostId: string) {
     for (const [id, binding] of brokerState.bindings) if (binding.hostId === hostId) {
-      brokerState.bindings.delete(id); runtimeBindings.delete(id); const key = JSON.stringify([hostId, binding.providerId, binding.nativeSessionId]);
+      brokerState.bindings.delete(id); runtimeBindings.delete(id); nativeRefusals.delete(id); const key = JSON.stringify([hostId, binding.providerId, binding.nativeSessionId]);
       brokerState.nativeBindings.delete(key); attached.delete(key);
     }
     for (const [key, value] of brokerState.completedCreations) if (!brokerState.bindings.has(value.agentId)) { brokerState.completedCreations.delete(key); creations.delete(key); }
@@ -560,7 +560,7 @@ export function createSessionBindings(ports: SessionBindingPorts) {
     for (const key of attachmentRequests.keys()) if (JSON.parse(JSON.parse(key)[0])[0] === hostId) attachmentRequests.delete(key);
   }
   /** The Relay shuts down: its saved records and the runtime ledgers are dropped. */
-  function clear() { runtimeBindings.clear(); attached.clear(); creations.clear(); }
+  function clear() { runtimeBindings.clear(); attached.clear(); creations.clear(); nativeRefusals.clear(); }
   return { runtimeAgentId, sessionRead, recoverBinding, mutate, waitForCreation, userMutation, sharedCatalog, hasCreation: (key: string) => creations.has(key), forgetHost, clear,
     /** The CLI's refusal of the Controller for a bound session, while it lasts. */
     nativeRefusal: (agentId: string): NativeRefusal | undefined => nativeRefusals.get(agentId) };

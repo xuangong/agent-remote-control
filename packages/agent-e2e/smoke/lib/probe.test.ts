@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { controllerPath } from '@orchardworks/agent-remote-protocol/model';
-import { linkedSession, sessionPane } from './probe.js';
+import { deviceKey } from '@orchardworks/agent-client/device-store';
+import { keptRecordOf, linkedSession, sessionPane } from './probe.js';
 
 const origin = 'http://127.0.0.1:61630';
 
@@ -19,5 +20,19 @@ describe('the conversation a smoke page reads and drives', () => {
     expect(sessionPane('host-1/claude/native-1')).toBe('[data-native-session="claude/native-1"]');
     // The command line reads everything after the provider as the native id.
     expect(sessionPane('host-1/opencode/ses/1')).toBe('[data-native-session="opencode/ses/1"]');
+  });
+});
+
+describe('the record a revisit paints from', () => {
+  const relay = 'http://127.0.0.1:61630/';
+  const keys = [deviceKey(relay, ['host-1', 'copilot', 'other-1']), deviceKey(relay, ['host-1', 'claude', 'native-2'])];
+  it("is the opened session's own: a record of another session of the Window does not count", () => {
+    expect(keptRecordOf(keys, 'host-1/claude/native-2')).toBe(true);
+    expect(keptRecordOf(keys, 'host-1/claude/native-1')).toBe(false);
+    expect(keptRecordOf(keys, 'host-1/codex/native-2')).toBe(false);
+  });
+  it('is any record for a page that opened a Window', () => {
+    expect(keptRecordOf(keys, undefined)).toBe(true);
+    expect(keptRecordOf([], undefined)).toBe(false);
   });
 });

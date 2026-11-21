@@ -102,6 +102,8 @@ export function result(invariant: string, checked: number, violations: Violation
 export interface RoundRecord {
   /** `codex terminal 3`, `claude two pages 1`. */
   label: string;
+  /** When the round started, on the run's clock: its violations are placed there. */
+  t?: number;
   writers: WriterRecord[];
   /** The native session's newest entries and facts, read after the round settled. */
   native: ViewRecord;

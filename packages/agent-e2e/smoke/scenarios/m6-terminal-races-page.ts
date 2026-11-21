@@ -29,17 +29,18 @@ const ask = (word: string) => `Reply with the single word ${word} and nothing el
  * session. A terminal is outside our system and its CLI's rules decide: a Codex terminal joins the session through the shared
  * daemon and Codex orders its turns and the page's; a Claude Code terminal resumes the transcript, as S6a's did; a separate Codex
  * process is refused by Codex while the daemon has the thread, and while it writes the page must still show the session and Codex's
- * reason. The page only reports what happened, live, and never says a connection word. `--rounds` (50) sets the terminal rounds per
- * provider, `--page-rounds` (10) the rounds of two pages; both are 2 with `--quick`.
+ * reason. The page only reports what happened, live, and never says a connection word. These real-CLI rounds check the wiring;
+ * the orderings of writers are enumerated at the seams. `--rounds` (5) sets the terminal rounds per provider, `--page-rounds` (5)
+ * the rounds of two pages; both are 2 with `--quick`.
  */
 export const terminalRacesPage: Scenario = {
   id: 'M6',
   title: 'Writers race on one session: two pages, and a terminal beside the page',
   quick: false,
-  deadlineMinutes: { quick: 20, full: 180 },
+  deadlineMinutes: { quick: 20, full: 60 },
   async run(context) {
-    const rounds = positiveInteger('--rounds', context.quick ? 2 : 50);
-    const pageRounds = positiveInteger('--page-rounds', context.quick ? 2 : 10);
+    const rounds = positiveInteger('--rounds', context.quick ? 2 : 5);
+    const pageRounds = positiveInteger('--page-rounds', context.quick ? 2 : 5);
     const reading = await smartReading(context);
     if (!reading.includes('claude') || !reading.includes('codex')) throw new Error(`M6 reads its sessions from the journal: turn smart reading on for Claude Code and Codex (now ${JSON.stringify(reading)}).`);
     const recorder = new TranscriptRecorder();
@@ -124,6 +125,7 @@ class Race {
   /** Two pages send at once, the second a seeded moment after the first. */
   async twoPages(provider: Provider, index: number, page: OpenPage, other: OpenPage): Promise<RoundRecord> {
     const label = `${provider} two pages ${index}`;
+    const t = this.recorder.clock();
     const from = this.recorder.transcript().at(-1)?.n ?? 0;
     const words = { [page.name]: this.word(provider, 'A', index), [other.name]: this.word(provider, 'B', index) };
     const [lead, follow] = this.context.random.pick([[page, other], [other, page]] as const);
@@ -133,13 +135,14 @@ class Race {
     const native = await this.settle(Object.values(words));
     await Promise.all([page, other].map(shown => this.waitForWords(shown, Object.values(words), 30_000)));
     const wire = this.recorder.transcript().filter(entry => entry.n > from);
-    return { label, writers: [page, other].map(writer => ({ writer: writer.name, word: words[writer.name]!, ...pageDelivery(wire, words[writer.name]!) })),
+    return { label, t, writers: [page, other].map(writer => ({ writer: writer.name, word: words[writer.name]!, ...pageDelivery(wire, words[writer.name]!) })),
       native, pages: [await this.view(page), await this.view(other)] };
   }
 
   /** The page sends while a terminal writes one turn; a seeded choice says which one starts first, and by how much. */
   async withTerminal(provider: 'claude' | 'codex', index: number, page: OpenPage, terminal: TerminalDriver): Promise<RoundRecord> {
     const label = `${provider} terminal ${index}`;
+    const t = this.recorder.clock();
     const from = this.recorder.transcript().at(-1)?.n ?? 0;
     const pageWord = this.word(provider, 'P', index), terminalWord = this.word(provider, 'T', index);
     const lead = this.context.random.pick(['page', 'terminal'] as const);
@@ -168,7 +171,7 @@ class Race {
     const shownAfterMs = turn.delivered ? await this.waitForWords(page, [terminalWord], carrying(native.userTexts, terminalWord) > 0 ? bound : 5000).then(at => at === null ? null : Math.max(0, at - turn.endedAt)) : null;
     const wire = this.recorder.transcript().filter(entry => entry.n > from);
     const record: RoundRecord = {
-      label,
+      label, t,
       writers: [{ writer: 'page', word: pageWord, ...pageDelivery(wire, pageWord) },
         { writer: 'terminal', word: terminalWord, delivered: turn.delivered, tries: turn.tries.length, ...(last.reason ? { refusal: last.reason } : {}) }],
       native, pages: [await this.view(page)],

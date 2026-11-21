@@ -1,5 +1,5 @@
-import type { InvariantResult } from './invariants/types.js';
-import type { Finding } from './report.js';
+import type { InvariantResult, Transcript, Violation } from './invariants/types.js';
+import type { Finding, ScheduleStep } from './report.js';
 
 /** Where a broken invariant is tested next: the seam of the integration test and the module (in architecture/modules.json) that owns the rule. */
 const owners: Record<string, { seam: string; module: string }> = {
@@ -33,14 +33,18 @@ const owners: Record<string, { seam: string; module: string }> = {
  * One finding per failed invariant. Each names the saved transcript and seed and the tests that follow section 5.7: the
  * transcript into `agent-remote-fixtures`, a failing integration test on the seam, then a failing unit test in the owning module.
  */
-export function findingsFromFailures(scenario: string, seed: number, invariants: InvariantResult[], transcript: string | undefined): Finding[] {
+export function findingsFromFailures(scenario: string, seed: number, invariants: InvariantResult[], transcript: string | undefined,
+  run: { schedule?: readonly ScheduleStep[]; entries?: Transcript } = {}): Finding[] {
   return invariants.filter(item => item.status === 'failed').map(item => {
     const owner = owners[item.invariant] ?? { seam: 'S3', module: 'unassigned' };
-    const first = item.violations[0];
+    const timed = item.violations.filter(violation => violation.at !== undefined).sort((a, b) => a.at! - b.at!);
+    const first = timed[0] ?? item.violations[0];
+    const where = first ? firstViolation(first, run) : undefined;
     return {
       id: `${scenario}-${item.invariant}`,
       summary: `${item.invariant}: ${first?.message ?? 'failed'}${item.violations.length > 1 ? ` (and ${item.violations.length - 1} more)` : ''}`,
-      evidence: `scenario ${scenario}, seed ${seed}${transcript ? `, transcript ${transcript}` : ''}`,
+      evidence: `scenario ${scenario}, seed ${seed}${transcript ? `, transcript ${transcript}` : ''}${where?.step ? `, step ${where.step.action} at t=${Math.round(where.step.t)} ms` : ''}${where?.window ? `, entries ${where.window.from} to ${where.window.to}` : ''}`,
+      ...(where ? { firstViolation: where } : {}),
       candidateTests: [
         `Add the transcript to agent-remote-fixtures and a failing integration test on seam ${owner.seam} in agent-remote-seams that replays it and asserts ${item.invariant}.`,
         `Add a failing unit test for the rule in ${owner.module}.`,
@@ -50,3 +54,15 @@ export function findingsFromFailures(scenario: string, seed: number, invariants:
 }
 
 export const knownInvariants = Object.keys(owners);
+
+/**
+ * Where the first violation happened, so a failure replays from the report alone: its time, the step of the fault schedule that
+ * was running then (the last one that started before it), and the transcript entries from that step's start to the violation.
+ */
+export function firstViolation(violation: Violation, { schedule = [], entries = [] }: { schedule?: readonly ScheduleStep[]; entries?: Transcript }): NonNullable<Finding['firstViolation']> {
+  const at = violation.at;
+  const step = at === undefined ? undefined : [...schedule].filter(item => item.t <= at).sort((a, b) => a.t - b.t).at(-1);
+  const inWindow = at === undefined ? [] : entries.filter(entry => entry.t >= (step?.t ?? 0) && entry.t <= at);
+  return { message: violation.message, ...(at === undefined ? {} : { at }), ...(step ? { step } : {}),
+    ...(inWindow.length ? { window: { from: inWindow[0]!.n, to: inWindow.at(-1)!.n } } : {}), ...(violation.detail === undefined ? {} : { detail: violation.detail }) };
+}

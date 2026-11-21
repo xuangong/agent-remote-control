@@ -14,6 +14,8 @@ export interface Finding {
   evidence: string;
   /** The integration test on the seam where the rule breaks, then the unit test in the owning module (section 5.7). */
   candidateTests: string[];
+  /** The first violation: when, during which step of the schedule, the transcript entries that replay it, and its context. */
+  firstViolation?: { message: string; at?: number; step?: ScheduleStep; window?: { from: number; to: number }; detail?: unknown };
 }
 
 export interface ScenarioReport {

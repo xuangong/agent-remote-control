@@ -28,8 +28,8 @@ const withDeadline = <T>(promise: Promise<T>, ms: number, message: string): Prom
   return Promise.race([promise, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); })]).finally(() => clearTimeout(timer));
 };
 // The run may take what its scenarios may take, and a margin for creating its sessions and writing the report, within the wrapper's
-// own deadline (scripts/run-smoke.mjs: 20 minutes quick, 300 full).
-const outerDeadlineMs = Math.min((quick ? 18 : 290) * 60_000, Math.max((quick ? 15 : 90) * 60_000, selected.reduce((sum, scenario) => sum + scenarioDeadlineMs(scenario), 10 * 60_000)));
+// own deadline (scripts/run-smoke.mjs: 20 minutes quick, 240 full).
+const outerDeadlineMs = Math.min((quick ? 18 : 230) * 60_000, Math.max((quick ? 15 : 90) * 60_000, selected.reduce((sum, scenario) => sum + scenarioDeadlineMs(scenario), 10 * 60_000)));
 const timer = setTimeout(() => { log(`outer deadline of ${outerDeadlineMs / 60_000} minutes reached`); process.exit(2); }, outerDeadlineMs);
 timer.unref();
 
@@ -57,7 +57,7 @@ try {
       const transcriptName = outcome.transcript ? `${scenario.id}.transcript.jsonl` : undefined;
       if (outcome.transcript && transcriptName) transcripts[transcriptName] = outcome.transcript.toJsonLines();
       report = { ...base, status: scenarioStatus(outcome.invariants), durationMs: Date.now() - started, schedule: outcome.schedule, measurements: outcome.measurements, invariants: outcome.invariants,
-        ...(transcriptName ? { transcript: transcriptName } : {}), findings: [...findingsFromFailures(scenario.id, seed, outcome.invariants, transcriptName), ...(outcome.findings ?? [])], ...(outcome.note ? { note: outcome.note } : {}) };
+        ...(transcriptName ? { transcript: transcriptName } : {}), findings: [...findingsFromFailures(scenario.id, seed, outcome.invariants, transcriptName, { schedule: outcome.schedule, ...(outcome.transcript ? { entries: outcome.transcript.transcript() } : {}) }), ...(outcome.findings ?? [])], ...(outcome.note ? { note: outcome.note } : {}) };
     } catch (error) {
       report = { ...base, status: 'errored', durationMs: Date.now() - started, note: (error as Error).stack?.split('\n').slice(0, 4).join(' | ') ?? String(error) };
     }

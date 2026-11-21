@@ -22,9 +22,9 @@ export function noLostOrDoubledMessage(rounds: readonly RoundRecord[]): Invarian
       for (const writer of round.writers) {
         checked += 1;
         const count = carrying(view.userTexts, writer.word);
-        if (writer.delivered && count === 0) violations.push({ message: `[${round.label}] ${view.name} lost the ${writer.writer}'s message ${writer.word}` });
-        if (count > 1) violations.push({ message: `[${round.label}] ${view.name} shows the ${writer.writer}'s message ${writer.word} ${count} times` });
-        if (!writer.delivered && count > 0) violations.push({ message: `[${round.label}] ${view.name} shows the ${writer.writer}'s message ${writer.word}, which its writer was told was refused (${writer.refusal ?? 'no reason'})` });
+        if (writer.delivered && count === 0) violations.push({ at: round.t, message: `[${round.label}] ${view.name} lost the ${writer.writer}'s message ${writer.word}` });
+        if (count > 1) violations.push({ at: round.t, message: `[${round.label}] ${view.name} shows the ${writer.writer}'s message ${writer.word} ${count} times` });
+        if (!writer.delivered && count > 0) violations.push({ at: round.t, message: `[${round.label}] ${view.name} shows the ${writer.writer}'s message ${writer.word}, which its writer was told was refused (${writer.refusal ?? 'no reason'})` });
       }
     }
   }
@@ -38,7 +38,7 @@ export function everyWriterSends(rounds: readonly RoundRecord[]): InvariantResul
   for (const round of rounds) {
     for (const writer of round.writers) {
       checked += 1;
-      if (!writer.delivered) violations.push({ message: `[${round.label}] the ${writer.writer} could not send ${writer.word} in ${writer.tries} tries: ${writer.refusal ?? 'no reason given'}` });
+      if (!writer.delivered) violations.push({ at: round.t, message: `[${round.label}] the ${writer.writer} could not send ${writer.word} in ${writer.tries} tries: ${writer.refusal ?? 'no reason given'}` });
     }
   }
   return result('every-writer-sends', checked, violations);
@@ -52,7 +52,7 @@ export function terminalRowsAppear(rounds: readonly RoundRecord[]): InvariantRes
     if (!round.terminalShown) continue;
     round.terminalShown.afterMs.forEach((ms, page) => {
       checked += 1;
-      if (ms === null) violations.push({ message: `[${round.label}] the terminal's turn did not appear on ${round.pages[page]?.name ?? `page ${page + 1}`} within ${round.terminalShown!.boundMs} ms` });
+      if (ms === null) violations.push({ at: round.t, message: `[${round.label}] the terminal's turn did not appear on ${round.pages[page]?.name ?? `page ${page + 1}`} within ${round.terminalShown!.boundMs} ms` });
     });
   }
   return result('terminal-rows-appear', checked, violations);
@@ -69,20 +69,20 @@ export function stateAndPropertiesMatch(rounds: readonly RoundRecord[]): Invaria
     for (const page of round.pages) {
       if (round.native.status !== undefined && page.status !== undefined) {
         checked += 1;
-        if (page.status !== round.native.status) violations.push({ message: `[${round.label}] ${page.name} says ${page.status}, the native session ${round.native.status}` });
+        if (page.status !== round.native.status) violations.push({ at: round.t, message: `[${round.label}] ${page.name} says ${page.status}, the native session ${round.native.status}` });
       } else if (round.native.status !== undefined) {
         checked += 1;
-        violations.push({ message: `[${round.label}] ${page.name} shows no activity` });
+        violations.push({ at: round.t, message: `[${round.label}] ${page.name} shows no activity` });
       }
       for (const [label, value] of Object.entries(round.native.settings ?? {})) {
         checked += 1;
         const shown = page.settings?.[label];
-        if (shown !== value) violations.push({ message: `[${round.label}] ${page.name} shows ${label} ${shown === undefined ? 'nowhere' : `"${shown}"`}, the native session "${value}"` });
+        if (shown !== value) violations.push({ at: round.t, message: `[${round.label}] ${page.name} shows ${label} ${shown === undefined ? 'nowhere' : `"${shown}"`}, the native session "${value}"` });
       }
     }
     round.liveState?.seenWorking.forEach((seen, page) => {
       checked += 1;
-      if (!seen) violations.push({ message: `[${round.label}] ${round.pages[page]?.name ?? `page ${page + 1}`} never said the session was working while the terminal's turn ran` });
+      if (!seen) violations.push({ at: round.t, message: `[${round.label}] ${round.pages[page]?.name ?? `page ${page + 1}`} never said the session was working while the terminal's turn ran` });
     });
   }
   return result('state-and-properties-match', checked, violations);

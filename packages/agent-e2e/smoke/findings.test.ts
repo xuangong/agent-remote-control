@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { findingsFromFailures, knownInvariants } from './findings.js';
+import { findingsFromFailures, firstViolation, knownInvariants } from './findings.js';
+import { transcript } from './invariants/builders.js';
 import { result } from './invariants/types.js';
 import * as invariants from './invariants/index.js';
 
@@ -24,5 +25,22 @@ describe('findings from failed invariants', () => {
     ].map(item => item.invariant);
     expect(reported.filter(name => !knownInvariants.includes(name))).toEqual([]);
     expect(knownInvariants.filter(name => !reported.includes(name))).toEqual([]);
+  });
+});
+
+describe('the first violation of a failed invariant', () => {
+  const schedule = [{ t: 100, action: 'controller-restart', detail: { round: 1 } }, { t: 900, action: 'controller-restart', detail: { round: 2 } }];
+  const entries = transcript().marker(50, 'turn-sent').receive(120, 'negotiated').receive(950, 'negotiated').receive(990, 'timeline_page').receive(1500, 'agent_stream').build();
+  it('names the step that was running, the entries that replay it and its context', () => {
+    expect(firstViolation({ message: 'gap', at: 1000, detail: { epoch: 'e', seq: 7 } }, { schedule, entries })).toEqual({
+      message: 'gap', at: 1000, step: schedule[1], window: { from: 3, to: 4 }, detail: { epoch: 'e', seq: 7 } });
+  });
+  it('says only the message when the violation has no time', () => {
+    expect(firstViolation({ message: 'lost' }, { schedule, entries })).toEqual({ message: 'lost' });
+  });
+  it('is the earliest violation of the finding, and the evidence says its step and entries', () => {
+    const [finding] = findingsFromFailures('M2', 7, [result('journal-sequences-contiguous', 3, [{ message: 'late', at: 1400 }, { message: 'early', at: 960 }])], 'M2.transcript.jsonl', { schedule, entries });
+    expect(finding?.firstViolation).toMatchObject({ message: 'early', at: 960, step: { t: 900 } });
+    expect(finding?.evidence).toBe('scenario M2, seed 7, transcript M2.transcript.jsonl, step controller-restart at t=900 ms, entries 3 to 3');
   });
 });

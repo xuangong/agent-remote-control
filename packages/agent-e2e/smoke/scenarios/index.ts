@@ -9,8 +9,8 @@ import { soak } from './m8-soak.js';
 import { hiddenAndDrops } from './m7-hidden-and-drops.js';
 
 /**
- * The scenarios of the plan, in its order. The quick subset is M1, M2, M4 and M7; M5 (minutes), M6 (50 terminal rounds per provider,
- * about two hours) and M8 (a soak of `--duration` minutes) are full-run only, and run alone with `pnpm smoke M6 --rounds N`.
+ * The scenarios of the plan, in its order. The quick subset is M1, M2, M4 and M7; M5 (minutes), M6 (real CLIs, about 20 minutes)
+ * and M8 (a soak of `--duration` minutes) are full-run only; `pnpm smoke M6 --rounds N` runs more terminal rounds.
  */
 export const scenarios: Scenario[] = [badNetwork, controllerRestart, relayRestart, quotaPressure, manySessions, terminalRacesPage, hiddenAndDrops, soak];
 

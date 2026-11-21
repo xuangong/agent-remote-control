@@ -7,8 +7,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const args = process.argv.slice(2);
-// A full run with M6's 50 rounds per provider takes about three and a half hours; each scenario has its own deadline inside.
-const outerDeadlineMs = (args.includes('--quick') ? 20 : 300) * 60_000;
+// A full run takes about two hours, half an hour of it M8's soak; each scenario has its own deadline inside.
+const outerDeadlineMs = (args.includes('--quick') ? 20 : 240) * 60_000;
 const tsx = join(root, 'packages/agent-e2e/node_modules/tsx/dist/cli.mjs');
 const child = spawn(process.execPath, [tsx, join(root, 'packages/agent-e2e/smoke/cli.ts'), ...args], { cwd: root, stdio: 'inherit', detached: process.platform !== 'win32' });
 const stop = signal => { try { process.kill(process.platform === 'win32' ? child.pid : -child.pid, signal); } catch (error) { if (error.code !== 'ESRCH') throw error; } };

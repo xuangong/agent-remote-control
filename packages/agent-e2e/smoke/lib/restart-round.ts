@@ -20,6 +20,14 @@ export interface RoundPlan {
 
 export interface RoundResult { label: string; results: InvariantResult[]; measurements: Record<string, unknown>; schedule: ScheduleStep[] }
 
+/**
+ * Whether the model is visibly in the middle of the turn just sent: a row that was not there before the send (`before`, its
+ * keys) shows a tool call, or a partial reply long enough to be streaming.
+ */
+export function landedMidTurn(rows: ReadonlyArray<{ key: string; kind: string; text: string }>, before: ReadonlySet<string>, phase: Phase): boolean {
+  return rows.some(row => !before.has(row.key) && (phase === 'tool-call' ? row.kind === 'tool_call' : row.kind === 'assistant_message' && row.text.length > 120));
+}
+
 const promptFor = (phase: Phase, word: string): string => phase === 'tool-call'
   ? `Run the shell command: sleep 20; echo ${word}-done. Then reply with the single word ${word}.`
   : `Write a 300 word story about a lighthouse keeper. Put the single word ${word} on its own line at the very end.`;
@@ -48,13 +56,16 @@ export async function runRestartRound(context: RunContext, plan: RoundPlan, reco
       const probe = await PageProbe.create(browserContext, recorder.origin, { process: 'full' });
       await probe.open(url.replace(context.instance.origin, proxy.origin), `open, ${label}`);
       await probe.page.waitForFunction(() => (window as any).__smoke.read().composer === 'enabled', undefined, { timeout: 60_000 });
+      // The session is shared by the rounds of a run: only the rows of this turn may say that the model is mid-turn.
+      const before = new Set((await probe.rows()).map(row => row.key));
       recorder.mark('turn-sent', { word, phase: plan.phase });
       await probe.send(firstPrompt);
       // The fault lands once the model is visibly mid-turn: a tool call row, or a long enough partial reply.
-      const reached = await probe.page.waitForFunction((phase: string) => {
-        const rows = (window as any).__smoke.rows() as Array<{ kind: string; text: string }>;
-        return phase === 'tool-call' ? rows.some(row => row.kind === 'tool_call') : rows.some(row => row.kind === 'assistant_message' && row.text.length > 120);
-      }, plan.phase, { timeout: 90_000 }).then(() => true, () => false);
+      let reached = false;
+      for (const until = Date.now() + 90_000; !reached && Date.now() < until;) {
+        reached = landedMidTurn(await probe.rows(), before, plan.phase);
+        if (!reached) await probe.page.waitForTimeout(250);
+      }
       measurements.faultLandedMidTurn = reached;
       if (plan.phase === 'tool-call') await probe.page.waitForTimeout(1500);
       recorder.mark(plan.marker, { phase: plan.phase });
@@ -84,7 +95,8 @@ export async function runRestartRound(context: RunContext, plan: RoundPlan, reco
     const results = [
       oneReplacementPerRestart(wire), journalSequencesContiguous(wire), messagesSettleOnce(wire, { final: false }), noDuplicateItemKey(wire, outcome),
       noBlankFrame(outcome), noSessionConnectionLabel(outcome),
-      turnRowsCompleteAfterReturn(outcome, [{ prompt: firstPrompt.slice(0, 40), requireReply: false }, { prompt: `Reply with the single word ${after}` }]),
+      // Each turn is found by the word only its own prompt carries: the rounds of a run ask the same questions.
+      turnRowsCompleteAfterReturn(outcome, [{ prompt: word, requireReply: false }, { prompt: `Reply with the single word ${after}` }]),
     ];
     return { label, results, measurements, schedule };
   } finally { await proxy.close(); }

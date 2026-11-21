@@ -28,6 +28,19 @@ export function sessionPane(address: string): string {
   return `[data-native-session=${JSON.stringify(`${provider}/${native.join('/')}`)}]`;
 }
 
+/**
+ * Whether the device store keeps a record of `session` (`<hostId>/<providerId>/<nativeSessionId>`), from the keys of its
+ * `sessions` store; any record at all when the page opened a Window. A Window shows several sessions, and a record of another
+ * one says nothing about the session a revisit will paint.
+ */
+export function keptRecordOf(keys: readonly string[], session: string | undefined): boolean {
+  if (!session) return keys.length > 0;
+  const [, provider, ...native] = session.split('/');
+  // A record's key is the device store's `deviceKey(relayUrl, [hostId, providerId, nativeSessionId])`.
+  const identity = `${JSON.stringify(provider)},${JSON.stringify(native.join('/'))}]`;
+  return keys.some(key => key.includes(identity));
+}
+
 /** `ms` is the time from the arrival of the page's document to its first row: the part the product controls. `totalMs` adds the document's own trip, which no code can shorten. */
 export interface Paint { label: string; ms: number; fromDeviceStore: boolean; timedOut?: boolean; totalMs?: number }
 
@@ -48,6 +61,8 @@ export class PageProbe {
   private timelinePageAt: number | undefined;
   /** The conversation this page reads and drives: the session its link opened. None when it opened a Window. */
   private pane: string | undefined;
+  /** The session its link opened, as the command line names it. */
+  private session: string | undefined;
   private constructor(readonly page: any, private readonly clockOrigin: number, private readonly cdp: any, private readonly process: ProcessDisplay | undefined) {}
 
   /** `process`: the display the scenario reads, chosen as this device's default before the page's own scripts run; none keeps the page's own. */
@@ -73,6 +88,7 @@ export class PageProbe {
   async open(url: string, label: string, { rowsDeadlineMs = 60_000 }: { rowsDeadlineMs?: number } = {}): Promise<Paint> {
     this.timelinePageAt = undefined;
     const session = linkedSession(url);
+    this.session = session;
     this.pane = session ? sessionPane(session) : undefined;
     // The observer reads this conversation from the page's first frame, so it is named before the page's own scripts run.
     await this.page.addInitScript((scope: string | null) => { (window as any).__smokeScope = scope; }, this.pane ?? null);
@@ -113,19 +129,20 @@ export class PageProbe {
    */
   async waitForKeptRecord(deadlineMs = 10_000): Promise<boolean> {
     const until = Date.now() + deadlineMs;
-    const kept = () => this.page.evaluate(() => new Promise<boolean>(resolve => {
+    const session = this.session;
+    const kept = () => this.page.evaluate(() => new Promise<string[]>(resolve => {
       const opening = indexedDB.open('agent-remote-image-drafts');
-      opening.onerror = () => resolve(false);
+      opening.onerror = () => resolve([]);
       opening.onsuccess = () => {
         const database = opening.result;
-        if (!database.objectStoreNames.contains('sessions')) { database.close(); resolve(false); return; }
-        const count = database.transaction('sessions').objectStore('sessions').count();
-        count.onsuccess = () => { database.close(); resolve(count.result > 0); };
-        count.onerror = () => { database.close(); resolve(false); };
+        if (!database.objectStoreNames.contains('sessions')) { database.close(); resolve([]); return; }
+        const keys = database.transaction('sessions').objectStore('sessions').getAllKeys();
+        keys.onsuccess = () => { database.close(); resolve(keys.result.map(String)); };
+        keys.onerror = () => { database.close(); resolve([]); };
       };
-    })).catch(() => false);
+    })).catch(() => [] as string[]);
     while (Date.now() < until) {
-      if (await kept()) return true;
+      if (keptRecordOf(await kept(), session)) return true;
       await this.page.waitForTimeout(100);
     }
     return false;

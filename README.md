@@ -858,7 +858,7 @@ pnpm test:local      # native CLI suites that need this machine's signed-in agen
 pnpm test:conformance
 pnpm test:e2e:flows   # the main flows: real browser, Relay and Controller with a scripted provider
 pnpm test:components  # the Workbench's fixture pages in a real browser, no Relay
-pnpm test:e2e         # older Playwright specs that start a Relay
+pnpm test:native:browser  # the page against a real Codex or DSH runtime, when one is selected
 pnpm lint:docs
 ```
 

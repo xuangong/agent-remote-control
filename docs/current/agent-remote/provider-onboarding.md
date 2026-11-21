@@ -66,7 +66,7 @@ A provider joins Relay journals only through its adapter: it declares `journal: 
 
 ## Verification and release record
 
-Run existing relevant behavior tests with both per-test and outer deadlines. Root `pnpm test`, `pnpm test:e2e` and `pnpm test:conformance` enforce outer deadlines; custom invocations need their own bounded wrapper. Select pinned native executables explicitly. Build before native tests that import `dist`. Use free test ports and preserve running user Hosts.
+Run existing relevant behavior tests with both per-test and outer deadlines. Root `pnpm test`, `pnpm test:e2e:flows` and `pnpm test:conformance` enforce outer deadlines; custom invocations need their own bounded wrapper. Select pinned native executables explicitly. Build before native tests that import `dist`. Use free test ports and preserve running user Hosts.
 
 Record the exact tests, native versions, environment mode and result. A green fixture suite proves normalization against that fixture; a native CLI against a loopback model service proves process integration; neither proves an online model workflow or the deployed DSH plugin. Skipped live tests must remain unverified. Do not rerun unrelated suites solely to turn a documentation edit into a release claim.
 

@@ -19,8 +19,8 @@ describe('findings from failed invariants', () => {
       invariants.noBlankFrame(empty), invariants.noSessionConnectionLabel(empty), invariants.halfOpenSocketRecovers([]), invariants.trimReported([]), invariants.liveOnlyItemsSurvive(empty, []),
       invariants.noRefusedRowHole([]), invariants.subscriptionsWithinBudget([], 1), invariants.unchangedRowsNotRerendered(empty),
       invariants.memoryFlat(empty), invariants.rowCountsStable(empty), invariants.socketCountsStable(empty),
-      invariants.leaseFollowsNativeOwner([]), invariants.noLostOrDoubledMessage(empty, []), invariants.takeOverWorks([]),
-      invariants.terminalRowsAppear([]), invariants.catchUpCostsOneTailRequest([]), invariants.draftAndPositionKept(empty),
+      invariants.noLostOrDoubledMessage([]), invariants.everyWriterSends([]), invariants.terminalRowsAppear([]), invariants.stateAndPropertiesMatch([]), invariants.pageStaysLiveWhenCodexRefuses([]),
+      invariants.catchUpCostsOneTailRequest([]), invariants.draftAndPositionKept(empty),
     ].map(item => item.invariant);
     expect(reported.filter(name => !knownInvariants.includes(name))).toEqual([]);
     expect(knownInvariants.filter(name => !reported.includes(name))).toEqual([]);

@@ -93,3 +93,53 @@ export interface InvariantResult {
 export function result(invariant: string, checked: number, violations: Violation[]): InvariantResult {
   return { invariant, checked, violations, status: violations.length > 0 ? 'failed' : checked === 0 ? 'not_exercised' : 'passed' };
 }
+
+/**
+ * M6's third input: what each round of writers racing on one session left behind. A writer is a page (its composer) or a terminal
+ * (its CLI); a view is a place that shows the session: each page, and the native session read through the command line. A run's
+ * rounds are kept in its report, so its M6 invariants replay from it as the others replay from the transcript.
+ */
+export interface RoundRecord {
+  /** `codex terminal 3`, `claude two pages 1`. */
+  label: string;
+  writers: WriterRecord[];
+  /** The native session's newest entries and facts, read after the round settled. */
+  native: ViewRecord;
+  pages: ViewRecord[];
+  /** A terminal round: how long after the terminal's turn ended its rows appeared on each page (`null`: not within `boundMs`). */
+  terminalShown?: { boundMs: number; afterMs: Array<number | null> };
+  /** A round whose terminal joins the page's live session: whether each page said the session was working while the terminal's turn ran. */
+  liveState?: { seenWorking: boolean[] };
+}
+
+/** One message of a round: its unique word, and what its writer was told. */
+export interface WriterRecord {
+  writer: string;
+  word: string;
+  /** The writer was told its message was taken: a page's send was acknowledged, a terminal's CLI ran the turn. */
+  delivered: boolean;
+  /** Tries it took: a terminal that Codex refused while another client's turn ran tries again. */
+  tries: number;
+  /** What the writer was told when its last try was refused. */
+  refusal?: string;
+}
+
+/** The session as one place showed it: the person's messages (newest last), its activity, and its settings by label. */
+export interface ViewRecord {
+  name: string;
+  userTexts: string[];
+  status?: string;
+  settings?: Record<string, string>;
+}
+
+/**
+ * M6, beside a separate Codex process: Codex refuses the Controller while another process writes the session (its single writer).
+ * What a page opened meanwhile showed, and whether the process's turn reached the page once it ended.
+ */
+export interface RefusalRecord {
+  label: string;
+  shown: { rows: number; status?: string; notice: string; retry: boolean; takeOver: boolean };
+  /** From the process's end to its turn on the page; `null`: not within `boundMs`. */
+  caughtUpMs: number | null;
+  boundMs: number;
+}

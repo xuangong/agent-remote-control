@@ -143,6 +143,36 @@ export class PageProbe {
 
   assistantCount(): Promise<number> { return this.page.evaluate(() => (window as any).__smoke.root().querySelectorAll('.agent-message-assistant').length); }
 
+  /** The texts of the person's messages the conversation holds, oldest first, read from the document whether or not a row is scrolled into view. */
+  userTexts(): Promise<string[]> {
+    return this.page.evaluate(() => [...(window as any).__smoke.root().querySelectorAll('.agent-timeline-entry .agent-message-user')]
+      .map((node: Element) => (node.textContent ?? '').trim()));
+  }
+
+  /** The session's activity as the conversation's title carries it (`idle`, `running`, `waiting`, …); none while it shows no title. */
+  sessionStatus(): Promise<string | undefined> {
+    return this.page.evaluate((pane: string) => document.querySelector(pane)?.querySelector('.agent-session-title[data-session-status]')?.getAttribute('data-session-status') ?? undefined, this.ownPane());
+  }
+
+  /**
+   * The session's facts as its assistant's details list them under Status: provider, runtime, each setting by its label, usage. The
+   * details cover the conversation, so they are opened for the read and closed again.
+   */
+  async sessionFacts(): Promise<Record<string, string>> {
+    const toggle = this.page.locator(`${this.ownPane()} .lab-tile-who`);
+    if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
+    const details = this.page.locator(`[id="${await toggle.getAttribute('aria-controls')}"]`);
+    try {
+      await details.locator('.agent-session-settings-list button', { hasText: 'Status' }).click({ timeout: 10_000 });
+      // The facts, then the usage, each a list of their own.
+      await details.locator('dl.agent-session-facts').first().waitFor({ timeout: 10_000 });
+      return Object.fromEntries(await details.locator('dl.agent-session-facts dt').evaluateAll((terms: Element[]) =>
+        terms.map(term => [term.textContent?.trim() ?? '', term.nextElementSibling?.textContent?.trim() ?? ''])));
+    } finally {
+      if (await toggle.getAttribute('aria-expanded') === 'true') await toggle.click();
+    }
+  }
+
   /** Waits until the conversation shows an assistant message containing `needle`. */
   waitForReplyContaining(needle: string, deadlineMs: number): Promise<boolean> { return this.waitForShown('.agent-message-assistant', needle, deadlineMs); }
 

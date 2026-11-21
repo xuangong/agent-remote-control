@@ -63,3 +63,26 @@ test('the smoke probe opens its page with the process display its scenario reads
   expect(await full.rows()).toHaveLength(24);
   await full.close();
 });
+
+test('the smoke probe reads the session the way M6 compares it with the native session: messages, activity and facts', async ({ context, baseURL }) => {
+  // tile-2 is working; every fourth row of each tile is a message of the person's; each session has a model and an effort setting.
+  const probe = await PageProbe.create(context, Date.now());
+  await probe.page.setViewportSize({ width: 1280, height: 900 });
+  expect((await probe.open(`${baseURL}${fixture}&working=tile-2&settings&users=4&host=host&provider=recorded&session=tile-2`, 'open', { rowsDeadlineMs: 20_000 })).timedOut).toBeUndefined();
+  expect(await probe.userTexts()).toEqual([4, 8, 12, 16, 20, 24].map(index => `Question ${index} of tile-2`).map(text => expect.stringContaining(text)));
+  expect(await probe.sessionStatus()).toBe('running');
+  const facts = await probe.sessionFacts();
+  expect(facts).toMatchObject({ Provider: 'recorded', Session: 'tile-2', Model: 'Recorded Large', 'Reasoning effort': 'medium' });
+  // The details cover the conversation while they are open; the read closes them, so the composer takes the next message.
+  await expect(probe.page.locator(`${sessionPane(address(2))} .lab-tile-who`)).toHaveAttribute('aria-expanded', 'false');
+  await probe.composer().click();
+  await probe.page.keyboard.type('after the facts');
+  expect(await probe.page.evaluate(() => (window as any).__smoke.composer())).toEqual({ text: 'after the facts', focused: true });
+  // Another tile's activity is its own.
+  const idle = await PageProbe.create(context, Date.now());
+  await idle.page.setViewportSize({ width: 1280, height: 900 });
+  await idle.open(`${baseURL}${fixture}&working=tile-2&settings&host=host&provider=recorded&session=tile-1`, 'open', { rowsDeadlineMs: 20_000 });
+  expect(await idle.sessionStatus()).toBe('idle');
+  await idle.close();
+  await probe.close();
+});

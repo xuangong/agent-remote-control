@@ -54,6 +54,13 @@ describe('every message settles once', () => {
       .send(30, 'send_message', send(30, 'r2', 'op1')).receive(40, 'command_acknowledged', { requestId: 'r2', agentId: 'agent', command: 'send_message', inputAcceptance: { disposition: 'started' } }).build();
     expect(messagesSettleOnce(retried).violations.map(v => v.message)).toEqual(['operation op1 started 2 times']);
   });
+  it('tells the requests of two pages apart, which count their request ids from the same start', () => {
+    const twoPages = sendAndAck().onConnection(2).send(15, 'send_message', { requestId: 'r1', operationId: 'op2', agentId: 'agent', text: 'hi too' })
+      .receive(25, 'command_acknowledged', { requestId: 'r1', agentId: 'agent', command: 'send_message', inputAcceptance: { disposition: 'queued' } }).build();
+    expect(messagesSettleOnce(twoPages)).toMatchObject({ status: 'passed', checked: 2 });
+    const unanswered = sendAndAck().onConnection(2).send(15, 'send_message', { requestId: 'r1', operationId: 'op2', agentId: 'agent', text: 'hi too' }).build();
+    expect(messagesSettleOnce(unanswered).violations.map(v => v.message)).toEqual(['send r1 never settled']);
+  });
 });
 
 describe('no duplicate item key', () => {

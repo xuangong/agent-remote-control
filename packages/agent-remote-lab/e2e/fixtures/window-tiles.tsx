@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 // A Window of 1 to 4 tiles in the real Workbench (?tiles=N, default 3; ?bots=1 makes its group a group of bots), each tile a
 // long conversation; ?docks=N docks 1 or 2 more sessions beside them, and ?working=tile-2,… names the sessions that are working.
+// ?settings gives each session a model and an effort setting, and ?users=N makes every Nth row a message of the person's.
 // The Window workspace answers from memory and the sessions from a recorded transport; no Relay runs.
 import { createRoot } from 'react-dom/client';
 import { applyGroupOperation, createWindowView, type WindowGroup } from '@orchardworks/agent-remote-protocol';
@@ -22,6 +23,11 @@ const binding = (index: number) => ({ hostId: 'host', providerId: 'recorded', na
 const docks = Math.max(0, Math.min(2, Number(params.get('docks') ?? 0)));
 const working = new Set((params.get('working') ?? '').split(',').filter(Boolean));
 const statusOf = (nativeSessionId: string) => working.has(nativeSessionId) ? 'running' as const : 'idle' as const;
+const settings = params.has('settings') ? [
+  { id: 'model', category: 'model' as const, label: 'Model', value: 'recorded-large', mutable: true, scope: 'session' as const, options: [{ value: 'recorded-large', label: 'Recorded Large' }, { value: 'recorded-small', label: 'Recorded Small' }] },
+  { id: 'effort', category: 'model' as const, label: 'Reasoning effort', value: 'medium', mutable: true, scope: 'session' as const, options: [{ value: 'low', label: 'low' }, { value: 'medium', label: 'medium' }] },
+] : undefined;
+const userEvery = Math.max(0, Number(params.get('users') ?? 0));
 const views = [...Array.from({ length: count }, (_, index) => createWindowView(`v${index + 1}`, binding(index + 1), 'primary')),
   ...Array.from({ length: docks }, (_, index) => createWindowView(`d${index + 1}`, binding(count + index + 1), 'dock'))];
 let group: WindowGroup = { window: { schemaVersion: 3, id: 'tiles', revision: 1, title: zh ? '窗口' : 'Tiles', selectedPrimaryViewId: 'v1', selectedViewId: 'v1', views },
@@ -47,8 +53,10 @@ SessionStarsClient.prototype.snapshot = async () => ({ stars: [], folders: [], r
 const directory = new SessionDirectoryClient(baseUrl, undefined, 'host');
 const entries = (agentId: string) => Array.from({ length: 24 }, (_, index) => ({ providerId: 'recorded', seqStart: index + 1, seqEnd: index + 1, timestamp: '2026-11-20T05:20:00Z',
   sourceSeqRanges: [{ startSeq: index + 1, endSeq: index + 1 }], collapsed: [], resources: [],
-  item: { type: 'assistant_message' as const, messageId: `${agentId}-${index + 1}`, text: zh ? `${agentId} 的第 ${index + 1} 条。${'不能被遮住的对话文字。'.repeat(3)}` : `Item ${index + 1} of ${agentId}. ${'Readable conversation text that must stay uncovered. '.repeat(3)}` } }));
-const snapshot = (agentId: string) => ({ ...replicaState.agent!, id: agentId, status: statusOf(agentId), runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: agentId, status: statusOf(agentId) } });
+  item: userEvery && (index + 1) % userEvery === 0
+    ? { type: 'user_message' as const, messageId: `${agentId}-${index + 1}`, text: zh ? `${agentId} 的第 ${index + 1} 个问题` : `Question ${index + 1} of ${agentId}` }
+    : { type: 'assistant_message' as const, messageId: `${agentId}-${index + 1}`, text: zh ? `${agentId} 的第 ${index + 1} 条。${'不能被遮住的对话文字。'.repeat(3)}` : `Item ${index + 1} of ${agentId}. ${'Readable conversation text that must stay uncovered. '.repeat(3)}` } }));
+const snapshot = (agentId: string) => ({ ...replicaState.agent!, id: agentId, status: statusOf(agentId), runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: agentId, status: statusOf(agentId), ...(settings ? { settings } : {}) } });
 const transport: RemoteAgentTransport & Pick<HttpWebSocketTransport, 'listProviders' | 'createAgent' | 'resumeAgent'> = {
   listProviders: async () => [{ providerId: 'recorded', displayName: 'Recorded' }],
   createAgent: async () => { throw new Error('Creation is not used'); },

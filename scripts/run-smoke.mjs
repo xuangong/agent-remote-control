@@ -1,4 +1,4 @@
-// `pnpm smoke [scenario ...] [--seed N] [--rounds N]` and `pnpm smoke:quick`: run the smoke scenarios of
+// `pnpm smoke [scenario ...] [--seed N] [--rounds N] [--page-rounds N]` and `pnpm smoke:quick`: run the smoke scenarios of
 // packages/agent-e2e/smoke against this checkout's local instance. They run real CLIs and a real browser, so they are never part
 // of `pnpm test`. The scenarios carry per-scenario deadlines; this wrapper adds the outer process deadline.
 import { spawn } from 'node:child_process';
@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const args = process.argv.slice(2);
-const outerDeadlineMs = (args.includes('--quick') ? 20 : 100) * 60_000;
+// A full run with M6's 50 rounds per provider takes about three and a half hours; each scenario has its own deadline inside.
+const outerDeadlineMs = (args.includes('--quick') ? 20 : 300) * 60_000;
 const tsx = join(root, 'packages/agent-e2e/node_modules/tsx/dist/cli.mjs');
 const child = spawn(process.execPath, [tsx, join(root, 'packages/agent-e2e/smoke/cli.ts'), ...args], { cwd: root, stdio: 'inherit', detached: process.platform !== 'win32' });
 const stop = signal => { try { process.kill(process.platform === 'win32' ? child.pid : -child.pid, signal); } catch (error) { if (error.code !== 'ESRCH') throw error; } };

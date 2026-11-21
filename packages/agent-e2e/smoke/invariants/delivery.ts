@@ -1,4 +1,4 @@
-import { result, type InvariantResult, type PageReport, type Transcript, type Violation } from './types.js';
+import { result, type Frame, type InvariantResult, type PageReport, type Transcript, type Violation } from './types.js';
 import { markers, payloadOf, received, sent } from './wire.js';
 
 /** M1: a revisit paints its first rows from the device store within the limit of the document's arrival (the document's own trip takes as long as the network does), whatever the network does. An open that shows no rows at all within its deadline fails too. */
@@ -21,26 +21,27 @@ export function firstPaintFromDeviceStore(page: PageReport, limitMs = 300): Inva
  * that never settled is a violation too; without it the run is still in flight.
  */
 export function messagesSettleOnce(transcript: Transcript, { final = true }: { final?: boolean } = {}): InvariantResult {
+  // A request id is the page's own counter, so two pages (two sockets) may use the same one: a request is its socket and its id.
+  const requestOf = (frame: Frame) => `${frame.connection}:${String(payloadOf(frame.message).requestId)}`;
   const settles = new Map<string, number>();
   for (const frame of received(transcript)) {
-    const requestId = payloadOf(frame.message).requestId;
-    if (typeof requestId !== 'string') continue;
-    if (frame.message.type === 'command_acknowledged' || frame.message.type === 'protocol_error') settles.set(requestId, (settles.get(requestId) ?? 0) + 1);
+    if (typeof payloadOf(frame.message).requestId !== 'string') continue;
+    if (frame.message.type === 'command_acknowledged' || frame.message.type === 'protocol_error') settles.set(requestOf(frame), (settles.get(requestOf(frame)) ?? 0) + 1);
   }
   const violations: Violation[] = [];
   const startedByOperation = new Map<string, string[]>();
   const sends = sent(transcript, 'send_message');
   for (const frame of sends) {
     const { requestId, operationId } = payloadOf(frame.message);
-    const count = settles.get(requestId) ?? 0;
+    const count = settles.get(requestOf(frame)) ?? 0;
     if (count > 1) violations.push({ message: `send ${requestId} was settled ${count} times`, at: frame.t });
     if (count === 0 && final) violations.push({ message: `send ${requestId} never settled`, at: frame.t });
-    if (typeof operationId === 'string') startedByOperation.set(operationId, [...(startedByOperation.get(operationId) ?? []), requestId]);
+    if (typeof operationId === 'string') startedByOperation.set(operationId, [...(startedByOperation.get(operationId) ?? []), requestOf(frame)]);
   }
   // A retry reuses the operation id with a new request id; the Controller may accept the operation only once.
-  for (const [operationId, requestIds] of startedByOperation) {
+  for (const [operationId, requests] of startedByOperation) {
     const accepted = received(transcript, 'command_acknowledged')
-      .filter(frame => requestIds.includes(payloadOf(frame.message).requestId) && payloadOf(frame.message).inputAcceptance?.disposition === 'started');
+      .filter(frame => requests.includes(requestOf(frame)) && payloadOf(frame.message).inputAcceptance?.disposition === 'started');
     if (accepted.length > 1) violations.push({ message: `operation ${operationId} started ${accepted.length} times`, at: accepted[1]!.t });
   }
   const typed = markers(transcript, 'turn-sent');

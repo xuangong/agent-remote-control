@@ -85,6 +85,16 @@ export class SessionPool {
     return this.waitForReply(address, previous);
   }
 
+  /** Releases one Codex session this run created, so the user's shared daemon may unload it; again after a page opened it again. */
+  async release(address: string): Promise<void> {
+    this.assertOwn(address);
+    const session = this.sessions.find(item => item.address === address)!;
+    if (session.provider !== 'codex') return;
+    await this.command('session', 'release', address);
+    session.released = true;
+    this.log(`released ${address}`);
+  }
+
   /** Releases every Codex session this run created. Safe to call twice. */
   async releaseAll(): Promise<void> {
     for (const session of this.sessions) {

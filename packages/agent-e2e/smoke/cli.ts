@@ -1,4 +1,4 @@
-// `pnpm smoke [scenario ...] [--seed N] [--quick] [--rounds N]`: runs the smoke scenarios against this checkout's local instance
+// `pnpm smoke [scenario ...] [--seed N] [--quick] [--rounds N] [--page-rounds N]`: runs the smoke scenarios against this checkout's local instance
 // and writes `.arc-local/smoke/<date>/report.json`, `summary.txt` and the wire transcripts. It reports; it never gates a task.
 import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
@@ -7,12 +7,13 @@ import { findingsFromFailures } from './findings.js';
 import { createRunContext } from './lib/run-context.js';
 import { scenarioStatus, summarize, writeReport, type RunReport, type ScenarioReport } from './report.js';
 import { deferredScenarios, scenarios } from './scenarios/index.js';
+import type { Scenario } from './scenario.js';
 
 const args = process.argv.slice(2);
 const option = (name: string) => { const at = args.indexOf(name); return at === -1 ? undefined : args[at + 1]; };
 const quick = args.includes('--quick');
 const seed = Number(option('--seed') ?? Date.now() % 100_000);
-const named = args.filter((arg, at) => !arg.startsWith('--') && !['--seed', '--out', '--rounds', '--condition', '--sessions', '--actions', '--duration'].includes(args[at - 1] ?? ''));
+const named = args.filter((arg, at) => !arg.startsWith('--') && !['--seed', '--out', '--rounds', '--page-rounds', '--condition', '--sessions', '--actions', '--duration'].includes(args[at - 1] ?? ''));
 const checkout = resolve(process.cwd());
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const runDirectory = resolve(option('--out') ?? join(checkout, '.arc-local/smoke', stamp));
@@ -21,12 +22,14 @@ const log = (message: string) => process.stderr.write(`[smoke ${new Date().toISO
 const selected = named.length > 0 ? scenarios.filter(item => named.includes(item.id)) : quick ? scenarios.filter(item => item.quick) : scenarios;
 if (named.length > 0 && selected.length === 0 && !deferredScenarios.some(item => named.includes(item.id))) throw new Error(`No scenario matches ${named.join(', ')}.`);
 
-const scenarioDeadlineMs = (quick ? 8 : 40) * 60_000;
+const scenarioDeadlineMs = (scenario: Scenario) => (scenario.deadlineMinutes?.[quick ? 'quick' : 'full'] ?? (quick ? 8 : 40)) * 60_000;
 const withDeadline = <T>(promise: Promise<T>, ms: number, message: string): Promise<T> => {
   let timer: NodeJS.Timeout;
   return Promise.race([promise, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); })]).finally(() => clearTimeout(timer));
 };
-const outerDeadlineMs = (quick ? 15 : 90) * 60_000;
+// The run may take what its scenarios may take, and a margin for creating its sessions and writing the report, within the wrapper's
+// own deadline (scripts/run-smoke.mjs: 20 minutes quick, 300 full).
+const outerDeadlineMs = Math.min((quick ? 18 : 290) * 60_000, Math.max((quick ? 15 : 90) * 60_000, selected.reduce((sum, scenario) => sum + scenarioDeadlineMs(scenario), 10 * 60_000)));
 const timer = setTimeout(() => { log(`outer deadline of ${outerDeadlineMs / 60_000} minutes reached`); process.exit(2); }, outerDeadlineMs);
 timer.unref();
 
@@ -50,7 +53,7 @@ try {
     const base = { scenario: scenario.id, title: scenario.title, seed, startedAt: new Date(started).toISOString(), schedule: [], measurements: {}, invariants: [], findings: [] };
     let report: ScenarioReport;
     try {
-      const outcome = await withDeadline(scenario.run(context), scenarioDeadlineMs, `${scenario.id} exceeded its ${scenarioDeadlineMs / 60_000} minute deadline`);
+      const outcome = await withDeadline(scenario.run(context), scenarioDeadlineMs(scenario), `${scenario.id} exceeded its ${scenarioDeadlineMs(scenario) / 60_000} minute deadline`);
       const transcriptName = outcome.transcript ? `${scenario.id}.transcript.jsonl` : undefined;
       if (outcome.transcript && transcriptName) transcripts[transcriptName] = outcome.transcript.toJsonLines();
       report = { ...base, status: scenarioStatus(outcome.invariants), durationMs: Date.now() - started, schedule: outcome.schedule, measurements: outcome.measurements, invariants: outcome.invariants,

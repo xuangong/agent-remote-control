@@ -40,6 +40,8 @@ export interface Scenario {
   quick: boolean;
   /** Pairs a scripted Host that publishes journals, so the instance must run with `ARC_LOCAL_JOURNALS=1`. */
   journals?: boolean;
+  /** Minutes the scenario may run, when its rounds need more than the run's default (8 quick, 40 full). */
+  deadlineMinutes?: { quick: number; full: number };
   run(context: RunContext): Promise<ScenarioOutcome>;
 }
 

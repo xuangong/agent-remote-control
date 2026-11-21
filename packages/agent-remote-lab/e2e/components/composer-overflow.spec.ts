@@ -1,3 +1,4 @@
+// Component projects: webkit-ask-desktop, webkit-ask-mobile
 import { expect, test } from '@playwright/test';
 import { activateComposerAction } from '../composer-actions';
 

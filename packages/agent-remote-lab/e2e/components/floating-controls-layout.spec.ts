@@ -1,3 +1,4 @@
+// Component projects: webkit-conversation
 import { expect, test, type Page } from '@playwright/test';
 
 // Without the sidebar, a wide screen floats the Track, Team, TPM, Window and Ask entries in the margin, where a person can drag them. A

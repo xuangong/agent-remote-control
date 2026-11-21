@@ -1,3 +1,4 @@
+// Component projects: webkit-conversation
 import { expect, test } from '@playwright/test';
 
 // The palette is a native modal: the browser returns focus to the composer it was opened from when it closes, which jsdom cannot show.

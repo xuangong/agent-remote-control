@@ -1,3 +1,4 @@
+// Component projects: webkit-mobile-viewport
 import { readFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 import { openSettingsPage } from '../all-sessions';

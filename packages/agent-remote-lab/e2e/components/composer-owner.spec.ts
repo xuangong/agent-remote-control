@@ -1,3 +1,4 @@
+// Component projects: webkit-desktop
 import { expect, test } from '@playwright/test';
 
 // The editor belongs to its draft owner, not to the session behind it: when a native confirmation moves the conversation from A to B,

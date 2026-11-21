@@ -1,3 +1,4 @@
+// Component projects: webkit-ask-desktop, webkit-ask-mobile
 import { clickSessionAction } from '../session-actions';
 import { expect, test } from '@playwright/test';
 import { englishWords } from './english-words.js';

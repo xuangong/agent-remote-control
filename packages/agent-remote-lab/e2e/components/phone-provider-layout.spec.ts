@@ -1,3 +1,4 @@
+// Component projects: orchard-phone-chromium, orchard-phone-webkit
 import { expect, test, type Locator } from '@playwright/test';
 
 // The Sessions drawer of a phone with three providers and values far longer than the screen: its list, a failed listing, the creation form

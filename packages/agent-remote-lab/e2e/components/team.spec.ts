@@ -1,3 +1,4 @@
+// Component projects: webkit-ask-desktop, orchard-phone-chromium, orchard-phone-webkit
 import { clickSessionAction, showSessionAction } from '../session-actions';
 import { expect, test } from '@playwright/test';
 const team={id:'team',operationId:'create',revision:1,title:'Diagnose across Hosts',status:'active',source:{hostId:'mac',providerId:'codex',nativeSessionId:'source',title:'Project'},createdAt:1,updatedAt:1,messages:[],members:[

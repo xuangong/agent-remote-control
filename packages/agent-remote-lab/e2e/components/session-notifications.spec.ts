@@ -1,3 +1,4 @@
+// Component projects: webkit-conversation
 import { expect, test, type Page } from '@playwright/test';
 import type { SessionAttentionNotifications } from '../../src/session-notifications';
 

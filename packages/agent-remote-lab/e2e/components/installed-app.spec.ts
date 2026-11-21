@@ -1,3 +1,4 @@
+// Component projects: webkit-mobile-viewport, orchard-phone-webkit
 import { expect, test, type Page } from '@playwright/test';
 import { installLifecycle } from '@orchardworks/agent-e2e/lifecycle';
 import { coveringControls } from './covering';

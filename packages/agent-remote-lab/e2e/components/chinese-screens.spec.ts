@@ -1,3 +1,4 @@
+// Component projects: orchard-phone-chromium, orchard-phone-webkit
 import { expect, test, type Page } from '@playwright/test';
 import { englishWords } from './english-words';
 

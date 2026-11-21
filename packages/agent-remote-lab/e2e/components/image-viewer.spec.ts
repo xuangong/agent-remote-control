@@ -1,3 +1,4 @@
+// Component projects: webkit-desktop, webkit-mobile
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 async function preview(page: Page): Promise<Locator> {

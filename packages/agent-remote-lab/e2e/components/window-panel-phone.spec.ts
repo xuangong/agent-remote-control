@@ -1,3 +1,4 @@
+// Component projects: webkit-conversation, orchard-phone-chromium, orchard-phone-webkit
 import { expect, test } from '@playwright/test';
 
 // The Windows panel of the launcher row, on the narrowest phones: it stays inside the screen with a long Window title, and every control stays inside it.

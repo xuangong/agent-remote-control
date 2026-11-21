@@ -1,3 +1,4 @@
+// Component projects: webkit-conversation
 import { expect, test } from '@playwright/test';
 
 // Bot mode on a wide screen: a long assistant name stays inside its row, and the list and the conversation scroll on their own.

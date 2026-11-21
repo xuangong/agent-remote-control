@@ -1,3 +1,4 @@
+// Component projects: webkit-ask-desktop, webkit-ask-mobile, orchard-phone-chromium, orchard-phone-webkit
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { activateComposerAction } from '../composer-actions';
 

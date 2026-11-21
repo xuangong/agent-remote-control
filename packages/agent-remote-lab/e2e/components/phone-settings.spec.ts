@@ -1,3 +1,4 @@
+// Component projects: orchard-phone-chromium, orchard-phone-webkit
 import { expect, test } from '@playwright/test';
 import { openSettingsPage } from '../all-sessions.js';
 

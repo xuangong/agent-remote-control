@@ -1,3 +1,4 @@
+// Component projects: webkit-conversation
 import { expect, test } from '@playwright/test';
 
 for (const width of [320, 390, 1440]) {

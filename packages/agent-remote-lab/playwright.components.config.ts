@@ -1,4 +1,5 @@
-import { defineConfig, devices } from '@playwright/test';
+import { readdirSync, readFileSync } from 'node:fs';
+import { defineConfig, devices, type PlaywrightTestProject } from '@playwright/test';
 
 delete process.env.NO_COLOR;
 
@@ -8,6 +9,33 @@ delete process.env.NO_COLOR;
  */
 const webPort = Number(process.env.AGENT_REMOTE_TEST_WEB_PORT ?? 6175);
 const browserExecutable = process.env.AGENT_REMOTE_TEST_BROWSER;
+
+/**
+ * Every spec runs in the two Chromium projects, except the phone-*.spec.ts files, which are written for exactly 390 x 844. A spec
+ * joins the other projects by naming them in a line of its own, `// Component projects: webkit-desktop, webkit-mobile`, and each
+ * project selects the specs that name it, so a new spec never edits this file. A name that is no project fails the run.
+ */
+const testDir = new URL('./e2e/components/', import.meta.url);
+const declared = new Map(readdirSync(testDir).filter(name => name.endsWith('.spec.ts'))
+  .map(name => [name, /^\/\/ Component projects: (.+)$/m.exec(readFileSync(new URL(name, testDir), 'utf8'))?.[1]?.split(', ') ?? []] as const));
+const specsIn = (project: string) => [...declared].filter(([, projects]) => projects.includes(project)).map(([name]) => name);
+
+const projects: PlaywrightTestProject[] = [
+  // The phone-*.spec.ts files are written for exactly 390 x 844 and name the orchard-phone projects below.
+  { name: 'chromium-desktop', testIgnore: ['**/phone-*.spec.ts'], use: { ...devices['Desktop Chrome'] } },
+  { name: 'chromium-mobile', testIgnore: ['**/phone-*.spec.ts'], use: { ...devices['Pixel 7'] } },
+  { name: 'webkit-conversation', testMatch: specsIn('webkit-conversation'), use: { ...devices['Desktop Safari'] } },
+  { name: 'webkit-mobile-viewport', testMatch: specsIn('webkit-mobile-viewport'), use: { ...devices['iPhone 13'], browserName: 'webkit' } },
+  { name: 'webkit-ask-desktop', testMatch: specsIn('webkit-ask-desktop'), use: { ...devices['Desktop Safari'] } },
+  { name: 'webkit-ask-mobile', testMatch: specsIn('webkit-ask-mobile'), use: { ...devices['iPhone 13'] } },
+  { name: 'webkit-desktop', testMatch: specsIn('webkit-desktop'), use: { ...devices['Desktop Safari'] } },
+  // The Orchard primitives and the assistant's conversation at exactly 390 x 844, in Chromium and in mobile WebKit.
+  { name: 'orchard-phone-chromium', testMatch: specsIn('orchard-phone-chromium'), use: { ...devices['Desktop Chrome'], viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } },
+  { name: 'orchard-phone-webkit', testMatch: specsIn('orchard-phone-webkit'), use: { ...devices['iPhone 13'], viewport: { width: 390, height: 844 } } },
+  { name: 'webkit-mobile', testMatch: specsIn('webkit-mobile'), use: { ...devices['iPhone 13'] } },
+];
+const unknown = [...declared].flatMap(([spec, names]) => names.filter(name => !projects.some(project => project.name === name)).map(name => `${spec} names ${name}`));
+if (unknown.length) throw new Error(`No such component project: ${unknown.join('; ')}.`);
 
 export default defineConfig({
   testDir: './e2e/components',
@@ -19,20 +47,7 @@ export default defineConfig({
     launchOptions: browserExecutable ? { executablePath: browserExecutable } : undefined,
     trace: 'retain-on-failure',
   },
-  projects: [
-    // The phone-*.spec.ts files are written for exactly 390 x 844 and run in the two orchard-phone projects below.
-    { name: 'chromium-desktop', testIgnore: ['**/phone-*.spec.ts'], use: { ...devices['Desktop Chrome'] } },
-    { name: 'chromium-mobile', testIgnore: ['**/phone-*.spec.ts'], use: { ...devices['Pixel 7'] } },
-    { name: 'webkit-conversation', testMatch: ['tracked-team.spec.ts', 'launcher-layout.spec.ts', 'assistant-view.spec.ts', 'session-notifications.spec.ts', 'window-overview.spec.ts', 'bot-scroll.spec.ts', 'window-panel-phone.spec.ts', 'command-palette-focus.spec.ts', 'floating-controls-layout.spec.ts'], use: { ...devices['Desktop Safari'] } },
-    { name: 'webkit-mobile-viewport', testMatch: ['layout-diagnostics.spec.ts', 'standalone-layout.spec.ts', 'mobile-viewport-reflow.spec.ts', 'image-atom-touch.spec.ts', 'launcher-layout.spec.ts', 'installed-app.spec.ts'], use: { ...devices['iPhone 13'], browserName: 'webkit' } },
-    { name: 'webkit-ask-desktop', testMatch: ['team.spec.ts', 'dock-title-interactions.spec.ts', 'session-family-resize.spec.ts', 'tpm-dock.spec.ts', 'session-title-rename.spec.ts', 'ask-timeline-layout.spec.ts', 'session-view-responsive.spec.ts', 'composer-overflow.spec.ts', 'ask-window.spec.ts'], use: { ...devices['Desktop Safari'] } },
-    { name: 'webkit-ask-mobile', testMatch: ['dock-title-interactions.spec.ts', 'session-family-resize.spec.ts', 'tpm-dock.spec.ts', 'ask-timeline-layout.spec.ts', 'session-view-responsive.spec.ts', 'composer-overflow.spec.ts', 'ask-window.spec.ts'], use: { ...devices['iPhone 13'] } },
-    { name: 'webkit-desktop', testMatch: ['composer-owner.spec.ts', 'image-input.spec.ts', 'image-viewer.spec.ts', 'markdown-reading.spec.ts', 'access-entry.spec.ts'], use: { ...devices['Desktop Safari'] } },
-    // The Orchard primitives and the assistant's conversation at exactly 390 x 844, in Chromium and in mobile WebKit.
-    { name: 'orchard-phone-chromium', testMatch: ['team.spec.ts', 'chinese-screens.spec.ts', 'navigation.spec.ts', 'settings.spec.ts', 'orchard-primitives.spec.ts', 'assistant-inventory.spec.ts', 'assistant-conversation.spec.ts', 'tool-approval.spec.ts', 'assistant-view.spec.ts', 'assistant-phone.spec.ts', 'launcher-layout.spec.ts', 'composer-capsule.spec.ts', 'ask-window.spec.ts', 'session-references-layout.spec.ts', 'session-actions-phone.spec.ts', 'window-overview.spec.ts', 'window-panel-phone.spec.ts', 'phone-keyboard.spec.ts', 'phone-touch.spec.ts', 'phone-layout.spec.ts', 'phone-sessions-drawer.spec.ts', 'phone-settings.spec.ts', 'phone-provider-layout.spec.ts', 'phone-tracking-favorites.spec.ts', 'session-scanner.spec.ts', 'touch-targets.spec.ts', 'playback-controls.spec.ts'], use: { ...devices['Desktop Chrome'], viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } },
-    { name: 'orchard-phone-webkit', testMatch: ['team.spec.ts', 'chinese-screens.spec.ts', 'navigation.spec.ts', 'settings.spec.ts', 'orchard-primitives.spec.ts', 'assistant-inventory.spec.ts', 'assistant-conversation.spec.ts', 'tool-approval.spec.ts', 'assistant-view.spec.ts', 'assistant-phone.spec.ts', 'composer-capsule.spec.ts', 'installed-app.spec.ts', 'ask-window.spec.ts', 'session-references-layout.spec.ts', 'session-actions-phone.spec.ts', 'window-overview.spec.ts', 'window-panel-phone.spec.ts', 'phone-keyboard.spec.ts', 'phone-layout.spec.ts', 'phone-sessions-drawer.spec.ts', 'phone-settings.spec.ts', 'phone-provider-layout.spec.ts', 'phone-tracking-favorites.spec.ts', 'session-scanner.spec.ts', 'touch-targets.spec.ts', 'playback-controls.spec.ts'], use: { ...devices['iPhone 13'], viewport: { width: 390, height: 844 } } },
-    { name: 'webkit-mobile', testMatch: ['image-input.spec.ts', 'image-viewer.spec.ts', 'markdown-reading.spec.ts'], use: { ...devices['iPhone 13'] } },
-  ],
+  projects,
   webServer: {
     // The fixture pages never reach a Relay; the target only has to be a valid address.
     command: `VITE_AGENT_REMOTE_RELAY_TARGET=http://127.0.0.1:9 pnpm exec vite --host 127.0.0.1 --port ${webPort} --strictPort`,

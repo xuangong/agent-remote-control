@@ -1,3 +1,4 @@
+// Component projects: webkit-conversation, orchard-phone-chromium, orchard-phone-webkit
 import { expect, test } from '@playwright/test';
 
 // All Windows on a wide screen opens from the keyboard and returns focus where it was; a narrow screen keeps no overview at all.

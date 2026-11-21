@@ -1,3 +1,4 @@
+// Component projects: webkit-desktop, webkit-mobile
 import { expect, test } from '@playwright/test';
 
 test('keeps text sizing stable through portrait and landscape viewport changes', async ({ page, isMobile }, testInfo) => {

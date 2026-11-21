@@ -1,3 +1,4 @@
+// Component projects: orchard-phone-chromium, orchard-phone-webkit
 import { expect, test } from '@playwright/test';
 
 test('asks inline with plain choices, opens long commands and rules in the card, and keeps the answer one line', async ({ page }, testInfo) => {

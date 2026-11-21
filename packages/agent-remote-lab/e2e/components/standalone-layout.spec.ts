@@ -1,3 +1,4 @@
+// Component projects: webkit-mobile-viewport
 import { expect, test } from '@playwright/test';
 
 test('serves browser-owned safe areas with the non-overlay Home Screen status bar', async ({ page }) => {

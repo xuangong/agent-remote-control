@@ -1,3 +1,4 @@
+// Component projects: webkit-ask-desktop, webkit-ask-mobile
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { clickSessionAction } from '../session-actions';
 

@@ -1,3 +1,4 @@
+// Component projects: webkit-ask-desktop
 import { expect, test, type Page } from '@playwright/test';
 
 test.beforeEach(({ isMobile }) => { test.skip(isMobile, 'Touch double-click follows native browser behavior.'); });

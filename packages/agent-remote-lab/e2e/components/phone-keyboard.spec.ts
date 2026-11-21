@@ -1,3 +1,4 @@
+// Component projects: orchard-phone-chromium, orchard-phone-webkit
 import { expect, test, type Page } from '@playwright/test';
 
 // The phone's keyboard and screen geometry on the real Window-mode Workbench (the session-stars fixture mounts the whole App on a stubbed

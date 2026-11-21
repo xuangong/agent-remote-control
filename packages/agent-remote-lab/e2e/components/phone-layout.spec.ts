@@ -1,3 +1,4 @@
+// Component projects: orchard-phone-chromium, orchard-phone-webkit
 import { expect, test } from '@playwright/test';
 import { coveringControls } from './covering.js';
 import { draftOf, longConversationFixture, lowerKeyboard, openConversation, raiseKeyboard } from './phone-conversation.js';

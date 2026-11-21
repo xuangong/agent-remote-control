@@ -1,3 +1,4 @@
+// Component projects: webkit-desktop, webkit-mobile
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5XcAAAAASUVORK5CYII=', 'base64');

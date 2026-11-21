@@ -1,3 +1,4 @@
+// Component projects: webkit-ask-desktop, webkit-ask-mobile
 import { expect, test, type Locator } from '@playwright/test';
 import { SESSION_CONNECTION_PATTERN } from '@orchardworks/agent-e2e/faults/connection-words.mjs';
 import { activateComposerAction, revealComposerAction } from '../composer-actions';

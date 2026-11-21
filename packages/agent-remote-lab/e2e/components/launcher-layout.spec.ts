@@ -1,3 +1,4 @@
+// Component projects: webkit-conversation, webkit-mobile-viewport, orchard-phone-chromium
 import { expect, test, type Page } from '@playwright/test';
 import { coveringControls } from './covering.js';
 

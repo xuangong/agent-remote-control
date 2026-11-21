@@ -1,3 +1,4 @@
+// Component projects: webkit-mobile-viewport
 import { expect, test } from '@playwright/test';
 
 test.beforeEach(async ({}, testInfo) => {

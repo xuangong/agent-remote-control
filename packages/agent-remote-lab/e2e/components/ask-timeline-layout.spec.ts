@@ -1,3 +1,4 @@
+// Component projects: webkit-ask-desktop, webkit-ask-mobile
 import { expect, test, type Page } from '@playwright/test';
 
 test.use({ locale: 'en-GB', timezoneId: 'Asia/Shanghai' });

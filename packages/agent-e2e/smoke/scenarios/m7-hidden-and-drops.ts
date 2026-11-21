@@ -8,7 +8,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 /**
  * M7: the page is hidden and offline while the session gets new messages, then returns. It must catch up with one tail request,
- * clear its reconnecting label, and keep the draft in the composer and the reader's place in the timeline.
+ * clear its reconnecting label, and keep the draft in the composer and the reader's place in the timeline. The session's next turn
+ * then arrives live, and its sequences must continue the ones the catch-up read.
  */
 export const hiddenAndDrops: Scenario = {
   id: 'M7',
@@ -22,6 +23,13 @@ export const hiddenAndDrops: Scenario = {
     const measurements: Record<string, unknown> = { drops: [] as unknown[] };
     const address = await context.sessionWithLongHistory('claude');
     const url = await context.pool.link(address);
+    /** A turn the session runs while the page watches, after the page came back: it reaches the page live, not in a catch-up page. */
+    const liveTurn = async (probe: PageProbe) => {
+      const word = `LIVE${context.random.int(100, 999)}`;
+      schedule.push({ t: recorder.clock(), action: 'live-turn', detail: { word } });
+      await context.pool.send(address, `Reply with the single word ${word} and nothing else.`);
+      return probe.waitForReplyContaining(word, 90_000);
+    };
     const proxy = await startLatencyProxy({ target: context.instance.origin, rttMs: 0, tap: recorder.tap, onSocket: recorder.socket });
     try {
       await withContext(context.browser, proxy.origin, async browserContext => {
@@ -54,11 +62,13 @@ export const hiddenAndDrops: Scenario = {
           const caughtUp = await probe.waitForReplyContaining(word, 90_000);
           await probe.page.waitForTimeout(3000);
           const after = await probe.page.evaluate(() => ({ composer: (window as any).__smoke.composer(), anchor: (window as any).__smoke.anchor() }));
+          const streamed = await liveTurn(probe);
+          await probe.page.waitForTimeout(1000);
           await probe.snapshotKeys();
           const page = await probe.report({ composer: before.composer && after.composer ? { before: before.composer, after: after.composer } : undefined, anchor: { before: before.anchor, after: after.anchor } });
           const wire = recorder.transcript().filter(entry => entry.n > first);
           conditions.push({ label: `offline ${seconds} s`, results: [catchUpCostsOneTailRequest(wire), noSessionConnectionLabel(page), draftAndPositionKept(page), noBlankFrame(page), noDuplicateItemKey(wire, page), journalSequencesContiguous(wire)] });
-          (measurements.drops as unknown[]).push({ seconds, scrolledTo, caughtUp, socketsOpenedAfterReturn: wire.filter(entry => 'marker' in entry && entry.marker === 'socket-open').length });
+          (measurements.drops as unknown[]).push({ seconds, scrolledTo, caughtUp, streamed, socketsOpenedAfterReturn: wire.filter(entry => 'marker' in entry && entry.marker === 'socket-open').length });
           await probe.composer().click();
           await probe.page.keyboard.press('Meta+a').catch(() => {});
           await probe.page.keyboard.press('Backspace');
@@ -73,13 +83,15 @@ export const hiddenAndDrops: Scenario = {
           await context.pool.send(address, `Reply with the single word ${word} and nothing else.`);
           const caughtUp = await probe.waitForReplyContaining(word, 120_000);
           await probe.page.waitForTimeout(3000);
+          const streamed = await liveTurn(probe);
+          await probe.page.waitForTimeout(1000);
           await probe.snapshotKeys();
           const page = await probe.report();
           const wire = recorder.transcript().filter(entry => entry.n > first);
           conditions.push({ label: 'half-open sockets', results: [halfOpenSocketRecovers(wire, 90_000), noSessionConnectionLabel(page), noBlankFrame(page), noDuplicateItemKey(wire, page), journalSequencesContiguous(wire)] });
           const faultAt = wire.find(entry => 'marker' in entry && entry.marker === 'fault')?.t;
           const replacedAt = wire.find(entry => 'message' in entry && entry.direction === 'relay->browser' && entry.message.type === 'negotiated' && faultAt !== undefined && entry.t > faultAt)?.t;
-          (measurements.drops as unknown[]).push({ halfOpen: true, sockets: affected, caughtUp, sessionServedAgainAfterMs: faultAt !== undefined && replacedAt !== undefined ? Math.round(replacedAt - faultAt) : null });
+          (measurements.drops as unknown[]).push({ halfOpen: true, sockets: affected, caughtUp, streamed, sessionServedAgainAfterMs: faultAt !== undefined && replacedAt !== undefined ? Math.round(replacedAt - faultAt) : null });
         }
         await probe.close();
       });

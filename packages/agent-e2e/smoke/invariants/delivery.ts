@@ -1,5 +1,5 @@
 import { result, type InvariantResult, type PageReport, type Transcript, type Violation } from './types.js';
-import { payloadOf, received, sent } from './wire.js';
+import { markers, payloadOf, received, sent } from './wire.js';
 
 /** M1: a revisit paints its first rows from the device store within the limit of the document's arrival (the document's own trip takes as long as the network does), whatever the network does. An open that shows no rows at all within its deadline fails too. */
 export function firstPaintFromDeviceStore(page: PageReport, limitMs = 300): InvariantResult {
@@ -14,8 +14,11 @@ export function firstPaintFromDeviceStore(page: PageReport, limitMs = 300): Inva
 }
 
 /**
- * M1: every message the page sent is settled exactly once, by an acknowledgement or an error carrying its request id.
- * With `final`, a send that never settled is a violation too; without it the run is still in flight.
+ * M1: every message the person sent leaves the page and is settled exactly once, by an acknowledgement or an error carrying its
+ * request id. The person's messages are the `turn-sent` markers; one left the page as a `send_message` (a retry keeps its operation
+ * id). A message that never left the page is a violation whenever the run ends: a send waits for its session and is delivered once
+ * the session is ready (target T4), so a page that held it, or never took it, cannot pass by sending nothing. With `final`, a send
+ * that never settled is a violation too; without it the run is still in flight.
  */
 export function messagesSettleOnce(transcript: Transcript, { final = true }: { final?: boolean } = {}): InvariantResult {
   const settles = new Map<string, number>();
@@ -40,7 +43,10 @@ export function messagesSettleOnce(transcript: Transcript, { final = true }: { f
       .filter(frame => requestIds.includes(payloadOf(frame.message).requestId) && payloadOf(frame.message).inputAcceptance?.disposition === 'started');
     if (accepted.length > 1) violations.push({ message: `operation ${operationId} started ${accepted.length} times`, at: accepted[1]!.t });
   }
-  return result('message-settles-once', sends.length, violations);
+  const typed = markers(transcript, 'turn-sent');
+  const left = new Set(sends.map(frame => { const { operationId, requestId } = payloadOf(frame.message); return typeof operationId === 'string' ? operationId : requestId; })).size;
+  if (left < typed.length) violations.push({ message: `${typed.length - left} of ${typed.length} messages the person sent never left the page`, at: typed[left]?.t });
+  return result('message-settles-once', Math.max(sends.length, typed.length), violations);
 }
 
 /** M1: no item key appears twice in one timeline page, or twice in the keys the page rendered at one moment. */

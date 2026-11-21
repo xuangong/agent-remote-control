@@ -12,8 +12,8 @@ const label = (condition: Condition) => `${condition.provider} ${condition.rttMs
 
 /**
  * M1: the page opens a session twice (so the second open has a device store to paint from) and sends a real message while the
- * proxy delays, jitters and drops traffic. `--condition claude:1500:0.1` (repeatable) replaces the default conditions. The first rows of the revisit must come from the device store, and the message must
- * settle exactly once.
+ * proxy delays, jitters and drops traffic. `--condition claude:1500:0.1` (repeatable) replaces the default conditions. The first rows of the revisit must come from the device store, and the message,
+ * sent at once while the session opens, must leave the page and settle exactly once.
  */
 export const badNetwork: Scenario = {
   id: 'M1',
@@ -35,7 +35,8 @@ export const badNetwork: Scenario = {
       const url = await context.pool.link(address);
       const proxy = await startLatencyProxy({ target: context.instance.origin, rttMs: condition.rttMs, jitterMs: Math.round(condition.rttMs * 0.2), lossRate: condition.lossRate,
         seed: context.seed, tap: recorder.tap, onSocket: recorder.socket });
-      schedule.push({ t: recorder.clock(), action: 'proxy-start', detail: { ...condition } });
+      const conditionStart = recorder.clock();
+      schedule.push({ t: conditionStart, action: 'proxy-start', detail: { ...condition } });
       try {
         const viaProxy = url.replace(context.instance.origin, proxy.origin);
         const word = `ZEPHYR${context.random.int(100, 999)}`;
@@ -49,6 +50,8 @@ export const badNetwork: Scenario = {
           const revisit = firstOpen.timedOut ? firstOpen : await probe.open(viaProxy, `revisit, ${name}`, { rowsDeadlineMs: 90_000 });
           const ready = !revisit.timedOut && await probe.page.waitForFunction(() => (window as any).__smoke.read().composer === 'enabled', undefined, { timeout: 90_000 }).then(() => true, () => false);
           if (!ready) {
+            // The person meant to send the message: a composer that never took it fails message-settles-once, as a held one does.
+            recorder.mark('turn-sent', { condition: name, word, composer: revisit.timedOut ? 'no rows' : 'never enabled' });
             const page = await probe.report();
             await probe.close();
             return { revisit, replied: false, page: { ...page, paints: [...page.paints, ...(revisit.timedOut ? [revisit] : [])] } };
@@ -64,10 +67,11 @@ export const badNetwork: Scenario = {
           return { revisit, replied, page };
         });
         const transcript = recorder.transcript();
-        const forCondition = transcript.filter(entry => entry.t >= (schedule.at(-2)?.t ?? 0));
+        const forCondition = transcript.filter(entry => entry.t >= conditionStart);
         const verdicts = [
           firstPaintFromDeviceStore({ ...condition_.page, paints: condition_.page.paints.filter(paint => /^revisit/.test(paint.label) || paint.timedOut) }),
-          messagesSettleOnce(forCondition, { final: condition_.replied }),
+          // The condition is over: its message has left the page and settled, whether or not the model replied in time.
+          messagesSettleOnce(forCondition),
           noDuplicateItemKey(forCondition, condition_.page),
           journalSequencesContiguous(forCondition),
           noSessionConnectionLabel(condition_.page),

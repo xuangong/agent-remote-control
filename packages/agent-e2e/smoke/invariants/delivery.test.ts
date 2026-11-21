@@ -34,6 +34,18 @@ describe('every message settles once', () => {
     expect(messagesSettleOnce(open).status).toBe('failed');
     expect(messagesSettleOnce(open, { final: false }).status).toBe('passed');
   });
+  it('fails, also while the run is in flight, when a message the person sent never left the page', () => {
+    const held = transcript().marker(5, 'turn-sent', { word: 'ZEPHYR1' }).build();
+    expect(messagesSettleOnce(held).violations.map(v => v.message)).toEqual(['1 of 1 messages the person sent never left the page']);
+    expect(messagesSettleOnce(held, { final: false }).status).toBe('failed');
+    const retried = transcript().marker(5, 'turn-sent').send(10, 'send_message', send(10, 'r1', 'op1')).send(30, 'send_message', send(30, 'r2', 'op1'))
+      .receive(40, 'command_acknowledged', { requestId: 'r2', agentId: 'agent', command: 'send_message' }).marker(50, 'turn-sent').build();
+    expect(messagesSettleOnce(retried, { final: false }).violations.map(v => v.message)).toEqual(['1 of 2 messages the person sent never left the page']);
+    expect(messagesSettleOnce(sendAndAck(transcript().marker(5, 'turn-sent')).build()).status).toBe('passed');
+  });
+  it('is not exercised when the person sent nothing', () => {
+    expect(messagesSettleOnce([]).status).toBe('not_exercised');
+  });
   it('fails for a doubled acknowledgement and for a retry the Controller started twice', () => {
     const doubled = sendAndAck().receive(30, 'command_acknowledged', { requestId: 'r1', agentId: 'agent', command: 'send_message' }).build();
     expect(messagesSettleOnce(doubled).violations[0]?.message).toMatch(/settled 2 times/);

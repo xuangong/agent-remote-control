@@ -12,8 +12,8 @@ afterAll(async () => { await browser?.close(); });
 
 const input = (page: Page) => page.locator('[data-testid="prompt-input"]');
 
-/** Types into the editor while the session is held back, and checks what a person sees until the session is ready. */
-async function typeWhileOpening(page: Page, text: string): Promise<void> {
+/** Types into the editor as soon as it takes text, and sends. */
+async function typeAndSend(page: Page, text: string): Promise<void> {
   await input(page).waitFor({ state: 'visible' });
   await expect.poll(() => input(page).isEditable()).toBe(true);
   await input(page).click();
@@ -21,6 +21,11 @@ async function typeWhileOpening(page: Page, text: string): Promise<void> {
   // Return sends under a fine pointer; on a touch screen it makes a new line and the send button sends (I3b).
   if (await page.evaluate(() => matchMedia('(pointer: coarse)').matches)) await page.getByRole('button', { name: 'Send message', exact: true }).click();
   else await page.keyboard.press('Enter');
+}
+
+/** Types into the editor while the session is held back, and checks what a person sees until the session is ready. */
+async function typeWhileOpening(page: Page, text: string): Promise<void> {
+  await typeAndSend(page, text);
   await page.locator('[data-testid="pending-send"]', { hasText: 'Sending' }).waitFor();
   expect(stack.provider.session('quiet')!.sent).not.toContain(text);
   await page.keyboard.type(' next');
@@ -68,6 +73,24 @@ describe.each(variants)('E9 at %s', (_name, view) => {
       await typeWhileOpening(page, 'Typed while reopening');
       sockets.release();
       await expectDeliveredOnce(page, 'Typed while reopening');
+      expect(await words.seen()).toEqual([]);
+    } finally { await context.close(); }
+  });
+
+  it('E9: a message sent at once while the Relay is slow to confirm and attach the session is delivered once, never held as Not sent', async () => {
+    // Smoke M1's condition (O44): the Window's view of the session mounts while the page still confirms the session's locator and its
+    // attach is still on its way. Both are waits, however long; the message is delivered once the session is ready.
+    const { context, page: first } = await openPage(browser, stack.sessionUrl('quiet'), view);
+    try {
+      await waitForEntries(first, 2);
+      await waitForKeptConversation(first, 'Hello quiet');
+      await first.close();
+      const { page, words } = await openPageIn(context, stack.sessionUrl('quiet'), { ...view, relayDelay: { requests: /\/v1\/(session-successions|remote\/.*attach)/, ms: 2000 } });
+      await waitForEntries(page, 2);
+      await typeAndSend(page, 'Sent at once to a slow Relay');
+      await page.locator('[data-testid="pending-send"]', { hasText: 'Sending' }).waitFor();
+      await expectDeliveredOnce(page, 'Sent at once to a slow Relay');
+      expect(await page.getByText('Not sent').count()).toBe(0);
       expect(await words.seen()).toEqual([]);
     } finally { await context.close(); }
   });

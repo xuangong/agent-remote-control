@@ -30,12 +30,19 @@ export interface PageOptions {
    * device; `'agent_snapshot'` holds from the session's first snapshot, so a session this device never opened has no state yet.
    */
   hold?: boolean | 'agent_snapshot';
+  /**
+   * Answers the Relay's HTTP requests whose path matches `requests` `ms` late, as a slow Relay or network does: the page opens through
+   * the waits this makes, such as an attach still on its way or a session locator the page has not confirmed yet.
+   */
+  relayDelay?: { requests: RegExp; ms: number };
 }
 
 /** A page on `url` in `context`, which already has its Window. Its WebSockets pass through a route that a flow can cut (`sockets.drop()`), wait on (`sockets.recoveredFrom`) or hold back (`hold`). */
 export async function openPageIn(context: BrowserContext, url: string, options: PageOptions = {}) {
   const page = await context.newPage();
   page.setDefaultTimeout(20_000);
+  const delay = options.relayDelay;
+  if (delay) await page.route(url => delay.requests.test(url.pathname), async route => { await new Promise(resolve => setTimeout(resolve, delay.ms)); await route.continue(); });
   const sockets = await watchSockets(page, options.hold);
   const words = await watchWords(page);
   await page.goto(url, { waitUntil: 'domcontentloaded' });

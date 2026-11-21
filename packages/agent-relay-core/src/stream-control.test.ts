@@ -99,4 +99,29 @@ describe('a browser stream through the lease table', () => {
     expect(sent).toHaveLength(count);
     expect(state().payload.nativeOwner).toEqual({ kind: 'controller', generation: 'c-1' });
   });
+
+  it('refuses an interaction answer without the token with its submission id as the request id', () => {
+    const { control, sent } = stream();
+    control.announce();
+    const answer = JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'interaction_response', payload: { agentId: 'agent-1', requestId: 'r1', submissionId: 'sub-1', operationId: '00000000-0000-4000-8000-000000000002', response: { kind: 'permission_approval', decision: 'deny' } } });
+    expect(control.admitRaw(answer)).toBe(true);
+    expect(sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'sub-1', code: 'session_read_only', recoverable: true } });
+  });
+
+  it('never gives two streams, or two acquires and refusals of one stream, the same revision or token', () => {
+    const streams = Array.from({ length: 3 }, () => stream());
+    const revisions = new Set<string>(), tokens = new Set<string>();
+    for (const { control, state, acquire } of streams) {
+      control.announce();
+      revisions.add(state().payload.revision);
+      acquire();
+      tokens.add(state().payload.token!);
+      control.controllerRefused('native_session_owned', owner);
+      revisions.add(state().payload.revision);
+      acquire();
+      tokens.add(state().payload.token!);
+    }
+    expect(revisions.size).toBe(3 * 2);
+    expect(tokens.size).toBe(3 * 2);
+  });
 });

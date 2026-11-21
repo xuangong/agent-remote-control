@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { watchSockets, watchWords } from './page.js';
 import { chromium, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { installLifecycle, type PageLifecycle } from '@orchardworks/agent-e2e/lifecycle';
 
 /** One headless browser for a file of flows; every flow opens its own signed-out context, which the Relay signs in as the local user. `E2E_BROWSER=webkit` runs the flows in WebKit. */
 export async function launchBrowser(): Promise<Browser> { return (process.env.E2E_BROWSER === 'webkit' ? webkit : chromium).launch({ headless: true }); }
@@ -35,6 +36,11 @@ export interface PageOptions {
    * the waits this makes, such as an attach still on its way or a session locator the page has not confirmed yet.
    */
   relayDelay?: { requests: RegExp; ms: number };
+  /**
+   * Drives the page through a phone's lifecycle (`@orchardworks/agent-e2e/lifecycle`): hidden, suspended with its sockets killed, the back-forward
+   * cache, ended by the operating system. `standalone` opens it as the web app added to the home screen. The page's timers run on Playwright's clock.
+   */
+  lifecycle?: true | { standalone?: boolean };
 }
 
 /** A page on `url` in `context`, which already has its Window. Its WebSockets pass through a route that a flow can cut (`sockets.drop()`), wait on (`sockets.recoveredFrom`) or hold back (`hold`). */
@@ -45,8 +51,9 @@ export async function openPageIn(context: BrowserContext, url: string, options: 
   if (delay) await page.route(url => delay.requests.test(url.pathname), async route => { await new Promise(resolve => setTimeout(resolve, delay.ms)); await route.continue(); });
   const sockets = await watchSockets(page, options.hold);
   const words = await watchWords(page);
+  const lifecycle = options.lifecycle ? await installLifecycle(page, { sockets, ...(options.lifecycle === true ? {} : options.lifecycle) }) : undefined;
   await page.goto(url, { waitUntil: 'domcontentloaded' });
-  return { page, sockets, words };
+  return { page, sockets, words, lifecycle: lifecycle as PageLifecycle };
 }
 
 /** A fresh context, signed in as the local user with a Window that holds nothing, and a page on `url`. */

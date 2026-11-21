@@ -16,11 +16,11 @@ export async function closeHosts(): Promise<void> { for (const close of closers.
  * A Controller's host runtime connected to a hosted Relay over a real socket, with the Relay's real journal service and a store, and a
  * page's requests (attach, a listing, the revision check) made through the Relay as the page makes them.
  */
-export async function startRelayHost(options: { registrations: AgentHostProviderRegistration[]; idleGraceMs?: number }) {
+export async function startRelayHost(options: { registrations: AgentHostProviderRegistration[]; idleGraceMs?: number; rpcTimeoutMs?: number }) {
   const store = new MemoryJournalStore();
   let recorded: Array<{ event: string; reason?: string }> = [];
   const diagnostics = createDiagnosticJournal({ storage: { save: async events => { recorded = structuredClone(events) as typeof recorded; } } });
-  const broker = createHostBroker({ origin: 'http://relay.test', rpcTimeoutMs: 5000, journals: store, diagnostics });
+  const broker = createHostBroker({ origin: 'http://relay.test', rpcTimeoutMs: options.rpcTimeoutMs ?? 5000, journals: store, diagnostics });
   const pairing = await broker.handleRequest(new Request('http://relay.test/v1/remote/pairings', { method: 'POST', body: '{}' }));
   const { key } = await pairing!.json();
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
@@ -58,6 +58,8 @@ export async function startRelayHost(options: { registrations: AgentHostProvider
   };
   return {
     store, lifecycle,
+    /** The attach a page's open makes, answered as the Relay answers it: its status and its body. */
+    tryAttach: async (providerId: string, nativeSessionId: string) => { const response = (await request('attach', { method: 'POST', body: JSON.stringify({ providerId, nativeSessionId }) }))!; return { status: response.status, body: await response.json() as { code?: string; error?: string; agentId?: string } }; },
     /** An operation on the attached session, as a page's send makes it: the Controller acquires the session for it. */
     acquire: async (providerId: string, nativeSessionId: string) => { await broker.handleRequest(new Request(`http://relay.test/v1/sessions/${encodeURIComponent(await agentIdOf(providerId, nativeSessionId))}/snapshot`)); },
     attach: async (providerId: string, nativeSessionId: string) => { expect((await request('attach', { method: 'POST', body: JSON.stringify({ providerId, nativeSessionId }) }))?.status).toBe(200); },

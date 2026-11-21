@@ -140,7 +140,7 @@ export const uplinkScenarios: Scenario[] = [
       const turn = [item('history', 'u2', 'Fix the bug'), item('history', 'a2', 'Done')];
       const refresh = createTerminalRefresh({
         now: uplink.clock.now, directory: () => ({ canReleaseSession: () => true }), bindings: () => [binding], bindingOf: () => binding,
-        isLive: () => false, hasDemand: () => false, expire: () => undefined, granted: () => true, stopped: () => false,
+        isLive: () => false, hasDemand: () => false, expire: () => undefined, reread: async () => undefined, granted: () => true, stopped: () => false,
         attachAndRelease: async () => {
           await uplink.follow(publisher, [...history, ...turn]);
           await uplink.settle(60);

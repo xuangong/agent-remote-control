@@ -118,6 +118,17 @@ describe('the simulated CLI', () => {
     expect(cli.native('thread-1').updatedAt).toBe(Date.now());
   });
 
+  it('shows the branch written last on a reread when two writes end in the same millisecond (S5)', async () => {
+    fakeTimers();
+    const cli = simulatedCli({ behaviour: forking, sessions: { 'thread-1': ['Base', 'Base reply'] }, turnMs: 1000 });
+    const session = await open(cli);
+    await session.sendMessage('PAGE');
+    const terminal = cli.externalWriter('thread-1', { text: 'TERM', turnMs: 1000 });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await terminal).toBe('written');
+    expect(cli.native('thread-1').history).toEqual(['Base', 'Base reply', 'TERM', 'Reply to TERM']);
+  });
+
   it('answers a slow resume after its delay, and a hung one only once healed (S6)', async () => {
     fakeTimers();
     const cli = simulatedCli({ behaviour: sharedDaemon });

@@ -1,7 +1,7 @@
 import { nativePrefixResumeHandle, successionResumeHandle } from './local-succession-preparation.js';
-import { resolveAgentNativePrefixCapability, serializeAgentEmptyCreationResult, type AgentNativePrefixTarget } from '@orchardworks/agent-provider-sdk';
+import { resolveAgentNativePrefixCapability, resolveAgentProviderBehaviour, serializeAgentEmptyCreationResult, type AgentNativePrefixTarget, type AgentProviderDescriptor } from '@orchardworks/agent-provider-sdk';
 import {acquireNativeSession, inspectNativeOwner, NativeSessionOwnerError, type NativeSessionLease, type NativeOwnerDiagnostic, type NativeOwnerIdentity, type NativeHandoffGrant} from './native-session-owner.js';
-import { diverged, mayReleaseDiverged } from './transcript-divergence.js';
+import { divergedByContent, mayReleaseDiverged } from './transcript-divergence.js';
 import { randomUUID } from 'node:crypto';
 import type {RemoteSessionSummary} from '@orchardworks/agent-session-runtime';
 import type { AgentHistoryQuery, AgentPersistenceHandle, AgentProviderAdapter, AgentSession, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
@@ -12,14 +12,21 @@ import type { SessionCreationStore } from './session-creation-store.js';
 import type { SessionHostAccessSource } from './session-callers.js';
 
 export type ManagedStdioProvider = Pick<AgentProviderAdapter, 'createSession' | 'resumeSession' | 'readSessionHistory' | 'nativePrefix'> & {
+    /** What the adapter declares of its CLI; its concurrency model keys the divergence rule. */
+    readonly descriptor?: Pick<AgentProviderDescriptor, 'behaviour'>;
     validatePromptEdit?(target: AgentNativePrefixTarget): Promise<void>;
     /** Pre-effect guarantee: ordinary createSession returns a same-provider ID with nonempty trim,
      * at most this many UTF-16 units. Covers every selected create mode, not resume/fork or history. */
     readonly createdSessionIdMaxLength?: number;
     listSessions(): Promise<RemoteSessionSummary[]>;
-    /** A loaded session of a runtime that keeps the conversation in memory: whether nothing runs for it, and when this process last wrote to it. */
-    sessionState?(id: string): { quiet: boolean; writtenAt: number } | undefined;
+    /**
+     * A loaded session of a runtime that keeps the conversation in memory: whether nothing runs for it, when this process last wrote to it,
+     * and the records of its transcript it holds, read when it loaded or written since, newest last.
+     */
+    sessionState?(id: string): { quiet: boolean; writtenAt: number; records: readonly string[] } | undefined;
     sessionNativeUpdatedAt?(id: string): Promise<number | undefined>;
+    /** The records of a session's transcript as a new attachment would read them, newest last; undefined when it cannot be read. */
+    sessionTranscript?(id: string): Promise<readonly string[] | undefined>;
     readSessionTitle?(id: string): Promise<string | undefined>;
     renameSession?(id: string, title: string): Promise<string>;
     validateSessionTitle?(title: string): void;
@@ -50,8 +57,35 @@ export function createManagedStdioDirectory(
   const unconfirmedStarts = new Set<string>();
   const rejectedStarts = new Map<string, { session: AgentSession; owner?: NativeSessionLease }>();
   const controllerTools = new Set<string>();
-  /** The native update time each listing last saw, to tell a transcript something else wrote from one this process did. */
+  /** The native update time a listing or a check last saw, from which a diverged transcript's quiet time counts. */
   const listedAt = new Map<string, number>();
+  // A CLI that forks a transcript two writers use continues a resident session from its own last message, so what another process wrote is
+  // not seen by it. The transcript's content decides divergence (`transcript-divergence.ts`), keyed on the declared concurrency model,
+  // never on the provider; a diverged session, once nothing runs for it, is released and read again.
+  const forks = resolveAgentProviderBehaviour(provider.descriptor ?? {}).concurrency.model === 'fork_on_divergence'
+    && !!provider.sessionState && !!provider.sessionTranscript;
+  /** Each session's last content check: valid while the session holds the same records and the transcript has the same update time. */
+  const verdicts = new Map<string, { updatedAt: number | undefined; held: number; last: string | undefined; diverged: boolean }>();
+  const verdictOf = (id: string, state: { records: readonly string[] }) => {
+    const verdict = verdicts.get(id);
+    return verdict && verdict.held === state.records.length && verdict.last === state.records.at(-1) ? verdict : undefined;
+  };
+  /** Reads the transcript of a quiet session, unless its update time and what the session holds are those of the last check. */
+  async function checkDivergence(id: string, listedUpdatedAt?: number): Promise<boolean> {
+    const updatedAt = listedUpdatedAt ?? await provider.sessionNativeUpdatedAt?.(id);
+    if (updatedAt !== undefined) listedAt.set(id, Math.max(listedAt.get(id) ?? updatedAt, updatedAt));
+    const state = provider.sessionState!(id);
+    if (!state?.quiet) return false;
+    const known = verdictOf(id, state);
+    if (known && updatedAt !== undefined && known.updatedAt === updatedAt) return known.diverged;
+    const transcript = await provider.sessionTranscript!(id).catch(() => undefined);
+    // A turn that began meanwhile, or a transcript that could not be read, gives no verdict.
+    const after = provider.sessionState!(id);
+    if (!transcript || !after?.quiet || after.records.length !== state.records.length || after.records.at(-1) !== state.records.at(-1)) return false;
+    const diverged = divergedByContent(state.records, transcript);
+    verdicts.set(id, { updatedAt, held: state.records.length, last: state.records.at(-1), diverged });
+    return diverged;
+  }
   let sourceAccessCheck: ((id: string) => Promise<void>) | undefined;
   let sourceBindingReader: SourceBindingReader | undefined;
   let sourceReferenceAncestors: ((id: string, preparationHandle?: AgentPersistenceHandle) => Promise<readonly string[]>) | undefined;
@@ -258,17 +292,13 @@ export function createManagedStdioDirectory(
     async sourceReference(id) { return sourceReferenceState(await lookupSourceGrant(id)); },
     async setSourceReferenceRemoved(id, removed) { return setSourceReferenceRemoved(references, await lookupSourceGrant(id), removed); },
     requiresController: id => controllerTools.has(id),
-    // A runtime that keeps the conversation in memory continues from its own last message, so a transcript another process wrote to is
-    // not seen by it: such a session, once nothing runs for it, is released and read again.
-    ...(provider.sessionState ? {
-      divergedAt: (id: string) => { const state = provider.sessionState!(id); return state && diverged(listedAt.get(id), state.writtenAt) ? state.writtenAt : undefined; },
-      canReleaseSession: (id: string) => mayReleaseDiverged(provider.sessionState!(id), listedAt.get(id), Date.now()),
-      async checkDivergence(id: string) {
-        const native = await provider.sessionNativeUpdatedAt?.(id);
-        if (native !== undefined) listedAt.set(id, native);
+    ...(forks ? {
+      divergedAt: (id: string) => { const state = provider.sessionState!(id); return state && verdictOf(id, state)?.diverged ? state.writtenAt : undefined; },
+      canReleaseSession: (id: string) => {
         const state = provider.sessionState!(id);
-        return !!state?.quiet && diverged(native, state.writtenAt);
+        return !!state && mayReleaseDiverged({ quiet: state.quiet, diverged: !!verdictOf(id, state)?.diverged, nativeUpdatedAt: listedAt.get(id) }, Date.now());
       },
+      checkDivergence,
     } : {}),
     list() { if (closed) throw new Error(`${displayName} directory is closed.`); return discovery ??= discover().finally(() => { discovery = undefined; }); },
     workspaces: () => [...workspaces],
@@ -432,6 +462,8 @@ export function createManagedStdioDirectory(
           }
           throw error;
         }
+        // A session read again holds what its transcript holds now: an earlier verdict says nothing of it.
+        verdicts.delete(nativeSessionId);
         await remember(session, owner, identity, nativeSessionId);
         if (creationIdentity) opened.get(nativeSessionId)!.nativeCreation = creationIdentity;
         if (prefixIdentity) opened.get(nativeSessionId)!.nativePrefix = prefixIdentity;

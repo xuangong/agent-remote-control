@@ -356,6 +356,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     isLive: agentId => !!liveAgent(agentId),
     hasDemand: agentId => idle.hasDemand(agentId),
     expire: agentId => idle.expire(agentId),
+    // Acquiring a session releases it first when its transcript diverged (`attachment.ts`), then attaches it again.
+    reread: async agentId => { const lease = await acquireSession(agentId); lease?.release(); },
     granted: () => journals.granted(),
     stopped: () => admission.stopped,
     attachAndRelease: async agentId => { const lease = await acquireSession(agentId); lease?.release(); idle.expire(agentId); },

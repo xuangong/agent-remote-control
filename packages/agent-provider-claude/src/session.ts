@@ -95,8 +95,14 @@ export class ClaudeAgentSession implements AgentSession {
   private readonly resultIds = new Set<string>();
   private readonly timeout: number;
   private sequence = 0;
-  /** When this process last wrote to the native session; a transcript newer than that was written by something else. */
+  /** When this process last wrote to the native session. */
   private lastWriteAt = Date.now();
+  /**
+   * The conversation records of the transcript this process holds, newest last: those it read when it loaded and those it wrote since.
+   * A reread that holds another record, or ends elsewhere, shows that something else wrote to the transcript (`nativeState`).
+   */
+  private readonly records: string[];
+  private readonly recordSet: Set<string>;
   private backgroundTasks = 0;
   private status: AgentRuntimeInfo['status'] = 'starting';
   private turnId: ReturnType<typeof randomUUID> | undefined;
@@ -134,6 +140,8 @@ export class ClaudeAgentSession implements AgentSession {
   private constructor(private readonly config: ClaudeSessionConfig, private readonly options: ClaudeSessionOptions,
     messages: ClaudeTimelineMessage[]) {
     this.inputDispatched = messages.some(message => message.type === 'user');
+    this.records = messages.map(message => message.uuid);
+    this.recordSet = new Set(this.records);
     this.nativeModelConfirmed = !options.restoreNativeModel;
     this.process = new ClaudeNativeProcess(options.onDiagnostic);
     this.timeout = options.requestTimeoutMs ?? 15_000;
@@ -286,6 +294,7 @@ export class ClaudeAgentSession implements AgentSession {
 
   private dispatchMessage(content: SDKUserMessage['message']['content'], turnId = randomUUID(), options: AgentMessageOptions = {}): void {
     this.lastWriteAt = Date.now();
+    this.noteRecord(turnId);
     const message = { type: 'user' as const, uuid: turnId, session_id: this.config.sessionId,
       parent_tool_use_id: null, message: { role: 'user' as const, content } };
     this.input.push(message);
@@ -318,7 +327,15 @@ export class ClaudeAgentSession implements AgentSession {
     const message = { type: 'user' as const, uuid: randomUUID(), session_id: this.config.sessionId,
       parent_tool_use_id: null, message: { role: 'user' as const, content } };
     this.steering.set(message.uuid, { message, started: false, onAcceptance: options.onAcceptance, onWithdrawn: options.onWithdrawn });
+    this.noteRecord(message.uuid);
     this.input.push(message);
+  }
+
+  /** A record this process wrote to the transcript, or will: its uuid is the transcript's. */
+  private noteRecord(uuid: string): void {
+    if (this.recordSet.has(uuid)) return;
+    this.recordSet.add(uuid);
+    this.records.push(uuid);
   }
 
   private noteCommandLifecycle(commandUuid: string, state: string): void {
@@ -342,6 +359,8 @@ export class ClaudeAgentSession implements AgentSession {
     if (!steered) return;
     this.steering.delete(commandUuid);
     if (steered.started) return;
+    // Input removed from the native queue is never written to the transcript.
+    if (this.recordSet.delete(commandUuid)) this.records.splice(this.records.lastIndexOf(commandUuid), 1);
     for (const observation of this.projector.project(steered.message)) {
       const event = observation.event.type === 'timeline' && observation.event.item.type === 'user_message'
         ? { ...observation.event, item: { ...observation.event.item, withdrawn: { reason: 'stopped' as const } } } : observation.event;
@@ -571,11 +590,14 @@ export class ClaudeAgentSession implements AgentSession {
     return settings;
   }
 
-  /** Whether nothing runs for this session, and when this process last wrote to it: what a release because the transcript moved on must know. */
-  nativeState(): { quiet: boolean; writtenAt: number } {
+  /**
+   * Whether nothing runs for this session, when this process last wrote to it, and the conversation records of the transcript it holds:
+   * what deciding by content that something else wrote to the transcript, and releasing the session for it, must know.
+   */
+  nativeState(): { quiet: boolean; writtenAt: number; records: readonly string[] } {
     const quiet = !this.disposed && !this.failure && this.status === 'idle' && !this.turnId && this.steering.size === 0 && this.interactions.size === 0 && this.backgroundTasks === 0
       && !this.changingSetting && !this.preparingMessage && !this.children.descriptors().some(child => child.status === 'running' || child.status === 'waiting');
-    return { quiet, writtenAt: this.lastWriteAt };
+    return { quiet, writtenAt: this.lastWriteAt, records: [...this.records] };
   }
 
   async runtimeInfo(options?: { refreshSettings?: boolean }): Promise<AgentRuntimeInfo> {
@@ -676,6 +698,9 @@ export class ClaudeAgentSession implements AgentSession {
         }
         this.children.consume(message, this.turnId);
         if ('parent_tool_use_id' in message && message.parent_tool_use_id) continue;
+        // A conversation row of the main transcript; the output of a local command is a synthetic message the transcript does not hold (FL6).
+        if ((message.type === 'user' || message.type === 'assistant') && typeof message.uuid === 'string'
+          && !(message.type === 'assistant' && message.message.model === '<synthetic>')) this.noteRecord(message.uuid);
         if (message.type === 'result') {
           if (this.resultIds.has(message.uuid)) continue;
           this.resultIds.add(message.uuid);

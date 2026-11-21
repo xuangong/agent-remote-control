@@ -84,8 +84,13 @@ export class ClaudeAgentProvider implements AgentProviderAdapter {
     return name;
   }
 
-  /** Whether a loaded session is quiet, and when this process last wrote to it. */
-  sessionState(sessionId: string): { quiet: boolean; writtenAt: number } | undefined { return this.sessions.get(sessionId)?.nativeState(); }
+  /** Whether a loaded session is quiet, when this process last wrote to it, and the transcript records it holds. */
+  sessionState(sessionId: string): { quiet: boolean; writtenAt: number; records: readonly string[] } | undefined { return this.sessions.get(sessionId)?.nativeState(); }
+
+  /** The conversation records of a session's transcript as a resume reads them, newest last; undefined when it cannot be read. */
+  async sessionTranscript(sessionId: string): Promise<readonly string[] | undefined> {
+    return this.catalog.records?.(sessionId).catch(() => undefined);
+  }
 
   /** The native update time of a session's transcript. */
   async sessionNativeUpdatedAt(sessionId: string): Promise<number | undefined> {

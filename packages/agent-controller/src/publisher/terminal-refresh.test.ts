@@ -20,7 +20,7 @@ function harness(options: { directory?: RefreshDirectory; granted?: boolean } = 
   const state = {
     now: NOW, granted: options.granted ?? true, stopped: false,
     bindings: [] as RefreshBinding[], live: new Set<string>(), demand: new Set<string>(),
-    attached: [] as string[], expired: [] as string[], released: [] as string[], journalServing: true,
+    attached: [] as string[], expired: [] as string[], reread: [] as string[], released: [] as string[], journalServing: true,
     attach: (_agentId: string): Promise<void> => Promise.resolve(),
     diverged: new Map<string, number>(),
   };
@@ -33,6 +33,7 @@ function harness(options: { directory?: RefreshDirectory; granted?: boolean } = 
     isLive: agentId => state.live.has(agentId),
     hasDemand: agentId => state.demand.has(agentId),
     expire: agentId => { state.expired.push(agentId); },
+    reread: async agentId => { state.reread.push(agentId); },
     granted: () => state.granted,
     stopped: () => state.stopped,
     attachAndRelease: async agentId => { state.attached.push(agentId); await state.attach(agentId); },
@@ -200,7 +201,7 @@ describe('a directory whose listing is read only on request', () => {
 });
 
 describe('a resident session another writer moved past', () => {
-  it('is expired when its transcript diverged, it has no demand and its provider can release it', async () => {
+  it('is expired when its transcript diverged, it has no demand and its provider can release it, and read again at once when a page shows it', async () => {
     const run = harness();
     const idleOne = await run.published('idle');
     const wanted = await run.published('wanted');
@@ -210,6 +211,23 @@ describe('a resident session another writer moved past', () => {
     run.state.demand.add(wanted.agentId);
     await run.refresh.refresh('fake', []);
     expect(run.state.expired).toEqual([idleOne.agentId]);
+    expect(run.state.reread).toEqual([wanted.agentId]);
+  });
+
+  it('checks a resident session by its content first, with the update time the listing read', async () => {
+    const checks: Array<[string, number | undefined]> = [];
+    const verdicts = new Map<string, boolean>();
+    const run = harness({ directory: {
+      canReleaseSession: () => true,
+      divergedAt: id => verdicts.get(id) ? 1 : undefined,
+      checkDivergence: async (id, listedUpdatedAt) => { checks.push([id, listedUpdatedAt]); verdicts.set(id, id === 'forked'); return id === 'forked'; },
+    } });
+    const forked = await run.published('forked');
+    const unlisted = await run.published('unlisted');
+    for (const item of [forked, unlisted]) run.state.live.add(item.agentId);
+    await run.refresh.refresh('fake', [run.writtenAgo('forked', MINUTE)]);
+    expect(checks).toEqual([['forked', NOW - MINUTE], ['unlisted', undefined]]);
+    expect(run.state.expired).toEqual([forked.agentId]);
   });
 
   it('is left alone when nothing diverged, or when the provider cannot release it', async () => {

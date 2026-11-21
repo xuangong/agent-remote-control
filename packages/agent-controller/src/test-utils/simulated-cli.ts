@@ -24,7 +24,9 @@ import { ScriptedSession } from './journal-scripted-session.js';
  *   while the session is loaded; otherwise it holds the writer for its turn, and a resume meanwhile is refused with `AgentSessionInUseError`
  *   reason `writer_elsewhere`, with `retryAfterMs` when the test gives one.
  * - S5 Fork on divergence. A write elsewhere continues the newest branch of the transcript as it was when the write began; a reread shows the
- *   branch with the newest write; a resident client keeps continuing its own branch and never sees the other one.
+ *   branch written last, also when two writes end in the same millisecond; a resident client keeps continuing its own branch and never sees
+ *   the other one. Through the managed stdio directory, a resident client tells the records it holds and the transcript its records as a
+ *   reread gives them, so divergence is decided by content.
  * - S6 Faults at resume: `slowResume(ms)`, `hangResume()` (answers once healed; `{ once: true }` hangs only the next resume),
  *   `usageLimit({ resetsAt })` (typed `native_usage_limited` with `resetsAt` until that time).
  * - S7 Faults mid-turn, on the next turn: `crash()` fails it with `native_exited` and ends the session's stream; `hang()` stops it after its
@@ -38,7 +40,8 @@ export interface SimulatorClock { now(): number; setTimeout(callback: () => void
 const globalClock: SimulatorClock = { now: () => Date.now(), setTimeout: (callback, delayMs) => setTimeout(callback, delayMs), clearTimeout: timer => clearTimeout(timer as ReturnType<typeof setTimeout>) };
 
 interface Item { key: string; type: 'user_message' | 'assistant_message'; text: string; turnId: string }
-interface Branch { items: Item[]; writtenAt: number }
+/** A branch of a transcript; `written` orders the writes, so the one written last is known even within one millisecond. */
+interface Branch { items: Item[]; writtenAt: number; written: number }
 
 export interface SimulatedCliOptions {
   behaviour: AgentProviderBehaviour;
@@ -62,20 +65,22 @@ export function simulatedCli(options: SimulatedCliOptions) {
   const natives = new Map<string, Native>();
   let turns = 0;
   let observations = 0;
+  let writes = 0;
   const resumeFaults: { slowMs?: number; hang?: 'always' | 'once'; hung: Array<() => void>; resetsAt?: number } = { hung: [] };
   const turnFaults: { next?: 'crash' | 'hang'; unknownKind?: string } = {};
 
   const nativeOf = (id: string): Native => {
     let native = natives.get(id);
-    if (!native) { native = { id, branches: [{ items: [], writtenAt: 0 }], clients: new Set(), loadedByOthers: 0, resumes: 0 }; natives.set(id, native); }
+    if (!native) { native = { id, branches: [{ items: [], writtenAt: 0, written: 0 }], clients: new Set(), loadedByOthers: 0, resumes: 0 }; natives.set(id, native); }
     return native;
   };
   for (const [id, texts] of Object.entries(options.sessions ?? {})) {
     const turn = (at: number) => `history-${at >> 1}`;
-    nativeOf(id).branches = [{ items: texts.map((text, at) => ({ key: `${id}:${at}`, type: at % 2 === 0 ? 'user_message' : 'assistant_message', text, turnId: turn(at) })), writtenAt: 0 }];
+    nativeOf(id).branches = [{ items: texts.map((text, at) => ({ key: `${id}:${at}`, type: at % 2 === 0 ? 'user_message' : 'assistant_message', text, turnId: turn(at) })), writtenAt: 0, written: 0 }];
   }
   /** The branch a reread shows: the one written last (S5); with one writer there is one branch. */
-  const history = (native: Native): Item[] => native.branches.reduce((newest, branch) => branch.writtenAt > newest.writtenAt ? branch : newest).items;
+  const newest = (native: Native): Branch => native.branches.reduce((last, branch) => branch.written > last.written ? branch : last);
+  const history = (native: Native): Item[] => newest(native).items;
   const updatedAt = (native: Native): number => Math.max(...native.branches.map(branch => branch.writtenAt));
   const loaded = (native: Native): boolean => native.clients.size > 0 || native.loadedByOthers > 0 || native.unload !== undefined;
   const othersSeeLive = behaviour.concurrency.othersVisible === 'live';
@@ -157,12 +162,11 @@ export function simulatedCli(options: SimulatedCliOptions) {
   function write(native: Native, client: SimulatedSession | undefined, items: Item[]): void {
     if (behaviour.concurrency.model === 'fork_on_divergence' && client) {
       client.branch = [...client.branch, ...items];
-      if (client.ownBranch) { client.ownBranch.items = client.branch; client.ownBranch.writtenAt = clock.now(); }
-      else { client.ownBranch = { items: client.branch, writtenAt: clock.now() }; native.branches.push(client.ownBranch); }
+      if (client.ownBranch) Object.assign(client.ownBranch, { items: client.branch, writtenAt: clock.now(), written: ++writes });
+      else { client.ownBranch = { items: client.branch, writtenAt: clock.now(), written: ++writes }; native.branches.push(client.ownBranch); }
       return;
     }
-    const branch = native.branches.reduce((newest, candidate) => candidate.writtenAt > newest.writtenAt ? candidate : newest);
-    native.branches = [{ items: [...branch.items, ...items], writtenAt: clock.now() }];
+    native.branches = [{ items: [...history(native), ...items], writtenAt: clock.now(), written: ++writes }];
     for (const other of native.clients) if (other !== client) other.branch = history(native);
   }
 
@@ -209,16 +213,21 @@ export function simulatedCli(options: SimulatedCliOptions) {
       };
       return { adapter, directory };
     },
-    /** A registration through the managed stdio directory, which applies the transcript divergence rule as it does for Claude Code. */
+    /**
+     * A registration through the managed stdio directory, which applies the transcript divergence rule of the declared concurrency model as
+     * it does for Claude Code: a resident client holds the records of its branch, and the transcript's records are those a reread shows.
+     */
     stdioRegistration(): AgentHostProviderRegistration {
       const provider: ManagedStdioProvider = {
+        descriptor: adapter.descriptor,
         createSession: adapter.createSession, resumeSession: adapter.resumeSession,
         async listSessions() { return [...natives.values()].map(summary); },
         sessionState(id) {
           const client = [...nativeOf(id).clients].at(-1);
-          return client ? { quiet: !client.running, writtenAt: client.writtenAt } : undefined;
+          return client ? { quiet: !client.running, writtenAt: client.writtenAt, records: client.branch.map(item => item.key) } : undefined;
         },
         async sessionNativeUpdatedAt(id) { return updatedAt(nativeOf(id)); },
+        async sessionTranscript(id) { return history(nativeOf(id)).map(item => item.key); },
       };
       return { adapter, directory: createManagedStdioDirectory(providerId, options.displayName ?? 'Simulated CLI', provider, []) };
     },
@@ -252,7 +261,7 @@ export function simulatedCli(options: SimulatedCliOptions) {
       if (model === 'fork_on_divergence') {
         const base = history(native);
         await elapse();
-        native.branches.push({ items: [...base, ...items], writtenAt: clock.now() });
+        native.branches.push({ items: [...base, ...items], writtenAt: clock.now(), written: ++writes });
         return 'written';
       }
       native.loadedByOthers += 1;

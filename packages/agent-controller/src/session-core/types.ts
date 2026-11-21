@@ -48,8 +48,11 @@ export interface AgentHostDirectory {
   canReleaseSession?(nativeSessionId: string): boolean;
   /** When this process last wrote to a session whose transcript something else has written to since; none when it did not diverge. */
   divergedAt?(nativeSessionId: string): number | undefined;
-  /** Reads the transcript's update time now: true when something else wrote to a session that is otherwise quiet. */
-  checkDivergence?(nativeSessionId: string): Promise<boolean>;
+  /**
+   * Checks a quiet session's transcript by its content now: true when it holds what something else wrote. `listedUpdatedAt` is the
+   * transcript's update time a listing just read, which spares reading it again.
+   */
+  checkDivergence?(nativeSessionId: string, listedUpdatedAt?: number): Promise<boolean>;
   reconcileIdleSession?(nativeSessionId: string): Promise<boolean>;
   sessionReleased?(nativeSessionId: string): Promise<void> | void;
   sessionWorkspace?(nativeSessionId: string, handle?: AgentPersistenceHandle): Promise<string | undefined>;

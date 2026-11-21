@@ -15,7 +15,9 @@ import { NativeSessionOwnerError } from '../native-session-owner.js';
  *   Due sessions are attached newest first and released again at once, so the Relay's journal reads the native history.
  * - At most one refresh runs at a time; a listing that arrives meanwhile, while stopping, or for a provider that is not followed, starts nothing.
  *   A refresh never fails the listing it rides on.
- * - A resident session whose transcript something else wrote to is expired, so the next attach reads it again.
+ * - A resident session whose transcript something else wrote to (its directory's `checkDivergence`, by content) and that may be released is
+ *   read again: one nothing holds is expired, so the next attach reads it; one a page shows or something holds is released and attached
+ *   again at once (`reread`), so the page follows native history without waiting for a send.
  * - Retry. The coverage moves to the summary's update time before the attach, so a failed attach waits for the next change. An attach
  *   refused because a terminal owns the session, or because the session is in use, puts the old coverage back, so the next listing tries again.
  * - A directory whose listing is read only on request does not move when a terminal writes: its remembered sessions are read one by one,
@@ -38,6 +40,8 @@ export interface RefreshDirectory {
   canReleaseSession?(nativeSessionId: string): boolean;
   /** When this process last wrote to a session whose transcript something else has written to since; none when it did not diverge. */
   divergedAt?(nativeSessionId: string): number | undefined;
+  /** Checks a resident session's transcript by its content, with the update time the listing read; the verdict feeds `divergedAt`. */
+  checkDivergence?(nativeSessionId: string, listedUpdatedAt?: number): Promise<boolean>;
 }
 
 export interface TerminalRefreshPorts {
@@ -51,6 +55,8 @@ export interface TerminalRefreshPorts {
   hasDemand(agentId: string): boolean;
   /** Releases the runtime of an idle session as soon as it can be. */
   expire(agentId: string): void;
+  /** Releases a held session whose transcript something else wrote to and attaches it again at once, so it reads native history. */
+  reread(agentId: string): Promise<void>;
   /** Whether the connection holds the Relay's journal grant, so a session published now would be read. */
   granted(): boolean;
   /** Closing or draining: nothing new starts. */
@@ -95,10 +101,15 @@ export function createTerminalRefresh(ports: TerminalRefreshPorts): TerminalRefr
   async function refresh(providerId: string, listedSummaries: readonly RemoteSessionSummary[]): Promise<void> {
     const directory = ports.directory(providerId);
     if (!directory) return;
-    // A resident session whose transcript something else wrote to is released, and the attach below reads it again.
-    for (const binding of ports.bindings()) {
-      if (binding.providerId === providerId && !binding.parentNativeSessionId && ports.isLive(binding.agentId) && !ports.hasDemand(binding.agentId)
-        && directory.canReleaseSession?.(binding.nativeSessionId) && directory.divergedAt?.(binding.nativeSessionId) !== undefined) ports.expire(binding.agentId);
+    // A resident session whose transcript something else wrote to is read again: one nothing holds is expired and the attach below reads
+    // it; one a page shows is released and attached again at once, so the page follows what native history shows.
+    for (const binding of [...ports.bindings()]) {
+      if (binding.providerId !== providerId || binding.parentNativeSessionId || !ports.isLive(binding.agentId)) continue;
+      const listed = Date.parse(listedSummaries.find(summary => summary.nativeSessionId === binding.nativeSessionId)?.updatedAt ?? '');
+      await directory.checkDivergence?.(binding.nativeSessionId, Number.isFinite(listed) ? listed : undefined).catch(() => false);
+      if (ports.stopped() || !directory.canReleaseSession?.(binding.nativeSessionId) || directory.divergedAt?.(binding.nativeSessionId) === undefined) continue;
+      if (ports.hasDemand(binding.agentId)) await ports.reread(binding.agentId).catch(() => undefined);
+      else ports.expire(binding.agentId);
     }
     if (!ports.granted()) return;
     const unheld = [...windowAt.keys()].flatMap(key => {

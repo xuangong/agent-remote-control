@@ -9,6 +9,7 @@ try {
     : operation === 'rename' && sessionId && argument ? await renameSession(sessionId, argument) : operation === 'list' ? await listSessions() : operation === 'info' && sessionId ? await getSessionInfo(sessionId)
     : operation === 'messages' && sessionId ? await getSessionMessages(sessionId)
     : operation === 'timeline-messages' && sessionId ? await timelineMessages(sessionId)
+    : operation === 'transcript-records' && sessionId ? (await timelineMessages(sessionId)).map(message => message.uuid)
     : operation?.startsWith('prompt-edit-') && sessionId && argument ? await promptEdit(operation, sessionId, argument)
     : operation === 'child-messages' && sessionId && argument ? await childMessages(sessionId, argument)
     : operation === 'children' && sessionId ? await readChildren(sessionId)

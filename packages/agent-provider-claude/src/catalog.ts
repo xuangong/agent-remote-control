@@ -15,6 +15,8 @@ export interface ClaudeCatalog {
   messages(sessionId: string): Promise<SessionMessage[]>;
   /** Conversation rows for presentation, including input the native runtime folded into a running turn. */
   timelineMessages?(sessionId: string): Promise<ClaudeTimelineMessage[]>;
+  /** The uuids of the rows `timelineMessages` reads, newest last: what a resume would hold of the transcript. */
+  records?(sessionId: string): Promise<string[]>;
   /** Reads, branches and checks a prompt-edit prefix in the configured native home. */
   promptEdit?: {
     inspect(target: AgentNativePrefixTarget): Promise<ClaudePromptEditBoundary>;
@@ -55,5 +57,5 @@ export function createClaudeCatalog(env: NodeJS.ProcessEnv, timeout: number): Cl
       fork: target => promptEdit('fork', target),
       verify: async (target, candidate) => { await promptEdit('verify', target, candidate); },
     },
-    messages: (id) => execute('messages', id), timelineMessages: (id) => execute('timeline-messages', id), children: (id) => execute('children', id), childMessages: (id, child) => execute('child-messages', id, child) };
+    messages: (id) => execute('messages', id), timelineMessages: (id) => execute('timeline-messages', id), records: (id) => execute('transcript-records', id), children: (id) => execute('children', id), childMessages: (id, child) => execute('child-messages', id, child) };
 }

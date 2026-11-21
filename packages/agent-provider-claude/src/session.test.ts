@@ -481,3 +481,31 @@ it('reserves submission during image reads and releases it on a failed image pre
 });
 
 
+
+describe('the transcript records a Claude session holds', () => {
+  const lifecycle = (command_uuid: string, state: string) => ({ type: 'command_lifecycle', session_id: 'native', uuid: `${command_uuid}-${state}`, command_uuid, state });
+  const assistant = (uuid: string, model = 'native-model') => ({ type: 'assistant', uuid, session_id: 'native', parent_tool_use_id: null, message: { id: `${uuid}-msg`, model, role: 'assistant', content: [{ type: 'text', text: uuid }] } });
+
+  it('are the rows it read at load and those it wrote since, newest last, so a reread can tell what something else wrote', async () => {
+    const native = runtime();
+    const session = await ClaudeAgentSession.open({ sessionId: 'native', cwd: '/workspace' }, { query: native.factory,
+      catalog: { list: async () => [], info: async () => undefined, messages: async () => [], children: async () => [] } }, [
+      { type: 'user', uuid: 'loaded-user', session_id: 'native', parent_tool_use_id: null, parent_agent_id: null, message: { role: 'user', content: 'Saved' } },
+      { type: 'assistant', uuid: 'loaded-reply', session_id: 'native', parent_tool_use_id: null, parent_agent_id: null, message: { id: 'old-msg', content: [{ type: 'text', text: 'Saved reply' }] } },
+    ] as never, true);
+    try {
+      await session.sendMessage('First');
+      const first = (await native.nextInput()).value;
+      native.push(assistant('reply'));
+      // A sub-agent's row belongs to its own transcript, and a local command's output is a synthetic row the transcript does not hold.
+      native.push({ ...assistant('child-row'), parent_tool_use_id: 'tool-1' });
+      native.push(assistant('local-output', '<synthetic>'));
+      const queued = await (async () => { await session.sendMessage('Withdrawn'); return (await native.nextInput()).value; })();
+      native.push(lifecycle(queued.uuid, 'queued'));
+      native.cancelOnInterrupt([queued.uuid]);
+      await session.cancel();
+      await expect.poll(() => session.nativeState().quiet).toBe(true);
+      expect(session.nativeState().records).toEqual(['loaded-user', 'loaded-reply', first.uuid, 'reply']);
+    } finally { await session.dispose(); }
+  });
+});

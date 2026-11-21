@@ -31,6 +31,15 @@ export function sessionPane(address: string): string {
 /** `ms` is the time from the arrival of the page's document to its first row: the part the product controls. `totalMs` adds the document's own trip, which no code can shorten. */
 export interface Paint { label: string; ms: number; fromDeviceStore: boolean; timedOut?: boolean; totalMs?: number }
 
+/**
+ * How much of each turn's work a conversation shows (the I3 process display). Concise, the default, folds a turn's tool calls into
+ * one work line, so a scenario that waits for a tool-call row, or reads the rows of tools that are still running, opens its pages
+ * with Full.
+ */
+export type ProcessDisplay = 'concise' | 'process' | 'full';
+/** This device's default process display, as Settings > Assistants stores it (agent-remote-lab `hooks/useProcessMode.ts`). */
+const PROCESS_DISPLAY_KEY = 'agent-remote:process-mode';
+
 /** One headless page opened on a session through the proxy, with the observer and the Network events that the invariants need. */
 export class PageProbe {
   private readonly paints: Paint[] = [];
@@ -39,14 +48,16 @@ export class PageProbe {
   private timelinePageAt: number | undefined;
   /** The conversation this page reads and drives: the session its link opened. None when it opened a Window. */
   private pane: string | undefined;
-  private constructor(readonly page: any, private readonly clockOrigin: number, private readonly cdp: any) {}
+  private constructor(readonly page: any, private readonly clockOrigin: number, private readonly cdp: any, private readonly process: ProcessDisplay | undefined) {}
 
-  static async create(context: any, clockOrigin: number): Promise<PageProbe> {
+  /** `process`: the display the scenario reads, chosen as this device's default before the page's own scripts run; none keeps the page's own. */
+  static async create(context: any, clockOrigin: number, { process }: { process?: ProcessDisplay } = {}): Promise<PageProbe> {
     const page = await context.newPage();
     page.setDefaultTimeout(30_000);
     await page.addInitScript(observerSource);
+    if (process) await page.addInitScript(([key, mode]: [string, string]) => { try { localStorage.setItem(key, mode); } catch { /* A frame with no storage of its own shows no conversation. */ } }, [PROCESS_DISPLAY_KEY, process]);
     const cdp = await context.newCDPSession(page);
-    const probe = new PageProbe(page, clockOrigin, cdp);
+    const probe = new PageProbe(page, clockOrigin, cdp, process);
     await cdp.send('Network.enable');
     await cdp.send('Performance.enable');
     cdp.on('Network.webSocketFrameReceived', (event: any) => {
@@ -78,7 +89,22 @@ export class PageProbe {
       paint = { label, ms: rowsDeadlineMs, fromDeviceStore: false, timedOut: true };
     }
     this.paints.push(paint);
+    if (!paint.timedOut) await this.expectProcessDisplay();
     return paint;
+  }
+
+  /**
+   * The conversation shows the process display the scenario chose. An assistant with a display of its own overrides the device's
+   * default; the run stops then, instead of leaving the invariants that read every row unexercised.
+   */
+  private async expectProcessDisplay(): Promise<void> {
+    if (!this.process || !this.pane) return;
+    const shown = (): Promise<string> => this.page.evaluate((pane: string) => document.querySelector(pane)?.querySelector('[data-process-mode]')?.getAttribute('data-process-mode') ?? 'none', this.pane);
+    const until = Date.now() + 10_000;
+    for (let display = await shown(); display !== this.process; display = await shown()) {
+      if (Date.now() > until) throw new Error(`The conversation shows the ${display} process display, not ${this.process}: its assistant keeps a display of its own.`);
+      await this.page.waitForTimeout(100);
+    }
   }
 
   /**

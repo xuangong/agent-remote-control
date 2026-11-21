@@ -45,3 +45,21 @@ for (const [tile, place] of [[1, 'the first primary group'], [2, 'the second pri
     await probe.close();
   });
 }
+
+test('the smoke probe opens its page with the process display its scenario reads: the page\'s own, or Full', async ({ context, baseURL }) => {
+  const link = `${baseURL}${fixture}&host=host&provider=recorded&session=tile-3`;
+  const display = (probe: PageProbe) => probe.page.locator(`${sessionPane(address(3))} [data-process-mode]`);
+  // A probe that chooses nothing keeps the device's own default, Concise, which folds a turn's tool calls into its work line.
+  const own = await PageProbe.create(context, Date.now());
+  await own.page.setViewportSize({ width: 1280, height: 900 });
+  expect((await own.open(link, 'own display', { rowsDeadlineMs: 20_000 })).timedOut).toBeUndefined();
+  await expect(display(own)).toHaveAttribute('data-process-mode', 'concise');
+  await own.close();
+  // A scenario that reads every tool call as a row chooses Full, as this device's default, before the page's scripts run.
+  const full = await PageProbe.create(context, Date.now(), { process: 'full' });
+  await full.page.setViewportSize({ width: 1280, height: 900 });
+  expect((await full.open(link, 'full display', { rowsDeadlineMs: 20_000 })).timedOut).toBeUndefined();
+  await expect(display(full)).toHaveAttribute('data-process-mode', 'full');
+  expect(await full.rows()).toHaveLength(24);
+  await full.close();
+});

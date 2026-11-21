@@ -44,7 +44,8 @@ export async function runRestartRound(context: RunContext, plan: RoundPlan, reco
     const after = `AFTER${context.random.int(100, 999)}`;
     const firstPrompt = promptFor(plan.phase, word);
     const outcome = await withContext(context.browser, proxy.origin, async browserContext => {
-      const probe = await PageProbe.create(browserContext, recorder.origin);
+      // The fault lands on a tool call the page shows as a row of its own: the Full process display shows every step of a turn.
+      const probe = await PageProbe.create(browserContext, recorder.origin, { process: 'full' });
       await probe.open(url.replace(context.instance.origin, proxy.origin), `open, ${label}`);
       await probe.page.waitForFunction(() => (window as any).__smoke.read().composer === 'enabled', undefined, { timeout: 60_000 });
       recorder.mark('turn-sent', { word, phase: plan.phase });

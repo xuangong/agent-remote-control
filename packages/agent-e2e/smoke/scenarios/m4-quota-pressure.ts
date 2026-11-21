@@ -63,7 +63,8 @@ async function sessionQuota(context: RunContext, recorder: TranscriptRecorder, s
   const sessions = { heavy: { title: 'Heavy tool outputs', history: heavyHistory('scripted', 'heavy', { calls, answer: 'M4-HISTORY-END' }) } };
   const first = recorder.transcript().length;
   const { value, restart } = await withLimits(context, recorder, schedule, SESSION_LIMITS, 'Smoke M4 session Host', sessions, async (host, proxy) => withContext(context.browser, proxy.origin, async browserContext => {
-    const probe = await PageProbe.create(browserContext, recorder.origin);
+    // The scenario reads tool calls, the running ones included, as rows of their own: the Full process display shows every step of a turn.
+    const probe = await PageProbe.create(browserContext, recorder.origin, { process: 'full' });
     await probe.open(host.sessionUrl('heavy').replace(context.instance.origin, proxy.origin), 'open heavy', { rowsDeadlineMs: 90_000 });
     const historyShown = await probe.waitForText('M4-HISTORY-END', 60_000);
     const live = await (async () => { for (let at = 0; at < 100; at += 1) { const open = host.provider.session('heavy'); if (open) return open; await delay(100); } throw new Error('The scripted Host never opened the session.'); })();
@@ -82,7 +83,7 @@ async function sessionQuota(context: RunContext, recorder: TranscriptRecorder, s
     const page = await probe.report();
     // A second page opens the session fresh: it is served whatever the Relay will serve after the pressure.
     const secondFrom = recorder.transcript().at(-1)!.n;
-    const second = await PageProbe.create(browserContext, recorder.origin);
+    const second = await PageProbe.create(browserContext, recorder.origin, { process: 'full' });
     await second.open(host.sessionUrl('heavy').replace(context.instance.origin, proxy.origin), 'reopen heavy', { rowsDeadlineMs: 90_000 });
     await second.page.waitForTimeout(2000);
     await second.snapshotKeys();
@@ -112,7 +113,7 @@ async function hostQuota(context: RunContext, recorder: TranscriptRecorder, sche
   const { value, restart } = await withLimits(context, recorder, schedule, HOST_LIMITS, 'Smoke M4 Host quota Host', sessions, async (host, proxy) => withContext(context.browser, proxy.origin, async browserContext => {
     const pages: Array<{ id: string; shown: boolean; keys: number; page: Awaited<ReturnType<PageProbe['report']>>; from: number }> = [];
     for (let at = 1; at <= count; at += 1) {
-      const probe = await PageProbe.create(browserContext, recorder.origin);
+      const probe = await PageProbe.create(browserContext, recorder.origin, { process: 'full' });
       const from = recorder.transcript().at(-1)?.n ?? 0;
       await probe.open(host.sessionUrl(`bulk${at}`).replace(context.instance.origin, proxy.origin), `open bulk${at}`, { rowsDeadlineMs: 90_000 });
       const shown = await probe.waitForText(`M4-BULK-END-${at}`, 60_000);

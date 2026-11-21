@@ -29,6 +29,8 @@ function runtime() {
     close() { closed = true; release?.(); },
   };
   return { push, interrupts, cancelOnInterrupt(ids: string[]) { cancelled = ids; }, get options() { return options; }, get closed() { return closed; },
+    /** The Claude Code process ends: the SDK's message stream finishes. */
+    end() { closed = true; release?.(); },
     nextInput: () => input.next(),
     factory(args: any) { input = args.prompt[Symbol.asyncIterator](); options = args.options; return query as any; } };
 }
@@ -507,6 +509,21 @@ describe('the transcript records a Claude session holds', () => {
       await expect.poll(() => session.nativeState().quiet).toBe(true);
       expect(session.nativeState().records).toEqual(['loaded-user', 'loaded-reply', first.uuid, 'reply']);
     } finally { await session.dispose(); }
+  });
+});
+
+describe('a Claude Code process that exits under a turn', () => {
+  it('fails the turn typed native_exited and ends the stream, so the Controller attaches the session again', async () => {
+    const native = runtime();
+    const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { query: native.factory });
+    const events: any[] = [];
+    const reading = (async () => { for await (const item of session.observe()) if (item.type === 'observation') events.push(item.event); })().catch(() => 'ended');
+    await session.sendMessage('Working');
+    // The process ends: the SDK's message stream finishes with no result for the turn.
+    native.end();
+    await expect.poll(() => events.find(event => event.type === 'turn_failed')).toMatchObject({ code: 'native_exited', error: 'Claude Code exited.' });
+    expect(await reading).toBe('ended');
+    await session.dispose();
   });
 });
 

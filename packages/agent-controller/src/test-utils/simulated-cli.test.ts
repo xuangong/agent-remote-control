@@ -183,15 +183,24 @@ describe('the simulated CLI', () => {
     expect(cli.native('thread-1').history).toEqual(['Over the limit', 'After the reset', 'Reply to After the reset']);
   });
 
-  it('fails a turn whose CLI exits with native_exited and ends the stream, and leaves a hung turn running (S7)', async () => {
+  it('fails a turn whose CLI exits, typed native_exited as declared, and ends the stream, and leaves a hung turn running (S7)', async () => {
     fakeTimers();
-    const cli = simulatedCli({ behaviour: sharedDaemon, turnMs: 100 });
+    const cli = simulatedCli({ behaviour: { ...sharedDaemon, failures: { runtime: ['native_exited'], inUse: [] } }, turnMs: 100 });
     const crashing = await open(cli);
     cli.faults.crash();
     await crashing.sendMessage('Crash');
     await vi.advanceTimersByTimeAsync(100);
     const ended = await drained(crashing);
     expect(ended.at(-1)?.event).toMatchObject({ type: 'turn_failed', code: 'native_exited' });
+    // A declaration that does not type the exit gets the failure untyped.
+    const untyped = simulatedCli({ behaviour: sharedDaemon, turnMs: 100 });
+    const session = await open(untyped);
+    untyped.faults.crash();
+    await session.sendMessage('Crash');
+    await vi.advanceTimersByTimeAsync(100);
+    const untypedEnd = await drained(session);
+    expect(untypedEnd.at(-1)?.event).toEqual(expect.objectContaining({ type: 'turn_failed', error: 'The CLI exited.' }));
+    expect(untypedEnd.at(-1)?.event).not.toHaveProperty('code');
     expect((await crashing.runtimeInfo()).status).toBe('closed');
     expect(cli.native('thread-1').clients).toBe(0);
     const hanging = await open(cli, 'thread-2');

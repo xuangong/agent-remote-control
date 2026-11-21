@@ -17,7 +17,8 @@ export const claudeBehaviour = {
   input: { identity: 'echoes_client_id', whileBusy: 'steer' },
   // `rate_limit_event` (Agent SDK 0.3.247 `SDKRateLimitEvent`, `sdk.d.ts`): status `rejected` stops turns until `resetsAt`, in seconds.
   limits: { signal: 'event' },
-  failures: { runtime: ['native_usage_limited'], inUse: [] },
+  // A Claude Code process that ends under a turn fails it `native_exited` (`session.ts`).
+  failures: { runtime: ['native_usage_limited', 'native_exited'], inUse: [] },
   liveOnly: ['interaction', 'synthetic_output'],
   verifiedVersion: '2.1.319',
 } as const satisfies AgentProviderBehaviour;

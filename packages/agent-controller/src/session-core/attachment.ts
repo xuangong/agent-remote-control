@@ -10,6 +10,7 @@ import { hasHeldChild, mayReconcileIdle, mayReleaseIdle } from './idle-release.j
 import { releaseGraceMs } from './residency.js';
 import { withinResumeDeadline } from './resume-deadline.js';
 import { TURN_SILENCE_MS, watchTurns } from './turn-watchdog.js';
+import { watchExit } from './native-exit.js';
 import { withReferenceNotes } from '../session-reference-notes.js';
 import type { SessionCoreContext } from './context.js';
 import { boundedSourceIdentity, HostRequestError } from './requests.js';
@@ -25,7 +26,8 @@ import type { SessionBinding as Binding } from './types.js';
  *   another native identity is closed and refused; a Controller that closed meanwhile disposes what it opened. An open the CLI does not answer
  *   within its declared resume deadline fails `native_unresponsive` and frees the binding (`resume-deadline.ts`); a takeover is not timed.
  *   The turns of a CLI that declares no heartbeat are watched (`turn-watchdog.ts`): a turn silent for `TURN_SILENCE_MS` ends
- *   `native_unresponsive` and the runtime is released.
+ *   `native_unresponsive` and the runtime is released. A CLI that exits under the session (`native-exit.ts`: a turn failed `native_exited`, or
+ *   a stream that ended unasked) has its runtime released too, so the next send or open attaches the session again; nothing is sent again.
  * - `acquireSession` holds a runtime for its caller: it holds the parent of a child first, waits for a release in progress, and releases a diverged, quiet
  *   session so it is read again before a send continues from it. The returned lease releases the runtime and its parent once.
  * - `watch` gives an idle session its release rule (`idle-release.ts`): released when it may be, journal first, then the runtime, then the directory; and
@@ -167,9 +169,11 @@ export function createAttachment(ctx: SessionCoreContext) {
           }) : withinResumeDeadline(open(), resumeDeadlineMs))
           : source.openChild ? await withinResumeDeadline(source.openChild(parentNativeSessionId, nativeSessionId), resumeDeadlineMs)
           : (() => { throw new HostRequestError(400, 'child_attachment_unavailable', 'This provider does not support native child attachment.'); })();
+        // A CLI that exits under the session leaves its runtime unusable: it is released, and the next send or open attaches it again.
+        const exiting = watchExit(nativeSession, { exited: () => { void releaseRuntime(binding).catch(() => undefined); } });
         // A turn of a CLI that declares no heartbeat is watched: a silent one ends native_unresponsive and the runtime is released (gap 4).
         const watched = behaviour.turn?.heartbeatMs === undefined
-          ? watchTurns(nativeSession, { silenceMs: TURN_SILENCE_MS, unresponsive: () => { void releaseRuntime(binding).catch(() => undefined); } }) : nativeSession;
+          ? watchTurns(exiting, { silenceMs: TURN_SILENCE_MS, unresponsive: () => { void releaseRuntime(binding).catch(() => undefined); } }) : exiting;
         const noted = sessionRefs && parentNativeSessionId === undefined ? withReferenceNotes(watched, {
           pending: () => pendingReferenceNote({ providerId, nativeSessionId }, sessionRefs),
           delivered: revision => sessionRefs.store.markDelivered({ providerId, nativeSessionId }, revision),

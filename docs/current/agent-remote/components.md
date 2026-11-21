@@ -15,7 +15,7 @@ checked against the code; the test mapping follows test titles and their asserti
 | Journal: window decision and quota | 25 | 3 | 3 | 0 |
 | Relay session control | 20 | 4 | 4 | 0 |
 | Relay host-session | 23 | 6 | 6 | 0 |
-| Controller session core | 25 | 8 | 8 | 0 |
+| Controller session core | 26 | 8 | 8 | 0 |
 | Controller publisher | 20 | 4 | 4 | 0 |
 | Codex and Claude adapter item identity | 18 | 4 | 3 | 1 |
 | Client replica and send state | 26 | 7 | 7 | 0 |
@@ -24,7 +24,7 @@ checked against the code; the test mapping follows test titles and their asserti
 | Provider behaviour declaration (B1, 2026-11-21; C7 gap 10) | 7 | 0 | 0 | 0 |
 | Provider conformance kit (B3, 2026-11-22) | 9 | 0 | 0 | 0 |
 | Native assumption checks (B5, 2026-11-22) | 5 | 0 | 0 | 0 |
-| **All** | **219** | **43** | **42** | **1** |
+| **All** | **220** | **43** | **42** | **1** |
 
 Every clause now names the tests that prove it. The 43 gaps were closed on 2026-11-21 (section "Gaps closed" below): 42 by a
 unit test, a vector row or a seam test with mock data, each under 300 ms and each failing when the rule it proves is broken (by a
@@ -353,6 +353,7 @@ Module: `agent-controller/src/session-core/` (`attachment.ts`, `idle-release.ts`
 - C23. The shown set (`session-core/shown-sessions.ts`) is the complete set the Relay last sent (`journal_shown`); it replaces the one before, marks every bound session, and is applied to a session bound later when it is attached.
 - C24. Resume deadline (gap 4, `session-core/resume-deadline.ts`): an open, or a child's, that the CLI does not answer within the deadline its adapter declares (`behaviour.resume.deadlineMs`, never the provider id) fails at the deadline with the typed `native_unresponsive` (503) and frees the binding; a session the CLI hands over later is disposed. A take-over is not timed. The next open is then held only by the native start backoff (C14).
 - C25. Turn watchdog (gap 4, `session-core/turn-watchdog.ts`): for an adapter that declares no turn heartbeat (`behaviour.turn.heartbeatMs`), a turn whose CLI emits nothing for `TURN_SILENCE_MS` (15 minutes; every item restarts the watch, the turn's end stops it) ends with `turn_failed` code `native_unresponsive`, the session reads idle, and the runtime is released (journal, runtime, directory, as C20), so the next send attaches the session again. Limit: a command silent for longer is taken for a hang.
+- C26. Native exit (`session-core/native-exit.ts`): a CLI that exits under a session (a turn failed `native_exited`, the typed failure, or a stream that ends or fails without the Controller disposing the session) has its runtime released once, after the failure reached the readers with the CLI's reason; the next send or open attaches the session again from native history within the declared resume deadline, and nothing the exit cut off is sent again. Keyed on the failure taxonomy and the SDK's stream contract, never on a provider id.
 
 | Clause | Test(s) that prove it |
 |---|---|
@@ -381,6 +382,7 @@ Module: `agent-controller/src/session-core/` (`attachment.ts`, `idle-release.ts`
 | C23 | `session-core/shown-sessions.test.ts` (4 tests); `agent-session-runtime/src/transport/remote-host-uplink-journal.test.ts` > "the sessions pages show" (2 tests) |
 | C24 | `session-core/resume-deadline.test.ts` > "passes an open that settles before the deadline through, its failure too (RD1)", "fails native_unresponsive at the deadline, not a millisecond before (RD2)", "closes a session the CLI hands over after the deadline, and drops a late failure (RD3)"; through the port, for every declaration: `provider-conformance.test.ts` > "gives a hung resume up at the declared deadline as native_unresponsive, and opens the session again once it is free" (Codex 90 s, Claude Code and Copilot 15 s; the late session closed, one client left) |
 | C25 | `session-core/turn-watchdog.test.ts` (4 tests: W1 and W2 at the bound, a runtime state's turn, items after it fired); through the port, for every declaration: `provider-conformance.test.ts` > "ends a turn whose CLI falls silent as native_unresponsive once the Controller has watched it long enough (no turn.heartbeatMs)" (the runtime released, the next send attached again); in the simulator: `turn-watchdog.test.ts` > "is left to the adapter that declares a heartbeat of its own" |
+| C26 | `session-core/native-exit.test.ts` (X1 to X3: released after a `native_exited` failure reached the reader, a stream ended unasked, nothing on a Controller dispose); for every declaration, through the CLI simulator: `provider-conformance.test.ts` > "starts the CLI again when the page opens the session after its CLI exited, and sends nothing the exit cut off again", "starts the CLI again at the next send after its CLI exited, within the declared resume deadline"; mutations caught: the policy not wired, a stream end not taken for an exit |
 
 Gaps: none. Closed 2026-11-21: C5, C10's wiring, C11's default, C12, C13's bound of 512, C17, C18 and C20, by unit tests on a stub
 session-core context (`session-core/attachment.test.ts`), the managed stdio directory with a stub provider state
@@ -744,7 +746,7 @@ Module: `agent-provider-sdk/src/behaviour.ts` (`AgentProviderBehaviour`, `resolv
 - C5. `AgentRuntimeError` names `native_usage_limited` (with `resetsAt`, kept only as a whole number of milliseconds), `native_auth_missing`, `native_exited` and `native_unresponsive` beside the earlier codes, and the protocol gives each of them fixed words that carry none of the CLI's text; an attach refused for a usage limit keeps its `resetsAt` through the Relay. A usage limit the CLI signals on a turn is the runtime fact `runtimeInfo.usageLimit { resetsAt }` (milliseconds, omitted when the CLI gives no time), reported by the adapter until the next turn starts, and the turn it stops fails with code `native_usage_limited`.
 
 ### Guarantees
-- C6. Each adapter's declaration is valid, so it is taken as declared: Codex is one of the shared daemon's clients with a 70 s unload (a private app-server is the thread's single writer), Claude Code forks a transcript two writers use, Copilot is a single writer it probes natively, OpenCode shares sessions among its server's clients, and a DeepSeek Harness agent has no other client. Codex's and Copilot's refusals of a writer elsewhere carry the reason `writer_elsewhere`. The live-only kinds name what each adapter marks (`synthetic_output` is what a local command prints, `partial_output` the text a turn streamed before it was interrupted); the conformance kit checks them against the recordings (K3), which found Copilot's interrupted text undeclared. Claude Code, Codex, Copilot and OpenCode raise `native_usage_limited` typed, each from its CLI's documented signal (C5).
+- C6. Each adapter's declaration is valid, so it is taken as declared: Codex is one of the shared daemon's clients with a 70 s unload (a private app-server is the thread's single writer), Claude Code forks a transcript two writers use, Copilot is a single writer it probes natively, OpenCode shares sessions among its server's clients, and a DeepSeek Harness agent has no other client. Codex's and Copilot's refusals of a writer elsewhere carry the reason `writer_elsewhere`. The live-only kinds name what each adapter marks (`synthetic_output` is what a local command prints, `partial_output` the text a turn streamed before it was interrupted); the conformance kit checks them against the recordings (K3), which found Copilot's interrupted text undeclared. Claude Code, Codex, Copilot and OpenCode raise `native_usage_limited` typed, each from its CLI's documented signal (C5). Claude Code raises `native_exited` when its process ends under a turn.
 - C7. One rule for every adapter (gap 10, `native-events.ts`): an event, notification, message, record or item of a kind the adapter does not know, or a known one it cannot read, is one diagnostic (`native_event_unknown`: provider, kind in at most 128 characters, live or history, why), never a row and never a silent drop; every kind it ignores on purpose is listed against its native release, the lists of Claude Code, Copilot and OpenCode checked complete against their SDKs' declared unions by the compiler. The Controller counts them in its health (`unknown_native_events`).
 
 | Clause | Test(s) that prove it |
@@ -769,7 +771,7 @@ Module: `agent-controller/src/test-utils/simulated-cli.ts` (`simulatedCli`), exp
 - S4. A writer elsewhere (`single_writer`, or `separate` beside shared clients) is refused while the session is loaded; otherwise it holds the writer for its turn, and a resume meanwhile is refused with `AgentSessionInUseError` reason `writer_elsewhere`.
 - S5. Fork on divergence: a write elsewhere continues the newest branch as it was when the write began; a reread shows the branch written last, also within one millisecond; a resident client continues its own branch. Through the managed stdio directory a resident client tells the records it holds, and the transcript its records as a reread gives them.
 - S6. Resume faults: slow, hung (once or until healed), and a usage limit typed `native_usage_limited` with `resetsAt` until that time; the usage limit at a turn (`at: 'turn'`), as CLIs signal it, fails each turn with code `native_usage_limited` after its user message and reports `runtimeInfo.usageLimit { resetsAt }` until a turn runs again.
-- S7. Mid-turn faults on the next turn: a crash fails it with `native_exited` and ends the stream; a hang leaves it running after its user message.
+- S7. Mid-turn faults on the next turn: a crash fails it, typed `native_exited` when the declaration types it, and ends the stream; a hang leaves it running after its user message.
 - S8. An event of a kind the adapter does not know, in every history read and turn until healed, reported by the simulated adapter as one diagnostic each time and never a row (the rule of gap 10).
 - S9. Every delay runs on the injected clock, the global timers by default, so fake timers drive it.
 
@@ -825,9 +827,9 @@ Matrix on 2026-11-22 (pass, or `fails` for an open item reproduced as an expecte
 | K7 an event of a kind it does not know (gap 10) | pass, was a row | pass, was dropped | pass, was dropped | pass, was a refresh |
 | Slow resume, hung resume, limit at open and at a turn, crash, silent turn, unknown event | pass | pass | pass | n/a |
 | Writer elsewhere | pass (refused, `writer_elsewhere`) | pass (not refused) | pass (refused, `writer_elsewhere`) | n/a |
-| The CLI again after it exited | fails (open item) | fails (open item) | fails (open item) | n/a |
+| The CLI again after it exited | pass | pass | pass | n/a |
 
-Open item found by the kit: after its CLI exits mid-turn, a session keeps its failed runtime ("Provider observation stream failed"), also when the page opens it again; the watchdog releases a silent turn's runtime, but nothing releases an exited one.
+The kit found that a session whose CLI exited mid-turn kept its failed runtime ("Provider observation stream failed"), also when the page opened it again; closed by session core C26 (native exit), so the row above now passes for every declaration.
 
 ## Native assumption checks
 Module: one check per CLI, by hand or nightly: `pnpm test:native:codex` (`agent-provider-codex/src/native-assumptions.local.test.ts` and the recorder), `pnpm test:native:claude` (`agent-provider-claude/src/native-assumptions.local.test.ts`, the recorder and the terminal fork), `pnpm test:native:copilot` (`agent-provider-copilot/tests/native-assumptions.local.test.ts` and the recorder), `pnpm test:native:opencode` (`scripts/opencode-native-assumptions.test.mjs`). Each runs the installed CLI in a temporary home against a scripted model: nothing signs in, and no session of the person's own CLIs, Codex daemon or Controller is touched. Design source: section 4.4 of the requirements review (step B5, gap 6).

@@ -680,12 +680,13 @@ export class ClaudeAgentSession implements AgentSession {
   private withTurn(event: AgentStreamEvent): AgentStreamEvent {
     return this.turnId && event.type !== 'runtime_updated' && event.type !== 'thread_started' ? { ...event, turnId: this.turnId } : event;
   }
-  private fail(error: unknown): void {
+  /** The session cannot go on; `code` types the failure of a running turn, `native_exited` when the Claude Code process ended under it. */
+  private fail(error: unknown, code?: 'native_exited'): void {
     if (this.disposed || this.failure) return;
     this.failure = new Error(error instanceof Error ? error.message : String(error));
     this.images.stop();
     this.interactions.cancelAll();
-    if (this.turnId) { this.finishOpenItems(); this.emit({ type: 'turn_failed', provider: 'claude', error: this.failure.message }); }
+    if (this.turnId) { this.finishOpenItems(); this.emit({ type: 'turn_failed', provider: 'claude', error: this.failure.message, ...(code ? { code } : {}) }); }
     this.turnId = undefined;
     this.status = 'failed';
     void this.children.close();
@@ -764,7 +765,8 @@ export class ClaudeAgentSession implements AgentSession {
         this.status = 'idle';
         this.runtimeUpdated();
       }
-      if (!this.disposed) this.fail(new Error('Claude runtime exited. Resume the saved session to reconnect.'));
+      // The process ended under the session; the Controller attaches the session again at its next send or open.
+      if (!this.disposed) this.fail(new Error('Claude Code exited.'), 'native_exited');
     } catch (error) { this.fail(error); }
   }
 }

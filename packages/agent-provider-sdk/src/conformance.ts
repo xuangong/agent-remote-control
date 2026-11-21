@@ -273,18 +273,19 @@ function runFaults(behaviour: AgentProviderBehaviour, ports: ProviderConformance
     expect(h.history().slice(-2)).toEqual(['After the reset', 'Reply to After the reset']);
   });
 
-  it('fails a turn whose CLI exits as native_exited', async () => {
+  const typedExit = failures.runtime.includes('native_exited');
+  it(`fails a turn whose CLI exits${typedExit ? ' as native_exited' : ''}, with the CLI's reason`, async () => {
     const h = await start();
     expect(await h.open()).toMatchObject({ status: 200 });
     h.faults.crash();
     await h.send('Crashes');
     await h.advance(h.turnMs);
-    expect(h.events().find(event => event.type === 'turn_failed')).toMatchObject({ code: 'native_exited' });
+    const failure = h.events().find(event => event.type === 'turn_failed');
+    expect(failure).toMatchObject({ error: 'The CLI exited.' });
+    if (typedExit) expect(failure).toMatchObject({ code: 'native_exited' });
   });
 
-  // Open: after its CLI exits, a session keeps its failed runtime ("Provider observation stream failed"), and nothing starts the CLI again;
-  // the watchdog releases a silent turn's runtime, an exit is not released.
-  it.fails('reaches the CLI again when the page opens the session after its CLI exited (open: an exited CLI is not started again)', async () => {
+  it('starts the CLI again when the page opens the session after its CLI exited, and sends nothing the exit cut off again', async () => {
     const h = await start();
     expect(await h.open()).toMatchObject({ status: 200 });
     h.faults.crash();
@@ -292,6 +293,21 @@ function runFaults(behaviour: AgentProviderBehaviour, ports: ProviderConformance
     await h.advance(h.turnMs);
     expect(await h.open()).toMatchObject({ status: 200 });
     await h.send('Again');
+    await h.advance(h.turnMs);
+    expect(h.history().slice(-3)).toEqual(['Crashes', 'Again', 'Reply to Again']);
+    expect(h.history().filter(text => text === 'Crashes')).toHaveLength(1);
+  });
+
+  it(`starts the CLI again at the next send after its CLI exited, within the declared resume deadline (resume.deadlineMs ${resume.deadlineMs})`, async () => {
+    const h = await start();
+    expect(await h.open()).toMatchObject({ status: 200 });
+    h.faults.crash();
+    await h.send('Crashes');
+    await h.advance(h.turnMs);
+    h.faults.slowResume(resume.deadlineMs - 1);
+    const sending = h.send('Again');
+    await h.advance(resume.deadlineMs - 1);
+    await sending;
     await h.advance(h.turnMs);
     expect(h.history().slice(-2)).toEqual(['Again', 'Reply to Again']);
   });

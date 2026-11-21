@@ -33,8 +33,8 @@ import { ScriptedSession } from './journal-scripted-session.js';
  *   `usageLimit({ resetsAt })` (typed `native_usage_limited` with `resetsAt` until that time). `usageLimit({ resetsAt, at: 'turn' })` is the
  *   limit as CLIs signal it, on a turn: until `resetsAt` each turn fails with code `native_usage_limited` after its user message, and the
  *   session reports `runtimeInfo.usageLimit { resetsAt }` until a turn runs again.
- * - S7 Faults mid-turn, on the next turn: `crash()` fails it with `native_exited` and ends the session's stream; `hang()` stops it after its
- *   user message.
+ * - S7 Faults mid-turn, on the next turn: `crash()` fails it, typed `native_exited` when the declaration types it (`failures.runtime`), and
+ *   ends the session's stream; `hang()` stops it after its user message.
  * - S8 `unknownEvent(kind)`: until healed, every history read and every turn carries an event of a kind the adapter does not know, which
  *   the simulated adapter reports as one diagnostic each time (`native_event_unknown`, the rule of gap 10), and never as a row.
  * - S9 Time runs only on the injected clock, so fake timers drive every delay.
@@ -98,6 +98,7 @@ export function simulatedCli(options: SimulatedCliOptions) {
   const timeline = (delivery: 'history' | 'live', item: Item): ProviderObservation => observation(delivery,
     { type: 'timeline', provider: providerId, turnId: item.turnId, item: { type: item.type, text: item.text, messageId: item.key, ...(item.clientId ? { clientMessageId: item.clientId } : {}) } }, item);
   const keepsClientIds = behaviour.input.identity === 'echoes_client_id';
+  const typedExit = behaviour.failures.runtime.includes('native_exited');
   /** An event of a kind the adapter does not know, as a CLI update could add one: a diagnostic of the simulated adapter, never a row (S8). */
   const diagnostics: string[] = [];
   const unknown = (delivery: 'history' | 'live', kind: string): void => { diagnostics.push(unknownNativeEventLine(providerId, kind, delivery)); };
@@ -155,7 +156,7 @@ export function simulatedCli(options: SimulatedCliOptions) {
       turnFaults.next = undefined;
       if (fault === 'hang') return;
       if (fault === 'crash') {
-        clock.setTimeout(() => { this.push(observation('live', { type: 'turn_failed', provider: providerId, turnId, error: 'The CLI exited.', code: 'native_exited' })); void this.end(); }, turnMs);
+        clock.setTimeout(() => { this.push(observation('live', { type: 'turn_failed', provider: providerId, turnId, error: 'The CLI exited.', ...(typedExit ? { code: 'native_exited' as const } : {}) })); void this.end(); }, turnMs);
         return;
       }
       const unknownKind = turnFaults.unknownKind;

@@ -691,6 +691,7 @@ it('refuses to resume a native session held outside the managed Controller', asy
   const provider = new CopilotAgentProvider({executable:'/test/copilot'});
   try {
     await expect(provider.resumeSession({providerId:'copilot',sessionId:'busy',opaque:'{}'})).rejects.toThrow('unmanaged native client');
+    await expect(provider.resumeSession({providerId:'copilot',sessionId:'busy',opaque:'{}'})).rejects.toMatchObject({name:'AgentSessionInUseError',reason:'writer_elsewhere'});
     expect(mock.client.resumeSession).not.toHaveBeenCalled();
   } finally {await provider.dispose();}
 });

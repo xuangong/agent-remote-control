@@ -5,6 +5,7 @@ import { createClaudeCatalog, type ClaudeCatalog } from './catalog.js';
 import { ClaudeShutdownError, ClaudeAgentSession, type ClaudeSessionConfig, type ClaudeSessionOptions } from './session.js';
 import { isResumableClaudePermissionMode } from './permission-modes.js';
 import { record } from './projector.js';
+import { claudeBehaviour } from './behaviour.js';
 import { claudeEmptyHandle, readClaudeEmptyDescriptor, claudeEvidenceReject, validClaudeId } from './native-evidence.js';
 
 export interface ClaudeSessionSummary {
@@ -24,7 +25,7 @@ export class ClaudeAgentProvider implements AgentProviderAdapter {
   /** Ordinary create supplies a nonempty UUID; this does not bound resume, fork, or history. */
   readonly createdSessionIdMaxLength: number = 36;
   readonly descriptor = { providerId: 'claude', displayName: 'Claude Code', sessionExtensions: { instructions: true, tools: true, toolNamespaces: 'live' as const }, sessionAccess: { readOnly: true as const },
-    sessionHostAccess: true as const };
+    sessionHostAccess: true as const, behaviour: claudeBehaviour };
   readonly nativeEvidence: AgentProviderNativeEvidence = {
     availability: () => ({ status: 'configured', version: 2 }),
     createEmpty: async config => {

@@ -28,3 +28,12 @@ describe('session subscription refusal', () => {
     expect(await sessionSubscriptionRefusal(undefined)).toEqual({ code: 1008, reason: 'Session subscription is unavailable.' });
   });
 });
+
+describe('session attach failure', () => {
+  it.each(['native_usage_limited', 'native_auth_missing', 'native_exited', 'native_unresponsive'])('gives the typed runtime failure %s its fixed words', code => {
+    const failure = sessionAttachFailure(JSON.stringify({ code, error: 'native text that may carry content' }));
+    expect(failure.code).toBe(code);
+    expect(failure.error).toMatch(/^The native CLI /);
+    expect(failure.error).not.toContain('content');
+  });
+});

@@ -1,4 +1,5 @@
 import { openCodeVersionIssue } from './compatibility.js';
+import { openCodeBehaviour } from './behaviour.js';
 import { openCodeProviderNativeEvidence } from './native-evidence.js';
 import { OpenCodeCallbackBridge } from './callback-bridge.js';
 import { readReferenceHistory } from './reference-history.js';
@@ -30,7 +31,7 @@ export class OpenCodeAgentProvider implements AgentProviderAdapter {
     verify: (target, handle) => this.verifyPromptEditBranch(target, handle),
   };
   readonly nativeEvidence: AgentProviderNativeEvidence = openCodeProviderNativeEvidence;
-  readonly descriptor = { providerId: 'opencode', displayName: 'OpenCode' };
+  readonly descriptor = { providerId: 'opencode', displayName: 'OpenCode', behaviour: openCodeBehaviour };
   private readonly transport: OpenCodeTransport;
   private readonly sessions = new Set<OpenCodeSession>();
   private closed = false;

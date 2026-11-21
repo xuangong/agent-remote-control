@@ -5,11 +5,12 @@ import type {
 } from '@orchardworks/agent-provider-sdk';
 
 import { LiveDshSession } from './live-session.js';
+import { dshBehaviour } from './behaviour.js';
 import type { DshRuntime } from './runtime.js';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { DshToolRegistry } from './tools.js';
 
-const descriptor = { providerId: 'dsh', displayName: 'DeepSeek Harness' } as const;
+const descriptor = { providerId: 'dsh', displayName: 'DeepSeek Harness', behaviour: dshBehaviour } as const;
 const emptyTools: DshToolRegistry = { get: () => undefined };
 
 export interface LiveDshProvider extends AgentProviderAdapter {

@@ -12,9 +12,10 @@ import type {
 
 import { DshPlayback, type PlaybackClock, type PlaybackMode } from './playback.js';
 import { DshProjector } from './projector.js';
+import { recordedDshBehaviour } from './behaviour.js';
 import type { DshTrace } from './trace/schema.js';
 
-const descriptor = { providerId: 'dsh-recorded', displayName: 'Recorded DSH trace' } as const;
+const descriptor = { providerId: 'dsh-recorded', displayName: 'Recorded DSH trace', behaviour: recordedDshBehaviour } as const;
 
 const capabilities: AgentCapabilities = {
   history: true,

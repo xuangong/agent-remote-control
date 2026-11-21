@@ -4,7 +4,8 @@ import type { AgentInteractionResponse } from './control.js';
 import type { AgentRuntimeInfo, ProviderStreamItem } from './observation.js';
 
 export interface AgentCapabilities {
-  /** @deprecated Compatibility-only metadata. Remote clients share the host-owned session; adapters do not choose page authorization. */
+  /** @deprecated Compatibility-only metadata. Remote clients share the host-owned session; adapters do not choose page authorization.
+   * How the CLI treats other clients is `AgentProviderDescriptor.behaviour.concurrency`. */
   sessionControl?: 'shared' | 'exclusive';
   resourceInput?: ResourceInputCapabilities;
   imageInput?: ImageInputCapabilities;
@@ -40,6 +41,8 @@ export interface AgentProviderDescriptor {
   sessionAccess?: { readOnly: true };
   /** The adapter gives AgentSessionHostAccess to the shell commands of the sessions it creates and resumes. */
   sessionHostAccess?: true;
+  /** How the native CLI behaves (`behaviour.ts`); read it through `resolveAgentProviderBehaviour`, which supplies the undeclared behaviour. */
+  behaviour?: import('./behaviour.js').AgentProviderBehaviour;
 }
 
 export interface AgentPersistenceHandle {
@@ -48,19 +51,41 @@ export interface AgentPersistenceHandle {
   opaque: string;
 }
 
+/** Why a CLI refused a client of a session: another writer holds the session, or a turn of the session runs. */
+export const AGENT_SESSION_IN_USE_REASONS = ['writer_elsewhere', 'turn_running'] as const;
+export type AgentSessionInUseReason = (typeof AGENT_SESSION_IN_USE_REASONS)[number];
+
 /** An adapter-confirmed ownership conflict, with a message safe for remote clients. */
 export class AgentSessionInUseError extends Error {
-  constructor(message: string) {
+  /** Why the CLI refused; absent when the adapter cannot tell. */
+  readonly reason?: AgentSessionInUseReason;
+  /** The earliest time after which a retry may succeed, in milliseconds, when the CLI says so. */
+  readonly retryAfterMs?: number;
+  constructor(message: string, details: { reason?: AgentSessionInUseReason; retryAfterMs?: number } = {}) {
     super(message);
     this.name = 'AgentSessionInUseError';
+    if (details.reason !== undefined && AGENT_SESSION_IN_USE_REASONS.includes(details.reason)) this.reason = details.reason;
+    if (Number.isSafeInteger(details.retryAfterMs) && details.retryAfterMs! >= 0) this.retryAfterMs = details.retryAfterMs;
   }
 }
 
+/**
+ * The typed failures of a native runtime. `native_usage_limited`: the account's usage or rate limit, with `resetsAt` when the CLI
+ * says; `native_auth_missing`: the CLI's sign-in is missing or expired; `native_exited`: the CLI process ended during the operation;
+ * `native_unresponsive`: the CLI stopped answering during a turn.
+ */
+export const AGENT_RUNTIME_ERROR_CODES = ['native_file_limit', 'native_runtime_unavailable', 'native_session_unavailable', 'native_resume_timeout',
+  'native_history_timeout', 'native_request_timeout', 'native_usage_limited', 'native_auth_missing', 'native_exited', 'native_unresponsive'] as const;
+export type AgentRuntimeErrorCode = (typeof AGENT_RUNTIME_ERROR_CODES)[number];
+
 /** Adapter-confirmed runtime failure. Messages must be safe for remote clients. */
 export class AgentRuntimeError extends Error {
-  constructor(readonly code: 'native_file_limit' | 'native_runtime_unavailable' | 'native_session_unavailable' | 'native_resume_timeout' | 'native_history_timeout' | 'native_request_timeout', message: string) {
+  /** When a usage limit resets, in milliseconds since the epoch, when the CLI says so. */
+  readonly resetsAt?: number;
+  constructor(readonly code: AgentRuntimeErrorCode, message: string, details: { resetsAt?: number } = {}) {
     super(message);
     this.name = 'AgentRuntimeError';
+    if (Number.isSafeInteger(details.resetsAt) && details.resetsAt! >= 0) this.resetsAt = details.resetsAt;
   }
 }
 

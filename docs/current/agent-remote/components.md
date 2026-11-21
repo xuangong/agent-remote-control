@@ -21,7 +21,8 @@ checked against the code; the test mapping follows test titles and their asserti
 | Client replica and send state | 25 | 7 | 7 | 0 |
 | Client session presentation | 18 | 4 | 4 | 0 |
 | Timeline turns, process mode and work line | 21 | 3 | 3 | 0 |
-| **All** | **187** | **43** | **42** | **1** |
+| Provider behaviour declaration (B1, 2026-11-21) | 6 | 0 | 0 | 0 |
+| **All** | **193** | **43** | **42** | **1** |
 
 Every clause now names the tests that prove it. The 43 gaps were closed on 2026-11-21 (section "Gaps closed" below): 42 by a
 unit test, a vector row or a seam test with mock data, each under 300 ms and each failing when the rule it proves is broken (by a
@@ -702,3 +703,31 @@ rendered together in the Workbench (component tier); out of scope for this modul
 
 Tests that map to no clause (candidates for deletion): none found.
 
+
+## Provider behaviour declaration
+Module: `agent-provider-sdk/src/behaviour.ts` (`AgentProviderBehaviour`, `resolveAgentProviderBehaviour`, `UNDECLARED_PROVIDER_BEHAVIOUR`) and the typed failures of `agent-provider-sdk/src/provider.ts` (`AgentRuntimeError`, `AgentSessionInUseError`); each adapter's declaration is its `src/behaviour.ts`. Design source: section 4.1 of `docs/superpowers/specs/2026-11-21-requirements-vs-external-dependencies.md` (step B1). Tests: `agent-provider-sdk/src/behaviour.test.ts`, `agent-provider-<name>/src/behaviour.test.ts` for Codex, Claude, Copilot, OpenCode and DSH, `agent-remote-protocol/src/model/session-errors.test.ts`.
+
+### Purpose
+- C1. An adapter states how its CLI behaves as data: how it treats other clients of a session, what a reread gives, what a resume costs and how long it may take, what it does with input, how it signals a usage limit, which failures the adapter raises typed, and which kinds of items a reread cannot rebuild. Policies key on these fields, never on a provider id.
+
+### Inputs and outputs
+- C2. `resolveAgentProviderBehaviour(descriptor)` returns the declaration when every field holds a value the contract names, and the undeclared behaviour otherwise; a declaration is taken whole or not at all.
+- C3. The undeclared behaviour is what the Controller assumed before declarations: the only client, live reread order, a process's resume within 30 s, no input identity, input refused while busy, no limit signal, nothing typed, nothing live-only.
+
+### Errors and refusals
+- C4. `AgentSessionInUseError` carries `reason` (`writer_elsewhere`, `turn_running`) and `retryAfterMs` only when the adapter can vouch for them: an unknown reason or a wait that is not a non-negative whole number is dropped.
+- C5. `AgentRuntimeError` names `native_usage_limited` (with `resetsAt`, kept only as a whole number of milliseconds), `native_auth_missing`, `native_exited` and `native_unresponsive` beside the earlier codes, and the protocol gives each of them fixed words that carry none of the CLI's text.
+
+### Guarantees
+- C6. Each adapter's declaration is valid, so it is taken as declared: Codex is one of the shared daemon's clients with a 70 s unload (a private app-server is the thread's single writer), Claude Code forks a transcript two writers use, Copilot is a single writer it probes natively, OpenCode shares sessions among its server's clients, and a DeepSeek Harness agent has no other client. Codex's and Copilot's refusals of a writer elsewhere carry the reason `writer_elsewhere`.
+
+| Clause | Test(s) that prove it |
+|---|---|
+| C1 | `behaviour.test.ts` > "is taken as declared when every field holds a value the contract names (C1, C2)" |
+| C2 | `behaviour.test.ts` > "is replaced whole by the undeclared behaviour for %s (C2)" (20 misdeclared fields), "is the undeclared behaviour for an adapter that declares none (C2)" |
+| C3 | `behaviour.test.ts` > "assumes what the Controller assumed before declarations: the only client, live order, a process's resume, nothing typed (C3)" |
+| C4 | `behaviour.test.ts` > "say why a session is in use and when to try again", "keep no reason or wait they cannot vouch for" |
+| C5 | `behaviour.test.ts` > "say when a usage limit resets, and only for a time a date can hold", "name %s"; `session-errors.test.ts` > "gives the typed runtime failure %s its fixed words" |
+| C6 | Codex `behaviour.test.ts` (three tests, with the refusal of a writer elsewhere); Claude, Copilot, OpenCode and DSH `behaviour.test.ts`; Copilot `provider.test.ts` > "refuses to resume a native session held outside the managed Controller" (the reason) |
+
+Gaps: none.

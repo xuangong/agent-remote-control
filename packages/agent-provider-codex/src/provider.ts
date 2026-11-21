@@ -1,4 +1,5 @@
 import { CodexSessionTakeover } from './session-takeover.js';
+import { codexBehaviour } from './behaviour.js';
 import { preparePromptEdit, verifyPromptEditBranch, type CodexPromptEditTarget } from './prompt-edit.js';
 import type { AgentNativePrefixCapability, AgentSessionExtensions, AgentSessionResumeOptions, AgentHistoryQuery, AgentHistoryPage } from '@orchardworks/agent-provider-sdk';
 import { readSessionHistoryPage } from './reference-history.js';
@@ -63,13 +64,7 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
     };
   }
   readonly nativeEvidence: CodexProviderNativeEvidence;
-  readonly descriptor: AgentProviderDescriptor = {
-    sessionExtensions: { instructions: true, tools: true, toolNamespaces: 'creation' },
-    sessionAccess: { readOnly: true },
-    sessionHostAccess: true,
-    providerId: 'codex',
-    displayName: 'Codex',
-  };
+  readonly descriptor: AgentProviderDescriptor;
 
   private readonly takeover: CodexSessionTakeover;
   private readonly sessions = new Set<CodexAppServerSession>();
@@ -80,6 +75,14 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
 
   constructor(private readonly options: CodexAppServerProviderOptions = {}) {
     this.options = { ...options };
+    this.descriptor = {
+      sessionExtensions: { instructions: true, tools: true, toolNamespaces: 'creation' },
+      sessionAccess: { readOnly: true },
+      sessionHostAccess: true,
+      providerId: 'codex',
+      displayName: 'Codex',
+      behaviour: codexBehaviour(options.connectionMode),
+    };
     this.takeover = new CodexSessionTakeover(options.env?.CODEX_HOME ?? process.env.CODEX_HOME ?? join(homedir(), '.codex'), undefined, options.onDiagnostic);
     if (options.connectionMode !== undefined && !['private', 'shared'].includes(options.connectionMode)) throw new Error('Codex connection mode must be private or shared.');
     if (options.socketPath !== undefined && (options.connectionMode !== 'shared' || !isAbsolute(options.socketPath))) {

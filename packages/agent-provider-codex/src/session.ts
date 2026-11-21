@@ -675,7 +675,7 @@ export class CodexAppServerSession implements AgentSession {
     }).catch((error: unknown) => {
       if (error instanceof CodexAppServerRpcError && error.code === -32600
         && error.message === `thread ${handle.sessionId} already has an active writer`) {
-        throw new AgentSessionInUseError('This session is in use by another Codex client. Close the original Codex client, then try opening this session again.');
+        throw new AgentSessionInUseError('This session is in use by another Codex client. Close the original Codex client, then try opening this session again.', { reason: 'writer_elsewhere' });
       }
       throw sessionLookupError(error, handle.sessionId, 'thread/resume');
     });

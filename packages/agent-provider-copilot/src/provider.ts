@@ -11,6 +11,7 @@ import { CopilotAgentSession } from './session.js';
 import { deadline } from './channel.js';
 import { nativeCanonical, nativeHash, nativeIdentity, rejectNativeEvidence, copilotEmptyHandle, readCopilotEmptyHandle, type CopilotEmptyDescriptor } from './native-evidence.js';
 import { readCopilotHistoryPage } from './reference-history.js';
+import { copilotBehaviour } from './behaviour.js';
 export interface CopilotAgentProviderOptions { executable?: string; env?: Record<string, string | undefined>; requestTimeoutMs?: number; onDiagnostic?: (message: string) => void; nativeSessionConfig?: Pick<SessionConfig, 'provider' | 'skillDirectories' | 'mcpServers'>; useLoggedInUser?: boolean; }
 export interface CopilotSessionSummary { nativeSessionId: string; providerId: string; title: string; workspace?: string; createdAt: string; updatedAt: string; state: 'idle' | 'running' | 'waiting' | 'unknown' | 'unavailable'; }
 export function resolveCopilotExecutable(): string {
@@ -25,7 +26,7 @@ function nativeSessionMissing(error: unknown, sessionId: string): boolean {
     `Request session.resume failed with message: Failed to load session events: ${missing}`].includes(error.message);
 }
 export class CopilotAgentProvider implements AgentProviderAdapter {
-  readonly descriptor = { providerId: 'copilot', displayName: 'GitHub Copilot', sessionExtensions: { instructions: true, tools: true, toolNamespaces: 'attachment' as const } };
+  readonly descriptor = { providerId: 'copilot', displayName: 'GitHub Copilot', sessionExtensions: { instructions: true, tools: true, toolNamespaces: 'attachment' as const }, behaviour: copilotBehaviour };
   /** Ordinary create supplies a nonempty UUID; this does not bound resume, fork, or history. */
   readonly createdSessionIdMaxLength = 36;
   readonly sessionRenameRequiresOpen = true;
@@ -108,7 +109,7 @@ export class CopilotAgentProvider implements AgentProviderAdapter {
   async assertSessionAvailable(sessionId: string): Promise<void> {
     await this.ready();
     const result = await deadline(this.client.rpc.sessions.checkInUse({sessionIds: [sessionId]}), this.options.requestTimeoutMs ?? 15000, 'Copilot ownership check');
-    if (result.inUse.includes(sessionId)) throw new AgentSessionInUseError('This Copilot session is open in an unmanaged native client. Close it there before resuming.');
+    if (result.inUse.includes(sessionId)) throw new AgentSessionInUseError('This Copilot session is open in an unmanaged native client. Close it there before resuming.', { reason: 'writer_elsewhere' });
   }
   async releaseSession(sessionId: string): Promise<void> {
     await this.ready();

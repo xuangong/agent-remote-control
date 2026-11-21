@@ -35,7 +35,7 @@ const regenerations = [
     write: () => lowerBudgets(root),
     check() {
       const over = overBudget(legacyCounts(root), JSON.parse(readFileSync(resolve(root, budgetPath), 'utf8')).budget);
-      return over.length ? { failure: `legacy variables over budget: ${over.join('; ')}` } : { verified: 'legacy token budgets at most their counts' };
+      return over.length ? { failure: `legacy variables over budget: ${over.join('; ')}` } : { verified: 'legacy variables within their budgets' };
     },
   },
   {

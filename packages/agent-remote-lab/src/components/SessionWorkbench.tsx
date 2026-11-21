@@ -39,7 +39,7 @@ import type { TraceEntryRequest } from '../trace-model.js';
 
 export type LabWorkbenchActions = SessionViewActions;
 
-export function SessionWorkbench({ assistant, details, conversationTitle, nativeSession, sessionDescription, onNavigateAttribution, todo, processAssistant, sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, imageDraftBinding, imageRecipient, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, renderCommandError, readOnly: recordingReadOnly = false, draftOnly = false, opening = false, mutationBlocked = false, pendingFirstInputContext, onPendingInputChange, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, headingStart, headingMode = 'inline', sessionManager, headingContext, composerContext, composerNotice, composerStatus, nativeTakeover, consoleCommands, onExecuteConsoleCommand, entrySelection, timelineStart, timelineEnd, sendLater, loadingNotice, host }: { entrySelection?: TimelineEntrySelection;
+export function SessionWorkbench({ assistant, details, conversationTitle, nativeSession, sessionDescription, onNavigateAttribution, todo, processAssistant, sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, imageDraftBinding, imageRecipient, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, renderCommandError, readOnly: recordingReadOnly = false, draftOnly = false, opening = false, openFailed = false, mutationBlocked = false, pendingFirstInputContext, onPendingInputChange, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, headingStart, headingMode = 'inline', sessionManager, headingContext, composerContext, composerNotice, composerStatus, nativeTakeover, consoleCommands, onExecuteConsoleCommand, entrySelection, timelineStart, timelineEnd, sendLater, loadingNotice, host }: { entrySelection?: TimelineEntrySelection;
   /** Who answers in this conversation: the live line's name and the avatar at the foot of the answers. */
   /** Who answers, and the session whose latest reply a tile's sentence says. */
   assistant?: AgentTimelineProps['assistant'] & { readonly session?: TileSession };
@@ -60,6 +60,8 @@ export function SessionWorkbench({ assistant, details, conversationTitle, native
   loadingNotice?: { title: string; detail: string };
   /** This is a stand-in for a session whose Window is still loading: plain messages typed into it wait for the pane that replaces it. */
   opening?: boolean;
+  /** The view could not open its session and says so with a Retry: a message waiting for the session says Not sent. */
+  openFailed?: boolean;
   /** Sends from a draft-only composer whose Host is offline: the message waits for the Host. */
   sendLater?: ComponentProps<typeof DraftComposer>['sendLater'];
   /** Content above this conversation's own entries once its oldest page is loaded: a bot's earlier sessions after a handoff. */
@@ -206,6 +208,7 @@ export function SessionWorkbench({ assistant, details, conversationTitle, native
             host={host}
             draftOnly={draftOnly}
             opening={opening}
+            openFailed={openFailed}
             mutationBlocked={mutationBlocked}
             onPendingInputChange={onPendingInputChange}
             pendingFirstInputContext={pendingFirstInputContext}

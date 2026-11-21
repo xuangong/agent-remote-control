@@ -76,6 +76,11 @@ export interface AgentComposerProps {
   onSendMessageContent?(content: readonly MessagePart[], options?: AgentMessageOptions & { imageDigests?: Readonly<Record<string, string>> }): Promise<void>;
   /** The view is a stand-in that shows the session while the Window that will own it loads: plain messages typed into it wait for the pane that replaces it. */
   opening?: boolean;
+  /**
+   * The view could not open its session and says so, with a Retry of its own: a message waiting for the session says Not sent and
+   * is sent only on Retry. A view still opening its session (an attach in flight, a locator not confirmed yet) has not failed.
+   */
+  openFailed?: boolean;
   draft?: string;
   onDraftChange?(text: string): void;
   /**
@@ -128,7 +133,7 @@ interface Draft {
   feedback?: { kind: 'success' | 'error'; message: string; delivery?: boolean; commandError?: unknown };
 }
 
-export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly: draftOnlyRequested = false, opening = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, recipient, readOnlyCollapsed = false, state, sessionControls, settings = 'inline', renderSessionSettingError, renderCommandError, sessionKey, host, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent, sendLater }: AgentComposerProps) {
+export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly: draftOnlyRequested = false, opening = false, openFailed = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, recipient, readOnlyCollapsed = false, state, sessionControls, settings = 'inline', renderSessionSettingError, renderCommandError, sessionKey, host, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent, sendLater }: AgentComposerProps) {
   const t = useTranslate();
   const draftOnly = draftOnlyRequested;
   const pendingFirstInputContext = firstInputContext !== undefined;
@@ -200,7 +205,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   const dispatch = availability.input === 'enabled' && !draftOnly && !mutationBlocked && !forcedReadOnly && agentId !== '' ? availability.dispatch : undefined;
   const sendNow = dispatch === 'now';
   // A stand-in view (`opening`) keeps the editor and takes a plain message into the queue, which the pane that
-  // replaces it delivers once the session is ready; a draft-only view that could not open holds it.
+  // replaces it delivers once the session is ready; another draft-only view takes none, and keeps those already waiting.
   const waitsWhileOpening = opening && draftOnly && !mutationBlocked && !forcedReadOnly && agentId !== '';
   const canWait = dispatch === 'when_ready' || waitsWhileOpening;
   // Commands, skills, files and next-turn queueing need the session itself and wait for it (owner decision 3): synchronized, its
@@ -251,8 +256,9 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   const queueAllowed = ready && session.operations.queue_message.allowed;
   const latest = useRef({ waitsWhileOpening, agentId, draftOnly, mutationBlocked, dispatchReady, sendAllowed, queueAllowed, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient });
   latest.current = { waitsWhileOpening, agentId, draftOnly, mutationBlocked, dispatchReady, sendAllowed, queueAllowed, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient };
-  // A message that waits for a session that cannot take it does not stay Sending, and is never sent unasked later.
-  const unsendable = availability.input === 'disabled' && !draftOnly ? availability.words : draftOnly && !waitsWhileOpening && !laterMode && agentId !== '' ? t('composer.openFailed') : undefined;
+  // A message waits for its session until the session is ready, however long it takes to open. It stops as Not sent, and is
+  // never sent unasked later, only when the session cannot take it: a business reason, or a view that could not open it.
+  const unsendable = availability.input === 'disabled' && !draftOnly ? availability.words : openFailed ? t('composer.openFailed') : undefined;
   useEffect(() => { if (unsendable) waiting.hold(unsendable); }, [unsendable, agentId, waiting.items.length]);
   const richPreparations = useRef(new Map<AbortController, ImageDraftRecipient>());
   for (const [abort, owner] of richPreparations.current) {

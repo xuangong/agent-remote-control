@@ -210,18 +210,21 @@ export function SessionConversation(props: SessionConversationProps) {
   // only its input waits (it queues) until a discovery confirms the locator again.
   const locatorWaiting = !!retainedResolution && staleLocator && !retainingInput;
   const pending = disconnected || !!resolutionError && !locatorWaiting || !displayedSession;
+  // The view could not open its session: its attach failed or its locator was refused, and it says so with a Retry. A locator
+  // that is still synchronizing is a wait, as an attach in flight is; a released view or an offline Host has not failed either.
+  const openFailed = !disconnected && !owner && !props.offline && (!!error || !!resolutionError && !(synchronizing && !retainingInput));
   // A view opening its first session, or opening it again after its connection was lost, takes messages, which wait until it
   // is ready (target T4). A failure, an offline Host and a view whose target changed under a previous session do not: the
   // composer's draft may belong to that previous session.
-  const opening = pending && !session && !(resolutionError && !locatorWaiting) && !error && !props.offline;
-  return <FamilyChat {...props} disconnected={disconnected} opening={opening} onPendingInputChange={count => {
+  const opening = pending && !session && !openFailed && !props.offline;
+  return <FamilyChat {...props} disconnected={disconnected} opening={opening} openFailed={openFailed} onPendingInputChange={count => {
       setInputOwner(previous => count ? previous?.count === count && sessionKey(previous.source) === sessionKey(target) && sessionKey(previous.target) === sessionKey(currentTarget)
         ? previous : { source: target, target: currentTarget, count } : undefined);
       props.onPendingInputChange?.(count);
     }} session={session ?? { ...currentTarget, agentId: '' }} attachmentAvailable={!disconnected && !!session} target={currentTarget} pending={pending} preview={preview} availabilityError={disconnected || owner ? undefined : resolutionNotice ?? error} nativeTakeover={nativeTakeover}
     onRetryAttachment={retrySynchronizing ?? (enabled && canAttach && !props.offline && !props.attachmentManaged ? () => { unavailable.forget(currentTarget); setAttempt(value => value + 1); } : undefined)} />;
 }
-function FamilyChat({ disconnected, opening, hostLabel, visible = true, mutationBlocked = false, onPendingInputChange, session, pending, transport, navigation, draftStore, draftBinding, imageDraftBinding, imageRecipient: explicitImageRecipient, controls, menuActions, offline, entries, onNavigate, displayBinding, baseUrl, target, preview, viewId, nativePrefixOnly, availabilityError, onRetryAttachment, consoleCommands, onExecuteConsoleCommand, replica, replicaFor, onSessionReady, onSessionBound, windowViewId, sessionPresentation, renderSessionFooter, familyRoot, nativeTakeover, sessionIntent, attachmentAvailable, compact, successionContext: explicitContext, directoryFor }: SessionConversationProps & { disconnected: boolean; opening: boolean; nativeTakeover?: ReactNode; attachmentAvailable: boolean; session: OpenedSession; pending: boolean; preview?: AgentReplicaState; availabilityError?: string; onRetryAttachment?(): void }) {
+function FamilyChat({ disconnected, opening, openFailed, hostLabel, visible = true, mutationBlocked = false, onPendingInputChange, session, pending, transport, navigation, draftStore, draftBinding, imageDraftBinding, imageRecipient: explicitImageRecipient, controls, menuActions, offline, entries, onNavigate, displayBinding, baseUrl, target, preview, viewId, nativePrefixOnly, availabilityError, onRetryAttachment, consoleCommands, onExecuteConsoleCommand, replica, replicaFor, onSessionReady, onSessionBound, windowViewId, sessionPresentation, renderSessionFooter, familyRoot, nativeTakeover, sessionIntent, attachmentAvailable, compact, successionContext: explicitContext, directoryFor }: SessionConversationProps & { disconnected: boolean; opening: boolean; openFailed: boolean; nativeTakeover?: ReactNode; attachmentAvailable: boolean; session: OpenedSession; pending: boolean; preview?: AgentReplicaState; availabilityError?: string; onRetryAttachment?(): void }) {
   const t = useTranslate();
   const conversation = useConversationSession(session, transport, replica ?? replicaFor?.(session.agentId), pending, { viewId, nativePrefixOnly, externalAttachment: true, sessionIntent, attachmentAvailable });
   const { state, sessionState, status, actions, questions, setQuestions, imageRecipient, operationBinding } = conversation;
@@ -304,7 +307,7 @@ function FamilyChat({ disconnected, opening, hostLabel, visible = true, mutation
     onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}
     conversationPath={<strong className="agent-session-title">{presentedSession.title}</strong>} {...presentation} {...firstInputPresentation}
     visible={visible && presentation?.visible !== false} mutationBlocked={mutationBlocked || presentation?.mutationBlocked}
-    draftOnly={pending && !opening || identityMismatch || !!presentation?.draftOnly}
+    draftOnly={pending && !opening || identityMismatch || !!presentation?.draftOnly} openFailed={openFailed}
     sessionManager={presentation?.sessionManager ?? <>{controls}<SessionHeadingActions sessionKey={key} alwaysCollapsed={!!menuActions}><SessionLink session={target} />{menuActions}</SessionHeadingActions></>}
     onPendingInputChange={reportPendingInput} headingStart={presentation?.headingStart}
     composerNotice={<>{/* While the Host is away the conversation opens again by itself once it is back; nothing to retry. */}

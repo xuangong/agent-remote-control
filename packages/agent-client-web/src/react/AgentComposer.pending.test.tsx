@@ -433,15 +433,30 @@ it('clears a successful plain-text send in the current fixed image-capable sessi
   expect(view.container.querySelector('[role="textbox"]')!.textContent).toBe('');
 });
 
-it('says Not sent for a waiting message when the view could not open its session', async () => {
+it('keeps a waiting message Sending while its view cannot take messages yet, however long, and sends it once the session is ready', async () => {
   const view = await setup({ sessionKey: 'view' });
   await view.type('Typed while opening'); await view.click();
-  expect(view.notice()?.textContent).toContain('Sending');
+  // A view that is still opening its session (a Window pane whose locator is not confirmed yet) is draft-only: a wait, not a refusal.
   await view.update({ draftOnly: true });
-  expect(view.notice()?.textContent).toContain('Not sent');
+  await advance(60_000);
+  expect(view.notice()?.textContent).toContain('Sending');
+  expect(view.notice()?.textContent).not.toContain('Not sent');
+  expect(view.send).not.toHaveBeenCalled();
   await view.update({ draftOnly: false, connection: 'ready' });
+  expect(view.send).toHaveBeenCalledExactlyOnceWith('Typed while opening');
+});
+
+it('says Not sent for a waiting message when the view could not open its session, and sends it only on Retry', async () => {
+  const view = await setup({ sessionKey: 'view' });
+  await view.type('Typed while opening'); await view.click();
+  await view.update({ draftOnly: true, openFailed: true });
+  expect(view.notice()?.textContent).toContain('Not sent');
+  expect(view.container.querySelector('[role="alert"]')?.textContent).toBe('This session could not be opened.');
+  await view.update({ draftOnly: false, openFailed: false, connection: 'ready' });
   await advance(1000);
   expect(view.send).not.toHaveBeenCalled();
+  await view.click('[aria-label="Retry pending send"]');
+  expect(view.send).toHaveBeenCalledExactlyOnceWith('Typed while opening');
 });
 
 it('lets a message the session refused for certain be retried, and sends it again only on Retry', async () => {

@@ -326,3 +326,32 @@ The last push brings the UI/UX and the IM experience to a finished state on both
 - **Scrolling and focus.** Smooth native scrolling, scroll position kept per chat, and a visible, logical focus order.
 
 Order: the provider boundary (B3, B5 and the phone/platform gaps) first, then the module split for parallel work, then I5. Within I5 the order is: installable app, then the IM audit and its fixes, then notifications and badges, then the UI/UX finish pass.
+
+## Release 2026-11-22: provider kit, phone and platform gaps, Controller 0.3.4
+
+Shipped from main `4b3ff860`.
+- Partitions Worker `a2d802c7`.
+- Relay `7a0e9d25`; rollback target `d6d464e1`. `scripts/deploy-readiness.mjs` confirmed the Durable Object on `7a0e9d25` about 5 minutes after the deploy.
+- Controller 0.3.4 (`controller-v0.3.4`, sha256 `e0c75677…`). Every Controller must update.
+
+**Shipped**
+- **Provider conformance kit** (`pnpm test:providers`): recordings, declared behaviour and simulator faults, run for Codex, Claude Code and Copilot.
+- **CLI exit:** a CLI that exits mid-turn is started again on the next send or open.
+- **Unknown events (gap 10):** an unknown native event becomes a diagnostic.
+- **Sibling order (gap 11):** unordered siblings are compared as a set.
+- **Codex:** recorded again on 0.171.0.
+- **Native assumption checks:** one per CLI.
+- **Browser lifecycle simulator,** with flows E13 and E13b on Chromium and WebKit (gap 7).
+- **Device store:** a record is kept when its page leaves at once (M1).
+- **Installed app:** asks the browser to keep its storage (`storage.persist()`).
+- **Deploy skew (gap 8):** seam tests against production, plus the readiness script.
+- **Durable Object reset (gap 9):** proven on workerd.
+- **Closed:** O54, O55, O56 and O58.
+- **Recorded:** O59 (device clock ahead of the lease).
+
+**Gates**
+- `pnpm verify` and the flows failed once each in the sequential gate run: the App test "edits a real App managed Team window…" and E3 "a session the Host no longer has…". Each passed 3 of 3 when run alone.
+- Flows on WebKit: 63 passed, 1 skipped.
+- Components: 3 WebKit timeouts in the full run; the specs passed 58 of 58 when run alone.
+- `smoke:quick` (seed 8828): M1, M2, M4 and M7 passed.
+- The App test's failed assertion ("Handoff complete…" not cleared) is recorded for investigation as O60.

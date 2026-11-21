@@ -180,13 +180,14 @@ Attaches before (main 0ba5350c) and after, counted with fake timers:
 Growth over time comes from two runners, neither part of the suite:
 
 ```sh
-# from packages/agent-remote-lab: two in-process Controllers (fake natives, no model), headless Chromium 1280 x 720
-ARC_SOAK_MINUTES=60 npx playwright test e2e/soak.spec.ts --project=chromium-desktop   # .tmp/soak.json (ARC_PERFORMANCE_OUTPUT)
+# from packages/agent-e2e, after `pnpm --filter @orchardworks/agent-remote-lab build`: a hosted Relay and two in-process Controllers
+# (fake natives, no model), headless Chromium 1280 x 720; the config starts no server and belongs to no test tier
+ARC_SOAK_MINUTES=60 pnpm exec playwright test --config=soak/playwright.config.ts      # .tmp/soak.json (ARC_PERFORMANCE_OUTPUT)
 # from the repository root: read-only on the pnpm local instance, with its real sessions; sends nothing
 MINUTES=20 node packages/agent-remote-lab/performance/local-soak.mjs                  # .tmp/local-soak.json
 ```
 
-The cross-Host soak holds 12 bots in three groups, each group with two bots on each Host, and each conversation starts with 20 turns. Every 5 s it opens the next bot. In the first half, every fourth switch sends a message, which the bot's Host answers. Every 24 switches (about two minutes) it goes to Window mode and back, and the Laptop leaves for one minute in every ten. Every minute it returns to the first bot, forces a garbage collection, and records the JS heap, DOM nodes, event listeners, open WebSockets, requests and console errors. `ARC_SOAK_SNAPSHOTS=35,60` also writes heap snapshots at those minutes.
+The cross-Host soak (`packages/agent-e2e/soak/`: `soak.spec.ts` and the Relay and Controllers it runs, `hosts.ts`) finds each bot by the native session behind its row in Chats, since the page names assistants itself. It holds 12 bots in three groups, each group with two bots on each Host, and each conversation starts with 20 turns. Every 5 s it opens the next bot. In the first half, every fourth switch sends a message, which the bot's Host answers. Every 24 switches (about two minutes) it goes to Window mode and back, and the Laptop leaves for one minute in every ten. Every minute it returns to the first bot, forces a garbage collection, and records the JS heap, DOM nodes, event listeners, open WebSockets, requests and console errors. `ARC_SOAK_SNAPSHOTS=35,60` also writes heap snapshots at those minutes.
 
 Budgets, checked by the spec: once sends stop, the heap and DOM nodes at the end stay within 10% of five minutes into the quiet half; requests per minute in the last ten minutes stay within a quarter of the quiet half's first ten; at most 12 WebSockets; no console errors.
 

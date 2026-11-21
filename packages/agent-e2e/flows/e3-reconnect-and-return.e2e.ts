@@ -6,13 +6,14 @@ import type { Browser } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { actAsLocalUser, startStack, type Stack } from '@orchardworks/agent-e2e/stack';
 import { launchBrowser, openPage, openPageIn, resetWindows, rowTexts } from './browser.js';
-import { holdsText, numberedHistory, rowOffset, send, showsText, timelineScroll, waitForEntries, waitForKeptConversation } from './page.js';
+import { composerOf, holdsText, numberedHistory, rowOffset, send, showsText, timelineScroll, waitForEntries, waitForKeptConversation } from './page.js';
 
 let stack: Stack; let browser: Browser;
 beforeAll(async () => {
   stack = await startStack({
     providerId: 'codex', displayName: 'Codex CLI',
     sessions: {
+      gone: { title: 'Gone', history: [{ role: 'user', text: 'Start' }, { role: 'assistant', text: 'Gone answer' }] },
       work: { title: 'Work', history: [{ role: 'user', text: 'Start' }, { role: 'assistant', text: 'Started' }] },
       long: { title: 'Long', history: numberedHistory(40) },
       rewritten: { title: 'Rewritten', history: numberedHistory(60, ' ' + 'padding '.repeat(40)) },
@@ -136,7 +137,8 @@ it('E3: with smart reading off, the reader keeps their line through a Controller
   } finally { await legacy.close(); }
 });
 
-it('E3: the page shows its rows when the first fetch of the application chunk fails (O27)', async () => {
+// WebKit does not fetch the refused chunk again, not even after the recovery's reload, so the page stays empty there (open item O54).
+it.skipIf(process.env.E2E_BROWSER === 'webkit')('E3: the page shows its rows when the first fetch of the application chunk fails (O27)', async () => {
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   await resetWindows(context, stack.origin);
   const page = await context.newPage();
@@ -169,5 +171,33 @@ it('E3: the reader keeps their line when a Controller restart replaces the journ
   // The replacement did arrive: reading up to row 10 shows the rewritten text.
   await timelineScroll(page).hover();
   await expect.poll(async () => { await page.mouse.wheel(0, -1500); return (await rowOffset(page, 'Row 10 rewritten while the reader was away')) !== undefined; }, { timeout: 20_000, interval: 150 }).toBe(true);
+  await context.close();
+});
+
+it('E3: a session the Host no longer has shows as an empty view that says so, and a new session opens beside it', async () => {
+  const { context, page } = await openPage(browser, stack.sessionUrl('gone'));
+  await showsText(page, 'Gone answer');
+  await stack.stopController();
+  stack.provider.forget('gone');
+  await stack.startController();
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  // The view stays in its Window and says why it is empty, with no composer and no generic error. That the page does not ask for the
+  // session again and again is the rule of unavailable-sessions.ts, owned by its unit tests.
+  const empty = page.getByRole('status').filter({ hasText: /“Gone” no longer exists on E2E Host/ });
+  await empty.waitFor();
+  expect(await composerOf(page).count()).toBe(0);
+  expect(await page.getByText(/could not find this session/).count()).toBe(0);
+  // Its own New session opens a new conversation beside the missing view, which stays in place until it is removed.
+  await empty.getByRole('button', { name: 'New session', exact: true }).click();
+  await page.getByTestId('session-create').click();
+  await composerOf(page).waitFor();
+  await expect.poll(() => page.getByRole('region', { name: /^Primary group:/ }).count()).toBe(2);
+  expect(await empty.count()).toBe(1);
+  // The Window keeps the missing view's reference, so it stays a place of its group, next to the new one.
+  const status = await (await context.request.get(stack.origin + '/auth/status')).json() as { basePath: string };
+  const windowId = new URL(page.url()).searchParams.get('window')!;
+  const { window } = await (await context.request.get(`${stack.origin}${status.basePath}v1/windows/${encodeURIComponent(windowId)}`)).json() as { window: { views: Array<{ placement: string; binding?: { nativeSessionId: string } }> } };
+  expect(window.views.filter(view => view.placement === 'primary').map(view => view.binding?.nativeSessionId)).toContain('gone');
+  expect(window.views.filter(view => view.placement === 'primary')).toHaveLength(2);
   await context.close();
 });

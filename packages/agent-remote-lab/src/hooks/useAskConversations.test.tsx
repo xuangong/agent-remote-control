@@ -432,6 +432,26 @@ it('keeps two source-bound Ask windows and preferences independent across reload
   expect(fixture.requests.filter(request => request.path.endsWith('/create'))).toHaveLength(2);
 });
 
+it('keeps the Ask of each view slot apart when two slots show the same session', async () => {
+  const fixture = await setup();
+  const slotOwner = (slotId: string) => {
+    const slot = createCompositionSlot(slotId, source, baseUrl), owner = createAskOwner(slot, baseUrl);
+    fixtureDocument().slots.push(slot); fixtureDocument().asks.push(owner); fixtureDocument().editRevision++;
+    return owner.id;
+  };
+  const [first, second] = [slotOwner('slot-first'), slotOwner('slot-second')];
+  await act(async () => { await fixture.current().open(state, source, '', false, { associationOwner: first }); fixture.current().setDraft(first, 'First slot draft'); });
+  expect(fixture.current().isOpen(source, first)).toBe(true);
+  expect(fixture.current().isOpen(source, second)).toBe(false);
+  await act(async () => { await fixture.current().open(state, source, '', false, { associationOwner: second }); fixture.current().setDraft(second, 'Second slot draft'); });
+  expect([fixture.current().drafts.get(first), fixture.current().drafts.get(second)]).toEqual(['First slot draft', 'Second slot draft']);
+  await act(async () => { fixture.current().toggle(source, first); });
+  expect(fixture.current().isEnabled(source, first)).toBe(false);
+  expect(fixture.current().isEnabled(source, second)).toBe(true);
+  expect(fixture.current().isOpen(source, second)).toBe(true);
+  expect(fixture.requests.filter(request => request.path.endsWith('/create'))).toHaveLength(3);
+});
+
 it('minimizes one source without cancelling another source restoration', async () => {
   const fixture = await setup();
   await act(async () => { await fixture.current().open(state, secondSource, '', false, { associationOwner: ownerId(secondSource) }); });

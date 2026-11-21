@@ -84,6 +84,43 @@ it('fits a resized window while visual viewport bounds are stale and restores af
   expect(shell.dataset.viewportOccluded).toBe('false');
 });
 
+it('keeps the height from before the keyboard as the reference when the window itself shrinks with it', async () => {
+  const shell = await mount();
+  shell.querySelector('textarea')!.focus();
+  property(window, 'innerHeight', 400);
+  property(document.documentElement, 'clientHeight', 400);
+  viewport.height = 400;
+  window.dispatchEvent(new Event('resize'));
+  viewport.dispatchEvent(new Event('resize'));
+  await advance(32);
+  expect(shell.dataset.viewportOccluded).toBe('true');
+  expect(height(shell)).toBe('400px');
+  property(window, 'innerHeight', 844);
+  property(document.documentElement, 'clientHeight', 844);
+  viewport.height = 844;
+  window.dispatchEvent(new Event('resize'));
+  viewport.dispatchEvent(new Event('resize'));
+  await advance(32);
+  expect(shell.dataset.viewportOccluded).toBe('false');
+  expect(height(shell)).toBe('');
+});
+
+it('does not take the taller portrait height as the reference for a rotated screen while a field has focus', async () => {
+  const shell = await mount();
+  shell.querySelector('textarea')!.focus();
+  await advance(32);
+  property(window, 'innerWidth', 844);
+  property(window, 'innerHeight', 390);
+  property(document.documentElement, 'clientHeight', 390);
+  Object.assign(viewport, { width: 844, height: 390 });
+  window.dispatchEvent(new Event('orientationchange'));
+  window.dispatchEvent(new Event('resize'));
+  viewport.dispatchEvent(new Event('resize'));
+  await advance(32);
+  expect(shell.dataset.viewportOccluded).toBe('false');
+  expect(height(shell)).toBe('');
+});
+
 it('preserves pinch zoom and does not treat hardware keyboard focus as occlusion', async () => {
   const shell = await mount();
   shell.querySelector('textarea')!.focus();

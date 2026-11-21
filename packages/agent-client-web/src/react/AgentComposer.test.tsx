@@ -280,6 +280,38 @@ it('sends a message at once through the queue, keeps the editor enabled and focu
   expect(document.activeElement).toBe(input);
 });
 
+it('returns the focus to the empty editor after the send button took it', async () => {
+  const send = vi.fn(async () => {});
+  const ready = buildSessionFacts('ready', { snapshot: { status: 'idle' }, control: CONTROL.granted });
+  const container = await render(<AgentComposer sessionKey="agent-1" state={ready.replica} sessionState={ready.session} onSendMessage={send} />);
+  const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'Focus returns');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const submit = container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
+  submit.focus();
+  expect(document.activeElement).toBe(submit);
+  await act(async () => { submit.click(); });
+  expect(send).toHaveBeenCalledExactlyOnceWith('Focus returns');
+  expect(input.value).toBe('');
+  expect(document.activeElement).toBe(input);
+});
+
+it('sends a multi-line draft with its blank line and line break as typed', async () => {
+  const send = vi.fn(async () => {});
+  const ready = buildSessionFacts('ready', { snapshot: { status: 'idle' }, control: CONTROL.granted });
+  const container = await render(<AgentComposer sessionKey="agent-1" state={ready.replica} sessionState={ready.session} onSendMessage={send} />);
+  const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
+  const draft = 'Help me improve this.\n\nKeep the **shared components**,\nand show the protocol.';
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, draft);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click(); });
+  expect(send).toHaveBeenCalledExactlyOnceWith(draft);
+});
+
 function readyAgent(imageInput: boolean): AgentReplicaState {
   return { ...createReplicaState(), timeline: { ...createReplicaState().timeline, initialized: true }, agent: {
     id: 'return-key', providerId: 'test', createdAt: '2026-09-20T00:00:00Z', updatedAt: '2026-09-20T00:00:00Z', status: 'idle', activeTurn: null,

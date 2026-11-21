@@ -48,6 +48,23 @@ it('stands open as rows in the details: no "+", and Escape gives the focus back 
   expect(document.activeElement).toBe(model);
 });
 
+it('gives the focus back to the row that opened the panel when its Close button is pressed, and opens the panel again from that row', async () => {
+  function Details() {
+    const [view, setView] = useState<SessionControlView>();
+    return <AgentSessionSettings state={state} presentation="list" disabled={false} busy={false} view={view} onView={setView} onPendingChange={() => {}} />;
+  }
+  const container = await render(<Details />);
+  const model = container.querySelector<HTMLButtonElement>('[data-testid="session-model-button"]')!;
+  await act(async () => { model.focus(); model.click(); });
+  expect(model.getAttribute('aria-expanded')).toBe('true');
+  await act(async () => { const close = container.querySelector<HTMLButtonElement>('[aria-label="Close session controls"]')!; close.focus(); close.click(); });
+  expect(model.getAttribute('aria-expanded')).toBe('false');
+  expect(document.activeElement).toBe(model);
+  await act(async () => { model.click(); });
+  expect(model.getAttribute('aria-expanded')).toBe('true');
+  expect(container.querySelector('[aria-label="Close session controls"]')).not.toBeNull();
+});
+
 it('leaves Escape available to the outer composition when focus has moved outside the settings', async () => {
   const container = await render(<><Controls /><button type="button">Outer action</button></>);
   const trigger = container.querySelector<HTMLButtonElement>('[data-testid="session-model-button"]')!;
@@ -58,6 +75,18 @@ it('leaves Escape available to the outer composition when focus has moved outsid
   expect(trigger.getAttribute('aria-expanded')).toBe('true');
   expect(document.activeElement).toBe(outer);
   expect(escape.defaultPrevented).toBe(false);
+});
+
+it('closes an open settings panel when the person presses outside it, not when they press inside it', async () => {
+  const container = await render(<><Controls /><p data-testid="conversation">The conversation</p></>);
+  const trigger = container.querySelector<HTMLButtonElement>('[data-testid="session-model-button"]')!;
+  await act(async () => { trigger.click(); });
+  expect(trigger.getAttribute('aria-expanded')).toBe('true');
+  const panel = container.querySelector<HTMLElement>('.agent-session-panel')!;
+  await act(async () => { panel.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); });
+  expect(trigger.getAttribute('aria-expanded')).toBe('true');
+  await act(async () => { container.querySelector('[data-testid="conversation"]')!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); });
+  expect(trigger.getAttribute('aria-expanded')).toBe('false');
 });
 
 it('dismisses settings from another control in the same composer without affecting other composers', async () => {

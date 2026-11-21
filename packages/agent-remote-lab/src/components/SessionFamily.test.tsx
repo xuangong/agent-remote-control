@@ -172,6 +172,48 @@ it('shows every view attached to one source beside it and returns a narrow view 
   expect(panes().map(pane => pane.getAttribute('aria-label'))).toEqual(['Root', 'Second Side']);
 });
 
+it('gives every attached view a width separator that edits only its own width in the Window, and none in a narrow layout', async () => {
+  const session = { hostId: 'local', providerId: 'recorded', nativeSessionId: 'native', agentId: 'agent', title: 'Root' };
+  const { agentId: _, ...binding } = session;
+  let window: WorkspaceWindow = { schemaVersion: 3, id: 'widths', title: 'Window', revision: 0, selectedPrimaryViewId: 'root', selectedViewId: 'root', views: [
+    createWindowView('root', binding, 'primary'),
+    { ...createWindowView('first', { ...binding, nativeSessionId: 'first', title: 'First Side' }, 'attached'), attachedTo: 'root', width: 300 },
+    { ...createWindowView('second', { ...binding, nativeSessionId: 'second', title: 'Second Side' }, 'attached'), attachedTo: 'root', width: 340 },
+  ] };
+  const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
+  const drafts = new DraftStore('family-widths');
+  let narrow!: (value: boolean) => void;
+  function Harness() {
+    const [, renderAgain] = useState(0);
+    const [compact, setCompact] = useState(false); narrow = setCompact;
+    const authority = { window, readWindow: () => window, operate(operation: Parameters<typeof applyWindowOperation>[1]) {
+      window = applyWindowOperation(window, operation); renderAgain(value => value + 1);
+    } };
+    return <WorkspaceReady.Provider value={false}><WindowLayoutContext.Provider value={authority}>
+      <SessionFamily attachedSession={session} target={session} viewId="root" storageScope="family-widths" baseUrl="http://fixture" hostLabel="Local"
+        compact={compact} active offline transport={transport} draftStore={drafts} />
+    </WindowLayoutContext.Provider></WorkspaceReady.Provider>;
+  }
+  const view = await render(<Harness />);
+  const separator = (title: string) => view.querySelector<HTMLElement>(`[role="separator"][aria-label="${title} width"]`)!;
+  const widthOf = (id: string) => window.views.find(item => item.id === id)!.width;
+  const press = (title: string, key: string, shiftKey = false) => act(async () => { separator(title).dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey, bubbles: true })); });
+  expect([...view.querySelectorAll('[role="separator"]')].map(item => item.getAttribute('aria-label'))).toEqual(['First Side width', 'Second Side width']);
+  expect(separator('First Side').getAttribute('aria-valuenow')).toBe('300');
+  expect(separator('First Side').getAttribute('aria-valuemin')).toBe('240');
+  await press('First Side', 'ArrowRight');
+  expect([widthOf('first'), widthOf('second')]).toEqual([310, 340]);
+  await press('Second Side', 'ArrowLeft', true);
+  expect([widthOf('first'), widthOf('second')]).toEqual([310, 300]);
+  await press('First Side', 'Home');
+  expect(widthOf('first')).toBe(240);
+  await press('First Side', 'Enter');
+  expect(widthOf('first')).toBe(440);
+  expect(view.querySelector<HTMLElement>('[data-view-id="first"]')!.style.width).toBe('440px');
+  await act(async () => narrow(true));
+  expect(view.querySelectorAll('[role="separator"]')).toHaveLength(0);
+});
+
 it('opens a subagent beside the views its source already shows and reuses the pane on its route', async () => {
   const session = { hostId: 'local', providerId: 'recorded', nativeSessionId: 'native', agentId: 'agent', title: 'Root' };
   const { agentId: _, ...binding } = session;

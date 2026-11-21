@@ -84,3 +84,27 @@ it('turns an expired resource receipt into an explicit upload retry', async () =
   await act(async () => Array.from(container.querySelectorAll('button')).find(button => button.textContent === 'Retry resource #1')!.click());
   expect(upload).toHaveBeenCalledTimes(2); expect(send).toHaveBeenCalledTimes(1);
 });
+it('refuses to save a download whose size or digest is not the message receipt, and says so', async () => {
+  const createURL = vi.fn(() => 'blob:fixture'); Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createURL });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  click.mockClear();
+  for (const result of [{ blob: new Blob(['zip']), name: 'fixture.zip', sha256: 'b'.repeat(64) }, { blob: new Blob(['zipzip']), name: 'fixture.zip', sha256: receipt.sha256 }]) {
+    const container = await render(<ResourceDownloadContext.Provider value={async () => result}><ResourceDownload resourceId="r" label="resource #1" name="fixture.zip" byteLength={3} sha256={receipt.sha256} /></ResourceDownloadContext.Provider>);
+    await act(async () => container.querySelector('button')!.click());
+    expect(container.querySelector('[role="alert"]')?.textContent).toMatch(/verif|integrity|match/i);
+  }
+  expect(createURL).not.toHaveBeenCalled(); expect(click).not.toHaveBeenCalled();
+});
+it('sends the text typed before the resource, then the resource, in that order', async () => {
+  const send = vi.fn(async () => {}); const upload = vi.fn(async () => receipt);
+  const container = await render(<AgentComposer sessionState={remoteSessionState(state, 'ready')} state={state} onUploadResource={upload} onSendMessageContent={send} />);
+  await act(async () => {
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: { files: [], getData: (type: string) => type === 'text/plain' ? 'Before ' : '' } });
+    container.querySelector('[role="textbox"]')!.dispatchEvent(event);
+  });
+  await pick(container);
+  expect(container.querySelector('[role="textbox"]')?.textContent).toContain('Before [resource #1]');
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
+  expect(send).toHaveBeenCalledExactlyOnceWith([{ type: 'text', text: 'Before ' }, { type: 'resource', resourceId: 'resource-final', label: 'resource #1' }], { imageDigests: {} });
+});

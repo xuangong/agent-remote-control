@@ -18,6 +18,31 @@ describe('ReplicaInspector', () => {
     expect(container.textContent).toContain('Reconnecting');
   });
 
+  it('reads a ready session as its status, connection, synchronization epoch and declared operations', async () => {
+    const container = await render(<ReplicaInspector state={replicaState} sessionStatus="ready" providerName="Recorded semantic Provider" />);
+    const text = (id: string) => container.querySelector(`[data-testid="${id}"]`)?.textContent;
+    expect(text('connection-status')).toBe('Ready');
+    expect(text('session-status')).toBe('idle');
+    expect(text('timeline-epoch')).toBe('epoch-1');
+    expect(container.textContent).toContain('send message available');
+    expect(container.textContent).toContain('question available');
+    expect(container.textContent).toContain('steer unavailable');
+  });
+
+  it('lists one Trace row per normalized Timeline entry, in Timeline order', async () => {
+    const kinds = [
+      { type: 'user_message' as const, text: 'One' }, { type: 'assistant_message' as const, text: 'Two', messageId: 'two' },
+      { type: 'reasoning' as const, text: 'Three' }, { type: 'todo' as const, items: [{ text: 'Four', completed: false }] },
+    ];
+    const state = { ...replicaState, timeline: { ...replicaState.timeline, entries: kinds.map((item, index) => ({
+      providerId: 'recorded', seqStart: index + 1, seqEnd: index + 1, timestamp: '2026-09-02T00:00:0' + index + '.000Z',
+      sourceSeqRanges: [{ startSeq: index + 1, endSeq: index + 1 }], collapsed: [], resources: [], item })) } };
+    const container = await render(<TraceView state={state} />);
+    const rows = [...container.querySelectorAll<HTMLElement>('[data-trace-entry-key]')];
+    expect(rows).toHaveLength(4);
+    expect(rows.map(row => row.querySelector('.lab-trace-sequence')?.textContent)).toEqual(['#1', '#2', '#3', '#4']);
+  });
+
   it('keeps Trace focused on normalized Timeline entries', async () => {
     const state = {
       ...replicaState,

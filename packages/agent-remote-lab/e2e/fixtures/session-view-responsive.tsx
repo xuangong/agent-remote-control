@@ -34,7 +34,7 @@ function recordSent(text: string): void { ((window as unknown as { sentMessages?
 
 function Fixture() {
   const query = new URLSearchParams(window.location.search);
-  const [width, setWidth] = useState(440);
+  const [width, setWidth] = useState(Number(query.get('width') ?? 440));
   const [height, setHeight] = useState(560);
   const [connection, setConnection] = useState<RemoteSessionStatus>('ready');
   const [takeoverRequest, setTakeoverRequest] = useState<{ reject(error: Error): void }>();

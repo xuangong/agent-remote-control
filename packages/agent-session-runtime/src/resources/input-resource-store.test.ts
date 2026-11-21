@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile, readdir, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -30,6 +30,16 @@ describe('durable incoming resources',()=>{
   await expect(store.begin('s',{...empty,uploadId:'overflow',byteLength:1})).rejects.toThrow(/quota/);
   now=11;expect((await store.getMetadata('s',id)).byteLength).toBe(0); expect((await store.readChunk('s',id,0)).contentBase64).toBe('');
   await store.begin('s',{...empty,uploadId:'replacement',byteLength:4});
+ });
+ it('serves a stored resource only while its file still has the declared digest',async()=>{
+  const {directory,store}=await fixture(); const bytes=Buffer.from('replay me'), source=join(directory,'source.txt'); await writeFile(source,bytes);
+  const id=(await store.importLocal('session',source,{uploadId:'kept'})).resourceId;
+  expect(await store.read('session',`input-resource:${id}`)).toMatchObject({status:'available',bytes,mediaType:expect.any(String)});
+  expect(await store.read('other',`input-resource:${id}`)).toMatchObject({status:'unavailable'});
+  const stored=(await readdir(directory,{recursive:true})).map(name=>join(directory,name));
+  let changed=0; for(const file of stored){ try{ if((await readFile(file)).equals(bytes) && file!==source){ await chmod(file,0o600); await writeFile(file,Buffer.from('tampered')); changed++; } }catch{} }
+  expect(changed).toBe(1);
+  expect(await store.read('session',`input-resource:${id}`)).toMatchObject({status:'unavailable',reason:expect.stringMatching(/integrity/)});
  });
  it('keeps only resources and uploads of listed scopes, pinned or not, after a restart too',async()=>{
   const {directory,store}=await fixture(); const bytes=Buffer.from('bytes'), source=join(directory,'source.txt'); await writeFile(source,bytes);

@@ -33,7 +33,7 @@ const reports = readdirSync(reportsDirectory).filter(name => name.endsWith('.jso
 const files = listFiles(join(root, 'packages')).concat(listFiles(join(root, 'scripts')).map(file => `scripts/${file}`));
 let playwright = { runs: 0, distinctTests: 0 };
 try {
-  const [command, commandArgs] = packageManager('pnpm', ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'playwright', 'test', '--list']);
+  const [command, commandArgs] = packageManager('pnpm', ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'playwright', 'test', '--config=playwright.components.config.ts', '--list']);
   playwright = parsePlaywrightList(execFileSync(command, commandArgs, { cwd: root, encoding: 'utf8', timeout: 120_000 }));
 } catch (error) { console.warn(`Playwright listing failed: ${error.message}`); }
 

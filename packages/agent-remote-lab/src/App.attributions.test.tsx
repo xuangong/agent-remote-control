@@ -177,6 +177,21 @@ it('settles attribution navigation locally while the Window save is still pendin
   }
 }, 10000);
 
+it('hides only the Team entry when the Team view is off, and keeps the Team sessions in the Window', async () => {
+  const hidden = await fixture({ hideTeam: true });
+  const entry = (container: HTMLElement) => container.querySelector<HTMLButtonElement>('button[aria-label="Teams"]');
+  await settle(() => expect(entry(hidden.container)).not.toBeNull());
+  expect(entry(hidden.container)!.closest('[aria-hidden="true"]')).not.toBeNull();
+  expect(hidden.leader().textContent).toContain('Original project');
+  expect(hidden.read().views.map(view => view.id)).toEqual(['main', 'source-view', 'leader-view', 'other-view']);
+}, 10000);
+
+it('shows the Team entry when the Team view is on', async () => {
+  const shown = await fixture();
+  await settle(() => expect(shown.container.querySelector('button[aria-label="Teams"]')).not.toBeNull());
+  expect(shown.container.querySelector('button[aria-label="Teams"]')!.closest('[aria-hidden="true"]')).toBeNull();
+}, 10000);
+
 it('reveals the Team management entry without changing the current Window layout or session bindings', async () => {
   const test = await fixture({ hideTeam: true });
   const before = structuredClone(test.read());

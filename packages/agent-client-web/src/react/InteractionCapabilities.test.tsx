@@ -81,6 +81,39 @@ it('does not render sensitive question answers or form values in completed recei
   expect(receipt.textContent).toContain('Hidden');
 });
 
+it('opens an external link in a separate, isolated page and sends nothing until the person says it is done', async () => {
+  const respond = vi.fn();
+  const request = { kind: 'external_action', requestId: 'external', title: 'Verify the project connection', message: 'Continue in browser', url: 'https://example.test/verify' } as AgentInteractionRequest;
+  const container = await render(<InteractionPanel request={request} onResponse={respond} />);
+  const link = container.querySelector<HTMLAnchorElement>('a.agent-external-link')!;
+  link.addEventListener('click', event => event.preventDefault());
+  expect(link.getAttribute('target')).toBe('_blank');
+  expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  expect(link.getAttribute('referrerpolicy')).toBe('no-referrer');
+  await act(async () => link.click());
+  expect(respond).not.toHaveBeenCalled();
+});
+
+it('presents a number field as a bounded number input and a sensitive field that says it is hidden in the history', async () => {
+  const container = await render(<InteractionPanel request={form} onResponse={vi.fn()} />);
+  const count = container.querySelector<HTMLInputElement>('input[name="count"]')!;
+  expect([count.type, count.min, count.max, count.step]).toEqual(['number', '1', '10', '1']);
+  expect(container.querySelector('input[name="token"]')?.closest('label')?.textContent).toContain('hidden in conversation history');
+});
+
+it('reads a recovered form receipt: every field the Controller redacted says Hidden answer, every other field shows its typed value', async () => {
+  const request = { kind: 'form', requestId: 'connect', title: 'Connect a project', message: 'Details', fields: [
+    { type: 'text', fieldId: 'email', label: 'Contact email', required: true },
+    { type: 'text', fieldId: 'token', label: 'Access token', required: true, sensitive: true },
+    { type: 'number', fieldId: 'retries', label: 'Retry limit', required: true, integer: true },
+    { type: 'select', fieldId: 'region', label: 'Region', required: true, options: [{ value: 'eu', label: 'EU' }] },
+  ] } as AgentInteractionRequest;
+  const container = await render(<InteractionItem item={{ type: 'interaction', request, response: { kind: 'form', action: 'submit', values: { email: 'developer@example.test', retries: 2 }, redactedFields: ['token', 'region'] } }} />);
+  await openReceipts(container);
+  const rows = Object.fromEntries([...container.querySelectorAll('.agent-form-receipt > div')].map(row => [row.querySelector('dt')!.textContent, row.querySelector('dd')!.textContent]));
+  expect(rows).toEqual({ 'Contact email': 'developer@example.test', 'Access token': 'Hidden answer', 'Retry limit': '2', Region: 'Hidden answer' });
+});
+
 async function type(input: HTMLInputElement, value: string) {
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
@@ -118,6 +151,7 @@ it('keeps form drafts in memory across offline and reconnect without submitting'
   const respond = vi.fn();
   const container = await render(<InteractionPanel request={form} onResponse={respond} />);
   await type(container.querySelector<HTMLInputElement>('input[name="token"]')!, 'retained-secret');
+  expect(JSON.stringify({ ...localStorage, ...sessionStorage })).not.toContain('retained-secret');
   await rerender(container, <InteractionPanel request={form} />);
   expect(container.querySelector<HTMLInputElement>('input[name="token"]')?.value).toBe('retained-secret');
   expect(container.querySelector('fieldset')?.disabled).toBe(true);

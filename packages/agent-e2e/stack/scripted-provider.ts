@@ -16,7 +16,7 @@
  * active turn until the turn ends, as a real provider does, and a denied approval ends it.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { parseAgentPreparedTextInput, serializeAgentPreparedTextInput, type AgentInteractionResponse, type AgentProviderAdapter, type AgentToolDetail, type AgentSessionNativeEvidence, type ProviderObservation, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import { AgentRuntimeError, parseAgentPreparedTextInput, serializeAgentPreparedTextInput, type AgentInteractionResponse, type AgentProviderAdapter, type AgentToolDetail, type AgentSessionNativeEvidence, type ProviderObservation, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory, AgentHostProviderRegistration } from '@orchardworks/agent-remote-controller';
 import { NativeSessionOwnerError, type NativeOwnerIdentity } from '@orchardworks/agent-remote-controller/testing';
 import { ScriptedSession } from '@orchardworks/agent-remote-fixtures';
@@ -81,6 +81,8 @@ export interface ScriptedProviderOptions {
    * runs before a successor is created, so a flow can hold the handoff half done.
    */
   succession?: { workspace: string; beforeCreate?(): Promise<void> };
+  /** A folder the directory offers as a workspace to browse and start sessions in; the Controller's execution policy has to allow it. */
+  workspaceRoot?: string;
 }
 
 export function scriptedProvider(options: ScriptedProviderOptions = {}) {
@@ -92,6 +94,8 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
   for (const [id, session] of Object.entries(options.sessions ?? {})) known.set(id, { ...session, history: [...session.history], createdAt: new Date(startedAt).toISOString(), updatedAt: new Date(startedAt).toISOString(), diverged: false });
   const live = new Map<string, ScriptedSessionHandle & ScriptedSession>();
   let created = 0;
+  /** The working directory each session the page created was started in. */
+  const startedIn = new Map<string, string | undefined>();
   let held: Promise<void> | undefined;
   const owners = new Map<string, NativeOwnerIdentity>();
   let handoff: ((nativeSessionId: string, next: NativeOwnerIdentity) => Promise<void>) | undefined;
@@ -101,7 +105,7 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
 
   const open = (nativeSessionId: string): ScriptedSession => {
     const saved = known.get(nativeSessionId);
-    if (!saved) throw new Error(`No scripted session ${nativeSessionId}.`);
+    if (!saved) throw new AgentRuntimeError('native_session_unavailable', `No scripted session ${nativeSessionId}.`);
     saved.diverged = false;
     const items: ProviderStreamItem[] = [...saved.history.map((entry, at) => observation(nativeSessionId, entry, at + 1, 'history')), { type: 'history_boundary' }];
     const base = new ScriptedSession(providerId, nativeSessionId, items);
@@ -126,7 +130,7 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
     /** A scripted turn: the rows and state events of a real provider's turn, under one turn id. */
     const pendingApprovals = new Map<string, (response: AgentInteractionResponse) => void>();
     let turnCount = 0, eventCount = 0, status: 'idle' | 'running' = 'idle';
-    const runtimeInfo = () => ({ providerId, sessionId: nativeSessionId, status, ...(options.succession ? { cwd: options.succession.workspace } : {}),
+    const runtimeInfo = () => ({ providerId, sessionId: nativeSessionId, status, ...(options.succession ? { cwd: options.succession.workspace } : options.workspaceRoot ? { cwd: startedIn.get(nativeSessionId) ?? options.workspaceRoot } : {}),
       persistence: { providerId, sessionId: nativeSessionId, opaque: '{}' } });
     const playTurn = async (text: string, steps: ScriptedStep[]) => {
       const turnId = `${nativeSessionId}-turn-${++turnCount}`;
@@ -234,9 +238,10 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
   const directory: AgentHostDirectory = {
     providerId,
     list: async () => [...known].map(([nativeSessionId, saved]) => ({ nativeSessionId, providerId, title: saved.title, createdAt: saved.createdAt, updatedAt: saved.updatedAt, state: 'idle' as const })),
-    workspaces: async () => [],
-    create: async () => { const id = `${providerId}-new-${++created}`; known.set(id, { title: 'New session', history: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), diverged: false }); return id; },
+    workspaces: async () => options.workspaceRoot ? [{ id: 'root', name: 'Projects', path: options.workspaceRoot }] : [],
+    create: async config => { const id = `${providerId}-new-${++created}`; startedIn.set(id, config.cwd); known.set(id, { title: 'New session', history: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), diverged: false }); return id; },
     canReleaseSession: () => true,
+    ...(options.workspaceRoot && !options.succession ? { sessionWorkspace: async (nativeSessionId: string) => startedIn.get(nativeSessionId) ?? options.workspaceRoot! } : {}),
     ...(options.succession ? { sessionWorkspace: async () => options.succession!.workspace, supportsSourceReferences: true, supportsBoundedSourceCreate: async () => true,
       sourceReferences: async () => [], setSourceBindingReader: () => {} } : {}),
     // A session that something else wrote to continues from its own last message; the Controller releases it and reads it again.
@@ -260,6 +265,10 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
     /** The running session of this provider, once something has opened it. */
     session: (nativeSessionId: string) => live.get(nativeSessionId),
     known: () => [...known.keys()],
+    /** The working directory the page chose for a session it created, by native session id. */
+    startedIn: (nativeSessionId: string) => startedIn.get(nativeSessionId),
+    /** The Host loses the session, as a deleted or never saved native session is lost: the directory no longer lists it and opening it is refused. */
+    forget(nativeSessionId: string) { known.delete(nativeSessionId); },
     /** Rows a terminal appends to the native history while the Controller's session does not see them; the provider reports the divergence. */
     terminalWrite(nativeSessionId: string, ...rows: ScriptedRow[]) {
       const saved = known.get(nativeSessionId);

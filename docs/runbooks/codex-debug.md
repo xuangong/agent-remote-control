@@ -78,7 +78,7 @@ Select the pinned native executable explicitly so tests do not use an older syst
 BORGEE_CODEX_TEST_EXECUTABLE="$PWD/.runtime/codex/node_modules/.bin/codex" pnpm test
 BORGEE_CODEX_TEST_EXECUTABLE="$PWD/.runtime/codex/node_modules/.bin/codex" \
 AGENT_REMOTE_TEST_RELAY_PORT=6014 AGENT_REMOTE_TEST_WEB_PORT=6285 \
-pnpm test:e2e e2e/codex.spec.ts --timeout=180000
+pnpm test:native:browser codex.spec.ts --timeout=180000
 ```
 
 The browser regression runs the real app-server against a local model-response fixture and covers questions, consecutive turns, and paginated history on desktop and mobile. It does not require a model API key. Use a live conversation and `ardb` to verify the configured model gateway separately.

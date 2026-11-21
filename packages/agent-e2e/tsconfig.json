@@ -21,6 +21,7 @@
     "faults",
     "smoke",
     "stack",
-    "flows"
+    "flows",
+    "soak"
   ]
 }

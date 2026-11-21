@@ -82,9 +82,14 @@ async function sessionLink(answer: () => Promise<{ agentId: string; nativeSessio
     await act(async () => { setPromptText(input, text); input.dispatchEvent(new Event('input', { bubbles: true })); });
     await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
   };
+  const type = async (text: string) => {
+    const input = container.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
+    await act(async () => { setPromptText(input, text); input.dispatchEvent(new Event('input', { bubbles: true })); });
+  };
+  const draft = () => container.querySelector<HTMLElement>('[data-testid="prompt-input"]')!.textContent;
   const waiting = () => [...container.querySelectorAll('[data-testid="pending-send"]')].map(item => item.textContent ?? '');
   await send('Sent at once');
-  return { container, sent, attach, waiting, send, advance: (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); }),
+  return { container, sent, attach, waiting, send, type, draft, advance: (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); }),
     showPane: () => act(async () => showPane()), confirm: () => act(async () => confirm()) };
 }
 
@@ -117,4 +122,17 @@ it('holds a waiting message as Not sent when the session could not be opened, an
   expect(link.container.querySelector('[role="alert"]')?.textContent).toContain('The Host refused the session.');
   await link.advance(60_000);
   expect(link.sent).toEqual([]);
+});
+
+it('keeps a command typed into a session that is still opening in its composer through the attach, without sending it', async () => {
+  const link = await sessionLink(async () => ({ agentId, nativeSessionId: target.nativeSessionId }));
+  await link.showPane();
+  await link.confirm();
+  await link.type('/ask');
+  await link.advance(ATTACH_MS / 2);
+  expect(link.draft()).toBe('/ask');
+  await link.advance(ATTACH_MS);
+  expect(link.attach).toHaveBeenCalledOnce();
+  expect(link.draft()).toBe('/ask');
+  expect(link.sent.map(message => 'text' in message.payload ? message.payload.text : message.payload.content)).toEqual(['Sent at once']);
 });

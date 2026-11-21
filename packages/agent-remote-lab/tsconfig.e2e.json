@@ -4,6 +4,6 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["e2e/**/*.ts", "e2e/**/*.tsx", "playwright.config.ts"],
+  "include": ["e2e/**/*.ts", "e2e/**/*.tsx", "playwright.components.config.ts"],
   "exclude": ["dist", "test-results"]
 }

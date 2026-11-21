@@ -106,7 +106,7 @@ AGENT_REMOTE_DSH_DELIVERY_FIXTURE=1 \
 AGENT_REMOTE_DSH_DELIVERY_EVIDENCE="$(mktemp -t dsh-delivery)" \
 AGENT_REMOTE_TEST_RELAY_PORT=6351 \
 AGENT_REMOTE_TEST_WEB_PORT=6352 \
-pnpm test:e2e dsh-delivery.spec.ts
+pnpm test:native:browser dsh-delivery.spec.ts
 ```
 
 Set `AGENT_REMOTE_TEST_BROWSER` to an installed Chromium executable when Playwright browsers are unavailable. On macOS, Google Chrome is `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`.

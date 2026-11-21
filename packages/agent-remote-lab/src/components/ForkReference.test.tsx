@@ -134,3 +134,38 @@ it('retains a known legacy shared source attachment', async () => {
   expect(container.querySelector('strong')!.textContent).toBe('Context from Parent');
   expect(container.querySelector('button')!.textContent).toBe('Open source session');
 });
+
+const snapshot: SessionFork = { ...fork, id: 'snapshot-fork', mode: undefined, itemCount: 4, capturedAt: '2026-10-02T00:00:00Z', boundary: { epoch: 'epoch-1', seq: 9 }, text: '[]' } as SessionFork;
+const reading = (container: HTMLElement) => container.querySelector('.lab-fork-reference-details')?.textContent ?? '';
+
+it('discloses what a snapshot holds and what it leaves out, with its boundary and the source to open', async () => {
+  const container = await render(<ForkReference fork={snapshot} onOpen={() => {}} />);
+  expect(container.querySelector('.lab-fork-title')?.textContent).toBe('Parent');
+  expect(reading(container)).toContain('Context from Parent');
+  expect(reading(container)).toContain('Fixed snapshot · 4 items');
+  expect(reading(container)).toContain('Later source messages are not included.');
+  expect(reading(container)).toContain('Boundary epoch-1 / 9');
+  expect(reading(container)).not.toContain('tool records shortened');
+  expect([...container.querySelectorAll('button')].map(button => button.textContent)).toContain('Open source session');
+});
+
+it('says how many tool records a snapshot shortened, and that dialogue was kept', async () => {
+  const container = await render(<ForkReference fork={{ ...snapshot, shortenedToolCount: 1 } as SessionFork} onOpen={() => {}} />);
+  expect(reading(container)).toContain('1 tool records shortened. User and assistant messages are preserved.');
+});
+
+it('describes a Side as a reference read on demand, with no snapshot or boundary', async () => {
+  const container = await render(<ForkReference fork={fork} onOpen={() => {}} />);
+  expect(reading(container)).toContain('Source reference · Read on demand. New source messages may be read.');
+  expect(reading(container)).not.toContain('Fixed snapshot');
+  expect(reading(container)).not.toContain('Boundary');
+});
+
+it('names each Side entry by its number and its first message, or else its session, or else New session', async () => {
+  const named = { ...fork, id: 'named', firstInput: '  Investigate the issue  ' };
+  const unnamed = { ...fork, id: 'unnamed', firstInput: undefined };
+  const bare = { ...fork, id: 'bare', firstInput: undefined, target: { ...fork.target!, title: '' } };
+  const container = await render(<ForkEntries forks={[named, unnamed, bare]} onOpen={() => {}} />);
+  expect([...container.querySelectorAll('.lab-fork-entry > button:first-child')].map(button => button.textContent))
+    .toEqual(['Side 1 · Investigate the issue', 'Side 2 · Child', 'Side 3 · New session']);
+});

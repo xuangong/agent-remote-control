@@ -26,6 +26,14 @@ describe('RecordedPlaybackControls', () => {
     expect(container.querySelector('[role="status"]')?.textContent).toContain('Provider resource reader stopped.');
   });
 
+  it.each([
+    ['playback-advance', 'Recorded observation advanced.'], ['playback-rehydrate', 'Recorded Timeline rehydrated.'], ['playback-stop-reader', 'Provider resource reader stopped.'],
+  ])('says %s done in its own words', async (control, words) => {
+    const container = await render(<RecordedPlaybackControls onAdvance={vi.fn()} onRehydrate={vi.fn()} onStopReader={vi.fn()} />);
+    await act(async () => (container.querySelector(`[data-testid="${control}"]`) as HTMLButtonElement).click());
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(words);
+  });
+
   it('announces a rejected fixture action as an alert', async () => {
     const container = await render(<RecordedPlaybackControls onAdvance={async () => { throw new Error('Fixture unavailable.'); }} />);
 

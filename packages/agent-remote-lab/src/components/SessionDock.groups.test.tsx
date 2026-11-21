@@ -44,6 +44,15 @@ it('keeps every primary group mounted while selection, collapse and compact pres
   expect([...mounts.values()]).toEqual([1, 1]);
 });
 
+it('offers no minimize or restore in a compact layout, which shows one group at a time and does not minimize', async () => {
+  const group = (id: string, collapsed: boolean) => ({ id, title: id, width: 640, collapsed, selected: id === 'a', content: <textarea aria-label={`${id} draft`} /> });
+  const view = await render(<SessionDockRail compact primaryGroups={[group('a', true), group('b', false)]} onCollapsePrimaryGroup={vi.fn()} />);
+  const names = () => [...view.querySelectorAll('button')].map(button => button.getAttribute('aria-label') ?? '');
+  expect(names().filter(name => /^(Minimize|Restore) primary group/.test(name))).toEqual([]);
+  expect(view.querySelector<HTMLElement>('[data-primary-group-id="a"] .lab-primary-group-content')!.hidden).toBe(false);
+  expect(view.querySelectorAll('[role="separator"]')).toHaveLength(0);
+});
+
 it('retains attached widths during a primary group resize preview and commits only its own width', async () => {
   const { WindowLayoutContext } = await import('../window-workspace-context.js');
   const { createWindowView } = await import('@orchardworks/agent-remote-protocol');

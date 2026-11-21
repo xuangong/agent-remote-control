@@ -31,7 +31,7 @@ The server continues to authorize every API and WebSocket request. A local displ
 
 ## Validation
 
-`packages/agent-remote-lab/e2e/seamless.playwright.config.ts` runs real local Gateway, Relay, Host-uplink and session-channel transports with a fixture authority. It covers desktop Chromium and iPhone WebKit, cached startup with a delayed access check, editor identity and draft preservation, foreground suspension, business request ordering, and automatic Gateway return. It does not use a real Google account or restart a native daemon.
+The flow E12 (`packages/agent-e2e/flows/e12-sign-in.e2e.ts`, `pnpm test:e2e:flows`, also with `E2E_BROWSER=webkit`) runs a real Gateway Relay with a fixture issuer, a Controller and the built page: a session link opened signed out returns to the session after sign-in, a returning browser completes authorization without a click, a slow access check on visibility and on pageshow leaves the live session usable, and confirmed device protection empties the disk copies of every tab. The callback page is tested in `packages/agent-relay-core/src/auth-callback.test.ts`, the sign-in card in `GatewayController.test.tsx` and the component spec `access-entry.spec.ts`, and the protection's wiring across tabs in `cache-protection.test.ts`. None uses a real Google account or restarts a native daemon.
 
 ## Optional device cache protection
 

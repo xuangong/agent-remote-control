@@ -19,8 +19,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run --testTimeout=2000 --hookTimeout=5000",
-    "test:e2e": "vitest run --config vitest.e2e.config.ts",
-    "test:specs": "playwright test --config=playwright.config.ts"
+    "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "devDependencies": {
     "@orchardworks/agent-client": "workspace:*",

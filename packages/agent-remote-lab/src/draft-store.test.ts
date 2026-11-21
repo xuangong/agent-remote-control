@@ -17,6 +17,15 @@ it('notifies only the edited conversation and persists the latest draft', () => 
   expect(readDrafts('scoped-drafts')).toEqual({ one: 'Latest' });
 });
 
+it('gives a page that opens later the drafts an earlier page saved, one per conversation', () => {
+  const earlier = new DraftStore('reopened-drafts');
+  earlier.set('primary', 'Unsent primary draft');
+  earlier.set('side', 'Unsent side draft');
+  const later = new DraftStore('reopened-drafts');
+  expect([later.get('primary'), later.get('side'), later.get('other')]).toEqual(['Unsent primary draft', 'Unsent side draft', '']);
+  expect(new DraftStore('another-scope').get('primary')).toBe('');
+});
+
 it('does not resurrect signed-out text or Ask drafts from a late completion', () => {
   const primary = new DraftStore('signed-out');
   const ask = new DraftStore('signed-out:ask');

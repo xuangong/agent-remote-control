@@ -111,6 +111,15 @@ describe('a Side whose link is gone, in a shared Window', () => {
     expect(scope.nextSideRequest).toHaveBeenCalled();
     expect(scope.trackedViews.unlink).not.toHaveBeenCalled();
   });
+  it('keeps a Side of the unlinked view attached to it, and leaves every other view as it was', async () => {
+    const nested = { ...buildView('nested'), attachedTo: 'target' };
+    const window = buildWindow([buildView('source'), attached, nested]);
+    const scope = scopeOf({ sharedWindow: window, sharedViewForSlot: () => attached });
+    await renderHook(() => useSideUnlinking(scope));
+    const { layout } = (scope.windowWorkspace.authority!.operate as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(layout.views.find((item: { id: string }) => item.id === 'nested')).toBe(window.views[2]);
+    expect(layout.views.find((item: { id: string }) => item.id === 'nested').attachedTo).toBe('target');
+  });
   it('does nothing to the layout for a view that is not attached', async () => {
     const scope = shared({ ...attached, attachedTo: undefined });
     await renderHook(() => useSideUnlinking(scope));

@@ -144,4 +144,16 @@ describe('succession action', () => {
     await expect(newer.succession.action(newer.host, 'status', { operationId: 'op-1' })).rejects.toMatchObject({ code: 'succession_enrollment_unavailable' });
     expect(changed.calls).toEqual([]);
   });
+
+  it('answers a repeated commit, reconcile or status of a committed operation from its saved projection, and never asks the Controller to commit twice', async () => {
+    const role = { id: 'role', revision: 2, origin: ref('A'), current: ref('B'), workspace: { controllerId: 'installation', canonicalCwd: '/w' } };
+    const record = { operationId: 'op-1', roleId: 'role', expectedRevision: 1, from: ref('A'), to: ref('B'), phase: 'committed', committedRevision: 2, startedAt: 'now', updatedAt: 'now' };
+    const run = setup({ associations: { ...emptyAssociations(), freezes: [{ ...savedFreeze(), released: 'committed', projection: { version: 1, role, receipt: record } } as never] },
+      rpc: () => ({ status: 200, body: {} }) });
+    for (const action of ['commit', 'commit', 'reconcile', 'status']) {
+      expect(await run.succession.action(run.host, action as 'commit', { operationId: 'op-1' })).toMatchObject({
+        record: { operationId: 'op-1', phase: 'committed', committedRevision: 2 }, role: { id: 'role', revision: 2 }, locator: { hostId: 'h1', providerId: 'codex', nativeSessionId: 'B' } });
+    }
+    expect(run.calls.filter(call => call.action === 'commit')).toEqual([]);
+  });
 });

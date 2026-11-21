@@ -129,6 +129,33 @@ it('keeps View options at the toolbar\'s start when the sidebar is hidden', asyn
   } finally { await app.close(); }
 });
 
+it('moves the one View options entry into the Header while the Header shows, and back to the toolbar when it is hidden', async () => {
+  const scope = 'http://localhost/window-toolbar-view-options-header/'; seedGroup(scope, windowGroup('A'));
+  history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope);
+  const header = () => app.container.querySelector<HTMLElement>('header.lab-app-bar')!;
+  const triggers = () => app.container.querySelectorAll<HTMLButtonElement>('button[aria-label="View options"]');
+  const toggleHeader = async () => {
+    await act(async () => app.button('View options')!.click());
+    await act(async () => app.container.querySelector<HTMLInputElement>('input[data-view-control="header"]')!.click());
+    await act(async () => { if (app.container.querySelector('#lab-view-options-panel')) app.button('View options')!.click(); });
+  };
+  try {
+    await until(() => expect(toolbar(app.container)).not.toBeNull());
+    expect(header().hidden).toBe(true);
+    expect(triggers()).toHaveLength(1);
+    expect(toolbar(app.container)!.contains(triggers()[0]!)).toBe(true);
+    await toggleHeader();
+    await until(() => expect(header().hidden).toBe(false));
+    expect(triggers()).toHaveLength(1);
+    expect(header().contains(triggers()[0]!)).toBe(true);
+    await toggleHeader();
+    await until(() => expect(header().hidden).toBe(true));
+    expect(triggers()).toHaveLength(1);
+    expect(toolbar(app.container)!.contains(triggers()[0]!)).toBe(true);
+  } finally { await app.close(); }
+});
+
 it('confirms before deleting the Window, then shows another one', async () => {
   const scope = 'http://localhost/window-toolbar-delete/'; seedGroup(scope, windowGroup('A')); seedGroup(scope, windowGroup('B'));
   history.replaceState(null, '', '/?window=A');

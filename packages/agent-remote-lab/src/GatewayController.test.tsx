@@ -405,3 +405,47 @@ describe('the device link indicator', () => {
     expect(view.querySelector('.gateway-recovery')).toBeNull();
   });
 });
+
+describe('the access page of a session link', () => {
+  const link = '?host=desk&provider=codex&session=native';
+  afterEach(() => window.history.replaceState(null, '', '/'));
+
+  it('waits with a sentence about the conversation, then asks to sign in with the focus on its heading and the link on the same session', async () => {
+    window.history.replaceState(null, '', '/' + link);
+    let answer!: (response: Response) => void;
+    vi.stubGlobal('fetch', () => new Promise<Response>(resolve => { answer = resolve; }));
+    const view = await render(<GatewayController>{() => <p>Private controller</p>}</GatewayController>);
+    expect(view.querySelector('[role="status"]')?.textContent).toBe('Opening your conversation…');
+    expect(view.querySelector('h1')).toBeNull();
+    await act(async () => answer(Response.json({}, { status: 401 })));
+    const heading = view.querySelector('h1')!;
+    expect(heading.textContent).toBe('Sign in to continue');
+    expect(document.activeElement).toBe(heading);
+    expect(view.querySelector('a.arc-access-action')?.getAttribute('href')).toBe('/auth/login' + link);
+  });
+
+  it('offers a retry when the Relay is unreachable that keeps the session link, and shows the sign-in card once it answers', async () => {
+    window.history.replaceState(null, '', '/' + link);
+    let status = 503;
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({}, { status })));
+    const view = await render(<GatewayController>{() => <p>Private controller</p>}</GatewayController>);
+    expect(view.querySelector('h1')?.textContent).toBe('Can’t reach Orchard right now');
+    expect(document.activeElement).toBe(view.querySelector('h1'));
+    expect(view.querySelector('.arc-access-secondary')?.getAttribute('href')).toBe('/auth/login' + link);
+    status = 401;
+    await act(async () => view.querySelector<HTMLButtonElement>('button.arc-access-action')!.click());
+    expect(view.querySelector('h1')?.textContent).toBe('Sign in to continue');
+    expect(view.querySelector('a.arc-access-action')?.getAttribute('href')).toBe('/auth/login' + link);
+  });
+
+  it('speaks the browser\'s language on the sign-in card', async () => {
+    window.history.replaceState(null, '', '/' + link);
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({}, { status: 401 })));
+    const languages = vi.spyOn(window.navigator, 'languages', 'get').mockReturnValue(['zh-CN', 'en']);
+    try {
+      const view = await render(<GatewayController>{() => <p>Private controller</p>}</GatewayController>);
+      expect(view.querySelector('h1')?.textContent).toBe('登录后继续');
+      expect(view.querySelector('a.arc-access-action')?.textContent).toBe('登录');
+    } finally { languages.mockRestore(); }
+  });
+});

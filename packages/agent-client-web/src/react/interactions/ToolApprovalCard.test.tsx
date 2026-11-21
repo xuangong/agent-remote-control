@@ -76,6 +76,18 @@ describe('tool approval', () => {
     expect(container.querySelector('[role="alert"]')).toBeNull();
   });
 
+  it.each([
+    ['[data-decision="deny"]', { kind: 'tool_approval', decision: 'deny' }],
+    ['[data-decision="cancel"]', { kind: 'tool_approval', decision: 'cancel' }],
+    ['[data-scope="once"]', { kind: 'tool_approval', decision: 'allow', scope: 'once' }],
+  ] as const)('sends the decision of the button %s chosen in the list of changes', async (selector, response) => {
+    const respond = vi.fn().mockResolvedValue(undefined);
+    const container = await render(<InteractionPanel request={request} onResponse={respond} />);
+    await showChanges(container);
+    await act(async () => container.querySelector<HTMLButtonElement>(`.agent-approval-actions ${selector}`)!.click());
+    expect(respond).toHaveBeenCalledExactlyOnceWith('command', response);
+  });
+
   it.each(['cancel', 'deny'] as const)('only offers and submits the permitted %s decision', async decision => {
     const respond = vi.fn().mockResolvedValue(undefined);
     const container = await render(<InteractionPanel request={{ ...request, allowedDecisions: [decision] }} onResponse={respond} />);

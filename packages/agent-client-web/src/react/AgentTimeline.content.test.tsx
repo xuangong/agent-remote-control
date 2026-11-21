@@ -29,6 +29,18 @@ function state(content = items) {
   })) } };
 }
 
+describe('a message the person wrote over several lines', () => {
+  it('reads as separate paragraphs with its line break and emphasis, as one user message', async () => {
+    const text = 'Help me improve this.\n\nKeep the **shared components**,\nand show the protocol.';
+    const container = await render(<AgentTimeline processMode="full" state={state([{ type: 'user_message', text }])} />);
+    const row = container.querySelector('.agent-message-user')!;
+    const paragraphs = [...row.querySelectorAll('p')];
+    expect(paragraphs.map(node => node.textContent)).toEqual(['Help me improve this.', 'Keep the shared components,\nand show the protocol.']);
+    expect(paragraphs[1]!.querySelectorAll('br')).toHaveLength(1);
+    expect(paragraphs[1]!.querySelector('strong')?.textContent).toBe('shared components');
+  });
+});
+
 describe('the conversation in Concise: messages and decisions, the work behind its line', () => {
   it('updates task completion and plan tool status while preserving answered questions and approval decisions', async () => {
     const request = { kind: 'question' as const, requestId: 'requirements', questions: [{

@@ -22,7 +22,15 @@ const session = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'reco
 const sidebarFixture = new URLSearchParams(location.search).has('sidebar');
 const renameFixture = new URLSearchParams(location.search).get('rename');
 directory.list = async () => ({ items: sidebarFixture ? Array.from({ length: 24 }, (_, index) => ({ ...session, nativeSessionId: `session-${index}`, title: `${['Review connection stability', 'Improve mobile session navigation', 'Investigate preview tunnel requests'][index % 3]} ${index + 1}` })) : [session], hasMore: false, revision: '1' });
-directory.workspaces = async () => ({ workspaces: [] });
+// Three providers with values far longer than a phone screen, and a listing that fails while `window.fixtureCatalogFails` is set.
+const providersFixture = new URLSearchParams(location.search).has('providers');
+const longValue = 'Workstation0123456789'.repeat(12);
+const providerNames = [{ providerId: 'codex', displayName: 'Codex CLI' }, { providerId: 'claude', displayName: 'Claude Code' }, { providerId: 'copilot', displayName: 'GitHub Copilot CLI' }];
+directory.workspaces = async () => ({ workspaces: providersFixture ? [{ id: 'project', name: longValue, path: `/projects/${longValue}` }] : [] });
+if (providersFixture) directory.list = async providerId => {
+  if ((window as unknown as { fixtureCatalogFails?: boolean }).fixtureCatalogFails) throw new Error(`Discovery failed: ${longValue}`);
+  return { items: Array.from({ length: 12 }, (_, index) => ({ hostId: 'host', providerId, nativeSessionId: `${providerId}-${index}`, title: `${providerId} ${longValue}`, workspace: `/projects/${longValue}`, model: longValue, state: 'idle' as const, createdAt: '2026-09-14T00:00:00Z', updatedAt: '2026-09-14T00:00:00Z' })), hasMore: false, revision: '1' };
+};
 directory.attach = async () => ({ agentId: 'agent-1', nativeSessionId: session.nativeSessionId });
 const observers = new Map<RemoteTransportListener, string>();
 const catchUpFixture = new URLSearchParams(location.search).has('catchup');
@@ -31,6 +39,9 @@ const allowContent = new URLSearchParams(location.search).has('switching');
 // A current Controller negotiates session control and grants it; without it, an opened session is read only.
 const controlFixture = new URLSearchParams(location.search).has('control');
 if (allowContent) directory.attach = async (_providerId, nativeSessionId) => ({ agentId: nativeSessionId, nativeSessionId });
+// A spec holds the Host's attachment by setting `window.fixtureAttachGate` to a promise it resolves later.
+const attachNow = directory.attach.bind(directory);
+directory.attach = async (...args) => { await (window as unknown as { fixtureAttachGate?: Promise<void> }).fixtureAttachGate; return attachNow(...args); };
 const transport: RemoteAgentTransport & Pick<HttpWebSocketTransport, 'listProviders' | 'createAgent' | 'resumeAgent'> = {
   listProviders: async () => [{ providerId: 'recorded', displayName: 'Recorded' }],
   createAgent: async () => { throw new Error('Creation is not used'); },
@@ -93,7 +104,7 @@ window.addEventListener('fixture-content', event => {
   } });
 });
 localStorage.setItem(`agent-remote-opened:${baseUrl}`, JSON.stringify([{ ...session, agentId: 'agent-1' }]));
-const hostService = { ...(sidebarFixture ? { controllerRelease: async () => ({ release: null }) } : {}), hosts: async () => ({ hosts: [{ id: 'host', name: sidebarFixture ? 'zhangxians-Mac-mini.local · CLI' : 'Work Mac', online: renameFixture !== 'offline', ...(sidebarFixture ? { access: 'owner' as const, environment: { detectedAt: Date.now(), os: { platform: 'darwin', name: 'macOS', arch: 'arm64', release: '25.0' }, shell: { name: 'zsh', source: 'account' as const }, shells: [], browsers: ['Chrome', 'Edge', 'Safari'].map(name => ({ id: name.toLowerCase(), name, status: 'found' as const })), vscode: { status: 'found' as const }, wsl: false, container: false } } : {}), providers: [{ providerId: 'recorded', displayName: 'Recorded', ...(renameFixture && renameFixture !== 'unsupported' ? { sessionRename: true as const } : {}) }] }] }), pair: async () => { throw new Error('Pairing is not used'); } };
+const hostService = { ...(sidebarFixture ? { controllerRelease: async () => ({ release: null }) } : {}), hosts: async () => ({ hosts: [{ id: 'host', name: sidebarFixture ? 'zhangxians-Mac-mini.local · CLI' : 'Work Mac', online: renameFixture !== 'offline', ...(sidebarFixture ? { access: 'owner' as const, environment: { detectedAt: Date.now(), os: { platform: 'darwin', name: 'macOS', arch: 'arm64', release: '25.0' }, shell: { name: 'zsh', source: 'account' as const }, shells: [], browsers: ['Chrome', 'Edge', 'Safari'].map(name => ({ id: name.toLowerCase(), name, status: 'found' as const })), vscode: { status: 'found' as const }, wsl: false, container: false } } : {}), providers: providersFixture ? providerNames : [{ providerId: 'recorded', displayName: 'Recorded', ...(renameFixture && renameFixture !== 'unsupported' ? { sessionRename: true as const } : {}) }] }] }), pair: async () => { throw new Error('Pairing is not used'); } };
 const requestedStatus = new URLSearchParams(location.search).get('status');
 const status = requestedStatus === 'waiting' || requestedStatus === 'idle' ? requestedStatus : 'running';
 const entries = longConversation ? Array.from({ length: 30 }, (_, index) => ({ providerId: 'recorded', seqStart: index + 1, seqEnd: index + 1, timestamp: '2026-09-20T00:00:00Z',

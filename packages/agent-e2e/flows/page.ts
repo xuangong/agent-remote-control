@@ -127,27 +127,39 @@ export const rowOffset = (page: Page, text: string): Promise<number | undefined>
  * of the page, and the page opens new ones by itself. With `held`, the Relay's first timeline page of a session, and every frame after it
  * on that socket, waits until `release()` (with `'agent_snapshot'`, the first snapshot of the session instead of the first timeline page); the page has by then everything else (the account, the Hosts, the subscription) but no
  * conversation rows from the Relay. Install it before the page loads.
+ *
+ * For the lifecycle simulator (`LifecycleSockets`): `cut()` ends the Relay's side of every open socket while the page's side stays open and
+ * carries nothing until `drop()`, as a connection that died while the page was frozen; `halfOpen()` lets nothing through either way and no
+ * close reach the page, as a connection that looks open and is dead. Sockets the page opens afterwards work.
  */
 export async function watchSockets(page: Page, held: boolean | 'agent_snapshot' = false) {
   const holdFrom = held === 'agent_snapshot' ? '"type":"agent_snapshot"' : '"type":"timeline_page"';
-  const open = new Set<import('@playwright/test').WebSocketRoute>();
+  type Route = import('@playwright/test').WebSocketRoute;
+  const open = new Map<Route, { dead: boolean; cut(): void }>();
   const releases: Array<() => void> = [];
   let released = !held;
   let closed = 0;
   await page.routeWebSocket(/.*/, socket => {
     const server = socket.connectToServer();
-    open.add(socket);
-    socket.onClose(() => { if (open.delete(socket)) closed += 1; });
+    // `dead`: nothing passes either way and no close reaches the page.
+    const state = { dead: false, cut: () => { state.dead = true; server.close({ code: 1006, reason: 'network dropped' }); } };
+    open.set(socket, state);
+    socket.onClose((code, reason) => { if (open.delete(socket)) closed += 1; if (!state.dead) server.close({ code, reason }); });
+    socket.onMessage(message => { if (!state.dead) server.send(message); });
+    server.onClose((code, reason) => { if (!state.dead) void socket.close({ code, reason }); });
     const waiting: Array<string | Buffer> = [];
     let holding = false;
     server.onMessage(message => {
+      if (state.dead) return;
       if (!released && (holding || (typeof message === 'string' && message.includes(holdFrom)))) { holding = true; waiting.push(message); return; }
       socket.send(message);
     });
-    releases.push(() => { holding = false; for (const message of waiting.splice(0)) socket.send(message); });
+    releases.push(() => { holding = false; for (const message of waiting.splice(0)) if (!state.dead) socket.send(message); });
   });
   return {
-    drop: async () => { const cut = [...open]; open.clear(); closed += cut.length; await Promise.all(cut.map(socket => socket.close({ code: 1006, reason: 'network dropped' }))); return cut.length; },
+    drop: async () => { const cut = [...open.keys()]; open.clear(); closed += cut.length; await Promise.all(cut.map(socket => socket.close({ code: 1006, reason: 'network dropped' }))); return cut.length; },
+    cut: () => { for (const state of open.values()) state.cut(); return open.size; },
+    halfOpen: () => { for (const state of open.values()) state.dead = true; return open.size; },
     release: () => { released = true; for (const release of releases) release(); },
     /** Runs `cause` (a Relay restart, say) and waits until every socket the page had was lost and the page has the same number open again. */
     async recoveredFrom(cause: () => Promise<void>, timeout = 30_000) {

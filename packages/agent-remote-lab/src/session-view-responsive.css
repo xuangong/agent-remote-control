@@ -54,10 +54,19 @@
   .lab-composer-dock .agent-composer :is(textarea, .agent-composer-editor) { font-size: 16px; }
 }
 
-/* Short views keep menus usable by letting them cover the composer. */
+/* Short views keep the session panel usable by letting it cover the composer. The command menu stays above the composer, so the person
+   sees the command they type while the keyboard is up (O58); only a view too short for two commands above it lets the menu cover it. */
 @container session-view (max-height: 420px) {
   .lab-composer-dock .agent-composer-input { position: static; }
-  .lab-composer-dock :is(.agent-session-panel, .agent-command-menu) {
+  .lab-composer-dock .agent-composer-input:has(> .agent-command-menu) { position: relative; }
+  .lab-composer-dock .agent-session-panel {
+    bottom: 0;
+    max-height: min(360px, max(0px, calc(100cqh - 72px)));
+  }
+}
+@container session-view (max-height: 240px) {
+  .lab-composer-dock .agent-composer-input:has(> .agent-command-menu) { position: static; }
+  .lab-composer-dock .agent-command-menu {
     bottom: 0;
     max-height: min(360px, max(0px, calc(100cqh - 72px)));
   }

@@ -49,11 +49,10 @@ test('Settings > Computers and its pairing key keep every control and line insid
 });
 
 test('a computer with a long unbroken name keeps its page and Rotate credential inside a 390px and a 320px phone', async ({ page }, info) => {
-  // An open defect: the computer page's heading (`.lab-host-page-head h2`) does not wrap an unbroken name, so the page is 580 px wide
-  // and Settings scrolls sideways. The test is expected to fail until the heading wraps; then remove this line.
-  test.fail(true, 'the computer page heading does not wrap an unbroken name');
+  // The computer page's heading wraps an unbroken name inside the page (O55): the page is not wider than the phone, and Settings does not scroll sideways.
   const { settings, fits } = await openComputers(page);
   await settings.locator('.lab-host-open').first().tap();
+  await expect(settings.locator('.lab-host-page-head h2')).toHaveText(longHost);
   await settings.getByRole('button', { name: 'Rotate credential', exact: true }).tap();
   await page.screenshot({ path: info.outputPath('computer-page.png') });
   for (const width of [390, 320]) await fits(width);

@@ -21,3 +21,53 @@ it('keeps the drafts and images stores of the same browser database untouched', 
 it('rejects when browser storage is unavailable, for the device store to absorb', async () => {
   await expect(createBrowserDeviceDatabase(() => undefined).readIndex()).rejects.toThrow('unavailable');
 });
+
+/** A page's localStorage, as a map. */
+function memoryStorage() {
+  const values = new Map<string, string>();
+  return { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); }, values };
+}
+
+it('puts on disk, at the next open, what a leaving page kept synchronously, a newer stored record staying, and then forgets it', async () => {
+  const factory = new IDBFactory(), storage = memoryStorage();
+  const before = createBrowserDeviceDatabase(() => factory, () => storage);
+  const newer = record('newer', 9), removed = record('removed', 1);
+  await before.write(new Map([[newer.key, newer], [removed.key, removed]]));
+  // The leaving page had not written these: a new record, an older copy of a record on disk, and the removal of one.
+  const left = record('left', 5);
+  before.keepWhileLeaving!(new Map<string, ReturnType<typeof record> | null>([[left.key, left], [newer.key, record('newer', 3)], [removed.key, null]]));
+  expect(storage.values.has('agent-remote:device-store:leaving')).toBe(true);
+  const next = createBrowserDeviceDatabase(() => factory, () => storage);
+  expect((await next.readIndex()).map(row => [row.key, row.updatedAt]).sort()).toEqual([[left.key, 5], [newer.key, 9]].sort());
+  expect((await next.read(left.key))?.entries).toEqual(left.entries);
+  expect(storage.values.has('agent-remote:device-store:leaving')).toBe(false);
+});
+
+it('adds to what an earlier leaving page kept, keeps nothing when storage is full, and forgets what it kept on clear', async () => {
+  const factory = new IDBFactory(), storage = memoryStorage();
+  const database = createBrowserDeviceDatabase(() => factory, () => storage);
+  const first = record('first', 1), second = record('second', 2);
+  database.keepWhileLeaving!(new Map([[first.key, first]]));
+  database.keepWhileLeaving!(new Map([[second.key, second]]));
+  expect((await createBrowserDeviceDatabase(() => factory, () => storage).readIndex()).map(row => row.key).sort()).toEqual([first.key, second.key].sort());
+  const full = { ...memoryStorage(), setItem: () => { throw Object.assign(new Error('full'), { name: 'QuotaExceededError' }); } };
+  expect(() => createBrowserDeviceDatabase(() => factory, () => full).keepWhileLeaving!(new Map([[first.key, first]]))).not.toThrow();
+  database.keepWhileLeaving!(new Map([[second.key, second]]));
+  await database.clear();
+  expect(storage.values.has('agent-remote:device-store:leaving')).toBe(false);
+  expect(await createBrowserDeviceDatabase(() => factory, () => storage).readIndex()).toEqual([]);
+});
+
+it('puts what this page kept while hidden on disk before the next read of the index, so a purge in the same page removes it', async () => {
+  const factory = new IDBFactory(), storage = memoryStorage();
+  const database = createBrowserDeviceDatabase(() => factory, () => storage);
+  expect(await database.readIndex()).toEqual([]);
+  // The database is open; the page is hidden with a write that had not completed, then shown again, and the person signs out.
+  const kept = record('kept', 4);
+  database.keepWhileLeaving!(new Map([[kept.key, kept]]));
+  const rows = await database.readIndex();
+  expect(rows.map(row => row.key)).toEqual([kept.key]);
+  await database.write(new Map(rows.map(row => [row.key, null] as const)));
+  expect(storage.values.has('agent-remote:device-store:leaving')).toBe(false);
+  expect(await createBrowserDeviceDatabase(() => factory, () => storage).readIndex()).toEqual([]);
+});

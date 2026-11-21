@@ -16,6 +16,10 @@ export default defineConfig({
       server.middlewares.use(FILE_FRAME_PATH, (_request, response) => { response.writeHead(200, fileFrameHeaders); response.end(fileFrameDocument); });
     },
   }],
+  // No modulepreload links for code-split JavaScript: WebKit keeps a failed `modulepreload` response for its URL across reloads and
+  // navigations, so a chunk whose first fetch failed could never load again and the page stayed empty (O54). An `import()` that failed is
+  // fetched again after a reload, which is how `loadChunkWithRecovery` recovers. A chunk's CSS is still loaded by the preload helper.
+  build: { modulePreload: false },
   server: {
     proxy: {
       '/v1': {

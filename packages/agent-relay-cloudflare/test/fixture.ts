@@ -50,6 +50,7 @@ async function buildBundles(options: { actualEntry?: true; completeCodec?: true;
           this.completeCodec = ${options.completeCodec === true};
           if (this.completeCodec) this.fixtureReady = ctx.blockConcurrencyWhile(async () => this.reopenCodec());
         }
+        hostLiveness() { const ms = Number(this.env.FIXTURE_HEARTBEAT_MS); return ms ? { heartbeatIntervalMs: ms, heartbeatTimeoutMs: Math.floor(ms / 2) } : {}; }
         reopenCodec() {
           const auth = { origin: this.fixtureEnv.AGENT_REMOTE_RELAY_URL, issuer: this.fixtureEnv.AGENT_REMOTE_ISSUER, secret: this.fixtureEnv.AGENT_REMOTE_SIGNING_SECRET };
           this.fixtureCodec = new SqliteRelayStore(this.fixtureContext.storage, auth);
@@ -75,6 +76,7 @@ async function buildBundles(options: { actualEntry?: true; completeCodec?: true;
             blob: this.fixtureContext.storage.sql.exec('SELECT bytes FROM relay_snapshot_chunks LIMIT 1').toArray().map(row => ({ arrayBuffer: row.bytes instanceof ArrayBuffer, size: row.bytes.byteLength, prefix: Array.from(new Uint8Array(row.bytes).slice(0, 16)) }))
           });
           if (path.startsWith('/_fixture/conformance/state/')) return Response.json(await runRelayStateStoreCase(this.fixtureContext.storage, Number(path.split('/').at(-1))));
+          if (path === '/_fixture/abort') { this.fixtureContext.abort('fixture reset'); return new Response('unreachable', { status: 500 }); }
           if (path === '/_fixture/alarm') { await this.alarm(); return new Response('ok'); }
           if (path === '/_fixture/journal-tables') return Response.json(this.fixtureContext.storage.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'journal%'").toArray());
           if (path.startsWith('/_fixture/partition/')) {
@@ -138,7 +140,7 @@ async function buildBundles(options: { actualEntry?: true; completeCodec?: true;
   return { script, journalsScript };
 }
 
-export async function fixture(options: { actualEntry?: true; completeCodec?: true; authProvider?: 'google' | 'mainsite' | 'gateway'; previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; workerVersionId?: string; authorityOutageGraceMs?: number; journals?: { tuning?: object; withoutBinding?: true; olderPartition?: true };
+export async function fixture(options: { actualEntry?: true; completeCodec?: true; authProvider?: 'google' | 'mainsite' | 'gateway'; previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; workerVersionId?: string; authorityOutageGraceMs?: number; /** The Relay's heartbeat interval for connected Hosts, in ms. */ heartbeatIntervalMs?: number; journals?: { tuning?: object; withoutBinding?: true; olderPartition?: true };
   /** Serves the store conformance cases of `testing` entries from the Durable Objects. */ conformance?: true; /** The fixture lives until its file ends instead of one test. */ lifetime?: 'file' } = {}) {
   const owned = options.lifetime === 'file' ? fileClosers : closers;
   const directory = await mkdtemp(join(tmpdir(), 'arc-workers-'));
@@ -158,7 +160,7 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
   async function start() {
     mf = new Miniflare({ handleRuntimeStdio: (_stdout, stderr) => { stderr.on('data', chunk => { runtimeErrors.push(String(chunk)); }); }, durableObjectsPersist: join(directory, 'state'), workers: [{ name: 'relay', modules: true, script, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
       durableObjects: { RELAY: { className: options.actualEntry ? 'RelayObject' : 'TestRelayObject', useSQLite: true }, ...(options.journals?.withoutBinding ? {} : { JOURNALS: { className: options.journals?.olderPartition ? 'OlderJournalPartition' : options.actualEntry ? 'JournalPartition' : 'TestJournalPartition', scriptName: 'journals', useSQLite: true } }) },
-      bindings: { ...(options.journals ? { AGENT_REMOTE_JOURNALS: '1' } : {}), ...(options.workerVersionId ? { CF_VERSION_METADATA: { id: options.workerVersionId } } : {}), ...(options.authorityOutageGraceMs !== undefined ? { AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS: String(options.authorityOutageGraceMs) } : {}), AGENT_REMOTE_RELAY_URL: origin, ...(options.previewDomain ? { AGENT_REMOTE_PREVIEW_DOMAIN: options.previewDomain } : {}), ...(options.previewOrigin ? { AGENT_REMOTE_PREVIEW_URL: options.previewOrigin } : {}), ...(options.authProvider === 'google' ? {
+      bindings: { ...(options.journals ? { AGENT_REMOTE_JOURNALS: '1' } : {}), ...(options.workerVersionId ? { CF_VERSION_METADATA: { id: options.workerVersionId } } : {}), ...(options.heartbeatIntervalMs !== undefined ? { FIXTURE_HEARTBEAT_MS: String(options.heartbeatIntervalMs) } : {}), ...(options.authorityOutageGraceMs !== undefined ? { AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS: String(options.authorityOutageGraceMs) } : {}), AGENT_REMOTE_RELAY_URL: origin, ...(options.previewDomain ? { AGENT_REMOTE_PREVIEW_DOMAIN: options.previewDomain } : {}), ...(options.previewOrigin ? { AGENT_REMOTE_PREVIEW_URL: options.previewOrigin } : {}), ...(options.authProvider === 'google' ? {
         AGENT_REMOTE_AUTH_PROVIDER: 'google', AGENT_REMOTE_GOOGLE_CLIENT_ID: googleClientId, AGENT_REMOTE_GOOGLE_CLIENT_SECRET: 'workers-client-secret', AGENT_REMOTE_GOOGLE_ALLOWED_EMAILS: googleEmails,
       } : { ...(options.authProvider ? { AGENT_REMOTE_AUTH_PROVIDER: options.authProvider } : {}), AGENT_REMOTE_ISSUER: issuer }), AGENT_REMOTE_SIGNING_SECRET: envSecret },
       serviceBindings: { ASSETS: async request => new Response(new URL(request.url).pathname === '/index.html'

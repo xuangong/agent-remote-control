@@ -3,10 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Test support for the real stack: fault injection (the latency proxy, process faults, quota and many-session profiles) and the smoke harness that runs real Claude Code and Codex sessions on a `pnpm local` instance under those faults.",
+  "description": "Test support for the real stack: fault injection (the latency proxy, process faults, quota and many-session profiles), the browser lifecycle simulator of a phone (suspension, dead sockets, the back-forward cache, an ended page, storage eviction, the installed app), and the smoke harness that runs real Claude Code and Codex sessions on a `pnpm local` instance under those faults.",
   "exports": {
     "./faults/connection-words.mjs": "./faults/connection-words.mjs",
     "./faults/latency-proxy.mjs": "./faults/latency-proxy.mjs",
+    "./lifecycle": {
+      "import": "./lifecycle/page-lifecycle.ts",
+      "types": "./lifecycle/page-lifecycle.ts"
+    },
     "./smoke/probe": {
       "import": "./smoke/lib/probe.ts",
       "types": "./smoke/lib/probe.ts"

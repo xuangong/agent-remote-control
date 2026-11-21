@@ -1,6 +1,6 @@
-import { afterEach, expect, it } from 'vitest';
-import { DeviceStore, type SessionIdentity } from './device-store.js';
-import { buildSessionIdentity, buildStoredRecord, memoryDeviceDatabase, TEST_RELAY_URL as scope } from './testing/index.js';
+import { afterEach, expect, it, vi } from 'vitest';
+import { DeviceStore, type SessionIdentity, type StoredRecord } from './device-store.js';
+import { buildSessionIdentity, buildStoredRecord, installPageLifecycle, memoryDeviceDatabase, stubBrowserPage, TEST_RELAY_URL as scope } from './testing/index.js';
 
 const identity = (name: string): SessionIdentity => buildSessionIdentity(name);
 const record = (who: string, name: string, at: number, rows = 3, text?: string) => buildStoredRecord({ relayUrl: who, nativeSessionId: name, updatedAt: at, rows, text });
@@ -8,16 +8,20 @@ const quota = Object.assign(new Error('full'), { name: 'QuotaExceededError' });
 
 let database = memoryDeviceDatabase();
 /** A page: a store over the device's one database. A second `make` is a later page of the same device. */
-const make = (options: ConstructorParameters<typeof DeviceStore>[0] = {}) => new DeviceStore({ database, writeBehindMs: 5, ...options });
-afterEach(() => { database = memoryDeviceDatabase(); });
+const make = (options: ConstructorParameters<typeof DeviceStore>[0] = {}) => new DeviceStore({ database, ...options });
+afterEach(() => { database = memoryDeviceDatabase(); vi.useRealTimers(); installPageLifecycle(); });
+const immediate = globalThis.setImmediate;
+/** The end of the current task: every microtask it queued has run, and no timer has. */
+const endOfTask = () => new Promise<void>(resolve => immediate(resolve));
 
-it('keeps a record in memory at once and writes it behind, and a new page preloads it', async () => {
+it('keeps a record in memory at once and on disk before its task ends, with no timer, and a new page preloads it', async () => {
+  // No timer may run: a page that leaves or is ended right after keeping a record still has it on disk.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
   const store = make();
   const saved = record(scope, 'one', 100);
   store.put(saved);
   expect(store.read(scope, identity('one'))).toBe(saved);
-  expect(database.keys()).toEqual([]);
-  await store.flush();
+  await endOfTask();
   expect(database.keys()).toEqual([saved.key]);
   const fresh = make();
   expect(fresh.read(scope, identity('one'))).toBeUndefined();
@@ -25,12 +29,13 @@ it('keeps a record in memory at once and writes it behind, and a new page preloa
   expect(fresh.read(scope, identity('one'))?.entries).toHaveLength(3);
 });
 
-it('batches the writes that arrive within the delay into one write', async () => {
-  const store = make({ writeBehindMs: 20 });
+it('writes the records kept in one task in one write, the last of a key winning', async () => {
+  const store = make();
   store.put(record(scope, 'a', 1)); store.put(record(scope, 'b', 2)); store.put(record(scope, 'a', 3));
-  await new Promise(resolve => setTimeout(resolve, 60));
+  await endOfTask();
   expect(database.writes).toBe(1);
   expect(database.keys()).toHaveLength(2);
+  expect((await database.read(record(scope, 'a', 3).key))?.updatedAt).toBe(3);
 });
 
 it('never reads or lists a record of another Relay URL, which is where another person is', async () => {
@@ -70,7 +75,7 @@ it('purges every record of a Relay, or of all Relays, from memory, the queue and
   expect(store.read(scope, identity('a'))).toBeUndefined();
   expect(store.read(scope, identity('queued'))).toBeUndefined();
   expect(store.read(other, identity('b'))).toBeDefined();
-  await new Promise(resolve => setTimeout(resolve, 15));
+  await endOfTask();
   expect(database.keys()).toHaveLength(1);
   await store.purge();
   expect(store.read(other, identity('b'))).toBeUndefined();
@@ -120,12 +125,12 @@ it('keeps the content in memory when the write fails twice', async () => {
 });
 
 it('works from memory when there is no database or it fails to open', async () => {
-  const unavailable = new DeviceStore({ writeBehindMs: 1 });
+  const unavailable = new DeviceStore();
   const saved = record(scope, 'a', 1);
   unavailable.put(saved);
   await unavailable.flush(); await unavailable.preload(scope);
   expect(unavailable.read(scope, identity('a'))).toBe(saved);
-  const broken = new DeviceStore({ writeBehindMs: 1, database: { ...memoryDeviceDatabase(), readIndex: () => Promise.reject(new Error('blocked')), write: () => Promise.reject(new Error('blocked')) } });
+  const broken = new DeviceStore({ database: { ...memoryDeviceDatabase(), readIndex: () => Promise.reject(new Error('blocked')), write: () => Promise.reject(new Error('blocked')) } });
   broken.put(saved);
   await expect(broken.flush()).resolves.toBeUndefined();
   await expect(broken.preload(scope)).resolves.toBeUndefined();
@@ -171,7 +176,7 @@ it('loads a record from disk that the preload budget left out', async () => {
 
 it('keeps memory only while the database says its storage does not exist, and writes once it does', async () => {
   let exists = false;
-  const store = new DeviceStore({ database: { ...database, available: () => exists }, writeBehindMs: 1 });
+  const store = new DeviceStore({ database: { ...database, available: () => exists } });
   store.put(record(scope, 'a', 1));
   await store.flush();
   expect(database.keys()).toEqual([]);
@@ -180,4 +185,43 @@ it('keeps memory only while the database says its storage does not exist, and wr
   store.put(record(scope, 'b', 2));
   await store.flush();
   expect(database.keys()).toEqual([record(scope, 'b', 2).key]);
+});
+
+it('hands what is not on disk yet to the database\'s synchronous keep when the page hides or leaves, and nothing once it is written', async () => {
+  const page = stubBrowserPage();
+  const kept: Array<Array<[string, StoredRecord | null]>> = [];
+  let finish!: () => void;
+  const slow = { ...database, write: () => new Promise<void>(resolve => { finish = resolve; }), keepWhileLeaving: (batch: ReadonlyMap<string, StoredRecord | null>) => { kept.push([...batch]); } };
+  const store = make({ database: slow });
+  const saved = record(scope, 'a', 1);
+  store.put(saved); store.forget(scope, identity('gone'));
+  await endOfTask();
+  // The write started and has not completed: WebKit would abort it on leaving, so the page keeps the batch at once.
+  page.window.dispatchEvent(new Event('pagehide'));
+  expect(kept).toEqual([[[saved.key, saved], [record(scope, 'gone', 1).key, null]]]);
+  finish();
+  await endOfTask();
+  page.window.dispatchEvent(new Event('pageshow'));
+  page.document.visibilityState = 'hidden';
+  page.document.dispatchEvent(new Event('visibilitychange'));
+  expect(kept).toHaveLength(1);
+});
+
+it('keeps nothing while leaving when persistence is off, or once a purge took the records', async () => {
+  const page = stubBrowserPage();
+  const kept: unknown[] = [];
+  const stuck = { ...database, write: () => new Promise<void>(() => undefined), keepWhileLeaving: (batch: ReadonlyMap<string, StoredRecord | null>) => { kept.push([...batch]); } };
+  const off = make({ database: stuck });
+  off.configurePersistence(() => false);
+  off.put(record(scope, 'a', 1));
+  await endOfTask();
+  page.window.dispatchEvent(new Event('pagehide'));
+  expect(kept).toEqual([]);
+  page.window.dispatchEvent(new Event('pageshow'));
+  const purged = make({ database: stuck });
+  purged.put(record(scope, 'b', 2));
+  await endOfTask();
+  void purged.purge(scope);
+  page.window.dispatchEvent(new Event('pagehide'));
+  expect(kept).toEqual([]);
 });

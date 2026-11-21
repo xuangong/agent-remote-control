@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { installLifecycle } from '@orchardworks/agent-e2e/lifecycle';
 import { contrastFailures } from './contrast.js';
 
 // The Orchard primitives on their fixture page, in both themes, at desktop and phone width: contrast, the theme override,
@@ -118,17 +119,19 @@ test.describe('motion', () => {
 
   test('a hidden page runs no avatar or mark animation, and a visible one resumes', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
+    const lifecycle = await installLifecycle(page);
     await open(page, 'theme=light&motion=on');
     const running = await page.locator('animate').count();
     expect(running).toBeGreaterThan(0);
-    const setVisibility = (state: 'hidden' | 'visible') => page.evaluate(next => {
-      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => next });
-      document.dispatchEvent(new Event('visibilitychange'));
-    }, state);
-    await setVisibility('hidden');
+    await lifecycle.hide();
     await expect(page.locator('animate')).toHaveCount(0);
     expect(await page.evaluate(() => document.querySelectorAll('.orchard-mark-glance, .orchard-mark-sway, .orchard-avatar[data-bob]').length)).toBe(0);
-    await setVisibility('visible');
+    await lifecycle.show();
+    await expect(page.locator('animate')).toHaveCount(running);
+    // A phone that freezes the page in the background and wakes it ten minutes later: still the same motion, none while away.
+    await lifecycle.suspend();
+    await expect(page.locator('animate')).toHaveCount(0);
+    await lifecycle.resume({ afterMs: 600_000 });
     await expect(page.locator('animate')).toHaveCount(running);
   });
 });

@@ -62,7 +62,7 @@ function HostPage({ host, services, visible, onBack }: { host: RemoteHost; servi
   return <div className="lab-host-page" data-host-id={host.id}>
     <div className="lab-host-page-head">
       <Pill className="lab-host-back" onClick={onBack}><Icon name="chevron-left" size={16} />{t('settings.computers.back')}</Pill>
-      <div><h2>{host.name}</h2><p><span className="lab-host-dot-lead" data-host-state={host.online ? 'online' : 'offline'} aria-hidden="true" />{host.online ? t('settings.computer.online') : t('settings.computer.offline')}{subtitle ? ` · ${subtitle}` : ''}</p></div>
+      <div className="lab-host-page-title"><h2>{host.name}</h2><p><span className="lab-host-dot-lead" data-host-state={host.online ? 'online' : 'offline'} aria-hidden="true" />{host.online ? t('settings.computer.online') : t('settings.computer.offline')}{subtitle ? ` · ${subtitle}` : ''}</p></div>
     </div>
     <SettingsSection title={t('settings.computer.system')}><div className="lab-setting-legacy"><HostEnvironmentDetails host={host} /></div></SettingsSection>
     {has('agents') ? <SettingsSection title={t('settings.computer.agents')}>

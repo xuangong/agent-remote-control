@@ -39,7 +39,7 @@ afterEach(async () => {
   vi.useRealTimers(); vi.restoreAllMocks(); clearConversationRecovery(scope); await deviceStore.purge();
 });
 
-it.each(['pagehide', 'hidden', 'close'] as const)('flushes working content on %s before connection readiness', async event => {
+it.each(['pagehide', 'hidden', 'close'] as const)('keeps the working content a page confirmed before connection readiness, through %s', async event => {
   const { pool, lease, replica } = setup();
   update(replica, 'Latest visible working content', 2);
   expect(lease.client.getSessionState().connection).not.toBe('ready');
@@ -89,7 +89,7 @@ it('keeps caching a retained session after its last view closes and shares one w
   expect(write).toHaveBeenCalledTimes(1);
 });
 
-it('flushes the last complete display when replacement history has not arrived', () => {
+it('keeps the last complete display while replacement history has not arrived', () => {
   const { replica } = setup();
   update(replica, 'Latest visible working content', 2);
   replica.replaceTimeline('new-epoch');

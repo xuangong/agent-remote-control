@@ -111,10 +111,18 @@ Before activating Controllers that advertise new uplink fields, verify the runni
 Durable Object as well as the Worker deployment and static assets. Cloudflare
 propagates Worker and Durable Object code independently. A successful deployment
 and matching website asset hashes can coexist with an old Relay instance that
-rejects the new registration envelope. Run `agent-remote-controller diagnostics
---source server --limit 20` on an already registered Host and require fresh entries
-whose `workerVersionId` matches the deployed version. Do not use old cached entries
-as readiness evidence. Keep the existing Controller running until this check passes;
+rejects the new registration envelope. On the machine of an already registered Host, run
+`node scripts/deploy-readiness.mjs --version <workerVersionId> --deployed-at <deploy time, ISO>`
+(`--deadline-seconds`, default 600, `--interval-seconds`, default 10). It reads the installed
+`agent-remote-controller diagnostics --source server --since <deploy time>` repeatedly, never writes,
+and succeeds when an entry written after the deploy names the deployed `workerVersionId`; the release
+notes record the entry it printed. At the deadline it exits 1 and says what it saw: fresh entries still
+on the previous version (the Durable Object has not switched yet), only entries older than the deploy,
+or nothing. Entries older than the deploy are never readiness evidence. Meanwhile a page of either
+release can meet the other release's Relay: the session wire stays compatible both ways by the release
+skew rule of S3 (`seams.md`), whose seam test plays the decoders of the release in production
+(`agent-remote-seams/tests/S3/fixtures/release-<commit>.json`); record that fixture again from the new
+release once it is in production. Keep the existing Controller running until this check passes;
 if an attempted upgrade rolls back, verify Relay readiness before retrying.
 See [Cloudflare code updates](https://developers.cloudflare.com/durable-objects/platform/known-issues/#code-updates).
 

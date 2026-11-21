@@ -32,6 +32,7 @@
         "packages/agent-controller/vitest.config.ts",
         "packages/agent-e2e/faults",
         "packages/agent-e2e/flows",
+        "packages/agent-e2e/lifecycle",
         "packages/agent-e2e/native",
         "packages/agent-e2e/package.json",
         "packages/agent-e2e/playwright.native.config.ts",
@@ -186,7 +187,7 @@
         "packages/codex-daemon-client/tsconfig.test.json",
         "packages/codex-daemon-client/vitest.config.ts"
       ],
-      "digest": "sha256:be2affc2cfa0f5322401e44c66bf9662e2f03243f2329b601dff35e2bb7b0313"
+      "digest": "sha256:678fb93340b8ff6fe963562bda258c22f6c52903f56e09152c5830882b1d55b7"
     }
   },
   "providers": [

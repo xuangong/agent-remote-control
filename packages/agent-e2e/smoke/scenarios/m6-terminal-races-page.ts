@@ -20,6 +20,7 @@ import { TranscriptRecorder } from '../transcript.js';
  */
 const TERMINAL_SHOWN_MS: Record<'claude' | 'codex', number> = { codex: 30_000, claude: 100_000 };
 const SETTLE_MS = 120_000;
+const QUIET_MS = 8000;
 const ask = (word: string) => `Reply with the single word ${word} and nothing else.`;
 
 /**
@@ -181,13 +182,20 @@ class Race {
     return record;
   }
 
-  /** Waits until the native session is idle and shows `words`, or `SETTLE_MS`; returns what it shows then. */
+  /**
+   * Waits until the native session is idle and shows `words`, or is idle and has not changed for `QUIET_MS` (a turn the native
+   * session dropped never comes), or `SETTLE_MS`; returns what it shows then.
+   */
   private async settle(words: string[]): Promise<ViewRecord> {
     const until = Date.now() + SETTLE_MS;
+    let seen = '', since = Date.now();
     for (;;) {
       const { state, entries } = await this.context.pool.read(this.address, 10);
       const userTexts = entries.filter(entry => entry.role === 'user').map(entry => entry.text).reverse();
-      if ((state === 'idle' && words.every(word => carrying(userTexts, word) > 0)) || Date.now() > until) {
+      const now = JSON.stringify([state, userTexts]);
+      if (now !== seen) { seen = now; since = Date.now(); }
+      const quiet = state === 'idle' && Date.now() - since >= QUIET_MS;
+      if ((state === 'idle' && words.every(word => carrying(userTexts, word) > 0)) || quiet || Date.now() > until) {
         const inspected = await this.context.pool.command('session', 'inspect', this.address);
         const settings = Object.fromEntries((inspected.settings as Array<{ label: string; value: string | null; options: Array<{ value: string; label: string }> }>)
           .map(setting => [setting.label, setting.options.find(option => option.value === setting.value)?.label ?? setting.value ?? '']));

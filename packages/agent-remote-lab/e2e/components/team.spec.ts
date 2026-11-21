@@ -295,6 +295,8 @@ test('Add member Browse isolates folder forms and preserves the draft when the p
  const picker=page.getByRole('dialog',{name:'Choose a workspace folder',exact:true});
  await expect(picker.getByLabel('Folder path')).toHaveValue(root);
  expect(folderRequests.at(-1)).toEqual({hostId:'win',providerId:'claude-code',path:root});
+ // The first listing shows before a path is typed: a listing that arrives later writes its own path into the field (open item O58).
+ await expect(picker.locator('footer > span')).toHaveText(root);
  await picker.getByLabel('Folder path').fill(chosen);
  await picker.getByRole('button',{name:'Go',exact:true}).click();
  await expect(picker.locator('footer > span')).toHaveText(chosen);

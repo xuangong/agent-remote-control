@@ -133,11 +133,15 @@ for (const first of ['window', 'visualViewport'] as const) {
 }
 
 test('rotating a screen without a keyboard follows each size, whether or not a field has focus and however late the viewport reports it', async ({ page }) => {
+  // The viewport hook samples again 120 ms to 2.5 s after each event; the page's clock runs those samples out before each look.
+  await page.clock.install();
+  const settle = () => page.clock.runFor(3000);
   const input = await openConversation(page, { width: 844, height: 390 }, true);
   await input.fill('Keep this draft and its position');
   const shell = page.locator('.lab-shell');
   for (const focused of [false, true]) {
     if (focused) await input.focus(); else await input.blur();
+    await settle();
     for (const size of [{ width: 390, height: 844 }, { width: 844, height: 390 }, { width: 390, height: 844 }]) {
       await page.setViewportSize(size);
       await page.evaluate(({ width, height }) => {
@@ -147,6 +151,7 @@ test('rotating a screen without a keyboard follows each size, whether or not a f
         window.dispatchEvent(new Event('orientationchange'));
         window.visualViewport!.dispatchEvent(new Event('resize'));
       }, size);
+      await settle();
       await expect(shell).toHaveAttribute('data-viewport-occluded', 'false');
       // A phone's tab bar stands under the shell; a landscape screen is wide enough for the rail instead.
       await expect.poll(() => page.evaluate(() => {
@@ -156,14 +161,15 @@ test('rotating a screen without a keyboard follows each size, whether or not a f
     }
     // Late, fractional samples after the rotation settle change nothing.
     const sample = () => page.evaluate(() => { const rect = (selector: string) => document.querySelector(selector)!.getBoundingClientRect(); return { shell: rect('.lab-shell').height, composer: rect('.lab-composer-dock').top, timeline: rect('[data-testid="timeline"]').height }; });
+    await settle();
     const settled = await sample();
     for (const [height, offsetTop] of [[842.5, 1.5], [841, 3], [844, 0]]) {
       await page.evaluate(({ height, offsetTop }) => {
         Object.assign(window.visualViewport!, { height, offsetTop });
         window.visualViewport!.dispatchEvent(new Event('resize'));
         window.visualViewport!.dispatchEvent(new Event('scroll'));
-        return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       }, { height, offsetTop });
+      await settle();
       expect(await sample()).toEqual(settled);
     }
   }

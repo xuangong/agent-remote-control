@@ -3,6 +3,7 @@ import type { AgentJournalTap } from '@orchardworks/agent-session-runtime';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { MESSAGE_BUDGET_BYTES } from './journal-items.js';
+import { DEFAULT_PUBLISHER_LIMITS } from './journal-publication.js';
 import { createJournalPublisher, type JournalPublisher, type JournalSource } from './journal-publisher.js';
 import { attachScripted, boundary, driver, item, ScriptedSession, virtualClock } from '../test-utils/journal-scripted-session.js';
 
@@ -197,6 +198,25 @@ describe('publishing a session', () => {
     expect(relay.windows().map(value => value.items.map((input: Wire) => input.row.itemKey))).toEqual([['m1']]);
   });
 
+  it('reads at most gapReadsMax older pages to find items for the first window, and sends none when they are still not found', async () => {
+    const pages = () => [{ observations: [], nextCursor: 'o-2' }, { observations: [], nextCursor: 'o-3' }, { observations: [item('history', 'm1', 'One') ] }];
+    const found = scriptedRelay();
+    await attachSession(publisherFor(found, { gapReadsMax: 3 }), [], pages());
+    await until(() => found.ops().includes('head'), 'the head');
+    expect(found.windows().map(value => value.items.map((input: Wire) => input.row.itemKey))).toEqual([['m1']]);
+
+    const short = scriptedRelay();
+    await attachSession(publisherFor(short, { gapReadsMax: 2 }), [], pages());
+    await until(() => short.ops().includes('head'), 'the head');
+    expect(short.ops()).toEqual(['head']);
+  });
+
+  it('has the documented limits by default', () => {
+    expect(DEFAULT_PUBLISHER_LIMITS).toMatchObject({
+      batchWindowMs: 50, responseTimeoutMs: 30_000, backoffBaseMs: 250, backoffMaxMs: 30_000, sustainedMs: 60_000, heldEventsMax: 10_000, gapReadsMax: 8, inFlightBytes: 16 * 1024 * 1024,
+    });
+  });
+
   it('does not publish a session of a provider that does not declare journal support', async () => {
     const relay = scriptedRelay();
     const publisher = createJournalPublisher({ providers: () => ['other'], scheduler: clock, now: clock.now, limits: { batchWindowMs: 5 } });
@@ -285,6 +305,22 @@ describe('live rows', () => {
     expect(diagnostics.filter(entry => entry.event === 'journal_row_rejected')).toEqual([{ event: 'journal_row_rejected', providerId: 'fake' }]);
     const appended = relay.publishes().flatMap(message => message.entries).filter((value: Wire) => value.op === 'append').map((value: Wire) => value.row.itemKey);
     expect(appended).toEqual(['good']);
+  });
+
+  it('keeps publishing when the diagnostic sink throws', async () => {
+    const relay = scriptedRelay();
+    const publisher = createJournalPublisher({
+      providers: () => ['fake'], scheduler: clock, now: clock.now, diagnostic: () => { throw new Error('The sink failed.'); },
+      limits: { batchWindowMs: 5, backoffBaseMs: 5, backoffMaxMs: 20, responseTimeoutMs: 10_000 },
+    });
+    closers.push(() => publisher.close());
+    relay.connect(publisher);
+    const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+    await live(relay);
+    session.push(item('live', 'bad', 'x', { turnId: 't'.repeat(600) }));
+    session.push(item('live', 'good', 'Fine', { completes: true }));
+    await until(() => relay.model().some(value => value.itemKey === 'good' && value.state === 'complete'), 'the rest, though the sink threw');
+    expect(relay.model().some(value => value.itemKey === 'bad')).toBe(false);
   });
 
   it('leaves an item the wire refuses out of every window, and tells the diagnostics once', async () => {
@@ -618,6 +654,24 @@ describe('recovering', () => {
     expect(entries.findIndex(value => value.op === 'head')).toBeLessThan(entries.findIndex(value => value.op === 'append' && value.row.itemKey === 'late'));
   });
 
+  it('opens again when more than heldEventsMax events arrive while it opens, and holds exactly heldEventsMax', async () => {
+    const diagnostics: Wire[] = [];
+    const relay = scriptedRelay({ holdOpened: true });
+    const publisher = publisherFor(relay, { heldEventsMax: 2 }, diagnostics);
+    const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+    await until(() => relay.opens() === 1, 'the open');
+    session.push(item('live', 'a', 'One'));
+    session.push(item('live', 'b', 'Two'));
+    await settle(30);
+    expect(diagnostics.filter(entry => entry.reason === 'held_events')).toEqual([]);
+    expect(relay.opens()).toBe(1);
+    session.push(item('live', 'c', 'Three'));
+    await until(() => relay.opens() === 2, 'the open again');
+    expect(diagnostics.filter(entry => entry.reason === 'held_events')).toEqual([{ event: 'journal_session_restarted', providerId: 'fake', reason: 'held_events' }]);
+    relay.releaseOpens();
+    await until(() => ['a', 'b', 'c'].every(key => relay.model().some(value => value.itemKey === key)), 'every row, from the window');
+  });
+
   it('keeps no more bytes in flight than the shared budget allows, across sessions, and admits one message when none is in flight', async () => {
     const pending: Array<() => void> = [];
     const relay = scriptedRelay({ onPublish: (_message, answer) => { pending.push(answer.ack); } });
@@ -908,6 +962,43 @@ describe('older history and fills the Relay asks for', () => {
     expect(fill.items.map((value: Wire) => [value.row.itemKey, value.row.item.text, typeof value.digest])).toEqual([['m1', 'One', 'string']]);
   });
 
+  describe('reading native history for one request', () => {
+    /** A session whose newest window is `m9` and whose older pages each hold one item, with the number of pages the publisher read. */
+    async function withPages() {
+      const relay = scriptedRelay();
+      const publisher = publisherFor(relay);
+      const session = new ScriptedSession('fake', 'thread-1', [item('history', 'm9', 'Nine'), boundary('o-1')],
+        [1, 2, 3, 4, 5].map(at => ({ observations: [item('history', `o${at}`, `Older ${at}`)], nextCursor: `o-${at + 1}` })));
+      const manager = await attachScripted(session);
+      closers.push(() => { void manager.close(); });
+      const reads = { count: 0 };
+      publisher.attach({ agentId: 'agent-1', providerId: 'fake', nativeSessionId: 'thread-1', source: sourceOf(manager, {
+        loadOlderHistory: () => { reads.count += 1; return manager.loadOlderHistory(); },
+      }) });
+      await live(relay);
+      return { relay, reads };
+    }
+
+    it('reads at most 3 older pages for an older-history request, and as few as it needs below that', async () => {
+      for (const [limit, expected] of [[2, 2], [3, 3], [4, 3], [10, 3]] as const) {
+        const { relay, reads } = await withPages();
+        const before = relay.written.length;
+        relay.send({ uplinkVersion: 2, type: 'journal_older_request', requestId: 'older-1', sessionKey: 'fake:thread-1', beforeItemKey: 'm9', limit });
+        await until(() => relay.written.slice(before).some(message => message.type === 'journal_older_done'), 'the answer');
+        expect(reads.count, `limit ${limit}`).toBe(expected);
+        expect(relay.written.slice(before).find(message => message.type === 'journal_older_done')).toMatchObject({ olderAvailable: true });
+        closers.pop()!(); closers.pop()!();
+      }
+    });
+
+    it('reads at most 3 older pages for a fill that names items none of them holds', async () => {
+      const { relay, reads } = await withPages();
+      relay.send({ uplinkVersion: 2, type: 'journal_fill_request', requestId: 'fill-1', sessionKey: 'fake:thread-1', itemKeys: ['missing'] });
+      await until(() => relay.written.some(message => message.type === 'journal_fill'), 'the fill');
+      expect(reads.count).toBe(3);
+    });
+  });
+
   it('answers an older-history request the Relay refused for its quota as exhausted, without opening again, and keeps numbering from the refused entry', async () => {
     const relay = scriptedRelay({ onPublish: (message, answer) => { if (message.entries[0].op === 'prepend') answer.refuse('quota_exceeded'); else answer.ack(); } });
     const publisher = publisherFor(relay);
@@ -1011,5 +1102,36 @@ describe('releasing a session', () => {
     await settle(100);
     expect(relay.ops().filter(op => op === 'append')).toHaveLength(1);
     expect(relay.opens()).toBe(opens);
+  });
+
+  it('stops waiting for the Relay to acknowledge after 5000 ms, and not before', async () => {
+    let acknowledged = 0;
+    const relay = scriptedRelay({ onPublish: (_message, answer) => { acknowledged += 1; if (acknowledged === 1) answer.ack(); } });
+    const publisher = publisherFor(relay, { batchWindowMs: 5, responseTimeoutMs: 60_000 });
+    const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+    await live(relay);
+    session.push(item('live', 'a', 'Never acknowledged', { completes: true }));
+    await settle(30);
+    expect(relay.publishes()).toHaveLength(2);
+    let done = false;
+    void publisher.release('agent-1').then(() => { done = true; });
+    await settle(4900);
+    expect(done).toBe(false);
+    await settle(100);
+    expect(done).toBe(true);
+  });
+
+  it('stops waiting for a session that is still opening after 5000 ms, and not before', async () => {
+    const relay = scriptedRelay({ holdOpened: true });
+    const publisher = publisherFor(relay, { batchWindowMs: 5, responseTimeoutMs: 60_000 });
+    await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+    await until(() => relay.opens() > 0, 'the open');
+    let done = false;
+    void publisher.release('agent-1').then(() => { done = true; });
+    await settle(4900);
+    expect(done).toBe(false);
+    await settle(100);
+    expect(done).toBe(true);
+    expect(relay.publishes()).toEqual([]);
   });
 });

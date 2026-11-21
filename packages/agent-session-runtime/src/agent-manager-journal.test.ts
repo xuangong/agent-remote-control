@@ -153,6 +153,24 @@ describe('the journal tap of an agent manager', () => {
     }
   });
 
+  it('accepts an item key of 4096 characters and tells the tap about one of 4097, or an empty one', async () => {
+    const told = async (key: string): Promise<number> => {
+      const stream = new Stream();
+      stream.push({ type: 'history_boundary' });
+      const manager = await attach(stream, { journalContract: true });
+      await manager.ready;
+      let count = 0;
+      manager.subscribeJournal({ event: () => undefined, closed: () => undefined, identityMissing: () => { count += 1; } });
+      stream.push(observation('stream:1', 'Hi', key));
+      await flush();
+      await manager.close();
+      return count;
+    };
+    expect(await told('k'.repeat(4096))).toBe(0);
+    expect(await told('k'.repeat(4097))).toBe(1);
+    expect(await told('')).toBe(1);
+  });
+
   it('tells a tap that subscribes later about a breach in history', async () => {
     const stream = new Stream();
     stream.push({ ...observation('history:1', 'Old', 'm1', { delivery: 'history' }), itemIdentity: undefined });

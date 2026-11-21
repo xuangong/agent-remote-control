@@ -42,7 +42,7 @@ export function createAttachment(ctx: SessionCoreContext) {
     catch { /* Diagnostics cannot change session lifetime. */ }
   }
   function watch(binding: Binding) {
-    const { admission, sessions, idle, liveAgent, ledger, providers, relay, terminalRefresh, shown, options } = ctx;
+    const { admission, sessions, idle, liveAgent, ledger, providers, shown, options } = ctx;
     // The release grace follows what the provider declares of its CLI (`residency.ts`, R4); a configured grace replaces it for every provider.
     const graceMs = options.idleGraceMs ?? releaseGraceMs(resolveAgentProviderBehaviour(providers.require(binding.providerId).adapter.descriptor));
     const childHeld = () => hasHeldChild(sessions.all(), binding, child => !!liveAgent(child.agentId) || idle.hasDemand(child.agentId));

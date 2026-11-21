@@ -270,7 +270,7 @@ export function acceptSessionChannel(
   }));
   removers.push(socket.onClose(() => stop(1001, 'Channel disconnected', false)));
   removers.push(socket.onError(() => stop(1011, 'Channel socket error')));
-  send({ protocolVersion: PROTOCOL_VERSION, type: 'ready', ...readiness, ...(preemption ? { preemption: 1 as const } : {}) });
+  send({ protocolVersion: PROTOCOL_VERSION, type: 'ready', ...readiness, settlement: 1 as const, ...(preemption ? { preemption: 1 as const } : {}) });
   if (!stopped) watchIdle(idleTimeoutMs);
   return () => stop();
 }

@@ -79,6 +79,11 @@ export interface RemoteConnection {
   send(message: ClientMessage): void;
   close(): void;
   /**
+   * Whether the Relay on this connection understands a `send_message` that settles an earlier operation. An older Relay answers a frame
+   * it cannot decode by closing every subscription of the channel, so a client asks only when this is true.
+   */
+  readonly settles?: boolean;
+  /**
    * Whether the owner uses the subscription now, or since when it has not. The Relay gives an account's
    * streams to subscriptions in use and, when they run out, closes the least recently used ones first.
    */

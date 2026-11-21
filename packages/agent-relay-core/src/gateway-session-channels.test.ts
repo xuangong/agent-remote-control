@@ -22,7 +22,7 @@ it('reuses Worker session channels and releases their Host streams on logout', a
   expect((await f.json(alice.basePath + `v1/remote/hosts/${hostId}/attach`, alice.cookie,
     { providerId: 'codex', nativeSessionId: 'native' })).status).toBe(200);
   const channel = await f.upgrade(alice.basePath + 'v1/session-channel?observation=session', { cookie: alice.cookie, origin });
-  expect(await event(channel, 'message')).toMatchObject({ type: 'ready' });
+  expect(await event(channel, 'message')).toMatchObject({ type: 'ready', settlement: 1 });
   for (const subscriptionId of [1, 2]) {
     const negotiated = event(channel, 'message');
     channel.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'subscribe', subscriptionId, agentId: 'agent',
@@ -67,7 +67,7 @@ it('gives a full account stream to the subscription in most recent use and pause
   };
   // A background tab holds the whole allowance; two of its sessions are in other Windows, one used longer ago.
   const background = await channel('&preemption=1');
-  expect(background.frames[0]).toEqual({ protocolVersion: '1.8.0', type: 'ready', preemption: 1 });
+  expect(background.frames[0]).toEqual({ protocolVersion: '1.8.0', type: 'ready', settlement: 1, preemption: 1 });
   for (let id = 1; id <= 64; id++) background.subscribe(id, id === 63 ? 120_000 : id === 64 ? 60_000 : undefined);
   await f.poll(() => background.frames.filter(frame => frame.type === 'message').length, { timeout: 10_000 }).toBe(64);
 
@@ -80,7 +80,7 @@ it('gives a full account stream to the subscription in most recent use and pause
   current.subscribe(2, 90_000);
   await f.poll(() => current.outcome(2)).toMatchObject({ type: 'closed', code: 4029 });
   const older = await channel('');
-  expect(older.frames[0]).toEqual({ protocolVersion: '1.8.0', type: 'ready' });
+  expect(older.frames[0]).toEqual({ protocolVersion: '1.8.0', type: 'ready', settlement: 1 });
   older.subscribe(1);
   await f.poll(() => older.outcome(1)).toMatchObject({ type: 'closed', code: 4029 });
   expect(background.frames.filter(frame => frame.type === 'closed')).toHaveLength(1);

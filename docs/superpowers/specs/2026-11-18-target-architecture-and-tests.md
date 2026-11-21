@@ -412,28 +412,28 @@ Smoke is `pnpm local` made extreme: the instance of `.agents/skills/prepare-arc-
 | M8 | Soak | 30 minutes of streaming on three sessions | Row counts, heap and socket counts stable |
 
 - **M6's boundary.** Our system is any number of pages, devices and Windows on one session. Inside it there is no conflict: the Controller is the session's one native client, the Relay-owned control lease (S5) orders the writers, every page can send, no message is lost or doubled, and every page shows the same state and properties. A terminal is outside our system, and its CLI's own mechanism decides: a Codex terminal that uses the shared daemon (`agent-remote-controller codex …`, `agent-remote-controller-dev codex …` for the instance, or native `codex` pointed at the shared socket) is another client of the loaded thread and Codex orders the turns (it refuses a second turn while one runs); a separate Codex process (`codex exec resume`) is refused by Codex with "active writer" while the thread is loaded in the daemon; Claude Code resumes its transcript. We add no lock and no handover for a terminal. We report what the CLI does: the page stays live through the session's events or read-only observation, and when Codex refuses the Controller it shows Codex's reason.
-- **Limits, not long runs.** A smoke failure is either a limit reached or a condition that triggers a defect; neither needs a long run. Each bound below belongs to a component clause in `docs/current/agent-remote/components.md` and needs a boundary test at the bound minus one, at the bound and at the bound plus one, at the lowest tier. "Clause test" means the limit is tested, but not yet at the three points; "gap" means no test (2026-11-21).
+- **Limits, not long runs.** A smoke failure is either a limit reached or a condition that triggers a defect; neither needs a long run. Each bound below belongs to a component clause in `docs/current/agent-remote/components.md` and needs a boundary test at the bound minus one, at the bound and at the bound plus one, at the lowest tier. "Yes" means the bound is tested at its edge; "clause test" means the limit is tested, but not at the three points (2026-11-21; the clause gaps were closed the same day, section 10, O53).
 
 | Bound | Value | Enforced in | At the bound | Boundary test |
 |---|---|---|---|---|
-| Journal bytes per session | 64 MiB (local and Node Relay default; the Cloudflare partition sets its own) | `host-journals.ts` `SESSION_MAX_BYTES`, `limits.sessionBytes` | the window is refused whole (`journal_refused`, `quota_exceeded`); the page reads through the Controller | clause test (Journal C13); M4 runs at tiny limits |
-| Journal bytes per Host | 1 GiB | `HOST_MAX_BYTES`, `limits.hostBytes` | a session's room is what the Host has left | clause test (Journal C14) |
-| Live-only items per session | 2,000, and a byte cap derived from the session limit | `LIVE_ONLY_MAX_ITEMS`, `liveOnlyBytesMax` | the oldest complete live-only item is dropped | clause test (Journal C15, C16) |
+| Journal bytes per session | 64 MiB (local and Node Relay default; the Cloudflare partition sets its own, 12 MiB) | `host-journals.ts` `HOST_JOURNAL_LIMITS.sessionBytes`, `limits.sessionBytes` | the window is refused whole (`journal_refused`, `quota_exceeded`); the page reads through the Controller | clause test at set limits, the default pinned by value (Journal C13); M4 runs at tiny limits |
+| Journal bytes per Host | 1 GiB | `HOST_JOURNAL_LIMITS.hostBytes`, `limits.hostBytes` | a session's room is what the Host has left | yes: at the default, the room it leaves and one byte more (Journal C14) |
+| Live-only items per session | 2,000, and a byte cap derived from the session limit | `HOST_JOURNAL_LIMITS.liveOnlyItems`, `liveOnlyBytesMax` | the oldest complete live-only item is dropped | yes: 2,000 and 2,001 at the default; the cap's two branches (Journal C15, C16) |
 | One publication message | 4 MiB | `journal-items.ts` `MESSAGE_BUDGET_BYTES` | a window takes the newest items that fit | clause test (Publisher C11) |
 | Host frame | 16 MiB buffered | `BROKER_MAX_FRAME_BYTES` | `host_backpressure` (503) | clause test (Host-session C15) |
-| Item key | 4,096 characters | `agent-manager.ts` (SDK contract) | the observation is refused | clause test (Publisher C13, Adapters C11) |
+| Item key | 4,096 characters | `agent-manager.ts` (SDK contract) | the observation is refused | yes: 4,096 and 4,097 (Publisher C13, Adapters C11) |
 | Pending requests of a Host | 128 | `host-session.ts` | the 129th is refused, `host_busy` (429) | clause test (Host-session C13) |
-| Hosts and device credentials | 128 each | Relay state | `host_capacity`, `capacity_exceeded` (429) | clause test (Host-session C16) |
+| Hosts and device credentials | 128 each | Relay state | `host_capacity`, `capacity_exceeded` (429) | yes: 127, 128 and the 129th (Host-session C16) |
 | Requests waiting for a live session | 32 | publisher `MAX_PENDING_REQUESTS` | the oldest is refused, `not_ready` | clause test (Publisher C12) |
-| Held events, gap reads, older reads | 10,000, 8, 3 per request | `DEFAULT_PUBLISHER_LIMITS` | the publisher reopens or refuses | gap (Publisher C10) |
-| Relay request deadlines | 30 s; 45 s for provider settings; 180 s for create | `host-session.ts` `rpcTimeoutMs`, `creationTimeoutMs` | the request is refused; a hung resume keeps the Controller's binding (`provider-faults.test.ts`) | gap for 45 and 180 s (Host-session C14) |
-| Host registration | 10 s | `registrationDeadlineMs` | close 1008 | clause test (Host-session C12) |
-| Idle grace of a session runtime | 5 min; reconcile every 60 s, backoff to 15 min | `idle-sessions.ts` | the runtime is released, journal first; a shown page holds none (O47) | clause test (Session core C11, C12) |
+| Held events, gap reads, older reads | 10,000, 8, 3 per request | `DEFAULT_PUBLISHER_LIMITS` | the publisher reopens or refuses | yes: at small limits, the bound and one past it; the defaults by value (Publisher C10, C12) |
+| Relay request deadlines | 30 s; 45 s for provider settings; 180 s for create; 5 s for diagnostics | `host-session.ts` `rpcTimeoutMs`, `creationTimeoutMs` | the request is refused; a hung resume keeps the Controller's binding (`provider-faults.test.ts`) | yes: 1 ms before each deadline and at it (Host-session C14) |
+| Host registration | 10 s | `registrationDeadlineMs` | close 1008 | yes: 9,999 and 10,000 ms at the default (Host-session C12) |
+| Idle grace of a session runtime | 5 min; reconcile every 60 s, backoff to 15 min | `idle-sessions.ts` | the runtime is released, journal first; a shown page holds none (O47) | yes: 299,999 and 300,000 ms; the 10-failure and 15-minute caps (Session core C11, C12) |
 | Transcript divergence | 2,000 ms tolerance, 30 s quiet | `transcript-divergence.ts` | a later native write is another writer's; a quiet diverged session is released and read again | yes: `transcript-divergence.test.ts` (Session core C10) |
 | Terminal refresh | 30 s quiet, 20 sessions, 4 reads at once | `publisher/terminal-refresh.ts` | an older session is no longer refreshed | clause test (Publisher C14) |
-| Echo watch of a sent message | after 10, 30 and 60 s; 8 pages a scan, 15 s | `message-echo-sync.ts` | the message stays `awaiting_echo` | gap (Replica C13) |
-| Background outcomes kept | 2,048 | `snapshot-apply.ts` | the oldest id is dropped | gap (Replica C14) |
-| Pending sends in the composer | no bound, no timeout | composer queue | a message waits as long as the session cannot take it | gap: the bound is missing (Replica C15) |
+| Echo watch of a sent message | after 10, 30 and 60 s; 8 pages a scan, 15 s | `message-echo-sync.ts` | the message stays `awaiting_echo` | yes: each step at 1 ms either side, page 8 and 9, 14,999 and 15,000 ms (Replica C13) |
+| Background outcomes kept | 2,048 | `snapshot-apply.ts` | the oldest id is dropped | yes: 2,048 kept, the 2,049th drops the oldest (Replica C14) |
+| Pending sends in the composer | no bound, no timeout | composer queue | a message waits as long as the session cannot take it | tested as unbounded: 50 messages waiting a day drain in order (Replica C15); whether it needs a bound is open (requirements review 2.2) |
 | Live subscriptions of one device | 6 | Workbench (`LIVE_RECENT` and the grace) | the oldest idle subscription is closed | M5 only |
 | Work summary | 3 clauses, then "and N more" | `work-summary.ts` | the rest is counted | clause test (Turns C13) |
 | Sign-ins of the site | 30 per minute | site | refused until the minute passes | not on the session path |
@@ -793,7 +793,7 @@ Every shortfall of a finished step is tracked here with the step that owns it an
 | O50 | With the managed terminal (`agent-remote-controller claude --resume <id> --take-over -p`), the journal-served page is not told that a terminal holds the session: no `session_control` frame arrives while the terminal runs, and the page learns only when its next send is refused (`native_session_owned`). The refusal toast then covers the conversation's own "Interrupt & take over" in the rightmost tile, and pointing at the button pauses the toast's auto-dismiss, so the button cannot be clicked until the toast is closed (`.tmp/m6/claude-after-send.png`) | M6 (exploration) | owner | open: not on M6's paths after the owner's boundary (Claude's terminal is S6a's raw `claude --resume`); the message was kept as "Not sent" with Retry, so nothing was lost |
 | O51 | Full smoke M1 (seed 70621): at 1,500 ms round trip with 2 % and 10 % loss the revisit painted its first rows 9,625 ms and 19,931 ms after the document, after the Relay's first page, not from the device store (they passed at 50 and 300 ms, and on 2026-11-18 at 1,500 ms) | full smoke 2026-11-21 | harness | closed (harness defect, not a product defect): the first violating event is the revisit's first row after the `timeline_page` of the session at 110,942 ms. The first open of that condition subscribed three sessions (the Window's panes); the opened session's tail page arrived at 99,524 ms and the probe closed the page 0.8 s later, because `waitForKeptRecord` counted any record of the device store, and the other panes' records were already written. So the revisit had no record of its own session to paint (clause: the device store paints only a kept record of the same session, S7). Run alone at 1,500 ms with and without loss, the revisit painted from the device store in 118 to 127 ms. The probe now waits for the record of the session it opened (`keptRecordOf`, pinned by `smoke/lib/probe.test.ts` with the store's own `deviceKey`); M1 re-run with the same seed passed, the 1,500 ms revisits painting from the device store in 109 and 119 ms |
 | O52 | Full smoke M2 (seed 70621): in rounds 8 and 10 (Codex, streaming, graceful stop) the follow-up message never left the page and its turn is missing | full smoke 2026-11-21 | harness | closed (harness defect; the product kept its contract): the first violating event is the follow-up typed at 195,880 ms with no `send_message` after it. The rounds share one session, and the mid-turn check accepted a long reply of an earlier round, so the Controller was stopped 6 ms after the round's first send, before its acknowledgement. The page marked that send `unconfirmed` and held the next message behind it until the person checks it (send-state contract, S6; `send-state.test.ts`), which M2 counted as never sent; its turn check also matched an earlier round's prompt by its first 40 characters. The check now waits for a row of this turn (`landedMidTurn`, pinned by `smoke/lib/restart-round.test.ts`) and finds each turn by the word only its prompt carries. Not re-run: the owner stopped long runs; the explanation rests on the transcript (no `send_message` after the follow-up, the earlier long reply the check matched) |
-| O53 | The session-path components have 187 design clauses and 43 without a test (`docs/current/agent-remote/components.md`); most limits in 5.7 are tested, but not at the bound minus one, at it and plus one; two orderings tests enumerate the Relay control lease and the send state, but not yet the Controller session core, the publisher or the replica across restart and reconnect; the fault-injecting provider shows two robustness gaps: no SDK error says how long to wait after a usage limit, and nothing on the Controller's side gives up a hung resume, which holds the session's binding | component statements, 2026-11-21 | owner | open: close the gaps at the lowest tier, in the order of the clause tables; the external dependency review of the provider CLIs is a separate task |
+| O53 | The session-path components have 187 design clauses and 43 without a test (`docs/current/agent-remote/components.md`); most limits in 5.7 are tested, but not at the bound minus one, at it and plus one; two orderings tests enumerate the Relay control lease and the send state, but not yet the Controller session core, the publisher or the replica across restart and reconnect; the fault-injecting provider shows two robustness gaps: no SDK error says how long to wait after a usage limit, and nothing on the Controller's side gives up a hung resume, which holds the session's binding | component statements, 2026-11-21 | owner | partly closed (2026-11-21): the 43 clause gaps are closed. 42 have a unit test, a vector row or a seam test with mock data, each under 300 ms and each failing on a one-line mutation of its rule (`components.md`, "Gaps closed"); adapter C14 is not tested, because no input reaches its branch, and the guarantee it guards (no row without an identity) is proven by the S1 seam. No clause was false. Corrected: Host-session C10's wording (a disconnect clears the control grant, not every grant) and where the partition limits live (Journal C13); three gaps had a test the mapping missed (adapter C3's interaction key, presentation C7's rows, replica C13's schedule, whose 8-page and 15 s bounds were untested). The limits of 5.7 that said "gap" are tested at their bounds. One production change: the journal's default limits are exported (`HOST_JOURNAL_LIMITS`), so the 64 MiB default is pinned by value; showing it through behaviour needs 64 MiB of data. Open: orderings of the Controller session core, the publisher and the replica across restart and reconnect; the two robustness gaps (no SDK error says how long to wait after a usage limit; nothing on the Controller gives up a hung resume), which need product changes (`2026-11-21-requirements-vs-external-dependencies.md`); the external dependency review is a separate task |
 
 **Skipped tests per tier at the M15 end gate** (2026-11-19, HEAD after O33 and the gate repairs). Before is the final gate of 57027f03.
 
@@ -975,15 +975,23 @@ The source files over 1,000 lines are the same five as in 11.5; none is new.
 | Navigation destinations and Settings groups | 35 | 1.7 s |
 | All of `agent-client` | 824 | 2.6 s |
 | All of `agent-client-web` | 910 | 11 s |
-| The seam suites (`agent-remote-seams`) | 406 | 10 s |
+| The seam suites (`agent-remote-seams`) | 419 | 6.7 s (406 in 10 s before the S3 file moved to a fake clock, 13.1) |
 
 ### Totals and slow tests
 
-- **`pnpm verify`** (I4 gate, `.tmp/i4/full2-verify.log`) passed 12,318 tests, failed 0 and skipped 22. After O44 and O45 it passed 12,329 and exited 0.
+- **`pnpm verify`** (I4 gate, `.tmp/i4/full2-verify.log`) passed 12,318 tests, failed 0 and skipped 22. After O44 and O45 it passed 12,329 and exited 0. After O53's clause tests, the S3 change and the allowlist re-measurement (2026-11-21) it passed 12,587, skipped 22 and exited 0 in 6 min 50 s; an earlier run under another worktree's e2e load failed only on the speed rule (five relay-core capacity tests over 1 s twice, every test passing).
 - **Mock-data tiers.** Of 10,187 tests:
   - 247 run over 300 ms, which is 2.4 percent (3.7 percent at the 11.4 measurement);
-  - 15 run over 1 s. Each is either on the allowlist (still 11 entries, each with its reason) or re-measured under 1 s alone.
+  - 15 run over 1 s. Each is either on the allowlist (still 11 entries, each with its reason) or re-measured under 1 s alone. Re-measured alone on 2026-11-21 (13.4), one allowlisted test runs under 1 s and left: the allowlist has 10 entries, and each whole-app entry names the real wait that keeps it over 1 s.
 - **The enforced reporter** passed.
+
+### Design clauses
+
+The nine components of the session path state 187 design clauses, and each clause names the tests that prove it (`docs/current/agent-remote/components.md`, O53). When they were written, 43 had no test. All 43 are now closed:
+
+- 42 have a unit test, a vector row or a seam test with mock data. Each runs under 300 ms and fails when the rule it proves is broken.
+- One, adapter C14, guards a branch that no input reaches. The guarantee it guards, no row without an identity, is proven by the S1 seam.
+- The limits of 5.7 that said "gap" are tested at their bounds.
 
 ### E2E and smoke
 
@@ -1036,10 +1044,21 @@ Each HEAD selection is `pnpm test:unit` of the module's test files plus the seam
 | Lab navigation and Settings rules (new) | 2,994, 108 s: the Workbench (Workbench, debugger) | no module | `destinations`, `settings/settings-groups`; S6 | 121 | 3.6 s | 25x, 30x |
 
 - **Noise.** Every row stays within 0.15 s of its median, except one protocol pass at 0.66 s.
-- **Against the target of 5.10** (2 to 10 s, worst 40 s): no change takes over 15 s, and five of eleven take under 10 s. The six over 10 s are the six that include S3:
-  - the S3 suite takes 10.5 s in each, as on 2026-11-19;
-  - 8.6 s of it is one file, `session-channel-client.integration.test.ts`. Its suspension tests wait out real timers (a 450 ms sleep and 200 to 300 ms deadlines), 600 to 920 ms per test.
-  - Section 11.1 named this file the next to make faster; it has not changed.
+- **Against the target of 5.10** (2 to 10 s, worst 40 s): at `0d08ab25` no change took over 15 s, and five of eleven took under 10 s. The six over 10 s were the six that include S3:
+  - the S3 suite took 10.5 s in each, as on 2026-11-19;
+  - 8.6 s of it was one file, `session-channel-client.integration.test.ts`. Its suspension tests waited out real timers (a 450 ms sleep and 200 to 300 ms deadlines), 600 to 920 ms per test, and its other tests polled `vi.waitFor` every 50 ms.
+- **The S3 file since** (2026-11-21, O53's follow-up). Its deadlines, heartbeats, suspensions, backoffs and the read-position batch run on Vitest's fake clock, and a test drains the in-memory sockets with one real turn of the event loop instead of polling. No `waitFor` limit or timeout was raised; the explicit 10 and 15 s test timeouts are gone, so the seams' 1 s limit applies. The tests that waited on time still fail when the rule they prove is broken (mutations: a 400 ms read batch, a 9 s ready deadline, a 1 s probe deadline, a deadline kept or not re-armed across a hidden page, a send bound by the operation deadline, a resume that does not wake a waiting reconnect). The file runs its 46 tests in 0.05 to 0.07 s (was 8.6 s), 10 of 10 times under load.
+- **Re-measured** with the method above: the base tree (`4c301368`, the code of `0d08ab25` with documents on top) and the new tree in turn, three times, median shown. Another worktree's e2e runs were loading the machine, so each run started only when 65 to 80 percent of the CPU was idle; the base rows came out 0.1 to 1.4 s slower than in the table above. Of the S3 suite's 3.3 s, Vitest's own duration is 2.2 to 2.6 s; the rest is pnpm and Vitest starting.
+
+| Selection | Tests: base, now | Wall: base, now |
+|---|---:|---:|
+| The S3 suite | 168, 181 | 10.6 s, 3.3 s |
+| Session-control rule | 218, 233 | 14.0 s, 5.7 s |
+| Session presentation rule | 289, 366 | 12.3 s, 5.8 s |
+| The seam suites (`agent-remote-seams`, every seam) | 406, 419 | 10.7 s, 6.7 s |
+
+- The new tests are the clause tests of O53: S3's `session-control-wire` (12) and one window vector, two `stream-control` tests, and 64 `session-presentation` tests.
+- The other four rows over 10 s (succession, host session, protocol schema, turns) run the same S3 suite and were not re-measured. Each should lose what S3 lost, about 7 s.
 - **Growth.** The succession, Workbench state and renderer rows grew by S6's new `recorded-turns` suite (78 tests: the turn fold over every recorded provider timeline, I3a), for 0.2 to 0.6 s. The other growth:
   - session control: the orderings table (+3);
   - host session: 10 relay-core tests;
@@ -1166,7 +1185,25 @@ The 123 process-project tests over 300 ms and 33 over 1 s spawn real CLIs, daemo
 No mock-data test over 1 s is without a disposition. Two related observations:
 
 - In the separate Workbench run, a sixth test crossed 1 s: `App.succession.ask-and-reconnect` > restores an open Ask with its original source after rebinding main and opening a fresh page (1,034 ms; 711 ms alone).
-- Reason (a) still names O15 as open. O15 closed in M13b, when `App.tsx` was split, and the six whole-app mounts it covers are still over 1 s.
+- Reason (a) still named O15 as open. O15 closed in M13b, when `App.tsx` was split, and the six whole-app mounts it covered were still over 1 s.
+
+**The allowlist re-measured** (2026-11-21, after O53's clause tests). Each of the 11 tests ran alone three times with the reporter's own method (`remeasureAlone`), each run started when at least 65 percent of the CPU was idle (another worktree was running e2e flows); median, with the range:
+
+| Test | Alone now | Disposition and reason |
+|---|---|---|
+| Workbench `App.succession.ask-and-reconnect` > edits a real App managed Team window into its retained origin owner and admits input only to the successor | 4,220 ms (4,208 to 4,230) | stays. The cause is not the mount: the test waits about 3.5 s for the Team menu's real roster poll (`TEAM_REFRESH_MS`, every 4 s while a member's conversation is open), after which the successor's seat appears and the page attaches it; the mount and the other steps take about 0.6 s |
+| Workbench `App.render-budget` > switching bots renders the conversations that change and leaves the others alone | 1,416 ms (1,403 to 1,639) | stays: the mount and renders of 120 bot views (about 0.85 s) plus 0.55 s of real settle waits; stage 6's render budget is a property of the composed page |
+| Workbench `App.render-budget` > in Window mode a change in one pane renders the visible panes at most once and no hidden conversation | 1,353 ms (1,242 to 1,774) | stays: the same mount, plus 0.45 s of real waits |
+| Workbench `App.render-budget` > a change of a bot elsewhere renders its roster row, not App and not a conversation | 1,196 ms (1,194 to 1,640) | stays: the same mount, plus 0.35 s of real waits |
+| Workbench `App.attach-budget` > asks for a missing session once across mode switches, state frames, bot switches, page resumes and an access pause | 1,071 ms (1,053 to 1,099) | stays: the mount and the steps (about 0.55 s) plus 0.5 s of real waits; stage 7's attach budget is a property of the composed page |
+| Workbench `App.succession.owners-and-attachment` > restores the selected Window owner while a new D Window keeps independent owners | 963 ms (937, 963; one run at 2,059 ms while the other worktree's load returned) | removed: under 1 s alone |
+| Cloudflare `storage-incremental` > every commit of L stores exactly its complete encoding, and the caches agree with complete accounting | 4,134 ms (3,958 to 4,630) | stays, (b) |
+| Cloudflare `storage-incremental` > a commit costs what it changes, not the size of the Relay | 1,678 ms (1,623 to 2,147) | stays, (b) |
+| Cloudflare `storage-incremental` > every commit of M stores exactly its complete encoding, and the caches agree with complete accounting | 1,242 ms (1,201 to 1,429) | stays, (b) |
+| journal `session-journal` > prepends 200,000 items and keeps the sequence contiguous | 1,934 ms (1,925 to 1,980) | stays, (c) |
+| journal `journal-pages` > pages over a very large selection | 1,066 ms (1,062 to 1,119) | stays, (c) |
+
+The allowlist has 10 entries, was 11. Reason (a) is gone: each of the five whole-app entries now names what it waits for and why it stays (composition that `docs/current/agent-remote/workbench-state.md` keeps), and that it leaves when those waits run on the fake clock. Real waits take each of them over 1 s: the Team roster poll (3.5 s) and settle waits of 0.35 to 0.55 s; without them each would run in 0.55 to 0.9 s alone (by subtraction, not measured). Reasons (b) and (c) are unchanged and still hold.
 
 **The 305 mock-data tests over 300 ms by cause**, without the process projects. Each was assigned from its file and name, and the per-package counts add up to the reporter's.
 
@@ -1223,14 +1260,14 @@ Met:
 
 Short, with the reason for each:
 
-- **Per-change under 10 s.** Six of eleven changes take 11.8 to 14.4 s. Each of them runs S3, which takes 10.5 s. 8.6 s of that is `session-channel-client.integration.test.ts`, whose suspension tests wait out real timers. Section 11 named the file; it is unchanged.
+- **Per-change under 10 s.** At `0d08ab25` six of eleven changes took 11.8 to 14.4 s, each because S3 took 10.5 s, 8.6 s of it in `session-channel-client.integration.test.ts`. That file now runs on a fake clock (13.1): the S3 suite takes 3.3 s, and the two re-measured selections take 5.7 s and 5.8 s. The other four were not re-measured.
 - **Slow tests.** The target is under 1 percent over 300 ms and none over 1 s.
   - Counted as 11.4 counted, 422 tests are over 300 ms (3.4 percent; 415 on 2026-11-19) and 49 over 1 s (48).
-  - The speed rule's own count, without the process projects, is 305 over 300 ms (2.5 percent) and 16 over 1 s: 11 allowlisted, and 5 that run under 1 s alone.
+  - The speed rule's own count, without the process projects, is 305 over 300 ms (2.5 percent) and 16 over 1 s: 11 allowlisted, and 5 that run under 1 s alone. Since then the S3 suite's 7 real-timer tests run on a fake clock (13.1) and the allowlist has 10 entries (13.4).
   - 169 of the 305 are whole-app mounts of the Workbench, the composition tests that O10 and O18 kept. The Workbench's count rose from 152 to 173.
   - 84 are real sockets and real processes in unit-tier files, 74 of them in the Controller and the Node Relay. Section 5.1 puts them in the transport and process tiers.
 - **Unit count.** 11,547 against about 7,000, and growing: the Orchard steps added 923, mostly the tables and view tests of their new rules (13.3).
-- **Mock data.** 3,739 inline wire messages in 441 files, not zero: 52 more than on 2026-11-19, 37 of them in the new tests of `agent-client` and `agent-client-web`.
+- **Mock data.** 3,739 inline wire messages in 441 files, not zero: 52 more than on 2026-11-19, 37 of them in the new tests of `agent-client` and `agent-client-web`. The clause tests of O53 add 32 (3,771 in 443 files), 20 of them the uplink and browser frames of relay-core's `host-session.test.ts`, which writes its messages inline as the rest of that file does.
 - **Source files.** 10 are over 800 lines and 6 over 1,000, the same files as on 2026-11-19 (target: none over 800 except tables).
 - **Layer violations.** 22 documented exceptions are not zero. Their owner steps (M10, M12) are finished, and the entries remain.
 - **Wall time.** `pnpm test` runs one package at a time and takes 349 s, against 90 s for the mock-data tiers.

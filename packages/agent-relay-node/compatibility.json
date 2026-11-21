@@ -32,10 +32,11 @@
         "packages/agent-controller/vitest.config.ts",
         "packages/agent-e2e/faults",
         "packages/agent-e2e/flows",
+        "packages/agent-e2e/native",
         "packages/agent-e2e/package.json",
-        "packages/agent-e2e/playwright.config.ts",
+        "packages/agent-e2e/playwright.native.config.ts",
         "packages/agent-e2e/smoke",
-        "packages/agent-e2e/specs",
+        "packages/agent-e2e/soak",
         "packages/agent-e2e/stack",
         "packages/agent-e2e/tsconfig.json",
         "packages/agent-e2e/vitest.config.ts",
@@ -142,10 +143,6 @@
         "packages/agent-remote-lab/package.json",
         "packages/agent-remote-lab/performance",
         "packages/agent-remote-lab/playwright.components.config.ts",
-        "packages/agent-remote-lab/playwright.config.ts",
-        "packages/agent-remote-lab/playwright.prompt-edit.config.ts",
-        "packages/agent-remote-lab/playwright.resources.config.ts",
-        "packages/agent-remote-lab/playwright.windows.config.ts",
         "packages/agent-remote-lab/public",
         "packages/agent-remote-lab/src",
         "packages/agent-remote-lab/tsconfig.e2e.json",
@@ -189,7 +186,7 @@
         "packages/codex-daemon-client/tsconfig.test.json",
         "packages/codex-daemon-client/vitest.config.ts"
       ],
-      "digest": "sha256:b389a2175a721f8b625f52e0ae8bc564af9f0d4b1ec954c6f552ee131fbae847"
+      "digest": "sha256:995e23868a18ad52ebe633b79e0046f922c5dcc9ce6d4f6b29627353d0a0ce21"
     }
   },
   "providers": [

@@ -29,7 +29,8 @@ interface IndexRow { readonly key: string; readonly relayUrl: string; readonly u
 
 /**
  * Where a page that hides or leaves keeps the records it has not written yet, synchronously: localStorage commits at once, while WebKit
- * aborts an IndexedDB transaction that a leaving page has not committed. The next open of the database writes them to IndexedDB first.
+ * aborts an IndexedDB transaction that a leaving page has not committed. They go to IndexedDB at the next open of the database and before
+ * every read of its index, so a purge, which reads the index first, removes them too.
  */
 export const LEAVING_KEY = 'agent-remote:device-store:leaving';
 /** The synchronous storage a leaving page writes to; the page's localStorage when it has one. */
@@ -81,7 +82,7 @@ const request = <T>(operation: IDBRequest<T>): Promise<T> => new Promise<T>((res
 
 /**
  * The device store's records in this browser's IndexedDB. The database opens when first used and again after the browser closes it; each
- * open first writes what leaving pages kept in `leaving` storage.
+ * open, and each read of the index, first writes what leaving pages kept in `leaving` storage.
  */
 export function createBrowserDeviceDatabase(factory: () => IDBFactory | undefined = () => typeof indexedDB === 'undefined' ? undefined : indexedDB,
   leaving: () => LeavingStorage | undefined = pageLocalStorage): DeviceDatabase {
@@ -111,7 +112,10 @@ export function createBrowserDeviceDatabase(factory: () => IDBFactory | undefine
   return {
     available: () => factory() !== undefined,
     async readIndex() {
-      return request<IndexRow[]>((await open()).transaction(SESSION_INDEX_STORE, 'readonly').objectStore(SESSION_INDEX_STORE).getAll());
+      const database = await open();
+      // A page of this tab that was hidden may have kept records since the open; the index includes them, so a purge reaches them.
+      await writeLeaving(database, leaving()).catch(() => undefined);
+      return request<IndexRow[]>(database.transaction(SESSION_INDEX_STORE, 'readonly').objectStore(SESSION_INDEX_STORE).getAll());
     },
     async read(key) {
       return request<StoredRecord | undefined>((await open()).transaction(SESSIONS_STORE, 'readonly').objectStore(SESSIONS_STORE).get(key));

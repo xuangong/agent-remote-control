@@ -57,3 +57,17 @@ it('adds to what an earlier leaving page kept, keeps nothing when storage is ful
   expect(storage.values.has('agent-remote:device-store:leaving')).toBe(false);
   expect(await createBrowserDeviceDatabase(() => factory, () => storage).readIndex()).toEqual([]);
 });
+
+it('puts what this page kept while hidden on disk before the next read of the index, so a purge in the same page removes it', async () => {
+  const factory = new IDBFactory(), storage = memoryStorage();
+  const database = createBrowserDeviceDatabase(() => factory, () => storage);
+  expect(await database.readIndex()).toEqual([]);
+  // The database is open; the page is hidden with a write that had not completed, then shown again, and the person signs out.
+  const kept = record('kept', 4);
+  database.keepWhileLeaving!(new Map([[kept.key, kept]]));
+  const rows = await database.readIndex();
+  expect(rows.map(row => row.key)).toEqual([kept.key]);
+  await database.write(new Map(rows.map(row => [row.key, null] as const)));
+  expect(storage.values.has('agent-remote:device-store:leaving')).toBe(false);
+  expect(await createBrowserDeviceDatabase(() => factory, () => storage).readIndex()).toEqual([]);
+});

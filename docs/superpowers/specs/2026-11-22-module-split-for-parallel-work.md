@@ -1,6 +1,6 @@
 # Module split for parallel work
 
-Status: proposal for the owner, 2026-11-22. Analysis only; no code was changed.
+Status: proposal for the owner, 2026-11-22; items 1 to 3 implemented the same day (last section).
 Inputs: `architecture/modules.json`, `scripts/arch-check.mjs`, sections 1 to 3 and 13 of the [target architecture](2026-11-18-target-architecture-and-tests.md), `docs/current/agent-remote/components.md`, `AGENTS.md`, the write-tests skill, `scripts/compatibility.mjs`.
 
 **Data.** `main` at `a75001d9`: 381 non-merge commits since 2026-11-19, the 4 merge commits, the 12 cherry-picked task branches (`ts/*`, `work/o*`, `test/security-pins`, matched by subject) and the reflog of `design/im-session-service`.
@@ -217,3 +217,10 @@ Each step preserves behaviour, keeps `arch:check` at 0 failing findings and chan
 Item 1 is approved, including the change to the compatibility rule on line 9 of `AGENTS.md`. Task branches no longer update the compatibility digest. It is regenerated and checked once a branch is merged to `main`, and a merge driver handles any conflict that remains. The release gates are unchanged.
 
 Item 1 is implemented after the two tasks now in flight (the provider kit and the phone/platform gaps) are merged, so those tasks are not caught by a rule change halfway through. Items 2 to 5 follow in the document's order.
+
+## Implemented: items 1 to 3 (2026-11-22)
+
+- **1. The digest.** `pnpm compatibility:check` reports a stale digest on a task branch and passes; it fails on `main`, on a detached HEAD, in GitHub Actions and with `--strict`, so the release gates are unchanged. After a merge, `pnpm postmerge` on `main` regenerates the digest, commits it alone and checks it. The merge driver of `compatibility.json` (`.gitattributes`; `pnpm install` and `pnpm task:start` register it) keeps this side's digest and merges the hand-written parts as text. The rule is line 9 of `AGENTS.md`; the merge and release steps are in the README ("Merging into main") and `docs/controller-npm-release.md`.
+- **2. The ledgers.** Section 10's open items are `docs/superpowers/open-items/O1.md` to `O60.md` (O60 from the 0.3.4 release record), with an index that `pnpm postmerge` generates on `main` and `pnpm open-items` prints anywhere. The clause tables are one file per component in `docs/current/agent-remote/components/`, under `components.md`, which holds no counts.
+- **3. The registries.** The legacy token budget is a ceiling: the stylesheet test fails on an added legacy use and passes on a removal, and `pnpm postmerge` lowers the budgets to the counts on `main`. Each component spec names its WebKit and phone projects in its first line, and the projects select by it; `playwright test --list` is the same for every project. Not done in step 3: one name per import line (2.6), and one file per provider behaviour in the conformance kit, which waits for B3 to settle.
+- **Proof.** In a scratch clone: this branch fast-forwarded onto `main`, then two task branches that changed different source files, one opening O61, the other closing O13 and removing a legacy variable, merged with no conflict; `pnpm compatibility:check` failed on `main` until `pnpm postmerge` committed the digest, the index and the budget, then passed. Two branches that both committed a digest update conflicted without the driver and merged cleanly with it.

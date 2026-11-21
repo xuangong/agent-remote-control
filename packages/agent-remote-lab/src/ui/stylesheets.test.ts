@@ -3,6 +3,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, it } from 'vitest';
+import { legacyCounts, overBudget } from '../../../../scripts/lib/legacy-token-budget.mjs';
 
 const lab = fileURLToPath(new URL('..', import.meta.url));
 const shared = fileURLToPath(new URL('../../../agent-client-web/src/styles.css', import.meta.url));
@@ -114,20 +115,13 @@ it('draws one focus ring: the global rule reads the token and the primitive offs
   }
 });
 
-const packages = fileURLToPath(new URL('../../../', import.meta.url));
+const repository = fileURLToPath(new URL('../../../../', import.meta.url));
 const budgetFile = JSON.parse(readFileSync(new URL('./legacy-token-budget.json', import.meta.url), 'utf8')) as { budget: Record<string, number> };
-const legacyUse = /var\(\s*--(?:ui|obs|agent)-/g;
 
-/** Each counted stylesheet, as its path under packages/, with its uses of legacy variables; ui/tokens.css defines them. */
-function legacyCounts(): Record<string, number> {
-  const files = [...stylesheets(lab).filter(path => !path.endsWith(join('ui', 'tokens.css'))), shared];
-  return Object.fromEntries(files.map(path => [path.slice(packages.length).split('\\').join('/'), [...uncommented(path).matchAll(legacyUse)].length] as const)
-    .sort(([a], [b]) => a.localeCompare(b)));
-}
-
-it('ratchets the legacy variables down: each stylesheet uses exactly its budget, which only falls', () => {
-  // A count above the budget is a new legacy use (use --orchard-* instead); one below it is a removal whose budget was not lowered.
-  expect(legacyCounts(), 'legacy-token-budget.json').toEqual(Object.fromEntries(Object.entries(budgetFile.budget).sort(([a], [b]) => a.localeCompare(b))));
+it('ratchets the legacy variables down: no stylesheet uses more than its budget, and one without a budget uses none', () => {
+  // A count above the budget is a new legacy use: use --orchard-* instead. A count below it passes; pnpm postmerge lowers the
+  // budget on main, so the ceiling only falls.
+  expect(overBudget(legacyCounts(repository), budgetFile.budget), 'legacy-token-budget.json').toEqual([]);
 });
 
 const theme = fileURLToPath(new URL('../../../agent-client-web/src/theme/theme.css', import.meta.url));

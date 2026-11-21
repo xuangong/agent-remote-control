@@ -877,11 +877,11 @@ The implementation digest of `packages/agent-relay-node/compatibility.json` cove
 ```bash
 git switch main
 git merge --no-ff feat/my-task
-pnpm postmerge       # regenerates the digest and the open-items index, commits them alone and checks them
+pnpm postmerge       # regenerates the digest and the open-items index, lowers the legacy token budgets, commits them alone and checks them
 git push origin main
 ```
 
-The index of [open items](docs/superpowers/open-items/README.md) is generated the same way: a task adds or edits only its item's file, and `pnpm open-items` prints the current index on any branch. `pnpm postmerge` runs only on `main`, after the merge commit and with no other changes to tracked files; with nothing to regenerate it commits nothing, so it can run again. A branch that still carries a digest update merges through the file's merge driver (`.gitattributes`; `pnpm install` and `pnpm task:start` register it): it keeps this side's digest, which `pnpm postmerge` replaces, and merges the hand-written parts as text, so it stops only on a real conflict there. A release regenerates the digest once more after its version change ([Controller npm releases](docs/controller-npm-release.md)).
+The index of [open items](docs/superpowers/open-items/README.md) is generated the same way: a task adds or edits only its item's file, and `pnpm open-items` prints the current index on any branch. The legacy token budgets (`packages/agent-remote-lab/src/ui/legacy-token-budget.json`) are a ceiling per stylesheet: a task that removes legacy variables leaves them alone, and `pnpm postmerge` lowers them to the counts. `pnpm postmerge` runs only on `main`, after the merge commit and with no other changes to tracked files; with nothing to regenerate it commits nothing, so it can run again. A branch that still carries a digest update merges through the file's merge driver (`.gitattributes`; `pnpm install` and `pnpm task:start` register it): it keeps this side's digest, which `pnpm postmerge` replaces, and merges the hand-written parts as text, so it stops only on a real conflict there. A release regenerates the digest once more after its version change ([Controller npm releases](docs/controller-npm-release.md)).
 
 ## Package boundaries
 

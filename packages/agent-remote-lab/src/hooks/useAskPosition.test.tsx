@@ -219,3 +219,16 @@ it.each(['resize', 'move'])('writes source-anchored Ask geometry after %s and re
   const restored = await render(<SharedHarness />);
   expect(geometry(restored.querySelector('section')!)).toEqual(resized);
 });
+
+it('leaves an overlay Ask where it covers the page when its heading is dragged', async () => {
+  bounds.set('phone', { width: 390, height: 700 });
+  const container = await render(<Harness scope="phone" />);
+  const panel = container.querySelector('section')!, heading = container.querySelector('.lab-ask-heading')!;
+  expect(panel.parentElement!.dataset.presentation).toBe('overlay');
+  Object.assign(panel, { setPointerCapture: vi.fn(), hasPointerCapture: () => false, releasePointerCapture: vi.fn() });
+  const pointer = (target: Element, type: string, dx = 0, dy = 0) => target.dispatchEvent(Object.assign(new MouseEvent(type, { clientX: 100 + dx, clientY: 100 + dy, bubbles: true, cancelable: true, button: 0 }), { pointerId: 1, isPrimary: true }));
+  await act(async () => { pointer(heading, 'pointerdown'); pointer(panel, 'pointermove', 60, 96); pointer(panel, 'pointerup', 60, 96); });
+  expect(panel.style.getPropertyValue('--ask-left')).toBe('');
+  expect(panel.style.getPropertyValue('--ask-top')).toBe('');
+  expect(inspectAskPosition('phone').position).toBeUndefined();
+});

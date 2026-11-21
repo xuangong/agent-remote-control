@@ -32,10 +32,11 @@ forks.bind(record.id, target);
 const bound = forks.get(record.id)!;
 const entry: AskEntry = { source, attached: true, record: bound, attachedParticipant: askParticipantKey(bound) };
 
-const settings = [
+type SessionSetting = NonNullable<NonNullable<AgentSnapshot['payload']['runtimeInfo']>['settings']>[number];
+const settings: SessionSetting[] = [
   { id: 'model', category: 'model', label: 'Model', value: 'gpt-6-astra', options: [{ value: 'gpt-6-astra', label: 'GPT-6-Astra' }], mutable: true, scope: 'session' },
   { id: 'approval', category: 'permissions', label: 'Approval policy', value: 'never', options: [{ value: 'never', label: 'Never ask' }], mutable: true, scope: 'session' },
-] as const;
+];
 const snapshot = (id: string): AgentSnapshot => {
   const agent = replicaState.agent!;
   const running = query.has('running') && id === target.agentId;

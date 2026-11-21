@@ -16,7 +16,7 @@ export * from './conformance-checks.js';
  * The provider conformance kit: one suite that every journal-capable adapter passes, present and future, on mock data and in seconds
  * (step B3 of the provider boundary, section 4.3 of `docs/superpowers/specs/2026-11-21-requirements-vs-external-dependencies.md`).
  * Onboarding a CLI is: implement the adapter, declare its behaviour, pass this kit, add its native checks. The kit holds the adapter to
- * its declaration (`AgentProviderDescriptor.behaviour`); the rules it applies are the pure checks of `conformance-checks.ts` (K1 to K6).
+ * its declaration (`AgentProviderDescriptor.behaviour`); the rules it applies are the pure checks of `conformance-checks.ts` (K1 to K7).
  *
  * - Part 1, recorded sessions: every recording of the real CLI is read again in the declared order (K1), with usable identities and no
  *   item the live run lacked (K2); a Relay journal built from the live run meets each reread unchanged from the second read on, and a

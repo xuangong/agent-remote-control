@@ -246,3 +246,13 @@ Shipped from main `896943fb`. Worker `61702401` with `wrangler.journals-enabled.
 - typed during open: 45/53 ms.
 
 **With I4, steps I1 to I4 and J are all in production.**
+
+## Release 2026-11-21: O44, sends during a slow open
+
+- **Shipped:** main `55c09b36`, Worker `8257f97b`, deployed with `wrangler.journals-enabled.jsonc`. Rollback target: `61702401`. The Durable Object reported `8257f97b` within a minute.
+- **The fix:** a message typed while a session opens over a slow network (a 300 ms round trip) is delivered once the session is ready. It is no longer held as "could not be opened". `smoke:quick` found the defect after its harness was fixed to read the session it opened.
+- **Checks:**
+  - `pnpm verify` exit 0 (12,329 tests);
+  - e2e flows 43/43, including E9 with a 2 s Relay delay;
+  - `smoke:quick` seed 68421: M1, M2, M4 and M7, with every invariant exercised.
+- **Process change:** `smoke:quick` now runs before every release that changes the client or the Relay. A component test checks the smoke harness's selectors in each step's gate.

@@ -273,3 +273,27 @@ Shipped from main `dc1d9bf8`.
 **Checks:**
 - `pnpm verify` exit 0: 12,850 tests, 2 expected failures.
 - `smoke:quick` seed 29348 (M1, M2, M4, M7): all passed.
+
+## Release 2026-11-22: O49 and gaps 3 to 5, Controller 0.3.3
+
+Shipped from main `388205b7`.
+- **Partitions Worker:** `e63babd4`.
+- **Relay:** `15f8edd8`, rollback target `59fece62`. The Durable Object reported `15f8edd8` within about a minute.
+- **Controller:** 0.3.3 (`controller-v0.3.3`, sha256 `6b9a0810…`). Every Controller must update. After the update, each Claude session's journal is replaced once, at its first open.
+
+**Fixes:**
+- **O49.** Divergence is decided by the transcript's content for `fork_on_divergence` adapters.
+- **Gap 4.** Declared deadlines: a hung resume frees its binding with `native_unresponsive`; a silent turn is given up after 15 minutes when the adapter declares no heartbeat; pending sends are bounded at 20 and time out after 60 s.
+- **Gap 3.** Usage limits:
+  - Every adapter maps its CLI's documented signal to `usageLimit { resetsAt }` and `native_usage_limited`.
+  - Sends wait for the reset and go once.
+  - The time is stated in both locales.
+- **Gap 5.** Every send carries its input id. After a restart, an unknown send is settled from native history as delivered or not delivered. It is never replayed.
+- **O57.** Closed: an e2e scripted-provider key collision.
+
+No expected failures remain in the simulator suite.
+
+**Gates:**
+- `pnpm verify` exit 0 (12,941 tests);
+- flows 55 of 55;
+- `smoke:quick` M1, M2, M4 and M7 passed.

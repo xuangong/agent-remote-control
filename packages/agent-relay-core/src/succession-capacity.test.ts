@@ -3,7 +3,7 @@ import { projectSuccessionFavorites } from './favorites-succession.js';
 import { createHash } from 'node:crypto';
 import { expect, test } from 'vitest';
 import { createRelayState, emptyRelayState, validateRelayState, type HostedRelayState } from './state.js';
-import { deriveSuccessionCapacity, isSuccessionCapacityError, type SuccessionEncodingCosts } from './succession-capacity.js';
+import { deriveSuccessionCapacity, isSuccessionCapacityError, SUCCESSION_FEATURE_BYTES, type SuccessionEncodingCosts } from './succession-capacity.js';
 import { validBrokerAssociations, migrateBrokerAssociations } from './succession-associations.js';
 import { encodeHostedSnapshot as encodeSqlSnapshot, measureHostedSnapshot, quoteHostedRecord as quoteSqlRecord, HOSTED_SNAPSHOT_FORMAT as SQL_SNAPSHOT_FORMAT, HOSTED_RECORD_FORMAT as SQL_RECORD_FORMAT, HOSTED_CHUNK_BYTES as SQL_CHUNK_BYTES } from './record-codec.js';
 
@@ -167,18 +167,27 @@ test('consumes projection reserves even when an equal-length Favorite replacemen
 });
 
 test('fits the exact shared aggregate and refuses the next byte with complete retained extras', () => {
+  // The bound is proven at a small budget the encoding port sets; a Relay keeps SUCCESSION_FEATURE_BYTES.
+  const budget = 300_000, small: SuccessionEncodingCosts = { ...costs, featureBytes: budget };
+  expect(SUCCESSION_FEATURE_BYTES).toBe(8_388_608);
   const state = initial(); state.tenants.push(...initial(65536, 'other').tenants);
   const associations: any = state.tenants[0]!.broker.associations!; associations.padding = '';
-  let size = deriveSuccessionCapacity(state, costs).featureCharge;
-  associations.padding = 'x'.repeat(8388608 - size);
-  for (let adjustment = 0; adjustment < 3 && (size = deriveSuccessionCapacity(state, costs).featureCharge) !== 8388608; adjustment++) {
-    associations.padding = associations.padding.slice(0, associations.padding.length - Math.max(0, size - 8388608));
+  let size = deriveSuccessionCapacity(state, small).featureCharge;
+  associations.padding = 'x'.repeat(budget - size);
+  for (let adjustment = 0; adjustment < 3 && (size = deriveSuccessionCapacity(state, small).featureCharge) !== budget; adjustment++) {
+    associations.padding = associations.padding.slice(0, associations.padding.length - Math.max(0, size - budget));
   }
-  expect(size).toBe(8388608);
-  expect(() => createRelayState(auth, { initial: state, async commit() {} }, () => {}, () => {}, costs)).not.toThrow();
-  associations.padding += 'x';
-  expect(deriveSuccessionCapacity(state, costs).featureCharge).toBe(8388609);
-  expect(() => createRelayState(auth, { initial: state, async commit() {} }, () => {}, () => {}, costs)).toThrow(/capacity/i);
+  const create = (encoding: SuccessionEncodingCosts) => () => createRelayState(auth, { initial: state, async commit() {} }, () => {}, () => {}, encoding);
+  expect(size).toBe(budget);
+  expect(create(small)).not.toThrow();
+  associations.padding = associations.padding.slice(1);
+  expect(deriveSuccessionCapacity(state, small).featureCharge).toBe(budget - 1);
+  expect(create(small)).not.toThrow();
+  associations.padding += 'xx';
+  expect(deriveSuccessionCapacity(state, small).featureCharge).toBe(budget + 1);
+  expect(create(small)).toThrow(/capacity/i);
+  // The same state is far inside the default budget.
+  expect(create(costs)).not.toThrow();
 }, 10000);
 
 test('retains all inventory kinds and derives remaining relation revisions and recovery claims after reopen', () => {
@@ -221,11 +230,16 @@ test('charges only shared quota completions matched by the actual owner creation
   expect(Math.abs(deriveSuccessionCapacity(state, costs).remainingBytes - deriveSuccessionCapacity(unrelated, costs).remainingBytes)).toBeLessThanOrEqual(2);
 }, 10000);
 
-test('covers full accepted source output and rejects durable binding and creation slot deficits', () => {
+/** A tenant whose one imported admission reserves one binding and one creation slot. */
+function admitted() {
   const state = initial(), broker = state.tenants[0]!.broker;
   broker.associations!.freezes = [];
-  const source = { controllerId: 'controller', providerId: 'fixture', nativeSessionId: 'source' };
-  broker.associations!.admissions = [{ id: 'imported', fingerprint: 'hash', source }];
+  broker.associations!.admissions = [{ id: 'imported', fingerprint: 'hash', source: { controllerId: 'controller', providerId: 'fixture', nativeSessionId: 'source' } }];
+  return { state, broker };
+}
+
+test('covers full accepted source output', () => {
+  const { state } = admitted(), source = { controllerId: 'controller', providerId: 'fixture', nativeSessionId: 'source' };
   const capacity = deriveSuccessionCapacity(state, costs), before = total(state);
   const widest = '\ud800'.repeat(512);
   const terminal = structuredClone(state), next = terminal.tenants[0]!.broker;
@@ -235,10 +249,25 @@ test('covers full accepted source output and rejects durable binding and creatio
   next.associations!.admissions = []; next.associations!.revision++;
   expect(total(terminal) - before).toBeLessThanOrEqual(capacity.remainingBytes);
   expect(deriveSuccessionCapacity(terminal, costs).tenants[0]).toMatchObject({ bindingSlots: 0, creationSlots: 0, remainingAssociationRevisions: 0 });
-  broker.bindings = Array.from({ length: 4096 }, (_, index) => ({ hostId: 'host', providerId: 'fixture', agentId: 'agent-' + index, nativeSessionId: 'native-' + index }));
-  broker.creations = broker.bindings.map(binding => ['create-' + binding.agentId, { fingerprint: 'full', agentId: binding.agentId }]);
-  expect(deriveSuccessionCapacity(state, costs).violations).toContain('Source completion slots are exhausted.');
-}, 10000);
+});
+
+test.each(['bindings', 'creations'] as const)('rejects a durable %s slot deficit past 4096 held and reserved, and not at 4096 or 4095', list => {
+  const { state, broker } = admitted();
+  const hold = (count: number) => {
+    const agents = Array.from({ length: count }, (_, index) => 'agent-' + index);
+    if (list === 'bindings') broker.bindings = agents.map((agentId, index) => ({ hostId: 'host', providerId: 'fixture', agentId, nativeSessionId: 'native-' + index }));
+    else {
+      // Creations name a bound agent; one binding keeps the bindings far from their own bound.
+      broker.bindings = [{ hostId: 'host', providerId: 'fixture', agentId: 'agent-0', nativeSessionId: 'native-0' }];
+      broker.creations = agents.map(agentId => ['create-' + agentId, { fingerprint: 'full', agentId: 'agent-0' }]);
+    }
+    return deriveSuccessionCapacity(state, costs).violations;
+  };
+  // The admission reserves one slot beside the held ones: 4094, 4095 and 4096 held are 4095, 4096 and 4097 in all.
+  expect(hold(4094)).not.toContain('Source completion slots are exhausted.');
+  expect(hold(4095)).not.toContain('Source completion slots are exhausted.');
+  expect(hold(4096)).toContain('Source completion slots are exhausted.');
+});
 
 test('holds recovery claims until complete Host and device evidence and ignores used invitation history alone', () => {
   const state = fullInventory(), broker = state.tenants[0]!.broker;

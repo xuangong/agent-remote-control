@@ -44,7 +44,7 @@ test('Favorites progress derives latest authorized completion from the same snap
   f.deny(); await f.restart();
   expect((await f.request('v1/favorites')).status).toBe(401);
 }, 10000);
-async function fixture(configure?: (state: HostedRelayState) => void, recentAuthentication = false, accounting = false, directBroker = false) {
+async function fixture(configure?: (state: HostedRelayState) => void, recentAuthentication = false, accounting = false, directBroker = false, featureBytes?: number) {
   const credential = 'arc_' + 'k'.repeat(43);
   let denied = false, unavailable = false;
   const authority = createServer(async (request, response) => {
@@ -81,7 +81,7 @@ async function fixture(configure?: (state: HostedRelayState) => void, recentAuth
   let select: HostBrokerOptions['successionProjectionAllowance'];
   let beforeCommit = async (_value: HostedRelayState) => {};
   let queuedControls = 0;
-  const encodingCosts = accounting ? hostedRecordEncodingCosts(auth) : undefined;
+  const encodingCosts = accounting ? { ...hostedRecordEncodingCosts(auth), ...(featureBytes === undefined ? {} : { featureBytes }) } : undefined;
   const start = (initial: unknown) => {
     const storage = { initial, async commit(value: HostedRelayState) { await beforeCommit(value); writes++; if (failSave) throw new Error('disk unavailable'); file = JSON.stringify(value); if (failAfterSave) throw new Error('Lost persistence acknowledgement'); } };
     if (!directBroker) return createHostedRelay({ ...auth, successionEncodingCosts: encodingCosts, successionEnrollment: true, successionProjectionAllowance: context => select?.(context) ?? 2 * 1024 * 1024, scheduler: { schedule() {}, cancel() {} }, storage });
@@ -1207,13 +1207,15 @@ function recoveredIdentity(state: HostedRelayState) {
   broker.pairings = [{ id: 'recovered', purpose: 'host-only', createdAt: 1, expiresAt: 100, usedAt: 2, hostId: recovery.hostId, hostName: 'Host', recovery }];
   state.version = 9;
 }
-function fillFeatureBudget(state: HostedRelayState) {
+/** The feature budget of the full-budget tests: a full budget refuses the same at any size, and a small one keeps them fast. */
+const FULL_BUDGET_BYTES = 1_048_576;
+function fillFeatureBudget(state: HostedRelayState, budget = FULL_BUDGET_BYTES) {
   const costs = { measureSnapshot: (value: Readonly<HostedRelayState>) => ({ snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES,
-    costs: measureHostedSnapshot(value as HostedRelayState, { ...state.config, secret: 's'.repeat(32) }) }), quoteRecord: quoteSqlRecord };
+    costs: measureHostedSnapshot(value as HostedRelayState, { ...state.config, secret: 's'.repeat(32) }) }), quoteRecord: quoteSqlRecord, featureBytes: budget };
   const associations = state.tenants[0]!.broker.associations as any; associations.padding = '';
-  associations.padding = 'x'.repeat(8388608 - deriveSuccessionCapacity(state, costs).featureCharge);
-  for (let index = 0; index < 3; index++) associations.padding = associations.padding.slice(0, associations.padding.length - Math.max(0, deriveSuccessionCapacity(state, costs).featureCharge - 8388608));
-  expect(deriveSuccessionCapacity(state, costs).featureCharge).toBe(8388608);
+  associations.padding = 'x'.repeat(budget - deriveSuccessionCapacity(state, costs).featureCharge);
+  for (let index = 0; index < 3; index++) associations.padding = associations.padding.slice(0, associations.padding.length - Math.max(0, deriveSuccessionCapacity(state, costs).featureCharge - budget));
+  expect(deriveSuccessionCapacity(state, costs).featureCharge).toBe(budget);
 }
 async function recoveryPeer(f: Awaited<ReturnType<typeof fixture>>, key = f.credential) {
   const socket = new WebSocket(f.origin.replace('http', 'ws') + '/ws/remote-host?control=1&successionEnrollment=2', { headers: { authorization: 'Bearer ' + key } });
@@ -1245,7 +1247,7 @@ test('recovery rotation unknown sync keeps complete overlap through old-key reco
 
 test('full-budget fresh recovery invitation refuses before key publication without poisoning unrelated requests', async () => {
   const f = await fixture(state => { recoveredIdentity(state); const broker = state.tenants[0]!.broker; broker.hosts = []; broker.keys = [];
-    broker.revokedHosts![0]!.revocationId = '00000000-0000-4000-8000-000000000002'; fillFeatureBudget(state); }, true, true, true);
+    broker.revokedHosts![0]!.revocationId = '00000000-0000-4000-8000-000000000002'; fillFeatureBudget(state); }, true, true, true, FULL_BUDGET_BYTES);
   const before = await f.saved(), writes = f.writes();
   const response = await f.request('v1/remote/pairings', 'owner', { recoverHostId: 'mapped-host' });
   expect(response.status).toBe(409); expect(await response.text()).not.toContain('arc_');
@@ -1290,7 +1292,7 @@ test('full feature budget revoke retains complete history and quota without ordi
     broker.bindings = [{ hostId: 'mapped-host', providerId: 'fixture', agentId: 'ordinary-agent', nativeSessionId: 'C' }];
     broker.creations = [['ordinary-create', { fingerprint: 'complete ordinary creation', agentId: 'ordinary-agent' }]];
     state.sessionStars = [favorite()]; state.favoritesTrees = [{ subject: 'owner', revision: 0, folders: [] }]; state.version = 9; broker.associations!.version = 5; projectSuccessionFavorites(state, 'owner', false); fillFeatureBudget(state);
-  }, true, true, true);
+  }, true, true, true, FULL_BUDGET_BYTES);
   const before = await f.saved();
   expect((await f.request('v1/remote/hosts/mapped-host/revoke', 'owner', {})).status).toBe(200);
   const saved = await f.saved(), broker = saved.tenants[0]!.broker;
@@ -1325,7 +1327,7 @@ test('new recovery rotation at the feature ceiling refuses before issuing a usab
     recoveredIdentity(state); state.tenants[0]!.broker.keys[0]![1].expires = Number.MAX_SAFE_INTEGER;
     Object.assign(state.tenants[0]!.broker.hosts[0]!, { pairingPurpose: 'host-only', credentialRotation: true });
     fillFeatureBudget(state);
-  }, true, true, true);
+  }, true, true, true, FULL_BUDGET_BYTES);
   const peer = await recoveryPeer(f), before = await f.saved(), writes = f.writes();
   expect((await f.request('v1/remote/hosts/mapped-host/rotate', 'owner', {})).status).toBe(409);
   expect(peer.messages.filter(row => row.type === 'credential_issued')).toEqual([]); expect(peer.socket.readyState).toBe(1);

@@ -17,7 +17,9 @@ it('resumes bounded chunks after restart and verifies a file larger than Team te
   const result=await store.finish('team',input.uploadId);expect(result.resource?.sha256).toBe(input.sha256);
   expect(await store.finish('team',input.uploadId)).toEqual(result);
   const output:Buffer[]=[];for(let offset=0;offset<bytes.length;offset+=32768) output.push(Buffer.from((await store.readChunk('team',result.resource!.resourceId,offset)).contentBase64,'base64'));
-  expect(Buffer.concat(output)).toEqual(bytes);
+  // The bytes read back are the file: its length and digest (a deep equality of 200,000 bytes costs 170 ms).
+  const read = Buffer.concat(output);
+  expect(read.length).toBe(bytes.length); expect(createHash('sha256').update(read).digest('hex')).toBe(input.sha256);
   await expect(store.getMetadata('other-team',result.resource!.resourceId)).rejects.toThrow('unavailable');
 });
 it('rejects changed upload identities, digest mismatch and store quota overflow', async () => {

@@ -19,6 +19,8 @@ export interface SuccessionEncodingCosts {
   quoteRecord(input: { kind: string; owner: string; key: string; payloadJsonBytesUpperBound: number }): Pick<SuccessionRecordCost, 'byteLength' | 'chunkCount' | 'manifestBytes'>;
   /** Optional runtime representation ceiling, checked before every effect admission and storage write. */
   acceptsSnapshot?(state: Readonly<HostedRelayState>, remainingSnapshotBytes: number): boolean;
+  /** The succession feature's encoded byte budget: `SUCCESSION_FEATURE_BYTES` unless set, as a test sets a small one to reach it. */
+  featureBytes?: number;
 }
 export const SUCCESSION_FEATURE_BYTES = 8_388_608;
 const MAX = Number.MAX_SAFE_INTEGER;
@@ -213,8 +215,11 @@ export function deriveSuccessionCapacity(state: Readonly<HostedRelayState>, enco
     tenants.push(slots);
     const brokerHeader = (delta: number) => headerGrowth('brokerHeader', owner, 'broker', delta);
     const identities = retainedHostIdentities(broker);
+    // Up to 8,192 retained identities: looked up by Host id, not searched for each (the first row of an id, as a search finds it).
+    const revoked = new Map<string, NonNullable<typeof broker.revokedHosts>[number]>();
+    for (const row of broker.revokedHosts ?? []) if (!revoked.has(row.hostId)) revoked.set(row.hostId, row);
     for (const [hostId, installationId] of identities) {
-      const existing = broker.revokedHosts?.find(row => row.hostId === hostId);
+      const existing = revoked.get(hostId);
       const key = JSON.stringify([hostId, installationId]);
       replacement('revokedHost', owner, key, bytes({ ...existing, hostId, installationId, revocationId: existing?.revocationId ?? '00000000-0000-4000-8000-000000000000', revokedAt: MAX }));
       if (!existing) brokerHeader(reference('revokedHost', owner, key));
@@ -377,7 +382,7 @@ export function deriveSuccessionCapacity(state: Readonly<HostedRelayState>, enco
   remainingBytes = sum(remainingBytes, ...replacements.values());
   remainingSnapshotBytes = sum(remainingSnapshotBytes, ...snapshotReplacements.values());
   const featureCharge = sum(retainedBytes, remainingBytes);
-  if (featureCharge > SUCCESSION_FEATURE_BYTES) violations.push('Succession evidence encoding capacity is exhausted.');
+  if (featureCharge > (encoding.featureBytes ?? SUCCESSION_FEATURE_BYTES)) violations.push('Succession evidence encoding capacity is exhausted.');
   if (encoding.acceptsSnapshot && !encoding.acceptsSnapshot(state, remainingSnapshotBytes)) violations.push('Complete Relay snapshot encoding capacity is exhausted.');
   return { retainedBytes, remainingBytes, remainingSnapshotBytes, featureCharge, tenants, violations };
 }

@@ -1,5 +1,9 @@
 import { readdirSync, readFileSync } from 'node:fs';
+import type { ProviderConformanceSubject } from '@orchardworks/agent-provider-sdk/conformance';
 import type { JournalRecording } from '@orchardworks/agent-provider-sdk/testing';
+
+import { codexBehaviour } from './behaviour.js';
+import { codexNativeFake } from './test-utils/native-fake.js';
 
 /** What a real codex CLI did for each recorded scenario, and the rows the runtime must hold for it. Test support: the package's `./recordings` entry, never published. */
 const directory = new URL('../src/journal-fixtures/', import.meta.url);
@@ -13,3 +17,11 @@ export const recording = (name: string): JournalRecording => JSON.parse(readFile
 
 /** The golden rows of a recording: what the runtime holds for its live run and for its reread. Reviewed once; see `docs/current/agent-remote/seams.md` (S1). */
 export const recordingRows = (name: string): { live: unknown[]; reread: unknown[] } => JSON.parse(readFileSync(new URL(`${name}.rows.json`, directory), 'utf8')) as { live: unknown[]; reread: unknown[] };
+
+/**
+ * Codex for the provider conformance kit (`@orchardworks/agent-provider-sdk/conformance`): the declaration of the shared daemon, which
+ * every Controller session uses, these recordings, and the adapter over a scripted app-server.
+ */
+export const codexConformanceSubject = (): ProviderConformanceSubject => ({
+  name: 'codex (shared daemon)', providerId: 'codex', behaviour: codexBehaviour('shared'), recordings: { names: recordingNames, recording }, native: codexNativeFake(),
+});

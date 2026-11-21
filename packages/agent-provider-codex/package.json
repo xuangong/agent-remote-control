@@ -26,6 +26,7 @@
   "files": [
     "dist",
     "!dist/recordings.*",
+    "!dist/test-utils/native-fake.*",
     "README.md",
     "LICENSE",
     "NOTICE"

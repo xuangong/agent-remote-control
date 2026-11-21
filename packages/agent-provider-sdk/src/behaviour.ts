@@ -29,9 +29,12 @@ import { AGENT_RUNTIME_ERROR_CODES, AGENT_SESSION_IN_USE_REASONS } from './provi
 export type AgentConcurrencyModel = 'single_writer' | 'shared_clients' | 'fork_on_divergence' | 'none';
 export const AGENT_CONCURRENCY_MODELS: readonly AgentConcurrencyModel[] = ['single_writer', 'shared_clients', 'fork_on_divergence', 'none'];
 
-/** Kinds of items a reread of native history cannot rebuild; the adapter marks each such observation `itemIdentity.liveOnly`. */
-export type AgentLiveOnlyKind = 'interaction' | 'todo' | 'error' | 'startup_notice' | 'reasoning' | 'synthetic_output';
-export const AGENT_LIVE_ONLY_KINDS: readonly AgentLiveOnlyKind[] = ['interaction', 'todo', 'error', 'startup_notice', 'reasoning', 'synthetic_output'];
+/**
+ * Kinds of items a reread of native history cannot rebuild; the adapter marks each such observation `itemIdentity.liveOnly`.
+ * `synthetic_output` is what a local command prints, `partial_output` the text a turn streamed before it was interrupted.
+ */
+export type AgentLiveOnlyKind = 'interaction' | 'todo' | 'error' | 'startup_notice' | 'reasoning' | 'synthetic_output' | 'partial_output';
+export const AGENT_LIVE_ONLY_KINDS: readonly AgentLiveOnlyKind[] = ['interaction', 'todo', 'error', 'startup_notice', 'reasoning', 'synthetic_output', 'partial_output'];
 
 export interface AgentConcurrencyBehaviour {
   readonly model: AgentConcurrencyModel;

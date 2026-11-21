@@ -103,6 +103,8 @@ const commands = {
   // specs that left the older Relay-backed tiers, about 1,450 runs on one worker.
   components: ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'playwright', 'test', '--config=playwright.components.config.ts', '--timeout=30000', '--global-timeout=1500000', ...process.argv.slice(3)],
   conformance: ['--filter', '@orchardworks/agent-relay-node', 'run', 'test:conformance'],
+  // The provider conformance kit for every journal-capable adapter, on mock data: recordings, declared behaviour and faults through the port.
+  providers: ['--filter', '@orchardworks/agent-remote-controller', 'exec', 'vitest', 'run', 'src/provider-conformance.test.ts', '--testTimeout=10000', '--hookTimeout=10000'],
   'e2e-flows': ['--filter', '@orchardworks/agent-e2e', 'run', 'test:e2e'],
 };
 if (!(mode in commands)) throw new Error(`Unknown test suite: ${mode}`);

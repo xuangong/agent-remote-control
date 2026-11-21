@@ -6,24 +6,18 @@ import { rowsOf, rowsOfRecording } from '@orchardworks/agent-remote-fixtures';
 
 /**
  * S1, adapter to Controller rows: what a real provider recording gives the runtime. Each recording is replayed twice; both runs must give
- * the golden rows recorded at baseline/im-session-2026-11-18, and the keys of an item read again must be the keys it had live.
+ * the golden rows recorded at baseline/im-session-2026-11-18. That a reread keeps the keys of the live run, in the order the adapter
+ * declares, with no key a journal cannot hold, is the provider conformance kit's (`agent-controller/src/provider-conformance.test.ts`).
  */
 const providers = { claude, codex, copilot } as const;
 
 describe.each(Object.entries(providers))('S1 adapter to Controller rows: %s recordings', (provider, library) => {
-  it.each(library.recordingNames())('%s: two replays give the golden rows, and a reread keeps the keys and the order of the live run', async name => {
+  it.each(library.recordingNames())('%s: two replays give the golden rows', async name => {
     const golden = library.recordingRows(name);
     const first = await rowsOfRecording(library.recording(name));
     const second = await rowsOfRecording(library.recording(name));
     expect(second).toEqual(first);
     expect(first).toEqual({ live: golden.live, reread: golden.reread });
-    const liveKeys = new Set(first.live.map(row => row.key));
-    expect(first.reread.filter(row => !liveKeys.has(row.key)).map(row => row.key)).toEqual([]);
-    // A reread shows the items it shares with the live run in the order the live run showed them.
-    const order = (rows: Array<{ key: string }>, keep: (key: string) => boolean) => [...new Set(rows.map(row => row.key))].filter(keep);
-    const rereadKeys = new Set(first.reread.map(row => row.key));
-    expect(order(first.reread, key => liveKeys.has(key))).toEqual(order(first.live, key => rereadKeys.has(key)));
-    expect([...first.live, ...first.reread].filter(row => row.key === '' || row.key.startsWith('controller:'))).toEqual([]);
   });
 });
 

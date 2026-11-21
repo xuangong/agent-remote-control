@@ -9,7 +9,8 @@ import { simulatedCli } from './test-utils/simulated-cli.js';
 /**
  * The Controller beside a CLI that stops answering in the middle of a turn, played by the CLI simulator (`hang`, S7): the turn shows its
  * user message and nothing more. For an adapter that declares no heartbeat the Controller's watchdog ends the turn and releases the
- * runtime, so the page does not say Working for ever and the next send reaches a fresh attachment. Requirements review gap 4.
+ * runtime; the provider conformance kit checks that for every adapter's declaration (`provider-conformance.test.ts`). An adapter that
+ * declares a heartbeat of its own ends such a turn itself, which no adapter declares yet, so it is checked here. Requirements review gap 4.
  */
 const closers: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of closers.splice(0).reverse()) await close(); vi.useRealTimers(); });
@@ -31,21 +32,6 @@ async function hungTurn(behaviour: AgentProviderBehaviour) {
 }
 
 describe('a turn whose CLI stops answering', () => {
-  it('ends native_unresponsive after 15 minutes of silence, releases the runtime, and the next send attaches the session again (gap 4)', async () => {
-    const { cli, runtime, events } = await hungTurn(codexBehaviour('shared'));
-    await vi.advanceTimersByTimeAsync(TURN_SILENCE_MS - 1);
-    expect(events.map(event => event.type)).not.toContain('turn_failed');
-    await vi.advanceTimersByTimeAsync(1);
-    expect(events.find(event => event.type === 'turn_failed')).toMatchObject({ code: 'native_unresponsive' });
-    await vi.advanceTimersByTimeAsync(0);
-    expect(cli.native('thread-1').clients).toBe(0);
-    const next = await runtime.acquireSession('agent-1');
-    await next!.agent.sendMessage('Again');
-    next!.release();
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(cli.native('thread-1')).toMatchObject({ clients: 1, resumes: 2, history: ['Hello', 'Hi', 'Stuck', 'Again', 'Reply to Again'] });
-  });
-
   it('is left to the adapter that declares a heartbeat of its own', async () => {
     const { cli, events } = await hungTurn({ ...codexBehaviour('shared'), turn: { heartbeatMs: 45_000 } });
     await vi.advanceTimersByTimeAsync(2 * TURN_SILENCE_MS);

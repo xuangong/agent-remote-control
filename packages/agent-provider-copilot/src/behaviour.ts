@@ -18,5 +18,6 @@ export const copilotBehaviour = {
   // that may follow (`@github/copilot-sdk` 1.0.11, `dist/generated/session-events.d.ts`; `usage-limit.ts`).
   limits: { signal: 'error' },
   failures: { runtime: ['native_usage_limited'], inUse: ['writer_elsewhere'] },
-  liveOnly: ['interaction', 'reasoning', 'todo', 'error'],
+  // The text a turn streamed before it was interrupted is kept live-only, since the CLI's history drops it (recording `interrupted`).
+  liveOnly: ['interaction', 'reasoning', 'todo', 'error', 'partial_output'],
 } as const satisfies AgentProviderBehaviour;

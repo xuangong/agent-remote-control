@@ -1,5 +1,9 @@
 import { readdirSync, readFileSync } from 'node:fs';
+import type { ProviderConformanceSubject } from '@orchardworks/agent-provider-sdk/conformance';
 import type { JournalRecording } from '@orchardworks/agent-provider-sdk/testing';
+
+import { copilotBehaviour } from './behaviour.js';
+import { copilotNativeFake } from './test-utils/native-fake.js';
 
 /** What a real copilot CLI did for each recorded scenario, and the rows the runtime must hold for it. Test support: the package's `./recordings` entry, never published. */
 const directory = new URL('../tests/fixtures/journal/', import.meta.url);
@@ -13,3 +17,8 @@ export const recording = (name: string): JournalRecording => JSON.parse(readFile
 
 /** The golden rows of a recording: what the runtime holds for its live run and for its reread. Reviewed once; see `docs/current/agent-remote/seams.md` (S1). */
 export const recordingRows = (name: string): { live: unknown[]; reread: unknown[] } => JSON.parse(readFileSync(new URL(`${name}.rows.json`, directory), 'utf8')) as { live: unknown[]; reread: unknown[] };
+
+/** Copilot for the provider conformance kit (`@orchardworks/agent-provider-sdk/conformance`): its declaration, these recordings, and the adapter over a scripted client. */
+export const copilotConformanceSubject = (): ProviderConformanceSubject => ({
+  name: 'copilot', providerId: 'copilot', behaviour: copilotBehaviour, recordings: { names: recordingNames, recording }, native: copilotNativeFake(),
+});

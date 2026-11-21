@@ -1,6 +1,7 @@
 import type { AgentRemoteHttpResult } from '@orchardworks/agent-session-runtime';
 
-const initialDelayMs = 5_000;
+/** How long a first failed native start is repeated before the session is started again; it doubles with each failure. */
+export const NATIVE_START_BACKOFF_MS = 5_000;
 const maxDelayMs = 60_000;
 
 /** Which native session an attach request would start, and whether it is an explicit takeover. */
@@ -41,7 +42,7 @@ export function createNativeStartBackoff(now: () => number = Date.now) {
         return;
       }
       const count = (failures.get(target.key)?.count ?? 0) + 1;
-      failures.set(target.key, { count, until: now() + Math.min(initialDelayMs * 2 ** (count - 1), maxDelayMs), result });
+      failures.set(target.key, { count, until: now() + Math.min(NATIVE_START_BACKOFF_MS * 2 ** (count - 1), maxDelayMs), result });
     },
   };
 }

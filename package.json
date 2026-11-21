@@ -29,6 +29,7 @@
     "test:e2e:flows": "node scripts/run-tests.mjs e2e-flows",
     "test:native:browser": "node scripts/run-tests.mjs native-browser",
     "test:conformance": "node scripts/run-tests.mjs conformance",
+    "test:providers": "node scripts/run-tests.mjs providers",
     "test:setup": "node scripts/run-tests.mjs setup",
     "test:local-env": "node scripts/run-tests.mjs local-env",
     "compatibility:update": "node scripts/compatibility.mjs",

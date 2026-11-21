@@ -12,7 +12,9 @@ import { deadline } from './channel.js';
 import { nativeCanonical, nativeHash, nativeIdentity, rejectNativeEvidence, copilotEmptyHandle, readCopilotEmptyHandle, type CopilotEmptyDescriptor } from './native-evidence.js';
 import { readCopilotHistoryPage } from './reference-history.js';
 import { copilotBehaviour } from './behaviour.js';
-export interface CopilotAgentProviderOptions { executable?: string; env?: Record<string, string | undefined>; requestTimeoutMs?: number; onDiagnostic?: (message: string) => void; nativeSessionConfig?: Pick<SessionConfig, 'provider' | 'skillDirectories' | 'mcpServers'>; useLoggedInUser?: boolean; }
+export interface CopilotAgentProviderOptions { executable?: string; env?: Record<string, string | undefined>; requestTimeoutMs?: number; onDiagnostic?: (message: string) => void; nativeSessionConfig?: Pick<SessionConfig, 'provider' | 'skillDirectories' | 'mcpServers'>; useLoggedInUser?: boolean;
+  /** The native client; absent, the provider starts the Copilot CLI over stdio. A test plays the CLI with it. */
+  client?: CopilotClient; }
 export interface CopilotSessionSummary { nativeSessionId: string; providerId: string; title: string; workspace?: string; createdAt: string; updatedAt: string; state: 'idle' | 'running' | 'waiting' | 'unknown' | 'unavailable'; }
 export function resolveCopilotExecutable(): string {
   const packagePath = createRequire(import.meta.url).resolve('@github/copilot/package.json');
@@ -48,7 +50,7 @@ export class CopilotAgentProvider implements AgentProviderAdapter {
     this.authority=Object.freeze({kind:'owned-runtime',authorityId:'copilot-sdk-stdio',namespaceId:nativeHash(nativeCanonical({profile}))});
     this.nativeEvidence=Object.freeze<AgentProviderNativeEvidence>({availability:()=>this.disposed?{status:'unavailable',code:'native_evidence_unavailable',reason:'Native evidence authority is unavailable.'}:{status:'configured',version:2},createEmpty:config=>this.createEmpty(config)});
     const invocation = /\.(?:mjs|cjs)$/i.test(executable) ? {path: process.execPath, args: [executable]} : {path: executable};
-    this.client = new CopilotClient({ connection: RuntimeConnection.forStdio(invocation), env: nativeEnv, useLoggedInUser: options.useLoggedInUser });
+    this.client = options.client ?? new CopilotClient({ connection: RuntimeConnection.forStdio(invocation), env: nativeEnv, useLoggedInUser: options.useLoggedInUser });
   }
   private async ready(): Promise<void> {
     if (this.disposed) throw new Error('Copilot provider is disposed.');

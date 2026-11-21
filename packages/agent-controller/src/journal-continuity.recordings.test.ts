@@ -25,22 +25,13 @@ describe.each(['copilot', 'codex', 'claude'] as const)('journal continuity of %s
   const names = recordingNames(provider);
   const present = (...wanted: string[]) => wanted.filter(name => names.includes(name));
 
+  // Every recording also passes the provider conformance kit (`provider-conformance.test.ts`): usable identities, a reread in the declared
+  // order that names no new item, and five more rereads unchanged.
   describe.skipIf(names.length === 0)('every recording', () => {
-    it('gives every row an identity and none a key the Controller keeps for itself', async () => {
-      for (const name of names) {
-        const items = [...await itemsOf(recording(provider, name).live), ...await itemsOf(recording(provider, name).reread)];
-        expect(items.length, name).toBeGreaterThan(0);
-        expect(items.filter(({ key }) => key.startsWith('controller:')), name).toEqual([]);
-      }
-    });
-
-    it.each(names)('%s: opened five times adds no item after the first, and leaves none open', async name => {
+    it.each(names)('%s: once read again, leaves no item open but a tool the CLI left running', async name => {
       const run = recording(provider, name);
       const journal = await journalOfRun(run.live);
       await journal.reread(run.reread);
-      const keys = journal.keys();
-      for (let open = 0; open < 5; open += 1) expect(await journal.reread(run.reread), `${name}, open ${open + 1}`).toEqual(UNCHANGED);
-      expect(journal.keys(), name).toEqual(keys);
       expect(journal.openKeys().filter(key => !key.startsWith('tool:')), name).toEqual([]);
     });
   });

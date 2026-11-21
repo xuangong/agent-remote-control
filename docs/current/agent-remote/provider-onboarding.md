@@ -68,6 +68,15 @@ Every adapter states how its CLI behaves as data, in `descriptor.behaviour` (`pa
 
 A provider joins Relay journals only through its adapter: it declares `journal: { itemIdentity: 1 }` once every timeline observation carries an `itemIdentity` and continuity fixtures pass (see the Provider Contract in `docs/blueprint/agent-remote-observation.md`). The fixture records a live session and the same session opened again against the real runtime (Copilot's are `packages/agent-provider-copilot/tests/fixtures/journal`), and `continuityOutcome` must show that the Relay's journal answers `unchanged` when the reread window is compared with the journal the live session built; a difference of content is counted as one replacement with its reason, a difference of keys is fixed in the adapter. Until then the provider's sessions stay on forwarding, which is always safe. The Controller asks for `journal=1` only when some provider declares the capability.
 
+## Conformance kit
+
+Every journal-capable adapter passes the provider conformance kit (`@orchardworks/agent-provider-sdk/conformance`, clauses in `components.md`), run by `pnpm test:providers` on mock data in seconds. An adapter joins it by exporting a subject from its `./recordings` entry, and adding the subject to `agent-controller/src/provider-conformance.test.ts`:
+- its declaration, as `resolveAgentProviderBehaviour` reads it;
+- its recordings of the real CLI, which must include `settled` and `restart`;
+- a native fake (`src/test-utils/native-fake.ts`) that drives the real adapter through its own native port: a turn over one finished turn of history, read again; the CLI's limit signal; the CLI's refusal of a second writer, when it has one.
+
+The kit holds the adapter to its declaration: the reread order, item identity and continuity of every recording (part 1), each declared behaviour through the native fake (part 3), and each fault the CLI simulator plays from the declaration through the Controller (part 2). A finding names the declared field the adapter contradicts: fix the adapter, or the declaration when the recordings show the declaration was wrong.
+
 ## Verification and release record
 
 Run existing relevant behavior tests with both per-test and outer deadlines. Root `pnpm test`, `pnpm test:e2e:flows` and `pnpm test:conformance` enforce outer deadlines; custom invocations need their own bounded wrapper. Select pinned native executables explicitly. Build before native tests that import `dist`. Use free test ports and preserve running user Hosts.

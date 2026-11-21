@@ -18,10 +18,12 @@ const shared = {
   // Codex lists the `clientUserMessageId` given to `turn/start` and `turn/steer` as `clientId` (`native-evidence.ts`); ordinary sends
   // pass one only on the native-evidence path until every send does (requirements review, gap 5).
   input: { identity: 'echoes_client_id', whileBusy: 'steer' },
-  // `account/rateLimits/updated` arrives with every turn; its shape at the limit is assumed.
+  // A turn the account's limit stops fails with `TurnError.codexErrorInfo` `usageLimitExceeded` or `rateLimitExceeded`, and
+  // `account/rateLimits/updated`, sent with every turn, gives each window's `usedPercent` and `resetsAt` in seconds (app-server protocol of
+  // codex-cli 0.171.0, `codex app-server generate-ts`: `v2/TurnError.ts`, `v2/CodexErrorInfo.ts`, `v2/RateLimitWindow.ts`; `usage-limit.ts`).
   limits: { signal: 'event' },
   failures: {
-    runtime: ['native_file_limit', 'native_runtime_unavailable', 'native_session_unavailable', 'native_resume_timeout', 'native_history_timeout', 'native_request_timeout'],
+    runtime: ['native_file_limit', 'native_runtime_unavailable', 'native_session_unavailable', 'native_resume_timeout', 'native_history_timeout', 'native_request_timeout', 'native_usage_limited'],
     inUse: ['writer_elsewhere'],
   },
   liveOnly: ['interaction', 'todo', 'error', 'startup_notice'],

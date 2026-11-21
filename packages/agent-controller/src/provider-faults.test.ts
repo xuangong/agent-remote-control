@@ -45,11 +45,12 @@ describe('a provider CLI that refuses or stalls a resume', () => {
     // The Relay answers first here; the Controller gives the hung resume up at its own declared deadline (`resume-deadline.test.ts`).
     cli.faults.heal();
   });
-  it('names a usage limit in fixed words, but not when it resets: nothing passes resetsAt on (requirements review, gap 3)', async () => {
+  it('names a usage limit in fixed words, and when it resets (gap 3)', async () => {
     const { cli, open } = await start();
-    cli.faults.usageLimit({ resetsAt: Date.now() + 60_000 });
+    const resetsAt = Date.now() + 60_000;
+    cli.faults.usageLimit({ resetsAt });
     const refused = await open();
-    expect(refused.body).toEqual({ code: 'native_usage_limited', error: 'The native CLI reached its usage limit. Reopen the session once the limit resets.', requestId: expect.any(String) });
+    expect(refused.body).toEqual({ code: 'native_usage_limited', error: 'The native CLI reached its usage limit. Reopen the session once the limit resets.', resetsAt, requestId: expect.any(String) });
   });
 });
 

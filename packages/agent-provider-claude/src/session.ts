@@ -104,6 +104,11 @@ export class ClaudeAgentSession implements AgentSession {
   private readonly records: string[];
   private readonly recordSet: Set<string>;
   private backgroundTasks = 0;
+  /**
+   * The plan's usage limit as Claude Code reports it: a `rate_limit_event` whose status is `rejected` stops turns until `resetsAt`, which
+   * Claude Code gives in seconds since the epoch (Agent SDK 0.3.247 `SDKRateLimitInfo`; the CLI compares `resetsAt*1000` with its clock).
+   */
+  private usageLimit: { resetsAt?: number } | undefined;
   private status: AgentRuntimeInfo['status'] = 'starting';
   private turnId: ReturnType<typeof randomUUID> | undefined;
   private cancelRequested = false;
@@ -304,6 +309,8 @@ export class ClaudeAgentSession implements AgentSession {
 
   private beginTurn(message: SDKUserMessage & { uuid: ReturnType<typeof randomUUID> }): void {
     this.turnId = message.uuid;
+    // A new turn asks the model again; the limit stands only if Claude Code reports it again.
+    this.usageLimit = undefined;
     this.inputDispatched = true;
     this.nativeEvidence.noteDispatch(message.uuid);
     this.usage.startTurn();
@@ -650,9 +657,16 @@ export class ClaudeAgentSession implements AgentSession {
   private info(): AgentRuntimeInfo {
     return { providerId: 'claude', sessionId: this.config.sessionId, status: this.status, cwd: this.config.cwd,
       model: this.config.model ?? null, planning: { active: this.planning }, settings: this.settings(), childSessions: this.children.descriptors(),
+      ...(this.usageLimit ? { usageLimit: { ...this.usageLimit } } : {}),
       persistence: this.options.emptyDescriptor && !this.inputDispatched ? claudeEmptyHandle({ ...this.config, planning: this.planning, permissionMode: this.resumePermissionMode }, this.options) : { providerId: 'claude', sessionId: this.config.sessionId, opaque: JSON.stringify({ ...persistedConfig(this.config), planning: this.planning, permissionMode: this.resumePermissionMode }) } };
   }
   private runtimeUpdated(): void { this.nativeEvidence.invalidate(); this.emit({ type: 'runtime_updated', provider: 'claude', runtimeInfo: this.info(), activeTurnId: this.turnId ?? null }); }
+  private noteRateLimit(info: { status: string; resetsAt?: number }): void {
+    const limit = info.status === 'rejected' ? { ...(Number.isSafeInteger(info.resetsAt) && info.resetsAt! > 0 ? { resetsAt: info.resetsAt! * 1000 } : {}) } : undefined;
+    if (JSON.stringify(limit) === JSON.stringify(this.usageLimit)) return;
+    this.usageLimit = limit;
+    this.runtimeUpdated();
+  }
   private emit(event: AgentStreamEvent, itemIdentity?: ProviderItemIdentity): void {
     this.output.push({ type: 'observation', sourceKey: `claude:${this.sourceId}:${++this.sequence}`, occurredAt: Date.now(), delivery: 'live',
       event: this.withTurn(event), ...(itemIdentity ? { itemIdentity } : {}) });
@@ -686,6 +700,7 @@ export class ClaudeAgentSession implements AgentSession {
         if (this.disposed) break;
         this.lastWriteAt = Date.now();
         if (message.type === 'system' && message.subtype === 'background_tasks_changed') this.backgroundTasks = (message as { tasks?: Array<{ ambient?: unknown }> }).tasks?.filter(task => !task.ambient).length ?? 0;
+        if (message.type === 'rate_limit_event') { this.noteRateLimit(message.rate_limit_info); continue; }
         if (message.session_id && message.session_id !== this.config.sessionId) throw new Error('Claude returned a different native session identity.');
         const lifecycle = message as { type: string; command_uuid?: unknown; state?: unknown };
         if (lifecycle.type === 'command_lifecycle') {
@@ -732,7 +747,7 @@ export class ClaudeAgentSession implements AgentSession {
         this.finishOpenItems();
         if (this.cancelRequested) this.emit({ type: 'turn_canceled', provider: 'claude', reason: 'Interrupted by the user.' });
         else if (message.is_error || message.subtype !== 'success') this.emit({ type: 'turn_failed', provider: 'claude',
-          error: 'errors' in message ? message.errors.join('\n') : 'Claude turn failed.' });
+          error: 'errors' in message ? message.errors.join('\n') : 'Claude turn failed.', ...(this.usageLimit ? { code: 'native_usage_limited' } : {}) });
         else this.emit({ type: 'turn_completed', provider: 'claude', usage });
         this.turnId = undefined;
         this.cancelRequested = false;

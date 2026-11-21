@@ -11,7 +11,7 @@ it("declares the Copilot CLI's single writer, which the SDK reports at resume, a
     concurrency: { model: 'single_writer', probe: 'native', othersVisible: 'never' },
     resume: { cost: 'shared_process', deadlineMs: 15_000 },
     limits: { signal: 'error' },
-    failures: { inUse: ['writer_elsewhere'] },
+    failures: { runtime: ['native_usage_limited'], inUse: ['writer_elsewhere'] },
     liveOnly: ['interaction', 'reasoning', 'todo', 'error'],
   });
   expect(resolveAgentProviderBehaviour(provider.descriptor).verifiedVersion).toBeUndefined();

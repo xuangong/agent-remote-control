@@ -543,3 +543,27 @@ it('delivers a waiting message once when two composers are mounted on one sessio
   expect([...firstSend.mock.calls, ...secondSend.mock.calls]).toEqual([['Said once']]);
   expect(container.querySelector('[data-testid="pending-send"]')).toBeNull();
 });
+
+it('holds waiting messages until a usage limit resets, never times them out meanwhile, then sends them once, in order (gap 3)', async () => {
+  const view = await setup({ sessionKey: 'limited', connection: 'ready' });
+  const resetsAt = Date.now() + 2 * 60 * 60_000;
+  await view.update({ state: { ...state, agent: { ...state.agent!, runtimeInfo: { ...state.agent!.runtimeInfo, usageLimit: { resetsAt } } } } });
+  await view.type('First'); await view.click();
+  await view.type('Second'); await view.click();
+  await advance(resetsAt - Date.now() - 1);
+  expect(view.send).not.toHaveBeenCalled();
+  const notices = [...view.container.querySelectorAll('[data-testid="pending-send"]')];
+  expect(notices.map(notice => notice.textContent?.includes('Sending') && !notice.textContent.includes('Not sent'))).toEqual([true, true]);
+  await advance(1);
+  expect(view.send.mock.calls).toEqual([['First'], ['Second']]);
+  await advance(60 * 60_000);
+  expect(view.send).toHaveBeenCalledTimes(2);
+  expect(view.notice()).toBeNull();
+});
+
+it('sends at once when the usage limit the runtime reported has already reset', async () => {
+  const view = await setup({ sessionKey: 'reset', connection: 'ready' });
+  await view.update({ state: { ...state, agent: { ...state.agent!, runtimeInfo: { ...state.agent!.runtimeInfo, usageLimit: { resetsAt: Date.now() - 1 } } } } });
+  await view.type('Now'); await view.click();
+  expect(view.send).toHaveBeenCalledExactlyOnceWith('Now');
+});

@@ -3,7 +3,8 @@ import { composerAvailability, sessionActivityLabel, sessionNotice, sessionNotic
 import { leaseNoticeLabel, leaseView } from './lease-view.js';
 import { translator } from '../presentation/messages.js';
 import { buildSnapshot } from '../testing/builders.js';
-import { buildSessionFacts, CONNECTIONS, CONTROL, SESSION_PRESENTATION_VECTORS, T5_PATTERN, type ReplicaFacts } from '../testing/session-presentation-vectors.js';
+import { buildSessionFacts, CONNECTIONS, CONTROL, LIMIT_NOW, LIMIT_RESETS_AT, SESSION_PRESENTATION_VECTORS, T5_PATTERN, type ReplicaFacts } from '../testing/session-presentation-vectors.js';
+import { momentWords } from '../presentation/day-line.js';
 
 const BUSINESS_LABELS = new Set(['Ready', 'Working', 'Waiting for response', 'Starting', 'Closed', 'Agent failed', 'Executing command', 'Native CLI has control', 'Native control transferred']);
 
@@ -19,6 +20,12 @@ describe('the presentation of a session, row by row', () => {
     expect(sessionNoticeWords({ kind: 'host_offline' })).toBe('The Host is offline. Messages will be delivered when it is back.');
     expect(sessionNoticeWords({ kind: 'ended' })).toBe('This session has ended.');
     expect(sessionNoticeWords({ kind: 'terminal_in_control' })).toBe('Native CLI has control');
+  });
+
+  it('says when a usage limit resets, in business words (R7)', () => {
+    const at = (resetsAt: number) => sessionNoticeWords({ kind: 'usage_limited', resetsAt, now: LIMIT_NOW }, translator('en'), 'en');
+    expect(at(LIMIT_RESETS_AT)).toMatch(/^This account's usage limit resets today at \d\d:00\. Messages you send wait and go out then\.$/);
+    expect(sessionNoticeWords({ kind: 'usage_limited' })).toBe('This account reached its usage limit. Messages go out again once it resets.');
   });
 
   it('says a pending command while the session is idle, and nothing before the Snapshot', () => {
@@ -42,10 +49,15 @@ describe('the words of a session in Chinese', () => {
     [{ kind: 'unavailable', message: 'Session was deleted' }, 'Session was deleted'],
     [{ kind: 'agent_unavailable', message: 'The agent is not available on Mac mini.' }, 'Mac mini 上的 Agent 暂时用不了。'],
     [{ kind: 'agent_unavailable', message: 'The agent is not available on its Host.' }, '它所在的 Host 上的 Agent 暂时用不了。'],
+    [{ kind: 'usage_limited' }, '这个账号的用量到上限了，额度恢复后才能接着发消息。'],
   ];
 
   it.each(notices.map(([notice, words]) => [`${notice.kind}: ${words}`, notice, words] as const))('words the notice %s', (_name, notice, words) => {
     expect(sessionNoticeWords(notice, zh)).toBe(words);
+  });
+
+  it('says when a usage limit resets (R7)', () => {
+    expect(sessionNoticeWords({ kind: 'usage_limited', resetsAt: LIMIT_RESETS_AT, now: LIMIT_NOW }, zh, 'zh')).toMatch(/^这个账号的用量到上限了，今天 \d\d:00 恢复。现在发的消息会先等着，到时候再发出去～$/);
   });
 
   it('words each lease state', () => {
@@ -155,12 +167,14 @@ describe('R2 and R3: the composer', () => {
     }
   });
 
-  it('sends now exactly when synchronized, the control check is over and send_message is allowed', () => {
+  it('sends now exactly when synchronized, the control check is over and send_message is allowed, and no usage limit holds sends until a known reset (R7)', () => {
     for (const { name, facts } of rows) {
       const composer = composerAvailability(facts);
       if (composer.input === 'disabled') continue;
       const { session } = facts;
-      expect(composer.dispatch, name).toBe(session.synchronized && !session.controlChecking && session.operations.send_message.allowed ? 'now' : 'when_ready');
+      const notice = sessionNotice(facts);
+      const held = notice?.kind === 'usage_limited' && notice.resetsAt !== undefined;
+      expect(composer.dispatch, name).toBe(session.synchronized && !session.controlChecking && session.operations.send_message.allowed && !held ? 'now' : 'when_ready');
     }
   });
 
@@ -171,5 +185,20 @@ describe('R2 and R3: the composer', () => {
       expect(sessionNotice(facts)?.kind, name).toBe('host_offline');
       expect(composerAvailability(facts).input, name).toBe('enabled');
     }
+  });
+});
+
+describe('a moment as a sentence says it', () => {
+  const now = Date.parse('2026-11-22T10:00:00Z');
+  it.each([
+    ['en', '2026-11-22T15:05:00Z', 'today at 15:05'],
+    ['en', '2026-11-23T09:00:00Z', 'tomorrow at 09:00'],
+    ['en', '2026-11-28T09:00:00Z', 'Nov 28 at 09:00'],
+    ['en', '2027-01-03T09:00:00Z', 'Jan 3, 2027 at 09:00'],
+    ['zh', '2026-11-22T15:05:00Z', '今天 15:05'],
+    ['zh', '2026-11-23T09:00:00Z', '明天 09:00'],
+    ['zh', '2026-11-28T09:00:00Z', '11月28日 09:00'],
+  ] as const)('in %s, %s is "%s"', (locale, time, words) => {
+    expect(momentWords(Date.parse(time), now, locale, translator(locale), 'UTC')).toBe(words);
   });
 });

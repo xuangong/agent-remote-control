@@ -28,7 +28,9 @@ import { ScriptedSession } from './journal-scripted-session.js';
  *   the other one. Through the managed stdio directory, a resident client tells the records it holds and the transcript its records as a
  *   reread gives them, so divergence is decided by content.
  * - S6 Faults at resume: `slowResume(ms)`, `hangResume()` (answers once healed; `{ once: true }` hangs only the next resume),
- *   `usageLimit({ resetsAt })` (typed `native_usage_limited` with `resetsAt` until that time).
+ *   `usageLimit({ resetsAt })` (typed `native_usage_limited` with `resetsAt` until that time). `usageLimit({ resetsAt, at: 'turn' })` is the
+ *   limit as CLIs signal it, on a turn: until `resetsAt` each turn fails with code `native_usage_limited` after its user message, and the
+ *   session reports `runtimeInfo.usageLimit { resetsAt }` until a turn runs again.
  * - S7 Faults mid-turn, on the next turn: `crash()` fails it with `native_exited` and ends the session's stream; `hang()` stops it after its
  *   user message.
  * - S8 `unknownEvent(kind)`: until healed, every history read and every turn carries an item of a kind the adapter does not know.
@@ -67,7 +69,7 @@ export function simulatedCli(options: SimulatedCliOptions) {
   let observations = 0;
   let writes = 0;
   const resumeFaults: { slowMs?: number; hang?: 'always' | 'once'; hung: Array<() => void>; resetsAt?: number } = { hung: [] };
-  const turnFaults: { next?: 'crash' | 'hang'; unknownKind?: string } = {};
+  const turnFaults: { next?: 'crash' | 'hang'; unknownKind?: string; limitResetsAt?: number } = {};
 
   const nativeOf = (id: string): Native => {
     let native = natives.get(id);
@@ -114,6 +116,7 @@ export function simulatedCli(options: SimulatedCliOptions) {
     running: string | undefined;
     writtenAt = 0;
     closed = false;
+    usageLimit: { resetsAt: number } | undefined;
     constructor(readonly native: Native) {
       const items = history(native);
       const newer = turnFaults.unknownKind ? [unknown('history', turnFaults.unknownKind, 'history-newer')] : [];
@@ -121,7 +124,8 @@ export function simulatedCli(options: SimulatedCliOptions) {
       this.branch = [...items];
     }
     override async runtimeInfo(): Promise<AgentRuntimeInfo> {
-      return { providerId, sessionId: this.native.id, status: this.closed ? 'closed' : this.running ? 'running' : 'idle', persistence: { providerId, sessionId: this.native.id, opaque: '{}' } };
+      return { providerId, sessionId: this.native.id, status: this.closed ? 'closed' : this.running ? 'running' : 'idle', persistence: { providerId, sessionId: this.native.id, opaque: '{}' },
+        ...(this.usageLimit ? { usageLimit: { ...this.usageLimit } } : {}) };
     }
     override async sendMessage(text: string): Promise<void> {
       if (this.closed) throw new Error('The simulated session is closed.');
@@ -131,6 +135,15 @@ export function simulatedCli(options: SimulatedCliOptions) {
       this.running = turnId;
       this.push(observation('live', { type: 'turn_started', provider: providerId, turnId }));
       this.push(timeline('live', ask));
+      const limitResetsAt = turnFaults.limitResetsAt;
+      if (limitResetsAt !== undefined && clock.now() < limitResetsAt) {
+        this.usageLimit = { resetsAt: limitResetsAt };
+        this.running = undefined;
+        this.push(observation('live', { type: 'runtime_updated', provider: providerId, runtimeInfo: await this.runtimeInfo(), activeTurnId: null }));
+        this.push(observation('live', { type: 'turn_failed', provider: providerId, turnId, error: 'The account reached its usage limit.', code: 'native_usage_limited' }));
+        return;
+      }
+      if (this.usageLimit) { this.usageLimit = undefined; this.push(observation('live', { type: 'runtime_updated', provider: providerId, runtimeInfo: await this.runtimeInfo(), activeTurnId: turnId })); }
       const fault = turnFaults.next;
       turnFaults.next = undefined;
       if (fault === 'hang') return;
@@ -279,13 +292,13 @@ export function simulatedCli(options: SimulatedCliOptions) {
     faults: {
       slowResume(ms: number) { resumeFaults.slowMs = ms; },
       hangResume(options: { once?: true } = {}) { resumeFaults.hang = options.once ? 'once' : 'always'; },
-      usageLimit(limit: { resetsAt: number }) { resumeFaults.resetsAt = limit.resetsAt; },
+      usageLimit(limit: { resetsAt: number; at?: 'resume' | 'turn' }) { if (limit.at === 'turn') turnFaults.limitResetsAt = limit.resetsAt; else resumeFaults.resetsAt = limit.resetsAt; },
       crash() { turnFaults.next = 'crash'; },
       hang() { turnFaults.next = 'hang'; },
       unknownEvent(kind: string) { turnFaults.unknownKind = kind; },
       heal() {
         delete resumeFaults.slowMs; delete resumeFaults.hang; delete resumeFaults.resetsAt;
-        turnFaults.next = undefined; turnFaults.unknownKind = undefined;
+        turnFaults.next = undefined; turnFaults.unknownKind = undefined; turnFaults.limitResetsAt = undefined;
         for (const release of resumeFaults.hung.splice(0)) release();
       },
     },

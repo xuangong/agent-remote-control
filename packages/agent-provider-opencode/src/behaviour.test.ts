@@ -12,6 +12,8 @@ it('declares that the OpenCode server shares a session among its clients and ser
     reread: { withoutAttach: true },
     resume: { cost: 'subscription' },
     input: { whileBusy: 'steer' },
+    limits: { signal: 'event' },
+    failures: { runtime: ['native_runtime_unavailable', 'native_usage_limited'] },
     liveOnly: [],
   });
 });

@@ -14,8 +14,9 @@ export const copilotBehaviour = {
   resume: { cost: 'shared_process', deadlineMs: 15_000 },
   // Assumed: no input id is kept, and input while busy waits for the next turn (immediate input is degraded).
   input: { identity: 'none', whileBusy: 'queue' },
-  // `session.error` with `errorType` `rate_limit` or `quota` (`@github/copilot-sdk` 1.0.11).
+  // `session.error` with `errorType` `rate_limit` or `quota`, and the seconds until the reset only in an `auto_mode_switch.requested`
+  // that may follow (`@github/copilot-sdk` 1.0.11, `dist/generated/session-events.d.ts`; `usage-limit.ts`).
   limits: { signal: 'error' },
-  failures: { runtime: [], inUse: ['writer_elsewhere'] },
+  failures: { runtime: ['native_usage_limited'], inUse: ['writer_elsewhere'] },
   liveOnly: ['interaction', 'reasoning', 'todo', 'error'],
 } as const satisfies AgentProviderBehaviour;

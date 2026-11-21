@@ -145,6 +145,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   const waiting = usePendingSend<PendingMessage>(JSON.stringify([draftScope, agentId]), visible, {
     ready: message => readyToDeliver(message),
     send: (message, signal, dispatch) => deliver(message, signal, dispatch),
+    heldUntil: () => latest.current.heldUntil,
   });
   const currentAgent = useRef(agentId);
   currentAgent.current = agentId;
@@ -200,8 +201,17 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   const session = suppliedSessionState;
   const activitySession = draftOnly ? remoteSessionState(undefined, session.connection) : session;
   const capabilities = state?.agent?.capabilities;
-  // Only a business reason blocks input (target T4). A send goes now, or waits in the queue until the session is ready.
-  const availability = composerAvailability({ session, host, replica: state }, t);
+  // Only a business reason blocks input (target T4). A send goes now, or waits in the queue until the session is ready, or until a
+  // usage limit resets: the composer renders again at the reset, and the queue sends what waited, once (gap 3).
+  const now = Date.now();
+  const availability = composerAvailability({ session, host, replica: state, now }, t);
+  const limitResetsAt = state?.agent?.runtimeInfo.usageLimit?.resetsAt;
+  const heldUntil = limitResetsAt !== undefined && limitResetsAt > now ? limitResetsAt : undefined;
+  useEffect(() => {
+    if (heldUntil === undefined) return;
+    const timer = setTimeout(() => refresh(value => value + 1), Math.max(0, heldUntil - Date.now()));
+    return () => clearTimeout(timer);
+  }, [heldUntil]);
   const dispatch = availability.input === 'enabled' && !draftOnly && !mutationBlocked && !forcedReadOnly && agentId !== '' ? availability.dispatch : undefined;
   const sendNow = dispatch === 'now';
   // A stand-in view (`opening`) keeps the editor and takes a plain message into the queue, which the pane that
@@ -254,8 +264,8 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   const dispatchReady = sendNow && !operationBusy;
   const sendAllowed = sendNow;
   const queueAllowed = ready && session.operations.queue_message.allowed;
-  const latest = useRef({ waitsWhileOpening, agentId, draftOnly, mutationBlocked, dispatchReady, sendAllowed, queueAllowed, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient });
-  latest.current = { waitsWhileOpening, agentId, draftOnly, mutationBlocked, dispatchReady, sendAllowed, queueAllowed, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient };
+  const latest = useRef({ waitsWhileOpening, agentId, draftOnly, mutationBlocked, dispatchReady, sendAllowed, queueAllowed, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient, heldUntil });
+  latest.current = { waitsWhileOpening, agentId, draftOnly, mutationBlocked, dispatchReady, sendAllowed, queueAllowed, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient, heldUntil };
   // A message waits for its session until the session is ready, however long it takes to open. It stops as Not sent, and is
   // never sent unasked later, only when the session cannot take it: a business reason, or a view that could not open it.
   const unsendable = availability.input === 'disabled' && !draftOnly ? availability.words : openFailed ? t('composer.openFailed') : undefined;

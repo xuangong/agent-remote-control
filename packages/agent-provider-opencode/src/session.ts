@@ -16,6 +16,7 @@ import { orderedSnapshot, reconcileTimeline, type SupplementalObservation } from
 import { OpenCodeSettings } from './settings.js';
 import { OpenCodeCommands } from './commands.js';
 import { permissionRequest, formRequest, formAnswer, formResponse } from './interactions.js';
+import { openCodeRetryLimit, openCodeUsageLimited } from './usage-limit.js';
 
 export class OpenCodeSession implements AgentSession {
   readonly capabilities: AgentCapabilities;
@@ -39,6 +40,8 @@ export class OpenCodeSession implements AgentSession {
   private startsAtBeginning = false;
   private failure?: AgentRuntimeInfo['failure'];
   private failureIdleId?: string;
+  /** The account's usage limit, while the server waits out a limit before it retries, or after a turn it stopped, until the next turn. */
+  private usageLimit?: AgentRuntimeInfo['usageLimit'];
   private streamConnected = false;
   private olderCursor?: string;
   private observed = false;
@@ -161,8 +164,17 @@ export class OpenCodeSession implements AgentSession {
     }
     // Exact native delivery settles ordinary admission even while its timeline snapshot is still loading.
     if (event.type === 'session.inbox.delivered' && event.data.inboxID === this.pendingInput) this.releaseOrdinaryInput();
+    this.noteUsageLimit(event);
     if (this.recovering) { this.recoveryDirty = true; return; }
     this.enqueue(() => this.applyEvent(event));
+  }
+  /**
+   * The server waits out a usage limit and retries the turn itself: the turn goes on, limited until the retry, and the next step lifts it.
+   * A fact of the event, not of the snapshot a refresh reads, so it applies while one loads too.
+   */
+  private noteUsageLimit(event: V2Event): void {
+    if (event.type === 'session.retry.scheduled' && openCodeUsageLimited(event.data.error)) { this.usageLimit = openCodeRetryLimit(event.data.at); this.emitRuntime(); }
+    else if (event.type === 'session.step.started' && this.usageLimit) { this.usageLimit = undefined; this.emitRuntime(); }
   }
   private async applyEvent(event: V2Event): Promise<void> {
     switch (event.type) {
@@ -295,7 +307,7 @@ export class OpenCodeSession implements AgentSession {
       this.activeTurnId = turnId ?? null;
       if (!this.execution) {
         this.execution = { turnId, beforeIdle: this.latestTerminal()?.id };
-        this.failure = undefined; this.failureIdleId = undefined;
+        this.failure = undefined; this.failureIdleId = undefined; this.usageLimit = undefined;
         this.emit({ type: 'turn_started', provider: 'opencode', turnId });
       } else if (turnId) this.execution.turnId = turnId;
       this.active = true;
@@ -321,7 +333,10 @@ export class OpenCodeSession implements AgentSession {
     if (outcome === 'failed') {
       const message = error ? nativeError(error) : 'OpenCode reported a failed execution without a failure reason.';
       this.failure = { message, turnId }; this.failureIdleId = undefined;
-      this.emit({ type: 'turn_failed', provider: 'opencode', turnId, error: message });
+      // A turn the account's limit stopped keeps the limit, with its reset when a scheduled retry said it, until the next turn.
+      const limited = openCodeUsageLimited(error);
+      if (limited) this.usageLimit ??= {};
+      this.emit({ type: 'turn_failed', provider: 'opencode', turnId, error: message, ...(limited ? { code: 'native_usage_limited' } : {}) });
     } else if (outcome === 'interrupted') this.emit({ type: 'turn_canceled', provider: 'opencode', turnId, reason: 'OpenCode execution interrupted.' });
     else this.emit({ type: 'turn_completed', provider: 'opencode', turnId, usage: this.currentUsage() });
     this.active = false; this.activeTurnId = null;
@@ -348,7 +363,8 @@ export class OpenCodeSession implements AgentSession {
     this.output.push({ type: 'observation', sourceKey: key ?? `runtime:${this.sequence + 1}`, nativeRevision: ++this.sequence, occurredAt: Date.now(), delivery: 'live', event });
   }
   private info(): AgentRuntimeInfo {
-    return { providerId: 'opencode', sessionId: this.nativeId, status: this.status, ...(this.status === 'failed' && this.failure ? { failure: this.failure } : {}), cwd: this.config.cwd, model: this.config.model ?? null, mode: this.config.agent ?? null, planning: { active: this.config.agent !== undefined && this.config.agent === this.controls.planningAgentId('plan') }, settings: this.controls.list(), childSessions: this.children.map(child => ({ ...child })), connection: { ...this.connection }, persistence: { providerId: 'opencode', sessionId: this.nativeId, opaque: JSON.stringify(this.config) } };
+    return { providerId: 'opencode', sessionId: this.nativeId, status: this.status, ...(this.status === 'failed' && this.failure ? { failure: this.failure } : {}),
+      ...(this.usageLimit ? { usageLimit: { ...this.usageLimit } } : {}), cwd: this.config.cwd, model: this.config.model ?? null, mode: this.config.agent ?? null, planning: { active: this.config.agent !== undefined && this.config.agent === this.controls.planningAgentId('plan') }, settings: this.controls.list(), childSessions: this.children.map(child => ({ ...child })), connection: { ...this.connection }, persistence: { providerId: 'opencode', sessionId: this.nativeId, opaque: JSON.stringify(this.config) } };
   }
   private emitRuntime(): void { this.emit({ type: 'runtime_updated', provider: 'opencode', runtimeInfo: this.info(), activeTurnId: this.activeTurnId && !this.terminalTurns.has(this.activeTurnId) ? this.activeTurnId : null }); }
   async runtimeInfo(options?: { refreshSettings?: boolean }): Promise<AgentRuntimeInfo> {

@@ -1,7 +1,8 @@
 import type { AgentReplicaState } from '../replica/types.js';
 import { leaseNoticeLabel, leaseView, type NativeRefusalReason } from './lease-view.js';
 import type { RemoteSessionState } from './session-state.js';
-import { translator, type Translate } from '../presentation/messages.js';
+import { translator, type Locale, type Translate } from '../presentation/messages.js';
+import { momentWords } from '../presentation/day-line.js';
 
 /**
  * What a person sees of a session: its one business notice, whether the composer takes input and whether a send goes now,
@@ -18,14 +19,18 @@ import { translator, type Translate } from '../presentation/messages.js';
  * - R5. The words for a native owner come from `leaseNoticeLabel`.
  * - R6. A session the CLI refuses as a client (`cli_refused`: another process writes it) is read-only with the CLI's reason; its
  *   composer is disabled and nothing offers to take it over (O48).
+ * - R7. The account's usage limit (`runtimeInfo.usageLimit`, gap 3) is a notice that says when it resets, and leaves the composer enabled;
+ *   while the reset time is known and ahead of `now`, sends wait for it. A reset time that `now` has passed no longer limits.
  */
 
 export interface SessionFacts {
   readonly session: RemoteSessionState;
   /** The session's Host as the Relay last said (SessionStatesView.host); undefined before it said anything. */
   readonly host?: { readonly online: boolean; readonly name?: string };
-  /** The replica, read only for the words of a failure: the runtime failure and the last non-recoverable diagnostic. */
+  /** The replica, read only for the words of a failure (the runtime failure and the last non-recoverable diagnostic) and the usage limit. */
   readonly replica?: AgentReplicaState;
+  /** When the facts are read, in milliseconds since the epoch; without it a usage limit counts as long as the runtime reports it. */
+  readonly now?: number;
 }
 
 export type SessionNotice =
@@ -40,7 +45,9 @@ export type SessionNotice =
   /** The Relay refused the session for good (`refuseDisconnected`), or a non-recoverable diagnostic. */
   | { readonly kind: 'unavailable'; readonly message: string }
   /** The adapter reports the native runtime unavailable. Sends wait (owner decision 1). */
-  | { readonly kind: 'agent_unavailable'; readonly message: string };
+  | { readonly kind: 'agent_unavailable'; readonly message: string }
+  /** The account reached its usage limit, which resets at `resetsAt` when the CLI said; `now` is when it was read (R7). */
+  | { readonly kind: 'usage_limited'; readonly resetsAt?: number; readonly now?: number };
 
 /** The Host the notice names when the Relay gave none. */
 const ITS_HOST = 'its Host';
@@ -57,6 +64,12 @@ const FAILED = 'The agent failed without error details.';
 
 function lastFailure(replica: AgentReplicaState | undefined): string | undefined {
   return [...(replica?.diagnostics ?? [])].reverse().find(diagnostic => !diagnostic.recoverable)?.message.trim() || undefined;
+}
+
+/** The usage limit that holds at `now` (R7). */
+function usageLimit(facts: SessionFacts): { resetsAt?: number } | undefined {
+  const limit = facts.replica?.agent?.runtimeInfo.usageLimit;
+  return limit && !(limit.resetsAt !== undefined && facts.now !== undefined && limit.resetsAt <= facts.now) ? limit : undefined;
 }
 
 function leaseNotice(control: SessionFacts['session']['control']): SessionNotice | undefined {
@@ -81,12 +94,17 @@ export function sessionNotice(facts: SessionFacts): SessionNotice | undefined {
   if (host?.online === false) return host.name ? { kind: 'host_offline', hostName: host.name } : { kind: 'host_offline' };
   const lease = leaseNotice(session.control);
   if (lease) return lease;
+  const limit = usageLimit(facts);
+  if (limit) return { kind: 'usage_limited', ...(limit.resetsAt === undefined ? {} : { resetsAt: limit.resetsAt }), ...(facts.now === undefined ? {} : { now: facts.now }) };
   if (session.runtime?.state === 'unavailable') return { kind: 'agent_unavailable', message: `The agent is not available on ${host?.name ?? ITS_HOST}.` };
   return undefined;
 }
 
-/** Plain words for a notice, for example "Mac mini is offline. Messages will be delivered when it is back." */
-export function sessionNoticeWords(notice: SessionNotice, t: Translate = translator('en')): string {
+/**
+ * Plain words for a notice, for example "Mac mini is offline. Messages will be delivered when it is back." A usage limit's reset is said
+ * in `locale`, as today, tomorrow or a date with the time.
+ */
+export function sessionNoticeWords(notice: SessionNotice, t: Translate = translator('en'), locale: Locale = 'en'): string {
   switch (notice.kind) {
     case 'host_offline': return t('client.notice.hostOffline', { host: notice.hostName ?? t('client.notice.theHost') });
     case 'ended': return t('client.notice.ended');
@@ -101,6 +119,8 @@ export function sessionNoticeWords(notice: SessionNotice, t: Translate = transla
       const host = AGENT_UNAVAILABLE.exec(notice.message)?.[1];
       return host === undefined ? notice.message : t('client.notice.agentUnavailable', { host: host === ITS_HOST ? t('client.notice.itsHost') : host });
     }
+    case 'usage_limited': return notice.resetsAt === undefined ? t('client.notice.usageLimited')
+      : t('client.notice.usageLimitedUntil', { time: momentWords(notice.resetsAt, notice.now ?? notice.resetsAt, locale, t) });
   }
 }
 
@@ -112,6 +132,8 @@ export function composerAvailability(facts: SessionFacts, t: Translate = transla
     : leaseNotice(session.control);
   if (blocking) return { input: 'disabled', reason: blocking.kind as ComposerBlock, words: sessionNoticeWords(blocking, t) };
   if (facts.replica?.agent?.capabilities.sendMessage === false) return { input: 'disabled', reason: 'unsupported', words: t('client.notice.unsupported') };
+  // A usage limit with a known reset holds sends until then (R7).
+  if (usageLimit(facts)?.resetsAt !== undefined) return { input: 'enabled', dispatch: 'when_ready' };
   // `send_message` is allowed only once the session is synchronized and its control check granted control (R3).
   const now = session.operations.send_message.allowed;
   return { input: 'enabled', dispatch: now ? 'now' : 'when_ready' };

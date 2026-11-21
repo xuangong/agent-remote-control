@@ -598,3 +598,26 @@ it('invalidates prompt-edit readiness as soon as an interaction response is subm
   const response = session.respondToInteraction('permission-local', { kind: 'tool_approval', decision: 'allow', scope: 'once' });
   expect(() => evidence.captureValidity()).toThrow(); await response;
 }, 10000);
+
+it('reports the usage limit a scheduled retry waits out until the server steps again, and fails a turn the limit stopped as native_usage_limited', async () => {
+  const f = await fixture(), session = await open(f), output = observe(session);
+  const limit = async () => (await session.runtimeInfo()).usageLimit;
+  f.active.ses_existing = { type: 'running' }; f.event('session.execution.started', { sessionID: 'ses_existing' });
+  await settled(async () => (await session.runtimeInfo()).status === 'running');
+  const at = Date.now() + 60_000;
+  // Another error the server retries is no usage limit.
+  f.event('session.retry.scheduled', { sessionID: 'ses_existing', assistantMessageID: 'msg_reply', attempt: 1, at, error: { type: 'api', message: 'Overloaded', status: 503 } });
+  f.event('session.retry.scheduled', { sessionID: 'ses_existing', assistantMessageID: 'msg_reply', attempt: 2, at, error: { type: 'api', message: 'Rate limit reached', status: 429 } });
+  await settled(async () => (await limit())?.resetsAt === at);
+  expect(output.some(item => item.type === 'observation' && item.event.type === 'runtime_updated' && item.event.runtimeInfo.usageLimit?.resetsAt === at)).toBe(true);
+  expect(output.some(item => item.type === 'observation' && item.event.type === 'turn_failed')).toBe(false);
+  f.event('session.step.started', { sessionID: 'ses_existing', assistantMessageID: 'msg_reply', agent: 'build', model: { providerID: 'test', id: 'model' }, started: Date.now() });
+  await settled(async () => (await limit()) === undefined);
+  delete f.active.ses_existing;
+  f.event('session.execution.failed', { sessionID: 'ses_existing', error: { type: 'api', message: 'Usage limit reached', status: 429 } });
+  await settled(() => output.some(item => item.type === 'observation' && item.event.type === 'turn_failed' && item.event.code === 'native_usage_limited'));
+  await new Promise(resolve => setTimeout(resolve, 150));
+  expect(await limit()).toEqual({});
+  f.active.ses_existing = { type: 'running' }; f.event('session.execution.started', { sessionID: 'ses_existing' });
+  await settled(async () => (await limit()) === undefined);
+});

@@ -420,7 +420,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (!handlesRequest(url)) return undefined;
       try { return await handle(request, context, url); }
       catch (error) {
-        if (error instanceof BrokerError || error instanceof SharingError) return json(error.status, { code: error.code, error: error.message, ...(error instanceof BrokerError && error.requestId ? { requestId: error.requestId } : {}), ...(error instanceof BrokerError && error.nativeOwner ? {nativeOwner: error.nativeOwner} : {}) });
+        if (error instanceof BrokerError || error instanceof SharingError) return json(error.status, { code: error.code, error: error.message, ...(error instanceof BrokerError && error.requestId ? { requestId: error.requestId } : {}), ...(error instanceof BrokerError && error.nativeOwner ? {nativeOwner: error.nativeOwner} : {}), ...(error instanceof BrokerError && error.resetsAt !== undefined ? { resetsAt: error.resetsAt } : {}) });
         return json(503, { code: 'host_operation_failed', error: error instanceof Error ? error.message : 'Remote Host operation failed.' });
       }
     },

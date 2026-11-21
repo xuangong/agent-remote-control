@@ -99,6 +99,12 @@ export interface AgentRuntimeInfo {
   settings?: import('./session-settings.js').AgentSessionSetting[];
   childSessions?: AgentChildSession[];
   persistence?: import('./provider.js').AgentPersistenceHandle;
+  /**
+   * The account reached its usage or rate limit, as the CLI signals it (`behaviour.limits`): its turns fail until `resetsAt`, in
+   * milliseconds since the epoch, when the CLI says when. Omitted when the CLI reports no limit; a reset time in the past no longer limits.
+   * A turn it stops fails with `code` `native_usage_limited`.
+   */
+  usageLimit?: { resetsAt?: number };
 }
 
 export type AgentStreamEvent =

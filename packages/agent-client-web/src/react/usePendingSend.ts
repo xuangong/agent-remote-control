@@ -14,6 +14,8 @@ export const PENDING_SEND_TIMEOUT_MS = 60_000;
 export interface PendingSendExecutor<P> {
   ready(payload: P): boolean;
   send(payload: P, signal: AbortSignal, dispatch: () => boolean): Promise<void>;
+  /** When the session takes messages again after a usage limit, if it holds them until then: they wait without timing out, and leave then. */
+  heldUntil?(): number | undefined;
 }
 export interface WaitingSend<P = unknown> {
   id: string;
@@ -45,6 +47,8 @@ const notifyAll = (queue: Queue) => { for (const member of queue.members) member
  * A queue holds at most `PENDING_SEND_LIMIT` messages: `start` refuses one more, and the composer keeps it. A message that has not left
  * `PENDING_SEND_TIMEOUT_MS` after it was queued or retried says Not sent and only Retry sends it; one that left and has no answer that
  * long after says Check delivery. No message leaves the queue unless it was delivered or the person removes it.
+ * While the session holds messages until a usage limit resets (`heldUntil`), its waiting messages wait for the reset without timing out;
+ * the queue wakes then and sends them once, in order.
  */
 export function usePendingSend<P>(sessionKey: string, visible: boolean, executor: PendingSendExecutor<P>) {
   const self = useRef<Member & { mounted: boolean }>();
@@ -77,12 +81,16 @@ export function usePendingSend<P>(sessionKey: string, visible: boolean, executor
   /** Marks the messages that waited too long, and returns when the next one will have. */
   function expire(): number | undefined {
     const now = Date.now();
-    let next: number | undefined;
+    const hold = latest.current.executor.heldUntil?.();
+    let next = hold !== undefined && hold > now ? hold : undefined;
     for (const key of keys.current.keys()) {
       const own = queueFor(key);
+      const heldTo = key === latest.current.sessionKey ? next : undefined;
       let changed = false;
       for (const item of own.items) {
         if (item.phase === 'error') continue;
+        // Its own wait counts from the reset of the limit that holds it.
+        if (heldTo !== undefined && !item.dispatched) item.since = Math.max(item.since, heldTo);
         const due = item.since + PENDING_SEND_TIMEOUT_MS;
         if (due > now) { next = next === undefined ? due : Math.min(next, due); continue; }
         changed = true;

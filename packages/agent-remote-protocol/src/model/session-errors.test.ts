@@ -36,6 +36,13 @@ describe('session attach failure', () => {
     expect(failure.error).toMatch(/^The native CLI /);
     expect(failure.error).not.toContain('content');
   });
+
+  it('keeps when a usage limit resets, and only a time a date can hold, and only for a usage limit (gap 3)', () => {
+    expect(sessionAttachFailure(JSON.stringify({ code: 'native_usage_limited', resetsAt: 1_800_000_000_000 }))).toMatchObject({ code: 'native_usage_limited', resetsAt: 1_800_000_000_000 });
+    expect(sessionAttachFailure(JSON.stringify({ code: 'native_usage_limited', resetsAt: -1 }))).not.toHaveProperty('resetsAt');
+    expect(sessionAttachFailure(JSON.stringify({ code: 'native_usage_limited', resetsAt: '2026-11-22T10:00:00Z' }))).not.toHaveProperty('resetsAt');
+    expect(sessionAttachFailure(JSON.stringify({ code: 'native_exited', resetsAt: 1_800_000_000_000 }))).not.toHaveProperty('resetsAt');
+  });
 });
 
 describe('a session in use', () => {

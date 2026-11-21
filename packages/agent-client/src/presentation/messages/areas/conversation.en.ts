@@ -54,6 +54,9 @@ export const conversation = {
   'time.seconds': '{seconds}s',
   'time.minutes': '{minutes}m {seconds}s',
   'time.hours': '{hours}h {minutes}m {seconds}s',
+  'time.todayAt': 'today at {time}',
+  'time.tomorrowAt': 'tomorrow at {time}',
+  'time.dateAt': '{date} at {time}',
 
   // Inline approvals: plain choices, the rest one tap away.
   'approval.allow': 'Allow',

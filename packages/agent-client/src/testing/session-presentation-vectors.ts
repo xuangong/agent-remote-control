@@ -74,15 +74,19 @@ export interface SessionPresentationVector {
 type Status = AgentSnapshotPayload['status'];
 type RuntimeConnection = NonNullable<AgentSnapshotPayload['runtimeInfo']['connection']>['state'];
 /** Snapshot fields of a session in `status`; the runtime reports the same status, and `connection` when given. */
-const agent = (status: Status, options: { connection?: RuntimeConnection; failure?: string; sendMessage?: boolean } = {}): Partial<AgentSnapshotPayload> => {
+const agent = (status: Status, options: { connection?: RuntimeConnection; failure?: string; sendMessage?: boolean; usageLimit?: { resetsAt?: number } } = {}): Partial<AgentSnapshotPayload> => {
   const base = buildSnapshot();
   return {
     status, activeTurn: status === 'running' || status === 'waiting' ? { turnId: 't1', startedAt: '2026-11-15T00:00:00.000Z' } : null,
-    runtimeInfo: { ...base.runtimeInfo, status, ...(options.connection ? { connection: { state: options.connection } } : {}), ...(options.failure ? { failure: { message: options.failure } } : {}) },
+    runtimeInfo: { ...base.runtimeInfo, status, ...(options.connection ? { connection: { state: options.connection } } : {}), ...(options.failure ? { failure: { message: options.failure } } : {}),
+      ...(options.usageLimit ? { usageLimit: options.usageLimit } : {}) },
     ...(options.sendMessage === false ? { capabilities: { ...base.capabilities, sendMessage: false } } : {}),
   };
 };
 const idle = agent('idle'), running = agent('running');
+/** A usage limit read at 10:00 UTC that resets at 15:00 UTC the same day. */
+export const LIMIT_NOW = Date.parse('2026-11-22T10:00:00Z');
+export const LIMIT_RESETS_AT = Date.parse('2026-11-22T15:00:00Z');
 const enabled = (dispatch: 'now' | 'when_ready'): ComposerAvailability => ({ input: 'enabled', dispatch });
 const disabled = (reason: Extract<ComposerAvailability, { input: 'disabled' }>['reason'], words: string): ComposerAvailability => ({ input: 'disabled', reason, words });
 
@@ -168,4 +172,13 @@ export const SESSION_PRESENTATION_VECTORS: readonly SessionPresentationVector[] 
   // 14. A read-only lease blocks before an agent that takes no messages does.
   { name: 'read-only and sendMessage unsupported: the lease blocks', facts: buildSessionFacts('ready', { snapshot: agent('idle', { sendMessage: false }), control: CONTROL.readOnly }),
     notice: { kind: 'read_only' }, composer: disabled('read_only', 'Ready to take control'), label: 'Ready' },
+  // 15. The account's usage limit (R7): a notice that says when it resets; sends wait for a known reset, and go once it has passed.
+  { name: 'ready, usage limited until a known time: the notice says when, sends wait', facts: { ...buildSessionFacts('ready', { snapshot: agent('idle', { usageLimit: { resetsAt: LIMIT_RESETS_AT } }), control: CONTROL.granted }), now: LIMIT_NOW },
+    notice: { kind: 'usage_limited', resetsAt: LIMIT_RESETS_AT, now: LIMIT_NOW }, composer: enabled('when_ready'), label: 'Ready' },
+  { name: 'ready, usage limited until a time that has passed: no notice, sends go', facts: { ...buildSessionFacts('ready', { snapshot: agent('idle', { usageLimit: { resetsAt: LIMIT_RESETS_AT } }), control: CONTROL.granted }), now: LIMIT_RESETS_AT },
+    notice: undefined, composer: enabled('now'), label: 'Ready' },
+  { name: 'ready, usage limited with no reset time: the notice, and sends go', facts: { ...buildSessionFacts('ready', { snapshot: agent('idle', { usageLimit: {} }), control: CONTROL.granted }), now: LIMIT_NOW },
+    notice: { kind: 'usage_limited', now: LIMIT_NOW }, composer: enabled('now'), label: 'Ready' },
+  { name: 'usage limited and a terminal has control: the lease speaks and blocks', facts: { ...buildSessionFacts('ready', { snapshot: agent('idle', { usageLimit: { resetsAt: LIMIT_RESETS_AT } }), control: CONTROL.nativeCli }), now: LIMIT_NOW },
+    notice: { kind: 'terminal_in_control' }, composer: disabled('terminal_in_control', 'Native CLI has control'), label: 'Native CLI has control' },
 ];

@@ -96,6 +96,8 @@ export const AgentRuntimeInfo = Strict({
   settings: Type.Optional(Type.Array(AgentSessionSetting)),
   childSessions: Type.Optional(Type.Array(AgentChildSession)),
   persistence: Type.Optional(AgentPersistenceHandle),
+  /** The account's usage or rate limit stops the runtime's turns until `resetsAt` (milliseconds since the epoch), when the CLI says. */
+  usageLimit: Type.Optional(Strict({ resetsAt: Type.Optional(Type.Integer({ minimum: 0 })) })),
 });
 export type AgentRuntimeInfo = Static<typeof AgentRuntimeInfo>;
 

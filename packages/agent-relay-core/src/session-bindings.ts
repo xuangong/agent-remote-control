@@ -134,7 +134,7 @@ export function createSessionBindings(ports: SessionBindingPorts) {
         if (result.status >= 300) {
           const failure = sessionAttachFailure(result.body);
           if (failure.nativeRefusal) refused(binding, failure.nativeRefusal);
-          throw new BrokerError(result.status, failure.code, failure.error, false, result.requestId, failure.nativeOwner, failure.nativeRefusal);
+          throw new BrokerError(result.status, failure.code, failure.error, false, result.requestId, failure.nativeOwner, failure.nativeRefusal, failure.resetsAt);
         }
         if (host.generation !== generation) throw new BrokerError(503, 'host_reconnected', 'The Remote Host changed while the session was reattaching.');
         let agentId = binding.agentId;
@@ -285,7 +285,7 @@ export function createSessionBindings(ports: SessionBindingPorts) {
         if (result.status >= 300) {
           if (attaching) {
             const failure = sessionAttachFailure(result.body);
-            throw new BrokerError(result.status, failure.code, failure.error, false, result.requestId, failure.nativeOwner, failure.nativeRefusal);
+            throw new BrokerError(result.status, failure.code, failure.error, false, result.requestId, failure.nativeOwner, failure.nativeRefusal, failure.resetsAt);
           }
           let detail: Record<string, unknown> = {};
           try { detail = JSON.parse(result.body); } catch { /* Preserve the status if the host did not return JSON. */ }

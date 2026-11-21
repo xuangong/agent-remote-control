@@ -50,6 +50,9 @@ export const conversation: AreaMessages<typeof english> = {
   'time.seconds': '{seconds} 秒',
   'time.minutes': '{minutes} 分 {seconds} 秒',
   'time.hours': '{hours} 小时 {minutes} 分 {seconds} 秒',
+  'time.todayAt': '今天 {time}',
+  'time.tomorrowAt': '明天 {time}',
+  'time.dateAt': '{date} {time}',
 
   'approval.allow': '好的',
   'approval.notNow': '先别',

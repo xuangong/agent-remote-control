@@ -166,6 +166,22 @@ describe('the simulated CLI', () => {
     expect((await open(cli)).capabilities.sendMessage).toBe(true);
   });
 
+  it('fails each turn with native_usage_limited after its user message until the limit resets, and says when it resets meanwhile (S6)', async () => {
+    fakeTimers(1_000_000);
+    const cli = simulatedCli({ behaviour: sharedDaemon, turnMs: 100 });
+    cli.faults.usageLimit({ resetsAt: 1_060_000, at: 'turn' });
+    const session = await open(cli);
+    await session.sendMessage('Over the limit');
+    const limited = (await drained(session)).map(({ event }) => event);
+    expect(limited.find(event => event.type === 'turn_failed')).toMatchObject({ code: 'native_usage_limited' });
+    expect((await session.runtimeInfo()).usageLimit).toEqual({ resetsAt: 1_060_000 });
+    await vi.advanceTimersByTimeAsync(60_000);
+    await session.sendMessage('After the reset');
+    await vi.advanceTimersByTimeAsync(100);
+    expect((await session.runtimeInfo()).usageLimit).toBeUndefined();
+    expect(cli.native('thread-1').history).toEqual(['After the reset', 'Reply to After the reset']);
+  });
+
   it('fails a turn whose CLI exits with native_exited and ends the stream, and leaves a hung turn running (S7)', async () => {
     fakeTimers();
     const cli = simulatedCli({ behaviour: sharedDaemon, turnMs: 100 });

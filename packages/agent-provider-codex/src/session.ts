@@ -53,6 +53,7 @@ import { CodexSessionRuntime, historyOverlapsNotifications, type CodexRawNotific
 import type { CodexSharedRecoveryPlan } from './shared-recovery.js';
 import { bridgeableNamespace, declaredToolNamespaces, type CodexToolBridge, type CodexToolBridgeRegistration } from './tool-bridge.js';
 import { codexHostAccess, sandboxParams } from './host-access.js';
+import { codexLimitResetsAt, mergeCodexRateLimits, type CodexRateLimits } from './usage-limit.js';
 
 const PROVIDER_ID = 'codex';
 
@@ -162,6 +163,10 @@ export class CodexAppServerSession implements AgentSession {
   private transportFailure: Error | undefined;
   private runtimeStatus: AgentRuntimeInfo['status'] = 'starting';
   private latestFailure: AgentRuntimeInfo['failure'];
+  /** The account's rate-limit windows Codex last reported (`account/rateLimits/updated`), which say when a limit resets. */
+  private rateLimits: CodexRateLimits = new Map();
+  /** The usage limit that stopped the latest turn, until the next turn starts. */
+  private usageLimit: AgentRuntimeInfo['usageLimit'];
   private runtimeRevision = 0;
   private settingsRevision = 0;
   private statusRevision = 0;
@@ -1180,6 +1185,7 @@ export class CodexAppServerSession implements AgentSession {
       sessionId: this.threadId ?? null,
       status: this.runtimeStatus,
       ...(this.runtimeStatus === 'failed' && this.latestFailure ? { failure: { ...this.latestFailure } } : {}),
+      ...(this.usageLimit ? { usageLimit: { ...this.usageLimit } } : {}),
       ...(this.runtime.connectionInfo() ? { connection: this.runtime.connectionInfo() } : {}),
       childSessions: this.threadId ? this.runtime.childSessions(this.threadId) : [],
       ...(this.config.cwd ? { cwd: this.config.cwd } : {}),
@@ -1412,7 +1418,10 @@ export class CodexAppServerSession implements AgentSession {
       this.observedTurnIds.add(observation.event.turnId);
       this.nativeTurnRevision += 1;
     }
+    // A turn the account's limit stopped leaves the session limited until the windows Codex reported reset; the next turn lifts it.
+    if (observation.event.type === 'turn_failed' && observation.event.code === 'native_usage_limited') this.usageLimit = this.limitFromWindows();
     if (observation.event.type === 'turn_started') {
+      this.usageLimit = undefined;
       this.latestFailure = undefined;
       this.activeTurnId = observation.event.turnId;
       this.statusRevision += 1;
@@ -1463,7 +1472,22 @@ export class CodexAppServerSession implements AgentSession {
     this.emitRuntimeUpdate();
   }
 
+  private limitFromWindows(): NonNullable<AgentRuntimeInfo['usageLimit']> {
+    const resetsAt = codexLimitResetsAt(this.rateLimits);
+    return resetsAt === undefined ? {} : { resetsAt };
+  }
+
   private handleRuntimeNotification(method: string, params: unknown): boolean {
+    if (method === 'account/rateLimits/updated') {
+      this.rateLimits = mergeCodexRateLimits(this.rateLimits, params);
+      // Windows reported after the failure still say when the limit that stopped it resets.
+      const resetsAt = codexLimitResetsAt(this.rateLimits);
+      if (this.usageLimit && resetsAt !== undefined && resetsAt !== this.usageLimit.resetsAt) {
+        this.usageLimit = { resetsAt };
+        if (this.ready) this.emitRuntimeUpdate();
+      }
+      return true;
+    }
     if (!this.ownsRuntime && method === 'thread/started' && isRecord(params) && isRecord(params.thread) && params.thread.id === this.threadId) {
       if (!this.ownsRuntime) {
         this.inputCapabilitiesRevision += 1;

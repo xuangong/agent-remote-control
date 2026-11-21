@@ -5,6 +5,7 @@ import { codexToolResult } from './tool-result.js';
 import { CodexImageRegistry } from './images.js';
 import { codexImagePlaceholderLabel } from './message-content.js';
 import { codexUsage } from './usage.js';
+import { codexUsageLimited } from './usage-limit.js';
 import type {
   AgentStreamEvent,
   AgentUserMessagePart,
@@ -384,6 +385,8 @@ export class CodexEventProjector {
       return this.observation(`turn:${id}:failed`, {
         type: 'turn_failed', provider: PROVIDER_ID, turnId: id,
         error: readErrorMessage(params.turn.error)?.trim() || 'Codex turn failed without an error detail.',
+        // The account's usage or rate limit stopped the turn (`TurnError.codexErrorInfo`).
+        ...(codexUsageLimited(params.turn.error) ? { code: 'native_usage_limited' } : {}),
       });
     }
     if (status === 'interrupted') {

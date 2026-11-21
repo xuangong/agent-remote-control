@@ -361,3 +361,14 @@ it('keeps the typed text, the waiting message and the focus when the Window pane
     expect(send).toHaveBeenCalledWith('Queued while opening');
   } finally { vi.useRealTimers(); }
 });
+
+it("says the account's usage limit and when it resets beside the composer, which stays open (gap 3)", async () => {
+  const resetsAt = Date.now() + 60 * 60_000;
+  const limited: AgentReplicaState = { ...replicaState, agent: { ...replicaState.agent!, runtimeInfo: { ...replicaState.agent!.runtimeInfo, usageLimit: { resetsAt } } } };
+  const container = await render(<SessionWorkbench state={limited} sessionStatus="ready" actions={{ sendMessage: vi.fn() }} />);
+  expect(container.querySelector('.lab-composer-host-notice')?.textContent).toMatch(/^This account's usage limit resets (today|tomorrow) at \d\d:\d\d\. Messages you send wait and go out then\.$/);
+  expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!.disabled).toBe(false);
+  const reset: AgentReplicaState = { ...replicaState, agent: { ...replicaState.agent!, runtimeInfo: { ...replicaState.agent!.runtimeInfo, usageLimit: { resetsAt: Date.now() - 1 } } } };
+  const after = await render(<SessionWorkbench state={reset} sessionStatus="ready" actions={{ sendMessage: vi.fn() }} />);
+  expect(after.querySelector('.lab-composer-host-notice')).toBeNull();
+});

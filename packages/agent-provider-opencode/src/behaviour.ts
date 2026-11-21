@@ -11,9 +11,10 @@ export const openCodeBehaviour = {
   reread: { order: 'live', paging: 'messages', withoutAttach: true, cost: 'whole_session' },
   resume: { cost: 'subscription', deadlineMs: 15_000 },
   input: { identity: 'none', whileBusy: 'steer' },
-  // `session.retry.scheduled`.
+  // `session.retry.scheduled { at, error }` with an error of HTTP status 429: the server retries the turn itself at `at`, in milliseconds
+  // (`@opencode/schema` 2.0.25, `dist/session-event.js`, `dist/session-error.js`; `usage-limit.ts`).
   limits: { signal: 'event' },
-  failures: { runtime: ['native_runtime_unavailable'], inUse: [] },
+  failures: { runtime: ['native_runtime_unavailable', 'native_usage_limited'], inUse: [] },
   // Interaction receipts live only in the server's memory; they are not marked yet (requirements review, section 4.5).
   liveOnly: [],
 } as const satisfies AgentProviderBehaviour;

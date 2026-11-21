@@ -8,6 +8,7 @@ import { IMAGE_INPUT_CAPABILITIES, type AgentInputPart, validateCommandDirectory
 import type { CopilotAgentProviderOptions } from './provider.js';
 import { Channel, deadline } from './channel.js';
 import { Projector, provider, record } from './projector.js';
+import {copilotLimitResetsAt, copilotUsageLimited} from './usage-limit.js';
 import { CopilotChildSession } from './child-session.js';
 import {isNativeInteraction} from './interaction-mapping.js';
 import {CopilotImages} from './images.js';
@@ -170,6 +171,11 @@ export class CopilotAgentSession implements AgentSession {
         if (event.type === 'assistant.turn_start') this.info.status = 'running';
         if (event.type === 'assistant.idle' || event.type === 'session.idle' || event.type === 'abort') this.info.status = 'idle';
         if (event.type === 'session.error') this.info.status = 'failed';
+        // The account's limit stops turns until it resets, which Copilot says only with an auto-mode switch; the next turn lifts it.
+        if (event.type === 'assistant.turn_start') delete this.info.usageLimit;
+        if (copilotUsageLimited(event)) this.info.usageLimit = {};
+        const resetsAt = this.info.usageLimit ? copilotLimitResetsAt(event) : undefined;
+        if (resetsAt !== undefined) { this.info.usageLimit = { resetsAt }; this.emitRuntime(); }
         if (['assistant.turn_start', 'assistant.idle', 'session.idle', 'abort', 'session.error'].includes(event.type)) this.emitRuntime();
       }
     }

@@ -15,9 +15,9 @@ export const claudeBehaviour = {
   resume: { cost: 'process', deadlineMs: 15_000 },
   // Claude Code keeps the uuid a user message is sent with (FL1); input while a turn runs is steered into it.
   input: { identity: 'echoes_client_id', whileBusy: 'steer' },
-  // `rate_limit_event` with a status and `resetsAt` (Agent SDK 0.3.247).
+  // `rate_limit_event` (Agent SDK 0.3.247 `SDKRateLimitEvent`, `sdk.d.ts`): status `rejected` stops turns until `resetsAt`, in seconds.
   limits: { signal: 'event' },
-  failures: { runtime: [], inUse: [] },
+  failures: { runtime: ['native_usage_limited'], inUse: [] },
   liveOnly: ['interaction', 'synthetic_output'],
   verifiedVersion: '2.1.319',
 } as const satisfies AgentProviderBehaviour;

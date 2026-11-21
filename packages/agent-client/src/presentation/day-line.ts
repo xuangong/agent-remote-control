@@ -41,3 +41,15 @@ export function dayLineLabel(timestamp: string, now: number, locale: Locale, t: 
   const date = formatter(tag, { month: 'short', day: 'numeric', ...(new Date(now).getUTCFullYear() !== new Date(time).getUTCFullYear() ? { year: 'numeric' } : {}), ...zone }).format(time);
   return `${date} ${clock}`;
 }
+
+/** A moment as a sentence says it: today and tomorrow by name, another day by its date, each with the time ("today at 15:00"). */
+export function momentWords(time: number, now: number, locale: Locale, t: Translate, timeZone?: string): string {
+  const zone = timeZone ? { timeZone } : {};
+  const tag = locale === 'zh' ? 'zh-CN' : 'en-US';
+  const clock = formatter(tag, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', ...zone }).format(time);
+  const day = localDay(time, timeZone);
+  if (day === localDay(now, timeZone)) return t('time.todayAt', { time: clock });
+  if (day === localDay(now + 24 * 60 * 60 * 1000, timeZone)) return t('time.tomorrowAt', { time: clock });
+  const date = formatter(tag, { month: 'short', day: 'numeric', ...(new Date(now).getUTCFullYear() !== new Date(time).getUTCFullYear() ? { year: 'numeric' } : {}), ...zone }).format(time);
+  return t('time.dateAt', { date, time: clock });
+}

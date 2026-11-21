@@ -509,3 +509,45 @@ describe('the transcript records a Claude session holds', () => {
     } finally { await session.dispose(); }
   });
 });
+
+describe('the usage limit Claude Code reports', () => {
+  const rateLimit = (status: string, resetsAt?: number) => ({ type: 'rate_limit_event', session_id: 'native', uuid: `limit-${status}`, rate_limit_info: { status, ...(resetsAt === undefined ? {} : { resetsAt }), rateLimitType: 'five_hour' } });
+
+  it('stops the turn it rejects with the typed native_usage_limited, and reports when the limit resets, until the next turn starts', async () => {
+    const native = runtime();
+    const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { query: native.factory });
+    const events: any[] = [];
+    void (async () => { for await (const item of session.observe()) if (item.type === 'observation') events.push(item.event); })().catch(() => {});
+    try {
+      await session.sendMessage('Over the limit');
+      const input = (await native.nextInput()).value;
+      native.push(rateLimit('rejected', 1_800_000_000));
+      native.push({ type: 'result', subtype: 'success', is_error: true, session_id: 'native', uuid: 'limited-result', user_message_uuid: input.uuid, usage: {} });
+      await expect.poll(() => events.some(event => event.type === 'turn_failed')).toBe(true);
+      expect(events.find(event => event.type === 'turn_failed')).toMatchObject({ code: 'native_usage_limited' });
+      expect((await session.runtimeInfo()).usageLimit).toEqual({ resetsAt: 1_800_000_000_000 });
+      expect(events.filter(event => event.type === 'runtime_updated').at(-1).runtimeInfo.usageLimit).toEqual({ resetsAt: 1_800_000_000_000 });
+      await session.sendMessage('After the reset');
+      expect((await session.runtimeInfo()).usageLimit).toBeUndefined();
+      native.push(rateLimit('allowed'));
+      native.push({ type: 'result', subtype: 'success', is_error: false, session_id: 'native', uuid: 'allowed-result', usage: {} });
+      await expect.poll(() => events.filter(event => event.type === 'turn_completed').length).toBe(1);
+      expect((await session.runtimeInfo()).usageLimit).toBeUndefined();
+    } finally { await session.dispose(); }
+  });
+
+  it('fails a turn the limit did not stop without the code', async () => {
+    const native = runtime();
+    const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { query: native.factory });
+    const events: any[] = [];
+    void (async () => { for await (const item of session.observe()) if (item.type === 'observation') events.push(item.event); })().catch(() => {});
+    try {
+      await session.sendMessage('Fails otherwise');
+      native.push(rateLimit('allowed_warning', 1_800_000_000));
+      native.push({ type: 'result', subtype: 'error_during_execution', is_error: true, session_id: 'native', uuid: 'failed-result', errors: ['Tool crashed'], usage: {} });
+      await expect.poll(() => events.some(event => event.type === 'turn_failed')).toBe(true);
+      expect(events.find(event => event.type === 'turn_failed')).toEqual(expect.not.objectContaining({ code: expect.anything() }));
+      expect((await session.runtimeInfo()).usageLimit).toBeUndefined();
+    } finally { await session.dispose(); }
+  });
+});

@@ -70,7 +70,9 @@ export type Binding = { hostId: string; providerId: string; nativeSessionId: str
 export class BrokerError extends Error {
   constructor(readonly status: number, readonly code: string, message: string, readonly creationRejected = false, readonly requestId?: string, readonly nativeOwner?: NativeSessionOwner,
     /** The CLI refused the Controller as a client of the session, for this reason (O48). */
-    readonly nativeRefusal?: NativeRefusal) { super(message); }
+    readonly nativeRefusal?: NativeRefusal,
+    /** When the usage limit that refused the session resets, in milliseconds since the epoch (gap 3). */
+    readonly resetsAt?: number) { super(message); }
 }
 export interface RemoteHostBrokerState {
   teams?: SavedTeam[];

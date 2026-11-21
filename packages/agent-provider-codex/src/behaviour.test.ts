@@ -12,6 +12,7 @@ describe('the behaviour Codex declares', () => {
       concurrency: { model: 'shared_clients', probe: 'lock_file', othersVisible: 'live', unloadAfterLastClientMs: 70_000 },
       reread: { order: 'live', paging: 'turns', withoutAttach: false, cost: 'page' },
       resume: { cost: 'subscription', deadlineMs: 90_000 },
+      limits: { signal: 'event' },
       failures: { inUse: ['writer_elsewhere'] },
       liveOnly: ['interaction', 'todo', 'error', 'startup_notice'],
       verifiedVersion: '0.171.0',
@@ -23,6 +24,12 @@ describe('the behaviour Codex declares', () => {
     expect(resolveAgentProviderBehaviour({ behaviour: declared })).toBe(declared);
     expect(declared?.concurrency).toEqual({ model: 'single_writer', probe: 'lock_file', othersVisible: 'never' });
     expect(declared?.resume.cost).toBe('process');
+  });
+
+  it('raises a turn the account limit stopped as native_usage_limited, through the shared daemon and a private app-server', () => {
+    for (const provider of [new CodexAppServerProvider({ connectionMode: 'shared' }), new CodexAppServerProvider({ spawn: () => createScriptedAppServer({}).child })]) {
+      expect(provider.descriptor.behaviour?.failures.runtime).toContain('native_usage_limited');
+    }
   });
 
   it("raises Codex's single-writer refusal as a session in use by a writer elsewhere", async () => {

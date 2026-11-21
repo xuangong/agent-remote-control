@@ -25,6 +25,8 @@ export const client = {
   'client.notice.unsupported': 'This agent does not take messages.',
   'client.notice.agentUnavailable': 'The agent is not available on {host}.',
   'client.notice.itsHost': 'its Host',
+  'client.notice.usageLimited': 'This account reached its usage limit. Messages go out again once it resets.',
+  'client.notice.usageLimitedUntil': "This account's usage limit resets {time}. Messages you send wait and go out then.",
 
   'client.send.historyChanged': 'Conversation history changed before delivery could be confirmed.',
   'client.send.restored': 'Delivery was not confirmed before this page closed. Check the conversation before retrying.',

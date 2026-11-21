@@ -43,7 +43,7 @@ export function nativeRefusalOf(value: unknown): NativeRefusal | undefined {
   return { reason: candidate.reason, ...(Number.isSafeInteger(wait) && (wait as number) >= 0 ? { retryAfterMs: wait as number } : {}) };
 }
 
-export function sessionAttachFailure(body: string): { code: string; error: string; nativeOwner?: NativeSessionOwner; nativeRefusal?: NativeRefusal } {
+export function sessionAttachFailure(body: string): { code: string; error: string; nativeOwner?: NativeSessionOwner; nativeRefusal?: NativeRefusal; resetsAt?: number } {
   let code: unknown, owner: unknown, value: unknown;
   try { value = JSON.parse(body); code = (value as { code?: unknown } | null)?.code; owner = (value as { nativeOwner?: unknown } | null)?.nativeOwner; } catch { /* Older Hosts may return a non-JSON failure. */ }
   const candidate = owner as Partial<NativeSessionOwner> | undefined;
@@ -51,7 +51,10 @@ export function sessionAttachFailure(body: string): { code: string; error: strin
     ? {kind: candidate.kind, generation: candidate.generation} : undefined;
   const nativeRefusal = code === 'session_in_use' ? nativeRefusalOf(value) : undefined;
   if (nativeRefusal) return { code: 'session_in_use', error: inUseErrors[nativeRefusal.reason], nativeRefusal };
-  if (typeof code === 'string' && Object.hasOwn(sessionErrors, code)) return { code, error: sessionErrors[code]!, ...(['native_session_owned','native_session_released','native_owner_changed'].includes(code) && nativeOwner ? {nativeOwner} : {}) };
+  // A usage limit keeps the time it resets, when the Host gives a valid one (gap 3).
+  const resetsAt = (value as { resetsAt?: unknown } | null)?.resetsAt;
+  const reset = code === 'native_usage_limited' && Number.isSafeInteger(resetsAt) && (resetsAt as number) >= 0 ? { resetsAt: resetsAt as number } : {};
+  if (typeof code === 'string' && Object.hasOwn(sessionErrors, code)) return { code, error: sessionErrors[code]!, ...(['native_session_owned','native_session_released','native_owner_changed'].includes(code) && nativeOwner ? {nativeOwner} : {}), ...reset };
   return { code: 'session_attach_failed', error: sessionErrors.session_attach_failed! };
 }
 

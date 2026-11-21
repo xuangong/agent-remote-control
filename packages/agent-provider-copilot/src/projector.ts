@@ -6,6 +6,7 @@ export {provider, record, detail} from './native.js';
 import {interactionRequest, interactionResponse} from './interaction-mapping.js';
 import {copilotToolResult, patchFiles} from './tool-result.js';
 import {copilotContextUsage} from './usage.js';
+import {copilotUsageLimited} from './usage-limit.js';
 /** One observation of a native event: its source key, what it says, and the item it belongs to. */
 export interface Projected { key: string; event: AgentStreamEvent; identity?: ProviderItemIdentity }
 /** Assistant text observations are append-only; durable messages contribute only an unsent suffix. Every timeline observation carries the identity of its item, the same live and when read again from history. */
@@ -155,7 +156,8 @@ export class Projector {
         this.messages.clear(); this.reasoning.clear();
         return [...finished, ...wrap({ type: 'turn_canceled', provider, reason: 'Native turn aborted', turnId })];
       }
-      case 'session.error': this.active = false; this.inputTurnId = undefined; return wrap({ type: 'turn_failed', provider, error: event.data.message, turnId });
+      case 'session.error': this.active = false; this.inputTurnId = undefined;
+        return wrap({ type: 'turn_failed', provider, error: event.data.message, turnId, ...(copilotUsageLimited(event) ? { code: 'native_usage_limited' } : {}) });
       case 'tool.execution_start': {
         const tool = { name: event.data.toolName, detail: detail(event.data.toolName, event.data.arguments) };
         this.tools.set(event.data.toolCallId, tool);

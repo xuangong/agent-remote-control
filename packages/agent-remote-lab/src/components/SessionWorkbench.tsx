@@ -32,7 +32,7 @@ import { TileHeader, type TileSession } from './assistant/TileHeader.js';
 import { usePhoneLayout } from '../hooks/usePhoneLayout.js';
 import { AssistantDetails, type AssistantRef } from './assistant/AssistantDetails.js';
 import { ModelSettings } from './assistant/ModelSettings.js';
-import { FilePreviewContext, useTranslate } from '@orchardworks/agent-client-web/react';
+import { FilePreviewContext, LocaleContext, useTranslate } from '@orchardworks/agent-client-web/react';
 
 
 import type { TraceEntryRequest } from '../trace-model.js';
@@ -116,15 +116,16 @@ export function SessionWorkbench({ assistant, details, conversationTitle, native
     entry.turnId === nativeFailure.turnId && entry.item.type === 'error' && entry.item.message === nativeFailure.message);
   const runtimeMutationDisabled = mutationBlocked || !session.operations.interaction_response.allowed;
   // The one business notice of the session (target T5), said once: above the timeline for a refused, failed or unavailable
-  // session, in the composer's context for an offline Host, and by the composer's control notice for a read-only lease.
-  const facts: SessionFacts = { session, host, replica: state };
+  // session, in the composer's context for an offline Host or a usage limit, and by the composer's control notice for a read-only lease.
+  const facts: SessionFacts = { session, host, replica: state, now: Date.now() };
+  const locale = useContext(LocaleContext);
   const notice = sessionNotice(facts);
   const activity = session.activity;
   const t = useTranslate();
   const activityLabel = sessionActivityLabel(facts, false, t) ?? '';
   const timelineNotice = notice && (notice.kind === 'unavailable' || notice.kind === 'agent_unavailable' || notice.kind === 'failed' && !failureInTimeline) ? notice : undefined;
   const hasTarget = (draftSessionKey ?? attachingAgentId) !== undefined;
-  const hostNotice = notice?.kind === 'host_offline' && !(state === undefined && loadingNotice) ? sessionNoticeWords(notice, t) : undefined;
+  const hostNotice = notice?.kind === 'host_offline' && !(state === undefined && loadingNotice) || notice?.kind === 'usage_limited' ? sessionNoticeWords(notice, t, locale) : undefined;
   const viewOptions = <SessionViewOptions key={displayScope} process={process} />;
   // The assistant's details: what its place and its presentation know, with this conversation's process mode, settings and files.
   const filePreview = useContext(FilePreviewContext);

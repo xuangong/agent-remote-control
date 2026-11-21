@@ -25,6 +25,8 @@ export const client: AreaMessages<typeof english> = {
   'client.notice.unsupported': '这个 Agent 不接收消息。',
   'client.notice.agentUnavailable': '{host} 上的 Agent 暂时用不了。',
   'client.notice.itsHost': '它所在的 Host',
+  'client.notice.usageLimited': '这个账号的用量到上限了，额度恢复后才能接着发消息。',
+  'client.notice.usageLimitedUntil': '这个账号的用量到上限了，{time} 恢复。现在发的消息会先等着，到时候再发出去～',
 
   'client.send.historyChanged': '对话记录有变动，没能确认消息是否送达。',
   'client.send.restored': '页面关闭前没能确认送达。重试前先看看对话里有没有。',

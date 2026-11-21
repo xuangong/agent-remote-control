@@ -77,6 +77,7 @@ const primaryState = { ...replicaState, timeline: { ...replicaState.timeline, ha
 function Fixture() {
   const [open, setOpen] = useState(query.has('open'));
   const [panel, setPanel] = useState(false);
+  const [primaryDraft, setPrimaryDraft] = useState('');
   const [observation, setObservation] = useState<SessionObservation>();
   useEffect(() => { (window as unknown as { setAskObservation(value: SessionObservation): void }).setAskObservation = setObservation; }, []);
   const ask = useMemo(() => ({
@@ -96,7 +97,7 @@ function Fixture() {
       <button type="button" onClick={() => setPanel(true)}>Windows</button></header>
     <PreviewWorkspace className="lab-main-stage" style={{ gridColumn: '1 / -1', gridRow: 2, minHeight: 0 }}>
       <div className="lab-primary-conversation" style={{ height: '100%' }}>
-        <SessionWorkbench state={primaryState} sessionStatus="ready" conversationPath={<strong>Main</strong>} actions={{ sendMessage: async () => {} }} messageDraft="" onMessageDraftChange={() => {}} />
+        <SessionWorkbench state={primaryState} sessionStatus="ready" conversationPath={<strong>Main</strong>} actions={{ sendMessage: async () => {} }} messageDraft={primaryDraft} onMessageDraftChange={setPrimaryDraft} />
       </div>
     </PreviewWorkspace>
     {panel ? <section aria-label="Windows" style={{ position: 'fixed', top: 60, right: 12, zIndex: 150, background: 'white', padding: 8 }}><button type="button" onClick={() => setPanel(false)}>Close Windows</button></section> : null}

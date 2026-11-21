@@ -1,7 +1,7 @@
 import { expect, test, type Locator } from '@playwright/test';
 
 /** On a phone only the Side shows: two panes would not fit beside each other. */
-const fixture = (kind: 'snapshot' | 'reference', width = 440, only = false) => `/e2e/fixtures/session-references-layout.html?kind=${kind}&width=${width}${only ? '&only=side' : ''}`;
+const fixture = (kind: 'snapshot' | 'reference', width = 440, only = false, extra = '') => `/e2e/fixtures/session-references-layout.html?kind=${kind}&width=${width}${only ? '&only=side' : ''}${extra}`;
 const box = async (locator: Locator) => (await locator.boundingBox())!;
 
 test('a fork lists its copied context above its composer, and opening it leaves the composer where it was', async ({ page, isMobile }) => {
@@ -49,4 +49,20 @@ test('the source reference of a Side starts at the composer edge, in one compact
   await side.locator('.lab-composer-dock').evaluate(node => { (node as HTMLElement).style.width = '1300px'; });
   await expect.poll(async () => (await box(side.locator('.agent-composer'))).x - (await box(side)).x).toBeGreaterThan(100);
   await expect.poll(offset).toBeLessThanOrEqual(1);
+});
+
+test('the session picker of a Side fits a short visible area: inside the session, above its references, with its title, filter and Cancel in view and the sessions scrolling', async ({ page, isMobile }) => {
+  // A touch keyboard leaves about 460 px of height; the pane fills it.
+  await page.setViewportSize({ width: isMobile ? 390 : 1100, height: 460 });
+  await page.goto(fixture('reference', isMobile ? 360 : 440, isMobile, '&picking&height=460'));
+  const side = page.getByRole('region', { name: 'side', exact: true });
+  const picker = side.getByRole('dialog', { name: 'Reference a session', exact: true });
+  await expect(picker.getByRole('button', { name: /^Listed session 1\b/ })).toBeVisible();
+  const references = side.locator('.lab-session-refs');
+  const pickerTop = async () => (await box(picker)).y - (await box(side.locator('.lab-workbench-layout').first())).y;
+  await expect.poll(pickerTop).toBeGreaterThanOrEqual(0);
+  const placed = await box(picker);
+  expect(placed.y + placed.height).toBeLessThanOrEqual((await box(references)).y);
+  for (const control of [picker.getByText('Reference a session', { exact: true }), picker.getByRole('searchbox'), picker.getByRole('button', { name: 'Cancel', exact: true })]) await expect(control).toBeInViewport({ ratio: 1 });
+  expect(await picker.locator('ul').evaluate(list => { list.scrollTop = list.scrollHeight; return list.scrollHeight > list.clientHeight && list.scrollTop === list.scrollHeight - list.clientHeight; })).toBe(true);
 });

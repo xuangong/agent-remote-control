@@ -48,6 +48,23 @@ it('stands open as rows in the details: no "+", and Escape gives the focus back 
   expect(document.activeElement).toBe(model);
 });
 
+it('gives the focus back to the row that opened the panel when its Close button is pressed, and opens the panel again from that row', async () => {
+  function Details() {
+    const [view, setView] = useState<SessionControlView>();
+    return <AgentSessionSettings state={state} presentation="list" disabled={false} busy={false} view={view} onView={setView} onPendingChange={() => {}} />;
+  }
+  const container = await render(<Details />);
+  const model = container.querySelector<HTMLButtonElement>('[data-testid="session-model-button"]')!;
+  await act(async () => { model.focus(); model.click(); });
+  expect(model.getAttribute('aria-expanded')).toBe('true');
+  await act(async () => { const close = container.querySelector<HTMLButtonElement>('[aria-label="Close session controls"]')!; close.focus(); close.click(); });
+  expect(model.getAttribute('aria-expanded')).toBe('false');
+  expect(document.activeElement).toBe(model);
+  await act(async () => { model.click(); });
+  expect(model.getAttribute('aria-expanded')).toBe('true');
+  expect(container.querySelector('[aria-label="Close session controls"]')).not.toBeNull();
+});
+
 it('leaves Escape available to the outer composition when focus has moved outside the settings', async () => {
   const container = await render(<><Controls /><button type="button">Outer action</button></>);
   const trigger = container.querySelector<HTMLButtonElement>('[data-testid="session-model-button"]')!;

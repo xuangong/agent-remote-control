@@ -1,5 +1,6 @@
 // A source session beside a Side or a fork, as the Window shows them: the Side lists its source above its composer, the fork its copied context.
-// The Host's references answer comes from the page's fetch, so no Relay is needed.
+// The Host's references answer comes from the page's fetch, so no Relay is needed. `picking` opens the session picker over 14 sessions;
+// `height` sets the pane's height (default 560).
 import { createRoot } from 'react-dom/client';
 import { SessionWorkbench } from '../../src/components/SessionWorkbench';
 import { SessionReferences } from '../../src/components/SessionReferences';
@@ -11,8 +12,13 @@ import '../../src/session-view-styles';
 const query = new URLSearchParams(window.location.search);
 const kind = query.get('kind') === 'snapshot' ? 'snapshot' : 'reference';
 const width = Number(query.get('width') ?? 440);
+const height = Number(query.get('height') ?? 560);
 
-window.fetch = async () => new Response(JSON.stringify({ revision: 1, refs: kind === 'reference' ? [{ providerId: 'codex', nativeSessionId: 'source', title: 'Source session', origin: 'source' }] : [] }),
+const sessions = Array.from({ length: 14 }, (_, index) => ({ providerId: 'codex', nativeSessionId: `listed-${index}`, title: `Listed session ${index + 1}`, state: 'idle',
+  createdAt: '2026-10-01T00:00:00Z', updatedAt: `2026-10-01T00:${String(index).padStart(2, '0')}:00Z` }));
+window.fetch = async input => new Response(JSON.stringify(new URL(String(input), location.href).pathname.endsWith('/catalog')
+  ? { items: sessions, hasMore: false, revision: '1' }
+  : { revision: 1, refs: kind === 'reference' ? [{ providerId: 'codex', nativeSessionId: 'source', title: 'Source session', origin: 'source' }] : [] }),
   { status: 200, headers: { 'content-type': 'application/json' } });
 
 const fork: SessionFork = {
@@ -28,9 +34,9 @@ const actions = { sendMessage: async () => {}, sendMessageContent: async () => {
 function Pane({ placement, referenced }: { placement: string; referenced: boolean }) {
   const context = referenced ? <SessionReferences scope="https://relay.example/u/layout/" holder={{ hostId: 'host', providerId: 'codex', nativeSessionId: 'side' }} providers={['codex']}
     fallback={<ForkReference fork={fork} onOpen={() => {}} />} snapshot={kind === 'snapshot' ? <ForkReference fork={fork} onOpen={() => {}} /> : undefined}
-    picking={false} onPickingChange={() => {}} onOpen={() => {}} /> : undefined;
+    picking={query.has('picking')} onPickingChange={() => {}} onOpen={() => {}} /> : undefined;
   return <section data-placement={placement} className={referenced ? 'lab-side-conversation' : 'lab-primary-conversation'} aria-label={placement}
-    style={{ width, height: 560, flex: 'none', minWidth: 0, padding: 0, border: 0, position: 'relative' }}>
+    style={{ width, height, flex: 'none', minWidth: 0, padding: 0, border: 0, position: 'relative' }}>
     <SessionWorkbench state={{ ...state, agent: { ...state.agent!, id: placement } }} sessionStatus="ready" headingMode="inline" composerContext={context}
       conversationPath={<strong>{placement}</strong>} messageDraft="" onMessageDraftChange={() => {}} actions={actions} />
   </section>;

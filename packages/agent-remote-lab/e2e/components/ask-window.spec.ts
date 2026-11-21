@@ -196,6 +196,27 @@ test('on a desktop the Ask floats inside the surface a margin from every edge an
   expect(box.y).toBeGreaterThanOrEqual(bar.y + bar.height);
 });
 
+test('the source composer stays usable beside an open Ask while the page narrows, and the Ask keeps its size and its draft', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'A desktop window.');
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const ask = await open(page);
+  await ask.getByTestId('prompt-input').fill('Keep the Ask draft while the source narrows');
+  const widened = (await ask.boundingBox())!;
+  await page.setViewportSize({ width: 1200, height: 1000 });
+  await expect.poll(() => insideSurface(page, ask)).toBe(true);
+  const narrowed = (await ask.boundingBox())!;
+  expect(narrowed.width).toBeCloseTo(widened.width, 0);
+  expect(narrowed.height).toBeCloseTo(widened.height, 0);
+  expect(narrowed.width).toBeLessThan((await surfaceOf(page).boundingBox())!.width);
+  const source = page.locator('.lab-primary-conversation').getByTestId('prompt-input');
+  await source.click({ timeout: 5_000 });
+  await source.fill('The source stays interactive with the Ask open');
+  await expect(source).toBeFocused();
+  await expect(source).toHaveValue('The source stays interactive with the Ask open');
+  await expect(ask).toBeVisible();
+  await expect(ask.getByTestId('prompt-input')).toHaveText('Keep the Ask draft while the source narrows');
+});
+
 test('on a wide short desktop window the Ask keeps its controls visible', async ({ page, isMobile }) => {
   test.skip(isMobile, 'A desktop window.');
   await page.setViewportSize({ width: 1280, height: 450 });

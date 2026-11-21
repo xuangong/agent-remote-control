@@ -979,10 +979,10 @@ The source files over 1,000 lines are the same five as in 11.5; none is new.
 
 ### Totals and slow tests
 
-- **`pnpm verify`** (I4 gate, `.tmp/i4/full2-verify.log`) passed 12,318 tests, failed 0 and skipped 22. After O44 and O45 it passed 12,329 and exited 0. After O53's clause tests, the S3 change and the allowlist re-measurement (2026-11-21) it passed 12,587, skipped 22 and exited 0 in 6 min 50 s; an earlier run under another worktree's e2e load failed only on the speed rule (five relay-core capacity tests over 1 s twice, every test passing).
+- **`pnpm verify`** (I4 gate, `.tmp/i4/full2-verify.log`) passed 12,318 tests, failed 0 and skipped 22. After O44 and O45 it passed 12,329 and exited 0. After O53's clause tests, the S3 change and the allowlist re-measurement (2026-11-21) it passed 12,587, skipped 22 and exited 0 in 6 min 50 s; an earlier run under another worktree's e2e load failed only on the speed rule (five relay-core capacity tests over 1 s twice, every test passing). After those five and two whole-app tests were fixed at their cause (13.4), it passed 12,589 and failed none, but exited 1 on the speed rule again, under the same load: `App.succession.opening-and-refresh` > shows A-B-C handoff history once in reverse order while ordinary A navigation still resolves current C took 1,217 ms and 1,132 ms alone (844 ms alone on an idle machine, 13.4). It is 19 steps of 30 to 110 ms over the loopback fixture, each polled after a 20 ms sleep, with no single long wait; it is the next to split.
 - **Mock-data tiers.** Of 10,187 tests:
   - 247 run over 300 ms, which is 2.4 percent (3.7 percent at the 11.4 measurement);
-  - 15 run over 1 s. Each is either on the allowlist (still 11 entries, each with its reason) or re-measured under 1 s alone. Re-measured alone on 2026-11-21 (13.4), one allowlisted test runs under 1 s and left: the allowlist has 10 entries, and each whole-app entry names the real wait that keeps it over 1 s.
+  - 15 run over 1 s. Each is either on the allowlist (still 11 entries, each with its reason) or re-measured under 1 s alone. Re-measured alone on 2026-11-21 (13.4), one allowlisted test ran under 1 s and left, and two more left once their real waits were injected: the allowlist has 8 entries, and each remaining whole-app entry names the real wait and the mount that keep it over 1 s.
 - **The enforced reporter** passed.
 
 ### Design clauses
@@ -1203,7 +1203,25 @@ No mock-data test over 1 s is without a disposition. Two related observations:
 | journal `session-journal` > prepends 200,000 items and keeps the sequence contiguous | 1,934 ms (1,925 to 1,980) | stays, (c) |
 | journal `journal-pages` > pages over a very large selection | 1,066 ms (1,062 to 1,119) | stays, (c) |
 
-The allowlist has 10 entries, was 11. Reason (a) is gone: each of the five whole-app entries now names what it waits for and why it stays (composition that `docs/current/agent-remote/workbench-state.md` keeps), and that it leaves when those waits run on the fake clock. Real waits take each of them over 1 s: the Team roster poll (3.5 s) and settle waits of 0.35 to 0.55 s; without them each would run in 0.55 to 0.9 s alone (by subtraction, not measured). Reasons (b) and (c) are unchanged and still hold.
+After this re-measurement the allowlist had 10 entries, was 11. Reason (a) is gone: each of the five whole-app entries now names what it waits for and why it stays (composition that `docs/current/agent-remote/workbench-state.md` keeps), and that it leaves when those waits run on the fake clock. Real waits take each of them over 1 s: the Team roster poll (3.5 s) and settle waits of 0.35 to 0.55 s; without them each would run in 0.55 to 0.9 s alone (by subtraction, not measured). Reasons (b) and (c) are unchanged and still hold.
+
+**The causes fixed** (the same day, a follow-up). Re-measured alone three times as above:
+
+- **The Team test** waited out the Team menu's real roster poll. The roster's periods are now an input (`TeamRefresh`, a context in `TeamMenu.tsx`; a page keeps 4 s and 30 s) and the test passes 50 ms: 828 to 901 ms alone, was 4,220. It still fails when the roster stops refreshing. Removed from the allowlist.
+- **The attach budget** runs its 200 and 300 ms settle waits on the fake clock: 605 to 635 ms, was 1,071. It still fails when a missing session is forgotten at once. Removed.
+- **The three render budgets** keep their real waits. On a fake clock the page's own timers fire at other points, and in the file's sequence a bot switch rendered the hidden Window panes. Without the waits they would still take about 0.85 to 0.9 s for the mount of 120 views. They stay, with that reason.
+- The allowlist has 8 entries.
+- Next near the limit: `App.succession.opening-and-refresh` > shows A-B-C handoff history once in reverse order while ordinary A navigation still resolves current C (844 ms alone idle, 1,132 ms under load). It has no long wait: 19 steps over the loopback fixture, each polled after a 20 ms sleep. Splitting it by behaviour is the fix.
+
+**The five relay-core capacity tests** that failed a `verify` run under another worktree's load (each over 1 s twice, every assertion passing):
+
+| Test | Cause | Fix | Alone now |
+|---|---|---|---:|
+| `succession-capacity` > derives every missing progress slot and retains the full supported Host identity inventory | the work, made quadratic: the capacity rule searched the revoked Hosts once per retained identity, 8,191 × 8,191 | the rule indexes them by Host id (`succession-capacity.ts`). No test failed when the lookup was lost, so the index was compared with the search on several states | 83 to 172 ms, was 273 to 357 |
+| `succession-capacity` > fits the exact shared aggregate and refuses the next byte with complete retained extras | volume: the state was padded to the 8 MiB feature budget and measured six times | the budget is an input of the encoding port (`featureBytes`; `SUCCESSION_FEATURE_BYTES` unless set). The bound is proven at 300,000 bytes at −1, 0 and +1, and the default by its value | 10 ms, was 206 |
+| `succession-capacity` > covers full accepted source output and rejects durable binding and creation slot deficits | two clauses in one test, with 4,096 bindings and 4,096 creations measured together | split: the output (25 ms), and one test per list at 4,095, 4,096 and 4,097 slots in all (90 to 121 ms each) | see Fix |
+| `succession-replay` > full feature budget revoke retains complete history and quota without ordinary-row funding | volume: an 8 MiB state saved and read again on every request | the fixture's Relay takes the budget, and the three full-budget tests fill 1 MiB. They fail when the Relay ignores it | 44 to 46 ms, was 261; the other two 33 to 37 ms |
+| `team-resources` > resumes bounded chunks after restart and verifies a file larger than Team text capacity | the assertion: a deep equality of 200,000 bytes took 170 ms, the store's work 4 ms | compares the length and the SHA-256 | 3 ms, was 186 |
 
 **The 305 mock-data tests over 300 ms by cause**, without the process projects. Each was assigned from its file and name, and the per-package counts add up to the reporter's.
 
@@ -1263,7 +1281,7 @@ Short, with the reason for each:
 - **Per-change under 10 s.** At `0d08ab25` six of eleven changes took 11.8 to 14.4 s, each because S3 took 10.5 s, 8.6 s of it in `session-channel-client.integration.test.ts`. That file now runs on a fake clock (13.1): the S3 suite takes 3.3 s, and the two re-measured selections take 5.7 s and 5.8 s. The other four were not re-measured.
 - **Slow tests.** The target is under 1 percent over 300 ms and none over 1 s.
   - Counted as 11.4 counted, 422 tests are over 300 ms (3.4 percent; 415 on 2026-11-19) and 49 over 1 s (48).
-  - The speed rule's own count, without the process projects, is 305 over 300 ms (2.5 percent) and 16 over 1 s: 11 allowlisted, and 5 that run under 1 s alone. Since then the S3 suite's 7 real-timer tests run on a fake clock (13.1) and the allowlist has 10 entries (13.4).
+  - The speed rule's own count, without the process projects, is 305 over 300 ms (2.5 percent) and 16 over 1 s: 11 allowlisted, and 5 that run under 1 s alone. Since then the S3 suite's 7 real-timer tests run on a fake clock (13.1) and the allowlist has 8 entries (13.4).
   - 169 of the 305 are whole-app mounts of the Workbench, the composition tests that O10 and O18 kept. The Workbench's count rose from 152 to 173.
   - 84 are real sockets and real processes in unit-tier files, 74 of them in the Controller and the Node Relay. Section 5.1 puts them in the transport and process tiers.
 - **Unit count.** 11,547 against about 7,000, and growing: the Orchard steps added 923, mostly the tables and view tests of their new rules (13.3).

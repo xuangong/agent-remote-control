@@ -14,8 +14,8 @@ import { simulatedCli } from './simulated-cli.js';
  * playing a declaration, on a fake clock (part 2). The kit's checks stay in the SDK; these ports only run them against the real modules.
  */
 export const controllerConformancePorts: ProviderConformancePorts = {
-  async continuity(recording, opens) {
-    const journal = await journalOfRun(recording.live);
+  async continuity(recording, opens, order) {
+    const journal = await journalOfRun(recording.live, order);
     const outcomes = [];
     for (let open = 0; open < opens; open += 1) outcomes.push(await journal.reread(recording.reread));
     return outcomes;

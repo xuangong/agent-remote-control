@@ -70,6 +70,8 @@ export interface PublicationContext {
 export interface SessionPublicationOptions {
   agentId: string;
   providerId: string;
+  /** How the provider's reread lists the siblings of a turn (its declared `reread.order`); the live order by default. */
+  order?: 'live' | 'siblings_unordered';
   sessionKey: string;
   source: JournalSource;
   context: PublicationContext;
@@ -319,14 +321,14 @@ export class SessionPublication {
     const lastSeq = subscription.rows[subscription.rows.length - 1]?.seq ?? 0;
     let rows = subscription.rows;
     let timeline = this.sendable(rows);
-    let window = await windowOp(timeline);
+    let window = await windowOp(timeline, this.options.order);
     // An empty window replaces the journal with nothing: while native history may hold older pages, they are read first.
     for (let reads = 0; window.count === 0 && reads < this.limits.gapReadsMax && this.source.hasOlderHistory(); reads += 1) {
       await this.source.loadOlderHistory();
       this.check(token);
       rows = this.source.timelineRows().filter(row => row.seq <= lastSeq);
       timeline = this.sendable(rows);
-      window = await windowOp(timeline);
+      window = await windowOp(timeline, this.options.order);
     }
     this.check(token);
     for (const key of window.refused) this.skip(key);

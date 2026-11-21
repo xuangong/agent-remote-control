@@ -1,6 +1,6 @@
 import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 
-import type { WindowDecision, WindowTail } from './window-decision.js';
+import type { WindowDecision, WindowOrder, WindowTail } from './window-decision.js';
 import type { JournalItem, JournalItemInput, ReplacementReason } from './types.js';
 
 /**
@@ -21,6 +21,8 @@ export interface VectorItem {
   kind?: 'message' | 'tool' | 'board';
   /** A held item whose body was evicted from memory. */
   evicted?: true;
+  /** The turn the item belongs to; `turn-1` by default. */
+  turn?: string;
 }
 
 export type VectorExpectation =
@@ -36,6 +38,8 @@ export interface WindowVector {
   incomplete?: true;
   /** The journal's size and the room it may fill, in bytes, for a vector about an extension that does not fit. */
   room?: { resident: number; roomBytes: number };
+  /** How the window lists the siblings of a turn; the live order by default. */
+  order?: WindowOrder;
   expect: VectorExpectation;
 }
 
@@ -46,6 +50,7 @@ const liveOpen = (key: string, text?: string): VectorItem => ({ ...open(key, tex
 const tool = (key: string, text: string): VectorItem => ({ ...live(key, text), kind: 'tool' });
 const board = (key: string, text: string): VectorItem => ({ ...live(key, text), kind: 'board' });
 const evicted = (item: VectorItem): VectorItem => ({ ...item, evicted: true });
+const inTurn = (turn: string, ...keys: string[]): VectorItem[] => keys.map(key => ({ key, turn }));
 const unchanged: VectorExpectation = { outcome: 'unchanged' };
 const extend = (append: string[], update: string[] = []): VectorExpectation => ({ outcome: 'extend', append, ...(update.length === 0 ? {} : { update }) });
 const replace = (reason: ReplacementReason): VectorExpectation => ({ outcome: 'replace', reason });
@@ -105,6 +110,20 @@ export const windowVectors: readonly WindowVector[] = [
   { name: 'a live-only item that changes kind is a replacement: changed', held: [done('a'), tool('x', 'same')], window: [done('a'), board('x', 'same')], expect: replace('changed') },
   { name: 'an extension of any size is appended when no room is given', held: [done('a')], window: [done('a'), done('b', 'x'.repeat(1_000_000))], expect: extend(['b']) },
   { name: 'an extension that does not fit the room is a replacement: changed', held: [done('a')], window: [done('a'), done('b')], room: { resident: 100, roomBytes: 150 }, expect: replace('changed') },
+
+  // A provider whose reread may permute the siblings of one turn (`siblings_unordered`): the Relay compares each turn's siblings as a set.
+  { name: 'the siblings of a turn read again in another order change nothing when the provider reads them unordered', order: 'siblings_unordered',
+    held: [...inTurn('t1', 'a'), ...inTurn('t2', 'b', 'c')], window: [...inTurn('t1', 'a'), ...inTurn('t2', 'c', 'b')], expect: unchanged },
+  { name: 'the siblings of a turn read again in another order are a replacement when the provider keeps the live order: changed',
+    held: [...inTurn('t1', 'a'), ...inTurn('t2', 'b', 'c')], window: [...inTurn('t1', 'a'), ...inTurn('t2', 'c', 'b')], expect: replace('changed') },
+  { name: 'unordered siblings keep the turn the journal holds for them, whatever turn the window names', order: 'siblings_unordered',
+    held: [...inTurn('t1', 'a'), ...inTurn('t2', 'b', 'c')], window: [...inTurn('t1', 'a'), ...inTurn('x', 'c'), ...inTurn('y', 'b')], expect: unchanged },
+  { name: 'a new sibling among unordered siblings read again is appended', order: 'siblings_unordered',
+    held: [...inTurn('t1', 'a', 'b')], window: [...inTurn('t1', 'b', 'x', 'a')], expect: extend(['x']) },
+  { name: 'turns read again in another order are a replacement even when siblings are unordered: changed', order: 'siblings_unordered',
+    held: [...inTurn('t1', 'a'), ...inTurn('t2', 'b', 'c')], window: [...inTurn('t2', 'b', 'c'), ...inTurn('t1', 'a')], expect: replace('changed') },
+  { name: 'an unordered sibling with another digest is a replacement: changed', order: 'siblings_unordered',
+    held: [...inTurn('t1', 'a', 'b')], window: [{ key: 'b', turn: 't1', text: 'other' }, ...inTurn('t1', 'a')], expect: replace('changed') },
 ];
 
 /** The text an item has when the vector does not give one. */
@@ -128,7 +147,7 @@ const textDigest: VectorDigest = item => `digest:${item.key}:${vectorText(item)}
 export function windowItems(vector: WindowVector, digestOf: VectorDigest = textDigest): JournalItemInput[] {
   return vector.window.map(item => ({
     row: {
-      itemKey: item.key, providerId: 'codex', sourceKey: `source-${item.key}`, occurredAt: 1_725_000_000_000, turnId: 'turn-1',
+      itemKey: item.key, providerId: 'codex', sourceKey: `source-${item.key}`, occurredAt: 1_725_000_000_000, turnId: item.turn ?? 'turn-1',
       item: vectorContent(item), ...(item.live ? { liveOnly: true } : {}),
     },
     ...(item.state === 'open' ? {} : { digest: digestOf(item) }),
@@ -138,7 +157,7 @@ export function windowItems(vector: WindowVector, digestOf: VectorDigest = textD
 /** What the journal holds, as the decision reads it. */
 export function heldTail(vector: WindowVector, digestOf: VectorDigest = textDigest): WindowTail {
   const items = vector.held.map((item, at): JournalItem => ({
-    itemKey: item.key, providerId: 'codex', turnId: 'turn-1', seqStart: at + 1, seqEnd: at + 1, sourceSeqRanges: [{ startSeq: at + 1, endSeq: at + 1 }],
+    itemKey: item.key, providerId: 'codex', turnId: item.turn ?? 'turn-1', seqStart: at + 1, seqEnd: at + 1, sourceSeqRanges: [{ startSeq: at + 1, endSeq: at + 1 }],
     state: item.state ?? 'complete', ...(item.state === 'open' ? {} : { digest: digestOf(item) }), liveOnly: item.live === true,
     body: item.evicted ? null : { item: vectorContent(item), timestamp: '2024-08-30T06:40:00.000Z', collapsed: [], resources: [] },
   }));

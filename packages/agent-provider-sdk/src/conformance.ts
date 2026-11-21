@@ -98,8 +98,11 @@ export interface ProviderFaultHarness {
 }
 
 export interface ProviderConformancePorts {
-  /** A Relay journal built from the recording's live run meets the window of its reread `opens` times; each outcome, in order. */
-  continuity(recording: JournalRecording, opens: number): Promise<ConformanceContinuityOutcome[]>;
+  /**
+   * A Relay journal built from the recording's live run meets the window of its reread `opens` times, each window in the declared reread
+   * `order` (gap 11: the Relay compares the siblings of a turn as a set for `siblings_unordered`); each outcome, in order.
+   */
+  continuity(recording: JournalRecording, opens: number, order: AgentProviderBehaviour['reread']['order']): Promise<ConformanceContinuityOutcome[]>;
   /** The Controller beside the CLI simulator playing `behaviour`, with a session whose history holds one finished turn. */
   faults(behaviour: AgentProviderBehaviour): Promise<ProviderFaultHarness>;
 }
@@ -163,7 +166,7 @@ export function runProviderConformance(subject: ProviderConformanceSubject, port
       });
 
       it.each(names)('%s: a journal of the live run meets five more rereads unchanged, and a settled session reopens unchanged', async name => {
-        const outcomes = await ports.continuity(recording(name), 6);
+        const outcomes = await ports.continuity(recording(name), 6, behaviour.reread.order);
         if (REQUIRED_RECORDINGS.includes(name)) expect(outcomes[0], `${name}, reopened`).toEqual(UNCHANGED);
         expect(outcomes.slice(1), `${name}, read again after the first reopen`).toEqual(Array.from({ length: 5 }, () => UNCHANGED));
       });

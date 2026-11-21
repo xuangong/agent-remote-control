@@ -8,6 +8,7 @@ import {describe, expect, it} from 'vitest';
 import type {AgentSession, ProviderObservation} from '@orchardworks/agent-provider-sdk';
 import {journalObservation as kept, recordingShape, serializeRecording, type JournalRecording as Recording} from '@orchardworks/agent-provider-sdk/testing';
 import {CopilotAgentProvider} from '../src/provider.js';
+import {copilotBehaviour} from '../src/behaviour.js';
 import {fixture, observe, reply, waitFor, type ModelRequest} from '../src/test-utils/native-fixture.js';
 
 /**
@@ -62,8 +63,6 @@ function stream(res: ServerResponse, body: ModelRequest, deltas: object[]) {
   res.end([...deltas.map(delta => chunk(delta, null)), chunk({}, 'stop')].map(value => `data: ${JSON.stringify(value)}\n\n`).join('') + 'data: [DONE]\n\n');
 }
 
-/** The todo snapshot is read from the CLI after the event that announced it, so its place among its neighbours varies from run to run. */
-const lateTodo = (line: string) => line.includes(' todo ');
 
 /** Paths of this machine and run never enter a fixture. */
 async function scrub(recording: Recording, paths: string[]): Promise<Recording> {
@@ -78,7 +77,9 @@ async function check(name: string, recording: Recording, cwd: string, home: stri
   const clean = await scrub(recording, [cwd, home, tmpdir(), homedir()]);
   if (RECORDING) { await mkdir(FIXTURES, {recursive: true}); await writeFile(path, serializeRecording(clean)); return; }
   if (!existsSync(path)) throw new Error(`No recording ${name}.json: run with RECORD_JOURNAL_FIXTURES=1.`);
-  expect(recordingShape(clean, lateTodo), `the shape of the ${name} recording`).toEqual(recordingShape(JSON.parse(await readFile(path, 'utf8')) as Recording, lateTodo));
+  // The todo snapshot is read from the CLI after the event that announced it, so its place among its siblings varies: Copilot declares siblings_unordered.
+  const order = copilotBehaviour.reread.order;
+  expect(recordingShape(clean, order), `the shape of the ${name} recording`).toEqual(recordingShape(JSON.parse(await readFile(path, 'utf8')) as Recording, order));
 }
 
 async function recorded(name: string, handler: Handler, drive: Drive, options?: Parameters<typeof record>[2]) {

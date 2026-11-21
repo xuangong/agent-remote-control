@@ -29,6 +29,7 @@ const valid: Array<Record<string, unknown>> = [
     { sequence: 11, op: 'outcome', providerId: 'codex', turnId: 'turn-1', background: { id: 'review-1', kind: 'review', status: 'visible' }, occurredAt: 1_725_000_000_000 },
     { sequence: 13, op: 'prepend', items: [{ row, digest: DIGEST }, { row: { ...row, itemKey: 'item-2' } }] },
     { sequence: 14, op: 'window', items: [{ row }, { row: { ...row, itemKey: 'item-2' } }] },
+    { sequence: 15, op: 'window', items: [{ row }], order: 'siblings_unordered' },
   ]),
   publish([
     { sequence: 1, op: 'outcome', providerId: 'codex', background: { id: 'review-1', kind: 'review', status: 'visible' }, occurredAt: 1 },
@@ -104,6 +105,7 @@ describe('journal uplink envelopes', () => {
     ['a correct entry', publish([{ sequence: 1, op: 'correct', row, digest: DIGEST, expectedRevision: 1 }])],
     ['a replace entry', publish([{ sequence: 1, op: 'replace', items: [{ row }] }])],
     ['a window item with an empty digest', publish([{ sequence: 1, op: 'window', items: [{ row, digest: '' }] }])],
+    ['a window in an order the protocol does not name', publish([{ sequence: 1, op: 'window', items: [{ row }], order: 'live' }])],
     ['a refusal that names an item', message({ type: 'journal_refused', sessionKey: SESSION, generation: 1, sequence: 1, reason: 'invalid', itemKey: 'item-1' })],
     ['a refusal for a removed reason', message({ type: 'journal_refused', sessionKey: SESSION, generation: 1, sequence: 1, reason: 'stale_revision' })],
     ['an open refusal for a removed reason', message({ type: 'journal_open_refused', requestId: 'o', sessionKey: SESSION, reason: 'index_too_large' })],

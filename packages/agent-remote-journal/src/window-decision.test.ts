@@ -13,7 +13,7 @@ describe('SessionJournal.sync over the window vectors', () => {
       items: [...tail.items],
     }, sequentialEpochs());
     const roomBytes = vector.room === undefined ? Number.MAX_SAFE_INTEGER : journal.residentBytes() + vector.room.roomBytes - vector.room.resident;
-    const result = journal.sync({ publisherId: 'p', generation: 1, sequence: 1 }, windowItems(vector), { roomBytes });
+    const result = journal.sync({ publisherId: 'p', generation: 1, sequence: 1 }, windowItems(vector), { roomBytes, ...(vector.order ? { order: vector.order } : {}) });
     const { expect: wanted } = vector;
     if (wanted.outcome === 'unchanged') expect(result).toEqual({ outcome: 'unchanged' });
     else if (wanted.outcome === 'replace') expect(result).toMatchObject({ outcome: 'replaced', reason: wanted.reason });
@@ -27,7 +27,7 @@ describe('SessionJournal.sync over the window vectors', () => {
 describe('decideWindow', () => {
   it.each(windowVectors.map(vector => [vector.name, vector] as const))('%s', (_name, vector) => {
     const window = windowItems(vector);
-    const decision = decideWindow(heldTail(vector), window, vector.room === undefined ? undefined : { roomBytes: vector.room.roomBytes });
+    const decision = decideWindow(heldTail(vector), window, { ...(vector.room ? { roomBytes: vector.room.roomBytes } : {}), ...(vector.order ? { order: vector.order } : {}) });
     expect(describeDecision(decision, window)).toEqual(vector.expect);
   });
 

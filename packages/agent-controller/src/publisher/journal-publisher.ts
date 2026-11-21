@@ -14,6 +14,8 @@ interface JournalWriter { send(json: string): void }
 interface JournalPublisherOptions {
   /** The providers whose adapters declare journal support. Sessions of any other provider are not published. */
   providers(): Iterable<string>;
+  /** How a provider's reread lists the siblings of a turn, as its adapter declares (`reread.order`); the live order when absent. */
+  rereadOrder?(providerId: string): 'live' | 'siblings_unordered';
   /** Names this Controller process to the Relay. A restart is a different publisher, and a reconnect is the same one. */
   publisherId?: string;
   limits?: Partial<PublisherLimits>;
@@ -151,7 +153,7 @@ export function createJournalPublisher(options: JournalPublisherOptions): Journa
         earlier?.stop();
       }
       const publication: SessionPublication = new SessionPublication({
-        agentId: session.agentId, providerId: session.providerId, sessionKey, source: session.source, context,
+        agentId: session.agentId, providerId: session.providerId, sessionKey, source: session.source, context, order: options.rereadOrder?.(session.providerId) ?? 'live',
         onFinished: () => {
           if (sessions.get(session.agentId) === publication) sessions.delete(session.agentId);
           if (byKey.get(sessionKey) === publication) byKey.delete(sessionKey);

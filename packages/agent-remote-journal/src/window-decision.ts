@@ -22,16 +22,23 @@ import type { JournalItem, JournalItemInput, ReplacementReason } from './types.j
  *   journal does not share. A live-only item the journal holds and the window lacks stays.
  * - Equality of a complete item is its digest; equality of an open item is its resident content, so an open item whose
  *   body was evicted is never equal.
+ * - Order `siblings_unordered` (a provider whose reread may permute the siblings of one turn, its declared `reread.order`): the
+ *   consecutive native items of one turn are compared as a set. Their turn is the one the journal holds for them, or for an item it does
+ *   not hold the one the window names; they are taken in the journal's order, and items it does not hold after them in window order.
+ *   A sibling moved to another turn, or a turn moved, is still a change.
  */
-export function decideWindow(tail: WindowTail, window: readonly JournalItemInput[], room?: { roomBytes: number }): WindowDecision {
+export function decideWindow(tail: WindowTail, window: readonly JournalItemInput[], options: { roomBytes?: number; order?: WindowOrder } = {}): WindowDecision {
   if (tail.incomplete) return { outcome: 'replace', reason: 'incomplete' };
-  const plan = planOf(tail, window);
+  const plan = planOf(tail, window, options.order ?? 'live');
   if (typeof plan === 'string') return { outcome: 'replace', reason: plan };
   if (plan.append.size === 0 && plan.update.size === 0) return { outcome: 'unchanged' };
   const bytes = window.reduce((sum, item) => sum + (plan.append.has(item.row.itemKey) || plan.update.has(item.row.itemKey) ? utf8ByteLength(JSON.stringify(item)) : 0), 0);
-  if (room && tail.residentBytes() + bytes > room.roomBytes) return { outcome: 'replace', reason: 'changed' };
+  if (options.roomBytes !== undefined && tail.residentBytes() + bytes > options.roomBytes) return { outcome: 'replace', reason: 'changed' };
   return { outcome: 'extend', append: plan.append, update: plan.update, bytes };
 }
+
+/** How a window lists the siblings of a turn: in the live order, or in an order the provider's reread does not keep. */
+export type WindowOrder = 'live' | 'siblings_unordered';
 
 /** What the journal offers the decision: its items in order, a lookup by key, whether rows are missing, and its size. */
 export interface WindowTail {
@@ -52,12 +59,13 @@ export const CONTENT_REPLACING_TYPES: ReadonlySet<string> = new Set(['tool_call'
 
 interface WindowPlan { append: Set<string>; update: Set<string> }
 
-function planOf(tail: WindowTail, window: readonly JournalItemInput[]): WindowPlan | ReplacementReason {
+function planOf(tail: WindowTail, window: readonly JournalItemInput[], order: WindowOrder): WindowPlan | ReplacementReason {
   for (const { row } of window) {
     const held = tail.byKey.get(row.itemKey);
     if (held && held.liveOnly !== (row.liveOnly === true)) return 'changed';
   }
-  const extension = nativeExtension(tail, window.filter(({ row }) => row.liveOnly !== true));
+  const native = window.filter(({ row }) => row.liveOnly !== true);
+  const extension = nativeExtension(tail, order === 'siblings_unordered' ? inHeldOrder(tail, native) : native);
   if (typeof extension === 'string') return extension;
   const plan: WindowPlan = { append: new Set(extension.map(({ row }) => row.itemKey)), update: new Set() };
   for (const item of window) {
@@ -90,6 +98,21 @@ function nativeExtension(tail: WindowTail, window: readonly JournalItemInput[]):
   }
   const extension = window.slice(next);
   return extension.some(({ row }) => tail.byKey.has(row.itemKey)) ? 'changed' : extension;
+}
+
+/** The window's native items with the siblings of each turn in the order the journal holds them (order `siblings_unordered`). */
+function inHeldOrder(tail: WindowTail, window: readonly JournalItemInput[]): JournalItemInput[] {
+  const position = new Map(tail.items.map((item, at) => [item.itemKey, at] as const));
+  const turnOf = ({ row }: JournalItemInput) => tail.byKey.get(row.itemKey)?.turnId ?? row.turnId;
+  const held = ({ row }: JournalItemInput) => position.get(row.itemKey) ?? Number.MAX_SAFE_INTEGER;
+  const ordered: JournalItemInput[] = [];
+  let siblings: JournalItemInput[] = [];
+  for (const item of window) {
+    const turn = turnOf(item);
+    if (siblings.length > 0 && (turn === undefined || turn !== turnOf(siblings[0] as JournalItemInput))) { ordered.push(...siblings.sort((a, b) => held(a) - held(b))); siblings = []; }
+    siblings.push(item);
+  }
+  return [...ordered, ...siblings.sort((a, b) => held(a) - held(b))];
 }
 
 /** Whether the journal's item is the window's item: the same key and live-only mark, and the same digest when complete or the same resident content when open. */

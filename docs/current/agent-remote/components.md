@@ -12,7 +12,7 @@ checked against the code; the test mapping follows test titles and their asserti
 
 | Component | Clauses | Gaps when written | Closed by a test | Not tested, with the reason |
 |---|---:|---:|---:|---:|
-| Journal: window decision and quota | 24 | 3 | 3 | 0 |
+| Journal: window decision and quota | 25 | 3 | 3 | 0 |
 | Relay session control | 20 | 4 | 4 | 0 |
 | Relay host-session | 23 | 6 | 6 | 0 |
 | Controller session core | 25 | 8 | 8 | 0 |
@@ -23,7 +23,7 @@ checked against the code; the test mapping follows test titles and their asserti
 | Timeline turns, process mode and work line | 21 | 3 | 3 | 0 |
 | Provider behaviour declaration (B1, 2026-11-21; C7 gap 10) | 7 | 0 | 0 | 0 |
 | Provider conformance kit (B3, 2026-11-22) | 9 | 0 | 0 | 0 |
-| **All** | **213** | **43** | **42** | **1** |
+| **All** | **214** | **43** | **42** | **1** |
 
 Every clause now names the tests that prove it. The 43 gaps were closed on 2026-11-21 (section "Gaps closed" below): 42 by a
 unit test, a vector row or a seam test with mock data, each under 300 ms and each failing when the rule it proves is broken (by a
@@ -107,7 +107,7 @@ that the test fails on (each was applied, run and reverted). The one production 
 Module: `packages/agent-remote-journal/src/window-decision.ts` (pure decision, vectors in `window-vectors.ts`) and `packages/agent-relay-core/src/host-journals.ts` (quota admission); tests: `journal/window-decision.test.ts`, `journal/journal-bytes.test.ts`, `journal/journal-size-invariant.test.ts`, `core/host-journals-bounds.test.ts`, `core/host-journals-window.test.ts`, `core/host-journals-amendments.test.ts`, `core/journal-uplink.test.ts`, `packages/agent-remote-seams/tests/S2/journal-uplink.integration.test.ts`, `packages/agent-remote-seams/tests/S5/Relay-to-Cloudflare-partition.integration.test.ts`, `packages/agent-controller/src/publisher/journal-publisher.test.ts`.
 
 ### Purpose
-- C1. `decideWindow(tail, window, room?)` says whether the journal already holds the newest window a Controller offers on open (`unchanged`), only needs items added (`extend`), or must start a new epoch (`replace` with a reason).
+- C1. `decideWindow(tail, window, { roomBytes?, order? })` says whether the journal already holds the newest window a Controller offers on open (`unchanged`), only needs items added (`extend`), or must start a new epoch (`replace` with a reason).
 - C2. The decision is pure: it reads its arguments and returns data; no clock, storage or sockets, and it does not mutate `tail` or `window`.
 - C3. The quota keeps one session and one Host inside byte limits, and keeps live-only items bounded; the limits are safety bounds, not the retention policy.
 
@@ -141,6 +141,7 @@ Module: `packages/agent-remote-journal/src/window-decision.ts` (pure decision, v
 - C22. A refused entry consumes no sequence and the watermark stays at the last applied entry; entries before the refused one are kept and acknowledged.
 - C23. A publication of a fenced generation does not count against the limits.
 - C24. A window the journal already holds writes no item, epoch or sequence however often it is reopened, even when other sessions fill the Host and bodies were evicted.
+- C25. A window that says `order: 'siblings_unordered'` (a provider whose reread may permute the siblings of one turn, its declared `reread.order`, gap 11) has the consecutive native items of each turn compared as a set: the turn the journal holds for an item, or the one the window names for an item it does not hold; held siblings are taken in the journal's order and new ones after them. A turn moved, or a sibling with another digest, is still `changed`; a window without `order` is compared in the live order.
 
 | Clause | Test(s) that prove it |
 |---|---|
@@ -168,6 +169,7 @@ Module: `packages/agent-remote-journal/src/window-decision.ts` (pure decision, v
 | C22 | `host-journals-bounds.test.ts` > "evicts bodies to make room for a row, and refuses a row that still does not fit" (refused events empty); `host-journals.test.ts` > "stops at the first refused entry and keeps and acknowledges the ones before it"; S5 > "refuses growth over the session limit with quota_exceeded, and consumes no sequence" (`watermark: 1`) |
 | C23 | `host-journals-bounds.test.ts` > "does not count a publication of a fenced generation against the limits" |
 | C24 | `host-journals-window.test.ts` > "writes no item, epoch or sequence for the same window after any number of reopens, and tells subscribers only the head", "leaves a window the journal already holds unchanged and served when other sessions fill the Host and bodies were evicted" |
+| C25 | vector rows "the siblings of a turn read again in another order change nothing when the provider reads them unordered", "... are a replacement when the provider keeps the live order: changed", "unordered siblings keep the turn the journal holds for them, whatever turn the window names", "a new sibling among unordered siblings read again is appended", "turns read again in another order are a replacement even when siblings are unordered: changed", "an unordered sibling with another digest is a replacement: changed" (journal, the publisher's window with its `order`, the replica); `remote-host-journal.test.ts` (the field round trips, another value is refused); `journal-continuity.recordings.test.ts` > "parallel-tools: a reread that lists the two tool calls in the other order leaves the journal unchanged, since Claude Code declares siblings_unordered (gap 11)" |
 
 Gaps: none. Closed 2026-11-21: the default limits (C13 to C16; the 64 MiB session default is pinned by the exported value, since
 showing it through behaviour needs 64 MiB of data), C12's row without `room`, and C21 at Host scope (a unit test of the uplink, not a
@@ -797,7 +799,7 @@ Module: `agent-provider-sdk/src/conformance.ts` (`runProviderConformance`, the `
 
 ### Clauses
 - P1. Every journal-capable adapter passes one suite, keyed on its declaration (`descriptor.behaviour`), never on its provider id; a new adapter brings a subject (declaration, recordings, native fake) and needs no change of the Controller, the Relay or the client.
-- P2. Part 1, recorded sessions: each recording is read again in the declared order (K1) with usable identities, no item the live run lacked and every item finished but a running tool (K2); a Relay journal built from the live run meets five more rereads unchanged, and a settled session (`settled`, `restart`, both required) reopens unchanged.
+- P2. Part 1, recorded sessions: each recording is read again in the declared order (K1) with usable identities, no item the live run lacked and every item finished but a running tool (K2); a Relay journal built from the live run meets five more rereads unchanged, each window in the declared order (journal C25), and a settled session (`settled`, `restart`, both required) reopens unchanged. No line of a recording is exempt: the recorders compare a new run with a recording by `recordingShape`, in which only the journal's rules move a line (a live-only item has no place; a turn's siblings are sorted when declared unordered).
 - P3. Part 3, the declared behaviour, through a fake of the CLI that drives the real adapter: live-only marks only of declared kinds (K3); the client's input id kept live and on a reread when `echoes_client_id` (K4); the CLI's limit signal failing the turn `native_usage_limited` with the reset in `runtimeInfo.usageLimit` when typed (K5); the CLI's refusal of a second writer raised as `AgentSessionInUseError` `writer_elsewhere` when declared (K6); an event of a kind the adapter does not know, in history and live, one diagnostic each time and no row (K7, the same turn played with and without it). K7 runs for OpenCode too, which is not journal-capable (`runUnknownEventRule`).
 - P4. Part 2, faults through the port, played by the CLI simulator from the declaration: a resume 1 ms inside the declared deadline opens; a hung resume is given up at the deadline as `native_unresponsive`, the next open succeeds and the late session is closed; a usage limit refuses an open, and fails a turn, `native_usage_limited` with when it resets, until a turn runs again; a crash fails the turn `native_exited`; a silent turn of an adapter without a heartbeat ends `native_unresponsive` at `TURN_SILENCE_MS`, its runtime released; a writer elsewhere is refused with its reason and wait for a single writer (or a lock-file probe beside shared clients) and never for a forking CLI.
 - P5. Each check returns findings that name the declared field the adapter contradicts (`conformance-checks.ts`), so a failure says which declaration is wrong.

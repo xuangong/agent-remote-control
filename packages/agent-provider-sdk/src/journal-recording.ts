@@ -1,4 +1,4 @@
-import type { ProviderObservation, ProviderStreamItem } from './index.js';
+import type { AgentRereadBehaviour, ProviderObservation, ProviderStreamItem } from './index.js';
 
 /**
  * What a real native runtime did for one scenario: the observations of the live run, and the history observations of the same native
@@ -13,16 +13,32 @@ export const journalObservation = (item: ProviderStreamItem): item is ProviderOb
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
 
 /**
- * What a recording says about identities and delivery, with ids masked and repeated snapshots of one item counted once. A line for
- * which `late` is true moves to the end, in sorted order, for items whose place among their neighbours varies from run to run.
+ * What a recording says about identities and delivery, with ids masked and repeated snapshots of one item counted once, so a run of a
+ * recorder is compared with the recording it made before. Lines move only as the journal's rules allow:
+ * - a live-only item has no place among the others (the window decision compares it by key), so its lines follow the others of their
+ *   side, sorted;
+ * - for an adapter whose declared reread `order` is `siblings_unordered`, the lines of consecutive observations of one turn are sorted,
+ *   since the siblings of a turn may come in any order.
  */
-export function recordingShape(recording: JournalRecording, late: (line: string) => boolean = () => false): string[] {
-  const lines = (observations: ProviderObservation[], side: string) => observations.map(({ delivery, event, itemIdentity }) => {
-    const item = event.type === 'timeline' ? event.item.type : event.type === 'interaction_resolved' ? 'resolved' : '';
-    return `${side} ${delivery} ${event.type} ${item} ${JSON.stringify(itemIdentity ?? null)}`.replace(UUID, '<id>');
-  });
-  const all = [...lines(recording.live, 'live'), ...lines(recording.reread, 'reread')].filter((line, at, every) => line !== every[at - 1]);
-  return [...all.filter(line => !late(line)), ...all.filter(late).sort()];
+export function recordingShape(recording: JournalRecording, order: AgentRereadBehaviour['order'] = 'live'): string[] {
+  const side = (observations: ProviderObservation[], name: string): string[] => {
+    const lines = observations.map(({ delivery, event, itemIdentity }) => {
+      const item = event.type === 'timeline' ? event.item.type : event.type === 'interaction_resolved' ? 'resolved' : '';
+      return { turnId: 'turnId' in event ? event.turnId : undefined, liveOnly: itemIdentity?.liveOnly === true,
+        line: `${name} ${delivery} ${event.type} ${item} ${JSON.stringify(itemIdentity ?? null)}`.replace(UUID, '<id>') };
+    }).filter((entry, at, every) => entry.line !== every[at - 1]?.line);
+    const native = lines.filter(({ liveOnly }) => !liveOnly);
+    const shape: string[] = [];
+    let turn: typeof native = [];
+    const flush = () => { shape.push(...(order === 'siblings_unordered' ? turn.map(({ line }) => line).sort() : turn.map(({ line }) => line))); turn = []; };
+    for (const entry of native) {
+      if (turn.length > 0 && (entry.turnId === undefined || entry.turnId !== turn[0]!.turnId)) flush();
+      turn.push(entry);
+    }
+    flush();
+    return [...shape, ...lines.filter(({ liveOnly }) => liveOnly).map(({ line }) => line).sort()];
+  };
+  return [...side(recording.live, 'live'), ...side(recording.reread, 'reread')];
 }
 
 /** One observation per line, so a fixture is read and compared as a list of events. */

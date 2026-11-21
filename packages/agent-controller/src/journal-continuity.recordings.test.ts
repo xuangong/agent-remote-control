@@ -1,3 +1,4 @@
+import { claudeBehaviour } from '@orchardworks/agent-provider-claude';
 import { describe, expect, it } from 'vitest';
 
 import { recording, recordingNames, type RecordedProvider } from './test-utils/recordings.js';
@@ -349,6 +350,17 @@ function claudeScenarios(present: (...wanted: string[]) => string[]): void {
       const journal = await journalOfRun(run.live);
       expect(journal.keys().filter(key => key.startsWith('tool:'))).toEqual(['tool:par-1', 'tool:par-2']);
       expect(await journal.reread(run.reread)).toEqual(UNCHANGED);
+    });
+
+    it('parallel-tools: a reread that lists the two tool calls in the other order leaves the journal unchanged, since Claude Code declares siblings_unordered (gap 11)', async () => {
+      const run = use('claude', 'parallel-tools');
+      const ofTool = (key: string) => run.reread.filter(({ itemIdentity }) => itemIdentity?.key === key);
+      const first = run.reread.findIndex(({ itemIdentity }) => itemIdentity?.key === 'tool:par-1');
+      const others = run.reread.filter(({ itemIdentity }) => itemIdentity?.key !== 'tool:par-1' && itemIdentity?.key !== 'tool:par-2');
+      // The second call's rows, then the first's, where the first call began.
+      const permuted = [...others.slice(0, first), ...ofTool('tool:par-2'), ...ofTool('tool:par-1'), ...others.slice(first)];
+      expect(await continuityOutcome({ live: run.live, reread: permuted }, claudeBehaviour.reread.order)).toEqual(UNCHANGED);
+      expect(await continuityOutcome({ live: run.live, reread: permuted }, 'live')).toEqual(CHANGED);
     });
 
     it('parallel-edits: six Edits whose first result was written while the others streamed keep the live order when reread', async () => {

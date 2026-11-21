@@ -72,8 +72,12 @@ export const JournalPublishEntry = Type.Union([
   Type.Object({ sequence, op: Type.Literal('append'), row: JournalRowInput }, object),
   Type.Object({ sequence, op: Type.Literal('complete'), itemKey, digest }, object),
   Type.Object({ sequence, op: Type.Literal('alias'), itemKey, clientMessageId: identity }, object),
-  /** The Controller's newest window of native history, oldest first. The Relay compares it with the journal and leaves it, appends to it or replaces it. */
-  Type.Object({ sequence, op: Type.Literal('window'), items }, object),
+  /**
+   * The Controller's newest window of native history, oldest first. The Relay compares it with the journal and leaves it, appends to it or
+   * replaces it. `order` `siblings_unordered`: the provider's reread may list the siblings of one turn in another order than it showed them
+   * live (its declared `reread.order`), so the Relay compares the siblings of each turn as a set; absent, the window is in the live order.
+   */
+  Type.Object({ sequence, op: Type.Literal('window'), items, order: Type.Optional(Type.Literal('siblings_unordered')) }, object),
   Type.Object({ sequence, op: Type.Literal('prepend'), items }, object),
   Type.Object({ sequence, op: Type.Literal('head'), head: JournalHead }, object),
   /** A resource binding of an item was replaced; the journal replaces it in place and tells subscribers. */

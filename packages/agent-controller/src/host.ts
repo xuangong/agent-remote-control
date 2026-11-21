@@ -31,7 +31,7 @@ import { createVscodeTunnelManager, type VscodeTunnelOptions } from './vscode-tu
 import { createOperationCache, OperationCacheError } from '@orchardworks/agent-session-runtime';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { AgentSession, AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
+import { resolveAgentProviderBehaviour, type AgentSession, type AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
 import { type HostEnvironment } from '@orchardworks/agent-remote-protocol';
 import { createSessionStatePublisher, liveSessionState } from './session-state-publisher.js';
 import { createSessionReplies } from './session-replies.js';
@@ -263,6 +263,10 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     providers: () => providers.all()
       .filter(({ adapter, directory }) => adapter.journal !== undefined && options.providerEnabled?.(directory.providerId) !== false)
       .map(({ adapter }) => adapter.descriptor.providerId),
+    rereadOrder: providerId => {
+      const registration = providers.all().find(({ adapter }) => adapter.descriptor.providerId === providerId);
+      return registration ? resolveAgentProviderBehaviour(registration.adapter.descriptor).reread.order : 'live';
+    },
     ...(options.onJournalDiagnostic ? { diagnostic: options.onJournalDiagnostic } : {}),
   });
   const relayAdapters = options.registrations.map(({ adapter }) => ({

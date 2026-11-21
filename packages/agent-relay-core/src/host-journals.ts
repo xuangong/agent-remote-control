@@ -367,7 +367,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
         // extension (after bodies are evicted for it), and what a replacement keeps plus the whole window for a replacement.
         size = undefined;
         const room = roomOf(hostId, sessionKey);
-        const growth = journal.extensionBytes(entry.items);
+        const growth = journal.extensionBytes(entry.items, entry.order);
         if (growth === 0) return;
         if (growth !== undefined) {
           if (journal.residentBytes() + growth > room) shrink(journal, room - growth);
@@ -407,7 +407,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       case 'complete': journal.complete(publication, entry.itemKey, entry.digest); break;
       case 'alias': journal.alias(publication, entry.itemKey, entry.clientMessageId); break;
       case 'window': {
-        const result = journal.sync(publication, entry.items, { roomBytes });
+        const result = journal.sync(publication, entry.items, { roomBytes, ...(entry.order ? { order: entry.order } : {}) });
         const bytes = utf8ByteLength(JSON.stringify(entry));
         published.window = result.outcome === 'replaced' ? { outcome: 'replaced', reason: result.reason, bytes } : { outcome: result.outcome, bytes };
         if (result.outcome === 'appended') for (const row of result.rows) published.events.push({ kind: 'row', row, itemSeqStart: journal.seqStartOf(row.itemKey) ?? row.seq });

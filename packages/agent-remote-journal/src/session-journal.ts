@@ -8,7 +8,7 @@ import { canonicalJson } from './item-digest.js';
 import { pageJournal, type JournalPageRequest, type JournalPageResult } from './journal-pages.js';
 import { evictable, retainedFrom } from './retention.js';
 import { replacementOrder } from './replacement.js';
-import { CONTENT_REPLACING_TYPES, decideWindow, type WindowTail } from './window-decision.js';
+import { CONTENT_REPLACING_TYPES, decideWindow, type WindowOrder, type WindowTail } from './window-decision.js';
 import { utf8ByteLength } from './utf8-size.js';
 import {
   JournalFencedError, JournalInvalidPublicationError, JournalSequenceGapError,
@@ -345,7 +345,7 @@ export class SessionJournal {
    * shared item are not a change, because older history is not uploaded until it is asked for. A journal that is missing
    * rows is always replaced. The caller has checked that the window and the live-only items fit the room.
    */
-  sync(publication: JournalPublication, window: readonly JournalItemInput[], options: { roomBytes: number }): SyncResult {
+  sync(publication: JournalPublication, window: readonly JournalItemInput[], options: { roomBytes: number; order?: WindowOrder }): SyncResult {
     if (this.duplicate(publication)) return { outcome: 'unchanged' };
     this.requireDistinct(window);
     const decision = decideWindow(this.windowTail(), window, options);
@@ -378,8 +378,8 @@ export class SessionJournal {
    * How many bytes `sync` would write for `window`: zero when the journal already holds it, and undefined when the window
    * replaces the journal instead. The Relay makes body room for this before it syncs.
    */
-  extensionBytes(window: readonly JournalItemInput[]): number | undefined {
-    const decision = decideWindow(this.windowTail(), window);
+  extensionBytes(window: readonly JournalItemInput[], order?: WindowOrder): number | undefined {
+    const decision = decideWindow(this.windowTail(), window, order ? { order } : {});
     return decision.outcome === 'unchanged' ? 0 : decision.outcome === 'extend' ? decision.bytes : undefined;
   }
 

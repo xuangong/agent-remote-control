@@ -12,19 +12,20 @@ import { windowOp } from './publisher/journal-reconcile.js';
  */
 const messageOnly = windowVectors.filter(({ held, window }) => [...held, ...window].every(({ kind }) => kind === undefined));
 const rowOf = (item: VectorItem, seq: number): CanonicalTimelineRow => ({
-  epoch: 'e', seq, providerId: 'codex', sourceKey: `source:${item.key}`, occurredAt: 1_725_000_000_000, timestamp: '2024-08-30T06:40:00.000Z', turnId: 'turn-1',
+  epoch: 'e', seq, providerId: 'codex', sourceKey: `source:${item.key}`, occurredAt: 1_725_000_000_000, timestamp: '2024-08-30T06:40:00.000Z', turnId: item.turn ?? 'turn-1',
   item: { type: 'assistant_message', text: vectorText(item), messageId: item.key }, resources: [],
   identity: { key: item.key, ...(item.state === 'open' ? {} : { completes: true }), ...(item.live ? { liveOnly: true } : {}) },
 });
 
 describe('the window the publisher builds, over the window vectors', () => {
   it.each(messageOnly.map(vector => [vector.name, vector] as const))('%s', async (_name, vector) => {
-    const { op: sized } = await windowOp(groupItems(vector.window.map((item, at) => rowOf(item, at + 1))));
+    const { op: sized } = await windowOp(groupItems(vector.window.map((item, at) => rowOf(item, at + 1))), vector.order);
     const op = sized.op;
     if (op.op !== 'window') throw new Error('expected a window entry');
     const digests = new Map(await Promise.all([...vector.held, ...vector.window].map(async item => [`${item.key}:${vectorText(item)}`, await itemDigest({ type: 'assistant_message', text: vectorText(item), messageId: item.key })] as const)));
     const tail = heldTail(vector, item => digests.get(`${item.key}:${vectorText(item)}`)!);
-    const decision = decideWindow(tail, op.items, vector.room === undefined ? undefined : { roomBytes: vector.room.roomBytes });
+    // The window says how its siblings are ordered, and the decision reads it from there, as the Relay does.
+    const decision = decideWindow(tail, op.items, { ...(vector.room ? { roomBytes: vector.room.roomBytes } : {}), ...(op.order ? { order: op.order } : {}) });
     expect(describeDecision(decision, op.items)).toEqual(vector.expect);
   });
 });

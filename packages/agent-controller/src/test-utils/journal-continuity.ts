@@ -1,5 +1,5 @@
 import type { ProviderObservation } from '@orchardworks/agent-provider-sdk';
-import { SessionJournal, type JournalItemInput, type ReplacementReason, type SyncResult } from '@orchardworks/agent-remote-journal';
+import { SessionJournal, type JournalItemInput, type ReplacementReason, type SyncResult, type WindowOrder } from '@orchardworks/agent-remote-journal';
 
 import { digestOf, groupItems, mergedRow, type TimelineItem } from '../publisher/journal-items.js';
 import { attachScripted, boundary, item, ScriptedSession, untilReal as until } from './journal-scripted-session.js';
@@ -58,15 +58,16 @@ const outcomeOf = (result: SyncResult): ContinuityOutcome => result.outcome === 
 /**
  * A Relay journal built from what a live run produced, which meets the windows a Controller would send when the session is
  * opened again and read again. Items the reread leaves open (a tool with no completion) are allowed: they are sent without a digest.
+ * `order` is the provider's declared reread order, which each window carries.
  */
-export async function journalOfRun(live: readonly ProviderObservation[]) {
+export async function journalOfRun(live: readonly ProviderObservation[], order: WindowOrder = 'live') {
   const journal = SessionJournal.create('host-1:continuity', 'epoch-1', sequentialEpochs());
   const { generation } = journal.claim('controller-1');
   const roomBytes = Number.MAX_SAFE_INTEGER;
   let sequence = 0;
   const meet = async (items: readonly TimelineItem[]): Promise<ContinuityOutcome> => {
     sequence += 1;
-    return outcomeOf(journal.sync({ publisherId: 'controller-1', generation, sequence }, await windowOf(items), { roomBytes }));
+    return outcomeOf(journal.sync({ publisherId: 'controller-1', generation, sequence }, await windowOf(items), { roomBytes, order }));
   };
   await meet(await itemsOf(live));
   return {
@@ -87,6 +88,6 @@ export async function journalOfRun(live: readonly ProviderObservation[]) {
 }
 
 /** What the Relay's journal does with the reread of a session: a journal built from the live run meets the window the Controller would send. */
-export async function continuityOutcome(run: ContinuityRun): Promise<ContinuityOutcome> {
-  return (await journalOfRun(run.live)).reread(run.reread);
+export async function continuityOutcome(run: ContinuityRun, order: WindowOrder = 'live'): Promise<ContinuityOutcome> {
+  return (await journalOfRun(run.live, order)).reread(run.reread);
 }

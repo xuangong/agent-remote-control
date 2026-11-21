@@ -6,9 +6,13 @@ import { digestOf, entryBytes, mergedRow, newestItems, type PublishOp, type Size
  * The newest items that fit one message, as one `window` entry the Relay compares with its journal. Items the wire refuses
  * are left out and named in `refused`. `count` is the number of items the window holds.
  */
-export async function windowOp(timeline: readonly TimelineItem[]): Promise<{ op: SizedOp; count: number; refused: string[] }> {
+/**
+ * The window entry of the newest items. `order` is the provider's declared reread order: a provider whose reread may permute the siblings of
+ * a turn says so on the window, and the Relay compares each turn's siblings as a set (gap 11).
+ */
+export async function windowOp(timeline: readonly TimelineItem[], order: 'live' | 'siblings_unordered' = 'live'): Promise<{ op: SizedOp; count: number; refused: string[] }> {
   const { block, refused } = await newestItems(timeline, digestOf);
-  const op: PublishOp = { op: 'window', items: block };
+  const op: PublishOp = { op: 'window', items: block, ...(order === 'siblings_unordered' ? { order } : {}) };
   return { op: { op, bytes: entryBytes(op) ?? 0 }, count: block.length, refused };
 }
 

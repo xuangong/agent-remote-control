@@ -1,31 +1,29 @@
 import { expect, test } from '@playwright/test';
 
-// Bot mode over the real Workbench on builder data: the editor of Window mode is the editor of Bot mode, focus follows a keyboard open, Tab
-// stays in the mode on screen.
+// Bot mode over the real Workbench on builder data: the editor of Window mode is the editor of Bot mode, a bot opened with the keyboard
+// takes focus to its title, Tab stays in the mode on screen, and on a phone Back returns focus to the bot's row.
 const url = '/e2e/fixtures/window-tiles.html?tiles=2&bots=1';
-for (const [width, height] of [[1440, 900]] as const) test(`keyboard focus and Tab order stay in Bot mode at ${width}x${height}`, async ({ page }) => {
+for (const [width, height] of [[1440, 900], [390, 844]] as const) test(`a bot opened with the keyboard takes focus to its title, and Tab stays in Bot mode at ${width}x${height}`, async ({ page }) => {
   await page.setViewportSize({ width, height });
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.goto(url);
   const phone = width < 600;
+  // A phone's home is the list of chats; a wide screen comes from Window mode with a draft, through the rail.
+  await page.goto(phone ? `${url}&mode=bot` : url);
   const window = page.locator('[data-workbench-mode="window"]'), bot = page.locator('[data-workbench-mode="bot"]');
-  const wide = !phone;
-  const drawer = page.locator('#lab-context').getByRole('button', { name: 'Close', exact: false }).first();
-  if (phone && await drawer.isVisible()) await drawer.click();
-  if (wide) {
+  if (!phone) {
     const editor = window.getByRole('textbox', { name: 'Message', exact: true }).first();
     await editor.click(); await page.keyboard.type('Keep this draft across modes');
-    await editor.evaluate(node => { (node as HTMLElement).dataset.retained = 'yes'; });
+    await page.locator('.lab-rail').getByRole('button', { name: 'Chats', exact: true }).click();
   }
-  const destination = phone ? page.locator('.lab-tab-bar') : page.locator('.lab-rail');
-  await destination.getByRole('button', { name: 'Chats', exact: true }).click();
   await expect(bot).toBeVisible();
   await expect(window).toBeHidden();
-  // Beside the list, opening a bot by keyboard leaves focus on its row.
-  const rows = bot.locator('[data-bot-place]');
-  const row = rows.nth(wide ? 1 : 0);
+  // Opening a bot by keyboard moves focus to its title (O56), at once or once its conversation is described.
+  const row = bot.locator('[data-bot-place]').nth(phone ? 0 : 1);
+  const name = await row.getAttribute('aria-label');
   await row.focus(); await row.press('Enter');
-  await expect(row).toBeFocused();
+  const title = bot.locator('button.lab-assistant-title');
+  await expect(title).toBeFocused();
+  await expect(title).toHaveAccessibleName(name!);
   const shown = bot.getByRole('textbox', { name: 'Message', exact: true }).locator('visible=true');
   await expect(shown).toHaveCount(1);
   for (let step = 0; step < 12; step++) {

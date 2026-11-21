@@ -102,13 +102,16 @@ export function BotWorkspace({ visible, covered = false, compact, scope, workspa
   // Choosing another bot dismisses a notice about the last one.
   useEffect(() => { if (place?.kind === 'bot') actions.clearNotice(); }, [key]);
   useEffect(() => { setError(undefined); }, [scope]);
+  // A bot opened with the keyboard takes focus to its title. The title is a button only once the conversation is described, so the
+  // intent waits for it instead of being spent on a title that cannot take focus yet.
+  const titleFocusable = !!descriptor;
   useEffect(() => {
     if (!visible) return;
     if (returning.current && navigation.rosterVisible) {
       returning.current = false;
       [...root.current?.querySelectorAll<HTMLButtonElement>('[data-bot-place]') ?? []].find(row => row.dataset.botPlace === key)?.focus({ preventScroll: true });
-    } else if (keyboardOpen.current && showConversation) { keyboardOpen.current = false; title.current?.focus({ preventScroll: true }); }
-  }, [visible, key, showConversation, navigation.rosterVisible]);
+    } else if (keyboardOpen.current && showConversation && title.current) { keyboardOpen.current = false; title.current.focus({ preventScroll: true }); }
+  }, [visible, key, showConversation, navigation.rosterVisible, titleFocusable]);
   // A phone moves between the list and a chat like a navigation stack: the chat pushes in, Back pops to the list at the
   // place it left. Hiding the list drops its scroll position, so it is kept here.
   const [motion, setMotion] = useState<'push' | 'pop'>();

@@ -1006,3 +1006,236 @@ The source files over 1,000 lines are the same five as in 11.5; none is new.
 Each Orchard step ran the unit, component and e2e tiers, but not the smoke tier. A layout change broke the smoke harness unnoticed, and a latency-only defect reached production.
 
 The smoke selectors are now checked in the per-step gate. `smoke:quick` runs before each release that changes the client or the Relay, as section 5.7 intended.
+
+## 13. Comparison at HEAD after the Orchard steps
+
+Measured 2026-11-21 on the machine of section 11 (10 cores, 16 GB, Node 22.23.2) at HEAD `0d08ab25` of `design/im-session-service`, with the method of section 11: the same commands in sequence, nothing else running (the worktree's idle `pnpm local` instance was left as it was). The baseline and HEAD 2026-11-19 columns are copied from section 11; neither was run again.
+
+Before timing anything, the method was reproduced at the 2026-11-19 commit (`24c9ca76`, in a temporary worktree, removed afterwards) by static listing (`vitest list --json`). The eight per-change selections give the recorded 230, 215, 368, 13, 244, 281, 95 and 704 tests. The Vitest tier counts and the component listing give the recorded numbers of 11.3; the e2e spec listings need a build there and were not repeated. That settles three details section 11 does not spell out:
+
+- the window row's client consumer is `agent-client/src/replica/window-absorption.test.ts`, and its journal side includes `journal-window.test.ts`;
+- 11.3 classifies by file suffix only, and its Unit row leaves out the smoke harness's own unit tests, which the Smoke row counts;
+- 11.4's Controller and Copilot rows include their `process` Vitest projects, whose files carry no suffix (13.4).
+
+### 13.1 Per-change test scope
+
+Each HEAD selection is `pnpm test:unit` of the module's test files plus the seam suites section 5.9 names for it, run three times in turn, median shown. Baseline: what `verify:changed` selected (tests only). The three new rows are the modules section 12 lists. Their baseline is the selection that a change at the rule's home in the baseline tree makes, and both homes have a selection recorded in 11.1. No baseline run was needed.
+
+| Change | Baseline | HEAD 2026-11-19 | HEAD now: module, selection | Tests | Wall | Against the baseline |
+|---|---|---|---|---:|---:|---|
+| Journal window rule | 6,009 tests, 431 s | 230, 8.0 s | `window-decision` and `journal-window`, the Controller's vector contract, the client's `window-absorption`; S2, S4 | 230 | 7.7 s | 26 times fewer tests, 56 times faster |
+| Session-control rule | 6,009, 431 s | 215, 12.4 s | `domain/session-control` (with its new orderings table), `stream-control`, `lease-view`; S3 | 218 | 12.6 s | 28x, 34x |
+| Succession rule | 2,994, 108 s | 368, 13.5 s | `agent-client/src/succession`, the two `useSessionSuccession` hook test files; S3, S6 | 446 | 14.1 s | 7x, 8x |
+| Workbench state rule | 2,994, 108 s | 13, 3.1 s | `state/draft-ownership`; S6 | 91 | 3.3 s | 33x, 33x |
+| Controller session-core rule | 4,789, 209 s | 244, 6.2 s | `session-core/`; S1, S2 | 245 | 6.1 s | 20x, 34x |
+| Relay host-session rule | 6,009, 431 s | 281, 11.9 s | `host-session`, `broker-heartbeat`; S2, S3, S4 | 291 | 12.0 s | 21x, 36x |
+| Renderer component | 3,950, 145 s | 95, 4.8 s | client-web `AgentTimeline*`; S6 | 187 | 5.3 s | 21x, 27x |
+| Protocol schema | 8,143, 468 s | 704, 14.4 s | protocol, fixtures, S2, S3, `fixtures:check` | 712 | 14.4 s | 11x, 33x |
+| Session presentation rule (new) | 3,950, 145 s: web `AgentActivityStatus` and `AgentComposer`, with copies in the Workbench (web, Workbench, debugger) | no module | `client/session-presentation`; S3, S6 | 289 | 11.8 s | 14x, 12x |
+| Turns, process mode and assistant name (new) | 3,950, 145 s: no such rules; the timeline renderer of web and the Workbench's bots (web, Workbench, debugger) | no module | `presentation/turns`, `process-mode`, `assistant-name`; S3, S6 | 353 | 11.8 s | 11x, 12x |
+| Lab navigation and Settings rules (new) | 2,994, 108 s: the Workbench (Workbench, debugger) | no module | `destinations`, `settings/settings-groups`; S6 | 121 | 3.6 s | 25x, 30x |
+
+- **Noise.** Every row stays within 0.15 s of its median, except one protocol pass at 0.66 s.
+- **Against the target of 5.10** (2 to 10 s, worst 40 s): no change takes over 15 s, and five of eleven take under 10 s. The six over 10 s are the six that include S3:
+  - the S3 suite takes 10.5 s in each, as on 2026-11-19;
+  - 8.6 s of it is one file, `session-channel-client.integration.test.ts`. Its suspension tests wait out real timers (a 450 ms sleep and 200 to 300 ms deadlines), 600 to 920 ms per test.
+  - Section 11.1 named this file the next to make faster; it has not changed.
+- **Growth.** The succession, Workbench state and renderer rows grew by S6's new `recorded-turns` suite (78 tests: the turn fold over every recorded provider timeline, I3a), for 0.2 to 0.6 s. The other growth:
+  - session control: the orderings table (+3);
+  - host session: 10 relay-core tests;
+  - renderer: 14 `AgentTimeline` tests (turns);
+  - session core: one S1 recording; protocol: 8 protocol tests.
+- **The new modules alone**, section 12's measure: session presentation 35 tests in 1.3 s, the presentation rules 99 in 1.2 s, navigation and Settings 35 in 1.6 s. Section 5.9 adds S3 and S6 for the client's rule tables, and S6 for the Workbench, so S3 sets the wall of the first two.
+
+### 13.2 Total test time
+
+| Run | Baseline | HEAD 2026-11-19 | HEAD now |
+|---|---|---|---|
+| `pnpm test` (every package's suite, serially; the Cloudflare package included) | 516.6 s, 9,610 tests, 9 failed | 315.4 s, 11,362 tests, 0 failed | not run without enforcement; see the next row |
+| `pnpm test` with slow-test enforcement (gate) | n/a | 339.1 s, 11,362 tests (22 skipped), 0 failed; the reporter counted 336 over 300 ms and 16 over 1 s (11 allowlisted, 5 passed their re-measurement alone) | 348.5 s, 12,396 tests (22 skipped), 0 failed; the reporter counted 305 over 300 ms and 16 over 1 s (11 allowlisted, 5 passed their re-measurement alone) |
+| Workbench package | 86.3 s, 2,853 tests (9 failed) | 67.6 s, 3,281 tests | 67.0 s with enforcement off, 3,417 tests (6 skipped); 113.3 s with it, about 38 s of which the reporter spent re-measuring three files alone |
+| Controller package | 75.1 s, 1,795 | 58.6 s, 1,980 | 59.5 s, 2,032 (10 skipped) |
+| Cloudflare (`test:cloudflare`) | 215.7 s, 239 | 48.3 s, 155 (31 in `workerd`) | 48.7 s, 155 (31 in `workerd`) |
+| `test:preview-browser` | 137.2 s, 73 (1 failed) | 141.8 s, 73, 1 failed (the same WebKit `session-recovery` test as at the baseline; it fails alone too) | 147.2 s, 73, 1 failed: the same WebKit `session-recovery` test ('due to access control checks'); alone it failed 1 of 2 runs |
+| `test:conformance` | 3.1 s, 31 | 6.4 s, 31 | 6.4 s, 31 |
+| E2E flows (`test:e2e:flows`) | none | 73.9 s, 31, 1 failed (E3 replacement; see O40) | 113.6 s, 43, 0 failed |
+| Playwright e2e (`test:e2e`; at the baseline the Workbench's 93 files) | stopped at its 480 s global deadline after 266 of 1,330 runs: 187 passed, 24 failed, 55 skipped, 1,064 did not run | 540.3 s (9.0 min), 283 passed, 67 skipped, 0 failed | stopped at 10 minutes: 91 of 350 runs reached, 23 passed, 37 skipped, 31 failed (30 of them failed their retry too) |
+| Workbench e2e (`test:e2e:lab`) | (part of the row above) | 527.4 s (8.8 min), 250 passed, 20 skipped, 0 failed | stopped at 10 minutes: 27 of 278 runs reached, 11 passed, 16 failed (15 of them failed their retry too) |
+| Component tier (`test:components`) | none | 483.2 s (8.0 min), 459 passed, 70 skipped, 1 failed (`session-view-responsive` in the loaded run; 3 of 3 reruns pass) | 728.8 s (12.1 min), 925 passed, 150 skipped, 0 failed |
+| `smoke:quick` | none (no harness) | 359.4 s, seed 9201: M1, M2, M4 and M7 passed | not run: a heavy job, outside this measurement; section 12 records seed 68421 at `315a88cf`, 4 of 4 |
+| The runs above, summed | not completable (the e2e deadline) | 2,556 s (42.6 min) with 3 single failures, each triaged in 11.8 | 2,593 s (43.2 min): `pnpm test`, Cloudflare, conformance, preview, flows, components and the two e2e tiers to their stop; no smoke (the 2,556 s of 2026-11-19 include `smoke:quick`) |
+
+- **`test:e2e` and `test:e2e:lab` were stopped at 10 minutes each**, the limit set for this measurement. On 2026-11-19 they passed in 9.0 and 8.8 minutes.
+  - Both now fail early and often. Each failure waits out its 5 to 30 s timeouts and a retry, so neither gets far.
+  - Failing files in `test:e2e`: `mobile-keyboard-controls` (10), `ask-session` (7), `modernization` (4), `ask-dock` (3), `cross-host` (3), `pending-send` (2), `ask-composer` (1), `claude-discovery` (1).
+  - Failing files in `test:e2e:lab`: `bot-mode` (15), `ask-persistence` (1).
+  - The failures read (the error contexts of both tiers) wait for the page as it was before the Orchard steps: the connection words that I1 removed ('Timeline synchronization is reconnecting.'), timeline row counts (`.agent-timeline-entry`), Bot mode's 'Chats' navigation with a 'New session' button, and a `.lab-shell` that never shows. Not every failure was checked for a product defect.
+  - The Orchard steps' gates (section 12) ran the flows, components and preview tiers and `pnpm verify`, not these two.
+- **A stopped `test:e2e` leaves its servers running.** Stopping the tier through `scripts/run-tests.mjs` (SIGTERM, which it forwards to Playwright's process group) left the Relay (`tsx src/recorded.ts`, port 5910) and Vite (port 6175) running. The next tier, `test:e2e:lab`, then failed at start on the taken port (the 0.9 s run). The servers were stopped and the tier run again.
+- **The Workbench package** takes the same time as on 2026-11-19 (67.0 s against 67.6 s) with 136 more tests. With enforcement on, the reporter re-measures the files of the near-1 s whole-app tests, which adds about 38 s.
+- **The preview tier's failure** is the WebKit `session-recovery` test, open since the baseline (11.8).
+- **A single failure outside the table.** The Controller's suite ran a third time, with Vitest's JSON reporter (13.4). In that run, `journal-publisher` 'doubles the backoff when failures follow each other closely' failed once: it recorded one refusal instead of two. It passed in the other two Controller runs and 15 of 15 times alone. Its driver advances a virtual clock 5 ms after three `setImmediate` turns, so a reaction that needs more turns under load would miss its step.
+- **Flows** take 113.6 s for 43 (73.9 s for 31); E9 to E11 add 12 flows, and E9 waits out a 2 s Relay delay on purpose.
+- **Components** take 728.8 s for 1,075 runs (483.2 s for 530). The 150 skipped runs (70) are specs that skip a project they do not apply to, 29 of them in the two new phone projects.
+
+### 13.3 Test counts per tier
+
+Static counts, by file suffix as in 11.3: `vitest list --json` in every package and configuration, then `playwright test --list`.
+
+| Tier | Baseline | HEAD 2026-11-19 | HEAD now |
+|---|---:|---:|---:|
+| Unit (Vitest, mock data) | 9,289 | 10,624 | 11,547 |
+| Contract and seams (`*.contract`, `*.integration`, seams package) | 9 | 425 | 504 |
+| Transport (real socket) | 51 | 31 | 31 |
+| Process | 0 (in unit) | 33 | 33 |
+| Workers (`workerd`) | 239 (the whole Cloudflare package) | 31 workers and 124 Cloudflare tests in Node | 31 workers and 124 Cloudflare tests in Node |
+| Component (jsdom preview tier) | 73 | 73 | 73 |
+| Component (Playwright, distinct tests) | 0 | 187 (530 runs over 8 projects, 44 files) | 321 (1,075 runs over 10 projects, 54 files) |
+| E2E flows | 0 | 31 | 43 |
+| E2E specs (Playwright, distinct) | 498 (1,330 runs, 93 files) | 273: `agent-e2e/specs` 183 (350 runs, 38 files), Workbench 90 (270 runs, 14 files) | 277: `agent-e2e/specs` 183 (350 runs, 38 files), Workbench 94 (278 runs, 14 files) |
+| Smoke scenarios | 0 | 7 (M1, M2, M3, M4, M5, M7, M8; M6 deferred), 4 in `smoke:quick`; 72 harness unit tests | 8 (M1 to M8), 4 in `smoke:quick`; 104 harness unit tests |
+| Local/native | 134 | 114 | 115 |
+
+- **Unit, +923.** The Orchard steps' rules and views make most of it:
+  - `agent-client` +287: the presentation rules (assistant status, turns, process mode, work summary, session presentation, the catalogue);
+  - `agent-client-web` +314: the theme (tokens, motion and avatars, 140), the composer and its menu, the activity line, turns;
+  - the Workbench +136: destinations, modes, the assistant details and directory, Settings;
+  - relay-core +98: the I4 access pages (47), the O41 security pins (about 43), the lease orderings (3);
+  - the Controller +52: recording continuity (38), transcript divergence at its bounds (9), provider faults (5);
+  - the e2e package's fault and stack tests +26, protocol +8, Claude +2.
+- **Suffix only, as in 11.3.** The Controller's and the Copilot provider's `process` Vitest projects hold 169 tests in files without the `.process` suffix (141 and 28, the same as on 2026-11-19). 11.3 counts them as unit; the Process row holds only the 33 suffixed tests.
+- **Contract and seams, +79.** All of it is in the seams package (327 to 406): S6 +78, S1 +1. The 98 contract and integration tests in other packages are unchanged.
+- **Components.** The Orchard steps added the two `orchard-phone` projects and twelve spec files, and removed two (net +10). The new files cover the assistant views, navigation, Settings, the composer capsule, the Chinese screens, the installed app, the launcher layout and the smoke probe.
+- **Flows.** E9 to E11 add 12 flows.
+- **Smoke and native.** Most of the 32 new harness tests come from M6, which now runs (race invariants, terminal rounds), and from the probe and restart-round fixes (O43, O51, O52). The one new native test is the Claude `parallel-edits` recording.
+
+### 13.4 Slow tests
+
+Measured as in 11.4: each package's Vitest with all its workers, mock-data tiers only, with tiers by file suffix. The counts come from the slow-test reporter's per-package JSON (`ARC_SLOW_TEST_DIR`) in the `pnpm test` run of 13.2.
+
+The 11.4 counting kept the Controller's and the Copilot provider's `process` Vitest projects, whose files carry no suffix. Today's Copilot count, 2 unit tests plus the 28 of its process project, reproduces its 30 and 8 of 2026-11-19 exactly. The reporter's JSON leaves those projects out, so the Controller's suite ran once more with Vitest's JSON reporter for its row. That run counted 56 mock-data tests over 300 ms (62 in `pnpm test`) and 95 in the process project.
+
+| Package (baseline name to HEAD name) | Over 300 ms: baseline, 2026-11-19, now | Over 1 s: baseline, 2026-11-19, now |
+|---|---|---|
+| Controller | 225, 165, 151 (56 mock data, 95 process project) | 50, 25, 25 (0 and 25) |
+| Workbench | 171, 152, 173 | 37, 8, 9 |
+| Cloudflare | 150, 3, 3 | 31, 3, 3 |
+| Copilot provider | 30, 30, 30 (2 and 28) | 7, 8, 8 (0 and 8) |
+| hosted to relay-core | 27, 7, 6 | 4, 0, 0 |
+| web to client and client-web | 20, 2, 1 | 8, 0, 0 |
+| relay to session-runtime | 16, 4, 4 | 3, 0, 0 |
+| debugger | 11, 2, 1 | 4, 0, 0 |
+| journal | 2, 2, 2 | 2, 2, 2 |
+| others | 14, 48 (Node Relay 29, seams 12), 51 (Node Relay 31, seams 12, OpenCode 3, Codex 2; Claude, tunnel and Codex daemon client 1 each) | 6, 2, 2 (Node Relay) |
+| **All** | **666, 415, 422** (7.0, 3.7 and 3.4 percent) | **152, 48, 49** |
+
+**Without the process projects**, as section 5.1 defines the process tier and as the speed rule judges, the counts are lower:
+
+- the reporter counted 305 tests over 300 ms of 12,110 (2.5 percent) and 16 over 1 s;
+- the 2026-11-19 gate counted 336 and 16.
+
+The 123 process-project tests over 300 ms and 33 over 1 s spawn real CLIs, daemons and tunnels. They belong to the process tier, which AGENTS.md exempts from the speed rule.
+
+**Every mock-data test over 1 s** in the gate run. The allowlist (`scripts/slow-test-allowlist.json`, 11 entries) gives three reasons:
+
+- (a) "Mounts the whole Workbench App to check composition: how its hooks, layout and the recorded Relay wire together. The state rules it touches have unit tables in packages/agent-remote-lab/src/state; the mount itself costs the time, and goes only when App.tsx's hook wiring is split (open item O15)."
+- (b) "Encodes and stores a Relay of 1,000s of records to prove commit cost; CPU bound by the size under test."
+- (c) "Builds a journal of 200,000 items to prove contiguity and paging at scale; CPU bound by the size under test."
+
+"Alone" is the reporter's own re-measurement (`remeasureAlone`: the file alone, one worker), run after the timed runs.
+
+| Gate run | Test | Disposition |
+|---:|---|---|
+| 4,269 ms | Workbench `App.succession.ask-and-reconnect` > edits a real App managed Team window into its retained origin owner and admits input only to the successor | allowlisted (a) |
+| 3,873 ms | Cloudflare `storage-incremental` > every commit of L stores exactly its complete encoding, and the caches agree with complete accounting | allowlisted (b) |
+| 1,974 ms | journal `session-journal` > prepends 200,000 items and keeps the sequence contiguous | allowlisted (c) |
+| 1,670 ms | Cloudflare `storage-incremental` > a commit costs what it changes, not the size of the Relay | allowlisted (b) |
+| 1,624 ms | Workbench `App.render-budget` > switching bots renders the conversations that change and leaves the others alone | allowlisted (a) |
+| 1,581 ms | Workbench `App.render-budget` > in Window mode a change in one pane renders the visible panes at most once and no hidden conversation | allowlisted (a) |
+| 1,489 ms | Workbench `App.render-budget` > a change of a bot elsewhere renders its roster row, not App and not a conversation | allowlisted (a) |
+| 1,330 ms | journal `journal-pages` > pages over a very large selection | allowlisted (c) |
+| 1,298 ms | Workbench `App.succession.owners-and-attachment` > restores the selected Window owner while a new D Window keeps independent owners | allowlisted (a) |
+| 1,292 ms | Workbench `App.succession.opening-and-refresh` > shows A-B-C handoff history once in reverse order while ordinary A navigation still resolves current C | under 1 s alone: 844 ms |
+| 1,276 ms | Workbench `App.attach-budget` > asks for a missing session once across mode switches, state frames, bot switches, page resumes and an access pause | allowlisted (a) |
+| 1,249 ms | Node Relay `hosted-runtime` > refuses a near-ceiling handoff before the native effect while keeping the Relay readable | under 1 s alone: 868 ms |
+| 1,204 ms | Cloudflare `storage-incremental` > every commit of M stores exactly its complete encoding, and the caches agree with complete accounting | allowlisted (b) |
+| 1,202 ms | Workbench `App.succession.owners-and-attachment` > restores the selected Window owner while a new B Window keeps independent owners | under 1 s alone: 769 ms |
+| 1,050 ms | Workbench `App.succession.ask-and-reconnect` > keeps one global Ask launcher and retains the original Ask draft when another primary root is selected | under 1 s alone: 744 ms |
+| 1,034 ms | Node Relay `devbox` > keeps permission changes available on the same Devbox WebSocket after eleven minutes of renewal | under 1 s alone: 626 ms |
+
+No mock-data test over 1 s is without a disposition. Two related observations:
+
+- In the separate Workbench run, a sixth test crossed 1 s: `App.succession.ask-and-reconnect` > restores an open Ask with its original source after rebinding main and opening a fresh page (1,034 ms; 711 ms alone).
+- Reason (a) still names O15 as open. O15 closed in M13b, when `App.tsx` was split, and the six whole-app mounts it covers are still over 1 s.
+
+**The 305 mock-data tests over 300 ms by cause**, without the process projects. Each was assigned from its file and name, and the per-package counts add up to the reporter's.
+
+| Cause | Over 300 ms | Over 1 s | Where |
+|---|---:|---:|---|
+| jsdom whole-app mount: the Workbench `App` over the recorded Relay | 169 | 9 | 28 `App.*` files; the five `App.succession.*` files and `App.bot-succession` hold 111 |
+| Real sockets in unit-tier files: a Relay host, the Devbox, or a runtime or provider stub server on a loopback port or a Unix socket | 46 | 1 | Node Relay 20 (`gateway-host-bootstrap`, `preview-tunnel`, `devbox`, `hosted-runtime` restarts), Controller 16 (`native-prefix-*`, Team delivery), session runtime 3, OpenCode 3, Codex 2, tunnel 1, Codex daemon client 1 |
+| Real child processes in unit-tier files: a stub CLI, `git`, a Controller or Node child | 38 | 0 | Controller 29 (the Claude and Codex version probes, `controller-shutdown`, `controller-launcher`, Call For Support's `git`), Node Relay 9 (the gateway entrypoint, the Codex version probe, `gateway-state`, the DSH pack, the VS Code tunnel) |
+| A Controller or the Relay composed whole in process (`createAgentHostRuntime`, a broker, the journal loopback) | 21 | 0 | Controller 16 (`host`, the journal window and terminal refresh over recordings, the native prefix readers, TPM), seams 5 (S2 `tpm-restore`, the S3 image runtime) |
+| Size under test, CPU bound | 15 | 6 | Cloudflare `storage-incremental` 3, journal 200,000 items 2, relay-core succession and Team capacity 6, Node Relay 5 MiB state 2, Controller 8 MiB witness 1, Claude long transcript 1 |
+| Real timer waits | 11 | 0 | S3 `session-channel-client` 7, Copilot usage refresh 2, the debugger's write deadline 1, the uplink watchdog 1 |
+| jsdom component render, not the App | 3 | 0 | `WindowWorkspaces`, `AssistantDetails`, client-web `MarkdownContent` |
+| Long simulated periods under fake timers | 2 | 0 | `GatewayController.background`, `layout-diagnostics` |
+| `workerd`; vector tables | 0 | 0 | The Worker tests are their own tier. The largest vector table (window decision, 99 rows) runs in milliseconds |
+| **All** | **305** | **16** | |
+
+### 13.5 Module sizes and architecture
+
+| Measure | Baseline | HEAD 2026-11-19 | HEAD now |
+|---|---:|---:|---:|
+| `broker.ts` | 2,737 | 423 | 423 |
+| `host.ts` | 1,807 | 551 | 551 |
+| `App.tsx` | 3,765 | 90 | 93 |
+| `replica/reducer.ts` | 725 | 5 (a re-export of four modules) | 5 |
+| `gateway.ts` | 1,222 | 1,228 | 1,228 |
+| `useSessionSuccession.ts` | 1,152 | 1,072 | 1,075 |
+| Source files over 800 lines (tests, fixtures and `dist` excluded) | 13 | 10 | 10 |
+| Source files over 1,000 lines | 9 | 6 | 6 |
+| Upward (`layer`) imports | 86 | 2 | 2 |
+| Cross-package relative imports | 225 | 10 | 10 |
+| `dist` imports | 36 | 8 | 8 |
+| Adapter imports adapter | 13 | 0 | 0 |
+| Controller knows Relay (rule added in M2) | not checked | 2 | 2 |
+| Documented exceptions; failing findings | none (report only); 360 | 22; 0 (blocking) | 22; 0 (blocking) |
+| Inline wire messages in tests | 3,877 in 415 files | 3,687 in 435 files | 3,739 in 441 files |
+
+- **The size count.** It reproduces 11.5 at both earlier trees (13 and 9 at the baseline tag, 10 and 6 at `24c9ca76`). It counts `.ts`, `.tsx`, `.mjs` and `.js` files under `packages/` and `scripts/`, without tests, `test`, `e2e`, `test-utils` and `fixtures` directories, declaration files and `dist`.
+- **Files over 1,000 lines.** The same six as in 11.5, not five as section 12 says:
+  - Codex `session.ts` (1,874), `gateway.ts` (1,228), `agent-manager.ts` (1,124);
+  - `useSessionSuccession.ts` (1,075), `remote-session-client.ts` (1,062);
+  - the performance baseline script `local-baselines.mjs` (1,014).
+- **Files from 800 to 1,000 lines.** The same four as on 2026-11-19: DSH `runtime.ts` (841), `tpm.ts` (840), `session-wire.ts` (819) and `session-succession-store.ts` (810).
+- **The Orchard steps added no file over 800 lines.** The CSS is not counted.
+- **`arch:check`.** It scans 2,669 files, none outside a module, and fails on nothing. The exceptions are the 22 of 2026-11-19, unchanged.
+
+### 13.6 Against section 7
+
+Met:
+
+- **Per-change scope, worst case.** No measured change takes over 15 s (target: none over 40 s), and a rule change never selects another layer's package. The three new modules select their own package and the seams.
+- **Module sizes.** The roots are under 900 lines (`broker.ts` 423, `host.ts` 551), and `App.tsx` is 93, under 800.
+- **Layer rules.** `arch:check` is blocking and fails on nothing.
+- **E2E time.** The 43 flows run in 1.9 minutes, against 4.
+
+Short, with the reason for each:
+
+- **Per-change under 10 s.** Six of eleven changes take 11.8 to 14.4 s. Each of them runs S3, which takes 10.5 s. 8.6 s of that is `session-channel-client.integration.test.ts`, whose suspension tests wait out real timers. Section 11 named the file; it is unchanged.
+- **Slow tests.** The target is under 1 percent over 300 ms and none over 1 s.
+  - Counted as 11.4 counted, 422 tests are over 300 ms (3.4 percent; 415 on 2026-11-19) and 49 over 1 s (48).
+  - The speed rule's own count, without the process projects, is 305 over 300 ms (2.5 percent) and 16 over 1 s: 11 allowlisted, and 5 that run under 1 s alone.
+  - 169 of the 305 are whole-app mounts of the Workbench, the composition tests that O10 and O18 kept. The Workbench's count rose from 152 to 173.
+  - 84 are real sockets and real processes in unit-tier files, 74 of them in the Controller and the Node Relay. Section 5.1 puts them in the transport and process tiers.
+- **Unit count.** 11,547 against about 7,000, and growing: the Orchard steps added 923, mostly the tables and view tests of their new rules (13.3).
+- **Mock data.** 3,739 inline wire messages in 441 files, not zero: 52 more than on 2026-11-19, 37 of them in the new tests of `agent-client` and `agent-client-web`.
+- **Source files.** 10 are over 800 lines and 6 over 1,000, the same files as on 2026-11-19 (target: none over 800 except tables).
+- **Layer violations.** 22 documented exceptions are not zero. Their owner steps (M10, M12) are finished, and the entries remain.
+- **Wall time.** `pnpm test` runs one package at a time and takes 349 s, against 90 s for the mock-data tiers.
+  - Vitest's own durations add up to 297 s: the Workbench 75 s, the Controller 58 s, Cloudflare 48 s (31 `workerd` tests), the debugger 27 s and the Copilot provider 17 s (both mostly their process tests).
+  - The rest is process start-up and the reporter's re-measurement.
+  - `pnpm verify` was not part of this measurement.
+- **Tier counts.** Components 321 against 200; flows 43 against 28 (E9 to E11 and local findings); Workers 31 against 20 (the owner's decision, O9); transport 31 against 30. The 277 older Playwright specs remain beside the flows (5.6's target is 28 e2e tests in all), and they now fail on the Orchard page (13.2).
+- **Not measured.** Redundancy: `arch:check --redundancy` does not exist. Smoke was not run here; section 10 lists the open findings.

@@ -2242,3 +2242,57 @@ it('reuses an explicit native-target scope across transport and public binding r
   }
   expect(requests).toEqual([false, true, false, false]);
 }, 2000);
+
+describe('settling a message the reader sent', () => {
+  const refuse = (f: Awaited<ReturnType<typeof outgoingFixture>>, requestId: string) => f.transport.emit({ protocolVersion: '1.8.0', type: 'protocol_error', payload: {
+    requestId, code: 'unsupported_operation', message: 'This session is read-only.', recoverable: false } });
+  const sends = (f: Awaited<ReturnType<typeof outgoingFixture>>) => f.transport.sent.filter(message => message.type === 'send_message');
+
+  it('deletes only a failed or an unconfirmed message, and keeps one that is sending or waiting for its echo', async () => {
+    const f = await outgoingFixture();
+    try {
+      const accepted = f.client.sendMessage('Accepted');
+      f.acknowledge(sends(f)[0]!.payload.requestId); await accepted;
+      void f.client.sendMessage('Not yet answered');
+      const [awaiting, sending] = f.replica.getState().outgoingMessages!;
+      expect([awaiting?.status, sending?.status]).toEqual(['awaiting_echo', 'sending']);
+      f.client.deleteMessage(sending!.id);
+      f.client.deleteMessage(awaiting!.id);
+      expect(f.replica.getState().outgoingMessages?.map(message => message.status)).toEqual(['awaiting_echo', 'sending']);
+      f.replica.updateMessage(sending!.id, 'unconfirmed', 'Delivery is not confirmed.');
+      f.replica.updateMessage(awaiting!.id, 'failed', 'Refused.');
+      f.client.deleteMessage(sending!.id);
+      f.client.deleteMessage(awaiting!.id);
+      expect(f.replica.getState().outgoingMessages).toEqual([]);
+    } finally { f.client.stop(); }
+  });
+
+  it('refuses to retry a message that is sending or waiting for its echo, and sends nothing', async () => {
+    const f = await outgoingFixture();
+    try {
+      const accepted = f.client.sendMessage('Accepted');
+      f.acknowledge(sends(f)[0]!.payload.requestId); await accepted;
+      void f.client.sendMessage('Not yet answered');
+      for (const message of f.replica.getState().outgoingMessages!) {
+        await expect(f.client.retryMessage(message.id)).rejects.toMatchObject({ message: 'This message is not available to retry.' });
+      }
+      await expect(f.client.retryMessage('outgoing-unknown')).rejects.toMatchObject({ message: 'This message is not available to retry.' });
+      expect(sends(f)).toHaveLength(2);
+      expect(f.replica.getState().outgoingMessages?.map(message => message.status)).toEqual(['awaiting_echo', 'sending']);
+    } finally { f.client.stop(); }
+  });
+
+  it('refuses to retry while the connection is not open, keeps the failed message as it was, and sends nothing', async () => {
+    const f = await outgoingFixture({ requestId: () => 'send-one', scheduleReconnect: () => () => undefined });
+    try {
+      const send = f.client.sendMessage('Refused input');
+      refuse(f, 'send-one');
+      await expect(send).rejects.toThrow('This session is read-only.');
+      const before = f.replica.getState().outgoingMessages;
+      f.transport.disconnect();
+      await expect(f.client.retryMessage(before![0]!.id)).rejects.toMatchObject({ code: 'connection_not_ready' });
+      expect(f.replica.getState().outgoingMessages).toEqual(before);
+      expect(sends(f)).toHaveLength(1);
+    } finally { f.client.stop(); }
+  });
+});

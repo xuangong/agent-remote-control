@@ -1,4 +1,4 @@
-import type { AgentStatus, BackgroundActivity, ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
+import type { AgentStatus, AgentTimelineItem, BackgroundActivity, ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import type { Turn } from '../presentation/turns.js';
 import { TimelineRows } from './timeline-kinds.js';
 
@@ -8,7 +8,7 @@ import { TimelineRows } from './timeline-kinds.js';
  * a step is `key:kind:state` (its first entry's key), a group lists its other keys after `+`.
  */
 export interface TurnVector {
-  readonly rule: 'T-2' | 'T-3' | 'T-4' | 'T-5' | 'T-6' | 'T-7' | 'key';
+  readonly rule: 'T-2' | 'T-3' | 'T-4' | 'T-5' | 'T-6' | 'T-7' | 'key' | 'unknown';
   readonly name: string;
   readonly entries: readonly ProjectedTimelineEntry[];
   readonly activeTurn?: { readonly turnId: string } | null;
@@ -120,4 +120,7 @@ export const TURN_VECTORS: readonly TurnVector[] = [
     r.user('No id', { key: 'u3' }); r.assistant('Fine', { key: 'a3' });
   }), turns: [{ key: 't1', prompt: 'u1', work: [], answer: ['a1'], state: 'ended' }, { key: 'pos:u2', prompt: 'u2', work: [], answer: ['a2'], state: 'ended' },
     { key: 'pos:u3', prompt: 'u3', work: [], answer: ['a3'], state: 'ended' }] },
+  { rule: 'unknown', name: 'a row of a type the client does not know is a narration step and moves nothing else', entries: rows(r => {
+    r.user('Go', { key: 'u1' }); r.add({ type: 'hologram', text: 'from a newer agent' } as unknown as AgentTimelineItem, { key: 'x1' }); r.assistant('Done', { key: 'a1' });
+  }), turns: [{ prompt: 'u1', work: ['x1:narration:done'], answer: ['a1'], state: 'ended' }] },
 ];

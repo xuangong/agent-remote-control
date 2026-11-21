@@ -472,3 +472,39 @@ it('lets a message the session refused for certain be retried, and sends it agai
   await advance(0);
   expect(send.mock.calls).toEqual([['Refused'], ['Refused']]);
 });
+
+it('has no bound on the waiting queue and no timeout: 50 waiting messages stay Sending for a day and then drain in order', async () => {
+  const view = await setup({ sessionKey: 'long-wait' });
+  const texts = Array.from({ length: 50 }, (_, index) => `Message ${index + 1}`);
+  for (const text of texts) { await view.type(text); await view.click(); }
+  await advance(24 * 60 * 60 * 1000);
+  const notices = [...view.container.querySelectorAll('[data-testid="pending-send"]')];
+  expect(notices).toHaveLength(50);
+  expect(notices.every(notice => notice.textContent?.includes('Sending') && !notice.textContent.includes('Not sent'))).toBe(true);
+  expect(view.send).not.toHaveBeenCalled();
+  await view.update({ connection: 'ready' });
+  await advance(1000);
+  expect(view.send.mock.calls).toEqual(texts.map(text => [text]));
+  expect(view.notice()).toBeNull();
+});
+
+it('delivers a waiting message once when two composers are mounted on one session key and can send at the same moment', async () => {
+  vi.useFakeTimers();
+  const firstSend = vi.fn(async () => {}), secondSend = vi.fn(async () => {});
+  const both = (connection: RemoteSessionStatus) => <>
+    {composer({ state, connection, sessionKey: 'shared', onSendMessage: firstSend, onCancel: vi.fn(async () => {}) })}
+    {composer({ state, connection, sessionKey: 'shared', onSendMessage: secondSend, onCancel: vi.fn(async () => {}) })}
+  </>;
+  const container = await render(both('disconnected'));
+  const input = container.querySelector('textarea')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'Said once');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
+  expect(container.querySelectorAll('[data-testid="pending-send"]')).toHaveLength(2);
+  await rerender(container, both('ready'));
+  await advance(1000);
+  expect([...firstSend.mock.calls, ...secondSend.mock.calls]).toEqual([['Said once']]);
+  expect(container.querySelector('[data-testid="pending-send"]')).toBeNull();
+});

@@ -54,6 +54,15 @@ describe('the outgoing message ledger follows row keys', () => {
     expect(status(replica)).toEqual(['awaiting_echo']);
   });
 
+  it('never settles a failed message with a later row of its text, and leaves that row for a later message', () => {
+    const { replica, id: refused } = sentAfter([row('a', 1, 'A')]);
+    replica.updateMessage(refused, 'failed', 'This session is read-only.');
+    const later = replica.beginMessage('agent-one', 'Ship it', undefined, 'operation-two');
+    replica.acknowledgeMessage(later);
+    replica.applyHistory(tail('epoch-one', [row('a', 1, 'A'), row('echo', 2, 'Ship it', 'user_message')]));
+    expect(replica.getState().outgoingMessages).toMatchObject([{ id: refused, status: 'failed', error: 'This session is read-only.' }]);
+  });
+
   it('reads a ledger written before row keys once as unconfirmed and writes it back in the new form', () => {
     const replica = new AgentReplica();
     replica.applySnapshot(snapshot);

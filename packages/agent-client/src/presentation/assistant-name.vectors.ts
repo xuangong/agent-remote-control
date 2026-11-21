@@ -24,4 +24,8 @@ export const ASSISTANT_NAME_VECTORS: readonly AssistantNameVector[] = [
     names: ['Chief', 'Chief', 'Nest', 'Pebbles'] },
   { name: 'when every name is taken, the name its key picks is numbered', assistants: [...ENGLISH_LIST.map((name, index) => named(`n${index}`, name)), unnamed('a')],
     names: [...ENGLISH_LIST, 'Berry 2'] },
+  { name: 'when every name is taken, assistants whose keys pick one name are numbered one after the other', assistants: [...ENGLISH_LIST.map((name, index) => named(`n${index}`, name)), unnamed('cd'), unnamed('aa')],
+    names: [...ENGLISH_LIST, 'Nest 3', 'Nest 2'] },
+  { name: 'when every name is taken, the numbered name is in the reader\'s language', assistants: [...ENGLISH_LIST.map((name, index) => named(`n${index}`, name)), unnamed('a')],
+    names: [...ENGLISH_LIST, '莓莓 2'], locale: 'zh' },
 ];

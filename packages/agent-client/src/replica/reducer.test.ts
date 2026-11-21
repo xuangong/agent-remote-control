@@ -22,6 +22,7 @@ import {
   reduceTimelineEvent,
   restoreFromDevice,
 } from './reducer.js';
+import { applyBackgroundOutcome } from './snapshot-apply.js';
 
 const capabilities = {
   history: true,
@@ -754,4 +755,21 @@ describe('rows restored from the device', () => {
     expect(tail.state.timeline.restoredFromDevice).toBeUndefined();
     expect(tail.state.timeline.pendingEpoch).toBeUndefined();
   });
+});
+
+it('keeps at most 2048 background outcomes by id and drops the oldest id beyond that', () => {
+  const outcome = (index: number) => ({ id: `review-${index}`, kind: 'review' as const, status: 'silent' as const });
+  // A replica that already holds 2048 outcomes, review-0 the oldest: building it by 2048 applications would only repeat the cost of the rule.
+  const held = createReplicaState();
+  const full = { ...held, timeline: { ...held.timeline,
+    backgroundActivities: Object.fromEntries(Array.from({ length: 2048 }, (_, index) => [`review-${index}`, outcome(index)])) } };
+  const sameId = applyBackgroundOutcome(full, { ...outcome(0), status: 'failed' });
+  expect(Object.keys(sameId.timeline.backgroundActivities ?? {})).toHaveLength(2048);
+  expect(sameId.timeline.backgroundActivities?.['review-0']).toMatchObject({ status: 'failed' });
+  const next = applyBackgroundOutcome(full, outcome(2048));
+  const ids = Object.keys(next.timeline.backgroundActivities ?? {});
+  expect(ids).toHaveLength(2048);
+  expect(ids).not.toContain('review-0');
+  expect(ids).toContain('review-1');
+  expect(ids).toContain('review-2048');
 });

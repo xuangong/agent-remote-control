@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { composerAvailability, sessionActivityLabel, sessionNotice, sessionNoticeWords, type SessionFacts } from './session-presentation.js';
-import { leaseView } from './lease-view.js';
+import { composerAvailability, sessionActivityLabel, sessionNotice, sessionNoticeWords, type ComposerBlock, type SessionFacts, type SessionNotice } from './session-presentation.js';
+import { leaseNoticeLabel, leaseView } from './lease-view.js';
+import { translator } from '../presentation/messages.js';
+import { buildSnapshot } from '../testing/builders.js';
 import { buildSessionFacts, CONNECTIONS, CONTROL, SESSION_PRESENTATION_VECTORS, T5_PATTERN, type ReplicaFacts } from '../testing/session-presentation-vectors.js';
 
 const BUSINESS_LABELS = new Set(['Ready', 'Working', 'Waiting for response', 'Starting', 'Closed', 'Agent failed', 'Executing command', 'Native CLI has control', 'Native control transferred']);
@@ -22,6 +24,73 @@ describe('the presentation of a session, row by row', () => {
   it('says a pending command while the session is idle, and nothing before the Snapshot', () => {
     expect(sessionActivityLabel(buildSessionFacts('ready', { snapshot: { status: 'idle' }, control: CONTROL.granted }), true)).toBe('Executing command');
     expect(sessionActivityLabel(buildSessionFacts('ready', undefined), true)).toBeUndefined();
+  });
+});
+
+describe('the words of a session in Chinese', () => {
+  const zh = translator('zh');
+  const notices: ReadonlyArray<readonly [SessionNotice, string]> = [
+    [{ kind: 'host_offline', hostName: 'Mac mini' }, 'Mac mini 离线了，回来后消息会送达～'],
+    [{ kind: 'host_offline' }, '这台 Host 离线了，回来后消息会送达～'],
+    [{ kind: 'ended' }, '这段会话已结束。'],
+    [{ kind: 'failed', message: 'The agent failed without error details.' }, 'Agent 出错了，没有更多信息。'],
+    [{ kind: 'failed', message: 'Model quota exhausted.' }, 'Model quota exhausted.'],
+    [{ kind: 'terminal_in_control' }, '命令行正在控制'],
+    [{ kind: 'other_controller' }, '另一个 Controller 正在控制'],
+    [{ kind: 'read_only' }, '随时可以接手'],
+    [{ kind: 'unavailable', message: 'This session is unavailable.' }, '这段会话现在用不了。'],
+    [{ kind: 'unavailable', message: 'Session was deleted' }, 'Session was deleted'],
+    [{ kind: 'agent_unavailable', message: 'The agent is not available on Mac mini.' }, 'Mac mini 上的 Agent 暂时用不了。'],
+    [{ kind: 'agent_unavailable', message: 'The agent is not available on its Host.' }, '它所在的 Host 上的 Agent 暂时用不了。'],
+  ];
+
+  it.each(notices.map(([notice, words]) => [`${notice.kind}: ${words}`, notice, words] as const))('words the notice %s', (_name, notice, words) => {
+    expect(sessionNoticeWords(notice, zh)).toBe(words);
+  });
+
+  it('words each lease state', () => {
+    expect(leaseNoticeLabel('native_cli', zh)).toBe('命令行正在控制');
+    expect(leaseNoticeLabel('other_controller', zh)).toBe('另一个 Controller 正在控制');
+    expect(leaseNoticeLabel('read_only', zh)).toBe('随时可以接手');
+  });
+
+  it('words the composer block and the activity label', () => {
+    expect(composerAvailability(buildSessionFacts('ready', { snapshot: { status: 'idle', capabilities: { ...buildSnapshot().capabilities, sendMessage: false } } }), zh))
+      .toEqual({ input: 'disabled', reason: 'unsupported', words: '这个 Agent 不接收消息。' });
+    const closed = SESSION_PRESENTATION_VECTORS.find(row => row.name === 'ready, closed')!.facts;
+    expect(composerAvailability(closed, zh)).toEqual({ input: 'disabled', reason: 'ended', words: '这段会话已结束。' });
+    expect(sessionActivityLabel(closed, false, zh)).toBe('已结束');
+    const terminal = SESSION_PRESENTATION_VECTORS.find(row => row.name === 'ready, a terminal has control')!.facts;
+    expect(sessionActivityLabel(terminal, false, zh)).toBe('命令行正在控制');
+  });
+});
+
+describe('the order of the notice and the reasons of the composer', () => {
+  it('has a row for every reason that disables the composer', () => {
+    const reasons = new Set(SESSION_PRESENTATION_VECTORS.flatMap(row => row.composer.input === 'disabled' ? [row.composer.reason] : []));
+    const all: ComposerBlock[] = ['read_only', 'terminal_in_control', 'other_controller', 'ended', 'failed', 'unavailable', 'unsupported'];
+    expect([...reasons].sort()).toEqual([...all].sort());
+  });
+
+  it('disables the composer in every row that has a business fact', () => {
+    for (const { name, facts } of SESSION_PRESENTATION_VECTORS) {
+      const { session, replica } = facts;
+      const business = session.connection === 'unavailable' || session.activity === 'failed' || session.activity === 'closed'
+        || leaseView(session.control).readOnly || replica?.agent?.capabilities.sendMessage === false;
+      expect(composerAvailability(facts).input === 'disabled', name).toBe(business);
+    }
+  });
+});
+
+describe('the same facts give the same outputs', () => {
+  it.each(SESSION_PRESENTATION_VECTORS.map(row => [row.name, row] as const))('%s: a repeat call and an equal copy agree', (_name, row) => {
+    const copy: SessionFacts = { ...row.facts, session: { ...row.facts.session }, ...(row.facts.host ? { host: { ...row.facts.host } } : {}) };
+    for (const facts of [row.facts, row.facts, copy]) {
+      expect(sessionNotice(facts)).toEqual(row.notice);
+      expect(composerAvailability(facts)).toEqual(row.composer);
+      expect(sessionActivityLabel(facts)).toBe(row.label);
+      expect(sessionActivityLabel(facts, true)).toEqual(sessionActivityLabel(row.facts, true));
+    }
   });
 });
 

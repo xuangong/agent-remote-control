@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
-import { buildEveryKindConversation, TURN_VECTORS, turnShapes } from '../testing/index.js';
+import { buildEveryKindConversation, TimelineRows, TURN_VECTORS, turnShapes } from '../testing/index.js';
 import { foldTurns, type Turn } from './turns.js';
 
 /** T-1: the entries of a fold, in the order the fold holds them. */
@@ -49,5 +49,48 @@ describe('foldTurns', () => {
 
   it('is empty for an empty timeline', () => {
     expect(foldTurns([], null)).toEqual([]);
+  });
+});
+
+describe('a long timeline', () => {
+  const shell = { type: 'shell', command: 'npm test' } as const;
+  /** Adds `count` turns of five rows (a message, a remark, a tool call, a letter and an answer); every other turn carries a turn id. */
+  function addTurns(rows: TimelineRows, first: number, count: number): void {
+    for (let turn = first; turn < first + count; turn += 1) {
+      const options = turn % 2 === 0 ? { turnId: `turn-${turn}` } : {};
+      rows.user(`Ask ${turn}`, options); rows.assistant(`Looking ${turn}`, options); rows.tool('Bash', shell, 'completed', options); rows.letter(`Note ${turn}`, options); rows.assistant(`Done ${turn}`, options);
+    }
+  }
+
+  it('folds a thousand entries into one turn each, once, with a unique key per turn', () => {
+    const rows = new TimelineRows();
+    addTurns(rows, 0, 200);
+    expect(rows.entries).toHaveLength(1000);
+    const turns = foldTurns(rows.entries, null, 'idle');
+    expect(turns).toHaveLength(200);
+    const folded = foldedEntries(turns);
+    expect(folded).toHaveLength(1000);
+    expect(new Set(folded).size).toBe(1000);
+    expect(new Set(turns.map(turn => turn.key)).size).toBe(turns.length);
+    expect(turns.every(turn => turn.state === 'ended')).toBe(true);
+  });
+
+  it('keys the same entries the same on every fold', () => {
+    const rows = new TimelineRows();
+    addTurns(rows, 0, 20);
+    expect(foldTurns(rows.entries, null, 'idle').map(turn => turn.key)).toEqual(foldTurns(rows.entries, null, 'idle').map(turn => turn.key));
+  });
+
+  it('keeps the keys of the earlier turns when a row or a turn is appended', () => {
+    const rows = new TimelineRows();
+    addTurns(rows, 0, 20);
+    const keys = () => foldTurns(rows.entries, null, 'idle').map(turn => turn.key);
+    const before = keys();
+    rows.assistant('One more answer', { turnId: 'turn-18' });
+    expect(keys()).toEqual(before);
+    addTurns(rows, 20, 1);
+    const after = keys();
+    expect(after.slice(0, before.length)).toEqual(before);
+    expect(after).toHaveLength(before.length + 1);
   });
 });

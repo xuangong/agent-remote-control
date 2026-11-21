@@ -13,7 +13,7 @@ const identity: SessionIdentity = buildSessionIdentity();
 
 /** One page of a device: a store over the device's one database, then what an opening conversation does with it. */
 function device(database = memoryDeviceDatabase()) {
-  const page = () => new DeviceStore({ database, writeBehindMs: 1 });
+  const page = () => new DeviceStore({ database });
   return {
     database,
     page,
@@ -127,7 +127,7 @@ describe('S7 device store to replica', () => {
   it('a record over the byte budget is evicted oldest first, and the evicted conversation opens empty', async () => {
     const phone = device();
     const size = buildStoredRecord().bytes;
-    const store = new DeviceStore({ database: phone.database, writeBehindMs: 1, diskCapBytes: size + 10 });
+    const store = new DeviceStore({ database: phone.database, diskCapBytes: size + 10 });
     store.put(buildStoredRecord({ nativeSessionId: 'old', updatedAt: 1 }));
     store.put(buildStoredRecord({ nativeSessionId: 'native-1', updatedAt: 2 }));
     await store.flush();

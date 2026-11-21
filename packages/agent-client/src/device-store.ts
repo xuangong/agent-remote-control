@@ -38,6 +38,13 @@ export interface DeviceDatabase {
   write(batch: ReadonlyMap<string, StoredRecord | null>): Promise<void>;
   /** Removes every record and index row. */
   clear(): Promise<void>;
+  /**
+   * Keeps a batch at once, synchronously, for a page that hides or leaves: a write the page has started may never complete then (WebKit
+   * aborts an IndexedDB transaction that a leaving page has not committed, and the operating system ends a page in the background without
+   * an event). The database puts the batch on disk before its next read, in this page or the next, the newer record of a key winning. A
+   * database without it loses what a leaving page had not written, and the next open reads that from the Relay.
+   */
+  keepWhileLeaving?(batch: ReadonlyMap<string, StoredRecord | null>): void;
 }
 
 export const deviceKey = (relayUrl: string, identity: SessionIdentity): string => JSON.stringify([relayUrl, identity]);
@@ -45,13 +52,11 @@ export const deviceKey = (relayUrl: string, identity: SessionIdentity): string =
 /** The two limits of the device store. Disk: whole records, oldest update first, pinned (mounted) sessions never. Memory: what the preload loaded plus mounted sessions. */
 export const DEFAULT_DISK_CAP_BYTES = 32 * 1024 * 1024;
 export const DEFAULT_PRELOAD_BYTES = 4 * 1024 * 1024;
-const WRITE_BEHIND_MS = 50;
 
 export interface DeviceStoreOptions {
   readonly database?: DeviceDatabase;
   readonly diskCapBytes?: number;
   readonly preloadBytes?: number;
-  readonly writeBehindMs?: number;
 }
 
 const isQuota = (error: unknown): boolean => typeof error === 'object' && error !== null && (error as { name?: unknown }).name === 'QuotaExceededError';
@@ -60,6 +65,11 @@ const isQuota = (error: unknown): boolean => typeof error === 'object' && error 
  * Conversations a device has read, kept in IndexedDB so that opening one shows its rows from the first frame. It is a display
  * cache: the connection's first page confirms or replaces what it holds. A failure of the browser's storage (blocked,
  * unavailable, over quota) never reaches the caller; the records stay in memory for this page.
+ *
+ * A record's write starts in the task that keeps it, never on a timer and never when the page leaves: WebKit aborts an IndexedDB write that
+ * a page starts while it leaves (`pagehide`, `visibilitychange`, `beforeunload`), Chromium one started at `pagehide` of a closing tab, and the
+ * operating system ends a page in the background without an event. What has not reached the disk when the page hides or leaves (a write
+ * queued behind a read, or not committed yet, which WebKit aborts on leaving) goes to the database's synchronous `keepWhileLeaving`.
  */
 export class DeviceStore {
   private readonly records = new Map<string, StoredRecord>();
@@ -69,7 +79,10 @@ export class DeviceStore {
   private indexLoaded = false;
   /** Counts purges: a disk read that began before one must not put its record back. */
   private purges = 0;
-  private timer: ReturnType<typeof setTimeout> | undefined;
+  /** A write of what this task queued is due at the end of the task. */
+  private writeDue = false;
+  /** What was kept or forgotten and is not on disk yet: queued, or in a write that has not completed. */
+  private readonly unwritten = new Map<string, StoredRecord | null>();
   private chain: Promise<void> = Promise.resolve();
   private database: DeviceDatabase | undefined;
   private persistent = () => true;
@@ -79,14 +92,11 @@ export class DeviceStore {
     if (options.database) this.useDatabase(options.database);
   }
 
-  /**
-   * Keeps records in `database` from now on, and writes what is queued when the page is hidden or leaves: the one place a leaving page writes,
-   * because a record is kept once a page confirmed it or a turn ended and the page's own listeners stop there.
-   */
+  /** Keeps records in `database` from now on; when the page hides or leaves, what is not on disk yet goes to its `keepWhileLeaving`. */
   useDatabase(database: DeviceDatabase): void {
     this.database = database;
     this.stopWatchingPage?.();
-    this.stopWatchingPage = watchPageResume(() => undefined, () => { void this.flush(); });
+    this.stopWatchingPage = watchPageResume(() => undefined, () => this.keepUnwritten());
   }
 
   /** The embedding application owns the device's retention preference; without persistence records live in memory only. */
@@ -131,13 +141,17 @@ export class DeviceStore {
     }, undefined);
   }
 
-  /** Keeps a record: in memory at once, on disk after a short delay, so a frame never waits for the disk. The last write wins. */
+  /**
+   * Keeps a record: in memory at once, and on disk by a write that starts before this task ends, so a page that leaves or is ended right
+   * after still keeps it. The records kept in one task go in one write; nothing waits for it. The last write wins.
+   */
   put(record: StoredRecord): void {
     this.records.set(record.key, record);
     this.index.set(record.key, { key: record.key, relayUrl: record.relayUrl, updatedAt: record.updatedAt, bytes: record.bytes });
     if (!this.diskAllowed()) return;
     this.queue.set(record.key, record);
-    this.timer ??= setTimeout(() => { void this.flush(); }, this.options.writeBehindMs ?? WRITE_BEHIND_MS);
+    this.unwritten.set(record.key, record);
+    this.writeAtEndOfTask();
   }
 
   /** Drops one record, for a person who lost access to the session. */
@@ -147,7 +161,8 @@ export class DeviceStore {
     this.index.delete(key);
     if (!this.diskAllowed()) return;
     this.queue.set(key, null);
-    this.timer ??= setTimeout(() => { void this.flush(); }, this.options.writeBehindMs ?? WRITE_BEHIND_MS);
+    this.unwritten.set(key, null);
+    this.writeAtEndOfTask();
   }
 
   /** A mounted session's record is never evicted from disk and its memory copy stays. */
@@ -164,23 +179,26 @@ export class DeviceStore {
     };
   }
 
-  /** Writes what is queued now. */
+  /**
+   * Writes what is queued now. The write is the disk task's first step: with the database open and no earlier disk task running, it starts
+   * in this task. The index of what is on disk is read after it, for eviction only.
+   */
   flush(): Promise<void> {
-    clearTimeout(this.timer);
-    this.timer = undefined;
     const batch = new Map(this.queue);
     this.queue.clear();
     if (!batch.size || !this.diskAllowed()) return this.chain;
     return this.enqueueDisk(async database => {
-      await this.loadIndex(database);
       try { await database.write(batch); }
       catch (error) {
         if (!isQuota(error)) throw error;
         // Make room by dropping the oldest unpinned records, then try once more; a second failure keeps the content in memory.
+        await this.loadIndex(database);
         const needed = [...batch.values()].reduce((sum, record) => sum + (record?.bytes ?? 0), 0);
         await this.evictOldest(database, needed, new Set(batch.keys()));
         await database.write(batch);
       }
+      for (const [key, value] of batch) if (this.unwritten.get(key) === value) this.unwritten.delete(key);
+      await this.loadIndex(database);
       await this.evictOldest(database, 0, new Set());
     }, undefined);
   }
@@ -192,6 +210,7 @@ export class DeviceStore {
     for (const [key, record] of [...this.records]) if (matches(record)) this.records.delete(key);
     for (const [key, row] of [...this.index]) if (matches(row)) this.index.delete(key);
     for (const [key, record] of [...this.queue]) if (record === null || matches(record)) this.queue.delete(key);
+    for (const [key, record] of [...this.unwritten]) if (record === null || matches(record)) this.unwritten.delete(key);
     // A purge reaches the disk even when persistence is off: records written while it was on must not outlive the person.
     await this.enqueueDisk(async database => {
       const rows = await database.readIndex();
@@ -201,13 +220,25 @@ export class DeviceStore {
 
   /** Removes the disk copies and keeps the memory ones, for "Clear cache on close". */
   async clearDisk(): Promise<void> {
-    clearTimeout(this.timer);
-    this.timer = undefined;
     this.queue.clear();
+    this.unwritten.clear();
     await this.enqueueDisk(database => database.clear(), undefined);
   }
 
   private diskAllowed(): boolean { return this.persistent() && !!this.database && this.database.available?.() !== false; }
+
+  /** The page hides or leaves: what is not on disk yet is kept by the database at once, for the next read to put on disk. */
+  private keepUnwritten(): void {
+    if (!this.unwritten.size || !this.diskAllowed()) return;
+    try { this.database?.keepWhileLeaving?.(new Map(this.unwritten)); } catch { /* A failure of the browser's storage never reaches the page. */ }
+  }
+
+  /** Writes what this task queued once the task's own work is done, still inside the task: a microtask, never a timer. */
+  private writeAtEndOfTask(): void {
+    if (this.writeDue) return;
+    this.writeDue = true;
+    queueMicrotask(() => { this.writeDue = false; void this.flush(); });
+  }
 
   private trimMemory(): void {
     let bytes = 0;

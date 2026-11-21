@@ -5,7 +5,7 @@ import { pinStoredSession, saveStoredDisplay } from './stored-display.js';
 
 /**
  * A shared session keeps what this device stores of it at two moments: when a page of the connection was confirmed (its first one, a reconnect's) and when a
- * turn ends. Nothing in between: what a leaving page has not kept, its next open reads again from the stored cursor. The store writes what is queued when the page leaves.
+ * turn ends. Nothing in between: what a leaving page has not kept, its next open reads again from the stored cursor. The store starts each write in the task that keeps the record, so leaving needs no write.
  */
 export function observeStoredDisplay(baseUrl: string, target: ControllerLocation, replica: AgentReplica): () => void {
   const generation = recoveryGeneration(baseUrl);

@@ -14,5 +14,5 @@ it("declares the Copilot CLI's single writer, which the SDK reports at resume, a
     failures: { inUse: ['writer_elsewhere'] },
     liveOnly: ['interaction', 'reasoning', 'todo', 'error'],
   });
-  expect(declared.verifiedVersion).toBeUndefined();
+  expect(resolveAgentProviderBehaviour(provider.descriptor).verifiedVersion).toBeUndefined();
 });

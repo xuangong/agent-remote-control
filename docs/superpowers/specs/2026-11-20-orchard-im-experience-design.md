@@ -73,7 +73,7 @@ The owner's rule (2026-11-21): the product's features are organised the way an I
 |---|---|
 | **Chats**: recent conversations sorted by activity, each with unread or needs-you dots, pin and mute, and a draft preserved per chat | The assistant list in Bot mode, ordered by last activity. The needs-you and unread dots come from attention. Pinning comes from the star. Drafts are kept per target. |
 | **Contacts**: everyone you can talk to, grouped, with add-new and presence | All assistants, including resting and hidden ones, grouped by Window group. Presence is working, idle, resting or Host offline. |
-| **Groups and workspaces**: several members side by side | Windows and Team. A window is a workspace of assistant tiles. Team messages appear as events in the conversation. |
+| **Groups**: assistants organised in groups, several members side by side | **A group is a Window** (the stored `WindowGroup`: one `window` plus its `bots` members). Chats and the Assistants directory are sectioned by group; Window mode shows the same group as tiles. A group has a name, members, and per-group settings (mute, notifications); an assistant can move between groups. Team messages appear as events in the conversation. |
 | **Me and Settings** | One Settings page, plus the account and device sections (see below) |
 | **Search** across chats and messages | Global search on the rail, plus search within a conversation |
 | **Notifications**: needs-you is distinct from unread; mute per chat | Attention rules, and per-assistant notifications in details and in Settings |

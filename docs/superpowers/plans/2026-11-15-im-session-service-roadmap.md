@@ -309,6 +309,14 @@ The last push brings the UI/UX and the IM experience to a finished state on both
 | **IM completeness audit** | Every row of "Organised as an IM product" in the Orchard design works end to end on desktop and phone: chats by activity, pin and mute, drafts per chat, contacts with add-new and presence, groups and workspaces, search across chats and messages, notifications, message actions (copy, quote, resend, retract and edit where allowed), delivery states, typing and working indicators, and multi-device sync of drafts and reads. Each gap is fixed or recorded as a decision. |
 | **UI/UX finish** | A pass over every screen in both themes and both languages, on desktop and phone: no leftover legacy styling, no stray English in Chinese, empty, loading and error states in the Orchard voice, keyboard shortcuts on the PC, focus order and accessibility, and motion that respects reduced motion. Each screen is checked against the approved mockups. |
 
+**Groups (owner, 2026-11-22).** Assistants are organised in groups, and a group *is* a Window: the data model already stores one `WindowGroup` per window with its bot members. I5 makes it one concept everywhere:
+- the word "group" (分组) is used in every view;
+- Chats and Assistants are sectioned by group;
+- Window mode is the same group as tiles;
+- group operations: create, rename, add, remove or move an assistant between groups, per-group mute and notifications, and group order;
+- an assistant that belongs to no group sits in a default group;
+- every operation is reachable on desktop and phone.
+
 **Desktop app polish (owner, 2026-11-22).** As an installed PWA the PC experience must feel like a desktop app, down to the details. This list is part of the I5 finish:
 - **Resizable panels.** The rail, sidebar, conversation and details panels each have a drag handle. Each panel has a minimum and a maximum width, and the sizes are remembered per device. A double-click on a handle resets it. The details panel collapses at narrow widths.
 - **Window chrome.** The installed app uses Window Controls Overlay: the title-bar area carries the assistant's name and the drag region, with the traffic lights clear. The window title follows the open assistant. The app opens to the last place.

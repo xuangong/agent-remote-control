@@ -20,12 +20,24 @@ function sample(files, check) {
 
 const transcript = 'packages/agent-remote-fixtures/transcripts/session-wire/open.jsonl';
 const recordings = 'packages/agent-provider-codex/src/journal-fixtures';
+const cli = JSON.stringify({ cli: { name: 'codex', version: '0.171.0' } });
 
 test('consistent transcripts and recordings with golden rows are accepted', () => {
   sample({
     [transcript]: `${header()}\n${frame(1)}\n${frame(2)}\n`,
-    [`${recordings}/settled.json`]: '{}', [`${recordings}/settled.rows.json`]: JSON.stringify({ kind: 'recording-rows', recording: 'settled' }),
+    [`${recordings}/settled.json`]: cli, [`${recordings}/settled.rows.json`]: JSON.stringify({ kind: 'recording-rows', recording: 'settled' }),
   }, root => assert.deepEqual(checkFixtures({ root, protocolVersion: '1.8.0' }), []));
+});
+
+test('a recording that does not name the CLI version it was made with is reported', () => {
+  sample({
+    [`${recordings}/settled.json`]: '{}', [`${recordings}/settled.rows.json`]: JSON.stringify({ kind: 'recording-rows', recording: 'settled' }),
+    [`${recordings}/restart.json`]: JSON.stringify({ cli: { name: 'codex', version: 'latest' } }), [`${recordings}/restart.rows.json`]: JSON.stringify({ kind: 'recording-rows', recording: 'restart' }),
+  }, root => {
+    const problems = checkFixtures({ root, protocolVersion: '1.8.0' }).join('\n');
+    assert.match(problems, /settled\.json: it does not name the CLI/);
+    assert.match(problems, /restart\.json: it does not name the CLI/);
+  });
 });
 
 test('a transcript recorded at another protocol version fails until it is recorded again', () => {
@@ -54,7 +66,7 @@ test('a transcript nothing replays is reported', () => {
 
 test('a recording without golden rows, and golden rows without their recording, are reported', () => {
   sample({
-    [`${recordings}/settled.json`]: '{}',
+    [`${recordings}/settled.json`]: cli,
     [`${recordings}/gone.rows.json`]: JSON.stringify({ kind: 'recording-rows', recording: 'gone' }),
   }, root => {
     const problems = checkFixtures({ root, protocolVersion: '1.8.0' }).join('\n');

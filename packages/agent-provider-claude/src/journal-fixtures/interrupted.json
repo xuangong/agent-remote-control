@@ -1,4 +1,5 @@
 {
+ "cli": {"name":"claude","version":"2.1.319"},
  "live": [
   {"type":"observation","sourceKey":"claude:0182782a-6891-467d-b95b-b6cc9eac9041:2","occurredAt":1794926314570,"delivery":"live","event":{"type":"turn_started","provider":"claude","turnId":"c0448b7c-c486-4279-adfe-ad0693a20264"}},
   {"type":"observation","sourceKey":"claude:4ff3ac7d-3aeb-4590-827f-fd2e3fe63664:message:c0448b7c-c486-4279-adfe-ad0693a20264","occurredAt":1794926314570,"delivery":"live","event":{"type":"timeline","provider":"claude","item":{"type":"user_message","text":"Stream then stop","messageId":"c0448b7c-c486-4279-adfe-ad0693a20264"},"turnId":"c0448b7c-c486-4279-adfe-ad0693a20264"},"itemIdentity":{"key":"user:c0448b7c-c486-4279-adfe-ad0693a20264","completes":true}},

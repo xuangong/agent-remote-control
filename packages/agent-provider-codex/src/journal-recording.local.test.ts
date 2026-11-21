@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
@@ -17,6 +18,8 @@ import { call, message, patch, pause, reasoning, shell, stalled, startResponsesF
  * by the shape of its identities, so a change of the adapter or of the CLI is a visible change.
  */
 const executable = process.env.BORGEE_CODEX_TEST_EXECUTABLE ?? 'codex';
+/** The CLI a recording is made with, which its header names. */
+const cli = { name: 'codex', version: /codex-cli\s+(\d+\.\d+\.\d+)/.exec(execFileSync(executable, ['--version'], { encoding: 'utf8', timeout: 5000 }))?.[1] ?? 'unknown' };
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'journal-fixtures');
 const RECORDING = process.env.RECORD_JOURNAL_FIXTURES === '1';
 const PATCH_MODEL = 'step-settings-a';
@@ -114,7 +117,7 @@ async function scrub(recording: JournalRecording, paths: string[]): Promise<Jour
 /** `unrecorded` names shape lines the native runtime sometimes does not write, however long the command ran. */
 async function check(name: string, recording: JournalRecording, cwd: string, home: string, unrecorded?: RegExp) {
   const path = join(FIXTURES, `${name}.json`);
-  const clean = await scrub(recording, [cwd, home, tmpdir(), homedir()]);
+  const clean = { cli, ...await scrub(recording, [cwd, home, tmpdir(), homedir()]) };
   if (RECORDING) { await mkdir(FIXTURES, { recursive: true }); await writeFile(path, serializeRecording(clean)); return; }
   if (!existsSync(path)) throw new Error(`No recording ${name}.json: run with RECORD_JOURNAL_FIXTURES=1.`);
   const shape = (value: JournalRecording) => recordingShape(value).filter(line => !unrecorded?.test(line));

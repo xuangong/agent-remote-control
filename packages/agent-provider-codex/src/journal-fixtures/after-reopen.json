@@ -1,4 +1,5 @@
 {
+ "cli": {"name":"codex","version":"0.169.0"},
  "live": [
   {"type":"observation","sourceKey":"item:01a1e955-a9ce-7170-8d1f-02cf24464f11:completed","occurredAt":1794916067000,"delivery":"history","event":{"type":"timeline","provider":"codex","turnId":"01a1e955-a9c7-73c0-8c8a-4e5b983908ed","item":{"type":"user_message","text":"First","messageId":"01a1e955-a9ce-7170-8d1f-02cf24464f11"}},"itemIdentity":{"key":"user:01a1e955-a9ce-7170-8d1f-02cf24464f11","completes":true}},
   {"type":"observation","sourceKey":"item:m1:completed","occurredAt":1794916067000,"delivery":"history","event":{"type":"timeline","provider":"codex","turnId":"01a1e955-a9c7-73c0-8c8a-4e5b983908ed","item":{"type":"assistant_message","text":"Running it.","messageId":"m1"}},"itemIdentity":{"key":"assistant:m1","completes":true}},

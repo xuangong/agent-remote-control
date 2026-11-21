@@ -1,4 +1,5 @@
 {
+ "cli": {"name":"codex","version":"0.169.0"},
  "live": [
   {"type":"observation","sourceKey":"turn:01a1e955-94ef-7ec1-90ad-068cbbbfe103:started","occurredAt":1794916062000,"delivery":"live","event":{"type":"turn_started","provider":"codex","turnId":"01a1e955-94ef-7ec1-90ad-068cbbbfe103"}},
   {"type":"observation","sourceKey":"item:01a1e955-94f5-7b52-a897-634e1356b609:user","occurredAt":1794916062453,"delivery":"live","event":{"type":"timeline","provider":"codex","turnId":"01a1e955-94ef-7ec1-90ad-068cbbbfe103","item":{"type":"user_message","text":"Plan it","messageId":"01a1e955-94f5-7b52-a897-634e1356b609"}},"itemIdentity":{"key":"user:01a1e955-94f5-7b52-a897-634e1356b609","completes":true}},

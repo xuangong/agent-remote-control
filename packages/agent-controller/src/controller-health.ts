@@ -1,5 +1,3 @@
-/** Native CLI versions the native suites last ran against. Newer installations work but are unverified. */
-export const verifiedNativeVersions: Readonly<Record<string, string>> = { claude: '2.1.296', codex: '0.162.0' };
 
 const windowMs = 60 * 60_000;
 const nativeExitWindowMs = 10 * 60_000;
@@ -30,7 +28,11 @@ function compareVersions(left: string, right: string): number {
  * Keeps one hour of Controller failure signals so repeated failures show up where the owner looks,
  * instead of only in the local diagnostic log. Holds counts and codes only, never request content.
  */
-export function createControllerHealth(options: { natives(): Array<{ providerId: string; version?: string }>; launcher: { managed: boolean; version?: string }; now?: () => number }) {
+/**
+ * `natives` names each provider's installed CLI version and the version its adapter's declaration was verified on (`behaviour.verifiedVersion`,
+ * which the native checks keep, `pnpm test:native:<cli>`); a newer installation works but is unverified.
+ */
+export function createControllerHealth(options: { natives(): Array<{ providerId: string; version?: string; verified?: string }>; launcher: { managed: boolean; version?: string }; now?: () => number }) {
   const now = options.now ?? Date.now;
   const startedAt = now();
   type Entry = { at: number; kind: 'request'; operation: string; status: number; code?: string }
@@ -70,7 +72,7 @@ export function createControllerHealth(options: { natives(): Array<{ providerId:
       const unknown = hour.filter((entry): entry is Extract<Entry, { kind: 'unknown_event' }> => entry.kind === 'unknown_event');
       const unknownNativeEvents = group(unknown, entry => JSON.stringify([entry.providerId, entry.eventKind]), entry => ({ providerId: entry.providerId, kind: entry.eventKind }));
       const natives = options.natives().flatMap(native => {
-        const verified = verifiedNativeVersions[native.providerId];
+        const verified = native.verified;
         return native.version && verified ? [{ providerId: native.providerId, version: native.version, verified, newer: compareVersions(native.version, verified) > 0 }] : [];
       });
       const warnings: ControllerHealthWarning[] = [];

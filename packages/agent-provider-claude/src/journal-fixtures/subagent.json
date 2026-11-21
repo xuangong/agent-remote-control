@@ -1,4 +1,5 @@
 {
+ "cli": {"name":"claude","version":"2.1.319"},
  "live": [
   {"type":"observation","sourceKey":"claude:5e52d9db-7998-45fd-b430-191719c8349a:2","occurredAt":1794926325547,"delivery":"live","event":{"type":"turn_started","provider":"claude","turnId":"d6581456-4503-4175-839d-60e6af24069b"}},
   {"type":"observation","sourceKey":"claude:fa55ca6a-3e93-4e00-a677-da608320fe89:message:d6581456-4503-4175-839d-60e6af24069b","occurredAt":1794926325547,"delivery":"live","event":{"type":"timeline","provider":"claude","item":{"type":"user_message","text":"Delegate","messageId":"d6581456-4503-4175-839d-60e6af24069b"},"turnId":"d6581456-4503-4175-839d-60e6af24069b"},"itemIdentity":{"key":"user:d6581456-4503-4175-839d-60e6af24069b","completes":true}},

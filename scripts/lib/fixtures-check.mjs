@@ -23,7 +23,7 @@ export function protocolVersionOf(root) {
 
 /**
  * Checks the committed fixtures: every transcript has a complete header, the protocol version the code declares, the scenario its file
- * is named for, numbered frames, and consumers that exist; every provider recording has golden rows that name it, and no golden rows
+ * is named for, numbered frames, and consumers that exist; every provider recording names the CLI version it was made with and has golden rows that name it, and no golden rows
  * file is left without its recording. Returns the problems found; an empty list means the fixtures are consistent.
  */
 export function checkFixtures({ root, protocolVersion = protocolVersionOf(root) }) {
@@ -53,6 +53,9 @@ export function checkFixtures({ root, protocolVersion = protocolVersionOf(root) 
     const recordings = files.filter(name => !name.endsWith('.rows.json')).map(name => name.slice(0, -'.json'.length));
     const goldens = files.filter(name => name.endsWith('.rows.json')).map(name => name.slice(0, -'.rows.json'.length));
     for (const name of recordings) {
+      // A recorded fact holds for the CLI version that made it, so every recording names it (seams.md, "How fixtures are made").
+      const { cli } = readJson(join(root, directory, `${name}.json`));
+      if (typeof cli?.name !== 'string' || !/^\d+\.\d+\.\d+/.test(cli?.version ?? '')) problems.push(`${directory}/${name}.json: it does not name the CLI and the version it was made with ("cli": { "name", "version" }).`);
       if (!goldens.includes(name)) { problems.push(`${directory}/${name}.json: no golden rows (${name}.rows.json). Record them with the rows recorder and review them.`); continue; }
       const golden = readJson(join(root, directory, `${name}.rows.json`));
       if (golden.kind !== 'recording-rows' || golden.recording !== name) problems.push(`${directory}/${name}.rows.json: its header does not name the recording ${name}.`);

@@ -1,4 +1,5 @@
 {
+ "cli": {"name":"copilot","version":"1.0.83"},
  "live": [
   {"type":"observation","sourceKey":"copilot:af6b900d-c7dc-4aff-8516-6e1b5472f736:3749436c-0ec0-42b7-9025-aff68d17824e","nativeRevision":1,"occurredAt":1794829319667,"delivery":"live","event":{"type":"timeline","provider":"copilot","item":{"type":"user_message","text":"Think","messageId":"3749436c-0ec0-42b7-9025-aff68d17824e"},"turnId":"turn:3749436c-0ec0-42b7-9025-aff68d17824e"},"itemIdentity":{"key":"user:3749436c-0ec0-42b7-9025-aff68d17824e","completes":true}},
   {"type":"observation","sourceKey":"copilot:af6b900d-c7dc-4aff-8516-6e1b5472f736:6c4d4b9d-d3cf-4be1-ae81-9dbd3d94d53e","nativeRevision":2,"occurredAt":1794829319668,"delivery":"live","event":{"type":"turn_started","provider":"copilot","turnId":"turn:3749436c-0ec0-42b7-9025-aff68d17824e"}},

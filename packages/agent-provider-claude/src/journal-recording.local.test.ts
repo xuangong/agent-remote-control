@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
@@ -22,6 +23,8 @@ import { nativeFixture, nativePaced, nativeReply, nativeStalled, type NativeBloc
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'journal-fixtures');
 const RECORDING = process.env.RECORD_JOURNAL_FIXTURES === '1';
 const MODEL = 'claude-sonnet-4-5-20250929';
+/** The CLI a recording is made with, which its header names. */
+const cli = { name: 'claude', version: /^(\d+\.\d+\.\d+) \(Claude Code\)/m.exec(execFileSync(process.env.AGENT_CLAUDE_TEST_EXECUTABLE ?? 'claude', ['--version'], { encoding: 'utf8', timeout: 5000 }))?.[1] ?? 'unknown' };
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ1kAAAAASUVORK5CYII=', 'base64');
 
 type Fixture = Awaited<ReturnType<typeof nativeFixture>>;
@@ -121,7 +124,7 @@ async function scrub(recording: JournalRecording, paths: string[]): Promise<Jour
 
 async function check(name: string, recording: JournalRecording, cwd: string, home: string) {
   const path = join(FIXTURES, `${name}.json`);
-  const clean = await scrub(recording, [cwd, home, tmpdir(), homedir()]);
+  const clean = { cli, ...await scrub(recording, [cwd, home, tmpdir(), homedir()]) };
   if (RECORDING) { await mkdir(FIXTURES, { recursive: true }); await writeFile(path, serializeRecording(clean)); return; }
   if (!existsSync(path)) throw new Error(`No recording ${name}.json: run with RECORD_JOURNAL_FIXTURES=1.`);
   // Concurrent tools finish in either order and their results are written in either order: Claude Code declares siblings_unordered.

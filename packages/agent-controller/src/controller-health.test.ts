@@ -1,21 +1,21 @@
 import { expect, it } from 'vitest';
 import { createControllerHealth } from './controller-health.js';
 
-function health(natives: Array<{ providerId: string; version?: string }> = [], launcher: { managed: boolean; version?: string } = { managed: true, version: '0.2.57' }) {
+function health(natives: Array<{ providerId: string; version?: string; verified?: string }> = [], launcher: { managed: boolean; version?: string } = { managed: true, version: '0.2.57' }) {
   let now = 1_000_000;
   const value = createControllerHealth({ natives: () => natives, launcher, now: () => now });
   return { health: value, advance(ms: number) { now += ms; } };
 }
 
 it('reports nothing for a quiet Controller with verified agents and a current launcher', () => {
-  const { health: value } = health([{ providerId: 'claude', version: '2.1.247' }, { providerId: 'codex', version: '0.162.0' }]);
+  const { health: value } = health([{ providerId: 'claude', version: '2.1.247', verified: '2.1.319' }, { providerId: 'codex', version: '0.171.0', verified: '0.171.0' }, { providerId: 'copilot', version: '1.0.83' }]);
   value.request('session_attach', 200);
   const snapshot = value.snapshot();
   expect(snapshot.warnings).toEqual([]);
   expect(snapshot.requestFailures).toEqual([]);
   expect(snapshot.natives).toEqual([
-    { providerId: 'claude', version: '2.1.247', verified: '2.1.296', newer: false },
-    { providerId: 'codex', version: '0.162.0', verified: '0.162.0', newer: false },
+    { providerId: 'claude', version: '2.1.247', verified: '2.1.319', newer: false },
+    { providerId: 'codex', version: '0.171.0', verified: '0.171.0', newer: false },
   ]);
 });
 
@@ -44,10 +44,10 @@ it('warns about native crash loops and unstable Relay connections', () => {
 });
 
 it('notes unverified native versions and a launcher that predates version reporting', () => {
-  const { health: value } = health([{ providerId: 'codex', version: '0.163.0' }, { providerId: 'copilot', version: '1.0.83' }], { managed: true });
+  const { health: value } = health([{ providerId: 'codex', version: '0.172.0', verified: '0.171.0' }, { providerId: 'copilot', version: '1.0.83' }], { managed: true });
   expect(value.snapshot().warnings).toEqual([
     expect.objectContaining({ code: 'legacy_launcher', severity: 'notice' }),
-    expect.objectContaining({ code: 'unverified_native_version', severity: 'notice', message: expect.stringContaining('codex 0.163.0 is newer than 0.162.0') }),
+    expect.objectContaining({ code: 'unverified_native_version', severity: 'notice', message: expect.stringContaining('codex 0.172.0 is newer than 0.171.0') }),
   ]);
 });
 

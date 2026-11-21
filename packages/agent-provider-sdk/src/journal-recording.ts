@@ -1,10 +1,15 @@
 import type { AgentRereadBehaviour, ProviderObservation, ProviderStreamItem } from './index.js';
 
 /**
- * What a real native runtime did for one scenario: the observations of the live run, and the history observations of the same native
- * session opened again. An adapter's recorder writes them; the Controller's continuity tests read them.
+ * What a real native runtime did for one scenario: the CLI it was made with, the observations of the live run, and the history observations
+ * of the same native session opened again. An adapter's recorder writes them; the Controller's continuity tests read them. A recorded fact
+ * holds for the CLI version that made it: every committed recording names it (`pnpm fixtures:check`), and the native checks fail while the
+ * installed CLI is another (`pnpm test:native:<cli>`).
  */
-export interface JournalRecording { live: ProviderObservation[]; reread: ProviderObservation[] }
+export interface JournalRecording { cli?: RecordedCli; live: ProviderObservation[]; reread: ProviderObservation[] }
+
+/** The CLI a recording was made with: its name, and the version it reported. */
+export interface RecordedCli { name: string; version: string }
 
 /** The observations a journal is built from; usage and runtime snapshots are not recorded. */
 export const journalObservation = (item: ProviderStreamItem): item is ProviderObservation => item.type === 'observation'
@@ -41,6 +46,6 @@ export function recordingShape(recording: JournalRecording, order: AgentRereadBe
   return [...side(recording.live, 'live'), ...side(recording.reread, 'reread')];
 }
 
-/** One observation per line, so a fixture is read and compared as a list of events. */
+/** The CLI header first, then one observation per line, so a fixture is read and compared as a list of events. */
 export const serializeRecording = (recording: JournalRecording): string =>
-  `{\n${(['live', 'reread'] as const).map(side => ` "${side}": [\n${recording[side].map(observation => `  ${JSON.stringify(observation)}`).join(',\n')}\n ]`).join(',\n')}\n}\n`;
+  `{\n${recording.cli ? ` "cli": ${JSON.stringify({ name: recording.cli.name, version: recording.cli.version })},\n` : ''}${(['live', 'reread'] as const).map(side => ` "${side}": [\n${recording[side].map(observation => `  ${JSON.stringify(observation)}`).join(',\n')}\n ]`).join(',\n')}\n}\n`;

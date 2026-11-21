@@ -1,4 +1,5 @@
 {
+ "cli": {"name":"claude","version":"2.1.319"},
  "live": [
   {"type":"observation","sourceKey":"claude:c448e07e-730f-4ebd-9918-7c2e886ec010:message:73f8e50f-b4d9-4b12-96b7-ea4c6126b6f9","occurredAt":1794926307668,"delivery":"history","event":{"type":"timeline","provider":"claude","item":{"type":"user_message","text":"First","messageId":"73f8e50f-b4d9-4b12-96b7-ea4c6126b6f9"},"turnId":"73f8e50f-b4d9-4b12-96b7-ea4c6126b6f9"},"itemIdentity":{"key":"user:73f8e50f-b4d9-4b12-96b7-ea4c6126b6f9","completes":true}},
   {"type":"observation","sourceKey":"claude:c448e07e-730f-4ebd-9918-7c2e886ec010:message:bb7f366d-c5a3-4bab-b9ff-74f76f16f1fe:0","occurredAt":1794926307688,"delivery":"history","event":{"type":"timeline","provider":"claude","item":{"type":"assistant_message","messageId":"msg-1:0","text":"Writing it."},"turnId":"73f8e50f-b4d9-4b12-96b7-ea4c6126b6f9"},"itemIdentity":{"key":"assistant:msg-1:0","completes":true}},

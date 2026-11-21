@@ -6,7 +6,7 @@ import { createDaemonMonitor } from './codex-daemon-monitor.js';
 import { restartCodexDaemon, supportsCodexDaemonControl } from './codex-daemon-runner.js';
 import { controllerIdentity, pruneControllerPackages, refreshInstalledLauncher, requestLauncherRestart } from './controller-update.js';
 import { createControllerHealth } from './controller-health.js';
-import { readUnknownNativeEvent } from '@orchardworks/agent-provider-sdk';
+import { readUnknownNativeEvent, resolveAgentProviderBehaviour } from '@orchardworks/agent-provider-sdk';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { appendFileSync, realpathSync } from 'node:fs';
@@ -185,8 +185,9 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
   const executionPolicy = await createHostExecutionPolicy(environment);
   if (executionPolicy) environment.AGENT_HOST_WORKSPACE = executionPolicy.defaultWorkspace;
   let daemonMonitor: ReturnType<typeof createDaemonMonitor> | undefined;
-  let healthRegistrations: () => Array<{ directory: { providerId: string }; nativeVersion?: string }> = () => [];
-  const health = createControllerHealth({ natives: () => healthRegistrations().map(item => ({ providerId: item.directory.providerId, version: item.nativeVersion })),
+  let healthRegistrations: () => Array<{ directory: { providerId: string }; nativeVersion?: string; adapter: { descriptor: Parameters<typeof resolveAgentProviderBehaviour>[0] } }> = () => [];
+  const health = createControllerHealth({ natives: () => healthRegistrations().map(item => ({ providerId: item.directory.providerId, version: item.nativeVersion,
+    verified: resolveAgentProviderBehaviour(item.adapter.descriptor).verifiedVersion })),
     launcher: { managed: !!process.env.AGENT_HOST_LAUNCHER, ...(process.env.AGENT_HOST_LAUNCHER_VERSION ? { version: process.env.AGENT_HOST_LAUNCHER_VERSION } : {}) } });
   const providerDiscovery = await createHostProviderDiscovery({ stateDir, env: environment,
     onDiagnostic: (line) => {

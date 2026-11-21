@@ -1,4 +1,5 @@
 {
+ "cli": {"name":"codex","version":"0.169.0"},
  "live": [
   {"type":"observation","sourceKey":"startup:broken","occurredAt":1794926487267,"delivery":"live","event":{"type":"timeline","provider":"codex","item":{"type":"error","message":"broken failed: MCP client for `broken` failed to start: MCP startup failed: No such file or directory (os error 2)"}},"itemIdentity":{"key":"startup:broken","completes":true,"liveOnly":true}},
   {"type":"observation","sourceKey":"turn:01a1e9f4-a717-7760-af59-e4305349f870:started","occurredAt":1794926487000,"delivery":"live","event":{"type":"turn_started","provider":"codex","turnId":"01a1e9f4-a717-7760-af59-e4305349f870"}},

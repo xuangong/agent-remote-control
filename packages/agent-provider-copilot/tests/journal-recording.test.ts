@@ -1,5 +1,4 @@
 import {mkdir, mkdtemp, readFile, realpath, rm, writeFile} from 'node:fs/promises';
-import {createRequire} from 'node:module';
 import {existsSync} from 'node:fs';
 import {homedir, tmpdir} from 'node:os';
 import {dirname, join} from 'node:path';
@@ -10,7 +9,7 @@ import type {AgentSession, ProviderObservation} from '@orchardworks/agent-provid
 import {journalObservation as kept, recordingShape, serializeRecording, type JournalRecording as Recording} from '@orchardworks/agent-provider-sdk/testing';
 import {CopilotAgentProvider} from '../src/provider.js';
 import {copilotBehaviour} from '../src/behaviour.js';
-import {fixture, observe, reply, waitFor, type ModelRequest} from '../src/test-utils/native-fixture.js';
+import {copilotRuntimeVersion, fixture, observe, reply, waitFor, type ModelRequest} from '../src/test-utils/native-fixture.js';
 
 /**
  * Records what the real Copilot CLI does for the scenarios the journal must survive: the observations of the live run, and
@@ -19,8 +18,8 @@ import {fixture, observe, reply, waitFor, type ModelRequest} from '../src/test-u
  * with the stored recording by the shape of its identities, so a change of the adapter or of the CLI is a visible change.
  */
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'journal');
-/** The CLI a recording is made with, which its header names: the pinned package the adapter runs. */
-const cli = {name: 'copilot', version: (createRequire(import.meta.url)('@github/copilot/package.json') as {version: string}).version};
+/** The CLI a recording is made with, which its header names: the runtime the pinned loader runs. */
+const cli = {name: 'copilot', version: copilotRuntimeVersion()};
 const RECORDING = process.env.RECORD_JOURNAL_FIXTURES === '1';
 
 type Handler = (body: ModelRequest, res: ServerResponse, index: number) => void;

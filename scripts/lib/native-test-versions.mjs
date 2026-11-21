@@ -73,6 +73,8 @@ function meetsBaseline(actual, target, range) {
 export async function verifyNativeTestVersions(mode, env = process.env) {
   const selections = [];
   const add = (provider, variable, fallback, range = 'exact') => selections.push({ provider, variable, selected: env[variable] ?? fallback, range });
+  if (mode === 'native-claude') add('claude', 'AGENT_CLAUDE_TEST_EXECUTABLE', 'claude', 'minimum');
+  if (mode === 'native-codex') add('codex', 'BORGEE_CODEX_TEST_EXECUTABLE', 'codex', 'minimum');
   if (['local', 'claude', 'claude-succession-evidence'].includes(mode))
     add('claude', 'AGENT_CLAUDE_TEST_EXECUTABLE', 'claude', mode === 'claude-succession-evidence' ? 'exact' : 'minimum');
   if (mode === 'local') {
@@ -89,12 +91,12 @@ export async function verifyNativeTestVersions(mode, env = process.env) {
       add('codex', 'AGENT_REMOTE_WINDOWS_CODEX_TEST_EXECUTABLE', undefined, 'minimum');
   }
   if (mode === 'codex-shared') add('codex', 'AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE', undefined, 'minimum');
-  if (['local', 'copilot'].includes(mode)) {
+  if (['local', 'copilot', 'native-copilot'].includes(mode)) {
     const manifestPath = createRequire(join(root, 'packages/agent-provider-copilot/package.json')).resolve('@github/copilot/package.json');
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
     selections.push({ provider: 'copilot', selected: resolve(dirname(manifestPath), manifest.bin.copilot), packageVersion: manifest.version, variable: 'the @github/copilot native runtime and its cache', range: 'minimum' });
   }
-  if (['opencode-native', 'opencode-server-native', 'opencode-succession-evidence', 'opencode-succession-adapter'].includes(mode)
+  if (['opencode-native', 'native-opencode', 'opencode-server-native', 'opencode-succession-evidence', 'opencode-succession-adapter'].includes(mode)
     || (mode === 'host-package' && env.AGENT_OPENCODE_TEST_EXECUTABLE))
     add('opencode', 'AGENT_OPENCODE_TEST_EXECUTABLE', undefined, ['opencode-server-native', 'host-package'].includes(mode) ? 'exact' : '2.x');
   const checked = new Set();

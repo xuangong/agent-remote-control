@@ -23,6 +23,7 @@ if (successionEvidence) {
 const changedSinceModes = ['affected', 'affected-build', 'affected-typecheck'];
 if (changedSinceModes.includes(mode) && !/^[0-9a-f]{7,40}$/.test(process.argv[3] ?? '')) throw new Error(`The ${mode} suite needs the commit to compare with.`);
 if (mode === 'claude' && !process.env.AGENT_CLAUDE_TEST_EXECUTABLE) throw new Error('Set AGENT_CLAUDE_TEST_EXECUTABLE to Claude Code 2.1.247 or newer for native Claude tests.');
+if (mode === 'native-opencode' && !isAbsolute(process.env.AGENT_OPENCODE_TEST_EXECUTABLE ?? '')) throw new Error('Set an absolute AGENT_OPENCODE_TEST_EXECUTABLE for the OpenCode native assumption checks.');
 if (mode === 'codex-shared' && !process.env.AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE) throw new Error('Set AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE to the native Codex executable for shared-runtime tests.');
 /**
  * Filters for the workspace packages changed since a commit, with their dependents. pnpm's own `...[commit]` filter
@@ -103,6 +104,11 @@ const commands = {
   // specs that left the older Relay-backed tiers, about 1,450 runs on one worker.
   components: ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'playwright', 'test', '--config=playwright.components.config.ts', '--timeout=30000', '--global-timeout=1500000', ...process.argv.slice(3)],
   conformance: ['--filter', '@orchardworks/agent-relay-node', 'run', 'test:conformance'],
+  // The native assumption checks of each CLI, by hand or nightly: the declaration and the recordings against the installed CLI (gap 6).
+  'native-codex': ['--filter', '@orchardworks/agent-provider-codex', 'run', 'test:native'],
+  'native-claude': ['--filter', '@orchardworks/agent-provider-claude', 'run', 'test:native'],
+  'native-copilot': ['--filter', '@orchardworks/agent-provider-copilot', 'run', 'test:native'],
+  'native-opencode': ['--filter', '@orchardworks/agent-provider-opencode', 'run', 'test:native'],
   // The provider conformance kit for every journal-capable adapter, on mock data: recordings, declared behaviour and faults through the port.
   providers: ['--filter', '@orchardworks/agent-remote-controller', 'exec', 'vitest', 'run', 'src/provider-conformance.test.ts', '--testTimeout=10000', '--hookTimeout=10000'],
   'e2e-flows': ['--filter', '@orchardworks/agent-e2e', 'run', 'test:e2e'],

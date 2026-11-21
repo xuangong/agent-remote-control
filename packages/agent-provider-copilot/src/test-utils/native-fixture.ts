@@ -1,9 +1,11 @@
+import {execFileSync} from 'node:child_process';
+import {mkdtempSync, rmSync} from 'node:fs';
 import {mkdtemp, mkdir, rm} from 'node:fs/promises';
 import {createServer, type ServerResponse} from 'node:http';
 import {once} from 'node:events';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {CopilotAgentProvider, type CopilotAgentProviderOptions} from '../provider.js';
+import {CopilotAgentProvider, resolveCopilotExecutable, type CopilotAgentProviderOptions} from '../provider.js';
 import {TimelineStore, projectTimelineRows} from '@orchardworks/agent-timeline';
 import type {AgentSession, ProviderStreamItem} from '@orchardworks/agent-provider-sdk';
 
@@ -42,4 +44,19 @@ export async function fixture(handler: (body: ModelRequest, res: ServerResponse,
  return {home, cwd, provider, baseUrl: `http://127.0.0.1:${address.port}`, requests, errors, diagnostics, async close() {
   try { await provider.dispose(); } finally { server.closeAllConnections(); await new Promise<void>(r => server.close(() => r())); await rm(home, {recursive: true, force: true}); }
  }};
+}
+
+/**
+ * The version of the Copilot runtime the adapter starts. The pinned `@github/copilot` package is a loader that runs a newer runtime it keeps
+ * up to date, so the package version is not the CLI's: this asks the runtime itself, in a temporary profile, as the native preflight does.
+ */
+export function copilotRuntimeVersion(): string {
+  const profile = mkdtempSync(join(tmpdir(), 'copilot-version-'));
+  try {
+    const output = execFileSync(process.execPath, [resolveCopilotExecutable(), '--version'], { encoding: 'utf8', timeout: 30_000,
+      env: { ...process.env, COPILOT_HOME: join(profile, 'profile'), GITHUB_TOKEN: undefined, GH_TOKEN: undefined, COPILOT_GITHUB_TOKEN: undefined } });
+    const version = /^(?:GitHub Copilot CLI\s+)?(\d+\.\d+\.\d+)/m.exec(output.trim())?.[1];
+    if (!version) throw new Error(`The Copilot runtime reported no version: ${output.slice(0, 200)}`);
+    return version;
+  } finally { rmSync(profile, { recursive: true, force: true }); }
 }

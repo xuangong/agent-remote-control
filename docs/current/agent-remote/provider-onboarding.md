@@ -77,6 +77,16 @@ Every journal-capable adapter passes the provider conformance kit (`@orchardwork
 
 The kit holds the adapter to its declaration: the reread order, item identity and continuity of every recording (part 1), each declared behaviour through the native fake (part 3), and each fault the CLI simulator plays from the declaration through the Controller (part 2). A finding names the declared field the adapter contradicts: fix the adapter, or the declaration when the recordings show the declaration was wrong.
 
+## Native assumption checks
+
+Each CLI has a native assumption check, run by hand or nightly with `pnpm test:native:<cli>` (`codex`, `claude`, `copilot`, `opencode`). It runs the real CLI in a temporary home against a scripted model, so nothing signs in and no session of the person's own CLIs is touched, and re-verifies against the installed version what the adapter declares and what its recordings record:
+- the installed version is the declaration's `verifiedVersion`, and the version every recording's header names;
+- the recorder, run against the committed recordings, finds the same shape (`recordingShape`);
+- each declared field it can provoke holds: the probe and the refusal of a second writer, the echoed input id, every error text the adapter matches as words;
+- a normal turn sends no event of a kind the adapter does not know.
+
+A difference fails loudly and names the declared field. Update the adapter, the declaration or its lists, or record again and review the diff; then set `verifiedVersion` to the version the checks passed on.
+
 ## Verification and release record
 
 Run existing relevant behavior tests with both per-test and outer deadlines. Root `pnpm test`, `pnpm test:e2e:flows` and `pnpm test:conformance` enforce outer deadlines; custom invocations need their own bounded wrapper. Select pinned native executables explicitly. Build before native tests that import `dist`. Use free test ports and preserve running user Hosts.

@@ -6,7 +6,7 @@
   "description": "Claude Code adapter for the provider-neutral Agent SDK.",
   "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" }, "./recordings": { "types": "./dist/recordings.d.ts", "import": "./dist/recordings.js" }, "./testing": { "types": "./dist/testing.d.ts", "import": "./dist/testing.js" } },
   "types": "./dist/index.d.ts",
-  "scripts": { "build": "tsc", "typecheck": "tsc --noEmit", "test": "vitest run --testTimeout=10000 --exclude '**/*.local.test.ts' --exclude '**/*.local.test.tsx'" },
+  "scripts": { "build": "tsc", "typecheck": "tsc --noEmit", "test": "vitest run --testTimeout=10000 --exclude '**/*.local.test.ts' --exclude '**/*.local.test.tsx'", "test:native": "tsc && vitest run src/native-assumptions.local.test.ts src/journal-recording.local.test.ts src/terminal-fork.local.test.ts --testTimeout=120000 --hookTimeout=30000 --maxWorkers=1" },
   "dependencies": { "@anthropic-ai/claude-agent-sdk": "0.3.247", "@modelcontextprotocol/sdk": "1.32.1", "@orchardworks/agent-provider-sdk": "workspace:*" },
   "devDependencies": { "@types/node": "24.13.3", "typescript": "5.9.3", "vitest": "4.1.11" }
 }

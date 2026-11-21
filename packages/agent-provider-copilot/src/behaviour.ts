@@ -1,8 +1,9 @@
 import type { AgentProviderBehaviour } from '@orchardworks/agent-provider-sdk';
 
 /**
- * What the GitHub Copilot CLI does, as the Provider SDK's behaviour contract states it (`agent-provider-sdk/src/behaviour.ts`). No
- * native check has confirmed it yet, so it names no verified version; a value marked "assumed" waits for one.
+ * What the GitHub Copilot CLI does, as the Provider SDK's behaviour contract states it (`agent-provider-sdk/src/behaviour.ts`). The native
+ * checks (`tests/native-assumptions.local.test.ts`) confirmed the native probe, the writer refusal and the event types of a turn on the
+ * Copilot runtime 1.0.109, which the pinned 1.0.83 loader runs; a value marked "assumed" waits for a check of its own.
  */
 export const copilotBehaviour = {
   // One client of the Copilot CLI writes a session; the SDK says at resume whether another client has it (`sessions.checkInUse`).
@@ -20,4 +21,6 @@ export const copilotBehaviour = {
   failures: { runtime: ['native_usage_limited'], inUse: ['writer_elsewhere'] },
   // The text a turn streamed before it was interrupted is kept live-only, since the CLI's history drops it (recording `interrupted`).
   liveOnly: ['interaction', 'reasoning', 'todo', 'error', 'partial_output'],
+  // The pinned @github/copilot 1.0.83 package is a loader that runs the runtime it keeps current: 1.0.109 on 2026-11-22.
+  verifiedVersion: '1.0.109',
 } as const satisfies AgentProviderBehaviour;

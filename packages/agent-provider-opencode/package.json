@@ -18,7 +18,8 @@
   "scripts": {
     "build": "tsc && node ../../scripts/build-opencode-plugin.mjs",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
-    "test": "vitest run --testTimeout=10000"
+    "test": "vitest run --testTimeout=10000",
+    "test:native": "tsc && node --test --test-timeout=150000 --test-concurrency=1 ../../scripts/opencode-native-assumptions.test.mjs"
   },
   "dependencies": {
     "@opencode/client": "2.0.25",

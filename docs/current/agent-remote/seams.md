@@ -20,7 +20,7 @@ flowchart LR
 
 | Fixture | Produced by | Home | Rule |
 | --- | --- | --- | --- |
-| Recording | The native tier against a real CLI (`pnpm test:claude`, `pnpm test:codex-shared` and the provider recorders), with the CLI version in the header | `agent-provider-<name>`, exported through `./recordings` | Never published; a changed recording is a reviewed diff |
+| Recording | The native tier against a real CLI (the provider recorders, `RECORD_JOURNAL_FIXTURES=1`), with the CLI and its version in the header (`"cli": { "name", "version" }`, which `pnpm fixtures:check` requires) | `agent-provider-<name>`, exported through `./recordings` | Never published; a changed recording is a reviewed diff. `pnpm test:native:<cli>` fails while the installed CLI is another version than the recordings name |
 | Golden rows | `pnpm transcripts:record` (the rows recorder): the canonical rows and item keys a real agent manager holds for a recording's live run and its reread | beside each recording as `<name>.rows.json` | Reviewed once; a change is a change of S1 behaviour |
 | Transcript | `pnpm transcripts:record`: a normalized JSON-lines capture of one scenario, with a header, steps, and frames with direction | `packages/agent-remote-fixtures/transcripts/<uplink or session-wire>` | Ids, times and tokens are placeholders numbered by first appearance; recording twice gives the same file |
 | Vector, builder | By hand | the owning package's `./testing` or `agent-remote-fixtures` | Tables and functions |

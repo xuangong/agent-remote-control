@@ -32,7 +32,14 @@ const EVENT_TYPES = [
 // Compiles only while the list names every type the SDK declares.
 export const everyEventTypeListed: readonly (typeof EVENT_TYPES)[number][] = [] as SessionEvent['type'][];
 
-const eventTypes = new Set<string>(EVENT_TYPES);
+/**
+ * Events the Copilot CLI sends that the SDK does not declare, which the adapter leaves out: the model call's own lifecycle and log. the Copilot
+ * runtime 1.0.109 sends them on every turn (native check, `tests/native-assumptions.local.test.ts`, 2026-11-22).
+ */
+const UNDECLARED_EVENT_TYPES = ['model.call_finished', 'model.call_start', 'model.log', 'model.message', 'model.messages_snapshot', 'model.model_call_started',
+  'model.model_call_success', 'model.response', 'model.turn_ended', 'model.turn_started'];
+
+const eventTypes = new Set<string>([...EVENT_TYPES, ...UNDECLARED_EVENT_TYPES]);
 
 /** Whether the adapter knows a session event's type. */
 export const knownCopilotEvent = (type: unknown): boolean => typeof type === 'string' && eventTypes.has(type);

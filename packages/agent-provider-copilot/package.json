@@ -22,7 +22,8 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
-    "test": "vitest run --testTimeout=10000"
+    "test": "vitest run --testTimeout=10000 --exclude '**/*.local.test.ts'",
+    "test:native": "vitest run --project process tests/native-assumptions.local.test.ts tests/journal-recording.test.ts --testTimeout=90000 --hookTimeout=30000"
   },
   "dependencies": {
     "@github/copilot-sdk": "1.0.11",

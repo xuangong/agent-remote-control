@@ -104,7 +104,7 @@ Sources:
 ### Our own documents that disagree with the code
 
 Each is an assumption a reader would take as documented:
-- `docs/current/agent-remote/seams.md:23` says recordings carry the CLI version in their header; none does.
+- `docs/current/agent-remote/seams.md:23` says recordings carry the CLI version in their header; none does. (Closed 2026-11-22: every recording names it, and `pnpm fixtures:check` requires it.)
 - `seams.md:105` promises a partition capability retry every 30 s; the code asks again at the next open (`core/journal-partition.ts:126-134`).
 - `docs/current/agent-remote/providers.md:83` says a Codex open hydrates `thread/read` history; it reads `thread/turns/list` and falls back to `thread/read` only on `-32601`. The same file's `historyMode: "paginated"` (`:139`) appears nowhere in the code.
 - `docs/current/agent-remote/copilot-normalized-events.md:38` keys Copilot's todo board `todo:<uuid>`; the code uses one key, `todo`.
@@ -404,6 +404,8 @@ Each step ships on its own:
 | B5 | Kit part 2 (faults through the port), and the nightly native checks with versioned recordings | M |
 | B6 | The Workbench reads capabilities from the declaration; process management moves behind one registration hook | M |
 | B7 | OpenCode is onboarded through the kit alone, as the acceptance test of the boundary | L |
+
+Status, 2026-11-22: B3 and B5 are built. The kit (`@orchardworks/agent-provider-sdk/conformance`, `pnpm test:providers`) holds Codex, Claude Code and Copilot to their declarations with recordings, a fake of each CLI and the CLI simulator; each CLI has a native check (`pnpm test:native:<cli>`); recordings name their CLI version. Gaps 6, 10 and 11 are closed by them: an unknown native event is a diagnostic for all four adapters, and a window of a `siblings_unordered` provider has a turn's siblings compared as a set. The clauses, the matrix and this machine's native results are in `docs/current/agent-remote/components.md` ("Provider conformance kit", "Native assumption checks").
 
 ## 5. The riskiest gaps, ranked
 

@@ -23,7 +23,8 @@ checked against the code; the test mapping follows test titles and their asserti
 | Timeline turns, process mode and work line | 21 | 3 | 3 | 0 |
 | Provider behaviour declaration (B1, 2026-11-21; C7 gap 10) | 7 | 0 | 0 | 0 |
 | Provider conformance kit (B3, 2026-11-22) | 9 | 0 | 0 | 0 |
-| **All** | **214** | **43** | **42** | **1** |
+| Native assumption checks (B5, 2026-11-22) | 5 | 0 | 0 | 0 |
+| **All** | **219** | **43** | **42** | **1** |
 
 Every clause now names the tests that prove it. The 43 gaps were closed on 2026-11-21 (section "Gaps closed" below): 42 by a
 unit test, a vector row or a seam test with mock data, each under 300 ms and each failing when the rule it proves is broken (by a
@@ -827,4 +828,25 @@ Matrix on 2026-11-22 (pass, or `fails` for an open item reproduced as an expecte
 | The CLI again after it exited | fails (open item) | fails (open item) | fails (open item) | n/a |
 
 Open item found by the kit: after its CLI exits mid-turn, a session keeps its failed runtime ("Provider observation stream failed"), also when the page opens it again; the watchdog releases a silent turn's runtime, but nothing releases an exited one.
+
+## Native assumption checks
+Module: one check per CLI, by hand or nightly: `pnpm test:native:codex` (`agent-provider-codex/src/native-assumptions.local.test.ts` and the recorder), `pnpm test:native:claude` (`agent-provider-claude/src/native-assumptions.local.test.ts`, the recorder and the terminal fork), `pnpm test:native:copilot` (`agent-provider-copilot/tests/native-assumptions.local.test.ts` and the recorder), `pnpm test:native:opencode` (`scripts/opencode-native-assumptions.test.mjs`). Each runs the installed CLI in a temporary home against a scripted model: nothing signs in, and no session of the person's own CLIs, Codex daemon or Controller is touched. Design source: section 4.4 of the requirements review (step B5, gap 6).
+
+### Clauses
+- N1. A recording names the CLI and the version that made it (`"cli"` header, required by `pnpm fixtures:check`); the check fails while the installed CLI is another version.
+- N2. The installed CLI is the declaration's `verifiedVersion`; the Controller's health compares installed CLIs with the same field (no table of its own).
+- N3. The recorder, run against the committed recordings, finds the same shape: only the journal's rules move a line (`recordingShape`).
+- N4. Each declared field the check can provoke holds on the installed CLI: the probe and the refusal of a second writer, typed; the echoed input id, live and read again; every error text the adapter matches as words, and whether the CLI now gives it a structured code.
+- N5. A normal turn sends no event of a kind the adapter does not know (gap 10); a new one is listed with its meaning, or reported.
+
+Run on 2026-11-22 on this machine:
+
+| CLI (installed) | N1 recordings | N2 declaration | N3 recorder | N4, N5 |
+|---|---|---|---|---|
+| Codex 0.171.0 | fails: made with 0.169.0 | pass (0.171.0) | 11 of 12; `plan-mode` drifted: the plan item's id lost its `-plan` suffix (keys still equal live and read again) | pass: the active-writer refusal is `-32600` with the exact words and no structured code; `no active turn to steer`; input id echoed; no unknown notification |
+| Claude Code 2.1.319 | pass | pass | 19 of 19, and the terminal fork | pass: input uuid kept in the transcript; no unknown message or record |
+| Copilot runtime 1.0.109 (the pinned 1.0.83 package is a loader that runs it) | pass, after recording again on 1.0.109 | pass, `verifiedVersion` 1.0.109 (was none) | 8 of 8 | pass: `checkInUse` refuses a second client, typed `writer_elsewhere`; ten `model.*` event types the SDK does not declare, now listed as known |
+| OpenCode 2.0.25 | none recorded | pass, `verifiedVersion` 2.0.25 (was none) | n/a | pass: no unknown event type in two turns |
+
+Open: the Codex recordings are recorded again on 0.171.0 in a reviewed step (`RECORD_JOURNAL_FIXTURES=1 pnpm test:native:codex`, the golden rows, and the S2 transcripts that `settled` feeds, whose content digests change). Not checked natively: Codex's 70 s unload in the shared daemon, the limit signals (the scripted models send none), Claude Code's fork beyond the terminal test.
 

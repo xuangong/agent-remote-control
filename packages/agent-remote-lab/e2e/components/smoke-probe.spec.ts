@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { PageProbe, sessionPane } from '@orchardworks/agent-e2e/smoke/probe';
 
 // A Window shows several conversations at once: primary groups side by side, docks beside them, and on the local instance
-// the views of earlier runs. Each conversation names the address of its session, and the smoke harness reads and drives the
+// the views of earlier runs. Each conversation names the native session it shows, and the smoke harness reads and drives the
 // session its link opened by that name: its probe, its observer and its composer, whichever place the Window gives it.
 
 const fixture = '/e2e/fixtures/window-tiles.html?tiles=2&docks=1';
@@ -10,7 +10,7 @@ const address = (tile: number) => `host/recorded/tile-${tile}`;
 
 test.skip(({ isMobile }) => isMobile, 'The smoke opens its pages on a desktop width, where a Window shows its tiles side by side.');
 
-test('each session of a Window is found by its address once, in a primary group or a dock', async ({ page }) => {
+test('each session of a Window is found by its name once, in a primary group or a dock', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(fixture);
   // Both primary groups are primary conversations: that class names no one session.

@@ -15,7 +15,9 @@ describe('the conversation a smoke page reads and drives', () => {
     expect(linkedSession(`${origin}/?window=group-1`)).toBeUndefined();
     expect(linkedSession(`${origin}/`)).toBeUndefined();
   });
-  it('is found by the address its conversation names, wherever the layout places it', () => {
-    expect(sessionPane('host-1/claude/native-1')).toBe('[data-session-address="host-1/claude/native-1"]');
+  it('is found by the native session its conversation names, wherever the layout places it and whether or not it knows its Host', () => {
+    expect(sessionPane('host-1/claude/native-1')).toBe('[data-native-session="claude/native-1"]');
+    // The command line reads everything after the provider as the native id.
+    expect(sessionPane('host-1/opencode/ses/1')).toBe('[data-native-session="opencode/ses/1"]');
   });
 });

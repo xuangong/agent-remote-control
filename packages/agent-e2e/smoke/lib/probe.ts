@@ -19,10 +19,14 @@ export function linkedSession(url: string): string | undefined {
 }
 
 /**
- * The conversation of one session, wherever the page shows it. A Window holds other views beside the one a run opened (several
- * primary groups side by side, docks, another session's composer); a conversation names the address of its session.
+ * The conversation of the session at `address`, wherever the page shows it. A Window holds other views beside the one a run
+ * opened (several primary groups side by side, docks, another session's composer), and a conversation names its native session
+ * (`<providerId>/<nativeSessionId>`): before the Window has loaded, the one painted from the device store does not know its Host.
  */
-export const sessionPane = (address: string): string => `[data-session-address=${JSON.stringify(address)}]`;
+export function sessionPane(address: string): string {
+  const [, provider, ...native] = address.split('/');
+  return `[data-native-session=${JSON.stringify(`${provider}/${native.join('/')}`)}]`;
+}
 
 /** `ms` is the time from the arrival of the page's document to its first row: the part the product controls. `totalMs` adds the document's own trip, which no code can shorten. */
 export interface Paint { label: string; ms: number; fromDeviceStore: boolean; timedOut?: boolean; totalMs?: number }

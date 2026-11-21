@@ -545,13 +545,14 @@ it.each([true, false])('groups Host, Provider, cwd and native Session ID in Info
   expect(rows.slice(0, 4)).toEqual(['HostMac Studiohost-id', 'Providerrecorded', `cwd${cached ? '/saved/workspace' : 'Not available in saved history'}`, 'Session IDnative-id']);
 });
 
-it.each([['host-id', 'host-id/recorded/native-id'], [undefined, 'local/recorded/native-id']])('names the session it shows by its address, as session links do (Host %s)', async (hostId, address) => {
+// Before its Window has loaded, a conversation painted from this device does not know its Host: the name leaves the Host out.
+it.each(['host-id', undefined])('names the native session it shows, whether or not it knows the Host (%s)', async hostId => {
   const session = { ...(hostId ? { hostId } : {}), providerId: 'recorded', nativeSessionId: 'native-id', title: 'Saved session' };
   const state = { ...replicaState, timeline: { ...replicaState.timeline, entries: [{ providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-11-21T00:00:00Z',
     sourceSeqRanges: [], collapsed: [], resources: [], item: { type: 'assistant_message' as const, text: 'READY' } }] } };
   const view = await render(<LabWorkbench sessionIdentity={session} state={state} sessionStatus="ready" actions={{}} />);
-  const named = [...view.querySelectorAll('[data-session-address]')];
-  expect(named.map(node => node.getAttribute('data-session-address'))).toEqual([address]);
+  const named = [...view.querySelectorAll('[data-native-session]')];
+  expect(named.map(node => node.getAttribute('data-native-session'))).toEqual(['recorded/native-id']);
   // The whole conversation is under the name: its rows and its composer.
   const rows = view.querySelectorAll('.agent-timeline-entry').length;
   expect(rows).toBeGreaterThan(0);
@@ -562,7 +563,7 @@ it.each([['host-id', 'host-id/recorded/native-id'], [undefined, 'local/recorded/
 
 it('names no session when it shows none', async () => {
   const view = await render(<LabWorkbench state={replicaState} sessionStatus="ready" actions={{}} />);
-  expect(view.querySelector('[data-session-address]')).toBeNull();
+  expect(view.querySelector('[data-native-session]')).toBeNull();
   await unmount(view);
 });
 

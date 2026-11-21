@@ -88,10 +88,26 @@ in the instance's `controller/` state and survives restarts; `status` shows
 commands still work; `window`, `api`, `host list`, `session handoff` and
 `--star` do not.
 
+## A Codex terminal beside the page
+
+`agent-remote-controller-dev codex exec resume <session-id> "<prompt>"` runs one
+turn of a Codex session from a terminal, and `codex resume <session-id>` opens it
+interactively. Both join the session through the user's shared Codex daemon, as
+another client of the thread the page shows: Codex orders the turns (it refuses a
+second turn while one runs, `remote thread already has an active turn`), and the
+page shows the terminal's turn live. A separate Codex process (plain
+`codex exec resume` without the shared socket) is refused by Codex with
+`already has an active writer` while the thread is loaded in the daemon; Codex
+unloads a thread about a minute after its last client leaves. Use only sessions
+you created; `--last`, another `--remote` or `--cd` are refused.
+
 ## What the instance refuses
 
-- `start`, `stop`, `foreground`, `pair`, `autostart` and the native CLIs: the
-  runner owns the Controller, and the native CLIs act on the shared profiles.
+- `start`, `stop`, `foreground`, `pair`, `autostart` and the native CLIs other
+  than `codex exec resume` and `codex resume` of one session: the runner owns the
+  Controller, and the native CLIs act on the shared profiles. The Codex daemon's
+  own commands (`codex daemon …`) and the Codex sign-in stay with the user's
+  Controller.
 - `update` and `host update`: run `pnpm local up`.
 - `session attach`, which can take a session over from its other clients.
 - `host tunnel start|stop`: the VS Code tunnel is shared with the user's own

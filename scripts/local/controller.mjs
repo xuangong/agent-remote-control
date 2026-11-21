@@ -11,10 +11,31 @@ export const controllerCli = source => join(source, 'packages/agent-controller/d
 
 const controllerCommands = new Set(['status', 'diagnostics', 'session', 'host', 'window', 'api', 'role', 'login', 'logout', '--skill', 'help', '--help', '-h', '--version']);
 
+/** Codex options that choose another session, another server or the daemon's own lifecycle instead of joining one session. */
+const codexSessionChoosers = new Set(['--last', '--all', '--remote', '--remote-auth-token-env', '--cd', '-C', '--worktree']);
+
+/**
+ * Why `codex …` is not run for the instance, or undefined when it is. Only joining one existing session through the shared Codex
+ * daemon is run (`codex exec resume <session-id> [prompt]`, `codex resume <session-id>`): the terminal is then another client of the
+ * session the page shows, and Codex orders their turns. Daemon management, sign-in and new sessions act on what the user's own
+ * Controller shares, so they are refused.
+ */
+function codexRefusal(args) {
+  const resume = args[1] === 'exec' ? args.slice(2) : args.slice(1);
+  const joined = resume[0] === 'resume' && (args[1] === 'exec' || args[1] === 'resume');
+  const session = resume[1];
+  if (!joined || session === undefined || session.startsWith('-') || args.some(arg => codexSessionChoosers.has(arg.split('=')[0]))) {
+    return 'Here codex only joins one session through the shared Codex daemon: codex exec resume <session-id> [prompt] or codex resume <session-id>. The daemon and the Codex sign-in belong to your own Controller.';
+  }
+  return undefined;
+}
+
 /** Why a Controller command is not run for the instance, or undefined when it is. */
-export function controllerRefusal([group, action, detail]) {
+export function controllerRefusal(args) {
+  const [group, action, detail] = args;
+  if (group === 'codex') return codexRefusal(args);
   if (!controllerCommands.has(group ?? '')) {
-    return 'The local instance runs session, host, window, api, role, login, logout, status, diagnostics and --skill. The runner owns start, stop, pairing and updates (run pnpm local up), and the native CLIs could take over shared sessions.';
+    return 'The local instance runs session, host, window, api, role, login, logout, status, diagnostics, --skill and codex (to join a session through the shared Codex daemon). The runner owns start, stop, pairing and updates (run pnpm local up), and the other native CLIs could take over shared sessions.';
   }
   if (group === 'session' && action === 'attach') return 'session attach runs a native CLI on the shared profiles and can take a session over from its other clients; open the session in the instance website instead.';
   if (group === 'host' && action === 'update') return "The runner owns the instance's build: run pnpm local up instead of host update.";

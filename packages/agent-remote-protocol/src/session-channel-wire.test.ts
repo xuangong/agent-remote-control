@@ -80,7 +80,7 @@ describe('session channel server adapter', () => {
         opened.set(agentId, lastUsed);
         return { accept(stream) { stream.onClose(() => released.push(agentId)); } };
       }, {}, undefined, { register(subscription) { registered.push(subscription); return () => registered.splice(registered.indexOf(subscription), 1); } });
-      expect(socket.sent[0]).toEqual({ protocolVersion, type: 'ready', settlement: 1, preemption: 1 });
+      expect(socket.sent[0]).toEqual({ protocolVersion, type: 'ready', preemption: 1 });
       socket.subscribe(1, 'shown');
       socket.receive('subscribe', { subscriptionId: 2, agentId: 'retained', message: negotiate, idleMs: 30_000 });
       await tick();
@@ -108,7 +108,7 @@ describe('session channel server adapter', () => {
     const socket = new Socket();
     let lastUsed: (() => number) | undefined;
     const cleanup = protocol.acceptSessionChannel(socket, 'session', async (_agentId, used) => { lastUsed = used; return { accept() {} }; });
-    expect(socket.sent[0]).toEqual({ protocolVersion, type: 'ready', settlement: 1 });
+    expect(socket.sent[0]).toEqual({ protocolVersion, type: 'ready' });
     socket.receive('subscribe', { subscriptionId: 1, agentId: 'a', message: negotiate, idleMs: 5_000 });
     socket.receive('intent', { active: false, subscriptionIds: [1] });
     await tick();
@@ -119,7 +119,7 @@ describe('session channel server adapter', () => {
   it('exports a pure socket adapter', () => { expect(protocol.acceptSessionChannel).toBeTypeOf('function'); });
   it('announces ready immediately and answers ping without opening a session', () => {
     const { socket } = setup();
-    expect(socket.sent).toEqual([{ protocolVersion, type: 'ready', settlement: 1 }]);
+    expect(socket.sent).toEqual([{ protocolVersion, type: 'ready' }]);
     socket.receive('ping');
     expect(socket.sent.at(-1)).toEqual({ protocolVersion, type: 'pong' });
   });

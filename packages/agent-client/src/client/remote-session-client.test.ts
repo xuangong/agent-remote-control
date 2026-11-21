@@ -1123,18 +1123,14 @@ class FakeTransport implements RemoteAgentTransport {
   timelineRequests: Array<{ direction: TimelineDirection; cursor?: TimelineCursor }> = [];
   connections = 0;
   closedConnections = 0;
-  /** Whether the Relay announced that it decodes a settlement. */
-  settles = true;
   private readonly timelineRequestsPending: Array<ReturnType<typeof deferred<HistoryPage>>> = [];
 
   connect(_agentId: string, listener: RemoteTransportListener): RemoteConnection {
     this.connections += 1;
     this.listener = listener;
-    const transport = this;
     return {
       send: (message) => this.sent.push(message),
       close: () => { this.closedConnections += 1; },
-      get settles() { return transport.settles; },
     };
   }
 
@@ -2330,23 +2326,6 @@ describe('settling a message whose delivery is unknown, once the session is read
       expect(f.replica.getState().outgoingMessages).toMatchObject([{ status: 'awaiting_echo' }]);
       f.echo(1, 'Cut off');
       expect(f.replica.getState().outgoingMessages).toEqual([]);
-    } finally { f.client.stop(); }
-  });
-
-  it('asks a Relay that did not announce settlement nothing, and keeps the message unknown', async () => {
-    let reconnect: (() => void) | undefined;
-    const f = await outgoingFixture({ scheduleReconnect: (_delay, next) => { reconnect = next; return () => undefined; } });
-    try {
-      f.transport.settles = false;
-      void f.client.sendMessage('Cut off').catch(() => undefined);
-      f.transport.disconnect();
-      await f.transport.settle();
-      reconnect!();
-      f.transport.open();
-      completeSubscription(f.transport);
-      await f.transport.settle();
-      expect(f.transport.sent.filter(message => message.type === 'send_message')).toHaveLength(1);
-      expect(f.replica.getState().outgoingMessages).toMatchObject([{ status: 'unconfirmed' }]);
     } finally { f.client.stop(); }
   });
 

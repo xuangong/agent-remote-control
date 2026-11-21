@@ -1068,10 +1068,8 @@ export class RemoteSessionClient {
    * message's operation reached the native CLI, which the Host answers from native history and sends nothing. One that arrived waits for
    * its echo; one that never did is Not sent, for the reader to retry as a new message; any other answer leaves it unknown until the next
    * connection, at most `SETTLEMENT_ASKS` times. A message is never sent again to settle it.
-   * A Relay that did not announce `settlement` is not asked: it would close the whole channel on the frame, so the message stays unknown there.
    */
   private settleUnconfirmed(): void {
-    if (this.connection?.settles !== true) return;
     for (const message of this.replica.getState().outgoingMessages ?? []) {
       if (message.agentId !== this.agentId || message.status !== 'unconfirmed' || !message.operationId || this.settling.has(message.id)) continue;
       const { id, operationId } = message;

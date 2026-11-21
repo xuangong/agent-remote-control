@@ -46,9 +46,7 @@ export const SessionChannelServerMessage = Type.Union([
   // changed and the IDs of the ones that left it (delivered or cancelled).
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('session_outbox'), snapshot: Type.Optional(Type.Literal(true)),
     entries: Type.Array(OutboxEntry, { maxItems: OUTBOX_LIMIT }), removed: Type.Optional(Type.Array(OutboxEntry.properties.id, { maxItems: OUTBOX_HOST_LIMIT })) }),
-  Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('ready'), successions: Type.Optional(Type.Literal(1)), preemption: Type.Optional(Type.Literal(1)),
-    // The Relay decodes `send_message` with `settle`; without it, a frame carrying `settle` is undecodable and closes the whole channel.
-    settlement: Type.Optional(Type.Literal(1)) }),
+  Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('ready'), successions: Type.Optional(Type.Literal(1)), preemption: Type.Optional(Type.Literal(1)) }),
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('message'), subscriptionId: SubscriptionId, message: Type.Union([ServerMessage, IncompatibleProtocolVersionErrorMessage]) }),
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('closed'), subscriptionId: SubscriptionId, code: Type.Integer(), reason: Type.String() }),
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('pong') }),

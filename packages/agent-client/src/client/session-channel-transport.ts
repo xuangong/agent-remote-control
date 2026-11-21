@@ -63,8 +63,6 @@ interface Channel {
   successions?: boolean;
   /** The Relay allocates streams by use and accepts intent reports. */
   preemption?: boolean;
-  /** The Relay decodes a `send_message` that only asks whether its operation arrived. */
-  settlement?: boolean;
   openTimer?: ReturnType<typeof setTimeout>;
   readyTimer?: ReturnType<typeof setTimeout>;
   pingTimer?: ReturnType<typeof setInterval>;
@@ -139,7 +137,6 @@ export class SessionChannelPool {
     return {
       send: (message) => this.send(subscription, message),
       close: () => this.retire(subscription),
-      get settles() { return subscription.channel?.settlement === true; },
       setActive: (active, inactiveSince) => {
         if (!subscription.active) return;
         if (!active && subscription.inUse) subscription.inactiveSince = inactiveSince ?? Date.now();
@@ -336,7 +333,6 @@ export class SessionChannelPool {
         channel.ready = true;
         channel.successions = this.dependencies.sessionSuccessions === true && frame.successions === 1;
         channel.preemption = frame.preemption === 1;
-        channel.settlement = frame.settlement === 1;
         this.dependencies.onSuccessionSupport?.(channel.successions);
         channel.opened = true;
         clearTimeout(channel.openTimer);

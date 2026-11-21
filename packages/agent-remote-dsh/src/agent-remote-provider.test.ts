@@ -41,6 +41,6 @@ describe('DSH plugin Agent Remote Provider export', () => {
   it('constructs the DSH Provider from a Cordis context', () => {
     const context = { get: () => undefined, on: () => () => undefined };
     const provider = createDshAgentRemoteProvider(context as never);
-    expect(provider.descriptor).toEqual({ providerId: 'dsh', displayName: 'DeepSeek Harness' });
+    expect(provider.descriptor).toMatchObject({ providerId: 'dsh', displayName: 'DeepSeek Harness', behaviour: { concurrency: { model: 'none' } } });
   });
 });

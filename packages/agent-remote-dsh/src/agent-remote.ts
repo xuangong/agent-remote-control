@@ -281,7 +281,7 @@ async function startRemoteHost(
       }
     };
     uplink = createRemoteHostUplinkClient({
-      relay: relay!, installationId, name: instanceName, providers: [dsh.descriptor], remoteKey, url, ...uplinkPorts,
+      relay: relay!, installationId, name: instanceName, providers: [{ providerId: dsh.descriptor.providerId, displayName: dsh.descriptor.displayName }], remoteKey, url, ...uplinkPorts,
       resolveSession: (sessionId) => {
         const projection = projections.get(sessionId);
         return projection ? relay!.requireAgent(projection.bindingId) : undefined;

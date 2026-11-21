@@ -8,6 +8,8 @@ import { NativeSessionOwnerError } from '../native-session-owner.js';
 import { pendingReferenceNote } from '../session-refs.js';
 import { hasHeldChild, mayReconcileIdle, mayReleaseIdle } from './idle-release.js';
 import { releaseGraceMs } from './residency.js';
+import { withinResumeDeadline } from './resume-deadline.js';
+import { TURN_SILENCE_MS, watchTurns } from './turn-watchdog.js';
 import { withReferenceNotes } from '../session-reference-notes.js';
 import type { SessionCoreContext } from './context.js';
 import { boundedSourceIdentity, HostRequestError } from './requests.js';
@@ -20,7 +22,10 @@ import type { SessionBinding as Binding } from './types.js';
  * - `project` binds a native session to a proposed agent identity and attaches it once: it waits for the binding, reuses a live runtime whose
  *   creation evidence matches, otherwise opens the native session (with a child's parent held, role or worker tools, the saved creation or prefix
  *   evidence, and a takeover only inside its admitted operation), annotates it, and registers it with the Relay's runtime. A provider that returns
- *   another native identity is closed and refused; a Controller that closed meanwhile disposes what it opened.
+ *   another native identity is closed and refused; a Controller that closed meanwhile disposes what it opened. An open the CLI does not answer
+ *   within its declared resume deadline fails `native_unresponsive` and frees the binding (`resume-deadline.ts`); a takeover is not timed.
+ *   The turns of a CLI that declares no heartbeat are watched (`turn-watchdog.ts`): a turn silent for `TURN_SILENCE_MS` ends
+ *   `native_unresponsive` and the runtime is released.
  * - `acquireSession` holds a runtime for its caller: it holds the parent of a child first, waits for a release in progress, and releases a diverged, quiet
  *   session so it is read again before a send continues from it. The returned lease releases the runtime and its parent once.
  * - `watch` gives an idle session its release rule (`idle-release.ts`): released when it may be, journal first, then the runtime, then the directory; and
@@ -46,9 +51,7 @@ export function createAttachment(ctx: SessionCoreContext) {
       directoryCanRelease: !!providers.require(binding.providerId).directory.canReleaseSession?.(binding.nativeSessionId), runtimeCanReleaseIdle: !!liveAgent(binding.agentId)?.canReleaseIdle(),
       childHeld: childHeld(),
     }), async () => {
-      await terminalRefresh.releaseJournal(binding);
-      await relay.closeAgent(binding.agentId);
-      await providers.require(binding.providerId).directory.sessionReleased?.(binding.nativeSessionId);
+      await releaseRuntime(binding);
       lifecycle('session_idle_released', binding);
     }, async isCurrent => {
       const source = providers.require(binding.providerId).directory;
@@ -67,15 +70,20 @@ export function createAttachment(ctx: SessionCoreContext) {
     }, graceMs);
     shown.apply(binding);
   }
+  /** Releases a session's runtime in the order of C20: what its journal holds is published, then the runtime closes, then the directory's hold. */
+  async function releaseRuntime(binding: Binding): Promise<void> {
+    const { providers, relay, terminalRefresh } = ctx;
+    await terminalRefresh.releaseJournal(binding);
+    await relay.closeAgent(binding.agentId);
+    await providers.require(binding.providerId).directory.sessionReleased?.(binding.nativeSessionId);
+  }
   async function releaseIfDiverged(binding: Binding): Promise<void> {
-    const { liveAgent, providers, relay, terminalRefresh } = ctx;
+    const { liveAgent, providers } = ctx;
     const directory = providers.require(binding.providerId).directory;
     if (!directory.checkDivergence || binding.parentNativeSessionId || !liveAgent(binding.agentId) || !await directory.checkDivergence(binding.nativeSessionId)) return;
     const agent = liveAgent(binding.agentId);
     if (!agent?.canReleaseIdle()) return;
-    await terminalRefresh.releaseJournal(binding);
-    await relay.closeAgent(binding.agentId);
-    await directory.sessionReleased?.(binding.nativeSessionId);
+    await releaseRuntime(binding);
   }
   async function acquireSession(agentId: string): Promise<RemoteHostSessionLease | undefined> {
     const { admission, sessions, idle, liveAgent, tracked } = ctx;
@@ -147,19 +155,25 @@ export function createAttachment(ctx: SessionCoreContext) {
           : await roles.extensions(genericSuccessionSource(attached) ?? attached, () => attached) ?? workerExtensions(providerId, attached, () => attached);
         ledger.recordWorkerTools(proposedAgentId, !!extensions?.toolNamespaces?.some(namespace => namespace.name === 'agent_remote' && !namespace.deferred));
         const open = () => source.open(nativeSessionId, { ...(takeOver ? { takeOver } : {}), ...(extensions ? { extensions } : {}), ...(nativePrefix ? { nativePrefix: nativePrefix.handle } : {}), ...(nativeCreation ? { nativeCreation, resumeHandle: succession?.contexts.forTarget(nativeRef({ providerId, nativeSessionId }))?.resumeHandle, resumeOptions: { initializeEmpty: succession?.contexts.canInitializeEmpty(nativeRef({ providerId, nativeSessionId })) === true } } : {}) });
+        // A resume the CLI does not answer within its declared deadline frees the binding instead of holding it (gap 4).
+        const behaviour = resolveAgentProviderBehaviour(providers.require(providerId).adapter.descriptor);
+        const resumeDeadlineMs = behaviour.resume.deadlineMs;
         const nativeSession = parentNativeSessionId === undefined ? await (takeOver
           ? directoryNativeEffect(successionBoundary?.currentEntry(), successionBoundary?.currentEntry()?.targets ?? [], async () => {
             try { return await open(); } catch (error) {
               if (error instanceof NativeSessionOwnerError && ['native_owner_changed', 'native_session_owned', 'succession_admission_closed'].includes(error.code)) throw new AgentOperationRejectedError(error.code, error.message);
               throw error;
             }
-          }) : open())
-          : source.openChild ? await source.openChild(parentNativeSessionId, nativeSessionId)
+          }) : withinResumeDeadline(open(), resumeDeadlineMs))
+          : source.openChild ? await withinResumeDeadline(source.openChild(parentNativeSessionId, nativeSessionId), resumeDeadlineMs)
           : (() => { throw new HostRequestError(400, 'child_attachment_unavailable', 'This provider does not support native child attachment.'); })();
-        const noted = sessionRefs && parentNativeSessionId === undefined ? withReferenceNotes(nativeSession, {
+        // A turn of a CLI that declares no heartbeat is watched: a silent one ends native_unresponsive and the runtime is released (gap 4).
+        const watched = behaviour.turn?.heartbeatMs === undefined
+          ? watchTurns(nativeSession, { silenceMs: TURN_SILENCE_MS, unresponsive: () => { void releaseRuntime(binding).catch(() => undefined); } }) : nativeSession;
+        const noted = sessionRefs && parentNativeSessionId === undefined ? withReferenceNotes(watched, {
           pending: () => pendingReferenceNote({ providerId, nativeSessionId }, sessionRefs),
           delivered: revision => sessionRefs.store.markDelivered({ providerId, nativeSessionId }, revision),
-        }) : nativeSession;
+        }) : watched;
         const annotated = tpm ? await tpm.annotateSession(providerId, nativeSessionId, noted) : noted;
         const session = successionBoundary ? successionBoundary.wrap(nativeRef(binding), annotated) : annotated;
         if (admission.closed) {

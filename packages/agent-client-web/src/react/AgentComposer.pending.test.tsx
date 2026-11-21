@@ -3,6 +3,7 @@ import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { render, rerender, unmount } from '../test/setup.js';
 import { AgentComposer, type AgentComposerProps } from './AgentComposer.js';
+import { PENDING_SEND_LIMIT, PENDING_SEND_TIMEOUT_MS } from './usePendingSend.js';
 import { CONTROL } from '@orchardworks/agent-client/testing';
 import { createReplicaState, remoteSessionState, type AgentReplicaState, type RemoteSessionState, type RemoteSessionStatus } from '@orchardworks/agent-client';
 
@@ -79,7 +80,7 @@ it('queues multiple messages, keeps editing available and drains FIFO without ch
   expect(view.container.querySelector('textarea')).toMatchObject({ value: '', disabled: false });
   await view.type('Second'); await view.click();
   await view.type('Still editing');
-  await advance(120000);
+  await advance(PENDING_SEND_TIMEOUT_MS - 1);
   expect(view.container.querySelectorAll('[data-testid="pending-send"]')).toHaveLength(2);
   expect(view.send).not.toHaveBeenCalled();
   await view.update({ connection: 'ready' });
@@ -115,7 +116,7 @@ it.each(['visibility', 'page'] as const)('waits in the background and sends on %
     else window.dispatchEvent(new Event('pagehide'));
   });
   await view.update({ connection: 'ready' });
-  await advance(120000);
+  await advance(PENDING_SEND_TIMEOUT_MS - 1);
   expect(view.send).not.toHaveBeenCalled();
   await act(async () => {
     if (kind === 'visibility') { visibility.mockReturnValue('visible'); document.dispatchEvent(new Event('visibilitychange')); }
@@ -433,12 +434,12 @@ it('clears a successful plain-text send in the current fixed image-capable sessi
   expect(view.container.querySelector('[role="textbox"]')!.textContent).toBe('');
 });
 
-it('keeps a waiting message Sending while its view cannot take messages yet, however long, and sends it once the session is ready', async () => {
+it('keeps a waiting message Sending while its view cannot take messages yet, up to the timeout, and sends it once the session is ready', async () => {
   const view = await setup({ sessionKey: 'view' });
   await view.type('Typed while opening'); await view.click();
   // A view that is still opening its session (a Window pane whose locator is not confirmed yet) is draft-only: a wait, not a refusal.
   await view.update({ draftOnly: true });
-  await advance(60_000);
+  await advance(PENDING_SEND_TIMEOUT_MS - 1);
   expect(view.notice()?.textContent).toContain('Sending');
   expect(view.notice()?.textContent).not.toContain('Not sent');
   expect(view.send).not.toHaveBeenCalled();
@@ -473,19 +474,53 @@ it('lets a message the session refused for certain be retried, and sends it agai
   expect(send.mock.calls).toEqual([['Refused'], ['Refused']]);
 });
 
-it('has no bound on the waiting queue and no timeout: 50 waiting messages stay Sending for a day and then drain in order', async () => {
-  const view = await setup({ sessionKey: 'long-wait' });
-  const texts = Array.from({ length: 50 }, (_, index) => `Message ${index + 1}`);
+it('holds at most 20 waiting messages and keeps the 21st in the composer, saying why, never dropping it', async () => {
+  const view = await setup({ sessionKey: 'bounded' });
+  const texts = Array.from({ length: PENDING_SEND_LIMIT }, (_, index) => `Message ${index + 1}`);
   for (const text of texts) { await view.type(text); await view.click(); }
-  await advance(24 * 60 * 60 * 1000);
-  const notices = [...view.container.querySelectorAll('[data-testid="pending-send"]')];
-  expect(notices).toHaveLength(50);
-  expect(notices.every(notice => notice.textContent?.includes('Sending') && !notice.textContent.includes('Not sent'))).toBe(true);
-  expect(view.send).not.toHaveBeenCalled();
+  await view.type('One more'); await view.click();
+  expect(view.container.querySelectorAll('[data-testid="pending-send"]')).toHaveLength(PENDING_SEND_LIMIT);
+  expect(view.container.querySelector('textarea')!.value).toBe('One more');
+  expect(view.container.textContent).toContain(`${PENDING_SEND_LIMIT} messages are already waiting for this session.`);
   await view.update({ connection: 'ready' });
   await advance(1000);
   expect(view.send.mock.calls).toEqual(texts.map(text => [text]));
-  expect(view.notice()).toBeNull();
+  await view.click();
+  expect(view.send).toHaveBeenLastCalledWith('One more');
+});
+
+it('says Not sent for a message that could not leave within a minute, keeps it with Retry, and sends it only then', async () => {
+  const view = await setup({ sessionKey: 'timed-out' });
+  await view.type('Waited too long'); await view.click();
+  await advance(PENDING_SEND_TIMEOUT_MS - 1);
+  expect(view.notice()?.textContent).toContain('Sending');
+  await advance(1);
+  expect(view.notice()?.textContent).toContain('Not sent');
+  expect(view.notice()?.querySelector('[title]')?.getAttribute('title')).toContain('This message waited a minute and could not be sent.');
+  await view.update({ connection: 'ready' });
+  await advance(1000);
+  expect(view.send).not.toHaveBeenCalled();
+  await view.click('[aria-label="Retry pending send"]');
+  expect(view.send).toHaveBeenCalledExactlyOnceWith('Waited too long');
+});
+
+it('says Check delivery for a message that left and had no answer within a minute, and keeps it until the person dismisses it', async () => {
+  const send = vi.fn(() => new Promise<void>(() => {}));
+  const view = await setup({ sessionKey: 'unanswered', connection: 'ready', onSendMessage: send });
+  await view.type('Left, no answer'); await view.click();
+  await view.type('Behind it'); await view.click();
+  expect(send).toHaveBeenCalledOnce();
+  await advance(PENDING_SEND_TIMEOUT_MS - 1);
+  expect(view.container.querySelectorAll('[data-testid="pending-send"]')).toHaveLength(1);
+  await advance(1);
+  const [left, behind] = view.container.querySelectorAll('[data-testid="pending-send"]');
+  expect(left!.textContent).toContain('Check delivery');
+  expect(left!.querySelector('[aria-label="Retry pending send"]')).toBeNull();
+  // The message behind it waited as long without leaving: it is Not sent, and Retry sends it.
+  expect(behind!.textContent).toContain('Not sent');
+  await view.click('[aria-label="Dismiss message after checking delivery"]');
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(view.notice()?.textContent).toContain('Not sent');
 });
 
 it('delivers a waiting message once when two composers are mounted on one session key and can send at the same moment', async () => {

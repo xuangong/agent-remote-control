@@ -20,7 +20,7 @@ import { draftHasContent, snapshotContent } from './composer-document.js';
 import { useComposerKeyboardDismiss } from './useComposerKeyboardDismiss.js';
 import type { MessagePart } from '@orchardworks/agent-remote-protocol';
 import { useSendButtonPress } from './useSendButtonPress.js';
-import { usePendingSend } from './usePendingSend.js';
+import { PENDING_SEND_LIMIT, usePendingSend } from './usePendingSend.js';
 import { SharedByKey } from './shared-by-key.js';
 import { PendingSendQueue } from './PendingSendQueue.js';
 import { composerAvailability, errorWords, remoteSessionState, type MessageKey, type RemoteSessionState, type AgentReplicaState, type SessionFacts } from '@orchardworks/agent-client';
@@ -323,10 +323,12 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
       ? [[part.imageId, { blob: imageDraft.images[part.imageId]?.blob, uploadId: crypto.randomUUID() }]] : []));
     const containsImages = hasImages;
     currentDraft.feedback = undefined;
-    waiting.start({
+    const queued = waiting.start({
       text: containsImages ? parts.map(part => part.type === 'text' ? part.text : `[${part.label}]`).join('') : submitted,
       payload: { agentId, containsImages, parts, images, submitted, imageRecipient, hadImageBinding: Boolean(imageDraftBinding) },
     });
+    // A full queue refuses the message; it stays in the composer, said so, rather than being dropped.
+    if (!queued) { currentDraft.feedback = { kind: 'error', message: t('composer.pending.full', { count: PENDING_SEND_LIMIT }) }; refresh(value => value + 1); return; }
     setText('');
     focusInput();
     refresh(value => value + 1);

@@ -42,8 +42,7 @@ describe('a provider CLI that refuses or stalls a resume', () => {
     cli.faults.hangResume();
     const refused = await open();
     expect(refused.status).toBeGreaterThanOrEqual(500);
-    // The hung resume holds the Controller's binding until it answers: nothing on the Controller's side gives it up (requirements review,
-    // gap 4; `resume-deadline.test.ts` pins it as an expected failure).
+    // The Relay answers first here; the Controller gives the hung resume up at its own declared deadline (`resume-deadline.test.ts`).
     cli.faults.heal();
   });
   it('names a usage limit in fixed words, but not when it resets: nothing passes resetsAt on (requirements review, gap 3)', async () => {

@@ -8,8 +8,8 @@ import { AGENT_RUNTIME_ERROR_CODES, AGENT_SESSION_IN_USE_REASONS } from './provi
  *
  * Contract.
  * - C1 A declaration states facts of the CLI at `verifiedVersion`: how it treats other clients of a session, what a reread of its history
- *   gives, what a resume costs and how long it may take, what it does with input, how it signals a usage limit, which failures the adapter
- *   raises typed, and which kinds of items a reread cannot rebuild.
+ *   gives, what a resume costs and how long it may take, what it does with input, whether a running turn shows a heartbeat, how it signals
+ *   a usage limit, which failures the adapter raises typed, and which kinds of items a reread cannot rebuild.
  * - C2 `resolveAgentProviderBehaviour` returns the descriptor's declaration when every field holds a value this contract names, and the
  *   undeclared behaviour otherwise: a declaration is taken whole or not at all, never completed field by field.
  * - C3 The undeclared behaviour is what the Controller assumed before declarations existed: it is the session's only client, a reread
@@ -68,11 +68,21 @@ export interface AgentInputBehaviour {
   readonly whileBusy: 'steer' | 'queue' | 'refuse';
 }
 
+export interface AgentTurnBehaviour {
+  /**
+   * The adapter shows that a running turn is alive at least this often, and itself ends a turn whose CLI stops answering (typed
+   * `native_unresponsive`). Absent: a turn may be silent for any time, as through a long command, and the Controller watches it.
+   */
+  readonly heartbeatMs?: number;
+}
+
 export interface AgentProviderBehaviour {
   readonly concurrency: AgentConcurrencyBehaviour;
   readonly reread: AgentRereadBehaviour;
   readonly resume: AgentResumeBehaviour;
   readonly input: AgentInputBehaviour;
+  /** How a running turn shows it is alive; absent like an empty one, a turn without a heartbeat. */
+  readonly turn?: AgentTurnBehaviour;
   /** How the CLI signals a usage or rate limit: an event in the stream, an error, or not at all. */
   readonly limits: { readonly signal: 'event' | 'error' | 'none' };
   /** The failures the adapter recognises and raises typed (`AgentRuntimeError` codes, `AgentSessionInUseError` reasons); others are generic. */
@@ -102,7 +112,7 @@ const duration = (value: unknown): value is number => Number.isSafeInteger(value
 /** Whether every field of a declaration holds a value this contract names (C2). */
 export function validAgentProviderBehaviour(value: unknown): value is AgentProviderBehaviour {
   if (!record(value)) return false;
-  const { concurrency, reread, resume, input, limits, failures, liveOnly, verifiedVersion } = value;
+  const { concurrency, reread, resume, input, turn, limits, failures, liveOnly, verifiedVersion } = value;
   return record(concurrency) && oneOf(concurrency.model, AGENT_CONCURRENCY_MODELS) && oneOf(concurrency.probe, ['native', 'lock_file', 'none'])
     && oneOf(concurrency.othersVisible, ['live', 'on_reread', 'never'])
     && (concurrency.unloadAfterLastClientMs === undefined || duration(concurrency.unloadAfterLastClientMs))
@@ -110,6 +120,7 @@ export function validAgentProviderBehaviour(value: unknown): value is AgentProvi
     && typeof reread.withoutAttach === 'boolean' && oneOf(reread.cost, ['page', 'whole_session'])
     && record(resume) && oneOf(resume.cost, ['subscription', 'shared_process', 'process']) && duration(resume.deadlineMs)
     && record(input) && oneOf(input.identity, ['echoes_client_id', 'none']) && oneOf(input.whileBusy, ['steer', 'queue', 'refuse'])
+    && (turn === undefined || record(turn) && (turn.heartbeatMs === undefined || duration(turn.heartbeatMs)))
     && record(limits) && oneOf(limits.signal, ['event', 'error', 'none'])
     && record(failures) && listOf(failures.runtime, AGENT_RUNTIME_ERROR_CODES) && listOf(failures.inUse, AGENT_SESSION_IN_USE_REASONS)
     && listOf(liveOnly, AGENT_LIVE_ONLY_KINDS)

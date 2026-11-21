@@ -15,14 +15,14 @@ checked against the code; the test mapping follows test titles and their asserti
 | Journal: window decision and quota | 24 | 3 | 3 | 0 |
 | Relay session control | 20 | 4 | 4 | 0 |
 | Relay host-session | 23 | 6 | 6 | 0 |
-| Controller session core | 23 | 8 | 8 | 0 |
+| Controller session core | 25 | 8 | 8 | 0 |
 | Controller publisher | 20 | 4 | 4 | 0 |
 | Codex and Claude adapter item identity | 18 | 4 | 3 | 1 |
 | Client replica and send state | 25 | 7 | 7 | 0 |
 | Client session presentation | 19 | 4 | 4 | 0 |
 | Timeline turns, process mode and work line | 21 | 3 | 3 | 0 |
 | Provider behaviour declaration (B1, 2026-11-21) | 6 | 0 | 0 | 0 |
-| **All** | **199** | **43** | **42** | **1** |
+| **All** | **201** | **43** | **42** | **1** |
 
 Every clause now names the tests that prove it. The 43 gaps were closed on 2026-11-21 (section "Gaps closed" below): 42 by a
 unit test, a vector row or a seam test with mock data, each under 300 ms and each failing when the rule it proves is broken (by a
@@ -37,7 +37,7 @@ The clause tables also marked some partial gaps inline (a default value, a close
 | `agent-relay-core/src/domain/session-control/session-control.orderings.test.ts` | Relay session control C4, C6 to C12, C17: every order of four events on one page (14,641 orders), every interleaving of two pages with a terminal's refusal at any point (140 orders); a broken order prints its sequence |
 | `agent-client/src/replica/send-state.orderings.test.ts` | Client replica and send state C4 to C10: every order of four events reaching one pending message (6,561 orders) |
 | `agent-controller/src/transcript-divergence.test.ts` | Controller session core C10: divergence decided by the transcript's content (a foreign record, or another newest record); 29,999, 30,000 and 30,001 ms of quiet before a release |
-| `agent-controller/src/provider-faults.test.ts` with the CLI simulator (`test-utils/simulated-cli.ts`, which replaced `faulty-provider.ts`) | Controller session core C16 and C17 against a provider CLI that misbehaves: Codex's single writer is surfaced as `session_in_use` in fixed words, a slow resume within the deadline opens, a hung resume is refused at the Relay's deadline, a usage limit is named in fixed words (`native_usage_limited`) but not when it resets, an item kind the adapter does not know is dropped and the known rows kept. The hung resume that holds the binding is pinned as an expected failure in `resume-deadline.test.ts` |
+| `agent-controller/src/provider-faults.test.ts` with the CLI simulator (`test-utils/simulated-cli.ts`, which replaced `faulty-provider.ts`) | Controller session core C16 and C17 against a provider CLI that misbehaves: Codex's single writer is surfaced as `session_in_use` in fixed words, a slow resume within the deadline opens, a hung resume is refused at the Relay's deadline, a usage limit is named in fixed words (`native_usage_limited`) but not when it resets, an item kind the adapter does not know is dropped and the known rows kept. The Controller's own deadline for a hung resume, and its watchdog of a silent turn, are session core C24 and C25 (`resume-deadline.test.ts`, `turn-watchdog.test.ts`) |
 
 ## Gaps closed
 
@@ -79,7 +79,7 @@ that the test fails on (each was applied, run and reverted). The one production 
 | Replica C10, C18 | `client/remote-session-client.test.ts` | the `canSettle` check of delete and of retry; the open-connection check |
 | Replica C13 | `client/message-echo-sync.test.ts` (new) | 9 pages; a 14 s and a 16 s deadline; each of the three delays |
 | Replica C14 | `replica/reducer.test.ts` | a 2,049 cap; the newest id dropped |
-| Replica C15, C22 | `AgentComposer.pending.test.tsx` | a queue cap of 20; a 60 s timeout; the `preparing` claim moved into the microtask |
+| Replica C15, C22 | `AgentComposer.pending.test.tsx` | a queue cap of 20; a 60 s timeout; the `preparing` claim moved into the microtask (C15 then said there was no bound; with gap 4 the cap of 20 and the 60 s timeout became the clause) |
 | Presentation C3 | `session-presentation.test.ts` | one Chinese lease word changed |
 | Presentation C4, C7 | `session-presentation-vectors.ts` rows, `session-presentation.test.ts` | six reorderings of the notice and composer checks |
 | Presentation C14 | `session-presentation.test.ts` | a call counter in `sessionNotice` |
@@ -347,6 +347,8 @@ Module: `agent-controller/src/session-core/` (`attachment.ts`, `idle-release.ts`
 - C21. Residency (`session-core/residency.ts`, O47): a session a page shows is kept whatever else is true of it; one an operation or a Controller stream holds, or that cannot be released now, is kept; one that nothing keeps waits its whole grace from the last moment something kept it and is released at the grace, not before. A shown session counts as demand: the terminal refresh leaves it alone and `expire` does not end its grace.
 - C22. The release grace follows the provider's declared behaviour, never its id: a CLI that keeps a session loaded after its last client (`unloadAfterLastClientMs`) gets the page-return grace, 10 s, so Codex unloads a session within 80 s of the last page closing; otherwise a subscription 15 s, a shared process 60 s, a process of its own 5 minutes (also an adapter that declares nothing).
 - C23. The shown set (`session-core/shown-sessions.ts`) is the complete set the Relay last sent (`journal_shown`); it replaces the one before, marks every bound session, and is applied to a session bound later when it is attached.
+- C24. Resume deadline (gap 4, `session-core/resume-deadline.ts`): an open, or a child's, that the CLI does not answer within the deadline its adapter declares (`behaviour.resume.deadlineMs`, never the provider id) fails at the deadline with the typed `native_unresponsive` (503) and frees the binding; a session the CLI hands over later is disposed. A take-over is not timed. The next open is then held only by the native start backoff (C14).
+- C25. Turn watchdog (gap 4, `session-core/turn-watchdog.ts`): for an adapter that declares no turn heartbeat (`behaviour.turn.heartbeatMs`), a turn whose CLI emits nothing for `TURN_SILENCE_MS` (15 minutes; every item restarts the watch, the turn's end stops it) ends with `turn_failed` code `native_unresponsive`, the session reads idle, and the runtime is released (journal, runtime, directory, as C20), so the next send attaches the session again. Limit: a command silent for longer is taken for a hang.
 
 | Clause | Test(s) that prove it |
 |---|---|
@@ -373,6 +375,8 @@ Module: `agent-controller/src/session-core/` (`attachment.ts`, `idle-release.ts`
 | C21 | `residency.test.ts` > the `RESIDENCY_VECTORS` rows (R1 to R3, at the grace and a millisecond either side); `idle-sessions.test.ts` > "a session a page shows" > "is kept past any grace, and waits its whole grace once no page shows it (residency R1, R3)", "stays shown when its watch is replaced by a restoration"; S2 `session-residency.integration.test.ts` > "stays resident past the idle grace, so another client's turn still reaches the page live (O47)" |
 | C22 | `residency.test.ts` > the `RELEASE_GRACE_VECTORS` rows, "follows what each adapter declares: Codex through its daemon 10 s, Claude Code and an undeclared adapter five minutes (R4)", "lets Codex unload a session within 80 s of the last page closing: the grace and Codex's own 70 s (R4)"; `idle-sessions.test.ts` > "the release grace of one session" (300 ms and 299 ms, and the `RangeError`s); `session-core/attachment.test.ts` > "watching an attached session" (2 tests); S2 `session-residency.integration.test.ts` > "is let go a short grace after no page shows it, so the CLI unloads it within its own unload time of the page closing (O47)" |
 | C23 | `session-core/shown-sessions.test.ts` (4 tests); `agent-session-runtime/src/transport/remote-host-uplink-journal.test.ts` > "the sessions pages show" (2 tests) |
+| C24 | `session-core/resume-deadline.test.ts` > "passes an open that settles before the deadline through, its failure too (RD1)", "fails native_unresponsive at the deadline, not a millisecond before (RD2)", "closes a session the CLI hands over after the deadline, and drops a late failure (RD3)"; in the simulator: `resume-deadline.test.ts` > "is given up at the deadline %s declares with a typed native_unresponsive, and frees the binding for the next open (gap 4)" (Codex 90 s, Claude Code 15 s) |
+| C25 | `session-core/turn-watchdog.test.ts` (4 tests: W1 and W2 at the bound, a runtime state's turn, items after it fired); in the simulator: `turn-watchdog.test.ts` > "ends native_unresponsive after 15 minutes of silence, releases the runtime, and the next send attaches the session again (gap 4)", "is left to the adapter that declares a heartbeat of its own" |
 
 Gaps: none. Closed 2026-11-21: C5, C10's wiring, C11's default, C12, C13's bound of 512, C17, C18 and C20, by unit tests on a stub
 session-core context (`session-core/attachment.test.ts`), the managed stdio directory with a stub provider state
@@ -536,7 +540,7 @@ Module: `agent-client/src/replica/` (`send-state.ts`, `pending-messages.ts`, `st
 - C12. A message's echo is a later `user_message` row after its anchor row (`afterKey`: row key, `epoch-start:<epoch>`, or `epoch-seq:<epoch>:<seq>` for streams without item keys); an older row with the same text is never taken (`pending-messages.ts`).
 - C13. Accepted-but-unechoed messages are looked for in history after 10 s, then 30 s, then 60 s and on (`message-echo-sync.ts`); each scan reads at most 8 pages, has a 15 s deadline, and a failed read only backs off. It reads forward only and never resends.
 - C14. Background outcomes kept by id: at most 2048; the oldest id is dropped beyond it (`applyBackgroundOutcome`, `snapshot-apply.ts`).
-- C15. The composer's pending-send queue has no length bound and no timeout: a waiting message stays "Sending" for any time until the session can take it (`usePendingSend.ts`; no constant). Device-store byte and window limits belong to S7 and are not part of this component.
+- C15. The composer's pending-send queue holds at most `PENDING_SEND_LIMIT` (20) messages per session: a further one is refused, stays in the composer and says why. A message that has not left `PENDING_SEND_TIMEOUT_MS` (60 s) after it was queued or retried says "Not sent" and only Retry sends it; one that left and has no answer 60 s after says "Check delivery". Nothing leaves the queue unless it was delivered or the person removes it (`usePendingSend.ts`, gap 4). Device-store byte and window limits belong to S7 and are not part of this component.
 
 ### Errors and refusals
 - C16. A queued message the session refused for good (terminal in control, read-only, control changed, Host or Controller offline: `NOT_DELIVERED` in `usePendingSend.ts`) is un-dispatched and says "Not sent" with Retry; any other failure after dispatch says "Check delivery" and offers only dismiss, never Retry.
@@ -568,7 +572,7 @@ Module: `agent-client/src/replica/` (`send-state.ts`, `pending-messages.ts`, `st
 | C12 | `message-ledger.test.ts` > "does not take an older message with the same text for the echo", "anchors a stream without item keys by position, so a row folded into an earlier one cannot make the message unconfirmed", "names the newest row as the anchor of a message"; `resource-pending-messages.test.ts` (both tests: echo matching by resource identity and with the reference note) |
 | C13 | `remote-session-client.test.ts` > "silently synchronizes overdue acknowledged messages together without resending", "does not synchronize messages that have already echoed or are still awaiting send acknowledgement", "preserves newer live projections and cursors while scanning earlier pages for a missing echo"; S3 > "recovers an omitted live echo through HTTP without reconnecting or resending"; `remote-session-client.test.ts` > "backs off during long native compaction without failing or replaying the accepted input" (the 10, 30 and 60 s steps at 1 ms either side); `client/message-echo-sync.test.ts` > "looking for the echo of an accepted message in history" > "reads nothing before 10 s, then reads forward from the row the message followed, a page at a time", "reads at most 8 pages in one scan, and goes on from the last page it read at the next check", "gives up on a scan whose read has not answered after 15 s, and backs off", "only backs off after a failed read: the message keeps waiting, and the checks go on at 30 s, 60 s and every 60 s" |
 | C14 | `reducer.test.ts` > "keeps at most 2048 background outcomes by id and drops the oldest id beyond that" |
-| C15 | `AgentComposer.pending.test.tsx` > "queues multiple messages, keeps editing available and drains FIFO without changing the new draft", "has no bound on the waiting queue and no timeout: 50 waiting messages stay Sending for a day and then drain in order" |
+| C15 | `AgentComposer.pending.test.tsx` > "queues multiple messages, keeps editing available and drains FIFO without changing the new draft", "holds at most 20 waiting messages and keeps the 21st in the composer, saying why, never dropping it", "says Not sent for a message that could not leave within a minute, keeps it with Retry, and sends it only then", "says Check delivery for a message that left and had no answer within a minute, and keeps it until the person dismisses it", "keeps a waiting message Sending while its view cannot take messages yet, up to the timeout, and sends it once the session is ready" |
 | C16 | `AgentComposer.pending.test.tsx` > "does not automatically retry an operation whose delivery became uncertain" ("Check delivery"), "lets a message the session refused for certain be retried, and sends it again only on Retry" |
 | C17 | `AgentComposer.pending.test.tsx` > "waits for confirmed control, and holds a waiting message as Not sent when a terminal takes the session, sending it only on Retry", "says Not sent, with Retry and Cancel, for a waiting message when the session ended / the agent failed", "says Not sent for a waiting message when the view could not open its session, and sends it only on Retry" |
 | C18 | `remote-session-client.test.ts` > "settling a message the reader sent" > "refuses to retry a message that is sending or waiting for its echo, and sends nothing", "refuses to retry while the connection is not open, keeps the failed message as it was, and sends nothing" |
@@ -581,8 +585,8 @@ Module: `agent-client/src/replica/` (`send-state.ts`, `pending-messages.ts`, `st
 | C25 | `reducer.test.ts` > "seeds only a replica that has read nothing", "are confirmed by the first page that reads forward from them, and not by one that reads older rows", "are replaced by the tail of the new epoch when the Relay does not hold the stored position, and then confirmed"; `restored.test.ts` > all 4; S6 > "paints the rows of a restored replica by item key before any frame arrives", "keeps every unchanged row mounted when the first server tail confirms a restored window", "takes a send over a restored replica, shows it as Sending, and sends it only after the first server page confirms the state" |
 
 Gaps: none. Closed 2026-11-21: C7 at ledger level, C10's delete, C13's schedule and bounds (on `watchMessageEchoes` with a stub
-transport and fake timers), C14, C15 (tested as no bound: whether a waiting message needs one is the owner's question, row 2.2 of
-`docs/superpowers/specs/2026-11-21-requirements-vs-external-dependencies.md`), C18 and C22. C14's cap drops `Object.keys(outcomes)[0]`; JavaScript lists integer-like keys first, so the
+transport and fake timers), C14, C15 (tested then as no bound, the owner's question of row 2.2 of
+`docs/superpowers/specs/2026-11-21-requirements-vs-external-dependencies.md`; gap 4 answered it with a bound and a timeout), C18 and C22. C14's cap drops `Object.keys(outcomes)[0]`; JavaScript lists integer-like keys first, so the
 "oldest id" would be the smallest number if background ids were ever numeric (they are not today).
 
 Tests that map to no clause (candidates for deletion): none found. `message-ledger.test.ts` > "names the newest row as the anchor of a message" overlaps C12 with the anchor tests; keep it unless the two others are merged.
@@ -721,7 +725,7 @@ Tests that map to no clause (candidates for deletion): none found.
 Module: `agent-provider-sdk/src/behaviour.ts` (`AgentProviderBehaviour`, `resolveAgentProviderBehaviour`, `UNDECLARED_PROVIDER_BEHAVIOUR`) and the typed failures of `agent-provider-sdk/src/provider.ts` (`AgentRuntimeError`, `AgentSessionInUseError`); each adapter's declaration is its `src/behaviour.ts`. Design source: section 4.1 of `docs/superpowers/specs/2026-11-21-requirements-vs-external-dependencies.md` (step B1). Tests: `agent-provider-sdk/src/behaviour.test.ts`, `agent-provider-<name>/src/behaviour.test.ts` for Codex, Claude, Copilot, OpenCode and DSH, `agent-remote-protocol/src/model/session-errors.test.ts`.
 
 ### Purpose
-- C1. An adapter states how its CLI behaves as data: how it treats other clients of a session, what a reread gives, what a resume costs and how long it may take, what it does with input, how it signals a usage limit, which failures the adapter raises typed, and which kinds of items a reread cannot rebuild. Policies key on these fields, never on a provider id.
+- C1. An adapter states how its CLI behaves as data: how it treats other clients of a session, what a reread gives, what a resume costs and how long it may take, what it does with input, whether a running turn shows a heartbeat (`turn.heartbeatMs`, optional; absent, the Controller watches the turn), how it signals a usage limit, which failures the adapter raises typed, and which kinds of items a reread cannot rebuild. Policies key on these fields, never on a provider id.
 
 ### Inputs and outputs
 - C2. `resolveAgentProviderBehaviour(descriptor)` returns the declaration when every field holds a value the contract names, and the undeclared behaviour otherwise; a declaration is taken whole or not at all.
@@ -737,7 +741,7 @@ Module: `agent-provider-sdk/src/behaviour.ts` (`AgentProviderBehaviour`, `resolv
 | Clause | Test(s) that prove it |
 |---|---|
 | C1 | `behaviour.test.ts` > "is taken as declared when every field holds a value the contract names (C1, C2)" |
-| C2 | `behaviour.test.ts` > "is replaced whole by the undeclared behaviour for %s (C2)" (20 misdeclared fields), "is the undeclared behaviour for an adapter that declares none (C2)" |
+| C2 | `behaviour.test.ts` > "is replaced whole by the undeclared behaviour for %s (C2)" (22 misdeclared fields), "is the undeclared behaviour for an adapter that declares none (C2)" |
 | C3 | `behaviour.test.ts` > "assumes what the Controller assumed before declarations: the only client, live order, a process's resume, nothing typed (C3)" |
 | C4 | `behaviour.test.ts` > "say why a session is in use and when to try again", "keep no reason or wait they cannot vouch for" |
 | C5 | `behaviour.test.ts` > "say when a usage limit resets, and only for a time a date can hold", "name %s"; `session-errors.test.ts` > "gives the typed runtime failure %s its fixed words" |
@@ -779,4 +783,4 @@ Each test fails today for the reason its open item names; the change that closes
 | O47 (closed, now plain tests) | `agent-remote-seams/tests/S2/session-residency.integration.test.ts` > "stays resident past the idle grace, so another client's turn still reaches the page live (O47)", "is let go a short grace after no page shows it, so the CLI unloads it within its own unload time of the page closing (O47)" | before the change: the Controller let the shown session go after 5 minutes, and held an unshown one for 5 minutes |
 | O48 (closed, now plain tests) | `agent-remote-seams/tests/S2/writer-elsewhere.integration.test.ts` > "stays readable from its journal, says the CLI's reason, offers a retry and no take-over, and goes live again after it (O48)", and the Retry test beside it | before the change: the page's open was refused (409 `session_in_use`) |
 | O49 (closed, now plain tests) | `agent-controller/src/transcript-fork.test.ts` > "shows the terminal's branch, which native history shows, when the terminal's turn ends %i ms after the page's (O49)" (0, 1,999 and 2,001 ms) | before the change: the 2,000 ms rule missed the fork, so the Controller kept the page's branch |
-| Gap 4 (O53) | `agent-controller/src/resume-deadline.test.ts` > "is given up at the declared deadline with a typed timeout, and frees the binding for the next open (gap 4)" | nothing answers the hung resume, and the next open waits behind it |
+| Gap 4 (O53, closed, now plain tests) | `agent-controller/src/resume-deadline.test.ts` > "is given up at the deadline %s declares with a typed native_unresponsive, and frees the binding for the next open (gap 4)" | before the change: nothing answered the hung resume, and the next open waited behind it |

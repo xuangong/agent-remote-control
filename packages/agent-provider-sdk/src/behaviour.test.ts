@@ -32,6 +32,8 @@ const misdeclared: Array<[string, (behaviour: Record<string, any>) => void]> = [
   ['a negative resume deadline', value => { value.resume.deadlineMs = -1; }],
   ['an unknown input identity', value => { value.input.identity = 'hash'; }],
   ['an unknown busy rule', value => { value.input.whileBusy = 'drop'; }],
+  ['a turn heartbeat of zero', value => { value.turn = { heartbeatMs: 0 }; }],
+  ['a turn that is not a record', value => { value.turn = 'heartbeat'; }],
   ['an unknown limit signal', value => { value.limits.signal = 'header'; }],
   ['a runtime failure the SDK does not type', value => { value.failures.runtime = ['native_runtime_failed']; }],
   ['an in-use reason the SDK does not name', value => { value.failures.inUse = ['busy']; }],
@@ -47,6 +49,8 @@ describe('the behaviour a provider declares', () => {
     const { verifiedVersion: _version, ...unversioned } = declared;
     const { unloadAfterLastClientMs: _unload, ...concurrency } = declared.concurrency;
     expect(resolveAgentProviderBehaviour({ behaviour: { ...unversioned, concurrency } })).toEqual({ ...unversioned, concurrency });
+    const heartbeat = { ...declared, turn: { heartbeatMs: 45_000 } };
+    expect(resolveAgentProviderBehaviour({ behaviour: heartbeat })).toBe(heartbeat);
   });
 
   it.each(misdeclared)('is replaced whole by the undeclared behaviour for %s (C2)', (_label, change) => {

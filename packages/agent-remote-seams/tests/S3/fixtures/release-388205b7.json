@@ -1,0 +1,455 @@
+{
+ "provenance": {
+  "release": "main 388205b7 (Controller 0.3.3), the release in production before the next deploy",
+  "relayWorker": "15f8edd8",
+  "recordedOn": "2026-11-22",
+  "recordedWith": "decodeSessionChannelClientMessage (the Relay side) and decodeSessionChannelServerMessage (the client side) of a temporary git worktree of 388205b7, fed the frames this tree emits (release-skew.fixture.ts) plus ready frames with a flag no release knows",
+  "relayChannelDecoder": "verdict of the Relay of that release on a frame a client sends; a refused frame closes the whole channel with 1008",
+  "clientReadyDecoder": "verdict of the client of that release on a ready frame; a refused frame fails the channel"
+ },
+ "relayChannelDecoder": [
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "subscribe",
+    "subscriptionId": 1,
+    "agentId": "a",
+    "message": {
+     "protocolVersion": "1.8.0",
+     "type": "negotiate",
+     "itemKeys": true
+    }
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "message",
+    "subscriptionId": 1,
+    "message": {
+     "protocolVersion": "1.8.0",
+     "type": "timeline_subscription",
+     "payload": {
+      "requestId": "remote-web-1",
+      "agentIds": [
+       "a"
+      ]
+     }
+    }
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "message",
+    "subscriptionId": 1,
+    "message": {
+     "protocolVersion": "1.8.0",
+     "type": "session_control_request",
+     "payload": {
+      "requestId": "remote-web-2",
+      "agentId": "a",
+      "action": "acquire",
+      "revision": "one"
+     }
+    }
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "message",
+    "subscriptionId": 1,
+    "message": {
+     "protocolVersion": "1.8.0",
+     "type": "timeline_request",
+     "payload": {
+      "requestId": "remote-web-3",
+      "agentId": "a",
+      "direction": "tail",
+      "limit": 100
+     }
+    }
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "message",
+    "subscriptionId": 1,
+    "message": {
+     "protocolVersion": "1.8.0",
+     "type": "send_message",
+     "payload": {
+      "requestId": "remote-web-5",
+      "operationId": "1c828408-2c33-4921-b81a-c586dba6767e",
+      "agentId": "a",
+      "text": "Hello"
+     },
+     "controlToken": "proof"
+    }
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "message",
+    "subscriptionId": 1,
+    "message": {
+     "protocolVersion": "1.8.0",
+     "type": "send_message",
+     "payload": {
+      "requestId": "remote-web-6",
+      "operationId": "881737d6-b82f-450a-ab89-0698a2c735dd",
+      "agentId": "a",
+      "content": [
+       {
+        "type": "text",
+        "text": "Parts"
+       }
+      ]
+     },
+     "controlToken": "proof"
+    }
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "message",
+    "subscriptionId": 1,
+    "message": {
+     "protocolVersion": "1.8.0",
+     "type": "send_message",
+     "payload": {
+      "requestId": "remote-web-7",
+      "operationId": "fa589c6b-7274-478a-a67b-e1bcd8a3149a",
+      "agentId": "a",
+      "text": "Later",
+      "delivery": "next_turn"
+     },
+     "controlToken": "proof"
+    }
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "message",
+    "subscriptionId": 1,
+    "message": {
+     "protocolVersion": "1.8.0",
+     "type": "steer",
+     "payload": {
+      "requestId": "remote-web-8",
+      "operationId": "acb54c3a-ca7d-4b6e-a27a-e07f57ab3dd9",
+      "agentId": "a",
+      "text": "Turn left"
+     },
+     "controlToken": "proof"
+    }
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "message",
+    "subscriptionId": 1,
+    "message": {
+     "protocolVersion": "1.8.0",
+     "type": "cancel",
+     "payload": {
+      "requestId": "remote-web-9",
+      "operationId": "69bf1b88-1346-49c0-a5e2-841f4645409f",
+      "agentId": "a"
+     },
+     "controlToken": "proof"
+    }
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "message",
+    "subscriptionId": 1,
+    "message": {
+     "protocolVersion": "1.8.0",
+     "type": "set_session_setting",
+     "payload": {
+      "requestId": "remote-web-10",
+      "operationId": "dc580871-c0a7-43fd-98e0-e391db0188d7",
+      "agentId": "a",
+      "settingId": "mode",
+      "value": "fast"
+     },
+     "controlToken": "proof"
+    }
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "message",
+    "subscriptionId": 1,
+    "message": {
+     "protocolVersion": "1.8.0",
+     "type": "set_planning",
+     "payload": {
+      "requestId": "remote-web-11",
+      "operationId": "0becd4a7-b42e-4ccc-9b5c-b4588bd61642",
+      "agentId": "a",
+      "active": true
+     },
+     "controlToken": "proof"
+    }
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "message",
+    "subscriptionId": 1,
+    "message": {
+     "protocolVersion": "1.8.0",
+     "type": "list_commands",
+     "payload": {
+      "requestId": "remote-web-12",
+      "agentId": "a"
+     }
+    }
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "message",
+    "subscriptionId": 1,
+    "message": {
+     "protocolVersion": "1.8.0",
+     "type": "execute_command",
+     "payload": {
+      "requestId": "remote-web-13",
+      "operationId": "69471978-8cd7-44d5-8201-ae63765a4eda",
+      "agentId": "a",
+      "commandId": "compact",
+      "args": ""
+     },
+     "controlToken": "proof"
+    }
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "message",
+    "subscriptionId": 1,
+    "message": {
+     "protocolVersion": "1.8.0",
+     "type": "resource_request",
+     "payload": {
+      "requestId": "remote-web-14",
+      "agentId": "a",
+      "resourceId": "resource-one"
+     }
+    }
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "message",
+    "subscriptionId": 1,
+    "message": {
+     "protocolVersion": "1.8.0",
+     "type": "resource_resolve_request",
+     "payload": {
+      "requestId": "remote-web-15",
+      "agentId": "a",
+      "locator": "file.txt"
+     }
+    }
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "message",
+    "subscriptionId": 1,
+    "message": {
+     "protocolVersion": "1.8.0",
+     "type": "interaction_response",
+     "payload": {
+      "agentId": "a",
+      "requestId": "request-one",
+      "submissionId": "remote-web-16",
+      "operationId": "11111111-1111-4111-8111-111111111111",
+      "response": {
+       "kind": "question",
+       "answers": []
+      }
+     },
+     "controlToken": "proof"
+    }
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "intent",
+    "active": false,
+    "subscriptionIds": [
+     2
+    ]
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "unsubscribe",
+    "subscriptionId": 1
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "message",
+    "subscriptionId": 3,
+    "message": {
+     "protocolVersion": "1.8.0",
+     "type": "timeline_request",
+     "payload": {
+      "requestId": "remote-web-19",
+      "agentId": "a",
+      "direction": "after",
+      "limit": 100,
+      "cursor": {
+       "epoch": "epoch",
+       "seq": 0
+      }
+     }
+    }
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "ping"
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "message",
+    "subscriptionId": 4,
+    "message": {
+     "protocolVersion": "1.8.0",
+     "type": "send_message",
+     "payload": {
+      "requestId": "remote-web-24",
+      "operationId": "4a915072-dd68-4aa8-8341-338a5a702ea1",
+      "agentId": "a",
+      "text": "Cut off",
+      "settle": true
+     },
+     "controlToken": "proof"
+    }
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "subscribe",
+    "subscriptionId": 5,
+    "agentId": "b",
+    "message": {
+     "protocolVersion": "1.8.0",
+     "type": "negotiate",
+     "itemKeys": true
+    },
+    "idleMs": 11
+   },
+   "verdict": "accepted"
+  }
+ ],
+ "clientReadyDecoder": [
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "ready"
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "ready",
+    "preemption": 1
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "ready",
+    "successions": 1
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "ready",
+    "successions": 1,
+    "preemption": 1
+   },
+   "verdict": "accepted"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "ready",
+    "settlement": 1
+   },
+   "verdict": "refused"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "ready",
+    "successions": 1,
+    "preemption": 1,
+    "settlement": 1
+   },
+   "verdict": "refused"
+  },
+  {
+   "frame": {
+    "protocolVersion": "1.8.0",
+    "type": "ready",
+    "futureFeature": 1
+   },
+   "verdict": "refused"
+  }
+ ]
+}

@@ -280,36 +280,57 @@ it('opens predecessor A from current B, reloads its concrete history and returns
   expect(f.frames.some(frame => ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message?.type ?? ''))).toBe(false);
 }, testDeadline);
 
-it('shows A-B-C handoff history once in reverse order while ordinary A navigation still resolves current C', async () => {
+/** The A-B-C handoff chain on a page opened at A (with `flags` on its address): the succession model and the history opener as the App uses them. */
+async function handoffChain(flags = '') {
   const real = successionHooks.useSessionSuccession, realHistory = historyHooks.useConversationHistory;
   let succession!: ReturnType<typeof real>, open!: Parameters<typeof realHistory>[2];
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
   vi.spyOn(historyHooks, 'useConversationHistory').mockImplementation((...args) => { open = args[2]; return realHistory(...args); });
-  const f = await failureFixture(false, 'B', false, '', { chain: [committed(), committed('B', 'C', 3)] });
-  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('C'));
+  const f = await failureFixture(false, 'B', false, flags, { chain: [committed(), committed('B', 'C', 3)] });
+  const bound = (id: string) => settleApp(() => expect(succession.binding?.session.nativeSessionId, succession.error).toBe(id));
+  /** Follows the session's link in the details' Sessions list. */
+  const follow = async (id: string) => { const link = await successionHistoryLink(f.view, id); await act(async () => link.click()); await bound(id); };
+  const address = () => new URL(window.location.href).searchParams;
+  const sent = () => f.frames.some(frame => ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message?.type ?? ''));
+  return { f, bound, follow, address, sent, open: (...args: Parameters<typeof open>) => open(...args) };
+}
+
+it('lists the A-B-C handoff chain once, newest first, and opens the oldest session as history', async () => {
+  const chain = await handoffChain();
+  await chain.bound('C');
   // The details list the chain newest first: C on screen, then B and A as links.
-  const nav = await openSessions(f.view);
+  const nav = await openSessions(chain.f.view);
   expect([...nav.querySelectorAll<HTMLAnchorElement>('a')].map(link => new URL(link.href).searchParams.get('session'))).toEqual(['B', 'A']);
-  const link = await successionHistoryLink(f.view, 'B');
-  await act(async () => link.click());
-  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
-  expect(new URL(window.location.href).searchParams.get('intent')).toBe('history');
-  const current = await successionHistoryLink(f.view, 'C');
-  await act(async () => current.click());
-  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('C'));
-  const oldest = await successionHistoryLink(f.view, 'A');
-  await act(async () => oldest.click());
-  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
-  await f.reload();
-  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
-  const back = await successionHistoryLink(f.view, 'C');
-  await act(async () => back.click());
-  await settleApp(() => expect(succession.binding?.session.nativeSessionId, succession.error).toBe('C'));
-  await act(async () => { expect(await open({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'A', title: 'Original A link' })).toBe(true); });
-  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('C'));
-  expect(new URL(window.location.href).searchParams.get('session')).toBe('C');
-  expect(new URL(window.location.href).searchParams.has('intent')).toBe(false);
-  expect(f.frames.some(frame => ['send_message', 'execute_command', 'image_upload_begin'].includes(frame.message?.type ?? ''))).toBe(false);
+  await chain.follow('A');
+  expect(chain.address().get('intent')).toBe('history');
+}, testDeadline);
+
+it('opens an earlier session of the chain as history, and returns to the current one from its link', async () => {
+  const chain = await handoffChain();
+  await chain.bound('C');
+  await chain.follow('B');
+  expect(chain.address().get('intent')).toBe('history');
+  await chain.follow('C');
+  expect(chain.sent()).toBe(false);
+}, testDeadline);
+
+it('keeps the history view of A across a reload', async () => {
+  const chain = await handoffChain('&intent=history');
+  await chain.bound('A');
+  await chain.f.reload();
+  await chain.bound('A');
+  expect(chain.address().get('intent')).toBe('history');
+}, testDeadline);
+
+it('returns from the history view of A to current C, and resolves an ordinary A link to current C', async () => {
+  const chain = await handoffChain('&intent=history');
+  await chain.bound('A');
+  await chain.follow('C');
+  await act(async () => { expect(await chain.open({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'A', title: 'Original A link' })).toBe(true); });
+  await chain.bound('C');
+  expect(chain.address().get('session')).toBe('C');
+  expect(chain.address().has('intent')).toBe(false);
+  expect(chain.sent()).toBe(false);
 }, testDeadline);
 
 it('removes handoff navigation when fresh authorized replay is denied', async () => {

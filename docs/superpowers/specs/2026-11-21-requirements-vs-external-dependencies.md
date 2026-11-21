@@ -135,7 +135,7 @@ Every gap in the matrix must be reproducible under our control before a fix or a
   - `terminalTakes`, an owner refusal;
   - `fork`;
   - `replaceHistory`, so the next reopen reads changed or reordered rows.
-- **The fault provider** (`ctl/test-utils/faulty-provider.ts`, with `ctl/provider-faults.test.ts`): `writer-busy`, `rate-limited`, `slow`, `hang` and `unknown-event`, all at open, and `heal()`. Step B2 replaced it with the CLI simulator (`ctl/test-utils/simulated-cli.ts`, clauses in `components.md`), driven by the declared behaviour.
+- **The fault provider** (`ctl/test-utils/faulty-provider.ts`, with `ctl/provider-faults.test.ts`): `writer-busy`, `rate-limited`, `slow`, `hang` and `unknown-event`, all at open, and `heal()`. Step B2 replaced it with the CLI simulator (`ctl/test-utils/simulated-cli.ts`, clauses in `components/cli-simulator.md`), driven by the declared behaviour.
 - **Session doubles:** `ctl/test-utils/journal-scripted-session.ts` (older pages, a read gate, a clock), and `packages/agent-remote-fixtures/src/scripted-session.ts` and `recorded-rows.ts`.
 - **Fake model APIs behind the real CLIs,** which produce the recordings: `codex/test-utils/native-responses-fixture.ts`, `codex/test-utils/scripted-app-server.ts` and `claude/test-utils/native-fixture.ts`.
 
@@ -405,7 +405,7 @@ Each step ships on its own:
 | B6 | The Workbench reads capabilities from the declaration; process management moves behind one registration hook | M |
 | B7 | OpenCode is onboarded through the kit alone, as the acceptance test of the boundary | L |
 
-Status, 2026-11-22: B3 and B5 are built. The kit (`@orchardworks/agent-provider-sdk/conformance`, `pnpm test:providers`) holds Codex, Claude Code and Copilot to their declarations with recordings, a fake of each CLI and the CLI simulator; each CLI has a native check (`pnpm test:native:<cli>`); recordings name their CLI version. Gaps 6, 10 and 11 are closed by them: an unknown native event is a diagnostic for all four adapters, and a window of a `siblings_unordered` provider has a turn's siblings compared as a set. The clauses, the matrix and this machine's native results are in `docs/current/agent-remote/components.md` ("Provider conformance kit", "Native assumption checks").
+Status, 2026-11-22: B3 and B5 are built. The kit (`@orchardworks/agent-provider-sdk/conformance`, `pnpm test:providers`) holds Codex, Claude Code and Copilot to their declarations with recordings, a fake of each CLI and the CLI simulator; each CLI has a native check (`pnpm test:native:<cli>`); recordings name their CLI version. Gaps 6, 10 and 11 are closed by them: an unknown native event is a diagnostic for all four adapters, and a window of a `siblings_unordered` provider has a turn's siblings compared as a set. The clauses, the matrix and this machine's native results are in `docs/current/agent-remote/components/provider-conformance-kit.md` and `native-assumption-checks.md`.
 
 ## 5. The riskiest gaps, ranked
 

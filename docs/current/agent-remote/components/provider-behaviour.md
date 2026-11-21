@@ -1,0 +1,33 @@
+# Provider behaviour declaration
+Module: `agent-provider-sdk/src/behaviour.ts` (`AgentProviderBehaviour`, `resolveAgentProviderBehaviour`, `UNDECLARED_PROVIDER_BEHAVIOUR`) and the typed failures of `agent-provider-sdk/src/provider.ts` (`AgentRuntimeError`, `AgentSessionInUseError`); each adapter's declaration is its `src/behaviour.ts`. Design source: section 4.1 of `docs/superpowers/specs/2026-11-21-requirements-vs-external-dependencies.md` (step B1). Tests: `agent-provider-sdk/src/behaviour.test.ts`, `agent-provider-<name>/src/behaviour.test.ts` for Codex, Claude, Copilot, OpenCode and DSH, `agent-remote-protocol/src/model/session-errors.test.ts`.
+
+| Clauses | Gaps when written | Closed by a test | Not tested, with the reason |
+|---:|---:|---:|---:|
+| 7 | 0 | 0 | 0 |
+
+## Purpose
+- C1. An adapter states how its CLI behaves as data: how it treats other clients of a session, what a reread gives, what a resume costs and how long it may take, what it does with input, whether a running turn shows a heartbeat (`turn.heartbeatMs`, optional; absent, the Controller watches the turn), how it signals a usage limit, which failures the adapter raises typed, and which kinds of items a reread cannot rebuild. Policies key on these fields, never on a provider id.
+
+## Inputs and outputs
+- C2. `resolveAgentProviderBehaviour(descriptor)` returns the declaration when every field holds a value the contract names, and the undeclared behaviour otherwise; a declaration is taken whole or not at all.
+- C3. The undeclared behaviour is what the Controller assumed before declarations: the only client, live reread order, a process's resume within 30 s, no input identity, input refused while busy, no limit signal, nothing typed, nothing live-only.
+
+## Errors and refusals
+- C4. `AgentSessionInUseError` carries `reason` (`writer_elsewhere`, `turn_running`) and `retryAfterMs` only when the adapter can vouch for them: an unknown reason or a wait that is not a non-negative whole number is dropped.
+- C5. `AgentRuntimeError` names `native_usage_limited` (with `resetsAt`, kept only as a whole number of milliseconds), `native_auth_missing`, `native_exited` and `native_unresponsive` beside the earlier codes, and the protocol gives each of them fixed words that carry none of the CLI's text; an attach refused for a usage limit keeps its `resetsAt` through the Relay. A usage limit the CLI signals on a turn is the runtime fact `runtimeInfo.usageLimit { resetsAt }` (milliseconds, omitted when the CLI gives no time), reported by the adapter until the next turn starts, and the turn it stops fails with code `native_usage_limited`.
+
+## Guarantees
+- C6. Each adapter's declaration is valid, so it is taken as declared: Codex is one of the shared daemon's clients with a 70 s unload (a private app-server is the thread's single writer), Claude Code forks a transcript two writers use, Copilot is a single writer it probes natively, OpenCode shares sessions among its server's clients, and a DeepSeek Harness agent has no other client. Codex's and Copilot's refusals of a writer elsewhere carry the reason `writer_elsewhere`. The live-only kinds name what each adapter marks (`synthetic_output` is what a local command prints, `partial_output` the text a turn streamed before it was interrupted); the conformance kit checks them against the recordings (K3), which found Copilot's interrupted text undeclared. Claude Code, Codex, Copilot and OpenCode raise `native_usage_limited` typed, each from its CLI's documented signal (C5). Claude Code raises `native_exited` when its process ends under a turn.
+- C7. One rule for every adapter (gap 10, `native-events.ts`): an event, notification, message, record or item of a kind the adapter does not know, or a known one it cannot read, is one diagnostic (`native_event_unknown`: provider, kind in at most 128 characters, live or history, why), never a row and never a silent drop; every kind it ignores on purpose is listed against its native release, the lists of Claude Code, Copilot and OpenCode checked complete against their SDKs' declared unions by the compiler. The Controller counts them in its health (`unknown_native_events`).
+
+| Clause | Test(s) that prove it |
+|---|---|
+| C1 | `behaviour.test.ts` > "is taken as declared when every field holds a value the contract names (C1, C2)" |
+| C2 | `behaviour.test.ts` > "is replaced whole by the undeclared behaviour for %s (C2)" (22 misdeclared fields), "is the undeclared behaviour for an adapter that declares none (C2)" |
+| C3 | `behaviour.test.ts` > "assumes what the Controller assumed before declarations: the only client, live order, a process's resume, nothing typed (C3)" |
+| C4 | `behaviour.test.ts` > "say why a session is in use and when to try again", "keep no reason or wait they cannot vouch for" |
+| C5 | `behaviour.test.ts` > "say when a usage limit resets, and only for a time a date can hold", "name %s"; `session-errors.test.ts` > "gives the typed runtime failure %s its fixed words", "keeps when a usage limit resets, and only a time a date can hold, and only for a usage limit (gap 3)"; each adapter's mapping of its CLI's signal: Claude `session.test.ts` > "the usage limit Claude Code reports" (2 tests: `rate_limit_event` rejected with `resetsAt` in seconds); Codex `usage-limit.test.ts` (3 tests: `TurnError.codexErrorInfo` `usageLimitExceeded` or `rateLimitExceeded`, the reset of the used-up `account/rateLimits/updated` window); Copilot `usage-limit.test.ts` (2 tests: `session.error` `errorType` `rate_limit` or `quota`, the reset from `auto_mode_switch.requested.retryAfterSeconds`); OpenCode `provider.test.ts` > "reports the usage limit a scheduled retry waits out until the server steps again, and fails a turn the limit stopped as native_usage_limited" (`session.retry.scheduled` with status 429, until `at`) |
+| C6 | Codex `behaviour.test.ts` (three tests, with the refusal of a writer elsewhere); Claude, Copilot, OpenCode and DSH `behaviour.test.ts`; Copilot `provider.test.ts` > "refuses to resume a native session held outside the managed Controller" (the reason) |
+| C7 | `native-events.test.ts` (3 tests); for Codex, Claude Code, Copilot and OpenCode, `provider-conformance.test.ts` > "reports an event of a kind it does not know as one diagnostic, never a row and never a silent drop (gap 10, K7)" (mutations caught: the Copilot rule and the OpenCode filter removed); Codex `projector.test.ts`, `history.test.ts`, `collaboration-items.test.ts`; the count: `controller-health.test.ts` > "counts the events of a kind an adapter does not know, by provider and kind, and notes them for an hour (gap 10)" |
+
+Gaps: none.

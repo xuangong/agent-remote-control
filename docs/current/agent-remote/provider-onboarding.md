@@ -70,7 +70,7 @@ A provider joins Relay journals only through its adapter: it declares `journal: 
 
 ## Conformance kit
 
-Every journal-capable adapter passes the provider conformance kit (`@orchardworks/agent-provider-sdk/conformance`, clauses in `components.md`), run by `pnpm test:providers` on mock data in seconds. An adapter joins it by exporting a subject from its `./recordings` entry, and adding the subject to `agent-controller/src/provider-conformance.test.ts`:
+Every journal-capable adapter passes the provider conformance kit (`@orchardworks/agent-provider-sdk/conformance`, clauses in [the kit's component file](components/provider-conformance-kit.md)), run by `pnpm test:providers` on mock data in seconds. An adapter joins it by exporting a subject from its `./recordings` entry, and adding the subject to `agent-controller/src/provider-conformance.test.ts`:
 - its declaration, as `resolveAgentProviderBehaviour` reads it;
 - its recordings of the real CLI, which must include `settled` and `restart`;
 - a native fake (`src/test-utils/native-fake.ts`) that drives the real adapter through its own native port: a turn over one finished turn of history, read again; the CLI's limit signal; the CLI's refusal of a second writer, when it has one.

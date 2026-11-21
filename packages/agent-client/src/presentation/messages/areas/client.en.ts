@@ -31,6 +31,7 @@ export const client = {
   'client.send.historyChanged': 'Conversation history changed before delivery could be confirmed.',
   'client.send.restored': 'Delivery was not confirmed before this page closed. Check the conversation before retrying.',
   'client.send.newAttempt': 'This message may not have arrived. If it is not in the conversation, Retry sends it again.',
+  'client.send.notDelivered': 'This message did not reach the agent, so it was not sent. Retry sends it.',
   'client.send.uncertain': 'Delivery is not confirmed. Check the conversation before sending again.',
   'client.send.failed': 'Send failed',
   'client.send.unconfirmed': 'Delivery not confirmed',

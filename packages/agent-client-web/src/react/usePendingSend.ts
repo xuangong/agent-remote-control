@@ -16,6 +16,8 @@ export interface PendingSendExecutor<P> {
   send(payload: P, signal: AbortSignal, dispatch: () => boolean): Promise<void>;
   /** When the session takes messages again after a usage limit, if it holds them until then: they wait without timing out, and leave then. */
   heldUntil?(): number | undefined;
+  /** Whether a message that left with an unknown outcome is settled elsewhere now (delivered, or Not sent where it can be retried). */
+  settled?(payload: P): boolean;
 }
 export interface WaitingSend<P = unknown> {
   id: string;
@@ -48,7 +50,8 @@ const notifyAll = (queue: Queue) => { for (const member of queue.members) member
  * `PENDING_SEND_TIMEOUT_MS` after it was queued or retried says Not sent and only Retry sends it; one that left and has no answer that
  * long after says Check delivery. No message leaves the queue unless it was delivered or the person removes it.
  * While the session holds messages until a usage limit resets (`heldUntil`), its waiting messages wait for the reset without timing out;
- * the queue wakes then and sends them once, in order.
+ * the queue wakes then and sends them once, in order. A message whose outcome was unknown (Check delivery) leaves the queue once it is
+ * settled elsewhere (`settled`, gap 5), so the messages behind it go on.
  */
 export function usePendingSend<P>(sessionKey: string, visible: boolean, executor: PendingSendExecutor<P>) {
   const self = useRef<Member & { mounted: boolean }>();
@@ -103,6 +106,8 @@ export function usePendingSend<P>(sessionKey: string, visible: boolean, executor
     return next;
   }
   function update(): void {
+    // A send the Host settled from native history needs no Check delivery any more; the messages behind it go on.
+    for (const item of [...queue.items]) if (item.phase === 'error' && item.dispatched && latest.current.executor.settled?.(item.payload)) remove(item);
     clearTimeout(expiry.current);
     const due = expire();
     if (due !== undefined && me.mounted) expiry.current = setTimeout(() => watcher.current(), Math.max(0, due - Date.now()));

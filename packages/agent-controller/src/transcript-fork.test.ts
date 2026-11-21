@@ -15,7 +15,8 @@ afterEach(async () => { for (const close of closers.splice(0).reverse()) await c
 
 const BASE = ['Base', 'Base reply'];
 const PAGE = [...BASE, 'PAGE', 'Reply to PAGE'];
-const TERMINAL_BRANCH = [...BASE, 'TERM', 'Reply to TERM'];
+/** The terminal read the transcript once the page's message was in it and continued from there; its turn is the newest branch. */
+const TERMINAL_BRANCH = [...BASE, 'PAGE', 'TERM', 'Reply to TERM'];
 
 async function residentSession() {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] });

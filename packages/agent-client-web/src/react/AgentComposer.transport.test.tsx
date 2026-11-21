@@ -105,8 +105,11 @@ it('holds a message through a real channel reconnect and never replays an unconf
     await until(() => expect(replica.getState().outgoingMessages?.[0]?.status).toBe('unconfirmed'));
     await until(() => expect(status, JSON.stringify(replica.getState().diagnostics)).toBe('ready'));
     expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Ready');
-    expect(sent).toHaveLength(1);
-    expect(sent[0]!.payload.text).toBe('Across the reconnect');
+    // Only questions follow the one send, whether it arrived (gap 5), and a bounded number of them: the message is never sent again.
+    const sends = sent.filter(message => !message.payload.settle);
+    expect(sends).toHaveLength(1);
+    expect(sends[0]!.payload.text).toBe('Across the reconnect');
+    expect(sent.filter(message => message.payload.settle).length).toBeLessThanOrEqual(3);
     expect(container.querySelector('[data-testid="pending-send"]')?.getAttribute('data-state')).toBe('error');
     expect(container.querySelector('textarea')!.value).toBe('');
   } finally {

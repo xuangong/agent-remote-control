@@ -38,6 +38,9 @@ export interface HandoffAdmissionState {
   commandWork: number;
   settingWork: boolean;
 }
+/** Whether an input reached the CLI: its user row is in native history, it is not and cannot be any more, or that is not known. */
+export type InputSettlement = 'delivered' | 'not_delivered' | 'unknown';
+
 export interface SessionWireAgent {
   handoffAdmissionState?(): HandoffAdmissionState;
   readonly agentId: string;
@@ -49,6 +52,8 @@ export interface SessionWireAgent {
   loadTimeline?(request: TimelinePageRequest): Promise<HistoryPage>;
   subscribe(listener: AgentManagerListener): () => void;
   sendMessage(text: string, options?: AgentMessageOptions): Promise<AgentInputAcceptance | void>;
+  /** Whether the input sent with this id reached the CLI, as native history read since shows; never sends anything (gap 5). */
+  settleInput?(inputId: string): Promise<InputSettlement>;
   sendMessageContent?(parts: readonly MessagePart[], options?: AgentMessageOptions, scope?: string): Promise<AgentInputAcceptance | void>;
   validateMessageContent?(parts: readonly MessagePart[], options?: AgentMessageOptions, scope?: string): Promise<void>;
   beginResourceUpload?(input: ResourceUploadDeclaration, scope?: string): Promise<ResourceUploadReceipt>;
@@ -363,12 +368,21 @@ export function createSessionWire(
         }
         case 'send_message': {
           const payload = message.payload;
+          // A settlement sends nothing: it answers from native history whether the operation's input arrived, and never sends it again.
+          if (payload.settle) {
+            const outcome = await boundAgent.settleInput?.(payload.operationId) ?? 'unknown';
+            if (outcome === 'delivered') sendMessage(commandAcknowledgement(payload.requestId, boundAgent.agentId, 'send_message'));
+            else if (outcome === 'not_delivered') sendMessage(protocolError('input_not_delivered', 'This message did not reach the native CLI, so it was not sent.', true, payload.requestId));
+            else sendMessage(protocolError('operation_outcome_unknown', 'Whether this message reached the native CLI is not known yet.', true, payload.requestId));
+            return;
+          }
           if ('content' in payload && options.authorize && !await options.authorize('send_message')) {
             sendMessage(protocolError('forbidden', 'Messages with attachments are not permitted for this session.', true, requestId));
             return;
           }
           if ('content' in payload && !boundAgent.sendMessageContent) throw new UnsupportedSessionCommandError('send_message_content');
-          const delivery = payload.delivery === undefined ? undefined : { delivery: payload.delivery };
+          // The operation id goes with the input, so a CLI that keeps client ids lets a later reread settle it (gap 5).
+          const delivery = { ...(payload.delivery === undefined ? {} : { delivery: payload.delivery }), inputId: payload.operationId };
           const imageScope = 'content' in payload ? options.imageScope?.() : undefined;
           const result = await executeOperation(boundAgent, {
             operationId: payload.operationId, kind: 'send_message',
@@ -384,7 +398,6 @@ export function createSessionWire(
             }
           }, dispatch: async () => {
             const acceptance = 'content' in payload ? await boundAgent.sendMessageContent!(payload.content, delivery, imageScope)
-              : delivery === undefined ? await boundAgent.sendMessage(payload.text)
               : await boundAgent.sendMessage(payload.text, delivery);
             return inputOperationResult(acceptance);
           } });

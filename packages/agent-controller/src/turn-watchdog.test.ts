@@ -43,7 +43,7 @@ describe('a turn whose CLI stops answering', () => {
     await next!.agent.sendMessage('Again');
     next!.release();
     await vi.advanceTimersByTimeAsync(1000);
-    expect(cli.native('thread-1')).toMatchObject({ clients: 1, resumes: 2, history: ['Hello', 'Hi', 'Again', 'Reply to Again'] });
+    expect(cli.native('thread-1')).toMatchObject({ clients: 1, resumes: 2, history: ['Hello', 'Hi', 'Stuck', 'Again', 'Reply to Again'] });
   });
 
   it('is left to the adapter that declares a heartbeat of its own', async () => {

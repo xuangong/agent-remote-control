@@ -47,13 +47,13 @@ describe('the simulated CLI', () => {
     expect(cli.native('thread-1').loaded).toBe(false);
   });
 
-  it("runs a send as a turn whose items reach history when it ends, and reads history back at the next resume (S2)", async () => {
+  it("runs a send as a turn whose user message reaches history as the CLI takes it and its reply when it ends, and reads history back at the next resume (S2)", async () => {
     fakeTimers();
     const cli = simulatedCli({ behaviour: sharedDaemon, sessions: { 'thread-1': ['Hello', 'Hi'] }, turnMs: 500 });
     const session = await open(cli);
     await session.sendMessage('Next');
     expect((await session.runtimeInfo()).status).toBe('running');
-    expect(cli.native('thread-1').history).toEqual(['Hello', 'Hi']);
+    expect(cli.native('thread-1').history).toEqual(['Hello', 'Hi', 'Next']);
     await vi.advanceTimersByTimeAsync(500);
     expect((await session.runtimeInfo()).status).toBe('idle');
     const live = await drained(session);
@@ -113,7 +113,8 @@ describe('the simulated CLI', () => {
     const terminal = cli.externalWriter('thread-1', { text: 'TERM', turnMs: 1500 });
     await vi.advanceTimersByTimeAsync(1500);
     expect(await terminal).toBe('written');
-    expect(cli.native('thread-1').history).toEqual(['Base', 'Base reply', 'TERM', 'Reply to TERM']);
+    // The terminal read the transcript once the page's message was in it, and continued from there.
+    expect(cli.native('thread-1').history).toEqual(['Base', 'Base reply', 'PAGE', 'TERM', 'Reply to TERM']);
     expect(texts(await drained(session))).toEqual(['Base', 'Base reply', 'PAGE', 'Reply to PAGE']);
     expect(cli.native('thread-1').updatedAt).toBe(Date.now());
   });
@@ -126,7 +127,7 @@ describe('the simulated CLI', () => {
     const terminal = cli.externalWriter('thread-1', { text: 'TERM', turnMs: 1000 });
     await vi.advanceTimersByTimeAsync(1000);
     expect(await terminal).toBe('written');
-    expect(cli.native('thread-1').history).toEqual(['Base', 'Base reply', 'TERM', 'Reply to TERM']);
+    expect(cli.native('thread-1').history).toEqual(['Base', 'Base reply', 'PAGE', 'TERM', 'Reply to TERM']);
   });
 
   it('answers a slow resume after its delay, and a hung one only once healed (S6)', async () => {
@@ -179,7 +180,7 @@ describe('the simulated CLI', () => {
     await session.sendMessage('After the reset');
     await vi.advanceTimersByTimeAsync(100);
     expect((await session.runtimeInfo()).usageLimit).toBeUndefined();
-    expect(cli.native('thread-1').history).toEqual(['After the reset', 'Reply to After the reset']);
+    expect(cli.native('thread-1').history).toEqual(['Over the limit', 'After the reset', 'Reply to After the reset']);
   });
 
   it('fails a turn whose CLI exits with native_exited and ends the stream, and leaves a hung turn running (S7)', async () => {

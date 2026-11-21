@@ -15,8 +15,8 @@ const shared = {
   reread: { order: 'live', paging: 'turns', withoutAttach: false, cost: 'page' },
   // `thread/resume` on the running daemon; the transport allows 90 s per request (`app-server-transport.ts`).
   resume: { cost: 'subscription', deadlineMs: 90_000 },
-  // Codex lists the `clientUserMessageId` given to `turn/start` and `turn/steer` as `clientId` (`native-evidence.ts`); ordinary sends
-  // pass one only on the native-evidence path until every send does (requirements review, gap 5).
+  // Codex lists the `clientUserMessageId` given to `turn/start` and `turn/steer` as `clientId` (`native-evidence.ts`), which the projector
+  // reports as the user row's `clientMessageId`; every send passes the operation's id as it.
   input: { identity: 'echoes_client_id', whileBusy: 'steer' },
   // A turn the account's limit stops fails with `TurnError.codexErrorInfo` `usageLimitExceeded` or `rateLimitExceeded`, and
   // `account/rateLimits/updated`, sent with every turn, gives each window's `usedPercent` and `resetsAt` in seconds (app-server protocol of

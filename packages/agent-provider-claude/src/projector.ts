@@ -86,7 +86,8 @@ export class ClaudeEventProjector {
         }
       }
       const text = typedCommand(parts.map(part => part.type === 'text' ? part.text : `[${part.label}]`).join(imageIndex ? '' : '\n'));
-      if (text && !value.isSynthetic) events.push({ ...this.item(key, { type: 'user_message', text, messageId: value.uuid,
+      // The uuid is the client's input id of a message the Controller sent (FL1), which settles a send by reread (gap 5).
+      if (text && !value.isSynthetic) events.push({ ...this.item(key, { type: 'user_message', text, messageId: value.uuid, ...(typeof value.uuid === 'string' ? { clientMessageId: value.uuid } : {}),
         ...(parts.some(part=>part.type!=='text') ? { content: parts } : {}) }, identity(`user:${value.uuid ?? key}`, true)), ...(imageIndex ? { resourceReferences } : {}) });
       const toolResults = content.filter((block: unknown) => record(block) && block.type === 'tool_result');
       const nativeResult = slimToolUseResult(value.tool_use_result);

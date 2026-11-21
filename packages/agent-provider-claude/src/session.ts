@@ -268,7 +268,7 @@ export class ClaudeAgentSession implements AgentSession {
     this.assertMessageReady(options);
     if (!text.trim()) throw new AgentOperationRejectedError('operation_rejected', 'Claude message cannot be empty.');
     if (this.inputPending()) this.steerMessage(text, options);
-    else this.dispatchMessage(text, undefined, options);
+    else this.dispatchMessage(text, inputUuid(options), options);
   }
 
   async steer(text: string, options: AgentMessageOptions = {}): Promise<void> {
@@ -287,7 +287,7 @@ export class ClaudeAgentSession implements AgentSession {
       const content = await prepareAgentOperation(() => claudeMessageContent(snapshot));
       this.requireOpen();
       if (this.inputPending()) this.steerMessage(content, options);
-      else this.dispatchMessage(content, undefined, options);
+      else this.dispatchMessage(content, inputUuid(options), options);
     } finally { this.preparingMessage = false; if (!this.disposed && !this.failure) this.runtimeUpdated(); }
   }
 
@@ -331,7 +331,7 @@ export class ClaudeAgentSession implements AgentSession {
     if (this.nativeCapabilities && STEER_CAPABILITIES.some(capability => !this.nativeCapabilities!.has(capability))) {
       throw new AgentOperationRejectedError('operation_rejected', 'This Claude Code version cannot accept input while a turn is running. Wait for the turn to finish or update Claude Code.');
     }
-    const message = { type: 'user' as const, uuid: randomUUID(), session_id: this.config.sessionId,
+    const message = { type: 'user' as const, uuid: inputUuid(options), session_id: this.config.sessionId,
       parent_tool_use_id: null, message: { role: 'user' as const, content } };
     this.steering.set(message.uuid, { message, started: false, onAcceptance: options.onAcceptance, onWithdrawn: options.onWithdrawn });
     this.noteRecord(message.uuid);
@@ -760,3 +760,12 @@ export class ClaudeAgentSession implements AgentSession {
 }
 
 function persistedConfig({ tools: _tools, toolNamespaces: _toolNamespaces, ...config }: ClaudeSessionConfig) { return config; }
+
+/**
+ * The uuid a user message is sent with: the client's input id when it gives one, which Claude Code keeps in its transcript (FL1), so a
+ * reread proves whether the input arrived (gap 5); a fresh one otherwise.
+ */
+function inputUuid(options: AgentMessageOptions): ReturnType<typeof randomUUID> {
+  const id = options.inputId;
+  return id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ? id as ReturnType<typeof randomUUID> : randomUUID();
+}

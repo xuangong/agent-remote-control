@@ -261,6 +261,35 @@ it('pauses FIFO behind an unknown outcome until the user checks and dismisses it
   expect(send.mock.calls).toEqual([['Uncertain'], ['Later']]);
 });
 
+it.each([
+  ['arrived and waits for its echo', 'awaiting_echo'],
+  ['never arrived and is Not sent in the conversation', 'failed'],
+  ['arrived and its echo delivered it', undefined],
+] as const)('drops Check delivery once the Host settles the send (it %s), and the message behind it goes (gap 5)', async (_name, settled) => {
+  const { RemoteOperationError } = await import('@orchardworks/agent-client');
+  const operationId = '55555555-5555-4555-8555-555555555555';
+  const lost = Object.assign(new RemoteOperationError('connection_disconnected', 'Remote session connection disconnected.', true), { operationId });
+  const send = vi.fn().mockRejectedValueOnce(lost).mockResolvedValue(undefined);
+  const view = await setup({ onSendMessage: send });
+  await view.type('Uncertain'); await view.click();
+  await view.type('Later'); await view.click();
+  const ledger = (status?: 'unconfirmed' | 'awaiting_echo' | 'failed') => ({ ...state, outgoingMessages: status ? [{ id: 'outgoing-1', operationId, agentId: 'one', text: 'Uncertain', status }] : [] });
+  await view.update({ connection: 'ready', state: ledger('unconfirmed') });
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(view.notice()?.textContent).toContain('Check delivery');
+  await view.update({ state: ledger(settled) });
+  expect(send.mock.calls).toEqual([['Uncertain'], ['Later']]);
+  expect(view.container.textContent).not.toContain('Check delivery');
+});
+
+it('keeps Check delivery for a send whose operation the ledger never held, until the person dismisses it', async () => {
+  const send = vi.fn().mockRejectedValueOnce(new Error('Unknown delivery')).mockResolvedValue(undefined);
+  const view = await setup({ onSendMessage: send });
+  await view.type('Uncertain'); await view.click();
+  await view.update({ connection: 'ready', state: { ...state, outgoingMessages: [] } });
+  expect(view.notice()?.textContent).toContain('Check delivery');
+});
+
 it('waits for confirmed control, and holds a waiting message as Not sent when a terminal takes the session, sending it only on Retry', async () => {
   const view = await setup();
   await view.type('After control'); await view.click();

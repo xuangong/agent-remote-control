@@ -217,6 +217,12 @@ export interface AgentProviderAdapter {
 export interface AgentMessageOptions {
   /** Immediate input joins active work; next_turn uses the native follow-up queue. */
   delivery?: 'immediate' | 'next_turn';
+  /**
+   * The client's id of this input, a UUID (its operation id). An adapter whose CLI keeps client ids (`behaviour.input.identity`
+   * `echoes_client_id`) sends it as the input's native id and reports it as the user row's `clientMessageId`, so a reread of native history
+   * proves whether the input arrived.
+   */
+  inputId?: string;
   /** Process-local evidence for this invocation, possibly after its receipt was lost.
    * Never serialized or used as operation identity. A queued disposition is not settlement. */
   onAcceptance?: (acceptance: AgentInputAcceptance) => void;

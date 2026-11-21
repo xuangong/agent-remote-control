@@ -43,6 +43,8 @@ export function isUncertainSend(error: unknown): error is RemoteOperationError {
 
 export class RemoteOperationError extends Error {
   readonly name = 'RemoteOperationError';
+  /** The operation of a send the client could not confirm, so its sender can follow the message's settlement in the ledger (gap 5). */
+  operationId?: string;
 
   constructor(
     readonly code: string,

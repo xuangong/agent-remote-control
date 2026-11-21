@@ -96,6 +96,17 @@ export class AgentReplica {
     }) });
   }
 
+  /** The Host's answer, from native history, to whether an unconfirmed message arrived (gap 5): the send-state table's `settled`. */
+  settleMessage(id: string, delivered: boolean): void {
+    this.replace({ ...this.state, outgoingMessages: this.state.outgoingMessages?.map(message => {
+      if (message.id !== id) return message;
+      const step = transition(message.status, { type: 'settled', delivered });
+      if (step.state === 'delivered' || step.state === message.status) return message;
+      return { ...message, status: step.state, error: step.error === undefined ? message.error : step.error ?? undefined,
+        retryRequiresNewOperation: step.retryRequiresNewOperation ?? message.retryRequiresNewOperation };
+    }) });
+  }
+
   updateMessage(id: string, status: OutgoingMessage['status'], error?: string, retryRequiresNewOperation?: boolean): void {
     const existing = this.state.outgoingMessages?.find(message => message.id === id);
     if (!existing || (status === 'awaiting_echo' && (existing.status === 'failed' || existing.status === 'unconfirmed'))) return;

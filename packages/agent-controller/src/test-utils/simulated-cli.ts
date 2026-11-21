@@ -1,5 +1,5 @@
 import {
-  AgentRuntimeError, AgentSessionInUseError, type AgentPersistenceHandle, type AgentProviderAdapter, type AgentProviderBehaviour, type AgentRuntimeInfo,
+  AgentRuntimeError, AgentSessionInUseError, type AgentMessageOptions, type AgentPersistenceHandle, type AgentProviderAdapter, type AgentProviderBehaviour, type AgentRuntimeInfo,
   type ProviderObservation, type ProviderStreamItem,
 } from '@orchardworks/agent-provider-sdk';
 import type { RemoteSessionSummary } from '@orchardworks/agent-session-runtime';
@@ -16,8 +16,10 @@ import { ScriptedSession } from './journal-scripted-session.js';
  * Clauses (`simulated-cli.test.ts`):
  * - S1 Clients. Each resume makes this process one client of the session until that session is disposed. A session is loaded while it
  *   has a client, and for the declared `unloadAfterLastClientMs` after its last client leaves.
- * - S2 Turns. A send runs a turn: the user message and `turn_started` at once, the reply and `turn_completed` after `turnMs`; the turn's
- *   items reach history when it ends.
+ * - S2 Turns. A send runs a turn: the user message and `turn_started` at once, the reply and `turn_completed` after `turnMs`. The CLI
+ *   records the user message as it takes it, and the reply when the turn ends, so an input it took stays in history if its client stops.
+ *   A CLI that declares it keeps client ids (`input.identity`) keeps the send's `inputId` with its user message and reports it as
+ *   `clientMessageId`, live and on every read.
  * - S3 Another client (`shared_clients`). `externalWriter` runs a turn of another client of the CLI: attached clients see it live when
  *   `othersVisible` is `live`, and it reaches history. It loads the session while it runs.
  * - S4 A writer elsewhere (`single_writer`, or `separate: true` beside shared clients: a process outside the CLI's clients). It is refused
@@ -41,7 +43,8 @@ export interface SimulatorClock { now(): number; setTimeout(callback: () => void
 /** The global timers, so `vi.useFakeTimers()` drives a simulator built without a clock. */
 const globalClock: SimulatorClock = { now: () => Date.now(), setTimeout: (callback, delayMs) => setTimeout(callback, delayMs), clearTimeout: timer => clearTimeout(timer as ReturnType<typeof setTimeout>) };
 
-interface Item { key: string; type: 'user_message' | 'assistant_message'; text: string; turnId: string }
+/** `clientId`: the client's id a user message was sent with, which a CLI that keeps client ids reports again on every read. */
+interface Item { key: string; type: 'user_message' | 'assistant_message'; text: string; turnId: string; clientId?: string }
 /** A branch of a transcript; `written` orders the writes, so the one written last is known even within one millisecond. */
 interface Branch { items: Item[]; writtenAt: number; written: number }
 
@@ -92,7 +95,8 @@ export function simulatedCli(options: SimulatedCliOptions) {
     ...(item ? { itemIdentity: { key: item.key, ...(completes ? { completes: true as const } : {}) } } : {}),
   });
   const timeline = (delivery: 'history' | 'live', item: Item): ProviderObservation => observation(delivery,
-    { type: 'timeline', provider: providerId, turnId: item.turnId, item: { type: item.type, text: item.text, messageId: item.key } }, item);
+    { type: 'timeline', provider: providerId, turnId: item.turnId, item: { type: item.type, text: item.text, messageId: item.key, ...(item.clientId ? { clientMessageId: item.clientId } : {}) } }, item);
+  const keepsClientIds = behaviour.input.identity === 'echoes_client_id';
   /** A well-formed observation of an item kind the adapter does not know, as a CLI update could add one (S8). */
   const unknown = (delivery: 'history' | 'live', kind: string, turnId: string): ProviderObservation => ({
     ...observation(delivery, { type: 'timeline', provider: providerId, turnId, item: { type: kind, text: 'from a newer CLI' } as never }), itemIdentity: { key: `${turnId}:${kind}`, completes: true } });
@@ -127,14 +131,16 @@ export function simulatedCli(options: SimulatedCliOptions) {
       return { providerId, sessionId: this.native.id, status: this.closed ? 'closed' : this.running ? 'running' : 'idle', persistence: { providerId, sessionId: this.native.id, opaque: '{}' },
         ...(this.usageLimit ? { usageLimit: { ...this.usageLimit } } : {}) };
     }
-    override async sendMessage(text: string): Promise<void> {
+    override async sendMessage(text: string, options?: AgentMessageOptions): Promise<void> {
       if (this.closed) throw new Error('The simulated session is closed.');
       this.sent.push(text);
       const turnId = `turn-${++turns}`;
-      const ask: Item = { key: `${turnId}:user`, type: 'user_message', text, turnId };
+      const ask: Item = { key: `${turnId}:user`, type: 'user_message', text, turnId, ...(keepsClientIds && options?.inputId ? { clientId: options.inputId } : {}) };
       this.running = turnId;
       this.push(observation('live', { type: 'turn_started', provider: providerId, turnId }));
       this.push(timeline('live', ask));
+      this.writtenAt = clock.now();
+      write(this.native, this, [ask]);
       const limitResetsAt = turnFaults.limitResetsAt;
       if (limitResetsAt !== undefined && clock.now() < limitResetsAt) {
         this.usageLimit = { resetsAt: limitResetsAt };
@@ -160,7 +166,7 @@ export function simulatedCli(options: SimulatedCliOptions) {
         this.push(observation('live', { type: 'turn_completed', provider: providerId, turnId }));
         this.running = undefined;
         this.writtenAt = clock.now();
-        write(this.native, this, [ask, reply]);
+        write(this.native, this, [reply]);
       }, turnMs);
     }
     /** The CLI's process ended under this client. */

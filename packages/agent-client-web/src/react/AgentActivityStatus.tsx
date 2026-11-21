@@ -8,6 +8,8 @@ export interface AgentActivityStatusProps {
   host?: SessionFacts['host'];
   visible?: boolean;
   commandPending?: boolean;
+  /** When the facts are read, for a usage limit that may have reset; the page's clock by default. */
+  now?: number;
 }
 
 /**
@@ -15,10 +17,10 @@ export interface AgentActivityStatusProps {
  * technology, out of sight, since the timeline's status line says it on screen (I4); Interrupt is the composer's stop button.
  * A notice dims the presence dot; the words of the notice are said elsewhere, once.
  */
-export function AgentActivityStatus({ state, sessionState: session, host, visible = true, commandPending = false }: AgentActivityStatusProps) {
+export function AgentActivityStatus({ state, sessionState: session, host, visible = true, commandPending = false, now: readAt }: AgentActivityStatusProps) {
   const t = useTranslate();
   const agent = state?.agent;
-  const facts: SessionFacts = { session, host, replica: state };
+  const facts: SessionFacts = { session, host, replica: state, now: readAt ?? Date.now() };
   const label = sessionActivityLabel(facts, commandPending, t);
   const notice = sessionNotice(facts) !== undefined;
   const terminal = session.activity === 'failed' || session.activity === 'closed';

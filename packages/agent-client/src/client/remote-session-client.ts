@@ -81,6 +81,8 @@ interface PendingOperation {
 }
 
 const TAIL_LIMIT_MAX = 200;
+/** How many connections may ask whether one unconfirmed message arrived, so a connection that drops on the question cannot loop. */
+const SETTLEMENT_ASKS = 3;
 
 export class RemoteSessionClient {
   private control?: SessionControlState;
@@ -130,6 +132,9 @@ export class RemoteSessionClient {
   private inactiveSince?: number;
   /** The Relay closed the subscription for one in more recent use; it reconnects when it is in use again. */
   private paused = false;
+  /** Unconfirmed messages whose settlement is being asked, and how often each was asked, by message id. */
+  private readonly settling = new Set<string>();
+  private readonly settlementAsks = new Map<string, number>();
 
   constructor(
     private readonly agentId: string,
@@ -507,6 +512,8 @@ export class RemoteSessionClient {
       response.type === 'command_acknowledged' && response.payload.command === 'send_message'
     ), null);
     const isCurrentAttempt = () => this.replica.getState().outgoingMessages?.some(item => item.id === outgoingId && item.operationId === operationId);
+    // A failure names the operation, which the ledger's message carries, before the caller sees it.
+    void operation.catch(error => { if (error instanceof RemoteOperationError) error.operationId ??= operationId; });
     void operation.then(acknowledgement => {
       if (!isCurrentAttempt()) return;
       this.replica.acknowledgeMessage(outgoingId, acknowledgement.payload.inputAcceptance, acknowledgement.payload.submittedTextSha256);
@@ -1052,7 +1059,32 @@ export class RemoteSessionClient {
     this.stopMessageEchoSync?.();
     this.stopMessageEchoSync = status === 'ready'
       ? watchMessageEchoes(this.agentId, this.transport, this.replica, this.historyPageSize) : undefined;
+    if (status === 'ready') this.settleUnconfirmed();
     for (const listener of this.statusListeners) listener(status);
+  }
+
+  /**
+   * Settles the messages whose delivery is unknown once the session is ready again (gap 5): for each, it asks the Host whether the
+   * message's operation reached the native CLI, which the Host answers from native history and sends nothing. One that arrived waits for
+   * its echo; one that never did is Not sent, for the reader to retry as a new message; any other answer leaves it unknown until the next
+   * connection, at most `SETTLEMENT_ASKS` times. A message is never sent again to settle it.
+   */
+  private settleUnconfirmed(): void {
+    for (const message of this.replica.getState().outgoingMessages ?? []) {
+      if (message.agentId !== this.agentId || message.status !== 'unconfirmed' || !message.operationId || this.settling.has(message.id)) continue;
+      const { id, operationId } = message;
+      const asks = this.settlementAsks.get(id) ?? 0;
+      if (asks >= SETTLEMENT_ASKS) continue;
+      this.settlementAsks.set(id, asks + 1);
+      this.settling.add(id);
+      const unsettled = () => this.replica.getState().outgoingMessages?.some(item => item.id === id && item.operationId === operationId && item.status === 'unconfirmed');
+      void this.sendOperation({ protocolVersion: PROTOCOL_VERSION, type: 'send_message', payload: { requestId: this.createRequestId(), operationId, agentId: this.agentId,
+        ...(message.content ? { content: [...message.content] } : { text: message.text }), ...(message.delivery === undefined ? {} : { delivery: message.delivery }), settle: true } },
+      'command_acknowledged:send_message', (response): response is CommandAcknowledgementMessage => response.type === 'command_acknowledged' && response.payload.command === 'send_message')
+        .then(() => { if (unsettled()) this.replica.settleMessage(id, true); },
+          error => { if (unsettled() && error instanceof RemoteOperationError && error.code === 'input_not_delivered') this.replica.settleMessage(id, false); })
+        .finally(() => { this.settling.delete(id); });
+    }
   }
 }
 

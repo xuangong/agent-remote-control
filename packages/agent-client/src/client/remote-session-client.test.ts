@@ -2296,3 +2296,59 @@ describe('settling a message the reader sent', () => {
     } finally { f.client.stop(); }
   });
 });
+
+describe('settling a message whose delivery is unknown, once the session is ready again (gap 5)', () => {
+  /** A send cut off by a lost connection, then the reconnect: what the client asks, and the Host's answer. */
+  async function cutOff() {
+    let reconnect: (() => void) | undefined;
+    const f = await outgoingFixture({ scheduleReconnect: (_delay, next) => { reconnect = next; return () => undefined; } });
+    const send = f.client.sendMessage('Cut off');
+    const operationId = (f.transport.sent.at(-1) as Extract<ClientMessage, { type: 'send_message' }>).payload.operationId;
+    f.transport.disconnect();
+    await expect(send).rejects.toMatchObject({ code: 'connection_disconnected' });
+    expect(f.replica.getState().outgoingMessages?.[0]?.status).toBe('unconfirmed');
+    reconnect!();
+    f.transport.open();
+    completeSubscription(f.transport);
+    await f.transport.settle();
+    const settlements = () => f.transport.sent.filter((message): message is Extract<ClientMessage, { type: 'send_message' }> => message.type === 'send_message' && message.payload.settle === true);
+    return { ...f, operationId, settlements };
+  }
+
+  it('asks the Host once, with the same operation and sending nothing, and lets a message that arrived wait for its echo', async () => {
+    const f = await cutOff();
+    try {
+      expect(f.settlements()).toHaveLength(1);
+      expect(f.settlements()[0]!.payload).toMatchObject({ operationId: f.operationId, text: 'Cut off', settle: true });
+      expect(f.transport.sent.filter(message => message.type === 'send_message' && !message.payload.settle)).toHaveLength(1);
+      f.acknowledge(f.settlements()[0]!.payload.requestId);
+      await f.transport.settle();
+      expect(f.replica.getState().outgoingMessages).toMatchObject([{ status: 'awaiting_echo' }]);
+      f.echo(1, 'Cut off');
+      expect(f.replica.getState().outgoingMessages).toEqual([]);
+    } finally { f.client.stop(); }
+  });
+
+  it('says Not sent for a message native history shows never arrived, and Retry sends it as a new message', async () => {
+    const f = await cutOff();
+    try {
+      f.transport.emit({ protocolVersion: '1.8.0', type: 'protocol_error', payload: { requestId: f.settlements()[0]!.payload.requestId, code: 'input_not_delivered', message: 'This message did not reach the native CLI, so it was not sent.', recoverable: true } });
+      await f.transport.settle();
+      expect(f.replica.getState().outgoingMessages).toMatchObject([{ status: 'failed', error: 'This message did not reach the agent, so it was not sent. Retry sends it.', retryRequiresNewOperation: true }]);
+      void f.client.retryMessage(f.replica.getState().outgoingMessages![0]!.id).catch(() => undefined);
+      const retried = f.transport.sent.at(-1) as Extract<ClientMessage, { type: 'send_message' }>;
+      expect(retried.payload).toMatchObject({ text: 'Cut off' });
+      expect(retried.payload.settle).toBeUndefined();
+      expect(retried.payload.operationId).not.toBe(f.operationId);
+    } finally { f.client.stop(); }
+  });
+
+  it('leaves the message unknown for any other answer', async () => {
+    const f = await cutOff();
+    try {
+      f.transport.emit({ protocolVersion: '1.8.0', type: 'protocol_error', payload: { requestId: f.settlements()[0]!.payload.requestId, code: 'operation_outcome_unknown', message: 'Not known yet.', recoverable: true } });
+      await f.transport.settle();
+      expect(f.replica.getState().outgoingMessages).toMatchObject([{ status: 'unconfirmed' }]);
+    } finally { f.client.stop(); }
+  });
+});

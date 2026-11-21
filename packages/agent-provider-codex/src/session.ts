@@ -768,7 +768,7 @@ export class CodexAppServerSession implements AgentSession {
     try {
       const input = await prepareAgentOperation(() => codexMessageInput(parts));
       this.assertMessageReady();
-      if (!this.activeTurnId) return accept(await this.startTurn(input));
+      if (!this.activeTurnId) return accept(await this.startTurn(input, undefined, undefined, options?.inputId));
       let expectedTurnId = this.activeTurnId;
       for (let attempt = 0; ; attempt += 1) {
         const revision = this.statusRevision;
@@ -787,7 +787,7 @@ export class CodexAppServerSession implements AgentSession {
             this.statusRevision += 1;
             this.emitRuntimeUpdate();
             this.assertMessageReady();
-            return accept(await this.startTurn(input));
+            return accept(await this.startTurn(input, undefined, undefined, options?.inputId));
           }
           const mismatch = /^expected active turn id `([^`]+)` but found `([^`]+)`$/.exec(error.message);
           if (attempt > 0 || !mismatch || mismatch[1] !== expectedTurnId || mismatch[2] === expectedTurnId || this.statusRevision !== revision) throw error;
@@ -817,7 +817,8 @@ export class CodexAppServerSession implements AgentSession {
 
   private async steerTurn(input: CodexInput[], expectedTurnId: string, options?: AgentMessageOptions): Promise<AgentInputAcceptance | void> {
     this.nativeEvidence.invalidate();
-    const clientUserMessageId = randomUUID();
+    // Codex keeps the client's id of an input and lists it as the history row's `clientId`, so a reread can settle it (gap 5).
+    const clientUserMessageId = options?.inputId ?? randomUUID();
     const pending: SteerInputAcceptance = { turnId: expectedTurnId, input, handled: false, onAcceptance: options?.onAcceptance };
     this.steerInputAcceptances.set(clientUserMessageId, pending);
     try {
@@ -859,7 +860,7 @@ export class CodexAppServerSession implements AgentSession {
     await this.transport.request('turn/interrupt', { threadId: this.threadId, turnId: this.activeTurnId });
   }
 
-  private async startTurn(message: string | CodexInput[], skill?: { name: string; path: string }, evidence?: AgentPreparedTextInput): Promise<AgentInputAcceptance | void> {
+  private async startTurn(message: string | CodexInput[], skill?: { name: string; path: string }, evidence?: AgentPreparedTextInput, inputId?: string): Promise<AgentInputAcceptance | void> {
     this.assertDirectInput();
     if (!this.threadId) throw new AgentOperationRejectedError('operation_rejected', 'Codex session has no thread');
     if (typeof message === 'string' && !message.trim() && !skill) throw new AgentOperationRejectedError('operation_rejected', 'Codex message must not be empty');
@@ -877,7 +878,7 @@ export class CodexAppServerSession implements AgentSession {
         ...(!this.hasPendingModelSetting && this.config.model ? { model: this.config.model } : {}),
         ...(!this.hasPendingModelSetting && this.config.reasoningEffort ? { effort: this.config.reasoningEffort } : {}),
         ...(collaborationMode ? { collaborationMode } : {}),
-        ...(evidence ? { ...codexEvidenceTurnSettings(evidence), clientUserMessageId: evidence.inputId } : {}),
+        ...(evidence ? { ...codexEvidenceTurnSettings(evidence), clientUserMessageId: evidence.inputId } : inputId ? { clientUserMessageId: inputId } : {}),
       });
       if (statusRevision === this.statusRevision && isRecord(result) && isRecord(result.turn) && readString(result.turn.id)) {
         this.runtimeStatus = 'running';

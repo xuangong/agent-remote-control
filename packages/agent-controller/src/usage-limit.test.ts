@@ -37,6 +37,6 @@ describe('a usage limit the CLI signals on a turn', () => {
     await vi.advanceTimersByTimeAsync(1000);
     lease!.release();
     expect(lease!.agent.snapshot().payload.runtimeInfo.usageLimit).toBeUndefined();
-    expect(cli.native('thread-1').history).toEqual(['Hello', 'Hi', 'After the reset', 'Reply to After the reset']);
+    expect(cli.native('thread-1').history).toEqual(['Hello', 'Hi', 'Over the limit', 'After the reset', 'Reply to After the reset']);
   });
 });

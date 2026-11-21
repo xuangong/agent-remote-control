@@ -106,6 +106,8 @@ interface PendingMessage {
   agentId: string; containsImages: boolean; submitted: string; parts: readonly DraftPart[];
   images: Record<string, { blob: Blob | undefined; uploadId: string }>;
   imageRecipient: ImageDraftRecipient | undefined; hadImageBinding: boolean;
+  /** The operation of a send that failed with an unknown outcome, as its error names it, and whether the replica's ledger held it since. */
+  operationId?: string; inLedger?: boolean;
 }
 
 /** How long a replacing composer keeps trying to take over the focus of the one it replaced. */
@@ -146,6 +148,14 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     ready: message => readyToDeliver(message),
     send: (message, signal, dispatch) => deliver(message, signal, dispatch),
     heldUntil: () => latest.current.heldUntil,
+    // A send whose delivery became unknown is settled in the replica once the Host answers from native history (gap 5): Not sent there
+    // with Retry, or sent and waiting for its echo, or delivered. The chip that said Check delivery then has nothing left to say.
+    settled: message => {
+      if (!message.operationId) return false;
+      const ledger = latest.current.outgoing?.find(item => item.operationId === message.operationId);
+      if (ledger) message.inLedger = true;
+      return ledger ? ledger.status === 'failed' || ledger.status === 'awaiting_echo' : message.inLedger === true;
+    },
   });
   const currentAgent = useRef(agentId);
   currentAgent.current = agentId;
@@ -264,8 +274,9 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   const dispatchReady = sendNow && !operationBusy;
   const sendAllowed = sendNow;
   const queueAllowed = ready && session.operations.queue_message.allowed;
-  const latest = useRef({ waitsWhileOpening, agentId, draftOnly, mutationBlocked, dispatchReady, sendAllowed, queueAllowed, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient, heldUntil });
-  latest.current = { waitsWhileOpening, agentId, draftOnly, mutationBlocked, dispatchReady, sendAllowed, queueAllowed, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient, heldUntil };
+  const outgoing = state?.outgoingMessages;
+  const latest = useRef({ waitsWhileOpening, agentId, draftOnly, mutationBlocked, dispatchReady, sendAllowed, queueAllowed, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient, heldUntil, outgoing });
+  latest.current = { waitsWhileOpening, agentId, draftOnly, mutationBlocked, dispatchReady, sendAllowed, queueAllowed, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient, heldUntil, outgoing };
   // A message waits for its session until the session is ready, however long it takes to open. It stops as Not sent, and is
   // never sent unasked later, only when the session cannot take it: a business reason, or a view that could not open it.
   const unsendable = availability.input === 'disabled' && !draftOnly ? availability.words : openFailed ? t('composer.openFailed') : undefined;
@@ -314,10 +325,17 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     }
     const content = containsImages ? snapshotContent(parts, attachments) : undefined;
     if (!dispatch()) return;
-    if (content) await richSend!(content, {
-      imageDigests: Object.fromEntries(Object.values(attachments).map(image => [image.attachmentId, image.sha256])),
-    });
-    else await textSend!(submitted.trim());
+    try {
+      if (content) await richSend!(content, {
+        imageDigests: Object.fromEntries(Object.values(attachments).map(image => [image.attachmentId, image.sha256])),
+      });
+      else await textSend!(submitted.trim());
+    } catch (error) {
+      // The client names the operation of a send it could not confirm, so the chip can follow its settlement in the ledger.
+      const operationId = (error as { operationId?: unknown } | undefined)?.operationId;
+      if (typeof operationId === 'string') message.operationId = operationId;
+      throw error;
+    }
     } finally { richPreparations.current.delete(preparation); signal.removeEventListener('abort', abortPreparation); }
 
   }

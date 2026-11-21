@@ -65,9 +65,11 @@ export type ProviderListResponse = Static<typeof ProviderListResponse>;
 export const SendMessageRequest = Strict({
   protocolVersion: ProtocolVersionSchema,
   type: Type.Literal('send_message'), controlToken: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+  // `settle`: send nothing; answer whether this operation's input reached the CLI, as native history shows it (gap 5). Acknowledged when it
+  // arrived, refused `input_not_delivered` when it never did, `operation_outcome_unknown` otherwise.
   payload: Type.Union([
-    Strict({ requestId: NonEmptyString, operationId: OperationId, agentId: NonEmptyString, text: Type.String(), delivery: Type.Optional(Type.Union([Type.Literal('immediate'), Type.Literal('next_turn')])) }),
-    Strict({ requestId: NonEmptyString, operationId: OperationId, agentId: NonEmptyString, content: Type.Array(MessagePart, { minItems: 1, maxItems: 1024 }), delivery: Type.Optional(Type.Union([Type.Literal('immediate'), Type.Literal('next_turn')])) }),
+    Strict({ requestId: NonEmptyString, operationId: OperationId, agentId: NonEmptyString, text: Type.String(), delivery: Type.Optional(Type.Union([Type.Literal('immediate'), Type.Literal('next_turn')])), settle: Type.Optional(Type.Literal(true)) }),
+    Strict({ requestId: NonEmptyString, operationId: OperationId, agentId: NonEmptyString, content: Type.Array(MessagePart, { minItems: 1, maxItems: 1024 }), delivery: Type.Optional(Type.Union([Type.Literal('immediate'), Type.Literal('next_turn')])), settle: Type.Optional(Type.Literal(true)) }),
   ]),
 });
 export type SendMessageRequest = Static<typeof SendMessageRequest>;

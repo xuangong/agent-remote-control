@@ -6,7 +6,7 @@ import { AgentActivityStatus } from './AgentActivityStatus.js';
 
 describe('the activity line says the business label of each row, and never a connection word', () => {
   it.each(SESSION_PRESENTATION_VECTORS.map(row => [row.name, row] as const))('%s', async (_name, row) => {
-    const container = await render(<AgentActivityStatus state={row.facts.replica} sessionState={row.facts.session} host={row.facts.host}
+    const container = await render(<AgentActivityStatus state={row.facts.replica} sessionState={row.facts.session} host={row.facts.host} now={row.facts.now}
       interruptDisabled interruptLabel="Interrupt" onInterrupt={() => {}} />);
     const label = container.querySelector<HTMLElement>('[data-testid="agent-activity-label"]')!;
     if (row.label === undefined) expect(label.hidden).toBe(true);

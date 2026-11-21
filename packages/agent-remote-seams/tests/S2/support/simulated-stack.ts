@@ -69,9 +69,10 @@ export async function simulatedStack(behaviour: AgentProviderBehaviour, closers:
       control: () => frames.filter(frame => frame.type === 'session_control').at(-1)?.payload as Frame | undefined,
       /** Asks for control, as the page's take-control or Retry button does, under the revision it last saw. */
       acquire: (requestId: string) => page.send({ protocolVersion: PROTOCOL_VERSION, type: 'session_control_request', payload: { agentId, requestId, revision: (frames.filter(frame => frame.type === 'session_control').at(-1)?.payload as Frame).revision, action: 'acquire' } }),
-      /** Sends a message as the page's composer does, with the control token it holds. */
-      send: (text: string, operationId: string = crypto.randomUUID()) => page.send({ protocolVersion: PROTOCOL_VERSION, type: 'send_message',
-        controlToken: (frames.filter(frame => frame.type === 'session_control').at(-1)?.payload as Frame | undefined)?.token, payload: { requestId: `send-${operationId}`, operationId, agentId, text } }),
+      /** Sends a message as the page's composer does, with the control token it holds; `settle` asks only whether it arrived, as the page does after a reconnect. */
+      send: (text: string, operationId: string = crypto.randomUUID(), options: { settle?: true } = {}) => page.send({ protocolVersion: PROTOCOL_VERSION, type: 'send_message',
+        controlToken: (frames.filter(frame => frame.type === 'session_control').at(-1)?.payload as Frame | undefined)?.token,
+        payload: { requestId: `${options.settle ? 'settle' : 'send'}-${operationId}`, operationId, agentId, text, ...options } }),
       close: page.close,
     };
   }

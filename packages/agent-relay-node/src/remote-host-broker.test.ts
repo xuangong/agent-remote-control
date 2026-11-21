@@ -331,8 +331,9 @@ it('carries native-host discovery, creation, snapshots, and chat through the pro
   const queuedText = '  Keep this text\nexactly as submitted  ';
   expect((await client.sendMessage(queuedText, { delivery: 'next_turn' })).payload.command).toBe('send_message');
   expect(deliveries).toEqual([
-    { text: 'Across the host uplink', options: undefined },
-    { text: queuedText, options: { delivery: 'next_turn' } },
+    // The send's operation travels as the input id (gap 5).
+    { text: 'Across the host uplink', options: { inputId: expect.any(String) } },
+    { text: queuedText, options: { delivery: 'next_turn', inputId: expect.any(String) } },
   ]);
   for (const session of nativeSessions) delete session.capabilities.queueMessage;
   await expect(client.sendMessage('Unsupported queue', { delivery: 'next_turn' })).rejects.toMatchObject({ code: 'unsupported_command', recoverable: true });

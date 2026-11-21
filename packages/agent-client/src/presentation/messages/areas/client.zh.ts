@@ -31,6 +31,7 @@ export const client: AreaMessages<typeof english> = {
   'client.send.historyChanged': '对话记录有变动，没能确认消息是否送达。',
   'client.send.restored': '页面关闭前没能确认送达。重试前先看看对话里有没有。',
   'client.send.newAttempt': '这条消息可能没送到。如果对话里没有，点“重试”再发一次。',
+  'client.send.notDelivered': '这条消息没送到 Agent，所以没有发出去。点“重试”再发一次。',
   'client.send.uncertain': '没能确认送达。再发之前先看看对话里有没有。',
   'client.send.failed': '没发出去',
   'client.send.unconfirmed': '不确定有没有送到',

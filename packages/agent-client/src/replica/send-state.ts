@@ -15,6 +15,9 @@
  * - Only `failed` and `unconfirmed` may be retried or deleted. A retry sends the same operation again when the first attempt is
  *   uncertain, its place in the conversation is still held and the Host can run it again; otherwise it is a new operation.
  * - `failed` is never changed by an acknowledgement, an echo or a history rewrite (an echo of a failed message is not matched).
+ * - Settlement (gap 5): when the Host answers from native history whether an `unconfirmed` message arrived, one that arrived waits for its
+ *   echo (`awaiting_echo`), and one that never arrived is `failed` with the "not delivered" words, so Retry sends it as a new message.
+ *   Nothing is sent to settle it; no other state is changed by a settlement.
  */
 import { translator, type Translate } from '../presentation/messages.js';
 export type SendState = 'sending' | 'awaiting_echo' | 'unconfirmed' | 'failed';
@@ -33,7 +36,9 @@ export type SendEvent =
   /** The page loaded the message back from storage. */
   | { type: 'restored'; error?: string }
   /** The reader retries it. */
-  | { type: 'retry' };
+  | { type: 'retry' }
+  /** The Host answered, from native history, whether the message arrived. */
+  | { type: 'settled'; delivered: boolean };
 
 export interface SendStep {
   /** The next state, or `delivered` when the message leaves the pending list. */
@@ -48,6 +53,7 @@ const HISTORY_CHANGED = 'Conversation history changed before delivery could be c
 const RESTORED = 'Delivery was not confirmed before this page closed. Check the conversation before retrying.';
 const NEW_ATTEMPT = 'This message may not have arrived. If it is not in the conversation, Retry sends it again.';
 const UNCERTAIN = 'Delivery is not confirmed. Check the conversation before sending again.';
+const NOT_DELIVERED = 'This message did not reach the agent, so it was not sent. Retry sends it.';
 
 export function transition(state: SendState, event: SendEvent): SendStep {
   switch (event.type) {
@@ -69,6 +75,9 @@ export function transition(state: SendState, event: SendEvent): SendStep {
       return { state: state === 'failed' ? 'failed' : 'unconfirmed', error: event.error ?? RESTORED };
     case 'retry':
       return canSettle(state) ? { state: 'sending', error: null, retryRequiresNewOperation: false } : { state };
+    case 'settled':
+      if (state !== 'unconfirmed') return { state };
+      return event.delivered ? { state: 'awaiting_echo', error: null } : { state: 'failed', error: NOT_DELIVERED, retryRequiresNewOperation: true };
   }
 }
 

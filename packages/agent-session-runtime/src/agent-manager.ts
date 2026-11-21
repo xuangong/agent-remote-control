@@ -22,7 +22,7 @@ import type {
   AgentStreamEvent,
   ProviderObservation,
 } from '@orchardworks/agent-provider-sdk';
-import { supportsJournal } from '@orchardworks/agent-provider-sdk';
+import { resolveAgentProviderBehaviour, supportsJournal } from '@orchardworks/agent-provider-sdk';
 import {
   PROTOCOL_VERSION,
   type AgentCommand,
@@ -549,6 +549,20 @@ export class AgentManager {
         return dispatch(() => this.session.sendMessageContent!(resolved, options));
       });
     });
+  }
+
+  /**
+   * Whether the input sent with `inputId` reached the CLI (gap 5), for a provider that declares its CLI keeps client ids
+   * (`behaviour.input.identity` `echoes_client_id`): `delivered` when a user row carries it as its `clientMessageId`; `not_delivered` when
+   * none does once native history is read and nothing runs that could still record it; `unknown` otherwise, and always for a CLI that
+   * keeps no client id. It sends nothing, so an input is never sent twice.
+   */
+  async settleInput(inputId: string): Promise<'delivered' | 'not_delivered' | 'unknown'> {
+    if (resolveAgentProviderBehaviour(this.provider).input.identity !== 'echoes_client_id') return 'unknown';
+    if (this.timeline.rows().some(row => row.item.type === 'user_message' && row.item.clientMessageId === inputId)) return 'delivered';
+    const state = this.state.payload;
+    const quiet = !this.closed && this.boundarySeen && (state.status === 'idle' || state.status === 'failed') && state.activeTurn === null && state.pendingInteractions.length === 0;
+    return quiet ? 'not_delivered' : 'unknown';
   }
 
   async setPlanning(active: boolean): Promise<void> {

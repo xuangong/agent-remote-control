@@ -6,6 +6,7 @@ const NEW_ATTEMPT = 'This message may not have arrived. If it is not in the conv
 const UNCERTAIN = 'Delivery is not confirmed. Check the conversation before sending again.';
 const HISTORY = 'Conversation history changed before delivery could be confirmed.';
 const RESTORED = 'Delivery was not confirmed before this page closed. Check the conversation before retrying.';
+const NOT_DELIVERED = 'This message did not reach the agent, so it was not sent. Retry sends it.';
 
 const rows: Array<{ name: string; from: SendState; event: SendEvent; step: SendStep }> = [
   // acknowledged
@@ -36,6 +37,11 @@ const rows: Array<{ name: string; from: SendState; event: SendEvent; step: SendS
   { name: 'a waiting message loaded after a reload is unconfirmed', from: 'awaiting_echo', event: { type: 'restored' }, step: { state: 'unconfirmed', error: RESTORED } },
   { name: 'an unconfirmed message keeps the words it was saved with', from: 'unconfirmed', event: { type: 'restored', error: 'Saved words.' }, step: { state: 'unconfirmed', error: 'Saved words.' } },
   { name: 'a failed message stays failed after a reload and keeps its words', from: 'failed', event: { type: 'restored', error: 'No access.' }, step: { state: 'failed', error: 'No access.' } },
+  // settled (gap 5)
+  { name: 'an unconfirmed message native history shows arrived waits for its echo', from: 'unconfirmed', event: { type: 'settled', delivered: true }, step: { state: 'awaiting_echo', error: null } },
+  { name: 'an unconfirmed message native history shows never arrived is not sent, and Retry sends it as a new message', from: 'unconfirmed', event: { type: 'settled', delivered: false }, step: { state: 'failed', error: NOT_DELIVERED, retryRequiresNewOperation: true } },
+  ...(['sending', 'awaiting_echo', 'failed'] as const).flatMap(from => [true, false].map(delivered => ({
+    name: `a settlement changes nothing of a ${from} message (${delivered ? 'arrived' : 'not arrived'})`, from, event: { type: 'settled', delivered } as SendEvent, step: { state: from } }))),
   // retry
   { name: 'a failed message is retried as sending, with no error and no new attempt owed', from: 'failed', event: { type: 'retry' }, step: { state: 'sending', error: null, retryRequiresNewOperation: false } },
   { name: 'an unconfirmed message is retried as sending', from: 'unconfirmed', event: { type: 'retry' }, step: { state: 'sending', error: null, retryRequiresNewOperation: false } },
@@ -50,7 +56,7 @@ suite('the send state table', () => {
 
   it('has a row for every state and every event', () => {
     for (const state of SEND_STATES) expect(new Set(rows.filter(row => row.from === state).map(row => row.event.type)).size).toBeGreaterThanOrEqual(5);
-    expect(new Set(rows.map(row => row.event.type))).toEqual(new Set(['acknowledged', 'send_failed', 'echoed', 'history_changed', 'restored', 'retry']));
+    expect(new Set(rows.map(row => row.event.type))).toEqual(new Set(['acknowledged', 'send_failed', 'echoed', 'history_changed', 'restored', 'retry', 'settled']));
   });
 });
 

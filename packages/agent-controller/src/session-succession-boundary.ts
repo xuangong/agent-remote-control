@@ -421,7 +421,8 @@ export class SessionSuccessionBoundary {
     if (!role || role.roleId !== attachment.roleId || role.roleRevision !== attachment.roleRevision) {
       throw new AgentOperationRejectedError('succession_not_committed', 'This candidate has not been committed as the current primary session.');
     }
-    const { onAcceptance, onWithdrawn: _withdrawn, ...selections } = options ?? {};
+    // The input id names the input, not a native selection; a prepared first input carries its own (the witness's).
+    const { onAcceptance, onWithdrawn: _withdrawn, inputId: _inputId, ...selections } = options ?? {};
     const nativeOptions = Object.keys(selections).length ? selections : undefined;
     const contentIdentity = createHash('sha256').update(JSON.stringify([parts ?? null, nativeOptions ?? null])).digest('hex');
     const prior = this.contexts.delivery(admitted.operationId);

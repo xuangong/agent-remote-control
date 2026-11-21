@@ -428,7 +428,7 @@ describe('session wire Timeline and manager-event projection', () => {
     }]);
   });
 
-  it.each([undefined, 'immediate', 'next_turn'] as const)('forwards %s delivery without changing native arguments or acknowledgement', async (delivery) => {
+  it.each([undefined, 'immediate', 'next_turn'] as const)('forwards %s delivery and the input id without changing the text or the acknowledgement', async (delivery) => {
     const { agent } = fakeAgent();
     const calls: unknown[][] = [];
     agent.sendMessage = async (...args) => { calls.push(args); };
@@ -441,7 +441,7 @@ describe('session wire Timeline and manager-event projection', () => {
       await wire.receive(JSON.stringify({ protocolVersion: '1.8.0', type: 'send_message', payload: {
         requestId: 'message-delivery', operationId: OPERATION_ID, agentId: 'agent-1', text, ...(delivery === undefined ? {} : { delivery }),
       } }));
-      expect(calls).toEqual([delivery === undefined ? [text] : [text, { delivery }]]);
+      expect(calls).toEqual([[text, { ...(delivery === undefined ? {} : { delivery }), inputId: OPERATION_ID }]]);
       expect(output).toEqual([{ protocolVersion: '1.8.0', type: 'command_acknowledged', payload: { requestId: 'message-delivery', agentId: 'agent-1', command: 'send_message' } }]);
     } finally { wire.close(); }
   });
@@ -746,4 +746,53 @@ it('requires authorization before granting shared control and rejects mutations 
     expect(messages.at(-1)).toMatchObject({type: 'protocol_error', payload: {code: 'session_read_only'}});
     expect(cancel).not.toHaveBeenCalled();
   } finally {wire.close(); registry.close();}
+});
+
+describe('session wire: the input id and the settlement of a send (gap 5)', () => {
+  const sendFrame = (requestId: string, extra: Record<string, unknown> = {}) => JSON.stringify({ protocolVersion: '1.8.0', type: 'send_message', payload: {
+    requestId, operationId: OPERATION_ID, agentId: 'agent-1', text: 'Hello', ...extra } });
+
+  it('sends the operation id as the input id of the message', async () => {
+    const { agent } = fakeAgent();
+    const sendMessage = vi.fn(async () => undefined);
+    agent.sendMessage = sendMessage;
+    const output: Array<Record<string, any>> = [];
+    const wire = createSessionWire(agent, json => output.push(JSON.parse(json)));
+    try {
+      await wire.receive(JSON.stringify({ protocolVersion: '1.8.0', type: 'negotiate' }));
+      await wire.receive(sendFrame('send-1'));
+      expect(sendMessage).toHaveBeenCalledExactlyOnceWith('Hello', { inputId: OPERATION_ID });
+    } finally { wire.close(); }
+  });
+
+  it.each([
+    ['delivered', { type: 'command_acknowledged', payload: { requestId: 'settle-1', agentId: 'agent-1', command: 'send_message' } }],
+    ['not_delivered', { type: 'protocol_error', payload: { requestId: 'settle-1', code: 'input_not_delivered', recoverable: true } }],
+    ['unknown', { type: 'protocol_error', payload: { requestId: 'settle-1', code: 'operation_outcome_unknown', recoverable: true } }],
+  ] as const)('answers a settlement the agent finds %s from native history, and sends nothing', async (outcome, answer) => {
+    const { agent } = fakeAgent();
+    const sendMessage = vi.fn(async () => undefined);
+    const settleInput = vi.fn(async () => outcome);
+    Object.assign(agent, { sendMessage, settleInput });
+    const output: Array<Record<string, any>> = [];
+    const wire = createSessionWire(agent, json => output.push(JSON.parse(json)));
+    try {
+      await wire.receive(JSON.stringify({ protocolVersion: '1.8.0', type: 'negotiate' }));
+      await wire.receive(sendFrame('settle-1', { settle: true }));
+      expect(settleInput).toHaveBeenCalledExactlyOnceWith(OPERATION_ID);
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(output.at(-1)).toMatchObject(answer);
+    } finally { wire.close(); }
+  });
+
+  it('answers a settlement unknown for an agent that cannot settle', async () => {
+    const { agent } = fakeAgent();
+    const output: Array<Record<string, any>> = [];
+    const wire = createSessionWire(agent, json => output.push(JSON.parse(json)));
+    try {
+      await wire.receive(JSON.stringify({ protocolVersion: '1.8.0', type: 'negotiate' }));
+      await wire.receive(sendFrame('settle-1', { settle: true }));
+      expect(output.at(-1)).toMatchObject({ type: 'protocol_error', payload: { code: 'operation_outcome_unknown' } });
+    } finally { wire.close(); }
+  });
 });

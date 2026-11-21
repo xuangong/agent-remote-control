@@ -14,6 +14,8 @@ const events: Record<string, SendEvent> = {
   'history-rewritten': { type: 'history_changed' },
   'page-reloaded': { type: 'restored' },
   retry: { type: 'retry' },
+  'settled-arrived': { type: 'settled', delivered: true },
+  'settled-not-arrived': { type: 'settled', delivered: false },
 };
 
 /** The clauses of the send state (header of send-state.ts) one step must keep; empty when it kept them all. */
@@ -26,6 +28,8 @@ function broken(before: SendState, name: string, after: SendState | 'delivered')
   if (after === 'delivered' && !(name === 'echo' && before !== 'failed') && !(event.type === 'acknowledged' && event.handled)) problems.push('only an echo or a command the Host handled delivers a message');
   if (name === 'retry' && (canSettle(before) ? after !== 'sending' : after !== before)) problems.push('only failed and unconfirmed may be retried, and a retry sends again');
   if (name === 'refused' && after !== 'failed') problems.push('a refusal fails the message');
+  if (name.startsWith('settled') && before !== 'unconfirmed' && after !== before) problems.push('a settlement changes only an unconfirmed message');
+  if (name === 'settled-not-arrived' && before === 'unconfirmed' && after !== 'failed') problems.push('a message that never arrived is failed, for the reader to retry');
   return problems;
 }
 

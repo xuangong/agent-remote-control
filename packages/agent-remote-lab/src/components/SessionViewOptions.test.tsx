@@ -35,3 +35,38 @@ it('speaks Chinese for a Chinese browser', async () => {
   await open(container, '会话视图选项');
   expect([...group(container, '这个助手')!.querySelectorAll('button')].map(button => button.textContent)).toEqual(['简洁', '过程', '完整']);
 });
+
+const panel = (container: HTMLElement) => container.querySelector('.lab-session-view-options-panel');
+const trigger = (container: HTMLElement) => container.querySelector<HTMLButtonElement>('[aria-label="Session view options"]')!;
+
+it('applies a choice at once and keeps the panel open for the next one', async () => {
+  const container = await render(<Options />);
+  await open(container);
+  await act(async () => [...group(container, 'This assistant')!.querySelectorAll('button')][0]!.click());
+  expect(pressed(container, 'This assistant')).toBe('Concise');
+  expect(panel(container)).not.toBeNull();
+  expect(trigger(container).getAttribute('aria-expanded')).toBe('true');
+});
+
+it('closes on Escape and returns focus to its trigger', async () => {
+  const container = await render(<Options />);
+  await open(container);
+  const first = group(container, 'This assistant')!.querySelector('button')!;
+  first.focus();
+  await act(async () => { first.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+  expect(panel(container)).toBeNull();
+  expect(document.activeElement).toBe(trigger(container));
+});
+
+it('closes when focus leaves it for another control, and when a pointer presses outside it', async () => {
+  const container = await render(<><Options /><button type="button" id="elsewhere">Elsewhere</button></>);
+  await open(container);
+  const first = group(container, 'This assistant')!.querySelector('button')!;
+  first.focus();
+  await act(async () => { container.querySelector<HTMLElement>('#elsewhere')!.focus(); });
+  expect(panel(container)).toBeNull();
+  await open(container);
+  expect(panel(container)).not.toBeNull();
+  await act(async () => { container.querySelector('#elsewhere')!.dispatchEvent(new Event('pointerdown', { bubbles: true })); });
+  expect(panel(container)).toBeNull();
+});

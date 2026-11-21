@@ -13,6 +13,18 @@ const response: RemoteServerMessage = {
 const cleanups: (() => unknown)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
+const immediate = globalThis.setImmediate;
+/**
+ * Runs what the memory sockets and the client have queued. Both work on microtasks, so one real turn of the event loop drains them;
+ * the turn is taken with the real `setImmediate`, so it works the same under fake timers. Time itself moves only by fake timers.
+ */
+const settled = () => new Promise<void>(resolve => immediate(resolve));
+/** The client's timers on a fake clock; microtasks and `setImmediate` stay real, so the memory sockets keep delivering. */
+function fakeClock(withDate = false) {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', ...(withDate ? ['Date' as const] : [])] });
+  cleanups.push(() => vi.useRealTimers());
+}
+
 async function server(ready = true, fetchImplementation?: typeof fetch) {
   const memory = memorySocketServer();
   const { sockets, urls, frames } = memory;
@@ -41,24 +53,30 @@ describe('shared read positions', () => {
       posts.push(JSON.parse(String(init?.body)));
       return new Response(JSON.stringify({ since: 5, reads: [] }), { status: 200 });
     }) as unknown as typeof fetch;
+    fakeClock();
     const harness = await server(true, fetchImplementation);
     const thread = { hostId: 'host', providerId: 'codex', nativeSessionId: 'thread' };
     const unread: boolean[] = [];
     const stop = harness.transport.watchSessionReads(view => unread.push(view.unread(thread, 10)));
-    await vi.waitFor(() => expect(harness.urls).toHaveLength(1));
+    await settled();
+    expect(harness.urls).toHaveLength(1);
     expect(harness.urls[0]).toContain('reads=1');
     // A snapshot without since starts the account's positions.
     harness.sockets[0]!.send(JSON.stringify({ protocolVersion: version, type: 'session_reads', snapshot: true, reads: [] }));
-    await vi.waitFor(() => expect(posts).toEqual([{ reads: [] }]));
+    await settled();
+    expect(posts).toEqual([{ reads: [] }]);
     harness.sockets[0]!.send(JSON.stringify({ protocolVersion: version, type: 'session_reads', since: 5, reads: [] }));
-    await vi.waitFor(() => expect(unread.at(-1)).toBe(true));
-    // Marking clears the dot at once and sends the newest position once.
+    await settled();
+    expect(unread.at(-1)).toBe(true);
+    // Marking clears the dot at once and sends the newest position once, after the half-second batch window.
     harness.transport.markSessionRead(thread, 8);
     harness.transport.markSessionRead(thread, 10);
     harness.transport.markSessionRead(thread, 9);
     expect(unread.at(-1)).toBe(false);
-    await vi.waitFor(() => expect(posts).toHaveLength(2), { timeout: 2000 });
-    expect(posts[1]).toEqual({ reads: [{ ...thread, readAt: 10 }] });
+    await vi.advanceTimersByTimeAsync(499);
+    expect(posts).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(posts).toEqual([{ reads: [] }, { reads: [{ ...thread, readAt: 10 }] }]);
     stop();
   });
 });
@@ -75,10 +93,12 @@ describe('shared drafts', () => {
     const thread = { hostId: 'host', providerId: 'codex', nativeSessionId: 'thread' };
     const texts: Array<string | undefined> = [];
     const stop = harness.transport.watchSessionDrafts(view => texts.push(view.draft(thread)?.text));
-    await vi.waitFor(() => expect(harness.urls).toHaveLength(1));
+    await settled();
+    expect(harness.urls).toHaveLength(1);
     expect(harness.urls[0]).toContain('drafts=1');
     harness.sockets[0]!.send(JSON.stringify({ protocolVersion: version, type: 'session_drafts', snapshot: true, drafts: [{ ...thread, text: 'From the phone', revision: 4 }] }));
-    await vi.waitFor(() => expect(texts.at(-1)).toBe('From the phone'));
+    await settled();
+    expect(texts.at(-1)).toBe('From the phone');
     const saved = await harness.transport.saveSessionDraft(thread, 'From the desk');
     expect(saved).toEqual({ ...thread, text: 'From the desk', revision: 9 });
     expect(requests).toEqual([{ url: expect.stringContaining('/base/v1/session-drafts'), body: { ...thread, text: 'From the desk' } }]);
@@ -101,10 +121,12 @@ describe('the outbox', () => {
     const harness = await server(true, fetchImplementation);
     const waiting: number[] = [];
     const stop = harness.transport.watchSessionOutbox(view => waiting.push(view.entries(thread).length));
-    await vi.waitFor(() => expect(harness.urls).toHaveLength(1));
+    await settled();
+    expect(harness.urls).toHaveLength(1);
     expect(harness.urls[0]).toContain('outbox=1');
     harness.sockets[0]!.send(JSON.stringify({ protocolVersion: version, type: 'session_outbox', snapshot: true, entries: [] }));
-    await vi.waitFor(() => expect(waiting.at(-1)).toBe(0));
+    await settled();
+    expect(waiting.at(-1)).toBe(0);
     const queued = await harness.transport.queueMessage(thread, 'Run the suite');
     expect(queued).toMatchObject({ ...thread, text: 'Run the suite', status: 'waiting' });
     expect(requests[0]).toEqual({ url: expect.stringContaining('/base/v1/outbox'), body: { id: queued.id, ...thread, text: 'Run the suite' } });
@@ -122,11 +144,13 @@ describe('the outbox', () => {
 describe('session channel transport', () => {
   it('delivers ordered title updates once across channels and replays the latest name', async () => {
     const harness = await server(); connect(harness.transport, 'session'); connect(harness.transport, 'session', true);
-    await vi.waitFor(() => expect(harness.sockets).toHaveLength(2));
+    await settled();
+    expect(harness.sockets).toHaveLength(2);
     const received = vi.fn(); harness.transport.onSessionTitle(received);
     const session = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Renamed', revision: 3 };
     for (const socket of harness.sockets) socket.send(JSON.stringify({ protocolVersion: version, type: 'session_title_updated', session }));
-    await vi.waitFor(() => expect(received).toHaveBeenCalledOnce());
+    await settled();
+    expect(received).toHaveBeenCalledOnce();
     harness.sockets[0]!.send(JSON.stringify({ protocolVersion: version, type: 'session_title_updated', session: { ...session, title: 'Old', revision: 2 } }));
     const late = vi.fn(); harness.transport.onSessionTitle(late); expect(late).toHaveBeenCalledWith(session);
   });
@@ -134,12 +158,14 @@ describe('session channel transport', () => {
   it('delivers account migrations once across content and activity channels and replays to a late listener', async () => {
     const harness = await server();
     connect(harness.transport, 'original'); connect(harness.transport, 'original', true);
-    await vi.waitFor(() => expect(harness.sockets).toHaveLength(2));
+    await settled();
+    expect(harness.sockets).toHaveLength(2);
     const from = { hostId: 'host', providerId: 'codex', nativeSessionId: 'old', agentId: 'original' };
     const migration = { id: 'edit', from, to: { ...from, nativeSessionId: 'new', agentId: 'branch' }, createdAt: 1 };
     const received = vi.fn(); const remove = harness.transport.onSessionMigration(received);
     for (const socket of harness.sockets) socket.send(JSON.stringify({ protocolVersion: version, type: 'session_migrated', migration }));
-    await vi.waitFor(() => expect(received).toHaveBeenCalledOnce());
+    await settled();
+    expect(received).toHaveBeenCalledOnce();
     const late = vi.fn(); harness.transport.onSessionMigration(late);
     expect(late).toHaveBeenCalledWith(migration); remove();
   });
@@ -147,96 +173,115 @@ describe('session channel transport', () => {
     const harness = await server();
     const a = harness.transport.connect('a', { onOpen() {}, onMessage() {}, onDisconnect() {} });
     connect(harness.transport, 'b');
-    await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
+    await settled();
+    expect(harness.frames).toHaveLength(1);
     a.send(negotiate);
-    await vi.waitFor(() => expect(harness.frames).toHaveLength(2));
+    await settled();
+    expect(harness.frames).toHaveLength(2);
     expect(harness.frames.map(({ frame }) => frame.agentId)).toEqual(['b', 'a']);
     expect(harness.frames[1]!.frame.subscriptionId).toBeGreaterThan(harness.frames[0]!.frame.subscriptionId);
-  }, 10_000);
+  });
 
   it('shares one session channel across switches and siblings, separating activity', async () => {
     const harness = await server();
     const a = connect(harness.transport, 'a');
     const b = connect(harness.transport, 'b');
     const activity = connect(harness.transport, 'a', true);
-    await vi.waitFor(() => expect(harness.frames).toHaveLength(3));
+    await settled();
+    expect(harness.frames).toHaveLength(3);
     expect(harness.urls.sort()).toEqual(['/base/v1/session-channel?observation=activity&migrations=1&titles=1&preemption=1&states=2&reads=1&drafts=1&outbox=1', '/base/v1/session-channel?observation=session&migrations=1&titles=1&preemption=1']);
     const subscriptions = harness.frames.map(({ frame }) => frame);
     expect(subscriptions.map((frame) => frame.type)).toEqual(['subscribe', 'subscribe', 'subscribe']);
     const firstId = subscriptions.find((frame) => frame.agentId === 'a' && !frame.message.observation).subscriptionId;
     a.connection.close();
     const c = connect(harness.transport, 'c');
-    await vi.waitFor(() => expect(harness.frames).toHaveLength(5));
+    await settled();
+    expect(harness.frames).toHaveLength(5);
     expect(harness.sockets).toHaveLength(2);
     const session = harness.frames.find(({ frame }) => frame.subscriptionId === firstId)!.socket;
     session.send(JSON.stringify({ protocolVersion: version, type: 'message', subscriptionId: firstId, message: response }));
     const cId = harness.frames.find(({ frame }) => frame.agentId === 'c')!.frame.subscriptionId;
     expect(cId).toBeGreaterThan(firstId);
     session.send(JSON.stringify({ protocolVersion: version, type: 'message', subscriptionId: cId, message: response }));
-    await vi.waitFor(() => expect(c.messages).toEqual([response]));
+    await settled();
+    expect(c.messages).toEqual([response]);
     expect(a.messages).toEqual([]);
     expect(b.disconnect).not.toHaveBeenCalled();
     expect(activity.disconnect).not.toHaveBeenCalled();
     b.connection.close(); c.connection.close(); activity.connection.close();
     harness.transport.dispose();
-    await vi.waitFor(() => expect(harness.sockets.every((socket) => socket.readyState === 3)).toBe(true));
-  }, 10_000);
+    await settled();
+    expect(harness.sockets.every((socket) => socket.readyState === 3)).toBe(true);
+  });
 
   it('notifies each logical client once and creates a fresh channel without replay after ready', async () => {
     const harness = await server();
     const a = connect(harness.transport, 'a');
     const b = connect(harness.transport, 'b');
-    await vi.waitFor(() => expect(harness.frames).toHaveLength(2));
+    await settled();
+    expect(harness.frames).toHaveLength(2);
     a.connection.send({ protocolVersion: version, type: 'cancel', payload: { requestId: 'cancel', operationId: '00000000-0000-4000-8000-000000000001', agentId: 'a' } });
-    await vi.waitFor(() => expect(harness.frames).toHaveLength(3));
+    await settled();
+    expect(harness.frames).toHaveLength(3);
     harness.sockets[0]!.terminate();
-    await vi.waitFor(() => { expect(a.disconnect).toHaveBeenCalledTimes(1); expect(b.disconnect).toHaveBeenCalledTimes(1); });
+    await settled();
+    expect(a.disconnect).toHaveBeenCalledTimes(1); expect(b.disconnect).toHaveBeenCalledTimes(1);
     expect(() => a.connection.send(negotiate)).toThrow();
     connect(harness.transport, 'a');
-    await vi.waitFor(() => expect(harness.frames).toHaveLength(4));
+    await settled();
+    expect(harness.frames).toHaveLength(4);
     expect(harness.urls).toEqual(['/base/v1/session-channel?observation=session&migrations=1&titles=1&preemption=1', '/base/v1/session-channel?observation=session&migrations=1&titles=1&preemption=1']);
     expect(harness.frames.filter(({ frame }) => frame.type === 'message')).toHaveLength(1);
-  }, 10_000);
+  });
 
   it('falls back before ready without duplicate opens and retries multiplexing on the next session', async () => {
     const harness = await server(false);
     const a = connect(harness.transport, 'agent one');
-    await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
+    await settled();
+    expect(harness.sockets).toHaveLength(1);
     harness.sockets[0]!.close();
-    await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
+    await settled();
+    expect(harness.frames).toHaveLength(1);
     expect(harness.urls).toEqual(['/base/v1/session-channel?observation=session&migrations=1&titles=1&preemption=1', '/base/v1/sessions/agent%20one/events']);
     expect(harness.frames[0]!.frame).toEqual(negotiate);
     expect(a.opened).toHaveBeenCalledTimes(1);
     expect(a.disconnect).not.toHaveBeenCalled();
     a.connection.close();
     connect(harness.transport, 'b');
-    await vi.waitFor(() => expect(harness.urls).toHaveLength(3));
+    await settled();
+    expect(harness.urls).toHaveLength(3);
     expect(harness.urls[2]).toContain('/base/v1/session-channel?');
     harness.sockets[2]!.send(JSON.stringify({ protocolVersion: version, type: 'ready' }));
-    await vi.waitFor(() => expect(harness.frames).toHaveLength(2));
+    await settled();
+    expect(harness.frames).toHaveLength(2);
     expect(harness.frames[1]!.frame).toMatchObject({ type: 'subscribe', agentId: 'b' });
-  }, 10_000);
+  });
 
   it('falls back for an unanswered ready handshake without disabling multiplexing for later sessions', async () => {
+    // The ten-second handshake deadline runs on a fake clock; the sockets stay in memory.
+    fakeClock();
     const harness = await server(false);
-    // The ten-second handshake deadline runs on a fake clock; the sockets stay real.
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); cleanups.push(() => vi.useRealTimers());
     const a = connect(harness.transport, 'agent one');
-    await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
-    await vi.advanceTimersByTimeAsync(10_000);
-    vi.useRealTimers();
-    await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
+    await settled();
+    expect(harness.sockets).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(harness.urls).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await settled();
+    expect(harness.frames).toHaveLength(1);
     expect(harness.urls).toEqual(['/base/v1/session-channel?observation=session&migrations=1&titles=1&preemption=1', '/base/v1/sessions/agent%20one/events']);
     expect(harness.frames[0]!.frame).toEqual(negotiate);
     expect(a.opened).toHaveBeenCalledOnce();
     expect(a.disconnect).not.toHaveBeenCalled();
     connect(harness.transport, 'b');
-    await vi.waitFor(() => expect(harness.sockets).toHaveLength(3));
+    await settled();
+    expect(harness.sockets).toHaveLength(3);
     expect(harness.urls[2]).toBe('/base/v1/session-channel?observation=session&migrations=1&titles=1&preemption=1');
     harness.sockets[2]!.send(JSON.stringify({ protocolVersion: version, type: 'ready' }));
-    await vi.waitFor(() => expect(harness.frames).toHaveLength(2));
+    await settled();
+    expect(harness.frames).toHaveLength(2);
     expect(harness.frames[1]!.frame).toMatchObject({ type: 'subscribe', agentId: 'b' });
-  }, 15_000);
+  });
 
   it.each([false, true])('waits for the actual socket open before starting channel negotiation timeout (suspend=%s)', async suspend => {
     vi.useFakeTimers(); cleanups.push(() => vi.useRealTimers());
@@ -503,20 +548,24 @@ describe('session channel transport', () => {
     const observed: unknown[] = [];
     harness.transport.onProtocolMessage((message) => observed.push(message));
     const a = connect(harness.transport, 'a');
-    await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
+    await settled();
+    expect(harness.frames).toHaveLength(1);
     a.connection.close();
-    await vi.waitFor(() => expect(harness.frames).toHaveLength(2));
+    await settled();
+    expect(harness.frames).toHaveLength(2);
     const b = connect(harness.transport, 'b');
-    await vi.waitFor(() => expect(harness.frames).toHaveLength(3));
+    await settled();
+    expect(harness.frames).toHaveLength(3);
     expect(harness.sockets).toHaveLength(1);
     harness.sockets[0]!.send(JSON.stringify({ protocolVersion: version, type: 'message', subscriptionId: harness.frames[2]!.frame.subscriptionId, message: response }));
-    await vi.waitFor(() => expect(b.messages).toEqual([response]));
+    await settled();
+    expect(b.messages).toEqual([response]);
     expect(observed).toEqual([
       { direction: 'outbound', channel: 'websocket', message: negotiate },
       { direction: 'outbound', channel: 'websocket', message: negotiate },
       { direction: 'inbound', channel: 'websocket', message: response },
     ]);
-  }, 10_000);
+  });
 
   it.each([0, 60_000])('preserves healthy content and activity channels through a %i ms page suspension', async suspendedMs => {
     const browserWindow = new EventTarget();
@@ -527,7 +576,8 @@ describe('session channel transport', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] }); cleanups.push(() => vi.useRealTimers());
     const a = connect(harness.transport, 'a');
     const activity = connect(harness.transport, 'a', true);
-    await vi.waitFor(() => expect(harness.frames).toHaveLength(2));
+    await settled();
+    expect(harness.frames).toHaveLength(2);
     for (const socket of harness.sockets) socket.on('message', data => {
       if (JSON.parse(String(data)).type === 'ping') socket.send(JSON.stringify({ protocolVersion: version, type: 'pong' }));
     });
@@ -539,7 +589,8 @@ describe('session channel transport', () => {
     document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
     browserWindow.dispatchEvent(new Event('online'));
     now.mockRestore();
-    await vi.waitFor(() => expect(harness.frames.filter(({frame}) => frame.type === 'ping')).toHaveLength(2));
+    await settled();
+    expect(harness.frames.filter(({frame}) => frame.type === 'ping')).toHaveLength(2);
     await vi.advanceTimersByTimeAsync(1200);
     expect(a.disconnect).not.toHaveBeenCalled(); expect(activity.disconnect).not.toHaveBeenCalled();
     expect(harness.sockets).toHaveLength(2);
@@ -555,7 +606,8 @@ describe('session channel transport', () => {
     cleanups.push(() => { vi.unstubAllGlobals(); installPageLifecycle(); }); installStubbedGlobalPage();
     const harness = await server(); vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] }); cleanups.push(() => vi.useRealTimers());
     const a = connect(harness.transport, 'a');
-    await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
+    await settled();
+    expect(harness.frames).toHaveLength(1);
     let pongTimer: ReturnType<typeof setTimeout> | undefined;
     cleanups.push(() => clearTimeout(pongTimer));
     harness.sockets[0]!.on('message', data => {
@@ -576,11 +628,13 @@ describe('session channel transport', () => {
   it('keeps multiplexing when the first channel ready frame takes 3500 ms to arrive', async () => {
     const harness = await server(false); vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] }); cleanups.push(() => vi.useRealTimers());
     const a = connect(harness.transport, 'a');
-    await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
+    await settled();
+    expect(harness.sockets).toHaveLength(1);
     const openedAt = performance.now();
     await vi.advanceTimersByTimeAsync(3500);
     harness.sockets[0]!.send(JSON.stringify({ protocolVersion: version, type: 'ready' }));
-    await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
+    await settled();
+    expect(harness.frames).toHaveLength(1);
     console.info('Delayed channel readiness', { delayMs: 3500, elapsedMs: Math.round(performance.now() - openedAt), sockets: harness.sockets.length });
     expect(harness.urls).toHaveLength(1);
     expect(harness.frames[0]!.frame).toMatchObject({ type: 'subscribe', agentId: 'a' });
@@ -594,7 +648,8 @@ describe('session channel transport', () => {
     cleanups.push(() => { vi.unstubAllGlobals(); installPageLifecycle(); }); installStubbedGlobalPage();
     const harness = await server(); vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] }); cleanups.push(() => vi.useRealTimers());
     const a = connect(harness.transport, 'a');
-    await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
+    await settled();
+    expect(harness.frames).toHaveLength(1);
     browserWindow.dispatchEvent(new Event('online'));
     expect(a.disconnect).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(5500);
@@ -608,22 +663,29 @@ describe('session channel transport', () => {
     const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
     vi.stubGlobal('window', browserWindow); vi.stubGlobal('document', document);
     cleanups.push(() => { vi.unstubAllGlobals(); installPageLifecycle(); }); installStubbedGlobalPage();
+    fakeClock();
     const harness = await server();
     const client = mode === 'content'
       ? new RemoteSessionClient('a', harness.transport, new AgentReplica(), {reconnectInitialDelayMs: 5000})
       : new RemoteActivityClient('a', harness.transport, () => {});
     cleanups.push(() => client.stop()); client.start();
-    await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
+    await settled();
+    expect(harness.frames).toHaveLength(1);
     harness.sockets[0]!.terminate();
-    await vi.waitFor(() => expect(harness.sockets[0]!.readyState).toBe(3));
-    await new Promise(resolve => setTimeout(resolve, 30));
+    await settled();
+    expect(harness.sockets[0]!.readyState).toBe(3);
+    // The reconnect waits (5 s for content, at least 0.5 s for activity); browser signals end the wait at once, as one reconnect.
+    await vi.advanceTimersByTimeAsync(30);
+    expect(harness.sockets).toHaveLength(1);
     document.visibilityState = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
     document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
     browserWindow.dispatchEvent(new Event('online'));
-    await vi.waitFor(() => expect(harness.frames.filter(({frame}) => frame.type === 'subscribe')).toHaveLength(2), {timeout: 500});
+    await settled();
+    expect(harness.frames.filter(({frame}) => frame.type === 'subscribe')).toHaveLength(2);
     expect(harness.sockets).toHaveLength(2);
+    // A stopped client stays stopped, also once its reconnect delay has passed.
     client.stop(); browserWindow.dispatchEvent(new Event('online'));
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await vi.advanceTimersByTimeAsync(6_000);
     expect(harness.sockets).toHaveLength(2);
   });
 
@@ -702,20 +764,23 @@ describe('session channel transport', () => {
   it('bounds pending commands and never sends a canceled pending stream after ready', async () => {
     const harness = await server(false);
     const a = connect(harness.transport, 'a');
-    await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
+    await settled();
+    expect(harness.sockets).toHaveLength(1);
     const command: ClientMessage = { protocolVersion: version, type: 'cancel', payload: {
       requestId: 'cancel', operationId: '00000000-0000-4000-8000-000000000001', agentId: 'a',
     } };
     expect(() => { for (let index = 0; index < 1024; index++) a.connection.send(command); }).toThrow('limit');
     expect(a.disconnect).toHaveBeenCalledTimes(1);
     const b = connect(harness.transport, 'b');
-    await vi.waitFor(() => expect(harness.sockets).toHaveLength(2));
+    await settled();
+    expect(harness.sockets).toHaveLength(2);
     expect(harness.sockets[0]!.readyState).toBe(3);
     harness.sockets[1]!.send(JSON.stringify({ protocolVersion: version, type: 'ready' }));
-    await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
+    await settled();
+    expect(harness.frames).toHaveLength(1);
     expect(harness.frames[0]!.frame.agentId).toBe('b');
     expect(b.disconnect).not.toHaveBeenCalled();
-  }, 10_000);
+  });
 
   it('detects silent dead channels through ping timeout and cancels all health work on dispose', async () => {
     vi.useFakeTimers();
@@ -741,7 +806,7 @@ describe('session channel transport', () => {
     transport.dispose();
     expect(vi.getTimerCount()).toBe(0);
     expect(sockets.every((socket) => socket.readyState === 3)).toBe(true);
-  }, 10_000);
+  });
 
   it('disposes a congested channel without requesting logical reconnects', async () => {
     const socket = new ControlledSocket();
@@ -756,7 +821,7 @@ describe('session channel transport', () => {
     expect(a.disconnect).not.toHaveBeenCalled();
     expect(b.disconnect).not.toHaveBeenCalled();
     expect(socket.readyState).toBe(3);
-  }, 10_000);
+  });
 });
 
 class ControlledSocket implements WebSocketLike {
@@ -784,13 +849,16 @@ it.each(['acknowledge', 'resume_then_acknowledge', 'slow_resume_then_acknowledge
       sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }], collapsed: [], resources: [], timestamp: '2026-09-20T00:00:00Z',
       item: { type: 'compaction', status: 'completed' } }],
   } };
+  // The client's deadlines and the Relay's slow answers run on a fake clock.
+  fakeClock();
   const harness = await server(true, async () => Response.json(history));
   const replica = new AgentReplica();
   const client = new RemoteSessionClient('a', harness.transport, replica, { operationTimeoutMs: 20, scheduleReconnect: () => () => {} });
   cleanups.push(() => client.stop());
   let status = 'idle'; client.subscribeStatus(value => { status = value; });
   client.start();
-  await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
+  await settled();
+  expect(harness.frames).toHaveLength(1);
   const { socket, frame: subscription } = harness.frames[0]!;
   const emit = (message: RemoteServerMessage) => socket.send(JSON.stringify({ protocolVersion: version, type: 'message', subscriptionId: subscription.subscriptionId, message }));
   emit({ protocolVersion: version, type: 'negotiated' });
@@ -800,29 +868,29 @@ it.each(['acknowledge', 'resume_then_acknowledge', 'slow_resume_then_acknowledge
     capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
       interactions: { question: false, planApproval: false, toolApproval: false } },
   } });
-  await vi.waitFor(() => expect(harness.frames).toHaveLength(3));
+  await settled();
+  expect(harness.frames).toHaveLength(3);
   emit({ protocolVersion: version, type: 'timeline_subscribed', payload: { requestId: harness.frames[1]!.frame.message.payload.requestId, agentIds: ['a'] } });
   emit({...history, payload: {...history.payload, requestId: harness.frames[2]!.frame.message.payload.requestId}});
-  await vi.waitFor(() => expect(status).toBe('ready'));
+  await settled();
+  expect(status).toBe('ready');
   let result = 'pending';
   const send = client.sendMessage('Continue after compact');
   void send.then(() => { result = 'accepted'; }, () => { result = 'rejected'; });
-  await vi.waitFor(() => expect(harness.frames).toHaveLength(4));
-  await new Promise(resolve => setTimeout(resolve, 60));
+  await settled();
+  expect(harness.frames).toHaveLength(4);
+  // A send waits for the Relay's answer, not for the operation deadline (20 ms here).
+  await vi.advanceTimersByTimeAsync(60);
   expect(result).toBe('pending');
   expect(status).toBe('ready');
   expect(replica.getState().outgoingMessages?.[0]?.status).toBe('sending');
   const requestId = harness.frames[3]!.frame.message.payload.requestId;
   if (outcome === 'resume_then_acknowledge' || outcome === 'slow_resume_then_acknowledge') {
-    let pongTimer: ReturnType<typeof setTimeout> | undefined;
-    cleanups.push(() => clearTimeout(pongTimer));
+    // The slow pong arrives 1.5 s after the probe, inside the client's 4 s foreground probe deadline.
+    const pongDelayMs = outcome === 'slow_resume_then_acknowledge' ? 1500 : 0;
     socket.on('message', data => {
-      if (JSON.parse(String(data)).type === 'ping') pongTimer = setTimeout(() => {
-        socket.send(JSON.stringify({ protocolVersion: version, type: 'pong' }));
-      }, outcome === 'slow_resume_then_acknowledge' ? 1500 : 0);
+      if (JSON.parse(String(data)).type === 'ping') setTimeout(() => socket.send(JSON.stringify({ protocolVersion: version, type: 'pong' })), pongDelayMs);
     });
-    // The slow pong arrives 1.5 s after the probe, inside the client's 4 s foreground probe deadline: fake timers stand for the wait.
-    if (outcome === 'slow_resume_then_acknowledge') { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); cleanups.push(() => { vi.useRealTimers(); }); }
     const hiddenAt = Date.now();
     const now = vi.spyOn(Date, 'now').mockReturnValue(hiddenAt);
     cleanups.push(() => now.mockRestore());
@@ -830,8 +898,11 @@ it.each(['acknowledge', 'resume_then_acknowledge', 'slow_resume_then_acknowledge
     now.mockReturnValue(hiddenAt + 60_000);
     document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
     now.mockRestore();
-    await vi.waitFor(() => expect(harness.frames.filter(({frame}) => frame.type === 'ping')).toHaveLength(1));
-    if (outcome === 'slow_resume_then_acknowledge') { await vi.advanceTimersByTimeAsync(1700); vi.useRealTimers(); }
+    await settled();
+    expect(harness.frames.filter(({frame}) => frame.type === 'ping')).toHaveLength(1);
+    // Past the probe deadline: the answered probe kept the channel and the send waiting on it.
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(harness.sockets).toHaveLength(1);
     expect(result).toBe('pending');
     expect(status).toBe('ready');
   }
@@ -840,7 +911,8 @@ it.each(['acknowledge', 'resume_then_acknowledge', 'slow_resume_then_acknowledge
     await expect(send).resolves.toMatchObject({ type: 'command_acknowledged' });
     emit({ protocolVersion: version, type: 'agent_stream', payload: { agentId: 'a', epoch: 'epoch', seq: 2,
       timestamp: '2026-09-20T00:00:01Z', event: { type: 'timeline', providerId: 'test', resources: [], item: { type: 'user_message', text: 'Continue after compact' } } } });
-    await vi.waitFor(() => expect(replica.getState().outgoingMessages).toEqual([]));
+    await settled();
+    expect(replica.getState().outgoingMessages).toEqual([]);
   } else if (outcome === 'reject') {
     emit({ protocolVersion: version, type: 'protocol_error', payload: { requestId, code: 'agent_busy', message: 'Native command still active.', recoverable: true } });
     await expect(send).rejects.toMatchObject({ code: 'agent_busy' });
@@ -852,19 +924,22 @@ it.each(['acknowledge', 'resume_then_acknowledge', 'slow_resume_then_acknowledge
   }
   expect(harness.sockets).toHaveLength(1);
   expect(harness.frames.filter(({ frame }) => frame.message?.type === 'send_message')).toHaveLength(1);
-}, 10_000);
+});
 
 it.each((['snapshot', 'control', 'history'] as const).flatMap(phase => (['recover', 'timeout'] as const).map(outcome => ({ phase, outcome }))))('keeps the same session wire while suspended waiting for $phase ($outcome)', async ({ phase, outcome }) => {
   const browserWindow = new EventTarget();
   const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
   vi.stubGlobal('window', browserWindow); vi.stubGlobal('document', document);
   cleanups.push(() => { vi.unstubAllGlobals(); installPageLifecycle(); }); installStubbedGlobalPage();
+  // The 300 ms synchronization deadline, the time the page stays hidden and the reconnect delay run on a fake clock.
+  fakeClock(true);
   const harness = await server();
   const replica = new AgentReplica();
   const client = new RemoteSessionClient('a', harness.transport, replica, { connectionTimeoutMs: 300, operationTimeoutMs: 200, reconnectInitialDelayMs: 10 });
   cleanups.push(() => client.stop());
   client.start();
-  await vi.waitFor(() => expect(harness.frames.some(({ frame }) => frame.type === 'subscribe')).toBe(true));
+  await settled();
+  expect(harness.frames.some(({ frame }) => frame.type === 'subscribe')).toBe(true);
   const { socket, frame: subscription } = harness.frames[0]!;
   const emit = (message: RemoteServerMessage) => socket.send(JSON.stringify({ protocolVersion: version, type: 'message', subscriptionId: subscription.subscriptionId, message }));
   const snapshot = () => emit({ protocolVersion: version, type: 'agent_snapshot', payload: {
@@ -881,19 +956,26 @@ it.each((['snapshot', 'control', 'history'] as const).flatMap(phase => (['recove
   emit({ protocolVersion: version, type: 'negotiated', ...(phase === 'control' ? { sessionControl: true as const } : {}) });
   if (phase !== 'snapshot') snapshot();
   if (phase === 'control') emit({ protocolVersion: version, type: 'session_control', payload: { agentId: 'a', revision: 'r1', access: 'read_only', available: true } });
-  if (phase !== 'snapshot') await vi.waitFor(() => expect(harness.frames.some(({ frame }) => frame.message?.type === 'timeline_request')).toBe(true));
+  await settled();
+  if (phase !== 'snapshot') expect(harness.frames.some(({ frame }) => frame.message?.type === 'timeline_request')).toBe(true);
+  // Hidden for longer than the deadline: the wire stays and the client keeps catching up.
   document.visibilityState = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
-  await new Promise(resolve => setTimeout(resolve, 450));
+  await vi.advanceTimersByTimeAsync(450);
   expect(harness.sockets).toHaveLength(1);
   expect(client.getSessionState().connection).toBe('catching_up');
   document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
+  await settled();
   if (outcome === 'timeout') {
+    // Visible again, the page gets the whole deadline from now, then reconnects once.
     const statuses: string[] = [];
     client.subscribeStatus(status => statuses.push(status));
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await vi.advanceTimersByTimeAsync(299);
     expect(statuses).not.toContain('disconnected');
-    await vi.waitFor(() => expect(statuses).toContain('disconnected'));
-    await vi.waitFor(() => expect(harness.frames.filter(({ frame }) => frame.type === 'subscribe')).toHaveLength(2));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(statuses).toContain('disconnected');
+    await vi.advanceTimersByTimeAsync(10);
+    await settled();
+    expect(harness.frames.filter(({ frame }) => frame.type === 'subscribe')).toHaveLength(2);
     expect(harness.frames.some(({ frame }) => frame.message?.type === 'send_message')).toBe(false);
     return;
   }
@@ -902,12 +984,14 @@ it.each((['snapshot', 'control', 'history'] as const).flatMap(phase => (['recove
     const request = harness.frames.find(({ frame }) => frame.message?.type === 'session_control_request')!.frame.message.payload;
     emit({ protocolVersion: version, type: 'session_control', payload: { agentId: 'a', requestId: request.requestId, revision: 'r2', access: 'control', available: false, token: 'proof' } });
   }
-  await vi.waitFor(() => expect(harness.frames.some(({ frame }) => frame.message?.type === 'timeline_request')).toBe(true));
+  await settled();
+  expect(harness.frames.some(({ frame }) => frame.message?.type === 'timeline_request')).toBe(true);
   const request = harness.frames.find(({ frame }) => frame.message?.type === 'timeline_request')!.frame.message.payload;
   emit({ protocolVersion: version, type: 'timeline_page', payload: { requestId: request.requestId, agentId: 'a', direction: 'tail', epoch: 'epoch',
     reset: false, staleCursor: false, gap: false, error: null, window: { minSeq: 0, maxSeq: 0, nextSeq: 1 },
     startCursor: null, endCursor: null, hasOlder: false, hasNewer: false, entries: [] } });
-  await vi.waitFor(() => expect(client.getSessionState().connection).toBe('ready'));
+  await settled();
+  expect(client.getSessionState().connection).toBe('ready');
   expect(harness.sockets).toHaveLength(1);
   expect(harness.frames.filter(({ frame }) => frame.type === 'subscribe')).toHaveLength(1);
   expect(harness.frames.filter(({ frame }) => frame.message?.type === 'timeline_request')).toHaveLength(1);
@@ -916,16 +1000,20 @@ it.each((['snapshot', 'control', 'history'] as const).flatMap(phase => (['recove
 it('retries multiplexing for later sessions after an initial transient channel failure', async () => {
   const harness = await server(false);
   const first = connect(harness.transport, 'a');
-  await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
+  await settled();
+  expect(harness.sockets).toHaveLength(1);
   harness.sockets[0]!.terminate();
-  await vi.waitFor(() => expect(harness.urls).toHaveLength(2));
+  await settled();
+  expect(harness.urls).toHaveLength(2);
   expect(harness.urls[1]).toContain('/sessions/a/events');
   const second = connect(harness.transport, 'b');
   const third = connect(harness.transport, 'c');
-  await vi.waitFor(() => expect(harness.urls).toHaveLength(3));
+  await settled();
+  expect(harness.urls).toHaveLength(3);
   expect(harness.urls[2]).toContain('/session-channel?');
   harness.sockets[2]!.send(JSON.stringify({ protocolVersion: version, type: 'ready' }));
-  await vi.waitFor(() => expect(harness.frames.filter(({ frame }) => frame.type === 'subscribe')).toHaveLength(2));
+  await settled();
+  expect(harness.frames.filter(({ frame }) => frame.type === 'subscribe')).toHaveLength(2);
   expect(first.opened).toHaveBeenCalledTimes(1);
   expect(second.disconnect).not.toHaveBeenCalled();
   expect(third.disconnect).not.toHaveBeenCalled();

@@ -137,8 +137,8 @@ it('E3: with smart reading off, the reader keeps their line through a Controller
   } finally { await legacy.close(); }
 });
 
-// WebKit does not fetch the refused chunk again, not even after the recovery's reload, so the page stays empty there (open item O54).
-it.skipIf(process.env.E2E_BROWSER === 'webkit')('E3: the page shows its rows when the first fetch of the application chunk fails (O27)', async () => {
+// In WebKit too (O54): WebKit keeps a failed `modulepreload` response across reloads, so the Workbench loads its chunks without one.
+it('E3: the page shows its rows when the first fetch of the application chunk fails (O27, O54)', async () => {
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   await resetWindows(context, stack.origin);
   const page = await context.newPage();

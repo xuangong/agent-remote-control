@@ -30,8 +30,10 @@ describe('a recorded Codex session that is opened again', () => {
   it('shows a plan turn once, as the plan message and the card that approved it, and reopens it unchanged', async () => {
     const { run, relay, publisher } = await h.published('plan-mode');
     const keys = await h.keysOf(relay);
-    expect(keys.filter(key => key.startsWith('assistant:') && key.endsWith('-plan'))).toHaveLength(1);
-    expect(keys.filter(key => key.startsWith('interaction:plan:'))).toHaveLength(1);
+    // The approval card names the plan it approved; the plan is one message item of that id, whatever form Codex gives the id.
+    const cards = keys.filter(key => key.startsWith('interaction:plan:'));
+    expect(cards).toHaveLength(1);
+    expect(keys.filter(key => key === `assistant:${cards[0]!.split(':').at(-1)}`)).toHaveLength(1);
     const reported = h.windows(relay).length;
     await h.reopenFrom(relay, publisher, run.reread);
     expect(h.windows(relay, reported)).toEqual(['unchanged']);

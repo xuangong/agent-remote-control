@@ -99,6 +99,8 @@ const commands = {
   local: ['-r', '--workspace-concurrency=1', 'exec', 'vitest', 'run', '--passWithNoTests', '--testTimeout=60000', '--hookTimeout=30000', '--maxWorkers=1', 'local.test'],
   // The specs that start a Relay and a recorded Host (agent-e2e/specs); the main flows are `e2e-flows`.
   e2e: ['--filter', '@orchardworks/agent-e2e', 'exec', 'playwright', 'test', '--config=playwright.config.ts', '--timeout=30000', '--global-timeout=1400000', ...process.argv.slice(3)],
+  // The page against a real CLI runtime (agent-e2e/native), by hand or nightly; each spec is skipped unless its runtime is selected.
+  'native-browser': ['--filter', '@orchardworks/agent-e2e', 'exec', 'playwright', 'test', '--config=playwright.native.config.ts', '--timeout=30000', '--global-timeout=1400000', ...process.argv.slice(3)],
   // The component tier: fixture pages of the Workbench on builder states, with no Relay.
   components: ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'playwright', 'test', '--config=playwright.components.config.ts', '--timeout=30000', '--global-timeout=900000', ...process.argv.slice(3)],
   // Specs that still import Workbench or Controller sources by path and wait for public entries (O19); they stay in the Workbench.
@@ -121,7 +123,7 @@ function stop(signal) {
   }
 }
 // The Playwright tiers run one worker over several projects (desktop, phone, Safari); each has a global deadline below its outer one.
-const outerDeadlineMs = mode === 'e2e' || mode === 'e2e-lab' ? 1_500_000 : mode === 'components' ? 1_000_000 : mode === 'e2e-flows' ? 240_000 : mode === 'live-cache-browser' ? 150_000 : mode === 'devbox' ? 30_000 : mode === 'devbox-server' ? 80_000 : mode === 'opencode-server-native' ? 90_000 : successionEvidence || opencodeSuccessionEvidence ? 120_000 : 540_000;
+const outerDeadlineMs = mode === 'e2e' || mode === 'e2e-lab' || mode === 'native-browser' ? 1_500_000 : mode === 'components' ? 1_000_000 : mode === 'e2e-flows' ? 240_000 : mode === 'live-cache-browser' ? 150_000 : mode === 'devbox' ? 30_000 : mode === 'devbox-server' ? 80_000 : mode === 'opencode-server-native' ? 90_000 : successionEvidence || opencodeSuccessionEvidence ? 120_000 : 540_000;
 const deadline = setTimeout(() => {
   process.stderr.write(`${mode} suite exceeded its ${outerDeadlineMs / 1000} second deadline.\n`);
   stop('SIGKILL');

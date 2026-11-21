@@ -1,5 +1,4 @@
-import { openSettingsPage } from './all-sessions';
-import { showNewSession } from './session-navigation';
+import { openSettingsPage, showNewSession } from './session-navigation';
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 

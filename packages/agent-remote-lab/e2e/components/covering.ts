@@ -2,9 +2,9 @@ import type { Page } from '@playwright/test';
 
 /**
  * Every control in a fixed or absolutely positioned layer over a text area: by default every visible timeline, so every tile
- * of a Window (`content` names another area, such as a list or a sheet's body), across the width its text lines take. It is generic, so a control added later
+ * of a Window (`content` names another area, such as a list or a sheet's body, or the composer's capsule), across the width its text lines take. It is generic, so a control added later
  * is caught too. Controls inside the area (its own content) and toasts, which are transient and dismissible notifications,
- * are not resident controls.
+ * are not resident controls. A control counts where it shows: the part its own scrolling or clipping ancestors cut off covers nothing.
  */
 export async function coveringControls(page: Page, content = '.lab-timeline-scroll') {
   return page.evaluate(selector => {
@@ -43,10 +43,23 @@ export async function coveringControls(page: Page, content = '.lab-timeline-scro
       };
       // Text scrolls through the whole visible area, so the area is that height across the width its lines take.
       const area = { left: Math.min(...lines.map(line => line.left)), right: Math.max(...lines.map(line => line.right)), top: scroller.top, bottom: scroller.bottom };
+      /** The part of a control that shows: its box cut by every ancestor that scrolls or clips. */
+      const shown = (element: Element): Box => {
+        const rect = element.getBoundingClientRect();
+        const box = { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+        for (let current = element.parentElement; current && current !== document.body; current = current.parentElement) {
+          const style = getComputedStyle(current);
+          if (style.overflowX === 'visible' && style.overflowY === 'visible') continue;
+          const clip = current.getBoundingClientRect();
+          box.left = Math.max(box.left, clip.left); box.top = Math.max(box.top, clip.top);
+          box.right = Math.min(box.right, clip.right); box.bottom = Math.min(box.bottom, clip.bottom);
+        }
+        return box;
+      };
       for (const element of controls) {
         if (timeline.contains(element) || !positioned(element)) continue;
-        const rect = element.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0 && meets(rect, area)) found.add(element.getAttribute('aria-label') ?? element.textContent?.trim().slice(0, 30) ?? element.tagName);
+        const box = shown(element);
+        if (box.right > box.left && box.bottom > box.top && meets(box, area)) found.add(element.getAttribute('aria-label') ?? element.textContent?.trim().slice(0, 30) ?? element.tagName);
       }
     }
     return [...found];

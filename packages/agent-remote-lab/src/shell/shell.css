@@ -185,6 +185,9 @@
 @media (pointer: coarse) { .lab-toolbar-launchers .lab-launcher button.lab-session-popover-trigger { min-height: 44px; } }
 .lab-launcher-bar { display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; padding-block: 2px 8px; }
 .lab-launcher-bar:not(:has(.lab-launcher:not([hidden], [data-hidden="true"]))) { display: none; }
+/* With the keyboard up the composer needs the room: the launchers, a conversation's Sides and the sessions that refer to it wait until
+   it is down, as the tab bar does, so a short visible area keeps the composer and Send in view (O58). */
+.lab-shell[data-viewport-occluded="true"] :is(.lab-launcher-bar, .lab-fork-entries, .lab-session-referrers) { display: none; }
 .lab-launcher[data-hidden="true"] { display: none; }
 .lab-launcher, .lab-launcher .lab-session-popover { position: static; min-width: 0; }
 .lab-launcher button.lab-session-popover-trigger {

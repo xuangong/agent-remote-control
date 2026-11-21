@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { coveringControls } from './covering.js';
 import { draftOf, longConversationFixture, lowerKeyboard, openConversation, raiseKeyboard } from './phone-conversation.js';
 
 // What a phone's width and visible area do to a conversation of the Window-mode Workbench (the whole App on a stubbed transport).
@@ -47,6 +48,8 @@ test('a command menu and the composer stay inside a contracted visual viewport, 
   const menu = (await page.locator('.agent-command-menu').boundingBox())!;
   expect(menu.y).toBeGreaterThanOrEqual(20);
   expect(menu.y + menu.height).toBeLessThanOrEqual(420);
+  // With the keyboard up the menu stands above the capsule: nothing covers the command being typed (O58).
+  expect(await coveringControls(page, '.agent-composer-capsule')).toEqual([]);
   await page.screenshot({ path: info.outputPath('contracted-viewport.png') });
   // A shorter visible area still holds the whole menu: it shrinks to the room above the composer.
   await raiseKeyboard(page, { height: 200, offsetTop: 140 });
@@ -54,6 +57,11 @@ test('a command menu and the composer stay inside a contracted visual viewport, 
   const squeezed = (await page.locator('.agent-command-menu').boundingBox())!;
   expect(squeezed.y).toBeGreaterThanOrEqual(140);
   expect(squeezed.y + squeezed.height).toBeLessThanOrEqual(340);
+  // The launchers wait below the keyboard, so Send stays in the visible area of a short view too (O58).
+  await expect(page.locator('.lab-launcher-bar')).toBeHidden();
+  const send = (await page.getByTestId('prompt-submit').boundingBox())!;
+  expect(send.y).toBeGreaterThanOrEqual(140);
+  expect(send.y + send.height).toBeLessThanOrEqual(340);
   await raiseKeyboard(page, { height: 400, offsetTop: 20 });
   await expect(shell).toHaveCSS('height', '400px');
   // A pinched visual viewport is not a keyboard: the shell keeps the height it had.

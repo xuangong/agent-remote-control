@@ -126,6 +126,22 @@ describe('Codex item identity', () => {
     expect(projectCodexThreadHistory({ thread: { id: THREAD, turns: [{ id: TURN, items: [unknown] }] } }, THREAD)[0]!.itemIdentity).toEqual(completed!.itemIdentity);
   });
 
+  it('keys an agent communication by comm: and an image by image:, equal live and in history', () => {
+    const communication = { type: 'agentCommunication', id: 'amsg-1', sender: '/root', recipient: '/root/review', text: 'Review the change.', startedAtMs: 1 };
+    const image = { type: 'imageView', id: 'view-1', path: '/workspace/view.png', startedAtMs: 2 };
+    const stream = live([lifecycle('item/started', communication), lifecycle('item/completed', communication), lifecycle('item/started', image), lifecycle('item/completed', image)]);
+    expect(timeline(stream).map(({ itemIdentity }) => itemIdentity)).toEqual([{ key: 'comm:amsg-1', completes: true }, { key: 'image:view-1', completes: true }]);
+    expect(timeline(reread([communication, image])).map(({ itemIdentity }) => itemIdentity)).toEqual(timeline(stream).map(({ itemIdentity }) => itemIdentity));
+  });
+
+  it('replaces the plan board in place under one key, whatever the plan says', () => {
+    const projector = new CodexEventProjector(THREAD);
+    const update = (step: string, status: string) => projector.projectNotifications('turn/plan/updated', { threadId: THREAD, turnId: TURN, plan: [{ step, status }] });
+    const rows = [...update('first', 'pending'), ...update('first', 'completed'), ...update('second', 'pending')];
+    expect(rows.map(({ itemIdentity }) => itemIdentity)).toEqual(Array(3).fill({ key: 'todo', completes: true, liveOnly: true }));
+    expect(new Set(rows.map(row => JSON.stringify(body(row)))).size).toBe(3);
+  });
+
   it('does not project the deprecated compaction notice, which repeats the compaction item', () => {
     const projector = new CodexEventProjector(THREAD);
     expect(projector.projectNotifications('thread/compacted', { threadId: THREAD, turnId: TURN })).toEqual([]);

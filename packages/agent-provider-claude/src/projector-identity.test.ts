@@ -138,4 +138,26 @@ describe('Claude item identity', () => {
     const [withdrawn] = run(new ClaudeEventProjector('session', 'live'), [user('steer-2', 'Never ran')]);
     expect(withdrawn!.itemIdentity).toEqual({ key: 'user:steer-2', completes: true });
   });
+
+  it('keys each image of a tool result by the tool and its block index, equal live and in history', () => {
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]), Buffer.from('IHDR'), Buffer.from([0, 0, 0, 1, 0, 0, 0, 1])]).toString('base64');
+    const frames = [
+      assistant('a1', [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: '/workspace/a.png' } }]),
+      user('r1', [{ type: 'tool_result', tool_use_id: 'tool-1', content: [{ type: 'text', text: 'Read it.' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } }] }]),
+    ];
+    for (const delivery of ['live', 'history'] as const) {
+      const rows = timeline(run(new ClaudeEventProjector('session', delivery), frames));
+      expect(rows.map(({ itemIdentity }) => itemIdentity)).toEqual([{ key: 'tool:tool-1' }, { key: 'tool:tool-1', completes: true }, { key: 'tool:tool-1:image:1', completes: true }]);
+      expect(text(rows[2]!)).toMatch(/^!\[Tool image\]\(claude-image:/);
+    }
+  });
+
+  it('emits nothing for a record whose uuid it has seen, and keeps the first row of it', () => {
+    const projector = new ClaudeEventProjector('session', 'history');
+    const record = assistant('a1', [{ type: 'text', text: 'Once' }]);
+    expect(run(projector, [record]).map(text)).toEqual(['Once']);
+    expect(run(projector, [record])).toEqual([]);
+    expect(run(projector, [user('u1', 'Hi'), user('u1', 'Hi')]).map(text)).toEqual(['Hi']);
+    expect(run(new ClaudeEventProjector('session', 'history'), [record]).map(text)).toEqual(['Once']);
+  });
 });

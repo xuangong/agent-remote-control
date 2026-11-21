@@ -30,7 +30,8 @@ test('waits through compaction delays before acknowledgement and echo without sh
   await page.getByTestId('prompt-input').fill('Continue after compaction.');
   await page.getByTestId('prompt-submit').click();
   const row = page.locator('.agent-outgoing-message');
-  await page.clock.fastForward(60_000);
+  // A compaction shorter than the pending bound: a message that left and has no answer 60 s later says Check delivery (gap 4, replica C15).
+  await page.clock.fastForward(59_000);
   await expect(row).toContainText('Sending…');
   await expect(row).toHaveAttribute('data-delivery-state', 'pending');
   // The queue took the message when it was dispatched: the editor is free again and nothing waits in the pending chip.

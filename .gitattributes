@@ -1,1 +1,4 @@
 * text=auto eol=lf
+# Its implementation digest is regenerated on main after a merge, never merged (scripts/compatibility-merge.mjs; pnpm install
+# or pnpm task:start registers the driver).
+packages/agent-relay-node/compatibility.json merge=arc-compatibility

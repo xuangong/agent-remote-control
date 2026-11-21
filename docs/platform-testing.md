@@ -116,9 +116,10 @@ outer deadline. Package tests have a three-minute per-test deadline and a
 five-minute outer deadline. The complete profile has a fifteen-minute deadline
 and terminates its active process tree on timeout.
 
-After reviewed changes run `pnpm compatibility:update`, then
-`pnpm compatibility:check`. A release candidate needs passing automated results
-from all affected native OSes at the same clean revision, with skipped tests
+A release candidate is a commit on `main` after `pnpm postmerge`, where
+`pnpm compatibility:check` fails on a stale digest; task branches leave the
+digest to that step. It needs passing automated results
+from all affected native OSes at that same clean revision, with skipped tests
 explained and required manual checks completed. Windows success alone does not
 establish macOS or Linux compatibility.
 

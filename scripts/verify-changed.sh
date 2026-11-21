@@ -2,7 +2,7 @@
 # Checks what a task changed, on demand: builds and type-checks the changed packages and their dependents, then runs
 # their unit suites. Files outside packages/ run nothing, except that scripts/**/*.test.mjs changed run alone and a change
 # to the root package.json, the lockfile or the workspace file runs the full `pnpm verify`, as releases do.
-# The compatibility digest is not checked here; `pnpm verify` and releases check it.
+# The compatibility digest is not checked here: task branches never update it, and `pnpm postmerge` checks it on main.
 # Usage: pnpm verify:changed [base-commit]
 # The base is, in order: the argument, $ARC_TASK_BASE, the commit `pnpm task:start` recorded, the merge base with origin/main.
 cd "$(git rev-parse --show-toplevel)" || exit 1

@@ -168,7 +168,6 @@ pnpm -r --workspace-concurrency=2 run test \
   --exclude '**/codex-host-process.test.ts' \
   --hookTimeout=30000
 pnpm typecheck
-pnpm compatibility:update
 pnpm compatibility:check
 ```
 

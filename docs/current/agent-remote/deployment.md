@@ -60,7 +60,8 @@ its own checkout. Agents does not import sibling source or workspace packages.
 
 ## Cloudflare
 
-Build from the Agents worktree with Node 22+ and pnpm 10:
+Deploy from `main` after `pnpm postmerge` (README, "Merging into main"), so the deployed tree carries a verified
+compatibility digest. Build from the Agents worktree with Node 22+ and pnpm 10:
 
 ```sh
 pnpm install --frozen-lockfile --registry=https://mirrors.cloud.tencent.com/npm/

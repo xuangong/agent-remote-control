@@ -89,8 +89,9 @@ Use isolated HOME/state/provider directories, loopback transports and free ports
 Disable provider auto-start in upgrade-only tests, retain original package bytes,
 use per-test and outer deadlines, and clean up only test-owned processes. Never
 replace the operator's installed Controller merely to validate a release.
-After reviewed implementation changes, run `pnpm compatibility:update` followed by
-`pnpm compatibility:check`, along with affected transport and package tests.
+After reviewed implementation changes, run the affected transport and package tests.
+The compatibility digest is regenerated and checked on `main` after the merge
+(`pnpm postmerge`), never on the task branch.
 
 Record test environment, artifact revision/checksum, expected and observed versions,
 installation identity continuity, status transitions and cleanup. A process-local

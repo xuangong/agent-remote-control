@@ -853,7 +853,7 @@ Keys are valid for new connections for 24 hours and bind to one installation. Es
 ## Development and verification
 
 ```bash
-pnpm verify          # compatibility check, build, typecheck and unit tests
+pnpm verify          # compatibility check (strict on main), build, typecheck and unit tests
 pnpm test:local      # native CLI suites that need this machine's signed-in agents
 pnpm test:conformance
 pnpm test:e2e:flows   # the main flows: real browser, Relay and Controller with a scripted provider
@@ -862,13 +862,26 @@ pnpm test:native:browser  # the page against a real Codex or DSH runtime, when o
 pnpm lint:docs
 ```
 
-There is no hosted CI, and pushing runs no checks. Run `pnpm verify:changed` before a push or a merge when you want them: the compatibility check, the full build and type check, and the unit suites of the packages changed since the merge base with `origin/main` and of the packages that depend on them. Changes to workspace files outside `packages/` and `docs/` run the full `pnpm verify`, which releases also run. The unit suite (`pnpm test`) excludes `*.local.test.ts` files and must pass on any machine; `pnpm test:local` runs those native suites one package at a time.
+There is no hosted CI, and pushing runs no checks. Run `pnpm verify:changed` before a push or a merge when you want them: the build, type check and unit suites of the packages changed since the task base (`pnpm task:start`) or the merge base with `origin/main`, and of the packages that depend on them. A change to the root `package.json`, the lockfile or the workspace file runs the full `pnpm verify`, which releases also run. The unit suite (`pnpm test`) excludes `*.local.test.ts` files and must pass on any machine; `pnpm test:local` runs those native suites one package at a time.
 
-Test scripts enforce per-test and outer process deadlines. Browser tests use separate configurable ports and refuse to reuse an existing server. Set `AGENT_REMOTE_TEST_RELAY_PORT` and `AGENT_REMOTE_TEST_WEB_PORT` to free ports for concurrent testing. Run `pnpm compatibility:update` after source changes, then `pnpm compatibility:check` to verify the declared implementation digest.
+Test scripts enforce per-test and outer process deadlines. Browser tests use separate configurable ports and refuse to reuse an existing server. Set `AGENT_REMOTE_TEST_RELAY_PORT` and `AGENT_REMOTE_TEST_WEB_PORT` to free ports for concurrent testing.
 
 The root test runner probes each selected native executable with a five-second `--version` deadline before starting native suites. It reports the resolved path, actual version and test baseline. Local native tests require `BORGEE_CODEX_TEST_EXECUTABLE` to name an explicit absolute executable whose complete version output matches the Lab compatibility manifest (currently `codex-cli 0.162.0`). `BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST` selects an alternative manifest, resolving relative paths from the Lab package. Shared and optional Codex native suites require 0.162.0+ instead. Claude Code requires 2.1.247+ and uses `AGENT_CLAUDE_TEST_EXECUTABLE` or `PATH`. Copilot requires 1.0.83+, uses its installed package entry, and reports the package version separately because its native cache can select a newer runtime. Explicit OpenCode native suites require 2.x at 2.0.25+, while existing evidence experiments retain their exact-version requirements. These are test prerequisites, not product compatibility guarantees; fixture-only suites do not acquire native dependencies. `pnpm test:setup` includes the preflight behavior tests.
 
 `pnpm dev` runs the Recorded-backed workbench and pairing broker. `pnpm agent-remote-controller start` starts the selected native providers in the managed Host daemon so a later `pnpm agent-remote-controller pair` can replace its uplink without stopping native sessions. `pnpm agent-remote-controller foreground` is an attached debugging mode without daemon pairing control. `pnpm dev codex-fixture` remains a clearly labeled direct fixture composition for adapter validation; `pnpm dev recorded` runs the Recorded fixture and broker. The optional DSH fixture launcher and installed-release preparation tools remain documented in the [Lab guide](packages/agent-remote-lab/README.md).
+
+### Merging into main
+
+The implementation digest of `packages/agent-relay-node/compatibility.json` covers every tracked source file, so two branches always carry two values of it. Task branches therefore never commit it: `pnpm compatibility:check`, and with it `pnpm verify`, reports a stale digest on a task branch and passes, while on `main`, on a detached HEAD (a release tag) and in the release workflows a stale digest fails. Whoever merges into `main` finishes there:
+
+```bash
+git switch main
+git merge --no-ff feat/my-task
+pnpm postmerge       # regenerates the digest, commits it alone and checks it
+git push origin main
+```
+
+`pnpm postmerge` runs only on `main`, after the merge commit and with no other changes to tracked files; with nothing to regenerate it commits nothing, so it can run again. A branch that still carries a digest update merges through the file's merge driver (`.gitattributes`; `pnpm install` and `pnpm task:start` register it): it keeps this side's digest, which `pnpm postmerge` replaces, and merges the hand-written parts as text, so it stops only on a real conflict there. A release regenerates the digest once more after its version change ([Controller npm releases](docs/controller-npm-release.md)).
 
 ## Package boundaries
 

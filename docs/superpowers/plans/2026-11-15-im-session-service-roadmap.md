@@ -19,7 +19,7 @@ Every plan follows the repository rules in `AGENTS.md`:
 - The work happens in the worktree `.worktrees/im-session-service`.
 - Tests run with per-test and outer deadlines.
 - Contract changes update fixtures and compatibility metadata.
-- `pnpm compatibility:update` runs after reviewed changes.
+- Task branches never update the compatibility digest; `pnpm postmerge` regenerates and checks it on `main` after the merge (owner, 2026-11-22).
 - Changes to the website, Relay or Controller are verified on `pnpm local`.
 
 ## Revised order after the simplification assessment (2026-11-16)

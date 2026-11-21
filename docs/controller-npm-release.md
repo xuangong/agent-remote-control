@@ -19,9 +19,11 @@ runs must target a release tag, not a branch. The tag must match the version
 in `packages/agent-controller/package.json`, and its commit must be on `main` history.
 Prerelease versions are deliberately excluded from this workflow.
 
-Before a release, update that package's version, refresh `pnpm-lock.yaml`, run
-`pnpm compatibility:update`, review the changes, and merge them to `main`.
-Create a tag at the intended commit, publish its GitHub Release, then explicitly
+A release is cut on `main` after the last merge's `pnpm postmerge` (README,
+"Merging into main"). Update that package's version, refresh `pnpm-lock.yaml`,
+run `pnpm compatibility:update`, review the changes and commit the three files
+together on `main`; `pnpm compatibility:check` then verifies the digest there, as
+the workflows do on the tag. Create a tag at that commit, publish its GitHub Release, then explicitly
 dispatch npm publication when requested. A manual retry uses the same tag:
 
 ```sh

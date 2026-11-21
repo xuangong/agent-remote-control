@@ -517,7 +517,7 @@ The assessment's X1 to X9 and B1 to B10 are refined by the target: layers and re
 3. **Old tests stay until the new ones prove the rule** (mutation check: break the rule, the new unit test fails, the old tests also fail, then delete the old ones).
 4. **Mechanical commits.** A rename or move commit changes no logic; `pnpm typecheck` and the whole unit suite pass before and after.
 5. **Local pass.** At the end of a step that touches the Relay, Controller or website: `pnpm local up` with the worktree's instance (per `prepare-arc-local`), one real Claude and one Codex session, and from M4 `pnpm smoke:quick` compared with the baseline run.
-6. `pnpm compatibility:update`, then `pnpm compatibility:check` after each reviewed implementation step.
+6. `pnpm compatibility:check` after each reviewed implementation step; since 2026-11-22 the digest itself is regenerated on `main` after the merge (`pnpm postmerge`), never on the task branch.
 
 ### 6.1 Order
 

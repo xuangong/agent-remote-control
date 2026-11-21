@@ -124,6 +124,14 @@ it('continues status, reconciliation, and cancellation of a retained operation w
   }]]);
 }, 5000);
 
+it('tells the chooser\'s reader where the successor runs and that choosing sends no message', async () => {
+  const state = await setup();
+  const dialog = document.querySelector('dialog')!;
+  expect(dialog.textContent).toContain('/actual/workspace');
+  expect(dialog.textContent).toContain('This step sends no message.');
+  expect(state.prepare).not.toHaveBeenCalled();
+}, 5000);
+
 it('defaults to the source provider even when the Host lists another target first', async () => {
   const state = await setup({ description: { ...description, targets: [{ providerId: 'codex', displayName: 'Codex' }, ...description.targets] } });
   expect(document.querySelector('select')?.value).toBe('opencode');

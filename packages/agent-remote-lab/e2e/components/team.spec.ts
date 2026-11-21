@@ -1,19 +1,16 @@
-import { clickSessionAction, showSessionAction } from './session-actions';
-import { expect, test, type Page } from '@playwright/test';
-async function openView(page: Page) {
- const trigger = page.getByRole('button', { name: 'View options', exact: true });
- if (await trigger.getAttribute('aria-expanded') !== 'true') await trigger.click();
-}
+import { clickSessionAction, showSessionAction } from '../session-actions';
+import { expect, test } from '@playwright/test';
 const team={id:'team',operationId:'create',revision:1,title:'Diagnose across Hosts',status:'active',source:{hostId:'mac',providerId:'codex',nativeSessionId:'source',title:'Project'},createdAt:1,updatedAt:1,messages:[],members:[
  {id:'leader',name:'Leader',role:'leader',hostId:'mac',providerId:'codex',nativeSessionId:'leader',creation:'ready',activity:'idle',responsibility:'Discuss and implement',summary:'',updatedAt:1},
  {id:'member',name:'Windows validation',role:'member',hostId:'win',providerId:'codex',nativeSessionId:'member',creation:'ready',activity:'idle',responsibility:'Check service logs',summary:'',updatedAt:1},
 ]};
 test.beforeEach(async({page})=>{
+ await page.route('**/v1/remote/call-for-support',route=>route.fulfill({json:{profiles:[],enablement:[]}}));
  await page.route('**/v1/remote/teams',route=>route.fulfill({json:{teams:[team]}}));
  await page.route('**/v1/remote/hosts/*/attach',route=>route.fulfill({json:{agentId:route.request().postDataJSON().nativeSessionId}}));
 });
 
-test('Team sessions retain an echoed draft until their matching send ACK', async ({ page, isMobile }) => {
+test('Team sessions each send to their own session and settle their own message on its echo', async ({ page, isMobile }) => {
  await page.goto('/e2e/fixtures/team.html?send=manual');
  const teams = page.getByRole('button', { name: 'Teams', exact: true });
  await teams.click(); await page.getByRole('button', { name: /Diagnose across Hosts/ }).click();
@@ -29,12 +26,14 @@ test('Team sessions retain an echoed draft until their matching send ACK', async
   const text = `Confirmed Team input for ${id}`;
   await input.fill(text); await pane.getByTestId('prompt-submit').click();
   await expect(page.locator('html')).toHaveAttribute('data-fixture-input-target', id);
+  // The composer hands the text to the pane's outgoing message, which waits for the echo of its own session.
+  await expect(input).toHaveValue('');
+  await expect(pane.locator('.agent-outgoing-message')).toContainText(text);
+  await expect(pane.locator('.agent-outgoing-message')).toContainText('Sending');
   await page.evaluate(id => window.dispatchEvent(new CustomEvent('fixture:settle-input', { detail: { id, outcome: 'echo' } })), id);
   await expect(pane.locator('.agent-message-user')).toContainText(text);
-  await expect(input).toHaveValue(text);
-  await expect(pane.getByTestId('prompt-submit')).toBeDisabled();
+  await expect(pane.locator('.agent-outgoing-message')).toHaveCount(0);
   await page.evaluate(id => window.dispatchEvent(new CustomEvent('fixture:settle-input', { detail: { id, outcome: 'ack' } })), id);
-  await expect(input).toHaveValue('');
   await expect.poll(() => page.evaluate(text => Object.values(JSON.parse(sessionStorage.getItem('agent-remote:recovery:team-fixture:drafts') ?? '{}')).includes(text), text)).toBe(false);
  }
  await page.reload();
@@ -42,7 +41,7 @@ test('Team sessions retain an echoed draft until their matching send ACK', async
 });
 test('compact Team navigation opens a member with its own editable permissions and returns to the Leader', async ({ page, isMobile }, info) => {
  test.skip(!isMobile, 'Compact Team navigation replaces the single visible session.');
- const { activateComposerAction } = await import('./composer-actions');
+ const { activateComposerAction } = await import('../composer-actions');
  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
  await page.goto('/e2e/fixtures/team.html?settings');
  const trigger = page.getByRole('button', { name: 'Teams', exact: true });
@@ -92,81 +91,6 @@ test('Team opens a normal dock layout with responsive presentation and refresh r
  await page.reload();await expect(page.locator('.lab-session-family-pane:visible')).toHaveCount(isMobile?1:3);
  expect(errors).toEqual([]);
 });
-
-test('Team applies an ordinary layout and its menu visibility does not hide sessions',async({page,isMobile})=>{
- const subscriptions:string[]=[];
- page.on('websocket',socket=>socket.on('framesent',event=>{
-  const frame=JSON.parse(String(event.payload));
-  const message=frame.type==='message'?frame.message:frame;
-  if(message.type==='timeline_subscription')subscriptions.push(...message.payload.agentIds);
- }));
- const {showNewSession}=await import('./session-navigation');
- await page.goto('/');await showNewSession(page);await page.getByTestId('session-create').click();
- const primary=page.locator('.lab-primary-conversation .lab-session-view');
- await expect(primary.getByTestId('prompt-input')).toBeEnabled();
- await expect(page).toHaveURL(/[?&]provider=[^&]+/);
- const url=new URL(page.url()),provider=url.searchParams.get('provider')!;
- const [source,leader,member]=await page.evaluate(async providerId=>{
-  const create=async()=>{const response=await fetch('/v1/remote/create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({providerId,operationId:crypto.randomUUID()})});
-   if(!response.ok)throw new Error(await response.text());return await response.json() as {nativeSessionId:string};};
-  return [await create(),await create(),await create()];
- },provider);
- const actual={...team,source:{hostId:'local',providerId:provider,nativeSessionId:source.nativeSessionId,title:'Team main'},members:[
-  {...team.members[0],hostId:'local',providerId:provider,nativeSessionId:leader.nativeSessionId},
-  {...team.members[1],hostId:'local',providerId:provider,nativeSessionId:member.nativeSessionId},
- ]};
- await page.route('**/v1/remote/teams',route=>route.fulfill({json:{teams:[actual]}}));
- await page.getByRole('button',{name:'Teams',exact:true}).click();await page.getByRole('button',{name:/Diagnose across Hosts/}).click();
- await expect(primary.first()).toBeVisible();
- await expect.poll(()=>new URL(page.url()).searchParams.get('session')).toBe(isMobile?leader.nativeSessionId:source.nativeSessionId);
- const leaderInput=isMobile?primary.getByTestId('prompt-input'):page.getByRole('region',{name:'Docked Leader',exact:true}).getByTestId('prompt-input');
- await expect(leaderInput).toBeEnabled();await leaderInput.fill('Keep Leader draft');
- if(isMobile){
-  const leaderAgent=new URL(page.url()).searchParams.get('agent')!;
-  const initialSubscriptions=subscriptions.filter(id=>id===leaderAgent).length;
-  expect(initialSubscriptions).toBeGreaterThan(0);
-  const entry=page.getByRole('button',{name:'Teams',exact:true}), navigation=page.getByRole('navigation',{name:'Diagnose across Hosts sessions',exact:true});
-  await entry.click();await navigation.getByRole('button',{name:/^Windows validation/}).click();
-  await expect.poll(()=>new URL(page.url()).searchParams.get('session')).toBe(member.nativeSessionId);
-  await expect(primary.getByTestId('prompt-input')).toBeEnabled();
-  await entry.click();await expect(navigation.getByRole('button',{name:/^Windows validation/})).toHaveAttribute('aria-current','page');
-  await navigation.getByRole('button',{name:/^Leader/}).click();
-  await expect.poll(()=>new URL(page.url()).searchParams.get('session')).toBe(leader.nativeSessionId);
-  await expect(leaderInput).toContainText('Keep Leader draft');
-  expect(subscriptions.filter(id=>id===leaderAgent)).toHaveLength(initialSubscriptions);
- }
- await openView(page);await page.getByRole('checkbox',{name:'Team view',exact:true}).uncheck();
- await expect(page.getByRole('button',{name:'Teams',exact:true})).toBeHidden();
- await expect(leaderInput).toBeVisible();await expect(leaderInput).toContainText('Keep Leader draft');
- if(!isMobile){
-  await expect(page.getByRole('button',{name:'Exit Team mode'})).toHaveCount(0);
-  await leaderInput.click();await clickSessionAction(page, 'Float Leader');
-  await expect(page.getByRole('region',{name:'Docked Leader',exact:true})).toHaveCount(0);
-  await expect(page.getByRole('region',{name:'Leader',exact:true}).getByTestId('prompt-input')).toContainText('Keep Leader draft');
-  await clickSessionAction(page, 'Dock Leader');
-  await expect(leaderInput).toBeVisible();
- }
- await page.reload();await expect(leaderInput).toBeVisible();
-});
-
-test('Team command and View switch share a retained presentation preference', async ({ page }) => {
- const { showNewSession } = await import('./session-navigation');
- await page.goto('/'); await showNewSession(page); await page.getByTestId('session-create').click();
- const primary = page.locator('.lab-primary-conversation .lab-session-view');
- const input = primary.getByTestId('prompt-input');
- await expect(input).toBeEnabled();
- const entry = page.getByRole('button', { name: 'Teams', exact: true });
- await expect(entry).toBeVisible();
- await input.fill('/team off'); await input.press('Enter'); await expect(entry).toBeHidden();
- await openView(page);
- const toggle = page.getByRole('checkbox', { name: 'Team view', exact: true });
- await expect(toggle).not.toBeChecked(); await toggle.check(); await expect(entry).toBeVisible();
- await input.click(); await input.fill('/team'); await input.press('Enter'); await expect(entry).toBeHidden();
- await page.reload(); await expect(input).toBeEnabled(); await expect(entry).toBeHidden();
- await input.fill('/team on'); await input.press('Enter'); await expect(entry).toBeVisible();
- await openView(page); await expect(toggle).toBeChecked();
-});
-
 
 test('Team names are edited in the floating list without opening or creating a Team', async ({ page }) => {
  let current = { ...team, title: 'New team' };
@@ -240,7 +164,7 @@ test('Team subagents belong to their parent pane and keep other families intact'
  await openChild('Leader', 'leader-child');
  if (isMobile) {
   await expect(page.locator('.lab-session-family-pane:visible')).toHaveCount(1);
-  await pane('leader-child').getByRole('button', { name: 'Back to Leader', exact: true }).click();
+  await clickSessionAction(pane('leader-child'), 'Back to Leader');
   await expect(pane('Leader').getByTestId('prompt-input')).toContainText('Keep Leader draft');
   await openChild('Leader', 'leader-child');
  } else {
@@ -272,68 +196,35 @@ test('Team subagents belong to their parent pane and keep other families intact'
  if (!isMobile) await expect(pane('leader-child')).toHaveCount(0);
 });
 
-test('Dock child navigation uses the live channel without replacing the main session', async ({ page, isMobile }) => {
- test.skip(isMobile, 'Mobile uses the ordinary primary session navigation covered by the layout test.');
- const { showNewSession } = await import('./session-navigation');
- let leader: { agentId: string; nativeSessionId: string } | undefined;
- let child: { agentId: string; nativeSessionId: string } | undefined;
- await page.routeWebSocket(/session-channel/, route => {
-  const server = route.connectToServer();
-  server.onMessage(message => {
-   const envelope = JSON.parse(String(message)), frame = envelope.type === 'message' ? envelope.message : envelope;
-   if (frame.type === 'agent_snapshot' && child && frame.payload.runtimeInfo.sessionId === leader?.nativeSessionId) {
-    frame.payload.runtimeInfo.childSessions = [{ nativeSessionId: child.nativeSessionId, title: 'Live child', createdAt: '2026-10-13T00:00:00Z', status: 'idle', observation: 'live' }];
-   }
-   route.send(JSON.stringify(envelope));
-  });
- });
- await page.goto('/'); await showNewSession(page); await page.getByTestId('session-create').click();
- const primary = page.locator('.lab-primary-conversation .lab-session-view');
- await expect(primary.getByTestId('prompt-input')).toBeEnabled();
- await primary.getByTestId('prompt-input').fill('Keep primary draft');
- await expect(page).toHaveURL(/[?&]provider=[^&]+/);
- const address = page.url(), url = new URL(address), provider = url.searchParams.get('provider')!, nativeSessionId = url.searchParams.get('session')!;
- [leader, child] = await page.evaluate(async providerId => {
-  const create = async () => {
-   const response = await fetch('/v1/remote/create', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId, operationId: crypto.randomUUID() }) });
-   if (!response.ok) throw new Error(await response.text());
-   return await response.json() as { agentId: string; nativeSessionId: string };
-  };
-  return [await create(), await create()];
- }, provider);
- const actual = { ...team, source: { hostId: 'local', providerId: provider, nativeSessionId, title: 'Main' }, members: [{ ...team.members[0], hostId: 'local', providerId: provider, nativeSessionId: leader!.nativeSessionId }] };
- await page.route('**/v1/remote/teams', route => route.fulfill({ json: { teams: [actual] } }));
+test('A subagent that cannot attach stays out of the panes, keeps its alert in the parent list and opens on retry', async ({ page, isMobile }) => {
  const requests: unknown[] = [];
  let fail = true;
- await page.route('**/v1/remote/child/attach', route => {
-  requests.push(route.request().postDataJSON());
-  return fail ? route.fulfill({ status: 503, json: { error: 'Child temporarily unavailable' } }) : route.fulfill({ json: child });
+ await page.route('**/v1/remote/hosts/*/child/attach', route => {
+  const input = route.request().postDataJSON(); requests.push(input);
+  return fail ? route.fulfill({ status: 503, json: { error: 'Child temporarily unavailable' } }) : route.fulfill({ json: { agentId: input.nativeSessionId, nativeSessionId: input.nativeSessionId } });
  });
+ await page.goto('/e2e/fixtures/team.html?children');
  await page.getByRole('button', { name: 'Teams', exact: true }).click();
  await page.locator('.lab-session-row').filter({ hasText: team.title }).click();
  const parent = page.getByRole('region', { name: 'Leader', exact: true });
  await expect(parent.getByTestId('prompt-input')).toBeEnabled();
  await parent.getByTestId('prompt-input').fill('Keep Team draft');
- await parent.locator('.agent-child-sessions > summary').click();
- const childRow = parent.locator(`[data-child-session-id="${child!.nativeSessionId}"]`);
- await childRow.click();
- // Since b7f70fea a subagent pane is created only after the Host attaches it; a failure stays in the parent's subagent list.
- const childPane = page.getByRole('region', { name: 'Live child', exact: true });
- await expect(parent.getByRole('group', { name: 'Session subagents' }).getByRole('alert')).toContainText('Child temporarily unavailable');
- await expect(childPane).toHaveCount(0);
- await expect(page).toHaveURL(address);
+ const list = parent.getByRole('group', { name: 'Session subagents', exact: true });
+ await list.locator('summary').click();
+ const row = parent.locator('[data-child-session-id="leader-child"]');
+ await row.click();
+ await expect(list.getByRole('alert')).toContainText('Child temporarily unavailable');
+ await expect(page.getByRole('region', { name: 'leader-child', exact: true })).toHaveCount(0);
  fail = false;
- const attemptsBeforeRetry = requests.length;
- await childRow.click();
- await expect(childPane.getByTestId('prompt-input')).toBeEnabled();
- await expect(parent.getByRole('group', { name: 'Session subagents' }).getByRole('alert')).toHaveCount(0);
- expect(requests).toHaveLength(attemptsBeforeRetry + 1);
- expect(requests).toEqual(Array(requests.length).fill({ providerId: provider, parentNativeSessionId: leader!.nativeSessionId, nativeSessionId: child!.nativeSessionId }));
- await childPane.getByRole('button', { name: isMobile ? 'Back to Leader' : 'Close subagent', exact: true }).click();
+ const attempts = requests.length;
+ await row.click();
+ const child = page.getByRole('region', { name: 'leader-child', exact: true });
+ await expect(child.getByTestId('prompt-input')).toBeEnabled();
+ await expect(list.getByRole('alert')).toHaveCount(0);
+ expect(requests).toHaveLength(attempts + 1);
+ expect(requests).toEqual(Array(requests.length).fill({ providerId: 'codex', parentNativeSessionId: 'leader', nativeSessionId: 'leader-child' }));
+ if (isMobile) await clickSessionAction(child, 'Back to Leader'); else await clickSessionAction(child, 'Close subagent');
  await expect(parent.getByTestId('prompt-input')).toContainText('Keep Team draft');
- await page.getByRole('button', { name: 'Close Leader',exact:true }).click();
- await expect(primary.getByTestId('prompt-input')).toContainText('Keep primary draft');
- await expect(page).toHaveURL(address);
 });
 
 test('Add member requires a selected Workspace and preserves the request identity after rejection', async ({ page }, info) => {

@@ -115,15 +115,20 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
       saved.updatedAt = new Date().toISOString();
       base.push(row(providerId, 'live', `${nativeSessionId}:h${saved.history.length}`, { role, text }, saved.history.length));
     };
-    /** The answer as a model streams it: two pieces under one item key, then the completed item. */
+    /**
+     * The answer as a model streams it: two pieces under one item key, then the completed item. It takes its place in the history as it
+     * starts, as a native transcript does, so a message written while it streams comes after it with a key of its own.
+     */
     const writeStreamed = (text: string) => {
-      const at = saved.history.length + 1;
       const half = Math.ceil(text.length / 2);
+      const entry = { role: 'assistant' as const, text: text.slice(0, half) };
+      saved.history.push(entry); saved.updatedAt = new Date().toISOString();
+      const at = saved.history.length;
       const key = `${nativeSessionId}:h${at}`;
       base.push(row(providerId, 'live', key, { role: 'assistant', text: text.slice(0, half) }, at, false, 1));
       setTimeout(() => {
         base.push(row(providerId, 'live', key, { role: 'assistant', text: text.slice(half) }, at, false, 2));
-        saved.history.push({ role: 'assistant', text }); saved.updatedAt = new Date().toISOString();
+        entry.text = text; saved.updatedAt = new Date().toISOString();
         base.push(row(providerId, 'live', key, { role: 'assistant', text: '' }, at, true, 3));
       }, options.replyDelayMs ?? 300);
     };

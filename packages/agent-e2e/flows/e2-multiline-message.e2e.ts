@@ -1,6 +1,5 @@
 // E2 (multi-line): a message written over several lines keeps its blank line and line break from the editor, through the Relay and the Controller, to the
-// delivered row. It has its own stack: on the stack of e2-send-and-reply, sent before that file's offline case, it leaves the offline message at "Sent,
-// waiting for conversation" (open item O57).
+// delivered row.
 import type { Browser } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { startStack, type Stack } from '@orchardworks/agent-e2e/stack';

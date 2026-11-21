@@ -57,3 +57,18 @@ it('ends the turn at a denied approval', async () => {
   expect(run.events().slice(4)).toEqual(['interaction_resolved', 'turn_completed', 'runtime_updated']);
   await run.close();
 });
+
+it('gives a message written while a reply streams a key of its own, so the reply never overwrites its row (O57)', async () => {
+  const provider = scriptedProvider({ stream: true, replyDelayMs: 20, sessions: { s1: { title: 'One', history: [{ role: 'user', text: 'Hello' }, { role: 'assistant', text: 'Hi' }] } } });
+  const session = await provider.registration.directory.open('s1') as unknown as { observe(): AsyncIterable<unknown>; sendMessage(text: string): Promise<void> };
+  const seen: ProviderObservation[] = [];
+  const reading = (async () => { for await (const item of session.observe()) if ((item as ProviderObservation).delivery === 'live') seen.push(item as ProviderObservation); })();
+  await session.sendMessage('First');
+  await session.sendMessage('Second');
+  await new Promise(resolve => setTimeout(resolve, 60));
+  const items = new Map<string, string[]>();
+  for (const { event, itemIdentity } of seen) if (event.type === 'timeline' && itemIdentity) items.set(itemIdentity.key, [...items.get(itemIdentity.key) ?? [], event.item.type]);
+  // Each key holds rows of one kind of item: the two user messages and the two streamed replies are four items.
+  expect([...items.values()].map(types => [...new Set(types)])).toEqual([['user_message'], ['assistant_message'], ['user_message'], ['assistant_message']]);
+  await provider.registration.directory.close(); await reading;
+});

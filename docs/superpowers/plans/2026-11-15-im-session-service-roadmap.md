@@ -256,3 +256,20 @@ Shipped from main `896943fb`. Worker `61702401` with `wrangler.journals-enabled.
   - e2e flows 43/43, including E9 with a 2 s Relay delay;
   - `smoke:quick` seed 68421: M1, M2, M4 and M7, with every invariant exercised.
 - **Process change:** `smoke:quick` now runs before every release that changes the client or the Relay. A component test checks the smoke harness's selectors in each step's gate.
+
+## Release 2026-11-21: provider boundary step 1, O47 and O48, Controller 0.3.2
+
+Shipped from main `dc1d9bf8`.
+- **Partitions Worker `0a5212c3`.** Deployed first.
+- **Relay `59fece62`.** Deployed with `wrangler.journals-enabled.jsonc`. The rollback target is `8257f97b`. The Durable Object reported `59fece62` within about a minute.
+- **Controller 0.3.2** (`controller-v0.3.2`, sha256 `f65142b9…`). Every Controller must update. An old Controller keeps working, but without visibility-driven residency.
+
+**Shipped:**
+- **B1.** A behaviour declaration and typed errors in the Provider SDK. Every adapter declares its behaviour.
+- **B2.** A CLI simulator driven by the declaration. O49 and gap 4 remain expected failures in it.
+- **O47.** Residency follows visibility. The Relay tells the Controller which sessions a page shows (`journal_shown`), and those sessions stay resident and live. When no page shows a session, it is released after the adapter's declared grace. For Codex the grace is 10 s, followed by Codex's own 70 s unload.
+- **O48.** `writer_elsewhere` is a generic policy. The page stays journal-readable and shows the CLI's reason and Retry, and no take-over is offered.
+
+**Checks:**
+- `pnpm verify` exit 0: 12,850 tests, 2 expected failures.
+- `smoke:quick` seed 29348 (M1, M2, M4, M7): all passed.

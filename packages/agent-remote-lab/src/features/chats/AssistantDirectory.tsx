@@ -69,8 +69,10 @@ export function AssistantDirectory({ model, project, workspace, focusGroup, host
   return <FloatingPanel as="section" label={t('navigation.directoryTitle')} className="lab-directory">
     <header className="lab-directory-head">
       <h1>{t('navigation.directoryTitle')}</h1>
-      <Pill onClick={actions.newGroup}>{t('navigation.groups.new')}</Pill>
-      {onNew ? <Pill variant="primary" onClick={onNew}>{t('assistants.new')}</Pill> : null}
+      <span className="lab-directory-head-actions">
+        <Pill onClick={actions.newGroup}>{t('navigation.groups.new')}</Pill>
+        {onNew ? <Pill variant="primary" onClick={onNew}>{t('assistants.new')}</Pill> : null}
+      </span>
     </header>
     {notice ? <p className="lab-bot-notice" role="alert">{notice}</p> : actions.notice ? <p className="lab-bot-notice" role="status">{actions.notice}</p> : null}
     {!sections.length ? <p className="lab-bot-empty">{t('navigation.directoryEmpty')}</p> : null}

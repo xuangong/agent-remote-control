@@ -49,7 +49,7 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
           {needsYou ? <span className="lab-bot-needs-you" /> : row.unread ? <span className="lab-bot-unread" /> : null}
         </span> : null}
       </span>
-      {row.details.pinned ? <span className="lab-bot-pinned" aria-hidden="true"><Icon name="pin" size={14} /></span> : null}
+      {row.details.pinned ? <span className="lab-bot-pinned" role="img" aria-label={t('assistants.pinned')}><Icon name="pin" size={14} /></span> : null}
     </button>
     {extra}
     {row.asks.length ? <ul className="lab-bot-asks" data-bot-asks={row.viewId} aria-label={t('assistants.asks', { name })}>

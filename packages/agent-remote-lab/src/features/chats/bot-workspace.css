@@ -176,7 +176,10 @@ button.lab-assistant-title:is(:hover, [aria-expanded="true"]):not(:disabled) { b
 .lab-chat-group-title > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lab-bot-muted { display: inline-flex; flex: none; align-items: center; color: var(--orchard-text-secondary); }
 .lab-bot-row[data-muted] .lab-bot-unread { background: var(--orchard-text-secondary); opacity: .55; }
-.lab-directory-head > h1 { margin-inline-end: auto; }
+.lab-directory-head-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--orchard-space-s); }
+/* An assistant's Asks list under its row, past its avatar, as in Chats. */
+.lab-directory-group .lab-bot-member { flex-wrap: wrap; }
+.lab-directory-group .lab-bot-member > .lab-bot-asks { flex-basis: 100%; }
 .lab-directory-row-actions { display: flex; flex: none; align-items: center; gap: var(--orchard-space-xs); }
 /* Move to group and Add assistants: one list of choices, the current group marked. */
 .lab-group-choices { display: flex; flex-direction: column; gap: 2px; margin: 0 0 var(--orchard-space-m); padding: 0; list-style: none; }

@@ -1,0 +1,33 @@
+/* The frame's panel widths and handles (DesktopFrame.tsx, panel-layout.ts). The frame sets --lab-panel-rail, --lab-panel-sidebar and
+   --lab-panel-details from the reader's widths. It owns the ground between the floating panels, so its handles sit in those gaps.
+
+   Bot mode's grid takes its columns from the frame here until bot-workspace.css reads the lengths itself (O66): these rules, (0,3,0)
+   and (0,4,0), win over its (0,1,0) and (0,2,0) ones. The phone's single column is left to it. */
+.lab-frame > .lab-bot-workspace:not([data-phone]) { grid-template-columns: var(--lab-panel-sidebar, 260px) minmax(0, 1fr); }
+.lab-frame > .lab-bot-workspace[data-details]:not([data-phone]) { grid-template-columns: var(--lab-panel-sidebar, 260px) minmax(0, 1fr) var(--lab-panel-details, 300px); }
+
+/* A handle is the gap's height and width; its line shows on hover, focus and drag. The sidebar's and the details' show only beside
+   Bot mode's panels, the details' only while the details are open. */
+.lab-panel-handle { position: fixed; z-index: 30; top: calc(var(--lab-title-bar-height, 0px) + var(--orchard-space-l)); bottom: var(--orchard-space-l);
+  width: var(--orchard-space-l); cursor: col-resize; touch-action: none; -webkit-tap-highlight-color: transparent; }
+.lab-panel-handle::after { content: ''; position: absolute; inset: var(--orchard-radius-panel) 4px; border-radius: 1px; background: transparent;
+  transition: background-color var(--orchard-duration-fast) var(--orchard-ease-standard); }
+.lab-panel-handle:hover::after, .lab-panel-handle[data-resizing]::after { background: var(--orchard-ink-faint); }
+/* A handle takes focus as it is dragged, so its focus line shows only after the keyboard moved there (focus-modality.ts). */
+.lab-panel-handle:focus-visible { outline: none; }
+:root:not([data-input-modality="pointer"]) .lab-panel-handle:focus-visible::after { inset-inline: 3px; border-radius: 2px; background: var(--orchard-focus); }
+.lab-panel-handle[data-panel="rail"] { left: calc(var(--orchard-space-l) + var(--lab-panel-rail, 60px)); }
+.lab-panel-handle[data-panel="sidebar"] { left: calc(2 * var(--orchard-space-l) + var(--lab-panel-rail, 60px) + var(--lab-panel-sidebar, 260px)); }
+.lab-panel-handle[data-panel="details"] { display: none; right: calc(var(--orchard-space-l) + var(--lab-panel-details, 300px)); }
+.lab-frame:has(> .lab-bot-workspace[data-details]:not([hidden])) > .lab-panel-handle[data-panel="details"] { display: block; }
+/* Up to 1180 px Window mode's shell starts at the rail's edge, with no gap for a handle: the rail resizes from Bot mode or a wider window. */
+@media (max-width: 1180px) { .lab-frame:has(> .lab-shell:not([hidden])) > .lab-panel-handle[data-panel="rail"] { display: none; } }
+/* While a handle is dragged the pointer keeps its resize cursor and the page selects no text. */
+:root:has(.lab-panel-handle[data-resizing]) { cursor: col-resize; user-select: none; -webkit-user-select: none; }
+
+/* The installed app's title bar: the name on screen over a drag region, placed in the area clear of the window's controls. The frame
+   starts below it (shell.css); with no overlay its height is 0. */
+.lab-title-bar { position: fixed; z-index: 160; display: flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 0;
+  padding-inline: var(--orchard-space-l); color: var(--orchard-text-secondary); font: 600 var(--orchard-type-footnote-size) / 1 var(--orchard-font-text);
+  -webkit-app-region: drag; app-region: drag; user-select: none; -webkit-user-select: none; }
+.lab-title-bar-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

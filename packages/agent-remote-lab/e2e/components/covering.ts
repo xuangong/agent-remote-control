@@ -26,11 +26,13 @@ export async function coveringControls(page: Page, content = '.lab-timeline-scro
       const lines: Box[] = [];
       const walker = document.createTreeWalker(timeline, NodeFilter.SHOW_TEXT);
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        if (!node.textContent?.trim()) continue;
+        // Text for assistive technology alone is no text a control can cover.
+        if (!node.textContent?.trim() || node.parentElement?.closest('.agent-visually-hidden')) continue;
         const range = document.createRange(); range.selectNodeContents(node);
+        // A line shows only inside the area's own box, however far it runs before the area clips it.
         for (const rect of range.getClientRects()) {
-          const line = { left: rect.left, right: rect.right, top: Math.max(rect.top, scroller.top), bottom: Math.min(rect.bottom, scroller.bottom) };
-          if (line.bottom > line.top && rect.width > 0) lines.push(line);
+          const line = { left: Math.max(rect.left, scroller.left), right: Math.min(rect.right, scroller.right), top: Math.max(rect.top, scroller.top), bottom: Math.min(rect.bottom, scroller.bottom) };
+          if (line.bottom > line.top && line.right > line.left) lines.push(line);
         }
       }
       if (!lines.length) { found.add('no conversation text'); continue; }
@@ -64,4 +66,28 @@ export async function coveringControls(page: Page, content = '.lab-timeline-scro
     }
     return [...found];
   }, content);
+}
+
+/**
+ * Where the frame's floating panels collide, whatever their widths: a panel (the rail, the assistant list, the conversation, the details
+ * or a page) that overlaps another or leaves the viewport, a resize handle over a panel, and a page that scrolls sideways. Empty when
+ * every panel stands in its own place with the ground between them.
+ */
+export async function panelOverlaps(page: Page) {
+  return page.evaluate(() => {
+    const shown = (element: Element) => { const rect = element.getBoundingClientRect(); return rect.width > 0 && rect.height > 0 && !element.closest('[hidden]'); };
+    const named = (element: Element) => element.getAttribute('aria-label') ?? String(element.className).split(' ')[0]!;
+    const meets = (a: DOMRect, b: DOMRect) => a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
+    const panels = [...document.querySelectorAll('.lab-frame > .lab-rail, .lab-frame > main > .orchard-panel, .lab-frame > .lab-page')].filter(shown);
+    const handles = [...document.querySelectorAll('.lab-panel-handle')].filter(element => getComputedStyle(element).display !== 'none' && shown(element));
+    const found: string[] = [];
+    for (const [index, panel] of panels.entries()) {
+      const rect = panel.getBoundingClientRect();
+      if (rect.left < -0.5 || rect.right > innerWidth + 0.5) found.push(`${named(panel)} leaves the viewport`);
+      for (const other of panels.slice(index + 1)) if (meets(rect, other.getBoundingClientRect())) found.push(`${named(panel)} overlaps ${named(other)}`);
+      for (const handle of handles) if (meets(rect, handle.getBoundingClientRect())) found.push(`${named(handle)} covers ${named(panel)}`);
+    }
+    if (document.documentElement.scrollWidth > innerWidth + 1) found.push('the page scrolls sideways');
+    return found;
+  });
 }

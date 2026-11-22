@@ -20,6 +20,8 @@ import { AssistantDirectory } from '../../src/features/chats/AssistantDirectory.
 import { SettingsPage, type SettingsContext } from '../../src/features/settings/SettingsPage.js';
 import { usePhoneLayout } from '../../src/kernel/usePhoneLayout.js';
 import type { RemoteHost } from '../../src/kernel/remote-host.js';
+import { DesktopFrame, useDetailsBeside } from '../../src/shell/DesktopFrame.js';
+import { shownAssistantName } from '../../src/kernel/window-title.js';
 
 const binding = (id: string, title: string) => ({ hostId: 'mac', providerId: 'claude', nativeSessionId: `${id}-session`, title });
 /** The sample data in the reader's language: a Chinese fixture shows Chinese sample data, an English one English. */
@@ -117,10 +119,13 @@ export function BotFixture({ conversation }: { conversation(props: { assistant: 
       assistant: { name: assistant.title, avatar: <AssistantAvatar id={assistant.id} {...(picture ? { picture } : {})} size={26} mood={assistant.activity === 'running' ? 'working' : 'idle'} /> } })}</>;
   };
   const page = navigation.page;
-  return <AssistantNamesContext.Provider value={accountNames(groups, t)}><div className="lab-shell fixture-assistant" style={{ display: 'block', height: '100dvh' }}>
-    <div className="lab-frame" data-rail={!phone || undefined} data-tab-bar={phone || undefined} style={{ height: '100dvh' }}>
+  const names = accountNames(groups, t);
+  const detailsBeside = useDetailsBeside(phone);
+  // The Workbench's own frame: the panels' widths and handles, the installed app's title bar and the window's title.
+  return <AssistantNamesContext.Provider value={names}><div className="lab-shell fixture-assistant" style={{ display: 'block', height: '100dvh' }}>
+    <DesktopFrame surface={page ? 'page' : 'bot'} phone={phone} title={shownAssistantName(place, !phone || !navigation.rosterVisible, names)} style={{ height: '100dvh' }}>
       {phone ? <TabBar current={navigation.destination} onGo={go} /> : <NavigationRail current={navigation.destination} onGo={go} onSearch={() => {}} searchKeys="⌘K" accountName={SAMPLE.names[0]!} />}
-      <BotWorkspace visible covered={!!page} compact={matchMedia('(max-width: 1180px)').matches} scope="fixture" workspace={workspace} navigation={navigation} selected={selected} roster={roster}
+      <BotWorkspace visible covered={!!page} compact={!detailsBeside} scope="fixture" workspace={workspace} navigation={navigation} selected={selected} roster={roster}
         directory={{ sessions: [], sources: [], refresh: async () => {}, loadMore: async () => {} }} describeConversation={describeConversation} mount={mount}
         onNewBot={() => {}} hostName={() => 'Mac mini'}
         botInfo={() => ({ host: 'Mac mini', online: true, provider: 'Claude Code', earlier: ['Codex'] })} />
@@ -129,6 +134,6 @@ export function BotFixture({ conversation }: { conversation(props: { assistant: 
         {page?.destination === 'settings' ? <SettingsPage context={settingsContext} group={page.group} phone={phone}
           onGroup={next => next ? navigation.open({ destination: 'settings', group: next }, phone ? 'push' : 'replace') : navigation.closePage()} /> : null}
       </main>
-    </div>
+    </DesktopFrame>
   </div></AssistantNamesContext.Provider>;
 }

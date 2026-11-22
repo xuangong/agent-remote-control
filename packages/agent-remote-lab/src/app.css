@@ -882,7 +882,9 @@ textarea {
   body { overflow: hidden; }
   .lab-shell { position: fixed; inset-inline: 0; top: var(--lab-viewport-top, 0px); height: var(--lab-viewport-height, 100dvh); }
   .lab-shell[data-viewport-occluded="true"] { --lab-composer-bottom-inset: 0px; }
-  .lab-context-rail, .lab-inspector-rail { top: var(--lab-viewport-top, 0px); bottom: auto; height: var(--lab-viewport-height, 100dvh); }
+  /* Below the installed app's title bar (0 elsewhere), whose window controls would cover a drawer's close button. */
+  .lab-context-rail, .lab-inspector-rail { top: calc(var(--lab-viewport-top, 0px) + var(--lab-title-bar-height, 0px)); bottom: auto;
+    height: calc(var(--lab-viewport-height, 100dvh) - var(--lab-title-bar-height, 0px)); }
   .lab-fork-reference-details { max-height: calc(var(--lab-viewport-height, 100dvh) * .45); overflow-y: auto; overscroll-behavior: contain; }
 }
 

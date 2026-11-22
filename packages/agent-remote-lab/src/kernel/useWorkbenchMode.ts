@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
-import { conversationSessionStorage } from './conversation-storage.js';
+import { conversationLocalStorage, conversationSessionStorage } from './conversation-storage.js';
+import { lastBotPlaceKey, openingBotPlace } from './opening-place.js';
 import { PHONE_LAYOUT_QUERY } from './usePhoneLayout.js';
 import { DEFAULT_VIEW_STORAGE_KEY, destinationOf, destinationUrl, initialMode, readDefaultView, type DestinationPlace, type SettingsGroupId } from './destinations.js';
-import { decodeBotPlace, parseWorkbenchRoute, persistedBotPlace, windowRouteFields, writeWorkbenchRoute, type BotPlace, type WindowRouteFields, type WorkbenchMode } from './workbench-mode.js';
+import { parseWorkbenchRoute, persistedBotPlace, windowRouteFields, writeWorkbenchRoute, type BotPlace, type WindowRouteFields, type WorkbenchMode } from './workbench-mode.js';
 
 /** Settings or the directory shown over the mode, which keeps its own place underneath. */
 export interface PagePlace { readonly destination: 'settings' | 'assistants'; readonly group?: SettingsGroupId }
@@ -18,9 +19,11 @@ const CONVERSATION_ENTRY = 'agentRemoteConversation';
 const isPhone = () => typeof window.matchMedia === 'function' && window.matchMedia(PHONE_LAYOUT_QUERY).matches;
 export function useWorkbenchMode(scope: string) {
   const runtime = useMemo(() => {
-    const botKey = `agent-remote:recovery:${scope}:bot-place`, windowKey = `agent-remote:recovery:${scope}:window-route`;
-    const saved = (() => { try { return JSON.parse(conversationSessionStorage.getItem(botKey) ?? 'null'); } catch { return undefined; } })();
-    const bot = { place: decodeBotPlace(saved?.place), rosterVisible: typeof saved?.rosterVisible === 'boolean' ? saved.rosterVisible : true };
+    const botKey = `agent-remote:recovery:${scope}:bot-place`, windowKey = `agent-remote:recovery:${scope}:window-route`, deviceKey = lastBotPlaceKey(scope);
+    const record = (storage: typeof conversationSessionStorage, key: string) => { try { return JSON.parse(storage.getItem(key) ?? 'null'); } catch { return undefined; } };
+    // A reload keeps the tab's place; a new window or the installed app opens at the device's last one.
+    const opening = openingBotPlace(record(conversationSessionStorage, botKey), record(conversationLocalStorage, deviceKey));
+    const bot: { place: BotPlace | undefined; rosterVisible: boolean } = { place: opening.place, rosterVisible: opening.rosterVisible };
     let windowRoute: WindowRouteFields = {};
     try { const value = JSON.parse(conversationSessionStorage.getItem(windowKey) ?? 'null'); if (value && typeof value === 'object') windowRoute = windowRouteFields(new URL(`https://route/?${new URLSearchParams(value)}`)); } catch { /* Page-local navigation still works. */ }
     const explicit = parseWorkbenchRoute(new URL(location.href));
@@ -36,7 +39,10 @@ export function useWorkbenchMode(scope: string) {
     const listeners = new Set<() => void>();
     const persist = () => {
       try { localStorage.setItem('agent-remote:workbench-mode', state.mode); } catch { /* Retain the page-local preference. */ }
-      try { conversationSessionStorage.setItem(botKey, JSON.stringify({ place: persistedBotPlace(bot.place), rosterVisible: bot.rosterVisible })); } catch { /* Retain the page-local place. */ }
+      const place = JSON.stringify({ place: persistedBotPlace(bot.place), rosterVisible: bot.rosterVisible });
+      for (const [storage, key] of [[conversationSessionStorage, botKey], [conversationLocalStorage, deviceKey]] as const) {
+        try { storage.setItem(key, place); } catch { /* Retain the page-local place. */ }
+      }
     };
     const publish = () => { state = { mode: state.mode, page: state.page, ...bot }; persist(); for (const listener of listeners) listener(); };
     /** Leaving Window mode keeps its route, so coming back returns to the same Window and session. */

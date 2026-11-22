@@ -5,21 +5,30 @@
 .lab-sidebar-header-actions:empty { display: none; }
 
 /* The frame holds the rail (desktop), the mode's surface and the tab bar (phone). The surfaces leave room for both through two
-   lengths, which a keyboard that covers the tab bar sets to zero. */
-.lab-frame { --lab-rail-width: 0px; --lab-tab-bar-height: 0px; display: flex; width: 100%; background: var(--orchard-ground); }
-.lab-frame[data-rail] { --lab-rail-width: calc(60px + var(--orchard-space-l)); }
+   lengths, which a keyboard that covers the tab bar sets to zero. The installed app's title bar, when its window gives the title bar
+   to the page, sits above them all: the frame starts below it (DesktopFrame.tsx sets its height from the overlay; it is 0 elsewhere). */
+.lab-frame { --lab-rail-width: 0px; --lab-tab-bar-height: 0px; --lab-title-bar-height: env(titlebar-area-height, 0px); display: flex; box-sizing: border-box; width: 100%;
+  padding-top: var(--lab-title-bar-height); background: var(--orchard-ground); }
+.lab-frame[data-rail] { --lab-rail-width: calc(var(--lab-panel-rail, 60px) + var(--orchard-space-l)); }
 .lab-frame[data-tab-bar] { --lab-tab-bar-height: calc(56px + var(--orchard-safe-area-bottom)); }
 .lab-frame[data-tab-bar]:is(:has([data-viewport-occluded="true"]), :has(> .lab-bot-workspace[data-chat]:not([hidden])), :has(> .lab-shell.lab-supporting-open:not([hidden]))) { --lab-tab-bar-height: 0px; }
 .lab-frame[data-tab-bar]:is(:has([data-viewport-occluded="true"]), :has(> .lab-bot-workspace[data-chat]:not([hidden])), :has(> .lab-shell.lab-supporting-open:not([hidden]))) > .lab-tab-bar { display: none; }
-.lab-frame > :is(main, .lab-page) { flex: 1 1 0; width: auto; min-width: 0; height: calc(var(--lab-viewport-height, 100dvh) - var(--lab-tab-bar-height)); }
+.lab-frame > :is(main, .lab-page) { flex: 1 1 0; width: auto; min-width: 0; height: calc(var(--lab-viewport-height, 100dvh) - var(--lab-tab-bar-height) - var(--lab-title-bar-height)); }
 @media (max-width: 1180px) { .lab-frame > .lab-shell { inset-inline-start: var(--lab-rail-width); }
   .lab-frame > .lab-shell:not([hidden]) { inset-inline-end: 0; } }
+/* The surfaces that are fixed to the viewport at narrow widths start below the installed app's title bar too (its height is 0 elsewhere):
+   Window mode up to 1180 px, the phone's Bot mode and pages up to 760 px. Their heights already leave it out (above). */
+@media (max-width: 1180px) { .lab-frame > .lab-shell { top: calc(var(--lab-viewport-top, 0px) + var(--lab-title-bar-height)); } }
+.lab-frame > .lab-bot-workspace[data-phone] { top: calc(var(--lab-viewport-top, 0px) + var(--lab-title-bar-height)); }
+@media (max-width: 760px) { .lab-frame > .lab-page { top: calc(var(--lab-viewport-top, 0px) + var(--lab-title-bar-height)); } }
 
 /* Under the tab bar the home indicator is the bar's, so the composer above it pads nothing for it. */
 .lab-frame[data-tab-bar] > .lab-shell { --lab-composer-bottom-inset: 0px; }
 
-/* The icon rail: a narrow floating panel at the far left; buttons are 42 px, 44 px under a coarse pointer. */
-.lab-rail.orchard-panel.orchard-panel { flex: none; align-self: stretch; box-sizing: border-box; width: 60px; margin: var(--orchard-space-l) 0 var(--orchard-space-l) var(--orchard-space-l); padding: var(--orchard-space-l) 0; }
+/* The icon rail: a narrow floating panel at the far left; buttons are 42 px, 44 px under a coarse pointer. Its width is the reader's
+   (--lab-panel-rail); from 132 px each button shows its label beside its icon. */
+.lab-rail.orchard-panel.orchard-panel { flex: none; align-self: stretch; box-sizing: border-box; width: var(--lab-panel-rail, 60px); margin: var(--orchard-space-l) 0 var(--orchard-space-l) var(--orchard-space-l); padding: var(--orchard-space-l) 0;
+  container: lab-rail / inline-size; }
 .lab-rail nav { display: flex; flex-direction: column; align-items: center; gap: var(--orchard-space-s); height: 100%; }
 .lab-rail-mark { margin-bottom: var(--orchard-space-m); }
 .lab-rail-spacer { flex: 1; }
@@ -39,6 +48,18 @@
 .lab-rail-link-line > .lab-link-dot { position: static; }
 .lab-rail-popover-action { justify-self: start; padding: 0; border: 0; background: none; color: var(--orchard-text-strong); font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
 @media (pointer: coarse) { .lab-rail-button.lab-rail-button { width: 44px; height: 44px; } .lab-rail-popover-action { min-height: 44px; } }
+.lab-rail-label { display: none; }
+@container lab-rail (min-width: 132px) {
+  .lab-rail nav { align-items: stretch; padding-inline: var(--orchard-space-m); }
+  .lab-rail-mark { align-self: flex-start; margin-inline-start: 4px; }
+  .lab-rail-item, .lab-rail-account { display: flex; }
+  .lab-rail-button.lab-rail-button { display: flex; align-items: center; justify-content: flex-start; gap: var(--orchard-space-l); width: auto; min-width: 0; padding-inline: 9px; }
+  :is(.lab-rail-item, .lab-rail-account) > .lab-rail-button.lab-rail-button { flex: 1 1 auto; }
+  .lab-rail-label { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 var(--orchard-type-callout-size) / 1.2 var(--orchard-font-text); }
+  .lab-rail-button[aria-current="page"] .lab-rail-label { color: var(--orchard-text-strong); }
+  .lab-rail-avatar { padding-inline-start: 6px; }
+  .lab-rail-avatar .lab-link-dot { left: 26px; right: auto; }
+}
 
 /* The tab bar: four equal tabs under the screen, padded for the home indicator; the current tab's icon takes the brand colour. */
 .lab-tab-bar { position: fixed; z-index: 40; inset: auto 0 0 0; display: grid; grid-template-columns: repeat(4, 1fr); box-sizing: border-box; height: var(--lab-tab-bar-height, calc(56px + var(--orchard-safe-area-bottom)));

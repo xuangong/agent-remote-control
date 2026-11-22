@@ -22,8 +22,8 @@ import type { DocksAndBotSelectionSlice } from './useDocksAndBotSelection.js';
 import type { AppInputs } from './types.js';
 import type { AppLate } from './types.js';
 
-export function useHostAndStack(scope: Pick<AppInputs & ActiveSessionSlice & RemoteHostStateSlice & RequestedSessionSlice & ProviderStateSlice & ViewSessionStateSlice & SessionSuccessionBindingSlice & ProviderCreationSlice & ConversationConnectionsSlice & WorkbenchRecordsSlice & SideSelectionSlice & WorkbenchShellSlice & DocksAndBotSelectionSlice, 'accessReady' | 'activeAgentId' | 'activeOpened' | 'baseUrl' | 'confirmedTitles' | 'currentSession' | 'detachedSideRoot' | 'directoryView' | 'forkStore' | 'initialState' | 'primaryGroups' | 'providerConnectionName' | 'providerName' | 'remoteHosts' | 'selectedHost' | 'setRenamingSession' | 'setUncertainMutation' | 'sharedWindow' | 'sideSelections' | 'sideSessions' | 'state' | 'status' | 'succession' | 'userScoped' | 'viewSession' | 'windowMode'>, late: AppLate) {
-  const { accessReady, activeAgentId, activeOpened, baseUrl, confirmedTitles, currentSession, detachedSideRoot, directoryView, forkStore, initialState, primaryGroups, providerConnectionName, providerName, remoteHosts, selectedHost, setRenamingSession, setUncertainMutation, sharedWindow, sideSelections, sideSessions, state, status, succession, userScoped, viewSession, windowMode } = scope;
+export function useHostAndStack(scope: Pick<AppInputs & ActiveSessionSlice & RemoteHostStateSlice & RequestedSessionSlice & ProviderStateSlice & ViewSessionStateSlice & SessionSuccessionBindingSlice & ProviderCreationSlice & ConversationConnectionsSlice & WorkbenchRecordsSlice & SideSelectionSlice & WorkbenchShellSlice & DocksAndBotSelectionSlice, 'accessReady' | 'activeAgentId' | 'activeOpened' | 'baseUrl' | 'confirmedTitles' | 'currentSession' | 'detachedSideRoot' | 'directoryView' | 'forkStore' | 'initialState' | 'primaryGroups' | 'providerConnectionName' | 'providerName' | 'remoteHosts' | 'selectedHost' | 'setRenamingSession' | 'setUncertainMutation' | 'sharedWindow' | 'sideSelections' | 'sideSessions' | 'state' | 'status' | 'succession' | 'userScoped' | 'viewSession'>, late: AppLate) {
+  const { accessReady, activeAgentId, activeOpened, baseUrl, confirmedTitles, currentSession, detachedSideRoot, directoryView, forkStore, initialState, primaryGroups, providerConnectionName, providerName, remoteHosts, selectedHost, setRenamingSession, setUncertainMutation, sharedWindow, sideSelections, sideSessions, state, status, succession, userScoped, viewSession } = scope;
 
   const t = useTranslate();
   const activeRemoteSession = activeOpened?.hostId !== undefined && activeOpened.hostId !== 'local';
@@ -95,19 +95,14 @@ export function useHostAndStack(scope: Pick<AppInputs & ActiveSessionSlice & Rem
     return roots.find(view => view.binding)?.binding;
   })();
 
-  const pageTitle = sharedWindow ? (pageTitleBinding && (confirmedTitles?.get(sessionKey(pageTitleBinding)) ?? pageTitleBinding.title)) || sharedWindow.title : featureSource?.title;
-
-  useEffect(() => {
-    if (!windowMode) return;
-    document.title = pageTitle?.trim() ? `${pageTitle.trim()} · Orchard` : 'Orchard';
-    return () => { document.title = 'Orchard'; };
-  }, [pageTitle, windowMode]);
+  /** What Window mode's window title names (the frame sets the title, DesktopFrame.tsx): its first session's title, or the Window's. */
+  const windowPageTitle = sharedWindow ? (pageTitleBinding && (confirmedTitles?.get(sessionKey(pageTitleBinding)) ?? pageTitleBinding.title)) || sharedWindow.title : featureSource?.title;
 
   const sideTitle = (session: OpenedSession) => ({ ...session, title: forkStore.find(session)?.firstInput?.trim().slice(0, 72) || session.title });
 
   const stackPath = sidePath(visibleStackRoot, sideSessions, sideSelections, viewKey).map(sideTitle);
   late.stackPath = stackPath;
-  return { activeRemoteSession, selectedRemoteHost, previewHost, hostOffline, connectionProviderName, connectionStatusLabel, runMutation, boundFork, stackRoot, primaryDisplaySlot, visibleStackRoot, featureSource, renamePrimaryTitle, sideTitle, stackPath };
+  return { activeRemoteSession, selectedRemoteHost, previewHost, hostOffline, connectionProviderName, connectionStatusLabel, runMutation, boundFork, stackRoot, primaryDisplaySlot, visibleStackRoot, featureSource, renamePrimaryTitle, sideTitle, stackPath, windowPageTitle };
 }
 
 export type HostAndStackSlice = ReturnType<typeof useHostAndStack>;

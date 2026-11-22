@@ -35,6 +35,9 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
   missing?: readonly string[] } = {}) {
   let workspace!: ReturnType<typeof workspaceHooks.useWindowWorkspace>;
   let succession!: ReturnType<typeof successionHooks.useSessionSuccession>;
+  // A desktop window, where Bot mode's details sit beside the conversation (jsdom's own is 1024 px wide, where they wait to be opened).
+  const viewport = window.innerWidth;
+  window.innerWidth = 1440;
   const useWorkspace = workspaceHooks.useWindowWorkspace, useSuccession = successionHooks.useSessionSuccession;
   const workspaceSpy = vi.spyOn(workspaceHooks, 'useWindowWorkspace').mockImplementation((...args) => { workspace = useWorkspace(...args); return workspace; });
   const successionSpy = vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = useSuccession(...args); return succession; });
@@ -180,6 +183,6 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
       await act(async () => target.click());
     },
     async switchMode(mode: 'window' | 'bot') { await this.go(mode === 'bot' ? 'Chats' : 'Windows'); },
-    async close() { await unmount(container); workspaceSpy.mockRestore(); successionSpy.mockRestore(); },
+    async close() { await unmount(container); workspaceSpy.mockRestore(); successionSpy.mockRestore(); window.innerWidth = viewport; },
   };
 }

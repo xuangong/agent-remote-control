@@ -53,11 +53,33 @@ it.each([
   expect(sessionStorage.getItem(key)).toBe('a'); expect(localStorage.getItem(`${key}:last-window`)).toBe('a');
 });
 
+it('opens a new window or the installed app at the device\'s last chat, while a reload keeps the tab\'s own place', async () => {
+  localStorage.setItem('agent-remote:workbench-mode', 'bot');
+  let read = await mount();
+  await act(async () => read().select({ kind: 'bot', groupId: 's', viewId: 'v' }));
+  await act(async () => root!.unmount()); root = undefined;
+  // A new window: no tab record, and an address that names no place.
+  sessionStorage.clear(); history.replaceState(null, '', '/');
+  read = await mount();
+  expect(read().mode).toBe('bot'); expect(read().place).toEqual({ kind: 'bot', groupId: 's', viewId: 'v' }); expect(read().rosterVisible).toBe(false);
+  await act(async () => root!.unmount()); root = undefined;
+  // Another tab chose another chat since: this tab's reload keeps its own.
+  localStorage.setItem('agent-remote:recovery:scope:last-bot-place', JSON.stringify({ place: { kind: 'bot', groupId: 's', viewId: 'w' }, rosterVisible: false }));
+  read = await mount();
+  expect(read().place).toEqual({ kind: 'bot', groupId: 's', viewId: 'v' });
+});
+
 // The phone (I3 plan, B6): the assistant list is home, and opening a conversation from it is a history entry.
 function phone() { vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(max-width: 760px)' || query === '(max-width: 1180px)', addEventListener() {}, removeEventListener() {} })); }
 it('lands on the assistant list on a phone without a route, whatever the stored mode', async () => {
   phone(); localStorage.setItem('agent-remote:workbench-mode', 'window');
   sessionStorage.setItem('agent-remote:recovery:scope:bot-place', JSON.stringify({ place: { kind: 'bot', groupId: 's', viewId: 'v' }, rosterVisible: false }));
+  const read = await mount();
+  expect(read().mode).toBe('bot'); expect(read().rosterVisible).toBe(true); expect(read().place).toEqual({ kind: 'bot', groupId: 's', viewId: 'v' });
+  vi.unstubAllGlobals();
+});
+it('keeps the device\'s last chat chosen on a phone, with the list as home', async () => {
+  phone(); localStorage.setItem('agent-remote:recovery:scope:last-bot-place', JSON.stringify({ place: { kind: 'bot', groupId: 's', viewId: 'v' }, rosterVisible: false }));
   const read = await mount();
   expect(read().mode).toBe('bot'); expect(read().rosterVisible).toBe(true); expect(read().place).toEqual({ kind: 'bot', groupId: 's', viewId: 'v' });
   vi.unstubAllGlobals();

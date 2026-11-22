@@ -15,7 +15,12 @@
  * - **storage eviction**: every script-writable storage of the origin is deleted (IndexedDB, localStorage, sessionStorage, Cache Storage),
  *   as Safari does after seven days without a visit, while the server's cookies stay (`evictStorage`);
  * - **the installed web app**: `navigator.standalone` and the `display-mode: standalone` media query, and a count of the page's
- *   `navigator.storage.persist()` requests (`standalone`, `persistRequests`).
+ *   `navigator.storage.persist()` requests (`standalone`, `persistRequests`);
+ * - **the installed desktop app with its title bar given to the page** (Window Controls Overlay): `navigator.windowControlsOverlay`
+ *   with the title bar area clear of the window's controls, its `geometrychange` event, and the `display-mode: window-controls-overlay`
+ *   media query; showing the title bar again turns the window back to `standalone` (`titleBar`, `setTitleBar`). Playwright has no
+ *   emulation of the overlay, and Chromium's DevTools one (`Overlay.setShowWindowControlsOverlay`) has no effect in headless Chromium,
+ *   so the page's CSS `env(titlebar-area-*)` values stay unset: the page takes the area from the overlay's API.
  *
  * Time is Playwright's clock, installed before the page loads; it runs in real time until a suspension pauses it. A resume moves the page's
  * timers and `performance.now()` by the time away, but not its wall clock, which stays the real time: the Relay's clock cannot jump with it,
@@ -26,7 +31,7 @@
  */
 import type { BrowserContext, Page } from '@playwright/test';
 
-export const MODELLED = ['hidden', 'suspended', 'socket-closed', 'socket-half-open', 'back-forward-cache', 'ended-by-os', 'storage-evicted', 'installed-app'] as const;
+export const MODELLED = ['hidden', 'suspended', 'socket-closed', 'socket-half-open', 'back-forward-cache', 'ended-by-os', 'storage-evicted', 'installed-app', 'window-controls-overlay'] as const;
 
 /** The WebSockets of a page as a route sees them. */
 export interface LifecycleSockets {
@@ -38,9 +43,14 @@ export interface LifecycleSockets {
   halfOpen(): number;
 }
 
+/** The title bar area of an installed desktop app window, in CSS pixels: the part of its top edge clear of the window's controls. */
+export interface TitleBarArea { x: number; y: number; width: number; height: number }
+
 export interface LifecycleOptions {
   /** The page runs as a web app added to the home screen. */
   standalone?: boolean;
+  /** The page runs as an installed desktop app whose window gives its title bar to the page, with this area clear of its controls. */
+  titleBar?: TitleBarArea;
   /** The page's WebSocket route, needed to kill sockets in a suspension or the back-forward cache. */
   sockets?: LifecycleSockets;
 }
@@ -69,13 +79,15 @@ export interface PageLifecycle {
   kill(): Promise<void>;
   /** How many times the page asked the browser to keep its storage (`navigator.storage.persist()`). */
   persistRequests(): Promise<number>;
+  /** The person hides the window's title bar again (`area`), or shows it (`undefined`); the page hears `geometrychange`. */
+  setTitleBar(area: TitleBarArea | undefined): Promise<void>;
 }
 
-interface PageState { hidden: boolean; ended: boolean; persistRequests: number }
+interface PageState { hidden: boolean; ended: boolean; persistRequests: number; setTitleBar?(area: TitleBarArea | null): void }
 const FREEZE_LEAD_MS = 25;
 
 /** Runs in the page before any of its scripts: visibility the simulator sets, the silence of an ended page, the installed app. */
-function preparePage({ standalone }: { standalone: boolean }): void {
+function preparePage({ standalone, titleBar }: { standalone: boolean; titleBar: TitleBarArea | null }): void {
   const state: PageState = { hidden: false, ended: false, persistRequests: 0 };
   Object.defineProperty(window, '__arcLifecycle', { value: state });
   const visibility = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState')!;
@@ -91,19 +103,30 @@ function preparePage({ standalone }: { standalone: boolean }): void {
     const persist = storage.persist.bind(storage);
     storage.persist = () => { state.persistRequests += 1; return persist(); };
   }
-  if (!standalone) return;
-  Object.defineProperty(Navigator.prototype, 'standalone', { configurable: true, enumerable: true, get: () => true });
+  if (!standalone && !titleBar) return;
+  if (standalone) Object.defineProperty(Navigator.prototype, 'standalone', { configurable: true, enumerable: true, get: () => true });
+  // The desktop app's window: the overlay while its title bar is given to the page, the standalone display mode while it shows one.
+  let area = titleBar;
+  if (titleBar) {
+    const overlay = new EventTarget();
+    Object.defineProperty(overlay, 'visible', { get: () => !!area });
+    Object.defineProperty(overlay, 'getTitlebarAreaRect', { value: () => area ? new DOMRect(area.x, area.y, area.width, area.height) : new DOMRect(0, 0, 0, 0) });
+    Object.defineProperty(Navigator.prototype, 'windowControlsOverlay', { configurable: true, enumerable: true, get: () => overlay });
+    state.setTitleBar = next => { area = next ?? null; overlay.dispatchEvent(new Event('geometrychange')); };
+  }
+  const displayMode = () => titleBar && area ? 'window-controls-overlay' : 'standalone';
   const matchMedia = window.matchMedia.bind(window);
   window.matchMedia = (query: string) => {
     const list = matchMedia(query);
-    if (!/display-mode\s*:\s*standalone/.test(query)) return list;
-    return new Proxy(list, { get: (target, key) => key === 'matches' ? true : (value => typeof value === 'function' ? value.bind(target) : value)(Reflect.get(target, key, target)) });
+    const mode = /display-mode\s*:\s*([\w-]+)/.exec(query)?.[1];
+    if (!mode) return list;
+    return new Proxy(list, { get: (target, key) => key === 'matches' ? mode === displayMode() : (value => typeof value === 'function' ? value.bind(target) : value)(Reflect.get(target, key, target)) });
   };
 }
 
 /** Installs the simulator on a page that has not loaded yet: call it before the page's first `goto`. */
 export async function installLifecycle(page: Page, options: LifecycleOptions = {}): Promise<PageLifecycle> {
-  await page.addInitScript(preparePage, { standalone: options.standalone === true });
+  await page.addInitScript(preparePage, { standalone: options.standalone === true, titleBar: options.titleBar ?? null });
   await page.clock.install();
   let frozen = false;
   let deadSockets = false;
@@ -177,6 +200,10 @@ export async function installLifecycle(page: Page, options: LifecycleOptions = {
       await page.close();
     },
     persistRequests: () => page.evaluate(() => (window as unknown as { __arcLifecycle: PageState }).__arcLifecycle.persistRequests),
+    async setTitleBar(area) {
+      if (!options.titleBar) throw new Error('This page is no desktop app with its title bar given to the page: pass `titleBar`.');
+      await page.evaluate(next => { (window as unknown as { __arcLifecycle: PageState }).__arcLifecycle.setTitleBar?.(next); }, area ?? null);
+    },
   };
 }
 

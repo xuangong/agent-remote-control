@@ -33,7 +33,9 @@ it('goes to a destination when its button is pressed and opens search with its s
 it('shows the account initial with the link dot, and says what the link needs in a popover', async () => {
   let container = await render(rail({ accountName: 'xian' }));
   const avatar = () => container.querySelector<HTMLButtonElement>('.lab-rail-avatar')!;
-  expect(avatar().textContent).toBe('X');
+  expect(avatar().querySelector('.lab-rail-initial')?.textContent).toBe('X');
+  // A widened rail shows the account's name beside it; the button's name stays the account and its link.
+  expect(avatar().querySelector('.lab-rail-label')?.textContent).toBe('xian');
   expect(avatar().getAttribute('aria-label')).toBe('Account: xian. Connected');
   expect(avatar().querySelector('.lab-link-dot')?.getAttribute('data-link')).toBe('online');
   container = await render(rail({ accountName: 'xian', notice: offline }));

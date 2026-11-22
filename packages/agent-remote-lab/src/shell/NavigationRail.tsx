@@ -19,13 +19,14 @@ export const linkState = (notice: DeviceLinkNotice | undefined) => notice ? noti
 /**
  * The desktop's icon rail, shared by both modes (design "Navigation and Settings"): the mark, Chats, Assistants, Windows
  * and Search, then Settings and the account's avatar with the device-link dot. The current place says so with aria-current.
+ * Widened by its handle, each button shows its label beside its icon (shell.css).
  */
 export function NavigationRail({ current, onGo, onSearch, searchKeys, accountName, notice }: {
   current: DestinationPlace; onGo(place: DestinationPlace): void; onSearch(): void; searchKeys: string; accountName?: string; notice?: DeviceLinkNotice;
 }) {
   const t = useTranslate();
   const button = (icon: IconName, label: string, active: boolean, onClick: () => void, title = label) =>
-    <button type="button" className="lab-rail-button" aria-label={label} title={title} aria-current={active ? 'page' : undefined} onClick={onClick}><Icon name={icon} size={24} /></button>;
+    <button type="button" className="lab-rail-button" aria-label={label} title={title} aria-current={active ? 'page' : undefined} onClick={onClick}><Icon name={icon} size={24} /><span className="lab-rail-label" aria-hidden="true">{label}</span></button>;
   return <FloatingPanel as="aside" className="lab-rail">
     <nav aria-label={t('navigation.main')}>
       <OrchardMark size={34} className="lab-rail-mark" />
@@ -58,6 +59,7 @@ function RailAccount({ name, notice, onAccount }: { name?: string; notice?: Devi
       {/* An account without a name shows a person, not the initial of a placeholder phrase. */}
       {name ? <span className="lab-rail-initial" aria-hidden="true">{[...name][0]?.toUpperCase()}</span> : <Icon name="person" />}
       <span className="lab-link-dot" data-link={state} aria-hidden="true" />
+      <span className="lab-rail-label" aria-hidden="true">{who}</span>
     </button>
     {open ? <div className="lab-rail-popover orchard-panel" role="group" aria-label={t('navigation.account', { name: who })}>
       <strong>{who}</strong>

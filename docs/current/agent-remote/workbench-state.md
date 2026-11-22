@@ -1,6 +1,6 @@
 # Workbench state
 
-The Workbench decides what to show in pure modules, each beside the feature that owns it (`src/features/<feature>/`, `src/kernel/`, `src/conversation/`; the rules of the composition engine stay under `src/state/`). The shell is the hooks under `src/app` (`use*.ts`, one per concern, composed in order by `App.tsx`; `useSessionOpening`, `useCommunicationsAndForks` and `useSideNavigation` are composers that call their concern hooks in the order of the original function), each with a hook test on a mock scope (`src/test/render-hook.tsx`) and the views under `src/app/views`: they hold the browser objects (sockets, timers, storage, the DOM), dispatch events into a module, and run the effects it returns. A module imports no React, DOM, timer or storage; its input is data and its output is data. Every module declares its contract at the top of its file, has a unit table beside it (`*.test.ts`, node environment, mock data from `src/test/window-builders.ts`), and each unit test runs in single-digit milliseconds.
+The Workbench decides what to show in pure modules, each beside the feature that owns it (`src/features/<feature>/`, `src/kernel/`, `src/conversation/`; the shell's own rules, the Handoff gates, source currency, draft ownership and the palette's actions, stay under `src/state/`). The shell is the hooks under `src/app` (`use*.ts`, one per concern, composed in order by `App.tsx`; `useSessionOpening`, `useCommunicationsAndForks` and `useSideNavigation` are composers that call their concern hooks in the order of the original function), each with a hook test on a mock scope (`src/test/render-hook.tsx`) and the views under `src/app/views`: they hold the browser objects (sockets, timers, storage, the DOM), dispatch events into a module, and run the effects it returns. A module imports no React, DOM, timer or storage; its input is data and its output is data. Every module declares its contract at the top of its file, has a unit table beside it (`*.test.ts`, node environment, mock data from `src/test/window-builders.ts`), and each unit test runs in single-digit milliseconds.
 
 A rule has one owner. A change to a rule runs its module's tests and the S6 seam: `pnpm test:unit agent-remote-lab <the rule's file>` (`pnpm test:changed` does the same for every changed module). A change to wiring runs the whole-app composition tests that mount `App`.
 
@@ -35,7 +35,7 @@ No module of the Workbench imports the shell. A hook that joins two features (th
 |---|---|---|---|
 | `panels` | Which surfaces are open: compact drawer, desktop sidebar and page, inspector, header, Workbench or Trace view, the sessions panel. Layout changes, focus-return and favorites-refresh effects | `reducePanels(state, event)` returns the next state and effects as data; selectors `contextVisible`, `pageOpen`, `supportingRailOpen`, `windowStageVisible` | `features/windows/usePanels.ts` |
 | `creation-choice` | The Host and provider the New session form targets; why creation is unavailable (requested Host, loading, offline, quota, no providers); restoring the Host a link or the remembered session names | Pure functions over the Host list, the catalog and the restored identity | `app/useProviderCreation.ts`, `app/useRemoteHostState.ts` |
-| `pane-folding` | How a pane folds, sleeps, closes and restores: bots fold where they stand, compact layouts do not fold, a missing session never folds, restoring selects the pane and wakes a sleeping bot | Pure decisions returning Window operations | `app/useSessionViewPresentation.ts` calls `authority.operate` |
+| `pane-folding` | How a pane folds, sleeps, closes and restores: bots fold where they stand, compact layouts do not fold, a missing session never folds, restoring selects the pane and wakes a sleeping bot | Pure decisions returning Window operations | `app/useSessionViewPresentation.tsx` calls `authority.operate` |
 | `quote-targets` | Which views the selected messages can be quoted into | Pure projection of Windows | `app/useQuotesAndReferences.tsx` |
 | `quote-selection` | The selection of messages being quoted, its busy and error state, and the notice after quoting | `reduceQuote(state, event)` | `conversation/useSyncReducer.ts` |
 | `source-currency` | Whether the session an Ask, Side or quote was captured from is still what its view shows | `viewStaleness`, `fixtureStaleness` over a binding lookup | `app/useFocusedAsk.ts` |
@@ -55,6 +55,30 @@ No module of the Workbench imports the shell. A hook that joins two features (th
 | `succession-gates` | When a command may go out, which actions a session offers, when the main conversation offers Handoff, what unsent messages block, when a Handoff holds the conversation, and whether a settled Handoff still matches its view | `commandRefusal`, `conversationActionsAvailable`, `canHandoffPrimary`, `handoffInputBlocker`, `primaryHandoffGated`, `successionAccessible`, `handoffCompletionMatches` | `app/useSendingAndSuccession.tsx` |
 
 Other rules the Workbench already kept in pure modules beside `App.tsx` and that are unchanged: `live-budget`, `bot-roster`, `window-composition`, `window-fold`, `composition-views`, `composer-draft-owner`, `side-tree`, `session-composition*`. The succession rules live in `agent-client` (`reduceRefresh` and the rest of `agent-client/src/succession`).
+
+## Session view contributions
+
+`useSessionViewPresentation` (shell) builds a session view's props from contributions, one per feature that says something about the view, so a feature's change to a view edits that feature's file:
+
+| Contribution | File | Says |
+|---|---|---|
+| forks | `features/session-links/fork-contribution.tsx` | The session's commands (fork actions), the display state of a fork, `/fork`, `/side`, `/ask`, and the Sides' entries in the composer |
+| quotes | `features/session-links/quote-contribution.tsx` | The message selection, the quote bar and notice, received quotes, the quotes waiting in the composer |
+| references | `features/session-links/reference-contribution.tsx` | `/ref`, the reference list (or the fork reference) in the composer, and the page's notes to the agent |
+| outbox | `features/sessions/outbox-contribution.tsx` | Messages waiting for an offline Host, Send when back, the offline notices |
+| identity | `app/contributions/identity.tsx` | Who answers (name, avatar), the assistant's details, the title, the bot's process mode, the heading mode |
+| handoff | `app/contributions/handoff.ts` | `/handoff`, its progress line, and the hold while a Handoff is under way |
+| heading actions | `app/contributions/heading-actions.tsx` | The session manager (close, star, menu, history, link, Open in Bot mode, Quote messages) and the title with its rename |
+| trace | `app/contributions/trace.ts` | Opening an entry in the Trace and revealing the entry a letter or the Trace asked for |
+| earlier sessions | `app/contributions/earlier-sessions.ts` | Where a bot's conversation starts and where an attribution leads |
+| owner input | `app/contributions/owner-input.ts` | Unsent answers to questions and the count of waiting inputs |
+
+The contract is `src/conversation/session-view-contribution.ts`. A contribution is `(inputs) => (view: SessionViewContext) => SessionViewContribution`: `inputs` is a typed object the contribution declares, and `SessionViewContext` holds the facts derived once per view (`context`, `options`, `team`, `botPresentation`, `source`, `view`, `windowBot`, `isPrimary`, `fork`, `sourceForks`, `host`, `available`, `quoteView`, `openBot`, `provisional`, `assertCurrent()`). A contribution yields `props` only it sets, and the parts of the seven props several features share; it never reads another contribution's output. `mergeSessionViewContributions` states their order:
+- `actions`: Bot mode takes the forks' commands as they are; a fork whose first input is still sending leaves only deleting its message; otherwise the quotes wrap the forks' commands, then the references wrap that.
+- `consoleCommands`: forks, Handoff, references. `onExecuteConsoleCommand`: `/ref` first, with no source check; then `assertCurrent()`; then the Handoff; then the forks (Bot mode's restriction, the wait for synchronisation, the fork).
+- `composerStatus`: the Handoff's progress, then the quote bar and notice. `composerContext` (none in Bot mode): references, then quote attachments. `composerNotice`: the outbox's hint when the Controller cannot deliver later, else (not in Bot mode) the forks' entries. `mutationBlocked`: any contribution's hold, or a Window not yet confirmed.
+
+Each contribution has a unit test on a mock context (`src/test/session-view-context.ts`); the merge has its own. The `App.*` mounts stay.
 
 ## Rules for adding to a module
 

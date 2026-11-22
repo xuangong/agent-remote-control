@@ -1,80 +1,38 @@
-// How a view presents its session, bot actions and folding.
+// How a view presents its session, bot actions and folding: the facts about a view, and the contributions that merge into its props.
 import { awakeDetails, closeOperation, foldsOnClose as foldsOnCloseOf, isAsleep, restorePlan } from '../features/windows/pane-folding.js';
-import { isBotView, type WindowView, type WindowBotDetails, type AgentCommandResult, type WindowSessionBinding, type SessionExcerpt } from '@orchardworks/agent-remote-protocol';
-import { windowSessionBinding } from '../kernel/window-workspace.js';
-import { appendedRank, botRole } from '../kernel/bot-roster.js';
-import { SessionOutboxMessages } from '../features/sessions/OutboxMessages.js';
-import { BotPicture } from '../kernel/BotPicture.js';
-import { sessionActivity } from '../kernel/session-activity-status.js';
-import { assistantStatus, type SessionAttribution, type AgentReplicaState } from '@orchardworks/agent-client';
-import { labSessionSuccessionDirectory } from '../kernel/session-succession-directory.js';
-import type { FamilySessionPresentationContext } from '../conversation/SessionFamily.js';
-import { handoffCommand, handoffProvider } from '../handoff-command.js';
-import { SessionTitle } from '../conversation/SessionTitle.js';
-import { StarButton } from '../features/sessions/SessionFavorites.js';
-import { sessionConnectionFailure } from '../kernel/SessionConnectionNotice.js';
-import { SessionLink } from '../kernel/SessionLink.js';
-import { SessionHeadingActions } from '../conversation/SessionHeadingActions.js';
+import { isBotView, type WindowView, type WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
+import { assistantStatus } from '@orchardworks/agent-client';
 import { useCallback, useRef } from 'react';
-import { SessionDirectoryClient } from '../kernel/directory-client.js';
-import { sessionKey, type SessionEntry } from '../kernel/session-tree.js';
-import { ChatSessionManager } from '../features/sessions/ChatSessionManager.js';
-import { ForkEntries, ForkReference } from '../features/session-links/ForkReference.js';
-import { refCommand, refCommandId, SessionReferences } from '../features/session-links/SessionReferences.js';
-import { loadSessionRefs, sessionRefsEntry } from '../kernel/session-references.js';
-import { sideNavigationSource, forkDisplayState } from '../kernel/session-forks.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
+import { sessionKey } from '../kernel/session-tree.js';
+import { sessionActivity } from '../kernel/session-activity-status.js';
+import { sessionConnectionFailure } from '../kernel/SessionConnectionNotice.js';
+import { botRole } from '../kernel/bot-roster.js';
 import type { FoldedBot } from '../kernel/SessionDock.js';
-import { forkActions, forkCommands } from '../conversation/fork-actions.js';
-import { restoreQuotes } from '../features/session-links/session-quotes.js';
-import { QuoteAttachments, QuoteMessagesButton, QuoteNotice, QuoteSelectionBar } from '../features/session-links/SessionQuotes.js';
-import { useTranslate, type QuestionDraft } from '@orchardworks/agent-client-web/react';
-import { IconButton } from '../ui/IconButton.js';
-import { viewKey } from './helpers.js';
-import type { SessionSuccessionBindingSlice } from './useSessionSuccessionBinding.js';
-import type { ViewSessionStateSlice } from './useViewSessionState.js';
-import type { ProviderStateSlice } from './useProviderState.js';
-import type { RequestedSessionSlice } from './useRequestedSession.js';
-import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';
-import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
-import type { SendingAndSuccessionSlice } from './useSendingAndSuccession.js';
-import type { RemoteHostStateSlice } from './useRemoteHostState.js';
-import type { FocusedAskSlice } from './useFocusedAsk.js';
-import type { SideNavigationSlice } from './useSideNavigation.js';
-import type { PanelsAndShortcutsSlice } from './usePanelsAndShortcuts.js';
-import type { TraceNavigationSlice } from './useTraceNavigation.js';
-import type { QuotesAndReferencesSlice } from './useQuotesAndReferences.js';
-import type { CommunicationsAndForksSlice } from './useCommunicationsAndForks.js';
-import type { SessionOpeningSlice } from './useSessionOpening.js';
-import type { SideSelectionSlice } from './useSideSelection.js';
-import type { ActiveSessionSlice } from './useActiveSession.js';
-import type { AttentionAndRosterSlice } from './useAttentionAndRoster.js';
-import type { WindowModeActionsSlice } from './useWindowModeActions.js';
-import type { AppInputs } from './types.js';
+import type { FamilySessionPresentationContext } from '../conversation/SessionFamily.js';
+import { mergeSessionViewContributions, type SessionViewContext, type SessionViewOptions, type SessionViewSource } from '../conversation/session-view-contribution.js';
+import { forkContribution } from '../features/session-links/fork-contribution.js';
+import { quoteContribution } from '../features/session-links/quote-contribution.js';
+import { referenceContribution } from '../features/session-links/reference-contribution.js';
+import { outboxContribution } from '../features/sessions/outbox-contribution.js';
+import { sideNavigationSource } from '../kernel/session-forks.js';
+import { earlierSessionsContribution } from './contributions/earlier-sessions.js';
+import { handoffContribution } from './contributions/handoff.js';
+import { headingActionsContribution } from './contributions/heading-actions.js';
+import { identityContribution } from './contributions/identity.js';
+import { ownerInputContribution } from './contributions/owner-input.js';
+import type { PresentationScope } from './contributions/scope.js';
+import { traceContribution } from './contributions/trace.js';
 
-export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSuccessionBindingSlice & ViewSessionStateSlice & ProviderStateSlice & RequestedSessionSlice & WorkbenchRecordsSlice & WorkbenchShellSlice & SendingAndSuccessionSlice & RemoteHostStateSlice & FocusedAskSlice & SideNavigationSlice & PanelsAndShortcutsSlice & TraceNavigationSlice & QuotesAndReferencesSlice & CommunicationsAndForksSlice & SessionOpeningSlice & SideSelectionSlice & ActiveSessionSlice & AttentionAndRosterSlice & WindowModeActionsSlice, 'assistantNames' | 'accessReady' | 'actions' | 'assertSourceCurrent' | 'attention' | 'baseUrl' | 'bindDirectorySession' | 'botHandoff' | 'compactLayout' | 'conversationHistory' | 'createFork' | 'currentBotSession' | 'directory' | 'dispatchQuote' | 'earlierConversationFor' | 'favorites' | 'forkInputStatus' | 'forkStore' | 'letterReveals' | 'missingSessions' | 'navigation' | 'openExcerptSource' | 'openFork' | 'openLocalView' | 'openSession' | 'openSideKeys' | 'questionDrafts' | 'quoteEntrySelection' | 'quoteNotice' | 'quoteSelected' | 'quoteSelection' | 'quoteTargets' | 'quotedActions' | 'referencePicker' | 'referencedActions' | 'refreshRelations' | 'remoteHosts' | 'removedReference' | 'restoredReference' | 'revealEarlier' | 'revealSession' | 'sessionEntries' | 'setPendingGroupInputs' | 'setQuestionDrafts' | 'setReferencePicker' | 'setRemovingBot' | 'setRenamingSession' | 'setSessionNotice' | 'setSuccessionDialog' | 'setTraceNavigation' | 'sharedWindow' | 'showView' | 'sourceCurrent' | 'sourceStateFor' | 'state' | 'succession' | 'successionDialog' | 'successionGated' | 'successionProgress' | 'supportTeams' | 'traceRequest' | 'traceRequestCounter' | 'tracking' | 'transport' | 'unlinkSide' | 'userScoped' | 'windowWorkspace' | 'withConfirmedTitle' | 'openInBotMode'>) {
+export function useSessionViewPresentation(scope: Pick<PresentationScope, 'assistantNames' | 'accessReady' | 'actions' | 'assertSourceCurrent' | 'attention' | 'baseUrl' | 'bindDirectorySession' | 'botHandoff' | 'compactLayout' | 'conversationHistory' | 'createFork' | 'currentBotSession' | 'directory' | 'dispatchQuote' | 'earlierConversationFor' | 'favorites' | 'forkInputStatus' | 'forkStore' | 'letterReveals' | 'missingSessions' | 'navigation' | 'openExcerptSource' | 'openFork' | 'openLocalView' | 'openSession' | 'openSideKeys' | 'questionDrafts' | 'quoteEntrySelection' | 'quoteNotice' | 'quoteSelected' | 'quoteSelection' | 'quoteTargets' | 'quotedActions' | 'referencePicker' | 'referencedActions' | 'refreshRelations' | 'remoteHosts' | 'removedReference' | 'restoredReference' | 'revealEarlier' | 'revealSession' | 'sessionEntries' | 'setPendingGroupInputs' | 'setQuestionDrafts' | 'setReferencePicker' | 'setRemovingBot' | 'setRenamingSession' | 'setSessionNotice' | 'setSuccessionDialog' | 'setTraceNavigation' | 'sharedWindow' | 'showView' | 'sourceCurrent' | 'sourceStateFor' | 'state' | 'succession' | 'successionDialog' | 'successionGated' | 'successionProgress' | 'supportTeams' | 'traceRequest' | 'traceRequestCounter' | 'tracking' | 'transport' | 'unlinkSide' | 'userScoped' | 'windowWorkspace' | 'withConfirmedTitle' | 'openInBotMode'>) {
   const { assistantNames, accessReady, actions, assertSourceCurrent, attention, baseUrl, bindDirectorySession, botHandoff, compactLayout, conversationHistory, createFork, currentBotSession, directory, dispatchQuote, earlierConversationFor, favorites, forkInputStatus, forkStore, letterReveals, missingSessions, navigation, openExcerptSource, openFork, openLocalView, openSession, openSideKeys, questionDrafts, quoteEntrySelection, quoteNotice, quoteSelected, quoteSelection, quoteTargets, quotedActions, referencePicker, referencedActions, refreshRelations, remoteHosts, removedReference, restoredReference, revealEarlier, revealSession, sessionEntries, setPendingGroupInputs, setQuestionDrafts, setReferencePicker, setRemovingBot, setRenamingSession, setSessionNotice, setSuccessionDialog, setTraceNavigation, sharedWindow, showView, sourceCurrent, sourceStateFor, state, succession, successionDialog, successionGated, successionProgress, supportTeams, traceRequest, traceRequestCounter, tracking, transport, unlinkSide, userScoped, windowWorkspace, withConfirmedTitle, openInBotMode } = scope;
   const t = useTranslate();
-
-  /** A bot at work: running a turn, not waiting for the owner, and connected to its agent. */
-  function botWorking(state: AgentReplicaState | undefined): boolean {
-    const agent = state?.agent;
-    return !!agent && (agent.status === 'running' || agent.status === 'starting') && !state!.pendingInteractions.length
-      && agent.runtimeInfo.connection?.state !== 'unavailable';
-  }
 
   /** Whether the shown Window's view is a bot put to sleep (stored with its group). */
   function asleepBot(view: { id: string }) {
     return !!sharedWindow && isAsleep(windowWorkspace.readGroup(sharedWindow.id), view.id);
   }
 
-  /** Stores an assistant's own name with its group, for every device; a group without bot details gets them first. */
-  function renameAssistant(groupId: string, viewId: string, name: string) {
-    const trimmed = name.trim(), group = windowWorkspace.readGroup(groupId);
-    if (!trimmed || !group) return;
-    const change = { type: 'bot.update' as const, viewId, details: { ...group.bots?.members[viewId], name: trimmed } };
-    void windowWorkspace.operateGroup(groupId, group.bots ? change : { type: 'batch', operations: [{ type: 'bots.add', rank: appendedRank(windowWorkspace.groups) }, change] })
-      .catch(error => setSessionNotice(sessionConnectionFailure(error, false, t)));
-  }
 
   /** Wakes a sleeping bot for every device, keeping its other details. */
   function wakeBot(groupId: string, viewId: string) {
@@ -94,189 +52,57 @@ export function useSessionViewPresentation(scope: Pick<AppInputs & SessionSucces
     authority.operate(closeOperation(current, viewId, foldsOnClose(current.views.find(view => view.id === viewId))));
   }
 
-  function sessionViewPresentation(context: FamilySessionPresentationContext, options: { team?: boolean; bot?: { groupId: string; viewId: string }; fallback?: boolean } = {}) {
+  /** The facts every contribution reads about one view. */
+  function sessionViewContext(context: FamilySessionPresentationContext, options: SessionViewOptions): SessionViewContext {
     const team = options.team === true, botPresentation = !!options.bot || options.fallback === true;
-    const source = { ...(team ? context.session : withConfirmedTitle(context.session)), hostId: context.session.hostId ?? 'local', viewId: context.viewId!, ...(options.bot ? { bot: options.bot } : options.fallback ? { fallback: true } : {}) };
+    const source: SessionViewSource = { ...(team ? context.session : withConfirmedTitle(context.session)), hostId: context.session.hostId ?? 'local', viewId: context.viewId!, ...(options.bot ? { bot: options.bot } : options.fallback ? { fallback: true as const } : {}) };
     const botGroup = options.bot ? windowWorkspace.readGroup(options.bot.groupId) : undefined;
-    const view = options.bot ? botGroup?.window.views.find(view => view.id === options.bot!.viewId) : sharedWindow?.views.find(view => view.id === context.windowViewId);
+    const view = options.bot ? botGroup?.window.views.find(item => item.id === options.bot!.viewId) : sharedWindow?.views.find(item => item.id === context.windowViewId);
     // In a group with bot details, a bot's pane in Window mode is the same bot: its conversation goes on into its earlier
     // sessions in place, as in Bot mode, since the group keeps the bot's conversation (rule 1). An ordinary Window opens
     // them in the view instead.
     const windowBot = !botPresentation && !!view && isBotView(view) && !!sharedWindow && !!windowWorkspace.readGroup(sharedWindow.id)?.bots;
-    const isPrimary = view?.placement === 'primary';
-    const fork = forkStore.find(source);
-    // In a Window, a fork view's input belongs to the fork only while that view still shows it.
-    const forkTarget = fork?.target;
-    const targetsFork = forkTarget && context.windowViewId ? () => {
-      const binding = windowWorkspace.readWindow()?.views.find(item => item.id === context.windowViewId)?.binding;
-      return !!binding && sessionKey({ ...binding, hostId: binding.hostId ?? 'local' }) === sessionKey({ ...forkTarget, hostId: forkTarget.hostId ?? 'local' });
-    } : undefined;
-    const commands = botPresentation ? context.actions : forkActions(actions ?? context.actions, forkStore, fork, transport, targetsFork);
-    const gated = successionGated && successionDialog?.scope === baseUrl && viewKey(successionDialog.source) === source.viewId;
-    const host = remoteHosts.find(host => host.id === source.hostId);
-    const available = accessReady && !context.offline && context.status === 'ready' && !context.pending && sourceCurrent(source);
-    const handoffAvailable = available && (!botPresentation || context.state?.agent?.status === 'idle') && !successionDialog && userScoped && !!directory && !source.parentNativeSessionId
-      && !context.sessionState.readOnly && !context.operationBinding.historical && host?.access !== 'shared' && host?.online === true;
-    const mayRename = !team && userScoped && host?.online && host.access !== 'shared' && host.providers?.some(provider => provider.providerId === source.providerId && provider.sessionRename);
-    const sourceForks = forkStore.linked().filter(item => item.target && sessionKey(sideNavigationSource(item)) === sessionKey(source));
-    // References live on the Host; a shared Host's sessions keep showing only their source.
-    const referencing = userScoped && !!directory && host?.access !== 'shared' && !!host?.providers?.some(provider => provider.providerId === source.providerId && provider.sessionReferences);
-    const refHolder = { hostId: source.hostId, providerId: source.providerId, nativeSessionId: source.nativeSessionId };
-    // A Controller that tells the agent itself needs no note from this page.
-    const pageNotes = referencing && !host?.providers?.some(provider => provider.providerId === source.providerId && provider.referenceNotes);
-    // A conversation whose Host is offline can still be written to: the message waits for the Host when its Controller delivers from the outbox.
-    const outboxTarget = { hostId: source.hostId, providerId: source.providerId, nativeSessionId: source.nativeSessionId };
-    const writable = !!context.offline && !!host && host.access !== 'shared' && !source.parentNativeSessionId && !context.operationBinding.historical;
-    const laterHost = writable && host!.outbox === 1 && transport.queueMessage ? host : undefined;
-    const outdatedOffline = writable && host!.outbox !== 1 && !!transport.queueMessage;
-    const forkReference = fork ? <ForkReference fork={fork} onOpen={revealSession} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} /> : null;
-    // Quoting happens between the session views of shared Windows.
-    const quoteView = !botPresentation && sharedWindow && context.windowViewId && !source.parentNativeSessionId ? context.windowViewId : undefined;
-    // A bot's details (its picture and its own process mode) are stored with its group, in Bot mode and in a Window of bots alike;
-    // a view in a group without bots has none and chooses only this device's default.
-    const botGroupId = options.bot?.groupId ?? (windowBot ? sharedWindow!.id : undefined), botViewId = options.bot?.viewId ?? (windowBot ? view!.id : undefined);
-    const botDetails = botGroupId && botViewId ? windowWorkspace.readGroup(botGroupId)?.bots?.members[botViewId] : undefined;
-    // Who answers: the assistant's name and its avatar, which works while it does. The avatar is the one the roster draws for
-    // the same Window view: its stored picture, or the picture of its view id. The name is the account's (assistantNames),
-    // never the session's title, which stays the conversation's subtitle.
-    const providerName = (providerId: string, hostId = source.hostId) => remoteHosts.find(item => item.id === hostId)?.providers?.find(provider => provider.providerId === providerId)?.displayName;
-    const nameGroupId = options.bot?.groupId ?? (view ? sharedWindow?.id : undefined), nameViewId = options.bot?.viewId ?? view?.id;
-    const assistant = { name: nameGroupId && nameViewId ? assistantNames.view(nameGroupId, nameViewId) : assistantNames.session(source),
-      session: { hostId: source.hostId, providerId: source.providerId, nativeSessionId: source.nativeSessionId },
-      avatar: <BotPicture id={botViewId ?? view?.id ?? source.viewId} picture={botDetails?.picture} size={26} mood={botWorking(context.state) ? 'working' : 'idle'} /> };
-    const openBot = !botPresentation && !team && sharedWindow && view && isBotView(view) ? () => void openInBotMode(sharedWindow.id, view.id) : undefined;
-    // Where it works and the sessions behind it, for its details: the Host and agent, the agents before a handoff, the chain.
-    const chain = succession.historyNavigationFor(source);
-    const earlier = chain?.predecessor && !chain.history ? [...chain.ancestors].reverse().concat(chain.predecessor) : [];
-    const details = {
-      id: botViewId ?? view?.id ?? source.viewId, ...(botDetails?.picture ? { picture: botDetails.picture } : {}), name: assistant.name,
-      ...(botDetails?.label ? { label: botDetails.label } : {}), ...(view && botRole(view, teamId => supportTeams.has(teamId), t) ? { role: botRole(view, teamId => supportTeams.has(teamId), t)! } : {}),
-      mood: botWorking(context.state) ? 'working' as const : 'idle' as const,
-      where: { host: host?.name ?? source.hostId, ...(host ? { online: host.online } : {}), provider: providerName(source.providerId) ?? source.providerId,
-        earlier: earlier.map(session => providerName(session.providerId, session.hostId ?? source.hostId) ?? session.providerId) },
-      sessions: {
-        session: source,
-        chain: { navigation: chain, open: async (session: SessionEntry, intent?: 'history') => {
-          // Bot mode opens an earlier session on its own, as Other sessions does; a Window opens it in the tile.
-          if (options.bot || options.fallback) { navigation.select({ kind: 'session', session: { ...session, hostId: session.hostId ?? source.hostId } }); return true; }
-          return windowBot ? revealEarlier(view!.id, session)
-          : view && sharedWindow ? bindDirectorySession({ ...session, sessionIntent: intent }, { windowId: sharedWindow.id, viewId: view.id, binding: JSON.stringify(view.binding ?? null) })
-          // Outside a Window the primary conversation opens it in place, as its handoff line did.
-          : openSession(session, undefined, undefined, false, undefined, intent);
-        } },
-        tools: <><StarButton session={source} favorites={favorites} /><SessionLink session={available ? source : windowSessionBinding(source)} sessionIntent={context.operationBinding.historical ? 'history' : undefined} /></>,
-      },
-      // A tile's assistant opens in Bot mode, keeping the Window's place.
-      ...(openBot ? { action: { label: t('card.openInBot'), icon: 'person' as const, onSelect: openBot } } : {}),
-      // A tile's assistant is renamed in its group's details; Bot mode's host renames a bot, and a session in no group keeps its name.
-      ...(!botPresentation && sharedWindow && view && isBotView(view) ? { rename: (name: string) => renameAssistant(sharedWindow.id, view.id, name) } : {}),
-    };
-    const processAssistant = botGroupId && botViewId ? {
-      details: botDetails,
-      update: (details: WindowBotDetails) => { void windowWorkspace.operateGroup(botGroupId, { type: 'bot.update', viewId: botViewId, details }).catch(error => setSessionNotice(sessionConnectionFailure(error, false, t))); },
-    } : undefined;
+    const host = remoteHosts.find(item => item.id === source.hostId);
     return {
-      assistant,
-      details,
-      conversationTitle: source.title,
-      processAssistant,
-      // Bot mode's top bar is the conversation's heading; a Window tile has the assistant's own header.
-      headingMode: botPresentation ? 'assistant' as const : 'tile' as const,
-      state: botPresentation ? context.state : forkDisplayState(context.state, fork),
-      questionDrafts: questionDrafts[source.agentId] ?? {},
-      onQuestionDraftChange: (requestId: string, draft: QuestionDraft) => setQuestionDrafts(current => ({
-        ...current, [source.agentId]: { ...current[source.agentId], [requestId]: draft },
-      })),
-      // A cached Window not yet confirmed by the service shows its sessions without sending to them.
-      mutationBlocked: gated || windowWorkspace.provisional,
-      onInspectEntry: botPresentation ? undefined : (key: string) => {
-        if (view) windowWorkspace.authority?.operate({ type: 'view.select', viewId: view.id });
-        setTraceNavigation({ scope: JSON.stringify([context.state?.agent?.id, context.state?.timeline.epoch]), key, view: 'trace', requestId: ++traceRequestCounter.current });
-        showView('trace');
-      },
-      revealEntry: botPresentation ? undefined : letterReveals[source.agentId] ?? (traceRequest?.view === 'workbench' && context.state?.agent?.id === state?.agent?.id ? traceRequest : undefined),
-      onNavigateAttribution: botPresentation ? async (attribution: SessionAttribution) => {
-        if (!attribution.target) return;
-        if (attribution.target.kind === 'group') throw new Error(t('sessions.presentation.openInWindow'));
-        navigation.select({ kind: 'session', session: { ...attribution.target, title: attribution.value } });
-      } : undefined,
-      onPendingInputChange: (count: number) => setPendingGroupInputs(values => values[source.viewId] === count ? values : { ...values, [source.viewId]: count }),
-      actions: botPresentation ? commands : forkInputStatus?.pending && forkInputStatus.agentId === source.agentId ? { deleteMessage: commands.deleteMessage }
-        : pageNotes ? referencedActions(quoteView ? quotedActions(commands, quoteView) : commands, source, context.state) : quoteView ? quotedActions(commands, quoteView) : commands,
-      ...(quoteView && context.state ? { entrySelection: quoteEntrySelection(quoteView, context.state.timeline.epoch) } : {}),
-      ...(quoteView ? { receiveQuotes: (excerpts: readonly SessionExcerpt[]) => restoreQuotes(baseUrl, quoteView, excerpts) } : {}),
-      // In Bot mode a Side joins the bot's group beside it (a Side is a bot); a fork or an Ask would open elsewhere.
-      consoleCommands: [...(available && directory && context.state?.agent?.capabilities.sendMessage && context.state.agent.capabilities.history ? botPresentation ? options.bot ? forkCommands.filter(command => command.id === 'console:side') : [] : forkCommands : []), ...(handoffAvailable ? [handoffCommand] : []),
-        ...(!botPresentation && referencing && available ? [refCommand(t)] : [])],
-      onExecuteConsoleCommand: async (id: string, args: string): Promise<AgentCommandResult> => {
-        if (id === refCommandId) {
-          await loadSessionRefs(baseUrl, refHolder);
-          if (sessionRefsEntry(baseUrl, refHolder).unsupported) throw new Error(t('sessions.presentation.refsNeedUpdate'));
-          setReferencePicker(source.viewId);
-          return {};
-        }
-        assertSourceCurrent(source);
-        if (id === handoffCommand.id) {
-          if (botPresentation && sourceStateFor(source)?.agent?.status !== 'idle') throw new Error(t('sessions.presentation.waitIdle'));
-          if (!handoffAvailable) throw new Error(t('sessions.presentation.handoffNeeds'));
-          setSuccessionDialog({ scope: baseUrl, source, visible: true, initialProvider: handoffProvider(args), directory: labSessionSuccessionDirectory(new SessionDirectoryClient(baseUrl, undefined, source.hostId)) });
-          return {};
-        }
-        // A Side joins a bot's group; a session listed under Other sessions has no group to join.
-        if (botPresentation && (id !== 'console:side' || !options.bot)) throw new Error(t('sessions.presentation.botUnavailable'));
-        if (!context.state || !available) throw new Error(t('sessions.sending.waitSync'));
-        return createFork(context.state, source, id, args);
-      },
-      composerStatus: <>{!botHandoff && (gated || successionDialog && viewKey(successionDialog.source) === source.viewId) ? successionProgress : null}
-        {quoteView && quoteSelection?.viewId === quoteView && context.state ? <QuoteSelectionBar count={quoteSelection.keys.size} windows={quoteTargets(quoteView, source)}
-          busy={!!quoteSelection.busy} error={quoteSelection.error} onCancel={() => dispatchQuote({ type: 'cancel' })}
-          onQuote={target => void quoteSelected(quoteView, source, context.state!, target)} /> : null}
-        {quoteView && quoteNotice?.viewId === quoteView ? <QuoteNotice message={quoteNotice.message} onDismiss={() => dispatchQuote({ type: 'notice.dismiss' })}
-          onOpen={quoteNotice.open ? () => { const open = quoteNotice.open!; dispatchQuote({ type: 'notice.dismiss' }); void open().catch(() => {}); } : undefined} /> : null}</>,
-      // Bot mode does not announce a handoff: the conversation continues into the earlier sessions instead of linking to them.
-      timelineStart: botPresentation || windowBot ? earlierConversationFor(succession.historyNavigationFor(source)) : undefined,
-      // Messages waiting for an offline Host follow the conversation; the timeline's own live line says when the assistant works.
-      timelineEnd: transport.cancelQueuedMessage ? <SessionOutboxMessages session={outboxTarget} hostName={host?.name ?? source.hostId} hostOnline={host?.online === true}
-          onCancel={async id => { await transport.cancelQueuedMessage!(id); }} onRetry={async id => { await transport.retryQueuedMessage!(id); }} /> : undefined,
-      ...(laterHost ? { sendLater: { label: t('sessions.presentation.sendWhenBack', { host: laterHost.name }), send: async (text: string) => { await transport.queueMessage!(outboxTarget, text); } } } : {}),
-      ...(context.offline && host ? { loadingNotice: { title: t('sessions.presentation.hostOffline', { host: host.name }),
-        detail: laterHost ? t('sessions.presentation.backLater') : t('sessions.presentation.back2') } } : {}),
-      composerContext: botPresentation ? undefined : <>{referencing ? <SessionReferences scope={baseUrl} holder={refHolder} providers={host?.providers?.map(provider => provider.providerId) ?? [source.providerId]}
-          fallback={forkReference} snapshot={fork?.mode === 'reference' ? null : forkReference} picking={referencePicker === source.viewId}
-          shown={new Set(sourceForks.flatMap(item => item.target ? [`${item.target.providerId}/${item.target.nativeSessionId}`] : []))} onPickingChange={picking => setReferencePicker(picking ? source.viewId : undefined)}
-          onOpen={ref => void openExcerptSource({ hostId: source.hostId, providerId: ref.providerId, nativeSessionId: ref.nativeSessionId, title: ref.title ?? '' })}
-          onRemoved={(ref, restore) => removedReference(ref, restore, fork)} onRestore={() => restoredReference(fork)} /> : forkReference}
-        {quoteView ? <QuoteAttachments scope={baseUrl} viewId={quoteView} /> : null}</>,
-      composerNotice: outdatedOffline ? <p className="agent-composer-note lab-outbox-hint" role="status">{t('sessions.presentation.updateController', { host: host!.name })}</p>
-        : botPresentation ? undefined : <ForkEntries forks={sourceForks} openSides={openSideKeys(source.viewId)} onOpen={record => void openFork({ ...record, navigationSource: source })} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} />,
-      sessionManager: botPresentation ? undefined : <>{context.controls}{isPrimary ? <IconButton icon="close" data-pane-selection-ignore label={t('sessions.presentation.closeGroup', { title: source.title })}
-        title={foldsOnClose(view) ? t('sessions.presentation.fold') : t('sessions.presentation.closeView')}
-        onClick={() => closeView(view.id)} /> : null}
-        {!compactLayout ? <StarButton session={source} favorites={favorites} /> : null}
-        <SessionHeadingActions sessionKey={sessionKey(source)} alwaysCollapsed={!!context.menuActions}>
-          {context.menuActions}
-          {isPrimary && (!compactLayout || succession.localViews().length > 0) && directory ? <ChatSessionManager current={source} entries={sessionEntries} busy={false}
-            localViews={succession.localViews()} activeSlot={context.viewId} onOpenView={view => void openLocalView(view.slotId)}
-            onOpen={item => void openSession(item, undefined, undefined, false, undefined, undefined, undefined, undefined, 'primary', view.id)} /> : null}
-          {isPrimary && view.id === sharedWindow?.selectedPrimaryViewId ? <nav className="lab-conversation-history" aria-label={t('sessions.presentation.history')}>
-            <button type="button" aria-label={t('sessions.presentation.backToPrevious')} title={t('sessions.side.back')} disabled={!conversationHistory.canBack} onClick={conversationHistory.back}>←</button>
-            <button type="button" aria-label={t('sessions.presentation.forwardToNext')} title={t('sessions.presentation.forward')} disabled={!conversationHistory.canForward} onClick={conversationHistory.forward}>→</button>
-          </nav> : null}
-          <SessionLink session={available ? source : windowSessionBinding(source)} sessionIntent={context.operationBinding.historical ? 'history' : undefined} />
-          {openBot ? <button type="button" className="lab-open-in-bot" onClick={openBot}>{t('card.openInBot')}</button> : null}
-          {quoteView && context.state && quoteSelection?.viewId !== quoteView
-            ? <QuoteMessagesButton onClick={() => quoteEntrySelection(quoteView, context.state!.timeline.epoch).select([], true)} /> : null}
-        </SessionHeadingActions></>,
-      conversationPath: botPresentation ? undefined : <SessionTitle className={isPrimary ? 'lab-primary-title' : undefined} title={source.title} status={context.state?.agent?.status}
-        onRename={mayRename ? () => setRenamingSession({ scope: baseUrl, session: { ...source, hostId: source.hostId ?? 'local' } }) : undefined} />,
+      context, options, team, botPresentation, source, view, windowBot, host,
+      isPrimary: view?.placement === 'primary',
+      fork: forkStore.find(source),
+      sourceForks: forkStore.linked().filter(item => item.target && sessionKey(sideNavigationSource(item)) === sessionKey(source)),
+      available: accessReady && !context.offline && context.status === 'ready' && !context.pending && sourceCurrent(source),
+      // Quoting happens between the session views of shared Windows.
+      quoteView: !botPresentation && sharedWindow && context.windowViewId && !source.parentNativeSessionId ? context.windowViewId : undefined,
+      openBot: !botPresentation && !team && sharedWindow && view && isBotView(view) ? () => void openInBotMode(sharedWindow.id, view.id) : undefined,
+      provisional: windowWorkspace.provisional,
+      assertCurrent: () => assertSourceCurrent(source),
     };
+  }
+
+  /** Each feature contributes what it says about the view; the merge states the order of the props they share. */
+  function sessionViewPresentation(context: FamilySessionPresentationContext, options: SessionViewOptions = {}) {
+    const view = sessionViewContext(context, options);
+    const reconcile = (record: Parameters<typeof refreshRelations.reconcile>[0]) => refreshRelations.reconcile(record);
+    const quoteInputs = { baseUrl, quoteSelection, quoteNotice, dispatchQuote, quoteTargets, quoteSelected, quotedActions, quoteEntrySelection };
+    return mergeSessionViewContributions(view, {
+      forks: forkContribution({ forkStore, actions, transport, readWindowViews: () => windowWorkspace.readWindow()?.views, forkInputStatus, directory, createFork, openFork, openSideKeys, unlinkSide, reconcile, t })(view),
+      handoff: handoffContribution({ baseUrl, botHandoff, directory, setSuccessionDialog, sourceStateFor, successionDialog, successionGated, successionProgress, userScoped, t })(view),
+      quotes: quoteContribution(quoteInputs)(view),
+      references: referenceContribution({ baseUrl, userScoped, directory, referencePicker, setReferencePicker, referencedActions, openExcerptSource, removedReference, restoredReference, revealSession, unlinkSide, reconcile, t })(view),
+      outbox: outboxContribution({ transport, t })(view),
+      plain: [
+        identityContribution({ assistantNames, bindDirectorySession, favorites, navigation, openSession, remoteHosts, revealEarlier, setSessionNotice, sharedWindow, succession, supportTeams, windowWorkspace, t })(view),
+        ownerInputContribution({ questionDrafts, setPendingGroupInputs, setQuestionDrafts })(view),
+        traceContribution({ letterReveals, setTraceNavigation, showView, state, traceRequest, traceRequestCounter, windowWorkspace })(view),
+        earlierSessionsContribution({ earlierConversationFor, navigation, succession, t })(view),
+        headingActionsContribution({ baseUrl, compactLayout, conversationHistory, directory, favorites, openLocalView, openSession, sessionEntries, setRenamingSession, sharedWindow, succession, userScoped, quoteSelection, quoteEntrySelection, t, foldsOnClose, closeView })(view),
+      ],
+    });
   }
 
   const sessionPresentationRef = useRef(sessionViewPresentation);
 
   sessionPresentationRef.current = sessionViewPresentation;
 
-  const presentSessionView = useCallback((context: FamilySessionPresentationContext, options?: Parameters<typeof sessionViewPresentation>[1]) => sessionPresentationRef.current(context, options), []);
+  const presentSessionView = useCallback((context: FamilySessionPresentationContext, options?: SessionViewOptions) => sessionPresentationRef.current(context, options), []);
 
   /** Removing a view from the shown Window's list: a bot of a group in Bot mode asks first. */
   function confirmBotRemoval(view: WindowView): boolean {

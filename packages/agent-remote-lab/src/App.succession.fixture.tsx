@@ -260,6 +260,14 @@ export async function failureFixture(advanceDuringRecovery = false, nativeIdenti
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const scope = `http://127.0.0.1:${(server.address() as { port: number }).port}/`;
   const transport = new HttpWebSocketTransport(scope, { WebSocket, sessionChannels: true, sessionSuccessions: true, stateRetryMs: setup?.stateRetryMs }) as LabTransport;
+  // A test can wait until the page has handled a committed Handoff's notice: whatever the page does with it has begun by then.
+  // Both go through the prototype when called, so a test that replaces either there later still reaches the page.
+  const noticeHandled: Array<() => void> = [];
+  transport.onSessionSuccession = listener => HttpWebSocketTransport.prototype.onSessionSuccession.call(transport as HttpWebSocketTransport,
+    replay => { listener(replay); for (const handled of noticeHandled.splice(0)) handled(); });
+  // A discovery reads the replay pages first, so the reads the page has started count its discoveries.
+  let replayReads = 0;
+  transport.fetchSessionSuccessions = (...args) => { replayReads++; return HttpWebSocketTransport.prototype.fetchSessionSuccessions.apply(transport as HttpWebSocketTransport, args); };
   cleanups.push(async () => { (transport as HttpWebSocketTransport).dispose(); for (const socket of sockets.clients) socket.terminate(); await new Promise<void>(resolve => sockets.close(() => resolve())); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
   const source = { hostId: 'host', providerId, nativeSessionId: 'A', agentId: 'agent-A', title: 'Retained primary' };
   localStorage.setItem(`agent-remote-opened:${scope}`, JSON.stringify([source]));
@@ -300,6 +308,10 @@ export async function failureFixture(advanceDuringRecovery = false, nativeIdenti
     /** The Relay's side of a lost connection: the page's session channels close at once and it reconnects. */
     dropSockets() { for (const socket of sockets.clients) socket.terminate(); },
     notify(replay: SessionSuccessionReplay) { for (const socket of sockets.clients) socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'session_succession_committed', succession: replay })); },
+    /** Resolves once the page has handled the next notice that a Handoff committed. */
+    noticeHandled() { return new Promise<void>(resolve => { noticeHandled.push(resolve); }); },
+    /** How many replay reads the page has started: each discovery starts one. */
+    replayReads() { return replayReads; },
   };
 }
 

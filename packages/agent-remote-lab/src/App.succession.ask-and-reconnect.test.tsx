@@ -16,6 +16,7 @@ import { ForkStore, referenceForkContext } from './kernel/session-forks.js';
 import { sessionKey } from './kernel/session-tree.js';
 import { saveTrackedSessions } from './kernel/tracking-state.js';
 import * as remoteReact from '@orchardworks/agent-client-web/react';
+import * as imageDrafts from '@orchardworks/agent-client-web/browser';
 import * as managerComponents from './features/sessions/ChatSessionManager.js';
 import { act, cleanups, committed, editVisiblePrompt, failureFixture, native, setGlobalAskVisible, settleApp, testDeadline, visibleQuery, waitFor } from './App.succession.fixture.js';
 
@@ -335,18 +336,16 @@ it('edits a real App managed Team window into its retained origin owner and admi
   const description: SuccessionDescription = { role: { ...prefix.projection.role, revision: 1, current: native('X') }, targets: [{ providerId: 'recorded', displayName: 'Recorded' }], eligibility: { status: 'ready' } };
   const prompt: ProjectedTimelineEntry = { providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-10-15T00:00:00Z', turnId: preparation.turnId, collapsed: [], resources: [], sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }], item: { type: 'user_message', messageId: preparation.messageId, text: 'Selected member prompt' } };
   const textKey = `session:${JSON.stringify(['host', 'recorded', 'X'])}`;
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
   // The roster refreshes every 50 ms instead of every 4 s, so the successor's seat shows without waiting out the real period.
-  let f!: Awaited<ReturnType<typeof failureFixture>>;
-  f = await failureFixture(false, 'A', false, '', { teamRefresh: { watchingMs: 50, idleMs: 30_000 }, chain, teams: () => [team], timeline: [prompt], persistPrompt: true, successionDescription: description,
+  const f = await failureFixture(false, 'A', false, '', { teamRefresh: { watchingMs: 50, idleMs: 30_000 }, chain, teams: () => [team], timeline: [prompt], persistPrompt: true, successionDescription: description,
     async successionPrepare(body) {
       prefix.projection.receipt.operationId = String(body.operationId); prefix.projection.receipt.prepared!.operationId = String(body.operationId);
       return { role: description.role, record: { ...prefix.projection.receipt, phase: 'ready', committedRevision: undefined } };
     }, successionCommit() {
       chain.push(prefix); team = { ...team, revision: 2, members: [{ ...team.members[0]!, nativeSessionId: 'Y' }] };
-      // The committed Handoff reaches the page's channel as it commits, so the page refreshes once for it. Sent after the test
-      // noticed the commit, it started a second refresh at a time set by the test's polling, which could fall inside the
-      // prompt's restoration and withdraw the successor's view from under it (O60).
-      f.notify(prefix);
       return { role: prefix.projection.role, record: prefix.projection.receipt, locator: prefix.to };
     }, seed(scope, source) {
       const main = createCompositionSlot('main-slot', source, scope);
@@ -357,12 +356,28 @@ it('edits a real App managed Team window into its retained origin owner and admi
       saveCompositionDocument(document, () => true); flushRecoveryWrites();
       const drafts = new DraftStore(scope); drafts.set(textKey, 'Existing member draft'); drafts.flush();
     } });
+  // The Relay's notice of the committed Handoff comes late: while the page restores the prompt into the successor, after its own
+  // refresh applied the Handoff (O62). A discovery the notice starts is held until the page has drawn it, as a browser draws
+  // between a request and its answer; then the restoration reads on.
+  const readDraft = imageDrafts.readImageDraft;
+  let lateNotice: Promise<void> | undefined;
+  vi.spyOn(imageDrafts, 'readImageDraft').mockImplementation(async key => {
+    lateNotice ??= (async () => {
+      const release = f.pauseReplay(), reads = f.replayReads(), handled = f.noticeHandled();
+      f.notify(prefix); await handled;
+      if (f.replayReads() > reads) await waitFor(() => expect(succession.discovering).toBe(true));
+      release();
+    })();
+    await lateNotice;
+    return readDraft(key);
+  });
   const panel = () => f.view.querySelector('[data-view-id="member-window"]')!;
   await settleApp(() => expect(panel()?.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Existing member draft'));
   await settleApp(() => expect(panel().querySelector('[data-prompt-edit-action]')).not.toBeNull());
   await act(async () => panel().querySelector<HTMLButtonElement>('[data-prompt-edit-action]')!.click());
   await settleApp(() => expect(f.requests.filter(request => request.url.endsWith('/succession/commit'))).toHaveLength(1));
   await waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); }); expect(panel().querySelector('.lab-handoff-notice')?.textContent ?? '').toBe(''); }, { timeout: 6000 });
+  expect(lateNotice).toBeDefined();
   expect(panel().querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Selected member prompt');
   expect(new DraftStore(f.scope).get(textKey)).toBe('Selected member prompt');
   expect(new DraftStore(f.scope).get(`session:${JSON.stringify(['host', 'recorded', 'Y'])}`)).toBe('');

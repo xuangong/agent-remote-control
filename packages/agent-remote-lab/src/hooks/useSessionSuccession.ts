@@ -4,7 +4,7 @@ import { applyConversationLayout, type ConversationLayout } from '../conversatio
 import { flushSync } from 'react-dom';
 import { useEffect, useMemo, useReducer, useRef } from 'react';
 import { nativeSessionRefKey, type SessionSuccessionCurrent, type SessionSuccessionReplay } from '@orchardworks/agent-remote-protocol';
-import { canonicalJson, canPruneSession, classifyFailure, committedRefreshOf, compositionStillChanging, continuesRole, errorWords, handoffOutcome, latestReplayByRole, nativeNotConfirmed, newerFavoritesHints, reduceRefresh, remoteSessionState, resolveLocator, restoredSourceOf, roleContextOf, sessionSuccessionHistory, settlementOf, sourceStaleness, successionDeadlines, unconfirmedOutcome, watchFeedRefresh, watchPageResume, type AgentReplica, type AgentReplicaState, type RefreshEffect, type RefreshEvent, type RemoteAgentTransport, type RemoteSessionClient, type RemoteSessionState, type RoleProgress, type SessionSuccessionHistoryNavigation, type SourceStaleness } from '@orchardworks/agent-client';
+import { canonicalJson, canPruneSession, classifyFailure, committedRefreshOf, compositionStillChanging, continuesRole, errorWords, handoffOutcome, latestReplayByRole, nativeNotConfirmed, newerFavoritesHints, notificationNeedsDiscovery, reduceRefresh, remoteSessionState, resolveLocator, restoredSourceOf, roleContextOf, sessionSuccessionHistory, settlementOf, sourceStaleness, successionDeadlines, unconfirmedOutcome, watchFeedRefresh, watchPageResume, type AgentReplica, type AgentReplicaState, type RefreshEffect, type RefreshEvent, type RemoteAgentTransport, type RemoteSessionClient, type RemoteSessionState, type RoleProgress, type SessionSuccessionHistoryNavigation, type SourceStaleness } from '@orchardworks/agent-client';
 import type { ImageDraftRecipient } from '@orchardworks/agent-client-web/browser';
 import type { ControllerLocation } from '@orchardworks/agent-remote-protocol/model';
 import { SessionDirectoryClient, type OpenedSession, type SuccessionActionResult } from '../kernel/directory-client.js';
@@ -909,8 +909,10 @@ export function useSessionSuccession(options: SuccessionOptions) {
       void discover();
     }
     const stopConnections = options.connections.subscribe(reconcileAskRecipients);
-    const stop = options.transport.onSessionSuccession?.(() => {
-      if (live() && supported) void discover(false, true);
+    // A notice of an operation this page already confirmed and applied finds nothing new, and a discovery withholds every
+    // locator while it runs, taking each view's operation authority away: such a notice starts none.
+    const stop = options.transport.onSessionSuccession?.(replay => {
+      if (live() && supported && notificationNeedsDiscovery(replay, { evidence: runtime.historyEvidence, roles: roleProgress() })) void discover(false, true);
     });
     const resumeRecipients = watchPageResume(() => { if (live()) { runtime.binding?.resumeRecipient(); for (const supplier of runtime.askRecipients.values()) supplier.update(); } }, () => {
       runtime.binding?.retireRecipient(); for (const supplier of runtime.askRecipients.values()) supplier.retire();

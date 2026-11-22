@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildRoleEvidence } from '../testing/succession.js';
-import { committedRefreshOf, handoffOutcome, restoredSourceOf, settlementOf, type RoleProgress, type SettlementObservation } from './settlement.js';
+import { committedRefreshOf, handoffOutcome, notificationNeedsDiscovery, restoredSourceOf, settlementOf, type RoleProgress, type SettlementObservation } from './settlement.js';
 
 const observation = (over: Partial<SettlementObservation> = {}): SettlementObservation => ({
   live: true, target: { hostId: 'host', providerId: 'recorded', nativeSessionId: 'B' }, related: true, discovering: false,
@@ -49,6 +49,22 @@ describe('committedRefreshOf', () => {
   });
   it('accepts an older committed operation of the role, not only the newest', () => {
     expect(committedRefreshOf({ operationId: 'primary-op-3', evidence: evidenceFor(), roles: roles() }).status).toBe('confirmed');
+  });
+});
+
+describe('notificationNeedsDiscovery', () => {
+  const replays = buildRoleEvidence(['A', 'B', 'C']).replays;
+  const notice = (index: number) => replays[index]!;
+  it.each<[string, ReturnType<typeof notice>, ReturnType<typeof evidenceFor>, RoleProgress[], boolean]>([
+    ['the newest operation of a role this page applied', notice(1), evidenceFor(), roles(), false],
+    ['an older operation of a role this page applied', notice(0), evidenceFor(), roles(), false],
+    ['an operation this page has not discovered', buildRoleEvidence(['A', 'B', 'C', 'D']).replays[2]!, evidenceFor(), roles(), true],
+    ['an operation discovered but not yet applied', notice(1), evidenceFor(), roles({ appliedRevision: 2 }), true],
+    ['an operation applied but not yet committed in the checkpoint', notice(1), evidenceFor(), roles({ committedRevision: 2 }), true],
+    ['an operation of a role with no checkpoint', notice(1), evidenceFor(), [], true],
+    ['an operation two roles hold', notice(1), new Map([['one', buildRoleEvidence(['A', 'B', 'C'])], ['two', buildRoleEvidence(['A', 'B', 'C'])]]), roles(), true],
+  ])('for a notice of %s', (_name, replay, evidence, progress, expected) => {
+    expect(notificationNeedsDiscovery(replay, { evidence, roles: progress })).toBe(expected);
   });
 });
 

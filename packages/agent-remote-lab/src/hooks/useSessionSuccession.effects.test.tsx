@@ -3,6 +3,7 @@
 import { act, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nativeNotConfirmed, notifyFeedReopened, successionDeadlines, unconfirmedOutcome, type RemoteAgentTransport } from '@orchardworks/agent-client';
+import { buildSuccessionChain } from '@orchardworks/agent-client/testing';
 import type { OpenedSession } from '../kernel/directory-client.js';
 import { DirectoryError } from '../kernel/directory-client.js';
 import { render, unmount } from '../test/setup.js';
@@ -11,6 +12,8 @@ import { useSessionSuccession } from './useSessionSuccession.js';
 const initial = { hostId: 'local', providerId: 'codex', nativeSessionId: 'A' };
 const page = (successions: unknown[] = [], nextCursor: string | null = null) => ({ version: 1, successions, nextCursor });
 const networkError = () => Object.assign(new Error('offline'), { code: 'network_error' });
+/** The Relay's notice of a Handoff this page has not discovered, as the transport hands it to the page. */
+const newHandoff = buildSuccessionChain(['A', 'B'])[0]!;
 
 /** A bound native session whose replica the test moves forward with `synchronize`. */
 function fakeLease(agentId: string, nativeSessionId: string) {
@@ -126,11 +129,11 @@ describe('discovery', () => {
 describe('the Relay feed', () => {
   it('reads again when the Relay says a succession happened, and stops listening when unmounted', async () => {
     const test = await mount(); await settle();
-    const notify = test.transport.onSessionSuccession.mock.calls[0]![0] as () => void;
-    await act(async () => { notify(); }); await settle();
+    const notify = test.transport.onSessionSuccession.mock.calls[0]![0] as (replay: typeof newHandoff) => void;
+    await act(async () => { notify(newHandoff); }); await settle();
     expect(test.transport.fetchSessionSuccessions).toHaveBeenCalledTimes(2);
     await test.unmount();
-    await act(async () => { notify(); }); await settle();
+    await act(async () => { notify(newHandoff); }); await settle();
     expect(test.transport.fetchSessionSuccessions).toHaveBeenCalledTimes(2);
     expect(test.stopFeed).toHaveBeenCalledTimes(1);
   });
@@ -138,7 +141,7 @@ describe('the Relay feed', () => {
     const test = await mount(); await settle();
     await act(async () => test.lease.synchronize());
     test.transport.fetchSessionSuccessions.mockImplementation(() => new Promise(() => {}));
-    await act(async () => { (test.transport.onSessionSuccession.mock.calls[0]![0] as () => void)(); }); await settle();
+    await act(async () => { (test.transport.onSessionSuccession.mock.calls[0]![0] as (replay: typeof newHandoff) => void)(newHandoff); }); await settle();
     expect(test.transport.fetchSessionSuccessions).toHaveBeenCalledTimes(2);
     expect(test.read().binding).toBeDefined();
     expect(test.attach).toHaveBeenCalledTimes(1);
@@ -180,7 +183,7 @@ describe('an unreachable Relay after a confirmed read', () => {
   it('does not fall back to old locators when the Relay itself said they changed', async () => {
     const test = await mount(ports(), { staleRetryDelays: [100] }); await settle();
     test.transport.fetchSessionSuccessions.mockRejectedValue(networkError());
-    await act(async () => { (test.transport.onSessionSuccession.mock.calls[0]![0] as () => void)(); }); await settle(60_000);
+    await act(async () => { (test.transport.onSessionSuccession.mock.calls[0]![0] as (replay: typeof newHandoff) => void)(newHandoff); }); await settle(60_000);
     expect(test.read().error).toBe('offline');
     expect(test.transport.fetchSessionSuccessions).toHaveBeenCalledTimes(2);
   });

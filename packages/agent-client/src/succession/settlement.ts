@@ -70,6 +70,16 @@ export function committedRefreshOf({ operationId, evidence, roles, shown }: {
   return { status: 'confirmed', roleKey, evidence: confirmed };
 }
 
+/**
+ * Whether a notice that a succession was committed (`session_succession_committed`) needs a discovery. Not when this page has
+ * already confirmed that operation and applied its role's committed revision (`committedRefreshOf`): the discovery would find
+ * nothing new, and while one runs it withholds every locator, which takes each view's operation authority away until it ends.
+ * A notice of an operation the page has not applied, of one two roles hold, or of a role with no checkpoint still discovers.
+ */
+export function notificationNeedsDiscovery(replay: SessionSuccessionReplay, known: { evidence: ReadonlyMap<string, RoleEvidence>; roles: readonly RoleProgress[] }): boolean {
+  return committedRefreshOf({ operationId: replay.projection.receipt.operationId, evidence: known.evidence, roles: known.roles }).status !== 'confirmed';
+}
+
 /** Which kind of Handoff outcome a refresh follows. */
 export type HandoffOutcome = 'committed' | 'restore_source' | 'unconfirmed';
 /**

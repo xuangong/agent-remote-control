@@ -51,6 +51,15 @@ export const isTaskView = (value: unknown): value is TaskView => Value.Check(Tas
 /** A payload line that would read as a frame is quoted, so only the Relay opens one. */
 export const quoteFrames = (text: string) => text.replace(/^\[(?=(Task|Tasks|Team|Support|Message from|Room)\b)/gm, '(');
 const heading = (text: string) => text.replace(/[\r\n\]]+/g, ' ').trim() || '…';
+/**
+ * How a brief names the session that started the task: the first line of its title, at most 80 characters. A CLI may title a
+ * session after its latest input, which can be another frame; such a title, or none, names it the main session.
+ */
+export function taskSenderName(title: string | undefined): string {
+  const line = title?.split('\n')[0]?.trim() ?? '';
+  if (!line || /^[[(](Task|Tasks|Team|Support|Message from|Room)\b/.test(line)) return 'the main session';
+  return line.length <= 80 ? line : `${line.slice(0, 79)}…`;
+}
 export const TASK_BRIEF_GUIDANCE = 'You work in the owner\'s working directory, which the owner may also change. Do the work with your own tools. '
   + 'Read the owner\'s conversation with read_source_session only when the brief is not enough. '
   + 'When you finish, call report_task once with status done or failed and a summary the owner can act on without reading your conversation.';

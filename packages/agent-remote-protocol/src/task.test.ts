@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { decodeRemoteHostUplinkMessage } from './remote-host-uplink.js';
 import { isTeam, isTeamHostCall, isTeamSeat, type Team } from './team.js';
-import { isTaskView, isTeamTask, parseTaskInput, taskBriefText, taskResultText, TASK_BRIEF_LIMIT, TASK_RESULT_GUIDANCE } from './task.js';
+import { isTaskView, isTeamTask, parseTaskInput, taskBriefText, taskResultText, taskSenderName, TASK_BRIEF_LIMIT, TASK_RESULT_GUIDANCE } from './task.js';
 
 const member = (id: string, role: 'leader' | 'requester', nativeSessionId?: string) => ({ id, hostId: 'host', providerId: 'codex', role, name: id, responsibility: '',
   creation: 'ready' as const, activity: 'idle' as const, summary: '', updatedAt: 1, ...(nativeSessionId ? { nativeSessionId } : {}) });
@@ -49,5 +49,13 @@ describe('task contract', () => {
     expect(parseTaskInput('[Task t1 · done · Collect logs]\nAll good.')).toBeUndefined();
     expect(parseTaskInput(`[Task t1 · done · Collect logs]\n${TASK_RESULT_GUIDANCE}`)).toBeUndefined();
     expect(parseTaskInput('Please collect the logs.')).toBeUndefined();
+  });
+  it('names the sender by a short title, never by a title that is another frame', () => {
+    expect(taskSenderName('Chief')).toBe('Chief');
+    expect(taskSenderName('Plan the release\nwith details')).toBe('Plan the release');
+    expect(taskSenderName('x'.repeat(100))).toBe(`${'x'.repeat(79)}…`);
+    expect(taskSenderName('[Task t1 · done · Count files]')).toBe('the main session');
+    expect(taskSenderName(undefined)).toBe('the main session');
+    expect(taskSenderName('  ')).toBe('the main session');
   });
 });

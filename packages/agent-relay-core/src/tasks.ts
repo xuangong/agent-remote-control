@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { nativeSessionRefKey, TASK_RUNNING_LIMIT, taskBriefText, taskResultText, type Team, type TeamHostCall, type TeamMember, type TeamTask, type TaskView } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, TASK_RUNNING_LIMIT, taskBriefText, taskResultText, taskSenderName, type Team, type TeamHostCall, type TeamMember, type TeamTask, type TaskView } from '@orchardworks/agent-remote-protocol';
 import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, unresolvedTeamDelivery, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
 import type { TeamBrokerPorts } from './teams.js';
@@ -96,9 +96,9 @@ export class TaskGroups {
       const worker: TeamMember = { id: randomUUID(), role: 'leader', hostId, providerId: call.owner.providerId, name: 'Worker', responsibility: call.title,
         creation: 'reserved', activity: 'unknown', summary: '', updatedAt: now };
       const main: TeamMember = { id: randomUUID(), role: 'requester', hostId, providerId: call.owner.providerId, nativeSessionId: call.owner.nativeSessionId,
-        name: call.owner.title ?? 'Owner', responsibility: 'The main session that owns this task.', creation: 'reserved', activity: 'unknown', summary: '', updatedAt: now };
+        name: taskSenderName(call.owner.title), responsibility: 'The main session that owns this task.', creation: 'reserved', activity: 'unknown', summary: '', updatedAt: now };
       const team: SavedTeam = { id: randomUUID(), operationId: call.operationId, revision: 1, title: call.title, status: 'active', members: [worker, main], messages: [],
-        source: { hostId, providerId: call.owner.providerId, nativeSessionId: call.owner.nativeSessionId, title: call.owner.title ?? 'Assistant' },
+        source: { hostId, providerId: call.owner.providerId, nativeSessionId: call.owner.nativeSessionId, title: taskSenderName(call.owner.title) },
         task: { title: call.title, brief: call.brief, ...(call.doneWhen ? { doneWhen: call.doneWhen } : {}), state: 'working', createdAt: now, updatedAt: now }, createdAt: now, updatedAt: now };
       const brief = { id: digest(['task-brief', team.id]), from: main.id, to: worker.id, text: briefText(team), status: 'queued' as const, createdAt: now };
       assertTeamQueueCapacity(team, brief);

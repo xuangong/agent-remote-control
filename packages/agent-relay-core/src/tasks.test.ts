@@ -46,6 +46,12 @@ describe('tasks on the Team broker', () => {
     await expect(f.broker.hostCall('mac', { ...create(), brief: 'Something else.' })).rejects.toThrow('different input');
   });
 
+  it('names the owner in the brief by a short title, not by a title the CLI took from an earlier frame', async () => {
+    const f = fixture();
+    await f.broker.hostCall('mac', { ...create(), owner: { ...owner, title: '[Task old · done · Count files]\nCounted 0 files.' } });
+    expect(f.state()[0]!.messages[0]!.text.split('\n')[0]).toMatch(/· brief · from the main session\]$/);
+  });
+
   it('bounds the tasks one session runs at once', async () => {
     const f = fixture();
     for (let index = 0; index < TASK_RUNNING_LIMIT; index++) await f.broker.hostCall('mac', create(`op-${index}`));

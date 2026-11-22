@@ -9,7 +9,7 @@ import { WorkerSupport } from './call-for-support-worker.js';
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { while (cleanups.length) await cleanups.pop()!(); });
-async function harness() { const h = await supportHarness({ tasks: true }); cleanups.push(() => h.close()); return h; }
+async function harness(toolNamespaces = false) { const h = await supportHarness({ tasks: true, toolNamespaces }); cleanups.push(() => h.close()); return h; }
 const owner = { providerId: 'codex', nativeSessionId: 'worker', title: 'Chief' };
 const createTask = { action: 'create_task' as const, owner, operationId: 'op', title: 'Collect logs', brief: 'Collect the build logs of the last run.' };
 const tool = (tools: readonly AgentSessionTool[] | undefined, name: string) => tools?.find(item => item.name === name) ?? (() => { throw new Error(`No ${name} tool.`); })();
@@ -48,6 +48,15 @@ describe('a task between a main session and its worker', () => {
     // Later polls neither deliver the result again nor keep the owner's seat.
     await h.runtime.tick(); await h.runtime.tick();
     expect(h.sessions.get('worker')!.deliveries).toEqual(result);
+  });
+
+  it('gives the worker its tools as a namespace where the provider takes one, so reporting needs no approval', async () => {
+    const h = await harness(true);
+    await h.host(createTask);
+    const { extensions } = h.created[0]!;
+    expect(extensions.tools).toBeUndefined();
+    expect(extensions.toolNamespaces?.map(namespace => [namespace.name, namespace.tools.map(item => item.name)])).toEqual([['agent_remote_task', ['read_source_session', 'report_task']]]);
+    expect(JSON.parse(await tool(extensions.toolNamespaces![0]!.tools, 'report_task').execute({ status: 'failed', summary: 'The runner is offline.' }) as string)).toMatchObject({ state: 'failed' });
   });
 
   it('reports one task listing to the owner', async () => {

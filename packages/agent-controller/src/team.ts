@@ -8,7 +8,7 @@ import type { SessionExecutionRouting } from './session-succession-service.js';
 import type { RoleSuccessionDecision, SessionRole } from './session-role-succession.js';
 import type { SessionCreation } from './role-session-creation.js';
 import { coordinatorInstructions, coordinatorTools, locationInstructions, supporterInstructions } from './call-for-support-roles.js';
-import { reportTaskTool, taskWorkerInstructions } from './task-roles.js';
+import { reportTaskTool, TASK_WORKER_NAMESPACE, taskWorkerInstructions } from './task-roles.js';
 import { collectPatch, createBundle, fetchBundle, prepareWorktree, removeWorktree, repositoryRoot, worktreePath } from './call-for-support-workspaces.js';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { accountUsage, type SupportUsage } from './call-for-support-usage.js';
@@ -26,6 +26,8 @@ export interface TeamRuntimeAccess {
   callForSupport?(): boolean;
   /** The Relay sends this Controller tasks. */
   tasks?(): boolean;
+  /** The provider takes tool namespaces, whose tools the Host governs and the CLI runs without asking. */
+  toolNamespaces?(providerId: string): boolean;
   /** Providers that run Team tools and enforce read-only sessions natively. */
   readOnlyProviders?(): string[];
   available(): boolean;
@@ -297,9 +299,13 @@ export class TeamRuntime implements SessionRole {
         return { ...page, entries, truncated: entries.length !== page.entries.length }; }
       finally { source.release(); }
     });
-    // A task's worker reads its brief as input and reports once; it has no Team inbox.
-    if (seat.task) return { instructions: `${taskWorkerInstructions(seat)} ${locationInstructions(seat)}`,
-      tools: bindAgentSessionTools([readSource, reportTaskTool(input => call(input))], assertCurrent) };
+    // A task's worker reads its brief as input and reports once; it has no Team inbox. Its tools come as a namespace where the
+    // provider takes one, so reporting never waits for the person's approval.
+    if (seat.task) {
+      const taskTools = bindAgentSessionTools([readSource, reportTaskTool(input => call(input))], assertCurrent), instructions = `${taskWorkerInstructions(seat)} ${locationInstructions(seat)}`;
+      return this.access.toolNamespaces?.(member.providerId) ? { instructions, toolNamespaces: [{ name: TASK_WORKER_NAMESPACE, description: 'Agent Remote Control: this task\'s own tools, to read its owner\'s conversation and report the result.', tools: taskTools }] }
+        : { instructions, tools: taskTools };
+    }
     const tools = [
       tool('read_team', 'Read members, responsibilities, progress, compact delivery status and a bounded page of complete messages addressed to you. This does not consume messages. Fully read incoming messages, then acknowledge their IDs with acknowledge_team_messages before acting. Use nextAfterMessageId as afterMessageId while hasMore is true. Accepted input is not completed work.', { afterMessageId: id }, [], async args => teamInbox(await call({ action: 'read' }), member.id, args.afterMessageId, { group: coordinator })),
       tool('acknowledge_team_messages', 'Acknowledge incoming message IDs you have completely read through read_team before acting on them. This records receipt, not task completion, and prevents later native reinjection. Never acknowledge unread or truncated bodies. Retry the same IDs after a lost response; accepted delivery receipts are idempotent. Claimed or uncertain native deliveries cannot be cleared by this tool.', { messageIds: { type: 'array', items: id, minItems: 1, maxItems: 32, uniqueItems: true } }, ['messageIds'], args => request({ action: 'acknowledge', teamId, memberId: member.id, messageIds: args.messageIds as unknown as string[], expectedNativeSessionId: actual()!.nativeSessionId })),

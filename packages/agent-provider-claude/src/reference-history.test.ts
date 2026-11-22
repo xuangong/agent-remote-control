@@ -132,3 +132,15 @@ it('rejects unavailable, foreign, repeated and over-budget native rows explicitl
     await expect(readClaudeHistoryPage(catalog([]), source, query)).rejects.toThrow(/invalid|cursor/i);
   }
 }, 10000);
+
+it('reads a session that searched for tools, whose results reference the tools found', async () => {
+  const rows = [row('u1', 'user', 'Start a task'), row('a1', 'assistant', [{ type: 'tool_use', id: 'search', name: 'ToolSearch', input: { query: 'create_task' } }]),
+    row('r1', 'user', [{ type: 'tool_result', tool_use_id: 'search', content: [{ type: 'tool_reference', tool_name: 'mcp__agent_remote__create_task' }] }]),
+    row('a2', 'assistant', [{ type: 'text', text: 'I started a task.' }])];
+  const page = await readClaudeHistoryPage(catalog(rows), source, { limit: 10 });
+  expect(page.entries[0]).toMatchObject({ role: 'assistant', text: 'I started a task.' });
+  expect(page.entries.at(-1)).toMatchObject({ role: 'user', text: 'Start a task' });
+  expect(page.entries.some(entry => entry.role === 'tool' && entry.text.includes('ToolSearch'))).toBe(true);
+  await expect(readClaudeHistoryPage(catalog([row('r1', 'user', [{ type: 'tool_result', tool_use_id: 'search', content: [{ type: 'tool_reference' }] }])]), source, {}))
+    .rejects.toThrow('Unsupported Claude source tool content block.');
+}, 10000);

@@ -118,7 +118,9 @@ function validateContentBlock(block: unknown, role: SessionMessage['type']): voi
     && (typeof block.content === 'string' || Array.isArray(block.content))) {
     if (Array.isArray(block.content)) {
       if (block.content.length > 256) throw new ClaudeHistoryError('Claude source history projection limit exceeded.');
-      for (const part of block.content) if (!record(part) || !(part.type === 'text' && typeof part.text === 'string' || part.type === 'image')) throw new ClaudeHistoryError('Unsupported Claude source tool content block.');
+      // A tool search answers with references to the tools it found; they carry a tool name and no content of their own.
+      for (const part of block.content) if (!record(part) || !(part.type === 'text' && typeof part.text === 'string' || part.type === 'image'
+        || part.type === 'tool_reference' && typeof part.tool_name === 'string')) throw new ClaudeHistoryError('Unsupported Claude source tool content block.');
     }
     return;
   }

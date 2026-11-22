@@ -1,6 +1,9 @@
 import { TASK_SUMMARY_LIMIT, type TeamHostCall, type TeamSeat } from '@orchardworks/agent-remote-protocol';
 import type { AgentSessionTool } from '@orchardworks/agent-provider-sdk';
 
+/** The namespace of a task worker's own tools. */
+export const TASK_WORKER_NAMESPACE = 'agent_remote_task';
+
 type Call = (input: Omit<Extract<TeamHostCall, { action: 'report_task' }>, 'teamId' | 'memberId'>) => Promise<unknown>;
 
 /** A task's worker: do the brief with its own tools and report once. */

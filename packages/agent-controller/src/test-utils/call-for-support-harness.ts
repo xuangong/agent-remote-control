@@ -17,7 +17,7 @@ export const reviewProfile: CallForSupportProfileInput = { name: 'Cross review',
   enableByDefault: false, mandate: { supporters: [{ providerId: 'claude', model: 'opus' }], maxSupporters: 2, workspaces: ['shared'], remoteHosts: [], approval: 'within_mandate' } };
 
 /** A Relay Team broker with Call For Support and a Controller Team runtime over fake native sessions. */
-export async function supportHarness(options: { callForSupport?: boolean; tasks?: boolean; failCreate?: (creation: SessionCreation) => boolean;
+export async function supportHarness(options: { callForSupport?: boolean; tasks?: boolean; toolNamespaces?: boolean; failCreate?: (creation: SessionCreation) => boolean;
   /** Sees each Relay call from the Controller, which forward completes. */
   intercept?: (call: TeamHostCall, forward: (call: TeamHostCall) => Promise<unknown>) => Promise<unknown> } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'call-for-support-'))), cache = createOperationCache();
@@ -59,7 +59,7 @@ export async function supportHarness(options: { callForSupport?: boolean; tasks?
   const created: Array<{ id: string; provider: string; creation: SessionCreation; extensions: AgentSessionExtensions }> = [];
   const access: TeamRuntimeAccess = {
     controllerId: 'controller', available: () => true, supportedProviders: () => ['codex', 'claude', 'copilot'], readOnlyProviders: () => ['codex', 'claude'],
-    callForSupport: () => options.callForSupport ?? true, tasks: () => options.tasks === true, genericSuccession: () => true,
+    callForSupport: () => options.callForSupport ?? true, tasks: () => options.tasks === true, toolNamespaces: () => options.toolNamespaces === true, genericSuccession: () => true,
     sessionRouting: { resolve: anchor => ({ anchor, target: anchor, operationIds: [] }), assertCurrent: (anchor, target) => { if (anchor.nativeSessionId !== target.nativeSessionId) throw new Error('Wrong recipient'); } },
     async create(provider, creation, extensions) { if (options.failCreate?.(creation)) throw new Error('The native session could not start.'); const id = `native-${created.length}`; created.push({ id, provider, creation, extensions }); session(id, provider); return id; },
     async acquire(_provider, id) { if (!sessions.has(id)) throw new Error('Session is unavailable.'); acquired.push(id); return { agent: agent(id), release() { released.push(id); } }; },

@@ -475,6 +475,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   const team = options.team?.request ? new TeamRuntime(options.team.stateDirectory, {...automationAccess, sessionRouting: successionService?.roleRouting ?? automationAccess.sessionRouting!,
     genericSuccession: () => !!successionService && options.team?.genericSuccession?.() === true, callForSupport: () => options.team?.callForSupport?.() === true,
     tasks: () => options.team?.tasks?.() === true,
+    toolNamespaces: providerId => !!providers.require(providerId).adapter.descriptor.sessionExtensions?.toolNamespaces,
     readOnlyProviders: () => automationAccess.supportedProviders().filter(providerId => providers.require(providerId).adapter.descriptor.sessionAccess?.readOnly),
     execute: executeOperation('host:team')}, options.team.request, options.team.tickMs) : undefined;
   const roles = new SessionRoles([...(team ? [team] : []), ...(tpm ? [tpmRole(tpm)] : [])]);

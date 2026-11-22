@@ -38,7 +38,8 @@ export function useProviderState(scope: Pick<AppInputs & RequestedSessionSlice &
 
   const draftStores = useMemo(() => new Map([[baseUrl, messageDrafts]]), [baseUrl, messageDrafts]);
 
-  const [teamRoster, setTeamRoster] = useState<{ baseUrl: string; teams: Team[] }>();
+  // Tasks travel as Teams on the Relay and are kept apart: they are not Teams to the roster, Track or roles.
+  const [teamRoster, setTeamRoster] = useState<{ baseUrl: string; teams: Team[]; tasks?: Team[] }>();
 
   const teamRosterRef = useRef(teamRoster);
  teamRosterRef.current = teamRoster;

@@ -80,7 +80,11 @@
 .agent-item-header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px; }
 .agent-item-header > div { display: flex; flex-wrap: wrap; min-width: 0; align-items: baseline; gap: 10px; }
 
-.agent-task-input { margin: var(--orchard-space-xs) 0; }
+.agent-task-inputs { display: grid; gap: var(--orchard-space-xs); margin: var(--orchard-space-xs) 0; }
+.agent-task-open { margin-inline-start: auto; border: 0; background: none; padding: 0; color: var(--orchard-brand); font: inherit; font-size: var(--orchard-type-footnote-size); cursor: pointer; }
+.agent-task-open:hover { text-decoration: underline; }
+.agent-task-open:focus-visible { outline: 2px solid var(--orchard-brand); outline-offset: 2px; border-radius: 2px; }
+@media (pointer: coarse) { .agent-task-open { min-height: 44px; padding: 0 8px; } }
 .agent-task-card { display: grid; gap: var(--orchard-space-xs); }
 .agent-task-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--orchard-space-s); }
 .agent-task-kicker { font-size: var(--orchard-type-footnote-size); color: var(--orchard-text-secondary); }

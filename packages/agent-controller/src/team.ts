@@ -13,7 +13,7 @@ import { collectPatch, createBundle, fetchBundle, prepareWorktree, removeWorktre
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { accountUsage, type SupportUsage } from './call-for-support-usage.js';
 import { tmpdir } from 'node:os';
-import { isNativeSessionRef, nativeSessionRefKey, type NativeSessionRef, isTeam, isTeamSeat, sessionOperationAvailability, type Team, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat } from '@orchardworks/agent-remote-protocol';
+import { isNativeSessionRef, joinTaskInputs, nativeSessionRefKey, type NativeSessionRef, isTeam, isTeamSeat, sessionOperationAvailability, type Team, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat } from '@orchardworks/agent-remote-protocol';
 import { OperationCacheError, type AgentManagerEvent, type RemoteHostSessionLease, type SessionWireOperationExecutor } from '@orchardworks/agent-session-runtime';
 
 export interface TeamRuntimeAccess {
@@ -42,6 +42,10 @@ interface LocalSeat { seat: TeamSeat; creation: 'dispatching' | 'ready' | 'unkno
   /** A coordinator's or supporter's usage, and what the Relay last accepted of it. */
   usage?: SupportUsage & { reported?: { tokens: number; costUsd?: number; at: number } };
   receipts: Record<string, { text: string; status: 'dispatching' | 'accepted' | 'rejected' | 'unknown'; error?: string; acceptance?: AgentInputAcceptance['disposition']; resolvedTarget?: NativeSessionRef }> }
+/** One message to deliver, with the seat it reaches and its Team. */
+interface Delivery { record: LocalSeat; team: Team; message: TeamMessage }
+/** A main session reads what waits on it before the rest. */
+const taskUpdatePriority = (message: TeamMessage) => /^\[Task \S+ · (question|needs the person) · /.test(message.text) ? 0 : 1;
 /** A task Team missing from the poll this long was removed by the Relay. */
 const TASK_MISSING_FORGET_MS = 10 * 60_000;
 const errorText = (error: unknown) => (error instanceof Error ? error.message : 'Team operation failed.').slice(0, 2048);
@@ -340,6 +344,8 @@ export class TeamRuntime implements SessionRole {
       await this.forgetEndedGroups(value as Team[]);
       await this.forgetFinishedTasks(value as Team[]);
       const retained = new Set<string>();
+      // A main session's task updates wait for it to be idle and then arrive together, as one input.
+      const updates = new Map<string, { lease: RemoteHostSessionLease; target: NativeSessionRef; items: Delivery[] }>();
       for (const record of this.records.filter(item => item.creation === 'ready')) {
         const team = (value as Team[]).find(team => team.id === record.seat.teamId);
         try { await this.reconcileReceipts(record, team); } catch { /* Retry receipt reads independently of other seats and lease cleanup. */ }
@@ -378,11 +384,19 @@ export class TeamRuntime implements SessionRole {
               // A claim survived but its local effect boundary did not. Never infer it was unexecuted.
               await this.settle(team.id, member.id, message.id, { status: 'unknown', resolvedTarget: message.resolvedTarget, error: 'Delivery claim has no local receipt. Inspect this session before resolving.' }); continue;
             }
-            if (message.status === 'queued' && team.status === 'active' && availableDelivery(lease, !record.seat.callForSupport && !record.seat.task, !record.seat.task)) await this.dispatch(record, team, message, lease, target);
+            if (message.status !== 'queued' || team.status !== 'active' || !availableDelivery(lease, !record.seat.callForSupport && !record.seat.task, !record.seat.task)) continue;
+            if (record.seat.task && member.role === 'requester') {
+              const key = nativeSessionRefKey(target), batch = updates.get(key) ?? { lease, target, items: [] };
+              batch.items.push({ record, team, message }); updates.set(key, batch);
+            } else await this.dispatch([{ record, team, message }], lease, target);
           }
           this.access.sessionRouting.assertCurrent(this.anchor(record.seat), target);
           await this.request({ action: 'presence', teamId: team.id, memberId: member.id, activity: idle(lease) ? 'idle' : 'busy' });
         } catch { /* Pending records remain durable; next poll retries reads and receipts, never uncertain effects. */ }
+      }
+      for (const batch of updates.values()) {
+        try { await this.dispatch(batch.items.sort((a, b) => taskUpdatePriority(a.message) - taskUpdatePriority(b.message) || a.message.createdAt - b.message.createdAt), batch.lease, batch.target); }
+        catch { /* Receipts stay durable; the next poll settles them and retries what was never sent. */ }
       }
       for (const [id, held] of this.leases) if (!retained.has(id)) this.release(id, held);
       for (const record of this.records) if (record.usage) await this.reportUsage(record).catch(() => undefined);
@@ -466,48 +480,74 @@ export class TeamRuntime implements SessionRole {
   private settle(teamId: string, memberId: string, messageId: string, receipt: {status:string;error?:string;acceptance?:AgentInputAcceptance['disposition'];resolvedTarget?:NativeSessionRef}) {
     return this.request({ action: 'settle', teamId, memberId, messageId, outcome: receipt.status as 'accepted'|'rejected'|'unknown', ...(receipt.resolvedTarget ? {resolvedTarget:receipt.resolvedTarget} : {}), ...(receipt.acceptance ? {acceptance:receipt.acceptance} : {}), ...(receipt.error ? {error:receipt.error} : {}) });
   }
-  private async dispatch(record: LocalSeat, team: Team, message: TeamMessage, lease: RemoteHostSessionLease, target: NativeSessionRef) {
+  /**
+   * Delivers one input to a session: one message, or several task updates of one main session joined. Each message is claimed and its
+   * receipt made durable before the one native call; they settle together.
+   */
+  private async dispatch(items: Delivery[], lease: RemoteHostSessionLease, target: NativeSessionRef) {
+    const first = items[0]!, seat = first.record.seat;
     // Support groups and tasks deliver between turns: steering races a turn that is ending, and their work does not need it.
     // The Relay frames what a requester and a task's worker read.
-    const framed = record.seat.member.role === 'requester' || !!record.seat.task, delivery = availableDelivery(lease, !record.seat.callForSupport && !record.seat.task, !record.seat.task);
+    const framed = seat.member.role === 'requester' || !!seat.task, delivery = availableDelivery(lease, !seat.callForSupport && !seat.task, !seat.task);
     if (!delivery || this.closed || !this.access.available()) return;
-    this.access.sessionRouting.assertCurrent(this.anchor(record.seat), target);
-    let receipt: LocalSeat['receipts'][string] | undefined;
+    this.access.sessionRouting.assertCurrent(this.anchor(seat), target);
+    const receipts: Array<{ item: Delivery; receipt: LocalSeat['receipts'][string] }> = [];
     const check = () => {
-      try { this.access.sessionRouting.assertCurrent(this.anchor(record.seat), target); }
-      catch (error) { throw new AgentOperationRejectedError('team_recipient_unavailable', errorText(error)); }
+      for (const { record } of items) {
+        try { this.access.sessionRouting.assertCurrent(this.anchor(record.seat), target); }
+        catch (error) { throw new AgentOperationRejectedError('team_recipient_unavailable', errorText(error)); }
+      }
       if (this.closed || !this.access.available() || !deliveryAllowed(lease, delivery)) throw new AgentOperationRejectedError('team_not_ready', 'Team session is not ready for this input delivery.');
     };
-    const sender = team.members.find(member => member.id === message.from);
-    const attachments = message.resources?.map((resource,index) => `[resource #${index+1}] ${JSON.stringify(resource)} (Use download_team_resource with resourceId to obtain a verified local file.)`).join('\n');
-    // A worker reads support reports as the Relay framed them; Team internals stay with the coordinator.
-    const text = framed ? message.text : `[Team ${team.id}; message ${message.id}; from ${sender?.name ?? message.from}]\n${message.text}${attachments ? `\n\nAttached resources:\n${attachments}` : ''}`;
+    const textOf = ({ team, message }: Delivery) => {
+      if (framed) return message.text;
+      const sender = team.members.find(member => member.id === message.from);
+      const attachments = message.resources?.map((resource,index) => `[resource #${index+1}] ${JSON.stringify(resource)} (Use download_team_resource with resourceId to obtain a verified local file.)`).join('\n');
+      // A worker reads support reports as the Relay framed them; Team internals stay with the coordinator.
+      return `[Team ${team.id}; message ${message.id}; from ${sender?.name ?? message.from}]\n${message.text}${attachments ? `\n\nAttached resources:\n${attachments}` : ''}`;
+    };
+    const settleAll = () => Promise.all(receipts.map(({ item, receipt }) => this.settle(item.team.id, item.record.seat.member.id, item.message.id, receipt)));
     try {
-      // Succession must not prepare between the claim and its durable receipt, which then takes over as the fence.
+      // Succession must not prepare between the claims and their durable receipts, which then take over as the fence.
       const recipient = nativeSessionRefKey(target);
       this.claiming.set(recipient, (this.claiming.get(recipient) ?? 0) + 1);
       try {
-        const claim = await this.request({ action: 'claim', teamId: team.id, memberId: record.seat.member.id, messageId: message.id, expectedNativeSessionId: target.nativeSessionId }) as TeamMessage;
-        if (!claim.resolvedTarget || nativeSessionRefKey(claim.resolvedTarget) !== nativeSessionRefKey(target)) throw new Error('Claim recipient could not be verified.');
-        receipt = { text: message.text, status: 'dispatching', resolvedTarget: structuredClone(claim.resolvedTarget) };
-        record.receipts[message.id] = receipt; await this.save();
+        for (const item of items) {
+          // A message that cannot be claimed now stays queued for a later poll; the ones claimed are still delivered.
+          let claim: TeamMessage;
+          try { claim = await this.request({ action: 'claim', teamId: item.team.id, memberId: item.record.seat.member.id, messageId: item.message.id, expectedNativeSessionId: target.nativeSessionId }) as TeamMessage; }
+          catch (error) { if (items.length === 1) throw error; continue; }
+          if (!claim.resolvedTarget || nativeSessionRefKey(claim.resolvedTarget) !== nativeSessionRefKey(target)) throw new Error('Claim recipient could not be verified.');
+          const receipt = { text: item.message.text, status: 'dispatching' as const, resolvedTarget: structuredClone(claim.resolvedTarget) };
+          item.record.receipts[item.message.id] = receipt; receipts.push({ item, receipt });
+          await this.save();
+        }
       } finally {
         const remaining = (this.claiming.get(recipient) ?? 1) - 1;
         if (remaining > 0) this.claiming.set(recipient, remaining); else this.claiming.delete(recipient);
       }
+      if (!receipts.length) return;
+      const text = receipts.length === 1 ? textOf(receipts[0]!.item) : joinTaskInputs(receipts.map(({ item }) => textOf(item)));
       const onAcceptance = (acceptance: AgentInputAcceptance) => {
-        if (!receipt || !['started','queued','handled'].includes(acceptance.disposition) || this.closed) return;
-        if (receipt.acceptance !== 'started' && receipt.acceptance !== 'handled') receipt.acceptance = acceptance.disposition;
-        receipt.status = 'accepted'; delete receipt.error;
-        void this.save().then(() => this.settle(team.id, record.seat.member.id, message.id, receipt!)).catch(() => {});
+        if (!receipts.length || !['started','queued','handled'].includes(acceptance.disposition) || this.closed) return;
+        for (const { receipt } of receipts) {
+          if (receipt.acceptance !== 'started' && receipt.acceptance !== 'handled') receipt.acceptance = acceptance.disposition;
+          receipt.status = 'accepted'; delete receipt.error;
+        }
+        void this.save().then(settleAll).catch(() => {});
       };
-      // Stopping the recipient removed this message before it ran; report it undelivered so the sender can resend.
+      // Stopping the recipient removed this input before it ran; report it undelivered so the sender can resend.
       const onWithdrawn = () => {
-        if (!receipt || receipt.acceptance === 'started' || receipt.acceptance === 'handled' || this.closed) return;
-        receipt.status = 'rejected'; delete receipt.acceptance; receipt.error = 'The recipient was stopped before this message ran. Send it again if it is still needed.';
-        void this.save().then(() => this.settle(team.id, record.seat.member.id, message.id, receipt!)).catch(() => {});
+        if (this.closed) return;
+        let changed = false;
+        for (const { receipt } of receipts) {
+          if (receipt.acceptance === 'started' || receipt.acceptance === 'handled') continue;
+          receipt.status = 'rejected'; delete receipt.acceptance; receipt.error = 'The recipient was stopped before this message ran. Send it again if it is still needed.'; changed = true;
+        }
+        if (changed) void this.save().then(settleAll).catch(() => {});
       };
-      const result = await this.access.execute(lease.agent, { operationId: operationId(message.id), kind: 'send_message', parameters: { text, delivery }, maximumResultBytes: 4096 }, {
+      const identity = receipts.length === 1 ? receipts[0]!.item.message.id : receipts.map(({ item }) => item.message.id).sort().join(':');
+      const result = await this.access.execute(lease.agent, { operationId: operationId(identity), kind: 'send_message', parameters: { text, delivery }, maximumResultBytes: 4096 }, {
         beforeDispatch: check,
         dispatch: async () => {
           check(); return lease.agent.sendMessage(text, {delivery,onAcceptance,onWithdrawn});
@@ -515,12 +555,15 @@ export class TeamRuntime implements SessionRole {
       });
       if (result && typeof result === 'object' && 'disposition' in result && ['started','queued','handled'].includes(String(result.disposition))) onAcceptance(result as AgentInputAcceptance);
       // A fulfilled SDK operation confirms acceptance without inventing a native disposition.
-      if (receipt?.status === 'dispatching') receipt.status = 'accepted';
+      for (const { receipt } of receipts) if (receipt.status === 'dispatching') receipt.status = 'accepted';
     } catch (error) {
-      if (!receipt) return;
-      if (receipt.status !== 'accepted') receipt.status = error instanceof AgentOperationRejectedError || error instanceof OperationCacheError && !['operation_outcome_unknown', 'native_file_limit'].includes(error.code) ? 'rejected' : 'unknown'; receipt.error = errorText(error);
+      if (!receipts.length) return;
+      for (const { receipt } of receipts) {
+        if (receipt.status !== 'accepted') receipt.status = error instanceof AgentOperationRejectedError || error instanceof OperationCacheError && !['operation_outcome_unknown', 'native_file_limit'].includes(error.code) ? 'rejected' : 'unknown';
+        receipt.error = errorText(error);
+      }
     }
-    if (receipt) { await this.save(); await this.settle(team.id, record.seat.member.id, message.id, receipt); }
+    if (receipts.length) { await this.save(); await settleAll(); }
   }
   private release(key: string, held: { lease: RemoteHostSessionLease; unsubscribe?: () => void }) { held.unsubscribe?.(); held.lease.release(); this.leases.delete(key); }
   private observeUsage(record: LocalSeat, event: AgentManagerEvent): void {

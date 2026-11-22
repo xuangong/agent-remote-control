@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentSessionTool } from '@orchardworks/agent-provider-sdk';
-import type { TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import { parseTaskInputs, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { supportHarness } from './test-utils/call-for-support-harness.js';
 import { WorkerSupport } from './call-for-support-worker.js';
 
@@ -57,6 +57,28 @@ describe('a task between a main session and its worker', () => {
     expect(extensions.tools).toBeUndefined();
     expect(extensions.toolNamespaces?.map(namespace => [namespace.name, namespace.tools.map(item => item.name)])).toEqual([['agent_remote_task', ['read_source_session', 'report_task']]]);
     expect(JSON.parse(await tool(extensions.toolNamespaces![0]!.tools, 'report_task').execute({ status: 'failed', summary: 'The runner is offline.' }) as string)).toMatchObject({ state: 'failed' });
+  });
+
+  it('delivers the results of several tasks that finished during one turn as one input', async () => {
+    const h = await harness();
+    await h.host(createTask);
+    await h.host({ ...createTask, operationId: 'op-2', title: 'Run tests', brief: 'Run the unit tests.' });
+    const [logs, tests] = h.created;
+    await h.runtime.tick();
+    h.busy('worker', true);
+    await tool(tests!.extensions.tools, 'report_task').execute({ status: 'failed', summary: 'Two tests fail.' });
+    await tool(logs!.extensions.tools, 'report_task').execute({ status: 'done', summary: 'Logs attached.' });
+    await h.runtime.tick();
+    expect(h.sessions.get('worker')!.deliveries).toEqual([]);
+    h.busy('worker', false);
+    await h.runtime.tick();
+    const deliveries = h.sessions.get('worker')!.deliveries;
+    expect(deliveries).toHaveLength(1);
+    const results = parseTaskInputs(deliveries[0]!.text)?.map(input => [input.kind, input.kind === 'brief' || input.kind === 'message' ? '' : input.title]);
+    expect(results).toHaveLength(2);
+    expect(results).toEqual(expect.arrayContaining([['failed', 'Run tests'], ['done', 'Collect logs']]));
+    await h.runtime.tick(); await h.runtime.tick();
+    expect(h.sessions.get('worker')!.deliveries).toHaveLength(1);
   });
 
   it('reports one task listing to the owner', async () => {

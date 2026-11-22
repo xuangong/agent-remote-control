@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { nativeSessionRefKey, TASK_RUNNING_LIMIT, taskBriefText, taskResultText, taskSenderName, type Team, type TeamHostCall, type TeamMember, type TeamTask, type TaskView } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, TASK_RUNNING_LIMIT, taskBriefText, taskResultText, taskSenderName, taskView, type Team, type TeamHostCall, type TeamMember, type TeamTask, type TaskView } from '@orchardworks/agent-remote-protocol';
 import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, unresolvedTeamDelivery, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
 import type { TeamBrokerPorts } from './teams.js';
@@ -39,14 +39,7 @@ export const briefText = (team: Team): string => { const item = task(team); retu
 /** The owner's view of a report. */
 export const resultText = (team: Team): string => { const item = task(team), result = item.result ?? fail('The task has no result.'); return taskResultText({ taskId: team.id, status: result.status, title: item.title, summary: result.summary }); };
 
-/** What the owner and the website see of a task. */
-export function taskView(team: Team): TaskView {
-  const item = task(team), worker = team.members[0]!, main = owner(team);
-  const state = item.state === 'working' && worker.creation !== 'ready' ? 'queued' : item.state;
-  return { taskId: team.id, title: item.title, state, ...(item.doneWhen ? { doneWhen: item.doneWhen } : {}), ...(item.result ? { result: structuredClone(item.result) } : {}),
-    worker: { hostId: worker.hostId, providerId: worker.providerId, ...(worker.nativeSessionId ? { nativeSessionId: worker.nativeSessionId } : {}), ...(worker.error ? { error: worker.error } : {}) },
-    owner: { hostId: main.hostId, providerId: main.providerId, nativeSessionId: main.nativeSessionId ?? team.source.nativeSessionId }, createdAt: item.createdAt, updatedAt: item.updatedAt };
-}
+export { taskView };
 
 /** The tasks whose owner seat holds the given session's role now. */
 export function ownerTasks(teams: SavedTeam[], resolve: TeamBrokerPorts['resolveSession'], hostId: string, session: { providerId: string; nativeSessionId: string }): SavedTeam[] {

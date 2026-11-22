@@ -1,6 +1,6 @@
 import { useId, type ReactNode } from 'react';
 import { PROCESS_MODES, type ProcessMode, type SessionFile } from '@orchardworks/agent-client';
-import type { BotPicture } from '@orchardworks/agent-remote-protocol';
+import type { BotPicture, TaskView } from '@orchardworks/agent-remote-protocol';
 import type { AvatarMood } from '@orchardworks/agent-client-web/theme';
 import { SegmentedControl, Sheet } from '@orchardworks/agent-client-web/primitives';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
@@ -11,6 +11,7 @@ import { AssistantCard, type CardAction } from './AssistantCard.js';
 import { WhereItWorks } from './WhereItWorks.js';
 import { SessionsList, type AssistantSessions } from './SessionsList.js';
 import { FilesList } from './FilesList.js';
+import { TasksList } from './TasksList.js';
 import './assistant.css';
 
 /** Everything the details show of one assistant; each section shows only when its part is known. */
@@ -22,6 +23,8 @@ export interface AssistantRef {
   readonly rename?: (name: string) => void;
   readonly where?: AssistantWhere;
   readonly sessions?: AssistantSessions;
+  /** The tasks the session on screen owns. */
+  readonly tasks?: readonly TaskView[];
   /** This assistant's own process mode; the device's default, notifications and letters are in Settings > Assistants. */
   readonly process?: ProcessModeChoice;
   readonly settings?: ReactNode;
@@ -50,6 +53,7 @@ export function AssistantDetails({ assistant, surface, onClose }: { assistant: A
     </div>) : null}
     {assistant.where ? section('where', t('details.where'), <WhereItWorks where={assistant.where} />) : null}
     {assistant.sessions ? section('sessions', t('details.sessions'), <SessionsList sessions={assistant.sessions} />) : null}
+    {assistant.tasks?.length ? section('tasks', t('details.tasks'), <TasksList tasks={assistant.tasks} />) : null}
     {assistant.settings ? section('model', t('details.model'), <div className="lab-assistant-settings">{assistant.settings}</div>) : null}
     {assistant.files ? section('files', t('details.files'), <FilesList files={assistant.files} {...(assistant.openFile ? { onOpen: assistant.openFile } : {})} />) : null}
   </div>;

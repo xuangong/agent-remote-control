@@ -40,7 +40,7 @@ input.lab-assistant-card-name { width: 100%; background: var(--orchard-surface);
 .lab-assistant-session small { flex: none; color: var(--orchard-text-secondary); font-size: var(--orchard-type-caption-size); }
 .lab-assistant-session-toggle { display: inline-grid; flex: none; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--orchard-radius-pill); background: transparent; color: var(--orchard-text-secondary); cursor: pointer; }
 .lab-assistant-session-toggle[aria-expanded="true"] > svg { transform: rotate(180deg); }
-.lab-assistant-sessions h4 { margin: var(--orchard-space-xs) 0 0; color: var(--orchard-text-secondary); font: inherit; }
+.lab-assistant-sessions h4, .lab-assistant-tasks h4 { margin: var(--orchard-space-xs) 0 0; color: var(--orchard-text-secondary); font: inherit; }
 .lab-assistant-return { margin: 0; }
 .lab-assistant-return a { color: var(--orchard-text-strong); }
 .lab-assistant-identity { display: grid; gap: var(--orchard-space-xs); padding-bottom: var(--orchard-space-m); }
@@ -66,3 +66,5 @@ input.lab-assistant-card-name { width: 100%; background: var(--orchard-surface);
   .lab-assistant-action, .lab-assistant-copy, .lab-avatar-picker button, .lab-assistant-files :is(button, span[title]), .lab-assistant-session-toggle { min-height: 44px; }
   .lab-assistant-copy, .lab-avatar-picker button, .lab-assistant-session-toggle { min-width: 44px; }
 }
+.lab-assistant-tasks { display: grid; gap: var(--orchard-space-xs); }
+.lab-assistant-tasks .lab-assistant-identity p { white-space: pre-wrap; }

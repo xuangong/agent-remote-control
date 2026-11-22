@@ -3,7 +3,7 @@
 import { useContext, useMemo, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { sessionFiles, timelineEntryKey, type AgentReplicaState, type RemoteSessionState, type RemoteSessionStatus } from '@orchardworks/agent-client';
-import { FilePreviewContext, useTranslate, type AgentChildSessionView } from '@orchardworks/agent-client-web/react';
+import { FilePreviewContext, useTaskDirectory, useTranslate, type AgentChildSessionView } from '@orchardworks/agent-client-web/react';
 import { AssistantDetails, type AssistantRef } from './assistant/AssistantDetails.js';
 import { ModelSettings } from './assistant/ModelSettings.js';
 import { PlanningControl } from './PlanningControl.js';
@@ -12,15 +12,20 @@ import type { useProcessMode } from './useProcessMode.js';
 import type { LabWorkbenchActions, SessionWorkbenchProps } from './session-workbench-props.js';
 
 export function ConversationDetails({ host, visible, state, details, assistant, displayScope, process, session, sessionStatus, readOnly, mutationBlocked, draftOnly, actions,
-  renderSessionSettingError, childrenFor, onOpenChildSession, workspaceLink }: {
+  renderSessionSettingError, childrenFor, onOpenChildSession, workspaceLink, nativeSession }: {
   host: AssistantDetailsHost | undefined; visible: boolean; state?: AgentReplicaState; details?: SessionWorkbenchProps['details']; assistant: SessionWorkbenchProps['assistant'];
   displayScope?: string; process: ReturnType<typeof useProcessMode>; session: RemoteSessionState; sessionStatus: RemoteSessionStatus;
   readOnly: boolean; mutationBlocked: boolean; draftOnly: boolean; actions: LabWorkbenchActions; renderSessionSettingError?(error: unknown): ReactNode;
   childrenFor?(nativeSessionId: string): readonly AgentChildSessionView[]; onOpenChildSession?(child: AgentChildSessionView): void | Promise<void>; workspaceLink?: ReactNode;
+  /** The session on screen, `<providerId>/<nativeSessionId>`. */
+  nativeSession?: string;
 }) {
   const t = useTranslate();
   const filePreview = useContext(FilePreviewContext);
+  const directory = useTaskDirectory();
+  const [providerId, ...rest] = nativeSession?.split('/') ?? [];
   const detailsShown = !!host?.open && visible && (host.surface === 'sheet' || !!host.slot);
+  const tasks = detailsShown && directory && providerId && rest.length ? directory.owned({ providerId, nativeSessionId: rest.join('/') }) : [];
   const files = useMemo(() => detailsShown && state ? sessionFiles(state.timeline.entries) : [], [detailsShown, state?.timeline.entries]);
   const reportedSession = state?.agent?.runtimeInfo.sessionId;
   const lastTurn = detailsShown ? Date.parse(state?.timeline.entries.at(-1)?.timestamp ?? '') || undefined : undefined;
@@ -29,7 +34,7 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
     ...(host?.action ? { action: host.action } : {}), ...(host?.actions ? { actions: host.actions } : {}),
     ...(host?.where ? { where: host.where } : {}), ...(host?.setPicture ? { setPicture: host.setPicture } : {}),
     ...(host?.rename ? { rename: host.rename } : {}),
-    process,
+    process, ...(tasks.length ? { tasks } : {}),
     sessions: { ...details?.sessions, ...(lastTurn ? { time: lastTurn } : {}), ...(state?.agent?.cwd ? { directory: state.agent.cwd } : {}), ...(reportedSession ? { sessionId: reportedSession } : {}),
       subagents: reportedSession ? childrenFor?.(reportedSession) ?? [] : [], ...(onOpenChildSession ? { openSubagent: onOpenChildSession } : {}),
       tools: <>{details?.sessions?.tools}{workspaceLink}</> },

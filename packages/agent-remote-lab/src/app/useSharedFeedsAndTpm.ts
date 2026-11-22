@@ -66,7 +66,8 @@ export function useSharedFeedsAndTpm(scope: Pick<AppInputs & WorkbenchShellSlice
 
   const sharedDrafts = useSharedDrafts(sharedFeeds, transport);
 
-  const updateTeamRoster = useCallback((baseUrl: string, teams: Team[]) => setTeamRoster({ baseUrl, teams }), []);
+  const updateTeamRoster = useCallback((baseUrl: string, teams: Team[]) => setTeamRoster(current => ({ baseUrl, teams, ...(current?.baseUrl === baseUrl && current.tasks ? { tasks: current.tasks } : {}) })), []);
+  const updateTaskRoster = useCallback((baseUrl: string, tasks: Team[]) => setTeamRoster(current => ({ baseUrl, teams: current?.baseUrl === baseUrl ? current.teams : [], tasks })), []);
 
   const [tpmListOpen, setTpmListOpen] = useState(false);
 
@@ -125,7 +126,7 @@ export function useSharedFeedsAndTpm(scope: Pick<AppInputs & WorkbenchShellSlice
   tpmMainState.current = { scope: baseUrl, transport, hosts: remoteHosts, providers, works: tpm.works };
 
   const tpmMainRequest = useRef(0);
-  return { askTriggerRef, tpmView, teamView, teamReveal, setTeamReveal, windowView, sharedFeeds, sharedDrafts, updateTeamRoster, tpmListOpen, setTpmListOpen, tpmTriggerRef, selectableHosts, openNewBot, tpm, tpmMainSessions, tpmMainState, tpmMainRequest };
+  return { askTriggerRef, tpmView, teamView, teamReveal, setTeamReveal, windowView, sharedFeeds, sharedDrafts, updateTeamRoster, updateTaskRoster, tpmListOpen, setTpmListOpen, tpmTriggerRef, selectableHosts, openNewBot, tpm, tpmMainSessions, tpmMainState, tpmMainRequest };
 }
 
 export type SharedFeedsAndTpmSlice = ReturnType<typeof useSharedFeedsAndTpm>;

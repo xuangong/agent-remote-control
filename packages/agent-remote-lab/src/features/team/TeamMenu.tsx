@@ -26,6 +26,8 @@ interface Props {
   reveal?: { teamId: string; requestId: string };
   onOpen(team: Team, sourceViewId?: string): Promise<boolean>; onOpenSession(target: TeamSource & { teamId?: string; teamMemberId?: string }): Promise<boolean>;
   onTeamsChange?(baseUrl: string, teams: Team[]): void;
+  /** Tasks, which the Relay keeps as Teams; the page shows them in their owners' conversations. */
+  onTasksChange?(baseUrl: string, tasks: Team[]): void;
 }
 /** How often the Team roster refreshes while someone looks at it or a Team is forming (`watchingMs`), and otherwise (`idleMs`). */
 export interface TeamRefreshPeriods { watchingMs: number; idleMs: number }
@@ -61,7 +63,10 @@ export function TeamMenu(props: Props) {
     const ticket = ++generation.current;
     const value = await client.list();
     // Tasks travel as Teams on the Relay; they show in their owner's conversation, not among Teams.
-    if (currentClient.current === client && ticket === generation.current) { setTeams(value.filter(team => !team.task)); setRosterClient(client); setLoadError(''); }
+    if (currentClient.current === client && ticket === generation.current) {
+      setTeams(value.filter(team => !team.task)); setRosterClient(client); setLoadError('');
+      props.onTasksChange?.(baseUrl, value.filter(team => !!team.task));
+    }
   };
   useEffect(() => {
     setTeams([]); setRosterClient(undefined); setSelected(''); setError(''); setLoadError(''); setPendingCreate(undefined);

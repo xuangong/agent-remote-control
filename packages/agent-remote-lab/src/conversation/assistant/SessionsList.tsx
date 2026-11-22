@@ -90,21 +90,21 @@ function childState(status: AgentChildSessionView['status'] | undefined, t: Retu
 }
 
 /** One session: its title, time and state on one line, and what its chevron shows. */
-function SessionRow({ title, heading, meta, onScreen = false, children }: { title: string; heading: ReactNode; meta: ReadonlyArray<string | undefined>; onScreen?: boolean; children: ReactNode }) {
+export function SessionRow({ title, heading, meta, onScreen = false, moreLabel, children }: { title: string; heading: ReactNode; meta: ReadonlyArray<string | undefined>; onScreen?: boolean; moreLabel?: string; children: ReactNode }) {
   const t = useTranslate();
   const [open, setOpen] = useState(false);
   const words = meta.filter(Boolean).join(' · ');
   return <li aria-current={onScreen ? 'true' : undefined}>
     <div className="lab-assistant-session">
       {heading}{words ? <small>{words}</small> : null}
-      <button type="button" className="lab-assistant-session-toggle" aria-expanded={open} aria-label={t('details.sessionMore', { title })} onClick={() => setOpen(value => !value)}>
+      <button type="button" className="lab-assistant-session-toggle" aria-expanded={open} aria-label={moreLabel ?? t('details.sessionMore', { title })} onClick={() => setOpen(value => !value)}>
         <Icon name="chevron-down" size={14} /></button>
     </div>
     {open ? <div className="lab-assistant-identity">{children}</div> : null}
   </li>;
 }
 
-function Copyable({ label, value }: { label: string; value: string }) {
+export function Copyable({ label, value }: { label: string; value: string }) {
   const t = useTranslate();
   return <p><span>{label}</span><code>{value}</code>
     <button type="button" className="lab-assistant-copy" aria-label={t('details.copy', { what: label })} title={t('details.copy', { what: label })}

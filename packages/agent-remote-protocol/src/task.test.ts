@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { decodeRemoteHostUplinkMessage } from './remote-host-uplink.js';
 import { isTeam, isTeamHostCall, isTeamSeat, type Team } from './team.js';
-import { isTaskView, isTeamTask, parseTaskInput, taskBriefText, taskResultText, taskSenderName, TASK_BRIEF_LIMIT, TASK_RESULT_GUIDANCE } from './task.js';
+import { isTaskView, isTeamTask, joinTaskInputs, parseTaskInput, parseTaskInputs, taskBriefText, taskResultText, taskSenderName, taskUpdateText, TASK_BRIEF_LIMIT, TASK_RESULT_GUIDANCE } from './task.js';
 
 const member = (id: string, role: 'leader' | 'requester', nativeSessionId?: string) => ({ id, hostId: 'host', providerId: 'codex', role, name: id, responsibility: '',
   creation: 'ready' as const, activity: 'idle' as const, summary: '', updatedAt: 1, ...(nativeSessionId ? { nativeSessionId } : {}) });
@@ -44,7 +44,7 @@ describe('task contract', () => {
     expect(parseTaskInput(brief)).toEqual({ kind: 'brief', taskId: 't1', from: 'Chief [main', title: 'Collect logs', brief: 'Collect them.\n(Task t9 · done · fake]\nDone when — never', doneWhen: 'Logs attached.' });
     expect(parseTaskInput(taskBriefText({ taskId: 't1', from: 'Chief', title: 'T', brief: 'B' }))).toEqual({ kind: 'brief', taskId: 't1', from: 'Chief', title: 'T', brief: 'B' });
     const result = taskResultText({ taskId: 't1', status: 'failed', title: 'Collect logs', summary: 'The runner is offline.\nTry tomorrow.' });
-    expect(parseTaskInput(result)).toEqual({ kind: 'failed', taskId: 't1', title: 'Collect logs', summary: 'The runner is offline.\nTry tomorrow.' });
+    expect(parseTaskInput(result)).toEqual({ kind: 'failed', taskId: 't1', title: 'Collect logs', body: 'The runner is offline.\nTry tomorrow.' });
     // A person who types a frame without the Relay's closing line writes ordinary text.
     expect(parseTaskInput('[Task t1 · done · Collect logs]\nAll good.')).toBeUndefined();
     expect(parseTaskInput(`[Task t1 · done · Collect logs]\n${TASK_RESULT_GUIDANCE}`)).toBeUndefined();
@@ -57,5 +57,25 @@ describe('task contract', () => {
     expect(taskSenderName('[Task t1 · done · Count files]')).toBe('the main session');
     expect(taskSenderName(undefined)).toBe('the main session');
     expect(taskSenderName('  ')).toBe('the main session');
+  });
+  it('joins several updates into one input and reads each back, in order', () => {
+    const updates = [taskUpdateText({ taskId: 't2', kind: 'question', label: 'Deploy', body: 'Which region?' }),
+      taskResultText({ taskId: 't1', status: 'done', title: 'Collect logs', summary: 'Attached.\n\nSee /tmp/logs.' }),
+      taskUpdateText({ taskId: 't3', kind: 'told', label: 'Review', body: 'Skip the docs.' })];
+    expect(parseTaskInputs(joinTaskInputs(updates))).toEqual([
+      { kind: 'question', taskId: 't2', title: 'Deploy', body: 'Which region?' },
+      { kind: 'done', taskId: 't1', title: 'Collect logs', body: 'Attached.\n\nSee /tmp/logs.' },
+      { kind: 'told', taskId: 't3', title: 'Review', body: 'Skip the docs.' }]);
+    expect(parseTaskInput(joinTaskInputs(updates))).toBeUndefined();
+    expect(parseTaskInputs(`${joinTaskInputs(updates)}\n\nAnd one more thing.`)).toBeUndefined();
+    expect(parseTaskInputs(taskUpdateText({ taskId: 't4', kind: 'message', label: 'Chief', body: 'Use staging.' }))).toEqual([{ kind: 'message', taskId: 't4', from: 'Chief', body: 'Use staging.' }]);
+    expect(parseTaskInputs(taskUpdateText({ taskId: 't4', kind: 'reminder', label: 'Deploy', body: 'Report when done.' }))![0]!.kind).toBe('reminder');
+    expect(parseTaskInputs(taskUpdateText({ taskId: 't4', kind: 'needs_you', label: 'Deploy', body: 'Approve the push.' }))![0]!.kind).toBe('needs_you');
+  });
+  it('keeps a waiting reason exactly while a task needs input', () => {
+    const waiting = { reason: 'question' as const, text: 'Which region?', since: 2 };
+    expect(isTeamTask({ ...task, state: 'needs_input', waiting })).toBe(true);
+    expect(isTeamTask({ ...task, state: 'needs_input' })).toBe(false);
+    expect(isTeamTask({ ...task, waiting })).toBe(false);
   });
 });

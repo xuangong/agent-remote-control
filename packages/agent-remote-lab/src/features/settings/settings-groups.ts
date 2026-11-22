@@ -7,7 +7,7 @@ import type { SettingsGroupId } from '../../kernel/destinations.js';
 
 export type SettingsItemId =
   | 'theme' | 'language' | 'motion' | 'defaultView' | 'mobileDisplay'
-  | 'processMode' | 'notifications' | 'letters'
+  | 'processMode' | 'notifications' | 'push' | 'letters'
   | 'computers' | 'pairing'
   | 'cache' | 'supportSharing'
   | 'layoutDiagnostics' | 'trace' | 'inspector'
@@ -29,7 +29,8 @@ export interface SettingsGroup { readonly id: SettingsGroupId; readonly items: r
 export function settingsGroups(facts: SettingsFacts): readonly SettingsGroup[] {
   return [
     { id: 'general', items: ['theme', 'language', 'motion', 'defaultView', 'mobileDisplay'] },
-    { id: 'assistants', items: ['processMode', ...(facts.notificationsAvailable ? ['notifications' as const] : []), 'letters'] },
+    // Push has a row on every device: where it does not work, the row says why.
+    { id: 'assistants', items: ['processMode', ...(facts.notificationsAvailable ? ['notifications' as const] : []), 'push', 'letters'] },
     { id: 'computers', items: ['computers', 'pairing'] },
     { id: 'privacy', items: ['cache', ...(facts.supportAvailable ? ['supportSharing' as const] : [])] },
     { id: 'advanced', items: ['layoutDiagnostics', 'trace', 'inspector'] },

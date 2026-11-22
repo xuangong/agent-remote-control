@@ -1,6 +1,6 @@
 // Attention, tracking and the bot roster.
 import { attentionDestination, attentionSets, botDirectorySources as botDirectorySourcesOf, keySignature, readableSessions as readableSessionsOf } from '../features/sessions/attention-targets.js';
-import { windowPrimaryViewId } from '@orchardworks/agent-remote-protocol';
+import { botViews, windowPrimaryViewId } from '@orchardworks/agent-remote-protocol';
 import { useOtherSessions, type OtherSessionSource } from '../features/chats/useOtherSessions.js';
 import { projectBotRoster, type BotRosterOptions } from '../kernel/bot-roster.js';
 import { assistantReminders, type Reminder } from '../kernel/assistant-groups.js';
@@ -165,7 +165,10 @@ export function useAttentionAndRoster(scope: Pick<AppInputs & WorkbenchShellSlic
     const group = windowWorkspace.readGroup(section.groupId);
     return section.rows.map(row => [sessionKey(row.session), assistantReminders(group, row.details)] as const);
   }));
-  useEffect(() => { attention.notifier.setReminderRule((key, reminder) => reminderRules.current.get(key)?.includes(reminder) ?? true); }, [attention.notifier]);
+  // While push is on for this device, the Relay reminds it of every assistant of the account (a bot view of any group), so the page does not too.
+  const pushed = useRef({ on: false, sessions: new Set<string>() });
+  pushed.current = { on: attention.pushOn, sessions: new Set(windowWorkspace.groups.flatMap(group => botViews(group).map(view => sessionKey(view.binding)))) };
+  useEffect(() => { attention.notifier.setReminderRule((key, reminder) => !(pushed.current.on && pushed.current.sessions.has(key)) && (reminderRules.current.get(key)?.includes(reminder) ?? true)); }, [attention.notifier]);
 
   const t = useTranslate();
   /** A Host as the Relay last said, named as the Hosts list names it. */

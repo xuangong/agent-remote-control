@@ -7,7 +7,8 @@ import { render } from '../../test/setup.js';
 import type { SettingsGroupId } from '../../kernel/destinations.js';
 import { SettingsPage, type SettingsContext } from './SettingsPage.js';
 
-const notifications = { enabled: true, available: true, permission: 'granted' as const, requestFailed: false, request: vi.fn(), set: vi.fn() };
+const notifications = { enabled: true, available: true, permission: 'granted' as const, requestFailed: false, request: vi.fn(), set: vi.fn(),
+  push: { availability: 'unsupported' as const, status: 'off' as const, enable: vi.fn(), disable: vi.fn() } };
 const context = (overrides: Partial<SettingsContext> = {}): SettingsContext => ({
   facts: { account: true, supportAvailable: false, notificationsAvailable: true }, account: { name: 'Xian', email: 'xian@example.com', ready: true, openSecurity: vi.fn(), signOut: vi.fn() }, baseUrl: 'http://localhost/',
   notifications, openTrace: vi.fn(), openInspector: vi.fn(),

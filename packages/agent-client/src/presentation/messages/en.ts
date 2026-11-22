@@ -11,8 +11,9 @@ import { sessions } from './areas/sessions.en.js';
 import { team } from './areas/team.en.js';
 import { diagnostics } from './areas/diagnostics.en.js';
 import { client } from './areas/client.en.js';
+import { push } from './areas/push.en.js';
 
 /** The English areas by name, for the catalogue's own checks. */
-export const englishAreas = { common, conversation, composer, timeline, navigation, settings, hosts, windows, sessions, team, diagnostics, client } as const;
-export const en = { ...common, ...conversation, ...composer, ...timeline, ...navigation, ...settings, ...hosts, ...windows, ...sessions, ...team, ...diagnostics, ...client } as const;
+export const englishAreas = { common, conversation, composer, timeline, navigation, settings, hosts, windows, sessions, team, diagnostics, client, push } as const;
+export const en = { ...common, ...conversation, ...composer, ...timeline, ...navigation, ...settings, ...hosts, ...windows, ...sessions, ...team, ...diagnostics, ...client, ...push } as const;
 export type MessageKey = keyof typeof en;

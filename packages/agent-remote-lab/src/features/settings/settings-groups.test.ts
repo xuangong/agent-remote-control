@@ -7,11 +7,11 @@ const everyFacts: SettingsFacts[] = [false, true].flatMap(account => [false, tru
 describe('the Settings groups', () => {
   it.each([
     [{ account: true, supportAvailable: true, notificationsAvailable: true }, {
-      general: ['theme', 'language', 'motion', 'defaultView', 'mobileDisplay'], assistants: ['processMode', 'notifications', 'letters'],
+      general: ['theme', 'language', 'motion', 'defaultView', 'mobileDisplay'], assistants: ['processMode', 'notifications', 'push', 'letters'],
       computers: ['computers', 'pairing'], privacy: ['cache', 'supportSharing'], advanced: ['layoutDiagnostics', 'trace', 'inspector'],
       account: ['account', 'security', 'signOut', 'versions'] }],
     [{ account: false, supportAvailable: false, notificationsAvailable: false }, {
-      general: ['theme', 'language', 'motion', 'defaultView', 'mobileDisplay'], assistants: ['processMode', 'letters'],
+      general: ['theme', 'language', 'motion', 'defaultView', 'mobileDisplay'], assistants: ['processMode', 'push', 'letters'],
       computers: ['computers', 'pairing'], privacy: ['cache'], advanced: ['layoutDiagnostics', 'trace', 'inspector'], account: ['versions'] }],
   ] as const)('%j', (facts, groups) => {
     expect(Object.fromEntries(settingsGroups(facts).map(group => [group.id, group.items]))).toEqual(groups);

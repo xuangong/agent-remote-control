@@ -35,6 +35,7 @@ export type { SessionDescriptionIdentity, SessionAttributionTarget, SessionAttri
 export * from './session-record.js';
 
 export * from './client/preview-client.js';
+export * from './client/push-client.js';
 export { timelineEntryKey } from './replica/timeline-entry-key.js';
 export * from './page-lifecycle.js';
 export { watchPagePolling } from './client/page-polling.js';

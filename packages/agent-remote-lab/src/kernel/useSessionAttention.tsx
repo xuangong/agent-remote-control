@@ -1,12 +1,13 @@
 import { keyedError } from '@orchardworks/agent-client';
-import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { LocaleContext, useTranslate } from '@orchardworks/agent-client-web/react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentCommandResult } from '@orchardworks/agent-remote-protocol';
 import type { ConsoleCommand } from '@orchardworks/agent-client-web/react';
 import type { SessionEntry } from './session-tree.js';
 import { SessionAttentionNotifications } from './session-notifications.js';
 import type { SessionObservation } from './tracking-state.js';
 import type { WorkbenchMode } from './workbench-mode.js';
+import { usePushDevice } from './usePushDevice.js';
 
 export const TrackViewCommand = { id: 'console:track', name: 'track', kind: 'command', description: 'Toggle Track view; use /track on or /track off', descriptionKey: 'sessions.console.track', inputHint: '[on|off]' } satisfies ConsoleCommand;
 export const TrackViewScope = createContext<((args: string) => Promise<AgentCommandResult>) | undefined>(undefined);
@@ -29,6 +30,8 @@ export function useSessionAttention(scope: string, active: boolean, onOpen: (ses
   const [notificationChoice, setNotificationChoice] = useState(() => preference(notificationKey) ?? true);
   const [notificationPermission, setPermission] = useState(permission);
   const [permissionError, setPermissionError] = useState(false);
+  // Push on this device (I5c): its subscription speaks the reader's language and pauses with the device's own switch.
+  const push = usePushDevice(scope, active, { locale: useContext(LocaleContext), paused: !notificationChoice });
   const clickScope = useMemo(() => ({ mode, lifetime: {} }), [scope, mode, active, mobile, notificationChoice]);
   const latest = useRef({ scope, active, mobile, notificationChoice, onOpen, clickScope });
   latest.current = { scope, active, mobile, notificationChoice, onOpen, clickScope };
@@ -98,9 +101,11 @@ export function useSessionAttention(scope: string, active: boolean, onOpen: (ses
     <label><span>{t('navigation.viewOptions.trackView')}</span><input type="checkbox" checked={trackVisible} onChange={event => setTrackVisible(event.target.checked)} /></label>
   </>;
   /** This device's session notifications, for an assistant's details: one choice that every assistant shares. */
-  const notifications = { enabled: notificationChoice, available: !mobile && notificationPermission !== 'unsupported', permission: notificationPermission, requestFailed: permissionError, request: () => void requestPermission(), set(value: boolean) {
+  const notifications = { enabled: notificationChoice, available: !mobile && notificationPermission !== 'unsupported', permission: notificationPermission, requestFailed: permissionError, request: () => void requestPermission(), push, set(value: boolean) {
     save(notificationKey, value); setNotificationChoice(value);
     if (value) void requestPermission();
   } };
-  return { enabled: active && !mobile && notificationChoice && notificationPermission === 'granted', trackVisible, setTrackVisible, executeTrack, controls, observe, notifier, notifications };
+  // While push is on for this device, the Relay reminds it of its assistants: the page leaves those reminders to it (`pushOn`).
+  return { enabled: active && !mobile && notificationChoice && notificationPermission === 'granted', trackVisible, setTrackVisible, executeTrack, controls, observe, notifier, notifications,
+    pushOn: push.status === 'on' };
 }

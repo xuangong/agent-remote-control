@@ -10,9 +10,9 @@ modules; `pnpm verify:changed` per commit; a real session in `pnpm local` for ea
 ## M1: tasks complete on one Host (T2)
 
 - [x] T2a: create, brief, report, result, cards, negotiation (commits ee18dee7, 72cfef0c, 5c2b6803)
-- [ ] Several task updates for one main session arrive as one input, needs-input first
-- [ ] A task card opens the worker session beside the conversation
-- [ ] The assistant's details list its tasks (Needs you, Working, Done)
+- [x] Several task updates for one main session arrive as one input, needs-input first (36e4978e)
+- [x] A task card opens the worker session (36e4978e, 2e58959f); in a Window it takes the tile's place
+- [x] The assistant's details list its tasks (Needs you, Working, Done) (36e4978e)
 
 ## M2: the task lifecycle (T3)
 

@@ -5,6 +5,7 @@ import { botGroup, botTarget, mountBotApp, seedGroup, until, visibleButton } fro
 import * as workspaceHooks from './hooks/useWindowWorkspace.js';
 import * as trackingHooks from './hooks/useSessionTracking.js';
 import { promptText, setPromptText } from './test/setup.js';
+import { nextPopstate } from './test/wait.js';
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); sessionStorage.clear(); });
 
@@ -629,15 +630,15 @@ it('on a phone, leaves a pushed conversation by the back gesture, then Settings,
     expect(app.container.querySelector('.lab-rail')).toBeNull();
     await act(async () => app.button('A1').click());
     expect(app.container.querySelector('.lab-bot-workspace')!.hasAttribute('data-chat')).toBe(true);
-    await act(async () => { history.back(); await new Promise(resolve => setTimeout(resolve, 20)); });
+    await act(async () => { const popped = nextPopstate(); history.back(); await popped; });
     expect(app.container.querySelector('.lab-bot-workspace')!.hasAttribute('data-chat')).toBe(false);
     await app.go('Settings');
     expect(app.container.querySelector('.lab-settings-me')).not.toBeNull();
     await act(async () => [...app.container.querySelectorAll<HTMLButtonElement>('.lab-settings-group')].find(item => item.querySelector('strong')?.textContent === 'General')!.click());
     expect(app.container.querySelector('.lab-settings h1')?.textContent).toBe('General');
-    await act(async () => { history.back(); await new Promise(resolve => setTimeout(resolve, 20)); });
+    await act(async () => { const popped = nextPopstate(); history.back(); await popped; });
     expect(app.container.querySelector('.lab-settings-me')).not.toBeNull();
-    await act(async () => { history.back(); await new Promise(resolve => setTimeout(resolve, 20)); });
+    await act(async () => { const popped = nextPopstate(); history.back(); await popped; });
     expect(app.container.querySelector('.lab-page')!.hasAttribute('hidden')).toBe(true);
   } finally { await app.close(); }
 });

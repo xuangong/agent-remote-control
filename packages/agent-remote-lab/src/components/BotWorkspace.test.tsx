@@ -64,14 +64,17 @@ it('compact Back restores the roster row and preserves the same editor without f
   vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(max-width: 1180px)' || query === '(max-width: 760px)', addEventListener() {}, removeEventListener() {} }));
   const scope = 'http://localhost/bot-compact/'; seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?mode=bot');
   const app = await mountBotApp(scope);
-  await act(async () => app.button('A1').click());
+  const row = () => app.row('A', 'A1');
+  await act(async () => row().click());
   await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
   const input = app.container.querySelector<HTMLElement>('.lab-bot-conversation [role="textbox"]')!;
   expect(document.activeElement).not.toBe(input);
   await act(async () => { setPromptText(input, 'retained'); input.dispatchEvent(new Event('input', { bubbles: true })); });
   await act(async () => app.button('Back to chats').click());
-  await until(() => expect(document.activeElement).toBe(app.button('A1')));
-  await act(async () => app.button('A1').click());
+  // Back pops the history entry the chat pushed, which the page learns from a later popstate event. Until then the open chat's
+  // title, also named A1, holds the focus, so the wait is for the roster's own row.
+  await until(() => { expect(row().closest('[hidden]')).toBeNull(); expect(document.activeElement).toBe(row()); });
+  await act(async () => row().click());
   expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).toBe(input);
   expect(promptText(input)).toBe('retained');
   await app.close();

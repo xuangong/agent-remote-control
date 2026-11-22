@@ -5,6 +5,7 @@ import { AgentReplica } from '@orchardworks/agent-client';
 import { App, type LabTransport } from './App.js';
 import { SessionDirectoryClient } from './directory-client.js';
 import { render, unmount } from './test/setup.js';
+import { nextPopstate } from './test/wait.js';
 import { replicaState } from './test/fixtures.js';
 import * as workbenchComponents from './components/LabWorkbench.js';
 
@@ -441,21 +442,21 @@ it('navigates activity links between a parent and siblings with browser and conv
     { path: '/v1/remote/child/attach', body: { providerId: 'codex', parentNativeSessionId: 'native-parent', nativeSessionId: 'native-child' } },
     { path: '/v1/remote/child/attach', body: { providerId: 'codex', parentNativeSessionId: 'native-parent', nativeSessionId: 'native-sibling' } },
   ]);
-  await act(async () => back().click());
+  await act(async () => { const popped = nextPopstate(); back().click(); await popped; });
   await waitForSession(f.container, 'child');
   expect(promptText(f.container)).toBe('Child draft');
-  await act(async () => window.history.back());
+  await act(async () => { const popped = nextPopstate(); window.history.back(); await popped; });
   await waitForSession(f.container, 'parent');
   expect(promptText(f.container)).toBe('Parent draft');
   expect(back().disabled).toBe(true);
-  await act(async () => forward().click());
+  await act(async () => { const popped = nextPopstate(); forward().click(); await popped; });
   await waitForSession(f.container, 'child');
-  await act(async () => window.history.forward());
+  await act(async () => { const popped = nextPopstate(); window.history.forward(); await popped; });
   await waitForSession(f.container, 'sibling');
   expect(forward().disabled).toBe(true);
   await act(async () => f.container.querySelector<HTMLAnchorElement>('.agent-session-reference')!.click());
   await waitForSession(f.container, 'parent');
-  await act(async () => back().click());
+  await act(async () => { const popped = nextPopstate(); back().click(); await popped; });
   await waitForSession(f.container, 'sibling');
 });
 
@@ -652,10 +653,11 @@ it('keeps the focused child and browser history when using the primary navigatio
   await act(async () => { menu.focus(); menu.click(); });
   expect(new URLSearchParams(location.search).get('session')).toBe('native-child');
   const back = primary.querySelector<HTMLButtonElement>('[aria-label="Back to previous conversation"]')!;
-  await act(async () => { back.focus(); back.click(); await new Promise(resolve => setTimeout(resolve, 30)); });
+  // Back and Forward move through the browser's history, which the page hears from a later popstate event.
+  await act(async () => { const popped = nextPopstate(); back.focus(); back.click(); await popped; });
   expect(new URLSearchParams(location.search).get('session')).toBe('native-parent');
   const forward = primary.querySelector<HTMLButtonElement>('[aria-label="Forward to next conversation"]')!;
   expect(forward.disabled).toBe(false);
-  await act(async () => { forward.focus(); forward.click(); await new Promise(resolve => setTimeout(resolve, 30)); });
+  await act(async () => { const popped = nextPopstate(); forward.focus(); forward.click(); await popped; });
   expect(new URLSearchParams(location.search).get('session')).toBe('native-child');
 });

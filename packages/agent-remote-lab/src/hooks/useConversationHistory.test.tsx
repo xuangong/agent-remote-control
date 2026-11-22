@@ -1,6 +1,7 @@
 import { act, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
+import { nextPopstate } from '../test/wait.js';
 import { useConversationHistory } from './useConversationHistory.js';
 import type { SessionEntry } from '../session-tree.js';
 
@@ -97,9 +98,9 @@ it('finishes at the latest browser destination when another traversal arrives du
   const f = await setup(open);
   await f.click('Child');
   await f.click('Sibling');
-  await act(async () => window.history.back());
+  await act(async () => { const popped = nextPopstate(); window.history.back(); await popped; });
   await settle();
-  await act(async () => window.history.back());
+  await act(async () => { const popped = nextPopstate(); window.history.back(); await popped; });
   await settle();
   await act(async () => release());
   await settle();
@@ -139,9 +140,9 @@ it('retains the latest layout for each browser visit and supplies it on back and
   await act(async () => focus('expanded-child'));
   await act(async () => select(child));
   await act(async () => focus('expanded-grandchild'));
-  await act(async () => window.history.back()); await settle();
+  await act(async () => { const popped = nextPopstate(); window.history.back(); await popped; }); await settle();
   expect(restored).toEqual(['expanded-child']);
-  await act(async () => window.history.forward()); await settle();
+  await act(async () => { const popped = nextPopstate(); window.history.forward(); await popped; }); await settle();
   expect(restored).toEqual(['expanded-child', 'expanded-grandchild']);
 });
 

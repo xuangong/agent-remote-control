@@ -336,12 +336,17 @@ it('edits a real App managed Team window into its retained origin owner and admi
   const prompt: ProjectedTimelineEntry = { providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-10-15T00:00:00Z', turnId: preparation.turnId, collapsed: [], resources: [], sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }], item: { type: 'user_message', messageId: preparation.messageId, text: 'Selected member prompt' } };
   const textKey = `session:${JSON.stringify(['host', 'recorded', 'X'])}`;
   // The roster refreshes every 50 ms instead of every 4 s, so the successor's seat shows without waiting out the real period.
-  const f = await failureFixture(false, 'A', false, '', { teamRefresh: { watchingMs: 50, idleMs: 30_000 }, chain, teams: () => [team], timeline: [prompt], persistPrompt: true, successionDescription: description,
+  let f!: Awaited<ReturnType<typeof failureFixture>>;
+  f = await failureFixture(false, 'A', false, '', { teamRefresh: { watchingMs: 50, idleMs: 30_000 }, chain, teams: () => [team], timeline: [prompt], persistPrompt: true, successionDescription: description,
     async successionPrepare(body) {
       prefix.projection.receipt.operationId = String(body.operationId); prefix.projection.receipt.prepared!.operationId = String(body.operationId);
       return { role: description.role, record: { ...prefix.projection.receipt, phase: 'ready', committedRevision: undefined } };
     }, successionCommit() {
       chain.push(prefix); team = { ...team, revision: 2, members: [{ ...team.members[0]!, nativeSessionId: 'Y' }] };
+      // The committed Handoff reaches the page's channel as it commits, so the page refreshes once for it. Sent after the test
+      // noticed the commit, it started a second refresh at a time set by the test's polling, which could fall inside the
+      // prompt's restoration and withdraw the successor's view from under it (O60).
+      f.notify(prefix);
       return { role: prefix.projection.role, record: prefix.projection.receipt, locator: prefix.to };
     }, seed(scope, source) {
       const main = createCompositionSlot('main-slot', source, scope);
@@ -357,7 +362,6 @@ it('edits a real App managed Team window into its retained origin owner and admi
   await settleApp(() => expect(panel().querySelector('[data-prompt-edit-action]')).not.toBeNull());
   await act(async () => panel().querySelector<HTMLButtonElement>('[data-prompt-edit-action]')!.click());
   await settleApp(() => expect(f.requests.filter(request => request.url.endsWith('/succession/commit'))).toHaveLength(1));
-  await act(async () => f.notify(prefix));
   await waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); }); expect(panel().querySelector('.lab-handoff-notice')?.textContent ?? '').toBe(''); }, { timeout: 6000 });
   expect(panel().querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Selected member prompt');
   expect(new DraftStore(f.scope).get(textKey)).toBe('Selected member prompt');

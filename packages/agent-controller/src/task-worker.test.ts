@@ -88,7 +88,7 @@ describe('a task between a main session and its worker', () => {
     await h.runtime.tick();
     h.busy(worker.id, true); h.interaction(worker.id, 'Run npm test?');
     await h.runtime.tick();
-    expect(h.team(taskId).task).toMatchObject({ state: 'needs_input', waiting: { reason: 'interaction', text: 'Run npm test?' } });
+    expect(h.team(taskId).task).toMatchObject({ state: 'needs_input', waiting: { reason: 'interaction', text: 'Run npm test? npm test' } });
     h.interaction(worker.id);
     await h.runtime.tick();
     expect(h.team(taskId).task?.state).toBe('working');

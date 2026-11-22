@@ -54,9 +54,10 @@ function operationId(value: string) {
 }
 /** A pending native interaction in a session, in a few words, or undefined. */
 function pendingInteraction(lease: RemoteHostSessionLease): string | undefined {
-  const request = lease.agent.snapshot().payload.pendingInteractions[0] as { summary?: string; title?: string; message?: string } | undefined;
+  const request = lease.agent.snapshot().payload.pendingInteractions[0] as { summary?: string; title?: string; message?: string; detail?: { command?: string; filePath?: string } } | undefined;
   if (!request) return undefined;
-  const words = (request.summary || request.title || request.message || 'It waits for the person to answer a request.').replace(/\s+/g, ' ').trim();
+  const what = request.detail?.command ?? request.detail?.filePath;
+  const words = [request.summary || request.title || request.message || 'It waits for the person to answer a request.', what].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
   return words.length > TASK_TOLD_LIMIT ? `${words.slice(0, TASK_TOLD_LIMIT - 1)}…` : words;
 }
 function idle(lease: RemoteHostSessionLease): boolean {

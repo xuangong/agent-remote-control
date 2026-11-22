@@ -378,3 +378,49 @@ Shipped from main `4b3ff860`.
 - Flows on Chromium 64 of 64; on WebKit 63 passed and 1 skipped.
 - Components: 1,225 passed. 3 WebKit timeouts recur in full runs and pass alone; they are recorded as O65.
 - `smoke:quick` seed 10524: M1, M2, M4 and M7 passed.
+
+## Release 2026-11-22: I5a (installable app) and I5b (IM completeness, groups)
+
+**Shipped.** From main `08a1b6f4`, via merge, postmerge and push.
+- Worker `bc8ed5c5`. The rollback target is `d90787b4`.
+- The readiness script confirmed the Durable Object.
+- There is no Controller change: group settings are Relay state.
+
+**Live checks.**
+- `manifest.webmanifest` has `display_override: window-controls-overlay`.
+- Maskable and monochrome icons, `/app/apple-touch-icon.png` and `/sw.js` all return 200.
+
+**I5a.**
+- Orchard is installable on the PC (manifest, WCO, maskable and monochrome icons) and on the iPhone home screen (iOS meta, 180 px icon).
+- A service worker provides the network-first shell, an offline start and update-on-reload. It never caches API or session traffic.
+- "Install Orchard" is in Settings > General.
+- Window Controls Overlay: the assistant name sits in the title bar, which doubles as a drag region. The window title follows the assistant, and a new window opens on the last chat.
+- Panels are resizable, with limits, per-device memory, keyboard handles and collapse rules. No overlap from 800 to 3440 px.
+
+**I5b.**
+- Groups are one concept (a group is a Window) in Chats, the directory and Window mode. A group can be created, renamed, reordered, muted, given notification settings, and assistants added to it, moved or removed. An ungrouped default group exists.
+- The IM completeness audit is in `docs/superpowers/specs/2026-11-22-im-completeness-audit.md`. Its fixes:
+  - pin and mute;
+  - a needs-you dot;
+  - search by reply and draft, and on the phone;
+  - Copy;
+  - edit with a mouse;
+  - "Not sent".
+- The audit's decisions are recorded there.
+
+**Gates.**
+- `pnpm verify` exit 0.
+- Flows on Chromium: 65/65. On WebKit: 64 passed, 1 skipped.
+- Components: 1,291 passed, 1 failed. `standalone-layout` on chromium-mobile failed under load and passed alone 3 of 3.
+- `smoke:quick` (seed 44604): M1, M2, M4 and M7 passed.
+
+**Open.**
+- O65: WebKit timeouts in other worktrees.
+- O66: Bot-mode widths should move into the chats module.
+- O67: a WebKit composer-owner selection test.
+
+**Needs the owner on real devices.**
+- Chrome or Edge: the install prompt and WCO.
+- Safari: Add to Dock.
+- iPhone: home-screen icon and offline start.
+- Android: maskable and monochrome icons.

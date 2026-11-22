@@ -1,6 +1,6 @@
 import { botViews, type BotPicture, type WindowGroup, type WindowGroupEdit, type WindowGroupOperation, type WindowOperation } from '@orchardworks/agent-remote-protocol';
 import { avatarWith, distinctAvatar } from '@orchardworks/agent-client-web/theme';
-import { appendedRank } from './bot-roster.js';
+import { rankInPlace } from './assistant-groups.js';
 
 /** The shape and colour of every assistant of the account: a bot's stored picture, or the avatar its view id generates. */
 export function takenAvatars(groups: readonly WindowGroup[]): Array<{ shape: BotPicture['shape']; color: string }> {
@@ -26,6 +26,6 @@ export function withNewAssistantPicture(group: WindowGroup, groups: readonly Win
   if (created?.type !== 'view.create') return operation;
   const picture = newAssistantPicture(created.view.id, groups);
   return { type: 'batch', operations: [
-    ...(group.bots ? [] : [{ type: 'bots.add', rank: appendedRank(groups) } as const]), ...edits,
+    ...(group.bots ? [] : [{ type: 'bots.add', rank: rankInPlace(groups, group.window.id) } as const]), ...edits,
     { type: 'bot.update', viewId: created.view.id, details: { picture } }] };
 }

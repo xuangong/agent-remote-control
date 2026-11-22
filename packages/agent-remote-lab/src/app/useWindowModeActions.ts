@@ -4,7 +4,7 @@ import { parseWindowFeature } from '../kernel/window-feature-views.js';
 import type { WindowView, WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
 import type { BotSessionRef } from '../kernel/bot-roster.js';
 import { botPlaceForTile, windowRouteForPin, type WorkbenchMode } from '../kernel/workbench-mode.js';
-import { appendedRank } from '../kernel/bot-roster.js';
+import { rankInPlace } from '../kernel/assistant-groups.js';
 import { windowBindingKey } from '../kernel/window-composition.js';
 import { windowCatalog } from '../features/windows/useWindowActions.js';
 import { attributionWindowOperation } from '../features/sessions/session-attribution-navigation.js';
@@ -136,7 +136,7 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
    */
   async function openInBotMode(groupId: string, viewId: string): Promise<void> {
     const group = windowWorkspace.readGroup(groupId);
-    const target = group ? botPlaceForTile(group, viewId, appendedRank(windowWorkspace.groups)) : undefined;
+    const target = group ? botPlaceForTile(group, viewId, rankInPlace(windowWorkspace.groups, groupId)) : undefined;
     if (!target) return;
     try { if (target.edit) await windowWorkspace.operateGroup(groupId, target.edit); }
     catch (error) { windowActions.setNotice(errorWords(error, t, 'windows.notice.botNotOpened')); return; }

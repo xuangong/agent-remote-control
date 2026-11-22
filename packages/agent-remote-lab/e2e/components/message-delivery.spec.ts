@@ -64,5 +64,5 @@ test('uses neutral delivery wording when the connection drops before acknowledge
   await page.clock.fastForward(120_000);
   await expect(row).toHaveCount(1);
   await expect(row).not.toContainText('Send acknowledged');
-  await expect(row).not.toContainText('Send failed');
+  await expect(row).not.toContainText('Not sent');
 });

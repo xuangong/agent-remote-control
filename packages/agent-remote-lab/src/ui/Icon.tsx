@@ -35,6 +35,10 @@ const PATHS = {
   lock: 'M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3',
   wrench: 'M14.5 6.5a4 4 0 0 0-5 5L4 17l3 3 5.5-5.5a4 4 0 0 0 5-5l-2.5 2.5-2.5-.5-.5-2.5z',
   trash: 'M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6m4-6v6',
+  'arrow-down': 'M12 5v14M6 13l6 6 6-6',
+  bell: 'M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 1.5h-15zM10 20.5h4',
+  'bell-off': 'M3 3l18 18M8.6 6.2A6 6 0 0 1 18 11v4.2M16.5 18H4.5L6 16.5V11c0-.9.2-1.8.6-2.6M10 20.5h4',
+  folder: 'M3.5 6.5a1.5 1.5 0 0 1 1.5-1.5h4.5l2 2.5H19a1.5 1.5 0 0 1 1.5 1.5v8.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z',
 } as const;
 
 export type IconName = keyof typeof PATHS;

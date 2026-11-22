@@ -17,7 +17,7 @@ async function toolbar(overrides: Partial<Props> = {}) {
 }
 
 const titleButton = (bar: HTMLElement) => bar.querySelector<HTMLButtonElement>('h2 > button.lab-window-toolbar-title')!;
-const input = () => document.querySelector<HTMLInputElement>('input[aria-label="Window title"]');
+const input = () => document.querySelector<HTMLInputElement>('input[aria-label="Group name"]');
 const press = (target: Element, key: string) => act(async () => {
   target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
 });
@@ -56,7 +56,7 @@ it('names the title button by the Window name, so the heading reads as it, and d
   expect(heading.hasAttribute('aria-label') || heading.hasAttribute('aria-labelledby')).toBe(false);
   expect(heading.textContent).toBe('Research');
   expect(button.textContent).toBe('Research');
-  expect([button.title, button.getAttribute('aria-description')]).toEqual(['Rename this Window', 'Rename this Window']);
+  expect([button.title, button.getAttribute('aria-description')]).toEqual(['Rename this group', 'Rename this group']);
 });
 
 it('renames in place with the whole title selected, saving on Enter and returning focus', async () => {
@@ -150,16 +150,16 @@ it('adds a new session view or opens a session from the Add menu', async () => {
   expect(props.onOpenSession).toHaveBeenCalledTimes(1);
 });
 
-it('lists the Window actions and runs each', async () => {
+it('lists the Group actions and runs each', async () => {
   const { bar, props } = await toolbar();
-  let menu = await openMenu(bar, 'Window actions');
-  expect(items(menu).map(entry => entry.textContent)).toEqual(['Hide in Bot mode', 'Copy link', 'Agent control…', 'Delete Window…']);
+  let menu = await openMenu(bar, 'Group actions');
+  expect(items(menu).map(entry => entry.textContent)).toEqual(['Hide in Bot mode', 'Copy link', 'Agent control…', 'Delete group…']);
   expect(menu.querySelectorAll('[role="separator"]')).toHaveLength(1);
-  expect(item(menu, 'Delete Window…').dataset.destructive).toBe('true');
+  expect(item(menu, 'Delete group…').dataset.destructive).toBe('true');
   await press(menu, 'Escape');
   for (const [label, callback] of [['Hide in Bot mode', props.onBotAppearance], ['Copy link', props.onCopyLink],
-    ['Agent control…', props.onAgentControl!], ['Delete Window…', props.onDelete]] as const) {
-    menu = await openMenu(bar, 'Window actions');
+    ['Agent control…', props.onAgentControl!], ['Delete group…', props.onDelete]] as const) {
+    menu = await openMenu(bar, 'Group actions');
     await act(async () => item(menu, label).click());
     expect(callback).toHaveBeenCalledTimes(1);
   }
@@ -168,12 +168,12 @@ it('lists the Window actions and runs each', async () => {
 
 it('shows a group hidden in Bot mode there again, and leaves out what does not apply', async () => {
   const hidden = await toolbar({ botAppearance: false });
-  const hiddenMenu = await openMenu(hidden.bar, 'Window actions');
+  const hiddenMenu = await openMenu(hidden.bar, 'Group actions');
   await act(async () => item(hiddenMenu, 'Show in Bot mode').click());
   expect(hidden.props.onBotAppearance).toHaveBeenCalledWith(true);
   const { bar } = await toolbar({ botAppearance: undefined, onAgentControl: undefined });
-  const menu = await openMenu(bar, 'Window actions');
-  expect(items(menu).map(entry => entry.textContent)).toEqual(['Copy link', 'Delete Window…']);
+  const menu = await openMenu(bar, 'Group actions');
+  expect(items(menu).map(entry => entry.textContent)).toEqual(['Copy link', 'Delete group…']);
 });
 
 it('renders the leading slot before the title', async () => {
@@ -215,16 +215,16 @@ it('offers only safe actions while read-only: no rename, no adding views, no hid
   await act(async () => item(menu, 'New session view').click());
   expect(props.onNewView).not.toHaveBeenCalled();
   await press(menu, 'Escape');
-  menu = await openMenu(bar, 'Window actions');
-  expect(disabled(menu)).toEqual(['Hide in Bot mode', 'Delete Window…']);
+  menu = await openMenu(bar, 'Group actions');
+  expect(disabled(menu)).toEqual(['Hide in Bot mode', 'Delete group…']);
   await act(async () => item(menu, 'Copy link').click());
   expect(props.onCopyLink).toHaveBeenCalledTimes(1);
 });
 
-it('disables Delete Window while another Window action runs', async () => {
+it('disables Delete group while another Window action runs', async () => {
   const { bar } = await toolbar({ deleteDisabled: true });
-  const menu = await openMenu(bar, 'Window actions');
-  expect(item(menu, 'Delete Window…').getAttribute('aria-disabled')).toBe('true');
+  const menu = await openMenu(bar, 'Group actions');
+  expect(item(menu, 'Delete group…').getAttribute('aria-disabled')).toBe('true');
   expect(item(menu, 'Copy link').getAttribute('aria-disabled')).toBeNull();
 });
 
@@ -238,10 +238,10 @@ it('ignores Enter while an input method is composing, so a candidate is not save
 });
 
 
-it('speaks Chinese: the title description and the Window actions', async () => {
+it('speaks Chinese: the title description and the Group actions', async () => {
   const container = await render(<LocaleContext.Provider value="zh"><WindowToolbar windowId="research" title="Research" summary="3" onRename={vi.fn()} onNewView={vi.fn()} onOpenSession={vi.fn()}
     botAppearance onBotAppearance={vi.fn()} onCopyLink={vi.fn()} onDelete={vi.fn()} /></LocaleContext.Provider>);
-  expect(container.querySelector('.lab-window-toolbar-title')!.getAttribute('title')).toBe('重命名这个窗口');
-  expect(container.querySelector('button[aria-label="窗口操作"]')).not.toBeNull();
+  expect(container.querySelector('.lab-window-toolbar-title')!.getAttribute('title')).toBe('重命名这个分组');
+  expect(container.querySelector('button[aria-label="分组操作"]')).not.toBeNull();
   expect(container.querySelector('button[aria-label="添加"]')).not.toBeNull();
 });

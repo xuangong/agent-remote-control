@@ -3,7 +3,8 @@ import type { BotPicture, WindowBotDetails, WindowGroupOperation } from '@orchar
 import { errorWords } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { useWindowWorkspace } from '../windows/useWindowWorkspace.js';
-import { appendedRank, type BotRow, type BotSection } from '../../kernel/bot-roster.js';
+import type { BotRow, BotSection } from '../../kernel/bot-roster.js';
+import { rankInPlace } from '../../kernel/assistant-groups.js';
 import type { BotPlace } from '../../kernel/workbench-mode.js';
 import type { MenuEntry } from '../../ui/Menu.js';
 import { Sheet } from '@orchardworks/agent-client-web/primitives';
@@ -43,7 +44,7 @@ export function useBotActions({ scope, workspace, onSelect, onError }: {
   function update(row: Pick<BotRow, 'groupId' | 'viewId'>, details: WindowBotDetails) {
     const change = { type: 'bot.update', viewId: row.viewId, details } as const;
     return run(row.groupId, workspace.readGroup(row.groupId)?.bots ? change
-      : { type: 'batch', operations: [{ type: 'bots.add', rank: appendedRank(workspace.groups) }, change] });
+      : { type: 'batch', operations: [{ type: 'bots.add', rank: rankInPlace(workspace.groups, row.groupId) }, change] });
   }
   const without = <K extends keyof WindowBotDetails>(details: WindowBotDetails, key: K): WindowBotDetails => {
     const { [key]: _removed, ...rest } = details; return rest;
@@ -84,10 +85,11 @@ export function useBotActions({ scope, workspace, onSelect, onError }: {
     if (await run(row.groupId, { type: 'view.close', viewId: row.viewId })) { setOpen(undefined); onSelect({ kind: 'section', groupId: row.groupId }); }
   }
 
-  /** The actions of a bot's name card; asleep, it offers Wake in place of Sleep. */
-  function cardActions(row: BotRow, groupTitle: string): MenuEntry[] {
+  /** The actions of a bot's name card, with its group's (`group`: pin, mute, move) after Label…; asleep, it offers Wake in place of Sleep. */
+  function cardActions(row: BotRow, groupTitle: string, group: readonly MenuEntry[] = []): MenuEntry[] {
     return [
       { label: t('card.label'), icon: 'pencil', onSelect: () => { setDraft(row.details.label ?? ''); setOpen({ kind: 'label', row, groupTitle }); } },
+      ...group,
       row.details.asleep ? { label: t('card.wake'), icon: 'moon', onSelect: () => void wake(row) } : { label: t('card.sleep'), icon: 'moon', onSelect: () => void sleep(row) },
       { label: t('card.hide'), icon: 'eye-off', onSelect: () => void hide(row) },
       { label: t('card.remove'), icon: 'trash', destructive: true, onSelect: () => setOpen({ kind: 'remove', row, groupTitle }) },

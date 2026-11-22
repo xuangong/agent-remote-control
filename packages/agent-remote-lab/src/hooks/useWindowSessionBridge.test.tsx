@@ -312,7 +312,7 @@ it('projects the same Window again after replacing its native runtime document',
 it('rejects stale opening callbacks while the Window recovery surface is unavailable', async () => {
   const test = await harness(); const open = test.read().openAttached;
   test.options.unavailable = true; test.options.window = undefined; await test.update();
-  await expect(open(session)).rejects.toThrow('available Window');
+  await expect(open(session)).rejects.toThrow('available group');
   expect(test.read().empty).toBe(true);
   expect(test.attached).not.toHaveBeenCalled(); expect(test.native).not.toHaveBeenCalled();
 }, 10000);
@@ -345,7 +345,7 @@ it('reports synchronous Window validation failures while projecting an applied s
   document.roles.push(checkpoint);
   slot.intent = { kind: 'role', roleKey: compositionRoleKey(checkpoint), revision: 1, target: { hostId: session.hostId, native: target } };
   document.primary = slot.id; document.editRevision++;
-  const error = new Error('The local Window is unavailable.');
+  const error = new Error('The local group is unavailable.');
   test.options.operate = vi.fn(() => { throw error; });
   test.options.enabled = true;
   await test.update();

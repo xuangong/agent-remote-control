@@ -6,7 +6,7 @@ import { WindowLayoutError, createWindowView } from './window-workspace-operatio
 import {
   WindowGroupError, applyGroupOperation, decodeWindowGroup, duplicateBot, hasBotAppearance, isBotView, isWindowGroup, isWindowGroupCreateRequest, isWindowGroupMutation,
   isWindowGroupOperation, isWindowMergeRequest, isWindowSplitRequest, isWindowTransferRequest, mergeGroups, splitGroup, toWindowGroup, transferBot, type WindowGroup,
-  rebindsBot, readBotPicture, WindowBotDetails,
+  rebindsBot, readBotPicture, WindowBotDetails, WindowBots,
 } from './window-groups.js';
 
 const session = (nativeSessionId: string, title = nativeSessionId) => ({ hostId: 'mac', providerId: 'claude', nativeSessionId, title });
@@ -370,4 +370,37 @@ it('carries the name through bot.update beside the other details, and reads the 
   expect(storedBots.members.main.name).toBeUndefined();
   expect(Object.values(namedBots.members).map(details => (details as { name?: string }).name)).toEqual(['Dango', '团团', undefined]);
   for (const details of Object.values(namedBots.members)) expect(Value.Check(WindowBotDetails, details)).toBe(true);
+});
+
+const mutedBots = JSON.parse(readFileSync(new URL('./fixtures/window-bots.mute.v1.json', import.meta.url), 'utf8'));
+
+it('reads a group muted with its notifications and a muted chat, and the frozen stored bots without them', () => {
+  expect(Value.Check(WindowBots, mutedBots)).toBe(true);
+  expect([mutedBots.muted, mutedBots.notifications, mutedBots.members.main.muted, mutedBots.members.review.muted]).toEqual([true, 'needs_you', true, undefined]);
+  // The frozen bots predate settings: nothing in them is muted.
+  expect([storedBots.muted, storedBots.notifications, ...Object.values(storedBots.members).map(details => (details as { muted?: true }).muted)].every(value => value === undefined)).toBe(true);
+  for (const value of [false, 'yes', 1]) {
+    expect(Value.Check(WindowBotDetails, { muted: value })).toBe(false);
+    expect(Value.Check(WindowBots, { rank: 'm', members: {}, muted: value })).toBe(false);
+  }
+  for (const notifications of ['all', 'needs_you']) expect(Value.Check(WindowBots, { rank: 'm', members: {}, notifications })).toBe(true);
+  for (const notifications of ['none', 'finished', '', null]) expect(Value.Check(WindowBots, { rank: 'm', members: {}, notifications })).toBe(false);
+});
+
+it('replaces a group\'s settings with section.settings, keeps its bots, and stores both reminders as nothing', () => {
+  const window = windowOf('w', createWindowView('main', session('a'), 'primary'));
+  const named = applyGroupOperation(section(window), { type: 'bot.update', viewId: 'main', details: { name: 'Dango', muted: true } });
+  const muted = applyGroupOperation(named, { type: 'section.settings', muted: true, notifications: 'needs_you' });
+  expect(muted.bots).toEqual({ rank: 'm', members: { main: { name: 'Dango', muted: true } }, muted: true, notifications: 'needs_you' });
+  expect(applyGroupOperation(muted, { type: 'section.settings', notifications: 'all' }).bots).toEqual({ rank: 'm', members: { main: { name: 'Dango', muted: true } } });
+  expect(() => applyGroupOperation({ window }, { type: 'section.settings', muted: true })).toThrow(expect.objectContaining({ code: 'section_missing' }));
+  for (const operation of [{ type: 'section.settings', muted: false }, { type: 'section.settings', notifications: 'none' }, { type: 'section.settings', rank: 'm' }]) expect(isWindowGroupOperation(operation)).toBe(false);
+});
+
+it('keeps the target\'s settings through a merge and each group\'s own through a transfer', () => {
+  const target = { ...section(windowOf('t', createWindowView('t1', session('t1'), 'primary')), 'b'), bots: { rank: 'b', members: {}, muted: true as const, notifications: 'needs_you' as const } };
+  const source = { ...section(windowOf('s', createWindowView('s1', session('s1'), 'primary'), createWindowView('s2', session('s2'), 'primary')), 'c'), bots: { rank: 'c', members: {}, notifications: 'needs_you' as const } };
+  expect(mergeGroups(target, { ...source, bots: { rank: 'c', members: {} } }).bots).toEqual({ rank: 'b', members: {}, muted: true, notifications: 'needs_you' });
+  const moved = transferBot(source, target, 's1');
+  expect([moved.source.bots?.notifications, moved.source.bots?.muted, moved.target.bots?.muted]).toEqual(['needs_you', undefined, true]);
 });

@@ -88,7 +88,7 @@ suite('the words a reader sees', () => {
     ['awaiting_echo', 'next_turn', 'Queued — waiting for conversation…', false, 'pending'],
     ['sending', 'next_turn', 'Sending…', false, 'pending'],
     ['unconfirmed', undefined, 'Delivery not confirmed', true, 'unconfirmed'],
-    ['failed', undefined, 'Send failed', true, 'failed'],
+    ['failed', undefined, 'Not sent', true, 'failed'],
   ] as const)('%s with %s delivery reads "%s"', (state, delivery, label, settled, deliveryState) => {
     expect(describe(state, delivery)).toEqual({ label, settled, deliveryState });
   });

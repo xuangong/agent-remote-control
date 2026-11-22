@@ -124,14 +124,14 @@ it('removes a bot and what closes with it from its group only after confirming',
     binding: { hostId: 'local', providerId: 'recorded', nativeSessionId: 'A1-ask', title: 'Why the delay?' } });
   const app = await open('bot-menu-remove', [group], '/?mode=bot&section=A&bot=A1');
   try {
-    await choose('card', 'Remove from group…');
-    expect(sheet()?.querySelector('h2')?.textContent).toBe('Remove “A1” from “A”?');
+    await choose('card', 'Remove assistant…');
+    expect(sheet()?.querySelector('h2')?.textContent).toBe('Remove “A1”?');
     expect(sheet()?.textContent).toContain('Its session keeps running.');
     expect(sheet()?.textContent).toContain('1 Ask closes with it.');
     await act(async () => visibleButton(sheet()!, 'Cancel').click());
     expect(sheet()).toBeNull();
     expect(app.workspace().readGroup('A')?.window.views.map(view => view.id)).toContain('A1');
-    await choose('card', 'Remove from group…');
+    await choose('card', 'Remove assistant…');
     await act(async () => visibleButton(sheet()!, 'Remove').click());
     await until(() => expect(app.workspace().readGroup('A')?.window.views.map(view => view.id)).toEqual(['A2']));
     await until(() => expect(row(app, 'A', 'A1')).toBeNull());

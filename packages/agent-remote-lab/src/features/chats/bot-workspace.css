@@ -167,3 +167,35 @@ button.lab-assistant-title:is(:hover, [aria-expanded="true"]):not(:disabled) { b
 .lab-directory-group .lab-bot-member { display: flex; align-items: center; gap: var(--orchard-space-m); }
 .lab-directory-group .lab-bot-member > .lab-bot-row { flex: 1; min-width: 0; width: auto; }
 .lab-directory-show { flex: none; }
+
+/* Groups (I5): Chats show a heading per group once there is more than the default group; a muted group or chat carries a
+   quiet bell, and its unread reply a grey dot that does not light the group. */
+.lab-chat-group + .lab-chat-group { margin-top: var(--orchard-space-s); }
+.lab-chat-group-title { display: flex; align-items: center; gap: var(--orchard-space-xs); margin: var(--orchard-space-m) var(--orchard-space-l) var(--orchard-space-xs);
+  color: var(--orchard-text-secondary); font: 600 var(--orchard-type-footnote-size) / 1.3 var(--orchard-font-text); }
+.lab-chat-group-title > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-bot-muted { display: inline-flex; flex: none; align-items: center; color: var(--orchard-text-secondary); }
+.lab-bot-row[data-muted] .lab-bot-unread { background: var(--orchard-text-secondary); opacity: .55; }
+.lab-directory-head-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--orchard-space-s); }
+/* An assistant's Asks list under its row, past its avatar, as in Chats. */
+.lab-directory-group .lab-bot-member { flex-wrap: wrap; }
+.lab-directory-group .lab-bot-member > .lab-bot-asks { flex-basis: 100%; }
+.lab-directory-row-actions { display: flex; flex: none; align-items: center; gap: var(--orchard-space-xs); }
+/* Move to group and Add assistants: one list of choices, the current group marked. */
+.lab-group-choices { display: flex; flex-direction: column; gap: 2px; margin: 0 0 var(--orchard-space-m); padding: 0; list-style: none; }
+.lab-group-choice { display: flex; align-items: center; gap: var(--orchard-space-m); width: 100%; min-height: 44px; padding: var(--orchard-space-s) var(--orchard-space-l); border: 0;
+  border-radius: var(--orchard-radius-row); background: var(--orchard-fill); color: var(--orchard-text); font: var(--orchard-type-body-size) / 1.3 var(--orchard-font-text); text-align: start; }
+.lab-group-choice:hover:not(:disabled) { background: var(--orchard-fill-strong); color: inherit; border-color: transparent; }
+.lab-group-choice:disabled { cursor: default; }
+.lab-group-choice[aria-current="true"] { background: var(--orchard-tint); }
+.lab-group-choice > span:first-child, .lab-group-choice-text { flex: 1; min-width: 0; }
+.lab-group-choice-text { display: flex; flex-direction: column; }
+.lab-group-choice-text > small { color: var(--orchard-text-secondary); font-size: var(--orchard-type-footnote-size); }
+.lab-group-choice-mark { display: inline-flex; align-items: center; gap: var(--orchard-space-xs); color: var(--orchard-text-secondary); font-size: var(--orchard-type-footnote-size); }
+/* A group's notifications: Mute, then which reminders it sends. */
+.lab-group-settings { display: grid; gap: var(--orchard-space-m); padding: var(--orchard-space-xs) 0 var(--orchard-space-m); }
+.lab-group-setting { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--orchard-space-m); min-height: 44px; }
+.lab-group-settings > .lab-group-mute.orchard-toggle { display: flex; width: 100%; min-height: 44px; }
+/* Needs you: the brand dot inside a ring, so it differs from an unread dot by shape as well as by weight. */
+.lab-bot-needs-you { flex: none; width: 8px; height: 8px; margin-inline: auto 3px; border-radius: 50%; background: var(--orchard-brand);
+  box-shadow: 0 0 0 2px var(--orchard-surface), 0 0 0 3.5px var(--orchard-brand); }

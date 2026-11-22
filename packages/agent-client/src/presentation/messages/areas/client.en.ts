@@ -33,7 +33,7 @@ export const client = {
   'client.send.newAttempt': 'This message may not have arrived. If it is not in the conversation, Retry sends it again.',
   'client.send.notDelivered': 'This message did not reach the agent, so it was not sent. Retry sends it.',
   'client.send.uncertain': 'Delivery is not confirmed. Check the conversation before sending again.',
-  'client.send.failed': 'Send failed',
+  'client.send.failed': 'Not sent',
   'client.send.unconfirmed': 'Delivery not confirmed',
   'client.send.sending': 'Sending…',
   'client.send.queued': 'Queued — waiting for conversation…',

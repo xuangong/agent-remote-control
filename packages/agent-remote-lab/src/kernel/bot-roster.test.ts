@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { createWindowView, type WindowGroup, type WindowSessionBinding, type WindowView } from '@orchardworks/agent-remote-protocol';
-import { projectBotRoster, projectChats } from './bot-roster.js';
+import { projectBotRoster } from './bot-roster.js';
 import type { SessionActivityStatus } from './session-activity-status.js';
 
 const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: id });
@@ -128,18 +128,6 @@ it("keeps the latest reply of a handed-off bot on a device that did not hand it 
   const row = (options: { earlier?: typeof earlier }) => projectBotRoster(groups, [], { status: () => 'idle', reply: session => replies[session.nativeSessionId], ...options }).sections[0]!.rows[0]!;
   expect(row({}).reply).toBeUndefined();
   expect(row({ earlier }).reply).toEqual({ replyAt: 7, preview: 'Said on the first provider.' });
-});
-
-it('lists Chats flat: pinned first, then by latest reply, never a hidden assistant, then Other sessions', () => {
-  const first = group('first', ['quiet', 'old', 'pinned'].map(id => createWindowView(id, binding(id))));
-  first.bots!.members = { pinned: { pinned: true }, old: {} };
-  const second = group('second', ['new', 'gone'].map(id => createWindowView(id, binding(id))), 'n');
-  second.bots!.members.gone = { hidden: true };
-  const replies: Record<string, number> = { old: 10, new: 30 };
-  const model = projectBotRoster([first, second], ['loose'].map(binding), { status: () => 'idle', reply: session => replies[session.nativeSessionId] ? { replyAt: replies[session.nativeSessionId]!, preview: '' } : undefined });
-  const chats = projectChats(model);
-  expect(chats.rows.map(row => row.viewId)).toEqual(['pinned', 'new', 'old', 'quiet']);
-  expect(chats.other.map(session => session.nativeSessionId)).toEqual(['loose']);
 });
 
 it('lists every assistant in the directory by group in catalog order, marking those Chats does not show', () => {

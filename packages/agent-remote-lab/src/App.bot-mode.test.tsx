@@ -167,12 +167,12 @@ it('puts the title and the New menu at the top of the Window sidebar, and the mo
     const open = async () => act(async () => (header.querySelector('button[aria-label="New"]') as HTMLButtonElement).click());
     const item = (label: string) => [...document.querySelectorAll<HTMLElement>('[role="menu"][aria-label="New"] [role="menuitem"]')].find(entry => entry.textContent === label)!;
     await open();
-    expect([...document.querySelectorAll('[role="menu"][aria-label="New"] [role="menuitem"]')].map(entry => entry.textContent)).toEqual(['New session', 'New Window']);
+    expect([...document.querySelectorAll('[role="menu"][aria-label="New"] [role="menuitem"]')].map(entry => entry.textContent)).toEqual(['New session', 'New group']);
     await act(async () => item('New session').click());
     expect(newSessionPanel().closest('[hidden]')).toBeNull();
     expect(app.container.querySelector<HTMLElement>('#lab-sessions-page[aria-label="New session"]')?.hidden).toBe(false);
     await open();
-    await act(async () => item('New Window').click());
+    await act(async () => item('New group').click());
     await until(() => expect(app.workspace().window?.id).toMatch(/^(?!A$)/));
     expect(app.workspace().windows.map(window => window.id)).toContain('A');
   } finally { await app.close(); }
@@ -193,9 +193,9 @@ it('creates one Window at a time from the New menu and clears its error toast af
     const header = app.container.querySelector('#lab-context .lab-sidebar-header')!;
     const item = async () => {
       if (!document.querySelector('[role="menu"][aria-label="New"]')) await act(async () => (header.querySelector('button[aria-label="New"]') as HTMLButtonElement).click());
-      return [...document.querySelectorAll<HTMLElement>('[role="menu"][aria-label="New"] [role="menuitem"]')].find(entry => entry.textContent === 'New Window')!;
+      return [...document.querySelectorAll<HTMLElement>('[role="menu"][aria-label="New"] [role="menuitem"]')].find(entry => entry.textContent === 'New group')!;
     };
-    const toast = () => [...document.querySelectorAll('.lab-toast')].find(node => node.textContent?.includes('Window not created'));
+    const toast = () => [...document.querySelectorAll('.lab-toast')].find(node => node.textContent?.includes('Group not created'));
     const first = await item();
     await act(async () => first.click());
     expect(create).toHaveBeenCalledTimes(1);
@@ -242,13 +242,13 @@ it('moves focus out of the Window sidebar, and closes its open New menu, when Co
   } finally { await app.close(); }
 });
 
-it('shows Windows, In this Window and Shortcuts in the desktop sidebar, and sessions on their own page', async () => {
+it('shows Windows, In this group and Shortcuts in the desktop sidebar, and sessions on their own page', async () => {
   const scope = 'http://localhost/window-sidebar/'; seedGroup(scope, botGroup('A'));
   history.replaceState(null, '', '/?window=A');
   const app = await mountBotApp(scope);
   try {
     const rail = () => app.container.querySelector('#lab-context')!;
-    await until(() => expect(rail().querySelector('nav[aria-label="Windows"]')).not.toBeNull());
+    await until(() => expect(rail().querySelector('nav[aria-label="Groups"]')).not.toBeNull());
     expect(rail().querySelector('nav[aria-label="Session views"]')).not.toBeNull();
     expect(rail().querySelector('nav[aria-label="Shortcuts"]')).not.toBeNull();
     expect(rail().querySelector('section[aria-label="Discover sessions"]')).toBeNull();

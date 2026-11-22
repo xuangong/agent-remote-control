@@ -545,3 +545,20 @@ it('stores an assistant\'s name through bot.update, keeps its other details and 
   expect((await restarted.call('/names')).body.bots.members.plain.name).toBe('Pebbles');
   expect((await update('empty', { name: '' })).status).toBe(400);
 });
+
+it('stores a group\'s mute and notifications and a chat\'s mute, and reads them back after a restart', async () => {
+  const mutedBots = JSON.parse(readFileSync(new URL('../../agent-remote-protocol/src/fixtures/window-bots.mute.v1.json', import.meta.url), 'utf8'));
+  const views = ['main', 'review', 'plain'].map((id, index) => createWindowView(id, { ...binding, nativeSessionId: id }, index === 0 ? 'primary' : undefined));
+  const stored: WorkspaceWindow = { schemaVersion: 3, id: 'quiet', title: 'Quiet', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views };
+  const f = await fixture({ ...emptyRelayState(auth), workspaceWindows: [{ subject: 'alice', id: 'quiet', window: stored, generation: 0, receipts: [], bots: mutedBots }] });
+  const listed = (await f.call()).body.groups.find((group: { window: WorkspaceWindow }) => group.window.id === 'quiet');
+  expect([listed.bots.muted, listed.bots.notifications, listed.bots.members.main.muted]).toEqual([true, 'needs_you', true]);
+  const operate = (operationId: string, revision: number, operation: unknown) => f.call('/quiet/operations', 'POST', f.mutation(operationId, revision, operation));
+  expect((await operate('unmute', 0, { type: 'section.settings' })).body.result.status).toBe('committed');
+  expect((await operate('mute-chat', 1, { type: 'bot.update', viewId: 'review', details: { name: 'Pebbles', muted: true } })).body.result.status).toBe('committed');
+  const after = (await f.call('/quiet')).body.bots;
+  expect([after.muted, after.notifications, after.members.review]).toEqual([undefined, undefined, { name: 'Pebbles', muted: true }]);
+  const restarted = await fixture(f.saved());
+  expect((await restarted.call('/quiet')).body.bots.members.review.muted).toBe(true);
+  expect((await operate('bad', 2, { type: 'section.settings', notifications: 'none' })).status).toBe(400);
+});

@@ -7,6 +7,8 @@ import { toggleTimelineTime, useTimelineTimeVisibility } from './timeline-time-v
 
 interface TimelineEntryProps {
   readonly onEdit?: () => Promise<void>;
+  /** A message's text, which its Copy action puts on the clipboard. */
+  readonly copyText?: string;
   readonly entryKey: string;
   readonly timestamp: string;
   readonly sent: boolean;
@@ -21,7 +23,7 @@ interface TimelineEntryProps {
 }
 const interactive = 'a, button, input, select, textarea, summary, label, [role="button"], [contenteditable="true"]';
 
-export function TimelineEntry({ onEdit, entryKey, timestamp, sent, inspected, searchSelected, inspect, children, selection, selectionLabel, onSelect }: TimelineEntryProps) {
+export function TimelineEntry({ onEdit, copyText, entryKey, timestamp, sent, inspected, searchSelected, inspect, children, selection, selectionLabel, onSelect }: TimelineEntryProps) {
   const t = useTranslate();
   const label = selectionLabel ?? t('timeline.entry.select');
   const selecting = !!onSelect && (selection === 'selected' || selection === 'unselected');
@@ -32,6 +34,13 @@ export function TimelineEntry({ onEdit, entryKey, timestamp, sent, inspected, se
   const editButton = onEdit ? <button type="button" data-prompt-edit-action className="agent-edit-prompt" aria-label={t('timeline.entry.edit')} title={t('timeline.entry.editHint')} disabled={editing} onClick={() => {
     setEditing(true); setEditError(undefined); void onEdit().catch(error => setEditError(errorWords(error, t, 'timeline.entry.editFailed'))).finally(() => setEditing(false));
   }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 4-5 5 5 5M4 9h10a6 6 0 0 1 0 12" /></svg></button> : null;
+  // Copy sits beside Edit: shown on hover and focus with a mouse, and beside the time a swipe reveals on a touch screen.
+  const [copied, setCopied] = useState(false);
+  const copyButton = copyText?.trim() && typeof navigator !== 'undefined' && navigator.clipboard
+    ? <button type="button" data-copy-action className="agent-edit-prompt" aria-label={t(copied ? 'common.copied' : 'timeline.message.copyText')} title={t('timeline.message.copyText')}
+      onClick={() => { void navigator.clipboard.writeText(copyText).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); }, () => {}); }}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{copied ? <path d="M5 12.5l4.5 4.5L19 7.5" /> : <path d="M9 9h10v10H9zM5 15V5h10" />}</svg>
+    </button> : null;
   const timeVisible = useTimelineTimeVisibility();
   const localTime = useMemo(() => {
     const date = new Date(timestamp);
@@ -42,10 +51,10 @@ export function TimelineEntry({ onEdit, entryKey, timestamp, sent, inspected, se
     };
   }, [timestamp]);
   const timeContext = useMemo(() => localTime ? { ...localTime, timestamp, visible: timeVisible, toggle: toggleTimelineTime } : undefined, [localTime, timestamp, timeVisible]);
-  const { ref, reveal } = useTimelineTimeSwipe(!!localTime, sent ? -1 : 1, !!onEdit);
+  const { ref, reveal } = useTimelineTimeSwipe(!!localTime, sent ? -1 : 1, (onEdit ? 1 : 0) + (copyButton ? 1 : 0));
   return <div ref={ref} className="agent-timeline-entry" data-entry-key={entryKey}
     data-inspected={inspected || undefined} data-search-selected={searchSelected || undefined} tabIndex={inspect || inspected ? -1 : undefined}
-    data-prompt-editable={!!onEdit || undefined}
+    data-prompt-editable={!!onEdit || undefined} data-entry-actions={!!onEdit || !!copyButton || undefined}
     data-selecting={selecting || undefined} data-selected={selection === 'selected' || undefined}
     // Shift-click would extend the page's text selection instead of selecting a range of messages.
     onMouseDown={selecting ? event => { if (event.shiftKey && !(event.target instanceof Element && event.target.closest(interactive))) event.preventDefault(); } : undefined}
@@ -66,8 +75,9 @@ export function TimelineEntry({ onEdit, entryKey, timestamp, sent, inspected, se
     style={{ '--agent-time-offset': `${reveal.offset}px`, '--agent-time-top': `${reveal.top}px` } as CSSProperties}>
     {selecting ? <button type="button" role="checkbox" className="agent-entry-checkbox" aria-checked={selection === 'selected'}
       aria-label={t('timeline.entry.selectMessage')} onClick={event => { event.stopPropagation(); onSelect!(event.shiftKey); }} /> : null}
-    {inspect || editButton || startSelection ? <span className="agent-entry-actions">
+    {inspect || editButton || copyButton || startSelection ? <span className="agent-entry-actions">
     {startSelection}
+    {copyButton ? <span className="agent-entry-edit-desktop">{copyButton}</span> : null}
     {editButton ? <span className="agent-entry-edit-desktop">{editButton}</span> : null}
     {inspect ? <button className="agent-inspect-entry" type="button" aria-label={t('timeline.entry.inspect')} title={t('timeline.entry.inspectHint')} onClick={inspect}>
       <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M3 4h5m-5 6h5m-5 6h5M5 4v12m6-6h6m-3-3 3 3-3 3" /></svg>
@@ -75,7 +85,7 @@ export function TimelineEntry({ onEdit, entryKey, timestamp, sent, inspected, se
     </span> : null}
     {localTime ? <div className="agent-entry-time"><time dateTime={timestamp} aria-label={t('timeline.time.local', { date: localTime.date, time: localTime.time })}>
       <span>{localTime.date}</span><span>{localTime.time}</span>
-    </time>{editButton}</div> : null}
+    </time>{copyButton}{editButton}</div> : null}
     {editError ? <p className="agent-edit-prompt-error" role="alert">{editError}</p> : null}
     <TimelineTimeContext.Provider value={timeContext}>
       <div className="agent-entry-content">{children}</div>

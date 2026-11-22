@@ -93,7 +93,7 @@ async function fixture({ views = [createWindowView('main', undefined, 'primary')
   const button = (title: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === title)!;
   const rename = async (id: string, title: string) => {
     await act(async () => container.querySelector<HTMLButtonElement>(`[data-window-rename="${id}"]`)!.click());
-    const input = container.querySelector<HTMLInputElement>('input[aria-label="Window title"]')!;
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="Group name"]')!;
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, title);
       input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -194,16 +194,16 @@ it('renames any Window from its row, including one that is not open, and reports
   expect(test.container.querySelector('form')).toBeNull();
   await act(async () => fail(new Error('The server refused this change.')));
   expect(test.container.textContent).toContain('The server refused this change.');
-  test.setRenameOther(async () => { throw new Error('This Window is unavailable.'); });
+  test.setRenameOther(async () => { throw new Error('This group is unavailable.'); });
   await test.rename('other', 'Missing');
   expect(test.container.querySelector('form')).not.toBeNull();
-  expect(test.container.textContent).toContain('This Window is unavailable.');
+  expect(test.container.textContent).toContain('This group is unavailable.');
 });
 
 it('cancels a rename with Escape, keeps an unchanged title without saving, and returns focus to the row action', async () => {
   const test = await fixture();
   await act(async () => test.container.querySelector<HTMLButtonElement>('[data-window-rename="other"]')!.click());
-  const input = test.container.querySelector<HTMLInputElement>('input[aria-label="Window title"]')!;
+  const input = test.container.querySelector<HTMLInputElement>('input[aria-label="Group name"]')!;
   expect(input.value).toBe('Window');
   // Only one row is edited at a time.
   expect(test.container.querySelector<HTMLButtonElement>('[data-window-rename="window"]')!.disabled).toBe(true);
@@ -224,7 +224,7 @@ it('lists the current Window in layout order, a Side beside its source, and focu
     createWindowView('main', undefined, 'primary'), { ...createWindowView('side', undefined, 'attached'), attachedTo: 'main' },
   ] });
   const views = test.container.querySelector('nav[aria-label="Session views"]')!;
-  expect(test.container.textContent).toContain('In this Window');
+  expect(test.container.textContent).toContain('In this group');
   expect([...views.querySelectorAll('[data-window-view-row]')].map(row => [row.getAttribute('data-window-view-row'), row.getAttribute('data-depth')]))
     .toEqual([['main', null], ['side', null], ['dock', null], ['float', null]]);
   expect(views.querySelector('[data-window-view-row="dock"]')?.hasAttribute('data-collapsed')).toBe(true);
@@ -245,18 +245,18 @@ it('lists the current Window in layout order, a Side beside its source, and focu
   } finally { pane.remove(); }
 });
 
-it('offers All Windows in the sidebar when an overview is available, and reports opening a Window', async () => {
+it('offers All groups in the sidebar when an overview is available, and reports opening a Window', async () => {
   const overview = vi.fn(), navigate = vi.fn();
   const test = await fixture({ placement: 'sidebar', onOverview: overview, onNavigate: navigate });
-  await act(async () => test.container.querySelector<HTMLButtonElement>('button[aria-label="Show all Windows"]')!.click());
+  await act(async () => test.container.querySelector<HTMLButtonElement>('button[aria-label="Show all groups"]')!.click());
   expect(overview).toHaveBeenCalledOnce();
   await act(async () => test.container.querySelector<HTMLButtonElement>('[data-window-id="other"]')!.click());
   expect(navigate).toHaveBeenCalledOnce();
 });
 
-it('shows no All Windows button without an overview', async () => {
+it('shows no All groups button without an overview', async () => {
   const test = await fixture({ placement: 'sidebar' });
-  expect(test.container.querySelector('button[aria-label="Show all Windows"]')).toBeNull();
+  expect(test.container.querySelector('button[aria-label="Show all groups"]')).toBeNull();
 });
 
 it('names All sessions in the sidebar\'s empty-views note', async () => {
@@ -281,17 +281,17 @@ it('shows sidebar headings with icon actions, flat rows without check marks, and
   ] });
   const root = test.container.querySelector('.lab-window-workspaces')!;
   expect(root.getAttribute('data-placement')).toBe('sidebar');
-  expect([...root.querySelectorAll('.lab-window-section-heading > h2.lab-sidebar-section-title')].map(heading => heading.textContent)).toEqual(['Windows', 'In this Window']);
+  expect([...root.querySelectorAll('.lab-window-section-heading > h2.lab-sidebar-section-title')].map(heading => heading.textContent)).toEqual(['Groups', 'In this group']);
   const named = (name: string) => [...root.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.getAttribute('aria-label') === name);
-  for (const name of ['New Window', 'Show all Windows', 'New session view']) {
+  for (const name of ['New group', 'Show all groups', 'New session view']) {
     const [button, ...others] = named(name);
     expect(others).toHaveLength(0);
     expect(button?.classList.contains('ui-icon-button')).toBe(true);
     expect(button?.textContent).toBe('');
     expect(button?.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
   }
-  expect(named('Show all Windows')[0]!.classList.contains('lab-window-overview-trigger')).toBe(true);
-  await act(async () => named('Show all Windows')[0]!.click());
+  expect(named('Show all groups')[0]!.classList.contains('lab-window-overview-trigger')).toBe(true);
+  await act(async () => named('Show all groups')[0]!.click());
   expect(overview).toHaveBeenCalledOnce();
   await act(async () => named('New session view')[0]!.click());
   expect(test.read().views).toHaveLength(3);
@@ -304,11 +304,11 @@ it('shows sidebar headings with icon actions, flat rows without check marks, and
   expect(root.querySelector('[data-window-view-row="side"]')?.hasAttribute('data-depth')).toBe(false);
   // Row actions keep their classes, names, titles and data attributes.
   const rename = root.querySelector<HTMLButtonElement>('.lab-window-rename-trigger[data-window-rename="other"]')!;
-  expect([rename.getAttribute('aria-label'), rename.title]).toEqual(['Rename Window: Window', 'Rename this Window']);
+  expect([rename.getAttribute('aria-label'), rename.title]).toEqual(['Rename group: Window', 'Rename this group']);
   const deletes = [...root.querySelectorAll<HTMLButtonElement>('.lab-window-delete')];
   expect(deletes.map(button => [button.getAttribute('aria-label'), button.title, button.disabled])).toEqual([
-    ['Delete Window: Project', 'Switch to another Window before deleting this one.', true],
-    ['Delete Window: Window', 'Delete this layout. Agent sessions keep running.', false],
+    ['Delete group: Project', 'Switch to another group before deleting this one.', true],
+    ['Delete group: Window', 'Delete this layout. Agent sessions keep running.', false],
   ]);
   const close = root.querySelector<HTMLButtonElement>('.lab-window-view-close[data-window-view-close="main"]')!;
   expect([close.getAttribute('aria-label'), close.title, close.textContent]).toEqual(['Close session view: Empty view', 'Close this session view. Agent sessions keep running.', '']);
@@ -321,24 +321,24 @@ it('keeps the floating panel text buttons, check marks and delete note by defaul
   const test = await fixture();
   const root = test.container.querySelector('.lab-window-workspaces')!;
   expect(root.getAttribute('data-placement')).toBe('panel');
-  expect(test.button('New Window')).toBeDefined();
-  // The floating panel's WindowMenu offers All Windows itself.
-  expect(root.querySelector('button[aria-label="Show all Windows"]')).toBeNull();
-  expect(root.querySelector('.lab-window-selected[aria-label="Current Window"]')?.textContent).toBe('✓');
+  expect(test.button('New group')).toBeDefined();
+  // The floating panel's WindowMenu offers All groups itself.
+  expect(root.querySelector('button[aria-label="Show all groups"]')).toBeNull();
+  expect(root.querySelector('.lab-window-selected[aria-label="Current group"]')?.textContent).toBe('✓');
   expect(root.querySelector('.lab-window-selected[aria-label="Selected view"]')?.textContent).toBe('✓');
-  expect(root.textContent).toContain('Switch to another Window before deleting the active one.');
+  expect(root.textContent).toContain('Switch to another group before deleting the active one.');
   expect(root.querySelector('.ui-icon-button')).toBeNull();
 });
 
 it.each(['panel', 'sidebar'] as const)('confirms deletion from the %s and cancels without removing a Window', async placement => {
   const test = await fixture({ placement });
-  const trigger = () => test.container.querySelector<HTMLButtonElement>('[aria-label="Delete Window: Window"]')!;
+  const trigger = () => test.container.querySelector<HTMLButtonElement>('[aria-label="Delete group: Window"]')!;
   await act(async () => trigger().click());
   expect(test.remove).not.toHaveBeenCalled();
   let dialog = test.container.querySelector('dialog')!;
   expect(dialog?.open).toBe(true);
   expect(dialog?.dataset.detent).toBe('content');
-  expect(dialog?.textContent).toContain('Delete this Window?');
+  expect(dialog?.textContent).toContain('Delete this group?');
   expect(dialog?.textContent).toContain('“Window”');
   expect(dialog?.textContent).toContain('agent sessions keep running');
   await act(async () => test.button('Cancel').click());
@@ -354,9 +354,9 @@ it.each(['panel', 'sidebar'] as const)('confirms deletion from the %s and cancel
 
 it('deletes only the confirmed Window and keeps the open Window', async () => {
   const test = await fixture();
-  await act(async () => test.container.querySelector<HTMLButtonElement>('[aria-label="Delete Window: Window"]')!.click());
+  await act(async () => test.container.querySelector<HTMLButtonElement>('[aria-label="Delete group: Window"]')!.click());
   expect(test.remove).not.toHaveBeenCalled();
-  await act(async () => test.button('Delete Window').click());
+  await act(async () => test.button('Delete group').click());
   expect(test.remove).toHaveBeenCalledExactlyOnceWith('other');
   expect(test.container.querySelector('[data-window-id="other"]')).toBeNull();
   expect(test.container.querySelector('[data-window-id="window"]')?.getAttribute('aria-current')).toBe('true');
@@ -367,9 +367,9 @@ it('keeps pending deletion open and prevents another submission or dismissal', a
   const test = await fixture();
   let finish!: () => void;
   test.setRemove(() => new Promise<void>(resolve => { finish = resolve; }));
-  await act(async () => test.container.querySelector<HTMLButtonElement>('[aria-label="Delete Window: Window"]')!.click());
+  await act(async () => test.container.querySelector<HTMLButtonElement>('[aria-label="Delete group: Window"]')!.click());
   const dialog = test.container.querySelector('dialog')!;
-  const confirm = test.button('Delete Window');
+  const confirm = test.button('Delete group');
   expect(confirm).toBeDefined();
   await act(async () => { confirm.click(); confirm.click(); });
   expect(confirm.disabled).toBe(true);
@@ -389,16 +389,16 @@ it('keeps pending deletion open and prevents another submission or dismissal', a
 it.each([false, true])('keeps a failed deletion visible and retryable inside its sheet (shared actions: %s)', async sharedActions => {
   const test = await fixture({ sharedActions });
   test.setRemove(async () => { throw new Error('This Window could not be deleted. Try again.'); });
-  await act(async () => test.container.querySelector<HTMLButtonElement>('[aria-label="Delete Window: Window"]')!.click());
-  expect(test.button('Delete Window')).toBeDefined();
-  await act(async () => test.button('Delete Window').click());
+  await act(async () => test.container.querySelector<HTMLButtonElement>('[aria-label="Delete group: Window"]')!.click());
+  expect(test.button('Delete group')).toBeDefined();
+  await act(async () => test.button('Delete group').click());
   const dialog = test.container.querySelector('dialog')!;
   expect(dialog?.open).toBe(true);
   expect(dialog?.querySelector('[role="alert"]')?.textContent).toBe('This Window could not be deleted. Try again.');
   expect(test.container.querySelector('[data-window-id="other"]')).not.toBeNull();
-  expect(test.button('Delete Window').disabled).toBe(false);
+  expect(test.button('Delete group').disabled).toBe(false);
   test.setRemove(async () => {});
-  await act(async () => test.button('Delete Window').click());
+  await act(async () => test.button('Delete group').click());
   expect(test.remove).toHaveBeenNthCalledWith(2, 'other');
   expect(test.container.querySelector('dialog')).toBeNull();
   expect(test.container.querySelector('[data-window-id="other"]')).toBeNull();
@@ -406,7 +406,7 @@ it.each([false, true])('keeps a failed deletion visible and retryable inside its
 
 it.each(['scope', 'window', 'panel'] as const)('closes stale deletion confirmation after a %s change', async change => {
   const test = await fixture();
-  await act(async () => test.container.querySelector<HTMLButtonElement>('[aria-label="Delete Window: Window"]')!.click());
+  await act(async () => test.container.querySelector<HTMLButtonElement>('[aria-label="Delete group: Window"]')!.click());
   expect(test.container.querySelector('dialog')?.open).toBe(true);
   if (change === 'scope') await test.changeScope();
   else if (change === 'window') await test.changeWindow();
@@ -418,9 +418,9 @@ it.each(['scope', 'window', 'panel'] as const)('closes stale deletion confirmati
 
 it('keeps Window deletion unavailable until another active Window is open', async () => {
   const test = await fixture();
-  expect(test.container.querySelector<HTMLButtonElement>('[aria-label="Delete Window: Project"]')!.disabled).toBe(true);
+  expect(test.container.querySelector<HTMLButtonElement>('[aria-label="Delete group: Project"]')!.disabled).toBe(true);
   await test.deactivateWindow();
-  const trigger = test.container.querySelector<HTMLButtonElement>('[aria-label="Delete Window: Window"]')!;
+  const trigger = test.container.querySelector<HTMLButtonElement>('[aria-label="Delete group: Window"]')!;
   expect(trigger.disabled).toBe(true);
   await act(async () => trigger.click());
   expect(test.container.querySelector('dialog')).toBeNull();
@@ -468,14 +468,14 @@ it('lists the group\'s bots by name, role and place, with Sides beside their sou
   expect(container.querySelector('[data-window-id="release"] small')?.textContent).toBe('Needs you · 6 bots · 4 open');
 });
 
-it('words the Windows list in Chinese', async () => {
+it('words the groups list in Chinese', async () => {
   const group = botGroup('A');
   const workspace = { window: group.window, group, windows: [group.window], groups: [group], readGroup: () => group, hasActiveWindow: true, unavailable: false } as unknown as ReturnType<typeof useWindowWorkspace>;
   const container = await render(<LocaleContext.Provider value="zh"><WindowWorkspaces workspace={workspace} placement="sidebar" /></LocaleContext.Provider>);
-  expect(container.querySelector('nav[aria-label="窗口"]')).not.toBeNull();
+  expect(container.querySelector('nav[aria-label="分组"]')).not.toBeNull();
   expect(container.querySelector('nav[aria-label="会话视图"]')).not.toBeNull();
-  expect(container.querySelector('[aria-label^="重命名窗口："]')).not.toBeNull();
-  expect(container.textContent).toContain('这个窗口里');
-  expect(container.textContent).toContain('窗口选项');
-  expect(container.textContent).not.toContain('Window options');
+  expect(container.querySelector('[aria-label^="重命名分组："]')).not.toBeNull();
+  expect(container.textContent).toContain('这个分组里');
+  expect(container.textContent).toContain('分组选项');
+  expect(container.textContent).not.toContain('Group options');
 });

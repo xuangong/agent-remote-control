@@ -45,7 +45,7 @@ describe('which actions the palette offers', () => {
     { name: 'no New session view without an editable Window', given: { windowEditable: false }, has: 'action:new-session-view', not: true },
     { name: 'no Favorites for an anonymous workbench', given: { userScoped: false }, has: 'action:favorites', not: true },
     { name: 'no sidebar toggle on a compact layout', given: { canToggleSidebar: false }, has: 'action:toggle-sidebar', not: true },
-    { name: 'no All Windows without overview support', given: { windowOverviewSupported: false }, has: 'action:all-windows', not: true },
+    { name: 'no All groups without overview support', given: { windowOverviewSupported: false }, has: 'action:all-windows', not: true },
     { name: 'Open in Bot mode for a selected tile that is an assistant', given: { canOpenInBotMode: true }, has: 'action:open-in-bot-mode', not: false },
     { name: 'no Open in Bot mode without one', given: {}, has: 'action:open-in-bot-mode', not: true },
     { name: 'Pin to a window for the assistant shown in Bot mode', given: { windowMode: false, canPinToWindow: true }, has: 'action:pin-to-window', not: false },
@@ -102,6 +102,6 @@ it('names every action in the reader\'s language', () => {
   const chinese = paletteActions(facts({ canOpenInBotMode: true, windowMode: true, t: translator('zh') }), recorder().runs).map(item => item.title);
   expect(chinese).toContain('新会话');
   expect(chinese).toContain('收起侧栏');
-  expect(chinese).toContain('全部窗口');
+  expect(chinese).toContain('全部分组');
   expect(chinese).toHaveLength(titles.length);
 });

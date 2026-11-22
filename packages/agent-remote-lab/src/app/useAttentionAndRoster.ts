@@ -3,6 +3,7 @@ import { attentionDestination, attentionSets, botDirectorySources as botDirector
 import { windowPrimaryViewId } from '@orchardworks/agent-remote-protocol';
 import { useOtherSessions, type OtherSessionSource } from '../features/chats/useOtherSessions.js';
 import { projectBotRoster, type BotRosterOptions } from '../kernel/bot-roster.js';
+import { assistantReminders, type Reminder } from '../kernel/assistant-groups.js';
 import { sharedReminders } from '../features/chats/bot-attention.js';
 import { useSharedFeedOf, type SharedFeedsSnapshot } from '../kernel/shared-feeds.js';
 import { sessionActivity } from '../kernel/session-activity-status.js';
@@ -157,6 +158,14 @@ export function useAttentionAndRoster(scope: Pick<AppInputs & WorkbenchShellSlic
   // Who the bots are, for App's own use (search, the selected bot); the roster on screen adds the shared IM state itself.
   const botRoster = projectBotRoster(windowWorkspace.groups, otherSessions.sessions, { status: () => 'unknown', supportTeam: teamId => supportTeams.has(teamId),
     current: currentBotSession, earlier: earlierBotSessions });
+
+  // A muted assistant or group sends no reminders, and a group set to "needs you" only that one, in either mode.
+  const reminderRules = useRef(new Map<string, readonly Reminder[]>());
+  reminderRules.current = new Map(botRoster.sections.flatMap(section => {
+    const group = windowWorkspace.readGroup(section.groupId);
+    return section.rows.map(row => [sessionKey(row.session), assistantReminders(group, row.details)] as const);
+  }));
+  useEffect(() => { attention.notifier.setReminderRule((key, reminder) => reminderRules.current.get(key)?.includes(reminder) ?? true); }, [attention.notifier]);
 
   const t = useTranslate();
   /** A Host as the Relay last said, named as the Hosts list names it. */

@@ -5,6 +5,8 @@ import { sessionKey } from './session-tree.js';
 import type { WorkbenchMode } from './workbench-mode.js';
 
 type Reminder = 'idle' | 'waiting';
+/** Whether a session's reminder of this kind may show: its assistant's or its group's mute and notifications decide. */
+export type ReminderRule = (key: string, reminder: Reminder) => boolean;
 interface NotificationClickScope { mode: WorkbenchMode; lifetime: object }
 interface DeliveredNotification { key: string; admission?: symbol; clickScope: NotificationClickScope }
 const ledgerKey = 'agent-remote:notification-receipts';
@@ -23,10 +25,14 @@ export class SessionAttentionNotifications {
   private readonly defaultClickScope: NotificationClickScope = { mode: 'bot', lifetime: {} };
   private eligible: Map<string, symbol> | undefined;
   private disposed = false;
+  private admits: ReminderRule = () => true;
   constructor(private readonly scope: string, private readonly enabled: () => boolean,
     private readonly open: (session: SessionEntry) => void,
     private readonly clickScope: () => NotificationClickScope = () => this.defaultClickScope,
     private readonly t: Translate = translator('en')) {}
+
+  /** The rule each reminder passes before it shows (mute and per-group notifications); every reminder shows without one. */
+  setReminderRule(rule: ReminderRule): void { this.admits = rule; }
 
   setEligible(sessions: readonly SessionEntry[]): void {
     const keys = new Set(sessions.map(sessionKey));
@@ -99,7 +105,7 @@ export class SessionAttentionNotifications {
   }
 
   private async deliver(session: SessionEntry, key: string, reminder: Reminder, identity: string, dedupe: boolean, admission: symbol | undefined, clickScope: NotificationClickScope): Promise<void> {
-    if (!this.enabled() || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    if (!this.enabled() || !this.admits(key, reminder) || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     try {
       const id = crypto.subtle ? await fingerprint(identity) : identity;
       const deliver = () => {

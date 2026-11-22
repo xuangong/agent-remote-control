@@ -10,6 +10,7 @@ import { BotRoster, botPlaceKey } from './BotRoster.js';
 import { useSharedFeed, type SharedFeedsSnapshot } from '../../kernel/shared-feeds.js';
 import { projectShared, useSharedRoster } from './shared-roster.js';
 import { useBotActions, type BotInfo } from './BotActions.js';
+import { useGroupActions } from './useGroupActions.js';
 import { AsleepNotice } from '../../conversation/AsleepNotice.js';
 import { SessionConversationMount, type SessionSurfaceDescriptor } from '../../conversation/SessionConversationSurfaces.js';
 import { SidebarHeader } from '../../kernel/SidebarHeader.js';
@@ -53,6 +54,8 @@ export interface BotWorkspaceProps {
   botInfo?(place: { groupId: string; viewId: string }): BotInfo | undefined;
   /** Shows a bot's tile in Window mode, keeping this place for the way back. */
   onPinToWindow?(place: { groupId: string; viewId: string }): void;
+  /** Opens search across chats and messages: the rail has it on a desktop, the list's header on a phone. */
+  onSearch?(): void;
 }
 
 /** Whether a conversation shows: at phone width one screen shows at a time, the list as home, and an unavailable assistant leaves the list on screen. */
@@ -65,7 +68,7 @@ export function botConversationShown(facts: { place?: BotPlace; phone: boolean; 
  * The details are closed by default below the compact width; at phone width one screen shows at a time, the list as home,
  * and the details open as a sheet.
  */
-export function BotWorkspace({ visible, covered = false, compact, scope, workspace, navigation, selected, roster, projectRoster, directory, describeConversation, mount: Mount = SessionConversationMount, hostName = id => id, botInfo, onNewBot, onPinToWindow }: BotWorkspaceProps) {
+export function BotWorkspace({ visible, covered = false, compact, scope, workspace, navigation, selected, roster, projectRoster, directory, describeConversation, mount: Mount = SessionConversationMount, hostName = id => id, botInfo, onNewBot, onPinToWindow, onSearch }: BotWorkspaceProps) {
   const t = useTranslate();
   const names = useAssistantNames();
   const phone = usePhoneLayout();
@@ -83,6 +86,11 @@ export function BotWorkspace({ visible, covered = false, compact, scope, workspa
     ? <p role="alert">{selected.error} <button type="button" onClick={() => void selected.retry()}>{t('common.retry')}</button></p> : null;
   const creation = workspace.sectionCreationState, saving = creation.state === 'saving';
   const actions = useBotActions({ scope, workspace, onSelect: navigation.select, onError: setError });
+  // An assistant that moves to another group while open here stays open at its new place.
+  const groupActions = useGroupActions({ workspace, defaultTitle: t('navigation.groups.default'), onMoved: (from, to) => {
+    const shown = navigation.place;
+    if (shown?.kind === 'bot' && shown.groupId === from.groupId && shown.viewId === from.viewId) navigation.select({ kind: 'bot', ...to });
+  } });
   const botSection = place?.kind === 'bot' ? roster.sections.find(section => section.groupId === place.groupId) : undefined;
   const botRow = place?.kind === 'bot' ? botSection?.rows.find(row => row.viewId === place.viewId) : undefined;
   // A bot put to sleep elsewhere while open here: its conversation is released until it is woken.
@@ -96,7 +104,7 @@ export function BotWorkspace({ visible, covered = false, compact, scope, workspa
   const info = place?.kind === 'bot' ? botInfo?.(place) : undefined;
   const detailsHost: AssistantDetailsHost = {
     surface: phone ? 'sheet' : 'panel', slot: detailsSlot, tools: toolsSlot, open: detailsShown, setOpen: setDetailsOpen,
-    ...(botRow && botSection ? { actions: actions.cardActions(botRow, botSection.title),
+    ...(botRow && botSection ? { actions: actions.cardActions(botRow, botSection.title, groupActions.assistantMenu(botRow)),
       ...(onPinToWindow ? { action: { label: t('card.pin'), icon: 'window' as const, onSelect: () => onPinToWindow({ groupId: botRow.groupId, viewId: botRow.viewId }) } } : {}),
       setPicture: (picture: BotPicture) => actions.setPicture(botRow, picture), rename: (name: string) => actions.rename(botRow, name) } : {}),
     ...(info ? { where: info } : {}),
@@ -161,13 +169,16 @@ export function BotWorkspace({ visible, covered = false, compact, scope, workspa
     }}>
     <h1 className="lab-bot-title agent-visually-hidden">{t('navigation.chats')}</h1>
     <aside ref={rosterElement} id={rosterId} className="lab-bot-roster orchard-panel" hidden={phone && showConversation}>
-      <SidebarHeader brand actions={onNewBot ? <IconButton icon="plus" label={t('assistants.new')} onClick={onNewBot} /> : undefined} />
+      <SidebarHeader brand actions={onNewBot || phone && onSearch ? <>
+        {phone && onSearch ? <IconButton icon="search" label={t('navigation.search')} onClick={onSearch} /> : null}
+        {onNewBot ? <IconButton icon="plus" label={t('assistants.new')} onClick={onNewBot} /> : null}</> : undefined} />
       {unavailable ? availabilityNotice : null}
       {saving ? <p className="lab-bot-notice" role="status">{t('navigation.botWorkspace.saving')}</p> : null}
       {error || creation.error ? <p className="lab-bot-notice" role="alert">{error ?? creation.error}</p> : null}
       {creation.state === 'unknown' ? <p className="lab-bot-notice" role="status">{t('navigation.botWorkspace.groupUnconfirmed')} <button type="button" onClick={() => void retryGroup()}>{t('common.retry')}</button></p> : null}
       {actions.notice}
-      <div className="lab-bot-roster-scroll" onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><SharedBotRoster model={roster} project={projectRoster} place={place} onSelect={open} hostName={hostName} compact={phone}
+      {groupActions.error ? <p className="lab-bot-notice" role="alert">{groupActions.error}</p> : groupActions.notice ? <p className="lab-bot-notice" role="status">{groupActions.notice}</p> : null}
+      <div className="lab-bot-roster-scroll" onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><SharedBotRoster model={roster} groups={workspace.groups} project={projectRoster} place={place} onSelect={open} hostName={hostName} compact={phone}
         directoryControls={<div className="lab-bot-directory-controls">
           {directory.sources.map(source => <div key={source.id}><small>{hostName(source.hostId)} · {source.providerId}</small>
             {!source.online ? <p>{t('navigation.botWorkspace.hostOffline')}</p> : null}{source.loading ? <p role="status">{t('navigation.botWorkspace.loadingSessions')}</p> : null}
@@ -199,6 +210,7 @@ export function BotWorkspace({ visible, covered = false, compact, scope, workspa
         <IconButton icon="close" label={t('details.close')} onClick={() => setDetailsOpen(false)} /></header>
     </aside>
     {actions.sheets}
+    {groupActions.sheets([])}
   </main>;
 }
 

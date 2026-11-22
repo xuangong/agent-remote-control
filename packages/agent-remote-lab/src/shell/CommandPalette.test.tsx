@@ -36,7 +36,7 @@ const item = (id: string, title: string, kind: CommandItem['kind'], extra: Parti
   ({ id, kind, title, run: () => { log.push(`run ${id}`); }, ...extra });
 const allKinds = [
   item('new-session', 'New session', 'action', { shortcut: '⌘N', keyShortcuts: 'Meta+N' }),
-  item('new-window', 'New Window', 'action'),
+  item('new-window', 'New group', 'action'),
   item('research', 'Research', 'window', { subtitle: '3 session views' }),
   item('helper', 'Helper', 'bot'),
   item('parser', 'Fix the parser', 'session'),
@@ -80,10 +80,10 @@ it('opens as a modal dialog with a focused combobox that controls a grouped list
   expect(input.getAttribute('aria-expanded')).toBe('true');
   const listbox = document.getElementById(input.getAttribute('aria-controls')!)!;
   expect(listbox.getAttribute('role')).toBe('listbox');
-  expect([...listbox.querySelectorAll('[role="group"]')].map(group => group.getAttribute('aria-label'))).toEqual(['Actions', 'Windows', 'Bots', 'Sessions']);
+  expect([...listbox.querySelectorAll('[role="group"]')].map(group => group.getAttribute('aria-label'))).toEqual(['Actions', 'Groups', 'Assistants', 'Sessions']);
   expect(listbox.querySelectorAll('[role="group"] > [role="option"]')).toHaveLength(5);
-  expect(titles()).toEqual(['New session', 'New Window', 'Research', 'Helper', 'Fix the parser']);
-  expect(input.getAttribute('aria-label')).toBe('Search Windows, Bots, sessions and actions');
+  expect(titles()).toEqual(['New session', 'New group', 'Research', 'Helper', 'Fix the parser']);
+  expect(input.getAttribute('aria-label')).toBe('Search groups, assistants, messages and actions');
   expect(options()[0]!.querySelector('kbd')!.textContent).toBe('⌘N');
   expect(options()[0]!.querySelector('kbd')!.getAttribute('aria-hidden')).toBe('true');
   expect(options()[0]!.getAttribute('aria-keyshortcuts')).toBe('Meta+N');
@@ -96,7 +96,7 @@ it('opens as a modal dialog with a focused combobox that controls a grouped list
 it('filters the results as the query changes', async () => {
   await palette();
   await type('new');
-  expect(titles()).toEqual(['New session', 'New Window']);
+  expect(titles()).toEqual(['New session', 'New group']);
   expect(document.querySelectorAll('[role="group"]')).toHaveLength(1);
   await type('views');
   expect(titles()).toEqual(['Research']);
@@ -283,8 +283,8 @@ it('speaks Chinese: the dialog, the field, the groups and the empty result', asy
   log.length = 0;
   await render(<LocaleContext.Provider value="zh"><Harness items={allKinds} /></LocaleContext.Provider>);
   expect(document.querySelector('dialog')!.getAttribute('aria-label')).toBe('搜索');
-  expect(combobox().placeholder).toBe('搜索窗口、Bot、会话和操作');
-  expect([...document.querySelectorAll('.lab-command-group-title')].map(title => title.textContent)).toEqual(['操作', '窗口', 'Bot', '会话']);
+  expect(combobox().placeholder).toBe('搜索分组、助手、消息和操作');
+  expect([...document.querySelectorAll('.lab-command-group-title')].map(title => title.textContent)).toEqual(['操作', '分组', '助手', '会话']);
   await type('zzzz-nothing');
   expect(document.querySelector('.lab-command-empty')!.textContent).toBe('没有找到');
 });

@@ -5,7 +5,7 @@ import { coveringControls } from './covering.js';
 // The Track, Team, TPM and Window launchers never cover the conversation's text or the composer. On a compact screen they sit in a
 // row of the navigation that the layout reserves, so the rule holds for any number of launchers; on a wide screen without the
 // sidebar they float in the margin beside the reading column.
-/** A launcher's button: the rail and the tab bar have a Windows destination of the same name, which is not a launcher. */
+/** A launcher's button, never the rail's or the tab bar's destinations. */
 const launcherButton = (page: Page, name: string) => page.getByRole('button', { name, exact: true }).and(page.locator(':not(.lab-rail *, .lab-tab-bar *)'));
 const launcherSelector = '.lab-launcher, .lab-tracking-floating, .lab-sidebar-shortcut';
 
@@ -52,7 +52,7 @@ async function openLongConversation(page: Page, width: number, height: number) {
 
 test('at 390x844 the launchers take their own row and cover no conversation text or composer, however many there are', async ({ page }, testInfo) => {
   await openLongConversation(page, 390, 844);
-  for (const name of ['Tracked sessions', 'Teams', 'TPM works', 'Windows']) await expect(launcherButton(page, name)).toBeVisible();
+  for (const name of ['Tracked sessions', 'Teams', 'TPM works', 'Groups']) await expect(launcherButton(page, name)).toBeVisible();
   const four = await coverage(page);
   expect(four.launchers.length).toBeGreaterThanOrEqual(4);
   expect(four.lines).toBeGreaterThan(0);
@@ -81,17 +81,17 @@ test('at 390x844 the launchers take their own row and cover no conversation text
 
 test('a launcher panel opens under the navigation and its launcher stays in place', async ({ page }) => {
   await openLongConversation(page, 390, 844);
-  const trigger = launcherButton(page, 'Windows');
+  const trigger = launcherButton(page, 'Groups');
   const before = await trigger.boundingBox();
   await trigger.click();
-  const panel = page.getByRole('region', { name: 'Windows', exact: true });
+  const panel = page.getByRole('region', { name: 'Groups', exact: true });
   await expect(panel).toBeVisible();
   const box = (await panel.boundingBox())!, navigation = (await page.getByRole('navigation', { name: 'Session navigation' }).boundingBox())!;
   expect(box.y).toBeGreaterThanOrEqual(navigation.y + navigation.height);
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(390);
   expect(await trigger.boundingBox()).toEqual(before);
-  await panel.getByRole('button', { name: 'Close Windows' }).click();
+  await panel.getByRole('button', { name: 'Close groups' }).click();
   await expect(panel).toBeHidden();
 });
 
@@ -99,7 +99,7 @@ for (const width of [1440, 1181]) {
   test(`at ${width}px the launchers cover no conversation text or composer`, async ({ page, isMobile }, testInfo) => {
     test.skip(isMobile, 'A desktop viewport on a desktop profile');
     await openLongConversation(page, width, 900);
-    await expect(launcherButton(page, 'Windows')).toBeVisible();
+    await expect(launcherButton(page, 'Groups')).toBeVisible();
     const found = await coverage(page);
     expect(found.launchers.length).toBeGreaterThan(0);
     expect(found.lines).toBeGreaterThan(0);
@@ -130,7 +130,7 @@ for (const width of [1024, 1280, 1440]) {
           const platform = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform, apple = /mac|iphone|ipad/i.test(platform);
           window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', code: 'Backslash', ctrlKey: !apple, metaKey: apple, bubbles: true, cancelable: true }));
         });
-        await expect(page.locator('.lab-toolbar-launchers').getByRole('button', { name: 'Windows', exact: true })).toBeVisible();
+        await expect(page.locator('.lab-toolbar-launchers').getByRole('button', { name: 'Groups', exact: true })).toBeVisible();
         expect(await coveringControls(page)).toEqual([]);
       }
       await page.screenshot({ path: testInfo.outputPath(`tiles-${width}-${tiles}.png`) });

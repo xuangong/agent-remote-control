@@ -1,4 +1,5 @@
 // The command palette items and its queued mode steps.
+import { isPersonalGroup } from '../kernel/assistant-groups.js';
 import { isBotView } from '@orchardworks/agent-remote-protocol';
 import { drainModeSteps } from '../features/windows/mode-steps.js';
 import { paletteActions } from '../state/palette-actions.js';
@@ -25,8 +26,8 @@ import type { WindowViewActionsSlice } from './useWindowViewActions.js';
 import type { AttentionAndRosterSlice } from './useAttentionAndRoster.js';
 import type { AppInputs } from './types.js';
 
-export function useCommandSearch(scope: Pick<AppInputs & SessionSuccessionBindingSlice & PanelsAndShortcutsSlice & WorkbenchShellSlice & WindowModeActionsSlice & ActiveSessionSlice & RequestedSessionSlice & RemoteHostStateSlice & ProviderStateSlice & SharedFeedsAndTpmSlice & WindowViewActionsSlice & AttentionAndRosterSlice, 'baseUrl' | 'botRoster' | 'closePage' | 'desktopContextVisible' | 'directory' | 'favorites' | 'inMode' | 'initialState' | 'modeSteps' | 'navigation' | 'openNewBot' | 'openNewSessionPanel' | 'providers' | 'queuedModeSteps' | 'remoteHosts' | 'searchOpen' | 'searchRuns' | 'sessionEntries' | 'setWindowOverviewOpen' | 'sharedWindow' | 'showPanel' | 'switchMode' | 'toggleSidebar' | 'userScoped' | 'windowMode' | 'windowOverviewSupported' | 'windowWorkspace' | 'openInBotMode' | 'pinToWindow'>) {
-  const { baseUrl, botRoster, closePage, desktopContextVisible, directory, favorites, inMode, initialState, modeSteps, navigation, openNewBot, openNewSessionPanel, providers, queuedModeSteps, remoteHosts, searchOpen, searchRuns, sessionEntries, setWindowOverviewOpen, sharedWindow, showPanel, switchMode, toggleSidebar, userScoped, windowMode, windowOverviewSupported, windowWorkspace, openInBotMode, pinToWindow } = scope;
+export function useCommandSearch(scope: Pick<AppInputs & SessionSuccessionBindingSlice & PanelsAndShortcutsSlice & WorkbenchShellSlice & WindowModeActionsSlice & ActiveSessionSlice & RequestedSessionSlice & RemoteHostStateSlice & ProviderStateSlice & SharedFeedsAndTpmSlice & WindowViewActionsSlice & AttentionAndRosterSlice, 'baseUrl' | 'botRoster' | 'closePage' | 'desktopContextVisible' | 'directory' | 'favorites' | 'inMode' | 'initialState' | 'modeSteps' | 'navigation' | 'openNewBot' | 'openNewSessionPanel' | 'providers' | 'queuedModeSteps' | 'remoteHosts' | 'searchOpen' | 'searchRuns' | 'sessionEntries' | 'setWindowOverviewOpen' | 'sharedFeeds' | 'sharedWindow' | 'showPanel' | 'switchMode' | 'toggleSidebar' | 'userScoped' | 'windowMode' | 'windowOverviewSupported' | 'windowWorkspace' | 'openInBotMode' | 'pinToWindow'>) {
+  const { baseUrl, botRoster, closePage, desktopContextVisible, directory, favorites, inMode, initialState, modeSteps, navigation, openNewBot, openNewSessionPanel, providers, queuedModeSteps, remoteHosts, searchOpen, searchRuns, sessionEntries, setWindowOverviewOpen, sharedFeeds, sharedWindow, showPanel, switchMode, toggleSidebar, userScoped, windowMode, windowOverviewSupported, windowWorkspace, openInBotMode, pinToWindow } = scope;
 
   const t = useTranslate();
 
@@ -69,18 +70,26 @@ export function useCommandSearch(scope: Pick<AppInputs & SessionSuccessionBindin
       createWindow: () => searchRuns.current.createWindowFromMenu(),
       addSessionView: () => { closePage(); searchRuns.current.addSessionView(); },
       openWindowOverview: () => setWindowOverviewOpen(true) });
-    // Each session is one item: a bot in Bot mode, a session (opened in Window mode) otherwise.
-    const bots = windowMode ? [] : botRoster.sections.flatMap(section => section.rows.map((row): CommandItem => ({ id: `bot:${row.groupId}/${row.viewId}`, kind: 'bot',
-      title: row.name, subtitle: section.title, ...(row.details.label ? { keywords: [row.details.label] } : {}),
-      run: () => {
-        const switching = windowMode;
-        navigation.select({ kind: 'bot', groupId: row.groupId, viewId: row.viewId });
-        if (switching) inMode('bot', () => searchRuns.current.focusShownMode('bot'));
-      } })));
+    // An assistant is found by its name, its group, its label, its session's title, its latest reply and the draft waiting for
+    // it: search across chats and their latest messages. Each session is one item: an assistant in Bot mode; in Window mode a
+    // session, which the same words find.
+    const shared = sharedFeeds.get();
+    const assistants = botRoster.sections.flatMap(section => {
+      const group = windowWorkspace.readGroup(section.groupId);
+      const groupTitle = group && isPersonalGroup(group) ? t('navigation.groups.default') : section.title;
+      return section.rows.map(row => {
+        const reply = shared.states?.reply(row.session)?.preview, draft = shared.drafts?.draft(row.session)?.text;
+        return { row, groupTitle, words: [row.name, groupTitle, row.details.label, row.binding.title, reply, draft].filter((word): word is string => !!word?.trim()) };
+      });
+    });
+    const bots = windowMode ? [] : assistants.map(({ row, groupTitle, words }): CommandItem => ({ id: `bot:${row.groupId}/${row.viewId}`, kind: 'bot', title: row.name, subtitle: groupTitle,
+      keywords: words.slice(2), run: () => navigation.select({ kind: 'bot', groupId: row.groupId, viewId: row.viewId }) }));
+    const wordsOf = new Map(assistants.map(({ row, words }) => [`session:${sessionKey(row.binding)}`, words]));
+    const sessions = sessionItems.map(item => { const words = wordsOf.get(item.id); return words ? { ...item, keywords: [...item.keywords ?? [], ...words] } : item; });
     const botSessions = new Set(windowMode ? [] : botRoster.sections.flatMap(section => section.rows.map(row => `session:${sessionKey(row.binding)}`)));
     const appearance = currentAppearance();
     const appearances = appearance ? appearanceItems(appearance.appearance, next => appearance.set(next)) : [];
-    return [...actions, ...appearances, ...windowItems, ...bots, ...sessionItems.filter(item => !botSessions.has(item.id))];
+    return [...actions, ...appearances, ...windowItems, ...bots, ...sessions.filter(item => !botSessions.has(item.id))];
   }
   return { commandItems };
 }

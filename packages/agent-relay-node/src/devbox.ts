@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { mkdir, open, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { defaultPushSubject, generateVapidKeys, isBrowserPushService, isUncompressedKey, type VapidKeys } from '@orchardworks/agent-relay-core';
 import { createDevboxAuthentication } from './devbox-auth.js';
 import { createGatewayRelay } from './gateway-relay.js';
 import { createGatewayStaticPages } from './gateway-static.js';
@@ -17,6 +18,8 @@ export interface DevboxServerOptions {
   controllerReleases?: Parameters<typeof createGatewayRelay>[0]['controllerReleases'];
   /** How long an idle Window poll waits for a change; the default returns before an outer preview tunnel's response deadline. */
   windowChangesWaitMs?: number;
+  /** Origins of push services the Relay may send to besides the browsers' own, such as a test's push service simulator. */
+  pushServices?: readonly string[];
 }
 export interface DevboxConnection { serverUrl: string; remoteKey: string }
 
@@ -28,6 +31,9 @@ export async function createDevboxServer(options: DevboxServerOptions) {
     throw new Error('Devbox requires a loopback HTTP origin with an explicit fixed port.');
   }
   const identity = await loadIdentity(options.stateDir, url.origin);
+  // A local Relay has its own VAPID key pair, made at its first start and kept with its state.
+  const vapid = await loadPushKeys(options.stateDir);
+  const pushServices = new Set(options.pushServices ?? []);
   const auth = { origin: url.origin, issuer: url.origin, secret: identity.secret, cookiePrefix: 'devbox' };
   const relay = createGatewayRelay({ ...auth, stateFile: join(options.stateDir, 'relay', 'state.json'),
     ...(options.journals ? { journalFile: join(options.stateDir, 'relay', 'journals.sqlite'), ...(options.journalLimits ? { journalLimits: options.journalLimits } : {}) } : {}),
@@ -36,6 +42,7 @@ export async function createDevboxServer(options: DevboxServerOptions) {
     // Return idle Window polls before an outer preview tunnel's response deadline.
     windowChangesWaitMs: options.windowChangesWaitMs ?? 10000,
     ...(options.controllerReleases ? { controllerReleases: options.controllerReleases } : {}),
+    push: { vapid: { ...vapid, subject: defaultPushSubject(url.origin) }, endpoints: endpoint => isBrowserPushService(endpoint) || pushServices.has(endpoint.origin) },
     originAliases: ['localhost', 'localhost.', '127.0.0.1', '[::1]'].map(host => `http://${host}:${url.port}`),
     servePage: await createGatewayStaticPages(options.webDist, { origin: url.origin, devbox: true }),
   });
@@ -70,6 +77,20 @@ async function loadIdentity(directory: string, origin: string): Promise<{ origin
   if (identity?.version !== 1 || typeof identity.secret !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(identity.secret)) throw new Error('Devbox identity is invalid. Restore its state volume.');
   if (identity.origin !== origin) throw new Error('Devbox state belongs to another origin. Keep the saved port or select another state volume.');
   return identity;
+}
+
+/** The local Relay's VAPID key pair, made once and kept in its state directory, readable by its owner only. */
+async function loadPushKeys(directory: string): Promise<VapidKeys> {
+  const file = join(directory, 'push-keys.json');
+  try {
+    const keys = await generateVapidKeys();
+    const output = await open(file, 'wx', 0o600);
+    try { await output.writeFile(JSON.stringify({ version: 1, ...keys }) + '\n'); await output.sync(); }
+    finally { await output.close(); }
+  } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+  const keys = JSON.parse(await readFile(file, 'utf8'));
+  if (keys?.version !== 1 || !isUncompressedKey(keys.publicKey) || typeof keys.privateKey !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(keys.privateKey)) throw new Error('Devbox push keys are invalid. Remove push-keys.json from its state to make new ones.');
+  return { publicKey: keys.publicKey, privateKey: keys.privateKey };
 }
 
 async function pairController(origin: string): Promise<DevboxConnection> {

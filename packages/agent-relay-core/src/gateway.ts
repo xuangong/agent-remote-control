@@ -12,6 +12,9 @@ import { createSessionMigrations } from './session-migrations.js';
 import { createSessionReads, SessionReadsError } from './session-reads.js';
 import { createSessionDrafts, SessionDraftsError } from './session-drafts.js';
 import { createSessionOutbox, OutboxError } from './session-outbox.js';
+import { createRelayPush } from './push/relay-push.js';
+import type { PushConfiguration } from './push/push-config.js';
+import type { ReminderState } from './push/push-reminders.js';
 import { PROTOCOL_VERSION, encodeSessionChannelServerMessage, SESSION_STATE_LIMIT, type SessionChannelServerMessage, type SessionStateHost, type SessionStateRef, type SessionStateUpdate } from '@orchardworks/agent-remote-protocol';
 import { acceptSessionChannel } from '@orchardworks/agent-remote-protocol';
 import { createSessionStars, StarError } from './session-stars.js';
@@ -87,6 +90,10 @@ export type HostedRelayOptions = HostedAuthOptions & {
   onStateCommit?(metrics: RelayStateCommitMetrics): void;
   /** Encoded bytes of the Relay state that Team changes may not grow beyond. Defaults to RELAY_STATE_BYTES with storage. */
   maximumStateBytes?: number;
+  /** Web Push reminders: the VAPID key pair and subject (push-config.ts). Absent, the Relay sends no pushes and says so to pages. */
+  push?: PushConfiguration;
+  /** Told once when the push configuration cannot be used, such as a key pair whose halves do not belong together. */
+  onPushProblem?(problem: string): void;
 }
 /**
  * The Relay state Team changes may grow to, in encoded bytes. Its other parts are bounded by their counts; Teams by their
@@ -209,6 +216,20 @@ export function createHostedRelay(options: HostedRelayOptions) {
     feed.snapshot = false; feed.entries = encoded;
     try { socket.send(frame.json); } catch { socket.close(1011, 'Outbox delivery failed'); }
   }
+  /** The session states an account may see, each Host once, as its channels share them. */
+  function visibleStates(subject: string): ReminderState[] {
+    const seen = new Set<string>(), states: ReminderState[] = [];
+    for (const tenant of tenants.values()) for (const host of tenant.broker.sessionStates(subject)) {
+      if (seen.has(host.hostId)) continue;
+      seen.add(host.hostId);
+      for (const state of host.states) states.push({ hostId: host.hostId, providerId: state.providerId, nativeSessionId: state.nativeSessionId, state: state.state,
+        ...(state.updatedAt === undefined ? {} : { updatedAt: state.updatedAt }), ...(state.replyAt === undefined ? {} : { replyAt: state.replyAt }) });
+    }
+    return states;
+  }
+  const push = createRelayPush({ state, ...(options.push ? { configuration: options.push } : {}), states: visibleStates,
+    groups: subject => windows.list({ subject }).groups, signedIn: (subject, device) => sessions.signedIn(subject, device),
+    onProblem: problem => options.onPushProblem?.(problem) });
   let successionPublishing: Promise<void> = Promise.resolve();
   function publishSuccessions(socket: RelaySocket, channel: { subject: string; expiresAt(): number; successions?: Set<string> }) {
     if (!channel.successions) return;
@@ -442,7 +463,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         ...(journalService ? { journalService } : {}),
         ...(options.successionEnrollment ? { successionEnrollment: { version: 1, origin: auth.origin, issuer: auth.issuer, namespace: grant.namespace, ownerSubject: grant.subject } as const, successionProjectionAllowance: allowance } : {}),
         userStreamCount, ...(stateRoom ? { stateRoom } : {}),
-        onSessionStates: () => publishAllStates(),
+        onSessionStates: () => { publishAllStates(); push.observe(); },
         onStateChange: async broker => { await state.mutate(draft => {
           stageBroker(draft, broker);
         }); await scheduling; },
@@ -650,7 +671,10 @@ export function createHostedRelay(options: HostedRelayOptions) {
     if (url.pathname === '/auth/logout' && request.method === 'POST') {
       if (!originAllowed(request)) return json(403, { error: 'Origin is not allowed.' });
       const current = await sessions.authenticate(request);
+      const device = sessions.device(request);
       await sessions.logout(request);
+      // A device that signs out gets no more reminders of the account.
+      if (current.grant && device) await push.forgetDevices(current.grant.subject, [device]);
       if (current.grant) await security.record(current.grant.subject, 'signed_out', 'allowed');
       const response = json(200, { ok: true });
       response.headers.set('set-cookie', `${gatewayCookieName(auth.origin, 'session', auth.cookiePrefix)}=; ${cookieFlags}; Max-Age=0`); return response;
@@ -675,10 +699,12 @@ export function createHostedRelay(options: HostedRelayOptions) {
         const result = await sessions.revoke(grant.subject, body.id, request);
         if (!result.found) return json(404, {error:'Browser session is unavailable.'});
         current = result.current;
+        if (result.device) await push.forgetDevices(grant.subject, [result.device]);
         await security.record(grant.subject, 'session_revoked', 'allowed');
       } else if (url.pathname === '/auth/sessions/revoke-all') {
         if (!body || Object.keys(body).length) return json(400, {error:'No parameters are accepted.'});
         await sessions.revokeAll(grant.subject); current = true;
+        await push.forgetDevices(grant.subject);
         await security.record(grant.subject, 'all_sessions_revoked', 'allowed');
       } else return json(405, {error:'Method is not allowed.'});
       const response = json(200, {ok:true,current});
@@ -819,6 +845,10 @@ export function createHostedRelay(options: HostedRelayOptions) {
         if (error instanceof SessionReadsError) return json(error.status, { code: error.code, error: error.message });
         throw error;
       }
+    }
+    if (path === '/v1/push-subscriptions') {
+      const answer = await push.request(request.method, grant.subject, sessions.device(request), () => readJson(request));
+      return json(answer.status, answer.body);
     }
     if (path === '/v1/session-drafts') {
       try {
@@ -1045,10 +1075,16 @@ export function createHostedRelay(options: HostedRelayOptions) {
             prepared = await prepare(new Request(target, request));
           }
           if (!prepared || prepared instanceof Response) return sessionSubscriptionRefusal(prepared);
-          if (!preemptible) return prepared;
           const accepted = prepared;
-          // Other subscriptions may have opened while this one was prepared.
-          return { accept(stream: RelaySocket) { preemption.makeRoom(grant.subject, lastUsed()); accepted.accept(stream); } };
+          // A stream of a conversation shows it to the account while the page uses it (push reminders wait for no such page).
+          const shown = mode === 'session' ? [...tenants.values()].map(tenant => tenant.broker.sessionOf(agentId, grant.subject)).find(session => session !== undefined) : undefined;
+          if (!preemptible && !shown) return accepted;
+          return { accept(stream: RelaySocket) {
+            // Other subscriptions may have opened while this one was prepared.
+            if (preemptible) preemption.makeRoom(grant.subject, lastUsed());
+            accepted.accept(stream);
+            if (shown && stream.readyState === 1) stream.onClose(push.presence.add(grant.subject, shown, () => lastUsed() === Number.POSITIVE_INFINITY));
+          } };
         }, route.searchParams.get('successions') === '1' ? { successions: 1 } : {}, undefined, preemptible);
         publishMigrations(socket, browserChannels.get(socket)!);
         publishTitles(socket, browserChannels.get(socket)!);

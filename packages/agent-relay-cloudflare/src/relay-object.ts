@@ -1,4 +1,4 @@
-import { createHostedRelay, createPartitionJournals, hostedAuthFromEnv, hostedRecordEncodingCosts, PortableTeamResourceStore, type HostedAuthEnvironment, type HostedRecordKind, type JournalPartitionApi, type RelayScheduler } from '@orchardworks/agent-relay-core';
+import { createHostedRelay, createPartitionJournals, hostedAuthFromEnv, hostedRecordEncodingCosts, PortableTeamResourceStore, pushFromEnvironment, type HostedAuthEnvironment, type HostedRecordKind, type JournalPartitionApi, type PushEnvironment, type RelayScheduler } from '@orchardworks/agent-relay-core';
 import { createStateCommitLog } from './state-commit-log.js';
 import { SqliteTeamResourceStorage } from './team-resource-storage.js';
 import { createHmac } from 'node:crypto';
@@ -7,7 +7,8 @@ import { SqliteDiagnosticStore } from './diagnostic-storage.js';
 import { WorkerRelaySocket } from './socket.js';
 import { WorkerPreviewSocket } from './preview-socket.js';
 
-export interface RelayEnvironment extends HostedAuthEnvironment {
+/** `PushEnvironment`: the VAPID public key is a variable, its private key the secret AGENT_REMOTE_PUSH_PRIVATE_KEY. */
+export interface RelayEnvironment extends HostedAuthEnvironment, PushEnvironment {
   AGENT_REMOTE_PREVIEW_URL?: string;
   AGENT_REMOTE_PREVIEW_DOMAIN?: string;
   /** Milliseconds that access confirmed before an account authority outage stays usable; defaults to 15 minutes. */
@@ -64,10 +65,13 @@ export class RelayObject {
       console.error('Configuration error: AGENT_REMOTE_JOURNALS is 1 but this Worker has no JOURNALS binding. The Relay runs without journals; deploy the journal partitions Worker and add the binding (see the deployment guide), or unset the variable.');
     }
     const journalService = partitions && createPartitionJournals({ partition: hostId => partitions.getByName(hostId) as unknown as JournalPartitionApi });
+    const push = pushFromEnvironment(this.env, auth.origin);
+    if (push.problem) console.error(`Configuration error: ${push.problem}`);
     this.core = createHostedRelay({ ...auth, hostLiveness: this.hostLiveness(), ...(journalService ? { journalService } : {}), ...(this.env.AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS ? { authorityOutageGraceMs: Number(this.env.AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS) } : {}), previewOrigin: this.env.AGENT_REMOTE_PREVIEW_URL, previewDomain: this.env.AGENT_REMOTE_PREVIEW_DOMAIN, storage, successionEnrollment: true, diagnosticStorage: new SqliteDiagnosticStore(this.context.storage, auth),
       teamResources: namespace => new PortableTeamResourceStore({ storage: new SqliteTeamResourceStorage(this.context.storage, createHmac('sha256', auth.secret).update(JSON.stringify([auth.origin, auth.issuer, namespace])).digest('hex')) }),
       successionEncodingCosts: hostedRecordEncodingCosts(auth, verification('capacity')), onStateCommit: metrics => log!.commit(metrics),
-      diagnosticContext: { runtimeInstanceId: this.runtimeInstanceId, workerVersionId: this.env.CF_VERSION_METADATA?.id, startReason }, scheduler, clientAddress: request => request.headers.get('cf-connecting-ip') ?? 'unknown' });
+      diagnosticContext: { runtimeInstanceId: this.runtimeInstanceId, workerVersionId: this.env.CF_VERSION_METADATA?.id, startReason }, scheduler, clientAddress: request => request.headers.get('cf-connecting-ip') ?? 'unknown',
+      ...(push.configuration ? { push: push.configuration } : {}), onPushProblem: problem => console.error(`Configuration error: ${problem}`) });
   }
   async fetch(request: Request): Promise<Response> {
     await this.ready;

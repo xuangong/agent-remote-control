@@ -29,3 +29,4 @@ export * from './window-routes.js';
 
 export { createPushSender, isBrowserPushService, retryAfterMs, RETRY_LIMIT_MS, type PushMessage, type PushOutcome, type PushSender, type PushSenderOptions, type PushUrgency } from './push/push-sender.js';
 export { encryptPush, fromBase64url, generateVapidKeys, importVapidKeys, isUncompressedKey, PUSH_PLAINTEXT_LIMIT, PUSH_RECORD_SIZE, toBase64url, vapidAuthorization, type PushTarget, type VapidKeys } from './push/web-push.js';
+export { defaultPushSubject, pushFromEnvironment, type PushConfiguration, type PushEnvironment } from './push/push-config.js';

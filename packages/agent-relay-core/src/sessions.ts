@@ -94,6 +94,16 @@ export function createHostedSessions(auth: HostedAuthOptions, state: RelayState,
       const legacy = !durable ? provider.legacy(request) : undefined;
       return legacy && !legacy.continuation ? { grant: legacy } : {};
     },
+    /** The device a request comes from: its browser's identity, or its own session when it has none (a command line, an old sign-in). */
+    device(request: Request): string | undefined {
+      const record = recordFor(request);
+      return record && deviceOf(record);
+    },
+    /** Whether a device still holds a live session of the account. */
+    signedIn(subject: string, device: string): boolean {
+      const now = Date.now();
+      return state.read().sessions.some(record => record.grant.subject === subject && record.sessionExpiresAt > now && deviceOf(record) === device);
+    },
     expiresAt(request: Request, grant: HostedGrant) {
       return provider.persistent(grant) ? recordFor(request)?.grant.expiresAt ?? 0 : grant.expiresAt;
     },
@@ -112,13 +122,14 @@ export function createHostedSessions(auth: HostedAuthOptions, state: RelayState,
       });
       return id ? identity.cookie(id) : undefined;
     },
-    async revoke(subject: string, id: string, request: Request) {
+    /** Revokes a browser's sessions of the account; `device` names the device they were, for what it kept (its push subscription). */
+    async revoke(subject: string, id: string, request: Request): Promise<{ found: boolean; current: boolean; device?: string }> {
       const active = recordFor(request);
       return state.mutate(draft => { const target = draft.sessions.find(record => record.grant.subject === subject && (record.browserId ? `browser:${record.browserId}` : record.id ?? managementId(record.hash)) === id);
         if (!target) return {found:false,current:false};
         const matches = (record: SavedGatewaySession) => record.grant.subject === subject && (target.browserId ? record.browserId === target.browserId : record.hash === target.hash);
         draft.sessions = draft.sessions.filter(record => !matches(record));
-        return {found:true,current:!!active && matches(active)};
+        return {found:true,current:!!active && matches(active),device:deviceOf(target)};
       });
     },
     async revokeAll(subject: string) { await state.mutate(draft => { draft.sessions = draft.sessions.filter(record => record.grant.subject !== subject); }); },
@@ -154,6 +165,8 @@ export function createHostedSessions(auth: HostedAuthOptions, state: RelayState,
 }
 
 function managementId(hash: string) { return createHash('sha256').update('browser-management:' + hash).digest('hex'); }
+/** The device a session belongs to: its browser, or the session itself when it has no browser identity. */
+const deviceOf = (record: SavedGatewaySession): string => record.browserId ? `browser:${record.browserId}` : record.id ?? managementId(record.hash);
 function browserLabel(agent?: string | null): string {
   const platform = /Android/.test(agent ?? '') ? 'Android' : /iPhone|iPad/.test(agent ?? '') ? 'iOS' : /Macintosh/.test(agent ?? '') ? 'Mac' : /Windows/.test(agent ?? '') ? 'Windows' : /Linux/.test(agent ?? '') ? 'Linux' : 'Device';
   const browser = /Edg(?:e|A|iOS)?\//.test(agent ?? '') ? 'Edge' : /Chrome\/|CriOS\//.test(agent ?? '') ? 'Chrome' : /Firefox\/|FxiOS\//.test(agent ?? '') ? 'Firefox' : /Safari\//.test(agent ?? '') ? 'Safari' : 'Browser';

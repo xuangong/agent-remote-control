@@ -3,9 +3,12 @@ import { resolve, join } from 'node:path';
 import { homedir } from 'node:os';
 import { createGatewayRelay } from './gateway-relay.js';
 import { createGatewayStaticPages } from './gateway-static.js';
-import { hostedAuthFromEnv } from '@orchardworks/agent-relay-core';
+import { hostedAuthFromEnv, pushFromEnvironment } from '@orchardworks/agent-relay-core';
 
 const auth = hostedAuthFromEnv(process.env);
+// Web Push reminders, with the same variables as the Worker: both halves of the VAPID key pair, or neither.
+const push = pushFromEnvironment(process.env, auth.origin);
+if (push.problem) console.error(`Configuration error: ${push.problem}`);
 const stateDirectory = process.env.AGENT_REMOTE_STATE_DIR ?? join(homedir(), '.agent-remote-control', 'gateway-relay');
 const server = createGatewayRelay({
   ...auth,
@@ -14,6 +17,7 @@ const server = createGatewayRelay({
   previewOrigin: process.env.AGENT_REMOTE_PREVIEW_URL,
   previewDomain: process.env.AGENT_REMOTE_PREVIEW_DOMAIN,
   ...(process.env.AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS ? { authorityOutageGraceMs: Number(process.env.AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS) } : {}),
+  ...(push.configuration ? { push: push.configuration } : {}), onPushProblem: problem => console.error(`Configuration error: ${problem}`),
   servePage: await createGatewayStaticPages(process.env.AGENT_REMOTE_WEB_DIST ?? fileURLToPath(new URL('../../agent-remote-lab/dist', import.meta.url)), { origin: auth.origin, previewDomain: process.env.AGENT_REMOTE_PREVIEW_DOMAIN }),
 });
 const port = Number(process.env.AGENT_REMOTE_PORT ?? 5910);

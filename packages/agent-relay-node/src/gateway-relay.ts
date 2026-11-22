@@ -36,6 +36,9 @@ export type GatewayRelayOptions = HostedAuthOptions & {
   maxStateBytes?: number;
   /** Trusted equivalent transport origins; production entrypoints do not configure aliases. */
   originAliases?: readonly string[];
+  /** Web Push reminders: the VAPID key pair and subject; absent, the Relay sends no pushes. */
+  push?: HostedRelayOptions['push'];
+  onPushProblem?: HostedRelayOptions['onPushProblem'];
 }
 export type GatewayRelayRequestInterceptor = (request: Request, dispatch: (request: Request) => Promise<Response | undefined>) => Promise<Response | undefined>;
 export function createGatewayRelay(options: GatewayRelayOptions) {
@@ -132,6 +135,7 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
         if (!originKnown) await openDurableParts();
         const initial = storage ? migrateLegacyNodeState(storage.initial, auth) : undefined;
         runtime = createHostedRelay({ ...auth, previewOrigin, previewDomain: options.previewDomain, clientAddress: request => clientAddresses.get(request) ?? 'unknown', maxTenants: options.maxTenants, keyLifetimeMs: options.keyLifetimeMs, recentAuthentication: options.recentAuthentication, windowChangesWaitMs: options.windowChangesWaitMs, ...(options.scheduler ? { scheduler: options.scheduler } : {}), ...(options.brokerScheduler ? { brokerScheduler: options.brokerScheduler } : {}), ...(options.controllerReleases ? { controllerReleases: options.controllerReleases } : {}), ...(options.authorityOutageGraceMs !== undefined ? { authorityOutageGraceMs: options.authorityOutageGraceMs } : {}),
+          ...(options.push ? { push: options.push } : {}), ...(options.onPushProblem ? { onPushProblem: options.onPushProblem } : {}),
           ...(storage ? { successionEnrollment: true, successionEncodingCosts: { ...hostedRecordEncodingCosts(auth), acceptsSnapshot: storage.acceptsSnapshot } } : {}),
           ...(options.stateFile ? { diagnosticStorage: openGatewayDiagnostics(options.stateFile, auth) } : {}),
           ...(options.stateFile ? { teamResources: (namespace: string) => new InputResourceStore({ directory: join(options.stateFile + '.resources', createHmac('sha256', auth.secret).update(JSON.stringify([auth.origin, auth.issuer, namespace])).digest('hex')) }) } : {}),

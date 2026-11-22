@@ -9,7 +9,7 @@ import { MAX_SESSION_TITLES } from './session-titles.js';
 import { validBrowserId } from './browser-devices.js';
 import type { SavedFavoritesTree } from '@orchardworks/agent-remote-protocol/model';
 import { validFavoritesState } from './favorites.js';
-import { decodeSessionChannelServerMessage, decodeWorkspaceWindow, isOutboxEntry, isSessionDraft, isSessionRead, OUTBOX_LIMIT, PROTOCOL_VERSION, SESSION_DRAFT_LIMIT, SESSION_READ_LIMIT, type OutboxEntry, type SessionDraft, type SessionRead, type SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
+import { decodeSessionChannelServerMessage, decodeWorkspaceWindow, isOutboxEntry, isPushSubscriptionRequest, isSessionDraft, isSessionRead, OUTBOX_LIMIT, PROTOCOL_VERSION, PUSH_DEVICE_LIMIT, SESSION_DRAFT_LIMIT, SESSION_READ_LIMIT, type OutboxEntry, type PushSubscriptionRequest, type SessionDraft, type SessionRead, type SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
 import type { SavedSessionMigration } from './session-migrations.js';
 import { validPairingHistory } from './pairing-keys.js';
 import { hasHostRecoveryMetadata, retainedHostIdentities, validHostRecovery, validRevokedHosts } from './host-recovery.js';
@@ -47,6 +47,11 @@ export interface HostedRelayState {
   sessionDrafts?: SavedSessionDraft[];
   /** Messages waiting for offline Hosts, one record per message. */
   outbox?: SavedOutboxEntry[];
+  /**
+   * Each account's push subscriptions, one per device (I5c). They stay in the Relay header rather than records of their own: an older
+   * Worker keeps a header field it does not know, so a rollback keeps them and still reads the state.
+   */
+  pushSubscriptions?: SavedPushSubscription[];
   config: { origin: string; issuer: string; provider?: 'google'; clientId?: string };
   googleIdentities?: Array<{ subject: string; email: string }>;
   sessions: SavedHostedSession[];
@@ -65,6 +70,10 @@ export const MAX_SESSION_DRAFTS = 1024;
 export type SavedOutboxEntry = OutboxEntry & { subject: string; claimedAt?: number };
 /** Messages kept across every account: at most 8 MB of text. */
 export const MAX_OUTBOX = 512;
+/** A device's push subscription: the browser's subscription, its language and switch, for one account and one device (a browser). */
+export type SavedPushSubscription = PushSubscriptionRequest & { subject: string; device: string; createdAt: number; updatedAt: number };
+/** Push subscriptions kept across every account, about 200 kB of the header at most. */
+export const MAX_PUSH_SUBSCRIPTIONS = 512;
 export interface LoginChallenge { expiresAt: number; hostId?: string; returnPath?: string; google?: { nonce: string; verifier: string; browserHash: string; browserId?: string } }
 /** What a store's commit wrote, for diagnostics. */
 export interface RelayStateCommitStats {
@@ -139,18 +148,18 @@ function validBroker(value: unknown): value is RemoteHostBrokerState {
 /** Frozen parts of committed state that passed validation; equal identity is equal content because nobody can change them. */
 interface ValidationMemo {
   tenants: WeakSet<object>; sessions: WeakSet<object>; challenges: WeakSet<object>; proofs: WeakSet<object>; events: WeakSet<object>;
-  windows: WeakSet<object>; migrations: WeakSet<object>; stars: WeakSet<object>; titles: WeakSet<object>; reads: WeakSet<object>; drafts: WeakSet<object>; outbox: WeakSet<object>; authorities: WeakSet<object>;
+  windows: WeakSet<object>; migrations: WeakSet<object>; stars: WeakSet<object>; titles: WeakSet<object>; reads: WeakSet<object>; drafts: WeakSet<object>; outbox: WeakSet<object>; push: WeakSet<object>; authorities: WeakSet<object>;
   progress: WeakSet<object>; favorites: WeakMap<object, WeakSet<object>>; normalized: WeakMap<object, boolean>;
   /** Whole collections that passed, with their uniqueness and per-account counts. */
-  lists: Record<'sessions' | 'tenants' | 'challenges' | 'proofs' | 'events' | 'migrations' | 'stars' | 'reads' | 'drafts' | 'outbox', WeakSet<object>>;
+  lists: Record<'sessions' | 'tenants' | 'challenges' | 'proofs' | 'events' | 'migrations' | 'stars' | 'reads' | 'drafts' | 'outbox' | 'push', WeakSet<object>>;
 }
 const memos = new WeakMap<HostedAuthOptions, ValidationMemo>();
 function memoFor(auth: HostedAuthOptions): ValidationMemo {
   let memo = memos.get(auth);
   if (!memo) memos.set(auth, memo = { tenants: new WeakSet(), sessions: new WeakSet(), challenges: new WeakSet(), proofs: new WeakSet(), events: new WeakSet(),
-    windows: new WeakSet(), migrations: new WeakSet(), stars: new WeakSet(), titles: new WeakSet(), reads: new WeakSet(), drafts: new WeakSet(), outbox: new WeakSet(), authorities: new WeakSet(), progress: new WeakSet(),
+    windows: new WeakSet(), migrations: new WeakSet(), stars: new WeakSet(), titles: new WeakSet(), reads: new WeakSet(), drafts: new WeakSet(), outbox: new WeakSet(), push: new WeakSet(), authorities: new WeakSet(), progress: new WeakSet(),
     favorites: new WeakMap(), normalized: new WeakMap(),
-    lists: { sessions: new WeakSet(), tenants: new WeakSet(), challenges: new WeakSet(), proofs: new WeakSet(), events: new WeakSet(), migrations: new WeakSet(), stars: new WeakSet(), reads: new WeakSet(), drafts: new WeakSet(), outbox: new WeakSet() } });
+    lists: { sessions: new WeakSet(), tenants: new WeakSet(), challenges: new WeakSet(), proofs: new WeakSet(), events: new WeakSet(), migrations: new WeakSet(), stars: new WeakSet(), reads: new WeakSet(), drafts: new WeakSet(), outbox: new WeakSet(), push: new WeakSet() } });
   return memo;
 }
 /** check(item), skipped for a frozen item that passed it before. */
@@ -219,6 +228,16 @@ function checkRelayState(value: unknown, auth: HostedAuthOptions, memo?: Validat
     })) || !unique(drafts, (item: SavedSessionDraft) => JSON.stringify([item.subject, item.hostId, item.providerId, item.nativeSessionId]))) return false;
     const counts = new Map<string, number>();
     for (const item of drafts) { const count = (counts.get(item.subject) ?? 0) + 1; if (count > SESSION_DRAFT_LIMIT) return false; counts.set(item.subject, count); }
+    return true;
+  }))) return invalid();
+  if (value.pushSubscriptions !== undefined && (!Array.isArray(value.pushSubscriptions) || value.pushSubscriptions.length > MAX_PUSH_SUBSCRIPTIONS || !once(memo?.lists.push, value.pushSubscriptions, (subscriptions: any[]) => {
+    if (!subscriptions.every((item: unknown) => once(memo?.push, item, (item: unknown) => {
+      if (!record(item) || !string(item.subject) || !string(item.device, 128) || !time(item.createdAt) || !time(item.updatedAt)) return false;
+      const { subject: _subject, device: _device, createdAt: _created, updatedAt: _updated, ...subscription } = item;
+      return isPushSubscriptionRequest(subscription);
+    })) || !unique(subscriptions, (item: SavedPushSubscription) => JSON.stringify([item.subject, item.device])) || !unique(subscriptions, (item: SavedPushSubscription) => item.endpoint)) return false;
+    const counts = new Map<string, number>();
+    for (const item of subscriptions) { const count = (counts.get(item.subject) ?? 0) + 1; if (count > PUSH_DEVICE_LIMIT) return false; counts.set(item.subject, count); }
     return true;
   }))) return invalid();
   if (value.outbox !== undefined && (!Array.isArray(value.outbox) || value.outbox.length > MAX_OUTBOX || !once(memo?.lists.outbox, value.outbox, (entries: any[]) => {

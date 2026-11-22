@@ -390,6 +390,11 @@ export function createHostBroker(options: HostBrokerOptions) {
     sessionRelationChangeStatus(subject: string, selection: { hostId: string; operationId: string }) { return { operation: structuredClone(savedRelationOperation(subject, selection)) }; },
     reconcileSessionRelationChange(subject: string, selection: { hostId: string; operationId: string }) { return continueRelationChange(subject, savedRelationOperation(subject, selection)); },
     canAccessSession: (agentId: string, subject: string) => { const binding = brokerState.bindings.get(agentId); return !!binding && sessionAllowed(binding, subject); },
+    /** The session a public agent id is bound to, as a subject that may access it sees it. */
+    sessionOf(agentId: string, subject: string): { hostId: string; providerId: string; nativeSessionId: string } | undefined {
+      const binding = brokerState.bindings.get(agentId);
+      return binding && sessionAllowed(binding, subject) ? { hostId: binding.hostId, providerId: binding.providerId, nativeSessionId: binding.nativeSessionId } : undefined;
+    },
     async manageShares(subject: string, hostId: string, action: 'shares' | 'share' | 'revoke-share', targetSubject?: string, targetLabel?: string, sessionLimit?: number) {
       brokerState.assertAvailable();
       requireOwner(subject);

@@ -22,7 +22,7 @@ it('lists only the owner browser sessions using non-secret IDs and revokes live 
   expect(sessions.list('bob',request)).toEqual([]);
   expect(await sessions.revoke('bob',listed[0]!.id,request)).toEqual({found:false,current:false});
   expect(sessions.expiresAt(request,opened.grant)).toBeGreaterThan(Date.now());
-  expect(await sessions.revoke('alice',listed[0]!.id,request)).toEqual({found:true,current:true});
+  expect(await sessions.revoke('alice',listed[0]!.id,request)).toEqual({found:true,current:true,device:listed[0]!.id});
   expect(sessions.expiresAt(request,opened.grant)).toBe(0); expect(state.read().sessions).toEqual([]);
 });
 it('does not rejuvenate authentication time on a renewal or from launch claims', async () => {
@@ -68,7 +68,7 @@ it('groups repeat logins by a verified browser cookie, never by the browser labe
   expect(group.activity).toHaveLength(1);
   expect(JSON.stringify(listed)).not.toContain(first.browserCookie);
   expect(await sessions.revoke('bob', group.id, request)).toEqual({ found: false, current: false });
-  expect(await sessions.revoke('alice', group.id, request)).toEqual({ found: true, current: true });
+  expect(await sessions.revoke('alice', group.id, request)).toEqual({ found: true, current: true, device: group.id });
   for (const token of [first.token, second.token]) expect(await sessions.authenticate(new Request(auth.origin, { headers: { cookie: `__Host-arc_session=${token}` } }))).toEqual({});
   expect(sessions.list('alice', request)).toHaveLength(1);
 });

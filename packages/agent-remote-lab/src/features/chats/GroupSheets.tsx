@@ -54,12 +54,12 @@ export function GroupNotificationsSheet({ group, muted, notifications, busy, err
   const t = useTranslate();
   return <Sheet open title={t('navigation.groups.notificationsTitle', { group })} detent="content" onClose={() => { if (!busy) onClose(); }}>
     <div className="lab-group-settings">
-      <div className="lab-group-setting"><span>{t('navigation.groups.mute')}</span>
-        <Toggle label={t('navigation.groups.mute')} checked={muted} disabled={busy} onChange={next => onChange({ muted: next, notifications })} /></div>
+      <Toggle className="lab-group-mute" label={t('navigation.groups.mute')} checked={muted} disabled={busy} onChange={next => onChange({ muted: next, notifications })} />
+      {/* The choice is kept while the group is muted and applies again when it is not. */}
       <div className="lab-group-setting"><span>{t('navigation.groups.notifyWhen')}</span>
         <SegmentedControl<GroupNotifications> label={t('navigation.groups.notifyWhen')} value={notifications}
           options={[{ value: 'all', label: t('navigation.groups.notifyAll') }, { value: 'needs_you', label: t('navigation.groups.notifyNeedsYou') }]}
-          onChange={next => { if (!busy && !muted) onChange({ muted, notifications: next }); }} /></div>
+          onChange={next => { if (!busy) onChange({ muted, notifications: next }); }} /></div>
       <p className="lab-sheet-note">{muted ? t('navigation.groups.mutedNote') : t('navigation.groups.notifyHint')}</p>
       {error ? <p className="lab-sheet-message" role="alert">{error}</p> : null}
     </div>

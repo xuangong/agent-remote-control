@@ -31,7 +31,7 @@ open
 ```
 
 <!-- open-items:start (generated from the item files by scripts/open-items.mjs; pnpm postmerge writes it on main) -->
-5 open, 5 partly closed and 55 closed.
+7 open, 5 partly closed and 55 closed.
 
 | # | Item | Found in | Owner step | Status |
 |---|---|---|---|---|
@@ -99,5 +99,7 @@ open
 | [O62](O62.md) | A discovery during a prompt edit's restoration ends it with "Refresh the conversation to continue" | O60's investigation, 2026-11-22 (module split items 4 and 5) | owner | closed |
 | [O63](O63.md) | Two Workbench tests still fail about once in 30 runs under heavy load | the load runs that proved O60 and O61, 2026-11-22 (module split items 4 and 5) | owner | open |
 | [O64](O64.md) | The E3 flow 'a session the Host no longer has…' fails about one run in three | the 0.3.4 release gate and the module split's end gate, 2026-11-22 | owner | closed |
-| [O65](O65.md) | Three WebKit component tests time out in the full component tier and pass alone | the 0.3.4 release gate (3 WebKit timeouts, recorded in the release record) and the module split's two end gates, 2026-11-22 | owner | open |
+| [O65](O65.md) | Three WebKit component tests time out in the full component tier and pass alone | the 0.3.4 release gate (3 WebKit timeouts, recorded in the release record) and the module split's two end gates, 2026-11-22 | owner | open (not reproducible in a clean worktree; investigation recorded) |
+| [O66](O66.md) | Bot mode's panel widths are applied over the chats module's stylesheet, and Window mode's sidebar keeps its own handle | I5a, desktop panels (2026-11-22), which could not edit the chats and windows feature modules while the IM audit worked in them | the next change to `workbench-chats` or `workbench-windows` | open |
+| [O67](O67.md) | The WebKit composer-owner component test loses its own selection now and then | the I5a end gate, `pnpm test:components` at `5e924da3` (2026-11-22) | owner | open |
 <!-- open-items:end -->

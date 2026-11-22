@@ -138,6 +138,7 @@
         "packages/agent-remote-journal/tsconfig.json",
         "packages/agent-remote-journal/vitest.config.ts",
         "packages/agent-remote-lab/README.md",
+        "packages/agent-remote-lab/app-shell-plugin.ts",
         "packages/agent-remote-lab/bundle-budget.ts",
         "packages/agent-remote-lab/e2e",
         "packages/agent-remote-lab/index.html",
@@ -187,7 +188,7 @@
         "packages/codex-daemon-client/tsconfig.test.json",
         "packages/codex-daemon-client/vitest.config.ts"
       ],
-      "digest": "sha256:cbad2edeb9abc0881db9f0d7cd9ce1d2e5eb174c9e27ee35903f3550c6d81cb5"
+      "digest": "sha256:2a45565ff710fcb258004ebf8cc7bf05a2e7e3d5a3bc5219d70b07edeae226ab"
     }
   },
   "providers": [

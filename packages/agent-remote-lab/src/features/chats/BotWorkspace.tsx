@@ -211,7 +211,7 @@ export function BotWorkspace({ visible, covered = false, compact, scope, workspa
       {descriptor ? <AssistantDetailsHostContext.Provider value={detailsHost}>
         <Mount mode="bot" active={visible && showConversation} descriptor={{ ...descriptor, props: { ...descriptor.props, visible: visible && showConversation, active: visible && showConversation, folded: asleep } }} />
       </AssistantDetailsHostContext.Provider>
-        : !selected.loading && !selected.error ? <div className="lab-bot-welcome" role="status">
+        : !selected.loading && !selected.error ? <div className="lab-bot-welcome">
           <OrchardMark size={56} />
           <h2>{t('assistants.chooseTitle')}</h2>
           <p>{place?.kind === 'section' ? t('assistants.chooseInGroup') : t('assistants.chooseHint', { keys: shortcutKeys('search', applePlatform()).shown })}</p>

@@ -11,9 +11,12 @@ export interface InstalledAppView {
   matchMedia?(query: string): { readonly matches: boolean };
 }
 
-/** Whether this page runs as the installed app: iOS's `navigator.standalone`, or the standalone display mode elsewhere. */
+/**
+ * Whether this page runs as the installed app: iOS's `navigator.standalone`, or the app's display modes elsewhere: standalone, or the
+ * window controls overlay a desktop app window shows when its title bar is hidden.
+ */
 export function runsInstalled(view: InstalledAppView = window as unknown as InstalledAppView): boolean {
-  return view.navigator.standalone === true || view.matchMedia?.('(display-mode: standalone)').matches === true;
+  return view.navigator.standalone === true || ['standalone', 'window-controls-overlay'].some(mode => view.matchMedia?.(`(display-mode: ${mode})`).matches === true);
 }
 
 /**

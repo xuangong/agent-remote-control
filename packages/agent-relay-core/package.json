@@ -13,6 +13,10 @@
       "types": "./dist/access-page.d.ts",
       "import": "./dist/access-page.js"
     },
+    "./static-site": {
+      "types": "./dist/static-site.d.ts",
+      "import": "./dist/static-site.js"
+    },
     "./auth": {
       "types": "./dist/auth.d.ts",
       "import": "./dist/auth.js"

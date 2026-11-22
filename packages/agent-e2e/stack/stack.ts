@@ -157,6 +157,9 @@ export async function startStack(options: StackOptions = {}) {
     /** The sign-in issuer of a stack started with `signIn`. */
     gateway,
     async restartRelay() { if (gateway) throw new Error('The sign-in Relay keeps no state to restart from.'); await relay.close(); relay = await startRelay(); },
+    /** The Relay goes away, as when the network is down: every request to it fails until `startRelay`, which starts it with its state. */
+    async stopRelay() { if (gateway) throw new Error('The sign-in Relay keeps no state to start again from.'); await relay.close(); },
+    async startRelay() { relay = await startRelay(); },
     async close() { await stopController(); await relay.close(); await gateway?.close(); await Promise.all([provider, ...otherProviders].map(each => each.registration.directory.close?.())); await rm(state, { recursive: true, force: true }); },
   };
 }

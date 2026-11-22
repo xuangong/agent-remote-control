@@ -80,7 +80,8 @@ describe.each(variants)('E9 at %s', (_name, view) => {
   it('E9: a message sent at once while the Relay is slow to confirm and attach the session is delivered once, never held as Not sent', async () => {
     // Smoke M1's condition (O44): the Window's view of the session mounts while the page still confirms the session's locator and its
     // attach is still on its way. Both are waits, however long; the message is delivered once the session is ready.
-    const { context, page: first } = await openPage(browser, stack.sessionUrl('quiet'), view);
+    // The second page's requests are delayed by a route, which a page the app's service worker controls escapes in WebKit.
+    const { context, page: first } = await openPage(browser, stack.sessionUrl('quiet'), { ...view, serviceWorkers: 'block' });
     try {
       await waitForEntries(first, 2);
       await waitForKeptConversation(first, 'Hello quiet');

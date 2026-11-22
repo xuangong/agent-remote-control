@@ -2,19 +2,20 @@ import { expect, it } from 'vitest';
 import { keepInstalledAppStorage, runsInstalled, type InstalledAppView } from './installed-app.js';
 
 /** A page: installed through iOS's flag or the display mode, with a Storage API that answers `granted` or fails. */
-function view(options: { standalone?: boolean; displayMode?: 'standalone' | 'browser'; persist?: 'granted' | 'refused' | 'throws' | 'none' } = {}) {
+function view(options: { standalone?: boolean; displayMode?: 'standalone' | 'window-controls-overlay' | 'browser'; persist?: 'granted' | 'refused' | 'throws' | 'none' } = {}) {
   const asked: string[] = [];
   const storage = options.persist === 'none' ? undefined : { persist: () => { asked.push('persist'); return options.persist === 'throws' ? Promise.reject(new Error('SecurityError')) : Promise.resolve(options.persist !== 'refused'); } };
   const page: InstalledAppView = {
     navigator: { ...(options.standalone === undefined ? {} : { standalone: options.standalone }), ...(storage ? { storage } : {}) },
-    matchMedia: query => ({ matches: query === '(display-mode: standalone)' && options.displayMode === 'standalone' }),
+    matchMedia: query => ({ matches: query === `(display-mode: ${options.displayMode})` }),
   };
   return { page, asked };
 }
 
-it('knows the installed app by iOS standalone or by the standalone display mode, and a tab by neither', () => {
+it('knows the installed app by iOS standalone or by its display mode, and a tab by neither', () => {
   expect(runsInstalled(view({ standalone: true }).page)).toBe(true);
   expect(runsInstalled(view({ displayMode: 'standalone' }).page)).toBe(true);
+  expect(runsInstalled(view({ displayMode: 'window-controls-overlay' }).page)).toBe(true);
   expect(runsInstalled(view({ standalone: false, displayMode: 'browser' }).page)).toBe(false);
   expect(runsInstalled({ navigator: {} })).toBe(false);
 });

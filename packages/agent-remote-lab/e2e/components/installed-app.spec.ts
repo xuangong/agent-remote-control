@@ -26,9 +26,14 @@ test('opens standalone as Orchard, with the light ground as its launch colour', 
   await expect(page.locator('meta[name="apple-mobile-web-app-capable"]')).toHaveAttribute('content', 'yes');
   await expect(page.locator('meta[name="apple-mobile-web-app-title"]')).toHaveAttribute('content', 'Orchard');
   await expect(page.locator('meta[name="apple-mobile-web-app-status-bar-style"]')).toHaveAttribute('content', 'default');
-  await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute('href', '/app/icon-192.png');
+  // iOS takes the 180 px square icon and rounds it itself.
+  await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute('href', '/app/apple-touch-icon.png');
+  await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute('sizes', '180x180');
+  const icon = await request.get('/app/apple-touch-icon.png');
+  expect(icon.ok()).toBe(true);
   const manifest = await (await request.get('/app/manifest.webmanifest')).json() as Record<string, unknown>;
-  expect(manifest).toMatchObject({ name: 'Orchard', short_name: 'Orchard', display: 'standalone', start_url: '/', scope: '/', background_color: GROUND.light, theme_color: GROUND.light });
+  expect(manifest).toMatchObject({ id: '/', name: 'Orchard', short_name: 'Orchard', display: 'standalone', display_override: ['window-controls-overlay'],
+    start_url: '/', scope: '/', background_color: GROUND.light, theme_color: GROUND.light });
 });
 
 for (const [appearance, scheme, light, dark] of [

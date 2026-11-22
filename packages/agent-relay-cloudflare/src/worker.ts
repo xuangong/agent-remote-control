@@ -1,4 +1,4 @@
-import { BUILT_ASSET_CACHE_CONTROL, isPreviewDomain, controllerContentSecurityPolicy, FILE_FRAME_PATH, fileFrameDocument, fileFrameHeaders } from '@orchardworks/agent-relay-core';
+import { isPreviewDomain, isStaticSiteFile, controllerContentSecurityPolicy, FILE_FRAME_PATH, fileFrameDocument, fileFrameHeaders, staticFileCacheControl } from '@orchardworks/agent-relay-core';
 import type { RelayEnvironment } from './relay-object.js';
 export { RelayObject } from './relay-object.js';
 
@@ -25,14 +25,15 @@ export default {
           'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff',
         } });
       }
-      if (url.pathname.startsWith('/assets/') || ['/install.sh', '/install.ps1', '/favicon.svg', '/favicon.ico', '/app/favicon-32.png', '/app/manifest.webmanifest', '/app/icon-192.png', '/app/icon-512.png'].includes(url.pathname)) {
+      if (isStaticSiteFile(url.pathname)) {
         const asset = await env.ASSETS.fetch(request);
         // Static asset fallback must never expose the ordinary unauthenticated workbench index.
         if (asset.headers.get('content-type')?.includes('text/html')) return new Response(null, { status: 404 });
-        if (!url.pathname.startsWith('/assets/') || !asset.ok) return asset;
-        const built = new Response(asset.body, asset);
-        built.headers.set('cache-control', BUILT_ASSET_CACHE_CONTROL);
-        return built;
+        const cacheControl = staticFileCacheControl(url.pathname);
+        if (!cacheControl || !asset.ok) return asset;
+        const served = new Response(asset.body, asset);
+        served.headers.set('cache-control', cacheControl);
+        return served;
       }
     }
     return env.RELAY.getByName('primary').fetch(request);

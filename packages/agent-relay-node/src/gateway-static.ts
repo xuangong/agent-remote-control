@@ -1,4 +1,4 @@
-import { BUILT_ASSET_CACHE_CONTROL, controllerContentSecurityPolicy, FILE_FRAME_PATH, fileFrameDocument, fileFrameHeaders } from '@orchardworks/agent-relay-core';
+import { controllerContentSecurityPolicy, FILE_FRAME_PATH, fileFrameDocument, fileFrameHeaders, isStaticSiteFile, staticFileCacheControl } from '@orchardworks/agent-relay-core';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -15,11 +15,12 @@ export async function createGatewayStaticPages(directory: string, options?: { or
       response.end(index); return true;
     }
     if (path === FILE_FRAME_PATH) { response.writeHead(200, fileFrameHeaders); response.end(fileFrameDocument); return true; }
-    if (!path.startsWith('/assets/') && !['/install.sh', '/install.ps1', '/favicon.svg', '/favicon.ico', '/app/favicon-32.png', '/app/manifest.webmanifest', '/app/icon-192.png', '/app/icon-512.png'].includes(path)) return false;
+    if (!isStaticSiteFile(path)) return false;
     let file: string;
     try { file = await realpath(resolve(root, '.' + decodeURIComponent(path))); } catch { return false; }
     if (!file.startsWith(root + sep) || !(await stat(file)).isFile()) return false;
     const type = types[extname(file)]; if (!type) return false;
-    response.writeHead(200, { 'content-type': type, ...(path.startsWith('/assets/') ? { 'cache-control': BUILT_ASSET_CACHE_CONTROL } : {}) }); response.end(await readFile(file)); return true;
+    const cacheControl = staticFileCacheControl(path);
+    response.writeHead(200, { 'content-type': type, ...(cacheControl ? { 'cache-control': cacheControl } : {}) }); response.end(await readFile(file)); return true;
   };
 }

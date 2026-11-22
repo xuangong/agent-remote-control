@@ -21,9 +21,18 @@ export function readAppearance(stored: string | null): Appearance {
   return stored === 'light' || stored === 'dark' ? stored : 'system';
 }
 
-/** Shows `appearance`: a pinned theme sets data-theme and gives both chrome colours its ground; the system clears it and restores each. */
-export function applyAppearance(port: AppearancePort, appearance: Appearance): void {
+/**
+ * The browser chrome's colour (`theme-color`) under each system appearance: the ground, so the title bar of the installed app and a
+ * phone's status bar continue the page. A pinned theme gives both its own ground; following the system gives each its ground.
+ */
+export function chromeColors(appearance: Appearance): Readonly<Record<ThemeName, string>> {
   const pinned = appearance === 'system' ? undefined : appearance;
-  port.setTheme(pinned);
-  for (const media of ['light', 'dark'] as const) port.setChromeColor(orchardColors.ground[pinned ?? media], media);
+  return { light: orchardColors.ground[pinned ?? 'light'], dark: orchardColors.ground[pinned ?? 'dark'] };
+}
+
+/** Shows `appearance`: a pinned theme sets data-theme, a followed system clears it; the chrome colours follow (`chromeColors`). */
+export function applyAppearance(port: AppearancePort, appearance: Appearance): void {
+  port.setTheme(appearance === 'system' ? undefined : appearance);
+  const colors = chromeColors(appearance);
+  for (const media of ['light', 'dark'] as const) port.setChromeColor(colors[media], media);
 }

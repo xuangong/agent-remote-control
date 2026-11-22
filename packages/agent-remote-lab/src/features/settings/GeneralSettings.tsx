@@ -1,10 +1,11 @@
 import { useSyncExternalStore } from 'react';
-import { SegmentedControl, Toggle } from '@orchardworks/agent-client-web/primitives';
+import { Pill, SegmentedControl, Toggle } from '@orchardworks/agent-client-web/primitives';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { Appearance, LanguageBinding } from '@orchardworks/agent-client-web/browser';
 import { deviceChoices } from '../../kernel/device-choices.js';
 import { DEFAULT_VIEWS, DEFAULT_VIEW_STORAGE_KEY, readDefaultView, type DefaultView } from '../../kernel/destinations.js';
 import { MobileDisplaySettings } from './MobileDisplaySettings.js';
+import { promptInstall, useInstallOffer } from '../../kernel/app-install.js';
 import { SettingsRow, SettingsSection } from './SettingsRow.js';
 import { useDeviceChoice } from './device-choice.js';
 
@@ -24,7 +25,23 @@ function useDefaultView(): [DefaultView, (next: DefaultView) => void] {
   }];
 }
 
-/** Settings > General: how this device looks and what it opens on. Every choice shows at once. */
+/**
+ * Installing Orchard as an app, shown only where the browser offers it: its own install prompt, or Safari's instructions for the
+ * home screen (iPhone and iPad) or the Dock (a Mac). The installed app shows nothing.
+ */
+function InstallSection() {
+  const t = useTranslate();
+  const offer = useInstallOffer();
+  if (offer === 'none') return null;
+  const hint = offer === 'home-screen' ? t('settings.install.homeScreen') : offer === 'dock' ? t('settings.install.dock') : t('settings.install.hint');
+  return <SettingsSection title={t('settings.app')}>
+    <SettingsRow id="settings-install" label={t('settings.install')} hint={hint}>
+      {offer === 'prompt' ? <Pill variant="primary" onClick={() => void promptInstall()}>{t('settings.install.action')}</Pill> : null}
+    </SettingsRow>
+  </SettingsSection>;
+}
+
+/** Settings > General: how this device looks and what it opens on, and installing Orchard as an app. Every choice shows at once. */
 export function GeneralSettings() {
   const t = useTranslate();
   const { appearance, language, motion } = deviceChoices();
@@ -50,6 +67,7 @@ export function GeneralSettings() {
         <SegmentedControl<DefaultView> label={t('settings.defaultView')} options={DEFAULT_VIEWS.map(value => ({ value, label: t(`settings.defaultView.${value}` as const) }))} value={defaultView} onChange={setDefaultView} />
       </SettingsRow>
     </SettingsSection>
+    <InstallSection />
     {/* The display settings carry their own heading, as every moved section does. */}
     <SettingsSection><div className="lab-setting-legacy"><MobileDisplaySettings /></div></SettingsSection>
   </>;

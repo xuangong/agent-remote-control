@@ -41,6 +41,11 @@ export interface PageOptions {
    * cache, ended by the operating system. `standalone` opens it as the web app added to the home screen. The page's timers run on Playwright's clock.
    */
   lifecycle?: true | { standalone?: boolean };
+  /**
+   * `block` keeps the app's service worker out of the context. A page the worker controls sends its requests through the worker, and
+   * WebKit's Playwright then no longer hands them to `page.route`: a flow that delays or holds an HTTP request of a later page blocks it.
+   */
+  serviceWorkers?: 'allow' | 'block';
 }
 
 /** A page on `url` in `context`, which already has its Window. Its WebSockets pass through a route that a flow can cut (`sockets.drop()`), wait on (`sockets.recoveredFrom`) or hold back (`hold`). */
@@ -58,7 +63,8 @@ export async function openPageIn(context: BrowserContext, url: string, options: 
 
 /** A fresh context, signed in as the local user with a Window that holds nothing, and a page on `url`. */
 export async function openPage(browser: Browser, url: string, options: PageOptions = {}) {
-  const context = await browser.newContext({ viewport: options.viewport ?? { width: 1280, height: 800 }, ...(options.mobile ? { isMobile: true, hasTouch: true } : {}) });
+  const context = await browser.newContext({ viewport: options.viewport ?? { width: 1280, height: 800 }, ...(options.mobile ? { isMobile: true, hasTouch: true } : {}),
+    serviceWorkers: options.serviceWorkers ?? 'allow' });
   await resetWindows(context, new URL(url).origin);
   return { context, ...await openPageIn(context, url, options) };
 }

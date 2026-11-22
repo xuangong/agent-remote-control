@@ -16,6 +16,7 @@ export * from './scheduler.js';
 
 export * from './preview-domain.js';
 export * from './file-frame.js';
+export * from './static-site.js';
 export * from './controller-releases.js';
 export * from './team-resources.js';
 

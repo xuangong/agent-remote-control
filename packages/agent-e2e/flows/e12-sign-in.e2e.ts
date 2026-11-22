@@ -22,8 +22,8 @@ afterAll(async () => { await browser?.close(); await stack?.close(); });
 /** The page is on the session of the link: the Relay adds the person's Window to the address. */
 const onSession = (address: string) => { const url = new URL(address); return url.origin === stack.origin && url.searchParams.get('session') === 'work' && url.searchParams.get('host') === stack.hostId; };
 
-async function openSignedOut(url: string): Promise<{ context: BrowserContext; page: Page; violations: string[] }> {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+async function openSignedOut(url: string, serviceWorkers: 'allow' | 'block' = 'allow'): Promise<{ context: BrowserContext; page: Page; violations: string[] }> {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, serviceWorkers });
   const page = await context.newPage();
   page.setDefaultTimeout(20_000);
   const violations: string[] = [];
@@ -70,7 +70,8 @@ it('E12: a returning browser completes the authorization without an extra click'
 for (const signal of ['visibility', 'pageshow'] as const) {
   it(`E12: a slow access check at the ${signal} of the page leaves the live session usable`, async () => {
     stack.gateway!.automaticSignIn = true;
-    const { context, page } = await openSignedOut(stack.sessionUrl('work'));
+    // The access check is held by a route, which a page the app's service worker controls escapes in WebKit (see PageOptions).
+    const { context, page } = await openSignedOut(stack.sessionUrl('work'), 'block');
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
     await showsText(page, 'Started');
     let sockets = 0;

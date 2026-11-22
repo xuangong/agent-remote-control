@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest';
+import { STATIC_SITE_FILES } from '@orchardworks/agent-relay-core';
 import { event, fixture, origin, send } from './fixture.js';
 
 it('serves hosted assets and health, authenticates browser login, and transports Host RPC and Controller frames', async () => {
@@ -19,11 +20,13 @@ it('serves hosted assets and health, authenticates browser login, and transports
   const built = await f.request('/assets/main.js');
   expect(built.status).toBe(200);
   expect(built.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
-  for (const path of ['/install.sh', '/install.ps1', '/favicon.svg', '/favicon.ico', '/app/favicon-32.png', '/app/manifest.webmanifest', '/app/icon-192.png', '/app/icon-512.png']) {
+  for (const path of STATIC_SITE_FILES) {
     const asset = await f.request(path);
     expect(asset.status).toBe(200);
     expect(await asset.text()).toBe('asset');
   }
+  // The app's service worker is checked at every navigation, so no cache may keep an old one.
+  expect((await f.request('/sw.js')).headers.get('cache-control')).toBe('no-cache');
   expect((await f.request('/ws/remote-host', { headers: { upgrade: 'websocket' } })).status).toBe(401);
   const alice = await f.login('alice');
   expect((await f.json('/auth/session', '', { ticket: alice.ticket })).status).toBe(401);

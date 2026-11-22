@@ -31,7 +31,7 @@ open
 ```
 
 <!-- open-items:start (generated from the item files by scripts/open-items.mjs; pnpm postmerge writes it on main) -->
-4 open, 5 partly closed and 51 closed.
+5 open, 5 partly closed and 55 closed.
 
 | # | Item | Found in | Owner step | Status |
 |---|---|---|---|---|
@@ -94,5 +94,10 @@ open
 | [O57](O57.md) | A multi-line message sent before E2's offline case leaves the offline message waiting | e2e convergence | owner | closed |
 | [O58](O58.md) | Phone overlaps seen in fixtures, to check on the real page | e2e convergence | owner | partly closed |
 | [O59](O59.md) | The page compares the Relay's absolute lease expiry with the device's clock | gap 7 | owner | open |
-| [O60](O60.md) | The App test 'edits a real App managed Team window…' failed once in the 0.3.4 release gate | 0.3.4 release gate, 2026-11-22 | owner | open |
+| [O60](O60.md) | The App test 'edits a real App managed Team window…' failed once in the 0.3.4 release gate | 0.3.4 release gate, 2026-11-22 | owner | closed |
+| [O61](O61.md) | `BotWorkspace.test.tsx` 'compact Back restores the roster row…' failed once under the full suite | `pnpm verify` on `design/im-session-service`, 2026-11-22 (module split, items 1 to 3) | owner | closed |
+| [O62](O62.md) | A discovery during a prompt edit's restoration ends it with "Refresh the conversation to continue" | O60's investigation, 2026-11-22 (module split items 4 and 5) | owner | closed |
+| [O63](O63.md) | Two Workbench tests still fail about once in 30 runs under heavy load | the load runs that proved O60 and O61, 2026-11-22 (module split items 4 and 5) | owner | open |
+| [O64](O64.md) | The E3 flow 'a session the Host no longer has…' fails about one run in three | the 0.3.4 release gate and the module split's end gate, 2026-11-22 | owner | closed |
+| [O65](O65.md) | Three WebKit component tests time out in the full component tier and pass alone | the 0.3.4 release gate (3 WebKit timeouts, recorded in the release record) and the module split's two end gates, 2026-11-22 | owner | open |
 <!-- open-items:end -->

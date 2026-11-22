@@ -7,8 +7,9 @@
 /* The frame holds the rail (desktop), the mode's surface and the tab bar (phone). The surfaces leave room for both through two
    lengths, which a keyboard that covers the tab bar sets to zero. The installed app's title bar, when its window gives the title bar
    to the page, sits above them all: the frame starts below it (DesktopFrame.tsx sets its height from the overlay; it is 0 elsewhere). */
+/* It is the window's height even where its surfaces are fixed to the viewport (Window mode up to 1180 px), so the rail runs the full height. */
 .lab-frame { --lab-rail-width: 0px; --lab-tab-bar-height: 0px; --lab-title-bar-height: env(titlebar-area-height, 0px); display: flex; box-sizing: border-box; width: 100%;
-  padding-top: var(--lab-title-bar-height); background: var(--orchard-ground); }
+  min-height: 100dvh; padding-top: var(--lab-title-bar-height); background: var(--orchard-ground); }
 .lab-frame[data-rail] { --lab-rail-width: calc(var(--lab-panel-rail, 60px) + var(--orchard-space-l)); }
 .lab-frame[data-tab-bar] { --lab-tab-bar-height: calc(56px + var(--orchard-safe-area-bottom)); }
 .lab-frame[data-tab-bar]:is(:has([data-viewport-occluded="true"]), :has(> .lab-bot-workspace[data-chat]:not([hidden])), :has(> .lab-shell.lab-supporting-open:not([hidden]))) { --lab-tab-bar-height: 0px; }

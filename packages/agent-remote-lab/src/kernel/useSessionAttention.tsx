@@ -32,9 +32,10 @@ export function useSessionAttention(scope: string, active: boolean, onOpen: (ses
   const clickScope = useMemo(() => ({ mode, lifetime: {} }), [scope, mode, active, mobile, notificationChoice]);
   const latest = useRef({ scope, active, mobile, notificationChoice, onOpen, clickScope });
   latest.current = { scope, active, mobile, notificationChoice, onOpen, clickScope };
+  // Notifications speak the reader's language, as the page does.
   const notifier = useMemo(() => new SessionAttentionNotifications(scope,
     () => latest.current.scope === scope && latest.current.active && !latest.current.mobile && latest.current.notificationChoice,
-    session => latest.current.onOpen(session), () => latest.current.clickScope), [scope]);
+    session => latest.current.onOpen(session), () => latest.current.clickScope, (key, params) => translate.current(key, params)), [scope]);
   const mountedNotifier = useRef<SessionAttentionNotifications>();
   useEffect(() => {
     mountedNotifier.current = notifier;

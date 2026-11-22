@@ -44,11 +44,11 @@ it.each(['directory', 'directory-open', 'Favorites', 'Track'] as const)('opens a
   await settleApp(() => expect(x()).not.toBeNull());
   if (navigation === 'Favorites') {
     expect(x()!.hidden).toBe(true);
-    await act(async () => f.view.querySelector<HTMLButtonElement>(':is(.lab-launcher, .lab-window-floating, .lab-toolbar-launchers, #lab-context) [aria-label="Windows"]')!.click());
+    await act(async () => f.view.querySelector<HTMLButtonElement>(':is(.lab-launcher, .lab-window-floating, .lab-toolbar-launchers, #lab-context) [aria-label="Groups"]')!.click());
     const option = f.view.querySelector<HTMLButtonElement>('[data-window-view-id="primary-X"]')!;
     expect(option.closest('[hidden]')).toBeNull();
     await act(async () => option.click());
-    await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Close Windows"]')!.click());
+    await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Close groups"]')!.click());
   } else {
     expect(x()!.closest('[hidden]')).toBeNull();
     await act(async () => { x()!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); });
@@ -359,12 +359,12 @@ it.each((['dock', 'attached', 'empty-dock'] as const).flatMap(destination => (['
   const setup = { chain: [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document, hostService };
   const f = await failureFixture(false, 'A', false, `&window=${document.id}`, setup);
   await settleApp(() => expect(f.view.querySelector('[data-window-view-id="feature-source"]')).not.toBeNull());
-  await act(async () => f.view.querySelector<HTMLButtonElement>(':is(.lab-launcher-window, .lab-window-floating) [aria-label="Windows"]')!.click());
+  await act(async () => f.view.querySelector<HTMLButtonElement>(':is(.lab-launcher-window, .lab-window-floating) [aria-label="Groups"]')!.click());
   // The Windows entry's own row, not the hidden sidebar's.
   const destinationOption = [...f.view.querySelectorAll<HTMLButtonElement>('[data-window-view-id="feature-source"]')].find(option => option.closest('.lab-launcher-window, .lab-window-floating'))!;
   expect(destinationOption.closest('[hidden]')).toBeNull();
   await act(async () => destinationOption.click());
-  await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Close Windows"]')!.click());
+  await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Close groups"]')!.click());
   await settleApp(() => expect(setup.windowDocument.selectedViewId).toBe('feature-source'));
   if (destination !== 'attached') {
     await settleApp(() => expect(f.view.querySelector('[data-primary-group-id="primary-A"]')?.hasAttribute('data-selected')).toBe(false));
@@ -532,9 +532,9 @@ it('selects a managed Team view directly for pointer and focus without first sel
   const input = () => f.view.querySelector<HTMLElement>('[data-view-id="team-leader"] [data-testid="prompt-input"]');
   await settleApp(() => expect(input()).not.toBeNull());
   for (const event of ['pointerdown', 'focusin']) {
-    await act(async () => f.view.querySelector<HTMLButtonElement>(':is(.lab-launcher, .lab-window-floating, .lab-toolbar-launchers, #lab-context) [aria-label="Windows"]')!.click());
+    await act(async () => f.view.querySelector<HTMLButtonElement>(':is(.lab-launcher, .lab-window-floating, .lab-toolbar-launchers, #lab-context) [aria-label="Groups"]')!.click());
     await act(async () => f.view.querySelector<HTMLButtonElement>('[data-window-view-id="primary-A"]')!.click());
-    await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Close Windows"]')!.click());
+    await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Close groups"]')!.click());
     await settleApp(() => expect(setup.windowDocument.selectedViewId).toBe('primary-A'));
     selections.length = 0;
     await act(async () => input()!.dispatchEvent(event === 'pointerdown' ? new MouseEvent(event, { bubbles: true }) : new FocusEvent(event, { bubbles: true })));

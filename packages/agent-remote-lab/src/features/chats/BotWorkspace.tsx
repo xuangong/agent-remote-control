@@ -10,6 +10,7 @@ import { BotRoster, botPlaceKey } from './BotRoster.js';
 import { useSharedFeed, type SharedFeedsSnapshot } from '../../kernel/shared-feeds.js';
 import { projectShared, useSharedRoster } from './shared-roster.js';
 import { useBotActions, type BotInfo } from './BotActions.js';
+import { useGroupActions } from './useGroupActions.js';
 import { AsleepNotice } from '../../conversation/AsleepNotice.js';
 import { SessionConversationMount, type SessionSurfaceDescriptor } from '../../conversation/SessionConversationSurfaces.js';
 import { SidebarHeader } from '../../kernel/SidebarHeader.js';
@@ -83,6 +84,11 @@ export function BotWorkspace({ visible, covered = false, compact, scope, workspa
     ? <p role="alert">{selected.error} <button type="button" onClick={() => void selected.retry()}>{t('common.retry')}</button></p> : null;
   const creation = workspace.sectionCreationState, saving = creation.state === 'saving';
   const actions = useBotActions({ scope, workspace, onSelect: navigation.select, onError: setError });
+  // An assistant that moves to another group while open here stays open at its new place.
+  const groupActions = useGroupActions({ workspace, defaultTitle: t('navigation.groups.default'), onMoved: (from, to) => {
+    const shown = navigation.place;
+    if (shown?.kind === 'bot' && shown.groupId === from.groupId && shown.viewId === from.viewId) navigation.select({ kind: 'bot', ...to });
+  } });
   const botSection = place?.kind === 'bot' ? roster.sections.find(section => section.groupId === place.groupId) : undefined;
   const botRow = place?.kind === 'bot' ? botSection?.rows.find(row => row.viewId === place.viewId) : undefined;
   // A bot put to sleep elsewhere while open here: its conversation is released until it is woken.
@@ -96,7 +102,7 @@ export function BotWorkspace({ visible, covered = false, compact, scope, workspa
   const info = place?.kind === 'bot' ? botInfo?.(place) : undefined;
   const detailsHost: AssistantDetailsHost = {
     surface: phone ? 'sheet' : 'panel', slot: detailsSlot, tools: toolsSlot, open: detailsShown, setOpen: setDetailsOpen,
-    ...(botRow && botSection ? { actions: actions.cardActions(botRow, botSection.title),
+    ...(botRow && botSection ? { actions: actions.cardActions(botRow, botSection.title, groupActions.assistantMenu(botRow)),
       ...(onPinToWindow ? { action: { label: t('card.pin'), icon: 'window' as const, onSelect: () => onPinToWindow({ groupId: botRow.groupId, viewId: botRow.viewId }) } } : {}),
       setPicture: (picture: BotPicture) => actions.setPicture(botRow, picture), rename: (name: string) => actions.rename(botRow, name) } : {}),
     ...(info ? { where: info } : {}),
@@ -167,7 +173,8 @@ export function BotWorkspace({ visible, covered = false, compact, scope, workspa
       {error || creation.error ? <p className="lab-bot-notice" role="alert">{error ?? creation.error}</p> : null}
       {creation.state === 'unknown' ? <p className="lab-bot-notice" role="status">{t('navigation.botWorkspace.groupUnconfirmed')} <button type="button" onClick={() => void retryGroup()}>{t('common.retry')}</button></p> : null}
       {actions.notice}
-      <div className="lab-bot-roster-scroll" onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><SharedBotRoster model={roster} project={projectRoster} place={place} onSelect={open} hostName={hostName} compact={phone}
+      {groupActions.error ? <p className="lab-bot-notice" role="alert">{groupActions.error}</p> : groupActions.notice ? <p className="lab-bot-notice" role="status">{groupActions.notice}</p> : null}
+      <div className="lab-bot-roster-scroll" onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><SharedBotRoster model={roster} groups={workspace.groups} project={projectRoster} place={place} onSelect={open} hostName={hostName} compact={phone}
         directoryControls={<div className="lab-bot-directory-controls">
           {directory.sources.map(source => <div key={source.id}><small>{hostName(source.hostId)} · {source.providerId}</small>
             {!source.online ? <p>{t('navigation.botWorkspace.hostOffline')}</p> : null}{source.loading ? <p role="status">{t('navigation.botWorkspace.loadingSessions')}</p> : null}
@@ -199,6 +206,7 @@ export function BotWorkspace({ visible, covered = false, compact, scope, workspa
         <IconButton icon="close" label={t('details.close')} onClick={() => setDetailsOpen(false)} /></header>
     </aside>
     {actions.sheets}
+    {groupActions.sheets([])}
   </main>;
 }
 

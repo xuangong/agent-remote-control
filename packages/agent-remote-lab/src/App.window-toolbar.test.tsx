@@ -77,7 +77,7 @@ it('renames the Window in place, and Escape cancels without leaving the Window',
   try {
     await until(() => expect(toolbar(app.container)).not.toBeNull());
     await act(async () => titleButton(app.container).click());
-    let field = toolbar(app.container)!.querySelector<HTMLInputElement>('input[aria-label="Window title"]')!;
+    let field = toolbar(app.container)!.querySelector<HTMLInputElement>('input[aria-label="Group name"]')!;
     await type(field, 'Discarded');
     await press(field, 'Escape');
     expect(toolbar(app.container)!.querySelector('input')).toBeNull();
@@ -86,10 +86,10 @@ it('renames the Window in place, and Escape cancels without leaving the Window',
     expect(app.workspace().window?.title).toBe('A');
 
     await act(async () => titleButton(app.container).click());
-    field = toolbar(app.container)!.querySelector<HTMLInputElement>('input[aria-label="Window title"]')!;
+    field = toolbar(app.container)!.querySelector<HTMLInputElement>('input[aria-label="Group name"]')!;
     await type(field, 'Research');
     await press(field, 'Enter');
-    await until(() => expect(sidebarRows(app.container, 'Windows').find(row => row.dataset.windowRow === 'A')?.querySelector('strong')?.textContent).toBe('Research'));
+    await until(() => expect(sidebarRows(app.container, 'Groups').find(row => row.dataset.windowRow === 'A')?.querySelector('strong')?.textContent).toBe('Research'));
     expect(titleButton(app.container).textContent).toBe('Research');
     expect(document.activeElement).toBe(titleButton(app.container));
   } finally { await app.close(); }
@@ -161,34 +161,34 @@ it('confirms before deleting the Window, then shows another one', async () => {
   history.replaceState(null, '', '/?window=A');
   const app = await mountBotApp(scope);
   try {
-    await until(() => expect(sidebarRows(app.container, 'Windows').map(row => row.dataset.windowRow).sort()).toEqual(['A', 'B']));
-    await choose(app.container, 'Window actions', 'Delete Window…');
-    const dialog = sheet('Delete this Window?')!;
+    await until(() => expect(sidebarRows(app.container, 'Groups').map(row => row.dataset.windowRow).sort()).toEqual(['A', 'B']));
+    await choose(app.container, 'Group actions', 'Delete group…');
+    const dialog = sheet('Delete this group?')!;
     expect(dialog?.open).toBe(true);
     expect(dialog.textContent).toContain('Its agent sessions keep running');
     expect(dialog.textContent).not.toContain('new empty Window');
     await act(async () => sheetButton(dialog, 'Cancel').click());
-    expect(sheet('Delete this Window?')?.open ?? false).toBe(false);
+    expect(sheet('Delete this group?')?.open ?? false).toBe(false);
     expect(app.workspace().window?.id).toBe('A');
 
-    await choose(app.container, 'Window actions', 'Delete Window…');
-    await act(async () => sheetButton(sheet('Delete this Window?')!, 'Delete Window').click());
+    await choose(app.container, 'Group actions', 'Delete group…');
+    await act(async () => sheetButton(sheet('Delete this group?')!, 'Delete group').click());
     await until(() => expect(app.workspace().window?.id).toBe('B'));
-    await until(() => expect(sidebarRows(app.container, 'Windows').map(row => row.dataset.windowRow)).toEqual(['B']));
+    await until(() => expect(sidebarRows(app.container, 'Groups').map(row => row.dataset.windowRow)).toEqual(['B']));
   } finally { await app.close(); }
 });
 
-it('shares Window actions with the sidebar and shows their notices as toasts', async () => {
+it('shares Group actions with the sidebar and shows their notices as toasts', async () => {
   const scope = 'http://localhost/window-toolbar-notice/'; seedGroup(scope, windowGroup('A'));
   history.replaceState(null, '', '/?window=A');
   vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText: vi.fn(async () => {}) } });
   const app = await mountBotApp(scope);
   try {
     await until(() => expect(toolbar(app.container)).not.toBeNull());
-    await choose(app.container, 'Window actions', 'Copy link');
-    await until(() => expect([...document.querySelectorAll('.lab-toast')].some(node => node.textContent?.includes('Window link copied.'))).toBe(true));
+    await choose(app.container, 'Group actions', 'Copy link');
+    await until(() => expect([...document.querySelectorAll('.lab-toast')].some(node => node.textContent?.includes('Group link copied.'))).toBe(true));
     // The sidebar does not repeat the notice the toast shows.
-    expect(app.container.querySelector('#lab-context .lab-window-workspaces')!.textContent).not.toContain('Window link copied.');
+    expect(app.container.querySelector('#lab-context .lab-window-workspaces')!.textContent).not.toContain('Group link copied.');
   } finally { await app.close(); }
 });
 
@@ -210,11 +210,11 @@ it('shows a cached Window read-only during a cold start: only Copy link acts, an
     expect(disabled('Add')).toEqual(['New session view', 'Open session…']);
     await pick('Add', 'New session view');
     await press(document.querySelector('[role="menu"][aria-label="Add"]') ?? document.body, 'Escape');
-    await open('Window actions');
-    expect(disabled('Window actions')).toEqual(['Hide in Bot mode', 'Delete Window…']);
-    await pick('Window actions', 'Delete Window…');
-    expect(sheet('Delete this Window?')).toBeUndefined();
-    await pick('Window actions', 'Hide in Bot mode');
+    await open('Group actions');
+    expect(disabled('Group actions')).toEqual(['Hide in Bot mode', 'Delete group…']);
+    await pick('Group actions', 'Delete group…');
+    expect(sheet('Delete this group?')).toBeUndefined();
+    await pick('Group actions', 'Hide in Bot mode');
     expect(app.workspace().window?.views).toHaveLength(2);
     expect(mutate).not.toHaveBeenCalled();
     app.releaseInspect();
@@ -229,13 +229,13 @@ it('closes the toolbar sheets when the toolbar goes away', async () => {
   const app = await mountBotApp(scope);
   try {
     await until(() => expect(toolbar(app.container)).not.toBeNull());
-    await choose(app.container, 'Window actions', 'Delete Window…');
-    expect(sheet('Delete this Window?')?.open).toBe(true);
+    await choose(app.container, 'Group actions', 'Delete group…');
+    expect(sheet('Delete this group?')?.open).toBe(true);
     await app.switchMode('bot');
-    expect(sheet('Delete this Window?')).toBeUndefined();
+    expect(sheet('Delete this group?')).toBeUndefined();
     await app.switchMode('window');
     await until(() => expect(toolbar(app.container)).not.toBeNull());
-    expect(sheet('Delete this Window?')).toBeUndefined();
+    expect(sheet('Delete this group?')).toBeUndefined();
   } finally { await app.close(); }
 });
 
@@ -246,7 +246,7 @@ it('shows a failed Window action as an error toast', async () => {
   const app = await mountBotApp(scope);
   try {
     await until(() => expect(toolbar(app.container)).not.toBeNull());
-    await choose(app.container, 'Window actions', 'Copy link');
+    await choose(app.container, 'Group actions', 'Copy link');
     await until(() => expect([...document.querySelectorAll<HTMLElement>('.lab-toast')].find(node => node.textContent?.includes('Clipboard blocked'))?.dataset.tone).toBe('error'));
   } finally { await app.close(); }
 });
@@ -281,7 +281,7 @@ it('keeps View options at the start of the Window toolbar while the sidebar show
   const app = await mountBotApp(scope);
   try {
     await until(() => expect(toolbar(app.container)).not.toBeNull());
-    await until(() => expect(app.container.querySelector('#lab-context nav[aria-label="Windows"]')).not.toBeNull());
+    await until(() => expect(app.container.querySelector('#lab-context nav[aria-label="Groups"]')).not.toBeNull());
     // One place for View options in a desktop Window, as Bot mode's toolbar keeps its sidebar control at its start.
     expect(app.button('View options').closest('header.lab-window-toolbar .ui-toolbar-leading')).not.toBeNull();
     // The sidebar starts with the mode switch, then its Windows: the old View and "Window" row is gone.

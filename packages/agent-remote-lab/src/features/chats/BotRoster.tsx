@@ -1,7 +1,8 @@
 import { useContext, type ReactNode } from 'react';
-import type { WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
+import type { WindowGroup, WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
 import { BotPicture } from '../../kernel/BotPicture.js';
-import { projectChats, type BotRosterModel, type BotRow } from '../../kernel/bot-roster.js';
+import type { BotRosterModel, BotRow } from '../../kernel/bot-roster.js';
+import { groupSections, showsGroupHeadings } from '../../kernel/assistant-groups.js';
 import type { BotPlace } from '../../kernel/workbench-mode.js';
 import { sessionKey } from '../../kernel/session-tree.js';
 import { Icon } from '../../ui/Icon.js';
@@ -25,17 +26,19 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
   const quiet = row.assistant.state === 'idle' || row.assistant.state === 'unknown';
   const sentence = draft && quiet ? undefined : row.assistant.sentence || undefined;
   // The role and label are tags beside the name, like a job title; screen readers hear them after the name.
-  const description = [row.role, row.details.label, sentence, draft ? `${t('assistants.draft')}: ${draft}` : undefined, row.unread ? t('assistants.unread') : undefined, time].filter(Boolean).join(' · ');
+  const description = [row.role, row.details.label, sentence, draft ? `${t('assistants.draft')}: ${draft}` : undefined, row.unread ? t('assistants.unread') : undefined,
+    row.details.pinned ? t('assistants.pinned') : undefined, row.muted ? t('assistants.muted') : undefined, time].filter(Boolean).join(' · ');
   return <div className="lab-bot-member">
     <button type="button" className="lab-bot-row" aria-label={name} aria-description={description || undefined}
       title={`${hostName(row.binding.hostId)} · ${row.binding.providerId}`} data-state={row.assistant.state}
-      data-bot-place={botPlaceKey(destination)} data-asleep={row.details.asleep || undefined} data-unread={row.unread || undefined} aria-current={current || undefined} onClick={() => onSelect(destination)}>
+      data-bot-place={botPlaceKey(destination)} data-asleep={row.details.asleep || undefined} data-unread={row.unread || undefined} data-muted={row.muted || undefined} aria-current={current || undefined} onClick={() => onSelect(destination)}>
       <BotPicture id={row.viewId} picture={row.details.picture} size={compact ? 44 : 40} mood={row.assistant.mood} />
       <span className="lab-bot-row-text">
         <span className="lab-bot-name-line"><strong className="lab-bot-name">{name}</strong>
           {row.role ? <span className="lab-bot-role">{row.role}</span> : null}
           {row.details.label ? <span className="lab-bot-label">{row.details.label}</span> : null}
           {marks}
+          {row.muted ? <span className="lab-bot-muted" aria-hidden="true"><Icon name="bell-off" size={13} /></span> : null}
           {time ? <span className="lab-bot-time" aria-hidden="true">{time}</span> : null}</span>
         {/* One sentence of what the assistant is doing; an unread reply is a dot, never a number. */}
         {sentence || draft || row.unread ? <span className="lab-bot-summary" aria-hidden="true">
@@ -44,7 +47,7 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
           {row.unread ? <span className="lab-bot-unread" /> : null}
         </span> : null}
       </span>
-      {row.details.pinned ? <span className="lab-bot-pinned" aria-label={t('assistants.pinned')}>⌖</span> : null}
+      {row.details.pinned ? <span className="lab-bot-pinned" aria-hidden="true"><Icon name="pin" size={14} /></span> : null}
     </button>
     {extra}
     {row.asks.length ? <ul className="lab-bot-asks" data-bot-asks={row.viewId} aria-label={t('assistants.asks', { name })}>
@@ -55,23 +58,34 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
   </div>;
 }
 
-/** Chats: the assistants Bot mode shows as one list, with no group headings (pinned first, then by latest reply), then Other sessions. */
-export function BotRoster({ model, place, onSelect, directoryControls, hostName = id => id, compact = false }: {
-  model: BotRosterModel; place?: BotPlace; onSelect(place: BotPlace): void; directoryControls: ReactNode;
+/**
+ * Chats: the assistants Bot mode shows, by group in the groups' order with the default group last, each group by activity
+ * (pinned first, then by latest reply); no headings while the default group is all there is. Then Other sessions.
+ */
+export function BotRoster({ model, groups, place, onSelect, directoryControls, hostName = id => id, compact = false }: {
+  model: BotRosterModel; groups: readonly WindowGroup[]; place?: BotPlace; onSelect(place: BotPlace): void; directoryControls: ReactNode;
   /** A phone's roster: larger pictures and taller rows, as in a native chat list. */
   compact?: boolean;
   /** A Host's display name for a Host ID; rows show names, never raw IDs. */
   hostName?(hostId: string): string;
 }) {
   const t = useTranslate();
-  const chats = projectChats(model);
+  const sections = groupSections(model, groups, { order: 'activity', defaultTitle: t('navigation.groups.default') });
+  const headings = showsGroupHeadings(sections);
+  const member = (row: BotRow) => <BotMember key={`${row.groupId}/${row.viewId}`} row={row} compact={compact} hostName={hostName} onSelect={onSelect}
+    current={place?.kind === 'bot' && place.groupId === row.groupId && place.viewId === row.viewId} />;
   return <nav aria-label={t('navigation.chats')} className="lab-bot-roster-list">
-    {chats.rows.length ? <div className="lab-bot-chats">{chats.rows.map(row => <BotMember key={row.viewId} row={row} compact={compact} hostName={hostName} onSelect={onSelect}
-      current={place?.kind === 'bot' && place.groupId === row.groupId && place.viewId === row.viewId} />)}</div>
-      : <p className="lab-bot-empty">{t('navigation.chatsEmpty')}</p>}
+    {!sections.length ? <p className="lab-bot-empty">{t('navigation.chatsEmpty')}</p>
+      : headings ? sections.map(section => { const key = section.groupId ?? 'default';
+        return <section key={key} className="lab-bot-chats lab-chat-group" aria-labelledby={`chat-group-${key}`} data-chat-group={key} data-muted={section.muted || undefined}>
+          <h2 id={`chat-group-${key}`} className="lab-chat-group-title"><span>{section.title}</span>
+            {section.muted ? <span className="lab-bot-muted" role="img" aria-label={t('navigation.groups.muted')}><Icon name="bell-off" size={13} /></span> : null}</h2>
+          {section.rows.map(member)}
+        </section>; })
+      : <div className="lab-bot-chats">{sections[0]!.rows.map(member)}</div>}
     <details className="lab-bot-section lab-bot-other">
       <summary><h2>{t('assistants.other')}</h2></summary>
-      {chats.other.map(session => { const destination: BotPlace = { kind: 'session', session }; const host = hostName(session.hostId ?? 'local');
+      {model.other.map(session => { const destination: BotPlace = { kind: 'session', session }; const host = hostName(session.hostId ?? 'local');
         return <button key={sessionKey(session)} type="button" className="lab-bot-row"
           aria-label={`${session.title || session.nativeSessionId} · ${host} · ${session.providerId}`}
           data-bot-place={botPlaceKey(destination)} aria-current={place?.kind === 'session' && sessionKey(place.session) === sessionKey(session) || undefined} onClick={() => onSelect(destination)}>

@@ -5,14 +5,14 @@ import { expect, test, type Page } from '@playwright/test';
 // compact screen (up to 1180 px) has no floating entries: they are capsules in a launcher bar (`launcher-layout`), so these tests run on a
 // desktop profile.
 const controls = [
-  { view: 'window', label: 'Windows', position: 'agent-remote:window-position' },
+  { view: 'window', label: 'Groups', position: 'agent-remote:window-position' },
   { view: 'track', label: 'Tracked sessions', position: 'agent-remote-tracking-position' },
   { view: 'team', label: 'Teams', position: 'agent-remote:team-position' },
   { view: 'tpm', label: 'TPM works', position: 'agent-remote:tpm-position' },
   { view: 'ask', label: 'Ask about this session', position: 'agent-remote:ask-position' },
 ];
 
-/** An entry's button: the rail has a Windows destination of the same name, which is not the Window entry. */
+/** An entry's button, never the rail's or the tab bar's destinations. */
 const entryButton = (page: Page, name: string) => page.getByRole('button', { name, exact: true }).and(page.locator(':not(.lab-rail *, .lab-tab-bar *)'));
 
 for (const control of controls) {

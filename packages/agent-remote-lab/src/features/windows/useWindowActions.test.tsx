@@ -27,7 +27,7 @@ async function fixture({ ids = ['a', 'b', 'c'], active = 'a', groups = [] as Win
   });
   const remove = vi.fn(async (id: string) => {
     calls.push(`remove:${id}`);
-    if (id === current) throw new Error('Switch to another Window before deleting the active Window.');
+    if (id === current) throw new Error('Switch to another group before deleting the active group.');
     windows = windows.filter(window => window.id !== id); update();
   });
   const operateGroup = vi.fn(async () => {});
@@ -58,7 +58,7 @@ it('copies the Window link without Bot route fields', async () => {
   expect(url.searchParams.get('window')).toBe('a');
   expect(url.searchParams.get('keep')).toBe('1');
   expect(['mode', 'section', 'bot'].some(key => url.searchParams.has(key))).toBe(false);
-  expect(test.actions().notice).toBe('Window link copied.');
+  expect(test.actions().notice).toBe('Group link copied.');
   expect(test.actions().noticeTone).toBe('info');
 });
 
@@ -66,7 +66,7 @@ it('hides the Window in Bot mode and shows it there again, with a notice each ti
   const test = await fixture();
   await act(async () => { await test.actions().setBotAppearance(false); });
   expect(test.operateGroup).toHaveBeenCalledWith('a', { type: 'bots.hide' });
-  expect(test.actions().notice).toBe('Hidden in Bot mode. It stays a Window.');
+  expect(test.actions().notice).toBe('Hidden in Bot mode. It stays in Window mode.');
   await act(async () => { await test.actions().setBotAppearance(true); });
   expect(test.operateGroup).toHaveBeenLastCalledWith('a', { type: 'bots.show' });
   expect(test.actions().notice).toBe('Shown in Bot mode.');
@@ -110,7 +110,7 @@ it('creates a Window before deleting the only one', async () => {
 
 it('keeps the current Window and says so when no other Window opens', async () => {
   const test = await fixture();
-  test.open.mockRejectedValue(new Error('This Window is unavailable.'));
+  test.open.mockRejectedValue(new Error('This group is unavailable.'));
   let deleted!: boolean;
   await act(async () => { deleted = await test.actions().deleteCurrent(); });
   expect(deleted).toBe(false);
@@ -118,12 +118,12 @@ it('keeps the current Window and says so when no other Window opens', async () =
   expect(test.remove).not.toHaveBeenCalled();
   expect(test.create).not.toHaveBeenCalled();
   expect(test.current()).toBe('a');
-  expect(test.actions().notice).toBe('The Window was not deleted: This Window is unavailable.');
+  expect(test.actions().notice).toBe('The group was not deleted: This group is unavailable.');
 });
 
 it('tries the next Window when one fails to open', async () => {
   const test = await fixture();
-  test.open.mockImplementationOnce(async id => { test.calls.push(`open:${id}`); throw new Error('This Window is unavailable.'); });
+  test.open.mockImplementationOnce(async id => { test.calls.push(`open:${id}`); throw new Error('This group is unavailable.'); });
   let deleted!: boolean;
   await act(async () => { deleted = await test.actions().deleteCurrent(); });
   expect(deleted).toBe(true);
@@ -134,14 +134,14 @@ it('tries the next Window when one fails to open', async () => {
 
 it('reports a failure in the Window it reached when opening switched and then failed', async () => {
   const test = await fixture();
-  test.open.mockImplementationOnce(async id => { test.calls.push(`open:${id}`); await test.switchTo(id); throw new Error('The Window scope changed before opening.'); });
+  test.open.mockImplementationOnce(async id => { test.calls.push(`open:${id}`); await test.switchTo(id); throw new Error('The group scope changed before opening.'); });
   let deleted!: boolean;
   await act(async () => { deleted = await test.actions().deleteCurrent(); });
   expect(deleted).toBe(false);
   expect(test.calls).toEqual(['open:b']);
   expect(test.current()).toBe('b');
   expect(test.ids()).toEqual(['a', 'b', 'c']);
-  expect(test.actions().notice).toBe('The Window was not deleted: The Window scope changed before opening.');
+  expect(test.actions().notice).toBe('The group was not deleted: The group scope changed before opening.');
 });
 
 it('reports a failed creation of the replacement Window', async () => {
@@ -151,7 +151,7 @@ it('reports a failed creation of the replacement Window', async () => {
   await act(async () => { deleted = await test.actions().deleteCurrent(); });
   expect(deleted).toBe(false);
   expect(test.remove).not.toHaveBeenCalled();
-  expect(test.actions().notice).toBe('The Window was not deleted: Storage full');
+  expect(test.actions().notice).toBe('The group was not deleted: Storage full');
 });
 
 it('never switches to a Window whose deletion is still in flight', async () => {
@@ -180,7 +180,7 @@ it('keeps the Window when a newer navigation superseded the switch, and says so'
   expect(deleted).toBe(false);
   expect(test.calls).toEqual(['open:b', 'remove:a']);
   expect(test.ids()).toEqual(['a', 'b', 'c']);
-  expect(test.actions().notice).toBe('The Window was not deleted: Switch to another Window before deleting the active Window.');
+  expect(test.actions().notice).toBe('The group was not deleted: Switch to another group before deleting the active group.');
 });
 
 it('reports a failed deletion in the Window it switched to', async () => {
@@ -191,7 +191,7 @@ it('reports a failed deletion in the Window it switched to', async () => {
   expect(deleted).toBe(false);
   expect(test.current()).toBe('b');
   expect(test.ids()).toEqual(['a', 'b', 'c']);
-  expect(test.actions().notice).toBe('The Window was not deleted: The server refused this change.');
+  expect(test.actions().notice).toBe('The group was not deleted: The server refused this change.');
 });
 
 it('deletes another Window by id', async () => {

@@ -47,7 +47,7 @@ it('saves a rename for this Window', async () => {
   const scope = scopeOf();
   const container = await render(<WindowToolbarRow scope={scope} />);
   await act(async () => container.querySelector<HTMLButtonElement>('button.lab-window-toolbar-title')!.click());
-  const field = container.querySelector<HTMLInputElement>('input[aria-label="Window title"]')!;
+  const field = container.querySelector<HTMLInputElement>('input[aria-label="Group name"]')!;
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, 'Research');
     field.dispatchEvent(new Event('input', { bubbles: true }));
@@ -69,31 +69,31 @@ it('adds a session view and opens a session through their own actions', async ()
 it('changes the Bot mode appearance of the Window\'s group, and leaves the toggle out for a Window without a group', async () => {
   const scope = scopeOf();
   const container = await render(<WindowToolbarRow scope={scope} />);
-  await choose(container, 'Window actions', 'Hide in Bot mode');
+  await choose(container, 'Group actions', 'Hide in Bot mode');
   expect(scope.windowActions.setBotAppearance).toHaveBeenCalledExactlyOnceWith(false);
   const alone = scopeOf({ windowWorkspace: { provisional: false, group: undefined } });
   const without = await render(<WindowToolbarRow scope={alone} />);
-  await act(async () => without.querySelector<HTMLButtonElement>('button[aria-label="Window actions"]')!.click());
-  expect(menuItems('Window actions').map(item => item.textContent)).toEqual(['Copy link', 'Delete Window…']);
+  await act(async () => without.querySelector<HTMLButtonElement>('button[aria-label="Group actions"]')!.click());
+  expect(menuItems('Group actions').map(item => item.textContent)).toEqual(['Copy link', 'Delete group…']);
 });
 
 it('copies the link, and opens Agent control only where there is a client', async () => {
   const scope = scopeOf();
   const container = await render(<WindowToolbarRow scope={scope} />);
-  await choose(container, 'Window actions', 'Copy link');
+  await choose(container, 'Group actions', 'Copy link');
   expect(scope.windowActions.copyLink).toHaveBeenCalledOnce();
-  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Window actions"]')!.click());
-  expect(menuItems('Window actions').map(item => item.textContent)).not.toContain('Agent control…');
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Group actions"]')!.click());
+  expect(menuItems('Group actions').map(item => item.textContent)).not.toContain('Agent control…');
   const hosted = scopeOf({ windowWorkspace: { provisional: false, group: undefined, client: {} } });
   const withClient = await render(<WindowToolbarRow scope={hosted} />);
-  await choose(withClient, 'Window actions', 'Agent control…');
+  await choose(withClient, 'Group actions', 'Agent control…');
   expect(hosted.setAgentControlOpen).toHaveBeenCalledExactlyOnceWith(true);
 });
 
 it('asks to delete rather than deleting, and shows a cached Window read-only', async () => {
   const scope = scopeOf();
   const container = await render(<WindowToolbarRow scope={scope} />);
-  await choose(container, 'Window actions', 'Delete Window…');
+  await choose(container, 'Group actions', 'Delete group…');
   expect(scope.setDeleteConfirmOpen).toHaveBeenCalledExactlyOnceWith(true);
   expect(scope.windowActions.saveRename).not.toHaveBeenCalled();
   const cached = await render(<WindowToolbarRow scope={scopeOf({ windowWorkspace: { provisional: true, group: undefined } })} />);
@@ -103,8 +103,8 @@ it('asks to delete rather than deleting, and shows a cached Window read-only', a
 it('keeps Delete from acting while another Window action runs', async () => {
   const busy = scopeOf({ windowActions: { busy: true, saveRename: vi.fn(), setBotAppearance: vi.fn(), copyLink: vi.fn() } });
   const container = await render(<WindowToolbarRow scope={busy} />);
-  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Window actions"]')!.click());
-  expect(menuItems('Window actions').filter(item => item.getAttribute('aria-disabled') === 'true').map(item => item.textContent)).toEqual(['Delete Window…']);
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Group actions"]')!.click());
+  expect(menuItems('Group actions').filter(item => item.getAttribute('aria-disabled') === 'true').map(item => item.textContent)).toEqual(['Delete group…']);
   expect(container.querySelector<HTMLButtonElement>('button.lab-window-toolbar-title')!.disabled).toBe(false);
 });
 
@@ -119,7 +119,7 @@ it('ends an open rename without saving when the toolbar shows another Window, an
   }
   const container = await render(<Switching />);
   await act(async () => container.querySelector<HTMLButtonElement>('button.lab-window-toolbar-title')!.click());
-  const field = container.querySelector<HTMLInputElement>('input[aria-label="Window title"]')!;
+  const field = container.querySelector<HTMLInputElement>('input[aria-label="Group name"]')!;
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, 'Meant for A');
     field.dispatchEvent(new Event('input', { bubbles: true }));

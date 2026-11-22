@@ -3,6 +3,7 @@ import { assistantStatus, translator, type AssistantStatus, type Translate } fro
 import type { SessionActivityStatus } from './session-activity-status.js';
 import { sessionKey, type SessionEntry } from './session-tree.js';
 import { accountNames, type AccountNames } from './assistant-names.js';
+import { rankBetween } from './ranks.js';
 
 /** A bot's position, shown as a tag beside its name like a job title, in the reader's words; ordinary bots have none. */
 export type BotRole = string;
@@ -27,6 +28,8 @@ export interface BotRow {
   waiting?: true;
   /** Only in the directory: the bot is hidden in Bot mode (itself, or its whole group), so Chats does not list it. */
   hiddenInChats?: true;
+  /** Muted, itself or with its group: no reminders, and a quiet unread dot. */
+  muted?: true;
 }
 /** `hidden` lists the views of this group's bots hidden in Bot mode, which the group can show again. */
 export interface BotSection { groupId: string; title: string; rows: BotRow[]; hidden: string[]; unread?: true; /** Only in the directory: the group is hidden in Bot mode. */ hiddenInChats?: true }
@@ -56,10 +59,10 @@ export interface BotRosterOptions {
   /** The assistant directory: every group and every bot, the hidden ones marked rather than left out. */
   everyone?: boolean;
 }
-/** A rank after every group's: groups keep catalog order in Bot mode, but bot details still carry one. */
+/** A rank after every group's, so a new group is listed last. */
 export function appendedRank(groups: readonly WindowGroup[]): string {
   const last = groups.flatMap(group => group.bots ? [group.bots.rank] : []).sort().at(-1);
-  return !last ? 'm' : last.length < 64 ? `${last}m` : last;
+  return !last ? 'm' : rankBetween(last, undefined) ?? last;
 }
 /** Native directory timestamps are metadata, never activity evidence. */
 export type DatedSessionEntry = SessionEntry & { updatedAt?: string };
@@ -131,7 +134,7 @@ export function projectBotRoster(groups: readonly WindowGroup[], directory: read
         ...(botRole(view, options.supportTeam, options.t) ? { role: botRole(view, options.supportTeam, options.t)! } : {}),
         asks: asks.filter(ask => ask.closeWith === view.id).map(ask => ({ viewId: ask.id, title: ask.binding?.title ?? 'Ask' })),
         ...(reply ? { reply } : {}), ...(latest && options.unread?.(latest.owner, latest.reply.replyAt) ? { unread: true as const } : {}),
-        ...(draft?.trim() ? { draft } : {}), ...(waiting ? { waiting: true as const } : {}),
+        ...(draft?.trim() ? { draft } : {}), ...(waiting ? { waiting: true as const } : {}), ...(details.muted || group.bots?.muted ? { muted: true as const } : {}),
         ...(everyone && (details.hidden || !hasBotAppearance(group)) ? { hiddenInChats: true as const } : {}) };
     });
     const hidden = botViews(group).filter(view => members[view.id]?.hidden).map(view => view.id);
@@ -140,16 +143,4 @@ export function projectBotRoster(groups: readonly WindowGroup[], directory: read
   });
   const grouped = new Set(groups.flatMap(group => group.window.views.flatMap(view => view.binding ? [sessionKey(view.binding)] : [])));
   return { sections, other: sortDirectorySessions(directory.filter(entry => !grouped.has(sessionKey(entry)))) };
-}
-
-/**
- * Chats (design "Organised as an IM product"): the assistants Bot mode shows as one list, with no group headings: pinned
- * first, then by the time of the latest reply, newest first; an assistant that never replied comes after those that did,
- * in roster order. Hidden assistants are never in it.
- */
-export function projectChats(model: BotRosterModel): { rows: BotRow[]; other: SessionEntry[] } {
-  const rows = model.sections.flatMap(section => section.rows).map((row, order) => ({ row, order }));
-  rows.sort((a, b) => Number(!!b.row.details.pinned) - Number(!!a.row.details.pinned)
-    || (b.row.reply?.replyAt ?? -1) - (a.row.reply?.replyAt ?? -1) || a.order - b.order);
-  return { rows: rows.map(item => item.row), other: model.other };
 }

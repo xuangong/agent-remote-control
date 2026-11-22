@@ -4,7 +4,8 @@ import { isBotView, type WindowBotDetails } from '@orchardworks/agent-remote-pro
 import type { SessionViewContribution, SessionViewContext } from '../../conversation/session-view-contribution.js';
 import { StarButton } from '../../features/sessions/SessionFavorites.js';
 import { BotPicture } from '../../kernel/BotPicture.js';
-import { appendedRank, botRole } from '../../kernel/bot-roster.js';
+import { botRole } from '../../kernel/bot-roster.js';
+import { rankInPlace } from '../../kernel/assistant-groups.js';
 import { SessionLink } from '../../kernel/SessionLink.js';
 import { sessionConnectionFailure } from '../../kernel/SessionConnectionNotice.js';
 import { windowSessionBinding } from '../../kernel/window-workspace.js';
@@ -29,7 +30,7 @@ export const identityContribution = (inputs: IdentityContributionInputs) => (vie
     const trimmed = name.trim(), group = windowWorkspace.readGroup(groupId);
     if (!trimmed || !group) return;
     const change = { type: 'bot.update' as const, viewId, details: { ...group.bots?.members[viewId], name: trimmed } };
-    void windowWorkspace.operateGroup(groupId, group.bots ? change : { type: 'batch', operations: [{ type: 'bots.add', rank: appendedRank(windowWorkspace.groups) }, change] })
+    void windowWorkspace.operateGroup(groupId, group.bots ? change : { type: 'batch', operations: [{ type: 'bots.add', rank: rankInPlace(windowWorkspace.groups, groupId) }, change] })
       .catch(error => setSessionNotice(sessionConnectionFailure(error, false, t)));
   }
 

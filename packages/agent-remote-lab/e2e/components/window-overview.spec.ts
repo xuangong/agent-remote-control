@@ -2,7 +2,7 @@
 import { expect, test } from '@playwright/test';
 
 // All Windows on a wide screen opens from the keyboard and returns focus where it was; a narrow screen keeps no overview at all.
-const overview = (page: import('@playwright/test').Page) => page.getByRole('dialog', { name: 'All Windows' });
+const overview = (page: import('@playwright/test').Page) => page.getByRole('dialog', { name: 'All groups' });
 
 test('on a wide screen Ctrl+Shift+Up shows every Window and Ctrl+Shift+Down returns', async ({ page, isMobile }) => {
   test.skip(isMobile, 'The overview is for wide screens.');
@@ -32,5 +32,5 @@ test('on a phone the shortcut opens nothing and the Windows list has no All Wind
   await page.keyboard.press('Control+Shift+ArrowUp');
   await page.waitForTimeout(200);
   await expect(overview(page)).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Show all Windows', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Show all groups', exact: true })).toHaveCount(0);
 });

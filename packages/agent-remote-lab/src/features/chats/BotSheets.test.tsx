@@ -22,11 +22,11 @@ afterAll(() => {
 });
 const zh = (node: JSX.Element) => <LocaleContext.Provider value="zh">{node}</LocaleContext.Provider>;
 
-it('names the group it leaves in English, and in Chinese', async () => {
+it('asks before removing an assistant, in English and in Chinese', async () => {
   const sheet = <RemoveBotSheet name="Helper" groupTitle="Research" window={undefined} viewId="v1" onCancel={() => {}} onRemove={() => {}} />;
-  expect((await render(sheet)).textContent).toContain('Remove “Helper” from “Research”?');
+  expect((await render(sheet)).textContent).toContain('Remove “Helper”?');
   const chinese = (await render(zh(sheet))).textContent!;
-  expect(chinese).toContain('把“Helper”从“Research”里移除？');
+  expect(chinese).toContain('移除“Helper”？');
   expect(chinese).toContain('取消');
   expect(chinese).toContain('它的会话会继续运行。');
 });

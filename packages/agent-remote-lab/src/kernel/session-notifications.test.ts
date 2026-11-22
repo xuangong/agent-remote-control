@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { SessionAttentionNotifications } from './session-notifications.js';
+import { sessionKey } from './session-tree.js';
 import type { SessionObservation } from './tracking-state.js';
 
 const session = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Research' };
@@ -175,5 +176,18 @@ it('does not notify quiet reviews but delivers a later visible assessment and pe
   await notifier.observe(session, { ...value('running', 4), background });
   await notifier.observe(session, { ...value('waiting', 4), background });
   expect(instances).toHaveLength(2);
+  notifier.dispose();
+});
+
+it('shows only the reminders its rule admits: a muted assistant none, a group set to needs you only that one', async () => {
+  const { notifier, instances } = setup();
+  const muted = { ...session, nativeSessionId: 'muted' }, quiet = { ...session, nativeSessionId: 'quiet' };
+  const rules: Record<string, readonly string[]> = { [sessionKey(muted)]: [], [sessionKey(quiet)]: ['waiting'] };
+  notifier.setReminderRule((key, reminder) => rules[key]?.includes(reminder) ?? true);
+  for (const target of [muted, quiet]) await notifier.remind(target, 'idle', 'finished');
+  await notifier.remind(muted, 'waiting', 'asks');
+  await notifier.remind(quiet, 'waiting', 'asks');
+  await notifier.remind(session, 'idle', 'finished');
+  expect(instances.map(item => [item.title, item.options.body])).toEqual([['Session needs your input', 'Research'], ['Session completed', 'Research']]);
   notifier.dispose();
 });

@@ -8,6 +8,7 @@ import type { CompositionDocument } from '../../kernel/session-composition.js';
 import type { WorkbenchMode } from '../../kernel/workbench-mode.js';
 import type { WindowSaveState } from '../../kernel/window-workspace-store.js';
 import { appendedRank } from '../../kernel/bot-roster.js';
+import { applyMoveSteps, type MoveStep } from '../../kernel/assistant-groups.js';
 import { newAssistantPicture } from '../../kernel/assistant-picture.js';
 import { applyGroupOperation, applyWindowOperation, createWindowView, decodeWindowGroup, decodeWorkspaceWindow, hasWindowAppearance, isWindowCreateRequest, isWindowGroupCreateRequest, toWindowGroup, windowPrimaryViewId, type WindowGroup, type WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
@@ -373,15 +374,17 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     sectionCreation.pending = { ...value, group }; return sectionCreation.pending;
   };
   /**
-   * Creates a group in the background, never choosing it in Window mode: an empty section (`title`) or a group started from a new
-   * session (`template`). An uncertain request is kept and only Retry submits it again.
+   * Creates a group in the background, never choosing it in Window mode: an empty group people name (`title`), or a group given
+   * whole (`template`), such as one started from a new session. An uncertain request is kept and only Retry submits it again.
    */
   const createSectionRequest = (title: string | undefined, explicitRetry: boolean, template?: () => WindowGroup): Promise<string> => {
     if (!inScope() || !access.current) return Promise.reject(keyedError('windows.error.scopeChanged'));
     if (sectionCreation.running) return sectionCreation.running;
     const previous = pendingSection();
     if (!previous && title === undefined && !template) return Promise.resolve('');
-    const group: WindowGroup = previous?.group ?? template?.() ?? { window: { ...emptyWindow(), title: title! }, bots: { rank: appendedRank(catalog.groups), members: {} }, presentation: { window: false } };
+    // A group people make starts empty, shown in Chats, the directory and Window mode alike, and is listed last.
+    const group: WindowGroup = previous?.group ?? template?.() ?? { window: { schemaVersion: 3, id: crypto.randomUUID(), revision: 0, title: title!, selectedPrimaryViewId: null, selectedViewId: null, views: [] },
+      bots: { rank: appendedRank(catalog.groups), members: {} } };
     const pending = previous ?? { group, operationId: crypto.randomUUID(), issuedAt: Date.now() };
     const ticket = admission;
     const clear = () => { sectionCreation.pending = null; try { conversationSessionStorage.removeItem(`${key}:pending-section-create`); } catch { /* A settled request can safely be inspected again. */ } };
@@ -577,6 +580,29 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   const dispatch = (operation: Parameters<WindowWorkspaceStore['operate']>[0]) => {
     try { void operate(operation).catch(() => {}); } catch (error) { setError(shown(error)); }
   };
+  /**
+   * A move between two groups through the Relay's transfer or merge, sent with the revisions it reads first; the groups it
+   * answers with replace the ones this page holds, and a merged group is forgotten. Without a Relay the same rules apply here.
+   */
+  const across = async (step: Extract<MoveStep, { kind: 'transfer' | 'merge' }>) => {
+    let changed: Record<string, WindowGroup | null>;
+    if (!client) {
+      const result = applyMoveSteps([step.source, step.target].flatMap(id => { const group = readGroup(id); return group ? [group] : []; }), [step]);
+      changed = Object.fromEntries([step.source, step.target].map(id => [id, result.find(group => group.window.id === id) ?? null]));
+      for (const group of Object.values(changed)) if (group) persistLocal(group);
+    } else {
+      const [source, target] = await Promise.all([client.inspect(step.source), client.inspect(step.target)]);
+      const identity = { operationId: crypto.randomUUID(), issuedAt: Date.now() };
+      changed = (step.kind === 'transfer'
+        ? await client.transfer(step.source, { ...identity, baseRevision: source.window.revision, viewId: step.viewId, target: step.target, targetRevision: target.window.revision })
+        : await client.merge(step.target, { ...identity, baseRevision: target.window.revision, source: step.source, sourceRevision: source.window.revision })).groups;
+    }
+    if (!inScope()) throw keyedError('windows.error.scopeChanged');
+    for (const [id, group] of Object.entries(changed)) {
+      if (!group) { forgetDeletedWindow(id); continue; }
+      const store = stores.get(id); store?.accept(group); updateCatalog(store?.getGroup() ?? group);
+    }
+  };
   const hasActiveWindow = confirmed && !unavailable;
   const deletedWindowIds = useMemo(() => [...selection.deleted] as readonly string[], [selection, selection.deleted.size]);
   return { window, group, windows, groups, error, client, deleted, deletedWindowIds, hasActiveWindow, saveState, provisional: !!window && provisional,
@@ -592,9 +618,31 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
         bots: { rank: appendedRank(catalog.groups), members: { [viewId]: { picture: newAssistantPicture(viewId, catalog.groups) } } } }));
       return { groupId, viewId };
     },
-    async createSection(title: string): Promise<string> {
+    /** Creates an empty group with this name, listed after the others. */
+    async createGroup(title: string): Promise<string> {
       const trimmed = title.trim(); if (!trimmed) throw keyedError('windows.error.titleRequired'); if (trimmed.length > 256) throw keyedError('windows.error.titleTooLong');
+      if (pendingSection()) throw keyedError('windows.error.unconfirmedGroup');
       return createSectionRequest(trimmed, false);
+    },
+    /** Runs the steps of a move (`planMove`) in order, each settled before the next. */
+    async moveAssistant(steps: readonly MoveStep[]): Promise<void> {
+      for (const step of steps) {
+        if (!inScope() || !access.current) throw keyedError('windows.error.scopeChanged');
+        if (step.kind === 'edit') await operateGroup(step.groupId, step.operation);
+        else if (step.kind === 'create') {
+          if (pendingSection()) throw keyedError('windows.error.unconfirmedGroup');
+          await createSectionRequest(undefined, false, () => step.group);
+        } else await across(step);
+      }
+    },
+    /** Deletes a group that is not the open Window, such as an empty one; a group already gone counts as deleted. */
+    async deleteGroup(id: string): Promise<void> {
+      if (currentStore.current?.getSnapshot().id === id) throw keyedError('windows.error.switchBeforeDelete');
+      if (client) {
+        try { const snapshot = await client.inspect(id); await client.delete(snapshot.window, { operationId: crypto.randomUUID(), issuedAt: Date.now() }); }
+        catch (error) { if (!(error instanceof WindowRequestError && error.status === 404)) throw error; }
+      } else conversationLocalStorage.removeItem(`${key}:${id}`);
+      forgetDeletedWindow(id);
     },
     discardLocalChanges: () => currentStore.current?.discardPendingChanges() ?? Promise.resolve(), unavailable: participating && enabled && unavailable, operate, readWindow,
     authority: window && !unavailable ? {

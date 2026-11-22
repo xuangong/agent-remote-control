@@ -36,19 +36,19 @@ const button = (sheet: HTMLElement, label: string) => [...sheet.querySelectorAll
 
 it('names the Window it deletes and says its sessions stay in All sessions', async () => {
   await render(<WindowSheets scope={scopeOf({}, [buildWindow([buildView('x')], 'x', { id: 'B' })])} />);
-  const text = dialog('Delete this Window?')!.querySelector('.lab-sheet-message')!.textContent;
+  const text = dialog('Delete this group?')!.querySelector('.lab-sheet-message')!.textContent;
   expect(text).toBe('“Alpha” and its layout are deleted. Its agent sessions keep running and stay in All sessions.');
 });
 
 it('says that deleting the only Window opens a new empty one in its place', async () => {
   await render(<WindowSheets scope={scopeOf()} />);
-  expect(dialog('Delete this Window?')!.querySelector('.lab-sheet-message')!.textContent).toContain('A new empty Window opens in its place.');
+  expect(dialog('Delete this group?')!.querySelector('.lab-sheet-message')!.textContent).toContain('A new empty group opens in its place.');
 });
 
 it('closes without deleting on Cancel', async () => {
   const scope = scopeOf();
   await render(<WindowSheets scope={scope} />);
-  await act(async () => button(dialog('Delete this Window?')!, 'Cancel').click());
+  await act(async () => button(dialog('Delete this group?')!, 'Cancel').click());
   expect(scope.setDeleteConfirmOpen).toHaveBeenCalledExactlyOnceWith(false);
   expect(scope.windowActions.deleteCurrent).not.toHaveBeenCalled();
 });
@@ -56,25 +56,25 @@ it('closes without deleting on Cancel', async () => {
 it('closes the delete sheet through its own flag and leaves Agent control alone', async () => {
   const scope = scopeOf();
   await render(<WindowSheets scope={scope} />);
-  await act(async () => dialog('Delete this Window?')!.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click());
+  await act(async () => dialog('Delete this group?')!.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click());
   expect(scope.setDeleteConfirmOpen).toHaveBeenCalledWith(false);
   expect(scope.setAgentControlOpen).not.toHaveBeenCalled();
   expect(scope.windowActions.deleteCurrent).not.toHaveBeenCalled();
 });
 
-it('closes and deletes the current Window on Delete Window', async () => {
+it('closes and deletes the current Window on Delete group', async () => {
   const scope = scopeOf();
   await render(<WindowSheets scope={scope} />);
-  await act(async () => button(dialog('Delete this Window?')!, 'Delete Window').click());
+  await act(async () => button(dialog('Delete this group?')!, 'Delete group').click());
   expect(scope.setDeleteConfirmOpen).toHaveBeenCalledExactlyOnceWith(false);
   expect(scope.windowActions.deleteCurrent).toHaveBeenCalledOnce();
 });
 
-it('keeps Delete Window from acting while another Window action runs or the Window is not confirmed', async () => {
+it('keeps Delete group from acting while another Window action runs or the Window is not confirmed', async () => {
   await render(<WindowSheets scope={scopeOf({ windowActions: { busy: true, deleteCurrent: vi.fn() } })} />);
-  expect(button(dialog('Delete this Window?')!, 'Delete Window').disabled).toBe(true);
+  expect(button(dialog('Delete this group?')!, 'Delete group').disabled).toBe(true);
   await render(<WindowSheets scope={scopeOf({ windowWorkspace: { provisional: true, client: undefined, windows: [] } })} />);
-  expect([...document.querySelectorAll('dialog.orchard-sheet')].every(item => button(item as HTMLElement, 'Delete Window').disabled)).toBe(true);
+  expect([...document.querySelectorAll('dialog.orchard-sheet')].every(item => button(item as HTMLElement, 'Delete group').disabled)).toBe(true);
 });
 
 const inspect = vi.fn(async (_windowId: string | undefined) => ({ manager: undefined }));
@@ -119,8 +119,8 @@ it('opens the Agent control sheet for the shown Window', async () => {
 
 it('words the delete sheet in Chinese', async () => {
   await render(<LocaleContext.Provider value="zh"><WindowSheets scope={scopeOf({}, [buildWindow([buildView('x')], 'x', { id: 'B' })])} /></LocaleContext.Provider>);
-  const sheet = dialog('删除这个窗口？')!;
+  const sheet = dialog('删除这个分组？')!;
   expect(sheet.querySelector('.lab-sheet-message')!.textContent).toBe('“Alpha”和它的布局会被删除。里面的 Agent 会话照常运行，仍留在全部会话里。');
-  expect(button(sheet, '删除窗口')).toBeDefined();
+  expect(button(sheet, '删除分组')).toBeDefined();
   expect(button(sheet, '取消')).toBeDefined();
 });

@@ -6,6 +6,7 @@ import { useWindowActions, windowCatalog } from './useWindowActions.js';
 import { AgentControl } from './AgentControl.js';
 import { windowActivity, type SessionActivityStatus } from '../../kernel/session-activity-status.js';
 import { botRole } from '../../kernel/bot-roster.js';
+import { inGroupOrder } from '../../kernel/assistant-groups.js';
 import { assistantStateWord, assistantStatus, errorWords, translator, type AssistantState, type Translate } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { windowSummary } from './window-summary.js';
@@ -103,7 +104,8 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
   useEffect(() => {
     setDeleting(undefined); pendingDelete.current = undefined;
   }, [workspace.client, workspace.window?.id, active]);
-  const catalog = windowCatalog(workspace);
+  // The groups in the order Chats and the directory list them.
+  const catalog = inGroupOrder(windowCatalog(workspace), workspace.groups ?? []);
   const deleteTarget = deleting && active && workspace.hasActiveWindow && deleting.client === workspace.client
     && deleting.windowId === workspace.window?.id && deleting.id !== workspace.window?.id
     && catalog.some(window => window.id === deleting.id) ? deleting : undefined;

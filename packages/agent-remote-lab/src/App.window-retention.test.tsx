@@ -168,11 +168,11 @@ it('reuses the same Session client and replica across Windows and releases a del
     expect(fixture.channels.filter(channel => channel.agentId === 'agent-one' && channel.observation === 'session')).toHaveLength(1);
     await act(async () => workspace.open(other.id));
     await until(() => expect(workspace.window?.id).toBe(other.id));
-    await act(async () => container!.querySelector<HTMLButtonElement>('#lab-context [aria-label="Delete Window: first"]')!.click());
-    await act(async () => [...container!.querySelectorAll<HTMLButtonElement>('dialog button')].find(button => button.textContent === 'Delete Window')!.click());
+    await act(async () => container!.querySelector<HTMLButtonElement>('#lab-context [aria-label="Delete group: first"]')!.click());
+    await act(async () => [...container!.querySelectorAll<HTMLButtonElement>('dialog button')].find(button => button.textContent === 'Delete group')!.click());
     expect(connections.find(target('one'))?.client).toBe(original.client);
-    await act(async () => container!.querySelector<HTMLButtonElement>('#lab-context [aria-label="Delete Window: shared"]')!.click());
-    await act(async () => [...container!.querySelectorAll<HTMLButtonElement>('dialog button')].find(button => button.textContent === 'Delete Window')!.click());
+    await act(async () => container!.querySelector<HTMLButtonElement>('#lab-context [aria-label="Delete group: shared"]')!.click());
+    await act(async () => [...container!.querySelectorAll<HTMLButtonElement>('dialog button')].find(button => button.textContent === 'Delete group')!.click());
     await until(() => expect(connections.find(target('one'))).toBeUndefined());
     expect(originalChannel.closed).toBe(1);
     expect(connections.find(target('two'))).toBeDefined();

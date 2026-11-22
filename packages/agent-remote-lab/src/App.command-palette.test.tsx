@@ -143,7 +143,7 @@ it('selects a bot from Bot mode, and opens a Window from Bot mode in Window mode
     // A Window made from Bot mode stays open once Window mode restores its Window.
     await app.switchMode('bot');
     await shortcut();
-    await search(app.container, 'New Window');
+    await search(app.container, 'New group');
     await until(() => expect(app.workspace().window?.id).toMatch(/^(?!(A|R|S)$)/));
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
     expect(app.workspace().window?.id).toMatch(/^(?!(A|R|S)$)/);

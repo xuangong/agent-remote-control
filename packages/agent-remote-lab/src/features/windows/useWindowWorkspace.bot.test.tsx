@@ -55,7 +55,7 @@ it('routes a confirmed section-only Window link without stale native attachment 
   const key = 'agent-remote:recovery:https://section/:shared-window'; conversationLocalStorage.setItem(`${key}:section`, JSON.stringify({ window: section.window }));
   const { read, sectionRoute } = await mount('https://section/', true);
   expect(sectionRoute).toHaveBeenCalledWith('section'); expect(read().window).toBeUndefined(); expect(create).not.toHaveBeenCalled(); expect(sessionStorage.getItem(key)).toBeNull();
-  await act(async () => { await expect(read().open('section')).rejects.toThrow('section'); }); expect(read().window).toBeUndefined();
+  await act(async () => { await expect(read().open('section')).rejects.toThrow('hidden in Window mode'); }); expect(read().window).toBeUndefined();
 });
 it('loads only sections in Bot mode and initializes a Window only when switched to it', async () => {
   const section = group('section', true); const backend = server(section); const create = vi.spyOn(WindowWorkspaceClient.prototype, 'create').mockImplementation(async window => { backend.groups.set(window.id, { window }); return { window }; });
@@ -85,22 +85,24 @@ it('stores a picture for a new assistant that no other assistant of the account 
   await act(async () => { created = await read().createBotGroup({ hostId: 'h', providerId: 'p', nativeSessionId: 'new', title: 'New session' }); });
   expect(read().readGroup(created.groupId)!.bots!.members[created.viewId]!.picture).toMatchObject(free!);
 });
-it('creates local empty sections separately from Window place and uses ranked group envelopes', async () => {
+it('creates empty local groups, shown in both modes and listed last, without choosing them in Window mode', async () => {
   const { read } = await mount('local-sections'); const before = read().window; const url = location.href;
-  let id!: string, second!: string; await act(async () => { id = await read().createSection('  First  '); second = await read().createSection('Second'); });
+  let id!: string, second!: string; await act(async () => { id = await read().createGroup('  First  '); second = await read().createGroup('Second'); });
   expect(read().window).toBe(before); expect(location.href).toBe(url); const section = read().readGroup(id)!;
-  expect(section.window.title).toBe('First'); expect(section.presentation).toEqual({ window: false }); expect(section.bots).toEqual({ rank: 'm', members: {} }); expect(section.window.views[0]?.binding).toBeUndefined(); expect(read().readGroup(second)?.bots?.rank).toBe('mm');
-  await expect(read().createSection('  ')).rejects.toThrow('title'); await expect(read().createSection('x'.repeat(257))).rejects.toThrow('256');
+  expect(section.window.title).toBe('First'); expect(section.presentation).toBeUndefined(); expect(section.bots).toEqual({ rank: 'm', members: {} }); expect(section.window.views).toEqual([]);
+  expect(read().readGroup(second)!.bots!.rank > section.bots!.rank).toBe(true);
+  await expect(read().createGroup('  ')).rejects.toThrow('name'); await expect(read().createGroup('x'.repeat(257))).rejects.toThrow('256');
 });
 it('retains an exact unsettled section request and only Retry can resubmit it', async () => {
   server(group('a')); history.replaceState(null, '', '/?window=a'); const writes: Array<{ group: WindowGroup; identity: unknown }> = [];
   const create = vi.spyOn(WindowWorkspaceClient.prototype, 'createGroup').mockImplementation(async (group, identity) => { writes.push({ group: structuredClone(group), identity }); throw new WindowMutationUnknownError(group.window.id, { ...identity!, window: group.window }, new Error('Lost')); });
   const recover = vi.spyOn(WindowWorkspaceClient.prototype, 'recoverCreate').mockImplementation(async (window, identity) => { throw new WindowMutationUnknownError(window.id, { ...identity, window }, new Error('Unknown')); });
   const { read } = await mount('https://creation/', true);
-  await act(async () => { await expect(read().createSection('Original')).rejects.toThrow(); }); const saved = conversationSessionStorage.getItem('agent-remote:recovery:https://creation/:shared-window:pending-section-create'); expect(saved).toContain('Original');
-  await act(async () => { await expect(read().createSection('Replacement')).rejects.toThrow(); }); expect(writes).toHaveLength(1); expect(recover).toHaveBeenCalled();
+  await act(async () => { await expect(read().createGroup('Original')).rejects.toThrow(); }); const saved = conversationSessionStorage.getItem('agent-remote:recovery:https://creation/:shared-window:pending-section-create'); expect(saved).toContain('Original');
+  // Another group waits until the unconfirmed one is settled; it never resubmits the first under the second name.
+  await act(async () => { await expect(read().createGroup('Replacement')).rejects.toThrow('not confirmed'); }); expect(writes).toHaveLength(1);
   expect(read().sectionCreationState).toMatchObject({ state: 'unknown', title: 'Original' }); expect(read().error).toBeUndefined();
-  await act(async () => { await expect(read().retrySection()).rejects.toThrow(); }); expect(writes).toHaveLength(2); expect(writes[1]).toEqual(writes[0]); expect(create).toHaveBeenCalledTimes(2);
+  await act(async () => { await expect(read().retrySection()).rejects.toThrow(); }); expect(recover).toHaveBeenCalled(); expect(writes).toHaveLength(2); expect(writes[1]).toEqual(writes[0]); expect(create).toHaveBeenCalledTimes(2);
 });
 it('keeps Window save Retry and uncertain section Retry independent', async () => {
   const backend = server(group('a')); history.replaceState(null, '', '/?window=a'); const { read } = await mount('https://separate-retry/', true);
@@ -109,7 +111,7 @@ it('keeps Window save Retry and uncertain section Retry independent', async () =
   const create = vi.spyOn(WindowWorkspaceClient.prototype, 'createGroup').mockImplementation(async (group, identity) => { throw new WindowMutationUnknownError(group.window.id, { ...identity!, window: group.window }, new Error('Lost')); });
   vi.spyOn(WindowWorkspaceClient.prototype, 'recoverCreate').mockImplementation(async (window, identity) => { throw new WindowMutationUnknownError(window.id, { ...identity, window }, new Error('Unknown')); });
   let saved!: Promise<void>; await act(async () => { saved = read().operate({ type: 'rename', title: 'Window edit' }); void saved.catch(() => {}); });
-  await act(async () => { await expect(read().createSection('Section')).rejects.toThrow(); }); const windowError = read().error; expect(read().saveState?.pending).toBe(1);
+  await act(async () => { await expect(read().createGroup('Section')).rejects.toThrow(); }); const windowError = read().error; expect(read().saveState?.pending).toBe(1);
   const beforeRetry = create.mock.calls.length; await act(async () => read().retrySave()); expect(create).toHaveBeenCalledTimes(beforeRetry); expect(read().error).toBe(windowError);
   const mutations = mutation.mock.calls.length; await act(async () => { await expect(read().retrySection()).rejects.toThrow(); }); expect(mutation).toHaveBeenCalledTimes(mutations); expect(read().sectionCreationState.state).toBe('unknown');
   expect(backend.groups.get('a')?.window.title).toBe('a');
@@ -129,7 +131,7 @@ it('keeps a cached Window read-only, without recording it as chosen, until an ex
   expect(sessionStorage.getItem(key)).toBeNull(); expect(localStorage.getItem(`${key}:last-window`)).toBeNull();
 });
 it('rejects an older layout if the group changes while its operation acquires a lease', async () => {
-  const { read } = await mount('local-layout-fence'); let handle!: GroupHandle; const sectionId = await read().createSection('Section');
+  const { read } = await mount('local-layout-fence'); let handle!: GroupHandle; const sectionId = await read().createGroup('Section');
   await act(async () => { handle = await read().acquireGroup(sectionId); }); const current = handle.getGroup(), { schemaVersion: _, id: __, revision: ___, ...layout } = current.window;
   const stale = read().operateGroup(sectionId, { type: 'layout.apply', layout: { ...layout, title: 'Stale layout' } }); const rejected = expect(stale).rejects.toThrow('changed');
   await act(async () => { await handle.operate({ type: 'rename', title: 'Fresh' }); await rejected; }); expect(read().readGroup(sectionId)?.window.title).toBe('Fresh'); handle.release();
@@ -171,8 +173,8 @@ it('recovers a lost section POST and adopts the inspected full group after reloa
   try {
     history.replaceState(null, '', '/?window=a'); const harness = await mount(scope, true);
     await vi.waitFor(async () => { await act(async () => {}); expect(harness.read().hasActiveWindow).toBe(true); }, { timeout: 3000, interval: 5 });
-    await act(async () => { await expect(harness.read().createSection('Original')).rejects.toThrow(); }); expect(writes).toHaveLength(1); expect(writes[0]).toMatchObject({ bots: { rank: 'm', members: {} }, presentation: { window: false }, window: { title: 'Original' } });
-    await act(async () => { await expect(harness.read().createSection('Replacement')).rejects.toThrow(); }); expect(writes).toHaveLength(1);
+    await act(async () => { await expect(harness.read().createGroup('Original')).rejects.toThrow(); }); expect(writes).toHaveLength(1); expect(writes[0]).toMatchObject({ bots: { rank: 'm', members: {} }, window: { title: 'Original', views: [] } }); expect(writes[0].presentation).toBeUndefined();
+    await act(async () => { await expect(harness.read().createGroup('Replacement')).rejects.toThrow(); }); expect(writes).toHaveLength(1);
     const id = writes[0].window.id; groups.set(id, applyGroupOperation(groups.get(id)!, { type: 'section.rank', rank: 'z' })); receiptsAvailable = true;
     await act(async () => root!.unmount()); root = undefined; const reloaded = await mount(scope, true);
     await vi.waitFor(async () => { await act(async () => {}); expect(reloaded.read().readGroup(id)?.bots?.rank).toBe('z'); expect(reloaded.read().sectionCreationState.state).toBe('idle'); }, { timeout: 3000, interval: 5 });
@@ -189,7 +191,7 @@ it('shows a cached Window read-only on a cold start until the service confirms i
   const { read } = await mount('https://cold/', true);
   expect(read().window?.title).toBe('Cached'); expect(read().provisional).toBe(true); expect(read().unavailable).toBe(false); expect(read().hasActiveWindow).toBe(false);
   expect(read().authority).toBeDefined(); expect(read().sessionBridge).toBeDefined();
-  await act(async () => { await expect(read().operate({ type: 'rename', title: 'Edited' })).rejects.toThrow('Wait for this Window'); });
+  await act(async () => { await expect(read().operate({ type: 'rename', title: 'Edited' })).rejects.toThrow('Wait for this group'); });
   await act(async () => { read().authority!.operate({ type: 'view.close', viewId: 'main' }); await Promise.resolve(); });
   expect(read().window?.views.map(view => view.id)).toEqual(['main']); expect(mutate).not.toHaveBeenCalled(); expect(backend.changes).not.toHaveBeenCalled();
   await act(async () => { finish(); }); await vi.waitFor(async () => { await act(async () => {}); expect(read().provisional).toBe(false); });

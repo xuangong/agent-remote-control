@@ -33,7 +33,7 @@ async function menu(statuses: Record<string, SessionActivityStatus>) {
   const workspace = { window: current, windows: [current, ...others], hasActiveWindow: true, unavailable: false,
     open: async () => {}, create: async () => {}, remove: async () => {}, operate: async () => {} } as unknown as ReturnType<typeof useWindowWorkspace>;
   const container = await render(<WindowMenu workspace={workspace} visible sessionStatus={session => statuses[session.nativeSessionId] ?? 'unknown'} />);
-  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Windows"]')!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Groups"]')!.click());
   const windowRow = (id: string) => container.querySelector(`[data-window-row="${id}"]`)!;
   const viewRow = (id: string) => container.querySelector(`[data-window-view-row="${id}"]`)!;
   return { container, windowRow, viewRow };
@@ -64,7 +64,7 @@ it('reminds of sessions waiting in another Window, not in the current one', asyn
   const root = elsewhere.container.querySelector<HTMLElement>('.lab-window-floating')!;
   expect(root.dataset.attention).toBe('true');
   expect(root.querySelector('.lab-tracking-attention')).not.toBeNull();
-  expect(root.querySelector('[role="status"]')!.textContent).toBe('Another Window has pending sessions.');
+  expect(root.querySelector('[role="status"]')!.textContent).toBe('Another group has pending sessions.');
   const here = await menu({ a: 'waiting', d: 'running', e: 'starting' });
   const quiet = here.container.querySelector<HTMLElement>('.lab-window-floating')!;
   expect(quiet.dataset.attention).toBeUndefined();
@@ -85,9 +85,9 @@ async function deletionMenu() {
     return <WindowMenu workspace={workspace} visible={visible} />;
   }
   const container = await render(<Harness />);
-  const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Windows"]')!;
+  const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Groups"]')!;
   const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('dialog button')].find(button => button.textContent === label)!;
-  const openConfirmation = () => act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Delete Window: Window other"]')!.click());
+  const openConfirmation = () => act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Delete group: Window other"]')!.click());
   await act(async () => trigger.click());
   return { container, trigger, button, openConfirmation, remove,
     setRemove(action: typeof removeWindow) { removeWindow = action; },
@@ -119,9 +119,9 @@ it.each(['success', 'failure'] as const)('keeps pending confirmation and its Win
   test.setRemove(() => new Promise<void>((resolve, reject) => { finish = resolve; fail = reject; }));
   await test.openConfirmation();
   const dialog = test.container.querySelector('dialog')!;
-  await act(async () => test.button('Delete Window').click());
-  expect(test.button('Delete Window').disabled).toBe(true);
-  await escape(test.button('Delete Window'));
+  await act(async () => test.button('Delete group').click());
+  expect(test.button('Delete group').disabled).toBe(true);
+  await escape(test.button('Delete group'));
   expect(test.trigger.getAttribute('aria-expanded')).toBe('true');
   expect(test.container.querySelector('dialog')).toBe(dialog);
   expect(dialog.open).toBe(true);
@@ -129,10 +129,10 @@ it.each(['success', 'failure'] as const)('keeps pending confirmation and its Win
   if (outcome === 'failure') {
     await act(async () => fail(new Error('Deletion is unavailable. Try again.')));
     expect(dialog.querySelector('[role="alert"]')?.textContent).toBe('Deletion is unavailable. Try again.');
-    expect(test.button('Delete Window').disabled).toBe(false);
+    expect(test.button('Delete group').disabled).toBe(false);
     expect(test.container.querySelector('[data-window-id="other"]')).not.toBeNull();
     test.setRemove(async () => {});
-    await act(async () => test.button('Delete Window').click());
+    await act(async () => test.button('Delete group').click());
     expect(test.remove).toHaveBeenNthCalledWith(2, 'other');
   } else await act(async () => finish());
   expect(test.trigger.getAttribute('aria-expanded')).toBe('true');
@@ -156,14 +156,14 @@ it.each(['scope', 'panel'] as const)('still invalidates nested confirmation afte
   expect(test.remove).not.toHaveBeenCalled();
 });
 
-it('words the Windows panel in Chinese', async () => {
+it('words the groups panel in Chinese', async () => {
   const current = windowOf('current', ['a']);
   const workspace = { window: current, windows: [current], hasActiveWindow: true, unavailable: false,
     open: async () => {}, create: async () => {}, remove: async () => {}, operate: async () => {} } as unknown as ReturnType<typeof useWindowWorkspace>;
   const container = await render(<LocaleContext.Provider value="zh"><WindowMenu workspace={workspace} visible onOverview={() => {}} /></LocaleContext.Provider>);
-  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="窗口"]')!.click());
-  expect(container.querySelector('[aria-label="关闭窗口列表"]')).not.toBeNull();
-  expect(container.textContent).toContain('新建窗口');
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="分组"]')!.click());
+  expect(container.querySelector('[aria-label="关闭分组列表"]')).not.toBeNull();
+  expect(container.textContent).toContain('新建分组');
   expect(container.textContent).toContain('1 个 Bot');
-  expect(container.textContent).not.toContain('New Window');
+  expect(container.textContent).not.toContain('New group');
 });

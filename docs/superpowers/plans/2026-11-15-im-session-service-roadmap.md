@@ -355,3 +355,26 @@ Shipped from main `4b3ff860`.
 - Components: 3 WebKit timeouts in the full run; the specs passed 58 of 58 when run alone.
 - `smoke:quick` (seed 8828): M1, M2, M4 and M7 passed.
 - The App test's failed assertion ("Handoff complete…" not cleared) is recorded for investigation as O60.
+
+## Release 2026-11-22: module split for parallel work
+
+**Deploy.** Shipped from main `27931c42`, through the new merge procedure: merge, `pnpm postmerge`, push. The Relay and website are Worker `d90787b4`, rollback target `7a0e9d25`. The readiness script confirmed the Durable Object. No Controller change.
+
+**What changed:**
+- **Split items 1 to 3.** The compatibility digest is regenerated on `main` only and has a merge driver. Open items are one file each under `docs/superpowers/open-items/`. Component clauses are one file per component. The legacy token budget is a ceiling. Component specs name their own browser projects.
+- **Split item 4.** The conversation surface and the session-view presentation are split into their parts.
+- **Split item 5.**
+  - Module-level test selection.
+  - The Workbench is now a shell, `workbench-kernel`, `workbench-conversation` and eight feature modules: chats, windows, team, sessions, session-links, computers, settings and diagnostics.
+  - Features use only the kernel and the conversation module, apart from three documented seams. `arch:check` enforces this with a new `uses` rule.
+  - A single-feature change now runs 119 to 171 tests in 4 to 6 s, where any Workbench file used to run 4,207 tests in 123 s.
+- **Fixed:**
+  - O60 and O61: test races at their cause;
+  - O62: a page race that took the successor's view away mid-restore, now handled by the succession rule `notificationNeedsDiscovery`;
+  - O64: an E3 flow race.
+
+**Gates:**
+- `pnpm verify` exit 0.
+- Flows on Chromium 64 of 64; on WebKit 63 passed and 1 skipped.
+- Components: 1,225 passed. 3 WebKit timeouts recur in full runs and pass alone; they are recorded as O65.
+- `smoke:quick` seed 10524: M1, M2, M4 and M7 passed.

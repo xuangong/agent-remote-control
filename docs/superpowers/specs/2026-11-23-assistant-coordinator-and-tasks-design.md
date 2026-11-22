@@ -524,6 +524,12 @@ wrote]`; an uncertain delivery or creation leaves the task waiting with `brief_u
 (`same`, `read_only`, `worktree` with the patch returned as a file on the Host), `provider` and `model`. What remains is tracked
 in open item O69.
 
+Assistants then message one another on the Team path (part of T4): the Relay reads an account's assistants from its Window groups
+(`agent-relay-core/src/assistants.ts`), `list_assistants` and `message_assistant` reach another assistant's main session on a link,
+a Team of the two main sessions bound where they are, framed as `[Message from <name> · m<id>]` and delivered between turns after
+task updates; a reply names the message it answers and a chain stops at six messages. The conversation folds them into one line
+per sender. What T1 still owes is tracked in open item O70.
+
 
 | Step | Delivers | Gate |
 |---|---|---|

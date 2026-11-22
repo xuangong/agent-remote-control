@@ -26,9 +26,9 @@ modules; `pnpm verify:changed` per commit; a real session in `pnpm local` for ea
 
 ## M3: assistants and their messages (T1, T4)
 
-- [ ] Assistants as Relay entities: id, name, current main session
-- [ ] `list_assistants` and `message_assistant`, framed, between turns, with replies and hop limits
-- [ ] Folded assistant lines in the conversation
+- [x] Assistants as Relay entities: id, name, current main session — a directory over the Window groups (8f8681cb); the separate record is O70
+- [x] `list_assistants` and `message_assistant`, framed, between turns, with replies and hop limits (8f8681cb)
+- [x] Folded assistant lines in the conversation (8f8681cb)
 
 ## M4: rooms (T6)
 

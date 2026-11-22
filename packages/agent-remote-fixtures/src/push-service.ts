@@ -78,6 +78,8 @@ export interface PushService {
   received(endpoint?: string): ReceivedPush[];
   /** Every push the browser of `endpoint` (or of any subscription) received, decrypted, in delivery order. */
   delivered(endpoint?: string): Promise<DeliveredPush[]>;
+  /** The encrypted bodies the browser of `endpoint` received, in delivery order, for a test that decrypts with its own key. */
+  bodies(endpoint: string): Uint8Array[];
   /** The subscription ended: every later push to it is answered `status`. */
   expire(endpoint: string, status: 404 | 410): void;
   /** The next `count` pushes (1 by default) are answered 429 with `Retry-After: retryAfterSeconds`. */
@@ -281,6 +283,12 @@ export function createPushService(options: PushServiceOptions = {}): PushService
         }
       }
       return out;
+    },
+    bodies(endpoint) {
+      const browser = [...browsers.values()].find(each => each.endpoint === endpoint);
+      if (!browser) return [];
+      settle(browser);
+      return browser.delivered.map(push => push.body.slice());
     },
     expire(endpoint, status) { const browser = [...browsers.values()].find(each => each.endpoint === endpoint); if (browser) browser.expired = status; },
     rateLimit({ retryAfterSeconds, count = 1 }) { limited = { retryAfterSeconds, count }; },

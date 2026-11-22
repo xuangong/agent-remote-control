@@ -14,6 +14,7 @@ flowchart LR
   relay -- S5 partition --> cloudflare["Cloudflare partition"]
   client -- S6 selectors --> renderer["Views"]
   client -- S7 records --> device["Device store"]
+  relay -- S8 push --> push["Browser push service"]
 ```
 
 ## How fixtures are made
@@ -124,6 +125,14 @@ The Relay's side of S2 is a set of modules in `agent-relay-core/src`; each contr
 - **Ports.** `DeviceDatabase` (`readIndex`, `read`, `write` of one batch, `clear`) is the store's only storage; `PageLifecycle` tells it when the page is hidden. `agent-client-web` installs the IndexedDB database and the browser page when imported.
 - **Fixtures.** `buildStoredRecord`; `agent-remote-seams/tests/S7/fixtures/device-record.v1.json`, frozen for stored version 1 (a new version adds a file, never edits one).
 - **Tests.** `agent-remote-seams/tests/S7` (12): a restored record paints before any frame arrives; a restore carries no turn or interaction; the first server page confirms by item key, replaces, or starts a new epoch; a read replica ignores the device; version, person and session mismatches are discarded; purge; byte-budget eviction; the window limit; the frozen v1 record. The `DeviceDatabase` contract runs on the memory database (`agent-client`) and on IndexedDB (`agent-client-web`).
+
+## S8 Relay to push service
+
+- **Parties.** The Relay's push sender (`agent-relay-core/src/push/push-sender.ts`) and a browser's push service (RFC 8030): Apple's, Google's, Mozilla's or Microsoft's. The push service is the sender's port (`post`, `fetch` in production); a test stands the push service simulator in its place.
+- **Contract.** One push is a POST to the subscription's endpoint: the payload encrypted for the subscription's keys (RFC 8291, one `aes128gcm` record of at most 4096 bytes), `Authorization: vapid t=<ES256 token>, k=<public key>` (RFC 8292; the token names the endpoint's origin, expires within 24 hours and carries the Relay's `mailto:` or `https:` subject), `TTL`, `Urgency`, and a `Topic` of up to 32 base64url characters when the push has one.
+- **Guarantees.** (1) A 2xx is `sent`. (2) A 404 or 410 is `gone`, and the sender tells `forget` the endpoint, so nothing is sent to it again. (3) A 429 or a 5xx is waited out once, as long as `Retry-After` asks and at most 5 minutes, then the push is `failed`; other 4xx are `refused` and the subscription stays. (4) A payload over one record, or an endpoint that is not a browser push service (`isBrowserPushService`, HTTPS on the services' own hosts), is never sent. (5) The service may replace a push it holds with a newer one of the same topic, and promises no order: the payload says when it was decided, so a browser shows the newest.
+- **Fixtures.** The push service simulator, `@orchardworks/agent-remote-fixtures/push-service`: in memory (its `fetch` is the port) or at a loopback port. It checks what a real service checks (TTL, Urgency, Topic, the content coding, the token's signature, audience, lifetime, subject and key), answers 201, 404 or 410 for an expired subscription, 429 with `Retry-After`, 413 over 4096 bytes, and plays the browser: it holds pushes for a browser that is offline, replaces a held push by topic, drops a held push after its TTL, drops or reverses pushes on request, and decrypts what it delivers. Its decryption and the sender's encryption are both checked against RFC 8291's example.
+- **Tests.** `agent-remote-seams/tests/S8` (transport, a real port): the signed request and its headers, a payload only the test's browser keys decrypt, collapse by tag, forgetting on 404 and 410, a 429's wait and the largest payload. The sender's unit tests (`push-sender.test.ts`, `web-push.test.ts`) and the simulator's own (`push-service.test.ts`) stay with their modules.
 
 ## Changing a seam
 

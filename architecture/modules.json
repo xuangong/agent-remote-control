@@ -350,6 +350,18 @@
       ]
     },
     {
+      "name": "relay-push",
+      "layer": 2,
+      "paths": [
+        "packages/agent-relay-core/src/push/**"
+      ],
+      "seams": [
+        "S8"
+      ],
+      "flows": [],
+      "invariants": []
+    },
+    {
       "name": "relay-core-test-support",
       "layer": 5,
       "paths": [
@@ -1167,6 +1179,18 @@
         "\\bfetch\\("
       ],
       "comment": "The headless client imports no React, DOM, IndexedDB or global fetch; those are adapter ports."
+    },
+    {
+      "id": "push-web-crypto",
+      "rule": 5,
+      "modules": [
+        "relay-push"
+      ],
+      "imports": [
+        "node:*"
+      ],
+      "code": [],
+      "comment": "The push sender runs on Workers as in Node: Web Crypto, and the push service through its port, never a Node built-in."
     }
   ],
   "roots": [

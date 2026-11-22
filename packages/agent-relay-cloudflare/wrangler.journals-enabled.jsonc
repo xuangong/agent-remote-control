@@ -55,6 +55,8 @@
     "AGENT_REMOTE_RELAY_URL": "https://agents.xianliao.de5.net",
     "AGENT_REMOTE_ISSUER": "https://token.xianliao.de5.net",
     "AGENT_REMOTE_PREVIEW_DOMAIN": "agents.xianliao.de5.net",
+    // The VAPID public key browsers subscribe to push with; its private half is the secret AGENT_REMOTE_PUSH_PRIVATE_KEY.
+    "AGENT_REMOTE_PUSH_PUBLIC_KEY": "BJCvH34pg0ewCKH6gjeQ0zKQ5AVHcXEq9FAwfZ2q8QgvchIBo6aNBy69BP9Gu4ndH8GG7coRd_b2m8QvfdaK0T4",
     "AGENT_REMOTE_JOURNALS": "1"
   }
 }

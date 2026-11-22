@@ -100,6 +100,34 @@ optional or new, and the Relay asks each partition for its `capabilities` and gr
 older partition without the method counts as the earliest version). With the variable set but no binding the Relay logs
 a configuration error and runs without journals.
 
+### Push notifications
+
+The Relay sends Web Push reminders (an assistant needs you, a turn finished while no page showed it) with a VAPID key
+pair (RFC 8292). Its public half is the variable `AGENT_REMOTE_PUSH_PUBLIC_KEY` in `wrangler.jsonc` and
+`wrangler.journals-enabled.jsonc`; browsers subscribe with it, and the Relay hands it to the page. Its private half is the
+secret `AGENT_REMOTE_PUSH_PRIVATE_KEY`, never a variable. The pair in the configuration was made on 2026-11-22 with
+`node scripts/push-keys.mjs --out .runtime/production-agents/push-vapid.json` in the primary checkout (mode 0600,
+outside version control); that file holds the private key. Set the secret once, before or with the deploy that
+first carries push:
+
+```sh
+node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('.runtime/production-agents/push-vapid.json','utf8')).privateKey)" \
+  | pnpm --filter @orchardworks/agent-relay-cloudflare exec wrangler secret put AGENT_REMOTE_PUSH_PRIVATE_KEY
+pnpm --filter @orchardworks/agent-relay-cloudflare exec wrangler secret list
+```
+
+Run the first line from the primary checkout; it pipes the value, so it reaches neither the terminal nor the shell's
+history. `wrangler secret list` then names `AGENT_REMOTE_PUSH_PRIVATE_KEY` beside `AGENT_REMOTE_SIGNING_SECRET`. The
+Relay signs as its own origin (`https://agents.xianliao.de5.net`); `AGENT_REMOTE_PUSH_SUBJECT` (a `mailto:` or `https:`
+URL) overrides that. With the variable set and no secret, the Worker logs `Configuration error: AGENT_REMOTE_PUSH_PUBLIC_KEY
+is set but the secret AGENT_REMOTE_PUSH_PRIVATE_KEY is not` once per start and runs without push: Settings then says
+notifications are not available on this server. Keep the file: a new pair invalidates every subscription made with the
+old one, and each device must then turn "Notify me on this device" on again (a page that finds its subscription made
+with another key subscribes again by itself). Back the file up with the signing secret's recovery copy.
+
+Push subscriptions live in the Relay state's header record as an optional field, which an older Worker keeps unread, so
+a rollback past this release keeps them and reads the state as before.
+
 Gateway keeps its existing route and resources; set its secret using Wrangler
 from `vnext/apps/platform-cloudflare`. Deploy the reviewed Gateway integration
 separately. Do not reset or copy its production database for this integration.

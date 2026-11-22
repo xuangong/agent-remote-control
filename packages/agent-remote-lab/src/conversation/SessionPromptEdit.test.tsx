@@ -368,7 +368,8 @@ it.each([true, false])('returns the quotes an edited prompt carried to a view th
   await vi.waitFor(() => expect(promptText(promptEditor(f.view))).toContain('Selected A prompt 2'));
   if (receives) {
     expect(promptText(promptEditor(f.view))).toBe('Selected A prompt 2');
-    expect(receiveQuotes).toHaveBeenCalledTimes(1);
+    // The quotes are handed back after the restored prompt is saved, which is later than the prompt showing in the editor.
+    await vi.waitFor(() => expect(receiveQuotes).toHaveBeenCalledTimes(1));
     expect(receiveQuotes.mock.calls[0]![0]).toEqual([quote]);
   } else expect(promptText(promptEditor(f.view))).toContain('<session-excerpt id="quote">');
   expect(f.sent).toHaveLength(0);

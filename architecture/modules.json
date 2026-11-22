@@ -312,7 +312,9 @@
       "seams": [
         "S8"
       ],
-      "flows": [],
+      "flows": [
+        "E14b"
+      ],
       "invariants": []
     },
     {
@@ -370,7 +372,9 @@
       "seams": [
         "S8"
       ],
-      "flows": [],
+      "flows": [
+        "E14b"
+      ],
       "invariants": []
     },
     {
@@ -744,7 +748,8 @@
         "E7",
         "E9",
         "E13",
-        "E14"
+        "E14",
+        "E14b"
       ],
       "invariants": [
         "draft-ownership",

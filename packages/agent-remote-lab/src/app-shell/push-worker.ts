@@ -91,8 +91,8 @@ export async function followClick(data: unknown, ports: PushWorkerPorts): Promis
   if (action.kind === 'focus') { await pages[action.page]!.focus(); return action; }
   if (action.kind === 'navigate') {
     const page = pages[action.page]!;
-    const moved = await page.navigate(action.url).catch(() => null);
-    if (moved) { await page.focus().catch(() => undefined); return action; }
+    // `navigate` rejects for a page this worker does not control; it resolves, with null for a page that left the origin, once it went.
+    if (await page.navigate(action.url).then(() => true, () => false)) { await page.focus().catch(() => undefined); return action; }
   }
   await ports.open(action.url);
   return { kind: 'open', url: action.url };

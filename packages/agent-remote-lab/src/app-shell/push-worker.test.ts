@@ -69,7 +69,7 @@ function worker(pages: Array<WorkerPage & { navigable?: boolean }> = []) {
     shown: async tag => shown.get(tag),
     badge: async () => { badge = true; },
     pages: async () => pages.map((each, index) => ({ ...each, focus: async () => { done.push(`focus ${index}`); },
-      navigate: async (url: string) => { done.push(`navigate ${index} ${url}`); return each.navigable === false ? null : {}; } })),
+      navigate: async (url: string) => { done.push(`navigate ${index} ${url}`); if (each.navigable === false) throw new TypeError('Not controlled'); return null; } })),
     open: async url => { done.push(`open ${url}`); },
   };
   return { ports, shown, done, badge: () => badge };

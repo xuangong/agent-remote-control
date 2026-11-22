@@ -60,6 +60,8 @@ export interface StackOptions extends Omit<ScriptedProviderOptions, 'succession'
    * state: no journals (so no smart reading, and sessions are read live from the Controller), no `journalLimits`, and no `restartRelay`.
    */
   signIn?: { automaticSignIn?: boolean };
+  /** Origins of push services the Relay may send to besides the browsers' own, such as the push service simulator's. */
+  pushServices?: readonly string[];
 }
 
 async function freePort(): Promise<number> {
@@ -81,7 +83,8 @@ export async function startStack(options: StackOptions = {}) {
   const webDist = options.webDist ?? WORKBENCH_DIST;
   const update = options.controllerUpdate;
   const controllerReleases = update ? { latest: async () => update.release, version: async () => update.release } : undefined;
-  const relayOptions = { origin, stateDir: join(state, 'relay'), webDist, journals: true, ...(options.journalLimits ? { journalLimits: options.journalLimits } : {}), ...(controllerReleases ? { controllerReleases } : {}) };
+  const relayOptions = { origin, stateDir: join(state, 'relay'), webDist, journals: true, ...(options.journalLimits ? { journalLimits: options.journalLimits } : {}), ...(controllerReleases ? { controllerReleases } : {}),
+    ...(options.pushServices ? { pushServices: options.pushServices } : {}) };
   const gateway = options.signIn ? await createSignInGateway({ origin, webDist, ...(options.signIn.automaticSignIn ? { automaticSignIn: true } : {}),
     ...(controllerReleases ? { controllerReleases } : {}) }) : undefined;
   const startRelay = async () => { const started = gateway ? await gateway.createRelay() : await createDevboxServer(relayOptions); await started.listen(port, '127.0.0.1'); return started; };

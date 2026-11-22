@@ -8,6 +8,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./push-service": {
+      "types": "./dist/push-service.d.ts",
+      "import": "./dist/push-service.js"
     }
   },
   "types": "./dist/index.d.ts",

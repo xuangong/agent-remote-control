@@ -31,8 +31,10 @@ async function setup(open?: (session: SessionEntry) => Promise<boolean>, windowI
     return <><button onClick={() => setRevision(value => value + 1)}>Reload</button><Fixture key={revision} /></>;
   }
   const container = await render(<Host />);
+  // Back and Forward traverse the browser's history, which the hook hears from a later popstate event.
   const click = async (label: string) => {
-    await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === label)!.click());
+    const traversal = label === 'Back' || label === 'Forward' ? nextPopstate() : undefined;
+    await act(async () => { [...container.querySelectorAll('button')].find(button => button.textContent === label)!.click(); await traversal; });
     await settle();
   };
   return { container, click };
@@ -51,11 +53,11 @@ it('visits ordinary and explicit history for the same native session independent
   const container = await render(<Fixture />);
   await act(async () => container.querySelector('button')!.click());
   expect(new URLSearchParams(location.search).get('intent')).toBe('history');
-  await act(async () => container.querySelectorAll('button')[1]!.click()); await settle();
+  await act(async () => { const popped = nextPopstate(); container.querySelectorAll('button')[1]!.click(); await popped; }); await settle();
   expect(opened).toEqual([['parent', undefined, true]]);
   expect(new URLSearchParams(location.search).has('intent')).toBe(false);
   expect(new URLSearchParams(location.search).get('keepOriginal')).toBe('1');
-  await act(async () => container.querySelectorAll('button')[2]!.click()); await settle();
+  await act(async () => { const popped = nextPopstate(); container.querySelectorAll('button')[2]!.click(); await popped; }); await settle();
   expect(opened[1]).toEqual(['parent', 'history', true]);
 });
 
@@ -82,9 +84,10 @@ it('restores the browser position after failed attachment so the next traversal 
   await f.click('Child');
   await f.click('Sibling');
   await f.click('Back');
+  // The failed visit takes the browser forward again, a second traversal.
+  await vi.waitFor(() => expect(new URLSearchParams(location.search).get('session')).toBe('sibling'), { interval: 5 });
   await settle();
   expect(f.container.querySelector('output')!.textContent).toBe('sibling');
-  expect(new URLSearchParams(location.search).get('session')).toBe('sibling');
   await f.click('Back');
   expect(f.container.querySelector('output')!.textContent).toBe('child');
   await f.click('Forward');

@@ -259,7 +259,8 @@ it.each(['A', 'B'].flatMap(initial => ['native preparation', 'selected resources
     const prepare = remoteReact.preparePromptDraft;
     vi.spyOn(remoteReact, 'preparePromptDraft').mockImplementation(async (...args) => { const value = await prepare(...args); entered = true; await gate; return value; });
   }
-  const f = await failureFixture(false, 'B', false, '', { chain: initial === 'A' ? [] : [committed()], timeline: [prompt], persistPrompt: true,
+  // The refusal shows until the dialog's first automatic status check, 1 s later on a page; that check is not the subject here.
+  const f = await failureFixture(false, 'B', false, '', { chain: initial === 'A' ? [] : [committed()], timeline: [prompt], persistPrompt: true, handoffStatusDelays: [60_000],
     successionDescription: description, async successionPrepare(body) {
       entered = true; await gate;
       return { role: description.role, record: { operationId: String(body.operationId), roleId: 'primary', expectedRevision: description.role.revision,

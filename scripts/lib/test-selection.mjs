@@ -30,6 +30,7 @@ export function planTests({ changed, files, modules, packages }) {
   const { assigned } = assignModules([...new Set([...files, ...changed])], modules);
   const runs = new Map();
   const seams = new Set();
+  const flows = new Set();
   const moduleNames = new Set();
   const run = directory => { let entry = runs.get(directory); if (!entry) runs.set(directory, entry = { all: false, files: new Set() }); return entry; };
   for (const file of changed) {
@@ -44,6 +45,7 @@ export function planTests({ changed, files, modules, packages }) {
     if (!module) { run(directory).all = true; continue; }
     moduleNames.add(module.name);
     for (const seam of module.seams ?? []) seams.add(seam);
+    for (const flow of module.flows ?? []) flows.add(flow);
     if (module.layer === TEST_SUPPORT_LAYER && !isTestFile(file) && file.startsWith(`${directory}/src/`)) { run(directory).all = true; continue; }
     for (const candidate of files) {
       if (assigned.get(candidate) !== module || !isUnitTest(candidate)) continue;
@@ -63,7 +65,8 @@ export function planTests({ changed, files, modules, packages }) {
   }
   // The modules' own tests first, the seam suites last.
   const order = entry => `${entry.directory === SEAMS_DIRECTORY ? 1 : 0}${entry.directory}`;
-  return { modules: [...moduleNames].sort(), seams: [...seams].sort(), runs: plan.sort((a, b) => order(a).localeCompare(order(b))) };
+  const byNumber = (a, b) => a.localeCompare(b, 'en', { numeric: true });
+  return { modules: [...moduleNames].sort(), seams: [...seams].sort(), flows: [...flows].sort(byNumber), runs: plan.sort((a, b) => order(a).localeCompare(order(b))) };
 }
 
 /** Every workspace package by directory, with the script that holds its unit tests (`test:unit` where a package has one). */
@@ -93,5 +96,7 @@ export function describePlan(plan) {
   if (!plan.runs.length) return 'No module test changed, so no unit test runs.';
   const lines = [`Modules: ${plan.modules.join(', ') || 'none'}; seams: ${plan.seams.join(', ') || 'none'}.`];
   for (const entry of plan.runs) lines.push(`  ${entry.name}: ${entry.all ? 'the whole unit suite' : `${entry.files.length} test ${entry.files.length === 1 ? 'path' : 'paths'}`}`);
+  // E2E flows never run here (section 5.9): the step's end runs them.
+  if (plan.flows?.length) lines.push(`Flows these modules take part in, for the step's end: ${plan.flows.join(', ')}.`);
   return lines.join('\n');
 }

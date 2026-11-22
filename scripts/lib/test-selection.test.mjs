@@ -10,7 +10,7 @@ const packages = {
 };
 const modules = [
   { name: 'shell', layer: 4, paths: ['packages/app/src/**'], seams: ['S6'] },
-  { name: 'settings', layer: 4, paths: ['packages/app/src/features/settings/**'], seams: ['S6'] },
+  { name: 'settings', layer: 4, paths: ['packages/app/src/features/settings/**'], seams: ['S6'], flows: ['E11', 'E2'] },
   { name: 'chats', layer: 4, paths: ['packages/app/src/features/chats/**'], seams: ['S6'] },
   { name: 'app-test-support', layer: 5, paths: ['packages/app/src/test/**'], seams: ['S6'] },
   { name: 'client', layer: 2, paths: ['packages/client/src/**'], seams: ['S3', 'S6'] },
@@ -81,7 +81,7 @@ test('a manifest outside every module runs its whole package; documents and file
   assert.deepEqual(plan(['packages/app/README.md', 'scripts/tool.mjs', 'docs/note.md']).runs, []);
 });
 
-test('the plan reads as one line per package', () => {
-  assert.match(describePlan(plan(['packages/app/src/features/settings/Settings.tsx'])), /settings; seams: S6\.\n {2}@sample\/app: 2 test paths\n {2}@sample\/seams: 1 test path/);
+test('the plan reads as one line per package, then the flows to run at the step\'s end', () => {
+  assert.match(describePlan(plan(['packages/app/src/features/settings/Settings.tsx'])), /settings; seams: S6\.\n {2}@sample\/app: 2 test paths\n {2}@sample\/seams: 1 test path\nFlows these modules take part in, for the step's end: E2, E11\./);
   assert.equal(describePlan(plan([])), 'No module test changed, so no unit test runs.');
 });

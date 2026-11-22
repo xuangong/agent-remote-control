@@ -1,16 +1,43 @@
 # Workbench state
 
-The Workbench decides what to show in pure modules under `packages/agent-remote-lab/src/state`. The shell is the hooks under `src/app` (`use*.ts`, one per concern, composed in order by `App.tsx`; `useSessionOpening`, `useCommunicationsAndForks` and `useSideNavigation` are composers that call their concern hooks in the order of the original function), each with a hook test on a mock scope (`src/test/render-hook.tsx`) and the views under `src/app/views`: they hold the browser objects (sockets, timers, storage, the DOM), dispatch events into a module, and run the effects it returns. A module imports no React, DOM, timer or storage; its input is data and its output is data. Every module declares its contract at the top of its file, has a unit table beside it (`*.test.ts`, node environment, mock data from `src/test/window-builders.ts`), and each unit test runs in single-digit milliseconds.
+The Workbench decides what to show in pure modules, each beside the feature that owns it (`src/features/<feature>/`, `src/kernel/`, `src/conversation/`; the rules of the composition engine stay under `src/state/`). The shell is the hooks under `src/app` (`use*.ts`, one per concern, composed in order by `App.tsx`; `useSessionOpening`, `useCommunicationsAndForks` and `useSideNavigation` are composers that call their concern hooks in the order of the original function), each with a hook test on a mock scope (`src/test/render-hook.tsx`) and the views under `src/app/views`: they hold the browser objects (sockets, timers, storage, the DOM), dispatch events into a module, and run the effects it returns. A module imports no React, DOM, timer or storage; its input is data and its output is data. Every module declares its contract at the top of its file, has a unit table beside it (`*.test.ts`, node environment, mock data from `src/test/window-builders.ts`), and each unit test runs in single-digit milliseconds.
 
-A rule has one owner. A change to a rule runs that module's table and nothing else: `pnpm test:unit agent-remote-lab src/state/<module>` (about 0.5 s, including start-up). A change to wiring runs the whole-app composition tests that mount `App`.
+A rule has one owner. A change to a rule runs its module's tests and the S6 seam: `pnpm test:unit agent-remote-lab <the rule's file>` (`pnpm test:changed` does the same for every changed module). A change to wiring runs the whole-app composition tests that mount `App`.
+
+## Modules and seams
+
+The Workbench is twelve modules of `architecture/modules.json`. Each lists in `uses` the modules of the Workbench it may import, and `pnpm arch:check` fails on any other (a `sibling` violation; test files are exempt):
+
+| Module | Path | Uses | Owns |
+|---|---|---|---|
+| `workbench-kernel` | `src/kernel/`, `src/ui/` | none | What every feature reads: the session tree, the directory and Host clients and their types, storage and recovery writes, the composition document, the Window workspace model (`window-workspace`, `window-composition`, `window-feature-views`), forks, tracking, the view contexts and console commands (Track, Ask, TPM, Team, Window), the dock (`SessionDock`), toasts, and the design system |
+| `workbench-conversation` | `src/conversation/` | kernel | The session renderer both modes draw (`SessionWorkbench` in parts, `LabWorkbench`, `SessionConversation`, the surfaces) and its operations: prompt edit, the Handoff dialog, fork actions, connections |
+| `workbench-chats` | `src/features/chats/` | kernel, conversation, windows | Bot mode, its roster and the Assistants directory |
+| `workbench-windows` | `src/features/windows/` | kernel, conversation | Window mode: the Window list and overview, panes, docks' rail, folding, panels and the window workspace hooks |
+| `workbench-team` | `src/features/team/` | kernel, conversation | Team, TPM, Ask and Call for Support |
+| `workbench-sessions` | `src/features/sessions/` | kernel, conversation | The directory, favorites and stars, tracking, creation choices, the outbox |
+| `workbench-session-links` | `src/features/session-links/` | kernel, conversation | Fork references, Sides, quotes, references, letters, relations |
+| `workbench-computers` | `src/features/computers/` | kernel, conversation | Hosts, pairing, Controller updates, previews, the VS Code tunnel, security |
+| `workbench-settings` | `src/features/settings/` | kernel, conversation, computers, team | The Settings page and device choices |
+| `workbench-diagnostics` | `src/features/diagnostics/` | kernel, conversation | Trace, the Replica Inspector, playback |
+| `workbench` (the shell) | the rest of `src/` | every module | `App`, `src/app` (slices and views), `src/shell`, and the composition engine (`useSessionSuccession`, `useSessionMigrations`, the bridges `useBotWorkspace` and `useWindowSessionBridge`) |
+| `workbench-test-support` | `src/test/` | (test support) | Fixtures, builders and the render helpers |
+
+A feature imports another feature only through a seam written here:
+
+- **Chats on the Window workspace.** Bot mode's groups are Window groups. Bot mode reads them through the window workspace's API (`useWindowWorkspace`'s `groups`, `readGroup`, `operateGroup`, `retrySection` and `sectionCreationState`), types only; the shell passes the workspace in.
+- **Settings on Computers.** The Settings page shows the Computers page (`ComputerSettings`, in Settings) built from the Computers feature's components (`HostOverview`, `HostProviders`, `HostCodexDaemon`, `HostPreviewGroups`, `HostSecurityActions`, `HostVscodeTunnel`, `ControllerUpdates`, `HostEnvironmentDetails`, `HostRevoke`) and the deployment update state.
+- **Settings on Team.** The Privacy settings show the Call for Support settings (`CallForSupportSettings`).
+
+No module of the Workbench imports the shell. A hook that joins two features (the Bot workspace and the composition engine, a Window and its sessions) lives in the shell; a feature's component takes its own input type instead of a hook's return type (`BotSelection` for `BotWorkspace`).
 
 | Module | Owns | Shape | Shell |
 |---|---|---|---|
-| `panels` | Which surfaces are open: compact drawer, desktop sidebar and page, inspector, header, Workbench or Trace view, the sessions panel. Layout changes, focus-return and favorites-refresh effects | `reducePanels(state, event)` returns the next state and effects as data; selectors `contextVisible`, `pageOpen`, `supportingRailOpen`, `windowStageVisible` | `hooks/usePanels.ts` |
+| `panels` | Which surfaces are open: compact drawer, desktop sidebar and page, inspector, header, Workbench or Trace view, the sessions panel. Layout changes, focus-return and favorites-refresh effects | `reducePanels(state, event)` returns the next state and effects as data; selectors `contextVisible`, `pageOpen`, `supportingRailOpen`, `windowStageVisible` | `features/windows/usePanels.ts` |
 | `creation-choice` | The Host and provider the New session form targets; why creation is unavailable (requested Host, loading, offline, quota, no providers); restoring the Host a link or the remembered session names | Pure functions over the Host list, the catalog and the restored identity | `app/useProviderCreation.ts`, `app/useRemoteHostState.ts` |
 | `pane-folding` | How a pane folds, sleeps, closes and restores: bots fold where they stand, compact layouts do not fold, a missing session never folds, restoring selects the pane and wakes a sleeping bot | Pure decisions returning Window operations | `app/useSessionViewPresentation.ts` calls `authority.operate` |
 | `quote-targets` | Which views the selected messages can be quoted into | Pure projection of Windows | `app/useQuotesAndReferences.tsx` |
-| `quote-selection` | The selection of messages being quoted, its busy and error state, and the notice after quoting | `reduceQuote(state, event)` | `hooks/useSyncReducer.ts` |
+| `quote-selection` | The selection of messages being quoted, its busy and error state, and the notice after quoting | `reduceQuote(state, event)` | `conversation/useSyncReducer.ts` |
 | `source-currency` | Whether the session an Ask, Side or quote was captured from is still what its view shows | `viewStaleness`, `fixtureStaleness` over a binding lookup | `app/useFocusedAsk.ts` |
 | `draft-ownership` | Which stored draft a pane's composer reads and writes; managed panes keep their origin session's draft | `paneDraftOwners`, `storeFor` | `app/useViewSessionState.ts` |
 | `mode-steps` | Work queued for when a Workbench mode is in front: dropped for another mode, held until the Window is confirmed | `drainModeSteps` | `app/useCommandSearch.ts` |

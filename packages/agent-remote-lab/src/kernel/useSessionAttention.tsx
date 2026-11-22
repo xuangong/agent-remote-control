@@ -31,7 +31,8 @@ export function useSessionAttention(scope: string, active: boolean, onOpen: (ses
   const [notificationPermission, setPermission] = useState(permission);
   const [permissionError, setPermissionError] = useState(false);
   // Push on this device (I5c): its subscription speaks the reader's language and pauses with the device's own switch.
-  const push = usePushDevice(scope, active, { locale: useContext(LocaleContext), paused: !notificationChoice });
+  const locale = useContext(LocaleContext);
+  const push = usePushDevice(scope, active, { locale, paused: !notificationChoice });
   const clickScope = useMemo(() => ({ mode, lifetime: {} }), [scope, mode, active, mobile, notificationChoice]);
   const latest = useRef({ scope, active, mobile, notificationChoice, onOpen, clickScope });
   latest.current = { scope, active, mobile, notificationChoice, onOpen, clickScope };

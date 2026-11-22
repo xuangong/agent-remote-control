@@ -3,7 +3,7 @@
  * browser's service worker, push manager and permission, and the Relay's `/v1/push-subscriptions`. It reconciles at each start and when
  * the page comes back, and tells the Relay when the device's language or its Notifications switch changes.
  */
-import { useEffect, useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { HttpPushClient } from '@orchardworks/agent-client';
 import type { PushLocale } from '@orchardworks/agent-remote-protocol';
 import { installPlatform } from './app-install.js';
@@ -26,8 +26,8 @@ async function serviceWorkerRegistration(): Promise<PushRegistration | undefined
 }
 
 export function usePushDevice(baseUrl: string, active: boolean, settings: { locale: PushLocale; paused: boolean }): PushDeviceControls {
-  const latest = useMemo(() => ({ ...settings }), []);
-  latest.locale = settings.locale; latest.paused = settings.paused;
+  const latest = useRef(settings);
+  latest.current = settings;
   const device = useMemo(() => createPushDevice({
     facts: () => ({
       pushManager: typeof window !== 'undefined' && 'PushManager' in window,
@@ -39,7 +39,7 @@ export function usePushDevice(baseUrl: string, active: boolean, settings: { loca
     relay: new HttpPushClient(baseUrl, workspaceFetch),
     registration: serviceWorkerRegistration,
     requestPermission: () => typeof Notification === 'undefined' ? Promise.resolve('denied' as NotificationPermission) : Notification.requestPermission(),
-  }, { locale: () => latest.locale, paused: () => latest.paused }), [baseUrl]);
+  }, { locale: () => latest.current.locale, paused: () => latest.current.paused }), [baseUrl]);
   const view = useSyncExternalStore(device.subscribe, device.view, device.view);
   useEffect(() => {
     if (!active) return;

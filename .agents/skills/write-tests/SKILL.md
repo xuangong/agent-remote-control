@@ -98,7 +98,7 @@ Expect fewer deletions than a size estimate predicts. Old whole-app tests often 
 
 ## 6. Test what you touched
 
-- **During a task:** `pnpm task:start` records a base. Then run `pnpm test:unit <package> [file]`, or `pnpm verify:changed`, which builds and tests only the changed packages and their dependents since that base. Workspace packages resolve to `src` in Vitest, so dependants do not need a build first.
+- **During a task:** `pnpm task:start` records a base. Then run `pnpm test:unit <package> [file]`, or `pnpm verify:changed`, which builds and type-checks the changed packages and their dependents since that base, then runs each changed module's own tests and the seam suites the module names in `architecture/modules.json` (`pnpm test:changed`). A source file given to `pnpm test:unit <package> <file>` runs its module's tests and seams the same way; a test file runs alone. Dependent modules are not run: the seams and the type check stand for them until the step's full `pnpm verify`. Workspace packages resolve to `src` in Vitest, so dependants do not need a build first.
 - **When a seam changes:** add the seam suite (`agent-remote-seams`) and `pnpm fixtures:check`.
 - **Full suite:** at the end of a step, and before a merge or release.
 - **Architecture:** run `pnpm arch:check` (blocking) on every change that adds an import. Fix violations. Never add an exception; lower an exception's `max` when you fix one.

@@ -1,8 +1,9 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { packageManager } from './lib/package-manager.mjs';
 import { verifyNativeTestVersions } from './lib/native-test-versions.mjs';
+import { describePlan, isUnitTest, packageFiles, planTests, readModules, workspacePackages } from './lib/test-selection.mjs';
 
 const mode = process.argv[2] ?? 'unit';
 const successionEvidence = mode === 'claude-succession-evidence';
@@ -20,7 +21,14 @@ if (successionEvidence) {
   if (!isAbsolute(process.env.AGENT_CLAUDE_TEST_EXECUTABLE ?? '')) throw new Error('Set an absolute AGENT_CLAUDE_TEST_EXECUTABLE for the installed SDK-bundled Claude 2.1.247.');
   if (!isAbsolute(process.env.AGENT_CLAUDE_SUCCESSION_EVIDENCE_OUTPUT ?? '')) throw new Error('Set AGENT_CLAUDE_SUCCESSION_EVIDENCE_OUTPUT to a new absolute JSON output path.');
 }
-const changedSinceModes = ['affected', 'affected-build', 'affected-typecheck'];
+const changedSinceModes = ['affected', 'affected-build', 'affected-typecheck', 'changed'];
+/** The commit a task compares with, as `pnpm verify:changed` finds it: $ARC_TASK_BASE, the commit `pnpm task:start` recorded, the merge base with origin/main. */
+function taskBase() {
+  const git = args => { try { return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return ''; } };
+  const recorded = (() => { try { return readFileSync(git(['rev-parse', '--git-path', 'arc-task-base']), 'utf8').trim(); } catch { return ''; } })();
+  return git(['rev-parse', '--verify', '--quiet', `${process.env.ARC_TASK_BASE || recorded || git(['merge-base', 'HEAD', 'origin/main'])}^{commit}`]);
+}
+if (mode === 'changed' && !/^[0-9a-f]{7,40}$/.test(process.argv[3] ?? '')) process.argv.splice(3, 0, taskBase());
 if (changedSinceModes.includes(mode) && !/^[0-9a-f]{7,40}$/.test(process.argv[3] ?? '')) throw new Error(`The ${mode} suite needs the commit to compare with.`);
 if (mode === 'claude' && !process.env.AGENT_CLAUDE_TEST_EXECUTABLE) throw new Error('Set AGENT_CLAUDE_TEST_EXECUTABLE to Claude Code 2.1.247 or newer for native Claude tests.');
 if (mode === 'native-opencode' && !isAbsolute(process.env.AGENT_OPENCODE_TEST_EXECUTABLE ?? '')) throw new Error('Set an absolute AGENT_OPENCODE_TEST_EXECUTABLE for the OpenCode native assumption checks.');
@@ -43,8 +51,8 @@ function hostExclusions(base) {
   const files = execFileSync('git', ['diff', '--name-only', base, 'HEAD'], { encoding: 'utf8' }).split('\n');
   return files.some(file => file.startsWith('packages/agent-relay-cloudflare/')) ? [] : ['--filter', '!@orchardworks/agent-relay-cloudflare'];
 }
-const affected = changedSinceModes.includes(mode) ? affectedFilters(process.argv[3]) : [];
-if (changedSinceModes.includes(mode) && !affected.length) {
+const affected = changedSinceModes.includes(mode) && mode !== 'changed' ? affectedFilters(process.argv[3]) : [];
+if (changedSinceModes.includes(mode) && mode !== 'changed' && !affected.length) {
   console.log('No workspace package changed, so nothing runs.');
   process.exit(0);
 }
@@ -60,6 +68,36 @@ function workspacePackage(selector) {
   throw new Error(`No workspace package matches ${selector}.`);
 }
 const unitPackage = mode === 'unit-package' ? workspacePackage(process.argv[3]) : undefined;
+/**
+ * A source file named to `pnpm test:unit <package> <file>` stands for its module: the module's own test files in that package,
+ * then the seam suites the module names. Test files, options and patterns pass to Vitest unchanged.
+ */
+function unitPackageRuns(selector, args) {
+  const directory = existsSync(join('packages', selector, 'package.json')) ? `packages/${selector}`
+    : readdirSync('packages').map(name => `packages/${name}`).find(candidate => existsSync(join(candidate, 'package.json')) && JSON.parse(readFileSync(join(candidate, 'package.json'), 'utf8')).name === selector);
+  const sources = [], rest = [];
+  for (const arg of args.filter(arg => arg !== '--list')) {
+    const path = arg.startsWith('-') || !directory ? undefined : [join(directory, arg), arg].find(candidate => existsSync(candidate) && statSync(candidate).isFile()
+      && !isUnitTest(candidate) && /^packages\//.test(candidate.split('\\').join('/')));
+    if (path) sources.push(path.split('\\').join('/')); else rest.push(arg);
+  }
+  if (!sources.length) return undefined;
+  const plan = planTests({ changed: sources, files: packageFiles('.'), modules: readModules('.'), packages: workspacePackages('.') });
+  const own = plan.runs.find(entry => entry.directory === directory);
+  console.log(`${sources.join(', ')}: module ${plan.modules.join(', ')}; ${own ? (own.all ? 'the whole suite' : `${own.files.length} test files`) : 'no test file'}${plan.seams.length ? `, seams ${plan.seams.join(', ')}` : ''}.`);
+  return plan.runs.filter(entry => entry.directory === directory || entry.directory === 'packages/agent-remote-seams')
+    .map(entry => ['--filter', entry.name, 'run', entry.script, ...entry.files, ...(entry.directory === directory ? rest : []), '--passWithNoTests']);
+}
+/** The module plan of the files changed since a commit (section 5.9): each changed module's own tests and its seams. */
+function changedRuns(base) {
+  const changed = execFileSync('git', ['diff', '--name-only', base, 'HEAD'], { encoding: 'utf8' }).split('\n').filter(Boolean);
+  const plan = planTests({ changed, files: packageFiles('.'), modules: readModules('.'), packages: workspacePackages('.') });
+  console.log(describePlan(plan));
+  return plan.runs.map(entry => ['--filter', entry.name, 'run', entry.script, ...entry.files, '--passWithNoTests']);
+}
+const plannedRuns = mode === 'changed' ? changedRuns(process.argv[3]) : mode === 'unit-package' ? unitPackageRuns(process.argv[3], process.argv.slice(4)) : undefined;
+if (plannedRuns && !plannedRuns.length) process.exit(0);
+if (plannedRuns && process.argv.includes('--list')) { for (const args of plannedRuns) console.log(`pnpm ${args.join(' ')}`); process.exit(0); }
 const commands = {
   'live-cache-browser': ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'playwright', 'test', '--config=e2e/session-live-cache.playwright.config.ts'],
   devbox: ['exec', 'node', '--test', '--test-timeout=18000', 'scripts/devbox/start.test.mjs', 'scripts/devbox/codex-profile.test.mjs', 'scripts/lib/build-provenance.test.mjs', 'scripts/controller/entrypoint.test.mjs'],
@@ -87,7 +125,7 @@ const commands = {
   claude: ['--filter', '@orchardworks/agent-provider-claude', 'exec', 'vitest', 'run', '--testTimeout=10000', '--hookTimeout=15000', '--maxWorkers=1'],
   'claude-succession-evidence': ['--filter', '@orchardworks/agent-provider-claude', 'exec', 'vitest', 'run', 'src/native-succession-evidence.local.test.ts', '--testTimeout=30000', '--hookTimeout=10000', '--maxWorkers=1'],
   copilot: ['--filter', '@orchardworks/agent-provider-copilot', 'run', 'test', '--hookTimeout=30000'],
-  setup: ['exec', 'node', '--test', '--test-timeout=60000', 'scripts/native-test-versions.test.mjs', 'scripts/dsh-debug.test.mjs', 'scripts/start.test.mjs', 'scripts/relay-local.test.mjs', 'scripts/deploy-readiness.test.mjs', 'scripts/prepare-relay-docker-lock.test.mjs', 'scripts/controller/entrypoint.test.mjs', 'scripts/controller/create-host.test.mjs', 'scripts/controller/install.test.mjs', 'scripts/local/instance.test.mjs', 'scripts/local/environment.test.mjs', 'scripts/local/controller.test.mjs', 'scripts/local/session.test.mjs', 'scripts/local/runner.test.mjs', 'scripts/lib/arch-check.test.mjs', 'scripts/lib/test-inventory.test.mjs', 'scripts/lib/fixtures-check.test.mjs', 'scripts/lib/slow-test-reporter.test.mjs', 'scripts/lib/slow-test-allowlist.test.mjs', 'scripts/lib/compatibility.test.mjs', 'scripts/lib/postmerge.test.mjs', 'scripts/lib/open-items.test.mjs', 'scripts/lib/legacy-token-budget.test.mjs'],
+  setup: ['exec', 'node', '--test', '--test-timeout=60000', 'scripts/native-test-versions.test.mjs', 'scripts/dsh-debug.test.mjs', 'scripts/start.test.mjs', 'scripts/relay-local.test.mjs', 'scripts/deploy-readiness.test.mjs', 'scripts/prepare-relay-docker-lock.test.mjs', 'scripts/controller/entrypoint.test.mjs', 'scripts/controller/create-host.test.mjs', 'scripts/controller/install.test.mjs', 'scripts/local/instance.test.mjs', 'scripts/local/environment.test.mjs', 'scripts/local/controller.test.mjs', 'scripts/local/session.test.mjs', 'scripts/local/runner.test.mjs', 'scripts/lib/arch-check.test.mjs', 'scripts/lib/test-inventory.test.mjs', 'scripts/lib/fixtures-check.test.mjs', 'scripts/lib/slow-test-reporter.test.mjs', 'scripts/lib/slow-test-allowlist.test.mjs', 'scripts/lib/compatibility.test.mjs', 'scripts/lib/postmerge.test.mjs', 'scripts/lib/open-items.test.mjs', 'scripts/lib/legacy-token-budget.test.mjs', 'scripts/lib/test-selection.test.mjs'],
   // Each package's Vitest already uses every core; running packages one at a time avoids load-induced timeouts.
   unit: ['-r', '--workspace-concurrency=1', 'run', 'test'],
   // The packages changed since a commit and the packages that depend on them; the workspace root runs everything.
@@ -113,12 +151,22 @@ const commands = {
   providers: ['--filter', '@orchardworks/agent-remote-controller', 'exec', 'vitest', 'run', 'src/provider-conformance.test.ts', '--testTimeout=10000', '--hookTimeout=10000'],
   'e2e-flows': ['--filter', '@orchardworks/agent-e2e', 'run', 'test:e2e'],
 };
-if (!(mode in commands)) throw new Error(`Unknown test suite: ${mode}`);
+if (!(mode in commands) && mode !== 'changed') throw new Error(`Unknown test suite: ${mode}`);
 await verifyNativeTestVersions(mode);
-const child = spawn(...packageManager('pnpm', commands[mode]), { stdio: 'inherit', windowsHide: true, detached: process.platform !== 'win32',
-  env: { ...process.env, AGENT_CLAUDE_SUCCESSION_EVIDENCE: successionEvidence ? '1' : undefined,
-    AGENT_OPENCODE_SUCCESSION_EVIDENCE: mode === 'opencode-succession-evidence' ? '1' : undefined,
-    AGENT_OPENCODE_ACTUAL_SUCCESSION: mode === 'opencode-succession-adapter' ? '1' : undefined } });
+const runs = plannedRuns ?? [commands[mode]];
+let child;
+function start(args) {
+  child = spawn(...packageManager('pnpm', args), { stdio: 'inherit', windowsHide: true, detached: process.platform !== 'win32',
+    env: { ...process.env, AGENT_CLAUDE_SUCCESSION_EVIDENCE: successionEvidence ? '1' : undefined,
+      AGENT_OPENCODE_SUCCESSION_EVIDENCE: mode === 'opencode-succession-evidence' ? '1' : undefined,
+      AGENT_OPENCODE_ACTUAL_SUCCESSION: mode === 'opencode-succession-adapter' ? '1' : undefined } });
+  child.once('error', (error) => { clearTimeout(deadline); console.error(error); process.exitCode = 1; });
+  // Planned runs go one package at a time, as the recursive suites do, and stop at the first failure.
+  child.once('exit', (code) => {
+    if (code === 0 && runs.length) { start(runs.shift()); return; }
+    clearTimeout(deadline); process.exitCode = code ?? 1;
+  });
+}
 function stop(signal) {
   try {
     if (process.platform === 'win32') spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on('error', () => child.kill(signal));
@@ -135,5 +183,4 @@ const deadline = setTimeout(() => {
 }, outerDeadlineMs);
 process.once('SIGINT', () => stop('SIGINT'));
 process.once('SIGTERM', () => stop('SIGTERM'));
-child.once('error', (error) => { clearTimeout(deadline); console.error(error); process.exitCode = 1; });
-child.once('exit', (code) => { clearTimeout(deadline); process.exitCode = code ?? 1; });
+start(runs.shift());

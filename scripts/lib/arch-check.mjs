@@ -91,7 +91,8 @@ const codeOf = text => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])
  * Reports how the files under a repository follow the layer rules (section 1.2 of the target architecture) and the module map:
  * unassigned and overlapping files, imports that run up the layers, contracts that import the workspace, imports across packages
  * by path or through a wildcard export, test support used by production code, impure domain code, edges the module map forbids
- * (`edges`, `bans`), composition roots over their line budget (`roots`), and wire messages written inline in tests.
+ * (`edges`, `bans`), imports of a module of the same package that a module's `uses` list leaves out (`sibling`), composition
+ * roots over their line budget (`roots`), and wire messages written inline in tests.
  * It changes nothing; `evaluate` compares the result with the documented exceptions.
  */
 export function analyze({ root, config }) {
@@ -148,6 +149,10 @@ export function analyze({ root, config }) {
       for (const edge of forbidden) record(edge.id, file, specifier, `${module.name} imports ${targetModule.name} (rule ${edge.rule})`, targetModule.name);
       if (forbidden.length > 0) continue;
       if (targetModule.layer === TEST_SUPPORT_LAYER) record('test-support-in-production', file, specifier, `${module.name} imports ${targetModule.name}`, targetModule.name);
+      // A module that lists `uses` reaches the other modules of its own package only through that list (one-way feature modules).
+      else if (Array.isArray(module.uses) && packageOf(target) === packageOf(file) && !module.uses.includes(targetModule.name)) {
+        record('sibling', file, specifier, `${module.name} imports ${targetModule.name}, which its uses list does not name`, targetModule.name);
+      }
       else if (targetModule.layer > module.layer && module.layer < 4) record('layer', file, specifier, `${module.name} (layer ${module.layer}) imports ${targetModule.name} (layer ${targetModule.layer})`, targetModule.name);
       else if (module.layer === 3 && targetModule.layer === 3 && packageOf(file) !== packageOf(target)) record('adapter-imports-adapter', file, specifier, `${module.name} imports ${targetModule.name}`, targetModule.name);
     }

@@ -111,6 +111,48 @@ test('files outside every module are listed', () => {
   });
 });
 
+/** A Workbench-like package: a shell, a kernel and two features, each feature reaching its siblings only through `uses`. */
+const featureConfig = {
+  ...config,
+  packages: { ...config.packages, '@sample/workbench': { dir: 'packages/workbench', entry: 'src/main.ts' } },
+  modules: [...config.modules,
+    { name: 'shell', layer: 4, paths: ['packages/workbench/src/**'] },
+    { name: 'kernel', layer: 4, paths: ['packages/workbench/src/kernel/**'], uses: [] },
+    { name: 'chats', layer: 4, paths: ['packages/workbench/src/features/chats/**'], uses: ['kernel'] },
+    { name: 'settings', layer: 4, paths: ['packages/workbench/src/features/settings/**'], uses: ['kernel', 'chats'] },
+  ],
+};
+const featureKinds = files => {
+  const root = sampleRepository({
+    'packages/domain/src/index.ts': 'export const domain = 1;\n',
+    'packages/workbench/src/kernel/keys.ts': 'export const key = 1;\n',
+    'packages/workbench/src/features/chats/Roster.tsx': "import { key } from '../../kernel/keys.js';\nexport const Roster = key;\n",
+    'packages/workbench/src/features/settings/Settings.tsx': "import { Roster } from '../chats/Roster.js';\nimport { domain } from '@sample/domain';\nexport const Settings = [Roster, domain];\n",
+    'packages/workbench/src/main.ts': "import { Settings } from './features/settings/Settings.js';\nexport const main = Settings;\n",
+    ...files,
+  });
+  try { return analyze({ root, config: featureConfig }).violations.map(violation => `${violation.kind}: ${violation.module} -> ${violation.targetModule}`); }
+  finally { rmSync(root, { recursive: true, force: true }); }
+};
+
+test('uses: a feature imports the kernel, the siblings it lists and other packages; the shell imports every feature', () => {
+  assert.deepEqual(featureKinds({}), []);
+});
+
+test('uses: a module of the same package that the list leaves out is a sibling violation, the kernel included', () => {
+  assert.deepEqual(featureKinds({
+    'packages/workbench/src/features/chats/Roster.tsx': "import { Settings } from '../settings/Settings.js';\nexport const Roster = Settings;\n",
+    'packages/workbench/src/kernel/keys.ts': "import { main } from '../main.js';\nexport const key = main;\n",
+  }), ['sibling: chats -> settings', 'sibling: kernel -> shell']);
+});
+
+test('uses: a type-only import counts, and a test file may import any sibling', () => {
+  assert.deepEqual(featureKinds({
+    'packages/workbench/src/features/chats/types.ts': "import type { Settings } from '../settings/Settings.js';\nexport type Shown = typeof Settings;\n",
+    'packages/workbench/src/features/chats/Roster.test.tsx': "import { Settings } from '../settings/Settings.js';\nimport { main } from '../../main.js';\nexport const checked = [Settings, main];\n",
+  }), ['sibling: chats -> settings']);
+});
+
 /** The rules of section 1.2 as a module map over two Relay-side packages, a Controller, a client and two adapters. */
 const ruleConfig = {
   scan: ['packages/*/src/**'],

@@ -18,6 +18,7 @@
     "test:local": "node scripts/run-tests.mjs local",
     "verify": "pnpm compatibility:check && pnpm arch:check && pnpm -r run build && pnpm typecheck && pnpm test",
     "verify:changed": "sh scripts/verify-changed.sh",
+    "test:changed": "node scripts/run-tests.mjs changed",
     "task:start": "sh scripts/task-start.sh",
     "postmerge": "node scripts/postmerge.mjs",
     "open-items": "node scripts/open-items.mjs",

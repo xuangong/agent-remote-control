@@ -862,7 +862,7 @@ pnpm test:native:browser  # the page against a real Codex or DSH runtime, when o
 pnpm lint:docs
 ```
 
-There is no hosted CI, and pushing runs no checks. Run `pnpm verify:changed` before a push or a merge when you want them: the build, type check and unit suites of the packages changed since the task base (`pnpm task:start`) or the merge base with `origin/main`, and of the packages that depend on them. A change to the root `package.json`, the lockfile or the workspace file runs the full `pnpm verify`, which releases also run. The unit suite (`pnpm test`) excludes `*.local.test.ts` files and must pass on any machine; `pnpm test:local` runs those native suites one package at a time.
+There is no hosted CI, and pushing runs no checks. Run `pnpm verify:changed` before a push or a merge when you want them: the build and type check of the packages changed since the task base (`pnpm task:start`) or the merge base with `origin/main` and of the packages that depend on them, then the unit tests of each changed module of `architecture/modules.json` with the seam suites it names (`pnpm test:changed`; `pnpm test:unit <package> <source file>` runs the same for one file). A change to the root `package.json`, the lockfile or the workspace file runs the full `pnpm verify`, which releases also run. The unit suite (`pnpm test`) excludes `*.local.test.ts` files and must pass on any machine; `pnpm test:local` runs those native suites one package at a time.
 
 Test scripts enforce per-test and outer process deadlines. Browser tests use separate configurable ports and refuse to reuse an existing server. Set `AGENT_REMOTE_TEST_RELAY_PORT` and `AGENT_REMOTE_TEST_WEB_PORT` to free ports for concurrent testing.
 

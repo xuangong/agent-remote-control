@@ -43,13 +43,23 @@ export const WindowBotDetails = Type.Object({
   hidden: Type.Optional(Type.Literal(true)),
   /** Asleep: quiet on every device, its conversation released until someone opens it, which wakes it. */
   asleep: Type.Optional(Type.Literal(true)),
+  /** Muted: its chat sends no reminders and its unread replies show a quiet dot, on every device. */
+  muted: Type.Optional(Type.Literal(true)),
   rank: Type.Optional(rank),
 }, strict);
 export type WindowBotDetails = Static<typeof WindowBotDetails>;
-/** A group's section in Bot mode. Bots without details use their defaults. */
+/**
+ * Which reminders a group's assistants send: both (needs you and finished), or only needs you. Absent is both; both values are
+ * accepted so a later choice can be added beside them.
+ */
+export const WindowGroupNotifications = Type.Union([Type.Literal('all'), Type.Literal('needs_you')]);
+export type WindowGroupNotifications = Static<typeof WindowGroupNotifications>;
+/** A group's section in Bot mode. Bots without details use their defaults. `muted` and `notifications` are the group's own settings. */
 export const WindowBots = Type.Object({
   rank,
   members: Type.Record(Type.String({ pattern: '^[A-Za-z0-9_.:-]{1,128}$' }), WindowBotDetails, { maxProperties: WINDOW_VIEW_LIMIT, additionalProperties: false }),
+  muted: Type.Optional(Type.Literal(true)),
+  notifications: Type.Optional(WindowGroupNotifications),
 }, strict);
 export type WindowBots = Static<typeof WindowBots>;
 /** Present only for a group hidden in a mode: `window: false` hides it in Window mode, `bots: false` in Bot mode. */
@@ -70,6 +80,8 @@ const GroupEdit = Type.Union([
   /** Replaces the bot's details. */
   Type.Object({ type: Type.Literal('bot.update'), viewId: id, details: WindowBotDetails }, strict),
   Type.Object({ type: Type.Literal('section.rank'), rank }, strict),
+  /** Replaces the group's own settings: muted, and which reminders its assistants send. Absent fields are cleared. */
+  Type.Object({ type: Type.Literal('section.settings'), muted: Type.Optional(Type.Literal(true)), notifications: Type.Optional(WindowGroupNotifications) }, strict),
 ]);
 export const WindowGroupEdit = Type.Union([...WindowEdit.anyOf, ...GroupEdit.anyOf]);
 export type WindowGroupEdit = Static<typeof WindowGroupEdit>;
@@ -209,6 +221,12 @@ function edit(group: WindowGroup, item: WindowGroupEdit): WindowGroup {
     case 'section.rank':
       if (!group.bots) fail('section_missing', 'This group is not a section.');
       return { ...group, bots: { ...group.bots, rank: item.rank } };
+    case 'section.settings': {
+      if (!group.bots) fail('section_missing', 'This group is not a section.');
+      const { muted: _muted, notifications: _notifications, ...section } = group.bots;
+      // Both reminders is the default, so it is stored as nothing.
+      return { ...group, bots: { ...section, ...(item.muted ? { muted: true as const } : {}), ...(item.notifications === 'needs_you' ? { notifications: item.notifications } : {}) } };
+    }
     default: {
       // Rule 1: a bot keeps its conversation; the title and role details of that session may change. A managed bot (a Team member,
       // a TPM or Support session) never takes view.bind: its feature rebinds it through the layout, like succession.
@@ -279,7 +297,9 @@ export function mergeGroups(targetGroup: WindowGroup, sourceGroup: WindowGroup):
   if (target.window.id === source.window.id) fail('same_group', 'A group cannot be merged into itself.');
   const window = appendViews(target.window, source.window.views);
   const rankOf = target.bots?.rank ?? source.bots?.rank;
-  const bots = rankOf === undefined ? undefined : { rank: rankOf, members: { ...source.bots?.members, ...target.bots?.members } };
+  // The target keeps its own settings, as it keeps its title.
+  const settings = { ...(target.bots?.muted ? { muted: true as const } : {}), ...(target.bots?.notifications ? { notifications: target.bots.notifications } : {}) };
+  const bots = rankOf === undefined ? undefined : { rank: rankOf, members: { ...source.bots?.members, ...target.bots?.members }, ...settings };
   // The merged group appears in each mode where either group appeared.
   const presentation = { ...(hasWindowAppearance(target) || hasWindowAppearance(source) ? {} : { window: false as const }),
     ...(hasBotAppearance(target) || hasBotAppearance(source) ? {} : { bots: false as const }) };

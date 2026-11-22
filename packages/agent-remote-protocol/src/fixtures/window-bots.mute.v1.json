@@ -1,0 +1,10 @@
+{
+  "rank": "m",
+  "muted": true,
+  "notifications": "needs_you",
+  "members": {
+    "main": { "name": "Dango", "muted": true, "pinned": true },
+    "review": { "name": "Pebbles" },
+    "plain": { "label": "Follows its group" }
+  }
+}

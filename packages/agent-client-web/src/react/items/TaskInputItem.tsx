@@ -26,10 +26,13 @@ function TaskInputCard({ input, resourceContext }: { readonly input: TaskInput; 
       <header className="agent-task-header">
         <span className="agent-task-kicker">{kicker}</span>
         {title ? <span className="agent-task-title">{title}</span> : null}
-        {directory?.canOpen(input.taskId) ? <button type="button" className="agent-task-open" onClick={() => directory.open(input.taskId)}>{t('timeline.task.open')}</button> : null}
+        {toOwner(input.kind) && directory?.canOpen(input.taskId) ? <button type="button" className="agent-task-open" onClick={() => directory.open(input.taskId)}>{t('timeline.task.open')}</button> : null}
       </header>
       <MarkdownContent markdown={body} resourceContext={resourceContext} />
       {input.kind === 'brief' && input.doneWhen ? <p className="agent-task-done-when">{t('timeline.task.doneWhen', { text: input.doneWhen })}</p> : null}
     </Card>
   </article>;
 }
+
+/** Briefs and messages reach the worker, whose conversation is already on screen; the others reach the owner, whose card opens the worker. */
+const toOwner = (kind: TaskInput['kind']) => kind !== 'brief' && kind !== 'message';

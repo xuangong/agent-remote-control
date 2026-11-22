@@ -17,7 +17,7 @@ export function TasksList({ tasks }: { tasks: readonly TaskView[] }) {
     [t('state.working'), tasks.filter(task => task.state === 'working' || task.state === 'queued')],
     [t('details.tasksDone'), tasks.filter(task => task.state === 'done' || task.state === 'failed' || task.state === 'cancelled').slice(0, FINISHED_SHOWN)],
   ];
-  return <div className="lab-assistant-tasks">{groups.filter(([, items]) => items.length).map(([title, items]) => <section key={title} aria-label={title}>
+  return <div className="lab-assistant-sessions lab-assistant-tasks">{groups.filter(([, items]) => items.length).map(([title, items]) => <section key={title} aria-label={title}>
     <h4>{title}</h4>
     <ul className="lab-assistant-chain">{items.map(task => <SessionRow key={task.taskId} title={task.title} moreLabel={t('details.taskMore', { title: task.title })}
       meta={[replyTime(task.updatedAt, undefined, dateLocale(locale), t), stateWords(task, t)]}

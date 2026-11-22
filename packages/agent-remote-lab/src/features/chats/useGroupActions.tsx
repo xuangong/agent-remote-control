@@ -91,16 +91,16 @@ export function useGroupActions({ workspace, defaultTitle, onMoved }: { workspac
     return true;
   }
 
-  /** An assistant's own entries: Pin to top, Mute, Move to group and, in a group people made, Remove from it. */
+  /** An assistant's own entries: Pin to top, Mute, Move to group and, in a group people made, Remove from it. A Side and a Team, TPM or Support member (they have a role) stay where they are. */
   function assistantMenu(row: BotRow): MenuEntry[] {
-    const group = groupOf(row);
+    const group = groupOf(row), movable = !row.role;
     return [
       row.details.pinned ? { label: t('card.unpin'), icon: 'pin', onSelect: () => void details(row, current => without(current, 'pinned')) }
         : { label: t('card.pinTop'), icon: 'pin', onSelect: () => void details(row, current => ({ ...current, pinned: true })) },
       row.details.muted ? { label: t('card.unmute'), icon: 'bell', onSelect: () => void details(row, current => without(current, 'muted')) }
         : { label: t('card.mute'), icon: 'bell-off', onSelect: () => void details(row, current => ({ ...current, muted: true })) },
-      { label: t('card.moveTo'), icon: 'folder', onSelect: () => setOpen({ kind: 'move', row }) },
-      ...(group ? [{ label: t('card.removeFromGroup', { group: group.window.title }), icon: 'folder' as const, onSelect: () => void move(row, undefined) }] : []),
+      ...(movable ? [{ label: t('card.moveTo'), icon: 'folder' as const, onSelect: () => setOpen({ kind: 'move', row }) }] : []),
+      ...(movable && group ? [{ label: t('card.removeFromGroup', { group: group.window.title }), icon: 'folder' as const, onSelect: () => void move(row, undefined) }] : []),
     ];
   }
 
@@ -115,7 +115,7 @@ export function useGroupActions({ workspace, defaultTitle, onMoved }: { workspac
     if (open.kind === 'notifications') return <GroupNotificationsSheet group={open.title} {...groupSettings(open.groupId)} busy={busy} error={error} onClose={close}
       onChange={next => void settings(open.groupId, next)} />;
     if (open.kind === 'add') return <AddAssistantsSheet group={open.title} busy={busy} error={error} onClose={close}
-      candidates={everyone.filter(row => row.groupId !== open.groupId)}
+      candidates={everyone.filter(row => row.groupId !== open.groupId && !row.role)}
       groupTitle={row => groupOf(row)?.window.title ?? defaultTitle} onAdd={row => void move(row, open.groupId)} />;
     const row = open.row, here = groupOf(row)?.window.id;
     return <MoveToGroupSheet name={row.name} {...(here ? { current: here } : {})} busy={busy} error={error} onClose={close}

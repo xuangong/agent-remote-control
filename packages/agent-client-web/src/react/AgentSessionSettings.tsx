@@ -4,7 +4,7 @@ import { ComposerMenu, ComposerMenuItems, type ComposerMenuEntry } from './Compo
 import type { ComposerMenuItem } from './composer-menu.js';
 import { AgentSessionUsage } from './AgentSessionUsage.js';
 import { useTranslate } from './locale.js';
-import { errorWords, remoteSessionState, type RemoteSessionState, type AgentReplicaState, type Translate } from '@orchardworks/agent-client';
+import { errorWords, remoteSessionState, sessionActivityLabel, type RemoteSessionState, type AgentReplicaState, type Translate } from '@orchardworks/agent-client';
 
 export type SessionControlView = 'status' | 'model' | 'permissions' | 'actions';
 
@@ -114,6 +114,7 @@ export function AgentSessionSettings({ state, sessionState, children, entries = 
   const modelLabel = model ? selectedLabel(model, unavailable) : agent.runtimeInfo.model;
   const permissionLabel = permissions.map(setting => selectedLabel(setting, unavailable)).filter((label) => label !== unavailable).join(' · ');
   const shown = (id: ComposerMenuItem['id']) => items.find(item => item.id === id);
+  const activityLabel = sessionActivityLabel({ session, replica: state, now: Date.now() }, false, t);
   const settingEntries: ComposerMenuEntry[] = [
     ...(shown('model') ? [{ id: 'model', label: categoryLabel('model'), testId: 'session-model-button', text: t('composer.model'),
       title: t('composer.modelTitle', { value: modelLabel ?? unavailable }), expanded: view === 'model', disabled: !shown('model')!.enabled, attention: categoryUnread('model'),
@@ -124,7 +125,9 @@ export function AgentSessionSettings({ state, sessionState, children, entries = 
       expanded: view === 'permissions', disabled: !shown('permissions')!.enabled, attention: categoryUnread('permissions'),
       detail: <span className={categoryPending('permissions') ? 'agent-setting-pending' : undefined}>{permissionLabel || null}</span>,
       run: () => onView(view === 'permissions' ? undefined : 'permissions') }] : []),
+    // The Status row says what the session is doing; it opens the session's facts.
     ...(shown('status') ? [{ id: 'status', label: t('composer.status'), title: t('composer.statusTitle'), expanded: view === 'status', disabled: !shown('status')!.enabled,
+      detail: <span>{activityLabel ?? null}</span>,
       run: () => onView(view === 'status' ? undefined : 'status') }] : []),
   ];
   return <div className="agent-session-controls" ref={layer}>
@@ -136,7 +139,7 @@ export function AgentSessionSettings({ state, sessionState, children, entries = 
       <div hidden={view !== 'status'}>{children}</div>
       {view === 'status' ? <><dl className="agent-session-facts">
           <dt>{t('composer.settings.provider')}</dt><dd>{agent.providerId}</dd><dt>{t('composer.settings.session')}</dt><dd>{agent.runtimeInfo.sessionId ?? unavailable}</dd>
-          <dt>{t('composer.settings.connection')}</dt><dd>{disconnected ? unavailable : connectionLabel(runtimeConnection?.state, t)}</dd><dt>{t('composer.settings.runtime')}</dt><dd>{disconnected || !runtimeConnected ? t('composer.settings.lastKnown', { value: session.activity ?? '' }) : session.activity}</dd>
+          <dt>{t('composer.settings.connection')}</dt><dd>{disconnected ? unavailable : connectionLabel(runtimeConnection?.state, t)}</dd><dt>{t('composer.settings.runtime')}</dt><dd>{disconnected || !runtimeConnected ? t('composer.settings.lastKnown', { value: activityLabel ?? unavailable }) : activityLabel ?? unavailable}</dd>
           <dt>{t('composer.settings.directory')}</dt><dd>{agent.runtimeInfo.cwd ?? unavailable}</dd>
           {settings.map((setting) => <div key={setting.id}><dt>{setting.label}</dt><dd>{selectedLabel({ ...setting, value: setting.value ?? changeFor(setting)?.confirmedValue ?? null }, unavailable)}</dd></div>)}
         </dl><AgentSessionUsage usage={agent.lastUsage} lastKnown={disconnected || !runtimeConnected} /></>

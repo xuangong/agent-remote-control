@@ -156,9 +156,11 @@ export function useAttentionAndRoster(scope: Pick<AppInputs & WorkbenchShellSlic
 
   const supportTeams = new Set(teamRoster?.baseUrl === baseUrl ? teamRoster.teams.filter(team => team.callForSupport).map(team => team.id) : []);
 
-  // Who the bots are, for App's own use (search, the selected bot); the roster on screen adds the shared IM state itself.
+  const t = useTranslate();
+  // Who the bots are, for App's own use (search, the selected bot), named in the reader's words as the roster on screen names
+  // them; the roster on screen adds the shared IM state itself.
   const botRoster = projectBotRoster(windowWorkspace.groups, otherSessions.sessions, { status: () => 'unknown', supportTeam: teamId => supportTeams.has(teamId),
-    current: currentBotSession, earlier: earlierBotSessions });
+    current: currentBotSession, earlier: earlierBotSessions, t });
 
   // A muted assistant or group sends no reminders, and a group set to "needs you" only that one, in either mode.
   const reminderRules = useRef(new Map<string, readonly Reminder[]>());
@@ -171,7 +173,6 @@ export function useAttentionAndRoster(scope: Pick<AppInputs & WorkbenchShellSlic
   pushed.current = { on: attention.pushOn, sessions: new Set(windowWorkspace.groups.flatMap(group => botViews(group).map(view => sessionKey(view.binding)))) };
   useEffect(() => { attention.notifier.setReminderRule((key, reminder) => !(pushed.current.on && pushed.current.sessions.has(key)) && (reminderRules.current.get(key)?.includes(reminder) ?? true)); }, [attention.notifier]);
 
-  const t = useTranslate();
   /** A Host as the Relay last said, named as the Hosts list names it. */
   const hostFacts = (shared: SharedFeedsSnapshot) => (hostId: string) => {
     const online = shared.states?.host(hostId)?.online ?? remoteHosts.find(host => host.id === hostId)?.online;

@@ -46,3 +46,32 @@ test("Window mode: the tiles and a tile's details", async ({ page, isMobile }) =
   await expect(tiles.first().locator('.lab-tile-details')).toBeVisible();
   await shown(page, 'tile details');
 });
+
+test('Bot mode on a desktop: no chat open, the shortcuts sheet, the palette and the context menus', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'The keyboard and the context menus are the desktop\'s.');
+  // The tiles fixture's sessions run on the lab's own Host ("local") with its recorded provider.
+  const shown = async (page: Page, where: string) => expect(await englishWords(page, { allow: [...sample, 'local', 'recorded'] }), where).toEqual([]);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/e2e/fixtures/window-tiles.html?tiles=3&bots=1&mode=bot&users=3');
+  const bot = page.locator('[data-workbench-mode="bot"]');
+  await expect(bot.locator('.lab-bot-welcome')).toBeVisible();
+  await shown(page, 'no chat open');
+  await bot.locator('[data-bot-place]').first().click();
+  await expect(bot.locator('.agent-message-assistant').first()).toBeVisible();
+  const primary = await page.evaluate(() => /mac|iphone|ipad/i.test((navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform) ? 'Meta' : 'Control');
+  await page.keyboard.press(`${primary}+Slash`);
+  await expect(page.getByRole('dialog', { name: '键盘快捷键' })).toBeVisible();
+  await shown(page, 'shortcuts sheet');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press(`${primary}+KeyK`);
+  await expect(page.getByRole('dialog', { name: '搜索' })).toBeVisible();
+  await shown(page, 'palette');
+  await page.keyboard.press('Escape');
+  await bot.locator('[data-bot-place]').nth(1).click({ button: 'right' });
+  await expect(page.getByRole('menu')).toBeVisible();
+  await shown(page, 'chat menu');
+  await page.keyboard.press('Escape');
+  await bot.locator('.agent-message-assistant').last().click({ button: 'right' });
+  await expect(page.getByRole('menu', { name: '消息操作' })).toBeVisible();
+  await shown(page, 'message menu');
+});

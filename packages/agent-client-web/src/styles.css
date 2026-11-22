@@ -466,6 +466,8 @@
 .agent-composer-input { position: relative; min-width: 0; }
 .agent-composer-capsule { display: flex; align-items: flex-end; gap: var(--orchard-space-xs); min-width: 0; padding: var(--orchard-space-s); border-radius: var(--orchard-radius-composer); background: var(--orchard-fill); font-size: var(--orchard-type-body-size); }
 .agent-composer-capsule:focus-within { box-shadow: 0 0 0 1px var(--orchard-text-secondary); }
+/* Files dragged over the composer: the capsule takes the brand's tint and edge, where they will land. */
+.agent-composer[data-drop-target] .agent-composer-capsule { box-shadow: 0 0 0 2px var(--orchard-brand); background: var(--orchard-tint); }
 .agent-composer-capsule > .agent-session-controls { display: contents; }
 .agent-composer-capsule > :is(textarea, .agent-composer-editor-container) { flex: 1 1 auto; align-self: center; }
 .agent-composer .agent-composer-capsule textarea { box-sizing: border-box; display: block; width: 100%; min-height: 32px; max-height: 200px; margin: 0; padding: 5px 2px; resize: none; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; line-height: 1.5; }

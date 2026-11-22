@@ -5,6 +5,8 @@ import type { Destination, DestinationPlace } from '../kernel/destinations.js';
 import type { DeviceLinkNotice } from '../kernel/device-link.js';
 import { Icon, type IconName } from '../ui/Icon.js';
 import { DeviceLinkWords } from '../kernel/DeviceLinkIndicator.js';
+import { shortcutKeys } from '../kernel/shortcuts.js';
+import { applePlatform } from '../kernel/platform.js';
 import './shell.css';
 
 const PLACES: readonly { destination: Exclude<Destination, 'settings'>; icon: IconName; label: 'navigation.chats' | 'navigation.assistants' | 'navigation.windows' }[] = [
@@ -21,17 +23,18 @@ export const linkState = (notice: DeviceLinkNotice | undefined) => notice ? noti
  * and Search, then Settings and the account's avatar with the device-link dot. The current place says so with aria-current.
  * Widened by its handle, each button shows its label beside its icon (shell.css).
  */
-export function NavigationRail({ current, onGo, onSearch, searchKeys, accountName, notice }: {
-  current: DestinationPlace; onGo(place: DestinationPlace): void; onSearch(): void; searchKeys: string; accountName?: string; notice?: DeviceLinkNotice;
+export function NavigationRail({ current, onGo, onSearch, accountName, notice }: {
+  current: DestinationPlace; onGo(place: DestinationPlace): void; onSearch(): void; accountName?: string; notice?: DeviceLinkNotice;
 }) {
   const t = useTranslate();
-  const button = (icon: IconName, label: string, active: boolean, onClick: () => void, title = label) =>
-    <button type="button" className="lab-rail-button" aria-label={label} title={title} aria-current={active ? 'page' : undefined} onClick={onClick}><Icon name={icon} size={24} /><span className="lab-rail-label" aria-hidden="true">{label}</span></button>;
+  const search = shortcutKeys('search', applePlatform());
+  const button = (icon: IconName, label: string, active: boolean, onClick: () => void, title = label, keys?: string) =>
+    <button type="button" className="lab-rail-button" aria-label={label} title={title} aria-current={active ? 'page' : undefined} aria-keyshortcuts={keys} onClick={onClick}><Icon name={icon} size={24} /><span className="lab-rail-label" aria-hidden="true">{label}</span></button>;
   return <FloatingPanel as="aside" className="lab-rail">
     <nav aria-label={t('navigation.main')}>
       <OrchardMark size={34} className="lab-rail-mark" />
       {PLACES.map(place => <span key={place.destination} className="lab-rail-item">{button(place.icon, t(place.label), current.destination === place.destination, () => onGo({ destination: place.destination }))}</span>)}
-      {button('search', t('navigation.search'), false, onSearch, t('navigation.searchShortcut', { keys: searchKeys }))}
+      {button('search', t('navigation.search'), false, onSearch, t('navigation.searchShortcut', { keys: search.shown }), search.aria)}
       <span className="lab-rail-spacer" />
       {button('gear', t('common.settings'), current.destination === 'settings', () => onGo({ destination: 'settings' }))}
       <RailAccount name={accountName} notice={notice} onAccount={() => onGo({ destination: 'settings', group: 'account' })} />

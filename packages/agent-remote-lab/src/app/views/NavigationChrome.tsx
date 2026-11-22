@@ -5,7 +5,6 @@ import type { DestinationPlace } from '../../kernel/destinations.js';
 import { NavigationRail } from '../../shell/NavigationRail.js';
 import { TabBar } from '../../shell/TabBar.js';
 import { useDeviceLink } from '../../kernel/DeviceLinkIndicator.js';
-import { applePlatform } from '../../kernel/platform.js';
 import type { AppScope } from '../types.js';
 
 /** Moves to a destination: Chats and Windows choose a mode, Settings and the directory open over the current one (a history entry the first time). */
@@ -20,5 +19,5 @@ export function NavigationChrome({ scope }: { readonly scope: Pick<AppScope, 'ac
   const go = useGo(navigation);
   const name = account?.name || account?.email || account?.id;
   return phone ? <TabBar current={navigation.destination} onGo={go} {...(notice ? { notice } : {})} />
-    : <NavigationRail current={navigation.destination} onGo={go} onSearch={openSearch} searchKeys={applePlatform() ? '⌘K' : 'Ctrl+K'} {...(name ? { accountName: name } : {})} {...(notice ? { notice } : {})} />;
+    : <NavigationRail current={navigation.destination} onGo={go} onSearch={openSearch} {...(name ? { accountName: name } : {})} {...(notice ? { notice } : {})} />;
 }

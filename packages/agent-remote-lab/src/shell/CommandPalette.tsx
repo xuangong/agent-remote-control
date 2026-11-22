@@ -2,7 +2,7 @@ import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { commandKinds, searchCommands, type CommandItem, type CommandKind } from './command-search.js';
 import { applePlatform } from '../kernel/platform.js';
-import { isSearchKey } from '../features/windows/useShellShortcuts.js';
+import { keyPressOf, shellShortcut } from '../kernel/shortcuts.js';
 import './shell.css';
 
 const groupKeys = { action: 'navigation.palette.groupAction', window: 'navigation.palette.groupWindow', bot: 'navigation.palette.groupBot', session: 'navigation.palette.groupSession' } as const satisfies Record<CommandKind, string>;
@@ -33,10 +33,7 @@ export function CommandPalette({ open, items, onClose }: { open: boolean; items:
   return <dialog ref={dialog} className="lab-command-palette" aria-label={t('common.search')}
     onCancel={event => { event.preventDefault(); onClose(); }}
     onKeyDown={event => {
-      if (event.nativeEvent.isComposing || event.altKey || event.shiftKey) return;
-      const apple = applePlatform();
-      const primary = apple ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
-      if (!primary || !isSearchKey(event)) return;
+      if (event.nativeEvent.isComposing || shellShortcut(keyPressOf(event), applePlatform()) !== 'search') return;
       event.preventDefault(); onClose();
     }}
     onPointerDown={event => { pressedBackdrop.current = event.target === event.currentTarget; }}

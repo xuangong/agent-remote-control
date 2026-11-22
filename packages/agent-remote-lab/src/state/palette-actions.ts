@@ -9,12 +9,15 @@
  * - Offered only when they can work: New bot in Bot mode with a directory; New session view with an open, available
  *   Window; Favorites for signed-in people; Hide or Show sidebar where the layout has a sidebar; All Windows when the
  *   overview is supported.
- * - Chats, Assistants, Windows and Settings are offered by name; Chats and Windows carry the platform's mode shortcut text.
+ * - Chats, Assistants, Windows and Settings are offered by name; an action with a shortcut carries its keys as the platform writes
+ *   them (kernel/shortcuts.ts), so the palette teaches them: Chats, Windows, Hide or Show sidebar, a new chat (New assistant in Bot
+ *   mode, New session in Window mode) and Keyboard shortcuts.
  */
 import type { CommandItem } from '../shell/command-search.js';
 import type { SessionPanel } from '../features/windows/panels.js';
 import { translator, type Translate } from '@orchardworks/agent-client';
 import type { Destination } from '../kernel/destinations.js';
+import { shortcutKeys, type ListedShortcut } from '../kernel/shortcuts.js';
 
 export interface PaletteFacts {
   readonly windowMode: boolean;
@@ -50,29 +53,33 @@ export interface PaletteRuns {
   openWindowOverview(): void;
   openInBotMode?(): void;
   pinToWindow?(): void;
+  /** Opens the keyboard shortcuts sheet. */
+  openShortcuts?(): void;
 }
 
 export function paletteActions(facts: PaletteFacts, runs: PaletteRuns): CommandItem[] {
   const { apple } = facts, t = facts.t ?? translator('en');
-  const action = (id: string, title: string, run: () => void, keys?: { shown: string; aria: string }): CommandItem =>
-    ({ id: `action:${id}`, kind: 'action', title, run, ...(keys ? { shortcut: keys.shown, keyShortcuts: keys.aria } : {}) });
+  const action = (id: string, title: string, run: () => void, shortcut?: ListedShortcut): CommandItem => {
+    const keys = shortcut ? shortcutKeys(shortcut, apple) : undefined;
+    return { id: `action:${id}`, kind: 'action', title, run, ...(keys ? { shortcut: keys.shown, keyShortcuts: keys.aria } : {}) };
+  };
   const panel = (id: string, title: string, target: SessionPanel) => action(id, title, () => { runs.toWindow(); runs.showPanel(target); });
   return [
-    ...(!facts.windowMode && facts.hasDirectory ? [action('new-bot', t('navigation.palette.newAssistant'), runs.newBot)] : []),
+    ...(!facts.windowMode && facts.hasDirectory ? [action('new-bot', t('navigation.palette.newAssistant'), runs.newBot, 'newChat')] : []),
     // Moving between the modes keeps each mode's place.
     ...(facts.windowMode && facts.canOpenInBotMode && runs.openInBotMode ? [action('open-in-bot-mode', t('navigation.palette.openInBotMode'), runs.openInBotMode)] : []),
     ...(!facts.windowMode && facts.canPinToWindow && runs.pinToWindow ? [action('pin-to-window', t('navigation.palette.pinToWindow'), runs.pinToWindow)] : []),
-    action('new-session', t('navigation.newSession'), () => { runs.toWindow(); runs.newSessionPanel(); }),
+    action('new-session', t('navigation.newSession'), () => { runs.toWindow(); runs.newSessionPanel(); }, facts.windowMode || !facts.hasDirectory ? 'newChat' : undefined),
     action('new-window', t('navigation.newWindow'), runs.inWindow(runs.createWindow)),
     ...(facts.windowEditable ? [action('new-session-view', t('navigation.palette.newSessionView'), runs.inWindow(runs.addSessionView, true))] : []),
     panel('all-sessions', t('navigation.allSessions'), 'list'),
     ...(facts.userScoped ? [panel('favorites', t('navigation.favorites'), 'favorites')] : []),
-    ...(facts.canToggleSidebar ? [action('toggle-sidebar', t(facts.sidebarShown ? 'navigation.palette.hideSidebar' : 'navigation.palette.showSidebar'), runs.toggleSidebar,
-      apple ? { shown: '⌘\\', aria: 'Meta+\\' } : { shown: 'Ctrl+\\', aria: 'Control+\\' })] : []),
-    action('chats', t('navigation.palette.chats'), () => runs.go('chats'), apple ? { shown: '⌥⌘2', aria: 'Alt+Meta+2' } : { shown: 'Ctrl+Alt+2', aria: 'Control+Alt+2' }),
+    ...(facts.canToggleSidebar ? [action('toggle-sidebar', t(facts.sidebarShown ? 'navigation.palette.hideSidebar' : 'navigation.palette.showSidebar'), runs.toggleSidebar, 'toggleSidebar')] : []),
+    action('chats', t('navigation.palette.chats'), () => runs.go('chats'), 'chats'),
     action('assistants', t('navigation.palette.assistants'), () => runs.go('assistants')),
-    action('windows', t('navigation.palette.windows'), () => runs.go('windows'), apple ? { shown: '⌥⌘1', aria: 'Alt+Meta+1' } : { shown: 'Ctrl+Alt+1', aria: 'Control+Alt+1' }),
+    action('windows', t('navigation.palette.windows'), () => runs.go('windows'), 'windows'),
     action('settings', t('navigation.palette.settings'), () => runs.go('settings')),
+    ...(runs.openShortcuts ? [action('shortcuts', t('navigation.shortcutsSheet.title'), runs.openShortcuts, 'shortcuts')] : []),
     ...(facts.windowOverviewSupported ? [action('all-windows', t('navigation.palette.allWindows'), () => { runs.toWindow(); runs.openWindowOverview(); })] : []),
   ];
 }

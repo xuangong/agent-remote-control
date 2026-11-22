@@ -36,6 +36,6 @@ it('keeps the report selectable when clipboard access fails and recording surviv
 it('speaks Chinese when the device does', async () => {
   vi.stubGlobal('matchMedia', () => ({ matches: false }));
   const view = await render(<LocaleContext.Provider value="zh"><LayoutDiagnosticsSettings /></LocaleContext.Provider>);
-  expect(view.querySelector('h2')?.textContent).toBe('布局诊断');
+  expect(view.querySelector('h3')?.textContent).toBe('布局诊断');
   expect(view.textContent).toContain('记录布局变化');
 });

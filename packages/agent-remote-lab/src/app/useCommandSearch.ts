@@ -13,6 +13,7 @@ import type { CommandItem } from '../shell/command-search.js';
 import { appearanceItems, commandSessions, sessionSubtitle } from '../shell/command-items.js';
 import { currentAppearance } from '../kernel/device-choices.js';
 import { applePlatform } from '../kernel/platform.js';
+import { useShellShortcuts } from '../shell/useShellShortcuts.js';
 import type { SessionSuccessionBindingSlice } from './useSessionSuccessionBinding.js';
 import type { PanelsAndShortcutsSlice } from './usePanelsAndShortcuts.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
@@ -26,12 +27,17 @@ import type { WindowViewActionsSlice } from './useWindowViewActions.js';
 import type { AttentionAndRosterSlice } from './useAttentionAndRoster.js';
 import type { AppInputs } from './types.js';
 
-export function useCommandSearch(scope: Pick<AppInputs & SessionSuccessionBindingSlice & PanelsAndShortcutsSlice & WorkbenchShellSlice & WindowModeActionsSlice & ActiveSessionSlice & RequestedSessionSlice & RemoteHostStateSlice & ProviderStateSlice & SharedFeedsAndTpmSlice & WindowViewActionsSlice & AttentionAndRosterSlice, 'baseUrl' | 'botRoster' | 'closePage' | 'desktopContextVisible' | 'directory' | 'favorites' | 'inMode' | 'initialState' | 'modeSteps' | 'navigation' | 'openNewBot' | 'openNewSessionPanel' | 'providers' | 'queuedModeSteps' | 'remoteHosts' | 'searchOpen' | 'searchRuns' | 'sessionEntries' | 'setWindowOverviewOpen' | 'sharedFeeds' | 'sharedWindow' | 'showPanel' | 'switchMode' | 'toggleSidebar' | 'userScoped' | 'windowMode' | 'windowOverviewSupported' | 'windowWorkspace' | 'openInBotMode' | 'pinToWindow'>) {
-  const { baseUrl, botRoster, closePage, desktopContextVisible, directory, favorites, inMode, initialState, modeSteps, navigation, openNewBot, openNewSessionPanel, providers, queuedModeSteps, remoteHosts, searchOpen, searchRuns, sessionEntries, setWindowOverviewOpen, sharedFeeds, sharedWindow, showPanel, switchMode, toggleSidebar, userScoped, windowMode, windowOverviewSupported, windowWorkspace, openInBotMode, pinToWindow } = scope;
+export function useCommandSearch(scope: Pick<AppInputs & SessionSuccessionBindingSlice & PanelsAndShortcutsSlice & WorkbenchShellSlice & WindowModeActionsSlice & ActiveSessionSlice & RequestedSessionSlice & RemoteHostStateSlice & ProviderStateSlice & SharedFeedsAndTpmSlice & WindowViewActionsSlice & AttentionAndRosterSlice, 'baseUrl' | 'botRoster' | 'closePage' | 'desktopContextVisible' | 'directory' | 'favorites' | 'inMode' | 'initialState' | 'modeSteps' | 'navigation' | 'openNewBot' | 'openNewSessionPanel' | 'openSearch' | 'openShortcuts' | 'providers' | 'queuedModeSteps' | 'remoteHosts' | 'searchOpen' | 'searchRuns' | 'sessionEntries' | 'setWindowOverviewOpen' | 'sharedFeeds' | 'sharedWindow' | 'showPanel' | 'switchMode' | 'toggleSidebar' | 'userScoped' | 'windowMode' | 'windowOverviewSupported' | 'windowWorkspace' | 'openInBotMode' | 'pinToWindow'>) {
+  const { baseUrl, botRoster, closePage, desktopContextVisible, directory, favorites, inMode, initialState, modeSteps, navigation, openNewBot, openNewSessionPanel, openSearch, openShortcuts, providers, queuedModeSteps, remoteHosts, searchOpen, searchRuns, sessionEntries, setWindowOverviewOpen, sharedFeeds, sharedWindow, showPanel, switchMode, toggleSidebar, userScoped, windowMode, windowOverviewSupported, windowWorkspace, openInBotMode, pinToWindow } = scope;
 
   const t = useTranslate();
 
   const windowConfirmed = !!initialState || windowWorkspace.unavailable || windowWorkspace.hasActiveWindow && !windowWorkspace.provisional;
+
+  // A new chat, as the palette offers it: New assistant in Bot mode, New session in Window mode.
+  const newChat = () => { if (!windowMode && directory) openNewBot(); else { switchMode('window'); openNewSessionPanel(); } };
+  // The shell's keys (kernel/shortcuts.ts): ⌘K, ⇧⌘O, ⌘/, ⌥⌘1 and 2, ⌘\ in Window mode, F6 and ⇧F6.
+  useShellShortcuts({ setMode: navigation.setMode, toggleSidebar, openSearch, newChat, openShortcuts });
 
   useEffect(() => {
     if (!modeSteps.current.length) return;
@@ -66,6 +72,7 @@ export function useCommandSearch(scope: Pick<AppInputs & SessionSuccessionBindin
       openInBotMode: () => { if (sharedWindow && selectedTile) void openInBotMode(sharedWindow.id, selectedTile.id); },
       pinToWindow: () => { if (botPlace) void pinToWindow(botPlace.groupId, botPlace.viewId); },
       toWindow, go: destination => { if (destination === 'chats') switchMode('bot'); else if (destination === 'windows') switchMode('window'); else navigation.open({ destination }, navigation.page ? 'replace' : 'push'); }, newBot: openNewBot, newSessionPanel: openNewSessionPanel, showPanel, toggleSidebar: () => toggleSidebar?.(),
+      openShortcuts,
       inWindow: (step, confirmed = false) => () => { toWindow(); inMode('window', step, confirmed); },
       createWindow: () => searchRuns.current.createWindowFromMenu(),
       addSessionView: () => { closePage(); searchRuns.current.addSessionView(); },
@@ -88,7 +95,7 @@ export function useCommandSearch(scope: Pick<AppInputs & SessionSuccessionBindin
     const sessions = sessionItems.map(item => { const words = wordsOf.get(item.id); return words ? { ...item, keywords: [...item.keywords ?? [], ...words] } : item; });
     const botSessions = new Set(windowMode ? [] : botRoster.sections.flatMap(section => section.rows.map(row => `session:${sessionKey(row.binding)}`)));
     const appearance = currentAppearance();
-    const appearances = appearance ? appearanceItems(appearance.appearance, next => appearance.set(next)) : [];
+    const appearances = appearance ? appearanceItems(appearance.appearance, next => appearance.set(next), t) : [];
     return [...actions, ...appearances, ...windowItems, ...bots, ...sessions.filter(item => !botSessions.has(item.id))];
   }
   return { commandItems };

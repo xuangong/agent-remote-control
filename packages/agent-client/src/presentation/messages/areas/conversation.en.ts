@@ -99,6 +99,13 @@ export const conversation = {
   'receipt.answeredOf': '{answered} of {total} answered',
 
   // The conversation around the bubbles.
+  'conversation.messageActions': 'Message actions',
+  'conversation.quote': 'Quote',
+  'conversation.resend': 'Resend',
+  'conversation.copiedNote': 'The message is on the clipboard, with its formatting.',
+  'conversation.copyFailedNote': 'This browser did not let the page use the clipboard.',
+  'card.renameMenu': 'Rename…',
+  'card.renameTitle': 'Rename “{name}”',
   'conversation.assistant': 'Assistant',
   'conversation.sessionChange': 'Continued in a new session',
   'conversation.today': 'Today {time}',
@@ -127,7 +134,8 @@ export const conversation = {
   'assistants.new': 'New assistant',
   'assistants.back': 'Back to chats',
   'assistants.backShort': 'Chats',
-  'assistants.choose': 'Choose an assistant to continue its conversation.',
+  'assistants.chooseTitle': 'Pick someone to talk to',
+  'assistants.chooseHint': 'Your assistants are in the list. Press {keys} to find one by name or by what was said.',
   'assistants.chooseInGroup': 'No assistant selected. Choose one from this group.',
   'assistants.empty': 'No assistants in this group yet.',
   'assistants.hiddenEmpty': 'Its assistants are hidden in Bot mode.',

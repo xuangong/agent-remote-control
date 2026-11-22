@@ -10,6 +10,8 @@ import { AgentActivityStatus } from './AgentActivityStatus.js';
 import { InterruptButton } from './InterruptButton.js';
 import { ComposerMenu, type ComposerMenuEntry } from './ComposerMenu.js';
 import { composerMenu } from './composer-menu.js';
+import { planComposerDrop } from './composer-drop.js';
+import { quoteInsertion } from './composer-quote.js';
 import { useTranslate } from './locale.js';
 import { ComposerEditor, type ComposerEditorHandle } from './ComposerEditor.js';
 import { useResourceDraft, type UploadResource } from './useResourceDraft.js';
@@ -84,6 +86,11 @@ export interface AgentComposerProps {
   draft?: string;
   onDraftChange?(text: string): void;
   /**
+   * A message the person quoted: its text goes at the end of the draft as a quote, with the caret after it, once per `id`
+   * (composer-quote.ts).
+   */
+  quote?: { readonly id: number; readonly text: string };
+  /**
    * Sends text to a session whose Host is offline: the message waits for the Host and is delivered when it returns. Given
    * only while the Host is offline, it replaces sending, even if the session still looks attached. label names the
    * action, for example "Send when Mac mini is back".
@@ -135,7 +142,7 @@ interface Draft {
   feedback?: { kind: 'success' | 'error'; message: string; delivery?: boolean; commandError?: unknown };
 }
 
-export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly: draftOnlyRequested = false, opening = false, openFailed = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, recipient, readOnlyCollapsed = false, state, sessionControls, settings = 'inline', renderSessionSettingError, renderCommandError, sessionKey, host, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent, sendLater }: AgentComposerProps) {
+export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly: draftOnlyRequested = false, opening = false, openFailed = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, recipient, readOnlyCollapsed = false, state, sessionControls, settings = 'inline', renderSessionSettingError, renderCommandError, sessionKey, host, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent, sendLater, quote }: AgentComposerProps) {
   const t = useTranslate();
   const draftOnly = draftOnlyRequested;
   const pendingFirstInputContext = firstInputContext !== undefined;
@@ -642,7 +649,38 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   const placeholder = ownershipReadOnly ? '' : forcedReadOnly ? readOnlyLabel ?? t('composer.recordingReadOnly') : readOnly && !laterMode ? readOnlyHint
     : blocked && !laterMode ? availability.words : agentId !== '' || draftOnly || laterMode ? recipient ? t('composer.placeholderTo', { name: recipient }) : t('composer.placeholder') : t('composer.noTarget');
 
-  return <section ref={composerRef} className="agent-composer" aria-label={t('composer.region')} aria-busy={busy || richEnabled && !imageDraft.hydrated} data-control-readonly={ownershipReadOnly || undefined}>
+  // A quoted message goes at the end of the draft, once per quote, with the caret after it (composer-quote.ts).
+  const quoted = useRef(quote?.id);
+  useEffect(() => {
+    if (!quote || quoted.current === quote.id) return;
+    quoted.current = quote.id;
+    const insertion = quoteInsertion(quote.text, currentDraft.text);
+    if (!insertion || ownershipReadOnly || readOnly && !laterMode) return;
+    if (richEnabled) { editorRef.current?.focus({ atEnd: true }); editorRef.current?.insertText(insertion); return; }
+    setText(currentDraft.text + insertion); refresh(value => value + 1);
+    requestAnimationFrame(() => { const input = inputRef.current; if (!input || input.disabled) return; input.focus(); input.setSelectionRange(input.value.length, input.value.length); });
+  }, [quote?.id]);
+  // Files dropped on the composer join the draft as the "+" menu adds them, by its availability (composer-drop.ts); what it cannot
+  // take is said once, above the input.
+  const [dropTarget, setDropTarget] = useState(false);
+  const carriesFiles = (event: { dataTransfer: DataTransfer | null }) => Array.from(event.dataTransfer?.types ?? []).includes('Files');
+  function dropFiles(files: readonly File[]): void {
+    const plan = planComposerDrop(files, menu);
+    if ((plan.images.length || plan.resources.length) && !composerRef.current?.contains(document.activeElement)) editorRef.current?.focus({ atEnd: true });
+    if (plan.images.length) editorRef.current?.insertParts(addImageFiles(plan.images));
+    if (plan.resources.length) {
+      try { editorRef.current?.insertParts(resourceDraft.add(plan.resources)); }
+      catch (error) { currentDraft.feedback = { kind: 'error', message: errorWords(error, t, 'composer.resourceSelectionFailed') }; refresh(value => value + 1); return; }
+    }
+    if (plan.note) { currentDraft.feedback = { kind: 'error', message: t(plan.note) }; refresh(value => value + 1); }
+  }
+
+  return <section ref={composerRef} className="agent-composer" aria-label={t('composer.region')} aria-busy={busy || richEnabled && !imageDraft.hydrated} data-control-readonly={ownershipReadOnly || undefined}
+    data-drop-target={dropTarget || undefined}
+    onDragEnter={event => { if (!carriesFiles(event)) return; event.preventDefault(); setDropTarget(true); }}
+    onDragOver={event => { if (!carriesFiles(event)) return; event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }}
+    onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(false); }}
+    onDrop={event => { if (!carriesFiles(event)) return; event.preventDefault(); setDropTarget(false); dropFiles(Array.from(event.dataTransfer.files)); }}>
     {richEnabled ? <input ref={fileInputRef} type="file" hidden multiple accept="image/png,image/jpeg,image/webp" onChange={event => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ''; if (filePickerAgent.current === agentId) editorRef.current?.insertParts(addImageFiles(files)); }} /> : null}
     {capabilities?.resourceInput ? <input ref={resourceInputRef} type="file" hidden multiple aria-label={t('composer.chooseResources')} onChange={event => {
       const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = '';

@@ -8,7 +8,12 @@ test('keeps the editor, its focus and its selection when the session behind the 
   const editor = page.getByTestId('prompt-input');
   await expect(editor).toHaveText('Keep this focused selection');
   const original = await editor.elementHandle();
-  await editor.focus();
+  // Focusing the editor makes ProseMirror schedule a 20 ms follow-up that writes its own selection to the page unless the page selection
+  // is the one it last read. A selection set inside that window is overwritten with 0, 0. A later timer of longer delay runs after it.
+  await editor.evaluate(async node => {
+    (node as HTMLElement).focus();
+    await new Promise(resolve => setTimeout(resolve, 30));
+  });
   await editor.evaluate(node => {
     const text = node.firstChild!, range = document.createRange(); range.setStart(text, 2); range.setEnd(text, 9);
     const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range);

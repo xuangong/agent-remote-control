@@ -94,6 +94,7 @@ export const settings: AreaMessages<typeof english> = {
   'settings.account.controller': '{name} 上的 Controller',
   'settings.account.controllerUnknown': '未报告',
   'settings.display.title': '显示',
+  'settings.display.fullScreen': '全屏',
   'settings.display.exitFullScreen': '退出全屏',
   'settings.display.enterFullScreen': '进入全屏',
   'settings.display.fullScreenNote': '工作时隐藏浏览器的控件。切换应用或用键盘时，浏览器可能会退出全屏。',

@@ -13,6 +13,7 @@ import { useSharedRoster } from './shared-roster.js';
 import { useGroupActions } from './useGroupActions.js';
 import { Menu, type MenuEntry } from '../../ui/Menu.js';
 import { Icon } from '../../ui/Icon.js';
+import { useContextMenu } from '../../ui/ContextMenu.js';
 
 type Workspace = Parameters<typeof useGroupActions>[0]['workspace'] & Pick<ReturnType<typeof useWindowWorkspace>, 'readGroup' | 'operateGroup' | 'groups'>;
 
@@ -32,6 +33,8 @@ export function AssistantDirectory({ model, project, workspace, focusGroup, host
   const roster = useSharedRoster(model, project);
   const sections = groupSections(roster, workspace.groups, { order: 'roster', defaultTitle });
   const actions = useGroupActions({ workspace, defaultTitle });
+  // A right-click (or Shift-F10) on an assistant offers what its ⋯ menu does.
+  const contextMenu = useContextMenu();
   const [error, setError] = useState<string>();
   useEffect(() => { if (focusGroup) document.getElementById(`directory-group-${focusGroup}`)?.scrollIntoView?.({ block: 'start' }); }, [focusGroup, sections.length]);
 
@@ -89,6 +92,7 @@ export function AssistantDirectory({ model, project, workspace, focusGroup, host
           </div>
           {!section.rows.length ? <p className="lab-bot-empty">{t('navigation.directoryGroupEmpty')}</p> : null}
           {section.rows.map(row => <BotMember key={`${row.groupId}/${row.viewId}`} row={row} current={false} compact={false} hostName={hostName} onSelect={() => void open(row)}
+            menu={(anchor, point) => contextMenu.show(anchor, t('card.more', { name: row.name }), actions.assistantMenu(row), point)}
             marks={<>{row.details.asleep ? <span className="lab-bot-role">{t('navigation.resting')}</span> : null}{row.hiddenInChats && !section.hiddenInChats ? <span className="lab-bot-role">{t('navigation.hiddenInChats')}</span> : null}</>}
             extra={<span className="lab-directory-row-actions">
               {row.hiddenInChats && !section.hiddenInChats ? <Pill className="lab-directory-show" onClick={() => void showInChats(row)}>{t('navigation.showInChats')}</Pill> : null}
@@ -97,5 +101,6 @@ export function AssistantDirectory({ model, project, workspace, focusGroup, host
         </section>; })}
     </div>
     {actions.sheets(sections.flatMap(section => section.rows))}
+    {contextMenu.menu}
   </FloatingPanel>;
 }

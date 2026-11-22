@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import { createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
+import { translator } from '@orchardworks/agent-client';
 import { appearanceItems, commandSessions, sessionSubtitle, sessionViewLocation } from './command-items.js';
 
 const session = (id: string, title = id, hostId = 'local') => ({ hostId, providerId: 'claude', nativeSessionId: id, title });
@@ -39,4 +40,9 @@ it('offers the three appearances, marks the current one and sets the one chosen'
   expect(items.every(item => item.kind === 'action')).toBe(true);
   items[1]!.run();
   expect(chosen).toEqual(['light']);
+});
+
+it('names the appearances in the reader\'s words', () => {
+  const items = appearanceItems('system', () => {}, translator('zh'));
+  expect(items.map(item => [item.title, item.subtitle])).toEqual([['外观：跟随系统', '当前'], ['外观：浅色', undefined], ['外观：深色', undefined]]);
 });

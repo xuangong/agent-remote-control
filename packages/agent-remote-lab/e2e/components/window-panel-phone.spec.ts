@@ -33,3 +33,14 @@ for (const width of [320, 390]) test(`the groups panel fits a ${width}px phone w
   await panel.getByRole('button', { name: 'Close groups', exact: true }).click();
   await expect(panel).toBeHidden();
 });
+
+// A phone's home is Chats: choosing Windows from there shows the window's tiles, not a sessions drawer opened at the page's start.
+test('from Chats, the Windows tab shows the window\'s tiles', async ({ page, isMobile }) => {
+  test.skip(!isMobile && (page.viewportSize()?.width ?? 1440) > 760, 'A phone width.');
+  await page.goto('/e2e/fixtures/window-tiles.html?tiles=2&bots=1&mode=bot');
+  await expect(page.locator('[data-workbench-mode="bot"] [data-bot-place]').first()).toBeVisible();
+  await page.locator('.lab-tab-bar').getByRole('button', { name: 'Windows', exact: true }).click();
+  await expect(page.locator('[data-workbench-mode="window"]')).toBeVisible();
+  await expect(page.locator('#lab-context')).toBeHidden();
+  await expect(page.getByTestId('prompt-input').locator('visible=true').first()).toBeVisible();
+});

@@ -8,14 +8,17 @@ import { sessionKey } from '../../kernel/session-tree.js';
 import { Icon } from '../../ui/Icon.js';
 import { dateLocale, replyTime } from '../../kernel/reply-time.js';
 import { LocaleContext, useTranslate } from '@orchardworks/agent-client-web/react';
+import { contextMenuEvents } from '../../ui/ContextMenu.js';
 
 export function botPlaceKey(place: BotPlace): string {
   return place.kind === 'bot' ? JSON.stringify([place.groupId, place.viewId]) : place.kind === 'session' ? sessionKey(place.session) : place.groupId;
 }
 
 /** One assistant as a row: avatar, name with its tags, one sentence. The directory adds its marks and action beside it. */
-export function BotMember({ row, current, compact, hostName, onSelect, marks, extra }: { row: BotRow; current: boolean; compact: boolean; hostName(hostId: string): string; onSelect(place: BotPlace): void;
-  /** Words beside the name, such as Hidden in Chats. */ marks?: ReactNode; /** A control after the row, such as Show in Chats. */ extra?: ReactNode }) {
+export function BotMember({ row, current, compact, hostName, onSelect, marks, extra, menu }: { row: BotRow; current: boolean; compact: boolean; hostName(hostId: string): string; onSelect(place: BotPlace): void;
+  /** Words beside the name, such as Hidden in Chats. */ marks?: ReactNode; /** A control after the row, such as Show in Chats. */ extra?: ReactNode;
+  /** Opens the row's context menu: at the pointer for a right-click, beside the row for Shift-F10 or the context menu key. */
+  menu?(anchor: HTMLElement, point?: { x: number; y: number }): void }) {
   const t = useTranslate();
   const name = row.name, destination: BotPlace = { kind: 'bot', groupId: row.groupId, viewId: row.viewId };
   const locale = useContext(LocaleContext);
@@ -30,8 +33,13 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
   // The role and label are tags beside the name, like a job title; screen readers hear them after the name.
   const description = [row.role, row.details.label, sentence, draft ? `${t('assistants.draft')}: ${draft}` : undefined, row.unread ? t('assistants.unread') : undefined,
     row.details.pinned ? t('assistants.pinned') : undefined, row.muted ? t('assistants.muted') : undefined, time].filter(Boolean).join(' · ');
+  const menuEvents = menu ? contextMenuEvents(({ target, point }) => {
+    const anchor = target.closest<HTMLElement>('.lab-bot-row');
+    if (!anchor) return false;
+    menu(anchor, point); return true;
+  }) : undefined;
   return <div className="lab-bot-member">
-    <button type="button" className="lab-bot-row" aria-label={name} aria-description={description || undefined}
+    <button type="button" className="lab-bot-row" aria-label={name} aria-description={description || undefined} {...menuEvents}
       title={`${hostName(row.binding.hostId)} · ${row.binding.providerId}`} data-state={row.assistant.state}
       data-bot-place={botPlaceKey(destination)} data-asleep={row.details.asleep || undefined} data-unread={row.unread || undefined} data-needs-you={needsYou || undefined} data-muted={row.muted || undefined} aria-current={current || undefined} onClick={() => onSelect(destination)}>
       <BotPicture id={row.viewId} picture={row.details.picture} size={compact ? 44 : 40} mood={row.assistant.mood} />
@@ -64,8 +72,10 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
  * Chats: the assistants Bot mode shows, by group in the groups' order with the default group last, each group by activity
  * (pinned first, then by latest reply); no headings while the default group is all there is. Then Other sessions.
  */
-export function BotRoster({ model, groups, place, onSelect, directoryControls, hostName = id => id, compact = false }: {
+export function BotRoster({ model, groups, place, onSelect, directoryControls, hostName = id => id, compact = false, menu }: {
   model: BotRosterModel; groups: readonly WindowGroup[]; place?: BotPlace; onSelect(place: BotPlace): void; directoryControls: ReactNode;
+  /** Opens an assistant's context menu (pin, mute, rename, move). */
+  menu?(row: BotRow, anchor: HTMLElement, point?: { x: number; y: number }): void;
   /** A phone's roster: larger pictures and taller rows, as in a native chat list. */
   compact?: boolean;
   /** A Host's display name for a Host ID; rows show names, never raw IDs. */
@@ -75,7 +85,7 @@ export function BotRoster({ model, groups, place, onSelect, directoryControls, h
   const sections = groupSections(model, groups, { order: 'activity', defaultTitle: t('navigation.groups.default') });
   const headings = showsGroupHeadings(sections);
   const member = (row: BotRow) => <BotMember key={`${row.groupId}/${row.viewId}`} row={row} compact={compact} hostName={hostName} onSelect={onSelect}
-    current={place?.kind === 'bot' && place.groupId === row.groupId && place.viewId === row.viewId} />;
+    current={place?.kind === 'bot' && place.groupId === row.groupId && place.viewId === row.viewId} {...(menu ? { menu: (anchor, point) => menu(row, anchor, point) } : {})} />;
   return <nav aria-label={t('navigation.chats')} className="lab-bot-roster-list">
     {!sections.length ? <p className="lab-bot-empty">{t('navigation.chatsEmpty')}</p>
       : headings ? sections.map(section => { const key = section.groupId ?? 'default';

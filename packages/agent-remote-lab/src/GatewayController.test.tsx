@@ -449,3 +449,35 @@ describe('the access page of a session link', () => {
     } finally { languages.mockRestore(); }
   });
 });
+
+describe('a device clock that differs from the Relay clock', () => {
+  const basePath = '/u/' + 'a'.repeat(64) + '/';
+  const minute = 60_000;
+  const relayAnswer = (relayNow: number, lifeMs: number, extra: object = {}) =>
+    Response.json({ basePath, expiresAt: relayNow + lifeMs, ...extra }, { headers: { date: new Date(relayNow).toUTCString() } });
+
+  it('becomes ready when the device clock is 10 minutes ahead of the answer, instead of pausing and asking again', async () => {
+    vi.useFakeTimers();
+    const requests: string[] = [];
+    vi.stubGlobal('fetch', async (url: string) => { requests.push(url); return relayAnswer(Date.now() - 10 * minute, 2 * minute); });
+    let ready = false;
+    const view = await render(<GatewayController>{(baseUrl, _account, isReady) => { ready = isReady; return <p>{baseUrl}</p>; }}</GatewayController>);
+    expect(view.textContent).toContain(window.location.origin + basePath);
+    expect(ready).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(ready).toBe(true);
+    expect(requests).toEqual(['/auth/status']);
+  });
+
+  it('renews before the real deadline when the device clock is 10 minutes behind the answer', async () => {
+    vi.useFakeTimers();
+    const requests: string[] = [];
+    vi.stubGlobal('fetch', async (url: string) => { requests.push(url); return relayAnswer(Date.now() + 10 * minute, 2 * minute); });
+    await render(<GatewayController>{baseUrl => <p>{baseUrl}</p>}</GatewayController>);
+    expect(requests).toEqual(['/auth/status']);
+    await act(async () => { await vi.advanceTimersByTimeAsync(110_000); });
+    expect(requests).toEqual(['/auth/status']);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(requests[1]).toBe('/auth/refresh');
+  });
+});

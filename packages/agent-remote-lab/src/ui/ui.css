@@ -60,7 +60,7 @@
   cursor: pointer; opacity: 1; transform: none; transition: background-color var(--ui-duration-short) var(--ui-ease); --ui-focus-offset: -1px;
 }
 .ui-list-row.ui-list-row:hover:not(:disabled) { color: var(--ui-label); background: var(--ui-row-hover); }
-.ui-list-row.ui-list-row[aria-current="true"], .ui-list-row.ui-list-row[aria-current="true"]:hover:not(:disabled) { background: var(--ui-selection); }
+.ui-list-row.ui-list-row[aria-current="true"], .ui-list-row.ui-list-row[aria-current="true"]:hover:not(:disabled) { background: var(--orchard-tint); }
 .ui-list-row.ui-list-row:active:not(:disabled) { transform: none; }
 .ui-list-row.ui-list-row:focus-visible { outline: 3px solid var(--ui-focus-ring); outline-offset: var(--ui-focus-offset); }
 .ui-list-row.ui-list-row:disabled { color: var(--ui-label-tertiary); cursor: default; opacity: 1; }

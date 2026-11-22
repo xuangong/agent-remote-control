@@ -1,9 +1,11 @@
 /* Bot mode: three floating panels on the warm ground (the assistants, the conversation, its details), separated by gaps.
-   Below the compact width the details wait to be opened; at phone width one panel shows edge to edge, the list as home. */
-.lab-bot-workspace { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: var(--orchard-space-l); box-sizing: border-box; height: var(--lab-viewport-height, 100dvh);
+   The list and the details take the widths the frame sets (--lab-panel-sidebar, --lab-panel-details; DesktopFrame.tsx), or
+   their defaults outside a frame. Below the compact width the details wait to be opened; at phone width one panel shows edge
+   to edge, the list as home. */
+.lab-bot-workspace { display: grid; grid-template-columns: var(--lab-panel-sidebar, 260px) minmax(0, 1fr); gap: var(--orchard-space-l); box-sizing: border-box; height: var(--lab-viewport-height, 100dvh);
   min-width: 0; min-height: 0; padding: var(--orchard-space-l); overflow: hidden; background: var(--orchard-ground); color: var(--orchard-text);
   font: var(--orchard-type-body-size) / var(--orchard-type-body-leading) var(--orchard-font-text); }
-.lab-bot-workspace[data-details] { grid-template-columns: 260px minmax(0, 1fr) 300px; }
+.lab-bot-workspace[data-details] { grid-template-columns: var(--lab-panel-sidebar, 260px) minmax(0, 1fr) var(--lab-panel-details, 300px); }
 .lab-bot-workspace > .orchard-panel.orchard-panel { min-width: 0; min-height: 0; }
 .lab-bot-workspace > .lab-bot-roster.orchard-panel { display: flex; flex-direction: column; gap: var(--orchard-space-xs); overflow: auto; padding: var(--orchard-space-xl) var(--orchard-space-m) 0; }
 .lab-bot-workspace > .lab-bot-conversation.orchard-panel { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
@@ -12,6 +14,12 @@
 /* The composer's tab to hide it stands inside the composer's own band, not over the conversation. */
 .lab-bot-conversation .lab-composer-dock { padding-top: var(--orchard-space-2xl); border-top: 0; }
 .lab-bot-workspace :focus-visible { outline: 2px solid var(--orchard-focus); outline-offset: 2px; }
+
+/* No chat open on a wide screen: the mark and one friendly line, in the middle of the conversation's panel. */
+.lab-bot-welcome { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: var(--orchard-space-m); padding: var(--orchard-space-3xl);
+  color: var(--orchard-text-secondary); text-align: center; }
+.lab-bot-welcome > h2 { margin: var(--orchard-space-m) 0 0; color: var(--orchard-text-strong); font: var(--orchard-type-headline-weight) var(--orchard-type-headline-size) / 1.3 var(--orchard-font-text); }
+.lab-bot-welcome > p { max-width: 34em; margin: 0; font-size: var(--orchard-type-callout-size); line-height: 1.5; }
 
 /* The sidebar: the wordmark with New assistant, then the chats. The rail carries the modes, Search and this device's link. */
 .lab-sidebar-brand { padding: var(--orchard-space-xs) var(--orchard-space-s) 0; }

@@ -74,7 +74,7 @@ test('soak: bot switches, sends, mode switches and a Host leaving and coming bac
     const cdp = await context.newCDPSession(page);
     await cdp.send('Performance.enable');
     const samples: Sample[] = [];
-    const conversation = bot.getByRole('region', { name: 'Bot conversation', exact: true });
+    const conversation = bot.getByRole('region', { name: 'Conversation', exact: true });
     const firstPane = bot.locator(`[data-native-session=${JSON.stringify(session(names[0]!))}]`);
     const sample = async (minute: number) => {
       // Every sample is taken on the same screen, the first bot with its history shown, so samples compare like with

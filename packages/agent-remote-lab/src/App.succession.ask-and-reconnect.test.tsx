@@ -243,6 +243,10 @@ it('fences a warm Team main view immediately when its public execution locator d
 
 it.each(['A', 'B'].flatMap(initial => ['native preparation', 'selected resources'].map(stage => ({ initial, stage }))))
 ('fences shared prompt editing from $initial after awaiting $stage over HTTP and WebSocket', async ({ initial, stage }) => {
+  // The dialog checks an uncertain handoff again 1 s after an error. This test reads the refusal, which the check replaces with the
+  // fixture's own answer, so that first automatic check is held back for the length of the test.
+  const nativeSetTimeout = globalThis.setTimeout;
+  vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback, delay, ...args) => nativeSetTimeout(callback, delay === 1000 ? 600_000 : delay, ...args));
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
   Range.prototype.getBoundingClientRect = () => new DOMRect();

@@ -106,7 +106,7 @@
 .lab-sidebar-link { display: flex; align-items: center; width: 100%; min-height: 30px; padding: 4px 10px; border: 0; border-radius: var(--ui-radius-control);
   color: var(--ui-label); background: transparent; font: var(--ui-size-body)/1.2 var(--ui-font); text-align: start; }
 .lab-sidebar-link:hover:not(:disabled) { color: var(--ui-label); background: var(--ui-row-hover); border-color: transparent; }
-.lab-sidebar-link[aria-current="page"] { background: var(--ui-selection); }
+.lab-sidebar-link[aria-current="page"] { background: var(--orchard-tint); }
 
 /* The All sessions page: the sidebar panels shown in place of the Window on desktop. */
 .lab-sessions-page { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; background: var(--ui-background); }
@@ -176,7 +176,7 @@
   display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 12px; border-radius: var(--ui-radius-control);
   color: var(--ui-label); font: var(--ui-size-body)/1.25 var(--ui-font); cursor: pointer;
 }
-.lab-command-option[aria-selected="true"] { background: var(--ui-selection); }
+.lab-command-option[aria-selected="true"] { background: var(--orchard-tint); }
 .lab-command-title { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lab-command-subtitle { flex: 1; min-width: 0; overflow: hidden; color: var(--ui-label-secondary); font-size: var(--ui-size-callout); text-overflow: ellipsis; white-space: nowrap; }
 .lab-command-shortcut { flex: none; margin-inline-start: auto; color: var(--ui-label-secondary); font: var(--ui-size-caption)/1 var(--ui-font); }
@@ -189,6 +189,19 @@
   .lab-command-option[aria-selected="true"] { forced-color-adjust: none; color: HighlightText; background: Highlight; }
   .lab-command-option[aria-selected="true"] :is(.lab-command-subtitle, .lab-command-shortcut) { color: HighlightText; }
 }
+
+/* The shortcuts sheet (⌘/): per group a title, then a card of rows, what a shortcut does on the left and its keys on the right. */
+.lab-shortcuts { display: flex; flex-direction: column; gap: var(--orchard-space-xl); padding-bottom: var(--orchard-space-m); }
+.lab-shortcuts-group > h3 { margin: 0 0 var(--orchard-space-s); padding: 0 var(--orchard-space-l); color: var(--orchard-text-secondary);
+  font: var(--orchard-type-footnote-weight) var(--orchard-type-footnote-size) / 1.4 var(--orchard-font-text); }
+.lab-shortcuts-group > dl { margin: 0; border-radius: var(--orchard-radius-group); background: var(--orchard-fill); overflow: hidden; }
+.lab-shortcuts-row { display: flex; align-items: center; justify-content: space-between; gap: var(--orchard-space-l); min-height: 44px; padding: var(--orchard-space-s) var(--orchard-space-l); }
+.lab-shortcuts-row + .lab-shortcuts-row { border-top: 1px solid var(--orchard-separator); }
+.lab-shortcuts-row > dt { min-width: 0; color: var(--orchard-text); }
+.lab-shortcuts-row > dd { flex: none; margin: 0; }
+.lab-shortcuts-row kbd { display: inline-block; min-width: 28px; padding: var(--orchard-space-2xs) var(--orchard-space-s); border-radius: var(--orchard-radius-row);
+  color: var(--orchard-text-strong); background: var(--orchard-surface); box-shadow: inset 0 -1px 0 var(--orchard-separator);
+  font: 600 var(--orchard-type-footnote-size) / 1.4 var(--orchard-font-text); text-align: center; white-space: nowrap; }
 
 /* The launcher bar of the compact navigation: the Track, Team, TPM, Window and Ask entries as capsules in a row the layout
    reserves. It wraps instead of overlapping, so no number of entries covers the conversation or the composer; with no entry

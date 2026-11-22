@@ -20,6 +20,9 @@ describe('initial panels', () => {
     { layout: { compact: false, opensSession: true }, drawer: false, sidebar: false },
     { layout: { compact: true, opensSession: false }, drawer: true, sidebar: true },
     { layout: { compact: true, opensSession: true }, drawer: false, sidebar: false },
+    // A phone's home is Chats: Window mode, chosen later, shows its tiles rather than a drawer opened for it at the start.
+    { layout: { compact: true, opensSession: false, windowMode: false }, drawer: false, sidebar: true },
+    { layout: { compact: true, opensSession: false, windowMode: true }, drawer: true, sidebar: true },
   ])('shows the drawer or sidebar a person without a session needs: $layout', ({ layout, drawer, sidebar }) => {
     const state = initialPanels(layout);
     expect(state.contextOpen).toBe(drawer);

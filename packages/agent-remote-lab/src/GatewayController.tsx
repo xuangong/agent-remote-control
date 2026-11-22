@@ -11,10 +11,13 @@ import { AccessPage } from './features/computers/AccessPage.js';
 import { clearConversationRecovery } from './kernel/conversation-recovery.js';
 import { flushRecoveryWrites } from './kernel/recovery-writes.js';
 import { useRecoveryNotice } from './conversation/useRecoveryNotice.js';
+import { leaseDeadlineOnDeviceClock } from './kernel/lease-clock.js';
 import { RelayLinkReport, WorkspaceReady, scopeFor, confirmWorkspaceAccess, readStoredLease, revokeStoredRows, retireWorkspace, workspaceSignedOut, previousWorkspacePath, parseAccess, readWorkspaceAccess, rememberWorkspaceAccess, forgetWorkspaceAccess, claimAutomaticSignIn, prepareManualSignIn, setWorkspaceReady, type WorkspaceAccess } from './kernel/workspace-access.js';
 
 /** The Security panel loads when it opens: the sign-in entry stays small, and the panel brings the page's words and components with it. */
 const SecurityPanel = lazy(() => import('./features/computers/SecurityPanel.js').then(module => ({ default: module.SecurityPanel })));
+/** The device link's words, from the page's catalogue; they load with the workspace, so the sign-in entry stays small. */
+const DeviceLinkWords = lazy(() => import('./kernel/DeviceLinkIndicator.js').then(module => ({ default: module.DeviceLinkWords })));
 const jsonPost = { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' };
 const navigateToLogin = (url: string) => window.location.replace(url);
 export function GatewayController({ children, navigate = navigateToLogin, automaticAccess = false }: {
@@ -120,9 +123,12 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
           return;
         }
         if (!response.ok) throw withMessageKey(new Error('Access service is unavailable.'), 'navigation.gateway.accessUnavailable');
-        const value = parseAccess(await response.json());
+        const answer = parseAccess(await response.json());
         if (stopped || controller.signal.aborted) return;
-        if (value.expiresAt <= Date.now()) throw withMessageKey(new Error('Access response expired.'), 'navigation.gateway.accessExpired');
+        // From here the lease's expiry is a moment on this device's clock, however far it is from the Relay's.
+        const receivedAt = Date.now();
+        const value = { ...answer, expiresAt: leaseDeadlineOnDeviceClock({ expiresAt: answer.expiresAt, relayDate: response.headers.get('date'), receivedAt }) };
+        if (value.expiresAt <= receivedAt) throw withMessageKey(new Error('Access response expired.'), 'navigation.gateway.accessExpired');
         const previousPath = display.current?.basePath ?? previousWorkspacePath();
         if (previousPath && previousPath !== value.basePath) {
           retireWorkspace(previousPath);
@@ -220,9 +226,7 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
   if (access) return <WorkspaceReady.Provider value={ready}><RelayLinkReport.Provider value={relayLinkReporter}><DeviceLinkContext.Provider value={deviceLink}>
     <div className="gateway-private" key={access.basePath} hidden={securityOpen} {...(securityOpen ? { inert: '' } : {})}>{children(new URL(access.basePath, window.location.origin).href, account, ready)}</div>
     {securityOpen ? <Suspense fallback={null}><SecurityPanel onClose={closeSecurity} onSignedOut={signedOut} /></Suspense> : null}
-    {notice && !securityOpen && !claims ? <div className="gateway-recovery" role="status">
-      {link.state === 'sign_in' ? <>Sign in again to keep sending. <a href={signIn.href} onClick={signIn.onClick}>Sign in</a></> : <>Offline. Messages will be sent when this device is back online. <button type="button" onClick={retryLink}>Retry</button></>}
-    </div> : null}
+    {deviceLink.notice && !claims ? <div className="gateway-recovery"><Suspense fallback={null}><DeviceLinkWords notice={deviceLink.notice} /></Suspense></div> : null}
   </DeviceLinkContext.Provider></RelayLinkReport.Provider></WorkspaceReady.Provider>;
   if (access === undefined && previousWorkspacePath()) return <WorkspaceShell />;
   return entry(access === undefined ? 'checking' : failed ? 'unavailable' : 'signin');

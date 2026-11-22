@@ -7,10 +7,11 @@ import { AgentTimeline, ProcessModeContext, TimelineLettersVisible, TimelineSear
 import { SessionTimelineTools } from './SessionTimelineTools.js';
 import { useTimelineScroll } from './useTimelineScroll.js';
 import type { SessionWorkbenchProps } from './session-workbench-props.js';
+import { useMessageMenu } from './useMessageMenu.js';
 
 export const ConversationTimeline = memo(function ConversationTimeline({ nativeTakeover, readOnly, state, sessionStatus, attachingAgentId, visible, readingPositions, actions, revealEntry,
   notice, hasTarget, runtimeMutationDisabled, onInspectEntry, onOpenChildSession, childrenFor, resolveSessionLink,
-  questionDrafts, onQuestionDraftChange, toolsTargetRef, toolsCollapsible, toolsScope, searchTriggerTarget, entrySelection, timelineStart, timelineEnd, loadingNotice, assistant }: Pick<SessionWorkbenchProps, 'readOnly' | 'state' | 'sessionStatus' | 'attachingAgentId' | 'visible' | 'actions' | 'revealEntry' | 'onInspectEntry' | 'onOpenChildSession' | 'childrenFor' | 'resolveSessionLink' | 'questionDrafts' | 'onQuestionDraftChange' | 'timelineStart' | 'timelineEnd' | 'entrySelection' | 'loadingNotice' | 'assistant'> & {
+  questionDrafts, onQuestionDraftChange, toolsTargetRef, toolsCollapsible, toolsScope, searchTriggerTarget, entrySelection, timelineStart, timelineEnd, loadingNotice, assistant, onQuote }: Pick<SessionWorkbenchProps, 'readOnly' | 'state' | 'sessionStatus' | 'attachingAgentId' | 'visible' | 'actions' | 'revealEntry' | 'onInspectEntry' | 'onOpenChildSession' | 'childrenFor' | 'resolveSessionLink' | 'questionDrafts' | 'onQuestionDraftChange' | 'timelineStart' | 'timelineEnd' | 'entrySelection' | 'loadingNotice' | 'assistant'> & {
     readingPositions: NonNullable<Parameters<typeof useTimelineScroll>[2]>; toolsTargetRef(node: HTMLDivElement | null): void; toolsCollapsible: boolean; toolsScope?: string;
     /** The session's notice when it belongs above the timeline: refused, failed or unavailable. */
     notice?: SessionNotice;
@@ -19,6 +20,8 @@ export const ConversationTimeline = memo(function ConversationTimeline({ nativeT
     /** A visible heading hosts the search trigger so it never covers Timeline content; null until it mounts. */
     searchTriggerTarget?: HTMLElement | null;
     runtimeMutationDisabled: boolean; nativeTakeover?: boolean;
+    /** Quotes a message into this conversation's composer; absent while the composer takes no text. */
+    onQuote?(text: string): void;
   }) {
   const t = useTranslate();
   const searchScope = JSON.stringify([state?.agent?.id, state?.timeline.epoch]);
@@ -38,6 +41,8 @@ export const ConversationTimeline = memo(function ConversationTimeline({ nativeT
   const contentRevision = useMemo(() => ({}), [state, display, lettersVisible, notice, questionDrafts, childrenFor]);
   const scroll = useTimelineScroll(JSON.stringify([state?.agent?.id]), visible, readingPositions, undefined,
     actions.loadOlder ? { hasOlder: state?.timeline.hasOlder === true, cursor: state?.timeline.entries[0]?.seqStart.toString(), load: actions.loadOlder } : undefined, contentRevision, 'bottom');
+  // A message's context menu: Copy with its formatting, Quote into the composer, Resend a message not sent.
+  const messageMenu = useMessageMenu({ state, ...(onQuote ? { onQuote } : {}), ...(actions.retryMessage && !readOnly ? { onResend: actions.retryMessage } : {}) });
   const consumedReveal = useRef<string>();
   useLayoutEffect(() => {
     if (!visible || !revealEntry) return;
@@ -98,7 +103,9 @@ export const ConversationTimeline = memo(function ConversationTimeline({ nativeT
       </> : null}
       </SessionTimelineTools>
       {searchTriggerTarget && searchButton ? createPortal(searchButton, searchTriggerTarget) : null}
-      <div className="lab-timeline-scroll" data-testid="timeline" ref={scroll.viewportRef} tabIndex={0} onScroll={scroll.onScroll} onWheel={scroll.onWheel} onPointerDown={scroll.onPointerDown} onKeyDown={scroll.onKeyDown} onFocus={scroll.onFocus} onTouchStart={scroll.onTouchStart} onTouchMove={scroll.onTouchMove}>
+      <div className="lab-timeline-scroll" data-testid="timeline" ref={scroll.viewportRef} tabIndex={0} onScroll={scroll.onScroll} onWheel={scroll.onWheel} onPointerDown={scroll.onPointerDown}
+        onKeyDown={event => { messageMenu.events.onKeyDown(event); if (!event.defaultPrevented) scroll.onKeyDown(event); }} onContextMenu={messageMenu.events.onContextMenu} onPointerDownCapture={messageMenu.events.onPointerDownCapture}
+        onFocus={scroll.onFocus} onTouchStart={scroll.onTouchStart} onTouchMove={scroll.onTouchMove}>
         <div className="lab-conversation-content" ref={scroll.contentRef}>
           {hasReplica ? <>
             {notice ? <p className="lab-control-note" role="alert">{sessionNoticeWords(notice, t)}</p> : null}
@@ -149,5 +156,6 @@ export const ConversationTimeline = memo(function ConversationTimeline({ nativeT
         </div>
       </div>
       {scroll.showLatest ? <button className="lab-back-to-latest" type="button" onClick={scroll.scrollToLatest}>{t('composer.view.latest')} <span aria-hidden="true">↓</span></button> : null}
+      {messageMenu.menu}
     </div>;
 });

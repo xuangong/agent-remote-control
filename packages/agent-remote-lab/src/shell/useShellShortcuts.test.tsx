@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { render, unmount } from '../../test/setup.js';
+import { render, unmount } from '../test/setup.js';
 import { useShellShortcuts } from './useShellShortcuts.js';
 
 const platform = Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform');
@@ -174,4 +174,29 @@ it('leaves Command-K alone without a search, and while a dialog such as the pale
   } finally { dialog.remove(); }
   await press({ key: 'k', code: 'KeyK', metaKey: true });
   expect(openSearch).toHaveBeenCalledOnce();
+});
+
+it('starts a new chat with Shift-Command-O and shows the shortcuts with Command-slash, Control elsewhere', async () => {
+  onPlatform('MacIntel');
+  const newChat = vi.fn(), openShortcuts = vi.fn(), setMode = vi.fn();
+  await render(<Harness setMode={setMode} newChat={newChat} openShortcuts={openShortcuts} />);
+  expect((await press({ key: 'O', code: 'KeyO', metaKey: true, shiftKey: true })).defaultPrevented).toBe(true);
+  expect((await press({ key: '/', code: 'Slash', metaKey: true })).defaultPrevented).toBe(true);
+  // Command-O alone stays the browser's.
+  expect((await press({ key: 'o', code: 'KeyO', metaKey: true })).defaultPrevented).toBe(false);
+  onPlatform('Win32');
+  await press({ key: 'O', code: 'KeyO', ctrlKey: true, shiftKey: true });
+  await press({ key: '/', code: 'Slash', ctrlKey: true });
+  expect(newChat).toHaveBeenCalledTimes(2);
+  expect(openShortcuts).toHaveBeenCalledTimes(2);
+  expect(setMode).not.toHaveBeenCalled();
+});
+
+it('leaves a key to the browser when the page has no action for it: no new chat, and F6 with no panel on screen', async () => {
+  onPlatform('MacIntel');
+  await render(<Harness setMode={vi.fn()} />);
+  expect((await press({ key: 'O', code: 'KeyO', metaKey: true, shiftKey: true })).defaultPrevented).toBe(false);
+  expect((await press({ key: '/', code: 'Slash', metaKey: true })).defaultPrevented).toBe(false);
+  // jsdom lays nothing out, so no panel is on screen and the browser keeps F6 (the browser tier moves between real panels).
+  expect((await press({ key: 'F6', code: 'F6' })).defaultPrevented).toBe(false);
 });

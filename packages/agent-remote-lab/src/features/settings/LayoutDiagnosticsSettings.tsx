@@ -1,11 +1,12 @@
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { useId, useState, useSyncExternalStore } from 'react';
+import { useState, useSyncExternalStore } from 'react';
+import { Pill, Toggle } from '@orchardworks/agent-client-web/primitives';
+import { SettingsRow, SettingsSection } from './SettingsRow.js';
 import { clearLayoutDiagnostics, exportLayoutDiagnostics, getLayoutDiagnosticsStatus, startLayoutDiagnostics, stopLayoutDiagnostics, subscribeLayoutDiagnostics } from '../../kernel/layout-diagnostics.js';
 
 export function LayoutDiagnosticsSettings() {
   const t = useTranslate();
   const state = useSyncExternalStore(subscribeLayoutDiagnostics, getLayoutDiagnosticsStatus, getLayoutDiagnosticsStatus);
-  const label = useId(), description = useId();
   const [report, setReport] = useState<string>();
   const [message, setMessage] = useState('');
   const [copying, setCopying] = useState(false);
@@ -38,25 +39,20 @@ export function LayoutDiagnosticsSettings() {
       setMessage(t('settings.diagnostics.prepared'));
     } catch { setMessage(t('settings.diagnostics.downloadUnavailable')); }
   }
-  return <div className="lab-display-settings lab-layout-diagnostics">
-    <h2>{t('settings.diagnostics.title')}</h2>
-    <div className="lab-cache-setting">
-      <span id={label}>{t('settings.diagnostics.record')}</span>
-      <button type="button" role="switch" aria-checked={state.recording} aria-labelledby={label} aria-describedby={description} disabled={copying} onClick={toggle}><span aria-hidden="true" /></button>
-    </div>
-    <p id={description}>{state.recording
-      ? t('settings.diagnostics.recording')
-      : t('settings.diagnostics.idle')}</p>
-    <p className="lab-layout-diagnostics-note">{t('settings.diagnostics.note')}</p>
-    {state.stopReason === 'timeout' ? <p>{t('settings.diagnostics.timeout')}</p> : null}
-    {state.hasRecording ? <div className="lab-layout-diagnostics-actions">
-      <button type="button" disabled={copying} onClick={() => void copy()}>{copying ? t('settings.diagnostics.copying') : t('settings.diagnostics.copy')}</button>
-      <button type="button" disabled={copying} onClick={download}>{t('settings.diagnostics.download')}</button>
-      <button type="button" disabled={copying} onClick={() => { clearLayoutDiagnostics(); setReport(undefined); setMessage(''); }}>{t('settings.diagnostics.clear')}</button>
+  return <SettingsSection title={t('settings.diagnostics.title')}>
+    <SettingsRow label={t('settings.diagnostics.record')} hint={state.recording ? t('settings.diagnostics.recording') : t('settings.diagnostics.idle')}>
+      <Toggle label={t('settings.diagnostics.record')} checked={state.recording} disabled={copying} onChange={toggle} />
+    </SettingsRow>
+    <p className="lab-setting-note">{t('settings.diagnostics.note')}</p>
+    {state.stopReason === 'timeout' ? <p className="lab-setting-note" role="status">{t('settings.diagnostics.timeout')}</p> : null}
+    {state.hasRecording ? <div className="lab-setting-actions">
+      <Pill disabled={copying} onClick={() => void copy()}>{copying ? t('settings.diagnostics.copying') : t('settings.diagnostics.copy')}</Pill>
+      <Pill disabled={copying} onClick={download}>{t('settings.diagnostics.download')}</Pill>
+      <Pill disabled={copying} onClick={() => { clearLayoutDiagnostics(); setReport(undefined); setMessage(''); }}>{t('settings.diagnostics.clear')}</Pill>
     </div> : null}
-    {message ? <p role="status">{message}</p> : null}
-    {report ? <label className="lab-layout-diagnostics-output">{t('settings.diagnostics.reportText')}
+    {message ? <p className="lab-setting-note" role="status">{message}</p> : null}
+    {report ? <label className="lab-setting-report">{t('settings.diagnostics.reportText')}
       <textarea readOnly value={report} rows={5} spellCheck={false} onFocus={event => event.currentTarget.select()} />
     </label> : null}
-  </div>;
+  </SettingsSection>;
 }

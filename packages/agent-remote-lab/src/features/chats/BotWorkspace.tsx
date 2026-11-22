@@ -23,6 +23,10 @@ import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { AssistantTopBar } from './AssistantTopBar.js';
 import { AssistantDetailsHostContext, type AssistantDetailsHost } from '../../conversation/assistant/details-host.js';
 import { useAssistantNames } from '../../kernel/names-context.js';
+import { useContextMenu } from '../../ui/ContextMenu.js';
+import { OrchardMark } from '@orchardworks/agent-client-web/primitives';
+import { shortcutKeys } from '../../kernel/shortcuts.js';
+import { applePlatform } from '../../kernel/platform.js';
 import './bot-workspace.css';
 
 /** What Bot mode shows of the selected group while it is acquired: whether it loads, why it is unavailable, and a retry. */
@@ -91,6 +95,10 @@ export function BotWorkspace({ visible, covered = false, compact, scope, workspa
     const shown = navigation.place;
     if (shown?.kind === 'bot' && shown.groupId === from.groupId && shown.viewId === from.viewId) navigation.select({ kind: 'bot', ...to });
   } });
+  // A right-click (or Shift-F10) on a chat offers the assistant's own actions: pin, mute, rename and move (kernel/context-menus.ts).
+  const contextMenu = useContextMenu();
+  const chatMenu = (row: BotRow, anchor: HTMLElement, point?: { x: number; y: number }) =>
+    contextMenu.show(anchor, t('card.more', { name: row.name }), groupActions.assistantMenu(row), point);
   const botSection = place?.kind === 'bot' ? roster.sections.find(section => section.groupId === place.groupId) : undefined;
   const botRow = place?.kind === 'bot' ? botSection?.rows.find(row => row.viewId === place.viewId) : undefined;
   // A bot put to sleep elsewhere while open here: its conversation is released until it is woken.
@@ -104,7 +112,7 @@ export function BotWorkspace({ visible, covered = false, compact, scope, workspa
   const info = place?.kind === 'bot' ? botInfo?.(place) : undefined;
   const detailsHost: AssistantDetailsHost = {
     surface: phone ? 'sheet' : 'panel', slot: detailsSlot, tools: toolsSlot, open: detailsShown, setOpen: setDetailsOpen,
-    ...(botRow && botSection ? { actions: actions.cardActions(botRow, botSection.title, groupActions.assistantMenu(botRow)),
+    ...(botRow && botSection ? { actions: actions.cardActions(botRow, botSection.title, groupActions.assistantMenu(botRow, { rename: false })),
       ...(onPinToWindow ? { action: { label: t('card.pin'), icon: 'window' as const, onSelect: () => onPinToWindow({ groupId: botRow.groupId, viewId: botRow.viewId }) } } : {}),
       setPicture: (picture: BotPicture) => actions.setPicture(botRow, picture), rename: (name: string) => actions.rename(botRow, name) } : {}),
     ...(info ? { where: info } : {}),
@@ -178,7 +186,7 @@ export function BotWorkspace({ visible, covered = false, compact, scope, workspa
       {creation.state === 'unknown' ? <p className="lab-bot-notice" role="status">{t('navigation.botWorkspace.groupUnconfirmed')} <button type="button" onClick={() => void retryGroup()}>{t('common.retry')}</button></p> : null}
       {actions.notice}
       {groupActions.error ? <p className="lab-bot-notice" role="alert">{groupActions.error}</p> : groupActions.notice ? <p className="lab-bot-notice" role="status">{groupActions.notice}</p> : null}
-      <div className="lab-bot-roster-scroll" onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><SharedBotRoster model={roster} groups={workspace.groups} project={projectRoster} place={place} onSelect={open} hostName={hostName} compact={phone}
+      <div className="lab-bot-roster-scroll" onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><SharedBotRoster model={roster} groups={workspace.groups} project={projectRoster} place={place} onSelect={open} hostName={hostName} compact={phone} menu={chatMenu}
         directoryControls={<div className="lab-bot-directory-controls">
           {directory.sources.map(source => <div key={source.id}><small>{hostName(source.hostId)} · {source.providerId}</small>
             {!source.online ? <p>{t('navigation.botWorkspace.hostOffline')}</p> : null}{source.loading ? <p role="status">{t('navigation.botWorkspace.loadingSessions')}</p> : null}
@@ -203,7 +211,11 @@ export function BotWorkspace({ visible, covered = false, compact, scope, workspa
       {descriptor ? <AssistantDetailsHostContext.Provider value={detailsHost}>
         <Mount mode="bot" active={visible && showConversation} descriptor={{ ...descriptor, props: { ...descriptor.props, visible: visible && showConversation, active: visible && showConversation, folded: asleep } }} />
       </AssistantDetailsHostContext.Provider>
-        : !selected.loading && !selected.error ? <p className="lab-bot-empty">{place?.kind === 'section' ? t('assistants.chooseInGroup') : t('assistants.choose')}</p> : null}
+        : !selected.loading && !selected.error ? <div className="lab-bot-welcome">
+          <OrchardMark size={56} />
+          <h2>{t('assistants.chooseTitle')}</h2>
+          <p>{place?.kind === 'section' ? t('assistants.chooseInGroup') : t('assistants.chooseHint', { keys: shortcutKeys('search', applePlatform()).shown })}</p>
+        </div> : null}
     </section>
     <aside ref={setDetailsSlot} id={detailsId} className="lab-assistant-details orchard-panel" aria-label={t('details.title')} hidden={!detailsShown || phone}>
       <header className="lab-assistant-details-head"><h2>{t('details.title')}</h2>
@@ -211,6 +223,7 @@ export function BotWorkspace({ visible, covered = false, compact, scope, workspa
     </aside>
     {actions.sheets}
     {groupActions.sheets([])}
+    {contextMenu.menu}
   </main>;
 }
 

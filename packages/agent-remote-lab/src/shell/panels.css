@@ -1,10 +1,6 @@
 /* The frame's panel widths and handles (DesktopFrame.tsx, panel-layout.ts). The frame sets --lab-panel-rail, --lab-panel-sidebar and
-   --lab-panel-details from the reader's widths. It owns the ground between the floating panels, so its handles sit in those gaps.
-
-   Bot mode's grid takes its columns from the frame here until bot-workspace.css reads the lengths itself (O66): these rules, (0,3,0)
-   and (0,4,0), win over its (0,1,0) and (0,2,0) ones. The phone's single column is left to it. */
-.lab-frame > .lab-bot-workspace:not([data-phone]) { grid-template-columns: var(--lab-panel-sidebar, 260px) minmax(0, 1fr); }
-.lab-frame > .lab-bot-workspace[data-details]:not([data-phone]) { grid-template-columns: var(--lab-panel-sidebar, 260px) minmax(0, 1fr) var(--lab-panel-details, 300px); }
+   --lab-panel-details from the reader's widths, and Bot mode's grid reads them (bot-workspace.css). It owns the ground between the
+   floating panels, so its handles sit in those gaps. */
 
 /* A handle is the gap's height and width; its line shows on hover, focus and drag. The sidebar's and the details' show only beside
    Bot mode's panels, the details' only while the details are open. */

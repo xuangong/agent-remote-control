@@ -9,7 +9,7 @@ import { AgentReplica, type RemoteAgentTransport } from '@orchardworks/agent-cli
 import type { AgentSnapshot, HistoryPage } from '@orchardworks/agent-remote-protocol';
 import { SessionAsk } from '../../src/components/SessionAsk';
 import { AskButton } from '../../src/components/AskButton';
-import { SessionWorkbench } from '../../src/components/SessionWorkbench';
+import { SessionWorkbench } from '../../src/conversation/ConversationSurface';
 import { ShortcutPlacement } from '../../src/shell/shortcut-placement';
 import { useVisualViewport } from '../../src/hooks/useVisualViewport';
 import { DraftStore } from '../../src/draft-store';

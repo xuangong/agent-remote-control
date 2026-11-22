@@ -2,7 +2,7 @@
 // The Host's references answer comes from the page's fetch, so no Relay is needed. `picking` opens the session picker over 14 sessions;
 // `height` sets the pane's height (default 560).
 import { createRoot } from 'react-dom/client';
-import { SessionWorkbench } from '../../src/components/SessionWorkbench';
+import { SessionWorkbench } from '../../src/conversation/ConversationSurface';
 import { SessionReferences } from '../../src/components/SessionReferences';
 import { ForkReference } from '../../src/components/ForkReference';
 import { replicaState } from '../../src/test/fixtures';

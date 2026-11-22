@@ -4,7 +4,7 @@ import { TpmViewCommand, TpmViewScope } from '../hooks/useTpmVisibility.js';
 import { AskViewCommand, AskViewScope } from '../hooks/useAskVisibility.js';
 import { useContext, useMemo, type ComponentProps } from 'react';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { SessionWorkbench } from './SessionWorkbench.js';
+import { SessionWorkbench } from '../conversation/ConversationSurface.js';
 import { RecoveryScope } from '../conversation-recovery.js';
 import { useBoundDraft, type DraftBinding } from '../draft-store.js';
 import { WorkspaceVscodeLink } from './HostVscodeTunnel.js';

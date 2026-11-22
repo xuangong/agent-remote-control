@@ -3,7 +3,7 @@ import { useBoundDraft, type DraftBinding } from '../../agent-remote-lab/src/dra
 import type { SessionOperationBinding } from '../../agent-remote-lab/src/session-view-operations.js';
 import { createContext, useContext, useRef, useState, type ComponentProps, type ReactNode } from 'react';
 import { ToastProvider } from '../../agent-remote-lab/src/components/Toast.js';
-import { SessionWorkbench } from '../../agent-remote-lab/src/components/SessionWorkbench.js';
+import { SessionWorkbench } from '../../agent-remote-lab/src/conversation/ConversationSurface.js';
 
 export const DebugControlsState = createContext<{ expanded: boolean; setExpanded(value: boolean | ((value: boolean) => boolean)): void } | undefined>(undefined);
 

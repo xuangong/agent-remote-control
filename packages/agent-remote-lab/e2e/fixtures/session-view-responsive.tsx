@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { SessionWorkbench } from '../../src/components/SessionWorkbench';
+import { SessionWorkbench } from '../../src/conversation/ConversationSurface';
 import { SessionControlNotice } from '../../src/components/SessionControlNotice';
 import { replicaState } from '../../src/test/fixtures';
 import type { AgentReplicaState, RemoteSessionStatus } from '@orchardworks/agent-client';

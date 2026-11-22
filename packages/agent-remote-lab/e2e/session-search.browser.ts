@@ -41,7 +41,7 @@ beforeAll(async () => {
     import React, { useEffect, useState } from 'react'; import { createRoot } from 'react-dom/client';
     import './session-view-styles.ts';
     import { AgentReplica, RemoteSessionClient, HttpWebSocketTransport } from '@orchardworks/agent-client';
-    import { SessionWorkbench } from './components/SessionWorkbench.tsx';
+    import { SessionWorkbench } from './conversation/ConversationSurface.tsx';
     function View({ id }) {
       const [replica] = useState(() => {
         const replica = new AgentReplica();

@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import type { SessionDescription } from '@orchardworks/agent-client';
 import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
-import { SessionWorkbench } from './SessionWorkbench.js';
+import { SessionWorkbench } from '../conversation/ConversationSurface.js';
 
 const description: SessionDescription = {
   identity: { hostId: 'host-a', providerId: 'codex', nativeSessionId: 'child' },

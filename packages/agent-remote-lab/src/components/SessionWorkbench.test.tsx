@@ -3,7 +3,7 @@ import { SESSION_CONNECTION_PATTERN } from '@orchardworks/agent-client/testing';
 import { expect, it, vi } from 'vitest';
 import { render, setPromptText } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
-import { SessionWorkbench } from './SessionWorkbench.js';
+import { SessionWorkbench } from '../conversation/ConversationSurface.js';
 import { LabWorkbench } from './LabWorkbench.js';
 import { SessionControlNotice } from './SessionControlNotice.js';
 import { SessionHeadingActions } from './SessionHeadingActions.js';

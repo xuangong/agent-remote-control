@@ -5,7 +5,7 @@ import type { TpmWork, AgentSnapshot, HistoryPage } from '@orchardworks/agent-re
 import type { RemoteAgentTransport } from '@orchardworks/agent-client';
 import { MinimizeMainSession, SessionDockProvider, SessionDockRail } from '../../src/components/SessionDock';
 import { ConversationPane, ConversationSplit } from '../../src/components/ConversationSplit';
-import { SessionWorkbench } from '../../src/components/SessionWorkbench';
+import { SessionWorkbench } from '../../src/conversation/ConversationSurface';
 import { AskConversation } from '../../src/components/AskConversation';
 import { TpmMenu } from '../../src/components/TpmMenu';
 import { TpmWorkspace } from '../../src/components/TpmWorkspace';

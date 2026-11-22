@@ -297,4 +297,8 @@ export const client: AreaMessages<typeof english> = {
   'client.describe.member': '成员',
   'client.describe.parent': '上级',
   'client.describe.child': '子级',
+  'client.gatewayRecovery.signInPrompt': '要继续发送，请重新登录。',
+  'client.gatewayRecovery.signIn': '登录',
+  'client.gatewayRecovery.offline': '现在离线，网络恢复后会自动发送。',
+  'client.gatewayRecovery.retry': '重试',
 };

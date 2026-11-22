@@ -297,8 +297,4 @@ export const client = {
   'client.describe.member': 'Member',
   'client.describe.parent': 'Parent',
   'client.describe.child': 'Child',
-  'client.gatewayRecovery.signInPrompt': 'Sign in again to keep sending.',
-  'client.gatewayRecovery.signIn': 'Sign in',
-  'client.gatewayRecovery.offline': 'Offline. Messages will be sent when this device is back online.',
-  'client.gatewayRecovery.retry': 'Retry',
 } as const satisfies Readonly<Record<string, Message>>;

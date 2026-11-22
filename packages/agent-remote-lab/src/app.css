@@ -1352,13 +1352,9 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
   .lab-favorite-menu button, .lab-favorite-dialog footer button, .lab-favorites-toolbar > button { min-height: 44px; }
 }
 
-.gateway-recovery {
-  position: fixed; z-index: 45; top: calc(env(safe-area-inset-top) + 44px); left: 50%; transform: translateX(-50%);
-  display: flex; align-items: center; gap: 10px; max-width: calc(100vw - 32px); padding: 4px 10px;
-  border: 1px solid var(--obs-border); border-radius: 8px; background: var(--obs-surface); color: var(--obs-text-secondary);
-  font-size: 12px; white-space: nowrap; box-shadow: var(--ui-shadow-pane);
-}
-.gateway-recovery button, .gateway-recovery a { min-height: 32px; padding: 4px; font-size: inherit; }
+/* A page with no sidebar on screen says the device link at the top, in the words and style of the sidebar's line. */
+.gateway-recovery { position: fixed; z-index: 45; top: calc(env(safe-area-inset-top) + 44px); left: 50%; transform: translateX(-50%); max-width: calc(100vw - 32px); }
+.gateway-recovery > .lab-device-link { background: var(--orchard-surface); box-shadow: var(--orchard-elevation-popover); }
 .gateway-workspace-shell { height: 100dvh; background: var(--orchard-ground); }
 
 

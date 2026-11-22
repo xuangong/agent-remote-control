@@ -6,7 +6,6 @@ import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { focusableElements } from '../features/windows/SupportingRail.js';
 import { useMovableHost } from '../shell/movable-host.js';
 import { useSidebarWidth } from '../features/windows/SidebarResize.js';
-import { useShellShortcuts } from '../features/windows/useShellShortcuts.js';
 import { focusWithinContext } from './helpers.js';
 import type { ModeStep } from './types.js';
 import type { RequestedSessionSlice } from './useRequestedSession.js';
@@ -14,8 +13,8 @@ import type { ViewTargetsSlice } from './useViewTargets.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
 import type { AppInputs } from './types.js';
 
-export function usePanelsAndShortcuts(scope: Pick<AppInputs & RequestedSessionSlice & ViewTargetsSlice & WorkbenchShellSlice, 'cachedState' | 'compactLayoutRef' | 'favorites' | 'initialState' | 'navigation' | 'requested' | 'viewTriggerRef' | 'windowMode'>) {
-  const { cachedState, compactLayoutRef, favorites, initialState, navigation, requested, viewTriggerRef, windowMode } = scope;
+export function usePanelsAndShortcuts(scope: Pick<AppInputs & RequestedSessionSlice & ViewTargetsSlice & WorkbenchShellSlice, 'cachedState' | 'compactLayoutRef' | 'favorites' | 'initialState' | 'requested' | 'viewTriggerRef' | 'windowMode'>) {
+  const { cachedState, compactLayoutRef, favorites, initialState, requested, viewTriggerRef, windowMode } = scope;
 
   const [traceNavigation, setTraceNavigation] = useState<{ scope: string; key: string; requestId: number; view: 'workbench' | 'trace' }>();
 
@@ -63,12 +62,15 @@ export function usePanelsAndShortcuts(scope: Pick<AppInputs & RequestedSessionSl
   // ⌘\ toggles Window mode's desktop sidebar; compact layouts have none to collapse, and Bot mode's panels stay.
   const toggleSidebar = compactLayout || !windowMode ? undefined : () => dispatchPanels({ type: 'desktopSidebar.toggle' });
 
-  // ⌘K opens the command palette, which serves both modes.
+  // ⌘K opens the command palette, which serves both modes; ⌘/ the shortcuts sheet. The shell's keys are bound with the
+  // actions they run, in useCommandSearch.
   const [searchOpen, setSearchOpen] = useState(false);
 
   const openSearch = useCallback(() => setSearchOpen(true), []);
 
-  useShellShortcuts({ setMode: navigation.setMode, toggleSidebar, openSearch });
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+
+  const openShortcuts = useCallback(() => setShortcutsOpen(true), []);
 
   // Steps that search runs once a mode has taken over (see inMode); they run after the Window workspace's own effects.
   const modeSteps = useRef<ModeStep[]>([]);
@@ -86,7 +88,7 @@ export function usePanelsAndShortcuts(scope: Pick<AppInputs & RequestedSessionSl
     if (trigger?.isConnected && !trigger.closest('[hidden], [inert]')) trigger.focus({ preventScroll: true });
     if (document.activeElement !== trigger) focusableElements(document.querySelector<HTMLElement>('.lab-main-stage'))[0]?.focus({ preventScroll: true });
   }, [desktopContextVisible]);
-  return { traceNavigation, setTraceNavigation, traceRequestCounter, scanOpen, setScanOpen, pageFocusReturn, panels, dispatchPanels, activeView, contextOpen, inspectorOpen, headerHidden, desktopContextVisible, compactLayout, sessionPanel, contextFromSessions, showView, closeInspector, sidebar, shortcutHost, askHost, shortcutSidebarSlot, shortcutFloatingSlot, shortcutBarSlot, shortcutToolbarSlot, askSidebarSlot, askFloatingSlot, askBarSlot, askToolbarSlot, pageOpen, sessionsPageTitleRef, closePage, closeContext, toggleSidebar, searchOpen, setSearchOpen, openSearch, modeSteps, queuedModeSteps, setQueuedModeSteps };
+  return { traceNavigation, setTraceNavigation, traceRequestCounter, scanOpen, setScanOpen, pageFocusReturn, panels, dispatchPanels, activeView, contextOpen, inspectorOpen, headerHidden, desktopContextVisible, compactLayout, sessionPanel, contextFromSessions, showView, closeInspector, sidebar, shortcutHost, askHost, shortcutSidebarSlot, shortcutFloatingSlot, shortcutBarSlot, shortcutToolbarSlot, askSidebarSlot, askFloatingSlot, askBarSlot, askToolbarSlot, pageOpen, sessionsPageTitleRef, closePage, closeContext, toggleSidebar, searchOpen, setSearchOpen, openSearch, shortcutsOpen, setShortcutsOpen, openShortcuts, modeSteps, queuedModeSteps, setQueuedModeSteps };
 }
 
 export type PanelsAndShortcutsSlice = ReturnType<typeof usePanelsAndShortcuts>;

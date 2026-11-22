@@ -4,6 +4,7 @@ import { useTimelineTimeSwipe } from './useTimelineTimeSwipe.js';
 import { isDesktopTimeline, TimelineTimeContext } from './TimelineTitle.js';
 import { useTranslate } from './locale.js';
 import { toggleTimelineTime, useTimelineTimeVisibility } from './timeline-time-visibility.js';
+import { copyMessage } from './message-copy.js';
 
 interface TimelineEntryProps {
   readonly onEdit?: () => Promise<void>;
@@ -34,11 +35,12 @@ export function TimelineEntry({ onEdit, copyText, entryKey, timestamp, sent, ins
   const editButton = onEdit ? <button type="button" data-prompt-edit-action className="agent-edit-prompt" aria-label={t('timeline.entry.edit')} title={t('timeline.entry.editHint')} disabled={editing} onClick={() => {
     setEditing(true); setEditError(undefined); void onEdit().catch(error => setEditError(errorWords(error, t, 'timeline.entry.editFailed'))).finally(() => setEditing(false));
   }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 4-5 5 5 5M4 9h10a6 6 0 0 1 0 12" /></svg></button> : null;
-  // Copy sits beside Edit: shown on hover and focus with a mouse, and beside the time a swipe reveals on a touch screen.
+  // Copy sits beside Edit: shown on hover and focus with a mouse, and beside the time a swipe reveals on a touch screen. It copies the
+  // message with its formatting, and its Markdown as plain text.
   const [copied, setCopied] = useState(false);
   const copyButton = copyText?.trim() && typeof navigator !== 'undefined' && navigator.clipboard
     ? <button type="button" data-copy-action className="agent-edit-prompt" aria-label={t(copied ? 'common.copied' : 'timeline.message.copyText')} title={t('timeline.message.copyText')}
-      onClick={() => { void navigator.clipboard.writeText(copyText).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); }, () => {}); }}>
+      onClick={() => { void copyMessage(copyText, ref.current).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); }, () => {}); }}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{copied ? <path d="M5 12.5l4.5 4.5L19 7.5" /> : <path d="M9 9h10v10H9zM5 15V5h10" />}</svg>
     </button> : null;
   const timeVisible = useTimelineTimeVisibility();

@@ -233,4 +233,7 @@ export const composer: AreaMessages<typeof english> = {
   'composer.action.command': '执行命令',
   'composer.action.history': '加载对话记录',
   'composer.action.edit': '编辑消息',
+  'composer.dropImagesOnly': '这里只能加 PNG、JPEG 或 WebP 图片。',
+  'composer.dropNotNow': '等对话准备好，就能加文件了。',
+  'composer.dropUnavailable': '这段对话不收文件。',
 };

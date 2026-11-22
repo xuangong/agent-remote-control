@@ -16,7 +16,7 @@ type Passed = Pick<SessionWorkbenchProps, 'composerStatus' | 'composerContext' |
 export function ConversationComposer({ composerStatus, composerContext, composerNotice, authenticationNotice, reauthenticate, hostNotice, nativeTakeover, host, opening, openFailed,
   onPendingInputChange, pendingFirstInputContext, consoleCommands, onExecuteConsoleCommand, draftSessionKey, draftScope, imageDraftBinding, imageRecipient, messageDraft, onMessageDraftChange,
   sendLater, renderSessionSettingError, renderCommandError, handoff, state, session, sessionStatus, visible, draftOnly, hasTarget, readOnly, controlReadOnly, recordingReadOnly,
-  mutationBlocked, chromeless, recipient, actions, feedbackActions, takeControl, onInspectCommand }: Passed & {
+  mutationBlocked, chromeless, recipient, actions, feedbackActions, takeControl, onInspectCommand, quote }: Passed & {
   state?: AgentReplicaState; session: RemoteSessionState; sessionStatus: RemoteSessionStatus; visible: boolean; draftOnly: boolean;
   /** The view has a session to show, resolved or not. */
   hasTarget: boolean;
@@ -30,6 +30,8 @@ export function ConversationComposer({ composerStatus, composerContext, composer
   /** The actions the view offers, and the same actions with their failures reported (sending goes through these). */
   actions: LabWorkbenchActions; feedbackActions: LabWorkbenchActions; takeControl: LabWorkbenchActions['takeControl'];
   onInspectCommand(command: AgentCommand): void;
+  /** A message quoted from the timeline, which the composer puts at the end of its draft. */
+  quote?: { id: number; text: string };
 }) {
   const t = useTranslate();
   const [composerHidden, setComposerHidden] = useState(false);
@@ -96,6 +98,7 @@ export function ConversationComposer({ composerStatus, composerContext, composer
             onRequestResource={actions.requestResource}
             onResolveResource={actions.resolveResource}
             onInspectCommand={onInspectCommand}
+            quote={quote}
           />
         </div>
       </div>

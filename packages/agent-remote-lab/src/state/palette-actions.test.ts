@@ -77,6 +77,25 @@ describe('which actions the palette offers', () => {
   });
 });
 
+describe('the keys the palette teaches', () => {
+  it('shows a new chat\'s keys on New assistant in Bot mode and on New session in Window mode', () => {
+    const bot = paletteActions(facts({ windowMode: false }), recorder().runs);
+    expect(bot.find(item => item.id === 'action:new-bot')).toMatchObject({ shortcut: '⇧⌘O', keyShortcuts: 'Shift+Meta+O' });
+    expect(bot.find(item => item.id === 'action:new-session')?.shortcut).toBeUndefined();
+    const window = paletteActions(facts({ windowMode: true, apple: false }), recorder().runs);
+    expect(window.find(item => item.id === 'action:new-session')).toMatchObject({ shortcut: 'Ctrl+Shift+O', keyShortcuts: 'Control+Shift+O' });
+  });
+
+  it('offers Keyboard shortcuts with its own keys when the page can show the sheet', () => {
+    const { calls, runs } = recorder();
+    expect(paletteActions(facts(), runs).some(item => item.id === 'action:shortcuts')).toBe(false);
+    const item = paletteActions(facts(), { ...runs, openShortcuts: () => { calls.push('shortcuts'); } }).find(entry => entry.id === 'action:shortcuts')!;
+    expect(item).toMatchObject({ title: 'Keyboard shortcuts', shortcut: '⌘/', keyShortcuts: 'Meta+/' });
+    item.run();
+    expect(calls).toEqual(['shortcuts']);
+  });
+});
+
 describe('what each action does first', () => {
   it('switches to Window mode before showing a panel, the new-session form or the overview', () => {
     expect(run('action:all-sessions')).toEqual(['toWindow', 'panel:list']);

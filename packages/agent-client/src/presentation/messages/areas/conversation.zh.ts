@@ -92,6 +92,13 @@ export const conversation: AreaMessages<typeof english> = {
   'receipt.questions': { other: '{count} 个问题' },
   'receipt.answeredOf': '答了 {answered}/{total}',
 
+  'conversation.messageActions': '消息操作',
+  'conversation.quote': '引用',
+  'conversation.resend': '重新发送',
+  'conversation.copiedNote': '消息已经复制好了，格式也一起带上。',
+  'conversation.copyFailedNote': '这个浏览器没让页面用剪贴板。',
+  'card.renameMenu': '改名…',
+  'card.renameTitle': '给“{name}”改名',
   'conversation.assistant': '助手',
   'conversation.sessionChange': '换到新的会话继续',
   'conversation.today': '今天 {time}',

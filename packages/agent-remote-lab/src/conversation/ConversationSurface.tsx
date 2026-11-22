@@ -1,6 +1,6 @@
 // The conversation surface both views draw: the frame that composes a session's heading, timeline, composer, command
 // details and the assistant's details, from the session's state and the actions its operations allow.
-import { useContext, useId, useMemo, useState } from 'react';
+import { useCallback, useContext, useId, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { remoteSessionState, sessionActivityLabel, sessionNotice, sessionNoticeWords, type SessionFacts } from '@orchardworks/agent-client';
 import type { AgentCommand } from '@orchardworks/agent-remote-protocol';
@@ -56,6 +56,10 @@ export function SessionWorkbench({ assistant, details, conversationTitle: _conve
   const failureInTimeline = !!nativeFailure?.turnId && state?.timeline.entries.some(entry =>
     entry.turnId === nativeFailure.turnId && entry.item.type === 'error' && entry.item.message === nativeFailure.message);
   const runtimeMutationDisabled = mutationBlocked || !session.operations.interaction_response.allowed;
+  // A message quoted from the timeline's menu goes into this conversation's composer, when the composer takes text.
+  const [quote, setQuote] = useState<{ id: number; text: string }>();
+  const quoteMessage = useCallback((text: string) => setQuote(previous => ({ id: (previous?.id ?? 0) + 1, text })), []);
+  const quotable = !readOnly && !mutationBlocked && !nativeTakeover && (hasReplica || draftOnly);
   // The one business notice of the session (target T5), said once: above the timeline for a refused, failed or unavailable
   // session, in the composer's context for an offline Host or a usage limit, and by the composer's control notice for a read-only lease.
   const facts: SessionFacts = { session, host, replica: state, now: Date.now() };
@@ -81,7 +85,8 @@ export function SessionWorkbench({ assistant, details, conversationTitle: _conve
       visible={visible} readingPositions={readingPositions} actions={actions} revealEntry={revealEntry}
       notice={timelineNotice} hasTarget={hasTarget} runtimeMutationDisabled={runtimeMutationDisabled}
       onInspectEntry={onInspectEntry} onOpenChildSession={onOpenChildSession} childrenFor={childrenFor} resolveSessionLink={resolveSessionLink}
-      questionDrafts={questionDrafts} onQuestionDraftChange={onQuestionDraftChange} entrySelection={entrySelection} timelineStart={timelineStart} timelineEnd={timelineEnd} loadingNotice={loadingNotice} assistant={assistant} />
+      questionDrafts={questionDrafts} onQuestionDraftChange={onQuestionDraftChange} entrySelection={entrySelection} timelineStart={timelineStart} timelineEnd={timelineEnd} loadingNotice={loadingNotice} assistant={assistant}
+      onQuote={quotable ? quoteMessage : undefined} />
     {headingMode === 'toolbar' && timelineToolsTarget ? createPortal(<SessionHeadingActionsPresentationContext.Provider value="inline">{workspaceLink}{sessionManager}{viewOptions}{toggle}</SessionHeadingActionsPresentationContext.Provider>, timelineToolsTarget) : null}
     <ConversationComposer composerStatus={composerStatus} composerContext={composerContext} composerNotice={composerNotice} authenticationNotice={authenticationNotice} reauthenticate={reauthenticate}
       hostNotice={hostNotice} nativeTakeover={nativeTakeover} host={host} opening={opening} openFailed={openFailed} onPendingInputChange={onPendingInputChange}
@@ -90,7 +95,7 @@ export function SessionWorkbench({ assistant, details, conversationTitle: _conve
       sendLater={sendLater} renderSessionSettingError={renderSessionSettingError} renderCommandError={renderCommandError} handoff={handoff} state={state} session={session}
       sessionStatus={sessionStatus} visible={visible} draftOnly={draftOnly} hasTarget={hasTarget} readOnly={readOnly} controlReadOnly={controlReadOnly} recordingReadOnly={recordingReadOnly}
       mutationBlocked={mutationBlocked} chromeless={assistantChrome || tileChrome} recipient={assistant?.name} actions={actions} feedbackActions={suppliedFeedbackActions}
-      takeControl={suppliedActions.takeControl} onInspectCommand={command => { if (state?.agent) setInspected({ agentId: state.agent.id, command }); }} />
+      takeControl={suppliedActions.takeControl} onInspectCommand={command => { if (state?.agent) setInspected({ agentId: state.agent.id, command }); }} quote={quote} />
     {selectedCommand && state ? <AgentCommandDetails key={`${state.agent?.id}:${selectedCommand.id}`} command={selectedCommand} resources={state.resources}
       onRequestResource={actions.requestResource} onResolveResource={actions.resolveResource}
       resourceScopeKey={JSON.stringify([state.agent?.id, selectedCommand.id])}

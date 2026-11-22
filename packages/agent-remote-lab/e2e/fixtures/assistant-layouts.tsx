@@ -156,7 +156,7 @@ export function BotFixture({ conversation }: { conversation(props: { assistant: 
   // The Workbench's own frame: the panels' widths and handles, the installed app's title bar and the window's title.
   return <AssistantNamesContext.Provider value={names}><div className="lab-shell fixture-assistant" style={{ display: 'block', height: '100dvh' }}>
     <DesktopFrame surface={page ? 'page' : 'bot'} phone={phone} title={shownAssistantName(place, !phone || !navigation.rosterVisible, names)} style={{ height: '100dvh' }}>
-      {phone ? <TabBar current={navigation.destination} onGo={go} /> : <NavigationRail current={navigation.destination} onGo={go} onSearch={() => {}} searchKeys="⌘K" accountName={SAMPLE.names[0]!} />}
+      {phone ? <TabBar current={navigation.destination} onGo={go} /> : <NavigationRail current={navigation.destination} onGo={go} onSearch={() => {}} accountName={SAMPLE.names[0]!} />}
       <BotWorkspace visible covered={!!page} compact={!detailsBeside} scope="fixture" workspace={workspace} navigation={navigation} selected={selected} roster={roster}
         directory={{ sessions: [], sources: [], refresh: async () => {}, loadMore: async () => {} }} describeConversation={describeConversation} mount={mount}
         onNewBot={() => {}} hostName={() => 'Mac mini'}

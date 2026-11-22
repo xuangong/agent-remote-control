@@ -7,6 +7,7 @@ import type { BotRow } from '../../kernel/bot-roster.js';
 import { isPersonalGroup, orderedGroups, planMove, rankInPlace, reorderGroup, type AssistantPlace, type GroupNotifications, type GroupRankChange, type GroupSection } from '../../kernel/assistant-groups.js';
 import { useAssistantNames } from '../../kernel/names-context.js';
 import type { MenuEntry } from '../../ui/Menu.js';
+import { chatMenu, type ChatMenuItem } from '../../kernel/context-menus.js';
 import { AddAssistantsSheet, GroupNameSheet, GroupNotificationsSheet, MoveToGroupSheet } from './GroupSheets.js';
 
 type Workspace = Pick<ReturnType<typeof useWindowWorkspace>, 'groups' | 'readGroup' | 'operateGroup' | 'rename' | 'createGroup' | 'moveAssistant' | 'deleteGroup'>;
@@ -15,7 +16,8 @@ type Open =
   | { kind: 'rename'; groupId: string; title: string }
   | { kind: 'notifications'; groupId: string; title: string }
   | { kind: 'add'; groupId: string; title: string }
-  | { kind: 'move'; row: BotRow };
+  | { kind: 'move'; row: BotRow }
+  | { kind: 'renameAssistant'; row: BotRow };
 
 /**
  * The group operations of the directory and of an assistant's card (I5): New group, Rename, Mute, Notifications, Move up and
@@ -91,17 +93,26 @@ export function useGroupActions({ workspace, defaultTitle, onMoved }: { workspac
     return true;
   }
 
-  /** An assistant's own entries: Pin to top, Mute, Move to group and, in a group people made, Remove from it. A Side and a Team, TPM or Support member (they have a role) stay where they are. */
-  function assistantMenu(row: BotRow): MenuEntry[] {
-    const group = groupOf(row), movable = !row.role;
-    return [
-      row.details.pinned ? { label: t('card.unpin'), icon: 'pin', onSelect: () => void details(row, current => without(current, 'pinned')) }
-        : { label: t('card.pinTop'), icon: 'pin', onSelect: () => void details(row, current => ({ ...current, pinned: true })) },
-      row.details.muted ? { label: t('card.unmute'), icon: 'bell', onSelect: () => void details(row, current => without(current, 'muted')) }
-        : { label: t('card.mute'), icon: 'bell-off', onSelect: () => void details(row, current => ({ ...current, muted: true })) },
-      ...(movable ? [{ label: t('card.moveTo'), icon: 'folder' as const, onSelect: () => setOpen({ kind: 'move', row }) }] : []),
-      ...(movable && group ? [{ label: t('card.removeFromGroup', { group: group.window.title }), icon: 'folder' as const, onSelect: () => void move(row, undefined) }] : []),
-    ];
+  /**
+   * An assistant's own entries, as the chat menu rule orders them (kernel/context-menus.ts): Pin to top, Mute, Rename…, Move to
+   * group… and, in a group people made, Remove from it. A Side and a Team, TPM or Support member (they have a role) stay where they
+   * are. The details card renames by its name, so its menu leaves Rename… out (`rename: false`).
+   */
+  function assistantMenu(row: BotRow, { rename = true }: { rename?: boolean } = {}): MenuEntry[] {
+    const group = groupOf(row);
+    const entry = (item: ChatMenuItem): MenuEntry => {
+      switch (item) {
+        case 'pin': return { label: t('card.pinTop'), icon: 'pin', onSelect: () => void details(row, current => ({ ...current, pinned: true })) };
+        case 'unpin': return { label: t('card.unpin'), icon: 'pin', onSelect: () => void details(row, current => without(current, 'pinned')) };
+        case 'mute': return { label: t('card.mute'), icon: 'bell-off', onSelect: () => void details(row, current => ({ ...current, muted: true })) };
+        case 'unmute': return { label: t('card.unmute'), icon: 'bell', onSelect: () => void details(row, current => without(current, 'muted')) };
+        case 'rename': return { label: t('card.renameMenu'), icon: 'pencil', onSelect: () => setOpen({ kind: 'renameAssistant', row }) };
+        case 'move': return { label: t('card.moveTo'), icon: 'folder', onSelect: () => setOpen({ kind: 'move', row }) };
+        case 'leaveGroup': return { label: t('card.removeFromGroup', { group: group?.window.title ?? defaultTitle }), icon: 'folder', onSelect: () => void move(row, undefined) };
+      }
+    };
+    return chatMenu({ pinned: !!row.details.pinned, muted: !!row.details.muted, movable: !row.role, grouped: !!group })
+      .filter(item => rename || item !== 'rename').map(entry);
   }
 
   const close = () => { if (!busy) { setOpen(undefined); setError(undefined); } };
@@ -117,6 +128,9 @@ export function useGroupActions({ workspace, defaultTitle, onMoved }: { workspac
     if (open.kind === 'add') return <AddAssistantsSheet group={open.title} busy={busy} error={error} onClose={close}
       candidates={everyone.filter(row => row.groupId !== open.groupId && !row.role)}
       groupTitle={row => groupOf(row)?.window.title ?? defaultTitle} onAdd={row => void move(row, open.groupId)} />;
+    if (open.kind === 'renameAssistant') return <GroupNameSheet title={t('card.renameTitle', { name: open.row.name })} field={t('card.name')} placeholder={open.row.name}
+      initial={open.row.name} busy={busy} error={error} onClose={close}
+      onSave={name => void details(open.row, current => ({ ...current, name })).then(done => { if (done && mounted.current) setOpen(undefined); })} />;
     const row = open.row, here = groupOf(row)?.window.id;
     return <MoveToGroupSheet name={row.name} {...(here ? { current: here } : {})} busy={busy} error={error} onClose={close}
       choices={[...orderedGroups(workspace.groups).map(group => ({ id: group.window.id, title: group.window.title })), { title: defaultTitle }]}

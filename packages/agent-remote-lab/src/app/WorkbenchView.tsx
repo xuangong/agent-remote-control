@@ -13,7 +13,7 @@ import { ConversationConnectionScope } from '../conversation/conversation-connec
 import { TrackViewScope } from '../kernel/useSessionAttention.js';
 import { TpmViewScope } from '../kernel/useTpmVisibility.js';
 import { ToastActivity } from '../kernel/Toast.js';
-import type { ReactNode } from 'react';
+import { useCallback, type ReactNode } from 'react';
 import { HttpPreviewClient } from '@orchardworks/agent-client';
 import { RecoveryScope } from '../kernel/conversation-recovery.js';
 import type { RemoteHost } from '../kernel/remote-host.js';
@@ -22,6 +22,7 @@ import { SessionDockProvider } from '../kernel/SessionDock.js';
 import { SidebarResize } from '../features/windows/SidebarResize.js';
 import { VscodeTunnelScope } from '../kernel/vscode-tunnel.js';
 import { CommandPalette } from '../shell/CommandPalette.js';
+import { ShortcutsSheet } from '../shell/ShortcutsSheet.js';
 import type { AppScope } from './types.js';
 import { WindowRecovery } from './views/WindowRecovery.js';
 import { WindowMenus } from './views/WindowMenus.js';
@@ -54,8 +55,9 @@ import { shownAssistantName } from '../kernel/window-title.js';
 const WINDOW_INSPECTOR_WIDTH = 320;
 
 export function WorkbenchView({ scope }: { readonly scope: AppScope }) {
-  const { assistantNames, activated, activeAgentId, activeOpened, activeView, askView, attention, backgroundInert, baseUrl, commandItems, compactLayout, connections, contextOpen, contextVisible, desktopContextVisible, focusManagedWindow, headerHidden, inspectorOpen, liveConnections, nativeTakeover, navigation, openExcerptSource, pageOpen, presentedPrimaryViewId, presentedViewId, previewClient, previewHost, promptMigrations, readingPositions, searchOpen, sessionDescriptions, sessionNotice, sessionViewOperations, setSearchOpen, sharedDrafts, sharedFeeds, sharedWindow, shellRef, sidebar, state, supportingRailOpen, teamView, tpmView, tracking, transport, userScoped, vscodeTunnelClient, windowMode, windowPageTitle, windowWorkspace, workbenchPanelRef } = scope;
+  const { assistantNames, activated, activeAgentId, activeOpened, activeView, askView, attention, backgroundInert, baseUrl, commandItems, compactLayout, connections, contextOpen, contextVisible, desktopContextVisible, focusManagedWindow, headerHidden, inspectorOpen, liveConnections, nativeTakeover, navigation, openExcerptSource, pageOpen, presentedPrimaryViewId, presentedViewId, previewClient, previewHost, promptMigrations, readingPositions, searchOpen, sessionDescriptions, sessionNotice, sessionViewOperations, setSearchOpen, setShortcutsOpen, sharedDrafts, sharedFeeds, sharedWindow, shellRef, shortcutsOpen, sidebar, state, supportingRailOpen, teamView, tpmView, tracking, transport, userScoped, vscodeTunnelClient, windowMode, windowPageTitle, windowWorkspace, workbenchPanelRef } = scope;
   const phone = usePhoneLayout();
+  const closeShortcuts = useCallback(() => setShortcutsOpen(false), [setShortcutsOpen]);
   const pageShown = !!navigation.page;
   const detailsBeside = useDetailsBeside(phone);
   return <AssistantNamesContext.Provider value={assistantNames}><SharedFeedsContext.Provider value={sharedFeeds}><SharedDraftsContext.Provider value={sharedDrafts}><LiveConnectionsContext.Provider value={liveConnections.stable}><SessionDescriptionsContext.Provider value={sessionDescriptions}><SessionExcerptNavigation.Provider value={openExcerptSource}><SessionViewOperationsContext.Provider value={sessionViewOperations}><AskViewScope.Provider value={askView.execute}><WindowSessionBridgeContext.Provider value={windowWorkspace.sessionBridge}><WindowLayoutContext.Provider value={windowWorkspace.authority}><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={windowMode && !compactLayout && activeView === 'workbench'}><TeamViewScope.Provider value={teamView.execute}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><PreviewScope client={previewClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><RecoveryScope.Provider value={readingPositions}><SessionConversationSurfaces scope={baseUrl} transport={transport} mode={navigation.mode}>{/* The frame sizes the rail and Bot mode's panels, leaving Window mode's own sidebar and inspector the room they take; the window's
@@ -113,6 +115,7 @@ export function WorkbenchView({ scope }: { readonly scope: AppScope }) {
     </DesktopFrame>
     {/* Mounted only while open (it closes its modal as it unmounts, returning focus), so a closed palette adds no dialog to the page. */}
     {searchOpen ? <CommandPalette open items={commandItems()} onClose={() => setSearchOpen(false)} /> : null}
+    {shortcutsOpen ? <ShortcutsSheet windowMode={windowMode} onClose={closeShortcuts} /> : null}
   </SessionConversationSurfaces></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider></SessionExcerptNavigation.Provider></SessionDescriptionsContext.Provider></LiveConnectionsContext.Provider></SharedDraftsContext.Provider></SharedFeedsContext.Provider></AssistantNamesContext.Provider>;
 }
 

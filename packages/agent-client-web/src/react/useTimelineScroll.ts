@@ -3,6 +3,7 @@ import { TimelineEntryIndex } from './timeline-entry-index.js';
 import { useTranslate } from './locale.js';
 import { useCallback, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type PointerEvent, type TouchEvent, type WheelEvent } from 'react';
 import { captureReadingText, readingTextTop, type ReadingTextAnchor } from './reading-text-anchor.js';
+import { restoredReading } from './reading-restore.js';
 
 interface ReadingAnchor { key: string; offset: number; text?: ReadingTextAnchor }
 export interface TimelineReadingPosition { following: boolean; anchor?: ReadingAnchor }
@@ -168,12 +169,11 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
       attemptedCursor.current = undefined;
       historyIntent.current = false;
       loading.current = undefined;
-      const saved = positionsRef.current?.get(identity);
-      const continuity = continuityRef.current?.positions.get(continuityRef.current.identity);
-      following.current = saved?.following ?? continuity?.following ?? true;
-      anchor.current = saved?.anchor;
+      const restore = restoredReading(positionsRef.current?.get(identity), continuityRef.current?.positions.get(continuityRef.current.identity));
+      following.current = restore.following;
+      anchor.current = restore.anchor;
       anchorRow.current = undefined;
-      pendingScrollTop.current = !saved && !following.current ? continuity?.scrollTop : undefined;
+      pendingScrollTop.current = restore.scrollTop;
       expectedScroll.current = undefined;
       draggingScrollbar.current = false;
     }

@@ -4,6 +4,7 @@ export { ProcessModeContext, TimelineLettersVisible, TimelineStepLevel } from '.
 export { LocaleContext, LocaleProvider, browserLocale, useLanguageChoice, useTranslate, type LanguageSource } from './react/locale.js';
 export type { AgentTimelineProps, AgentTimelineState, TimelineEntrySelection } from './react/AgentTimeline.js';
 export { isSelectableTimelineItem } from './react/AgentTimeline.js';
+export { copyMessage, formattedMessage } from './react/message-copy.js';
 export { SessionExcerptList, SessionExcerptNavigation, excerptMessageCount, withoutSessionExcerpts } from './react/SessionExcerpts.js';
 export { CopyTunnelUrl } from './react/CopyTunnelUrl.js';
 export { PreviewActions, discoverLoopbackTargets } from './react/PreviewActions.js';

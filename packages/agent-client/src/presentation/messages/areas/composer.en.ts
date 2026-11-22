@@ -241,4 +241,7 @@ export const composer = {
   'composer.action.command': 'Run command',
   'composer.action.history': 'Load conversation history',
   'composer.action.edit': 'Edit prompt',
+  'composer.dropImagesOnly': 'Only PNG, JPEG and WebP images can be added here.',
+  'composer.dropNotNow': 'Files can be added once the conversation is ready.',
+  'composer.dropUnavailable': 'This conversation takes no files.',
 } as const satisfies Readonly<Record<string, Message>>;

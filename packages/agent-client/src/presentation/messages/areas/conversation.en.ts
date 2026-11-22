@@ -99,6 +99,13 @@ export const conversation = {
   'receipt.answeredOf': '{answered} of {total} answered',
 
   // The conversation around the bubbles.
+  'conversation.messageActions': 'Message actions',
+  'conversation.quote': 'Quote',
+  'conversation.resend': 'Resend',
+  'conversation.copiedNote': 'The message is on the clipboard, with its formatting.',
+  'conversation.copyFailedNote': 'This browser did not let the page use the clipboard.',
+  'card.renameMenu': 'Rename…',
+  'card.renameTitle': 'Rename “{name}”',
   'conversation.assistant': 'Assistant',
   'conversation.sessionChange': 'Continued in a new session',
   'conversation.today': 'Today {time}',

@@ -7,16 +7,16 @@ import { BotPicture } from '../../kernel/BotPicture.js';
 import { Button } from '../../ui/Button.js';
 import { Icon } from '../../ui/Icon.js';
 
-/** A group's name, for New group and Rename. Saving an unchanged or empty name is not offered. */
-export function GroupNameSheet({ title, initial = '', busy, error, onSave, onClose }: {
-  title: string; initial?: string; busy: boolean; error?: string; onSave(name: string): void; onClose(): void;
+/** A name, for New group, Rename of a group and Rename of an assistant (`field` and `placeholder`). Saving an unchanged or empty name is not offered. */
+export function GroupNameSheet({ title, initial = '', field, placeholder, busy, error, onSave, onClose }: {
+  title: string; initial?: string; field?: string; placeholder?: string; busy: boolean; error?: string; onSave(name: string): void; onClose(): void;
 }) {
   const t = useTranslate();
   const [name, setName] = useState(initial);
   const trimmed = name.trim();
   return <Sheet open title={title} detent="content" onClose={() => { if (!busy) onClose(); }}>
     <form className="lab-bot-sheet-form" onSubmit={event => { event.preventDefault(); if (trimmed && trimmed !== initial && !busy) onSave(trimmed); }}>
-      <input aria-label={t('navigation.groups.name')} autoFocus maxLength={256} placeholder={t('navigation.groups.namePlaceholder')} value={name} disabled={busy}
+      <input aria-label={field ?? t('navigation.groups.name')} autoFocus maxLength={256} placeholder={placeholder ?? t('navigation.groups.namePlaceholder')} value={name} disabled={busy}
         onFocus={event => event.currentTarget.select()} onChange={event => setName(event.target.value)} />
       {error ? <p className="lab-sheet-message" role="alert">{error}</p> : null}
       <div className="lab-sheet-actions">

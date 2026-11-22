@@ -234,3 +234,21 @@ test('a downgraded Controller cannot claim or settle a persisted successor and c
   f.restart(); const downgraded = await f.connect(); expect(downgraded.packets[0].teamRecipients).toBeUndefined();
   expect((await downgraded.call({ action: 'poll' })).status).toBe(409); expect(downgraded.socket.readyState).toBe(WebSocket.OPEN);
 }, 10000);
+
+test('the Relay acknowledges tasks only with Call For Support and when offered, and the Controller learns it from registration', async () => {
+  const current = await currentRelay(), url = await current.listen();
+  const connect = async (offer: { callForSupport?: true; tasks?: true }) => {
+    const host = createRemoteHostUplinkClient({ relay: createAgentRemoteRelay({ providers: [] }), url, installationId: 'controller', name: 'Host', remoteKey: 'key',
+      teamManagement: true, ...offer, providers: [], resolveSession: () => undefined, control: () => ({ status: 200, body: '{}' }) });
+    close.push(() => host.close()); await host.ready; return host;
+  };
+  const modern = await connect({ callForSupport: true, tasks: true });
+  expect(modern.tasks).toBe(true);
+  await modern.close();
+  const withoutSupport = await connect({ tasks: true });
+  expect(withoutSupport.tasks).toBe(false);
+  await expect(withoutSupport.teamRequest({ action: 'task_status', owner: { providerId: 'codex', nativeSessionId: 'main' } })).rejects.toThrow('Update the Relay to use tasks.');
+  await withoutSupport.close();
+  const unoffered = await connect({ callForSupport: true });
+  expect(unoffered.tasks).toBe(false);
+}, 10000);

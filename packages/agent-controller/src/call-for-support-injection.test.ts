@@ -61,7 +61,7 @@ it('declares the worker namespace on every Codex thread it creates, deferred unt
   const f = await fixture();
   try {
     await f.control('/remote/create', { providerId: 'codex', operationId: randomUUID(), cwd: f.root });
-    expect(worker(f.created[0]!.input)).toMatchObject({ deferred: true, tools: [{ name: 'call_for_support' }, { name: 'support_status' }, { name: 'read_support_report' }, { name: 'download_support_resource' }] });
+    expect(worker(f.created[0]!.input)).toMatchObject({ deferred: true, tools: [{ name: 'call_for_support' }, { name: 'support_status' }, { name: 'read_support_report' }, { name: 'download_support_resource' }, { name: 'create_task' }, { name: 'task_status' }] });
     // Attachments rebind its executors; the thread keeps its declaration.
     expect(worker(f.opened.find(entry => entry.id === 'codex-0')?.extensions)).toBeDefined();
     f.support.profiles[0]!.enableByDefault = true;
@@ -94,7 +94,7 @@ it('gives a Copilot session the worker tools when it is attached while enabled, 
       const id = `copilot-${++attached}`;
       await f.control('/remote/attach', { providerId: 'copilot', nativeSessionId: id });
       return worker(f.opened.find(entry => entry.id === id)?.extensions);
-    }).toMatchObject({ name: 'agent_remote', tools: [{ name: 'call_for_support' }, { name: 'support_status' }, { name: 'read_support_report' }, { name: 'download_support_resource' }] });
+    }).toMatchObject({ name: 'agent_remote', tools: [{ name: 'call_for_support' }, { name: 'support_status' }, { name: 'read_support_report' }, { name: 'download_support_resource' }, { name: 'create_task' }, { name: 'task_status' }] });
     expect(worker(f.opened.at(-1)!.extensions)).not.toHaveProperty('deferred');
   } finally { await f.close(); }
 });

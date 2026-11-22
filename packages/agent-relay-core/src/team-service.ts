@@ -83,6 +83,10 @@ export function createTeamService(ports: TeamServicePorts) {
       const result = await ports.rpc(ports.requireHost(hostId), 'POST', '/remote/team/create-seat', undefined, JSON.stringify(seat));
       const value = JSON.parse(result.body); if (result.status !== 200) throw new Error(value.error ?? 'Team session creation failed.'); return value;
     },
+    tasks: {
+      capable: hostId => brokerState.hosts.get(hostId)?.tasks === 1,
+      assertHost(hostId) { if (ports.requireHost(hostId).tasks !== 1) throw new BrokerError(409, 'tasks_upgrade_required', 'Update the Controller to use tasks.'); },
+    },
     callForSupport: {
       state: () => brokerState.callForSupport,
       capable: hostId => brokerState.hosts.get(hostId)?.callForSupport === 1,

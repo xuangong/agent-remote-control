@@ -4,6 +4,7 @@ import { Value } from '@sinclair/typebox/value';
 import { TeamResource } from './team-resource.js';
 import { CallForSupportCallInput, CallForSupportFinding, CallForSupportGroup, CallForSupportMandate, CallForSupportReportStatus, CallForSupportRosterProposal,
   isCallForSupportGroup } from './call-for-support.js';
+import { TaskBrief, TaskDoneWhen, TaskOwner, TaskReportStatus, TaskTitle, TeamTask, TASK_SUMMARY_LIMIT, isTeamTask } from './task.js';
 const object = { additionalProperties: false } as const;
 const id = Type.String({ minLength: 1, maxLength: 256 });
 const short = Type.String({ maxLength: 2048 });
@@ -56,6 +57,8 @@ export const Team = Type.Object({ id, operationId: id, revision: Type.Integer({ 
   createdAt: Type.Number(), updatedAt: Type.Number(),
   /** Set for a Call For Support group: the Leader coordinates and the requester is the worker. */
   callForSupport: Type.Optional(CallForSupportGroup),
+  /** Set for a task: the Leader is the worker session and the requester is the main session that owns the task. */
+  task: Type.Optional(TeamTask),
 }, object);
 export type Team = Static<typeof Team>;
 export const TeamCreate = Type.Object({ operationId: id, source: TeamSource,
@@ -113,18 +116,28 @@ export const TeamHostCall = Type.Union([
     roleId: Type.Optional(id), callId: Type.Optional(id) }, object),
   // Which of the calling Host's sessions may call for support.
   Type.Object({ action: Type.Literal('support_enablement') }, object),
+  // A main session's task tools, by the main session on the calling Host.
+  Type.Object({ action: Type.Literal('create_task'), owner: TaskOwner, operationId: id, title: TaskTitle, brief: TaskBrief, doneWhen: Type.Optional(TaskDoneWhen) }, object),
+  Type.Object({ action: Type.Literal('task_status'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), taskId: Type.Optional(id) }, object),
+  // A task's worker reports its result once.
+  Type.Object({ action: Type.Literal('report_task'), teamId: id, memberId: id, status: TaskReportStatus, summary: Type.String({ minLength: 1, maxLength: TASK_SUMMARY_LIMIT }) }, object),
   // The status of groups the calling Host holds seats in, so it can forget the seats of archived and removed groups.
   Type.Object({ action: Type.Literal('support_group_states'), teamIds: Type.Array(id, { minItems: 1, maxItems: 64, uniqueItems: true }) }, object),
 ]);
 export type TeamHostCall = Static<typeof TeamHostCall>;
 export const TeamSeat = Type.Object({ teamId: id, source: TeamSource, member: TeamMember,
   /** The seat belongs to a Call For Support group serving this role. */
-  callForSupport: Type.Optional(Type.Object({ role: Type.String({ minLength: 1, maxLength: 256 }), description: Type.String({ maxLength: 4000 }) }, object)) }, object);
+  callForSupport: Type.Optional(Type.Object({ role: Type.String({ minLength: 1, maxLength: 256 }), description: Type.String({ maxLength: 4000 }) }, object)),
+  /** The seat belongs to a task: its worker as Leader, or the main session that owns it as requester. */
+  task: Type.Optional(Type.Object({ title: TaskTitle }, object)) }, object);
 export type TeamSeat = Static<typeof TeamSeat>;
 const groupFields = ['model', 'reasoningEffort', 'access', 'workspace', 'usage'] as const;
-/** A Call For Support group has exactly one requester after its Leader; other Teams have none and no group fields. */
+/** A Call For Support group has exactly one requester after its Leader; a task has its worker and then its owner; other Teams have no requester and no group fields. */
 const validGroupShape = (value: Team) => {
   const group = value.callForSupport, requesters = value.members.filter(member => member.role === 'requester');
+  if (value.task) return !group && isTeamTask(value.task) && value.members.length === 2 && value.members[1]!.role === 'requester'
+    && value.members.every(member => member.creation !== 'released' && member.access === undefined && member.workspace === undefined)
+    && value.messages.every(message => message.callForSupportCallId === undefined) && (value.unresolvedReceipts ?? []).every(receipt => receipt.callForSupportCallId === undefined);
   if (!group) return !requesters.length && value.members.every(member => groupFields.every(field => member[field] === undefined) && member.creation !== 'released')
     && value.messages.every(message => message.callForSupportCallId === undefined) && (value.unresolvedReceipts ?? []).every(receipt => receipt.callForSupportCallId === undefined);
   return isCallForSupportGroup(group) && requesters.length === 1 && value.members[0]?.role !== 'requester'

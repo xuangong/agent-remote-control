@@ -131,7 +131,7 @@ export function createSocketEdge(ports: SocketEdgePorts) {
         register(client, key, context, hash!, { enrollmentRequested: enrollment === '3' ? 3 : enrollment === '2' ? 2 : enrollment === '1' ? 1 : undefined,
           teamRequested: asked('team'), resourcesRequested: asked('teamResources'), recipientsRequested: asked('teamRecipients'), inboxRequested: asked('teamInbox'),
           statesRequested: !asked('sessionStates') ? false : asked('sessionReplyFacts') ? 2 : 1, successionRequested: asked('teamSuccession'),
-          callForSupportRequested: asked('callForSupport') && readOnlyProviders(url.searchParams.getAll('readOnlyProvider')), statusRequested: asked('hostStatus'), outboxRequested: asked('outbox'),
+          callForSupportRequested: asked('callForSupport') && readOnlyProviders(url.searchParams.getAll('readOnlyProvider')), tasksRequested: asked('tasks'), statusRequested: asked('hostStatus'), outboxRequested: asked('outbox'),
           journalRequested: url.searchParams.get('journal') === String(JOURNAL_VERSION) ? JOURNAL_VERSION : 0, shownRequested: asked('journalShown'), controlRequested: asked('control') });
       } };
     }

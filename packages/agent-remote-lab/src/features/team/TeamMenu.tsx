@@ -60,7 +60,8 @@ export function TeamMenu(props: Props) {
     if (mutating.current) return;
     const ticket = ++generation.current;
     const value = await client.list();
-    if (currentClient.current === client && ticket === generation.current) { setTeams(value); setRosterClient(client); setLoadError(''); }
+    // Tasks travel as Teams on the Relay; they show in their owner's conversation, not among Teams.
+    if (currentClient.current === client && ticket === generation.current) { setTeams(value.filter(team => !team.task)); setRosterClient(client); setLoadError(''); }
   };
   useEffect(() => {
     setTeams([]); setRosterClient(undefined); setSelected(''); setError(''); setLoadError(''); setPendingCreate(undefined);

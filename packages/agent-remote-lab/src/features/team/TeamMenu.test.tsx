@@ -364,3 +364,12 @@ it('speaks Chinese: the menu, its heading and the empty state come from the cata
   expect(view.textContent).toContain('先从一位组长开始');
   expect(button(view,'新建 Team')).toBeDefined();
 });
+it('leaves tasks, which the Relay keeps as Teams, out of the Team list', async () => {
+  const task: Team = { ...structuredClone(team), id: 'task', title: 'Collect logs', members: [team.members[0]!, { ...team.members[1]!, hostId: 'mac', role: 'requester' }],
+    task: { title: 'Collect logs', brief: 'Collect them.', state: 'working', createdAt: 1, updatedAt: 1 } };
+  fixture.teams = [structuredClone(team), task];
+  const view = await render(<App />);
+  await act(async () => button(view, 'Teams').click());
+  expect(view.textContent).toContain('Cross-platform diagnosis');
+  expect(view.textContent).not.toContain('Collect logs');
+});

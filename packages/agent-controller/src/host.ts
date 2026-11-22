@@ -106,7 +106,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   let uplinkUrl = options.uplink.url;
   const siteOrigin = () => { const url = new URL(uplinkUrl); url.protocol = url.protocol === 'ws:' ? 'http:' : 'https:'; return url.origin; };
   const runtime = createAgentHostRuntime({ ...options, hostId: registeredHostId, siteOrigin, ...(options.team ? { team: { ...options.team, request: (call: TeamHostCall) => connection.client.teamRequest(call),
-    genericSuccession: () => connection.client.teamSuccession, callForSupport: () => connection.client.callForSupport } } : {}), controllerId: options.installationId,
+    genericSuccession: () => connection.client.teamSuccession, callForSupport: () => connection.client.callForSupport, tasks: () => connection.client.tasks === true } } : {}), controllerId: options.installationId,
     ...(options.inputImages ? {} : stateDirectory ? { inputImages: { directory: join(stateDirectory, 'input-images') } } : {}),
     ...(options.inputResources ? {} : stateDirectory ? { inputResources: { directory: join(stateDirectory, 'input-resources') } } : {}),
     ...(options.sessionRepliesFile || !stateDirectory ? {} : { sessionRepliesFile: join(stateDirectory, 'session-replies.json') }),
@@ -151,7 +151,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     runtime.journals.available(undefined);
     const current = fence.begin();
     return { superseded: false, client: (options.uplinkClient ?? createRemoteHostUplinkClient)({ relay: runtime.relay, installationId: options.installationId, name: options.name, environment: options.environment, controller: options.controller?.identity,
-      ...(options.team ? { teamManagement: true, callForSupport: true,
+      ...(options.team ? { teamManagement: true, callForSupport: true, tasks: true,
         readOnlyProviders: options.registrations.filter(({ adapter }) => adapter.descriptor.sessionAccess?.readOnly).map(({ adapter }) => adapter.descriptor.providerId) } : {}),
       ...(options.tpm ? { tpmManagement: true } : {}),
       hostStatus: true,
@@ -474,6 +474,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   const tpm = options.tpm ? new TpmCoordinator(options.tpm, automationAccess) : undefined;
   const team = options.team?.request ? new TeamRuntime(options.team.stateDirectory, {...automationAccess, sessionRouting: successionService?.roleRouting ?? automationAccess.sessionRouting!,
     genericSuccession: () => !!successionService && options.team?.genericSuccession?.() === true, callForSupport: () => options.team?.callForSupport?.() === true,
+    tasks: () => options.team?.tasks?.() === true,
     readOnlyProviders: () => automationAccess.supportedProviders().filter(providerId => providers.require(providerId).adapter.descriptor.sessionAccess?.readOnly),
     execute: executeOperation('host:team')}, options.team.request, options.team.tickMs) : undefined;
   const roles = new SessionRoles([...(team ? [team] : []), ...(tpm ? [tpmRole(tpm)] : [])]);
@@ -488,7 +489,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     },
     acquire: automationAccess.acquire,
   } }) : undefined;
-  const workerSupport = options.team?.request ? new WorkerSupport({ request: options.team.request, available: () => options.team?.callForSupport?.() === true,
+  const workerSupport = options.team?.request ? new WorkerSupport({ request: options.team.request, available: () => options.team?.callForSupport?.() === true, tasks: () => options.team?.tasks?.() === true,
     stateDirectory: options.team.stateDirectory, title: async ref => await providers.require(ref.providerId).directory.sessionTitle?.(ref.nativeSessionId) }) : undefined;
   workerSupport?.onChange(() => { void successionWiring.applyWorkerTools().catch(() => undefined); });
   const workerSupportTimer = workerSupport ? setInterval(() => { if (!admission.closed) void workerSupport.refresh(automationAccess.controllerId).catch(() => undefined); }, options.team?.tickMs ?? 3000) : undefined;

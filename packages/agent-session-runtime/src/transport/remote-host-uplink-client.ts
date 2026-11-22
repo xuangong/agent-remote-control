@@ -78,6 +78,8 @@ export interface RemoteHostUplinkClientOptions {
   readonly teamManagement?: true;
   /** Request Call For Support groups; honored only with teamManagement. */
   readonly callForSupport?: true;
+  /** Request tasks; honored only with callForSupport. */
+  readonly tasks?: true;
   /**
    * Providers that enforce read-only sessions natively, sent with the Call For Support request.
    * They travel in the connection's query, which older Relays ignore, never in the provider descriptors they validate strictly.
@@ -129,6 +131,8 @@ export interface RemoteHostUplinkClient {
   readonly teamSuccession: boolean;
   /** The Relay sends this Host Call For Support groups. */
   readonly callForSupport: boolean;
+  /** The Relay runs tasks for this Host's sessions. Absent on clients that predate tasks. */
+  readonly tasks?: boolean;
   readonly ready: Promise<{ hostId: string; pairingPurpose?: PairingPurpose }>;
   close(): Promise<void>;
 }
@@ -138,6 +142,7 @@ const connectWebSocket = (endpoint: URL, init: UplinkSocketInit): UplinkSocket =
 }) as unknown as UplinkSocket;
 
 /** Host calls only a Relay that acknowledged Call For Support understands. */
+const taskActions = new Set<string>(['create_task', 'task_status', 'report_task']);
 const callForSupportActions = new Set<string>(['propose_roster', 'report_support', 'write_ledger', 'release_supporter', 'collect_supporter_patch', 'report_usage', 'call_for_support', 'support_status', 'support_enablement', 'support_group_states']);
 
 export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOptions): RemoteHostUplinkClient {
@@ -159,6 +164,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
   let teamRecipients = false;
   let teamSuccession = false;
   let callForSupport = false;
+  let tasks = false;
   let sendTeam: ((json: string) => void) | undefined;
   const outboxPending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
   let sendOutbox: ((json: string) => void) | undefined;
@@ -168,7 +174,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     outboxPending.clear();
     if (available) options.outbox?.onAvailable(false);
   };
-  const rejectTeam = () => { teamInbox = false; teamRecipients = false; teamSuccession = false; callForSupport = false; teamResources = false; sendTeam = undefined; for (const pending of teamPending.values()) { clearTimeout(pending.timer); pending.reject(new Error('Team transport disconnected; query the original operation before retrying.')); } teamPending.clear(); };
+  const rejectTeam = () => { teamInbox = false; teamRecipients = false; teamSuccession = false; callForSupport = false; tasks = false; teamResources = false; sendTeam = undefined; for (const pending of teamPending.values()) { clearTimeout(pending.timer); pending.reject(new Error('Team transport disconnected; query the original operation before retrying.')); } teamPending.clear(); };
   let remoteKey = options.remoteKey;
   let credentialWrite: Promise<void> | undefined;
   let closed = false;
@@ -208,7 +214,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     endpoint.searchParams.set('control', '1');
     if (options.journal) endpoint.searchParams.set('journal', String(JOURNAL_VERSION));
     if (options.journal?.shown) endpoint.searchParams.set('journalShown', '1');
-    if (options.teamManagement) { endpoint.searchParams.set('team', '1'); endpoint.searchParams.set('teamInbox', '1'); endpoint.searchParams.set('teamRecipients', '1'); endpoint.searchParams.set('teamSuccession', '1'); endpoint.searchParams.set('teamResources', '1'); if (options.callForSupport) { endpoint.searchParams.set('callForSupport', '1'); for (const providerId of options.readOnlyProviders ?? []) endpoint.searchParams.append('readOnlyProvider', providerId); } }
+    if (options.teamManagement) { endpoint.searchParams.set('team', '1'); endpoint.searchParams.set('teamInbox', '1'); endpoint.searchParams.set('teamRecipients', '1'); endpoint.searchParams.set('teamSuccession', '1'); endpoint.searchParams.set('teamResources', '1'); if (options.callForSupport) { endpoint.searchParams.set('callForSupport', '1'); for (const providerId of options.readOnlyProviders ?? []) endpoint.searchParams.append('readOnlyProvider', providerId); if (options.tasks) endpoint.searchParams.set('tasks', '1'); } }
     const socket: UplinkSocket = (options.connect ?? connectWebSocket)(endpoint, { authorization: `Bearer ${remoteKey}`, maxPayload: UPLINK_MAX_FRAME_BYTES, handshakeTimeout: registrationTimeout });
     let registered = false;
     let registeredHostId: string | undefined;
@@ -349,6 +355,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         teamRecipients = options.teamManagement === true && decoded.value.teamManagement === true && decoded.value.teamRecipients === 1;
         teamSuccession = teamRecipients && decoded.value.teamSuccession === 1;
         callForSupport = teamSuccession && options.callForSupport === true && decoded.value.callForSupport === 1;
+        tasks = callForSupport && options.tasks === true && decoded.value.tasks === 1;
         sendTeam = decoded.value.teamManagement ? json => { writer.send(json); } : undefined;
         registeredHostId = decoded.value.hostId;
         sessionControl = decoded.value.control === 1;
@@ -444,6 +451,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     ready,
     get teamSuccession() { return teamSuccession; },
     get callForSupport() { return callForSupport; },
+    get tasks() { return tasks; },
     outboxRequest(call) {
       if (!sendOutbox || closed || outboxPending.size >= 32) return Promise.reject(new Error('The outbox is unavailable on this connection.'));
       const requestId = randomUUID();
@@ -459,6 +467,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       if (!teamRecipients && (call.action === 'claim' || call.action === 'settle' && call.resolvedTarget)) return Promise.reject(new Error('Update the Relay to support exact Team recipients before dispatching or settling this delivery.'));
       if ((call.action.startsWith('resource_') || call.action === 'send' && call.resources?.length) && !teamResources) return Promise.reject(new Error('Team resources are unavailable on this Relay. Update the Relay or configure resource storage.'));
       if (!callForSupport && callForSupportActions.has(call.action)) return Promise.reject(new Error('Update the Relay to use Call For Support.'));
+      if (!tasks && taskActions.has(call.action)) return Promise.reject(new Error('Update the Relay to use tasks.'));
       if (!sendTeam || closed || teamPending.size >= 32) return Promise.reject(new Error('Team transport is unavailable.'));
       const requestId = randomUUID();
       return new Promise((resolve, reject) => {

@@ -1,13 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { AgentSessionTool, AgentSessionToolNamespace } from '@orchardworks/agent-provider-sdk';
-import { nativeSessionRefKey, type CallForSupportCall, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, TASK_BRIEF_LIMIT, TASK_DONE_WHEN_LIMIT, TASK_TITLE_LIMIT, type CallForSupportCall, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { TeamResourceFiles } from './team-resource-files.js';
 
 export interface WorkerSupportPorts {
   request(call: TeamHostCall): Promise<unknown>;
   /** The Relay acknowledged Call For Support. */
   available(): boolean;
+  /** The Relay acknowledged tasks, which every session without a role may then use. */
+  tasks?(): boolean;
   /** A directory for downloaded support resources. */
   stateDirectory: string;
   /** A session's title, for the group the Relay creates. */
@@ -29,16 +31,18 @@ export class WorkerSupport {
   private readonly listeners = new Set<() => void>();
   private readonly resources: TeamResourceFiles;
   private polling = false;
+  private tasksOffered = false;
   constructor(private readonly ports: WorkerSupportPorts) {
     this.resources = new TeamResourceFiles(join(ports.stateDirectory, 'support-resources'), call => ports.request(call));
   }
-  /** Whether the user enabled the session, explicitly or by a profile's default. */
+  /** Whether the session is offered the namespace: tasks are on, or the user enabled it for support, explicitly or by a profile's default. */
   enabled(ref: NativeSessionRef): boolean {
     if (!this.ports.available()) return false;
+    if (this.ports.tasks?.() === true) return true;
     return this.enablement.sessions.get(nativeSessionRefKey(ref)) ?? this.enablement.defaultEnabled;
   }
-  /** Whether a session the Controller is about to create will be enabled: only a profile's default can say so yet. */
-  enabledByDefault(): boolean { return this.ports.available() && this.enablement.defaultEnabled; }
+  /** Whether a session the Controller is about to create will be offered the namespace: tasks, or a profile's default, can say so yet. */
+  enabledByDefault(): boolean { return this.ports.available() && (this.ports.tasks?.() === true || this.enablement.defaultEnabled); }
   onChange(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   /** Reads enablement from the Relay; listeners hear about any change. */
   async refresh(controllerId: string): Promise<void> {
@@ -52,10 +56,10 @@ export class WorkerSupport {
         if (typeof entry?.providerId !== 'string' || typeof entry.nativeSessionId !== 'string' || typeof entry.enabled !== 'boolean') continue;
         sessions.set(nativeSessionRefKey({ controllerId, providerId: entry.providerId, nativeSessionId: entry.nativeSessionId }), entry.enabled);
       }
-      const next = { defaultEnabled: value.defaultEnabled, sessions };
-      const changed = next.defaultEnabled !== this.enablement.defaultEnabled || next.sessions.size !== this.enablement.sessions.size
+      const next = { defaultEnabled: value.defaultEnabled, sessions }, tasks = this.ports.tasks?.() === true;
+      const changed = tasks !== this.tasksOffered || next.defaultEnabled !== this.enablement.defaultEnabled || next.sessions.size !== this.enablement.sessions.size
         || [...next.sessions].some(([key, enabled]) => this.enablement.sessions.get(key) !== enabled);
-      this.enablement = next;
+      this.enablement = next; this.tasksOffered = tasks;
       if (changed) for (const listener of this.listeners) { try { listener(); } catch { /* Listeners cannot stop enablement. */ } }
     } finally { this.polling = false; }
   }
@@ -65,6 +69,7 @@ export class WorkerSupport {
     const request = async (call: TeamHostCall) => { if (!this.ports.available()) fail('Update the Relay to use Call For Support.'); return this.ports.request(call); };
     const status = async (input: { roleId?: string; callId?: string }) => { const ref = worker(); return request({ action: 'support_status', worker: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, ...input }); };
     const call = async (callId: string) => await status({ callId }) as StatusCall;
+    const taskRequest = async (input: TeamHostCall) => { if (this.ports.tasks?.() !== true) fail('Update the Relay to use tasks.'); return this.ports.request(input); };
     const context = object({ commit: { type: 'string', pattern: '^[0-9a-f]{7,64}$' }, base: { type: 'string', pattern: '^[0-9a-f]{7,64}$' },
       files: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 2048 }, maxItems: 64 }, conversation: { type: 'boolean' } }, []);
     const tools = [
@@ -92,8 +97,18 @@ export class WorkerSupport {
           if (!found.report?.resources?.some(resource => resource.resourceId === args.resourceId)) fail('The resource is not attached to this report.');
           return this.resources.download(roleId, requesterMemberId, args.resourceId, args.outputDirectory);
         }),
+      tool('create_task', 'Start a task: a separate session on this Host works on it in your working directory while you keep talking with the person. Use it for work that takes more than a few steps, and start one task per independent piece of work. Write a brief that stands alone: the worker sees only the brief, and reads your conversation only if the brief says it is needed. The result arrives later as input labelled [Task … · done] or [Task … · failed]; until then tell the person what you started and keep answering them. Reuse operationId to retry the same task after a lost response.',
+        object({ title: { type: 'string', minLength: 1, maxLength: TASK_TITLE_LIMIT }, brief: { type: 'string', minLength: 1, maxLength: TASK_BRIEF_LIMIT },
+          done_when: { type: 'string', minLength: 1, maxLength: TASK_DONE_WHEN_LIMIT }, operationId: id }, ['title', 'brief']),
+        async args => {
+          const ref = worker(), title = await this.ports.title?.(ref).catch(() => undefined);
+          return taskRequest({ action: 'create_task', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId, ...(title ? { title: title.slice(0, 256) } : {}) },
+            operationId: args.operationId ?? randomUUID(), title: args.title, brief: args.brief, ...(args.done_when ? { doneWhen: args.done_when } : {}) });
+        }),
+      tool('task_status', 'List the tasks this session started, newest first, with their state (queued, working, done, failed, cancelled) and result; or read one by taskId.',
+        object({ taskId: id }, []), args => { const ref = worker(); return taskRequest({ action: 'task_status', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, ...(args.taskId ? { taskId: args.taskId } : {}) }); }),
     ];
-    return { name: WORKER_NAMESPACE, description: 'Agent Remote Control: call for support from other sessions, models and machines (reviews, consultations, tests), and read their reports.',
+    return { name: WORKER_NAMESPACE, description: 'Agent Remote Control: start tasks that other sessions work on in parallel and report back; call for support from other sessions, models and machines (reviews, consultations, tests), and read their reports.',
       ...(deferred ? { deferred: true } : {}), tools };
   }
 }

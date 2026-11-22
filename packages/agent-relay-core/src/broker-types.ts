@@ -53,6 +53,8 @@ export type Host = {
   teamSuccession?: 1;
   /** The Host runs Call For Support groups: requester seats, coordinators and supporters. */
   callForSupport?: 1;
+  /** The Host runs tasks: main sessions as requester seats and workers as Leaders. It needs Call For Support. */
+  tasks?: 1;
   /** Providers the Host named, with its Call For Support request, as enforcing read-only sessions natively. */
   readOnlyProviders?: string[];
   connectionId?: string; stopDiagnostics?(): void;

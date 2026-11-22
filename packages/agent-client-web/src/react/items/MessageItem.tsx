@@ -6,7 +6,8 @@ import { ImagePreview } from '../ImagePreview.js';
 import { loadLocalResource } from '../local-resource.js';
 import { TimelineTitle } from '../TimelineTitle.js';
 import { useTranslate } from '../locale.js';
-import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
+import { parseTaskInput, splitSessionReferences, type AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
+import { TaskInputItem } from './TaskInputItem.js';
 import { MarkdownContent } from '../MarkdownContent.js';
 import { CommunicationContent } from '../CommunicationContent.js';
 import type { MessageGroupPosition } from '../timeline-render-model.js';
@@ -26,6 +27,9 @@ interface MessageItemProps<T extends Message> {
 }
 
 export function UserMessageItem({ item, messageGroup, resourceContext }: MessageItemProps<Extract<Message, { type: 'user_message' }>>) {
+  // A task's brief or result reached this session as input; it reads as a card, not as something the person wrote.
+  const task = item.content?.some(part => part.type !== 'text') ? undefined : parseTaskInput(splitSessionReferences(item.text).text);
+  if (task) return <TaskInputItem input={task} resourceContext={resourceContext} />;
   return <MessageBubble item={item} messageGroup={messageGroup} resourceContext={resourceContext} />;
 }
 

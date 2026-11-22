@@ -8,6 +8,7 @@ import type { SessionExecutionRouting } from './session-succession-service.js';
 import type { RoleSuccessionDecision, SessionRole } from './session-role-succession.js';
 import type { SessionCreation } from './role-session-creation.js';
 import { coordinatorInstructions, coordinatorTools, locationInstructions, supporterInstructions } from './call-for-support-roles.js';
+import { reportTaskTool, taskWorkerInstructions } from './task-roles.js';
 import { collectPatch, createBundle, fetchBundle, prepareWorktree, removeWorktree, repositoryRoot, worktreePath } from './call-for-support-workspaces.js';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { accountUsage, type SupportUsage } from './call-for-support-usage.js';
@@ -23,6 +24,8 @@ export interface TeamRuntimeAccess {
   genericSuccession?(): boolean;
   /** The Relay sends this Controller Call For Support groups. */
   callForSupport?(): boolean;
+  /** The Relay sends this Controller tasks. */
+  tasks?(): boolean;
   /** Providers that run Team tools and enforce read-only sessions natively. */
   readOnlyProviders?(): string[];
   available(): boolean;
@@ -37,6 +40,8 @@ interface LocalSeat { seat: TeamSeat; creation: 'dispatching' | 'ready' | 'unkno
   /** A coordinator's or supporter's usage, and what the Relay last accepted of it. */
   usage?: SupportUsage & { reported?: { tokens: number; costUsd?: number; at: number } };
   receipts: Record<string, { text: string; status: 'dispatching' | 'accepted' | 'rejected' | 'unknown'; error?: string; acceptance?: AgentInputAcceptance['disposition']; resolvedTarget?: NativeSessionRef }> }
+/** A task Team missing from the poll this long was removed by the Relay. */
+const TASK_MISSING_FORGET_MS = 10 * 60_000;
 const errorText = (error: unknown) => (error instanceof Error ? error.message : 'Team operation failed.').slice(0, 2048);
 function operationId(value: string) {
   const hex = createHash('sha256').update(value).digest('hex'); return `${hex.slice(0,8)}-${hex.slice(8,12)}-8${hex.slice(13,16)}-a${hex.slice(17,20)}-${hex.slice(20,32)}`;
@@ -54,10 +59,14 @@ function deliveryAllowed(lease: RemoteHostSessionLease, delivery: TeamDelivery):
   if (!sessionOperationAvailability(state, delivery === 'next_turn' ? 'queue_message' : 'send_message').allowed) return false;
   return delivery === 'next_turn' || readyIdle || sessionOperationAvailability(state, 'steer').allowed;
 }
-/** steer: input may join a running turn. A worker's support reports never do; they wait for its next turn. */
-export function availableDelivery(lease: RemoteHostSessionLease, steer = true): TeamDelivery | undefined {
+/**
+ * steer: input may join a running turn. A worker's support reports never do; they wait for its next turn.
+ * queue: input may wait in the CLI's own next-turn queue. A task's input never does: that queue is ordered with the person's
+ * queued messages and the Host cannot withdraw from it, so task input waits here until the session is idle.
+ */
+export function availableDelivery(lease: RemoteHostSessionLease, steer = true, queue = true): TeamDelivery | undefined {
   if (deliveryAllowed(lease, 'immediate') && (steer || lease.agent.snapshot().payload.activeTurn === null)) return 'immediate';
-  if (deliveryAllowed(lease, 'next_turn')) return 'next_turn';
+  if (queue && deliveryAllowed(lease, 'next_turn')) return 'next_turn';
 }
 
 /** Local native bindings and delivery evidence outlive browser and transport connections. */
@@ -74,6 +83,8 @@ export class TeamRuntime implements SessionRole {
   private readonly claiming = new Map<string, number>();
   /** When to ask again about a support group missing from the poll, which omits archived groups. */
   private readonly groupChecks = new Map<string, number>();
+  /** When each task Team was first missing from the poll. */
+  private readonly missingTasks = new Map<string, number>();
   /** Counts seat bindings, so a group restored while its archive was being confirmed keeps its new seats. */
   private bindings = 0;
   private readonly boundAt = new Map<string, number>();
@@ -151,7 +162,8 @@ export class TeamRuntime implements SessionRole {
   private async createOnce(seat: TeamSeat): Promise<TeamMember> {
     await this.ready;
     if (!isTeamSeat(seat) || !this.access.available() || seat.member.role !== 'requester' && !this.access.supportedProviders().includes(seat.member.providerId)) throw new Error('Provider does not support Team tools on this Host.');
-    if ((seat.callForSupport || seat.member.role === 'requester') && this.access.callForSupport?.() !== true) throw new Error('Update the Relay to use Call For Support.');
+    if (seat.task ? this.access.tasks?.() !== true : (seat.callForSupport || seat.member.role === 'requester') && this.access.callForSupport?.() !== true)
+      throw new Error(seat.task ? 'Update the Relay to use tasks.' : 'Update the Relay to use Call For Support.');
     const existing = this.records.find(item => item.seat.teamId === seat.teamId && item.seat.member.id === seat.member.id);
     if (existing) {
       const previous = existing.seat;
@@ -277,6 +289,17 @@ export class TeamRuntime implements SessionRole {
       name, description, inputSchema: { type: 'object', properties, required, additionalProperties: false }, execute: async args => JSON.stringify(await execute(args as Record<string, string>)),
     });
     const group = seat.callForSupport, coordinator = !!group && member.role === 'leader';
+    const readSource = tool('read_source_session', 'Read a bounded page from the source conversation for context. The source agent has no Team tools and receives no automatic Team messages.', { before: { type: 'object', properties: { epoch: { type: 'string' }, seq: { type: 'integer' } }, required: ['epoch','seq'], additionalProperties: false } }, [], async args => {
+      assertCurrent();
+      const source = await this.access.acquire(seat.source.providerId, seat.source.nativeSessionId);
+      try { assertCurrent(); const request = { requestId: randomUUID(), agentId: source.agent.agentId, direction: args.before ? 'before' as const : 'tail' as const, limit: 20, ...(args.before ? { cursor: args.before as unknown as {epoch:string;seq:number} } : {}) }; const page = (await source.agent.fetchTimeline(request)).payload; assertCurrent();
+        let remaining = 48000; const entries = page.entries.filter(entry => { remaining -= JSON.stringify(entry).length; return remaining >= 0; });
+        return { ...page, entries, truncated: entries.length !== page.entries.length }; }
+      finally { source.release(); }
+    });
+    // A task's worker reads its brief as input and reports once; it has no Team inbox.
+    if (seat.task) return { instructions: `${taskWorkerInstructions(seat)} ${locationInstructions(seat)}`,
+      tools: bindAgentSessionTools([readSource, reportTaskTool(input => call(input))], assertCurrent) };
     const tools = [
       tool('read_team', 'Read members, responsibilities, progress, compact delivery status and a bounded page of complete messages addressed to you. This does not consume messages. Fully read incoming messages, then acknowledge their IDs with acknowledge_team_messages before acting. Use nextAfterMessageId as afterMessageId while hasMore is true. Accepted input is not completed work.', { afterMessageId: id }, [], async args => teamInbox(await call({ action: 'read' }), member.id, args.afterMessageId, { group: coordinator })),
       tool('acknowledge_team_messages', 'Acknowledge incoming message IDs you have completely read through read_team before acting on them. This records receipt, not task completion, and prevents later native reinjection. Never acknowledge unread or truncated bodies. Retry the same IDs after a lost response; accepted delivery receipts are idempotent. Claimed or uncertain native deliveries cannot be cleared by this tool.', { messageIds: { type: 'array', items: id, minItems: 1, maxItems: 32, uniqueItems: true } }, ['messageIds'], args => request({ action: 'acknowledge', teamId, memberId: member.id, messageIds: args.messageIds as unknown as string[], expectedNativeSessionId: actual()!.nativeSessionId })),
@@ -287,14 +310,7 @@ export class TeamRuntime implements SessionRole {
     ];
     if (member.role === 'leader') {
       if (!group) tools.push(tool('describe_team_member', 'Record responsibilities agreed with the user. Include task scope, environment, permissions, dependencies and expected evidence. This does not dispatch work or grant native permissions.', { target: id, responsibility: { type: 'string', maxLength: 2048 } }, ['target', 'responsibility'], async args => teamMemberUpdate(await request({ action: 'describe_member', teamId, memberId: member.id, target: args.target!, responsibility: args.responsibility! }), args.target!)));
-      tools.push(tool('read_source_session', 'Read a bounded page from the source conversation for context. The source agent has no Team tools and receives no automatic Team messages.', { before: { type: 'object', properties: { epoch: { type: 'string' }, seq: { type: 'integer' } }, required: ['epoch','seq'], additionalProperties: false } }, [], async args => {
-        assertCurrent();
-        const source = await this.access.acquire(seat.source.providerId, seat.source.nativeSessionId);
-        try { assertCurrent(); const request = { requestId: randomUUID(), agentId: source.agent.agentId, direction: args.before ? 'before' as const : 'tail' as const, limit: 20, ...(args.before ? { cursor: args.before as unknown as {epoch:string;seq:number} } : {}) }; const page = (await source.agent.fetchTimeline(request)).payload; assertCurrent();
-          let remaining = 48000; const entries = page.entries.filter(entry => { remaining -= JSON.stringify(entry).length; return remaining >= 0; });
-          return { ...page, entries, truncated: entries.length !== page.entries.length }; }
-        finally { source.release(); }
-      }));
+      tools.push(readSource);
     }
     if (coordinator) tools.push(...coordinatorTools(input => call(input as Omit<TeamHostCall, 'teamId' | 'memberId'>)));
     const inboxInstructions = ' After completely reading incoming messages from read_team, acknowledge those IDs with acknowledge_team_messages before acting on them. This confirms receipt, not task completion. Never acknowledge unread or truncated message bodies. Follow hasMore with nextAfterMessageId to read additional pages. Retry acknowledgement with the same IDs after a lost response; no user confirmation is needed.';
@@ -316,6 +332,7 @@ export class TeamRuntime implements SessionRole {
       const value = await this.request({ action: 'poll' });
       if (!Array.isArray(value) || !value.every(isTeam)) throw new Error('Invalid Team catalog.');
       await this.forgetEndedGroups(value as Team[]);
+      await this.forgetFinishedTasks(value as Team[]);
       const retained = new Set<string>();
       for (const record of this.records.filter(item => item.creation === 'ready')) {
         const team = (value as Team[]).find(team => team.id === record.seat.teamId);
@@ -333,7 +350,7 @@ export class TeamRuntime implements SessionRole {
         const pending = team.messages.some(item => item.to === member.id && (['queued','dispatching','unknown'].includes(item.status) || item.status === 'accepted' && !['started','handled'].includes(item.acceptance ?? '')));
         const leaseKey = `${team.id}:${member.id}`, current = this.leases.get(leaseKey);
         // The live session decides for a held runtime: reported presence can lag a delivery that just started a turn.
-        if (record.seat.callForSupport && !pending && member.activity === 'idle' && team.status !== 'archiving' && !(current && !idle(current.lease))) continue;
+        if ((record.seat.callForSupport || record.seat.task) && !pending && member.activity === 'idle' && team.status !== 'archiving' && !(current && !idle(current.lease))) continue;
         try {
           const target = this.access.sessionRouting.resolve(this.anchor(record.seat)).target;
           if (target.providerId !== member.providerId || target.nativeSessionId !== member.nativeSessionId) continue;
@@ -355,7 +372,7 @@ export class TeamRuntime implements SessionRole {
               // A claim survived but its local effect boundary did not. Never infer it was unexecuted.
               await this.settle(team.id, member.id, message.id, { status: 'unknown', resolvedTarget: message.resolvedTarget, error: 'Delivery claim has no local receipt. Inspect this session before resolving.' }); continue;
             }
-            if (message.status === 'queued' && team.status === 'active' && availableDelivery(lease, !record.seat.callForSupport)) await this.dispatch(record, team, message, lease, target);
+            if (message.status === 'queued' && team.status === 'active' && availableDelivery(lease, !record.seat.callForSupport && !record.seat.task, !record.seat.task)) await this.dispatch(record, team, message, lease, target);
           }
           this.access.sessionRouting.assertCurrent(this.anchor(record.seat), target);
           await this.request({ action: 'presence', teamId: team.id, memberId: member.id, activity: idle(lease) ? 'idle' : 'busy' });
@@ -398,6 +415,30 @@ export class TeamRuntime implements SessionRole {
     for (const id of ended) if (!this.records.some(item => item.seat.teamId === id)) { this.groupChecks.delete(id); this.boundAt.delete(id); }
     await this.save();
   }
+  /**
+   * Forgets the seats of tasks that finished and whose deliveries settled, and of tasks the Relay removed: a task's seats are never
+   * used again, and every task would otherwise hold two of the Host's seats.
+   */
+  private async forgetFinishedTasks(listed: readonly Team[]): Promise<void> {
+    if (this.access.tasks?.() !== true) return;
+    const settled = (team: Team, memberId: string) => !team.messages.some(message => message.to === memberId && (['queued', 'dispatching', 'unknown'].includes(message.status)
+      || message.status === 'accepted' && !['started', 'handled'].includes(message.acceptance ?? '')));
+    const forgotten = new Set<LocalSeat>(), now = Date.now();
+    for (const record of this.records) {
+      if (!record.seat.task || record.creation === 'dispatching' || Object.values(record.receipts).some(receipt => receipt.status === 'dispatching' || receipt.status === 'unknown')) continue;
+      const team = listed.find(item => item.id === record.seat.teamId);
+      if (team) { this.missingTasks.delete(team.id); if (team.task?.state !== 'working' && settled(team, record.seat.member.id)) forgotten.add(record); continue; }
+      // A Team just created can be missing from a poll answered before its seats were committed; only a long absence means the Relay removed it.
+      const since = this.missingTasks.get(record.seat.teamId) ?? now;
+      this.missingTasks.set(record.seat.teamId, since);
+      if (record.creation !== 'ready' || now - since >= TASK_MISSING_FORGET_MS) forgotten.add(record);
+    }
+    if (!forgotten.size) return;
+    for (const record of forgotten) { const key = `${record.seat.teamId}:${record.seat.member.id}`, held = this.leases.get(key); if (held) this.release(key, held); }
+    this.records = this.records.filter(item => !forgotten.has(item));
+    for (const id of [...this.missingTasks.keys()]) if (!this.records.some(item => item.seat.teamId === id)) this.missingTasks.delete(id);
+    await this.save();
+  }
   private async reconcileReceipts(record: LocalSeat, team?: Team): Promise<void> {
     const pending = Object.entries(record.receipts).filter(([id, receipt]) => !team?.messages.some(message => message.id === id)
       && (['dispatching', 'unknown'].includes(receipt.status) || receipt.status === 'accepted' && !['started', 'handled'].includes(receipt.acceptance ?? '')));
@@ -420,8 +461,9 @@ export class TeamRuntime implements SessionRole {
     return this.request({ action: 'settle', teamId, memberId, messageId, outcome: receipt.status as 'accepted'|'rejected'|'unknown', ...(receipt.resolvedTarget ? {resolvedTarget:receipt.resolvedTarget} : {}), ...(receipt.acceptance ? {acceptance:receipt.acceptance} : {}), ...(receipt.error ? {error:receipt.error} : {}) });
   }
   private async dispatch(record: LocalSeat, team: Team, message: TeamMessage, lease: RemoteHostSessionLease, target: NativeSessionRef) {
-    // Support groups deliver between turns: steering races a turn that is ending, and support work does not need it.
-    const worker = record.seat.member.role === 'requester', delivery = availableDelivery(lease, !record.seat.callForSupport);
+    // Support groups and tasks deliver between turns: steering races a turn that is ending, and their work does not need it.
+    // The Relay frames what a requester and a task's worker read.
+    const framed = record.seat.member.role === 'requester' || !!record.seat.task, delivery = availableDelivery(lease, !record.seat.callForSupport && !record.seat.task, !record.seat.task);
     if (!delivery || this.closed || !this.access.available()) return;
     this.access.sessionRouting.assertCurrent(this.anchor(record.seat), target);
     let receipt: LocalSeat['receipts'][string] | undefined;
@@ -433,7 +475,7 @@ export class TeamRuntime implements SessionRole {
     const sender = team.members.find(member => member.id === message.from);
     const attachments = message.resources?.map((resource,index) => `[resource #${index+1}] ${JSON.stringify(resource)} (Use download_team_resource with resourceId to obtain a verified local file.)`).join('\n');
     // A worker reads support reports as the Relay framed them; Team internals stay with the coordinator.
-    const text = worker ? message.text : `[Team ${team.id}; message ${message.id}; from ${sender?.name ?? message.from}]\n${message.text}${attachments ? `\n\nAttached resources:\n${attachments}` : ''}`;
+    const text = framed ? message.text : `[Team ${team.id}; message ${message.id}; from ${sender?.name ?? message.from}]\n${message.text}${attachments ? `\n\nAttached resources:\n${attachments}` : ''}`;
     try {
       // Succession must not prepare between the claim and its durable receipt, which then takes over as the fence.
       const recipient = nativeSessionRefKey(target);

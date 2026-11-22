@@ -31,6 +31,8 @@ export const TaskBrief = Type.String({ minLength: 1, maxLength: TASK_BRIEF_LIMIT
 export const TaskDoneWhen = Type.String({ minLength: 1, maxLength: TASK_DONE_WHEN_LIMIT, pattern: '\\S' });
 
 export const TASK_QUESTION_LIMIT = 2000;
+/** What the owner reads of the person's words to a worker, and of a pending interaction. */
+export const TASK_TOLD_LIMIT = 280;
 /**
  * Why a task needs input. question: the worker asked its owner (ask_owner); interaction: the worker waits on an approval or a
  * question only the person can answer; no_report: the worker stopped twice without reporting; brief_unknown: whether the worker was
@@ -93,8 +95,8 @@ export function taskSenderName(title: string | undefined): string {
  * question (the worker asks), needs_you (the worker waits on the person, or stopped without reporting), told (the person wrote to
  * the worker).
  */
-export type TaskInputKind = 'brief' | 'message' | 'reminder' | 'done' | 'failed' | 'question' | 'needs_you' | 'told';
-const kindWords: Record<TaskInputKind, string> = { brief: 'brief', message: 'message', reminder: 'report', done: 'done', failed: 'failed', question: 'question',
+export type TaskInputKind = 'brief' | 'message' | 'reminder' | 'done' | 'failed' | 'cancelled' | 'question' | 'needs_you' | 'told';
+const kindWords: Record<TaskInputKind, string> = { brief: 'brief', message: 'message', reminder: 'report', done: 'done', failed: 'failed', cancelled: 'stopped', question: 'question',
   needs_you: 'needs the person', told: 'the person wrote' };
 export const TASK_GUIDANCE: Record<TaskInputKind, string> = {
   brief: 'You work in the owner\'s working directory, which the owner may also change. Do the work with your own tools. '
@@ -104,7 +106,8 @@ export const TASK_GUIDANCE: Record<TaskInputKind, string> = {
   reminder: 'Your last turn ended without a report. If the task is done or cannot be done, call report_task now; if you need something, ask with ask_owner.',
   done: 'This is the worker\'s report. Check what matters before relying on it, then tell the person what it means for their request.',
   failed: 'This is the worker\'s report. Check what matters before relying on it, then tell the person what it means for their request.',
-  question: 'The worker waits for your answer. Answer with message_task and answers set to this task, or ask the person first if only they can decide.',
+  cancelled: 'The person stopped this task; its worker does no more. Take it into account for their request.',
+  question: 'The worker waits for your answer. Answer with message_task, or ask the person first if only they can decide.',
   needs_you: 'The worker waits on the person, who sees the request in the task. Tell the person if they may not have noticed; do not answer it yourself.',
   told: 'The person wrote this to the worker directly. Take it into account; the worker already has it.',
 };
@@ -133,7 +136,7 @@ export type TaskInput =
   | { kind: 'message'; taskId: string; from: string; body: string }
   | { kind: Exclude<TaskInputKind, 'brief' | 'message'>; taskId: string; title: string; body: string };
 const wordKinds = new Map(Object.entries(kindWords).map(([kind, word]) => [word, kind as TaskInputKind]));
-const framePattern = /^\[Task (\S+) · (brief|message|report|done|failed|question|needs the person|the person wrote) · (.+)\]$/;
+const framePattern = new RegExp(`^\\[Task (\\S+) · (${Object.values(kindWords).join('|')}) · (.+)\\]$`);
 /** Reads one brief or update the Relay framed; any other text, or a frame without its closing guidance, is not a task input. */
 function parseOne(lines: string[]): TaskInput | undefined {
   const frame = framePattern.exec(lines[0] ?? '');

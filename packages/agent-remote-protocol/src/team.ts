@@ -4,7 +4,7 @@ import { Value } from '@sinclair/typebox/value';
 import { TeamResource } from './team-resource.js';
 import { CallForSupportCallInput, CallForSupportFinding, CallForSupportGroup, CallForSupportMandate, CallForSupportReportStatus, CallForSupportRosterProposal,
   isCallForSupportGroup } from './call-for-support.js';
-import { TaskBrief, TaskDoneWhen, TaskOwner, TaskReportStatus, TaskTitle, TeamTask, TASK_SUMMARY_LIMIT, isTeamTask } from './task.js';
+import { TaskBrief, TaskDoneWhen, TaskOwner, TaskReportStatus, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_QUESTION_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, isTeamTask } from './task.js';
 const object = { additionalProperties: false } as const;
 const id = Type.String({ minLength: 1, maxLength: 256 });
 const short = Type.String({ maxLength: 2048 });
@@ -77,6 +77,9 @@ export const TeamAction = Type.Union([
   Type.Object({ teamId: id, action: Type.Literal('release_member'), memberId: id }, object),
   Type.Object({ teamId: id, action: Type.Literal('update_mandate'), mandate: CallForSupportMandate, profileRevision: Type.Optional(Type.Integer({ minimum: 1 })) }, object),
   Type.Object({ teamId: id, action: Type.Literal('resume_group') }, object),
+  // The person stops a task, or takes it as done.
+  Type.Object({ teamId: id, action: Type.Literal('cancel_task') }, object),
+  Type.Object({ teamId: id, action: Type.Literal('mark_task_done') }, object),
 ]);
 export type TeamAction = Static<typeof TeamAction>;
 /** Removes an archived Call For Support group for good, so its worker's next call for the profile starts a new group. */
@@ -96,7 +99,9 @@ export const TeamHostCall = Type.Union([
   Type.Object({ action: Type.Literal('send'), teamId: id, memberId: id, to: id, operationId: id, text, resources: Type.Optional(Type.Array(id, { minItems: 1, maxItems: 8, uniqueItems: true })) }, object),
   Type.Object({ action: Type.Literal('describe_member'), teamId: id, memberId: id, target: id, responsibility: short }, object),
   Type.Object({ action: Type.Literal('report'), teamId: id, memberId: id, summary: short }, object),
-  Type.Object({ action: Type.Literal('presence'), teamId: id, memberId: id, activity: enumOf('idle', 'busy', 'unknown') }, object),
+  Type.Object({ action: Type.Literal('presence'), teamId: id, memberId: id, activity: enumOf('idle', 'busy', 'unknown'),
+    // A task worker's pending native interaction, which only the person answers.
+    interaction: Type.Optional(Type.String({ minLength: 1, maxLength: TASK_TOLD_LIMIT })) }, object),
   Type.Object({ action: Type.Literal('claim'), teamId: id, memberId: id, messageId: id, expectedNativeSessionId: Type.Optional(NativeSessionRef.properties.nativeSessionId) }, object),
   Type.Object({ action: Type.Literal('settle'), teamId: id, memberId: id, messageId: id, resolvedTarget: Type.Optional(NativeSessionRef), outcome: enumOf('accepted', 'rejected', 'unknown'), acceptance: Type.Optional(enumOf('started', 'queued', 'handled')), error: Type.Optional(short) }, object),
   // Call For Support coordinator.
@@ -119,8 +124,16 @@ export const TeamHostCall = Type.Union([
   // A main session's task tools, by the main session on the calling Host.
   Type.Object({ action: Type.Literal('create_task'), owner: TaskOwner, operationId: id, title: TaskTitle, brief: TaskBrief, doneWhen: Type.Optional(TaskDoneWhen) }, object),
   Type.Object({ action: Type.Literal('task_status'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), taskId: Type.Optional(id) }, object),
+  Type.Object({ action: Type.Literal('message_task'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), taskId: id, operationId: id,
+    text: Type.String({ minLength: 1, maxLength: TASK_BRIEF_LIMIT }) }, object),
+  Type.Object({ action: Type.Literal('cancel_task'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), taskId: id }, object),
+  Type.Object({ action: Type.Literal('mark_task_done'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), taskId: id,
+    summary: Type.Optional(Type.String({ minLength: 1, maxLength: TASK_SUMMARY_LIMIT })) }, object),
   // A task's worker reports its result once.
   Type.Object({ action: Type.Literal('report_task'), teamId: id, memberId: id, status: TaskReportStatus, summary: Type.String({ minLength: 1, maxLength: TASK_SUMMARY_LIMIT }) }, object),
+  // A task's worker asks its owner, and the worker's Host says what the person wrote to the worker directly.
+  Type.Object({ action: Type.Literal('ask_owner'), teamId: id, memberId: id, question: Type.String({ minLength: 1, maxLength: TASK_QUESTION_LIMIT }) }, object),
+  Type.Object({ action: Type.Literal('tell_task'), teamId: id, memberId: id, operationId: id, text: Type.String({ minLength: 1, maxLength: TASK_TOLD_LIMIT }) }, object),
   // The status of groups the calling Host holds seats in, so it can forget the seats of archived and removed groups.
   Type.Object({ action: Type.Literal('support_group_states'), teamIds: Type.Array(id, { minItems: 1, maxItems: 64, uniqueItems: true }) }, object),
 ]);

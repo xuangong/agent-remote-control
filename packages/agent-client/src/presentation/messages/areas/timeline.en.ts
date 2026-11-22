@@ -47,6 +47,7 @@ export const timeline = {
   'timeline.task.brief': 'Task from {from}',
   'timeline.task.done': 'Task done',
   'timeline.task.failed': 'Task not finished',
+  'timeline.task.cancelled': 'Task stopped',
   'timeline.task.doneWhen': 'Done when: {text}',
   'timeline.task.message': 'Message from {from}',
   'timeline.task.reminder': 'Reminder to report',

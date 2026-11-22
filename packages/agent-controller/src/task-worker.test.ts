@@ -21,7 +21,7 @@ describe('a task between a main session and its worker', () => {
     expect(h.created).toHaveLength(1);
     const worker = h.created[0]!;
     expect(worker.creation.cwd).toBe(h.directory);
-    expect(worker.extensions.tools?.map(item => item.name)).toEqual(['read_source_session', 'report_task']);
+    expect(worker.extensions.tools?.map(item => item.name)).toEqual(['read_source_session', 'report_task', 'ask_owner']);
     expect(worker.extensions.instructions).toContain('worker of task');
     await h.runtime.tick();
     expect(h.sessions.get(worker.id)!.deliveries).toEqual([{ text: expect.stringMatching(/^\[Task \S+ · brief · from Chief\]\nTask: Collect logs\n/), delivery: 'immediate' }]);
@@ -55,7 +55,7 @@ describe('a task between a main session and its worker', () => {
     await h.host(createTask);
     const { extensions } = h.created[0]!;
     expect(extensions.tools).toBeUndefined();
-    expect(extensions.toolNamespaces?.map(namespace => [namespace.name, namespace.tools.map(item => item.name)])).toEqual([['agent_remote_task', ['read_source_session', 'report_task']]]);
+    expect(extensions.toolNamespaces?.map(namespace => [namespace.name, namespace.tools.map(item => item.name)])).toEqual([['agent_remote_task', ['read_source_session', 'report_task', 'ask_owner']]]);
     expect(JSON.parse(await tool(extensions.toolNamespaces![0]!.tools, 'report_task').execute({ status: 'failed', summary: 'The runner is offline.' }) as string)).toMatchObject({ state: 'failed' });
   });
 
@@ -81,6 +81,56 @@ describe('a task between a main session and its worker', () => {
     expect(h.sessions.get('worker')!.deliveries).toHaveLength(1);
   });
 
+  it('tells the owner of a pending interaction in the worker and of a question it asks, and delivers the answer', async () => {
+    const h = await harness();
+    const { taskId } = await h.host(createTask);
+    const worker = h.created[0]!;
+    await h.runtime.tick();
+    h.busy(worker.id, true); h.interaction(worker.id, 'Run npm test?');
+    await h.runtime.tick();
+    expect(h.team(taskId).task).toMatchObject({ state: 'needs_input', waiting: { reason: 'interaction', text: 'Run npm test?' } });
+    h.interaction(worker.id);
+    await h.runtime.tick();
+    expect(h.team(taskId).task?.state).toBe('working');
+    await tool(worker.extensions.tools, 'ask_owner').execute({ question: 'Which branch?' });
+    h.busy(worker.id, false);
+    await h.runtime.tick();
+    const inputs = h.sessions.get('worker')!.deliveries.flatMap(delivery => parseTaskInputs(delivery.text) ?? []);
+    expect(inputs.map(input => input.kind)).toEqual(['needs_you', 'question']);
+    const owner = new WorkerSupport({ request: call => h.host(call), available: () => true, tasks: () => true, stateDirectory: h.directory, title: async () => 'Chief' });
+    await tool(owner.namespace(() => h.ref('codex', 'worker'), false).tools, 'message_task').execute({ taskId, text: 'Use main.' });
+    await h.runtime.tick();
+    expect(h.sessions.get(worker.id)!.deliveries.map(delivery => parseTaskInputs(delivery.text)?.[0]?.kind)).toEqual(['brief', 'message']);
+    expect(h.team(taskId).task?.state).toBe('working');
+  });
+
+  it('tells the owner what the person typed to the worker, and not the inputs the Relay sent it', async () => {
+    const h = await harness();
+    const { taskId } = await h.host(createTask);
+    const worker = h.created[0]!;
+    await h.runtime.tick();
+    h.userMessage(worker.id, h.sessions.get(worker.id)!.deliveries[0]!.text, 'brief');
+    h.userMessage(worker.id, 'Skip the old logs.', 'u1');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    await h.runtime.tick();
+    const told = h.sessions.get('worker')!.deliveries.flatMap(delivery => parseTaskInputs(delivery.text) ?? []);
+    expect(told).toEqual([expect.objectContaining({ kind: 'told', taskId, body: 'Skip the old logs.' })]);
+  });
+
+  it('stops a cancelled task\'s running worker turn and lets its runtime go', async () => {
+    const h = await harness();
+    const { taskId } = await h.host(createTask);
+    const worker = h.created[0]!;
+    await h.runtime.tick();
+    h.busy(worker.id, true);
+    await h.runtime.tick();
+    const owner = new WorkerSupport({ request: call => h.host(call), available: () => true, tasks: () => true, stateDirectory: h.directory, title: async () => 'Chief' });
+    expect(JSON.parse(await tool(owner.namespace(() => h.ref('codex', 'worker'), false).tools, 'cancel_task').execute({ taskId }) as string)).toEqual({ taskId, state: 'cancelled' });
+    await h.runtime.tick();
+    expect(h.cancelled).toEqual([worker.id]);
+    expect(h.released).toContain(worker.id);
+  });
+
   it('reports one task listing to the owner', async () => {
     const h = await harness();
     const { taskId } = await h.host(createTask);
@@ -103,6 +153,7 @@ describe('the main session\'s task tools', () => {
     expect(worker.enabled(ref)).toBe(true);
     expect(worker.enabledByDefault()).toBe(true);
     const tools = worker.namespace(() => ref, false).tools;
+    expect(tools.map(item => item.name).filter(name => name.includes('task'))).toEqual(['create_task', 'task_status', 'message_task', 'cancel_task', 'mark_task_done']);
     await tool(tools, 'create_task').execute({ title: 'Collect logs', brief: 'Collect them.', done_when: 'Attached.', operationId: 'op' });
     expect(calls).toEqual([{ action: 'create_task', owner: { providerId: 'codex', nativeSessionId: 'main', title: 'Chief' }, operationId: 'op', title: 'Collect logs', brief: 'Collect them.', doneWhen: 'Attached.' }]);
     await tool(tools, 'task_status').execute({});

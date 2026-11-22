@@ -34,12 +34,13 @@ export async function supportHarness(options: { callForSupport?: boolean; tasks?
     sessions.set(id, { payload, deliveries: [] });
   };
   session('worker');
-  const acquired: string[] = [], released: string[] = [];
+  const acquired: string[] = [], released: string[] = [], cancelled: string[] = [];
   const listeners = new Map<string, Set<(event: AgentManagerEvent) => void>>();
   const agent = (id: string): SessionWireAgent => ({
     agentId: id, snapshot: () => ({ protocolVersion: '1.8.0', type: 'agent_snapshot', payload: structuredClone(sessions.get(id)!.payload) }),
     subscribe: (listener: (event: AgentManagerEvent) => void) => { const set = listeners.get(id) ?? new Set(); set.add(listener); listeners.set(id, set); return () => { set.delete(listener); }; },
     async fetchTimeline() { return { payload: { entries: [] } } as never; }, async respondToInteraction() {},
+    async cancel() { cancelled.push(id); },
     async sendMessage(text: string, messageOptions?: AgentMessageOptions) { sessions.get(id)!.deliveries.push({ text, delivery: messageOptions?.delivery }); return { disposition: 'started' }; },
   } as unknown as SessionWireAgent);
   let teams: SavedTeam[] = [];
@@ -71,7 +72,7 @@ export async function supportHarness(options: { callForSupport?: boolean; tasks?
   const profile = (input: CallForSupportProfileInput = reviewProfile) => executeProfileCommand(support, { type: 'create', profile: input }, Date.now())!;
   const enable = (profileIds: string[]) => setEnablement(support, resolve, { hostId: 'host', providerId: 'codex', nativeSessionId: 'worker' }, profileIds, Date.now());
   return {
-    directory, commit, git, broker, runtime, sessions, created, acquired, released, ref, profile, enable,
+    directory, commit, git, broker, runtime, sessions, created, acquired, released, cancelled, ref, profile, enable,
     team: (id: string): Team => structuredClone(teams.find(team => team.id === id)!) as Team,
     host: (call: TeamHostCall) => broker.hostCall('host', call) as Promise<any>,
     call: (input: Record<string, unknown>) => broker.hostCall('host', { action: 'call_for_support', worker: { providerId: 'codex', nativeSessionId: 'worker', title: 'Implement login' },
@@ -80,6 +81,14 @@ export async function supportHarness(options: { callForSupport?: boolean; tasks?
     usage(id: string, usage: AgentUsage, turnCompleted = false) {
       const event = turnCompleted ? { type: 'turn_completed' as const, turnId: 'turn', usage } : { type: 'usage_updated' as const, usage };
       for (const listener of listeners.get(id) ?? []) listener({ type: 'agent_stream', agentId: id, event: event as never, delivery: 'live', timestamp: new Date().toISOString() });
+    },
+    /** A pending native interaction in a session, or none. */
+    interaction(id: string, summary?: string) {
+      sessions.get(id)!.payload.pendingInteractions = summary ? [{ kind: 'tool_approval', requestId: 'r', toolCallId: 'c', toolName: 'shell', summary, detail: { type: 'shell', command: 'npm test' }, allowedDecisions: ['allow', 'deny'] } as never] : [];
+    },
+    /** Input someone typed into a session, as its provider streams it. */
+    userMessage(id: string, text: string, messageId: string) {
+      for (const listener of listeners.get(id) ?? []) listener({ type: 'agent_stream', agentId: id, event: { type: 'timeline', item: { type: 'user_message', text, messageId } } as never, delivery: 'live', timestamp: new Date().toISOString() });
     },
     busy(id: string, active: boolean) {
       const payload = sessions.get(id)!.payload;

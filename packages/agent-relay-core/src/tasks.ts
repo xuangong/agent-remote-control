@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { nativeSessionRefKey, TASK_RUNNING_LIMIT, taskBriefText, taskResultText, taskSenderName, taskView, type Team, type TeamHostCall, type TeamMember, type TeamTask, type TaskView } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, TASK_RUNNING_LIMIT, taskBriefText, taskResultText, taskSenderName, taskUpdateText, taskView, TASK_TOLD_LIMIT, type Team, type TeamMessage, type TeamHostCall, type TeamMember, type TeamTask, type TaskView } from '@orchardworks/agent-remote-protocol';
 import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, unresolvedTeamDelivery, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
 import type { TeamBrokerPorts } from './teams.js';
@@ -20,6 +20,10 @@ export interface TaskPorts {
 type CreateCall = Extract<TeamHostCall, { action: 'create_task' }>;
 type StatusCall = Extract<TeamHostCall, { action: 'task_status' }>;
 type ReportCall = Extract<TeamHostCall, { action: 'report_task' }>;
+type MessageCall = Extract<TeamHostCall, { action: 'message_task' }>;
+type OwnerCall = Extract<TeamHostCall, { action: 'cancel_task' | 'mark_task_done' }>;
+type AskCall = Extract<TeamHostCall, { action: 'ask_owner' }>;
+type TellCall = Extract<TeamHostCall, { action: 'tell_task' }>;
 
 /** Finished tasks kept per account; older ones, whose deliveries are settled, are removed. */
 export const TASK_FINISHED_KEEP = 200;
@@ -29,6 +33,83 @@ const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(va
 const task = (team: Team): TeamTask => team.task ?? fail('Team is not a task.');
 const owner = (team: Team): TeamMember => team.members[1] ?? fail('Task has no owner.');
 const finished = (state: TeamTask['state']) => state === 'done' || state === 'failed' || state === 'cancelled';
+const running = (state: TeamTask['state']) => state === 'working' || state === 'needs_input';
+const clip = (text: string) => text.length > TASK_TOLD_LIMIT ? `${text.slice(0, TASK_TOLD_LIMIT - 1)}…` : text;
+/** Whether more input is on its way to a member: queued, being delivered, or accepted but not yet started. */
+const inbound = (team: Team, memberId: string) => team.messages.some(message => message.to === memberId
+  && (message.status === 'queued' || message.status === 'dispatching' || message.status === 'unknown' || message.status === 'accepted' && message.acceptance !== 'started' && message.acceptance !== 'handled'));
+/** Queues a task input; its id makes a repeated call queue it once. */
+function enqueue(team: SavedTeam, from: TeamMember, to: TeamMember, key: unknown[], text: string, now: number): TeamMessage {
+  const id = digest(key), existing = team.messages.find(message => message.id === id);
+  if (existing) return existing;
+  const message = { id, from: from.id, to: to.id, text, status: 'queued' as const, createdAt: now };
+  assertTeamQueueCapacity(team, message);
+  team.messages.push(message);
+  return message;
+}
+function touch(team: SavedTeam, item: TeamTask, now: number) { item.updatedAt = now; team.revision++; team.updatedAt = now; }
+function wait(team: SavedTeam, item: TeamTask, reason: NonNullable<TeamTask['waiting']>['reason'], text: string, now: number) {
+  item.state = 'needs_input'; item.waiting = { reason, text, since: now }; touch(team, item, now);
+}
+/** The worker continues: what it waited for arrived. A pending native interaction still waits for the person. */
+function resume(team: SavedTeam, item: TeamTask, now: number) {
+  if (item.state !== 'needs_input' || item.waiting?.reason === 'interaction') return;
+  item.state = 'working'; delete item.waiting; delete item.reminded; touch(team, item, now);
+}
+/** Ends a task without a report from its worker; what was still on its way to the worker is withdrawn. */
+function close(team: SavedTeam, item: TeamTask, state: 'done' | 'cancelled', summary: string, now: number) {
+  const worker = team.members[0]!;
+  for (const message of team.messages) if (message.to === worker.id && message.status === 'queued') message.status = 'canceled';
+  item.state = state; delete item.waiting;
+  if (state === 'done') item.result = { status: 'done', summary, reportedAt: now };
+  touch(team, item, now);
+}
+/** The worker's turn ended without a report: one reminder, then the task waits for the owner or the person. */
+function turnEnded(team: SavedTeam, item: TeamTask, now: number) {
+  const worker = team.members[0]!, main = owner(team);
+  if (item.reminded === undefined) {
+    item.reminded = now; touch(team, item, now);
+    enqueue(team, main, worker, ['task-reminder', team.id], taskUpdateText({ taskId: team.id, kind: 'reminder', label: item.title, body: 'Report this task.' }), now);
+    return;
+  }
+  wait(team, item, 'no_report', 'The worker stopped without reporting.', now);
+  enqueue(team, worker, main, ['task-no-report', team.id, now], taskUpdateText({ taskId: team.id, kind: 'needs_you', label: item.title,
+    body: 'The worker ended its turns twice without a report. Message it with message_task, or cancel the task or mark it done.' }), now);
+}
+
+/** A task worker's presence: a pending interaction waits for the person, and a turn that ended without a report is followed up. */
+export function taskPresence(team: SavedTeam, self: TeamMember, before: TeamMember['activity'], interaction: string | undefined, now: number): void {
+  const item = team.task;
+  if (!item || self.role !== 'leader' || team.status !== 'active') return;
+  if (interaction && item.state === 'working') {
+    wait(team, item, 'interaction', interaction, now);
+    enqueue(team, self, owner(team), ['task-interaction', team.id, now], taskUpdateText({ taskId: team.id, kind: 'needs_you', label: item.title, body: interaction }), now);
+    return;
+  }
+  if (!interaction && item.state === 'needs_input' && item.waiting?.reason === 'interaction') { item.state = 'working'; delete item.waiting; touch(team, item, now); return; }
+  if (before === 'busy' && self.activity === 'idle' && item.state === 'working' && !inbound(team, self.id)) turnEnded(team, item, now);
+}
+/** A delivery to the worker whose outcome is unknown: the worker may not have its brief, so the task waits for a decision. */
+export function taskSettled(team: SavedTeam, message: TeamMessage, now: number): void {
+  const item = team.task;
+  if (!item || message.to !== team.members[0]?.id || message.status !== 'unknown' || item.state !== 'working') return;
+  wait(team, item, 'brief_unknown', 'Whether the worker received its input is unknown.', now);
+  enqueue(team, team.members[0]!, owner(team), ['task-unknown', team.id, message.id], taskUpdateText({ taskId: team.id, kind: 'needs_you', label: item.title,
+    body: 'Whether the worker received its last input is unknown, so it is not sent again. Send it again with message_task, or cancel the task.' }), now);
+}
+/** The person stops a task or takes it as done; the owner is told. */
+export function taskAction(team: SavedTeam, action: 'cancel_task' | 'mark_task_done', now: number): void {
+  const item = task(team);
+  if (!running(item.state)) fail('This task is no longer running.');
+  const worker = team.members[0]!, main = owner(team);
+  if (action === 'cancel_task') {
+    close(team, item, 'cancelled', '', now);
+    enqueue(team, worker, main, ['task-cancelled', team.id], taskUpdateText({ taskId: team.id, kind: 'cancelled', label: item.title, body: 'The person stopped this task.' }), now);
+  } else {
+    close(team, item, 'done', 'The person marked this task done.', now);
+    enqueue(team, worker, main, ['task-result', team.id], resultText(team), now);
+  }
+}
 const sameKey = (resolve: TeamBrokerPorts['resolveSession'], hostId: string, providerId: string, nativeSessionId: string) => {
   try { return nativeSessionRefKey(resolve(hostId, providerId, nativeSessionId)); } catch { return undefined; }
 };
@@ -82,8 +163,8 @@ export class TaskGroups {
         if (!item || seat?.nativeSessionId !== call.owner.nativeSessionId || seat.hostId !== hostId || item.title !== call.title || item.brief !== call.brief || item.doneWhen !== call.doneWhen) fail('Task identity has different input.');
         return existing;
       }
-      const running = ownerTasks(plain(teams), resolve, hostId, call.owner).filter(team => team.task!.state === 'working').length;
-      if (running >= TASK_RUNNING_LIMIT) fail(`This session already has ${running} tasks running. Wait for a result before starting another.`);
+      const count = ownerTasks(plain(teams), resolve, hostId, call.owner).filter(team => running(team.task!.state)).length;
+      if (count >= TASK_RUNNING_LIMIT) fail(`This session already has ${count} tasks running. Wait for a result before starting another.`);
       pruneTasks(teams, 1);
       if (plain(teams).length >= ACCOUNT_TEAM_LIMIT) fail('Team capacity reached.');
       const worker: TeamMember = { id: randomUUID(), role: 'leader', hostId, providerId: call.owner.providerId, name: 'Worker', responsibility: call.title,
@@ -102,7 +183,8 @@ export class TaskGroups {
     const team = await this.provision(created.id);
     const view = taskView(team);
     return { taskId: view.taskId, state: view.state,
-      message: view.state === 'queued' ? `Task ${view.taskId} is recorded but its worker is not ready${view.worker.error ? `: ${view.worker.error}` : ''}.`
+      message: view.state === 'needs_input' ? `Task ${view.taskId} is recorded, but whether its worker session started is unknown${view.worker.error ? ` (${view.worker.error})` : ''}. Tell the person; cancel it with cancel_task if it should not run.`
+        : view.state === 'queued' ? `Task ${view.taskId} is recorded but its worker is not ready${view.worker.error ? `: ${view.worker.error}` : ''}.`
         : `Task ${view.taskId} started. Its result arrives later as input; keep the person informed meanwhile.` };
   }
   /** The owner's seat binds first; the worker starts in the owner's directory. */
@@ -111,7 +193,13 @@ export class TaskGroups {
     let team = await this.broker.provision(teamId, owner(saved).id);
     if (owner(team).creation !== 'ready') return team;
     team = await this.broker.provision(teamId, team.members[0]!.id);
-    return team;
+    if (team.members[0]!.creation !== 'unknown' || team.task?.state !== 'working') return team;
+    // Whether the worker session exists is unknown, and it is never created twice: the task waits for the person or the owner.
+    return this.broker.change(teams => {
+      const saved = teams.find(item => item.id === teamId) ?? fail('Task not found.'), item = task(saved);
+      if (item.state === 'working' && saved.members[0]!.creation === 'unknown') wait(saved, item, 'brief_unknown', 'Whether the worker session started is unknown.', this.broker.ports.now());
+      return saved;
+    });
   }
   status(hostId: string, call: StatusCall): { tasks: TaskView[] } | TaskView {
     this.ports.assertHost(hostId);
@@ -129,13 +217,66 @@ export class TaskGroups {
         if (item.result.status === call.status && item.result.summary === call.summary) return { taskId: team.id, state: item.state };
         fail('This task was already reported.');
       }
-      if (item.state !== 'working' || team.status !== 'active') fail('This task is no longer running.');
-      item.result = { status: call.status, summary: call.summary, reportedAt: now }; item.state = call.status; item.updatedAt = now;
-      const message = { id: digest(['task-result', team.id]), from: self.id, to: owner(team).id, text: resultText(team), status: 'queued' as const, createdAt: now };
-      assertTeamQueueCapacity(team, message);
-      team.messages.push(message);
-      team.revision++; team.updatedAt = now;
+      if (!running(item.state) || team.status !== 'active') fail('This task is no longer running.');
+      item.result = { status: call.status, summary: call.summary, reportedAt: now }; item.state = call.status; delete item.waiting; touch(team, item, now);
+      enqueue(team, self, owner(team), ['task-result', team.id], resultText(team), now);
       return { taskId: team.id, state: item.state };
+    });
+  }
+  /** The owner sends its worker input; it answers a question the worker asked. */
+  message(hostId: string, call: MessageCall): Promise<{ taskId: string; state: TeamTask['state'] }> {
+    return this.ownerChange(hostId, call, (team, item, now) => {
+      if (!running(item.state)) fail('This task is finished. Start a new task for more work.');
+      const main = owner(team);
+      enqueue(team, main, team.members[0]!, ['task-message', team.id, call.operationId], taskUpdateText({ taskId: team.id, kind: 'message', label: main.name, body: call.text }), now);
+      resume(team, item, now);
+      return { taskId: team.id, state: item.state };
+    });
+  }
+  /** The owner stops a task, or takes it as done. */
+  finish(hostId: string, call: OwnerCall): Promise<{ taskId: string; state: TeamTask['state'] }> {
+    return this.ownerChange(hostId, call, (team, item, now) => {
+      if (call.action === 'cancel_task' ? item.state === 'cancelled' : item.state === 'done') return { taskId: team.id, state: item.state };
+      if (!running(item.state)) fail('This task is no longer running.');
+      close(team, item, call.action === 'cancel_task' ? 'cancelled' : 'done', call.action === 'mark_task_done' ? call.summary ?? 'Marked done by its owner.' : '', now);
+      return { taskId: team.id, state: item.state };
+    });
+  }
+  /** The worker asks its owner; the task waits for the answer. */
+  ask(hostId: string, call: AskCall): Promise<{ taskId: string; state: TeamTask['state'] }> {
+    return this.workerChange(hostId, call, (team, self, item, now) => {
+      if (item.state === 'needs_input' && item.waiting?.reason === 'question' && item.waiting.text === call.question) return { taskId: team.id, state: item.state };
+      if (item.state !== 'working') fail('This task is not running.');
+      wait(team, item, 'question', call.question, now);
+      enqueue(team, self, owner(team), ['task-question', team.id, now], taskUpdateText({ taskId: team.id, kind: 'question', label: item.title, body: call.question }), now);
+      return { taskId: team.id, state: item.state };
+    });
+  }
+  /** The person wrote to the worker directly: the owner is told, and what the worker waited for may have arrived. */
+  tell(hostId: string, call: TellCall): Promise<{ taskId: string; state: TeamTask['state'] }> {
+    return this.workerChange(hostId, call, (team, self, item, now) => {
+      if (!running(item.state)) return { taskId: team.id, state: item.state };
+      enqueue(team, self, owner(team), ['task-told', team.id, call.operationId], taskUpdateText({ taskId: team.id, kind: 'told', label: item.title, body: clip(call.text) }), now);
+      resume(team, item, now);
+      return { taskId: team.id, state: item.state };
+    });
+  }
+  private ownerChange<T>(hostId: string, call: { owner: { providerId: string; nativeSessionId: string }; taskId: string }, update: (team: SavedTeam, item: TeamTask, now: number) => T): Promise<T> {
+    this.ports.assertHost(hostId);
+    return this.broker.change(teams => {
+      const team = ownerTasks(teams, this.broker.ports.resolveSession, hostId, call.owner).find(item => item.id === call.taskId) ?? fail('Task not found for this session.');
+      if (team.status !== 'active') fail('This task is no longer running.');
+      return update(team, task(team), this.broker.ports.now());
+    });
+  }
+  private workerChange<T>(hostId: string, call: { teamId: string; memberId: string }, update: (team: SavedTeam, self: TeamMember, item: TeamTask, now: number) => T): Promise<T> {
+    this.ports.assertHost(hostId);
+    return this.broker.change(teams => {
+      const team = teams.find(item => item.id === call.teamId) ?? fail('Task not found.'), item = task(team);
+      const self = team.members.find(member => member.id === call.memberId) ?? fail('Team member not found.');
+      if (self.hostId !== hostId || self.creation !== 'ready' || self.role !== 'leader') fail('Only the task\'s worker does this.');
+      if (team.status !== 'active') fail('This task is no longer running.');
+      return update(team, self, item, this.broker.ports.now());
     });
   }
 }

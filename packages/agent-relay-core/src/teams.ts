@@ -3,7 +3,7 @@ import { plain } from './drafts.js';
 export { teamMessageBudgetBytes } from './team-delivery.js';
 import type { TeamResourceStore } from './team-resources.js';
 import { admitTeam, archiveIdleGroups, callForSupportNeedsCompaction, CallForSupportGroups, compactCallForSupport, pruneGroups, restoreGroup, type CallForSupportPorts } from './call-for-support.js';
-import { TaskGroups, type TaskPorts } from './tasks.js';
+import { TaskGroups, taskAction, taskPresence, taskSettled, type TaskPorts } from './tasks.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TeamResource } from '@orchardworks/agent-remote-protocol';
 
@@ -161,6 +161,10 @@ export class TeamBroker {
         ...(input.followUpOf ? { followUpOf: input.followUpOf } : {}) });
     }
     if (input.action === 'resolve_roster' || input.action === 'release_member' || input.action === 'update_mandate' || input.action === 'resume_group') return (this.groups ?? fail(unavailableGroups)).userAction(input);
+    if (input.action === 'cancel_task' || input.action === 'mark_task_done') {
+      if (!this.tasks) fail(unavailableTasks);
+      return this.project(await this.change(teams => { const team = find(teams, input.teamId); taskAction(team, input.action as 'cancel_task' | 'mark_task_done', this.ports.now()); return team; }));
+    }
     if (input.action === 'add_member') this.ports.assertHost(input.hostId, input.providerId);
     const result = await this.change(teams => {
       const team = find(teams, input.teamId), now = this.ports.now();
@@ -219,6 +223,10 @@ export class TeamBroker {
     if (call.action === 'create_task') return (this.tasks ?? fail(unavailableTasks)).create(hostId, call);
     if (call.action === 'task_status') return (this.tasks ?? fail(unavailableTasks)).status(hostId, call);
     if (call.action === 'report_task') { assertCurrent(); return (this.tasks ?? fail(unavailableTasks)).report(hostId, call); }
+    if (call.action === 'message_task') return (this.tasks ?? fail(unavailableTasks)).message(hostId, call);
+    if (call.action === 'cancel_task' || call.action === 'mark_task_done') return (this.tasks ?? fail(unavailableTasks)).finish(hostId, call);
+    if (call.action === 'ask_owner') { assertCurrent(); return (this.tasks ?? fail(unavailableTasks)).ask(hostId, call); }
+    if (call.action === 'tell_task') { assertCurrent(); return (this.tasks ?? fail(unavailableTasks)).tell(hostId, call); }
     if (call.action === 'support_group_states') return (this.groups ?? fail(unavailableGroups)).groupStates(hostId, call.teamIds);
     if (call.action === 'propose_roster' || call.action === 'release_supporter' || call.action === 'report_support' || call.action === 'write_ledger' || call.action === 'report_usage' || call.action === 'collect_supporter_patch') {
       assertCurrent(); return (this.groups ?? fail(unavailableGroups)).memberCall(hostId, call);
@@ -256,7 +264,11 @@ export class TeamBroker {
         return { acknowledged: messages.map(message => ({ id: message.id, from: message.from, to: message.to,
           status: message.status, acceptance: message.acceptance, createdAt: message.createdAt, resolvedTarget: message.resolvedTarget })) };
       }
-      if (call.action === 'presence') { if (self.activity === call.activity && team.status !== 'archiving') return team.status; self.activity = call.activity; self.updatedAt = now; settleArchive(team, now); return team.status; }
+      if (call.action === 'presence') {
+        const before = self.activity;
+        if (team.task) { self.activity = call.activity; taskPresence(team, self, before, call.interaction, now); if (before !== call.activity) self.updatedAt = now; return team.status; }
+        if (self.activity === call.activity && team.status !== 'archiving') return team.status; self.activity = call.activity; self.updatedAt = now; settleArchive(team, now); return team.status;
+      }
       if (call.action === 'settle' || call.action === 'claim') {
         const message = team.messages.find(item => item.id === call.messageId && item.to === self.id);
         if (!message) {
@@ -278,6 +290,7 @@ export class TeamBroker {
           message.resolvedTarget = structuredClone(target); message.status = 'dispatching'; self.activity = 'busy';
         }
         else { if (!recipientAware && message.resolvedTarget && nativeSessionRefKey(message.resolvedTarget) !== nativeSessionRefKey(this.resolveRecipientFromAnchor(self))) fail(upgradeRequired); if (call.resolvedTarget && (!message.resolvedTarget || nativeSessionRefKey(call.resolvedTarget) !== nativeSessionRefKey(message.resolvedTarget))) fail('Team receipt recipient changed.'); if (message.status !== 'dispatching' && message.status !== 'unknown' && message.status !== call.outcome && !withdrawable(message, call.outcome)) fail('Message is already settled.'); message.status = call.outcome; if (message.acceptance !== 'started' && message.acceptance !== 'handled') message.acceptance = call.acceptance; message.error = call.error; }
+        if (call.action === 'settle') taskSettled(team, message, now);
         return projectDelivery(message);
       }
       active(team);

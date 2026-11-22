@@ -8,12 +8,12 @@ import type { SessionExecutionRouting } from './session-succession-service.js';
 import type { RoleSuccessionDecision, SessionRole } from './session-role-succession.js';
 import type { SessionCreation } from './role-session-creation.js';
 import { coordinatorInstructions, coordinatorTools, locationInstructions, supporterInstructions } from './call-for-support-roles.js';
-import { reportTaskTool, TASK_WORKER_NAMESPACE, taskWorkerInstructions } from './task-roles.js';
+import { askOwnerTool, reportTaskTool, TASK_WORKER_NAMESPACE, taskWorkerInstructions } from './task-roles.js';
 import { collectPatch, createBundle, fetchBundle, prepareWorktree, removeWorktree, repositoryRoot, worktreePath } from './call-for-support-workspaces.js';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { accountUsage, type SupportUsage } from './call-for-support-usage.js';
 import { tmpdir } from 'node:os';
-import { isNativeSessionRef, joinTaskInputs, nativeSessionRefKey, type NativeSessionRef, isTeam, isTeamSeat, sessionOperationAvailability, type Team, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat } from '@orchardworks/agent-remote-protocol';
+import { isNativeSessionRef, joinTaskInputs, nativeSessionRefKey, parseTaskInputs, TASK_TOLD_LIMIT, type NativeSessionRef, isTeam, isTeamSeat, sessionOperationAvailability, type Team, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat } from '@orchardworks/agent-remote-protocol';
 import { OperationCacheError, type AgentManagerEvent, type RemoteHostSessionLease, type SessionWireOperationExecutor } from '@orchardworks/agent-session-runtime';
 
 export interface TeamRuntimeAccess {
@@ -51,6 +51,13 @@ const TASK_MISSING_FORGET_MS = 10 * 60_000;
 const errorText = (error: unknown) => (error instanceof Error ? error.message : 'Team operation failed.').slice(0, 2048);
 function operationId(value: string) {
   const hex = createHash('sha256').update(value).digest('hex'); return `${hex.slice(0,8)}-${hex.slice(8,12)}-8${hex.slice(13,16)}-a${hex.slice(17,20)}-${hex.slice(20,32)}`;
+}
+/** A pending native interaction in a session, in a few words, or undefined. */
+function pendingInteraction(lease: RemoteHostSessionLease): string | undefined {
+  const request = lease.agent.snapshot().payload.pendingInteractions[0] as { summary?: string; title?: string; message?: string } | undefined;
+  if (!request) return undefined;
+  const words = (request.summary || request.title || request.message || 'It waits for the person to answer a request.').replace(/\s+/g, ' ').trim();
+  return words.length > TASK_TOLD_LIMIT ? `${words.slice(0, TASK_TOLD_LIMIT - 1)}…` : words;
 }
 function idle(lease: RemoteHostSessionLease): boolean {
   const state = lease.agent.snapshot().payload;
@@ -306,8 +313,8 @@ export class TeamRuntime implements SessionRole {
     // A task's worker reads its brief as input and reports once; it has no Team inbox. Its tools come as a namespace where the
     // provider takes one, so reporting never waits for the person's approval.
     if (seat.task) {
-      const taskTools = bindAgentSessionTools([readSource, reportTaskTool(input => call(input))], assertCurrent), instructions = `${taskWorkerInstructions(seat)} ${locationInstructions(seat)}`;
-      return this.access.toolNamespaces?.(member.providerId) ? { instructions, toolNamespaces: [{ name: TASK_WORKER_NAMESPACE, description: 'Agent Remote Control: this task\'s own tools, to read its owner\'s conversation and report the result.', tools: taskTools }] }
+      const taskTools = bindAgentSessionTools([readSource, reportTaskTool(input => call(input)), askOwnerTool(input => call(input))], assertCurrent), instructions = `${taskWorkerInstructions(seat)} ${locationInstructions(seat)}`;
+      return this.access.toolNamespaces?.(member.providerId) ? { instructions, toolNamespaces: [{ name: TASK_WORKER_NAMESPACE, description: 'Agent Remote Control: this task\'s own tools, to read its owner\'s conversation, ask it, and report the result.', tools: taskTools }] }
         : { instructions, tools: taskTools };
     }
     const tools = [
@@ -362,7 +369,9 @@ export class TeamRuntime implements SessionRole {
         const pending = team.messages.some(item => item.to === member.id && (['queued','dispatching','unknown'].includes(item.status) || item.status === 'accepted' && !['started','handled'].includes(item.acceptance ?? '')));
         const leaseKey = `${team.id}:${member.id}`, current = this.leases.get(leaseKey);
         // The live session decides for a held runtime: reported presence can lag a delivery that just started a turn.
-        if ((record.seat.callForSupport || record.seat.task) && !pending && member.activity === 'idle' && team.status !== 'archiving' && !(current && !idle(current.lease))) continue;
+        // A running task's worker stays held, so its ended turns, pending interactions and the person's input to it are seen.
+        const working = !!record.seat.task && member.role === 'leader' && (team.task?.state === 'working' || team.task?.state === 'needs_input');
+        if ((record.seat.callForSupport || record.seat.task) && !working && !pending && member.activity === 'idle' && team.status !== 'archiving' && !(current && !idle(current.lease))) continue;
         try {
           const target = this.access.sessionRouting.resolve(this.anchor(record.seat)).target;
           if (target.providerId !== member.providerId || target.nativeSessionId !== member.nativeSessionId) continue;
@@ -373,10 +382,13 @@ export class TeamRuntime implements SessionRole {
             const lease = await this.access.acquire(target.providerId, target.nativeSessionId); held = { target, lease };
             // While held, a support group's coordinator and supporters account their usage toward the group's budget.
             if (record.seat.callForSupport && member.role !== 'requester') { const seat = record; held.unsubscribe = lease.agent.subscribe(event => this.observeUsage(seat, event)); }
+            if (record.seat.task && member.role === 'leader') { const seat = record; held.unsubscribe = lease.agent.subscribe(event => this.observeWorkerInput(seat, event)); }
             this.leases.set(leaseKey, held);
           }
           this.access.sessionRouting.assertCurrent(this.anchor(record.seat), target);
           retained.add(leaseKey); const lease = held.lease;
+          // A task worker that was just given input may not show its turn yet: its presence waits for the next poll, so an ended turn is never inferred from it.
+          let dispatched = false;
           for (const message of team.messages.filter(item => item.to === member.id && (['queued','dispatching','unknown'].includes(item.status) || item.status === 'accepted' && !['started','handled'].includes(item.acceptance ?? '')))) {
             const receipt = record.receipts[message.id];
             if (receipt && receipt.status !== 'dispatching') { await this.settle(team.id, member.id, message.id, receipt); continue; }
@@ -388,10 +400,11 @@ export class TeamRuntime implements SessionRole {
             if (record.seat.task && member.role === 'requester') {
               const key = nativeSessionRefKey(target), batch = updates.get(key) ?? { lease, target, items: [] };
               batch.items.push({ record, team, message }); updates.set(key, batch);
-            } else await this.dispatch([{ record, team, message }], lease, target);
+            } else { await this.dispatch([{ record, team, message }], lease, target); dispatched = !!record.seat.task; }
           }
           this.access.sessionRouting.assertCurrent(this.anchor(record.seat), target);
-          await this.request({ action: 'presence', teamId: team.id, memberId: member.id, activity: idle(lease) ? 'idle' : 'busy' });
+          const interaction = working ? pendingInteraction(lease) : undefined;
+          if (!dispatched) await this.request({ action: 'presence', teamId: team.id, memberId: member.id, activity: idle(lease) ? 'idle' : 'busy', ...(interaction ? { interaction } : {}) });
         } catch { /* Pending records remain durable; next poll retries reads and receipts, never uncertain effects. */ }
       }
       for (const batch of updates.values()) {
@@ -443,18 +456,30 @@ export class TeamRuntime implements SessionRole {
     if (this.access.tasks?.() !== true) return;
     const settled = (team: Team, memberId: string) => !team.messages.some(message => message.to === memberId && (['queued', 'dispatching', 'unknown'].includes(message.status)
       || message.status === 'accepted' && !['started', 'handled'].includes(message.acceptance ?? '')));
-    const forgotten = new Set<LocalSeat>(), now = Date.now();
+    const forgotten = new Set<LocalSeat>(), cancelled = new Set<LocalSeat>(), now = Date.now();
     for (const record of this.records) {
       if (!record.seat.task || record.creation === 'dispatching' || Object.values(record.receipts).some(receipt => receipt.status === 'dispatching' || receipt.status === 'unknown')) continue;
       const team = listed.find(item => item.id === record.seat.teamId);
-      if (team) { this.missingTasks.delete(team.id); if (team.task?.state !== 'working' && settled(team, record.seat.member.id)) forgotten.add(record); continue; }
+      if (team) {
+        this.missingTasks.delete(team.id);
+        if (team.task?.state === 'cancelled' && record.seat.member.role === 'leader') cancelled.add(record);
+        if (team.task?.state !== 'working' && team.task?.state !== 'needs_input' && settled(team, record.seat.member.id)) forgotten.add(record);
+        continue;
+      }
       // A Team just created can be missing from a poll answered before its seats were committed; only a long absence means the Relay removed it.
       const since = this.missingTasks.get(record.seat.teamId) ?? now;
       this.missingTasks.set(record.seat.teamId, since);
       if (record.creation !== 'ready' || now - since >= TASK_MISSING_FORGET_MS) forgotten.add(record);
     }
     if (!forgotten.size) return;
-    for (const record of forgotten) { const key = `${record.seat.teamId}:${record.seat.member.id}`, held = this.leases.get(key); if (held) this.release(key, held); }
+    for (const record of forgotten) {
+      const key = `${record.seat.teamId}:${record.seat.member.id}`, held = this.leases.get(key);
+      if (!held) continue;
+      // A stopped task's worker stops its running turn before its runtime is let go.
+      if (cancelled.has(record) && !idle(held.lease)) await this.access.execute(held.lease.agent, { operationId: operationId(`task-cancel:${record.seat.teamId}`), kind: 'cancel', parameters: null, maximumResultBytes: 4096 },
+        { dispatch: async () => { await held.lease.agent.cancel?.(); } }).catch(() => undefined);
+      this.release(key, held);
+    }
     this.records = this.records.filter(item => !forgotten.has(item));
     for (const id of [...this.missingTasks.keys()]) if (!this.records.some(item => item.seat.teamId === id)) this.missingTasks.delete(id);
     await this.save();
@@ -566,6 +591,15 @@ export class TeamRuntime implements SessionRole {
     if (receipts.length) { await this.save(); await settleAll(); }
   }
   private release(key: string, held: { lease: RemoteHostSessionLease; unsubscribe?: () => void }) { held.unsubscribe?.(); held.lease.release(); this.leases.delete(key); }
+  /** What the person writes to a task's worker directly reaches its owner too; the Relay's own framed inputs do not. */
+  private observeWorkerInput(record: LocalSeat, event: AgentManagerEvent): void {
+    if (event.type !== 'agent_stream' || event.delivery === 'history' || event.event.type !== 'timeline' || event.event.item.type !== 'user_message') return;
+    const item = event.event.item, text = item.text.trim();
+    if (!text || item.withdrawn || parseTaskInputs(text)) return;
+    const id = item.messageId ?? item.clientMessageId ?? createHash('sha256').update(text).digest('hex').slice(0, 64);
+    void this.request({ action: 'tell_task', teamId: record.seat.teamId, memberId: record.seat.member.id, operationId: id,
+      text: text.length > TASK_TOLD_LIMIT ? `${text.slice(0, TASK_TOLD_LIMIT - 1)}…` : text }).catch(() => undefined);
+  }
   private observeUsage(record: LocalSeat, event: AgentManagerEvent): void {
     if (event.type !== 'agent_stream' || event.delivery === 'history') return;
     const update = event.event.type === 'usage_updated' ? event.event.usage : event.event.type === 'turn_completed' ? event.event.usage : undefined;

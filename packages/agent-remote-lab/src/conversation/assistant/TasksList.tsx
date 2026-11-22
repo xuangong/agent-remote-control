@@ -1,4 +1,5 @@
-import { useContext } from 'react';
+import { useContext, useState } from 'react';
+import { errorWords } from '@orchardworks/agent-client';
 import type { TaskView } from '@orchardworks/agent-remote-protocol';
 import { LocaleContext, useTaskDirectory, useTranslate } from '@orchardworks/agent-client-web/react';
 import { dateLocale, replyTime } from '../../kernel/reply-time.js';
@@ -12,6 +13,12 @@ export function TasksList({ tasks }: { tasks: readonly TaskView[] }) {
   const t = useTranslate();
   const locale = useContext(LocaleContext);
   const directory = useTaskDirectory();
+  const [pending, setPending] = useState(false), [error, setError] = useState<string>();
+  async function act(taskId: string, action: 'cancel_task' | 'mark_task_done') {
+    if (!directory || pending) return;
+    setPending(true); setError(undefined);
+    try { await directory.act(taskId, action); } catch (reason) { setError(errorWords(reason, t, 'details.taskActionFailed')); } finally { setPending(false); }
+  }
   const groups: Array<[string | undefined, TaskView[]]> = [
     [t('state.needsYou'), tasks.filter(task => task.state === 'needs_input')],
     [t('state.working'), tasks.filter(task => task.state === 'working' || task.state === 'queued')],
@@ -25,12 +32,16 @@ export function TasksList({ tasks }: { tasks: readonly TaskView[] }) {
         ? <button type="button" className="lab-assistant-session-title" onClick={() => directory.open(task.taskId)}>{task.title}</button>
         : <span className="lab-assistant-session-title">{task.title}</span>}>
       {task.waiting ? <p>{task.waiting.text}</p> : null}
+      {directory && (task.state === 'working' || task.state === 'needs_input' || task.state === 'queued') ? <div className="lab-assistant-task-actions">
+        <button type="button" className="lab-assistant-action" disabled={pending} onClick={() => void act(task.taskId, 'mark_task_done')}>{t('details.taskMarkDone')}</button>
+        <button type="button" className="lab-assistant-action" disabled={pending} onClick={() => void act(task.taskId, 'cancel_task')}>{t('details.taskStop')}</button>
+      </div> : null}
       {task.result ? <p>{task.result.summary}</p> : null}
       {task.worker.nativeSessionId ? <Copyable label={t('details.sessionId')} value={task.worker.nativeSessionId} /> : null}
     </SessionRow>)}</ul>
-  </section>)}</div>;
+  </section>)}{error ? <p role="alert">{error}</p> : null}</div>;
 }
 
 function stateWords(task: TaskView, t: Translate): string | undefined {
-  return task.state === 'failed' ? t('state.failed') : task.state === 'cancelled' ? t('state.ended') : undefined;
+  return task.state === 'failed' ? t('state.failed') : task.state === 'cancelled' ? t('details.taskStopped') : undefined;
 }

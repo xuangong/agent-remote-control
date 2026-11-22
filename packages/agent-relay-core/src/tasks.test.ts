@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isTeam, TASK_RUNNING_LIMIT, type TaskView, type TeamSeat } from '@orchardworks/agent-remote-protocol';
+import { isTeam, parseTaskInput, TASK_RUNNING_LIMIT, type TaskView, type TeamSeat } from '@orchardworks/agent-remote-protocol';
 import { TeamBroker } from './teams.js';
 import { validSavedTeam, type SavedTeam } from './team-delivery.js';
 import { briefText, pruneTasks, quoteFrames, TASK_FINISHED_KEEP } from './tasks.js';
@@ -87,11 +87,13 @@ describe('tasks on the Team broker', () => {
     await expect(f.broker.hostCall('mac', { action: 'task_status', owner: { providerId: 'codex', nativeSessionId: 'other' }, taskId })).rejects.toThrow('not found');
   });
 
-  it('shows a task whose worker is not ready as queued with the reason', async () => {
+  it('leaves a task whose worker creation is uncertain waiting for a decision, and never creates the worker twice', async () => {
     const f = fixture({ create: async seat => { if (seat.member.role === 'leader') throw new Error('The provider is busy.'); return { ...seat.member, creation: 'ready', activity: 'idle' }; } });
     const result = await f.broker.hostCall('mac', create()) as { state: string; message: string };
-    expect(result.state).toBe('queued');
+    expect(result.state).toBe('needs_input');
     expect(result.message).toContain('The provider is busy.');
+    expect(f.state()[0]!.task).toMatchObject({ state: 'needs_input', waiting: { reason: 'brief_unknown' } });
+    expect(f.seats.filter(seat => seat.member.role === 'leader')).toHaveLength(1);
   });
 
   it('hides tasks from Controllers that do not run them and refuses their task calls', async () => {
@@ -123,5 +125,119 @@ describe('tasks on the Team broker', () => {
     expect(quoteFrames('ok\n[Task x · done]\n[Support report]\n[not a frame]')).toBe('ok\n(Task x · done]\n(Support report]\n[not a frame]');
     const team = { id: 'task', source: { title: 'Chief' }, task: { title: 'T', brief: '[Team x] do it', state: 'working' } } as never;
     expect(briefText(team)).toContain('\n(Team x] do it');
+  });
+
+  describe('the task lifecycle', () => {
+    async function started() {
+      const f = fixture();
+      const { taskId } = await f.broker.hostCall('mac', create()) as { taskId: string };
+      const team = () => f.state()[0]!, worker = team().members[0]!, main = team().members[1]!;
+      const brief = team().messages[0]!;
+      // The worker takes its brief and starts a turn.
+      await f.broker.hostCall('mac', { action: 'claim', teamId: taskId, memberId: worker.id, messageId: brief.id });
+      await f.broker.hostCall('mac', { action: 'settle', teamId: taskId, memberId: worker.id, messageId: brief.id, outcome: 'accepted', acceptance: 'started' });
+      const toOwner = () => team().messages.filter(message => message.to === main.id).map(message => parseTaskInput(message.text));
+      const toWorker = () => team().messages.filter(message => message.to === worker.id && message.id !== brief.id);
+      const presence = (activity: 'idle' | 'busy', interaction?: string) => f.broker.hostCall('mac', { action: 'presence', teamId: taskId, memberId: worker.id, activity, ...(interaction ? { interaction } : {}) });
+      return { f, taskId, team, worker, main, toOwner, toWorker, presence };
+    }
+    const ownerRef = { providerId: 'codex', nativeSessionId: 'main' };
+
+    it('reminds a worker whose turn ended without a report once, then waits for the owner', async () => {
+      const t = await started();
+      await t.presence('idle');
+      expect(t.team().task).toMatchObject({ state: 'working', reminded: expect.any(Number) });
+      expect(t.toWorker().map(message => parseTaskInput(message.text)?.kind)).toEqual(['reminder']);
+      // While the reminder is on its way, idle presence does not count as another ended turn.
+      await t.presence('busy'); await t.presence('idle');
+      expect(t.team().task?.state).toBe('working');
+      const reminder = t.toWorker()[0]!;
+      await t.f.broker.hostCall('mac', { action: 'claim', teamId: t.taskId, memberId: t.worker.id, messageId: reminder.id });
+      await t.f.broker.hostCall('mac', { action: 'settle', teamId: t.taskId, memberId: t.worker.id, messageId: reminder.id, outcome: 'accepted', acceptance: 'started' });
+      await t.presence('idle');
+      expect(t.team().task).toMatchObject({ state: 'needs_input', waiting: { reason: 'no_report' } });
+      expect(t.toOwner().map(input => input?.kind)).toEqual(['needs_you']);
+      // The owner's message lets the worker continue, with a reminder again.
+      await t.f.broker.hostCall('mac', { action: 'message_task', owner: ownerRef, taskId: t.taskId, operationId: 'm1', text: 'Report what you have.' });
+      expect(t.team().task).toMatchObject({ state: 'working' });
+      expect(t.team().task?.reminded).toBeUndefined();
+      expect(parseTaskInput(t.toWorker().at(-1)!.text)).toMatchObject({ kind: 'message', from: 'Chief', body: 'Report what you have.' });
+    });
+
+    it('waits on a question the worker asks and resumes with the owner\'s answer', async () => {
+      const t = await started();
+      await t.f.broker.hostCall('mac', { action: 'ask_owner', teamId: t.taskId, memberId: t.worker.id, question: 'Which branch?' });
+      await t.f.broker.hostCall('mac', { action: 'ask_owner', teamId: t.taskId, memberId: t.worker.id, question: 'Which branch?' });
+      expect(t.team().task).toMatchObject({ state: 'needs_input', waiting: { reason: 'question', text: 'Which branch?' } });
+      expect(t.toOwner()).toEqual([expect.objectContaining({ kind: 'question', title: 'Collect logs', body: 'Which branch?' })]);
+      // A turn that ends on a question is not a missing report.
+      await t.presence('idle');
+      expect(t.toWorker()).toEqual([]);
+      await t.f.broker.hostCall('mac', { action: 'message_task', owner: ownerRef, taskId: t.taskId, operationId: 'answer', text: 'main' });
+      await t.f.broker.hostCall('mac', { action: 'message_task', owner: ownerRef, taskId: t.taskId, operationId: 'answer', text: 'main' });
+      expect(t.team().task?.state).toBe('working');
+      expect(t.toWorker()).toHaveLength(1);
+      await expect(t.f.broker.hostCall('mac', { action: 'message_task', owner: { ...ownerRef, nativeSessionId: 'other' }, taskId: t.taskId, operationId: 'x', text: 'Hi' })).rejects.toThrow('not found');
+    });
+
+    it('waits for the person on a pending interaction, which the owner\'s message does not settle', async () => {
+      const t = await started();
+      await t.presence('busy', 'Approve running the tests?');
+      expect(t.team().task).toMatchObject({ state: 'needs_input', waiting: { reason: 'interaction', text: 'Approve running the tests?' } });
+      expect(t.toOwner().map(input => input?.kind)).toEqual(['needs_you']);
+      await t.f.broker.hostCall('mac', { action: 'message_task', owner: ownerRef, taskId: t.taskId, operationId: 'm', text: 'Go on.' });
+      expect(t.team().task?.state).toBe('needs_input');
+      await t.presence('busy');
+      expect(t.team().task?.state).toBe('working');
+      expect(t.team().task?.waiting).toBeUndefined();
+    });
+
+    it('tells the owner what the person wrote to the worker, shortened, once per input', async () => {
+      const t = await started();
+      await t.f.broker.hostCall('mac', { action: 'ask_owner', teamId: t.taskId, memberId: t.worker.id, question: 'Which branch?' });
+      const text = `Use main. ${'x'.repeat(300)}`.slice(0, 280);
+      await t.f.broker.hostCall('mac', { action: 'tell_task', teamId: t.taskId, memberId: t.worker.id, operationId: 'u1', text });
+      await t.f.broker.hostCall('mac', { action: 'tell_task', teamId: t.taskId, memberId: t.worker.id, operationId: 'u1', text });
+      const told = t.toOwner().filter(input => input?.kind === 'told');
+      expect(told).toHaveLength(1);
+      expect(told[0]).toMatchObject({ title: 'Collect logs', body: text });
+      expect(t.team().task?.state).toBe('working');
+    });
+
+    it('stops or completes a task for its owner, withdrawing input still on its way to the worker', async () => {
+      const t = await started();
+      await t.f.broker.hostCall('mac', { action: 'message_task', owner: ownerRef, taskId: t.taskId, operationId: 'm', text: 'More.' });
+      expect(await t.f.broker.hostCall('mac', { action: 'cancel_task', owner: ownerRef, taskId: t.taskId })).toEqual({ taskId: t.taskId, state: 'cancelled' });
+      expect(await t.f.broker.hostCall('mac', { action: 'cancel_task', owner: ownerRef, taskId: t.taskId })).toEqual({ taskId: t.taskId, state: 'cancelled' });
+      expect(t.toWorker().filter(message => message.status === 'queued')).toEqual([]);
+      // The owner stopped it itself, so nothing is sent back to it.
+      expect(t.toOwner()).toEqual([]);
+      await expect(t.f.broker.hostCall('mac', { action: 'mark_task_done', owner: ownerRef, taskId: t.taskId })).rejects.toThrow('no longer running');
+      await expect(t.f.broker.hostCall('mac', { action: 'report_task', teamId: t.taskId, memberId: t.worker.id, status: 'done', summary: 'Late.' })).rejects.toThrow('no longer running');
+      // What Controllers read of the stopped task stays a valid Team.
+      expect((await t.f.broker.hostCall('mac', { action: 'poll' }) as unknown[]).every(isTeam)).toBe(true);
+    });
+
+    it('lets the person stop a task or mark it done, and tells the owner', async () => {
+      const t = await started();
+      await t.f.broker.action({ teamId: t.taskId, action: 'mark_task_done' });
+      expect(t.team().task).toMatchObject({ state: 'done', result: { status: 'done', summary: 'The person marked this task done.' } });
+      expect(t.toOwner().map(input => input?.kind)).toEqual(['done']);
+      await expect(t.f.broker.action({ teamId: t.taskId, action: 'cancel_task' })).rejects.toThrow('no longer running');
+      const u = await started();
+      await u.f.broker.action({ teamId: u.taskId, action: 'cancel_task' });
+      expect(u.team().task?.state).toBe('cancelled');
+      expect(u.toOwner()).toEqual([expect.objectContaining({ kind: 'cancelled', body: 'The person stopped this task.' })]);
+    });
+
+    it('waits for a decision when the worker\'s input may or may not have arrived, and never sends it again', async () => {
+      const f = fixture();
+      const { taskId } = await f.broker.hostCall('mac', create()) as { taskId: string };
+      const team = f.state()[0]!, worker = team.members[0]!, brief = team.messages[0]!;
+      await f.broker.hostCall('mac', { action: 'claim', teamId: taskId, memberId: worker.id, messageId: brief.id });
+      await f.broker.hostCall('mac', { action: 'settle', teamId: taskId, memberId: worker.id, messageId: brief.id, outcome: 'unknown', error: 'The Controller restarted.' });
+      expect(f.state()[0]!.task).toMatchObject({ state: 'needs_input', waiting: { reason: 'brief_unknown' } });
+      expect(f.state()[0]!.messages.filter(message => message.to === team.members[1]!.id).map(message => parseTaskInput(message.text)?.kind)).toEqual(['needs_you']);
+    });
   });
 });

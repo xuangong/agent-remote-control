@@ -47,6 +47,7 @@ export const timeline: AreaMessages<typeof english> = {
   'timeline.task.brief': '{from} 交给你的任务',
   'timeline.task.done': '任务完成啦',
   'timeline.task.failed': '任务没能完成',
+  'timeline.task.cancelled': '任务已停止',
   'timeline.task.doneWhen': '完成标准：{text}',
   'timeline.task.message': '{from} 发来的消息',
   'timeline.task.reminder': '提醒你汇报结果',

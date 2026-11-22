@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { AgentSessionTool, AgentSessionToolNamespace } from '@orchardworks/agent-provider-sdk';
-import { nativeSessionRefKey, TASK_BRIEF_LIMIT, TASK_DONE_WHEN_LIMIT, TASK_TITLE_LIMIT, type CallForSupportCall, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, TASK_BRIEF_LIMIT, TASK_DONE_WHEN_LIMIT, TASK_SUMMARY_LIMIT, TASK_TITLE_LIMIT, type CallForSupportCall, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { TeamResourceFiles } from './team-resource-files.js';
 
 export interface WorkerSupportPorts {
@@ -105,8 +105,16 @@ export class WorkerSupport {
           return taskRequest({ action: 'create_task', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId, ...(title ? { title: title.slice(0, 256) } : {}) },
             operationId: args.operationId ?? randomUUID(), title: args.title, brief: args.brief, ...(args.done_when ? { doneWhen: args.done_when } : {}) });
         }),
-      tool('task_status', 'List the tasks this session started, newest first, with their state (queued, working, done, failed, cancelled) and result; or read one by taskId.',
+      tool('task_status', 'List the tasks this session started, newest first, with their state (queued, working, needs_input, done, failed, cancelled), what a waiting task waits for, and the result; or read one by taskId.',
         object({ taskId: id }, []), args => { const ref = worker(); return taskRequest({ action: 'task_status', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, ...(args.taskId ? { taskId: args.taskId } : {}) }); }),
+      tool('message_task', 'Send input to the worker of a running task: an answer to its question, a correction or more detail. It arrives when the worker is between turns.',
+        object({ taskId: id, text: { type: 'string', minLength: 1, maxLength: TASK_BRIEF_LIMIT }, operationId: id }, ['taskId', 'text']), args => { const ref = worker();
+          return taskRequest({ action: 'message_task', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, taskId: args.taskId, operationId: args.operationId ?? randomUUID(), text: args.text }); }),
+      tool('cancel_task', 'Stop a running task: its worker stops and gets no more input. Its session stays readable.',
+        object({ taskId: id }, ['taskId']), args => { const ref = worker(); return taskRequest({ action: 'cancel_task', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, taskId: args.taskId }); }),
+      tool('mark_task_done', 'Take a running task as done without its report, for example when the person says it is enough; summary records why.',
+        object({ taskId: id, summary: { type: 'string', minLength: 1, maxLength: TASK_SUMMARY_LIMIT } }, ['taskId']), args => { const ref = worker();
+          return taskRequest({ action: 'mark_task_done', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, taskId: args.taskId, ...(args.summary ? { summary: args.summary } : {}) }); }),
     ];
     return { name: WORKER_NAMESPACE, description: 'Agent Remote Control: start tasks that other sessions work on in parallel and report back; call for support from other sessions, models and machines (reviews, consultations, tests), and read their reports.',
       ...(deferred ? { deferred: true } : {}), tools };

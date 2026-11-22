@@ -67,3 +67,4 @@ input.lab-assistant-card-name { width: 100%; background: var(--orchard-surface);
   .lab-assistant-copy, .lab-avatar-picker button, .lab-assistant-session-toggle { min-width: 44px; }
 }
 .lab-assistant-tasks .lab-assistant-identity p { white-space: pre-wrap; }
+.lab-assistant-task-actions { display: flex; gap: var(--orchard-space-xs); }

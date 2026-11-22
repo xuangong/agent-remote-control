@@ -10,6 +10,8 @@ export interface TaskDirectory {
   open(taskId: string): void;
   /** The tasks a session owns, newest first. */
   owned(owner: { providerId: string; nativeSessionId: string }): readonly TaskView[];
+  /** The person stops a running task or takes it as done. */
+  act(taskId: string, action: 'cancel_task' | 'mark_task_done'): Promise<void>;
 }
 export const TaskDirectoryContext = createContext<TaskDirectory | undefined>(undefined);
 export const useTaskDirectory = (): TaskDirectory | undefined => useContext(TaskDirectoryContext);

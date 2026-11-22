@@ -78,4 +78,10 @@ describe('task contract', () => {
     expect(isTeamTask({ ...task, state: 'needs_input' })).toBe(false);
     expect(isTeamTask({ ...task, waiting })).toBe(false);
   });
+  it('reads back every kind of update it writes', () => {
+    for (const kind of ['message', 'reminder', 'done', 'failed', 'cancelled', 'question', 'needs_you', 'told'] as const) {
+      const text = taskUpdateText({ taskId: 't1', kind, label: 'Collect logs', body: 'Body.' });
+      expect(parseTaskInput(text)).toMatchObject(kind === 'message' ? { kind, from: 'Collect logs', body: 'Body.' } : { kind, title: 'Collect logs', body: 'Body.' });
+    }
+  });
 });

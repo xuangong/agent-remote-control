@@ -11,10 +11,11 @@ export function taskWorker(tasks: readonly Team[] | undefined, taskId: string): 
 }
 
 /** Task cards open a task's worker session the way the page opens any session. */
-export function taskDirectory(tasks: readonly Team[] | undefined, open: (worker: TaskWorker) => void): TaskDirectory {
+export function taskDirectory(tasks: readonly Team[] | undefined, open: (worker: TaskWorker) => void, act: TaskDirectory['act'] = async () => {}): TaskDirectory {
   return {
     canOpen: taskId => !!taskWorker(tasks, taskId),
     open: taskId => { const worker = taskWorker(tasks, taskId); if (worker) open(worker); },
+    act,
     owned: owner => (tasks ?? []).filter(team => team.task && team.members[1]?.providerId === owner.providerId && team.members[1].nativeSessionId === owner.nativeSessionId)
       .map(taskView).sort((a, b) => b.updatedAt - a.updatedAt),
   };

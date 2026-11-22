@@ -1,10 +1,11 @@
-import { TASK_SUMMARY_LIMIT, type TeamHostCall, type TeamSeat } from '@orchardworks/agent-remote-protocol';
+import { TASK_QUESTION_LIMIT, TASK_SUMMARY_LIMIT, type TeamHostCall, type TeamSeat } from '@orchardworks/agent-remote-protocol';
 import type { AgentSessionTool } from '@orchardworks/agent-provider-sdk';
 
 /** The namespace of a task worker's own tools. */
 export const TASK_WORKER_NAMESPACE = 'agent_remote_task';
 
-type Call = (input: Omit<Extract<TeamHostCall, { action: 'report_task' }>, 'teamId' | 'memberId'>) => Promise<unknown>;
+type Worker<A> = Omit<Extract<TeamHostCall, { action: A }>, 'teamId' | 'memberId'>;
+type Call = (input: Worker<'report_task'> | Worker<'ask_owner'>) => Promise<unknown>;
 
 /** A task's worker: do the brief with its own tools and report once. */
 export function taskWorkerInstructions(seat: TeamSeat): string {
@@ -12,7 +13,8 @@ export function taskWorkerInstructions(seat: TeamSeat): string {
     + 'Your brief arrives as your first input, labelled [Task … · brief]. Do the work yourself with your own tools in this working directory; the owner may change it too, so do not undo changes you did not make. '
     + 'Read the owner\'s conversation with read_source_session only when the brief is not enough. '
     + 'When the task is done, or you cannot finish it, call report_task once with status done or failed and a summary the owner can act on without reading your conversation: what you did, what you found, where results are, and what is left. '
-    + 'Input labelled [Task …] that follows comes from the person or the owner about this task. Native permissions still apply.';
+    + 'When only the owner can decide something, ask with ask_owner and end your turn; the answer arrives as input. '
+    + 'Input labelled [Task …] that follows comes from the owner about this task; the person may also write to you directly. Native permissions still apply.';
 }
 
 /** The worker's report_task tool. */
@@ -23,5 +25,15 @@ export function reportTaskTool(call: Call): AgentSessionTool {
     inputSchema: { type: 'object', properties: { status: { type: 'string', enum: ['done', 'failed'] }, summary: { type: 'string', minLength: 1, maxLength: TASK_SUMMARY_LIMIT } },
       required: ['status', 'summary'], additionalProperties: false },
     execute: async args => JSON.stringify(await call({ action: 'report_task', status: (args as { status: 'done' | 'failed' }).status, summary: (args as { summary: string }).summary })),
+  };
+}
+
+/** The worker's ask_owner tool: the task waits until the owner or the person answers. */
+export function askOwnerTool(call: Call): AgentSessionTool {
+  return {
+    name: 'ask_owner',
+    description: 'Ask the session that started this task a question only it or the person can answer, then end your turn. The task waits; the answer arrives as input.',
+    inputSchema: { type: 'object', properties: { question: { type: 'string', minLength: 1, maxLength: TASK_QUESTION_LIMIT } }, required: ['question'], additionalProperties: false },
+    execute: async args => JSON.stringify(await call({ action: 'ask_owner', question: (args as { question: string }).question })),
   };
 }

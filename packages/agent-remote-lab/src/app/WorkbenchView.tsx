@@ -15,6 +15,8 @@ import { TpmViewScope } from '../kernel/useTpmVisibility.js';
 import { ToastActivity } from '../kernel/Toast.js';
 import { useCallback, useMemo, type ReactNode } from 'react';
 import { taskDirectory } from '../features/tasks/task-directory.js';
+import { RemoteTeamClient } from '@orchardworks/agent-client';
+import { workspaceFetch } from '../kernel/workspace-access.js';
 import { HttpPreviewClient } from '@orchardworks/agent-client';
 import { RecoveryScope } from '../kernel/conversation-recovery.js';
 import type { RemoteHost } from '../kernel/remote-host.js';
@@ -56,14 +58,16 @@ import { shownAssistantName } from '../kernel/window-title.js';
 const WINDOW_INSPECTOR_WIDTH = 320;
 
 export function WorkbenchView({ scope }: { readonly scope: AppScope }) {
-  const { assistantNames, activated, activeAgentId, activeOpened, activeView, askView, attention, backgroundInert, baseUrl, commandItems, compactLayout, connections, contextOpen, contextVisible, desktopContextVisible, focusManagedWindow, headerHidden, inspectorOpen, liveConnections, nativeTakeover, navigation, openExcerptSource, pageOpen, presentedPrimaryViewId, presentedViewId, previewClient, previewHost, promptMigrations, readingPositions, searchOpen, sessionDescriptions, sessionNotice, sessionViewOperations, setSearchOpen, setShortcutsOpen, sharedDrafts, sharedFeeds, sharedWindow, shellRef, shortcutsOpen, sidebar, state, supportingRailOpen, teamView, tpmView, tracking, transport, userScoped, vscodeTunnelClient, windowMode, windowPageTitle, windowWorkspace, workbenchPanelRef , teamRoster , openSession } = scope;
+  const { assistantNames, activated, activeAgentId, activeOpened, activeView, askView, attention, backgroundInert, baseUrl, commandItems, compactLayout, connections, contextOpen, contextVisible, desktopContextVisible, focusManagedWindow, headerHidden, inspectorOpen, liveConnections, nativeTakeover, navigation, openExcerptSource, pageOpen, presentedPrimaryViewId, presentedViewId, previewClient, previewHost, promptMigrations, readingPositions, searchOpen, sessionDescriptions, sessionNotice, sessionViewOperations, setSearchOpen, setShortcutsOpen, sharedDrafts, sharedFeeds, sharedWindow, shellRef, shortcutsOpen, sidebar, state, supportingRailOpen, teamView, tpmView, tracking, transport, userScoped, vscodeTunnelClient, windowMode, windowPageTitle, windowWorkspace, workbenchPanelRef , teamRoster , openSession , updateTaskRoster } = scope;
   const phone = usePhoneLayout();
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), [setShortcutsOpen]);
   const pageShown = !!navigation.page;
   const detailsBeside = useDetailsBeside(phone);
   const tasks = teamRoster?.baseUrl === baseUrl ? teamRoster.tasks : undefined;
-  const tasksDirectory = useMemo(() => taskDirectory(tasks, worker => void openSession(worker, undefined, undefined, false, undefined, undefined, undefined, undefined, compactLayout ? 'primary' : undefined)),
-    [tasks, openSession, compactLayout]);
+  const taskClient = useMemo(() => new RemoteTeamClient(baseUrl, workspaceFetch), [baseUrl]);
+  const tasksDirectory = useMemo(() => taskDirectory(tasks, worker => void openSession(worker, undefined, undefined, false, undefined, undefined, undefined, undefined, compactLayout ? 'primary' : undefined),
+    async (taskId, action) => { const team = await taskClient.action({ teamId: taskId, action }); updateTaskRoster(baseUrl, [...(tasks ?? []).filter(item => item.id !== team.id), team]); }),
+    [tasks, openSession, compactLayout, taskClient, updateTaskRoster, baseUrl]);
   return <TaskDirectoryContext.Provider value={tasksDirectory}><AssistantNamesContext.Provider value={assistantNames}><SharedFeedsContext.Provider value={sharedFeeds}><SharedDraftsContext.Provider value={sharedDrafts}><LiveConnectionsContext.Provider value={liveConnections.stable}><SessionDescriptionsContext.Provider value={sessionDescriptions}><SessionExcerptNavigation.Provider value={openExcerptSource}><SessionViewOperationsContext.Provider value={sessionViewOperations}><AskViewScope.Provider value={askView.execute}><WindowSessionBridgeContext.Provider value={windowWorkspace.sessionBridge}><WindowLayoutContext.Provider value={windowWorkspace.authority}><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={windowMode && !compactLayout && activeView === 'workbench'}><TeamViewScope.Provider value={teamView.execute}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><PreviewScope client={previewClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><RecoveryScope.Provider value={readingPositions}><SessionConversationSurfaces scope={baseUrl} transport={transport} mode={navigation.mode}>{/* The frame sizes the rail and Bot mode's panels, leaving Window mode's own sidebar and inspector the room they take; the window's
      title names the assistant on screen, or Window mode's own title. */}
   <DesktopFrame surface={pageShown ? 'page' : windowMode ? 'window' : 'bot'} phone={phone}

@@ -1,4 +1,5 @@
 import { act } from 'react';
+const act_ = (work: () => void) => act(async () => work());
 import { describe, expect, it, vi } from 'vitest';
 import type { Team, TeamTask } from '@orchardworks/agent-remote-protocol';
 import { TaskDirectoryContext } from '@orchardworks/agent-client-web/react';
@@ -37,5 +38,16 @@ describe('the task directory', () => {
       .toEqual([['Needs you', 1], ['Working', 1], ['Done', 1]]);
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button.lab-assistant-session-title')].find(button => button.textContent === 'Task n')!.click());
     expect(open).toHaveBeenCalledWith(expect.objectContaining({ nativeSessionId: 'n-session' }));
+  });
+
+  it('stops a running task or marks it done from its row, and offers neither on a finished one', async () => {
+    const act = vi.fn(async () => {});
+    const directory = taskDirectory([taskTeam('w', {}), taskTeam('d', { state: 'done', result: { status: 'done', summary: 'Done.', reportedAt: 3 } })], () => {}, act);
+    const container = await render(<TaskDirectoryContext.Provider value={directory}><TasksList tasks={directory.owned({ providerId: 'claude', nativeSessionId: 'main' })} /></TaskDirectoryContext.Provider>);
+    const rows = [...container.querySelectorAll('li')];
+    for (const row of rows) await act_(() => row.querySelector<HTMLButtonElement>('.lab-assistant-session-toggle')!.click());
+    expect(rows.map(row => [...row.querySelectorAll('.lab-assistant-task-actions button')].map(button => button.textContent))).toEqual([['Mark done', 'Stop'], []]);
+    await act_(() => rows[0]!.querySelector<HTMLButtonElement>('.lab-assistant-task-actions button:last-child')!.click());
+    expect(act).toHaveBeenCalledWith('w', 'cancel_task');
   });
 });

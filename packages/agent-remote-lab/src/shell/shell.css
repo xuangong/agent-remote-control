@@ -176,7 +176,7 @@
   display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 12px; border-radius: var(--ui-radius-control);
   color: var(--ui-label); font: var(--ui-size-body)/1.25 var(--ui-font); cursor: pointer;
 }
-.lab-command-option[aria-selected="true"] { background: var(--ui-selection); }
+.lab-command-option[aria-selected="true"] { background: var(--orchard-tint); }
 .lab-command-title { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lab-command-subtitle { flex: 1; min-width: 0; overflow: hidden; color: var(--ui-label-secondary); font-size: var(--ui-size-callout); text-overflow: ellipsis; white-space: nowrap; }
 .lab-command-shortcut { flex: none; margin-inline-start: auto; color: var(--ui-label-secondary); font: var(--ui-size-caption)/1 var(--ui-font); }

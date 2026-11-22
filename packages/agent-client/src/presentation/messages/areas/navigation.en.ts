@@ -123,7 +123,7 @@ export const navigation = {
   'navigation.newBot.starting': 'Starting…',
   'navigation.newBot.start': 'Start',
   'navigation.botWorkspace.opening': 'Opening the assistant…',
-  'navigation.botWorkspace.unavailable': 'This assistant or group is not available now.',
+  'navigation.botWorkspace.unavailable': 'This assistant or group is unavailable.',
   'navigation.botWorkspace.saving': 'Saving the new group…',
   'navigation.botWorkspace.groupUnconfirmed': 'The new group is not confirmed.',
   'navigation.botWorkspace.hostOffline': 'Host offline',

@@ -376,3 +376,20 @@ it('leaves tasks and links between assistants, which the Relay keeps as Teams, o
   expect(view.textContent).not.toContain('Collect logs');
   expect(view.textContent).not.toContain('Chief and Tracker');
 });
+it('shows a room with what was said and who speaks, and sends the person\'s message or ends it', async () => {
+  const members = [{ ...team.members[0]!, role: 'requester' as const, name: 'Chief' }, { ...team.members[1]!, hostId: 'mac', role: 'requester' as const, name: 'Tracker' }];
+  const room: Team = { ...structuredClone(team), id: 'room', title: 'Release', members, room: { name: 'Release', topic: 'Ready?', state: 'open', deadline: Date.now() + 60_000, turns: 1,
+    speaker: members[0]!.id, askedAt: 1, seen: {}, passed: [], transcript: [{ id: 'a', from: members[0]!.id, name: 'Chief', text: 'Ready?', at: 1 }, { id: 'b', from: members[1]!.id, name: 'Tracker', text: 'Two bugs open.', at: 2 }] } };
+  fixture.teams = [room];
+  const view = await render(<App />);
+  await act(async () => button(view, 'Teams').click());
+  const shown = view.querySelector('.lab-room')!;
+  expect(shown.querySelector('[role="status"]')?.textContent).toBe('Chief is speaking');
+  expect([...shown.querySelectorAll('.lab-room-transcript li strong')].map(item => item.textContent)).toEqual(['Chief', 'Tracker']);
+  const box = shown.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message to the room"]')!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, 'Ship it.'); box.dispatchEvent(new Event('input', { bubbles: true })); });
+  await act(async () => button(shown as HTMLElement, 'Send').click());
+  expect(fixture.actions).toEqual([{ teamId: 'room', action: 'room_post', operationId: expect.any(String), text: 'Ship it.' }]);
+  await act(async () => button(shown as HTMLElement, 'End room').click());
+  expect(fixture.actions.at(-1)).toEqual({ teamId: 'room', action: 'close_room' });
+});

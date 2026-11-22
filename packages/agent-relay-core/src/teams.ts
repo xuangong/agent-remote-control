@@ -4,6 +4,7 @@ export { teamMessageBudgetBytes } from './team-delivery.js';
 import type { TeamResourceStore } from './team-resources.js';
 import { admitTeam, archiveIdleGroups, callForSupportNeedsCompaction, CallForSupportGroups, compactCallForSupport, pruneGroups, restoreGroup, type CallForSupportPorts } from './call-for-support.js';
 import { AssistantMessages, type AssistantPorts } from './assistants.js';
+import { roomAction, Rooms } from './rooms.js';
 import { TaskGroups, taskAction, taskPresence, taskSettled, type TaskPorts } from './tasks.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TeamResource } from '@orchardworks/agent-remote-protocol';
@@ -57,9 +58,13 @@ export class TeamBroker {
   private readonly groups?: CallForSupportGroups;
   private readonly tasks?: TaskGroups;
   private readonly assistants?: AssistantMessages;
+  private readonly rooms?: Rooms;
   constructor(private readonly ports: TeamBrokerPorts) {
     if (ports.tasks) this.tasks = new TaskGroups({ ports, change: update => this.change(update), provision: (teamId, memberId) => this.provision(teamId, memberId) }, ports.tasks);
-    if (ports.assistants) this.assistants = new AssistantMessages({ ports, change: update => this.change(update), provision: (teamId, memberId) => this.provision(teamId, memberId) }, ports.assistants);
+    if (ports.assistants) {
+      const lent = { ports, change: <T>(update: (teams: SavedTeam[]) => T) => this.change(update), provision: (teamId: string, memberId: string) => this.provision(teamId, memberId) };
+      this.assistants = new AssistantMessages(lent, ports.assistants); this.rooms = new Rooms(lent, ports.assistants);
+    }
     if (ports.callForSupport) this.groups = new CallForSupportGroups({ ports, change: update => this.change(update), provision: (teamId, memberId) => this.provision(teamId, memberId),
       project: team => this.project(team), resource: (team, memberId, resourceId) => this.resourceAccess(team, memberId, resourceId),
       pinResources: (teamId, memberId, resourceIds, keep) => this.pinResources(teamId, memberId, resourceIds, keep) }, ports.callForSupport);
@@ -167,6 +172,10 @@ export class TeamBroker {
         ...(input.followUpOf ? { followUpOf: input.followUpOf } : {}) });
     }
     if (input.action === 'resolve_roster' || input.action === 'release_member' || input.action === 'update_mandate' || input.action === 'resume_group') return (this.groups ?? fail(unavailableGroups)).userAction(input);
+    if (input.action === 'room_post' || input.action === 'close_room') {
+      if (!this.rooms) fail(unavailableAssistants);
+      return this.project(await this.change(teams => { const team = find(teams, input.teamId); roomAction(team, input as Parameters<typeof roomAction>[1], this.ports.now()); return team; }));
+    }
     if (input.action === 'cancel_task' || input.action === 'mark_task_done') {
       if (!this.tasks) fail(unavailableTasks);
       return this.project(await this.change(teams => { const team = find(teams, input.teamId); taskAction(team, input.action as 'cancel_task' | 'mark_task_done', this.ports.now()); return team; }));
@@ -221,7 +230,7 @@ export class TeamBroker {
     // A Controller that does not run Call For Support groups never sees them.
     // A Controller that does not run tasks never sees them either.
     const visible = (team: SavedTeam) => (!team.callForSupport || this.ports.callForSupport?.capable(hostId) === true) && (!team.task || this.ports.tasks?.capable(hostId) === true)
-      && (!team.link || this.ports.assistants?.capable(hostId) === true);
+      && (!team.link && !team.room || this.ports.assistants?.capable(hostId) === true);
     // A released member's Host keeps seeing its Team, to clean up what the member left.
     if (call.action === 'poll') return this.ports.read().filter(team => team.status !== 'archived' && visible(team) && team.members.some(item => item.hostId === hostId && (item.creation === 'ready' || item.creation === 'released'))).map(team => this.project(team, recipientAware));
     const projectDelivery = <T extends { id: string; resolvedTarget?: NativeSessionRef }>(value: T) => recipientAware ? value : withoutRecipient(value);
@@ -230,6 +239,8 @@ export class TeamBroker {
     if (call.action === 'create_task') return (this.tasks ?? fail(unavailableTasks)).create(hostId, call);
     if (call.action === 'task_status') return (this.tasks ?? fail(unavailableTasks)).status(hostId, call);
     if (call.action === 'report_task') { assertCurrent(); return (this.tasks ?? fail(unavailableTasks)).report(hostId, call); }
+    if (call.action === 'open_room') return (this.rooms ?? fail(unavailableAssistants)).open(hostId, call);
+    if (call.action === 'room_say' || call.action === 'room_pass') return (this.rooms ?? fail(unavailableAssistants)).speak(hostId, call);
     if (call.action === 'list_assistants') return (this.assistants ?? fail(unavailableAssistants)).list(hostId, call);
     if (call.action === 'message_assistant') return (this.assistants ?? fail(unavailableAssistants)).message(hostId, call);
     if (call.action === 'message_task') return (this.tasks ?? fail(unavailableTasks)).message(hostId, call);
@@ -246,7 +257,7 @@ export class TeamBroker {
       assertCurrent();
       const team = find(teams, call.teamId), self = member(team, call.memberId), now = this.ports.now();
       if (self.hostId !== hostId || self.creation !== 'ready') fail('This Host is not the registered Team member.');
-      if (!visible(team)) fail(team.task || team.link ? tasksUpgrade : callForSupportUpgrade);
+      if (!visible(team)) fail(team.task || team.link || team.room ? tasksUpgrade : callForSupportUpgrade);
       if (!recipientAware && !sameRecipient(this.resolveRecipientFromAnchor(self), self)) fail(upgradeRequired);
       if (call.action === 'read') return { ...this.project(team, recipientAware), receipts: team.deliveryReceipts?.map(({ fingerprint: _hash, settledAt: _time, ...receipt }) => projectDelivery(receipt)) ?? [] };
       if (call.action === 'acknowledge') {
@@ -428,7 +439,7 @@ export class TeamBroker {
     try {
       result = await this.ports.createSeat(item.hostId, { teamId, source: team.source, member: item,
         ...(team.callForSupport ? { callForSupport: { role: team.callForSupport.role, description: team.callForSupport.description } } : {}),
-        ...(team.task ? { task: { title: team.task.title } } : {}), ...(team.link ? { link: { peer: team.members.find(other => other.id !== item.id)!.name } } : {}) });
+        ...(team.task ? { task: { title: team.task.title } } : {}), ...(team.link ? { link: { peer: team.members.find(other => other.id !== item.id)!.name } } : {}), ...(team.room ? { room: { name: team.room.name } } : {}) });
       if (!isTeamMember(result) || result.id !== item.id || result.hostId !== item.hostId || result.providerId !== item.providerId || result.role !== item.role || result.creation !== 'ready' || !result.nativeSessionId) fail('Invalid Host member registration.');
     } catch (error) { result = { ...item, creation: 'unknown', error: error instanceof Error ? error.message.slice(0, 2048) : 'Member creation is uncertain.' }; }
     return this.change(teams => {

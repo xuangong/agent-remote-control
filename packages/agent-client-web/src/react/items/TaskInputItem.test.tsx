@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { expect, it } from 'vitest';
-import { appendSessionReferences, assistantMessageText, joinTaskInputs, taskBriefText, taskResultText, taskUpdateText } from '@orchardworks/agent-remote-protocol';
+import { appendSessionReferences, assistantMessageText, joinTaskInputs, roomTurnText, taskBriefText, taskResultText, taskUpdateText } from '@orchardworks/agent-remote-protocol';
 import { TaskDirectoryContext } from '../TaskDirectory.js';
 import { render } from '../../test/setup.js';
 import { UserMessageItem } from './MessageItem.js';
@@ -65,4 +65,9 @@ it('folds messages from another assistant into one line per sender beside task c
   expect(folded.querySelector('summary')?.textContent).toBe('2 messages from Tracker');
   expect(folded.hasAttribute('open')).toBe(false);
   expect(folded.textContent).toContain('Tag pushed.');
+});
+
+it('folds a room\'s turn into one line naming the room', async () => {
+  const container = await render(<UserMessageItem item={message(roomTurnText({ roomId: 'r1', name: 'Release', messages: [{ name: 'Chief', text: 'Ready?' }], minutesLeft: 5 }))} />);
+  expect(container.querySelector('details[data-room-id="r1"] summary')?.textContent).toBe('Your turn in Release · 1 new message');
 });

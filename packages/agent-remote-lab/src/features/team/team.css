@@ -28,3 +28,10 @@
 .lab-team-gather { position: relative; display: inline-flex; }
 .lab-team-gather > button { font-size: 12px; padding: 4px 6px; min-height: 28px; }
 .lab-team-gather-notice { position: absolute; top: 100%; right: 0; z-index: 60; width: min(280px, 70vw); padding: 10px; border: 1px solid var(--orchard-separator); border-radius: 6px; background: var(--orchard-surface); color: var(--orchard-text); font-size: 12px; white-space: normal; box-shadow: var(--orchard-elevation-popover); }
+/* A room: its transcript and the person's message. */
+.lab-room { display: grid; gap: var(--orchard-space-s); padding: 4px 10px 10px; font-size: 12px; }
+.lab-room-state { margin: 0; color: var(--orchard-text-secondary); }
+.lab-room-transcript { display: grid; gap: var(--orchard-space-xs); max-height: 320px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.lab-room-transcript strong { display: block; color: var(--orchard-text-strong); }
+.lab-room-composer { display: grid; gap: var(--orchard-space-xs); }
+.lab-room-composer textarea { min-height: 56px; font: inherit; }

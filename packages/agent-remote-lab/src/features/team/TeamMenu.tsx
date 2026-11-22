@@ -1,3 +1,4 @@
+import { RoomView } from './RoomView.js';
 import { createPortal } from 'react-dom';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { Translate } from '@orchardworks/agent-client';
@@ -179,7 +180,7 @@ export function TeamMenu(props: Props) {
         <ul className="lab-tpm-list">{group.map(item => <TeamListItem key={item.id} team={item} selected={!revealing && props.compact ? item.members.some(member => isCurrentMember(member, props.currentSession)) : selected === item.id} busy={busy}
           onOpen={() => void run(() => openTeam(item))} onRename={title => run(() => change({action:'rename',teamId:item.id,title}))}
           navigation={props.compact ? <TeamSessionNavigation team={item} hosts={hosts} busy={busy} currentSession={props.currentSession} onOpen={target => void run(() => openSession(target))} /> : undefined}
-          management={item.callForSupport
+          management={item.room ? <RoomView team={item} busy={busy} onChange={input => run(() => change(input))} /> : item.callForSupport
             ? <SupportGroup team={item} hosts={hosts} busy={busy} onChange={input => run(() => change(input))} onDelete={() => run(() => remove(item.id))} onOpenSession={target => void run(() => openSession(target))} />
             : <TeamManagement baseUrl={baseUrl} team={item} hosts={hosts} busy={busy} failure={error} onChange={input => run(() => change(input))} onOpenSession={target => void run(() => openSession(target))} />} />)}</ul></section>;
     });

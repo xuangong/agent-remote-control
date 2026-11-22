@@ -171,7 +171,7 @@ describe('the main session\'s task tools', () => {
     expect(worker.enabled(ref)).toBe(true);
     expect(worker.enabledByDefault()).toBe(true);
     const tools = worker.namespace(() => ref, false).tools;
-    expect(tools.map(item => item.name).filter(name => name.includes('task') || name.includes('assistant'))).toEqual(['create_task', 'task_status', 'list_assistants', 'message_assistant', 'message_task', 'cancel_task', 'mark_task_done']);
+    expect(tools.map(item => item.name).filter(name => name.includes('task') || name.includes('assistant') || name.includes('room'))).toEqual(['create_task', 'task_status', 'list_assistants', 'message_assistant', 'open_room', 'room_say', 'room_pass', 'message_task', 'cancel_task', 'mark_task_done']);
     await tool(tools, 'create_task').execute({ title: 'Collect logs', brief: 'Collect them.', done_when: 'Attached.', operationId: 'op' });
     expect(calls).toEqual([{ action: 'create_task', owner: { providerId: 'codex', nativeSessionId: 'main', title: 'Chief' }, operationId: 'op', title: 'Collect logs', brief: 'Collect them.', doneWhen: 'Attached.' }]);
     await tool(tools, 'task_status').execute({});
@@ -212,5 +212,18 @@ describe('messages between assistants', () => {
     expect(parseTaskInputs(h.sessions.get('worker')!.deliveries[0]!.text)).toEqual([expect.objectContaining({ kind: 'assistant', from: 'Tracker', replyTo: sent.messageId, body: 'Yes.' })]);
     // The main sessions keep their own tools.
     expect(await h.runtime.extensions(h.ref('codex', 'tracker'))).toBeUndefined();
+  });
+
+  it('asks the members of a room in turn, between their turns, and takes their answers', async () => {
+    const h = await supportHarness({ tasks: true, groups, sessions: ['tracker'] });
+    cleanups.push(() => h.close());
+    const support = (title: string) => new WorkerSupport({ request: call => h.host(call), available: () => true, tasks: () => true, stateDirectory: h.directory, title: async () => title });
+    const tools = (worker: WorkerSupport, id: string) => worker.namespace(() => h.ref('codex', id), false).tools;
+    const { roomId } = JSON.parse(await tool(tools(support('Chief'), 'worker'), 'open_room').execute({ name: 'Release', topic: 'Ready?', members: ['Tracker'], minutes: 30 }) as string);
+    await h.runtime.tick();
+    const turn = parseTaskInputs(h.sessions.get('tracker')!.deliveries[0]!.text);
+    expect(turn).toEqual([{ kind: 'room', roomId, name: 'Release', count: 1, body: 'Chief: Ready?' }]);
+    await tool(tools(support('Tracker'), 'tracker'), 'room_say').execute({ room: roomId, text: 'Yes.', done: true });
+    expect(h.team(roomId).room).toMatchObject({ state: 'done', result: { text: 'Yes.' } });
   });
 });

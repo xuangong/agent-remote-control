@@ -4,7 +4,7 @@ import { Value } from '@sinclair/typebox/value';
 import { TeamResource } from './team-resource.js';
 import { CallForSupportCallInput, CallForSupportFinding, CallForSupportGroup, CallForSupportMandate, CallForSupportReportStatus, CallForSupportRosterProposal,
   isCallForSupportGroup } from './call-for-support.js';
-import { TaskBrief, TaskDoneWhen, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_HOP_LIMIT, ASSISTANT_MESSAGE_LIMIT, TaskReportStatus, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_QUESTION_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, isTeamTask } from './task.js';
+import { TaskBrief, TaskDoneWhen, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_HOP_LIMIT, ASSISTANT_MESSAGE_LIMIT, ROOM_MINUTES_LIMIT, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, TaskReportStatus, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_QUESTION_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, isTeamTask } from './task.js';
 const object = { additionalProperties: false } as const;
 const id = Type.String({ minLength: 1, maxLength: 256 });
 const short = Type.String({ maxLength: 2048 });
@@ -56,6 +56,18 @@ export type TeamUnresolvedReceipt = Static<typeof TeamUnresolvedReceipt>;
 export const TeamLink = Type.Object({ assistants: Type.Tuple([id, id]),
   recent: Type.Array(Type.Object({ id: AssistantMessageId, from: id, hop: Type.Integer({ minimum: 1, maximum: ASSISTANT_MESSAGE_HOP_LIMIT }), operationId: id }, object), { maxItems: 64 }) }, object);
 export type TeamLink = Static<typeof TeamLink>;
+const roomText = Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT });
+/**
+ * A room: assistants' main sessions, bound where they are, and the people of the account, talking one member at a time. speaker: the
+ * member asked to speak now; seen: how many transcript entries each member was given; passed: members that passed since the last
+ * message. open until a member says it is done, the person ends it, or its turns or time run out (closed).
+ */
+export const TeamRoom = Type.Object({ name: Type.String({ minLength: 1, maxLength: 120 }), topic: roomText, state: Type.Union([Type.Literal('open'), Type.Literal('done'), Type.Literal('closed')]),
+  deadline: Type.Number(), turns: Type.Integer({ minimum: 0, maximum: ROOM_TURN_LIMIT }), speaker: Type.Optional(id), askedAt: Type.Optional(Type.Number()),
+  seen: Type.Record(id, Type.Integer({ minimum: 0 })), passed: Type.Array(id, { maxItems: 12 }),
+  transcript: Type.Array(Type.Object({ id, from: id, name: Type.String({ minLength: 1, maxLength: 120 }), text: roomText, at: Type.Number() }, object), { maxItems: ROOM_TRANSCRIPT_LIMIT }),
+  result: Type.Optional(Type.Object({ from: id, text: roomText }, object)) }, object);
+export type TeamRoom = Static<typeof TeamRoom>;
 export const Team = Type.Object({ id, operationId: id, revision: Type.Integer({ minimum: 1 }), source: TeamSource,
   title: Type.String({ minLength: 1, maxLength: 256 }), status: enumOf('active', 'archiving', 'archived'),
   members: Type.Array(TeamMember, { minItems: 1, maxItems: 12 }), messages: Type.Array(TeamMessage, { maxItems: 200 }),
@@ -68,6 +80,8 @@ export const Team = Type.Object({ id, operationId: id, revision: Type.Integer({ 
   task: Type.Optional(TeamTask),
   /** Set for the link between two assistants: each member is one assistant's main session, bound where it is. */
   link: Type.Optional(TeamLink),
+  /** Set for a room of assistants and people; every member is an assistant's main session. */
+  room: Type.Optional(TeamRoom),
 }, object);
 export type Team = Static<typeof Team>;
 export const TeamCreate = Type.Object({ operationId: id, source: TeamSource,
@@ -89,6 +103,9 @@ export const TeamAction = Type.Union([
   // The person stops a task, or takes it as done.
   Type.Object({ teamId: id, action: Type.Literal('cancel_task') }, object),
   Type.Object({ teamId: id, action: Type.Literal('mark_task_done') }, object),
+  // The person writes in a room, or ends it.
+  Type.Object({ teamId: id, action: Type.Literal('room_post'), operationId: id, text: Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT }) }, object),
+  Type.Object({ teamId: id, action: Type.Literal('close_room') }, object),
 ]);
 export type TeamAction = Static<typeof TeamAction>;
 /** Removes an archived Call For Support group for good, so its worker's next call for the profile starts a new group. */
@@ -146,6 +163,13 @@ export const TeamHostCall = Type.Union([
   Type.Object({ action: Type.Literal('list_assistants'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object) }, object),
   Type.Object({ action: Type.Literal('message_assistant'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object),
     to: Type.String({ minLength: 1, maxLength: 300 }), operationId: id, text: Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT }), replyTo: Type.Optional(AssistantMessageId) }, object),
+  // An assistant opens a room with others, and speaks or passes when the room asks it.
+  Type.Object({ action: Type.Literal('open_room'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), operationId: id,
+    name: Type.String({ minLength: 1, maxLength: 120 }), topic: roomText, members: Type.Array(Type.String({ minLength: 1, maxLength: 300 }), { minItems: 1, maxItems: 7 }),
+    minutes: Type.Integer({ minimum: 1, maximum: ROOM_MINUTES_LIMIT }) }, object),
+  Type.Object({ action: Type.Literal('room_say'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), roomId: id, text: roomText,
+    done: Type.Optional(Type.Boolean()) }, object),
+  Type.Object({ action: Type.Literal('room_pass'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), roomId: id }, object),
   // A task's worker asks its owner, and the worker's Host says what the person wrote to the worker directly.
   Type.Object({ action: Type.Literal('ask_owner'), teamId: id, memberId: id, question: Type.String({ minLength: 1, maxLength: TASK_QUESTION_LIMIT }) }, object),
   Type.Object({ action: Type.Literal('tell_task'), teamId: id, memberId: id, operationId: id, text: Type.String({ minLength: 1, maxLength: TASK_TOLD_LIMIT }) }, object),
@@ -159,12 +183,17 @@ export const TeamSeat = Type.Object({ teamId: id, source: TeamSource, member: Te
   /** The seat belongs to a task: its worker as Leader, or the main session that owns it as requester. */
   task: Type.Optional(Type.Object({ title: TaskTitle }, object)),
   /** The seat is one assistant's main session in a link: bound where it is, it only receives messages. */
-  link: Type.Optional(Type.Object({ peer: Type.String({ minLength: 1, maxLength: 256 }) }, object)) }, object);
+  link: Type.Optional(Type.Object({ peer: Type.String({ minLength: 1, maxLength: 256 }) }, object)),
+  /** The seat is one assistant's main session in a room. */
+  room: Type.Optional(Type.Object({ name: Type.String({ minLength: 1, maxLength: 120 }) }, object)) }, object);
 export type TeamSeat = Static<typeof TeamSeat>;
 const groupFields = ['model', 'reasoningEffort', 'access', 'workspace', 'usage'] as const;
 /** A Call For Support group has exactly one requester after its Leader; a task has its worker and then its owner; other Teams have no requester and no group fields. */
 const validGroupShape = (value: Team) => {
   const group = value.callForSupport, requesters = value.members.filter(member => member.role === 'requester');
+  if (value.room) return !group && !value.task && !value.link && value.members.length >= 2 && value.members.every(member => member.role === 'requester' && member.creation !== 'released'
+    && groupFields.every(field => member[field] === undefined)) && value.messages.every(message => message.callForSupportCallId === undefined)
+    && (value.unresolvedReceipts ?? []).every(receipt => receipt.callForSupportCallId === undefined);
   if (value.link) return !group && !value.task && value.members.length === 2 && value.members.every(member => member.role === 'requester')
     && value.members.every(member => member.creation !== 'released' && groupFields.every(field => member[field] === undefined))
     && value.messages.every(message => message.callForSupportCallId === undefined) && (value.unresolvedReceipts ?? []).every(receipt => receipt.callForSupportCallId === undefined);
@@ -180,7 +209,7 @@ const validGroupShape = (value: Team) => {
 };
 export const isTeam = (value: unknown): value is Team => Value.Check(Team, value)
   // A link binds two main sessions; every other Team starts with its Leader.
-  && (value.link ? true : value.members[0]?.role === 'leader' && value.members.slice(1).every(member => member.role === 'member' || member.role === 'requester')) && validGroupShape(value)
+  && (value.link || value.room ? true : value.members[0]?.role === 'leader' && value.members.slice(1).every(member => member.role === 'member' || member.role === 'requester')) && validGroupShape(value)
   && value.members[0]!.hostId === value.source.hostId
   && new Set(value.members.map(member => member.id)).size === value.members.length
   && new Set([...value.messages, ...(value.unresolvedReceipts ?? [])].map(message => message.id)).size === value.messages.length + (value.unresolvedReceipts?.length ?? 0)

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { AgentSessionTool, AgentSessionToolNamespace } from '@orchardworks/agent-provider-sdk';
-import { ASSISTANT_MESSAGE_LIMIT, nativeSessionRefKey, TASK_BRIEF_LIMIT, TASK_DONE_WHEN_LIMIT, TASK_SUMMARY_LIMIT, TASK_TITLE_LIMIT, type CallForSupportCall, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import { ASSISTANT_MESSAGE_LIMIT, nativeSessionRefKey, ROOM_MINUTES_LIMIT, TASK_BRIEF_LIMIT, TASK_DONE_WHEN_LIMIT, TASK_SUMMARY_LIMIT, TASK_TITLE_LIMIT, type CallForSupportCall, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { TeamResourceFiles } from './team-resource-files.js';
 
 export interface WorkerSupportPorts {
@@ -123,6 +123,18 @@ export class WorkerSupport {
         args => { const ref = worker();
           return taskRequest({ action: 'message_assistant', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, to: args.to, text: args.text, operationId: args.operationId ?? randomUUID(),
             ...(args.reply_to ? { replyTo: args.reply_to } : {}) }); }),
+      tool('open_room', 'Open a room: a conversation of you and other assistants of this account (by name) about a topic, for a set number of minutes. The topic is your first message; the room then asks one member at a time to speak, with the messages it has not seen, and you are asked again when there is something new. The person sees the room and may write in it.',
+        object({ name: { type: 'string', minLength: 1, maxLength: 120 }, topic: { type: 'string', minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT },
+          members: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 300 }, minItems: 1, maxItems: 7 }, minutes: { type: 'integer', minimum: 1, maximum: ROOM_MINUTES_LIMIT }, operationId: id }, ['name', 'topic', 'members', 'minutes']),
+        args => { const ref = worker();
+          return taskRequest({ action: 'open_room', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, operationId: args.operationId ?? randomUUID(), name: args.name, topic: args.topic,
+            members: args.members, minutes: args.minutes }); }),
+      tool('room_say', 'Speak in a room when it is your turn (input labelled [Room … · your turn]). Say done: true with the result when the room has reached what it was opened for.',
+        object({ room: id, text: { type: 'string', minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT }, done: { type: 'boolean' } }, ['room', 'text']),
+        args => { const ref = worker();
+          return taskRequest({ action: 'room_say', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, roomId: args.room, text: args.text, ...(args.done === true ? { done: true } : {}) }); }),
+      tool('room_pass', 'Pass your turn in a room when you have nothing to add.',
+        object({ room: id }, ['room']), args => { const ref = worker(); return taskRequest({ action: 'room_pass', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, roomId: args.room }); }),
       tool('message_task', 'Send input to the worker of a running task: an answer to its question, a correction or more detail. It arrives when the worker is between turns.',
         object({ taskId: id, text: { type: 'string', minLength: 1, maxLength: TASK_BRIEF_LIMIT }, operationId: id }, ['taskId', 'text']), args => { const ref = worker();
           return taskRequest({ action: 'message_task', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, taskId: args.taskId, operationId: args.operationId ?? randomUUID(), text: args.text }); }),

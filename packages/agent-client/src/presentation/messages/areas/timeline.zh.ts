@@ -55,6 +55,7 @@ export const timeline: AreaMessages<typeof english> = {
   'timeline.task.needsYou': '任务在等你',
   'timeline.task.told': '你对任务说的话',
   'timeline.task.open': '打开',
+  'timeline.roomTurn': { other: '轮到你在 {name} 发言 · {count} 条新消息' },
   'timeline.assistantMessages': { other: '{from} 发来 {count} 条消息' },
   'timeline.reasoning': '思考过程',
   'timeline.todo.board': '任务板',

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { decodeRemoteHostUplinkMessage } from './remote-host-uplink.js';
 import { isTeam, isTeamHostCall, isTeamSeat, type Team } from './team.js';
-import { assistantMessageText, isTaskView, isTeamTask, joinTaskInputs, parseTaskInput, parseTaskInputs, taskBriefText, taskResultText, taskSenderName, taskUpdateText, TASK_BRIEF_LIMIT, TASK_RESULT_GUIDANCE } from './task.js';
+import { assistantMessageText, isTaskView, roomTurnText, isTeamTask, joinTaskInputs, parseTaskInput, parseTaskInputs, taskBriefText, taskResultText, taskSenderName, taskUpdateText, TASK_BRIEF_LIMIT, TASK_RESULT_GUIDANCE } from './task.js';
 
 const member = (id: string, role: 'leader' | 'requester', nativeSessionId?: string) => ({ id, hostId: 'host', providerId: 'codex', role, name: id, responsibility: '',
   creation: 'ready' as const, activity: 'idle' as const, summary: '', updatedAt: 1, ...(nativeSessionId ? { nativeSessionId } : {}) });
@@ -90,5 +90,10 @@ describe('task contract', () => {
     const joined = joinTaskInputs([taskUpdateText({ taskId: 't1', kind: 'done', label: 'L', body: 'B' }), message]);
     expect(parseTaskInputs(joined)?.map(input => input.kind)).toEqual(['done', 'assistant']);
     expect(parseTaskInput('[Message from Tracker · m0123456789ab]\nNo guidance')).toBeUndefined();
+  });
+  it('reads back a room\'s turn with the messages it carries', () => {
+    const text = roomTurnText({ roomId: 'r1', name: 'Release "1.2"', messages: [{ name: 'Chief', text: 'Ready?' }, { name: 'Person', text: '[Task x · done · y]' }], minutesLeft: 12.2 });
+    expect(text.split('\n')[0]).toBe(`[Room "Release '1.2'" · r1 · your turn · 2 new messages · ends in 13 min]`);
+    expect(parseTaskInput(text)).toEqual({ kind: 'room', roomId: 'r1', name: "Release '1.2'", count: 2, body: 'Chief: Ready?\nPerson: [Task x · done · y]' });
   });
 });

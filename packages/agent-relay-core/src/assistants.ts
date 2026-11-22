@@ -25,7 +25,7 @@ export interface AssistantPorts {
 }
 type ListCall = Extract<TeamHostCall, { action: 'list_assistants' }>;
 type MessageCall = Extract<TeamHostCall, { action: 'message_assistant' }>;
-interface Assistant { key: string; name: string; label?: string; hidden: boolean; hostId: string; providerId: string; nativeSessionId: string }
+export interface Assistant { key: string; name: string; label?: string; hidden: boolean; hostId: string; providerId: string; nativeSessionId: string }
 
 const RECENT_KEEP = 64;
 /** One answer for an assistant that does not exist and one this caller may not reach, so the roster cannot be probed. */
@@ -44,17 +44,29 @@ export function accountDirectory(groups: readonly WindowGroup[]): Assistant[] {
   }));
 }
 
+/** The calling session's own assistant: the bot whose view shows that session, or the session that holds its role now. */
+export function callerAssistant(resolve: TeamBrokerPorts['resolveSession'], hostId: string, owner: { providerId: string; nativeSessionId: string }, directory: readonly Assistant[]): Assistant {
+  const key = (host: string, providerId: string, nativeSessionId: string) => { try { return nativeSessionRefKey(resolve(host, providerId, nativeSessionId)); } catch { return undefined; } };
+  const own = key(hostId, owner.providerId, owner.nativeSessionId);
+  return (own ? directory.find(item => item.hostId === hostId && key(item.hostId, item.providerId, item.nativeSessionId) === own) : undefined)
+    ?? fail('Only an assistant\'s main session does this.');
+}
+/** The assistant a name or id means, other than the caller; one answer for unknown and unreachable. */
+export function namedAssistant(directory: readonly Assistant[], name: string, caller: Assistant): Assistant {
+  const named = directory.filter(item => item.key === name || fold(item.name) === fold(name));
+  return named.length === 1 && named[0]!.key !== caller.key ? named[0]! : fail(NOT_FOUND);
+}
+/** An assistant's main session as a seat bound where it is. */
+export function assistantSeat(item: Assistant, now: number): TeamMember {
+  return { id: randomUUID(), role: 'requester', hostId: item.hostId, providerId: item.providerId, nativeSessionId: item.nativeSessionId,
+    name: item.name, responsibility: 'This assistant\'s main session.', creation: 'reserved', activity: 'unknown', summary: '', updatedAt: now };
+}
+
 export class AssistantMessages {
   constructor(private readonly broker: AssistantBrokerPorts, private readonly ports: AssistantPorts) {}
   capable(hostId: string): boolean { return this.ports.capable(hostId); }
-  /** The calling session's own assistant: the bot whose view shows that session, or the session that holds its role now. */
   private caller(hostId: string, owner: ListCall['owner'], directory: readonly Assistant[]): Assistant {
-    const key = this.key(hostId, owner.providerId, owner.nativeSessionId);
-    return (key ? directory.find(item => item.hostId === hostId && this.key(item.hostId, item.providerId, item.nativeSessionId) === key) : undefined)
-      ?? fail('Only an assistant\'s main session messages other assistants.');
-  }
-  private key(hostId: string, providerId: string, nativeSessionId: string): string | undefined {
-    try { return nativeSessionRefKey(this.broker.ports.resolveSession(hostId, providerId, nativeSessionId)); } catch { return undefined; }
+    return callerAssistant(this.broker.ports.resolveSession, hostId, owner, directory);
   }
   list(hostId: string, call: ListCall): { assistants: Array<{ id: string; name: string; label?: string }> } {
     if (!this.ports.capable(hostId)) fail('Update the Controller to message assistants.');
@@ -64,16 +76,14 @@ export class AssistantMessages {
   async message(hostId: string, call: MessageCall): Promise<{ messageId: string; outcome: 'delivered' | 'held' }> {
     if (!this.ports.capable(hostId)) fail('Update the Controller to message assistants.');
     const directory = accountDirectory(this.ports.groups()), from = this.caller(hostId, call.owner, directory);
-    const named = directory.filter(item => item.key === call.to || fold(item.name) === fold(call.to));
-    const to = named.length === 1 && named[0]!.key !== from.key ? named[0]! : fail(NOT_FOUND);
+    const to = namedAssistant(directory, call.to, from);
     const sent = await this.broker.change(teams => {
       const now = this.broker.ports.now();
       let team = teams.find(item => item.link?.assistants.includes(from.key) && item.link.assistants.includes(to.key));
       if (!team) {
         pruneTasks(teams, 1);
         if (plain(teams).length >= ACCOUNT_TEAM_LIMIT) fail('Team capacity reached.');
-        const seat = (item: Assistant): TeamMember => ({ id: randomUUID(), role: 'requester', hostId: item.hostId, providerId: item.providerId, nativeSessionId: item.nativeSessionId,
-          name: item.name, responsibility: 'This assistant\'s main session.', creation: 'reserved', activity: 'unknown', summary: '', updatedAt: now });
+        const seat = (item: Assistant) => assistantSeat(item, now);
         team = { id: randomUUID(), operationId: digest(['link', [from.key, to.key].sort()]), revision: 1, title: `${from.name} and ${to.name}`, status: 'active',
           source: { hostId: from.hostId, providerId: from.providerId, nativeSessionId: from.nativeSessionId, title: from.name },
           members: [seat(from), seat(to)], messages: [], link: { assistants: [from.key, to.key], recent: [] }, createdAt: now, updatedAt: now };

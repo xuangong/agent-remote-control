@@ -36,7 +36,7 @@ it('calls, lists, reads and downloads through the worker\'s own tools', async ()
   const { h, namespace, run } = await fixture();
   try {
     expect(namespace).toMatchObject({ name: 'agent_remote' });
-    expect(namespace.tools.map(tool => tool.name)).toEqual(['call_for_support', 'support_status', 'read_support_report', 'download_support_resource', 'create_task', 'task_status', 'list_assistants', 'message_assistant', 'message_task', 'cancel_task', 'mark_task_done']);
+    expect(namespace.tools.map(tool => tool.name)).toEqual(['call_for_support', 'support_status', 'read_support_report', 'download_support_resource', 'create_task', 'task_status', 'list_assistants', 'message_assistant', 'open_room', 'room_say', 'room_pass', 'message_task', 'cancel_task', 'mark_task_done']);
     const profile = h.profile();
     expect(await run('call_for_support', { profileId: profile.id, task: 'Review.', deliverable: 'findings' })).toMatchObject({ status: 'unavailable' });
     h.enable([profile.id]);

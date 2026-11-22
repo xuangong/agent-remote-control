@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -131,6 +131,24 @@ describe('a task between a main session and its worker', () => {
     expect(h.released).toContain(worker.id);
   });
 
+  it('starts a read-only worker that may not write, and a worktree worker whose report carries its patch', async () => {
+    const h = await harness();
+    await h.host({ ...createTask, operationId: 'read', workspace: 'read_only' });
+    expect(h.created[0]!.extensions).toMatchObject({ access: 'read_only' });
+    expect(h.created[0]!.extensions.instructions).toContain('read-only');
+    const { taskId } = await h.host({ ...createTask, operationId: 'tree', title: 'Edit', workspace: 'worktree', commit: h.commit });
+    const worker = h.created[1]!;
+    expect(worker.creation.cwd).not.toBe(h.directory);
+    await writeFile(join(worker.creation.cwd!, 'a.txt'), 'two\n');
+    await tool(worker.extensions.tools, 'report_task').execute({ status: 'done', summary: 'Changed a.txt.' });
+    const summary = h.team(taskId).task!.result!.summary, path = /apply with git apply\): (\S+)$/.exec(summary)?.[1];
+    expect(summary).toMatch(/^Changed a\.txt\.\n\nPatch/);
+    expect(await readFile(path!, 'utf8')).toContain('+two');
+    // Once the result is delivered and the task forgotten, its worktree goes.
+    await h.runtime.tick(); await h.runtime.tick();
+    expect(await stat(worker.creation.cwd!).then(() => true, () => false)).toBe(false);
+  });
+
   it('reports one task listing to the owner', async () => {
     const h = await harness();
     const { taskId } = await h.host(createTask);
@@ -158,6 +176,9 @@ describe('the main session\'s task tools', () => {
     expect(calls).toEqual([{ action: 'create_task', owner: { providerId: 'codex', nativeSessionId: 'main', title: 'Chief' }, operationId: 'op', title: 'Collect logs', brief: 'Collect them.', doneWhen: 'Attached.' }]);
     await tool(tools, 'task_status').execute({});
     expect(calls[1]).toEqual({ action: 'task_status', owner: { providerId: 'codex', nativeSessionId: 'main' } });
+    // A provider that cannot keep a session read-only is refused before anything is asked of the Relay.
+    await expect(tool(tools, 'create_task').execute({ title: 'T', brief: 'B', workspace: 'read_only' })).rejects.toThrow('cannot work read-only');
+    expect(calls).toHaveLength(2);
   });
   it('keeps the tools declared but refuses them while the Relay does not run tasks', async () => {
     const { worker, calls } = await support(false);

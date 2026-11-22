@@ -152,7 +152,9 @@ export class TaskGroups {
   capable(hostId: string): boolean { return this.ports.capable(hostId); }
   async create(hostId: string, call: CreateCall): Promise<{ taskId: string; state: TaskView['state']; message: string }> {
     this.ports.assertHost(hostId);
-    this.broker.ports.assertHost(hostId, call.owner.providerId);
+    const providerId = call.provider ?? call.owner.providerId;
+    this.broker.ports.assertHost(hostId, providerId);
+    if (call.workspace === 'worktree' && !call.commit) fail('A worktree task needs the commit it starts from.');
     const resolve = this.broker.ports.resolveSession;
     if (!sameKey(resolve, hostId, call.owner.providerId, call.owner.nativeSessionId)) fail('The owner session is not on this Host.');
     const created = await this.broker.change(teams => {
@@ -160,20 +162,24 @@ export class TaskGroups {
       const existing = teams.find(team => team.operationId === call.operationId);
       if (existing) {
         const item = existing.task, seat = existing.task && owner(existing);
-        if (!item || seat?.nativeSessionId !== call.owner.nativeSessionId || seat.hostId !== hostId || item.title !== call.title || item.brief !== call.brief || item.doneWhen !== call.doneWhen) fail('Task identity has different input.');
+        const worker = existing.members[0];
+        if (!item || seat?.nativeSessionId !== call.owner.nativeSessionId || seat.hostId !== hostId || item.title !== call.title || item.brief !== call.brief || item.doneWhen !== call.doneWhen
+          || (item.workspace ?? 'same') !== (call.workspace ?? 'same') || worker?.providerId !== providerId || worker.model !== call.model) fail('Task identity has different input.');
         return existing;
       }
       const count = ownerTasks(plain(teams), resolve, hostId, call.owner).filter(team => running(team.task!.state)).length;
       if (count >= TASK_RUNNING_LIMIT) fail(`This session already has ${count} tasks running. Wait for a result before starting another.`);
       pruneTasks(teams, 1);
       if (plain(teams).length >= ACCOUNT_TEAM_LIMIT) fail('Team capacity reached.');
-      const worker: TeamMember = { id: randomUUID(), role: 'leader', hostId, providerId: call.owner.providerId, name: 'Worker', responsibility: call.title,
-        creation: 'reserved', activity: 'unknown', summary: '', updatedAt: now };
+      const worker: TeamMember = { id: randomUUID(), role: 'leader', hostId, providerId, name: 'Worker', responsibility: call.title,
+        creation: 'reserved', activity: 'unknown', summary: '', updatedAt: now, ...(call.model ? { model: call.model } : {}),
+        ...(call.workspace === 'read_only' ? { access: 'read_only' as const } : {}), ...(call.workspace === 'worktree' ? { workspace: { kind: 'worktree' as const, commit: call.commit! } } : {}) };
       const main: TeamMember = { id: randomUUID(), role: 'requester', hostId, providerId: call.owner.providerId, nativeSessionId: call.owner.nativeSessionId,
         name: taskSenderName(call.owner.title), responsibility: 'The main session that owns this task.', creation: 'reserved', activity: 'unknown', summary: '', updatedAt: now };
       const team: SavedTeam = { id: randomUUID(), operationId: call.operationId, revision: 1, title: call.title, status: 'active', members: [worker, main], messages: [],
         source: { hostId, providerId: call.owner.providerId, nativeSessionId: call.owner.nativeSessionId, title: taskSenderName(call.owner.title) },
-        task: { title: call.title, brief: call.brief, ...(call.doneWhen ? { doneWhen: call.doneWhen } : {}), state: 'working', createdAt: now, updatedAt: now }, createdAt: now, updatedAt: now };
+        task: { title: call.title, brief: call.brief, ...(call.doneWhen ? { doneWhen: call.doneWhen } : {}), ...(call.workspace && call.workspace !== 'same' ? { workspace: call.workspace } : {}),
+          state: 'working', createdAt: now, updatedAt: now }, createdAt: now, updatedAt: now };
       const brief = { id: digest(['task-brief', team.id]), from: main.id, to: worker.id, text: briefText(team), status: 'queued' as const, createdAt: now };
       assertTeamQueueCapacity(team, brief);
       team.messages.push(brief);

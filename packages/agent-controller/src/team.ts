@@ -13,7 +13,7 @@ import { collectPatch, createBundle, fetchBundle, prepareWorktree, removeWorktre
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { accountUsage, type SupportUsage } from './call-for-support-usage.js';
 import { tmpdir } from 'node:os';
-import { isNativeSessionRef, joinTaskInputs, nativeSessionRefKey, parseTaskInputs, TASK_TOLD_LIMIT, type NativeSessionRef, isTeam, isTeamSeat, sessionOperationAvailability, type Team, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat } from '@orchardworks/agent-remote-protocol';
+import { isNativeSessionRef, joinTaskInputs, nativeSessionRefKey, parseTaskInputs, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, type NativeSessionRef, isTeam, isTeamSeat, sessionOperationAvailability, type Team, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat } from '@orchardworks/agent-remote-protocol';
 import { OperationCacheError, type AgentManagerEvent, type RemoteHostSessionLease, type SessionWireOperationExecutor } from '@orchardworks/agent-session-runtime';
 
 export interface TeamRuntimeAccess {
@@ -235,6 +235,17 @@ export class TeamRuntime implements SessionRole {
       throw error;
     }
   }
+  /** A worktree task's summary with the path of its patch appended; the summary alone when the worktree changed nothing. */
+  private async withPatch(seat: TeamSeat, summary: string): Promise<string> {
+    const record = this.records.find(item => item.seat.teamId === seat.teamId && item.seat.member.id === seat.member.id), workspace = seat.member.workspace;
+    if (!record?.worktree || record.worktree.removed || workspace?.kind !== 'worktree') throw new Error('This task\'s worktree is not on this Host.');
+    const patch = await collectPatch(record.worktree.path, workspace.commit);
+    if (!patch) return summary;
+    const directory = join(this.directory, 'task-patches'), file = join(directory, `${seat.teamId}.patch`);
+    await mkdir(directory, { recursive: true }); await writeFile(file, patch);
+    const line = `\n\nPatch of the worktree's changes against ${workspace.commit.slice(0, 12)} (apply with git apply): ${file}`;
+    return summary.slice(0, TASK_SUMMARY_LIMIT - line.length) + line;
+  }
   /** Removes a seat's worktree once; a failure is retried on a later tick. */
   private async removeSeatWorktree(record: LocalSeat): Promise<void> {
     if (!record.worktree || record.worktree.removed) return;
@@ -314,9 +325,12 @@ export class TeamRuntime implements SessionRole {
     // A task's worker reads its brief as input and reports once; it has no Team inbox. Its tools come as a namespace where the
     // provider takes one, so reporting never waits for the person's approval.
     if (seat.task) {
-      const taskTools = bindAgentSessionTools([readSource, reportTaskTool(input => call(input)), askOwnerTool(input => call(input))], assertCurrent), instructions = `${taskWorkerInstructions(seat)} ${locationInstructions(seat)}`;
-      return this.access.toolNamespaces?.(member.providerId) ? { instructions, toolNamespaces: [{ name: TASK_WORKER_NAMESPACE, description: 'Agent Remote Control: this task\'s own tools, to read its owner\'s conversation, ask it, and report the result.', tools: taskTools }] }
-        : { instructions, tools: taskTools };
+      // A worktree task's report carries the path of its patch, saved on this Host where its owner works.
+      const report = reportTaskTool(async input => call(member.workspace?.kind === 'worktree' ? { ...input, summary: await this.withPatch(seat, input.summary) } : input));
+      const taskTools = bindAgentSessionTools([readSource, report, askOwnerTool(input => call(input))], assertCurrent), instructions = `${taskWorkerInstructions(seat)} ${locationInstructions(seat)}`;
+      const access = member.access ? { access: member.access } : {};
+      return this.access.toolNamespaces?.(member.providerId) ? { instructions, ...access, toolNamespaces: [{ name: TASK_WORKER_NAMESPACE, description: 'Agent Remote Control: this task\'s own tools, to read its owner\'s conversation, ask it, and report the result.', tools: taskTools }] }
+        : { instructions, ...access, tools: taskTools };
     }
     const tools = [
       tool('read_team', 'Read members, responsibilities, progress, compact delivery status and a bounded page of complete messages addressed to you. This does not consume messages. Fully read incoming messages, then acknowledge their IDs with acknowledge_team_messages before acting. Use nextAfterMessageId as afterMessageId while hasMore is true. Accepted input is not completed work.', { afterMessageId: id }, [], async args => teamInbox(await call({ action: 'read' }), member.id, args.afterMessageId, { group: coordinator })),
@@ -475,11 +489,14 @@ export class TeamRuntime implements SessionRole {
     if (!forgotten.size) return;
     for (const record of forgotten) {
       const key = `${record.seat.teamId}:${record.seat.member.id}`, held = this.leases.get(key);
-      if (!held) continue;
-      // A stopped task's worker stops its running turn before its runtime is let go.
-      if (cancelled.has(record) && !idle(held.lease)) await this.access.execute(held.lease.agent, { operationId: operationId(`task-cancel:${record.seat.teamId}`), kind: 'cancel', parameters: null, maximumResultBytes: 4096 },
-        { dispatch: async () => { await held.lease.agent.cancel?.(); } }).catch(() => undefined);
-      this.release(key, held);
+      if (held) {
+        // A stopped task's worker stops its running turn before its runtime is let go.
+        if (cancelled.has(record) && !idle(held.lease)) await this.access.execute(held.lease.agent, { operationId: operationId(`task-cancel:${record.seat.teamId}`), kind: 'cancel', parameters: null, maximumResultBytes: 4096 },
+          { dispatch: async () => { await held.lease.agent.cancel?.(); } }).catch(() => undefined);
+        this.release(key, held);
+      }
+      // A worktree task's changes went to its owner as a patch with the report.
+      await this.removeSeatWorktree(record);
     }
     this.records = this.records.filter(item => !forgotten.has(item));
     for (const id of [...this.missingTasks.keys()]) if (!this.records.some(item => item.seat.teamId === id)) this.missingTasks.delete(id);

@@ -25,6 +25,7 @@ import { createHostStatusReader, hostStatusPaths } from './host-status.js';
 import { allowedWorkspace, protectHostDirectory } from './execution-policy.js';
 import { SessionRoles, type SessionRole } from './session-role-succession.js';
 import { roleSessionConfig } from './role-session-creation.js';
+import { headCommit } from './call-for-support-workspaces.js';
 import { WorkerSupport } from './call-for-support-worker.js';
 import { createControllerPreviews } from './previews.js';
 import { createVscodeTunnelManager, type VscodeTunnelOptions } from './vscode-tunnel.js';
@@ -491,7 +492,15 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     acquire: automationAccess.acquire,
   } }) : undefined;
   const workerSupport = options.team?.request ? new WorkerSupport({ request: options.team.request, available: () => options.team?.callForSupport?.() === true, tasks: () => options.team?.tasks?.() === true,
-    stateDirectory: options.team.stateDirectory, title: async ref => await providers.require(ref.providerId).directory.sessionTitle?.(ref.nativeSessionId) }) : undefined;
+    stateDirectory: options.team.stateDirectory, title: async ref => await providers.require(ref.providerId).directory.sessionTitle?.(ref.nativeSessionId),
+    head: async ref => {
+      const lease = await automationAccess.acquire(ref.providerId, ref.nativeSessionId);
+      let cwd: string | undefined;
+      try { cwd = lease.agent.snapshot().payload.runtimeInfo.cwd; } finally { lease.release(); }
+      if (!cwd) throw new Error('This session\'s working directory is unknown.');
+      return headCommit(cwd);
+    },
+    readOnly: providerId => !!providers.get(providerId)?.adapter.descriptor.sessionAccess?.readOnly }) : undefined;
   workerSupport?.onChange(() => { void successionWiring.applyWorkerTools().catch(() => undefined); });
   const workerSupportTimer = workerSupport ? setInterval(() => { if (!admission.closed) void workerSupport.refresh(automationAccess.controllerId).catch(() => undefined); }, options.team?.tickMs ?? 3000) : undefined;
   workerSupportTimer?.unref?.();

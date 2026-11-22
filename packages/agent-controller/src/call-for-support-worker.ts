@@ -14,6 +14,10 @@ export interface WorkerSupportPorts {
   stateDirectory: string;
   /** A session's title, for the group the Relay creates. */
   title?(ref: NativeSessionRef): Promise<string | undefined>;
+  /** The commit checked out in a session's working directory, where a worktree task starts. */
+  head?(ref: NativeSessionRef): Promise<string>;
+  /** The provider keeps a session it starts from writing its working directory. */
+  readOnly?(providerId: string): boolean;
 }
 type Enablement = { defaultEnabled: boolean; sessions: Map<string, boolean> };
 type StatusCall = { roleId: string; requesterMemberId: string; call: CallForSupportCall };
@@ -97,13 +101,18 @@ export class WorkerSupport {
           if (!found.report?.resources?.some(resource => resource.resourceId === args.resourceId)) fail('The resource is not attached to this report.');
           return this.resources.download(roleId, requesterMemberId, args.resourceId, args.outputDirectory);
         }),
-      tool('create_task', 'Start a task: a separate session on this Host works on it in your working directory while you keep talking with the person. Use it for work that takes more than a few steps, and start one task per independent piece of work. Write a brief that stands alone: the worker sees only the brief, and reads your conversation only if the brief says it is needed. The result arrives later as input labelled [Task … · done] or [Task … · failed]; until then tell the person what you started and keep answering them. Reuse operationId to retry the same task after a lost response.',
+      tool('create_task', 'Start a task: a separate session on this Host works on it while you keep talking with the person. Use it for work that takes more than a few steps, and start one task per independent piece of work. Write a brief that stands alone: the worker sees only the brief, and reads your conversation only if the brief says it is needed. workspace: same (default) works in your working directory alongside you; read_only investigates it without changing it; worktree works in its own git worktree at your current commit (uncommitted changes are not in it) and returns its changes as a patch. provider and model choose another agent or model for the worker. The result arrives later as input labelled [Task … · done] or [Task … · failed]; until then tell the person what you started and keep answering them. Reuse operationId to retry the same task after a lost response.',
         object({ title: { type: 'string', minLength: 1, maxLength: TASK_TITLE_LIMIT }, brief: { type: 'string', minLength: 1, maxLength: TASK_BRIEF_LIMIT },
-          done_when: { type: 'string', minLength: 1, maxLength: TASK_DONE_WHEN_LIMIT }, operationId: id }, ['title', 'brief']),
+          done_when: { type: 'string', minLength: 1, maxLength: TASK_DONE_WHEN_LIMIT }, workspace: { type: 'string', enum: ['same', 'read_only', 'worktree'] }, provider: id,
+          model: { type: 'string', minLength: 1, maxLength: 256 }, operationId: id }, ['title', 'brief']),
         async args => {
           const ref = worker(), title = await this.ports.title?.(ref).catch(() => undefined);
+          const workspace = args.workspace as 'same' | 'read_only' | 'worktree' | undefined;
+          if (workspace === 'read_only' && !this.ports.readOnly?.(args.provider ?? ref.providerId)) fail('This agent cannot work read-only here; use workspace worktree or same.');
+          const commit = workspace === 'worktree' ? await (this.ports.head ?? (() => fail('Worktree tasks are not available on this Host.')))(ref) : undefined;
           return taskRequest({ action: 'create_task', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId, ...(title ? { title: title.slice(0, 256) } : {}) },
-            operationId: args.operationId ?? randomUUID(), title: args.title, brief: args.brief, ...(args.done_when ? { doneWhen: args.done_when } : {}) });
+            operationId: args.operationId ?? randomUUID(), title: args.title, brief: args.brief, ...(args.done_when ? { doneWhen: args.done_when } : {}),
+            ...(workspace && workspace !== 'same' ? { workspace } : {}), ...(commit ? { commit } : {}), ...(args.provider ? { provider: args.provider } : {}), ...(args.model ? { model: args.model } : {}) });
         }),
       tool('task_status', 'List the tasks this session started, newest first, with their state (queued, working, needs_input, done, failed, cancelled), what a waiting task waits for, and the result; or read one by taskId.',
         object({ taskId: id }, []), args => { const ref = worker(); return taskRequest({ action: 'task_status', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, ...(args.taskId ? { taskId: args.taskId } : {}) }); }),

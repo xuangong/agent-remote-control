@@ -99,7 +99,7 @@ export type TaskInputKind = 'brief' | 'message' | 'reminder' | 'done' | 'failed'
 const kindWords: Record<TaskInputKind, string> = { brief: 'brief', message: 'message', reminder: 'report', done: 'done', failed: 'failed', cancelled: 'stopped', question: 'question',
   needs_you: 'needs the person', told: 'the person wrote' };
 export const TASK_GUIDANCE: Record<TaskInputKind, string> = {
-  brief: 'You work in the owner\'s working directory, which the owner may also change. Do the work with your own tools. '
+  brief: 'Do the work with your own tools, where your instructions say. '
     + 'Read the owner\'s conversation with read_source_session only when the brief is not enough. '
     + 'When you finish, call report_task once with status done or failed and a summary the owner can act on without reading your conversation.',
   message: 'This is input about your task. Continue it; when you finish, call report_task once.',

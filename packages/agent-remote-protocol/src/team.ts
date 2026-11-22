@@ -4,7 +4,7 @@ import { Value } from '@sinclair/typebox/value';
 import { TeamResource } from './team-resource.js';
 import { CallForSupportCallInput, CallForSupportFinding, CallForSupportGroup, CallForSupportMandate, CallForSupportReportStatus, CallForSupportRosterProposal,
   isCallForSupportGroup } from './call-for-support.js';
-import { TaskBrief, TaskDoneWhen, TaskOwner, TaskReportStatus, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_QUESTION_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, isTeamTask } from './task.js';
+import { TaskBrief, TaskDoneWhen, TaskOwner, TaskWorkspace, TaskReportStatus, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_QUESTION_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, isTeamTask } from './task.js';
 const object = { additionalProperties: false } as const;
 const id = Type.String({ minLength: 1, maxLength: 256 });
 const short = Type.String({ maxLength: 2048 });
@@ -122,7 +122,9 @@ export const TeamHostCall = Type.Union([
   // Which of the calling Host's sessions may call for support.
   Type.Object({ action: Type.Literal('support_enablement') }, object),
   // A main session's task tools, by the main session on the calling Host.
-  Type.Object({ action: Type.Literal('create_task'), owner: TaskOwner, operationId: id, title: TaskTitle, brief: TaskBrief, doneWhen: Type.Optional(TaskDoneWhen) }, object),
+  // workspace: where the worker works (default same); worktree needs the commit it starts from. provider and model choose the worker's agent.
+  Type.Object({ action: Type.Literal('create_task'), owner: TaskOwner, operationId: id, title: TaskTitle, brief: TaskBrief, doneWhen: Type.Optional(TaskDoneWhen),
+    workspace: Type.Optional(TaskWorkspace), commit: Type.Optional(gitObject), provider: Type.Optional(id), model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })) }, object),
   Type.Object({ action: Type.Literal('task_status'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), taskId: Type.Optional(id) }, object),
   Type.Object({ action: Type.Literal('message_task'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), taskId: id, operationId: id,
     text: Type.String({ minLength: 1, maxLength: TASK_BRIEF_LIMIT }) }, object),
@@ -149,7 +151,8 @@ const groupFields = ['model', 'reasoningEffort', 'access', 'workspace', 'usage']
 const validGroupShape = (value: Team) => {
   const group = value.callForSupport, requesters = value.members.filter(member => member.role === 'requester');
   if (value.task) return !group && isTeamTask(value.task) && value.members.length === 2 && value.members[1]!.role === 'requester'
-    && value.members.every(member => member.creation !== 'released' && member.access === undefined && member.workspace === undefined)
+    && value.members.every(member => member.creation !== 'released') && value.members[1]!.access === undefined && value.members[1]!.workspace === undefined
+    && (value.members[0]!.workspace === undefined || value.members[0]!.workspace.kind === 'worktree')
     && value.messages.every(message => message.callForSupportCallId === undefined) && (value.unresolvedReceipts ?? []).every(receipt => receipt.callForSupportCallId === undefined);
   if (!group) return !requesters.length && value.members.every(member => groupFields.every(field => member[field] === undefined) && member.creation !== 'released')
     && value.messages.every(message => message.callForSupportCallId === undefined) && (value.unresolvedReceipts ?? []).every(receipt => receipt.callForSupportCallId === undefined);

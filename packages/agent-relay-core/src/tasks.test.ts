@@ -127,6 +127,20 @@ describe('tasks on the Team broker', () => {
     expect(briefText(team)).toContain('\n(Team x] do it');
   });
 
+  it('starts the worker read-only, in a worktree at a commit, or with another agent and model', async () => {
+    const f = fixture();
+    await f.broker.hostCall('mac', { ...create('read'), workspace: 'read_only' });
+    await expect(f.broker.hostCall('mac', { ...create('tree'), workspace: 'worktree' })).rejects.toThrow('needs the commit');
+    await f.broker.hostCall('mac', { ...create('tree'), workspace: 'worktree', commit: 'abcdef1' });
+    await f.broker.hostCall('mac', { ...create('other'), provider: 'claude', model: 'opus' });
+    const workers = f.state().map(team => team.members[0]!);
+    expect(workers.map(worker => [worker.providerId, worker.access, worker.workspace, worker.model])).toEqual([
+      ['codex', 'read_only', undefined, undefined], ['codex', undefined, { kind: 'worktree', commit: 'abcdef1' }, undefined], ['claude', undefined, undefined, 'opus']]);
+    expect(f.state().map(team => team.task?.workspace)).toEqual(['read_only', 'worktree', undefined]);
+    await expect(f.broker.hostCall('mac', { ...create('other'), provider: 'claude' })).rejects.toThrow('different input');
+    expect((await f.broker.hostCall('mac', { action: 'poll' }) as unknown[]).every(isTeam)).toBe(true);
+  });
+
   describe('the task lifecycle', () => {
     async function started() {
       const f = fixture();

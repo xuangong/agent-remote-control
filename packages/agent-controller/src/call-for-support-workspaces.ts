@@ -27,6 +27,11 @@ async function git(cwd: string, args: string[], options: { maxBuffer?: number } 
 }
 const exists = (path: string) => stat(path).then(() => true, () => false);
 
+/** The commit checked out in cwd. */
+export async function headCommit(cwd: string): Promise<string> {
+  return (await git(cwd, ['rev-parse', 'HEAD'])).trim();
+}
+
 /** The top-level directory of the repository that contains cwd. */
 export async function repositoryRoot(cwd: string): Promise<string> {
   return realpath((await git(cwd, ['rev-parse', '--show-toplevel'])).trim());

@@ -658,7 +658,7 @@ textarea {
 .lab-directory-heading button { min-height: 32px; padding: 4px 8px; font-size: .85rem; }
 .lab-session-list { display: grid; gap: 3px; max-height: 300px; overflow-y: auto; margin: 8px 0; padding: 0; list-style: none; }
 .lab-session-row { display: flex; flex-direction: column; gap: 4px; width: 100%; min-width: 0; padding: 10px 8px; text-align: left; border-color: transparent; background: transparent; }
-.lab-session-row[aria-current="page"] { color: var(--obs-action); background: var(--obs-surface-selected); }
+.lab-session-row[aria-current="page"] { color: var(--orchard-text-strong); background: var(--orchard-tint); }
 .lab-session-row strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .92rem; font-weight: 600; }
 .lab-chat-session-row strong { white-space: normal; overflow-wrap: anywhere; }
 .lab-session-row small { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--obs-text-secondary); font-size: .8rem; }

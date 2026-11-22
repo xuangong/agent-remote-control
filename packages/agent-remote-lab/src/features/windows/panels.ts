@@ -58,9 +58,13 @@ export type PanelsEffect =
 export interface PanelsStep { readonly state: PanelsState; readonly effects: readonly PanelsEffect[] }
 
 /** The state on first render: a compact layout without a session to show opens its drawer; desktop shows the sidebar. */
-export function initialPanels(layout: { readonly compact: boolean; readonly opensSession: boolean }): PanelsState {
+/**
+ * The panels a page opens with. A compact page opening Window mode with no session to show starts in the drawer, the sessions to
+ * choose from; a page that opens Bot mode (a phone's home is Chats) starts without it, so Windows shows its tiles when it is chosen.
+ */
+export function initialPanels(layout: { readonly compact: boolean; readonly opensSession: boolean; readonly windowMode?: boolean }): PanelsState {
   return {
-    activeView: 'workbench', compact: layout.compact, contextOpen: layout.compact && !layout.opensSession, contextFromSessions: true,
+    activeView: 'workbench', compact: layout.compact, contextOpen: layout.compact && !layout.opensSession && layout.windowMode !== false, contextFromSessions: true,
     inspectorOpen: false, desktopContextVisible: !layout.opensSession, sessionsPage: false, headerHidden: true,
     sessionPanel: 'list',
   };

@@ -26,7 +26,7 @@ export function usePanelsAndShortcuts(scope: Pick<AppInputs & RequestedSessionSl
 
   const pageFocusReturn = useRef(false);
 
-  const [panels, dispatchPanels] = usePanels({ compact: compactLayoutRef.current, opensSession }, effect => {
+  const [panels, dispatchPanels] = usePanels({ compact: compactLayoutRef.current, opensSession, windowMode }, effect => {
     if (effect.type === 'page-focus-return') pageFocusReturn.current = true;
     else void favorites.refresh();
   });

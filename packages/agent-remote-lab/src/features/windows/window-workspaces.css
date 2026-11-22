@@ -15,7 +15,7 @@
 .lab-window-list > button > span:first-child, .lab-window-open > span:first-child { flex: 1; min-width: 0; }
 .lab-window-list strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; line-height: 1.4; font-size: 13px; font-weight: 500; }
 .lab-window-list small { display: block; margin-top: 2px; color: var(--obs-text-secondary); font-size: 11px; }
-.lab-window-list [aria-current="true"] { background: var(--obs-surface-selected); }
+.lab-window-list [aria-current="true"] { background: var(--orchard-tint); }
 .lab-window-selected { flex: none; color: var(--obs-action); }
 .lab-window-options { margin-top: 12px; border-top: 1px solid var(--obs-border); }
 .lab-window-options summary { cursor: pointer; padding: 12px 4px; min-height: 44px; }
@@ -72,7 +72,7 @@
 /* The row is the visual row, so hover and selection cover its actions too. */
 .lab-window-workspaces[data-placement="sidebar"] .lab-window-row { gap: 0; padding-inline-end: 4px; border-radius: var(--ui-radius-control); transition: background-color var(--ui-duration-short) var(--ui-ease); }
 .lab-window-workspaces[data-placement="sidebar"] .lab-window-row:hover { background: var(--ui-row-hover); }
-.lab-window-workspaces[data-placement="sidebar"] .lab-window-row:has(> .lab-window-open[aria-current="true"]) { background: var(--ui-selection); }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-row:has(> .lab-window-open[aria-current="true"]) { background: var(--orchard-tint); }
 .lab-window-workspaces[data-placement="sidebar"] .lab-window-row[data-renaming] { padding-inline: 4px; background: transparent; }
 .lab-window-workspaces[data-placement="sidebar"] .lab-window-row[data-depth="1"] { margin-left: 16px; padding-left: 0; }
 .lab-window-workspaces[data-placement="sidebar"] .lab-window-open {

@@ -106,7 +106,7 @@
 .lab-sidebar-link { display: flex; align-items: center; width: 100%; min-height: 30px; padding: 4px 10px; border: 0; border-radius: var(--ui-radius-control);
   color: var(--ui-label); background: transparent; font: var(--ui-size-body)/1.2 var(--ui-font); text-align: start; }
 .lab-sidebar-link:hover:not(:disabled) { color: var(--ui-label); background: var(--ui-row-hover); border-color: transparent; }
-.lab-sidebar-link[aria-current="page"] { background: var(--ui-selection); }
+.lab-sidebar-link[aria-current="page"] { background: var(--orchard-tint); }
 
 /* The All sessions page: the sidebar panels shown in place of the Window on desktop. */
 .lab-sessions-page { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; background: var(--ui-background); }

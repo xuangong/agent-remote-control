@@ -7,7 +7,8 @@
   --ui-background-grouped: light-dark(#f2f2f7, #000000);
   --ui-background-elevated: light-dark(#ffffff, #2c2c2e);
   --ui-sidebar: light-dark(#f2f2f7, #2c2c2e);
-  --ui-selection: light-dark(#e8f0fc, #16304d);
+  /* A selected row takes the brand's tint, as Orchard's lists do (the selected chat, the Settings group). */
+  --ui-selection: var(--orchard-tint);
 
   --ui-label: light-dark(#1d1d1f, #f5f5f7);
   --ui-label-secondary: light-dark(#636366, #98989d);

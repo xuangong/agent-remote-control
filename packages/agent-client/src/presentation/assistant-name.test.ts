@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { ASSISTANT_NAME_WORDS } from '@orchardworks/agent-remote-protocol';
+import { ASSISTANT_NAME_VECTORS } from '@orchardworks/agent-remote-protocol/testing';
 import { ASSISTANT_NAME_IDS, assistantName, assistantNames } from './assistant-name.js';
-import { ASSISTANT_NAME_VECTORS } from './assistant-name.vectors.js';
 import { translator } from './messages.js';
 
 describe('assistantNames', () => {
@@ -27,6 +28,12 @@ describe('assistantNames', () => {
       for (const name of names) expect(name).not.toMatch(/^name\./);
     }
     expect(['dango', 'gummies', 'nest', 'pebbles', 'hatch'].map(id => translator('zh')(`name.${id}` as `name.${typeof ASSISTANT_NAME_IDS[number]}`))).toEqual(['团团', '软糖', '窝', '石子', '孵']);
+  });
+
+  it('has the protocol\'s words for every name, so the Relay calls an assistant what every page calls it', () => {
+    for (const locale of ['en', 'zh'] as const) {
+      expect(Object.fromEntries(ASSISTANT_NAME_IDS.map(id => [id, translator(locale)(`name.${id}`)]))).toEqual(Object.fromEntries(ASSISTANT_NAME_IDS.map(id => [id, ASSISTANT_NAME_WORDS[id][locale]])));
+    }
   });
 });
 

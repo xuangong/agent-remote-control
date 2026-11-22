@@ -64,6 +64,8 @@ export * from './resource-input.js';
 export * from './window-workspace.js';
 export * from './window-workspace-operations.js';
 export * from './window-groups.js';
+export * from './assistant-names.js';
+export * from './push-notifications.js';
 
 export { SessionListingStatus, isSessionListingStatus } from './session-listing.js';
 

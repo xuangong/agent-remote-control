@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyGroupOperation, createWindowView, isWindowGroup, type WindowBotDetails, type WindowGroup, type WindowView } from '@orchardworks/agent-remote-protocol';
 import { translator } from '@orchardworks/agent-client';
-import { applyMoveSteps, assistantReminders, groupSections, inGroupOrder, rankInPlace, isPersonalGroup, orderedGroups, planMove, reorderGroup, showsGroupHeadings, type MoveStep } from './assistant-groups.js';
+import { applyMoveSteps, groupSections, inGroupOrder, rankInPlace, isPersonalGroup, orderedGroups, planMove, reorderGroup, showsGroupHeadings, type MoveStep } from './assistant-groups.js';
 import { rankBetween } from './ranks.js';
 import { accountNames } from './assistant-names.js';
 import { projectBotRoster } from './bot-roster.js';
@@ -126,17 +126,6 @@ describe('sections', () => {
     expect(showsGroupHeadings(sections)).toBe(false);
     const research = [group('r', 'Research', [bot('r1')], { rank: 'b' })];
     expect(showsGroupHeadings(groupSections(projectBotRoster(research, [], { status: () => 'idle' }), research, { order: 'activity', defaultTitle: 'Ungrouped' }))).toBe(false);
-  });
-});
-
-describe('reminders', () => {
-  // Each row: the group's settings, the chat's details, and the reminders it sends.
-  const rows: Array<[{ muted?: true; notifications?: 'needs_you' } | undefined, WindowBotDetails | undefined, string[]]> = [
-    [undefined, undefined, ['waiting', 'idle']], [{}, {}, ['waiting', 'idle']], [{ notifications: 'needs_you' }, {}, ['waiting']],
-    [{ muted: true }, {}, []], [{}, { muted: true }, []], [{ notifications: 'needs_you' }, { muted: true }, []],
-  ];
-  for (const [settings, details, reminders] of rows) it(`sends ${reminders.join(' and ') || 'nothing'} for ${JSON.stringify(settings)} and ${JSON.stringify(details)}`, () => {
-    expect(assistantReminders(settings ? { bots: { rank: 'm', members: {}, ...settings } } : undefined, details)).toEqual(reminders);
   });
 });
 

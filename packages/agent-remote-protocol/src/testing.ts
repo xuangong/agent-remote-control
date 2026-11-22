@@ -4,3 +4,5 @@
  */
 export { isTeam as isLegacyTeam } from './testing/legacy-team/team.js';
 export { decodeRemoteHostUplinkMessage as decodeLegacyRemoteHostUplinkMessage } from './testing/legacy-team/remote-host-uplink.js';
+export { ASSISTANT_NAME_VECTORS, type AssistantNameVector } from './testing/assistant-names.vectors.js';
+export { ASSISTANT_REMINDER_VECTORS, SESSION_REMINDER_VECTORS } from './testing/reminders.vectors.js';

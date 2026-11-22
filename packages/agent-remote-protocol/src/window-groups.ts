@@ -62,6 +62,16 @@ export const WindowBots = Type.Object({
   notifications: Type.Optional(WindowGroupNotifications),
 }, strict);
 export type WindowBots = Static<typeof WindowBots>;
+/** The reminders an assistant can send: it needs you (`waiting`), and it finished a turn (`idle`). */
+export type AssistantReminder = 'waiting' | 'idle';
+/**
+ * The reminders an assistant sends, on every device and from the Relay: none while it or its group is muted, only "needs you" when its
+ * group asks for that, otherwise both. A device's own switch comes before this.
+ */
+export function assistantReminders(group: Pick<WindowGroup, 'bots'> | undefined, details: WindowBotDetails | undefined): readonly AssistantReminder[] {
+  if (details?.muted || group?.bots?.muted) return [];
+  return group?.bots?.notifications === 'needs_you' ? ['waiting'] : ['waiting', 'idle'];
+}
 /** Present only for a group hidden in a mode: `window: false` hides it in Window mode, `bots: false` in Bot mode. */
 export const WindowPresentation = Type.Object({ window: Type.Optional(Type.Literal(false)), bots: Type.Optional(Type.Literal(false)) }, { ...strict, minProperties: 1 });
 export type WindowPresentation = Static<typeof WindowPresentation>;

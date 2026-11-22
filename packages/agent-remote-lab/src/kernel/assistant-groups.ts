@@ -106,16 +106,8 @@ export function groupSections(model: BotRosterModel, groups: readonly WindowGrou
 /** Chats show no headings while one group is all there is, as a plain list. */
 export const showsGroupHeadings = (sections: readonly GroupSection[]): boolean => sections.length > 1;
 
-/** The reminders a page shows for an assistant: needs you, and a finished turn. */
-export type Reminder = 'waiting' | 'idle';
-/**
- * The reminders an assistant sends: none while it or its group is muted, only "needs you" when its group asks for that,
- * otherwise both. The device's own switch in Settings comes before this.
- */
-export function assistantReminders(group: Pick<WindowGroup, 'bots'> | undefined, details: WindowBotDetails | undefined): readonly Reminder[] {
-  if (details?.muted || group?.bots?.muted) return [];
-  return group?.bots?.notifications === 'needs_you' ? ['waiting'] : ['waiting', 'idle'];
-}
+/** The reminders a page shows for an assistant: needs you, and a finished turn. The rule is the protocol's, which the Relay's pushes follow too. */
+export { assistantReminders, type AssistantReminder as Reminder } from '@orchardworks/agent-remote-protocol';
 
 /** One change of a reorder: a group's new rank (`section.rank`, or `bots.add` for a group without a section). */
 export interface GroupRankChange { readonly groupId: string; readonly operation: WindowGroupOperation }

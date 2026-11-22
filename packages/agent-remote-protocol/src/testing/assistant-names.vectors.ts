@@ -1,8 +1,11 @@
-import type { Locale } from './messages.js';
-import type { NamedAssistant } from './assistant-name.js';
+import type { AssistantNameLocale, NamedAssistant } from '../assistant-names.js';
 
-/** Assistants of one account and the names they are called by, row by row, in `locale` (English by default). Read by `assistant-name.test.ts`. */
-export interface AssistantNameVector { readonly name: string; readonly assistants: readonly NamedAssistant[]; readonly names: readonly string[]; readonly locale?: Locale }
+/**
+ * Assistants of one account and the names they are called by, row by row, in `locale` (English by default). Read by the protocol's
+ * `assistant-names.test.ts` with its own words and by `agent-client`'s `assistant-name.test.ts` with the client's catalogue, so a
+ * device and the Relay call every assistant the same.
+ */
+export interface AssistantNameVector { readonly name: string; readonly assistants: readonly NamedAssistant[]; readonly names: readonly string[]; readonly locale?: AssistantNameLocale }
 
 const unnamed = (key: string): NamedAssistant => ({ key });
 const named = (key: string, name: string): NamedAssistant => ({ key, name });

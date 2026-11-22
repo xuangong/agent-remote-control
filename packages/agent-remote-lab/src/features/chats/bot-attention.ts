@@ -1,4 +1,5 @@
 import type { SessionStatesView } from '@orchardworks/agent-client';
+import { sessionReminder } from '@orchardworks/agent-remote-protocol';
 import { sessionKey, type SessionEntry } from '../../kernel/session-tree.js';
 
 export interface SharedReminder { session: SessionEntry; reminder: 'waiting' | 'idle'; identity: string }
@@ -17,8 +18,8 @@ export function sharedReminders(previous: ReadonlyMap<string, Known>, sessions: 
     const state = shared && (shared.state === 'running' || shared.state === 'waiting' || shared.state === 'idle' || shared.state === 'failed') ? shared.state : before;
     if (!state) continue;
     next.set(key, state);
-    if (!before || before === state) continue;
-    const reminder = state === 'waiting' ? 'waiting' : before === 'running' && state === 'idle' ? 'idle' : undefined;
+    // The protocol's rule, which the Relay's pushes follow too.
+    const reminder = sessionReminder(before, state);
     if (!reminder) continue;
     // The same on every page: the reply that finished the turn, and the native update time.
     const reply = view?.reply({ hostId: session.hostId ?? 'local', providerId: session.providerId, nativeSessionId: session.nativeSessionId });

@@ -304,6 +304,18 @@
       ]
     },
     {
+      "name": "relay-push-decision",
+      "layer": 1,
+      "paths": [
+        "packages/agent-relay-core/src/domain/push-reminders/**"
+      ],
+      "seams": [
+        "S8"
+      ],
+      "flows": [],
+      "invariants": []
+    },
+    {
       "name": "relay-core",
       "layer": 2,
       "paths": [
@@ -1140,7 +1152,8 @@
         "timeline",
         "journal",
         "relay-session-control",
-        "client-theme"
+        "client-theme",
+        "relay-push-decision"
       ],
       "imports": [
         "node:*"

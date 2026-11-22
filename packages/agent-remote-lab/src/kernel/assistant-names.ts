@@ -1,11 +1,11 @@
-import { assistantName, assistantNames, translator, type NamedAssistant, type Translate } from '@orchardworks/agent-client';
-import { botViews, type WindowGroup, type WindowGroupEdit, type WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
+import { assistantName, assistantNames, translator, type Translate } from '@orchardworks/agent-client';
+import { accountAssistants, viewAssistantKey, type WindowGroup, type WindowGroupEdit, type WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
+
+export { accountAssistants, viewAssistantKey };
 
 /** A session as the account knows it, for an assistant that is in no group (a session of Bot mode's Other sessions). */
 export interface NamedSession { readonly hostId?: string; readonly providerId: string; readonly nativeSessionId: string }
 
-/** What names a view's assistant in the account: its group and view, the same on every device. */
-export const viewAssistantKey = (groupId: string, viewId: string): string => `${groupId}/${viewId}`;
 const sessionAssistantKey = (session: NamedSession): string => `session:${session.hostId ?? 'local'}/${session.providerId}/${session.nativeSessionId}`;
 
 /** The names the assistants of an account are called by (`assistantNames`): every bot view of every group, Bot mode's rows and Window mode's tiles alike. */
@@ -14,13 +14,6 @@ export interface AccountNames {
   session(session: NamedSession): string;
 }
 
-/** The assistants of an account: every bot view of every group, with the name its details store. */
-export function accountAssistants(groups: readonly WindowGroup[]): NamedAssistant[] {
-  return groups.flatMap(group => botViews(group).map(view => {
-    const name = group.bots?.members[view.id]?.name;
-    return { key: viewAssistantKey(group.window.id, view.id), ...(name ? { name } : {}) };
-  }));
-}
 
 export function accountNames(groups: readonly WindowGroup[], t: Translate = translator('en')): AccountNames {
   const assistants = accountAssistants(groups);

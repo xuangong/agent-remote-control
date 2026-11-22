@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import { SessionStateStore } from '@orchardworks/agent-client';
+import { SESSION_REMINDER_VECTORS } from '@orchardworks/agent-remote-protocol/testing';
 import { sharedReminders } from './bot-attention.js';
 
 const bot = (id: string) => ({ hostId: 'host', providerId: 'codex', nativeSessionId: id, title: id, agentId: '' });
@@ -29,4 +30,10 @@ it('keeps the last known state through an offline Host, so coming back the same 
   expect(result.reminders).toEqual([]);
   result = sharedReminders(result.next, [bot('a')], states([['a', 'failed']]));
   expect(result.reminders).toEqual([]);
+});
+
+it.each(SESSION_REMINDER_VECTORS)('reminds of $reminder when a bot goes from $before to $state, as the Relay does', ({ before, state, reminder }) => {
+  const seen = sharedReminders(new Map(), [bot('v')], before ? states([['v', before]]) : states([]));
+  const result = sharedReminders(seen.next, [bot('v')], state ? states([['v', state]]) : states([]));
+  expect(result.reminders.map(item => item.reminder)).toEqual(reminder ? [reminder] : []);
 });

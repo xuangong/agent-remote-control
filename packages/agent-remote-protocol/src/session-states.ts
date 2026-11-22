@@ -8,6 +8,15 @@ import { Type, type Static } from '@sinclair/typebox';
  */
 export const SessionActivityState = Type.Union([Type.Literal('running'), Type.Literal('waiting'), Type.Literal('idle'), Type.Literal('failed')]);
 export type SessionActivityState = Static<typeof SessionActivityState>;
+/**
+ * The reminder a change of a session's state is worth, on every page and at the Relay: it starts waiting for its owner (`waiting`), or
+ * it finishes working (`idle`, from `running`). Only a change between two known states counts: the first state seen is no news.
+ */
+export function sessionReminder(before: SessionActivityState | undefined, state: SessionActivityState | undefined): 'waiting' | 'idle' | undefined {
+  if (!before || !state || before === state) return undefined;
+  if (state === 'waiting') return 'waiting';
+  return before === 'running' && state === 'idle' ? 'idle' : undefined;
+}
 
 /** A Controller confirms every state it knows at least this often. */
 export const SESSION_STATE_CONFIRMATION_MS = 60_000;

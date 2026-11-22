@@ -1,6 +1,6 @@
 # Push notifications: decision proposal
 
-Status: proposal for the owner, 2026-11-22. Not implemented. It answers matrix row 8.4 and the push part of gap 7 of the [requirements review](2026-11-21-requirements-vs-external-dependencies.md), and IM gateway decision 3 ("notifications with no page open"), which waited for the read state and presence. Both exist now: shared read positions, the outbox, and the Relay's knowledge of which sessions a visible page shows (`journal_shown`, intent reports).
+Status: decided by the owner and implemented in I5c, 2026-11-22 (`docs/current/agent-remote/gateway-relay.md`, "Push reminders"; `lab.md`, "Push reminders"). The proposal as written follows. It answers matrix row 8.4 and the push part of gap 7 of the [requirements review](2026-11-21-requirements-vs-external-dependencies.md), and IM gateway decision 3 ("notifications with no page open"), which waited for the read state and presence. Both exist now: shared read positions, the outbox, and the Relay's knowledge of which sessions a visible page shows (`journal_shown`, intent reports).
 
 ## The problem
 
@@ -26,8 +26,8 @@ An assistant that needs the person (an approval, a question) or finishes a long 
 - **What is sent.** Only the two reminders the page sends today, for a session the person can read: an assistant **needs you**, and a turn **finished while no page of the account showed it**. The payload carries the assistant's name and the reminder kind, never conversation text, so a push service never sees content.
 - **Who decides.** The Relay, at the moment a session state changes (the same `session_states` it sends to pages). It sends nothing while a page of the account shows the session (`journal_shown`), so a person never gets the reminder twice. One reminder per session and state, collapsed by a tag, as the page's notifications are today.
 - **Subscriptions.** Per device and per account, kept by the Relay with the account's state. Created from Settings with one tap ("Notify me on this device"), on the installed app or a desktop browser. A 404 or 410 from the push service forgets the subscription; sign-out and a revoked browser forget it too.
-- **Service worker.** Push and `notificationclick` only: a click opens the conversation's address, or focuses a page that already shows it. It caches nothing, so the immutable asset policy and the chunk recovery stay as they are.
-- **Badge.** The unread count of the read positions, set by the service worker on each push and by the page on each read.
+- **Service worker.** Push and `notificationclick`: a click opens the conversation's address, or focuses a page that already shows it. It joins the app shell worker of I5a, whose caching it leaves as it is.
+- **Badge.** A dot, never a count (owner decision 4): `setAppBadge()` with no number, set by the service worker on each push and set or cleared by the page from the unread and needs-you state.
 
 ## How it would be tested
 
@@ -54,3 +54,13 @@ M to L: the sender and its encryption (S to M), the subscription store and route
 4. **The badge is a dot,** never a count, as the Orchard design says. Use `navigator.setAppBadge()` with no number. Correct "How it is done" here: the badge is a dot, not a count of read positions.
 
 Before the sender is built, the push service gets its own simulator, per section 3 of the requirements review.
+
+## As implemented (I5c)
+
+- The push services got their simulator first (`@orchardworks/agent-remote-fixtures/push-service`), then the sender; seam S8 runs one against the other.
+- "A page of the account shows the session" is a session-channel stream of the conversation in use (`journal_shown` counts the same content streams, for every account and whether or not the page is visible); the channel's intent reports narrow it to the account's visible pages.
+- One push per session and state: each change the Relay sees is one state, so a second need in the same turn is pushed too. On screen and at the push service, a session's reminders collapse by its tag.
+- The per-device setting the Relay respects is the device's own Notifications switch (`paused` on its subscription), beside group mute, chat mute and the group's needs-you-only choice.
+- While push is on for a device, its page leaves the assistants' reminders to the Relay, so a desktop does not show them twice.
+- Delivery through Apple's and Google's services is the real-device check of the release.
+

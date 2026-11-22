@@ -158,6 +158,13 @@ pnpm --filter @orchardworks/agent-relay-cloudflare exec wrangler deploy \
 
 Wrangler prompts for your own Cloudflare authentication and secret values. The
 Google secret command is needed only in Google mode. Keep secrets out of `vars`.
+
+Push reminders are optional. To send them, make your own VAPID key pair with
+`node scripts/push-keys.mjs --out <private file>`, add its public key to `vars` as
+`AGENT_REMOTE_PUSH_PUBLIC_KEY`, and set the private key as the secret
+`AGENT_REMOTE_PUSH_PRIVATE_KEY` (`wrangler secret put AGENT_REMOTE_PUSH_PRIVATE_KEY
+--config ../../deploy/self-hosted/wrangler.jsonc`). Without them the Relay sends no
+pushes and Settings says so; the Node Relay reads the same two variables.
 The template binds public assets and a SQLite-backed `RelayObject` under `RELAY`,
 with a stable `primary` object. Keep that binding, class, Worker identity and
 migration history stable during upgrades. The Worker has no main-site D1/KV/R2

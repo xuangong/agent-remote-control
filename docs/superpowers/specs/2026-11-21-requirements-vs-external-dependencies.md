@@ -244,6 +244,10 @@ Every gap in the matrix must be reproducible under our control before a fix or a
 
 **Size.** M; the iPhone check S.
 
+### 3.4b Push service simulator (I5c)
+
+The browsers' push services (Apple's, Google's, Mozilla's, Microsoft's) became a dependency with push reminders, and got their simulator before the sender: `@orchardworks/agent-remote-fixtures/push-service`, in memory (its `fetch` is the sender's port) or at a loopback port. It states what it models as data (`PUSH_SERVICE_MODELLED`): accept (201) after a real service's checks (TTL, Urgency, Topic, `aes128gcm`, and a VAPID token signed by its key, for its origin, valid for at most 24 hours, with a `mailto:` or `https:` subject and the subscription's key); an expired subscription (404 or 410); rate limiting (429 with `Retry-After`); the 4096-byte payload limit (413); and delivery to the browser: pushes held while it is offline, a newer push of the same `Topic` replacing the held one, TTL expiry, drops and reordering. It plays the browser too, so a test reads each push decrypted. Seam S8, the Relay's unit tests and the flow E14b use it. Its fidelity check is a real device: the installed app on a locked iPhone, and desktop Chrome with no Orchard window open.
+
 ### 3.5 Fidelity checks
 
 - **Each simulator states what it models, as data:** the CLI simulator its profile, the platform knobs their production values, the network script its fault kinds, and the lifecycle simulator its events.
@@ -435,7 +439,7 @@ Ranked by how wrong the assumption is (**F** before **A**), how weak today's han
 - **1.1 holds.** A conversation whose stored copy was evicted opens from the journal, with no connection word and no frame that loses its rows.
 - **The installed app** asks `navigator.storage.persist()` once per start; a browser tab does not ask.
 - **8.2** still needs the five-step check on a real iPhone before a release that changes the client's lifecycle (`docs/current/agent-remote/web.md`, "The page lifecycle of a phone").
-- **8.4** has a decision proposal: [push notifications](2026-11-22-push-notifications-decision.md).
+- **8.4** is answered by push reminders (I5c, [decision](2026-11-22-push-notifications-decision.md)): the Relay pushes "needs you" and "finished while no page showed it" to the installed app and desktop browsers, with the push service simulator (3.4b) under seam S8 and flow E14b. Delivery through Apple's and Google's services is checked by hand on a real iPhone and in desktop Chrome before the release.
 - **New, found by the simulator:** a device clock ahead of the Relay's by more than the lease's life makes every access answer look expired (O59).
 
 **Gap 8, deploy readiness (3.4).**

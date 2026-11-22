@@ -222,8 +222,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
     for (const tenant of tenants.values()) for (const host of tenant.broker.sessionStates(subject)) {
       if (seen.has(host.hostId)) continue;
       seen.add(host.hostId);
-      for (const state of host.states) states.push({ hostId: host.hostId, providerId: state.providerId, nativeSessionId: state.nativeSessionId, state: state.state,
-        ...(state.updatedAt === undefined ? {} : { updatedAt: state.updatedAt }), ...(state.replyAt === undefined ? {} : { replyAt: state.replyAt }) });
+      for (const state of host.states) states.push({ hostId: host.hostId, providerId: state.providerId, nativeSessionId: state.nativeSessionId, state: state.state, changedAt: state.changedAt });
     }
     return states;
   }

@@ -30,8 +30,9 @@ function relay(options: { groups?: WindowGroup[]; devices?: SavedPushSubscriptio
   });
   return {
     reminders, pushed, presence,
+    /** A report of the account's states; each entry's number is when the Relay saw that state change. */
     report(entries: Array<[string, SessionActivityState, number?]>) {
-      states = entries.map(([id, state, updatedAt]) => ({ ...session(id), state, ...(updatedAt ? { updatedAt } : {}) }));
+      states = entries.map(([id, state, changedAt]) => ({ ...session(id), state, changedAt: changedAt ?? 0 }));
       return reminders.observe();
     },
     payloads: () => pushed.map(item => decodePushReminder(item.message.payload)),
@@ -95,12 +96,13 @@ describe('what the Relay pushes', () => {
     const r = relay();
     r.report([['s1', 'running', 1]]);
     expect(r.report([['s1', 'waiting', 2]])).toHaveLength(1);
-    // The Host goes away and comes back in the same state: no news.
+    // The same report seen again, and a Host that goes away and comes back in the same state: no news.
+    expect(r.report([['s1', 'waiting', 2]])).toEqual([]);
     expect(r.report([])).toEqual([]);
     expect(r.report([['s1', 'waiting', 2]])).toEqual([]);
-    // The same state reported again after a flicker is not pushed twice.
-    r.report([['s1', 'running', 2]]);
-    expect(r.report([['s1', 'waiting', 2]])).toEqual([]);
+    // A second need in the same turn is a new state, and needs the person again.
+    r.report([['s1', 'running', 3]]);
+    expect(r.report([['s1', 'waiting', 4]])).toHaveLength(1);
   });
 
   it('follows the group\'s and the chat\'s settings and the devices\' own', () => {

@@ -5,7 +5,8 @@
  * Contract. `observe()` reads, for every account with a subscribed device, the session states it may see, compares each with the last
  * one it knew for that account (the first sight of a session, or of an account, is no news; a session that is no longer reported keeps
  * its last known state), and for each change worth a reminder asks `decidePush` with the account's assistant for the session, whether a
- * visible page of the account shows it, whether this reminder of this session and state went out, and the account's devices. Each push
+ * visible page of the account shows it, whether this reminder of this state (the Relay's time of the change) went out, and the
+ * account's devices. Each push
  * carries the assistant's name in the device's language and the reminder's kind, never conversation text, with the conversation's
  * address, the session's tag (also its `Topic`) and the time of the decision. It returns the decisions it sent and sends them without
  * waiting; `settled()` waits for the pushes under way. A push service's 404 or 410 forgets the subscription through the sender's port.
@@ -17,8 +18,8 @@ import type { PushSender } from './push-sender.js';
 import type { PushSubscriptions } from './push-subscriptions.js';
 import type { PresenceSession, SessionPresence } from './session-presence.js';
 
-/** A session's state as the Relay shares it with an account. */
-export interface ReminderState extends PresenceSession { readonly state: SessionActivityState; readonly updatedAt?: number; readonly replyAt?: number }
+/** A session's state as the Relay shares it with an account; `changedAt` is when the Relay saw it change, which names this state. */
+export interface ReminderState extends PresenceSession { readonly state: SessionActivityState; readonly changedAt: number }
 /** A push the Relay sent, for its own diagnostics and tests. */
 export interface SentReminder { readonly subject: string; readonly session: PresenceSession; readonly kind: PushReminderKind; readonly devices: readonly string[] }
 
@@ -98,7 +99,8 @@ export function createPushReminders(ports: PushRemindersPorts) {
           groups ??= ports.groups(subject);
           assistants ??= assistantsOf(groups);
           const assistant = assistants.get(key);
-          const identity = JSON.stringify([subject, key, reminder, state.updatedAt ?? null, state.replyAt ?? null]);
+          // One push per state: a second need in the same turn is a new state, a report of the same change seen again is not.
+          const identity = JSON.stringify([subject, key, reminder, state.changedAt]);
           const devices = ports.subscriptions.list(subject).map(subscription => ({ id: subscription.device, ...(subscription.paused ? { paused: true } : {}), signedIn: ports.signedIn(subject, subscription.device) }));
           const decision = decidePush({ ...(before ? { before } : {}), state: state.state, ...(assistant ? { assistant: { group: assistant.group, ...(assistant.details ? { details: assistant.details } : {}) } } : {}),
             shown: ports.presence.shows(subject, state), sent: sent.has(identity), devices });

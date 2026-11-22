@@ -31,7 +31,8 @@ export function AssistantSettings({ items, notifications }: { items: readonly Se
       {items.includes('notifications') && notifications.enabled && notifications.permission === 'default' ? <SettingsRow label={t('settings.notifications.allow')}><Pill onClick={notifications.request}>{t('settings.notifications.allow')}</Pill></SettingsRow> : null}
       {items.includes('notifications') && notifications.permission === 'denied' ? <p className="lab-setting-note">{t('settings.notifications.blocked')}</p> : null}
       {items.includes('notifications') && notifications.requestFailed ? <p className="lab-setting-note">{t('settings.notifications.failed')}</p> : null}
-      {items.includes('push') ? <PushRow push={notifications.push} paused={notifications.enabled === false} /> : null}
+      {items.includes('push') ? <PushRow push={notifications.push} paused={notifications.enabled === false}
+        blockedSaid={items.includes('notifications') && notifications.permission === 'denied'} /> : null}
       <SettingsRow label={t('settings.letters')} hint={t('settings.letters.hint')}>
         <Toggle label={t('settings.letters')} checked={letters} onChange={setLetters} />
       </SettingsRow>
@@ -44,11 +45,13 @@ export function AssistantSettings({ items, notifications }: { items: readonly Se
  * iPhone or iPad tab (Apple delivers pushes only to the app on the Home Screen), a browser without push, a Relay that sends none, or a
  * site whose notifications are blocked.
  */
-function PushRow({ push, paused }: { push: PushDeviceControls; paused: boolean }) {
+function PushRow({ push, paused, blockedSaid }: { push: PushDeviceControls; paused: boolean; blockedSaid: boolean }) {
   const t = useTranslate();
   const usable = push.availability === 'available' || push.status === 'on';
+  // A site whose notifications are blocked is said once: by the Notifications row above, where the page has one.
+  const blocked = (push.availability === 'blocked' || push.failure === 'denied') && !blockedSaid;
   const why = push.availability === 'install' ? 'push.install' : push.availability === 'unsupported' ? 'push.unsupported' : push.availability === 'server' ? 'push.server'
-    : push.availability === 'blocked' || push.failure === 'denied' ? 'push.blocked' : undefined;
+    : blocked ? 'push.blocked' : undefined;
   return <>
     <SettingsRow label={t('push.title')} hint={t('push.hint')}>
       {usable ? <Toggle label={t('push.title')} checked={push.status === 'on'} disabled={push.status === 'working' || push.status === 'checking'}

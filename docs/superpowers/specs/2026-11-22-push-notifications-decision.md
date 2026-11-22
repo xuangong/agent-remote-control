@@ -45,3 +45,12 @@ M to L: the sender and its encryption (S to M), the subscription store and route
 1. Ship Web Push (A) at all, given that on iPhone it works only for the installed app?
 2. Are the two reminders the right set, or also "a message from an assistant" while away (closer to an IM, and more pushes)?
 3. Is a payload without conversation text acceptable on the lock screen ("Chief needs you")?
+
+## Owner decisions (2026-11-22)
+
+1. **Web Push (option A).** The Relay sends it to desktop browsers and to the installed app. On iPhone only the installed app can receive it, which is Apple's rule and is accepted.
+2. **Two reminders.** A push goes out when an assistant **needs you**, or when a turn **finished while no page showed it**. An ordinary assistant message sends no push.
+3. **Name and kind only on the lock screen,** for example "Chief needs you" or "Builder finished". Conversation text never passes through a push service.
+4. **The badge is a dot,** never a count, as the Orchard design says. Use `navigator.setAppBadge()` with no number. Correct "How it is done" here: the badge is a dot, not a count of read positions.
+
+Before the sender is built, the push service gets its own simulator, per section 3 of the requirements review.

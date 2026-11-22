@@ -65,6 +65,8 @@ export const navigation = {
   'navigation.palette.newSessionView': 'New session view',
   'navigation.palette.hideSidebar': 'Hide sidebar',
   'navigation.palette.showSidebar': 'Show sidebar',
+  'navigation.palette.appearance': 'Appearance: {theme}',
+  'navigation.palette.current': 'Current',
   'navigation.palette.allWindows': 'All groups',
   'navigation.shortcutsSheet.title': 'Keyboard shortcuts',
   'navigation.shortcutsSheet.general': 'General',

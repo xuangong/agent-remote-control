@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { CallForSupportConflictError, errorWords, RemoteCallForSupportClient, type Translate } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { CallForSupportProfile, CallForSupportProfileInput } from '@orchardworks/agent-remote-protocol';
+import { Pill } from '@orchardworks/agent-client-web/primitives';
 import { workspaceFetch } from '../../../kernel/workspace-access.js';
+import { SettingsRow, SettingsSection } from '../../../ui/SettingsRow.js';
 import { ProfileEditor, type SupportProvider } from './ProfileEditor.js';
 import './call-for-support.css';
 
@@ -48,24 +50,25 @@ export function CallForSupportSettings({ baseUrl, enabled, hosts }: { baseUrl: s
   }
   if (!enabled) return null;
   const providers = supportProviders(hosts);
-  return <div className="lab-display-settings lab-support-settings">
-    <h2>{t('team.support.title')}</h2>
-    <p className="lab-support-muted">{t('team.support.profilesIntro')}</p>
-    {profiles === undefined && !loadError ? <p role="status">{t('team.support.loadingProfiles')}</p> : null}
-    {profiles?.length ? <ul className="lab-support-profiles">{profiles.map(profile => <li key={profile.id}>
-      <div><strong>{profile.name}</strong><small>{summary(t, profile)}</small>{profile.description ? <small>{profile.description}</small> : null}</div>
-      <div className="lab-support-actions">
-        <button type="button" disabled={busy} onClick={() => { setError(''); setEditing(profile); }}>{t('common.edit')}</button>
+  return <SettingsSection title={t('team.support.title')}>
+    <p className="lab-setting-note">{t('team.support.profilesIntro')}</p>
+    {profiles === undefined && !loadError ? <p className="lab-setting-note" role="status">{t('team.support.loadingProfiles')}</p> : null}
+    {profiles?.map(profile => <SettingsRow key={profile.id} label={profile.name} hint={[summary(t, profile), profile.description].filter(Boolean).join(' · ')}>
+      <span className="lab-support-actions">
+        <Pill disabled={busy} onClick={() => { setError(''); setEditing(profile); }}>{t('common.edit')}</Pill>
         {deleting === profile.id
-          ? <><button type="button" disabled={busy} onClick={() => setDeleting(undefined)}>{t('team.support.keep')}</button><button type="button" disabled={busy} onClick={() => void run(async () => { setProfiles((await client.profile({ type: 'delete', id: profile.id, revision: profile.revision })).profiles); setDeleting(undefined); })}>{t('team.support.deleteProfile')}</button></>
-          : <button type="button" disabled={busy} aria-label={t('team.support.deleteNamed', { name: profile.name })} onClick={() => setDeleting(profile.id)}>{t('common.delete')}</button>}
-      </div>
-    </li>)}</ul> : profiles ? <p className="lab-control-note">{t('team.support.noProfiles')}</p> : null}
-    <button type="button" disabled={busy || profiles === undefined || profiles.length >= 32 || !providers.length} onClick={() => { setError(''); setEditing('new'); }}>{t('team.support.newProfile')}</button>
-    {!providers.length ? <p className="lab-control-note">{t('team.support.connectHost')}</p> : null}
-    {loadError ? <p role="alert">{loadError} <button type="button" onClick={() => void reload()}>{t('common.retry')}</button></p> : null}
-    {error && !editing ? <p role="alert">{error}</p> : null}
+          ? <><Pill disabled={busy} onClick={() => setDeleting(undefined)}>{t('team.support.keep')}</Pill><Pill disabled={busy} onClick={() => void run(async () => { setProfiles((await client.profile({ type: 'delete', id: profile.id, revision: profile.revision })).profiles); setDeleting(undefined); })}>{t('team.support.deleteProfile')}</Pill></>
+          : <Pill disabled={busy} aria-label={t('team.support.deleteNamed', { name: profile.name })} onClick={() => setDeleting(profile.id)}>{t('common.delete')}</Pill>}
+      </span>
+    </SettingsRow>)}
+    {profiles && !profiles.length ? <p className="lab-setting-note">{t('team.support.noProfiles')}</p> : null}
+    {!providers.length ? <p className="lab-setting-note">{t('team.support.connectHost')}</p> : null}
+    {loadError ? <p className="lab-setting-note" role="alert">{loadError}<Pill onClick={() => void reload()}>{t('common.retry')}</Pill></p> : null}
+    {error && !editing ? <p className="lab-setting-note" role="alert">{error}</p> : null}
+    <div className="lab-setting-actions">
+      <Pill disabled={busy || profiles === undefined || profiles.length >= 32 || !providers.length} onClick={() => { setError(''); setEditing('new'); }}>{t('team.support.newProfile')}</Pill>
+    </div>
     {editing ? <ProfileEditor profile={editing === 'new' ? undefined : editing} providers={providers} hosts={hosts} busy={busy} error={error}
       onSave={input => void save(input)} onClose={() => { setEditing(undefined); setError(''); }} /> : null}
-  </div>;
+  </SettingsSection>;
 }

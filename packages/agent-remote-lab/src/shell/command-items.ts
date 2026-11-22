@@ -39,9 +39,9 @@ export function sessionViewLocation(windows: readonly WorkspaceWindow[], current
   }
 }
 
-const appearanceTitles: Record<Appearance, string> = { system: 'System', light: 'Light', dark: 'Dark' };
-/** The palette's three appearance actions; the current one says so. */
-export function appearanceItems(current: Appearance, set: (next: Appearance) => void): CommandItem[] {
-  return (['system', 'light', 'dark'] as const).map(appearance => ({ id: `appearance:${appearance}`, kind: 'action', title: `Appearance: ${appearanceTitles[appearance]}`,
-    keywords: ['theme', 'dark mode', 'light mode', 'color scheme'], ...(appearance === current ? { subtitle: 'Current' } : {}), run: () => set(appearance) }));
+/** The palette's three appearance actions, in the reader's words; the current one says so. English search words find them in any language. */
+export function appearanceItems(current: Appearance, set: (next: Appearance) => void, t: Translate = translator('en')): CommandItem[] {
+  return (['system', 'light', 'dark'] as const).map(appearance => ({ id: `appearance:${appearance}`, kind: 'action',
+    title: t('navigation.palette.appearance', { theme: t(`settings.theme.${appearance}`) }),
+    keywords: ['theme', 'dark mode', 'light mode', 'color scheme', t('settings.theme')], ...(appearance === current ? { subtitle: t('navigation.palette.current') } : {}), run: () => set(appearance) }));
 }

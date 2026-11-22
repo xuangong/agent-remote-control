@@ -94,6 +94,7 @@ export const settings = {
   'settings.account.controller': 'Controller on {name}',
   'settings.account.controllerUnknown': 'not reported',
   'settings.display.title': 'Display',
+  'settings.display.fullScreen': 'Full screen',
   'settings.display.exitFullScreen': 'Exit full screen',
   'settings.display.enterFullScreen': 'Enter full screen',
   'settings.display.fullScreenNote': 'Hide the browser controls while you work. Your browser may leave full screen when you switch apps or use the keyboard.',

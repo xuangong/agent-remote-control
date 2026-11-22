@@ -24,6 +24,9 @@ import { AssistantTopBar } from './AssistantTopBar.js';
 import { AssistantDetailsHostContext, type AssistantDetailsHost } from '../../conversation/assistant/details-host.js';
 import { useAssistantNames } from '../../kernel/names-context.js';
 import { useContextMenu } from '../../ui/ContextMenu.js';
+import { OrchardMark } from '@orchardworks/agent-client-web/primitives';
+import { shortcutKeys } from '../../kernel/shortcuts.js';
+import { applePlatform } from '../../kernel/platform.js';
 import './bot-workspace.css';
 
 /** What Bot mode shows of the selected group while it is acquired: whether it loads, why it is unavailable, and a retry. */
@@ -208,7 +211,11 @@ export function BotWorkspace({ visible, covered = false, compact, scope, workspa
       {descriptor ? <AssistantDetailsHostContext.Provider value={detailsHost}>
         <Mount mode="bot" active={visible && showConversation} descriptor={{ ...descriptor, props: { ...descriptor.props, visible: visible && showConversation, active: visible && showConversation, folded: asleep } }} />
       </AssistantDetailsHostContext.Provider>
-        : !selected.loading && !selected.error ? <p className="lab-bot-empty">{place?.kind === 'section' ? t('assistants.chooseInGroup') : t('assistants.choose')}</p> : null}
+        : !selected.loading && !selected.error ? <div className="lab-bot-welcome" role="status">
+          <OrchardMark size={56} />
+          <h2>{t('assistants.chooseTitle')}</h2>
+          <p>{place?.kind === 'section' ? t('assistants.chooseInGroup') : t('assistants.chooseHint', { keys: shortcutKeys('search', applePlatform()).shown })}</p>
+        </div> : null}
     </section>
     <aside ref={setDetailsSlot} id={detailsId} className="lab-assistant-details orchard-panel" aria-label={t('details.title')} hidden={!detailsShown || phone}>
       <header className="lab-assistant-details-head"><h2>{t('details.title')}</h2>

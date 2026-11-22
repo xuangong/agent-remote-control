@@ -65,6 +65,8 @@ export const navigation: AreaMessages<typeof english> = {
   'navigation.palette.newSessionView': '新会话视图',
   'navigation.palette.hideSidebar': '收起侧栏',
   'navigation.palette.showSidebar': '展开侧栏',
+  'navigation.palette.appearance': '外观：{theme}',
+  'navigation.palette.current': '当前',
   'navigation.palette.allWindows': '全部分组',
   'navigation.shortcutsSheet.title': '键盘快捷键',
   'navigation.shortcutsSheet.general': '常用',

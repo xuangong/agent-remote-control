@@ -95,7 +95,7 @@ export function useCommandSearch(scope: Pick<AppInputs & SessionSuccessionBindin
     const sessions = sessionItems.map(item => { const words = wordsOf.get(item.id); return words ? { ...item, keywords: [...item.keywords ?? [], ...words] } : item; });
     const botSessions = new Set(windowMode ? [] : botRoster.sections.flatMap(section => section.rows.map(row => `session:${sessionKey(row.binding)}`)));
     const appearance = currentAppearance();
-    const appearances = appearance ? appearanceItems(appearance.appearance, next => appearance.set(next)) : [];
+    const appearances = appearance ? appearanceItems(appearance.appearance, next => appearance.set(next), t) : [];
     return [...actions, ...appearances, ...windowItems, ...bots, ...sessions.filter(item => !botSessions.has(item.id))];
   }
   return { commandItems };

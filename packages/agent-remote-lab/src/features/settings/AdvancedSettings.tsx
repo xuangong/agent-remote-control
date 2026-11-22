@@ -8,7 +8,7 @@ import { SettingsRow, SettingsSection } from './SettingsRow.js';
 export function AdvancedSettings({ openTrace, openInspector, playback }: { openTrace(): void; openInspector(): void; playback?: ReactNode }) {
   const t = useTranslate();
   return <>
-    <SettingsSection><div className="lab-setting-legacy"><LayoutDiagnosticsSettings /></div></SettingsSection>
+    <LayoutDiagnosticsSettings />
     <SettingsSection title={t('settings.advanced.diagnosis')}>
       <SettingsRow label={t('settings.advanced.trace')}><Pill onClick={openTrace}>{t('common.open')}</Pill></SettingsRow>
       <SettingsRow label={t('settings.advanced.inspector')}><Pill onClick={openInspector}>{t('common.show')}</Pill></SettingsRow>

@@ -68,7 +68,6 @@ export function GeneralSettings() {
       </SettingsRow>
     </SettingsSection>
     <InstallSection />
-    {/* The display settings carry their own heading, as every moved section does. */}
-    <SettingsSection><div className="lab-setting-legacy"><MobileDisplaySettings /></div></SettingsSection>
+    <MobileDisplaySettings />
   </>;
 }

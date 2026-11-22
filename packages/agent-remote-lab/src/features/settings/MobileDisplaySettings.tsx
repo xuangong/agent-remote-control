@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
+import { Pill } from '@orchardworks/agent-client-web/primitives';
 import { runsInstalled } from '../../kernel/installed-app.js';
+import { SettingsRow, SettingsSection } from './SettingsRow.js';
 
 function displayState() {
   return {
@@ -37,18 +39,18 @@ export function MobileDisplaySettings() {
     finally { setBusy(false); }
   }
 
-  return <div className="lab-display-settings">
-    <h2>{t('settings.display.title')}</h2>
-    {display.fullscreen || display.supported && !display.standalone ? <>
-      <button type="button" disabled={busy} onClick={() => void toggleFullscreen()}>{display.fullscreen ? t('settings.display.exitFullScreen') : t('settings.display.enterFullScreen')}</button>
-      <p>{t('settings.display.fullScreenNote')}</p>
-    </> : display.standalone ? <p>{t('settings.display.standalone')}</p>
-      : <p>{t('settings.display.unsupported')}</p>}
-    {failure ? <p role="alert">{t('settings.display.failed')}</p> : null}
-    {!display.standalone ? <details>
+  // Full screen, or why there is none; then how to open Orchard without the address bar, unless it already is.
+  return <SettingsSection title={t('settings.display.title')}>
+    {display.fullscreen || display.supported && !display.standalone
+      ? <SettingsRow label={t('settings.display.fullScreen')} hint={t('settings.display.fullScreenNote')}>
+        <Pill disabled={busy} onClick={() => void toggleFullscreen()}>{display.fullscreen ? t('settings.display.exitFullScreen') : t('settings.display.enterFullScreen')}</Pill>
+      </SettingsRow>
+      : <SettingsRow label={t('settings.display.fullScreen')} hint={display.standalone ? t('settings.display.standalone') : t('settings.display.unsupported')} />}
+    {failure ? <p className="lab-setting-note" role="alert">{t('settings.display.failed')}</p> : null}
+    {!display.standalone ? <details className="lab-setting-disclosure">
       <summary>{t('settings.display.withoutAddressBar')}</summary>
-      <p>{t('settings.display.iphone')}</p>
-      <p>{t('settings.display.android')}</p>
+      <p className="lab-setting-note">{t('settings.display.iphone')}</p>
+      <p className="lab-setting-note">{t('settings.display.android')}</p>
     </details> : null}
-  </div>;
+  </SettingsSection>;
 }

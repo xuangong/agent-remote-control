@@ -15,6 +15,12 @@
 .lab-bot-conversation .lab-composer-dock { padding-top: var(--orchard-space-2xl); border-top: 0; }
 .lab-bot-workspace :focus-visible { outline: 2px solid var(--orchard-focus); outline-offset: 2px; }
 
+/* No chat open on a wide screen: the mark and one friendly line, in the middle of the conversation's panel. */
+.lab-bot-welcome { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: var(--orchard-space-m); padding: var(--orchard-space-3xl);
+  color: var(--orchard-text-secondary); text-align: center; }
+.lab-bot-welcome > h2 { margin: var(--orchard-space-m) 0 0; color: var(--orchard-text-strong); font: var(--orchard-type-headline-weight) var(--orchard-type-headline-size) / 1.3 var(--orchard-font-text); }
+.lab-bot-welcome > p { max-width: 34em; margin: 0; font-size: var(--orchard-type-callout-size); line-height: 1.5; }
+
 /* The sidebar: the wordmark with New assistant, then the chats. The rail carries the modes, Search and this device's link. */
 .lab-sidebar-brand { padding: var(--orchard-space-xs) var(--orchard-space-s) 0; }
 .lab-bot-chats { display: flex; flex-direction: column; }

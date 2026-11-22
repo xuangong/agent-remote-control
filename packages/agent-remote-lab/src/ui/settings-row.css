@@ -1,0 +1,41 @@
+/* A titled card of settings rows (SettingsRow.tsx), the grouped list of the mockup: each row its name and a line of help on the left
+   and its control on the right; notes, actions, a disclosure and a report inside the same card. At phone width a control that does not
+   fit beside its name goes under it. */
+.lab-setting-section { display: flex; flex-direction: column; gap: var(--orchard-space-m); min-width: 0; }
+.lab-setting-section-title { margin: 0; padding: 0 var(--orchard-space-l); color: var(--orchard-text-secondary); font: var(--orchard-type-footnote-weight) var(--orchard-type-footnote-size) / 1.4 var(--orchard-font-text); }
+.lab-setting-card.orchard-card { display: flex; flex-direction: column; padding: 0; overflow: hidden; background: var(--orchard-fill); }
+.lab-setting-row { display: flex; align-items: center; justify-content: space-between; gap: var(--orchard-space-2xl); min-height: 52px; padding: var(--orchard-space-l) var(--orchard-space-2xl); }
+.lab-setting-row + .lab-setting-row { border-top: 1px solid var(--orchard-separator); }
+.lab-setting-text { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.lab-setting-text > strong { color: var(--orchard-text-strong); font-weight: 600; }
+.lab-setting-text > small, .lab-setting-note { color: var(--orchard-text-secondary); font-size: var(--orchard-type-footnote-size); }
+.lab-setting-note { margin: 0; padding: var(--orchard-space-l) var(--orchard-space-2xl); }
+.lab-setting-control { flex: none; max-width: 60%; }
+.lab-setting-legacy { padding: var(--orchard-space-l) var(--orchard-space-2xl); min-width: 0; overflow-wrap: anywhere; }
+/* The row's name is the switch's name, so the switch shows no second label beside it. */
+.lab-setting-row .orchard-toggle-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.lab-setting-actions { display: flex; flex-wrap: wrap; gap: var(--orchard-space-s); padding: 0 var(--orchard-space-2xl) var(--orchard-space-l); }
+.lab-setting-row + .lab-setting-actions, .lab-setting-note + .lab-setting-actions { padding-top: 0; }
+.lab-setting-note[role="alert"] { color: var(--orchard-danger-text); }
+.lab-setting-note .orchard-pill { margin-inline-start: var(--orchard-space-s); }
+/* A line that opens to say more, inside a card: its summary reads as a row. */
+.lab-setting-disclosure { border-top: 1px solid var(--orchard-separator); }
+.lab-setting-disclosure > summary { display: flex; align-items: center; gap: var(--orchard-space-s); min-height: 44px; padding: var(--orchard-space-m) var(--orchard-space-2xl);
+  color: var(--orchard-text-strong); font-weight: 600; cursor: pointer; list-style: none; }
+.lab-setting-disclosure > summary::-webkit-details-marker { display: none; }
+.lab-setting-disclosure > summary::after { content: ''; width: 7px; height: 7px; margin-inline-start: auto; border: solid var(--orchard-text-secondary); border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg); transition: transform var(--orchard-duration-fast) var(--orchard-ease-standard); }
+.lab-setting-disclosure[open] > summary::after { transform: rotate(225deg); }
+.lab-setting-disclosure > .lab-setting-note { padding-top: 0; }
+.lab-setting-report { display: flex; flex-direction: column; gap: var(--orchard-space-s); padding: 0 var(--orchard-space-2xl) var(--orchard-space-l);
+  color: var(--orchard-text-secondary); font-size: var(--orchard-type-footnote-size); }
+.lab-setting-report textarea { box-sizing: border-box; width: 100%; min-height: 120px; padding: var(--orchard-space-m); border: 0; border-radius: var(--orchard-radius-row);
+  color: var(--orchard-text); background: var(--orchard-surface); font: var(--orchard-type-footnote-size) / 1.4 var(--orchard-font-mono); resize: vertical; }
+@media (max-width: 760px) {
+  /* A row wraps its control under its name when both do not fit, rather than squeezing the name; a segmented choice goes under it. */
+  .lab-setting-row { flex-wrap: wrap; row-gap: var(--orchard-space-m); }
+  .lab-setting-text { flex: 1 1 10em; }
+  .lab-setting-control { max-width: 100%; }
+  .lab-setting-control:has(> .orchard-segmented) { flex: 1 1 100%; }
+  .lab-setting-control > .orchard-segmented { display: flex; width: 100%; }
+}

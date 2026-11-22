@@ -177,6 +177,17 @@ it('E3: the reader keeps their line when a Controller restart replaces the journ
 it('E3: a session the Host no longer has shows as an empty view that says so, and a new session opens beside it', async () => {
   const { context, page } = await openPage(browser, stack.sessionUrl('gone'));
   await showsText(page, 'Gone answer');
+  // The page creates its Window with the session as the link named it, and retitles the view once the Relay has confirmed the Window and
+  // the catalog the title, a moment after the conversation paints. A view the Host later reports missing is named by the title its
+  // Window holds, so the Host loses the session only once the Window says "Gone".
+  const windowDocument = async () => {
+    const status = await (await context.request.get(stack.origin + '/auth/status')).json() as { basePath: string };
+    const windowId = new URL(page.url()).searchParams.get('window');
+    if (!windowId) return undefined;
+    const response = await context.request.get(`${stack.origin}${status.basePath}v1/windows/${encodeURIComponent(windowId)}`);
+    return response.ok() ? (await response.json() as { window: { views: Array<{ placement: string; binding?: { nativeSessionId: string; title?: string } }> } }).window : undefined;
+  };
+  await expect.poll(async () => (await windowDocument())?.views.find(view => view.binding?.nativeSessionId === 'gone')?.binding?.title, { timeout: 20_000, interval: 50 }).toBe('Gone');
   await stack.stopController();
   stack.provider.forget('gone');
   await stack.startController();
@@ -194,9 +205,7 @@ it('E3: a session the Host no longer has shows as an empty view that says so, an
   await expect.poll(() => page.getByRole('region', { name: /^Primary group:/ }).count()).toBe(2);
   expect(await empty.count()).toBe(1);
   // The Window keeps the missing view's reference, so it stays a place of its group, next to the new one.
-  const status = await (await context.request.get(stack.origin + '/auth/status')).json() as { basePath: string };
-  const windowId = new URL(page.url()).searchParams.get('window')!;
-  const { window } = await (await context.request.get(`${stack.origin}${status.basePath}v1/windows/${encodeURIComponent(windowId)}`)).json() as { window: { views: Array<{ placement: string; binding?: { nativeSessionId: string } }> } };
+  const window = (await windowDocument())!;
   expect(window.views.filter(view => view.placement === 'primary').map(view => view.binding?.nativeSessionId)).toContain('gone');
   expect(window.views.filter(view => view.placement === 'primary')).toHaveLength(2);
   await context.close();

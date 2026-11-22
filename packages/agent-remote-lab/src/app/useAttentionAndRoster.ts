@@ -5,6 +5,7 @@ import { useOtherSessions, type OtherSessionSource } from '../features/chats/use
 import { projectBotRoster, type BotRosterOptions } from '../kernel/bot-roster.js';
 import { assistantReminders, type Reminder } from '../kernel/assistant-groups.js';
 import { sharedReminders } from '../features/chats/bot-attention.js';
+import { appBadgeShown, browserBadge } from '../kernel/app-badge.js';
 import { useSharedFeedOf, type SharedFeedsSnapshot } from '../kernel/shared-feeds.js';
 import { sessionActivity } from '../kernel/session-activity-status.js';
 import type { SessionStateRef } from '@orchardworks/agent-client';
@@ -182,6 +183,21 @@ export function useAttentionAndRoster(scope: Pick<AppInputs & WorkbenchShellSlic
     current: currentBotSession, earlier: earlierBotSessions, reply: session => shared.states?.reply(session), unread: (session, replyAt) => !!shared.reads?.unread(session, replyAt),
     draft: session => shared.drafts?.draft(session)?.text, waiting: session => (shared.outbox?.entries(session).length ?? 0) > 0 });
   const projectSharedRoster = (shared: SharedFeedsSnapshot) => projectBotRoster(windowWorkspace.groups, otherSessions.sessions, rosterOptions(shared));
+  // The app badge's dot follows the shared state (unread replies and needs you) while the page runs; the service worker sets it with each push.
+  const projectedRoster = useRef(projectSharedRoster); projectedRoster.current = projectSharedRoster;
+  useEffect(() => {
+    const badge = browserBadge();
+    if (!badge || !accessReady) return;
+    let shown: boolean | undefined;
+    const update = () => {
+      const next = appBadgeShown(projectedRoster.current(sharedFeeds.get()).sections.flatMap(section => section.rows));
+      if (next === shown) return;
+      shown = next;
+      void (next ? badge.set() : badge.clear()).catch(() => undefined);
+    };
+    update();
+    return sharedFeeds.subscribe(update);
+  }, [sharedFeeds, accessReady, windowWorkspace.groups]);
   /** The directory: every assistant of the account, the hidden and resting ones included. */
   const projectSharedDirectory = (shared: SharedFeedsSnapshot) => projectBotRoster(windowWorkspace.groups, [], { ...rosterOptions(shared), everyone: true });
 

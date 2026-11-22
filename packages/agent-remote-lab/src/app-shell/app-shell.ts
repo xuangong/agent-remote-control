@@ -1,5 +1,5 @@
 /**
- * The installed app's service worker: an app shell for an offline start. Push and notification clicks join it later (I5c).
+ * The installed app's service worker: an app shell for an offline start. Its push reminders and their clicks are push-events.ts (I5c).
  * - The shell is the page (`/`) and the bundles it starts with; each build lists them and names its version (app-shell-plugin.ts).
  * - Opening the page asks the network first, so a reload always takes the newest build; the stored shell answers only when the network
  *   fails, which is what lets the app start offline.

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { assistantAddress, decodePushReminder, encodePushReminder, isPushDevice, isPushSubscriptionRequest, pushReminderKind, pushTag, type PushReminder } from './push-notifications.js';
+import { Value } from '@sinclair/typebox/value';
+import { isPushDevice, isPushSubscriptionRequest, PushReminderSchema } from './push-notifications.js';
+import { assistantAddress, decodePushReminder, encodePushReminder, pushReminderKind, pushTag, type PushReminder } from './push-reminder.js';
 
 const KEYS = { p256dh: 'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4', auth: 'BTBZMqHH6r4Tts7J_aSIgg' };
 const REMINDER: PushReminder = { v: 1, kind: 'needs_you', name: 'Chief', locale: 'en', url: '/?mode=bot&section=g1&bot=v1', tag: 'sabc', at: 1_790_000_000_000 };
@@ -26,11 +28,16 @@ describe('a subscription request', () => {
 });
 
 describe('a reminder\'s payload', () => {
+  const INVALID = [{ ...REMINDER, v: 2 }, { ...REMINDER, kind: 'message' }, { ...REMINDER, preview: 'Deploy the site?' }, { ...REMINDER, url: 'https://evil.example/' },
+    { ...REMINDER, url: '/?a b' }, { ...REMINDER, tag: 'x'.repeat(33) }, { ...REMINDER, name: '' }, { ...REMINDER, name: 'x'.repeat(81) }, { ...REMINDER, locale: 'fr' },
+    { ...REMINDER, at: -1 }, { ...REMINDER, at: 1.5 }, (({ at: _at, ...rest }) => rest)(REMINDER), [REMINDER], null];
   it('reads back what was written, and nothing else', () => {
     expect(decodePushReminder(encodePushReminder(REMINDER))).toEqual(REMINDER);
-    for (const text of [undefined, '', 'not json', JSON.stringify({ ...REMINDER, v: 2 }), JSON.stringify({ ...REMINDER, kind: 'message' }),
-      JSON.stringify({ ...REMINDER, preview: 'Deploy the site?' }), JSON.stringify({ ...REMINDER, url: 'https://evil.example/' }), JSON.stringify({ ...REMINDER, tag: 'x'.repeat(33) })]) {
-      expect(decodePushReminder(text)).toBeUndefined();
+    for (const text of [undefined, '', 'not json', ...INVALID.map(value => JSON.stringify(value))]) expect(decodePushReminder(text)).toBeUndefined();
+  });
+  it('reads exactly what its schema accepts, though it reads without the schema library', () => {
+    for (const value of [REMINDER, { ...REMINDER, kind: 'finished', locale: 'zh', name: 'x'.repeat(80) }, ...INVALID]) {
+      expect(decodePushReminder(JSON.stringify(value)) !== undefined, JSON.stringify(value)).toBe(Value.Check(PushReminderSchema, value));
     }
   });
   it('maps a page\'s reminders to its kinds', () => {

@@ -1,8 +1,10 @@
 /**
  * The service worker's script, built on its own into `/sw.js` by app-shell-plugin.ts with the build's shell (`__APP_SHELL__`). It only
- * wires the worker's events to app-shell.ts. The page's types know no worker scope, so the few events it handles are typed here.
+ * wires the worker's events: the app shell's to app-shell.ts, and push reminders and their clicks to push-events.ts (I5c). The page's
+ * types know no worker scope, so the few events it handles are typed here.
  */
 import { appShellWorker, DIRECT_ROUTES, type AppShell } from './app-shell.js';
+import { installPushEvents, type PushWorkerScope } from './push-events.js';
 
 declare const __APP_SHELL__: AppShell;
 
@@ -24,7 +26,7 @@ interface WorkerScope {
   addEventListener(type: 'fetch', listener: (event: FetchEvent) => void): void;
 }
 
-const scope = self as unknown as WorkerScope;
+const scope = self as unknown as WorkerScope & PushWorkerScope;
 const worker = appShellWorker<Request>(__APP_SHELL__, { caches, fetch: request => fetch(request) });
 
 /** The direct routes in the browser's terms, where it has them; a refusal leaves every request to the fetch event. */
@@ -44,3 +46,5 @@ scope.addEventListener('fetch', event => {
   const answer = worker.respond(event.request, { origin: scope.location.origin, preload: event.preloadResponse, waitUntil: work => event.waitUntil(work) });
   if (answer) event.respondWith(answer);
 });
+// A push shows its reminder and sets the badge's dot; a click focuses the page that shows the conversation, or opens it.
+installPushEvents(scope);

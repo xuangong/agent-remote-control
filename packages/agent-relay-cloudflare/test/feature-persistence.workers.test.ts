@@ -1,5 +1,9 @@
-import { expect, it } from 'vitest';
+import { beforeAll, expect, it } from 'vitest';
+import { generateVapidKeys, type VapidKeys } from '@orchardworks/agent-relay-core';
 import { fixture, origin, send } from './fixture.js';
+
+let push: VapidKeys;
+beforeAll(async () => { push = await generateVapidKeys(); });
 
 // One Worker test per Relay feature that keeps records: the rules are the Relay's and run in agent-relay-core
 // (gateway-*.test.ts); these prove that the feature reaches the Durable Object SQLite storage and comes back after the Worker restarts.
@@ -95,10 +99,18 @@ const features: Feature[] = [
     expect((await f.json(alice.basePath + 'v1/outbox', alice.cookie, { id, ...ref(hostId), text: 'Run the suite when you are back.' })).status).toBe(200);
     return async (f, again) => { expect(await (await f.json(again.basePath + 'v1/outbox', again.cookie)).json()).toEqual({ entries: [expect.objectContaining({ id, status: 'waiting' })] }); };
   } },
+  { name: 'a device\'s push subscription', async keep(f, alice) {
+    // The Relay answers with its key only once Web Crypto in workerd has imported the pair and signed with it.
+    const subscription = { endpoint: 'https://fcm.googleapis.com/fcm/send/workers-device', keys: { p256dh: 'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4', auth: 'BTBZMqHH6r4Tts7J_aSIgg' }, locale: 'zh' };
+    const saved = await (await f.json(alice.basePath + 'v1/push-subscriptions', alice.cookie, subscription)).json();
+    expect(saved).toEqual({ publicKey: push.publicKey, device: { endpoint: subscription.endpoint, locale: 'zh' } });
+    // The same browser after the restart: its subscription is its device's.
+    return async f => { expect(await (await f.json(alice.basePath + 'v1/push-subscriptions', alice.cookie)).json()).toEqual(saved); };
+  } },
 ];
 
 it('every feature that keeps records comes back from the Durable Object storage after the Worker restarts', async () => {
-  const f = await fixture();
+  const f = await fixture({ push });
   const accounts = new Map<Feature, Account>(), checks = new Map<Feature, (f: Fixture, again: Account) => Promise<void>>();
   for (const [index, feature] of features.entries()) {
     const account = await f.login(`feature-${index}`);

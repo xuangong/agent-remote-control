@@ -141,7 +141,8 @@ async function buildBundles(options: { actualEntry?: true; completeCodec?: true;
 }
 
 export async function fixture(options: { actualEntry?: true; completeCodec?: true; authProvider?: 'google' | 'mainsite' | 'gateway'; previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; workerVersionId?: string; authorityOutageGraceMs?: number; /** The Relay's heartbeat interval for connected Hosts, in ms. */ heartbeatIntervalMs?: number; journals?: { tuning?: object; withoutBinding?: true; olderPartition?: true };
-  /** Serves the store conformance cases of `testing` entries from the Durable Objects. */ conformance?: true; /** The fixture lives until its file ends instead of one test. */ lifetime?: 'file' } = {}) {
+  /** Serves the store conformance cases of `testing` entries from the Durable Objects. */ conformance?: true; /** The fixture lives until its file ends instead of one test. */ lifetime?: 'file';
+  /** The Relay's VAPID key pair, as the variable and the secret of a deployment that sends push reminders. */ push?: { publicKey: string; privateKey: string } } = {}) {
   const owned = options.lifetime === 'file' ? fileClosers : closers;
   const directory = await mkdtemp(join(tmpdir(), 'arc-workers-'));
   owned.push(() => rm(directory, { recursive: true, force: true }));
@@ -162,7 +163,8 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
       durableObjects: { RELAY: { className: options.actualEntry ? 'RelayObject' : 'TestRelayObject', useSQLite: true }, ...(options.journals?.withoutBinding ? {} : { JOURNALS: { className: options.journals?.olderPartition ? 'OlderJournalPartition' : options.actualEntry ? 'JournalPartition' : 'TestJournalPartition', scriptName: 'journals', useSQLite: true } }) },
       bindings: { ...(options.journals ? { AGENT_REMOTE_JOURNALS: '1' } : {}), ...(options.workerVersionId ? { CF_VERSION_METADATA: { id: options.workerVersionId } } : {}), ...(options.heartbeatIntervalMs !== undefined ? { FIXTURE_HEARTBEAT_MS: String(options.heartbeatIntervalMs) } : {}), ...(options.authorityOutageGraceMs !== undefined ? { AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS: String(options.authorityOutageGraceMs) } : {}), AGENT_REMOTE_RELAY_URL: origin, ...(options.previewDomain ? { AGENT_REMOTE_PREVIEW_DOMAIN: options.previewDomain } : {}), ...(options.previewOrigin ? { AGENT_REMOTE_PREVIEW_URL: options.previewOrigin } : {}), ...(options.authProvider === 'google' ? {
         AGENT_REMOTE_AUTH_PROVIDER: 'google', AGENT_REMOTE_GOOGLE_CLIENT_ID: googleClientId, AGENT_REMOTE_GOOGLE_CLIENT_SECRET: 'workers-client-secret', AGENT_REMOTE_GOOGLE_ALLOWED_EMAILS: googleEmails,
-      } : { ...(options.authProvider ? { AGENT_REMOTE_AUTH_PROVIDER: options.authProvider } : {}), AGENT_REMOTE_ISSUER: issuer }), AGENT_REMOTE_SIGNING_SECRET: envSecret },
+      } : { ...(options.authProvider ? { AGENT_REMOTE_AUTH_PROVIDER: options.authProvider } : {}), AGENT_REMOTE_ISSUER: issuer }), AGENT_REMOTE_SIGNING_SECRET: envSecret,
+        ...(options.push ? { AGENT_REMOTE_PUSH_PUBLIC_KEY: options.push.publicKey, AGENT_REMOTE_PUSH_PRIVATE_KEY: options.push.privateKey } : {}) },
       serviceBindings: { ASSETS: async request => new Response(new URL(request.url).pathname === '/index.html'
         ? '<!doctype html><html><head><title>Controller</title></head><body><script src="/assets/main.js"></script></body></html>' : 'asset',
       { headers: { 'content-type': new URL(request.url).pathname === '/index.html' ? 'text/html' : 'text/javascript' } }) },

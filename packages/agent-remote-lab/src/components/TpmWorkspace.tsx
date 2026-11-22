@@ -6,7 +6,8 @@ import type { AgentReplica, RemoteAgentTransport } from '@orchardworks/agent-cli
 import { CommunicationNavigationContext, MarkdownContent, SessionAttributions } from '@orchardworks/agent-client-web/react';
 import { useBoundDraft, type DraftBinding } from '../draft-store.js';
 import type { OpenedSession } from '../directory-client.js';
-import type { TpmAction, TpmItem } from '../hooks/useTpmWork.js';
+import type { TpmAction } from '../hooks/useTpmWork.js';
+import type { TpmItem } from '../tpm-main-sessions.js';
 import { useAskPosition } from '../hooks/useAskPosition.js';
 import { useConversationSession } from '../hooks/useConversationSession.js';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';

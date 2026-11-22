@@ -1,6 +1,6 @@
 import { PreviewProvider, usePreviewController, useTranslate, type PreviewContextValue } from '@orchardworks/agent-client-web/react';
 import type { HttpPreviewClient } from '@orchardworks/agent-client';
-import type { RemoteHost } from './HostPairing.js';
+import type { RemoteHost } from '../kernel/remote-host.js';
 import { HostPreviewList } from './HostPreviewList.js';
 
 export function HostPreviewGroups({ client, hosts, activeHostId, polling, onOpen, onOpenSource }: {

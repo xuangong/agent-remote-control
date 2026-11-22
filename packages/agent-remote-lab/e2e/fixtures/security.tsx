@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { GatewayController } from '../../src/GatewayController.js';
 import { HostSecurityActions } from '../../src/components/HostSecurityActions.js';
 import { HostCodexDaemon } from '../../src/components/HostCodexDaemon.js';
-import type { RemoteHost } from '../../src/components/HostPairing.js';
+import type { RemoteHost } from '../../src/kernel/remote-host.js';
 import type { AccountFacts } from '../../src/account.js';
 import { RemoteHostClient } from '../../src/directory-client.js';
 import '../../src/ui/tokens.css';

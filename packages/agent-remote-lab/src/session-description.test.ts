@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Team } from '@orchardworks/agent-remote-protocol';
 import type { OpenedSession } from './directory-client.js';
-import type { TpmItem } from './hooks/useTpmWork.js';
+import type { TpmItem } from './tpm-main-sessions.js';
 import type { SessionFork } from './session-forks.js';
 import { describeSession } from './session-description.js';
 

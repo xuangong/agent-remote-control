@@ -1,6 +1,6 @@
 import { useCallback, useSyncExternalStore } from 'react';
 import { appendSessionExcerpts, isSessionExcerpt, MAX_SESSION_EXCERPTS_PER_MESSAGE, sessionExcerptAttachment, type SessionExcerpt } from '@orchardworks/agent-remote-protocol';
-import type { LabWorkbenchActions } from './components/LabWorkbench.js';
+import type { SessionViewActions as LabWorkbenchActions } from '@orchardworks/agent-client-web/react';
 import { conversationLocalStorage } from './conversation-storage.js';
 import { withMessageKey } from '@orchardworks/agent-client';
 

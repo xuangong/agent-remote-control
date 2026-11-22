@@ -1,7 +1,7 @@
 import { parseWindowFeature } from '../window-feature-views.js';
 import type { WindowLayoutAuthority } from '../window-workspace-context.js';
 import { featureView, openFeatureView, projectFeatureBinding } from '../window-feature-views.js';
-import { tpmMainTarget } from '../tpm-main-sessions.js';
+import { tpmMainTarget, type TpmItem } from '../tpm-main-sessions.js';
 import { conversationSessionStorage } from '../conversation-storage.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TpmCreate, TpmList, TpmWork } from '@orchardworks/agent-remote-protocol';
@@ -19,7 +19,6 @@ export interface TpmService {
   tpmAction(hostId: string, id: string, input: TpmActionInput): Promise<TpmWork>;
 }
 export interface TpmHost { id: string; name: string; online: boolean; access?: 'owner' | 'shared' }
-export interface TpmItem { key: string; hostId: string; hostName: string; online: boolean; work: TpmWork; unread: boolean }
 interface Catalog extends TpmList { error?: string }
 export function tpmKey(hostId: string, id: string): string { return JSON.stringify([hostId, id]); }
 function meaningful(work: TpmWork): string {

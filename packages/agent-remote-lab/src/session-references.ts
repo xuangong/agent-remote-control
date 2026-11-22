@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { appendSessionReferences, sessionReferencesAttachment, splitSessionExcerpts, splitSessionReferences, type SessionReferenceNote } from '@orchardworks/agent-remote-protocol';
 import { watchList, type AgentReplicaState } from '@orchardworks/agent-client';
-import type { LabWorkbenchActions } from './components/LabWorkbench.js';
+import type { SessionViewActions as LabWorkbenchActions } from '@orchardworks/agent-client-web/react';
 import { DirectoryError, SessionDirectoryClient } from './directory-client.js';
 
 /** A session another session references, as its Host reports it. */

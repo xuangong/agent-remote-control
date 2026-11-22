@@ -4,7 +4,7 @@ import { render } from '../test/setup.js';
 import { LocaleContext } from '@orchardworks/agent-client-web/react';
 import { HttpPreviewClient } from '@orchardworks/agent-client';
 import { DirectoryError } from '../directory-client.js';
-import type { RemoteHost } from '../components/HostPairing.js';
+import type { RemoteHost } from '../kernel/remote-host.js';
 import { ComputerSettings, type ComputerServices } from './ComputerSettings.js';
 
 const owned: RemoteHost = { id: 'studio', name: 'Studio Mac', online: true, managed: true, credentialRotation: true, providers: [{ providerId: 'codex', displayName: 'Codex' }, { providerId: 'claude', displayName: 'Claude Code' }],

@@ -3,7 +3,8 @@ import { expect, it, vi } from 'vitest';
 import type { VscodeTunnelSnapshot } from '@orchardworks/agent-remote-protocol';
 import { render } from '../test/setup.js';
 import { VscodeTunnelScope, type VscodeTunnelService } from '../vscode-tunnel.js';
-import { HostVscodeTunnel, WorkspaceVscodeLink } from './HostVscodeTunnel.js';
+import { HostVscodeTunnel } from './HostVscodeTunnel.js';
+import { WorkspaceVscodeLink } from './WorkspaceVscodeLink.js';
 
 const host = { id: 'host-one', name: 'Desktop', online: true, access: 'owner' as const };
 const stopped: VscodeTunnelSnapshot = { status: 'stopped', processAlive: false, revision: 0 };

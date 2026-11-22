@@ -7,7 +7,7 @@ import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { SessionWorkbench } from '../conversation/ConversationSurface.js';
 import { RecoveryScope } from '../conversation-recovery.js';
 import { useBoundDraft, type DraftBinding } from '../draft-store.js';
-import { WorkspaceVscodeLink } from './HostVscodeTunnel.js';
+import { WorkspaceVscodeLink } from './WorkspaceVscodeLink.js';
 import { SessionWorkspaceContext } from './SessionLink.js';
 import { needsReauthentication } from '../security-client.js';
 import { ReauthenticationNotice } from './ReauthenticationNotice.js';

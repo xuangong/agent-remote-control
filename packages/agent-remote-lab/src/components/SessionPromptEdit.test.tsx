@@ -20,7 +20,7 @@ import { AskConversation } from './AskConversation.js';
 import { TpmWorkspace } from './TpmWorkspace.js';
 import { askParticipantKey } from '../hooks/useAskConversations.js';
 import type { SessionFork } from '../session-forks.js';
-import type { TpmItem } from '../hooks/useTpmWork.js';
+import type { TpmItem } from '../tpm-main-sessions.js';
 import { SessionDirectoryClient, type OpenedSession, type SuccessionActionResult } from '../directory-client.js';
 import { SessionViewOperationsContext } from '../session-view-operations.js';
 import { labSessionSuccessionDirectory } from '../session-succession-directory.js';

@@ -11,7 +11,7 @@
  * - Restoring the Host runs once: first the Host a link requested, else the Host of the remembered session.
  */
 import type { AgentProviderDescriptor } from '@orchardworks/agent-remote-protocol';
-import type { RemoteHost } from '../components/HostPairing.js';
+import type { RemoteHost } from '../kernel/remote-host.js';
 import { translator, type Translate } from '@orchardworks/agent-client';
 
 export const LOCAL_HOST_ID = 'local';

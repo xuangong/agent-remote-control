@@ -6,7 +6,7 @@ import { Button } from '../ui/Button.js';
 import { Pill } from '@orchardworks/agent-client-web/primitives';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { Icon } from '../ui/Icon.js';
-import type { HostPairingService, RemoteHost } from './HostPairing.js';
+import type { HostPairingService, RemoteHost } from '../kernel/remote-host.js';
 import { PairingKeys } from './PairingKeys.js';
 
 /** How often an open Hosts page reads each Host's status. */

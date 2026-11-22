@@ -4,7 +4,7 @@ import type { useSessionTracking } from '../hooks/useSessionTracking.js';
 import type { SessionConnectionMessage } from '../components/SessionConnectionNotice.js';
 import type { ReactNode } from 'react';
 import type { AgentReplicaState, RemoteAgentTransport, RemoteSessionStatus } from '@orchardworks/agent-client';
-import type { HostPairingService } from '../components/HostPairing.js';
+import type { HostPairingService } from '../kernel/remote-host.js';
 import type { SessionDirectoryClient, OpenedSession, SessionSummary } from '../directory-client.js';
 import type { LabWorkbenchActions } from '../components/LabWorkbench.js';
 import type { useAskConversations } from '../hooks/useAskConversations.js';

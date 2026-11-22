@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { HostStatus } from '@orchardworks/agent-remote-protocol';
 import { render } from '../test/setup.js';
 import { HostOverview, formatBytes } from './HostOverview.js';
-import type { HostPairingService, RemoteHost } from './HostPairing.js';
+import type { HostPairingService, RemoteHost } from '../kernel/remote-host.js';
 
 const GiB = 2 ** 30;
 const status: HostStatus = {

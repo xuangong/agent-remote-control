@@ -6,7 +6,7 @@ import type { SessionPanel } from '../state/panels.js';
 import { windowPrimaryViewId, type Team } from '@orchardworks/agent-remote-protocol';
 import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
 import { useEffect } from 'react';
-import type { RemoteHost } from '../components/HostPairing.js';
+import type { RemoteHost } from '../kernel/remote-host.js';
 import type { RemoteHostStateSlice } from './useRemoteHostState.js';
 import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';
 import type { ConversationConnectionsSlice } from './useConversationConnections.js';

@@ -1,7 +1,6 @@
 import { forwardRef, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ComponentType } from 'react';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import type { useWorkbenchMode } from '../hooks/useWorkbenchMode.js';
-import type { useBotWorkspace } from '../hooks/useBotWorkspace.js';
 import type { useOtherSessions } from '../hooks/useOtherSessions.js';
 import { useVisualViewport } from '../hooks/useVisualViewport.js';
 import { usePhoneLayout } from '../hooks/usePhoneLayout.js';
@@ -25,13 +24,16 @@ import { AssistantDetailsHostContext, type AssistantDetailsHost } from './assist
 import { useAssistantNames } from './assistant/names-context.js';
 import './bot-workspace.css';
 
+/** What Bot mode shows of the selected group while it is acquired: whether it loads, why it is unavailable, and a retry. */
+export interface BotSelection { loading: boolean; error?: string; retry(): Promise<void> }
+
 export interface BotWorkspaceProps {
   visible: boolean; compact: boolean; scope: string;
   /** Settings or the directory is over this workspace: it keeps its conversation and its draft, but is out of sight and reach. */
   covered?: boolean;
   workspace: ReturnType<typeof useWindowWorkspace>;
   navigation: ReturnType<typeof useWorkbenchMode>;
-  selected: ReturnType<typeof useBotWorkspace>;
+  selected: BotSelection;
   /** Who the bots are, for the selected bot's menu. */
   roster: BotRosterModel;
   /**

@@ -5,7 +5,7 @@ import { SessionDirectoryClient, type SessionCatalogPage } from '../directory-cl
 import { groupTpmWorks, type TpmMainSession } from '../tpm-main-sessions.js';
 import { sessionKey } from '../session-tree.js';
 import { render } from '../test/setup.js';
-import type { TpmItem } from './useTpmWork.js';
+import type { TpmItem } from '../tpm-main-sessions.js';
 import { useTpmMainSessions } from './useTpmMainSessions.js';
 
 afterEach(() => vi.restoreAllMocks());

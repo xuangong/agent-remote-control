@@ -8,7 +8,7 @@ import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
 import { useSessionDockDrag } from '../hooks/useSessionDockDrag.js';
 import type { WindowBotDetails } from '@orchardworks/agent-remote-protocol';
 import type { SessionStatesView } from '@orchardworks/agent-client';
-import { BotPicture } from './BotRoster.js';
+import { BotPicture } from './BotPicture.js';
 import type { AssistantStatus } from '@orchardworks/agent-client';
 import { useSharedFeed } from '../shared-feeds.js';
 import { TileStack } from './assistant/TileStack.js';

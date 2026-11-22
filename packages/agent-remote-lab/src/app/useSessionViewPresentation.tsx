@@ -4,7 +4,7 @@ import { isBotView, type WindowView, type WindowBotDetails, type AgentCommandRes
 import { windowSessionBinding } from '../window-workspace.js';
 import { appendedRank, botRole } from '../bot-roster.js';
 import { SessionOutboxMessages } from '../components/OutboxMessages.js';
-import { BotPicture } from '../components/BotRoster.js';
+import { BotPicture } from '../components/BotPicture.js';
 import { sessionActivity } from '../session-activity-status.js';
 import { assistantStatus, type SessionAttribution, type AgentReplicaState } from '@orchardworks/agent-client';
 import { labSessionSuccessionDirectory } from '../session-succession-directory.js';

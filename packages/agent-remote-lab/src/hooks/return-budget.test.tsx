@@ -7,7 +7,7 @@ import { SessionStarsClient } from '../session-stars-client.js';
 import { useRemoteHosts } from './useRemoteHosts.js';
 import { useSessionRelations } from './useSessionRelations.js';
 import { useSessionStars } from './useSessionStars.js';
-import type { HostPairingService } from '../components/HostPairing.js';
+import type { HostPairingService } from '../kernel/remote-host.js';
 
 let visibility: DocumentVisibilityState = 'visible';
 const setVisibility = (value: DocumentVisibilityState) => { visibility = value; document.dispatchEvent(new Event('visibilitychange')); };

@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { CodexDaemonStatus } from '@orchardworks/agent-remote-protocol';
 import { render } from '../test/setup.js';
 import { HostCodexDaemon } from './HostCodexDaemon.js';
-import type { HostPairingService, RemoteHost } from './HostPairing.js';
+import type { HostPairingService, RemoteHost } from '../kernel/remote-host.js';
 
 const host: RemoteHost = { id: 'host-one', name: 'Desktop', online: true, managed: true, access: 'owner',
   providers: [{ providerId: 'codex', displayName: 'Codex', daemonControl: true }] };

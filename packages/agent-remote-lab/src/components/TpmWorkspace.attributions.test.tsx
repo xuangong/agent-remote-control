@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { RemoteAgentTransport } from '@orchardworks/agent-client';
 import { render } from '../test/setup.js';
 import { DraftStore } from '../draft-store.js';
-import type { TpmItem } from '../hooks/useTpmWork.js';
+import type { TpmItem } from '../tpm-main-sessions.js';
 import { SessionDescriptionsContext } from '../session-description-context.js';
 import { describeSession } from '../session-description.js';
 import type { SessionEntry } from '../session-tree.js';

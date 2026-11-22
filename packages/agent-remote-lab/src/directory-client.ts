@@ -9,7 +9,7 @@ import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
 import { workspaceFetch } from './workspace-access.js';
 import { isCodexDaemonStatus, type CodexDaemonStatus, type CodexDaemonRestart } from '@orchardworks/agent-remote-protocol';
 import type { ControllerReleaseDiscovery, ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
-import type { HostPairingService, PairingInvitation, RemoteHost, HostStopResult, PairingPurpose, PairingHistory } from './components/HostPairing.js';
+import type { HostPairingService, PairingInvitation, RemoteHost, HostStopResult, PairingPurpose, PairingHistory } from './kernel/remote-host.js';
 export interface SessionSummary {
   nativeSessionId: string;
   providerId: string;

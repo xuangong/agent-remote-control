@@ -1,6 +1,6 @@
 import { CachePrivacySettings } from '../components/CachePrivacySettings.js';
 import { CallForSupportSettings } from '../components/call-for-support/CallForSupportSettings.js';
-import type { RemoteHost } from '../components/HostPairing.js';
+import type { RemoteHost } from '../kernel/remote-host.js';
 import type { SettingsItemId } from './settings-groups.js';
 import { SettingsSection } from './SettingsRow.js';
 

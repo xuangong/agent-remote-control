@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { CodexDaemonStatus } from '@orchardworks/agent-remote-protocol';
 import { errorWords } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import type { HostPairingService, RemoteHost } from './HostPairing.js';
+import type { HostPairingService, RemoteHost } from '../kernel/remote-host.js';
 
 // Cover the fifteen-minute native refresh plus readiness confirmation and transport delay.
 const daemonStatusPollingWindowMs = 16 * 60000;

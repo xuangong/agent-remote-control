@@ -3,7 +3,7 @@ import { Toggle } from '@orchardworks/agent-client-web/primitives';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { MessageKey } from '@orchardworks/agent-client';
 import { DirectoryError } from '../directory-client.js';
-import type { RemoteHost } from '../components/HostPairing.js';
+import type { RemoteHost } from '../kernel/remote-host.js';
 import { SettingsRow, SettingsSection } from './SettingsRow.js';
 
 /** What the Relay keeps about smart reading; the owner of a Host reads and changes it provider by provider. */

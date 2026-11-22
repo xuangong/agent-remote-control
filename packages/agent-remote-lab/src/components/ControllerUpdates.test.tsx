@@ -3,7 +3,7 @@ import { act, useState } from 'react';
 import { expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
 import { ControllerUpdates, controllerUpdateCoverage } from './ControllerUpdates.js';
-import type { HostPairingService, RemoteHost } from './HostPairing.js';
+import type { HostPairingService, RemoteHost } from '../kernel/remote-host.js';
 import type { ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
 const release = { protocolVersion: '1.8.0', version: '0.2.0', revision: 'a'.repeat(40), sha256: 'b'.repeat(64), asset: 'orchardworks-agent-remote-controller-0.2.0.tgz', nodeMajor: 22, platforms: ['darwin-arm64'] };
 const host: RemoteHost = { id: 'mac', name: 'Mac', online: true, access: 'owner', controller: { version: '0.1.0', revision: 'c'.repeat(40), platform: 'darwin', arch: 'arm64', nodeMajor: 22, remoteUpdate: true } };

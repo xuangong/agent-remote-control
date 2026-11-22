@@ -1,7 +1,7 @@
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { Pill } from '@orchardworks/agent-client-web/primitives';
 import type { AccountFacts } from '../account.js';
-import type { RemoteHost } from '../components/HostPairing.js';
+import type { RemoteHost } from '../kernel/remote-host.js';
 import { runningDeploymentEntry } from '../deployment-update.js';
 import type { SettingsItemId } from './settings-groups.js';
 import { SettingsRow, SettingsSection } from './SettingsRow.js';

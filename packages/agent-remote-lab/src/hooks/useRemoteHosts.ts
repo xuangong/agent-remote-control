@@ -1,7 +1,7 @@
 import { errorWords, watchFeedRefresh } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { HostPairingService, RemoteHost } from '../components/HostPairing.js';
+import type { HostPairingService, RemoteHost } from '../kernel/remote-host.js';
 
 export function useRemoteHosts(service: HostPairingService, enabled: boolean, discovery = true, activeHostId?: string) {
   const t = useTranslate();

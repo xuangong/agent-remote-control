@@ -2,7 +2,7 @@
 import { BotWorkspace } from '../../components/BotWorkspace.js';
 import { NewBotSheet } from '../../components/NewBotSheet.js';
 import { SessionConversationMount } from '../../components/SessionConversationSurfaces.js';
-import type { RemoteHost } from '../../components/HostPairing.js';
+import type { RemoteHost } from '../../kernel/remote-host.js';
 import { RemoveBotSheet } from '../../components/RemoveBotSheet.js';
 import type { AppScope } from '../types.js';
 

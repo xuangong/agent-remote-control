@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import type { AgentProviderDescriptor } from '@orchardworks/agent-remote-protocol';
-import type { RemoteHost } from '../components/HostPairing.js';
+import type { RemoteHost } from '../kernel/remote-host.js';
 import {
   availableProvidersOf, chosenProviderId, creationUnavailableReason, hostProviders, providerAfterHostChange, providerChoices,
   providerConnectionName, restoreHostSelection, type CreationFacts,

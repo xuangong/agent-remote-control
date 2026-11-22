@@ -1,7 +1,6 @@
 import { useContext, type ReactNode } from 'react';
-import type { WindowBotDetails, WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
-import { AssistantAvatar } from '@orchardworks/agent-client-web/primitives';
-import type { AvatarMood } from '@orchardworks/agent-client-web/theme';
+import type { WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
+import { BotPicture } from './BotPicture.js';
 import { projectChats, type BotRosterModel, type BotRow } from '../bot-roster.js';
 import type { BotPlace } from '../workbench-mode.js';
 import { sessionKey } from '../session-tree.js';
@@ -9,10 +8,6 @@ import { Icon } from '../ui/Icon.js';
 import { dateLocale, replyTime } from '../reply-time.js';
 import { LocaleContext, useTranslate } from '@orchardworks/agent-client-web/react';
 
-/** A bot's avatar: generated from its view id, which survives a handoff, unless its stored picture overrides it. */
-export function BotPicture({ id, picture, size = 26, mood = 'idle' }: Pick<WindowBotDetails, 'picture'> & { id: string; size?: number; mood?: AvatarMood }) {
-  return <AssistantAvatar id={id} {...(picture ? { picture } : {})} size={size} mood={mood} />;
-}
 export function botPlaceKey(place: BotPlace): string {
   return place.kind === 'bot' ? JSON.stringify([place.groupId, place.viewId]) : place.kind === 'session' ? sessionKey(place.session) : place.groupId;
 }

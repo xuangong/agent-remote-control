@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import type { HostProviderSettings } from '@orchardworks/agent-remote-protocol';
 import { render } from '../test/setup.js';
 import { HostProviders } from './HostProviders.js';
-import type { HostPairingService, RemoteHost } from './HostPairing.js';
+import type { HostPairingService, RemoteHost } from '../kernel/remote-host.js';
 const host: RemoteHost = { id: 'host', name: 'Desktop', online: true, managed: true, access: 'owner', providerManagement: true };
 const initial: HostProviderSettings = { revision: 'one', providers: [
   { providerId: 'codex', displayName: 'Codex', state: 'enabled' },

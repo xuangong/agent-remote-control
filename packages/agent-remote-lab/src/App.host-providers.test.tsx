@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { HostProvider } from './components/HostPairing.js';
+import type { HostProvider } from './kernel/remote-host.js';
 import { App, type LabTransport } from './App.js';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import { SessionDirectoryClient } from './directory-client.js';

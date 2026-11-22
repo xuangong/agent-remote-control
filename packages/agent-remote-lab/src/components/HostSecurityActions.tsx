@@ -2,7 +2,7 @@ import { useFeedbackToast } from './Toast.js';
 import { useState } from 'react';
 import { errorWords } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import type { HostPairingService, RemoteHost, HostStopResult } from './HostPairing.js';
+import type { HostPairingService, RemoteHost, HostStopResult } from '../kernel/remote-host.js';
 import { needsReauthentication } from '../security-client.js';
 import { ReauthenticationNotice } from './ReauthenticationNotice.js';
 

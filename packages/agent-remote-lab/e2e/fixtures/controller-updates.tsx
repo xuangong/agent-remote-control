@@ -1,6 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import { ControllerUpdates } from '../../src/components/ControllerUpdates';
-import type { HostPairingService, RemoteHost } from '../../src/components/HostPairing';
+import type { HostPairingService, RemoteHost } from '../../src/kernel/remote-host.js';
 import '../../src/ui/tokens.css';
 import '../../src/app.css';
 const controller = { version: '0.1.0', revision: 'a'.repeat(40), platform: 'darwin', arch: 'arm64', nodeMajor: 22, remoteUpdate: true };

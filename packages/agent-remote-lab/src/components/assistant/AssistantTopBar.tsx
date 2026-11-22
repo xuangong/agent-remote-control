@@ -1,7 +1,7 @@
 import { forwardRef, useId, type ReactNode } from 'react';
 import type { WindowBotDetails } from '@orchardworks/agent-remote-protocol';
 import type { AssistantStatus } from '@orchardworks/agent-client';
-import { BotPicture } from '../BotRoster.js';
+import { BotPicture } from '../BotPicture.js';
 
 /**
  * The top of an assistant's conversation: its avatar, name and one sentence of what it is doing, in a title pill that

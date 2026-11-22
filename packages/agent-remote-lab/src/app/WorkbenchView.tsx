@@ -16,7 +16,7 @@ import { ToastActivity } from '../components/Toast.js';
 import type { ReactNode } from 'react';
 import { HttpPreviewClient } from '@orchardworks/agent-client';
 import { RecoveryScope } from '../conversation-recovery.js';
-import type { RemoteHost } from '../components/HostPairing.js';
+import type { RemoteHost } from '../kernel/remote-host.js';
 import { PreviewProvider, PreviewWorkspace, SessionExcerptNavigation } from '@orchardworks/agent-client-web/react';
 import { SessionDockProvider } from '../components/SessionDock.js';
 import { SidebarResize } from '../components/SidebarResize.js';

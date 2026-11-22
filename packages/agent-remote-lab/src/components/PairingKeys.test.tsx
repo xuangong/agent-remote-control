@@ -1,7 +1,7 @@
 import { act } from 'react';
 import { expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
-import type { PairingPurpose, HostPairingService } from './HostPairing.js';
+import type { PairingPurpose, HostPairingService } from '../kernel/remote-host.js';
 import { PairingKeys } from './PairingKeys.js';
 
 const invitation = { id: 'new', key: 'private-secret', purpose: 'host-only' as const, createdAt: '2026-01-01T00:00:00Z', expiresAt: '2099-01-01T00:00:00Z', serverUrl: 'https://relay.example' };

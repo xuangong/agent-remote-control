@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { HostProviderChange, HostProviderSettings } from '@orchardworks/agent-remote-protocol';
 import { errorWords } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import type { RemoteHost, HostPairingService } from './HostPairing.js';
+import type { RemoteHost, HostPairingService } from '../kernel/remote-host.js';
 
 export function HostProviders({ host, service, visible }: { host: RemoteHost; service: HostPairingService; visible: boolean }) {
   if (!host.providerManagement || host.access === 'shared' || !service.providerSettings) return null;

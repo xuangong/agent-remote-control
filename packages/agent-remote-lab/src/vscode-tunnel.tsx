@@ -3,7 +3,7 @@ import { errorWords, watchList, withMessageKey } from '@orchardworks/agent-clien
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { parseVscodeTunnelSnapshot, type VscodeTunnelSnapshot } from '@orchardworks/agent-remote-protocol';
-import type { RemoteHost } from './components/HostPairing.js';
+import type { RemoteHost } from './kernel/remote-host.js';
 import { DirectoryError } from './directory-client.js';
 
 export interface VscodeTunnelService {

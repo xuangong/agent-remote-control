@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { compareControllerVersions, releaseCoversHost, PROTOCOL_VERSION, controllerUpdateTarget, controllerUpgradeBridgeVersion, type ControllerRelease, type ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
 import { errorWords, watchList } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import type { HostPairingService, RemoteHost } from './HostPairing.js';
+import type { HostPairingService, RemoteHost } from '../kernel/remote-host.js';
 import { hostDisplayLabel } from './host-environment.js';
 import { readControllerHealth, type ControllerHealthView } from '../controller-health-view.js';
 

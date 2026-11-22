@@ -8,7 +8,7 @@ import { readControllerLocation, type ControllerLocation } from '@orchardworks/a
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { HttpPreviewClient } from '@orchardworks/agent-client';
 import { readLastSession } from '../conversation-recovery.js';
-import type { RemoteHost } from '../components/HostPairing.js';
+import type { RemoteHost } from '../kernel/remote-host.js';
 import { RemoteHostClient, SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import { readCurrentConversationLayout } from '../hooks/useConversationHistory.js';
 import { sessionKey } from '../session-tree.js';

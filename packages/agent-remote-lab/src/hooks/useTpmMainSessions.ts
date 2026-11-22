@@ -3,7 +3,7 @@ import type { RemoteAgentTransport } from '@orchardworks/agent-client';
 import { SessionDirectoryClient } from '../directory-client.js';
 import { sessionKey } from '../session-tree.js';
 import { tpmMainTarget, type TpmMainSession } from '../tpm-main-sessions.js';
-import type { TpmItem } from './useTpmWork.js';
+import type { TpmItem } from '../tpm-main-sessions.js';
 
 /** Resolve list labels from the directory without opening native sessions. */
 export function useTpmMainSessions(baseUrl: string, enabled: boolean, open: boolean, works: readonly TpmItem[],

@@ -1,5 +1,5 @@
 import type { AgentProviderDescriptor, WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
-import type { RemoteHost } from '../components/HostPairing.js';
+import type { RemoteHost } from '../kernel/remote-host.js';
 import { sessionKey } from '../session-tree.js';
 import type { Appearance } from '@orchardworks/agent-client-web/browser';
 import type { CommandItem } from './command-search.js';

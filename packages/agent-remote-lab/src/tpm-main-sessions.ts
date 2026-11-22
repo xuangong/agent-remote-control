@@ -1,6 +1,8 @@
-import type { TpmItem } from './hooks/useTpmWork.js';
+import type { TpmWork } from '@orchardworks/agent-remote-protocol';
 import { sessionKey, type SessionEntry } from './session-tree.js';
 
+/** One TPM work as the Workbench lists it, with its Host. */
+export interface TpmItem { key: string; hostId: string; hostName: string; online: boolean; work: TpmWork; unread: boolean }
 export type TpmMainSession = Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId' | 'title'> & { workspace?: string };
 export function tpmMainTarget(item: TpmItem) {
   const ref = item.work.mainSessionRef;

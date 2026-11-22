@@ -1,6 +1,6 @@
 import type { NativeSessionRef, Team } from '@orchardworks/agent-remote-protocol';
 import { translator, type SessionAttribution, type SessionDescription, type SessionDescriptionIdentity, type Translate } from '@orchardworks/agent-client';
-import type { TpmItem } from './hooks/useTpmWork.js';
+import type { TpmItem } from './tpm-main-sessions.js';
 import { currentForkSource, sideLinkVisible, sideNavigationSource, sideNavigationTarget, type SessionFork } from './session-forks.js';
 import { sessionKey, type SessionEntry } from './session-tree.js';
 import { tpmMainTarget } from './tpm-main-sessions.js';

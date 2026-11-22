@@ -1,6 +1,6 @@
 import type { AgentCommandResult } from '@orchardworks/agent-remote-protocol';
 import { AgentReplica, RemoteOperationError, RemoteSessionClient, type RemoteAgentTransport, withMessageKey } from '@orchardworks/agent-client';
-import type { LabWorkbenchActions } from './components/LabWorkbench.js';
+import type { SessionViewActions as LabWorkbenchActions } from '@orchardworks/agent-client-web/react';
 import { captureForkContext, contextPrefix, type ForkStore, type SessionFork } from './session-forks.js';
 
 export const askCommand = { id: 'console:ask', name: 'ask', kind: 'command' as const, description: 'Toggle global Ask view; use on/off, or add a question for this session', descriptionKey: 'client.fork.askDescription' as const };

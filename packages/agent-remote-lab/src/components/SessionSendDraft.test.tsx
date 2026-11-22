@@ -18,7 +18,7 @@ import { AskConversation } from './AskConversation.js';
 import { TpmWorkspace } from './TpmWorkspace.js';
 import { askParticipantKey } from '../hooks/useAskConversations.js';
 import type { SessionFork } from '../session-forks.js';
-import type { TpmItem } from '../hooks/useTpmWork.js';
+import type { TpmItem } from '../tpm-main-sessions.js';
 import type { OpenedSession } from '../directory-client.js';
 import { sessionViewNavigation } from '../session-view-navigation.js';
 

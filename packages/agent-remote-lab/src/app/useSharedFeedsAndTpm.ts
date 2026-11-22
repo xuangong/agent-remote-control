@@ -12,7 +12,7 @@ import { useTpmWork, type TpmService } from '../hooks/useTpmWork.js';
 import { useTpmMainSessions } from '../hooks/useTpmMainSessions.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import type { RemoteHost } from '../components/HostPairing.js';
+import type { RemoteHost } from '../kernel/remote-host.js';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
 import type { ActiveSessionSlice } from './useActiveSession.js';

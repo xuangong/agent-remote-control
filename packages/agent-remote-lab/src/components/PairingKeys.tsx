@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { errorWords, type Translate } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import type { HostPairingService, PairingHistory, PairingInvitation, PairingPurpose, PairingRecord } from './HostPairing.js';
+import type { HostPairingService, PairingHistory, PairingInvitation, PairingPurpose, PairingRecord } from '../kernel/remote-host.js';
 import { needsReauthentication } from '../security-client.js';
 import { ReauthenticationNotice } from './ReauthenticationNotice.js';
 import { ControllerInstallGuide } from './ControllerInstallGuide.js';

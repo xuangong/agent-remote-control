@@ -1,5 +1,5 @@
 import { translator, type Translate } from '@orchardworks/agent-client';
-import type { RemoteHost } from './HostPairing.js';
+import type { RemoteHost } from '../kernel/remote-host.js';
 
 export function hostEnvironmentLabels(host: RemoteHost, t: Translate = translator('en')): string[] {
   const value = host.environment;

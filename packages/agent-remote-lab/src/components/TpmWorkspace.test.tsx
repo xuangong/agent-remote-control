@@ -5,7 +5,7 @@ import { createWindowView, type WorkspaceWindow, type AgentSnapshot, type Histor
 import { replicaState } from '../test/fixtures.js';
 import { render } from '../test/setup.js';
 import { DraftStore } from '../draft-store.js';
-import type { TpmItem } from '../hooks/useTpmWork.js';
+import type { TpmItem } from '../tpm-main-sessions.js';
 import { SessionDescriptionsContext } from '../session-description-context.js';
 import { describeSession } from '../session-description.js';
 import { TpmWorkspace } from './TpmWorkspace.js';

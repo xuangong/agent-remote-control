@@ -19,7 +19,7 @@ import { TabBar } from '../../src/shell/TabBar.js';
 import { AssistantDirectory } from '../../src/components/assistant/AssistantDirectory.js';
 import { SettingsPage, type SettingsContext } from '../../src/settings/SettingsPage.js';
 import { usePhoneLayout } from '../../src/hooks/usePhoneLayout.js';
-import type { RemoteHost } from '../../src/components/HostPairing.js';
+import type { RemoteHost } from '../../src/kernel/remote-host.js';
 
 const binding = (id: string, title: string) => ({ hostId: 'mac', providerId: 'claude', nativeSessionId: `${id}-session`, title });
 /** The sample data in the reader's language: a Chinese fixture shows Chinese sample data, an English one English. */

@@ -9,7 +9,7 @@ import { useAssistantNames } from '../../kernel/names-context.js';
 import type { MenuEntry } from '../../ui/Menu.js';
 import { AddAssistantsSheet, GroupNameSheet, GroupNotificationsSheet, MoveToGroupSheet } from './GroupSheets.js';
 
-type Workspace = Pick<ReturnType<typeof useWindowWorkspace>, 'groups' | 'readGroup' | 'operateGroup' | 'rename' | 'createGroup' | 'moveAssistant'>;
+type Workspace = Pick<ReturnType<typeof useWindowWorkspace>, 'groups' | 'readGroup' | 'operateGroup' | 'rename' | 'createGroup' | 'moveAssistant' | 'deleteGroup'>;
 type Open =
   | { kind: 'new' }
   | { kind: 'rename'; groupId: string; title: string }
@@ -65,6 +65,9 @@ export function useGroupActions({ workspace, defaultTitle, onMoved }: { workspac
       { label: t('navigation.groups.notifications'), icon: 'bell', onSelect: () => setOpen({ kind: 'notifications', groupId, title: section.title }) },
       { label: t('navigation.groups.moveUp'), icon: 'arrow-up', disabled: !up, onSelect: () => { if (up) void reorder(up); } },
       { label: t('navigation.groups.moveDown'), icon: 'arrow-down', disabled: !down, onSelect: () => { if (down) void reorder(down); } },
+      // Only an empty group is deleted here: its assistants move out first, so deleting never takes an assistant away.
+      { label: t('navigation.groups.delete'), icon: 'trash', destructive: true, disabled: !!workspace.readGroup(groupId)?.window.views.length,
+        onSelect: () => void run(() => workspace.deleteGroup(groupId), 'navigation.groups.failed') },
     ];
   }
 

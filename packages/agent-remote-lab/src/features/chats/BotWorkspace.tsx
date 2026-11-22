@@ -54,6 +54,8 @@ export interface BotWorkspaceProps {
   botInfo?(place: { groupId: string; viewId: string }): BotInfo | undefined;
   /** Shows a bot's tile in Window mode, keeping this place for the way back. */
   onPinToWindow?(place: { groupId: string; viewId: string }): void;
+  /** Opens search across chats and messages: the rail has it on a desktop, the list's header on a phone. */
+  onSearch?(): void;
 }
 
 /** Whether a conversation shows: at phone width one screen shows at a time, the list as home, and an unavailable assistant leaves the list on screen. */
@@ -66,7 +68,7 @@ export function botConversationShown(facts: { place?: BotPlace; phone: boolean; 
  * The details are closed by default below the compact width; at phone width one screen shows at a time, the list as home,
  * and the details open as a sheet.
  */
-export function BotWorkspace({ visible, covered = false, compact, scope, workspace, navigation, selected, roster, projectRoster, directory, describeConversation, mount: Mount = SessionConversationMount, hostName = id => id, botInfo, onNewBot, onPinToWindow }: BotWorkspaceProps) {
+export function BotWorkspace({ visible, covered = false, compact, scope, workspace, navigation, selected, roster, projectRoster, directory, describeConversation, mount: Mount = SessionConversationMount, hostName = id => id, botInfo, onNewBot, onPinToWindow, onSearch }: BotWorkspaceProps) {
   const t = useTranslate();
   const names = useAssistantNames();
   const phone = usePhoneLayout();
@@ -167,7 +169,9 @@ export function BotWorkspace({ visible, covered = false, compact, scope, workspa
     }}>
     <h1 className="lab-bot-title agent-visually-hidden">{t('navigation.chats')}</h1>
     <aside ref={rosterElement} id={rosterId} className="lab-bot-roster orchard-panel" hidden={phone && showConversation}>
-      <SidebarHeader brand actions={onNewBot ? <IconButton icon="plus" label={t('assistants.new')} onClick={onNewBot} /> : undefined} />
+      <SidebarHeader brand actions={onNewBot || phone && onSearch ? <>
+        {phone && onSearch ? <IconButton icon="search" label={t('navigation.search')} onClick={onSearch} /> : null}
+        {onNewBot ? <IconButton icon="plus" label={t('assistants.new')} onClick={onNewBot} /> : null}</> : undefined} />
       {unavailable ? availabilityNotice : null}
       {saving ? <p className="lab-bot-notice" role="status">{t('navigation.botWorkspace.saving')}</p> : null}
       {error || creation.error ? <p className="lab-bot-notice" role="alert">{error ?? creation.error}</p> : null}

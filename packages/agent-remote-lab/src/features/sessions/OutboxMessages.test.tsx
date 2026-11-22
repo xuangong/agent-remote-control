@@ -42,7 +42,7 @@ it('offers to send again a message that was not delivered, or whose delivery is 
   const entries = [entry(1, 'failed', { error: 'The session is not on this Host.' }), entry(2, 'unknown', { error: 'Check the conversation before sending it again.' })];
   const container = await render(<OutboxMessages entries={entries} hostName="Mac mini" hostOnline now={now} onCancel={onCancel} onRetry={onRetry} />);
   expect(message(container, 1).dataset.deliveryState).toBe('failed');
-  expect(delivery(container, 1)).toContain('Not delivered');
+  expect(delivery(container, 1)).toContain('Not sent');
   expect(delivery(container, 1)).toContain('The session is not on this Host.');
   expect(message(container, 2).dataset.deliveryState).toBe('unconfirmed');
   expect(delivery(container, 2)).toContain('Check delivery');

@@ -162,3 +162,14 @@ it('sections the chats by group, each pinned first and then by latest reply, and
   expect([...plain.querySelectorAll('.lab-bot-chats .lab-bot-name')].map(name => name.textContent)).toEqual(['Q1', 'P1']);
   expect([...plain.querySelectorAll('h2')].map(heading => heading.textContent)).toEqual(['Other sessions']);
 });
+
+it('marks needs you with its own ringed dot in place of the unread one, and a muted chat with a quiet unread dot', async () => {
+  const group = botGroup('A'); group.bots!.members.A2 = { name: 'A2', muted: true };
+  const model = projectBotRoster([group], [], { status: binding => binding.nativeSessionId === 'A1' ? 'waiting' : 'idle', reply: () => ({ replyAt: 5, preview: 'ok' }), unread: () => true });
+  const container = await render(<BotRoster model={model} groups={[group]} onSelect={() => {}} directoryControls={null} />);
+  const needing = visibleButton(container, 'A1'), muted = visibleButton(container, 'A2');
+  expect([needing.querySelector('.lab-bot-needs-you') !== null, needing.querySelector('.lab-bot-unread')]).toEqual([true, null]);
+  expect(muted.dataset.muted).toBe('true');
+  expect(muted.querySelector('.lab-bot-unread')).not.toBeNull();
+  expect(muted.getAttribute('aria-description')).toContain('Muted');
+});

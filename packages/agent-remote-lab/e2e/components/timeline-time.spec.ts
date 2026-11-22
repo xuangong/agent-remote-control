@@ -63,7 +63,8 @@ test('reveals local timestamps in the sender direction without changing row heig
     await expect(time.locator('time')).toHaveAttribute('datetime', '2026-09-18T02:11:17.158Z');
     expect(Math.abs((await assistant.boundingBox())!.height - rowHeight)).toBeLessThan(0.1);
     await page.screenshot({ path: testInfo.outputPath(dx < 0 ? 'user-time.png' : 'assistant-time.png') });
-    await expect(time).toBeHidden({ timeout: 4000 });
+    // A reveal that carries actions (Copy, and Edit on an editable prompt) stays five seconds, so a finger can reach them.
+    await expect(time).toBeHidden({ timeout: 6000 });
     await expect(row.locator('.agent-entry-content')).toHaveCSS('transform', 'none');
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -252,4 +253,16 @@ test('uses one native swipe listener per timeline as history grows', async ({ pa
   await page.getByRole('button', { name: 'Open Side conversation' }).click();
   await expect(page.locator('[data-entry-key="codex:1:side"]')).toBeVisible();
   expect(await page.evaluate(() => (window as any).swipeListeners)).toBe(2);
+});
+
+test('keeps Edit from this message beside the message for a mouse on a narrow desktop window', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'A touch screen edits from the swipe.');
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto('/e2e/fixtures/timeline-time.html?edit=1');
+  const user = page.locator('[data-entry-key="codex:1:user"]');
+  await user.hover();
+  const button = user.getByRole('button', { name: 'Edit from this message' }).filter({ visible: true });
+  await expect(button).toBeVisible();
+  await button.click();
+  await expect(page.getByTestId('edits')).toHaveText('1');
 });

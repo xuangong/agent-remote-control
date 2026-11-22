@@ -115,6 +115,7 @@ export function BotFixture({ conversation }: { conversation(props: { assistant: 
       latest.current = next; setGroups(next); return { saved: Promise.resolve() };
     },
     moveAssistant: async (steps: readonly MoveStep[]) => { const next = applyMoveSteps(latest.current, steps); latest.current = next; setGroups(next); },
+    deleteGroup: async (id: string) => { const next = latest.current.filter(group => group.window.id !== id); latest.current = next; setGroups(next); },
   } as unknown as BotWorkspaceProps['workspace'];
   const t = translator(browserLocale());
   const roster = projectBotRoster(groups, [], {

@@ -87,6 +87,12 @@ test('lists the same groups in the Assistants directory, with every group operat
   await assistantAction(page, 'Ink', 'Remove from “Research team”');
   await expect.poll(() => names(directoryGroup(page, 'Ungrouped'))).toEqual(['Rice', 'Ink']);
   await expect(directory.getByRole('status')).toHaveText('“Ink” is in “Ungrouped” now.');
+  // Ops is empty again, so it can be deleted; a group with assistants cannot.
+  await page.getByRole('button', { name: 'Group actions: Notes', exact: true }).click();
+  await expect(page.getByRole('menuitem', { name: 'Delete group', exact: true })).toHaveAttribute('aria-disabled', 'true');
+  await page.keyboard.press('Escape');
+  await groupAction(page, 'Ops', 'Delete group');
+  await expect.poll(() => titles(directory.locator('.lab-directory-group'))).toEqual(['Research team', 'Notes', 'Ungrouped']);
   await assistantAction(page, 'Rice', 'Pin to top');
   await assistantAction(page, 'Rice', 'Mute');
   await expect.poll(() => directoryGroup(page, 'Ungrouped').locator('.lab-bot-row[data-muted]').count()).toBe(1);

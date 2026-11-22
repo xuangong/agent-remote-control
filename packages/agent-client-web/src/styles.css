@@ -910,10 +910,12 @@ body:has(.agent-image-preview[open]) { overflow: hidden; }
 .agent-entry-time time { display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .agent-edit-prompt-error { color: var(--agent-muted); font-size: 12px; margin: 4px 8px; }
 @media (max-width: 1180px) {
-  .agent-entry-edit-desktop { display: none; }
-  .agent-timeline-entry[data-prompt-editable] > .agent-entry-time { width: 160px; flex-direction: row; justify-content: center; }
+  .agent-timeline-entry[data-entry-actions] > .agent-entry-time { width: 160px; flex-direction: row; justify-content: center; }
+  .agent-timeline-entry[data-prompt-editable] > .agent-entry-time:has(> [data-copy-action]) { width: 208px; }
   .agent-entry-time .agent-edit-prompt { flex: 0 0 44px; width: 44px; height: 44px; }
 }
+/* A touch screen edits from the swipe; a mouse at any width keeps the action beside the message, shown on hover and focus. */
+@media (max-width: 1180px) and (pointer: coarse) { .agent-entry-edit-desktop { display: none; } }
 
 .agent-session-search { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 8px; border: 1px solid var(--agent-rule); border-radius: 8px; color: var(--agent-ink); background: var(--agent-panel); box-shadow: 0 4px 16px color-mix(in oklab, var(--agent-shadow-ink) 12%, transparent); font-size: 12px; }
 .agent-session-search-input { display: flex; align-items: center; gap: 4px; min-width: 0; flex: none; }

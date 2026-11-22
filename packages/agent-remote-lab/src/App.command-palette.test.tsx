@@ -211,3 +211,28 @@ it('keeps focus on the page when Hide sidebar runs from the sidebar Search butto
     expect(document.getElementById('lab-context')!.contains(document.activeElement)).toBe(false);
   } finally { await app.close(); }
 });
+
+it('finds a chat by its latest reply and names its group, the default one for an assistant in a group of its own', async () => {
+  const scope = 'http://localhost/u/palette-messages/';
+  seedGroup(scope, section('S', 'Support', 'Helper'));
+  // A group New assistant made: one assistant, the group named after its session.
+  const own = botGroup('P'); own.window.views = [createWindowView('P1', { ...botTarget('P1'), title: 'Draft the notes' }, 'primary')];
+  own.window.title = 'Draft the notes'; own.window.selectedPrimaryViewId = 'P1'; own.window.selectedViewId = 'P1'; own.bots = { rank: 'z', members: { P1: { name: 'Pebble' } } };
+  seedGroup(scope, own);
+  history.replaceState(null, '', '/?mode=bot');
+  const app = await mountBotApp(scope, { hosted: true });
+  try {
+    await app.switchMode('bot');
+    await until(() => expect(app.container.querySelectorAll('.lab-bot-roster-list .lab-bot-row').length).toBeGreaterThanOrEqual(3));
+    await act(async () => app.emitStates({ hosts: [{ hostId: 'local', online: true }], states: [{ hostId: 'local', providerId: 'recorded', nativeSessionId: 'P1', state: 'idle', ageMs: 0, replyAt: 1000, preview: 'The release checklist is ready' }] }));
+    await shortcut();
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field(app.container), 'checklist');
+      field(app.container).dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const result = palette(app.container).querySelector('[role="group"][aria-label="Assistants"] [role="option"]');
+    expect([result?.querySelector('.lab-command-title')?.textContent, result?.querySelector('.lab-command-subtitle')?.textContent]).toEqual(['Pebble', 'Ungrouped']);
+    await act(async () => { field(app.container).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+    await until(() => expect(currentBot(app.container)).toBe('Pebble'));
+  } finally { await app.close(); }
+});

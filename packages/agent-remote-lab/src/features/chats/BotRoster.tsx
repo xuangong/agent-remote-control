@@ -24,6 +24,8 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
   const draft = !current && row.draft ? row.draft.replace(/\s+/g, ' ').trim() : undefined;
   // The sentence says what the assistant is doing; a draft takes the place of a quiet one (its latest reply, or ready).
   const quiet = row.assistant.state === 'idle' || row.assistant.state === 'unknown';
+  // Needs you is not unread: it asks for the owner, so its dot is distinct and mute never quiets it.
+  const needsYou = row.assistant.state === 'needs_you';
   const sentence = draft && quiet ? undefined : row.assistant.sentence || undefined;
   // The role and label are tags beside the name, like a job title; screen readers hear them after the name.
   const description = [row.role, row.details.label, sentence, draft ? `${t('assistants.draft')}: ${draft}` : undefined, row.unread ? t('assistants.unread') : undefined,
@@ -31,7 +33,7 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
   return <div className="lab-bot-member">
     <button type="button" className="lab-bot-row" aria-label={name} aria-description={description || undefined}
       title={`${hostName(row.binding.hostId)} · ${row.binding.providerId}`} data-state={row.assistant.state}
-      data-bot-place={botPlaceKey(destination)} data-asleep={row.details.asleep || undefined} data-unread={row.unread || undefined} data-muted={row.muted || undefined} aria-current={current || undefined} onClick={() => onSelect(destination)}>
+      data-bot-place={botPlaceKey(destination)} data-asleep={row.details.asleep || undefined} data-unread={row.unread || undefined} data-needs-you={needsYou || undefined} data-muted={row.muted || undefined} aria-current={current || undefined} onClick={() => onSelect(destination)}>
       <BotPicture id={row.viewId} picture={row.details.picture} size={compact ? 44 : 40} mood={row.assistant.mood} />
       <span className="lab-bot-row-text">
         <span className="lab-bot-name-line"><strong className="lab-bot-name">{name}</strong>
@@ -40,11 +42,11 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
           {marks}
           {row.muted ? <span className="lab-bot-muted" aria-hidden="true"><Icon name="bell-off" size={13} /></span> : null}
           {time ? <span className="lab-bot-time" aria-hidden="true">{time}</span> : null}</span>
-        {/* One sentence of what the assistant is doing; an unread reply is a dot, never a number. */}
-        {sentence || draft || row.unread ? <span className="lab-bot-summary" aria-hidden="true">
+        {/* One sentence of what the assistant is doing; an unread reply is a dot, never a number, and needs you a ringed dot in its place. */}
+        {sentence || draft || row.unread || needsYou ? <span className="lab-bot-summary" aria-hidden="true">
           {sentence ? <span className="lab-bot-sentence" data-state={row.assistant.state}>{sentence}</span> : null}
           {draft ? <span className="lab-bot-draft"><span className="lab-bot-draft-label">{t('assistants.draft')}</span>{draft}</span> : null}
-          {row.unread ? <span className="lab-bot-unread" /> : null}
+          {needsYou ? <span className="lab-bot-needs-you" /> : row.unread ? <span className="lab-bot-unread" /> : null}
         </span> : null}
       </span>
       {row.details.pinned ? <span className="lab-bot-pinned" aria-hidden="true"><Icon name="pin" size={14} /></span> : null}

@@ -328,7 +328,7 @@ export const sessions = {
   'sessions.outbox.hours': '{count} h',
   'sessions.outbox.days': '{count} d',
   'sessions.outbox.sending': 'Sending…',
-  'sessions.outbox.notDelivered': 'Not delivered',
+  'sessions.outbox.notDelivered': 'Not sent',
   'sessions.outbox.checkDelivery': 'Check delivery',
   'sessions.outbox.waitingToSend': 'Waiting to send',
   'sessions.outbox.waitingForHost': 'Waiting for {host}',

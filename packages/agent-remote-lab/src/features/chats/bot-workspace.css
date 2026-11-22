@@ -192,3 +192,6 @@ button.lab-assistant-title:is(:hover, [aria-expanded="true"]):not(:disabled) { b
 /* A group's notifications: Mute, then which reminders it sends. */
 .lab-group-settings { display: grid; gap: var(--orchard-space-m); padding: var(--orchard-space-xs) 0 var(--orchard-space-m); }
 .lab-group-setting { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--orchard-space-m); min-height: 44px; }
+/* Needs you: the brand dot inside a ring, so it differs from an unread dot by shape as well as by weight. */
+.lab-bot-needs-you { flex: none; width: 8px; height: 8px; margin-inline: auto 3px; border-radius: 50%; background: var(--orchard-brand);
+  box-shadow: 0 0 0 2px var(--orchard-surface), 0 0 0 3.5px var(--orchard-brand); }

@@ -1,6 +1,8 @@
 export interface TimeReveal { offset: number; top: number; dragging: boolean }
 export const idleTimeReveal: TimeReveal = { offset: 0, top: 0, dragging: false };
-interface Entry { element: HTMLElement; direction: -1 | 1; actionable: boolean; publish(value: TimeReveal): void }
+/** `actions`: how many 44 px actions (Copy, Edit) sit beside the time, which the swipe reveals with it. */
+interface Entry { element: HTMLElement; direction: -1 | 1; actions: number; publish(value: TimeReveal): void }
+const revealed = (actions: number) => 116 + 48 * actions;
 const timelines = new WeakMap<HTMLElement, ReturnType<typeof createGestures>>();
 
 export function registerTimeGesture(entry: Entry): () => void {
@@ -66,7 +68,7 @@ function createGestures(root: HTMLElement) {
     }
     if (!event.cancelable) { reset(); return; }
     event.preventDefault();
-    gesture.distance = Math.max(0, Math.min(active.actionable ? 164 : 116, dx));
+    gesture.distance = Math.max(0, Math.min(revealed(active.actions), dx));
     suppressClickUntil = Date.now() + 500;
     suppressedElement = active.element;
     active.publish({ offset: gesture.distance * active.direction, top: gesture.top, dragging: true });
@@ -75,9 +77,9 @@ function createGestures(root: HTMLElement) {
     if (actionTouch) { actionTouch = false; timer = setTimeout(reset, 5000); return; }
     if (gesture?.locked) suppressClickUntil = Date.now() + 500;
     if (!gesture?.locked || gesture.distance < 36 || !active) { reset(); return; }
-    active.publish({ offset: (active.actionable ? 164 : 116) * active.direction, top: gesture.top, dragging: false });
+    active.publish({ offset: revealed(active.actions) * active.direction, top: gesture.top, dragging: false });
     gesture = undefined;
-    timer = setTimeout(reset, active.actionable ? 5000 : 1400);
+    timer = setTimeout(reset, active.actions ? 5000 : 1400);
   }
   function click(event: MouseEvent) {
     if (Date.now() < suppressClickUntil && event.target instanceof Node && suppressedElement?.contains(event.target)) {

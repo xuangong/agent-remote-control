@@ -188,6 +188,6 @@ it('shows only the reminders its rule admits: a muted assistant none, a group se
   await notifier.remind(muted, 'waiting', 'asks');
   await notifier.remind(quiet, 'waiting', 'asks');
   await notifier.remind(session, 'idle', 'finished');
-  expect(instances.map(item => [item.title, item.options.body])).toEqual([['Session needs your input', 'Research'], ['Session completed', 'Research']]);
+  expect(instances.map(item => [(item as unknown as { title: string }).title, item.options.body])).toEqual([['Session needs your input', 'Research'], ['Session completed', 'Research']]);
   notifier.dispose();
 });

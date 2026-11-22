@@ -16,13 +16,13 @@ modules; `pnpm verify:changed` per commit; a real session in `pnpm local` for ea
 
 ## M2: the task lifecycle (T3)
 
-- [ ] needs_input: a worker's pending interaction, and `ask_owner`
-- [ ] `message_task` from the owner, answering a question or adding input
-- [ ] The person's input to a worker tells the main session
-- [ ] `cancel_task` and `mark_task_done`, from the owner and from the page
-- [ ] A worker idle without a report gets one reminder, then needs input
-- [ ] A worker whose creation is unknown leaves its task needing input
-- [ ] Workspaces `read_only` and `worktree` (with the patch returned), provider and model choice
+- [x] needs_input: a worker's pending interaction, and `ask_owner` (c0ff5c53, 3cd8342c)
+- [x] `message_task` from the owner, answering a question or adding input (c0ff5c53)
+- [x] The person's input to a worker tells the main session (c0ff5c53)
+- [x] `cancel_task` and `mark_task_done`, from the owner and from the page (c0ff5c53)
+- [x] A worker idle without a report gets one reminder, then needs input (c0ff5c53)
+- [x] A worker whose creation is unknown leaves its task needing input (c0ff5c53)
+- [x] Workspaces `read_only` and `worktree` (with the patch returned), provider and model choice (a497fbf9)
 
 ## M3: assistants and their messages (T1, T4)
 

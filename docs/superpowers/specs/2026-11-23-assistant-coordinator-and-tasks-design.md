@@ -516,9 +516,13 @@ uses, so the main flow runs end to end now and moves onto the P2 queue later:
   never enters the CLI's own next-turn queue (5.4 rules 1 and 2). Finished tasks' seats are forgotten.
 - The Workbench draws a brief and a result as a task card, and leaves tasks out of the Team list.
 
-Not yet in T2a, tracked in open item O69: coalescing several results into one input, the order at idle across kinds,
-`needs_input`, `cancel_task`, `message_task`, stalls, a worker whose creation is unknown (it stays `queued`), task cards that
-open the worker session and the details list, and the requester field on echoes.
+Then, still on the Team path (T2 and part of T3): several updates for one main session arrive as one input, questions and
+needs-the-person first; `ask_owner`, a worker's pending interaction, and one reminder before `no_report` move a task to
+`needs_input`; the owner has `message_task`, `cancel_task` and `mark_task_done`, and the person stops a task or marks it done
+from the assistant's details, which list its tasks; what the person types to a worker reaches the owner as `[Task … · the person
+wrote]`; an uncertain delivery or creation leaves the task waiting with `brief_unknown`; `create_task` takes `workspace`
+(`same`, `read_only`, `worktree` with the patch returned as a file on the Host), `provider` and `model`. What remains is tracked
+in open item O69.
 
 
 | Step | Delivers | Gate |

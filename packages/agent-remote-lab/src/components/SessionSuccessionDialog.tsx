@@ -1,5 +1,5 @@
 import { errorWords } from '@orchardworks/agent-client';
-import { createContext, useContext, useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { OpenedSession, SuccessionActionResult, SuccessionDescription, SuccessionPrepareInput } from '../directory-client.js';
@@ -8,11 +8,7 @@ import './session-succession.css';
 import type { NativePrefixSelection } from '@orchardworks/agent-remote-protocol';
 
 type Action = 'prepare' | 'commit' | 'cancel' | 'status' | 'reconcile';
-/**
- * The delays before each automatic status check of an unconfirmed Handoff, after which the checks stop. A page keeps these;
- * a test passes longer ones instead of racing them.
- */
-export const HandoffStatusDelays = createContext<readonly number[]>([1000, 2000, 4000, 8000, 15000]);
+const statusDelays = [1000, 2000, 4000, 8000, 15000];
 const isTerminal = (value?: SuccessionActionResult) => !!value && ['committed', 'cancelled', 'rejected'].includes(value.record.phase);
 const providerName = (id: string) => ({ codex: 'Codex', 'claude-code': 'Claude Code', claude: 'Claude Code', copilot: 'Copilot', opencode: 'OpenCode' })[id] ?? id;
 function preferredTarget(description: SuccessionDescription, initialProvider?: string): string {
@@ -33,7 +29,6 @@ export function SessionSuccessionDialog({ source, directory, assertAccess, asser
   onSettled(result: SuccessionActionResult): Promise<void>; onClose(retain?: boolean): void | Promise<void>; onOpen?(): void; onGatedChange?(gated: boolean): void;
 }) {
   const t = useTranslate();
-  const statusDelays = useContext(HandoffStatusDelays);
   const dialog = useRef<HTMLDialogElement>(null), label = useId(), detailsId = useId();
   const [description, setDescription] = useState<SuccessionDescription>();
   const [target, setTarget] = useState(''), [intent, setIntent] = useState(resume);

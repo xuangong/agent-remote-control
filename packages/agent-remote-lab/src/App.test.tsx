@@ -15,9 +15,9 @@ import type { RemoteTransportListener } from '@orchardworks/agent-client';
 import { App, type LabTransport } from './App.js';
 import { render, unmount, setPromptText, promptText } from './test/setup.js';
 import { replicaState } from './test/fixtures.js';
-import { SessionDirectoryClient } from './directory-client.js';
-import * as windowWorkspaceHooks from './hooks/useWindowWorkspace.js';
-import * as directoryComponents from './components/SessionDirectory.js';
+import { SessionDirectoryClient } from './kernel/directory-client.js';
+import * as windowWorkspaceHooks from './features/windows/useWindowWorkspace.js';
+import * as directoryComponents from './features/sessions/SessionDirectory.js';
 
 describe('App', () => {
   it('renders a supplied Session View snapshot without a Window controller', async () => {
@@ -1077,9 +1077,9 @@ it('notifies a failed send, keeps the message as Check delivery and does not rep
 });
 
 it('shows no stored conversation content before the Relay confirms access, and shows it once it does', async () => {
-  const { WorkspaceReady, rememberWorkspaceAccess, setWorkspaceReady } = await import('./workspace-access.js');
-  const { saveStoredDisplay } = await import('./stored-display.js');
-  const { saveLastSession } = await import('./conversation-recovery.js');
+  const { WorkspaceReady, rememberWorkspaceAccess, setWorkspaceReady } = await import('./kernel/workspace-access.js');
+  const { saveStoredDisplay } = await import('./kernel/stored-display.js');
+  const { saveLastSession } = await import('./kernel/conversation-recovery.js');
   const path = '/u/' + 'a'.repeat(64) + '/';
   const scope = new URL(path, window.location.origin).href;
   const target = { hostId: 'desk', providerId: 'recorded', nativeSessionId: 'recorded-session', agentId: 'agent-1' };
@@ -1104,9 +1104,9 @@ it('shows no stored conversation content before the Relay confirms access, and s
 });
 
 it('shows stored conversation content in the first render on a cached lease, with no opening word', async () => {
-  const { WorkspaceReady, rememberWorkspaceAccess, setWorkspaceReady } = await import('./workspace-access.js');
-  const { saveStoredDisplay } = await import('./stored-display.js');
-  const { saveLastSession } = await import('./conversation-recovery.js');
+  const { WorkspaceReady, rememberWorkspaceAccess, setWorkspaceReady } = await import('./kernel/workspace-access.js');
+  const { saveStoredDisplay } = await import('./kernel/stored-display.js');
+  const { saveLastSession } = await import('./kernel/conversation-recovery.js');
   const path = '/u/' + 'c'.repeat(64) + '/';
   const scope = new URL(path, window.location.origin).href;
   const target = { hostId: 'desk', providerId: 'recorded', nativeSessionId: 'recorded-session', agentId: 'agent-1' };

@@ -1,7 +1,7 @@
 // The TPM workspaces.
-import { tpmMainTarget } from '../../tpm-main-sessions.js';
-import { TpmWorkspace } from '../../components/TpmWorkspace.js';
-import { sessionKey } from '../../session-tree.js';
+import { tpmMainTarget } from '../../kernel/tpm-main-sessions.js';
+import { TpmWorkspace } from '../../features/team/TpmWorkspace.js';
+import { sessionKey } from '../../kernel/session-tree.js';
 import type { AppScope } from '../types.js';
 
 export function TpmWorkspaces({ scope }: { readonly scope: Pick<AppScope, 'baseUrl' | 'compactLayout' | 'messageDrafts' | 'openTpmMain' | 'presentedFeature' | 'replicaFor' | 'sessionWindows' | 'setTpmListOpen' | 'sharedWindow' | 'supportingRailOpen' | 'tpm' | 'tpmMainSessions' | 'tpmTriggerRef' | 'tpmView' | 'transport' | 'viewNavigation' | 'windowMode'> }) {

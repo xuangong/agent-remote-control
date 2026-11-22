@@ -1,13 +1,13 @@
 // Provider catalog loading, the creation choice and attaching a session.
-import { creationUnavailableReason as creationUnavailableReasonOf, providerChoices, providerConnectionName as providerConnectionNameOf, restoreHostSelection } from '../state/creation-choice.js';
-import { mayResume, resumedSession } from '../state/agent-creation.js';
-import { type SessionEntry, sessionKey } from '../session-tree.js';
+import { creationUnavailableReason as creationUnavailableReasonOf, providerChoices, providerConnectionName as providerConnectionNameOf, restoreHostSelection } from '../features/sessions/creation-choice.js';
+import { mayResume, resumedSession } from '../features/sessions/agent-creation.js';
+import { type SessionEntry, sessionKey } from '../kernel/session-tree.js';
 import { errorWords, remoteSessionState } from '@orchardworks/agent-client';
-import { conversationLocalStorage } from '../conversation-storage.js';
+import { conversationLocalStorage } from '../kernel/conversation-storage.js';
 import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
-import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
+import { sessionConnectionFailure } from '../kernel/SessionConnectionNotice.js';
 import { useCallback, useEffect, useLayoutEffect, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
+import { SessionDirectoryClient, type OpenedSession } from '../kernel/directory-client.js';
 import { createAgentId, rememberedAgent, rememberAgent, openedSessionsKey, openedSessionMetadata } from './helpers.js';
 import type { PanelsAndShortcutsSlice } from './usePanelsAndShortcuts.js';
 import type { ViewTargetsSlice } from './useViewTargets.js';

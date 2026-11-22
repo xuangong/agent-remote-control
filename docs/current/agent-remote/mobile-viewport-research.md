@@ -28,7 +28,7 @@ The distance is an observation, not a constant to subtract in a workaround.
 | Timeline | Internal scrolling, bottom-origin flex layout | Its scroll correction cannot alone translate the header and composer. |
 | Composer | Normal Grid row, bottom safe-area padding suppressed during inferred occlusion | Keep this shared layout rather than independently fixing the composer. |
 
-Relevant files are `packages/agent-remote-lab/src/hooks/useVisualViewport.ts`,
+Relevant files are `packages/agent-remote-lab/src/kernel/useVisualViewport.ts`,
 `packages/agent-remote-lab/src/app.css`, and `packages/agent-remote-lab/index.html`.
 
 The hook checks that visual viewport width matches window width before comparing

@@ -1,9 +1,9 @@
 import { useLayoutEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { AgentReplicaState } from '@orchardworks/agent-client';
-import { LabWorkbench } from '../../src/components/LabWorkbench.js';
+import { LabWorkbench } from '../../src/conversation/LabWorkbench.js';
 import { replicaState } from '../../src/test/fixtures.js';
-import { ReadingPositions, RecoveryScope } from '../../src/conversation-recovery.js';
+import { ReadingPositions, RecoveryScope } from '../../src/kernel/conversation-recovery.js';
 import '../../src/session-view-styles';
 
 const binding = { locator: './diagram.png', resourceId: 'diagram', status: 'available' as const };

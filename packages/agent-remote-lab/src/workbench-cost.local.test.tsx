@@ -6,7 +6,7 @@ import { appendFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createWindowView, type WindowGroup } from '@orchardworks/agent-remote-protocol';
-import * as conversation from './components/SessionConversation.js';
+import * as conversation from './conversation/SessionConversation.js';
 import { botTarget, mountBotApp, seedGroup, until } from './test/bot-mode-fixtures.js';
 
 const output = resolve(process.env.ARC_PERFORMANCE_OUTPUT ?? '.tmp/workbench-cost.log');

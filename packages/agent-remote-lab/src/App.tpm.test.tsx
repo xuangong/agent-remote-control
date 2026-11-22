@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { App } from './App.js';
 import type { LabTransport } from './App.js';
 import type { TpmWork } from '@orchardworks/agent-remote-protocol';
-import { SessionDirectoryClient } from './directory-client.js';
+import { SessionDirectoryClient } from './kernel/directory-client.js';
 import { replicaState } from './test/fixtures.js';
 import { render, setPromptText, promptText } from './test/setup.js';
 

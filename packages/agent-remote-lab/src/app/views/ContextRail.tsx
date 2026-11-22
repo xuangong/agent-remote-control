@@ -1,7 +1,7 @@
 // The sidebar: Windows, shortcuts, the sessions panel on compact layouts and the footer.
-import { WindowWorkspaces } from '../../components/WindowWorkspaces.js';
-import { SupportingRail } from '../../components/SupportingRail.js';
-import { SidebarHeader } from '../../shell/SidebarHeader.js';
+import { WindowWorkspaces } from '../../features/windows/WindowWorkspaces.js';
+import { SupportingRail } from '../../features/windows/SupportingRail.js';
+import { SidebarHeader } from '../../kernel/SidebarHeader.js';
 import { Menu } from '../../ui/Menu.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { AppScope } from '../types.js';

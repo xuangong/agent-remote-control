@@ -1,6 +1,6 @@
 // Component projects: webkit-conversation
 import { expect, test, type Page } from '@playwright/test';
-import type { SessionAttentionNotifications } from '../../src/session-notifications';
+import type { SessionAttentionNotifications } from '../../src/kernel/session-notifications';
 
 type NotificationFixture = { notifier: SessionAttentionNotifications; notices: { title: string; onclick?: () => void; options: NotificationOptions }[]; focused: number; opened: string[] };
 const session = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Research' };

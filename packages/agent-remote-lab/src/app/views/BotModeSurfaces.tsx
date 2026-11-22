@@ -1,9 +1,9 @@
 // The Bot mode workspace and its sheets.
-import { BotWorkspace } from '../../components/BotWorkspace.js';
-import { NewBotSheet } from '../../components/NewBotSheet.js';
-import { SessionConversationMount } from '../../components/SessionConversationSurfaces.js';
+import { BotWorkspace } from '../../features/chats/BotWorkspace.js';
+import { NewBotSheet } from '../../features/chats/NewBotSheet.js';
+import { SessionConversationMount } from '../../conversation/SessionConversationSurfaces.js';
 import type { RemoteHost } from '../../kernel/remote-host.js';
-import { RemoveBotSheet } from '../../components/RemoveBotSheet.js';
+import { RemoveBotSheet } from '../../features/chats/RemoveBotSheet.js';
 import type { AppScope } from '../types.js';
 
 export function BotModeSurfaces({ scope }: { readonly scope: Pick<AppScope, 'assistantNames' | 'baseUrl' | 'botHandoff' | 'botRoster' | 'compactLayout' | 'createAgent' | 'creationUnavailableReason' | 'describeBot' | 'describeBotConversation' | 'directory' | 'navigation' | 'newBot' | 'openNewBot' | 'otherSessions' | 'pinToWindow' | 'projectSharedRoster' | 'providerChoiceList' | 'providerId' | 'remoteHosts' | 'removingBot' | 'retainedHandoff' | 'selectHost' | 'selectProvider' | 'selectableHosts' | 'selectedBot' | 'selectedHost' | 'selectedProviderChoice' | 'sessionOptions' | 'setNewBot' | 'setRemovingBot' | 'setSessionOptions' | 'sharedWindow' | 'successionProgress' | 'transitioning' | 'windowMode' | 'windowWorkspace'> }) {

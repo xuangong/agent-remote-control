@@ -1,6 +1,6 @@
-import { ToastProvider } from './components/Toast.js';
+import { ToastProvider } from './kernel/Toast.js';
 import { LocaleProvider } from '@orchardworks/agent-client-web/react';
-import { deviceChoices } from './device-choices.js';
+import { deviceChoices } from './kernel/device-choices.js';
 import { useWorkbenchShell } from './app/useWorkbenchShell.js';
 import { useRequestedSession } from './app/useRequestedSession.js';
 import { useWorkbenchRecords } from './app/useWorkbenchRecords.js';

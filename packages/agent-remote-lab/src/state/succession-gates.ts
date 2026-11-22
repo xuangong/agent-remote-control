@@ -26,7 +26,7 @@
  */
 import type { NativeSessionRef } from '@orchardworks/agent-remote-protocol';
 import { nativeSessionRefKey } from '@orchardworks/agent-remote-protocol';
-import { sessionKey } from '../session-tree.js';
+import { sessionKey } from '../kernel/session-tree.js';
 
 export type CommandRefusal = 'access-restoring' | 'native-unconfirmed' | 'conversation-changed';
 

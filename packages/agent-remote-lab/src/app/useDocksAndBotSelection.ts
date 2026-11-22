@@ -1,7 +1,7 @@
 // Window actions, docks, the selected bot and the bot presentation.
 import { hasBotAppearance, isBotView, primaryWindowViews, type WindowView, type Team } from '@orchardworks/agent-remote-protocol';
 import { useBotWorkspace } from '../hooks/useBotWorkspace.js';
-import { windowBindingKey } from '../window-composition.js';
+import { windowBindingKey } from '../kernel/window-composition.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SessionSuccessionBindingSlice } from './useSessionSuccessionBinding.js';
 import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import type { CompositionSlot } from '../session-composition-model.js';
+import type { CompositionSlot } from '../kernel/session-composition-model.js';
 import { paneDraftOwners, storeFor } from './draft-ownership.js';
 
 const slot = (): CompositionSlot => ({

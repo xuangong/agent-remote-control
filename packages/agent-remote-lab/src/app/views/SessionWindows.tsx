@@ -1,8 +1,8 @@
 // The floating session windows.
-import { TeamGatherButton } from '../../components/TeamGatherButton.js';
-import { SessionWindow } from '../../components/SessionWindow.js';
-import { SessionFamily } from '../../components/SessionFamily.js';
-import { sessionKey } from '../../session-tree.js';
+import { TeamGatherButton } from '../../features/team/TeamGatherButton.js';
+import { SessionWindow } from '../../features/windows/SessionWindow.js';
+import { SessionFamily } from '../../conversation/SessionFamily.js';
+import { sessionKey } from '../../kernel/session-tree.js';
 import type { AppScope } from '../types.js';
 
 export function SessionWindows({ scope }: { readonly scope: Pick<AppScope, 'activeView' | 'baseUrl' | 'chooseWindowSession' | 'compactLayout' | 'markSessionMissing' | 'messageDrafts' | 'missingSessions' | 'presentSessionView' | 'presentedRootView' | 'receiveViewSession' | 'remoteHosts' | 'sessionWindows' | 'sharedWindow' | 'supportingRailOpen' | 'transport' | 'viewNavigation' | 'windowDraftBinding' | 'windowMode' | 'windowPaneFolding'> }) {

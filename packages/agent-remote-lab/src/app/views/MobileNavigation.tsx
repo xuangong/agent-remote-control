@@ -1,6 +1,6 @@
 // The compact layout's session navigation bar.
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { FavoritesMenu } from '../../components/SessionFavorites.js';
+import { FavoritesMenu } from '../../features/sessions/SessionFavorites.js';
 import { viewKey } from '../helpers.js';
 import type { AppScope } from '../types.js';
 

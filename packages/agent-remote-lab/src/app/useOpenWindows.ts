@@ -1,7 +1,7 @@
 import { windowPrimaryViewId } from '@orchardworks/agent-remote-protocol';
 import { useEffect, useMemo } from 'react';
-import { compositionSession } from '../session-composition.js';
-import { sessionKey } from '../session-tree.js';
+import { compositionSession } from '../kernel/session-composition.js';
+import { sessionKey } from '../kernel/session-tree.js';
 import { viewKey } from './helpers.js';
 import type { AppInputs } from './types.js';
 import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';

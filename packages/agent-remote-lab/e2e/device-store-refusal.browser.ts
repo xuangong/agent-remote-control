@@ -19,8 +19,8 @@ beforeAll(async () => {
     import React from 'react';
     import { createRoot } from 'react-dom/client';
     import { GatewayController } from './GatewayController.tsx';
-    import { useStoredDisplay } from './hooks/useStoredDisplay.ts';
-    import { saveStoredDisplay } from './stored-display.ts';
+    import { useStoredDisplay } from './conversation/useStoredDisplay.ts';
+    import { saveStoredDisplay } from './kernel/stored-display.ts';
     import { startDeviceStore } from './device-store-start.ts';
     import '@orchardworks/agent-client-web/browser';
     import { AgentTimeline } from '@orchardworks/agent-client-web/react';

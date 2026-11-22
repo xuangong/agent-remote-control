@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Module map for pnpm arch:check. Each source and test file under packages belongs to the module whose most specific path matches it. Modules are named by their target role (docs/superpowers/specs/2026-11-18-target-architecture-and-tests.md, section 3) and placed where the code lives today. Layers: 0 contracts, 1 domain, 2 application, 3 adapters, 4 apps, 5 test support (may import any layer). `edges`, `bans` and `roots` encode rules 3 and 5 to 10 of section 1.2; the others are structural. Violations that cannot be fixed yet are listed in architecture/exceptions.json with the step that removes them.",
+  "description": "Module map for pnpm arch:check. Each source and test file under packages belongs to the module whose most specific path matches it. Modules are named by their target role (docs/superpowers/specs/2026-11-18-target-architecture-and-tests.md, section 3) and placed where the code lives today. Layers: 0 contracts, 1 domain, 2 application, 3 adapters, 4 apps, 5 test support (may import any layer). `edges`, `bans` and `roots` encode rules 3 and 5 to 10 of section 1.2; the others are structural. A module that lists `uses` may import the other modules of its own package only from that list (a `sibling` violation otherwise): the Workbench's feature modules import the kernel and the conversation surface, and another feature only through a seam written in docs/current/agent-remote/workbench-state.md. Violations that cannot be fixed yet are listed in architecture/exceptions.json with the step that removes them.",
   "scan": [
     "packages/*/src/**",
     "packages/*/test/**",
@@ -717,12 +717,207 @@
         "E3",
         "E5",
         "E6",
-        "E7"
+        "E7",
+        "E9",
+        "E13"
       ],
       "invariants": [
         "draft-ownership",
         "recovery-notice"
       ]
+    },
+    {
+      "name": "workbench-kernel",
+      "layer": 4,
+      "paths": [
+        "packages/agent-remote-lab/src/kernel/**",
+        "packages/agent-remote-lab/src/ui/**"
+      ],
+      "uses": [],
+      "seams": [
+        "S6"
+      ],
+      "flows": [
+        "E1",
+        "E2",
+        "E3",
+        "E5",
+        "E6"
+      ],
+      "invariants": []
+    },
+    {
+      "name": "workbench-conversation",
+      "layer": 4,
+      "paths": [
+        "packages/agent-remote-lab/src/conversation/**"
+      ],
+      "uses": [
+        "workbench-kernel"
+      ],
+      "seams": [
+        "S6"
+      ],
+      "flows": [
+        "E1",
+        "E2",
+        "E3",
+        "E5",
+        "E10"
+      ],
+      "invariants": [
+        "recovery-notice"
+      ]
+    },
+    {
+      "name": "workbench-chats",
+      "layer": 4,
+      "paths": [
+        "packages/agent-remote-lab/src/features/chats/**"
+      ],
+      "uses": [
+        "workbench-kernel",
+        "workbench-conversation",
+        "workbench-windows"
+      ],
+      "seams": [
+        "S6"
+      ],
+      "flows": [
+        "E6",
+        "E10"
+      ],
+      "invariants": []
+    },
+    {
+      "name": "workbench-windows",
+      "layer": 4,
+      "paths": [
+        "packages/agent-remote-lab/src/features/windows/**"
+      ],
+      "uses": [
+        "workbench-kernel",
+        "workbench-conversation"
+      ],
+      "seams": [
+        "S6"
+      ],
+      "flows": [
+        "E6",
+        "E6b"
+      ],
+      "invariants": []
+    },
+    {
+      "name": "workbench-team",
+      "layer": 4,
+      "paths": [
+        "packages/agent-remote-lab/src/features/team/**"
+      ],
+      "uses": [
+        "workbench-kernel",
+        "workbench-conversation"
+      ],
+      "seams": [
+        "S6"
+      ],
+      "flows": [
+        "E7"
+      ],
+      "invariants": []
+    },
+    {
+      "name": "workbench-sessions",
+      "layer": 4,
+      "paths": [
+        "packages/agent-remote-lab/src/features/sessions/**"
+      ],
+      "uses": [
+        "workbench-kernel",
+        "workbench-conversation"
+      ],
+      "seams": [
+        "S6"
+      ],
+      "flows": [
+        "E1",
+        "E3",
+        "E9"
+      ],
+      "invariants": []
+    },
+    {
+      "name": "workbench-session-links",
+      "layer": 4,
+      "paths": [
+        "packages/agent-remote-lab/src/features/session-links/**"
+      ],
+      "uses": [
+        "workbench-kernel",
+        "workbench-conversation"
+      ],
+      "seams": [
+        "S6"
+      ],
+      "flows": [
+        "E2"
+      ],
+      "invariants": []
+    },
+    {
+      "name": "workbench-computers",
+      "layer": 4,
+      "paths": [
+        "packages/agent-remote-lab/src/features/computers/**"
+      ],
+      "uses": [
+        "workbench-kernel",
+        "workbench-conversation"
+      ],
+      "seams": [
+        "S6"
+      ],
+      "flows": [
+        "E1",
+        "E8"
+      ],
+      "invariants": []
+    },
+    {
+      "name": "workbench-settings",
+      "layer": 4,
+      "paths": [
+        "packages/agent-remote-lab/src/features/settings/**"
+      ],
+      "uses": [
+        "workbench-kernel",
+        "workbench-conversation",
+        "workbench-computers",
+        "workbench-team"
+      ],
+      "seams": [
+        "S6"
+      ],
+      "flows": [
+        "E11"
+      ],
+      "invariants": []
+    },
+    {
+      "name": "workbench-diagnostics",
+      "layer": 4,
+      "paths": [
+        "packages/agent-remote-lab/src/features/diagnostics/**"
+      ],
+      "uses": [
+        "workbench-kernel",
+        "workbench-conversation"
+      ],
+      "seams": [
+        "S6"
+      ],
+      "flows": [],
+      "invariants": []
     },
     {
       "name": "relay-node",

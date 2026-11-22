@@ -1,5 +1,5 @@
 // The View options control, placed in the view target that currently shows.
-import { ViewOptions } from '../../components/ViewOptions.js';
+import { ViewOptions } from '../../features/windows/ViewOptions.js';
 import type { AppScope } from '../types.js';
 
 export function GlobalViewOptions({ scope }: { readonly scope: Pick<AppScope, 'activeView' | 'askView' | 'attention' | 'compactLayout' | 'contextVisible' | 'desktopContextVisible' | 'dispatchPanels' | 'headerHidden' | 'headerViewTarget' | 'inspectorOpen' | 'minimizedViewTarget' | 'mobileViewTarget' | 'pageOpen' | 'pageViewTarget' | 'sessionViewTarget' | 'setAllPanelsVisible' | 'sidebarViewTarget' | 'supportingRailOpen' | 'teamView' | 'toggleContext' | 'tpmView' | 'traceViewTarget' | 'userScoped' | 'viewTriggerRef' | 'windowMode' | 'windowToolbarShown' | 'windowToolbarViewTarget' | 'windowView'> }) {

@@ -1,6 +1,6 @@
 import { createRoot } from 'react-dom/client';
-import { LabWorkbench } from '../../src/components/LabWorkbench.js';
-import { ToastProvider } from '../../src/components/Toast.js';
+import { LabWorkbench } from '../../src/conversation/LabWorkbench.js';
+import { ToastProvider } from '../../src/kernel/Toast.js';
 import { replicaState } from '../../src/test/fixtures.js';
 import '../../src/session-view-styles';
 

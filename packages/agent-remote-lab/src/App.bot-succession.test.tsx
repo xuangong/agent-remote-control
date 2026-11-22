@@ -1,15 +1,15 @@
 import { act, useContext, type ComponentProps } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { SessionSuccessionReplay } from '@orchardworks/agent-remote-protocol';
-import * as workbench from './components/LabWorkbench.js';
-import * as dialogs from './components/SessionSuccessionDialog.js';
-import * as managerComponents from './components/ChatSessionManager.js';
+import * as workbench from './conversation/LabWorkbench.js';
+import * as dialogs from './conversation/SessionSuccessionDialog.js';
+import * as managerComponents from './features/sessions/ChatSessionManager.js';
 import { loadSuccessionIntent } from './session-succession-intent.js';
-import { SessionDirectoryClient, type SuccessionActionResult, type SuccessionDescription } from './directory-client.js';
-import { SessionViewOperationsContext, type SessionViewOperations } from './session-view-operations.js';
+import { SessionDirectoryClient, type SuccessionActionResult, type SuccessionDescription } from './kernel/directory-client.js';
+import { SessionViewOperationsContext, type SessionViewOperations } from './conversation/session-view-operations.js';
 import { botGroup, botTarget, mountBotApp, seedGroup, until, visibleButton } from './test/bot-mode-fixtures.js';
 import { setPromptText } from './test/setup.js';
-import { sessionKey } from './session-tree.js';
+import { sessionKey } from './kernel/session-tree.js';
 
 const native = (nativeSessionId: string) => ({ controllerId: 'installation', providerId: 'recorded', nativeSessionId });
 const description: SuccessionDescription = { role: { id: 'B-role', revision: 1, origin: native('B1'), current: native('B1'), workspace: { controllerId: 'installation', canonicalCwd: '/fixture' } }, targets: [{ providerId: 'recorded', displayName: 'Recorded Provider' }], eligibility: { status: 'ready' } };

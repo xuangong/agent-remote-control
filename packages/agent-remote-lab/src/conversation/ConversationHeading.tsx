@@ -4,9 +4,9 @@ import type { ReactNode } from 'react';
 import type { AgentStatus } from '@orchardworks/agent-remote-protocol';
 import type { SessionFacts, SessionNotice } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { SessionHeading } from '../components/SessionHeading.js';
-import { SessionHeadingActions, SessionHeadingActionsPresentationContext } from '../components/SessionHeadingActions.js';
-import { TileHeader } from '../components/assistant/TileHeader.js';
+import { SessionHeading } from './SessionHeading.js';
+import { SessionHeadingActions, SessionHeadingActionsPresentationContext } from './SessionHeadingActions.js';
+import { TileHeader } from './assistant/TileHeader.js';
 import { IconButton } from '../ui/IconButton.js';
 import type { ConversationHeadingMode, SessionWorkbenchProps } from './session-workbench-props.js';
 

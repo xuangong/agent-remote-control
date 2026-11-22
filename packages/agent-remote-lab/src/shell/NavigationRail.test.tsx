@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
 import { LocaleContext } from '@orchardworks/agent-client-web/react';
 import { NavigationRail } from './NavigationRail.js';
-import type { DeviceLinkNotice } from '../device-link.js';
+import type { DeviceLinkNotice } from '../kernel/device-link.js';
 
 const noop = () => {};
 const offline: DeviceLinkNotice = { state: 'offline', signIn: { href: '/auth/login', onClick: noop }, retry: vi.fn() };

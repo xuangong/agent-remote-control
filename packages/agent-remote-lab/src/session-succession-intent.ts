@@ -1,4 +1,4 @@
-import type { OpenedSession, SuccessionPrepareInput } from './directory-client.js';
+import type { OpenedSession, SuccessionPrepareInput } from './kernel/directory-client.js';
 export interface SessionSuccessionIntent { source: OpenedSession; operation: SuccessionPrepareInput; cancelRequested?: boolean }
 const key = (scope: string) => `agent-remote:succession-intent:${scope}`;
 /** Retain the tab-local request identity, never a projected successor binding or credentials. */

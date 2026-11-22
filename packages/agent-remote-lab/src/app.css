@@ -1,6 +1,6 @@
-@import "./trace.css";
-@import "./ask.css";
-@import "./tpm.css";
+@import "./features/diagnostics/trace.css";
+@import "./features/team/ask.css";
+@import "./features/team/tpm.css";
 
 @font-face {
   font-family: "Baloo 2 Digits";

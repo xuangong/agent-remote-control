@@ -1,6 +1,6 @@
-import { askActivityOf, askSourcesOf } from '../state/ask-visibility.js';
+import { askActivityOf, askSourcesOf } from '../features/team/ask-visibility.js';
 import { useMemo } from 'react';
-import { compositionSession } from '../session-composition.js';
+import { compositionSession } from '../kernel/session-composition.js';
 import type { AppInputs } from './types.js';
 import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';
 import type { FocusedAskSlice } from './useFocusedAsk.js';

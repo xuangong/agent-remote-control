@@ -1,4 +1,4 @@
-import { expandedSideRange } from '../side-tree.js';
+import { expandedSideRange } from '../kernel/side-tree.js';
 import { viewKey } from './helpers.js';
 import type { AppInputs } from './types.js';
 import type { AppLate } from './types.js';

@@ -3,11 +3,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, type AgentChildSession } from '@orchardworks/agent-remote-protocol';
 import { AgentReplica } from '@orchardworks/agent-client';
 import { App, type LabTransport } from './App.js';
-import { SessionDirectoryClient } from './directory-client.js';
+import { SessionDirectoryClient } from './kernel/directory-client.js';
 import { render, unmount } from './test/setup.js';
 import { nextPopstate } from './test/wait.js';
 import { replicaState } from './test/fixtures.js';
-import * as workbenchComponents from './components/LabWorkbench.js';
+import * as workbenchComponents from './conversation/LabWorkbench.js';
 
 const realWorkbench = workbenchComponents.LabWorkbench;
 

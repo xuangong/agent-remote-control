@@ -1,8 +1,8 @@
-import { parseWindowFeature } from '../window-feature-views.js';
+import { parseWindowFeature } from '../kernel/window-feature-views.js';
 import { createWindowView, type Team } from '@orchardworks/agent-remote-protocol';
-import { windowSessionBinding } from '../window-workspace.js';
-import { teamLayoutTargets } from '../team-layout.js';
-import { sessionKey } from '../session-tree.js';
+import { windowSessionBinding } from '../kernel/window-workspace.js';
+import { teamLayoutTargets } from '../features/team/team-layout.js';
+import { sessionKey } from '../kernel/session-tree.js';
 import type { AppInputs } from './types.js';
 import type { HostAndStackSlice } from './useHostAndStack.js';
 import type { ViewSessionStateSlice } from './useViewSessionState.js';

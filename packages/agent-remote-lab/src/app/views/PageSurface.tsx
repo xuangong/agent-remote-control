@@ -1,11 +1,11 @@
 // Settings or the Assistants directory, over whichever mode is current; the mode keeps its place, so leaving returns to it.
 import { useMemo } from 'react';
-import { usePhoneLayout } from '../../hooks/usePhoneLayout.js';
-import { AssistantDirectory } from '../../components/assistant/AssistantDirectory.js';
-import { SettingsPage, type SettingsContext } from '../../settings/SettingsPage.js';
-import { RecordedPlaybackControls } from '../../components/RecordedPlaybackControls.js';
-import type { SettingsGroupId } from '../../destinations.js';
-import { useDeviceLink } from '../../shell/DeviceLinkIndicator.js';
+import { usePhoneLayout } from '../../kernel/usePhoneLayout.js';
+import { AssistantDirectory } from '../../features/chats/AssistantDirectory.js';
+import { SettingsPage, type SettingsContext } from '../../features/settings/SettingsPage.js';
+import { RecordedPlaybackControls } from '../../features/diagnostics/RecordedPlaybackControls.js';
+import type { SettingsGroupId } from '../../kernel/destinations.js';
+import { useDeviceLink } from '../../kernel/DeviceLinkIndicator.js';
 import type { AppScope } from '../types.js';
 
 type PageScope = Pick<AppScope, 'account' | 'accessReady' | 'attention' | 'baseUrl' | 'botRoster' | 'closeInspector' | 'dispatchPanels' | 'directory' | 'hostClient' | 'hostsLoaded' | 'navigation' | 'openNewBot'

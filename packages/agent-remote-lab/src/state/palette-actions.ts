@@ -12,9 +12,9 @@
  * - Chats, Assistants, Windows and Settings are offered by name; Chats and Windows carry the platform's mode shortcut text.
  */
 import type { CommandItem } from '../shell/command-search.js';
-import type { SessionPanel } from './panels.js';
+import type { SessionPanel } from '../features/windows/panels.js';
 import { translator, type Translate } from '@orchardworks/agent-client';
-import type { Destination } from '../destinations.js';
+import type { Destination } from '../kernel/destinations.js';
 
 export interface PaletteFacts {
   readonly windowMode: boolean;

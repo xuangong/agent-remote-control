@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { sessionKey } from '../session-tree.js';
+import { sessionKey } from '../kernel/session-tree.js';
 import { canHandoffPrimary, commandRefusal, conversationActionsAvailable, handoffCompletionMatches, handoffInputBlocker, pendingInputBlocker, primaryHandoffGated, successionAccessible } from './succession-gates.js';
 
 describe('whether a command may go out', () => {

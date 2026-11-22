@@ -1,6 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import type { AgentInteractionRequest } from '@orchardworks/agent-remote-protocol';
-import { LabWorkbench } from '../../src/components/LabWorkbench.js';
+import { LabWorkbench } from '../../src/conversation/LabWorkbench.js';
 import { replicaState } from '../../src/test/fixtures.js';
 import '../../src/session-view-styles';
 

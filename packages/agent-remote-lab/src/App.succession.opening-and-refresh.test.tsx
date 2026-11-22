@@ -3,14 +3,14 @@ import 'fake-indexeddb/auto';
 import { type ComponentProps } from 'react';
 import { expect, it, vi } from 'vitest';
 import { HttpWebSocketTransport } from '@orchardworks/agent-client';
-import { type SuccessionActionResult } from './directory-client.js';
-import { DraftStore } from './draft-store.js';
-import { SessionLocatorSynchronizingError } from './session-view-operations.js';
+import { type SuccessionActionResult } from './kernel/directory-client.js';
+import { DraftStore } from './kernel/draft-store.js';
+import { SessionLocatorSynchronizingError } from './conversation/session-view-operations.js';
 import * as successionHooks from './hooks/useSessionSuccession.js';
-import * as workbenchComponents from './components/LabWorkbench.js';
+import * as workbenchComponents from './conversation/LabWorkbench.js';
 import * as historyHooks from './hooks/useConversationHistory.js';
-import * as directoryComponents from './components/SessionDirectory.js';
-import { saveStoredDisplay } from './stored-display.js';
+import * as directoryComponents from './features/sessions/SessionDirectory.js';
+import { saveStoredDisplay } from './kernel/stored-display.js';
 import { act, cachedConversation, cleanups, committed, editVisiblePrompt, failureFixture, handoffCommandFixture, native, openSessions, settleApp, successionHistoryLink, testDeadline, visibleQuery, visibleText, waitFor, windowHandoffFixture } from './App.succession.fixture.js';
 
 it.each(['recovering', 'attach-failed', 'identity-mismatch'] as const)('keeps sharing the selected session while %s', async phase => {

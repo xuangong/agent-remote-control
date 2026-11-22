@@ -1,19 +1,19 @@
 // Quoting, references and the earlier conversation.
-import { quoteTargets as quoteTargetsOf } from '../state/quote-targets.js';
-import { selectedKeys } from '../state/quote-selection.js';
+import { quoteTargets as quoteTargetsOf } from '../features/session-links/quote-targets.js';
+import { selectedKeys } from '../features/session-links/quote-selection.js';
 import { createWindowView, type Team, createSessionExcerpt } from '@orchardworks/agent-remote-protocol';
-import { windowSessionBinding } from '../window-workspace.js';
-import { type SessionEntry, sessionKey } from '../session-tree.js';
-import { EarlierConversation } from '../components/EarlierConversation.js';
+import { windowSessionBinding } from '../kernel/window-workspace.js';
+import { type SessionEntry, sessionKey } from '../kernel/session-tree.js';
+import { EarlierConversation } from '../conversation/EarlierConversation.js';
 import { useCallback, useRef } from 'react';
 import { errorWords, keyedError, timelineEntryKey, type AgentReplicaState } from '@orchardworks/agent-client';
-import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
-import type { LabWorkbenchActions } from '../components/LabWorkbench.js';
-import { SessionAsk } from '../components/SessionAsk.js';
-import { withSessionReferences } from '../session-references.js';
+import { SessionDirectoryClient, type OpenedSession } from '../kernel/directory-client.js';
+import type { LabWorkbenchActions } from '../conversation/LabWorkbench.js';
+import { SessionAsk } from '../features/team/SessionAsk.js';
+import { withSessionReferences } from '../kernel/session-references.js';
 import type { TimelineEntrySelection } from '@orchardworks/agent-client-web/react';
-import { addQuote, withViewQuotes } from '../session-quotes.js';
-import { NEW_SESSION_TARGET, type QuoteTargetWindow } from '../components/SessionQuotes.js';
+import { addQuote, withViewQuotes } from '../features/session-links/session-quotes.js';
+import { NEW_SESSION_TARGET, type QuoteTargetWindow } from '../features/session-links/SessionQuotes.js';
 import { viewKey } from './helpers.js';
 import type { RequestedSessionSlice } from './useRequestedSession.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
@@ -33,9 +33,9 @@ import type { WindowViewActionsSlice } from './useWindowViewActions.js';
 import type { TraceNavigationSlice } from './useTraceNavigation.js';
 import type { AppInputs } from './types.js';
 
-import { sessionQuotaReached } from '../state/agent-creation.js';
-import { quoteCreationId, quoteLanding, quoteSessionOptions, quoteStart, reloadedConversationMessage } from '../state/quote-flow.js';
-import { askRestoreAllowed } from '../state/ask-visibility.js';
+import { sessionQuotaReached } from '../features/sessions/agent-creation.js';
+import { quoteCreationId, quoteLanding, quoteSessionOptions, quoteStart, reloadedConversationMessage } from '../features/session-links/quote-flow.js';
+import { askRestoreAllowed } from '../features/team/ask-visibility.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 export function useQuotesAndReferences(scope: Pick<AppInputs & RequestedSessionSlice & WorkbenchShellSlice & FocusedAskSlice & ViewSessionStateSlice & RemoteHostStateSlice & SessionSuccessionBindingSlice & SideSelectionSlice & ConversationConnectionsSlice & PanelsAndShortcutsSlice & ActiveSessionSlice & SharedFeedsAndTpmSlice & CommunicationsAndForksSlice & ProviderCreationSlice & WorkbenchRecordsSlice & WindowViewActionsSlice & TraceNavigationSlice, 'accessReady' | 'ask' | 'askSurfaceVisible' | 'askTriggerRef' | 'askView' | 'baseUrl' | 'compactLayout' | 'compositionProtected' | 'connections' | 'directory' | 'dispatchQuote' | 'earlierConversations' | 'earlierDirectory' | 'editWindow' | 'navigateAttributionRef' | 'openAsk' | 'pageOpen' | 'quote' | 'quoteSelection' | 'refreshRelations' | 'rememberSession' | 'remoteHosts' | 'replicaFor' | 'retryHosts' | 'selectedHost' | 'setDirectoryRevision' | 'sharedWindow' | 'sideSessions' | 'sourceCurrent' | 'succession' | 'transitioning' | 'transport' | 'viewNavigation' | 'windowWorkspace'>) {

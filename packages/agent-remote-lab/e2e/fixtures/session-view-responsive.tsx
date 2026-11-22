@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SessionWorkbench } from '../../src/conversation/ConversationSurface';
-import { SessionControlNotice } from '../../src/components/SessionControlNotice';
+import { SessionControlNotice } from '../../src/conversation/SessionControlNotice';
 import { replicaState } from '../../src/test/fixtures';
 import type { AgentReplicaState, RemoteSessionStatus } from '@orchardworks/agent-client';
 import '../../src/session-view-styles';
-import '../../src/ask.css';
+import '../../src/features/team/ask.css';
 
 const tokenScope = new URLSearchParams(window.location.search).get('usageScope') === 'runtime' ? 'runtime' : 'session';
 

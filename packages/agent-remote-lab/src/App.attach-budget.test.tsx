@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { SessionDirectoryClient, DirectoryError } from './directory-client.js';
+import { SessionDirectoryClient, DirectoryError } from './kernel/directory-client.js';
 import { botGroup, mountBotApp, seedGroup, until, visibleButton } from './test/bot-mode-fixtures.js';
 
 // Stage 7: a session its Host reported missing is not asked for again by what the page does around it (see the stage 7 plan).

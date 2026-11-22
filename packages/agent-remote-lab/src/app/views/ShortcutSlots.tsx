@@ -1,8 +1,8 @@
 // The movable shortcut and Ask slots and their entries.
 import { createPortal } from 'react-dom';
-import { ShortcutPlacement } from '../../shell/shortcut-placement.js';
+import { ShortcutPlacement } from '../../kernel/shortcut-placement.js';
 import { MovableHostSlot } from '../../shell/movable-host.js';
-import { WindowMenu } from '../../components/WindowMenu.js';
+import { WindowMenu } from '../../features/windows/WindowMenu.js';
 import type { AppScope } from '../types.js';
 
 export function ShortcutSlots({ scope }: { readonly scope: Pick<AppScope, 'askBarSlot' | 'askEntry' | 'askFloatingSlot' | 'askHost' | 'askSidebarSlot' | 'askToolbarSlot' | 'shortcutToolbarSlot' | 'confirmBotRemoval' | 'menuCurrentBinding' | 'setWindowOverviewOpen' | 'shortcutBarSlot' | 'shortcutFloatingSlot' | 'shortcutHost' | 'shortcutPlacement' | 'shortcutSidebarSlot' | 'sidebarShortcuts' | 'supportTeams' | 'supportingRailOpen' | 'trackTeamTpmEntries' | 'windowMode' | 'windowOverviewAvailable' | 'windowSessionStatus' | 'windowView' | 'windowWorkspace'> }) {

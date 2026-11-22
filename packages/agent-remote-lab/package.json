@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Protocol validation site for provider-neutral remote agent sessions.",
   "exports": {
-    "./directory-client": "./src/directory-client.ts"
+    "./directory-client": "./src/kernel/directory-client.ts"
   },
   "scripts": {
     "dev": "vite",

@@ -1,6 +1,6 @@
-import { sessionViewNavigation, type SessionViewNavigationActions } from '../session-view-navigation.js';
+import { sessionViewNavigation, type SessionViewNavigationActions } from '../kernel/session-view-navigation.js';
 import type { AgentReplicaState } from '@orchardworks/agent-client';
-import { type OpenedSession } from '../directory-client.js';
+import { type OpenedSession } from '../kernel/directory-client.js';
 import type { AppInputs } from './types.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
 import type { SessionSuccessionBindingSlice } from './useSessionSuccessionBinding.js';

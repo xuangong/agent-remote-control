@@ -4,9 +4,9 @@ import { useId, useRef, useState } from 'react';
 import type { AgentReplicaState, RemoteSessionState, RemoteSessionStatus } from '@orchardworks/agent-client';
 import type { AgentCommand } from '@orchardworks/agent-remote-protocol';
 import { AgentComposer as DraftComposer, useTranslate } from '@orchardworks/agent-client-web/react';
-import { SessionControlNotice } from '../components/SessionControlNotice.js';
-import { PlanningControl } from '../components/PlanningControl.js';
-import { useToastAnchor } from '../components/Toast.js';
+import { SessionControlNotice } from './SessionControlNotice.js';
+import { PlanningControl } from './PlanningControl.js';
+import { useToastAnchor } from '../kernel/Toast.js';
 import type { LabWorkbenchActions, SessionWorkbenchProps } from './session-workbench-props.js';
 
 type Passed = Pick<SessionWorkbenchProps, 'composerStatus' | 'composerContext' | 'composerNotice' | 'authenticationNotice' | 'nativeTakeover' | 'host' | 'opening' | 'openFailed'

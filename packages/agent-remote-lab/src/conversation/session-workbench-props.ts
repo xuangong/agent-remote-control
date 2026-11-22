@@ -4,10 +4,10 @@ import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent
 import type { AgentReplicaState, RemoteSessionState, RemoteSessionStatus, SessionAttribution, SessionDescription, SessionFacts, SessionHandoffState } from '@orchardworks/agent-client';
 import type { AgentCommand, AgentCommandResult } from '@orchardworks/agent-remote-protocol';
 import type { AgentChildSessionView, AgentComposer, AgentTimelineProps, QuestionDraft, SessionLinkResolver, SessionTodoPanelProps, SessionViewActions, TimelineEntrySelection, TimelineReadingPositions } from '@orchardworks/agent-client-web/react';
-import type { ProcessAssistant } from '../hooks/useProcessMode.js';
-import type { TileSession } from '../components/assistant/TileHeader.js';
-import type { AssistantRef } from '../components/assistant/AssistantDetails.js';
-import type { TraceEntryRequest } from '../trace-model.js';
+import type { ProcessAssistant } from './useProcessMode.js';
+import type { TileSession } from './assistant/TileHeader.js';
+import type { AssistantRef } from './assistant/AssistantDetails.js';
+import type { TraceEntryRequest } from '../kernel/trace-model.js';
 
 export type LabWorkbenchActions = SessionViewActions;
 

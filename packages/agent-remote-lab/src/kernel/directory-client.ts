@@ -1,0 +1,186 @@
+import { isSessionListingStatus, type SessionListingStatus } from '@orchardworks/agent-remote-protocol';
+import { RemoteHostControlClient, RemoteHostControlError, keyedError, withMessageKey, type MessageKey, type TpmActionInput } from '@orchardworks/agent-client';
+import type { TpmCreate, TpmList, TpmWork } from '@orchardworks/agent-remote-protocol';
+import { isHostProviderSettings, type HostProviderChange, type HostProviderSettings } from '@orchardworks/agent-remote-protocol';
+import { isHostStatus, type HostStatus } from '@orchardworks/agent-remote-protocol';
+import { isSuccessionDescription, isSuccessionActionResult, type SuccessionDescription, type SuccessionActionResult, type NativePrefixSelection } from '@orchardworks/agent-remote-protocol';
+export type { SuccessionDescription, SuccessionActionResult } from '@orchardworks/agent-remote-protocol';
+import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
+import { workspaceFetch } from './workspace-access.js';
+import { isCodexDaemonStatus, type CodexDaemonStatus, type CodexDaemonRestart } from '@orchardworks/agent-remote-protocol';
+import type { ControllerReleaseDiscovery, ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
+import type { HostPairingService, PairingInvitation, RemoteHost, HostStopResult, PairingPurpose, PairingHistory } from './remote-host.js';
+export interface SessionSummary {
+  nativeSessionId: string;
+  providerId: string;
+  title: string;
+  workspace?: string;
+  model?: string;
+  createdAt: string;
+  updatedAt: string;
+  state: 'idle' | 'running' | 'waiting' | 'unknown' | 'unavailable';
+}
+export interface SessionCatalogPage { items: SessionSummary[]; hasMore: boolean; nextCursor?: string; revision: string }
+export interface SessionWorkspace { id: string; name: string; path: string }
+export interface WorkspaceFolderPage { path: string; parentPath: string | null; roots: string[]; folders: Array<{ name: string; path: string }>; nextOffset: number | null }
+export interface CreateSessionOptions { creationSource?: import('@orchardworks/agent-remote-protocol').CreationSource; conversationKind?: 'side' | 'ask'; editNativeSessionId?: string; editTurnId?: string; editMessageId?: string; sourceNativeSessionId?: string; workspaceId?: string; cwd?: string; model?: string; reasoningEffort?: string; planning?: boolean }
+export interface OpenedSession { hostId?: string; agentId: string; providerId: string; nativeSessionId: string; title: string; parentAgentId?: string; parentNativeSessionId?: string; createdAt?: string }
+export class DirectoryError extends Error {
+  constructor(message: string, readonly code?: string, readonly status?: number, readonly requestId?: string, readonly nativeOwner?: NativeSessionOwner) { super(message); }
+}
+/** A failure response: the words the Relay sent when it sent any (data stays as sent), else the fallback in the reader's language. */
+function failedResponse(sent: unknown, fallback: string, key: MessageKey, code?: string, status?: number, requestId?: string, nativeOwner?: NativeSessionOwner): DirectoryError {
+  const error = new DirectoryError(sent as string ?? fallback, code, status, requestId, nativeOwner);
+  return sent === undefined || sent === null ? withMessageKey(error, key) : error;
+}
+/** The Host's native agent looked the session up by its identity and has no such session, so opening it again cannot succeed. */
+export const nativeSessionMissing = (error: unknown): boolean => error instanceof DirectoryError && error.code === 'native_session_unavailable';
+export interface SuccessionPrepareInput { operationId: string; providerId: string; nativeSessionId: string; expectedRevision: number; targetProviderId?: string; preparation?: NativePrefixSelection }
+export class SessionDirectoryClient {
+  readonly cachedPages = new Map<string, SessionCatalogPage>();
+  constructor(private readonly baseUrl: string, private readonly fetcher: typeof fetch = workspaceFetch, private readonly hostId = 'local') {}
+  private async request<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+    const response = await this.fetcher(new URL(`v1/remote/${this.hostId === 'local' ? '' : `hosts/${encodeURIComponent(this.hostId)}/`}${path}`, this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`), body === undefined ? { signal } : {
+      signal,
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const data = await response.json();
+    if (!response.ok) throw failedResponse(data.error ?? data.message, 'Session service is unavailable.', 'hosts.error.sessionService', data.code, response.status, typeof data.requestId === 'string' ? data.requestId : undefined, data.nativeOwner);
+    return data as T;
+  }
+  async describeSuccession(providerId: string, nativeSessionId: string, preparation?: NativePrefixSelection): Promise<SuccessionDescription> {
+    const value = await this.request('succession/describe', { providerId, nativeSessionId, ...(preparation ? { preparation } : {}) }, AbortSignal.timeout(15000));
+    if (!isSuccessionDescription(value)) throw keyedError('hosts.error.handoffEligibility');
+    return value;
+  }
+  async prepareSuccession(input: SuccessionPrepareInput): Promise<SuccessionActionResult> {
+    const value = await this.request('succession/prepare', input, AbortSignal.timeout(50000));
+    if (!isSuccessionActionResult(value)) throw keyedError('hosts.error.handoffResult');
+    return value;
+  }
+  async successionAction(action: 'commit' | 'cancel' | 'status' | 'reconcile', operationId: string, options?: { includeContext?: true; signal?: AbortSignal; original?: SuccessionPrepareInput }): Promise<SuccessionActionResult> {
+    if (options?.original && (action !== 'cancel' || options.original.operationId !== operationId)) throw keyedError('hosts.error.handoffCancel');
+    const value = await this.request(`succession/${action}`, { ...options?.original, operationId, ...(options?.includeContext ? { includeContext: true } : {}) }, options?.signal ?? AbortSignal.timeout(50000));
+    if (!isSuccessionActionResult(value)) throw keyedError('hosts.error.handoffResult');
+    return value;
+  }
+  sessionRefs(providerId: string, nativeSessionId: string): Promise<import('./session-references.js').LabSessionRefs> {
+    return this.request(`session/refs?${new URLSearchParams({ providerId, nativeSessionId })}`, undefined, AbortSignal.timeout(15000));
+  }
+  changeSessionRef(providerId: string, nativeSessionId: string, action: 'add' | 'remove', target: { providerId: string; nativeSessionId: string }): Promise<import('./session-references.js').LabSessionRefs> {
+    return this.request('session/refs', { providerId, nativeSessionId, action, target }, AbortSignal.timeout(20000));
+  }
+  /** The session's native title as its Host reports it (through the Host owner's session commands); undefined while it has none. */
+  async nativeTitle(providerId: string, nativeSessionId: string, signal?: AbortSignal): Promise<string | undefined> {
+    const value = await this.request<{ result?: { session?: { title?: unknown } } }>('session/call',
+      { request: { command: 'read', target: `${this.hostId}/${providerId}/${nativeSessionId}`, limit: 0 } }, signal);
+    const title = value.result?.session?.title;
+    return typeof title === 'string' ? title : undefined;
+  }
+  rename(providerId: string, nativeSessionId: string, title: string, operationId: string): Promise<{ title: string }> {
+    return this.request('session/rename', { providerId, nativeSessionId, title, operationId }, AbortSignal.timeout(35000));
+  }
+  list(providerId: string, cursor?: string, signal?: AbortSignal): Promise<SessionCatalogPage> {
+    const query = new URLSearchParams({ providerId, limit: '30' });
+    if (cursor) query.set('cursor', cursor);
+    return this.request(`catalog?${query}`, undefined, signal);
+  }
+  async listing(providerId: string, refresh = false): Promise<SessionListingStatus> {
+    const value = await this.request(`catalog/listing${refresh ? '' : '?' + new URLSearchParams({ providerId })}`,
+      refresh ? { providerId } : undefined, AbortSignal.timeout(15000));
+    if (!isSessionListingStatus(value)) throw withMessageKey(new DirectoryError('The session listing status is invalid.'), 'hosts.error.listingInvalid');
+    return value;
+  }
+  revision(providerId: string): Promise<{ revision: string }> { return this.request(`catalog/revision?${new URLSearchParams({ providerId })}`); }
+  workspaces(providerId: string): Promise<{ workspaces: SessionWorkspace[] }> { return this.request(`workspaces?${new URLSearchParams({ providerId })}`); }
+  folders(providerId: string, options: { path?: string; offset?: number; search?: string; hidden?: boolean } = {}, signal?: AbortSignal): Promise<WorkspaceFolderPage> {
+    const query = new URLSearchParams({ providerId });
+    if (options.path) query.set('path', options.path);
+    if (options.offset) query.set('offset', String(options.offset));
+    if (options.search) query.set('search', options.search);
+    if (options.hidden) query.set('hidden', '1');
+    return this.request(`workspace-folders?${query}`, undefined, signal);
+  }
+  attach(providerId: string, nativeSessionId: string, signal?: AbortSignal, takeOver?: string): Promise<{ agentId: string; nativeSessionId?: string }> { return this.request('attach', { providerId, nativeSessionId, ...(takeOver ? {takeOver} : {}) }, signal); }
+  attachHistorical(providerId: string, nativeSessionId: string, roleId: string, signal?: AbortSignal): Promise<{ agentId: string; nativeSessionId: string }> { return this.request('history/attach', { providerId, nativeSessionId, roleId }, signal); }
+  createFolder(providerId: string, parentPath: string, name: string, signal?: AbortSignal): Promise<{ path: string }> {
+    return this.request('workspace-folders/create', { providerId, parentPath, name }, signal);
+  }
+  attachChild(providerId: string, parentNativeSessionId: string, nativeSessionId: string, signal?: AbortSignal): Promise<{ agentId: string; nativeSessionId: string }> { return this.request('child/attach', { providerId, parentNativeSessionId, nativeSessionId }, signal); }
+  create(providerId: string, operationId: string, options: CreateSessionOptions): Promise<{ agentId: string; nativeSessionId?: string }> { const { conversationKind, ...native } = options; return this.request('create', { providerId, operationId, ...native, ...(this.hostId !== 'local' && conversationKind ? { conversationKind } : {}) }); }
+}
+
+export class RemoteHostClient implements HostPairingService {
+  get serverUrl(): string { return new URL(this.baseUrl).origin; }
+  invitation?: PairingInvitation;
+  constructor(private readonly baseUrl: string) {}
+  private async request<T>(path: string, method = 'GET', requestBody?: unknown, timeoutMs?: number): Promise<T> {
+    const response = await workspaceFetch(new URL(`v1/remote/${path}`, this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`), { method, ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
+      ...(method === 'POST' || method === 'PUT' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(requestBody ?? {}) } : {}) });
+    const body = await response.json();
+    if (!response.ok) throw body.code === 'reauthentication_required'
+      ? withMessageKey(new DirectoryError('A recent sign-in is required.', body.code, response.status, typeof body.requestId === 'string' ? body.requestId : undefined), 'hosts.error.recentSignIn')
+      : failedResponse(body.error, 'Remote Host service is unavailable.', 'hosts.error.hostService', body.code, response.status, typeof body.requestId === 'string' ? body.requestId : undefined);
+    return body as T;
+  }
+  tpmList(hostId: string): Promise<TpmList> { return this.tpm(client => client.tpmList(hostId, { signal: AbortSignal.timeout(15000) })); }
+  tpmWork(hostId: string, id: string): Promise<TpmWork> { return this.tpm(client => client.tpmWork(hostId, id, { signal: AbortSignal.timeout(15000) })); }
+  tpmCreate(hostId: string, input: TpmCreate): Promise<TpmWork> { return this.tpm(client => client.tpmCreate(hostId, input, { signal: AbortSignal.timeout(50000) })); }
+  tpmAction(hostId: string, id: string, input: TpmActionInput): Promise<TpmWork> { return this.tpm(client => client.tpmAction(hostId, id, input, { signal: AbortSignal.timeout(50000) })); }
+  private async tpm<T>(operation: (client: RemoteHostControlClient) => Promise<T>): Promise<T> {
+    try { return await operation(new RemoteHostControlClient(this.baseUrl, { fetch: workspaceFetch })); }
+    catch (error) {
+      if (error instanceof RemoteHostControlError) throw new DirectoryError(error.message, error.code, error.status, error.requestId);
+      throw error;
+    }
+  }
+  async hosts(): Promise<{ hosts: RemoteHost[] }> {
+    return this.request<{ hosts: RemoteHost[] }>('hosts');
+  }
+  controllerRelease(options: { refresh?: boolean } = {}): Promise<ControllerReleaseDiscovery> { return this.request(`controller-release${options.refresh ? '?refresh=1' : ''}`, 'GET', undefined, 35000); }
+  async providerSettings(hostId: string, input?: HostProviderChange): Promise<HostProviderSettings> {
+    const value = await this.request(`hosts/${encodeURIComponent(hostId)}/provider-settings`, input ? 'POST' : 'GET', input, 50000);
+    if (!isHostProviderSettings(value)) throw keyedError('hosts.error.providerResult');
+    return value;
+  }
+  async codexDaemon(hostId: string, input?: CodexDaemonRestart): Promise<CodexDaemonStatus> {
+    const value = await this.request(`hosts/${encodeURIComponent(hostId)}/codex-daemon`, input ? 'POST' : 'GET', input, 15000);
+    if (!isCodexDaemonStatus(value)) throw keyedError('hosts.error.daemonResult');
+    return value;
+  }
+  async hostStatus(hostId: string): Promise<HostStatus> {
+    const value = await this.request(`hosts/${encodeURIComponent(hostId)}/status`, 'GET', undefined, 15000);
+    if (!isHostStatus(value)) throw keyedError('hosts.error.statusUnverified');
+    return value;
+  }
+  controllerUpdate(hostId: string, input?: { version: string; operationId: string }): Promise<ControllerUpdateStatus> {
+    return this.request(`hosts/${encodeURIComponent(hostId)}/controller-update`, input ? 'POST' : 'GET', input, 20000);
+  }
+  pair(purpose: PairingPurpose = 'host-only'): Promise<PairingInvitation> { return this.request('pairings', 'POST', { purpose }); }
+  pairings(): Promise<PairingHistory> { return this.request('pairings'); }
+  async revokePairing(id: string): Promise<void> { await this.request(`pairings/${encodeURIComponent(id)}/revoke`, 'POST'); }
+  async deletePairing(id: string): Promise<void> { await this.request(`pairings/${encodeURIComponent(id)}`, 'DELETE'); }
+  async rotate(hostId: string): Promise<{ ok: true; status: 'pending' | 'rotated' }> {
+    const value = await this.request<{ ok?: boolean; status?: string }>(`hosts/${encodeURIComponent(hostId)}/rotate`, 'POST');
+    if (value.ok !== true || !['pending', 'rotated'].includes(value.status ?? '')) throw keyedError('hosts.error.rotationResult');
+    return value as { ok: true; status: 'pending' | 'rotated' };
+  }
+  async stop(hostId: string, operationId = crypto.randomUUID()): Promise<{ results: HostStopResult[] }> {
+    const value = await this.request<{ results?: HostStopResult[] }>(`hosts/${encodeURIComponent(hostId)}/stop`, 'POST', { operationId });
+    if (!Array.isArray(value.results) || !value.results.every(result => result && typeof result.agentId === 'string' && ['cancelled', 'unsupported', 'failed'].includes(result.status) && (result.message === undefined || typeof result.message === 'string'))) throw keyedError('hosts.error.stopResults');
+    return { results: value.results };
+  }
+  async revoke(hostId: string): Promise<void> { await this.request(`hosts/${encodeURIComponent(hostId)}/revoke`, 'POST'); }
+  /** The providers of a Host whose sessions the Relay reads ahead of an open conversation (the owner's choice). */
+  async smartReading(hostId: string): Promise<{ providers: string[] }> {
+    const value = await this.request<{ providers?: unknown }>(`hosts/${encodeURIComponent(hostId)}/smart-reading`);
+    if (!Array.isArray(value.providers) || !value.providers.every(item => typeof item === 'string')) throw keyedError('hosts.error.smartReading');
+    return { providers: value.providers };
+  }
+  /** Turns smart reading on or off for one provider of a Host; a refusal (no journals, not the owner) is thrown with its status. */
+  async setSmartReading(hostId: string, providerId: string, enabled: boolean): Promise<{ providers: string[] }> {
+    const value = await this.request<{ providers?: unknown }>(`hosts/${encodeURIComponent(hostId)}/smart-reading`, 'PUT', { providerId, enabled });
+    if (!Array.isArray(value.providers) || !value.providers.every(item => typeof item === 'string')) throw keyedError('hosts.error.smartReading');
+    return { providers: value.providers };
+  }
+}

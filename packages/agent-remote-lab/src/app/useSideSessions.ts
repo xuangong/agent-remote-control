@@ -1,9 +1,9 @@
-import { windowSessionBinding } from '../window-workspace.js';
-import { withNewAssistantPicture } from '../assistant-picture.js';
-import { sideWindowOperation } from '../window-side-navigation.js';
-import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
-import { type OpenedSession } from '../directory-client.js';
-import { sessionKey } from '../session-tree.js';
+import { windowSessionBinding } from '../kernel/window-workspace.js';
+import { withNewAssistantPicture } from '../kernel/assistant-picture.js';
+import { sideWindowOperation } from '../features/windows/window-side-navigation.js';
+import { sessionConnectionFailure } from '../kernel/SessionConnectionNotice.js';
+import { type OpenedSession } from '../kernel/directory-client.js';
+import { sessionKey } from '../kernel/session-tree.js';
 import { viewKey } from './helpers.js';
 import type { AppInputs } from './types.js';
 import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';

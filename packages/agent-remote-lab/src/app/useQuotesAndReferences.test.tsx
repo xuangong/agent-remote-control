@@ -2,9 +2,9 @@
 // quote lands, and the stable wrappers of the next message. The rules themselves are owned by `quote-flow` and `quote-targets`.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MAX_SESSION_EXCERPTS_PER_MESSAGE } from '@orchardworks/agent-remote-protocol';
-import { readQuotes } from '../session-quotes.js';
-import { reloadedConversationMessage } from '../state/quote-flow.js';
-import { NEW_SESSION_TARGET } from '../components/SessionQuotes.js';
+import { readQuotes } from '../features/session-links/session-quotes.js';
+import { reloadedConversationMessage } from '../features/session-links/quote-flow.js';
+import { NEW_SESSION_TARGET } from '../features/session-links/SessionQuotes.js';
 import { buildOpened, mockScope, renderHook } from '../test/render-hook.js';
 import { buildBinding, buildView, buildWindow } from '../test/window-builders.js';
 import { useQuotesAndReferences } from './useQuotesAndReferences.js';

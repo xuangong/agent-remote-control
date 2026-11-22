@@ -1,0 +1,99 @@
+import { act } from 'react';
+import { afterEach, expect, it, vi } from 'vitest';
+import { render } from '../../test/setup.js';
+import { SecurityPanel } from './SecurityPanel.js';
+const now = Date.now();
+const current = { id: 'current-id', label: 'This laptop', createdAt: now, lastSeenAt: now, expiresAt: now + 3600000, current: true, identified: true };
+const other = { ...current, id: 'other-id', label: 'Mobile Safari', current: false };
+const list = { sessions: [current, other], authenticatedAt: now, recentAuthentication: true };
+afterEach(() => vi.unstubAllGlobals());
+const button = (view: HTMLElement, label: string) => [...view.querySelectorAll('button')].find(value => value.textContent === label)!;
+it('uses provider-neutral copy while loading and reviewing a recent sign-in', async () => {
+  let complete!: (response: Response) => void;
+  vi.stubGlobal('fetch', (url: string) => url === '/auth/sessions'
+    ? new Promise<Response>(resolve => { complete = resolve; }) : Promise.resolve(Response.json({ events: [] })));
+  const view = await render(<SecurityPanel onClose={() => undefined} onSignedOut={() => undefined} />);
+  expect(view.textContent).toContain('Checking whether a recent sign-in is required…');
+  await act(async () => complete(Response.json(list)));
+  expect(view.textContent).toContain('Your recent sign-in allows pairing and credential rotation.');
+  expect(view.textContent).toContain('Last sign-in:');
+  expect(view.textContent).not.toMatch(/gateway/i);
+});
+
+it('revokes another browser, refreshes activity and leaves this browser signed in', async () => {
+  const signedOut = vi.fn(); const calls: string[] = []; let removed = false;
+  vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+    calls.push(url);
+    if (url === '/auth/sessions') return Response.json({ ...list, sessions: removed ? [current] : list.sessions });
+    if (url === '/auth/audit') return Response.json({ events: [{ id: 'event', at: now, action: 'session_revoked', outcome: 'success' }] });
+    expect(init?.body).toBe(JSON.stringify({ id: 'other-id' })); removed = true; return Response.json({ ok: true, current: false });
+  });
+  const view = await render(<SecurityPanel onClose={() => undefined} onSignedOut={signedOut} />);
+  expect(document.activeElement).toBe(view.querySelector('h1'));
+  await act(async () => button(view, 'Sign out browser').click());
+  await act(async () => button(view, 'Confirm sign out').click());
+  expect(signedOut).not.toHaveBeenCalled();
+  expect(view.querySelector('[aria-label="Sign out Mobile Safari"]')).toBeNull();
+  expect(view.textContent).toContain('Session revoked');
+  expect(calls.filter(value => value === '/auth/audit')).toHaveLength(2);
+});
+it('revokes all browsers only after confirmation and signs out locally exactly once', async () => {
+  const signedOut = vi.fn(); const mutations: string[] = [];
+  vi.stubGlobal('fetch', async (url: string) => {
+    if (url === '/auth/sessions') return Response.json(list);
+    if (url === '/auth/audit') return Response.json({ events: [] });
+    mutations.push(url); return Response.json({ ok: true });
+  });
+  const view = await render(<SecurityPanel onClose={() => undefined} onSignedOut={signedOut} />);
+  await act(async () => button(view, 'Sign out all browsers').click());
+  expect(mutations).toEqual([]);
+  await act(async () => button(view, 'Confirm sign out').click());
+  expect(mutations).toEqual(['/auth/sessions/revoke-all']);
+  expect(signedOut).toHaveBeenCalledOnce();
+});
+it('keeps the session list after a failed mutation and exposes audit failure independently', async () => {
+  const signedOut = vi.fn();
+  vi.stubGlobal('fetch', async (url: string) => url === '/auth/sessions' ? Response.json(list) : Response.json({}, { status: 503 }));
+  const view = await render(<SecurityPanel onClose={() => undefined} onSignedOut={signedOut} />);
+  expect(view.textContent).toContain('Security activity is unavailable');
+  await act(async () => button(view, 'Sign out browser').click());
+  await act(async () => button(view, 'Confirm sign out').click());
+  expect(signedOut).not.toHaveBeenCalled();
+  expect(view.textContent).toContain('Mobile Safari');
+  expect(view.textContent).toContain('could not be completed');
+  expect(button(view, 'Confirm sign out').disabled).toBe(false);
+});
+it('does not render malformed management rows and can retry loading', async () => {
+  let malformed = true;
+  vi.stubGlobal('fetch', async (url: string) => url === '/auth/sessions' ? Response.json(malformed ? { ...list, sessions: [{ ...current, expiresAt: 'invalid' }] } : list) : Response.json({ events: [] }));
+  const view = await render(<SecurityPanel onClose={() => undefined} onSignedOut={() => undefined} />);
+  expect(view.textContent).toContain('browser session list is invalid');
+  expect(button(view, 'Sign out this browser')).toBeUndefined();
+  malformed = false;
+  await act(async () => button(view, 'Refresh').click());
+  expect(button(view, 'Sign out this browser')).toBeDefined();
+});
+
+it('shows one browser row with grouped sign-ins and expandable seven-day activity', async () => {
+  const grouped = { ...other, id: 'browser:device-id', sessionCount: 3, activity: [now, now - 86400000] };
+  vi.stubGlobal('fetch', async (url: string) => url === '/auth/sessions' ? Response.json({ ...list, sessions: [current, grouped] }) : Response.json({ events: [] }));
+  const view = await render(<SecurityPanel onClose={() => undefined} onSignedOut={() => undefined} />);
+  expect(view.querySelectorAll('.gateway-security-list:first-of-type > li')).toHaveLength(2);
+  expect(view.textContent).toContain('3 sign-ins');
+  expect(view.textContent).toContain('Activity in the last 7 days');
+  expect(view.querySelectorAll('details li')).toHaveLength(2);
+});
+
+it('separates unidentified old sign-ins from the browser inventory instead of claiming each is a device', async () => {
+  const legacy = { ...other, identified: false, id: 'legacy-one' };
+  vi.stubGlobal('fetch', async (url: string) => url === '/auth/sessions' ? Response.json({ ...list, sessions: [current, legacy, { ...legacy, id: 'legacy-two' }] }) : Response.json({ events: [] }));
+  const view = await render(<SecurityPanel onClose={() => undefined} onSignedOut={() => undefined} />);
+  expect(view.querySelectorAll('[aria-label="Identified browsers"] > li')).toHaveLength(1);
+  const older = view.querySelector<HTMLDetailsElement>('.gateway-security-legacy')!;
+  expect(older).not.toBeNull();
+  expect(older.open).toBe(false);
+  expect(older.querySelector('summary')?.textContent).toBe('Earlier sign-ins (2)');
+  expect(older.textContent).not.toContain('Browser legacy');
+  await act(async () => { older.open = true; button(older, 'Sign out this login').click(); });
+  expect(view.querySelector('[aria-label="Confirm browser sign-out"]')?.textContent).toContain('earlier sign-in');
+});

@@ -2,10 +2,10 @@
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { remoteSessionState, RemoteOperationError, sessionActivityLabel } from '@orchardworks/agent-client';
 import { useEffect } from 'react';
-import { compositionSession } from '../session-composition.js';
-import type { OpenedSession } from '../directory-client.js';
-import { sessionKey } from '../session-tree.js';
-import { sidePath } from '../side-tree.js';
+import { compositionSession } from '../kernel/session-composition.js';
+import type { OpenedSession } from '../kernel/directory-client.js';
+import { sessionKey } from '../kernel/session-tree.js';
+import { sidePath } from '../kernel/side-tree.js';
 import { viewKey } from './helpers.js';
 import type { ActiveSessionSlice } from './useActiveSession.js';
 import type { RemoteHostStateSlice } from './useRemoteHostState.js';

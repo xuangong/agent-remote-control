@@ -1,6 +1,6 @@
-import { projectBotRoster } from '../bot-roster.js';
+import { projectBotRoster } from '../kernel/bot-roster.js';
 import { useRef } from 'react';
-import { sessionKey } from '../session-tree.js';
+import { sessionKey } from '../kernel/session-tree.js';
 import type { AppInputs } from './types.js';
 import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';
 import type { FocusedAskSlice } from './useFocusedAsk.js';

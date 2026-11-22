@@ -56,12 +56,12 @@ flowchart LR
 - The browser renderer has no provider-native or Relay-internal dependency (`packages/agent-client/src/index.ts:1-7`, `packages/agent-client-web/src/react/AgentTimeline.tsx:1-18`).
 - Snapshot holds current Agent state and pending interactions, while Timeline history is fetched and recovered separately (`packages/agent-remote-protocol/src/snapshot.ts:47-72`, `packages/agent-remote-protocol/src/history.ts:13-48`).
 - The lab observes the public serialized boundary rather than shared in-memory event objects (`packages/agent-remote-lab/src/server.ts:11-23`).
-- Declared capabilities, rather than Provider names, decide whether a generic Lab control is enabled (`packages/agent-remote-lab/src/components/LiveControlPanel.tsx:15-66`).
+- Declared capabilities, rather than Provider names, decide whether a generic Lab control is enabled (`packages/agent-remote-lab/src/conversation/LiveControlPanel.tsx:15-66`).
 
 ## Non-Goals
 
 - This area does not bind agent sessions to Borgee channels, durable product storage, or product authorization.
-- The Lab does not contain a Provider projector or duplicate the Web reducer or renderer: its Node entry only composes supplied Providers with Relay, while its shell imports the shared Replica/client and Timeline components (`packages/agent-remote-lab/src/server.ts:1-23`, `packages/agent-remote-lab/src/App.tsx:10-23`, `packages/agent-remote-lab/src/components/LabWorkbench.tsx:1-34`).
+- The Lab does not contain a Provider projector or duplicate the Web reducer or renderer: its Node entry only composes supplied Providers with Relay, while its shell imports the shared Replica/client and Timeline components (`packages/agent-remote-lab/src/server.ts:1-23`, `packages/agent-remote-lab/src/App.tsx:10-23`, `packages/agent-remote-lab/src/conversation/LabWorkbench.tsx:1-34`).
 
 ## See also
 

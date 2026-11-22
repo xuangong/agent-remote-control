@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client';
-import { HostVscodeTunnel } from '../../src/components/HostVscodeTunnel.js';
-import { LabWorkbench } from '../../src/components/LabWorkbench.js';
-import { HttpVscodeTunnelClient, VscodeTunnelScope } from '../../src/vscode-tunnel.js';
+import { HostVscodeTunnel } from '../../src/features/computers/HostVscodeTunnel.js';
+import { LabWorkbench } from '../../src/conversation/LabWorkbench.js';
+import { HttpVscodeTunnelClient, VscodeTunnelScope } from '../../src/kernel/vscode-tunnel.js';
 import { replicaState } from '../../src/test/fixtures.js';
 import '../../src/session-view-styles';
 

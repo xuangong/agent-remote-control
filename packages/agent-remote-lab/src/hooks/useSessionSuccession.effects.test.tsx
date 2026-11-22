@@ -3,8 +3,8 @@
 import { act, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nativeNotConfirmed, notifyFeedReopened, successionDeadlines, unconfirmedOutcome, type RemoteAgentTransport } from '@orchardworks/agent-client';
-import type { OpenedSession } from '../directory-client.js';
-import { DirectoryError } from '../directory-client.js';
+import type { OpenedSession } from '../kernel/directory-client.js';
+import { DirectoryError } from '../kernel/directory-client.js';
 import { render, unmount } from '../test/setup.js';
 import { useSessionSuccession } from './useSessionSuccession.js';
 

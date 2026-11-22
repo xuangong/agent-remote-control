@@ -1,0 +1,65 @@
+import { useWindowLayout } from '../../kernel/window-workspace-context.js';
+import { useEffect, useRef, type RefObject } from 'react';
+import type { AgentReplica, RemoteAgentTransport } from '@orchardworks/agent-client';
+import { FilePreviewScope } from '@orchardworks/agent-client-web/react';
+import type { OpenedSession } from '../../kernel/directory-client.js';
+import { isAskAttached, askParticipantKey, type useAskConversations } from './useAskConversations.js';
+import type { SessionViewNavigationFactory } from '../../kernel/session-view-navigation.js';
+import { sessionKey } from '../../kernel/session-tree.js';
+import { AskConversation } from './AskConversation.js';
+import type { ImageDraftRecipient } from '@orchardworks/agent-client-web/browser';
+import { resolveAskPresentation } from './ask-presentation.js';
+
+/** Each source association retains its Ask conversation in the global surface. */
+export function SessionAsk({ source, ask, visible, covered = false, canRestore, synchronizing = false, storageScope, synchronize, onOpen, onToggleEnabled, triggerRef, replicaFor, transport, navigation, associationOwner, imageRecipient, compact = false }: {
+  source: OpenedSession; ask: ReturnType<typeof useAskConversations>;
+  visible: boolean;
+  /** Another page covers the Window: the Ask stays mounted, with its draft, scroll and connection, but is hidden. */
+  covered?: boolean;
+  canRestore: boolean;
+  /** Succession discovery is refreshing the current locators. A restoration already in flight continues through it. */
+  synchronizing?: boolean;
+  storageScope: string;
+  synchronize(): Promise<void>; onOpen(clean?: boolean): void; onToggleEnabled(): void;
+  triggerRef: RefObject<HTMLButtonElement>;
+  replicaFor(id: string): AgentReplica; transport: RemoteAgentTransport;
+  navigation: SessionViewNavigationFactory;
+  compact?: boolean; associationOwner: string; imageRecipient?: ImageDraftRecipient;
+}) {
+  const shared = useWindowLayout();
+  const sharedView = ask.sharedView(associationOwner);
+  const sharedTarget = sharedView?.binding && sessionKey(sharedView.binding);
+  const key = associationOwner;
+  const owner = ask.associationOwner(associationOwner);
+  if (!owner) throw new Error('Ask owner unavailable.');
+  const geometryScope = owner.geometryScope;
+  const entry = ask.entryFor(source, associationOwner);
+  const attached = isAskAttached(entry);
+  const participant = entry.record ? askParticipantKey(entry.record) : undefined;
+  const expanded = ask.isOpen(source, associationOwner);
+  const { shown, selected } = resolveAskPresentation({ window: shared?.window, view: sharedView, visible, expanded, compact });
+  const focus = (event: { target: EventTarget }) => {
+    if (!shared || !sharedView || event.target instanceof Element && event.target.closest('[data-pane-selection-ignore],.lab-session-family-pane')) return;
+    if ((shared.readWindow?.() ?? shared.window).selectedViewId !== sharedView.id) shared.operate({ type: 'view.select', viewId: sharedView.id });
+  };
+  // A discovery refresh withholds restoration, but must not cancel one this Ask started and start it again once it finishes.
+  const restoreStarted = useRef(false);
+  const restorePermitted = canRestore || synchronizing && restoreStarted.current && !!(entry.busy || entry.restoring);
+  useEffect(() => {
+    if (!shown || !restorePermitted) return;
+    const cancel = ask.restore(source, synchronize, associationOwner);
+    restoreStarted.current = !!cancel;
+    return () => { restoreStarted.current = false; cancel?.(); };
+  }, [storageScope, ask.store, transport, key, source.agentId, shown, restorePermitted, synchronize, sharedTarget]);
+  if (!shown) return null;
+  return <div className="lab-session-ask-surface" hidden={covered} data-ask-source={sessionKey(source)} data-ask-owner={associationOwner}
+    style={{ zIndex: selected ? 2 : 1 }} onPointerDownCapture={focus} onFocusCapture={focus}>
+    <FilePreviewScope resourceScope={JSON.stringify([associationOwner, participant])}><AskConversation baseUrl={storageScope} viewId={sharedView?.id} compact={compact} entry={entry} storageScope={geometryScope}
+      transport={transport} replica={attached && entry.record?.target ? replicaFor(entry.record.target.agentId) : undefined}
+      triggerRef={triggerRef} navigation={navigation} onSendInput={(id, send) => ask.sendInput(key, id, send, participant)}
+      onDiscardInput={id => ask.discardInput(key, id)}
+      draftBinding={ask.draftBinding(owner.id)} imageDraftBinding={owner.image} displayBinding={sharedView ? { scope: owner.display?.scope ?? storageScope, key: sharedView.id } : owner.display} imageRecipient={imageRecipient}
+      onClose={() => ask.minimize(source, associationOwner)} onToggleEnabled={onToggleEnabled}
+      onClean={() => onOpen(true)} onRetry={() => onOpen()} /></FilePreviewScope>
+  </div>;
+}

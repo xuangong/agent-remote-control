@@ -1,13 +1,13 @@
 // The provider catalog, replica state, Team roster, missing sessions and the live budget.
-import { useLiveBudget } from '../hooks/useLiveBudget.js';
+import { useLiveBudget } from '../kernel/useLiveBudget.js';
 import type { Team, AgentProviderDescriptor } from '@orchardworks/agent-remote-protocol';
 import { remoteSessionState, type RemoteSessionState, type AgentReplicaState } from '@orchardworks/agent-client';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import type { CompositionDocument } from '../session-composition-model.js';
-import type { OpenedSession } from '../directory-client.js';
-import { sessionKey } from '../session-tree.js';
+import type { CompositionDocument } from '../kernel/session-composition-model.js';
+import type { OpenedSession } from '../kernel/directory-client.js';
+import { sessionKey } from '../kernel/session-tree.js';
 import type { QuestionDraft } from '@orchardworks/agent-client-web/react';
-import type { ProviderCatalogStatus } from '../components/ProviderSessionControls.js';
+import type { ProviderCatalogStatus } from '../features/sessions/ProviderSessionControls.js';
 import type { RequestedSessionSlice } from './useRequestedSession.js';
 import type { ConversationConnectionsSlice } from './useConversationConnections.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';

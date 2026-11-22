@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { HostProvider } from './kernel/remote-host.js';
 import { App, type LabTransport } from './App.js';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
-import { SessionDirectoryClient } from './directory-client.js';
+import { SessionDirectoryClient } from './kernel/directory-client.js';
 import { replicaState } from './test/fixtures.js';
 import { render } from './test/setup.js';
 

@@ -1,6 +1,6 @@
 // The notice and Window list shown while the Window workspace is unavailable.
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { WindowWorkspaces } from '../../components/WindowWorkspaces.js';
+import { WindowWorkspaces } from '../../features/windows/WindowWorkspaces.js';
 import type { AppScope } from '../types.js';
 
 export function WindowRecovery({ scope }: { readonly scope: Pick<AppScope, 'closePage' | 'windowWorkspace'> }) {

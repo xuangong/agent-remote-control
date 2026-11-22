@@ -4,12 +4,12 @@ import { vi } from 'vitest';
 import { PROTOCOL_VERSION, applyGroupOperation, createWindowView, type WindowGroup, type SessionSuccessionReplay, type ProjectedTimelineEntry, type SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
 import { SessionDraftStore, SessionOutboxStore, SessionReadStore, SessionStateStore, WindowWorkspaceClient, type RemoteTransportListener, type SessionDraftsFrame, type SessionOutboxFrame, type SessionReadsFrame, type SessionStatesFrame } from '@orchardworks/agent-client';
 import { App, type LabTransport } from '../App.js';
-import { DirectoryError, SessionDirectoryClient } from '../directory-client.js';
-import * as workspaceHooks from '../hooks/useWindowWorkspace.js';
+import { DirectoryError, SessionDirectoryClient } from '../kernel/directory-client.js';
+import * as workspaceHooks from '../features/windows/useWindowWorkspace.js';
 import * as successionHooks from '../hooks/useSessionSuccession.js';
 import { replicaState } from './fixtures.js';
 import { render, unmount } from './setup.js';
-import { WorkspaceReady } from '../workspace-access.js';
+import { WorkspaceReady } from '../kernel/workspace-access.js';
 
 export const botTarget = (id: string) => ({ hostId: 'local', providerId: 'recorded', nativeSessionId: id, title: id });
 export function botGroup(id: string, section = true): WindowGroup {

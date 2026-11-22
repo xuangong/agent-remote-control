@@ -1,9 +1,9 @@
 // Remote Hosts, their offline refusal and the providers they offer.
-import { availableProvidersOf, chosenProviderId } from '../state/creation-choice.js';
+import { availableProvidersOf, chosenProviderId } from '../features/sessions/creation-choice.js';
 import { useEffect, useRef, useState } from 'react';
-import { useRemoteHosts } from '../hooks/useRemoteHosts.js';
-import { unavailableSessions } from '../unavailable-sessions.js';
-import { announceHostReturned } from '../session-restoration.js';
+import { useRemoteHosts } from '../features/computers/useRemoteHosts.js';
+import { unavailableSessions } from '../kernel/unavailable-sessions.js';
+import { announceHostReturned } from '../kernel/session-restoration.js';
 import type { RequestedSessionSlice } from './useRequestedSession.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
 import type { PanelsAndShortcutsSlice } from './usePanelsAndShortcuts.js';

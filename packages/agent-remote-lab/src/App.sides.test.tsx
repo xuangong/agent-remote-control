@@ -4,9 +4,9 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { configureImageDraftPersistence } from '@orchardworks/agent-client-web/browser';
 import { App, type LabTransport } from './App.js';
-import * as workspaceHooks from './hooks/useWindowWorkspace.js';
-import { SessionDirectoryClient } from './directory-client.js';
-import { ForkStore, referenceForkContext } from './session-forks.js';
+import * as workspaceHooks from './features/windows/useWindowWorkspace.js';
+import { SessionDirectoryClient } from './kernel/directory-client.js';
+import { ForkStore, referenceForkContext } from './kernel/session-forks.js';
 import { render } from './test/setup.js';
 import { replicaState } from './test/fixtures.js';
 

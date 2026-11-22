@@ -1,9 +1,9 @@
 import { createRoot } from 'react-dom/client';
 import { translator } from '@orchardworks/agent-client';
 import { browserLocale, LocaleContext } from '@orchardworks/agent-client-web/react';
-import { SessionLink, SessionWorkspaceContext } from '../../src/components/SessionLink.js';
-import { SessionConnectionNotice, sessionConnectionFailure } from '../../src/components/SessionConnectionNotice.js';
-import { DirectoryError } from '../../src/directory-client.js';
+import { SessionLink, SessionWorkspaceContext } from '../../src/kernel/SessionLink.js';
+import { SessionConnectionNotice, sessionConnectionFailure } from '../../src/kernel/SessionConnectionNotice.js';
+import { DirectoryError } from '../../src/kernel/directory-client.js';
 import '../../src/ui/tokens.css';
 import '@orchardworks/agent-client-web/styles.css';
 import '../../src/app.css';

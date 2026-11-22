@@ -1,18 +1,18 @@
 // Favorites, confirmed titles, the session the link requests and the selected Host.
-import { parseWorkbenchRoute } from '../workbench-mode.js';
-import { workspaceFetch } from '../workspace-access.js';
-import { useStoredDisplay } from '../hooks/useStoredDisplay.js';
-import { useSessionStars } from '../hooks/useSessionStars.js';
-import type { StarInput } from '../session-stars-client.js';
+import { parseWorkbenchRoute } from '../kernel/workbench-mode.js';
+import { workspaceFetch } from '../kernel/workspace-access.js';
+import { useStoredDisplay } from '../conversation/useStoredDisplay.js';
+import { useSessionStars } from '../features/sessions/useSessionStars.js';
+import type { StarInput } from '../features/sessions/session-stars-client.js';
 import { readControllerLocation, type ControllerLocation } from '@orchardworks/agent-remote-protocol/model';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { HttpPreviewClient } from '@orchardworks/agent-client';
-import { readLastSession } from '../conversation-recovery.js';
+import { readLastSession } from '../kernel/conversation-recovery.js';
 import type { RemoteHost } from '../kernel/remote-host.js';
-import { RemoteHostClient, SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
+import { RemoteHostClient, SessionDirectoryClient, type OpenedSession } from '../kernel/directory-client.js';
 import { readCurrentConversationLayout } from '../hooks/useConversationHistory.js';
-import { sessionKey } from '../session-tree.js';
-import { HttpVscodeTunnelClient } from '../vscode-tunnel.js';
+import { sessionKey } from '../kernel/session-tree.js';
+import { HttpVscodeTunnelClient } from '../kernel/vscode-tunnel.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
 import type { AppInputs } from './types.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';

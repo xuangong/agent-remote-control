@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildOpened, mockScope, renderHook } from '../test/render-hook.js';
 
-vi.mock('../fork-actions.js', async importOriginal => ({ ...await importOriginal<typeof import('../fork-actions.js')>(), configureFork: vi.fn(async () => undefined), sendForkInput: vi.fn(async () => undefined) }));
+vi.mock('../conversation/fork-actions.js', async importOriginal => ({ ...await importOriginal<typeof import('../conversation/fork-actions.js')>(), configureFork: vi.fn(async () => undefined), sendForkInput: vi.fn(async () => undefined) }));
 
-const { ForkStore } = await import('../session-forks.js');
-const { sendForkInput } = await import('../fork-actions.js');
+const { ForkStore } = await import('../kernel/session-forks.js');
+const { sendForkInput } = await import('../conversation/fork-actions.js');
 const { useForks } = await import('./useForks.js');
 
 const source = buildOpened('source');

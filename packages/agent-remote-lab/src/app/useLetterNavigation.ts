@@ -1,12 +1,12 @@
-import { otherEndpoint, participantTitle, stackPlan, windowLetterPlan } from '../state/letter-navigation.js';
+import { otherEndpoint, participantTitle, stackPlan, windowLetterPlan } from '../features/session-links/letter-navigation.js';
 import { createWindowView, type WindowEdit, type ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
-import { windowSessionBinding } from '../window-workspace.js';
-import { communicationResolver, communicationDirection, loadSessionCommunication, waitForCommunicationSession, type CommunicationSnapshot } from '../session-communication.js';
+import { windowSessionBinding } from '../kernel/window-workspace.js';
+import { communicationResolver, communicationDirection, loadSessionCommunication, waitForCommunicationSession, type CommunicationSnapshot } from '../features/session-links/session-communication.js';
 import type { CommunicationNavigation } from '@orchardworks/agent-client-web/react';
-import { type SessionEntry, sessionKey } from '../session-tree.js';
-import { ConversationConnections } from '../conversation-connections.js';
+import { type SessionEntry, sessionKey } from '../kernel/session-tree.js';
+import { ConversationConnections } from '../conversation/conversation-connections.js';
 import type { AgentReplicaState } from '@orchardworks/agent-client';
-import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
+import { SessionDirectoryClient, type OpenedSession } from '../kernel/directory-client.js';
 import { viewKey } from './helpers.js';
 import type { AppInputs } from './types.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';

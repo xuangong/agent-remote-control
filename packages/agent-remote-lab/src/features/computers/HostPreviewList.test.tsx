@@ -1,0 +1,121 @@
+import { act, useState } from 'react';
+import { expect, it, vi } from 'vitest';
+import type { PreviewContextValue } from '@orchardworks/agent-client-web/react';
+
+import { render } from '../../test/setup.js';
+import { HostPreviewList } from './HostPreviewList.js';
+
+it('shows lifecycle, availability, source navigation, and owner-only unregister controls', async () => {
+  const unregister = vi.fn(async () => undefined);
+  const openSource = vi.fn();
+  const controller = value({ unregister });
+  const container = await render(<HostPreviewList controller={controller} onOpenSource={openSource} />);
+  expect(container.textContent).toContain('Active');
+  expect(container.textContent).toContain('Controller offline');
+  expect(container.textContent).not.toContain('Expired');
+  expect(container.textContent).toContain(new Date(1_789_520_400_000).toLocaleString());
+
+  await act(async () => container.querySelector<HTMLButtonElement>('.lab-preview-source')?.click());
+  expect(openSource).toHaveBeenCalledWith('agent-one', 'epoch:1');
+  await act(async () => container.querySelector<HTMLButtonElement>('.lab-preview-unregister')?.click());
+  expect(unregister).toHaveBeenCalledWith('preview-one');
+});
+
+it('opens the preview through its controller without creating a new tab', async () => {
+  const open = vi.fn(async () => 'https://preview.test/entry/one');
+  const shared = value({ canManage: false, open });
+  const container = await render(<HostPreviewList controller={{ ...shared, registrations: shared.registrations.map(item => ({ ...item, availability: 'online' })) }} />);
+  expect(container.textContent).toContain('localhost:5173');
+  expect(container.querySelector('.lab-preview-unregister')).toBeNull();
+  expect(container.textContent).toContain('Only the Host owner can unregister previews.');
+  expect(open).not.toHaveBeenCalled();
+  await act(async () => container.querySelector<HTMLButtonElement>('.lab-preview-open')?.click());
+  expect(open).toHaveBeenCalledWith('preview-one', 'http://localhost:5173');
+  expect(container.querySelector('a[target="_blank"]')).toBeNull();
+});
+
+it('removes the open action when registration state no longer permits access', async () => {
+  const open = vi.fn(async () => 'https://preview.test/entry/one');
+  const active = value({ open, registrations: value().registrations.map(item => ({ ...item, availability: 'online' })) });
+  const container = await render(<RegistrationStateHarness controller={active} />);
+  await act(async () => container.querySelector<HTMLButtonElement>('.lab-preview-open')?.click());
+  expect(open).toHaveBeenCalledTimes(1);
+
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-action="expire"]')?.click());
+  expect(container.querySelector('.lab-preview-open')).toBeNull();
+});
+
+it('does not prepare a link while unregister is pending', async () => {
+  const pending = value({ registrations: value().registrations.map(item => ({
+    ...item, availability: 'online', pendingUnregister: true,
+  })) });
+  const container = await render(<HostPreviewList controller={pending} />);
+
+  expect(container.querySelector<HTMLButtonElement>('.lab-preview-open')?.disabled).toBe(true);
+});
+
+function value(overrides: Partial<PreviewContextValue> = {}): PreviewContextValue {
+  return {
+    registrations: [{ id: 'preview-one', target: 'http://localhost:5173', status: 'active', createdAt: 1_789_516_800_000,
+      expiresAt: 1_789_520_400_000, revision: 1, pathMode: 'strip', availability: 'controller_offline',
+      sources: [{ sessionId: 'agent-one', itemId: 'epoch:1' }] }],
+    canManage: true, loading: false, register: async () => { throw new Error('unused'); }, unregister: async () => undefined,
+    open: async () => '', refresh: async () => undefined, ...overrides,
+  };
+}
+
+function RegistrationStateHarness({ controller }: { readonly controller: PreviewContextValue }) {
+  const [expired, setExpired] = useState(false);
+  const current = expired ? {
+    ...controller,
+    registrations: controller.registrations.map(item => ({ ...item, status: 'expired' as const, revision: item.revision + 1 })),
+  } : controller;
+  return <><HostPreviewList controller={current} /><button data-action="expire" onClick={() => setExpired(true)}>Expire</button></>;
+}
+
+it('only lists active previews and shows an empty state after the last one expires', async () => {
+  const active = value().registrations[0]!;
+  const container = await render(<HostPreviewList controller={value({ registrations: [active,
+    { ...active, id: 'expired', target: 'http://localhost:6001', status: 'expired' },
+    { ...active, id: 'unregistered', target: 'http://localhost:6002', status: 'unregistered' },
+  ] })} />);
+  expect(container.querySelectorAll('li')).toHaveLength(1);
+  expect(container.textContent).not.toContain('localhost:6001');
+  expect(container.textContent).not.toContain('localhost:6002');
+  const empty = await render(<HostPreviewList controller={value({ registrations: [{ ...active, status: 'expired' }] })} />);
+  expect(empty.querySelectorAll('li')).toHaveLength(0);
+  expect(empty.textContent).toContain('No active previews');
+});
+
+it('shows the Host and origin mapping and pins a name independently of tunnel availability', async () => {
+  const pinName = vi.fn(async () => {});
+  const controller = value({ routing: 'subdomain', pinName, registrations: value().registrations.map(entry => ({ ...entry,
+    tunnelOrigin: 'https://rose-seal-123456789abc.arc.test', tunnelNamePinned: true,
+  })) });
+  const container = await render(<HostPreviewList hostName="Work Mac" controller={controller} />);
+  expect(container.querySelector('li')?.textContent).toContain('Work Mac');
+  expect(container.querySelector('li')?.textContent).toContain('http://localhost:5173');
+  expect(container.querySelector('li')?.textContent).toContain('https://rose-seal-123456789abc.arc.test');
+  const button = container.querySelector<HTMLButtonElement>('.lab-preview-pin')!;
+  expect(button.textContent).toBe('Unpin tunnel name');
+  expect(button.getAttribute('aria-pressed')).toBe('true');
+  await act(async () => button.click());
+  expect(pinName).toHaveBeenCalledWith('preview-one', false);
+});
+
+
+it('keeps an inactive pinned mapping visible and allows unpin without opening a tunnel', async () => {
+  const unpinName = vi.fn(async () => {});
+  const controller = value({ registrations: [], routing: 'subdomain', unpinName,
+    pinnedNames: [{ target: 'http://127.0.0.1:5173', nameId: 'saved-name', tunnelOrigin: 'https://rose-seal.arc.test' }],
+  });
+  const container = await render(<HostPreviewList hideEmpty hostName="Offline PC" controller={controller} />);
+  expect(container.textContent).toContain('Offline PC');
+  expect(container.textContent).toContain('http://127.0.0.1:5173');
+  expect(container.textContent).toContain('https://rose-seal.arc.test');
+  expect(container.textContent).toContain('Name reserved');
+  expect(container.querySelector('.lab-preview-open')).toBeNull();
+  expect(container.querySelector('.lab-preview-unregister')).toBeNull();
+  await act(async () => container.querySelector<HTMLButtonElement>('.lab-preview-pin')!.click());
+  expect(unpinName).toHaveBeenCalledWith('saved-name');
+});

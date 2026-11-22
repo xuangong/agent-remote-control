@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { errorWords, isUncertainSend, type MessageKey } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { useFeedbackToast } from '../components/Toast.js';
+import { useFeedbackToast } from '../kernel/Toast.js';
 import type { LabWorkbenchActions } from './session-workbench-props.js';
 
 /** Stream capacity explains what frees a slot, and a paused session says how it resumes; other interruptions only reconnect. */

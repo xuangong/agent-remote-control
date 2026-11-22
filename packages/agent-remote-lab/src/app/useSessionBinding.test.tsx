@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DirectoryError } from '../directory-client.js';
+import { DirectoryError } from '../kernel/directory-client.js';
 import { buildView, buildWindow } from '../test/window-builders.js';
 import { buildOpened, mockScope, renderHook } from '../test/render-hook.js';
 import { useSessionBinding } from './useSessionBinding.js';

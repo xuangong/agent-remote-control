@@ -1,12 +1,12 @@
 // Panels, sidebar, shortcuts and the queue of mode steps.
-import { usePanels } from '../hooks/usePanels.js';
-import { pageOpen as pageOpenOf, type MainView } from '../state/panels.js';
+import { usePanels } from '../features/windows/usePanels.js';
+import { pageOpen as pageOpenOf, type MainView } from '../features/windows/panels.js';
 import type { Team } from '@orchardworks/agent-remote-protocol';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
-import { focusableElements } from '../components/SupportingRail.js';
+import { focusableElements } from '../features/windows/SupportingRail.js';
 import { useMovableHost } from '../shell/movable-host.js';
-import { useSidebarWidth } from '../components/SidebarResize.js';
-import { useShellShortcuts } from '../hooks/useShellShortcuts.js';
+import { useSidebarWidth } from '../features/windows/SidebarResize.js';
+import { useShellShortcuts } from '../features/windows/useShellShortcuts.js';
 import { focusWithinContext } from './helpers.js';
 import type { ModeStep } from './types.js';
 import type { RequestedSessionSlice } from './useRequestedSession.js';

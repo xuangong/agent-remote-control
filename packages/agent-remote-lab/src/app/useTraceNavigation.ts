@@ -1,8 +1,8 @@
 // Navigation history, the Trace request and attribution navigation.
-import { resolveConversationLayout } from '../conversation-layout.js';
+import { resolveConversationLayout } from '../conversation/conversation-layout.js';
 import { useEffect, useRef } from 'react';
-import { saveLastSession } from '../conversation-recovery.js';
-import type { OpenedSession } from '../directory-client.js';
+import { saveLastSession } from '../kernel/conversation-recovery.js';
+import type { OpenedSession } from '../kernel/directory-client.js';
 import { useConversationHistory } from '../hooks/useConversationHistory.js';
 import { viewKey } from './helpers.js';
 import type { SessionSuccessionBindingSlice } from './useSessionSuccessionBinding.js';

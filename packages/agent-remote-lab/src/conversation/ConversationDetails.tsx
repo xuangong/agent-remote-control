@@ -4,11 +4,11 @@ import { useContext, useMemo, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { sessionFiles, timelineEntryKey, type AgentReplicaState, type RemoteSessionState, type RemoteSessionStatus } from '@orchardworks/agent-client';
 import { FilePreviewContext, useTranslate, type AgentChildSessionView } from '@orchardworks/agent-client-web/react';
-import { AssistantDetails, type AssistantRef } from '../components/assistant/AssistantDetails.js';
-import { ModelSettings } from '../components/assistant/ModelSettings.js';
-import { PlanningControl } from '../components/PlanningControl.js';
-import type { AssistantDetailsHost } from '../components/assistant/details-host.js';
-import type { useProcessMode } from '../hooks/useProcessMode.js';
+import { AssistantDetails, type AssistantRef } from './assistant/AssistantDetails.js';
+import { ModelSettings } from './assistant/ModelSettings.js';
+import { PlanningControl } from './PlanningControl.js';
+import type { AssistantDetailsHost } from './assistant/details-host.js';
+import type { useProcessMode } from './useProcessMode.js';
 import type { LabWorkbenchActions, SessionWorkbenchProps } from './session-workbench-props.js';
 
 export function ConversationDetails({ host, visible, state, details, assistant, displayScope, process, session, sessionStatus, readOnly, mutationBlocked, draftOnly, actions,

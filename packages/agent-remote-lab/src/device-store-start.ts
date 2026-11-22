@@ -1,7 +1,7 @@
 import '@orchardworks/agent-client-web/browser';
 import { deviceStore } from '@orchardworks/agent-client/device-store';
-import { conversationLocalStorage, storageKeys } from './conversation-storage.js';
-import { readWorkspaceAccess, scopeFor } from './workspace-access.js';
+import { conversationLocalStorage, storageKeys } from './kernel/conversation-storage.js';
+import { readWorkspaceAccess, scopeFor } from './kernel/workspace-access.js';
 
 /**
  * The previous release kept the last six conversations as plain display copies in localStorage, with no principal. They are removed once at start. This is the only

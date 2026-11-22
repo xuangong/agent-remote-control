@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { errorWords } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { botViews, hasBotAppearance, isBotView, type WindowGroup } from '@orchardworks/agent-remote-protocol';
-import type { BotPlace } from '../workbench-mode.js';
-import { windowBindingKey, windowSuccessionLayout } from '../window-composition.js';
+import type { BotPlace } from '../kernel/workbench-mode.js';
+import { windowBindingKey, windowSuccessionLayout } from '../kernel/window-composition.js';
 import type { useSessionSuccession } from './useSessionSuccession.js';
-import type { GroupHandle, useWindowWorkspace } from './useWindowWorkspace.js';
+import type { GroupHandle, useWindowWorkspace } from '../features/windows/useWindowWorkspace.js';
 
 type Workspace = ReturnType<typeof useWindowWorkspace>;
 type Succession = Pick<ReturnType<typeof useSessionSuccession>, 'document' | 'ensureWindowView' | 'save' | 'refresh' | 'discovering'>;

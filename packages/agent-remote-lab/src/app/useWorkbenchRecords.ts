@@ -1,10 +1,10 @@
 // Opened sessions, forks, side activity, quotes, new and removed bots and the creation locks.
-import { noQuote, reduceQuote } from '../state/quote-selection.js';
-import { useSyncReducer } from '../hooks/useSyncReducer.js';
-import { useToast } from '../components/Toast.js';
+import { noQuote, reduceQuote } from '../features/session-links/quote-selection.js';
+import { useSyncReducer } from '../conversation/useSyncReducer.js';
+import { useToast } from '../kernel/Toast.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CreateSessionOptions, OpenedSession } from '../directory-client.js';
-import { ForkStore, type SessionFork } from '../session-forks.js';
+import type { CreateSessionOptions, OpenedSession } from '../kernel/directory-client.js';
+import { ForkStore, type SessionFork } from '../kernel/session-forks.js';
 import { readOpenedSessions } from './helpers.js';
 import type { RequestedSessionSlice } from './useRequestedSession.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';

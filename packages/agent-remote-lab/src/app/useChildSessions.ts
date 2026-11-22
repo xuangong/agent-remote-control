@@ -1,8 +1,8 @@
-import { besideChildSession, childOpensBeside, childRequestCurrent, directParentOf, knownChildOf, replacingChildSession } from '../state/child-session-plan.js';
-import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
+import { besideChildSession, childOpensBeside, childRequestCurrent, directParentOf, knownChildOf, replacingChildSession } from '../features/session-links/child-session-plan.js';
+import { sessionConnectionFailure } from '../kernel/SessionConnectionNotice.js';
 import type { AgentReplicaState } from '@orchardworks/agent-client';
-import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
-import { sessionKey } from '../session-tree.js';
+import { SessionDirectoryClient, type OpenedSession } from '../kernel/directory-client.js';
+import { sessionKey } from '../kernel/session-tree.js';
 import type { AgentChildSessionView } from '@orchardworks/agent-client-web/react';
 import type { AppInputs } from './types.js';
 import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';

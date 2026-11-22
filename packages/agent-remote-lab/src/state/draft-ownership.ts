@@ -8,8 +8,8 @@
  * - A pane without a slot has no draft binding.
  * - The text store of an owner is found by its scope; the shell creates a store for a scope it has not seen.
  */
-import { sessionKey } from '../session-tree.js';
-import type { CompositionSlot } from '../session-composition-model.js';
+import { sessionKey } from '../kernel/session-tree.js';
+import type { CompositionSlot } from '../kernel/session-composition-model.js';
 
 export interface DraftOwner { readonly scope: string; readonly key: string }
 export interface PaneDraftOwners { readonly text: DraftOwner; readonly image: DraftOwner }

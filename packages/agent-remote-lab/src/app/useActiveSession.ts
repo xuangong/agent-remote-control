@@ -1,14 +1,14 @@
 // The active session, its entries and the presented view.
-import { contextVisible as contextVisibleOf, supportingRailOpen as supportingRailOpenOf, windowStageVisible as windowStageVisibleOf } from '../state/panels.js';
-import { parseWindowFeature } from '../window-feature-views.js';
+import { contextVisible as contextVisibleOf, supportingRailOpen as supportingRailOpenOf, windowStageVisible as windowStageVisibleOf } from '../features/windows/panels.js';
+import { parseWindowFeature } from '../kernel/window-feature-views.js';
 import { windowPrimaryViewId } from '@orchardworks/agent-remote-protocol';
-import { useSessionWindows } from '../hooks/useSessionWindows.js';
-import { useAskVisibility } from '../hooks/useAskVisibility.js';
-import { isAskSelected } from '../ask-presentation.js';
+import { useSessionWindows } from '../kernel/useSessionWindows.js';
+import { useAskVisibility } from '../kernel/useAskVisibility.js';
+import { isAskSelected } from '../features/team/ask-presentation.js';
 import { useEffect, useMemo, useState } from 'react';
-import type { OpenedSession } from '../directory-client.js';
-import { useSessionEntries } from '../hooks/useSessionEntries.js';
-import { sessionKey } from '../session-tree.js';
+import type { OpenedSession } from '../kernel/directory-client.js';
+import { useSessionEntries } from '../features/sessions/useSessionEntries.js';
+import { sessionKey } from '../kernel/session-tree.js';
 import type { PanelsAndShortcutsSlice } from './usePanelsAndShortcuts.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
 import type { SessionSuccessionBindingSlice } from './useSessionSuccessionBinding.js';

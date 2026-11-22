@@ -1,8 +1,8 @@
-import { unlinkSideView } from '../tracked-session-views.js';
+import { unlinkSideView } from '../kernel/tracked-session-views.js';
 import { useLayoutEffect } from 'react';
-import { sessionKey } from '../session-tree.js';
-import { sideNavigationSource, sideNavigationTarget, sideLinkVisible } from '../session-forks.js';
-import { sidePath } from '../side-tree.js';
+import { sessionKey } from '../kernel/session-tree.js';
+import { sideNavigationSource, sideNavigationTarget, sideLinkVisible } from '../kernel/session-forks.js';
+import { sidePath } from '../kernel/side-tree.js';
 import { viewKey } from './helpers.js';
 import type { AppInputs } from './types.js';
 import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';

@@ -5,7 +5,7 @@ import { useFocusedAsk } from './useFocusedAsk.js';
 
 const setLinked = vi.fn(async () => undefined);
 beforeEach(() => setLinked.mockClear());
-vi.mock('../hooks/useSessionRelations.js', () => ({ useSessionRelations: () => ({ setLinked, reconcile: vi.fn() }) }));
+vi.mock('../features/session-links/useSessionRelations.js', () => ({ useSessionRelations: () => ({ setLinked, reconcile: vi.fn() }) }));
 
 function scopeOf(facts: Record<string, unknown> = {}) {
   return mockScope<typeof useFocusedAsk>({

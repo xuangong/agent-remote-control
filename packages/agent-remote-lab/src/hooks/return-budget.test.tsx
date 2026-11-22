@@ -2,11 +2,11 @@ import { notifyFeedReopened } from '@orchardworks/agent-client';
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
-import { ForkStore } from '../session-forks.js';
-import { SessionStarsClient } from '../session-stars-client.js';
-import { useRemoteHosts } from './useRemoteHosts.js';
-import { useSessionRelations } from './useSessionRelations.js';
-import { useSessionStars } from './useSessionStars.js';
+import { ForkStore } from '../kernel/session-forks.js';
+import { SessionStarsClient } from '../features/sessions/session-stars-client.js';
+import { useRemoteHosts } from '../features/computers/useRemoteHosts.js';
+import { useSessionRelations } from '../features/session-links/useSessionRelations.js';
+import { useSessionStars } from '../features/sessions/useSessionStars.js';
 import type { HostPairingService } from '../kernel/remote-host.js';
 
 let visibility: DocumentVisibilityState = 'visible';

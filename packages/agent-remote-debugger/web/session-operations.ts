@@ -1,6 +1,6 @@
 import { isSuccessionActionResult, isSuccessionDescription, type SuccessionDescription } from '@orchardworks/agent-remote-protocol';
-import type { OpenedSession } from '../../agent-remote-lab/src/directory-client.js';
-import type { SessionSuccessionDirectory } from '../../agent-remote-lab/src/session-succession-directory.js';
+import type { OpenedSession } from '../../agent-remote-lab/src/kernel/directory-client.js';
+import type { SessionSuccessionDirectory } from '../../agent-remote-lab/src/kernel/session-succession-directory.js';
 import type { DebuggerSession } from '../src/server.js';
 
 export type LiveSession = OpenedSession & Pick<DebuggerSession, 'draftOwnerId'>;

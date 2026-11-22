@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client';
-import { ControllerUpdates } from '../../src/components/ControllerUpdates';
+import { ControllerUpdates } from '../../src/features/computers/ControllerUpdates';
 import type { HostPairingService, RemoteHost } from '../../src/kernel/remote-host.js';
 import '../../src/ui/tokens.css';
 import '../../src/app.css';

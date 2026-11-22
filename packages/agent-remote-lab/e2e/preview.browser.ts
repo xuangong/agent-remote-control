@@ -128,10 +128,10 @@ for (const engine of [chromium, webkit]) it(`keeps authenticated preview navigat
     import React, {useRef,useState} from 'react';import {createRoot} from 'react-dom/client';
     import {PreviewProvider,usePreviewController,PreviewDock,PreviewActions,PreviewWorkspace} from '@orchardworks/agent-client-web/react';
     import {HttpPreviewClient} from '@orchardworks/agent-client';
-    import {trackFocusModality} from './focus-modality.ts';
-    import {ViewOptions} from './components/ViewOptions.tsx';
-    import {SupportingRail} from './components/SupportingRail.tsx';
-    import {HostPreviewList} from './components/HostPreviewList.tsx';
+    import {trackFocusModality} from './kernel/focus-modality.ts';
+    import {ViewOptions} from './features/windows/ViewOptions.tsx';
+    import {SupportingRail} from './features/windows/SupportingRail.tsx';
+    import {HostPreviewList} from './features/computers/HostPreviewList.tsx';
     trackFocusModality(document);
     function ChromeControls(){
       const view=useRef(null),settings=useRef(null);const [open,setOpen]=useState(false);

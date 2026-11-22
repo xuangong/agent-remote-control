@@ -1,10 +1,10 @@
 // Window and view actions: choose, create, edit, add and bind.
 import { errorWords, keyedError } from '@orchardworks/agent-client';
-import { providerAfterHostChange } from '../state/creation-choice.js';
+import { providerAfterHostChange } from '../features/sessions/creation-choice.js';
 import { paneDraftOwners } from '../state/draft-ownership.js';
-import type { SessionPanel } from '../state/panels.js';
+import type { SessionPanel } from '../features/windows/panels.js';
 import { windowPrimaryViewId, type Team } from '@orchardworks/agent-remote-protocol';
-import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
+import { sessionConnectionFailure } from '../kernel/SessionConnectionNotice.js';
 import { useEffect } from 'react';
 import type { RemoteHost } from '../kernel/remote-host.js';
 import type { RemoteHostStateSlice } from './useRemoteHostState.js';

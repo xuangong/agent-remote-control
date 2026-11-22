@@ -1,8 +1,8 @@
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { commandKinds, searchCommands, type CommandItem, type CommandKind } from './command-search.js';
-import { applePlatform } from '../platform.js';
-import { isSearchKey } from '../hooks/useShellShortcuts.js';
+import { applePlatform } from '../kernel/platform.js';
+import { isSearchKey } from '../features/windows/useShellShortcuts.js';
 import './shell.css';
 
 const groupKeys = { action: 'navigation.palette.groupAction', window: 'navigation.palette.groupWindow', bot: 'navigation.palette.groupBot', session: 'navigation.palette.groupSession' } as const satisfies Record<CommandKind, string>;

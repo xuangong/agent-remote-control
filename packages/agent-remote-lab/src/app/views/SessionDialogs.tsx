@@ -1,5 +1,5 @@
 // The Recover Handoff button and the rename dialog.
-import { RenameSessionDialog } from '../../components/favorites/RenameSessionDialog.js';
+import { RenameSessionDialog } from '../../features/sessions/favorites/RenameSessionDialog.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { AppScope } from '../types.js';
 

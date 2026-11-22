@@ -1,6 +1,6 @@
-import type { SessionEntry } from '../session-tree.js';
-import { conversationLocalStorage } from '../conversation-storage.js';
-import type { OpenedSession } from '../directory-client.js';
+import type { SessionEntry } from '../kernel/session-tree.js';
+import { conversationLocalStorage } from '../kernel/conversation-storage.js';
+import type { OpenedSession } from '../kernel/directory-client.js';
 import { Menu } from '../ui/Menu.js';
 
 export const nonTextInputTypes = new Set(['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit']);

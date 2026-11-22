@@ -1,7 +1,7 @@
 import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
-import { takenAvatars } from '../assistant-picture.js';
+import { sessionConnectionFailure } from '../kernel/SessionConnectionNotice.js';
+import { takenAvatars } from '../kernel/assistant-picture.js';
 import { buildBinding, buildGroup, buildView, buildWindow } from '../test/window-builders.js';
 import { buildOpened, mockScope, renderHook } from '../test/render-hook.js';
 import { useSideSessions } from './useSideSessions.js';

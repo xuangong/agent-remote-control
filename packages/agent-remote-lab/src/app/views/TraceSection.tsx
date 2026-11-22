@@ -1,5 +1,5 @@
 // The Trace view.
-import { TraceView } from '../../components/TraceView.js';
+import { TraceView } from '../../features/diagnostics/TraceView.js';
 import type { AppScope } from '../types.js';
 
 export function TraceSection({ scope }: { readonly scope: Pick<AppScope, 'accessReady' | 'activeOpened' | 'activeView' | 'conversationActions' | 'hostOffline' | 'inspectTimelineEntry' | 'pageOpen' | 'primaryNavigation' | 'setTraceViewTarget' | 'state' | 'status' | 'traceRequest' | 'traceScope' | 'windowMode'> }) {

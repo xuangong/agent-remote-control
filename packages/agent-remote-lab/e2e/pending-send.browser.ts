@@ -12,7 +12,7 @@ for (const engine of [chromium, webkit]) for (const width of [402, 1280]) {
       import { createRoot } from 'react-dom/client';
       import './session-view-styles.ts';
       import { createReplicaState } from '@orchardworks/agent-client';
-      import { LabWorkbench } from './components/LabWorkbench.tsx';
+      import { LabWorkbench } from './conversation/LabWorkbench.tsx';
       // A synchronized session has received its first Timeline page; until then queued messages keep waiting.
       const replica = createReplicaState();
       const state = { ...replica, timeline: { ...replica.timeline, initialized: true }, agent: {

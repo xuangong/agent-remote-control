@@ -1,8 +1,8 @@
-import { usePromptEditOperation } from '../../agent-remote-lab/src/hooks/usePromptEditOperation.js';
-import { useBoundDraft, type DraftBinding } from '../../agent-remote-lab/src/draft-store.js';
-import type { SessionOperationBinding } from '../../agent-remote-lab/src/session-view-operations.js';
+import { usePromptEditOperation } from '../../agent-remote-lab/src/conversation/usePromptEditOperation.js';
+import { useBoundDraft, type DraftBinding } from '../../agent-remote-lab/src/kernel/draft-store.js';
+import type { SessionOperationBinding } from '../../agent-remote-lab/src/conversation/session-view-operations.js';
 import { createContext, useContext, useRef, useState, type ComponentProps, type ReactNode } from 'react';
-import { ToastProvider } from '../../agent-remote-lab/src/components/Toast.js';
+import { ToastProvider } from '../../agent-remote-lab/src/kernel/Toast.js';
 import { SessionWorkbench } from '../../agent-remote-lab/src/conversation/ConversationSurface.js';
 
 export const DebugControlsState = createContext<{ expanded: boolean; setExpanded(value: boolean | ((value: boolean) => boolean)): void } | undefined>(undefined);

@@ -1,8 +1,8 @@
 import { errorWords } from '@orchardworks/agent-client';
-import { classifyCreationFailure, mayCreate, partialCreationMessage, planningOption, reservationFor } from '../state/agent-creation.js';
-import { windowSessionBinding } from '../window-workspace.js';
-import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
-import { DirectoryError } from '../directory-client.js';
+import { classifyCreationFailure, mayCreate, partialCreationMessage, planningOption, reservationFor } from '../features/sessions/agent-creation.js';
+import { windowSessionBinding } from '../kernel/window-workspace.js';
+import { sessionConnectionFailure } from '../kernel/SessionConnectionNotice.js';
+import { DirectoryError } from '../kernel/directory-client.js';
 import { createAgentId } from './helpers.js';
 import type { AppInputs } from './types.js';
 import type { HostAndStackSlice } from './useHostAndStack.js';

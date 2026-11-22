@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { MessagePart } from '@orchardworks/agent-remote-protocol';
-import { LabWorkbench } from '../../src/components/LabWorkbench.js';
-import { ReadingPositions, RecoveryScope } from '../../src/conversation-recovery.js';
+import { LabWorkbench } from '../../src/conversation/LabWorkbench.js';
+import { ReadingPositions, RecoveryScope } from '../../src/kernel/conversation-recovery.js';
 import { replicaState } from '../../src/test/fixtures.js';
 import '../../src/session-view-styles';
 

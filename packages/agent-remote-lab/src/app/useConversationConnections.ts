@@ -1,12 +1,12 @@
 // Catch-up, replicas, live connections and the refs that follow the attached conversation.
 import { SessionHandoffRejectedError, AgentReplica, RemoteSessionClient } from '@orchardworks/agent-client';
-import { ConversationConnections } from '../conversation-connections.js';
-import { ReplicaCache } from '../replica-cache.js';
-import { DraftStore } from '../draft-store.js';
-import { useSessionCatchUp } from '../hooks/useSessionCatchUp.js';
-import type { TrackedSessionView } from '../tracked-session-views.js';
+import { ConversationConnections } from '../conversation/conversation-connections.js';
+import { ReplicaCache } from '../conversation/replica-cache.js';
+import { DraftStore } from '../kernel/draft-store.js';
+import { useSessionCatchUp } from '../conversation/useSessionCatchUp.js';
+import type { TrackedSessionView } from '../kernel/tracked-session-views.js';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
-import { SessionDirectoryClient } from '../directory-client.js';
+import { SessionDirectoryClient } from '../kernel/directory-client.js';
 import type { LabTransport } from './types.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
 import type { RequestedSessionSlice } from './useRequestedSession.js';

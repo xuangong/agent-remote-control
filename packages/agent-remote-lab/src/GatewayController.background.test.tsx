@@ -6,7 +6,7 @@ import { GatewayController } from './GatewayController.js';
 import { memoryProtocolRelay } from '@orchardworks/agent-relay-node/testing/memory-relay';
 import { createRecordedLabProvider } from '@orchardworks/agent-relay-node/recorded';
 import { render, unmount } from './test/setup.js';
-import { workspaceFetch, workspaceSocket } from './workspace-access.js';
+import { workspaceFetch, workspaceSocket } from './kernel/workspace-access.js';
 
 const realSetTimeout = globalThis.setTimeout;
 const cleanups: Array<() => Promise<void> | void> = [];

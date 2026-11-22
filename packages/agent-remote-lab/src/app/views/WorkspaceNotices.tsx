@@ -1,5 +1,5 @@
 // Connection, succession and mutation notices above the conversations.
-import { SessionConnectionNotice } from '../../components/SessionConnectionNotice.js';
+import { SessionConnectionNotice } from '../../kernel/SessionConnectionNotice.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { AppScope } from '../types.js';
 

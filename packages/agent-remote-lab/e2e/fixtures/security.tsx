@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GatewayController } from '../../src/GatewayController.js';
-import { HostSecurityActions } from '../../src/components/HostSecurityActions.js';
-import { HostCodexDaemon } from '../../src/components/HostCodexDaemon.js';
+import { HostSecurityActions } from '../../src/features/computers/HostSecurityActions.js';
+import { HostCodexDaemon } from '../../src/features/computers/HostCodexDaemon.js';
 import type { RemoteHost } from '../../src/kernel/remote-host.js';
-import type { AccountFacts } from '../../src/account.js';
-import { RemoteHostClient } from '../../src/directory-client.js';
+import type { AccountFacts } from '../../src/kernel/account.js';
+import { RemoteHostClient } from '../../src/kernel/directory-client.js';
 import '../../src/ui/tokens.css';
 import '../../src/app.css';
 

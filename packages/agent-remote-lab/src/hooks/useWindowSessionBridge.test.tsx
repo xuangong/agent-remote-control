@@ -1,9 +1,9 @@
 import { act, useReducer } from 'react';
 import { expect, it, vi } from 'vitest';
 import { applyWindowOperation, createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
-import { windowSessionBinding } from '../window-workspace.js';
-import { compositionRoleKey, createAskOwner, createCompositionDocument, createCompositionSlot } from '../session-composition.js';
-import { bindWindowCompositionSlot, ensureWindowCompositionSlot, projectWindowComposition } from '../window-composition.js';
+import { windowSessionBinding } from '../kernel/window-workspace.js';
+import { compositionRoleKey, createAskOwner, createCompositionDocument, createCompositionSlot } from '../kernel/session-composition.js';
+import { bindWindowCompositionSlot, ensureWindowCompositionSlot, projectWindowComposition } from '../kernel/window-composition.js';
 import { render } from '../test/setup.js';
 import { useWindowSessionBridge } from './useWindowSessionBridge.js';
 

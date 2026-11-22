@@ -14,7 +14,7 @@ beforeAll(async () => {
   const source = `
     import React from 'react'; import { createRoot } from 'react-dom/client';
     import './session-view-styles.ts';
-    import { App } from './App.tsx'; import { SessionDirectoryClient } from './directory-client.ts';
+    import { App } from './App.tsx'; import { SessionDirectoryClient } from './kernel/directory-client.ts';
     import { replicaState } from './test/fixtures.ts';
     const child = { nativeSessionId: 'child', title: '/root/review', status: 'idle', observation: 'live', createdAt: '2026-09-29T00:00:00Z' };
     const agent = id => ({ ...replicaState.agent, id, providerId: 'codex', runtimeInfo: { providerId: 'codex', sessionId: id, status: 'idle', ...(id === 'parent' ? {childSessions:[child]} : {}) } });

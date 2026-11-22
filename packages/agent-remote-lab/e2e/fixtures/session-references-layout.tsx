@@ -3,10 +3,10 @@
 // `height` sets the pane's height (default 560).
 import { createRoot } from 'react-dom/client';
 import { SessionWorkbench } from '../../src/conversation/ConversationSurface';
-import { SessionReferences } from '../../src/components/SessionReferences';
-import { ForkReference } from '../../src/components/ForkReference';
+import { SessionReferences } from '../../src/features/session-links/SessionReferences';
+import { ForkReference } from '../../src/features/session-links/ForkReference';
 import { replicaState } from '../../src/test/fixtures';
-import type { SessionFork } from '../../src/session-forks';
+import type { SessionFork } from '../../src/kernel/session-forks';
 import '../../src/session-view-styles';
 
 const query = new URLSearchParams(window.location.search);

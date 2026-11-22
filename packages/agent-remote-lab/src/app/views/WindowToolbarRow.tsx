@@ -1,6 +1,6 @@
 // The Window toolbar.
 import { hasBotAppearance } from '@orchardworks/agent-remote-protocol';
-import { windowSummary } from '../../window-summary.js';
+import { windowSummary } from '../../features/windows/window-summary.js';
 import { WindowToolbar } from '../../shell/WindowToolbar.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { AppScope } from '../types.js';

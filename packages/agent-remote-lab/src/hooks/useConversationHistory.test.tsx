@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
 import { nextPopstate } from '../test/wait.js';
 import { useConversationHistory } from './useConversationHistory.js';
-import type { SessionEntry } from '../session-tree.js';
+import type { SessionEntry } from '../kernel/session-tree.js';
 
 const parent: SessionEntry = { hostId: 'local', providerId: 'codex', nativeSessionId: 'parent', title: 'Parent' };
 const child = { ...parent, nativeSessionId: 'child', parentNativeSessionId: 'parent', title: 'Child' };

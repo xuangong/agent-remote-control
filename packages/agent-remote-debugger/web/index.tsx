@@ -1,6 +1,6 @@
 import { ardbSessionDirectory, describeLiveSession, type LiveSession } from './session-operations.js';
-import { DraftStore } from '../../agent-remote-lab/src/draft-store.js';
-import { SessionViewOperationsContext } from '../../agent-remote-lab/src/session-view-operations.js';
+import { DraftStore } from '../../agent-remote-lab/src/kernel/draft-store.js';
+import { SessionViewOperationsContext } from '../../agent-remote-lab/src/conversation/session-view-operations.js';
 import { LiveControls, useLiveRecording } from './live-controls.js';
 import { RecordingPicker, type OpenedRecording } from './recording-picker.js';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
@@ -8,7 +8,7 @@ import { createRoot } from 'react-dom/client';
 import { HttpWebSocketTransport } from '@orchardworks/agent-client';
 import { DebugControlsState, DebugSessionView, DebugWorkbench } from './session-view.js';
 import { useSessionView } from '@orchardworks/agent-client-web/react';
-import { trackFocusModality } from '../../agent-remote-lab/src/focus-modality.js';
+import { trackFocusModality } from '../../agent-remote-lab/src/kernel/focus-modality.js';
 import { ReplayView } from './replay.js';
 import { RecordingPlayer, type SessionRecording } from '../src/recording.js';
 import { createBrowserTrace } from './browser-trace.js';

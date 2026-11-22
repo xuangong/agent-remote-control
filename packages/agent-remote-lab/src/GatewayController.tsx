@@ -1,20 +1,20 @@
 import { relayLinkView, watchPageResume, type ChannelLink } from '@orchardworks/agent-client';
-import { DeviceLinkContext, type DeviceLink } from './device-link.js';
-import type { AccountFacts } from './account.js';
+import { DeviceLinkContext, type DeviceLink } from './kernel/device-link.js';
+import type { AccountFacts } from './kernel/account.js';
 import { deviceStore } from '@orchardworks/agent-client/device-store';
 import { withMessageKey } from '@orchardworks/agent-client/locale';
 import { controllerPath, readControllerLocation } from '@orchardworks/agent-remote-protocol/model';
 import { Suspense, lazy, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { signInReturnKey } from '@orchardworks/agent-relay-core/access-page';
-import { WorkspaceShell } from './components/WorkspaceShell.js';
-import { AccessPage } from './components/AccessPage.js';
-import { clearConversationRecovery } from './conversation-recovery.js';
-import { flushRecoveryWrites } from './recovery-writes.js';
-import { useRecoveryNotice } from './hooks/useRecoveryNotice.js';
-import { RelayLinkReport, WorkspaceReady, scopeFor, confirmWorkspaceAccess, readStoredLease, revokeStoredRows, retireWorkspace, workspaceSignedOut, previousWorkspacePath, parseAccess, readWorkspaceAccess, rememberWorkspaceAccess, forgetWorkspaceAccess, claimAutomaticSignIn, prepareManualSignIn, setWorkspaceReady, type WorkspaceAccess } from './workspace-access.js';
+import { WorkspaceShell } from './features/windows/WorkspaceShell.js';
+import { AccessPage } from './features/computers/AccessPage.js';
+import { clearConversationRecovery } from './kernel/conversation-recovery.js';
+import { flushRecoveryWrites } from './kernel/recovery-writes.js';
+import { useRecoveryNotice } from './conversation/useRecoveryNotice.js';
+import { RelayLinkReport, WorkspaceReady, scopeFor, confirmWorkspaceAccess, readStoredLease, revokeStoredRows, retireWorkspace, workspaceSignedOut, previousWorkspacePath, parseAccess, readWorkspaceAccess, rememberWorkspaceAccess, forgetWorkspaceAccess, claimAutomaticSignIn, prepareManualSignIn, setWorkspaceReady, type WorkspaceAccess } from './kernel/workspace-access.js';
 
 /** The Security panel loads when it opens: the sign-in entry stays small, and the panel brings the page's words and components with it. */
-const SecurityPanel = lazy(() => import('./components/SecurityPanel.js').then(module => ({ default: module.SecurityPanel })));
+const SecurityPanel = lazy(() => import('./features/computers/SecurityPanel.js').then(module => ({ default: module.SecurityPanel })));
 const jsonPost = { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' };
 const navigateToLogin = (url: string) => window.location.replace(url);
 export function GatewayController({ children, navigate = navigateToLogin, automaticAccess = false }: {

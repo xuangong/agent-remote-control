@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { type OpenedSession } from '../directory-client.js';
+import { type OpenedSession } from '../kernel/directory-client.js';
 import { viewKey } from './helpers.js';
 import type { AppInputs } from './types.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';

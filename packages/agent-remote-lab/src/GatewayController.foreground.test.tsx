@@ -1,7 +1,7 @@
 import { act } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { GatewayController } from './GatewayController.js';
-import { workspaceFetch, workspaceSocket } from './workspace-access.js';
+import { workspaceFetch, workspaceSocket } from './kernel/workspace-access.js';
 import { render } from './test/setup.js';
 
 const basePath = '/u/' + 'a'.repeat(64) + '/';

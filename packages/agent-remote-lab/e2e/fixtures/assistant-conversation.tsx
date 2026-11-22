@@ -12,12 +12,12 @@ import { createReplicaState, translator, type AgentReplicaState, type RemoteSess
 import { buildEveryKindConversation, buildTailPage, TimelineRows } from '@orchardworks/agent-client/testing';
 import { bindAppearance } from '@orchardworks/agent-client-web/browser';
 import { browserLocale, LocaleProvider } from '@orchardworks/agent-client-web/react';
-import { deviceChoices } from '../../src/device-choices.js';
+import { deviceChoices } from '../../src/kernel/device-choices.js';
 import { AssistantAvatar, MotionProvider } from '@orchardworks/agent-client-web/primitives';
-import { LabWorkbench } from '../../src/components/LabWorkbench.js';
-import { EarlierConversation, type EarlierTransport } from '../../src/components/EarlierConversation.js';
-import { ReplicaInspector } from '../../src/components/ReplicaInspector.js';
-import { ToastProvider } from '../../src/components/Toast.js';
+import { LabWorkbench } from '../../src/conversation/LabWorkbench.js';
+import { EarlierConversation, type EarlierTransport } from '../../src/conversation/EarlierConversation.js';
+import { ReplicaInspector } from '../../src/features/diagnostics/ReplicaInspector.js';
+import { ToastProvider } from '../../src/kernel/Toast.js';
 import '../../src/session-view-styles';
 import { BotFixture, SAMPLE } from './assistant-layouts.js';
 

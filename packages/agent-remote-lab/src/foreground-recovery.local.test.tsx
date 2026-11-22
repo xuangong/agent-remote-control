@@ -7,9 +7,9 @@ import type { ClientMessage, SessionChannelClientMessage } from '@orchardworks/a
 import { HttpWebSocketTransport, RemoteSessionClient, AgentReplica, type WebSocketLike } from '@orchardworks/agent-client';
 import { AgentComposer } from '@orchardworks/agent-client-web/react';
 import { GatewayController } from './GatewayController.js';
-import { ConversationConnections, ConversationConnectionScope } from './conversation-connections.js';
-import { useConversationSession } from './hooks/useConversationSession.js';
-import { workspaceFetch, workspaceSocket } from './workspace-access.js';
+import { ConversationConnections, ConversationConnectionScope } from './conversation/conversation-connections.js';
+import { useConversationSession } from './conversation/useConversationSession.js';
+import { workspaceFetch, workspaceSocket } from './kernel/workspace-access.js';
 import { createProtocolValidationServer } from '@orchardworks/agent-relay-node/protocol-validation-server';
 import { render, unmount } from './test/setup.js';
 

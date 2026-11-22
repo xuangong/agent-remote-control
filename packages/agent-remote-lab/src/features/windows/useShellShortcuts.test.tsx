@@ -1,0 +1,177 @@
+import { act } from 'react';
+import { afterEach, expect, it, vi } from 'vitest';
+import { render, unmount } from '../../test/setup.js';
+import { useShellShortcuts } from './useShellShortcuts.js';
+
+const platform = Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform');
+afterEach(() => { if (platform) Object.defineProperty(Navigator.prototype, 'platform', platform); });
+const onPlatform = (value: string) => {
+  // applePlatform() prefers userAgentData.platform; jsdom has none, so stubbing navigator.platform decides it.
+  expect('userAgentData' in navigator).toBe(false);
+  Object.defineProperty(Navigator.prototype, 'platform', { configurable: true, get: () => value });
+};
+const press = async (init: KeyboardEventInit) => {
+  const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+  await act(async () => { window.dispatchEvent(event); });
+  return event;
+};
+
+function Harness(props: Parameters<typeof useShellShortcuts>[0]) { useShellShortcuts(props); return null; }
+
+it('toggles the sidebar with Command-Backslash and switches modes with Option-Command-1 and 2 on Apple platforms', async () => {
+  onPlatform('MacIntel');
+  const toggleSidebar = vi.fn(), setMode = vi.fn();
+  await render(<Harness toggleSidebar={toggleSidebar} setMode={setMode} />);
+  await press({ key: '\\', code: 'Backslash', metaKey: true });
+  await press({ key: '¡', code: 'Digit1', metaKey: true, altKey: true });
+  await press({ key: '™', code: 'Digit2', metaKey: true, altKey: true });
+  expect(toggleSidebar).toHaveBeenCalledOnce();
+  expect(setMode.mock.calls).toEqual([['window'], ['bot']]);
+  await press({ key: '\\', code: 'Backslash', ctrlKey: true });
+  await press({ key: '1', code: 'Digit1', metaKey: true });
+  expect(toggleSidebar).toHaveBeenCalledOnce();
+  expect(setMode).toHaveBeenCalledTimes(2);
+});
+
+it('uses Control elsewhere, ignores AltGraph and events already handled, and works without a sidebar', async () => {
+  onPlatform('Win32');
+  const setMode = vi.fn();
+  await render(<Harness setMode={setMode} />);
+  expect((await press({ key: '\\', code: 'Backslash', ctrlKey: true })).defaultPrevented).toBe(false);
+  await press({ key: '1', code: 'Digit1', ctrlKey: true, altKey: true });
+  expect(setMode).toHaveBeenCalledWith('window');
+  await act(async () => {
+    const event = new KeyboardEvent('keydown', { key: '2', code: 'Digit2', ctrlKey: true, altKey: true, cancelable: true });
+    Object.defineProperty(event, 'getModifierState', { value: (key: string) => key === 'AltGraph' });
+    window.dispatchEvent(event);
+  });
+  await act(async () => {
+    const event = new KeyboardEvent('keydown', { key: '2', code: 'Digit2', ctrlKey: true, altKey: true, cancelable: true });
+    event.preventDefault(); window.dispatchEvent(event);
+  });
+  expect(setMode).toHaveBeenCalledOnce();
+});
+
+it('leaves Control-Alt-2 alone when the layout types a character with it', async () => {
+  onPlatform('Win32');
+  const setMode = vi.fn();
+  await render(<Harness setMode={setMode} />);
+  const event = await press({ key: '²', code: 'Digit2', ctrlKey: true, altKey: true });
+  expect(event.defaultPrevented).toBe(false);
+  expect(setMode).not.toHaveBeenCalled();
+});
+
+it('ignores repeated keydowns from a held key', async () => {
+  onPlatform('MacIntel');
+  const toggleSidebar = vi.fn(), setMode = vi.fn();
+  await render(<Harness toggleSidebar={toggleSidebar} setMode={setMode} />);
+  await press({ key: '\\', code: 'Backslash', metaKey: true });
+  await press({ key: '\\', code: 'Backslash', metaKey: true, repeat: true });
+  await press({ key: '\\', code: 'Backslash', metaKey: true, repeat: true });
+  expect(toggleSidebar).toHaveBeenCalledOnce();
+});
+
+it('does nothing while a dialog is open', async () => {
+  onPlatform('MacIntel');
+  const toggleSidebar = vi.fn(), setMode = vi.fn();
+  await render(<Harness toggleSidebar={toggleSidebar} setMode={setMode} />);
+  const dialog = document.createElement('dialog');
+  dialog.setAttribute('open', '');
+  document.body.append(dialog);
+  try {
+    const event = await press({ key: '\\', code: 'Backslash', metaKey: true });
+    await press({ key: '™', code: 'Digit2', metaKey: true, altKey: true });
+    expect(event.defaultPrevented).toBe(false);
+    expect(toggleSidebar).not.toHaveBeenCalled();
+    expect(setMode).not.toHaveBeenCalled();
+  } finally { dialog.remove(); }
+  await press({ key: '\\', code: 'Backslash', metaKey: true });
+  expect(toggleSidebar).toHaveBeenCalledOnce();
+});
+
+it('does nothing while a modal sheet such as the compact Sessions & Hosts rail is open', async () => {
+  onPlatform('MacIntel');
+  const toggleSidebar = vi.fn(), setMode = vi.fn();
+  await render(<Harness toggleSidebar={toggleSidebar} setMode={setMode} />);
+  const sheet = document.createElement('aside');
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-modal', 'true');
+  document.body.append(sheet);
+  try {
+    const event = await press({ key: '\\', code: 'Backslash', metaKey: true });
+    await press({ key: '™', code: 'Digit2', metaKey: true, altKey: true });
+    expect(event.defaultPrevented).toBe(false);
+    expect(toggleSidebar).not.toHaveBeenCalled();
+    expect(setMode).not.toHaveBeenCalled();
+    sheet.setAttribute('aria-modal', 'false');
+    await press({ key: '\\', code: 'Backslash', metaKey: true });
+    expect(toggleSidebar).toHaveBeenCalledOnce();
+  } finally { sheet.remove(); }
+});
+
+it('stops listening once unmounted', async () => {
+  onPlatform('MacIntel');
+  const toggleSidebar = vi.fn(), setMode = vi.fn();
+  const container = await render(<Harness toggleSidebar={toggleSidebar} setMode={setMode} />);
+  await unmount(container);
+  await press({ key: '\\', code: 'Backslash', metaKey: true });
+  await press({ key: '¡', code: 'Digit1', metaKey: true, altKey: true });
+  expect(toggleSidebar).not.toHaveBeenCalled();
+  expect(setMode).not.toHaveBeenCalled();
+});
+
+it('opens search with Command-K on Apple platforms and Control-K elsewhere, also from a text field or the composer', async () => {
+  onPlatform('MacIntel');
+  const openSearch = vi.fn(), setMode = vi.fn();
+  const container = await render(<Harness setMode={setMode} openSearch={openSearch} />);
+  const field = document.createElement('input'), composer = document.createElement('div');
+  composer.contentEditable = 'true'; container.append(field, composer);
+  const pressIn = async (target: Element, init: KeyboardEventInit) => {
+    const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+    await act(async () => { target.dispatchEvent(event); });
+    return event;
+  };
+  expect((await press({ key: 'k', code: 'KeyK', metaKey: true })).defaultPrevented).toBe(true);
+  expect((await pressIn(field, { key: 'k', code: 'KeyK', metaKey: true })).defaultPrevented).toBe(true);
+  expect((await pressIn(composer, { key: 'k', code: 'KeyK', metaKey: true })).defaultPrevented).toBe(true);
+  expect(openSearch).toHaveBeenCalledTimes(3);
+  // Not with Alt or Shift, not with the other primary modifier, and not on a different layout's K position by `key` alone.
+  await press({ key: '˚', code: 'KeyK', metaKey: true, altKey: true });
+  await press({ key: 'K', code: 'KeyK', metaKey: true, shiftKey: true });
+  await press({ key: 'k', code: 'KeyK', ctrlKey: true });
+  expect(openSearch).toHaveBeenCalledTimes(3);
+  expect(setMode).not.toHaveBeenCalled();
+
+  // Other layouts: Dvorak types K from the QWERTY V position; `key` decides there.
+  expect((await press({ key: 'k', code: 'KeyV', metaKey: true })).defaultPrevented).toBe(true);
+  expect(openSearch).toHaveBeenCalledTimes(4);
+  // Another Latin letter at the K position is that letter's shortcut (Colemak types E there); a non-Latin layout falls back to the position.
+  expect((await press({ key: 'e', code: 'KeyK', metaKey: true })).defaultPrevented).toBe(false);
+  expect(openSearch).toHaveBeenCalledTimes(4);
+  expect((await press({ key: 'л', code: 'KeyK', metaKey: true })).defaultPrevented).toBe(true);
+  expect(openSearch).toHaveBeenCalledTimes(5);
+
+  onPlatform('Win32');
+  expect((await press({ key: 'k', code: 'KeyK', ctrlKey: true })).defaultPrevented).toBe(true);
+  expect(openSearch).toHaveBeenCalledTimes(6);
+});
+
+it('leaves Command-K alone without a search, and while a dialog such as the palette itself is open', async () => {
+  onPlatform('MacIntel');
+  const setMode = vi.fn();
+  await unmount(await render(<Harness setMode={setMode} />).then(async container => {
+    expect((await press({ key: 'k', code: 'KeyK', metaKey: true })).defaultPrevented).toBe(false);
+    return container;
+  }));
+  const openSearch = vi.fn();
+  await render(<Harness setMode={setMode} openSearch={openSearch} />);
+  const dialog = document.createElement('dialog');
+  dialog.setAttribute('open', '');
+  document.body.append(dialog);
+  try {
+    expect((await press({ key: 'k', code: 'KeyK', metaKey: true })).defaultPrevented).toBe(false);
+    expect(openSearch).not.toHaveBeenCalled();
+  } finally { dialog.remove(); }
+  await press({ key: 'k', code: 'KeyK', metaKey: true });
+  expect(openSearch).toHaveBeenCalledOnce();
+});

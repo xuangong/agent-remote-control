@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { FloatingPanel, OrchardMark } from '@orchardworks/agent-client-web/primitives';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import type { Destination, DestinationPlace } from '../destinations.js';
-import type { DeviceLinkNotice } from '../device-link.js';
+import type { Destination, DestinationPlace } from '../kernel/destinations.js';
+import type { DeviceLinkNotice } from '../kernel/device-link.js';
 import { Icon, type IconName } from '../ui/Icon.js';
-import { DeviceLinkWords } from './DeviceLinkIndicator.js';
+import { DeviceLinkWords } from '../kernel/DeviceLinkIndicator.js';
 import './shell.css';
 
 const PLACES: readonly { destination: Exclude<Destination, 'settings'>; icon: IconName; label: 'navigation.chats' | 'navigation.assistants' | 'navigation.windows' }[] = [

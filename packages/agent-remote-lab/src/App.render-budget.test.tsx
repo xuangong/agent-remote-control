@@ -1,9 +1,9 @@
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createWindowView, type WindowGroup } from '@orchardworks/agent-remote-protocol';
-import * as rosterModel from './bot-roster.js';
+import * as rosterModel from './kernel/bot-roster.js';
 import * as botWorkspaceHooks from './hooks/useBotWorkspace.js';
-import * as conversation from './components/SessionConversation.js';
+import * as conversation from './conversation/SessionConversation.js';
 import { botTarget, mountBotApp, seedGroup, until } from './test/bot-mode-fixtures.js';
 
 // Stage 6's render budgets: the work of a change is the work of the conversations it concerns (see the stage 6 plan).

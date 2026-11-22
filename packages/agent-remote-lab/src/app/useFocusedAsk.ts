@@ -1,18 +1,18 @@
 // The focused view, its Ask and its source.
 import { errorWords, keyedError } from '@orchardworks/agent-client';
 import { fixtureStaleness, viewStaleness, type CapturedBot, type GroupBindingLookup } from '../state/source-currency.js';
-import { windowBindingKey } from '../window-composition.js';
-import { useSessionRelations } from '../hooks/useSessionRelations.js';
+import { windowBindingKey } from '../kernel/window-composition.js';
+import { useSessionRelations } from '../features/session-links/useSessionRelations.js';
 import type { SourceStaleness, AgentReplicaState } from '@orchardworks/agent-client';
 import { useRef } from 'react';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { compositionSession, compositionSelection } from '../session-composition.js';
-import type { OpenedSession } from '../directory-client.js';
-import { sessionKey } from '../session-tree.js';
-import type { LabSessionRef } from '../session-references.js';
-import { sideLinkVisible, type SessionFork } from '../session-forks.js';
+import { compositionSession, compositionSelection } from '../kernel/session-composition.js';
+import type { OpenedSession } from '../kernel/directory-client.js';
+import { sessionKey } from '../kernel/session-tree.js';
+import type { LabSessionRef } from '../kernel/session-references.js';
+import { sideLinkVisible, type SessionFork } from '../kernel/session-forks.js';
 import { viewKey } from './helpers.js';
-import { askUnavailableReason } from '../state/ask-visibility.js';
+import { askUnavailableReason } from '../features/team/ask-visibility.js';
 import type { HostAndStackSlice } from './useHostAndStack.js';
 import type { SideSelectionSlice } from './useSideSelection.js';
 import type { SessionOpeningSlice } from './useSessionOpening.js';

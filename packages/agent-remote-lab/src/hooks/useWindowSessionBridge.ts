@@ -1,11 +1,11 @@
 import { keyedError } from '@orchardworks/agent-client';
 import { useCallback, useEffect, useRef, useReducer } from 'react';
 import { createWindowView, type WindowOperation, type WindowSessionBinding, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
-import { compositionSelection } from '../session-composition.js';
-import { adoptWindowPrimaryRole, primaryWindowFamily, windowBindingKey, windowCompositionMapping, windowSuccessionLayout } from '../window-composition.js';
-import { windowSessionBinding } from '../window-workspace.js';
-import { sessionKey, type SessionEntry } from '../session-tree.js';
-import type { OpenedSession } from '../directory-client.js';
+import { compositionSelection } from '../kernel/session-composition.js';
+import { adoptWindowPrimaryRole, primaryWindowFamily, windowBindingKey, windowCompositionMapping, windowSuccessionLayout } from '../kernel/window-composition.js';
+import { windowSessionBinding } from '../kernel/window-workspace.js';
+import { sessionKey, type SessionEntry } from '../kernel/session-tree.js';
+import type { OpenedSession } from '../kernel/directory-client.js';
 import type { useSessionSuccession } from './useSessionSuccession.js';
 
 type Succession = Pick<ReturnType<typeof useSessionSuccession>, 'document' | 'desired' | 'selected' | 'discovering' | 'navigationIntent' | 'open' | 'openAttached' | 'ensureWindowView' | 'bindWindowView' | 'projectWindow' | 'leave' | 'clearPresentation'>;

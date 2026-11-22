@@ -1,0 +1,590 @@
+import { applyInteractionRequested, remoteSessionState, RemoteOperationError, SessionHandoff } from '@orchardworks/agent-client';
+import { SESSION_CONNECTION_PATTERN } from '@orchardworks/agent-client/testing';
+import { ToastProvider } from '../kernel/Toast.js';
+import { act, useEffect, useState } from 'react';
+import { describe, expect, it, vi } from 'vitest';
+
+import { render, setPromptText, unmount } from '../test/setup.js';
+import { replicaState } from '../test/fixtures.js';
+import { SessionControlNotice } from './SessionControlNotice.js';
+import { LabWorkbench } from './LabWorkbench.js';
+import { AskViewCommand, AskViewScope } from '../kernel/useAskVisibility.js';
+import { askCommand } from './fork-actions.js';
+
+it('offers only the global Ask switch when a session has no source-question handler', async () => {
+  const execute = vi.fn(async () => ({ text: 'Ask view shown.' }));
+  const send = vi.fn(async () => {});
+  function Harness() {
+    const [draft, setDraft] = useState('/ask');
+    return <AskViewScope.Provider value={execute}>
+    <LabWorkbench state={replicaState} sessionStatus="ready" messageDraft={draft} onMessageDraftChange={setDraft} actions={{ sendMessage: send }} />
+    </AskViewScope.Provider>;
+  }
+  const container = await render(<Harness />);
+  expect(container.querySelector('[role="option"]')?.textContent).toContain(AskViewCommand.description);
+  expect(container.textContent).not.toContain('add a question');
+  await act(async () => {
+    const input = container.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
+    setPromptText(input, '/ask on'); input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
+  expect(execute).toHaveBeenCalledWith(' on');
+  expect(send).not.toHaveBeenCalled();
+});
+
+it.each(['on', 'explain the current task'])('routes Ask arguments %s to the matching global or source handler', async args => {
+  const execute = vi.fn(async () => ({}));
+  const source = vi.fn(async () => ({}));
+  function Harness() {
+    const [draft, setDraft] = useState('/ask');
+    return <AskViewScope.Provider value={execute}>
+    <LabWorkbench state={replicaState} sessionStatus="ready" messageDraft={draft} onMessageDraftChange={setDraft} actions={{ sendMessage: vi.fn(async () => {}) }}
+      consoleCommands={[askCommand]} onExecuteConsoleCommand={source} />
+    </AskViewScope.Provider>;
+  }
+  const container = await render(<Harness />);
+  expect(container.querySelectorAll('[role="option"]')).toHaveLength(1);
+  expect(container.querySelector('[role="option"]')?.textContent).toContain(askCommand.description);
+  await act(async () => {
+    const input = container.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
+    setPromptText(input, `/ask ${args}`); input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
+  if (args === 'on') {
+    expect(execute).toHaveBeenCalledWith(' on');
+    expect(source).not.toHaveBeenCalled();
+  } else {
+    expect(source).toHaveBeenCalledWith(askCommand.id, ` ${args}`);
+    expect(execute).not.toHaveBeenCalled();
+  }
+});
+
+it('offers sign-in inside the permission panel while preserving the session and draft', async () => {
+  window.history.replaceState(null, '', '/?host=studio&provider=codex&session=native-1&debug=1');
+  const setSessionSetting = vi.fn<(id: string, value: string) => Promise<void>>().mockRejectedValueOnce(Object.assign(new Error('Sign in again before changing session permissions.'), { code: 'reauthentication_required' })).mockRejectedValueOnce(new Error('Provider unavailable.')).mockResolvedValue(undefined);
+  const state = { ...replicaState, pendingInteractions: [], agent: { ...replicaState.agent!, status: 'idle' as const, activeTurn: null,
+    capabilities: { ...replicaState.agent!.capabilities, sessionSettings: true },
+    runtimeInfo: { ...replicaState.agent!.runtimeInfo, settings: [{ id: 'sandbox', category: 'permissions' as const, label: 'Sandbox', value: 'readOnly', mutable: true, scope: 'session' as const,
+      options: [{ value: 'readOnly', label: 'Read only' }, { value: 'dangerFullAccess', label: 'Full access' }] }] } } };
+  const container = await render(<LabWorkbench state={state} sessionStatus="ready" messageDraft="Keep my draft" actions={{ setSessionSetting }} />);
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="session-permissions-button"]')!.click());
+  const select = container.querySelector<HTMLSelectElement>('[data-testid="session-setting-sandbox"]')!;
+  await act(async () => { select.value = 'dangerFullAccess'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect(setSessionSetting).toHaveBeenCalledExactlyOnceWith('sandbox', 'dangerFullAccess');
+  const panel = container.querySelector('[aria-label="Permission settings"]')!;
+  const signIn = panel.querySelector<HTMLAnchorElement>('.lab-reauthentication a');
+  expect(signIn?.getAttribute('href')).toBe('/auth/login?reauthenticate=1&host=studio&provider=codex&session=native-1');
+  expect(signIn?.textContent).toBe('Sign in again');
+  expect(container.querySelectorAll('.lab-reauthentication')).toHaveLength(1);
+  expect(panel.textContent).toContain('Return to this session, then retry your change.');
+  expect(panel.textContent).not.toContain('Sign in again before changing session permissions.');
+  signIn!.addEventListener('click', event => event.preventDefault());
+  await act(async () => signIn!.click());
+  expect(sessionStorage.getItem('agent-remote-sign-in-return')).toBe('/?host=studio&provider=codex&session=native-1');
+  sessionStorage.removeItem('agent-remote-sign-in-return');
+  expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('Ready');
+  expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!.value).toBe('Keep my draft');
+  expect(select.value).toBe('readOnly');
+  expect(setSessionSetting).toHaveBeenCalledTimes(1);
+  await act(async () => { select.value = 'dangerFullAccess'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect(panel.querySelector('.lab-reauthentication')).toBeNull();
+  expect(panel.querySelector('[role="alert"]')?.textContent).toBe('Provider unavailable.');
+  await act(async () => { select.value = 'dangerFullAccess'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect(panel.querySelector('[role="alert"]')).toBeNull();
+  expect(setSessionSetting).toHaveBeenCalledTimes(3);
+});
+
+it.each(['console', 'native'] as const)('offers sign-in once beneath a %s command that needs a recent sign-in', async kind => {
+  window.history.replaceState(null, '', '/?host=studio&provider=claude&session=native-1');
+  const signIn = Object.assign(new Error('Sign in again before changing session permissions. Then retry the change.'), { code: 'reauthentication_required' });
+  const command = vi.fn().mockRejectedValue(signIn);
+  const fork = { id: 'console:fork', name: 'fork', kind: 'command' as const, description: 'Fork this conversation' };
+  const state = { ...replicaState, pendingInteractions: [], agent: { ...replicaState.agent!, status: 'idle' as const, activeTurn: null,
+    capabilities: { ...replicaState.agent!.capabilities, commands: true } } };
+  const listCommands = vi.fn(async () => [{ ...fork, id: 'native:fork' }]);
+  const container = await render(<ToastProvider><LabWorkbench state={state} sessionStatus="ready" messageDraft="/fork 继续"
+    actions={{ sendMessage: vi.fn(), ...(kind === 'native' ? { listCommands, executeCommand: command } : {}) }}
+    {...(kind === 'console' ? { consoleCommands: [fork], onExecuteConsoleCommand: command } : {})} /></ToastProvider>);
+  await vi.waitFor(async () => {
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
+    expect(command).toHaveBeenCalledTimes(1);
+  });
+  const notices = container.querySelectorAll('.lab-reauthentication');
+  expect(notices).toHaveLength(1);
+  expect(notices[0]!.closest('.agent-composer-note')).not.toBeNull();
+  expect(notices[0]!.textContent).toContain('Return to this session, then run it again.');
+  expect(container.textContent).not.toContain('Then retry the change.');
+  const link = notices[0]!.querySelector<HTMLAnchorElement>('a')!;
+  expect(link.getAttribute('href')).toBe('/auth/login?reauthenticate=1&host=studio&provider=claude&session=native-1');
+  link.addEventListener('click', event => event.preventDefault());
+  await act(async () => link.click());
+  expect(sessionStorage.getItem('agent-remote-sign-in-return')).toBe('/?host=studio&provider=claude&session=native-1');
+  sessionStorage.removeItem('agent-remote-sign-in-return');
+  expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!.value).toBe('/fork 继续');
+});
+
+describe('LabWorkbench', () => {
+  // Target T5: the label is the session's business state whatever the connection.
+  it.each([
+    ['starting', 'connecting', 'Starting'],
+    ['idle', 'catching_up', 'Ready'],
+    ['idle', 'disconnected', 'Ready'],
+    ['idle', 'idle', 'Ready'],
+    ['starting', 'ready', 'Starting'],
+    ['closed', 'ready', 'Closed'],
+    ['running', 'ready', 'Working'],
+    ['waiting', 'ready', 'Waiting for response'],
+    ['idle', 'ready', 'Ready'],
+  ] as const)('reports %s Agent state with %s synchronization accurately', async (agentStatus, sessionStatus, expected) => {
+    const state = { ...replicaState, agent: { ...replicaState.agent!, status: agentStatus } };
+    const container = await render(<LabWorkbench state={state} sessionStatus={sessionStatus} actions={{}} />);
+    expect(container.querySelector('.lab-conversation-status')?.textContent).toBe(expected);
+    expect(container.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
+    if (sessionStatus !== 'ready') {
+      expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe(expected);
+      expect(container.querySelector('[data-testid="cancel-submit"]')?.matches(':disabled')).toBe(true);
+    }
+  });
+
+  it('indicates a pending answer even before an Agent status change arrives', async () => {
+    const state = applyInteractionRequested(replicaState, { kind: 'plan_approval', requestId: 'plan-1', plan: 'Review this plan.', allowedActions: ['approve'] });
+    const container = await render(<LabWorkbench state={state} sessionStatus="ready" actions={{}} />);
+    expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('Waiting for response');
+  });
+
+  it.each([
+    {
+      connectionState: 'reconnecting' as const,
+      notice: undefined,
+    },
+    {
+      connectionState: 'restoring' as const,
+      notice: undefined,
+    },
+    {
+      connectionState: 'unavailable' as const,
+      notice: 'The agent is not available on its Host.',
+    },
+  ])('keeps $connectionState recovery mounted and restricts control operations', async ({ connectionState, notice }) => {
+    const state = {
+      ...replicaState,
+      pendingInteractions: [{
+        kind: 'plan_approval' as const, requestId: 'plan-1', plan: 'Review this plan.',
+        allowedActions: ['approve' as const, 'reject' as const],
+      }],
+      agent: {
+        ...replicaState.agent!,
+        status: 'running' as const,
+        activeTurn: { turnId: 'turn-1', startedAt: '2026-09-17T00:00:00.000Z' },
+        capabilities: {
+          ...replicaState.agent!.capabilities,
+          cancel: true, steer: true, commands: true, planning: true, sessionSettings: true,
+        },
+        runtimeInfo: {
+          ...replicaState.agent!.runtimeInfo,
+          connection: { state: connectionState, reason: 'transport_closed', attempt: 2 },
+          planning: { active: false },
+          settings: [{
+            id: 'model', category: 'model' as const, label: 'Model', value: 'current', mutable: true,
+            scope: 'session' as const, options: [{ value: 'current', label: 'Current' }, { value: 'next', label: 'Next' }],
+          }],
+        },
+      },
+    };
+    const container = await render(<LabWorkbench
+      state={state}
+      sessionStatus="ready"
+      messageDraft="Keep my recovery draft"
+      actions={{
+        sendMessage: vi.fn(), cancel: vi.fn(), setPlanning: vi.fn(),
+        setSessionSetting: vi.fn(), listCommands: vi.fn(), executeCommand: vi.fn(),
+        respondToInteraction: vi.fn(),
+      }}
+    />);
+
+    // The heading keeps the business label; only an unavailable agent is said, once, above the timeline.
+    expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('Working');
+    expect([...container.querySelectorAll('.lab-control-note')].map(note => note.textContent)).toEqual(notice ? [notice] : []);
+    expect(container.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
+    expect(container.textContent).toContain('Waiting for connection to respond.');
+    expect(container.textContent).not.toContain('The host cannot respond');
+    expect(container.textContent).not.toContain('Open or attach to an Agent first.');
+    expect(container.querySelector('[aria-label="Agent timeline"]')).not.toBeNull();
+    expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')).toMatchObject({
+      disabled: false, value: 'Keep my recovery draft',
+    });
+    // A send waits for the runtime (owner decision 1).
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')?.disabled).toBe(false);
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="Open chat commands"]')?.disabled).toBe(true);
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="cancel-submit"]')?.disabled).toBe(true);
+    expect(container.querySelector<HTMLButtonElement>('[role="switch"]')?.disabled).toBe(true);
+    expect(container.querySelector<HTMLButtonElement>('[data-choice="allow"]')?.matches(':disabled')).toBe(true);
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="session-model-button"]')!.click());
+    expect(container.querySelector<HTMLSelectElement>('[data-testid="session-setting-model"]')?.disabled).toBe(true);
+  });
+
+  it('focuses the empty state on opening a Provider instead of showing an unavailable composer', async () => {
+    const container = await render(<LabWorkbench sessionStatus="idle" actions={{}} />);
+
+    expect(container.textContent).toContain('Start with a Provider');
+    expect((container.querySelector('.lab-composer-dock') as HTMLElement).hidden).toBe(true);
+    expect(container.querySelector('[data-testid="agent-activity"]')?.closest('[hidden]')).not.toBeNull();
+  });
+
+  it('does not present a session-start empty state for the Agent being attached', async () => {
+    const container = await render(<LabWorkbench sessionStatus="connecting" attachingAgentId="remembered-agent" actions={{}} />);
+    expect(container.textContent).not.toContain('Start with a Provider');
+    expect(container.textContent).not.toContain('Connecting');
+  });
+
+  it.each(['connecting', 'catching_up'] as const)('says the last business label, not the opening words, while %s with rows held from the device or across a replacement', async status => {
+    for (const held of [{ restoredFromDevice: true as const }, { pendingEpoch: 'next-epoch' }]) {
+      const state = { ...replicaState, timeline: { ...replicaState.timeline, ...held } };
+      const container = await render(<LabWorkbench state={state} sessionStatus={status} actions={{}} />);
+      expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('Ready');
+      expect(container.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
+    }
+  });
+
+  it('keeps the business label for rows held from the device when the connection breaks', async () => {
+    const state = { ...replicaState, timeline: { ...replicaState.timeline, restoredFromDevice: true as const } };
+    const container = await render(<LabWorkbench state={state} sessionStatus="disconnected" actions={{}} />);
+    expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('Ready');
+    expect(container.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
+  });
+
+  it('says nothing while a conversation is still opening and has no rows', async () => {
+    const container = await render(<LabWorkbench sessionStatus="connecting" attachingAgentId="remembered-agent" actions={{}} draftOnly />);
+    // The heading and the timeline say nothing; the draft composer keeps its own status.
+    expect(container.querySelector('.lab-timeline, .agent-timeline')?.textContent ?? '').not.toMatch(SESSION_CONNECTION_PATTERN);
+    expect(container.querySelector('.lab-empty-state')).toBeNull();
+    expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('');
+  });
+
+  it('says a refusal for good once, and nothing for an earlier diagnostic while connecting again', async () => {
+    const state = {
+      ...replicaState,
+      diagnostics: [{ code: 'incompatible_protocol_version', message: 'Protocol version is incompatible.', recoverable: false }],
+    };
+    const connecting = await render(<LabWorkbench state={state} sessionStatus="connecting" actions={{}} />);
+    expect(connecting.querySelector('.lab-control-note')).toBeNull();
+    const refused = await render(<LabWorkbench state={state} sessionStatus="unavailable" actions={{}} />);
+    expect(refused.querySelector('.lab-control-note[role="alert"]')?.textContent).toBe('Protocol version is incompatible.');
+  });
+
+  it('says nothing per session while reconnecting after a historical unrecoverable diagnosis', async () => {
+    const state = {
+      ...replicaState,
+      diagnostics: [{ code: 'incompatible_protocol_version', message: 'Protocol version is incompatible.', recoverable: false }],
+    };
+    const container = await render(<LabWorkbench state={state} sessionStatus="disconnected" actions={{}} />);
+
+    expect(container.querySelector('.lab-control-note')).toBeNull();
+    expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('Ready');
+    expect(container.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
+  });
+
+  it.each([
+    ['Provider observation stream failed.', 'Provider observation stream failed.'],
+    [undefined, 'The agent failed without error details.'],
+  ])('alerts with the failed Agent reason while retaining Timeline', async (lastError, expectedReason) => {
+    const agent = replicaState.agent;
+    if (!agent) throw new Error('The Workbench fixture requires an Agent Snapshot.');
+    const state = {
+      ...replicaState,
+      agent: { ...agent, status: 'failed' as const, ...(lastError === undefined ? {} : { lastError }) },
+    };
+    const container = await render(<LabWorkbench state={state} sessionStatus="ready" actions={{}} />);
+    const alert = container.querySelector('[role="alert"]');
+
+    expect(alert).not.toBeNull();
+    expect(alert!.textContent).toBe(expectedReason);
+    expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('Agent failed');
+    expect(container.querySelector('[aria-label="Agent timeline"]')).not.toBeNull();
+  });
+});
+
+
+it('collapses the input dock while preserving its draft and timeline', async () => {
+  const container = await render(<LabWorkbench state={replicaState} sessionStatus="ready" messageDraft="Keep my draft" actions={{}} />);
+  const input = container.querySelector('textarea')!;
+  const toggle = container.querySelector<HTMLButtonElement>('button[aria-label="Hide message input"]');
+  expect(toggle).not.toBeNull();
+  await act(async () => toggle!.click());
+  const body = container.querySelector<HTMLElement>('.lab-composer-body')!;
+  expect(body.hidden).toBe(true);
+  expect(toggle!.getAttribute('aria-label')).toBe('Show message input');
+  expect(toggle!.getAttribute('aria-expanded')).toBe('false');
+  expect(container.querySelector('[aria-label="Agent timeline"]')).not.toBeNull();
+  await act(async () => toggle!.click());
+  expect(body.hidden).toBe(false);
+  expect(container.querySelector('textarea')).toBe(input);
+  expect(input.value).toBe('Keep my draft');
+});
+
+
+it('does not notify a late action failure in a different session', async () => {
+  let reject!: (error: Error) => void;
+  const sendMessage = vi.fn(() => new Promise<void>((_resolve, fail) => { reject = fail; }));
+  function Sessions() {
+    const [id, setId] = useState('first');
+    return <ToastProvider><button onClick={() => setId('second')}>Switch session</button>
+      <LabWorkbench state={{ ...replicaState, agent: { ...replicaState.agent!, id } }} sessionStatus="ready" actions={{ sendMessage }} />
+    </ToastProvider>;
+  }
+  const container = await render(<Sessions />);
+  const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'Pending message');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('button')!.click());
+  await act(async () => reject(new Error('Previous session failed.')));
+  expect(container.querySelector('.lab-toast')).toBeNull();
+  expect(sendMessage).toHaveBeenCalledTimes(1);
+});
+
+it.each(['connecting', 'catching_up', 'disconnected', 'idle'] as const)('locks cached-session operations while %s without blocking a separate ready window', async status => {
+  const pending = { kind: 'plan_approval' as const, requestId: 'approval', plan: 'Cached approval', allowedActions: ['approve' as const] };
+  const state = { ...replicaState, agent: { ...replicaState.agent!, capabilities: { ...replicaState.agent!.capabilities, cancel: true } }, pendingInteractions: [pending] };
+  const send = vi.fn(async () => {}), cancel = vi.fn(async () => {}), approve = vi.fn(async () => {}), fork = vi.fn(async () => ({}));
+  let synchronize!: () => void;
+  function Harness() {
+    const [current, setCurrent] = useState<typeof status | 'ready'>(status); synchronize = () => setCurrent('ready');
+    return <><section data-window="pending"><LabWorkbench state={state} sessionStatus={current} messageDraft="/side"
+      actions={{ sendMessage: send, cancel, respondToInteraction: approve }}
+      consoleCommands={[{ id: 'console:side', name: 'side', kind: 'command', description: 'Side conversation' }]} onExecuteConsoleCommand={fork} /></section>
+      <section data-window="ready"><LabWorkbench state={state} sessionStatus="ready" messageDraft="Ready window input" actions={{ sendMessage: send, respondToInteraction: approve }} /></section></>;
+  }
+  const container = await render(<Harness />);
+  const pendingWindow = container.querySelector('[data-window="pending"]')!;
+  const readyWindow = container.querySelector('[data-window="ready"]')!;
+  expect(pendingWindow.querySelector('.agent-turn-requests .agent-plan')).not.toBeNull();
+  expect(pendingWindow.textContent).not.toContain('Interaction unavailable');
+  expect(pendingWindow.textContent).toContain('Waiting for connection to respond.');
+  expect(pendingWindow.querySelector('[data-choice="allow"]')?.matches(':disabled')).toBe(true);
+  expect(pendingWindow.textContent).toContain('Cached approval');
+  expect(pendingWindow.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
+  expect(pendingWindow.querySelector<HTMLButtonElement>('[aria-label="Open chat commands"]')!.disabled).toBe(true);
+  expect(pendingWindow.querySelector('fieldset')!.disabled).toBe(true);
+  expect(readyWindow.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(false);
+  expect(readyWindow.querySelector('fieldset')!.disabled).toBe(false);
+  await act(async () => {
+    pendingWindow.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click();
+    pendingWindow.querySelector<HTMLButtonElement>('[aria-label="Open chat commands"]')!.click();
+  });
+  expect(send).not.toHaveBeenCalled(); expect(cancel).not.toHaveBeenCalled(); expect(approve).not.toHaveBeenCalled(); expect(fork).not.toHaveBeenCalled();
+  await act(async () => synchronize());
+  expect(pendingWindow.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(false);
+  expect(pendingWindow.querySelector('fieldset')!.disabled).toBe(false);
+  await act(async () => pendingWindow.querySelector<HTMLButtonElement>('[role="option"]')!.click());
+  expect(fork).toHaveBeenCalledWith('console:side', '');
+});
+
+it('keeps replay input read-only even when the recorded Agent can send and recover', async () => {
+  const state = { ...replicaState, agent: { ...replicaState.agent!, capabilities: { ...replicaState.agent!.capabilities, sendMessage: true },
+    runtimeInfo: { ...replicaState.agent!.runtimeInfo, connection: { state: 'reconnecting' as const } } } };
+  const container = await render(<LabWorkbench readOnly state={state} sessionStatus="disconnected" messageDraft="Recorded input" actions={{ sendMessage: async () => { throw new Error('Playback must not send'); } }} />);
+  expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!.disabled).toBe(true);
+  expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
+  expect(container.querySelector('[data-testid="prompt-input"]')?.getAttribute('placeholder')).toContain('read-only');
+});
+
+it('shows live read-only ownership, keeps the draft, and offers takeover without interrupting', async () => {
+  const takeControl = vi.fn(async () => {});
+  const cancel = vi.fn(async () => {});
+  const state = { ...replicaState, sessionControl: { access: 'read_only' as const, available: false, revision: 'one' } };
+  const container = await render(<LabWorkbench state={state} sessionStatus="ready" messageDraft="Keep my draft"
+    actions={{ takeControl, cancel, sendMessage: async () => {} }} />);
+  expect(container.textContent).toContain('Read only');
+  const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
+  expect(input.readOnly).toBe(true);
+  expect(input.value).toBe('Keep my draft');
+  expect(input.placeholder).not.toContain('recording');
+  expect(container.querySelector('[data-testid="prompt-submit"]')).toBeNull();
+  const composer = container.querySelector('[aria-label="Live provider controls"]')!;
+  expect(composer.textContent).toContain('Read only');
+  expect(container.querySelector('.lab-workbench-heading')?.textContent).not.toContain('Take control');
+  const button = [...composer.querySelectorAll('button')].find(button => button.textContent === 'Take control')!;
+  await act(async () => button.click());
+  expect(takeControl).toHaveBeenCalledOnce();
+  expect(cancel).not.toHaveBeenCalled();
+});
+
+it.each(['shared', 'exclusive'] as const)('keeps the %s composer free of ownership notices when this page has control', async mode => {
+  const state = { ...replicaState, agent: {...replicaState.agent!, capabilities: {...replicaState.agent!.capabilities, sessionControl: mode}}, sessionControl: { access: 'control' as const, available: false, revision: 'two' } };
+  const container = await render(<LabWorkbench state={state} sessionStatus="ready" actions={{ takeControl: async () => {} }} />);
+  expect(container.querySelector('.lab-session-control')).toBeNull();
+  expect(container.textContent).not.toContain('Take control');
+  expect(container.textContent).not.toContain('You have control');
+});
+
+it('shows immediate native takeover in the chatbox and explains the interruption', async () => {
+  const takeControl = vi.fn(async () => {});
+  const state = {...replicaState,sessionControl:{access:'read_only' as const,available:false,revision:'r',nativeOwner:{kind:'native_cli' as const,generation:'native-generation'}}};
+  const container = await render(<LabWorkbench state={state} sessionStatus="ready" actions={{takeControl}} />);
+  const composer = container.querySelector('[aria-label="Live provider controls"]')!;
+  expect(composer.textContent).toContain('Native CLI');
+  expect(composer.textContent).toContain('Interrupt & take over');
+  expect(composer.textContent).not.toContain('safe');
+  const button = [...composer.querySelectorAll('button')].find(button=>button.getAttribute('aria-label')==='Interrupt and take control')!;
+  await act(async()=>button.click()); expect(takeControl).toHaveBeenCalledOnce();
+});
+
+it('shows takeover for a cold target without enabling the previous conversation', async () => {
+  const container = await render(<LabWorkbench sessionStatus="idle" actions={{}} nativeTakeover={<span>Target session is open in the CLI</span>} />);
+  const composer=container.querySelector('[aria-label="Live provider controls"]')!;
+  expect(composer.closest('[hidden]')).toBeNull();
+  expect(composer.textContent).toContain('Target session');
+  expect(container.querySelector('[data-testid="prompt-submit"]')).toBeNull();
+});
+
+it('keeps takeover reachable when the composer is collapsed and hides empty input chrome', async () => {
+  const state = {...replicaState, sessionControl: {access: 'read_only' as const, available: false}};
+  const container = await render(<LabWorkbench state={state} sessionStatus="ready" actions={{takeControl: async () => {}}} />);
+  const input = container.querySelector('[data-testid="prompt-input"]')!;
+  expect(input.closest('[hidden]')).not.toBeNull();
+  expect(container.querySelector('[data-testid="prompt-submit"]')).toBeNull();
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Hide message input"]')!.click());
+  expect(container.querySelector('.lab-session-control')!.closest('[hidden]')).toBeNull();
+});
+
+it('keeps takeover drafts selectable without allowing edits', async () => {
+  const state = {...replicaState, sessionControl: {access: 'read_only' as const, available: false}};
+  const container = await render(<LabWorkbench state={state} sessionStatus="ready" messageDraft="Keep and copy this" actions={{takeControl: async () => {}}} />);
+  const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
+  expect(input.readOnly).toBe(true);
+  expect(input.disabled).toBe(false);
+  expect(input.value).toBe('Keep and copy this');
+  expect(input.closest('[hidden]')).toBeNull();
+});
+
+it.each(['checking', 'restoring', 'unknown'] as const)('renders %s handoff from the shared session state without host-specific wiring', async phase => {
+  const state = { ...replicaState, sessionControl: { access: 'read_only' as const, available: false,
+    nativeOwner: { kind: 'native_cli' as const, generation: 'native-one' } } };
+  const sessionState = { ...remoteSessionState(state, 'ready'), handoff: { generation: 'native-one', phase, message: phase === 'unknown' ? 'Control could not be confirmed.' : undefined } };
+  const container = await render(<LabWorkbench state={state} sessionState={sessionState} sessionStatus="ready" actions={{ takeControl: async () => {} }} />);
+  const button = container.querySelector<HTMLButtonElement>('.lab-session-control button')!;
+  if (phase === 'unknown') {
+    expect(button.getAttribute('aria-label')).toBe('Check session status');
+    expect(container.querySelector('.lab-session-control [role="alert"]')?.textContent).toBe('Control could not be confirmed.');
+  } else {
+    expect(button.disabled).toBe(true);
+    // Every phase of the take-over says the same words (I1).
+    expect(container.querySelector('.lab-session-control [role="status"]')?.textContent).toContain('Taking control…');
+  }
+});
+
+it('renders shared handoff recovery after the notice remounts without owning retry policy', async () => {
+  let finish!: () => void;
+  const calls: boolean[] = [];
+  const handoff = new SessionHandoff();
+  const control = { access: 'read_only' as const, available: false, nativeOwner: { kind: 'native_cli' as const, generation: 'native-one' } };
+  function View() {
+    const [state, setState] = useState(handoff.getState());
+    useEffect(() => handoff.subscribe(() => setState(handoff.getState())), []);
+    return <SessionControlNotice control={control} handoff={state} connected onTakeControl={() => handoff.run('native-one', async options => {
+      calls.push(options.checkOnly);
+      if (!options.checkOnly) throw Object.assign(new Error('No reply'), { code: 'native_handoff_unknown' });
+      options.onRestoring();
+      await new Promise<void>(resolve => { finish = resolve; });
+    })} />;
+  }
+  const first = await render(<View />);
+  await act(async () => first.querySelector('button')!.click());
+  await unmount(first);
+  const container = await render(<View />);
+  expect(container.querySelector('[role="alert"]')!.textContent).toContain('not confirmed');
+  expect(container.querySelector('button')!.textContent).toBe('Check status');
+  await act(async () => container.querySelector('button')!.click());
+  expect(container.querySelector('button')!.disabled).toBe(true);
+  expect(container.textContent).toContain('Taking control…');
+  expect(calls).toEqual([false, true]);
+  await act(async () => finish());
+});
+
+it('shows a restored native failure inline without a runtime toast or duplicate historical error', async () => {
+  const reason = 'Encrypted function output content could not be decrypted or decoded.';
+  const agent = replicaState.agent!;
+  const state = { ...replicaState, agent: { ...agent, status: 'failed' as const,
+    runtimeInfo: { ...agent.runtimeInfo, status: 'failed' as const, failure: { message: reason, turnId: 'failed-turn' } } },
+    timeline: { ...replicaState.timeline, entries: [{ providerId: 'codex', turnId: 'failed-turn', seqStart: 1, seqEnd: 1,
+      timestamp: '2026-09-28T00:00:00Z', sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }], collapsed: [], resources: [],
+      item: { type: 'error' as const, message: reason } }] } };
+  const container = await render(<ToastProvider><LabWorkbench state={state} sessionStatus="ready" actions={{}} /></ToastProvider>);
+  // The failed turn's work line says so; opening it shows the reason, once.
+  const line = container.querySelector<HTMLButtonElement>('.agent-work-line > button')!;
+  expect(container.querySelector('.agent-work-line')?.textContent).toContain('1 step failed');
+  await act(async () => line.click());
+  expect(container.querySelector('[aria-label="Agent timeline"]')?.textContent).toContain(reason);
+  expect(container.querySelectorAll('.agent-error')).toHaveLength(1);
+  expect(container.querySelector('.lab-timeline-scroll .lab-error')).toBeNull();
+  expect(document.querySelector('.lab-toast')).toBeNull();
+  expect(container.textContent).not.toContain('The Agent did not provide a failure reason.');
+});
+
+it('shows native failure evidence inline when its timeline page is not loaded', async () => {
+  const agent = replicaState.agent!;
+  const state = { ...replicaState, agent: { ...agent, status: 'failed' as const,
+    runtimeInfo: { ...agent.runtimeInfo, status: 'failed' as const, failure: { message: 'Native failure detail', turnId: 'failed-turn' } } } };
+  const container = await render(<ToastProvider><LabWorkbench state={state} sessionStatus="ready" actions={{}} /></ToastProvider>);
+  expect(container.querySelector('.lab-timeline-scroll [role="alert"]')?.textContent).toContain('Native failure detail');
+  expect(document.querySelector('.lab-toast')).toBeNull();
+});
+
+it.each([true, false])('groups Host, Provider, cwd and native Session ID in Info with cached state: %s', async cached => {
+  const session = { hostId: 'host-id', providerId: 'recorded', nativeSessionId: 'native-id', title: 'Saved session' };
+  const state = cached ? { ...replicaState, agent: { ...replicaState.agent!, providerId: session.providerId, cwd: '/saved/workspace',
+    runtimeInfo: { ...replicaState.agent!.runtimeInfo, providerId: session.providerId, sessionId: session.nativeSessionId } } } : undefined;
+  const view = await render(<LabWorkbench sessionIdentity={session} hostLabel="Mac Studio" state={state} sessionStatus="idle" draftOnly actions={{}} />);
+  const toggle = view.querySelector<HTMLButtonElement>('[aria-label="Show session attributions"]')!;
+  expect(toggle.textContent).toContain('Info');
+  await act(async () => toggle.click());
+  const rows = [...view.querySelectorAll('.agent-session-attributions tr')].map(row => row.textContent);
+  expect(rows.slice(0, 4)).toEqual(['HostMac Studiohost-id', 'Providerrecorded', `cwd${cached ? '/saved/workspace' : 'Not available in saved history'}`, 'Session IDnative-id']);
+});
+
+// Before its Window has loaded, a conversation painted from this device does not know its Host: the name leaves the Host out.
+it.each(['host-id', undefined])('names the native session it shows, whether or not it knows the Host (%s)', async hostId => {
+  const session = { ...(hostId ? { hostId } : {}), providerId: 'recorded', nativeSessionId: 'native-id', title: 'Saved session' };
+  const state = { ...replicaState, timeline: { ...replicaState.timeline, entries: [{ providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-11-21T00:00:00Z',
+    sourceSeqRanges: [], collapsed: [], resources: [], item: { type: 'assistant_message' as const, text: 'READY' } }] } };
+  const view = await render(<LabWorkbench sessionIdentity={session} state={state} sessionStatus="ready" actions={{}} />);
+  const named = [...view.querySelectorAll('[data-native-session]')];
+  expect(named.map(node => node.getAttribute('data-native-session'))).toEqual(['recorded/native-id']);
+  // The whole conversation is under the name: its rows and its composer.
+  const rows = view.querySelectorAll('.agent-timeline-entry').length;
+  expect(rows).toBeGreaterThan(0);
+  expect(named[0]!.querySelectorAll('.agent-timeline-entry')).toHaveLength(rows);
+  expect(named[0]!.querySelector('[data-testid="prompt-input"]')).not.toBeNull();
+  await unmount(view);
+});
+
+it('names no session when it shows none', async () => {
+  const view = await render(<LabWorkbench state={replicaState} sessionStatus="ready" actions={{}} />);
+  expect(view.querySelector('[data-native-session]')).toBeNull();
+  await unmount(view);
+});
+
+it('leaves an uncertain retry to the message, which says what to check, and reports other retry failures', async () => {
+  const outgoing = { id: 'outgoing-1', agentId: replicaState.agent!.id, text: 'Deploy the fix', status: 'unconfirmed' as const, afterKey: 'epoch-start:epoch',
+    retryRequiresNewOperation: true, error: 'This message may not have arrived. If it is not in the conversation, Retry sends it again.' };
+  const state = { ...replicaState, pendingInteractions: [], outgoingMessages: [outgoing], agent: { ...replicaState.agent!, status: 'idle' as const, activeTurn: null } };
+  const retryMessage = vi.fn(async () => {
+    throw new RemoteOperationError('operation_outcome_unknown', 'The operation may have reached the native runtime. Inspect native state before creating a new intent.', true);
+  });
+  const container = await render(<ToastProvider><LabWorkbench state={state} sessionStatus="ready" actions={{ retryMessage }} /></ToastProvider>);
+  const retry = () => container.querySelector<HTMLButtonElement>('.agent-outgoing-message button[aria-label="Retry message"]')!;
+  await act(async () => retry().click());
+  expect(retryMessage).toHaveBeenCalledTimes(1);
+  expect(container.querySelector('.lab-toast')).toBeNull();
+  expect(container.textContent).not.toContain('native runtime');
+  // The message itself says what to check, under its delivery mark.
+  await act(async () => container.querySelector<HTMLButtonElement>('.agent-outgoing-message button[aria-label="Delivery error"]')!.click());
+  expect(container.querySelector('.agent-outgoing-message .agent-delivery-error')?.textContent).toBe('This message may not have arrived. If it is not in the conversation, Retry sends it again.');
+  retryMessage.mockImplementationOnce(async () => { throw new Error('This message is not available to retry.'); });
+  await act(async () => retry().click());
+  expect(container.querySelector('.lab-toast')?.textContent).toContain('This message is not available to retry.');
+  await unmount(container);
+});

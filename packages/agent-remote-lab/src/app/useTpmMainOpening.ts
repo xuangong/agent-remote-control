@@ -1,6 +1,6 @@
 import { errorWords } from '@orchardworks/agent-client';
-import { tpmMainTarget } from '../tpm-main-sessions.js';
-import { sessionKey } from '../session-tree.js';
+import { tpmMainTarget } from '../kernel/tpm-main-sessions.js';
+import { sessionKey } from '../kernel/session-tree.js';
 import type { AppInputs } from './types.js';
 import type { HostAndStackSlice } from './useHostAndStack.js';
 import type { ViewSessionStateSlice } from './useViewSessionState.js';

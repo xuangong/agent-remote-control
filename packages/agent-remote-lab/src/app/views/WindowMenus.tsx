@@ -1,6 +1,6 @@
 // The session transfer dialog and the Window overview; the Window entry moves with the shortcuts (see ShortcutSlots).
-import { WindowOverview } from '../../components/WindowOverview.js';
-import { SessionTransferDialog } from '../../components/SessionLink.js';
+import { WindowOverview } from '../../features/windows/WindowOverview.js';
+import { SessionTransferDialog } from '../../kernel/SessionLink.js';
 import type { AppScope } from '../types.js';
 
 export function WindowMenus({ scope }: { readonly scope: Pick<AppScope, 'baseUrl' | 'openScannedSession' | 'scanOpen' | 'setScanOpen' | 'setWindowOverviewOpen' | 'windowMode' | 'windowOverviewAvailable' | 'windowOverviewOpen' | 'windowSessionStatus' | 'windowWorkspace'> }) {

@@ -1,22 +1,22 @@
-import { writeDeviceProcessMode } from './hooks/useProcessMode.js';
+import { writeDeviceProcessMode } from './conversation/useProcessMode.js';
 import 'fake-indexeddb/auto';
 import { type ComponentProps } from 'react';
 import { WebSocket } from 'ws';
 import { expect, it, vi } from 'vitest';
 import { createWindowView, type WorkspaceWindow, type ProjectedTimelineEntry, type SessionSuccessionReplay, type Team } from '@orchardworks/agent-remote-protocol';
 import { App } from './App.js';
-import { type OpenedSession, type SuccessionDescription } from './directory-client.js';
-import { DraftStore } from './draft-store.js';
-import { readCompositionDocument, parseComposition, saveCompositionDocument, createCompositionDocument, createCompositionSlot, createAskOwner } from './session-composition.js';
-import { flushRecoveryWrites } from './recovery-writes.js';
-import * as trackingHooks from './hooks/useSessionTracking.js';
-import * as askHooks from './hooks/useAskConversations.js';
+import { type OpenedSession, type SuccessionDescription } from './kernel/directory-client.js';
+import { DraftStore } from './kernel/draft-store.js';
+import { readCompositionDocument, parseComposition, saveCompositionDocument, createCompositionDocument, createCompositionSlot, createAskOwner } from './kernel/session-composition.js';
+import { flushRecoveryWrites } from './kernel/recovery-writes.js';
+import * as trackingHooks from './features/sessions/useSessionTracking.js';
+import * as askHooks from './features/team/useAskConversations.js';
 import * as successionHooks from './hooks/useSessionSuccession.js';
-import { ForkStore, referenceForkContext } from './session-forks.js';
-import { sessionKey } from './session-tree.js';
-import { saveTrackedSessions } from './tracking-state.js';
+import { ForkStore, referenceForkContext } from './kernel/session-forks.js';
+import { sessionKey } from './kernel/session-tree.js';
+import { saveTrackedSessions } from './kernel/tracking-state.js';
 import * as remoteReact from '@orchardworks/agent-client-web/react';
-import * as managerComponents from './components/ChatSessionManager.js';
+import * as managerComponents from './features/sessions/ChatSessionManager.js';
 import { act, cleanups, committed, editVisiblePrompt, failureFixture, native, setGlobalAskVisible, settleApp, testDeadline, visibleQuery, waitFor } from './App.succession.fixture.js';
 
 it('keeps post-upgrade view preferences and owners when opening the same Window in a new tab', async () => {

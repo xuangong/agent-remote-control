@@ -3,15 +3,15 @@ import { expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { WindowWorkspaceClient, type RemoteTransportListener, type WindowSnapshot } from '@orchardworks/agent-client';
 import { App, type LabTransport } from './App.js';
-import { ConversationConnections } from './conversation-connections.js';
-import { SessionDirectoryClient } from './directory-client.js';
+import { ConversationConnections } from './conversation/conversation-connections.js';
+import { SessionDirectoryClient } from './kernel/directory-client.js';
 import { replicaState } from './test/fixtures.js';
 import { render, unmount } from './test/setup.js';
-import * as windowWorkspaceHooks from './hooks/useWindowWorkspace.js';
+import * as windowWorkspaceHooks from './features/windows/useWindowWorkspace.js';
 import * as successionHooks from './hooks/useSessionSuccession.js';
-import { saveLastSession } from './conversation-recovery.js';
-import { saveStoredDisplay } from './stored-display.js';
-import { WorkspaceReady } from './workspace-access.js';
+import { saveLastSession } from './kernel/conversation-recovery.js';
+import { saveStoredDisplay } from './kernel/stored-display.js';
+import { WorkspaceReady } from './kernel/workspace-access.js';
 
 function target(id: string) { return { hostId: 'local', providerId: 'recorded', nativeSessionId: `native-${id}`, title: `Session ${id}` }; }
 function windowFixture(id: string, native: string): WorkspaceWindow {

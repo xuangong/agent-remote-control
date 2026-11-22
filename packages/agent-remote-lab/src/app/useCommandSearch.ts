@@ -1,17 +1,17 @@
 // The command palette items and its queued mode steps.
 import { isBotView } from '@orchardworks/agent-remote-protocol';
-import { drainModeSteps } from '../state/mode-steps.js';
+import { drainModeSteps } from '../features/windows/mode-steps.js';
 import { paletteActions } from '../state/palette-actions.js';
-import { windowSummary } from '../window-summary.js';
-import { windowCatalog } from '../hooks/useWindowActions.js';
-import { byRecentUse } from '../window-recency.js';
+import { windowSummary } from '../features/windows/window-summary.js';
+import { windowCatalog } from '../features/windows/useWindowActions.js';
+import { byRecentUse } from '../features/windows/window-recency.js';
 import { useEffect, useMemo } from 'react';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { sessionKey } from '../session-tree.js';
+import { sessionKey } from '../kernel/session-tree.js';
 import type { CommandItem } from '../shell/command-search.js';
 import { appearanceItems, commandSessions, sessionSubtitle } from '../shell/command-items.js';
-import { currentAppearance } from '../device-choices.js';
-import { applePlatform } from '../platform.js';
+import { currentAppearance } from '../kernel/device-choices.js';
+import { applePlatform } from '../kernel/platform.js';
 import type { SessionSuccessionBindingSlice } from './useSessionSuccessionBinding.js';
 import type { PanelsAndShortcutsSlice } from './usePanelsAndShortcuts.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';

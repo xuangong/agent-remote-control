@@ -1,6 +1,6 @@
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import type { Destination, DestinationPlace } from '../destinations.js';
-import type { DeviceLinkNotice } from '../device-link.js';
+import type { Destination, DestinationPlace } from '../kernel/destinations.js';
+import type { DeviceLinkNotice } from '../kernel/device-link.js';
 import { Icon, type IconName } from '../ui/Icon.js';
 import './shell.css';
 

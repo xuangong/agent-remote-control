@@ -1,7 +1,7 @@
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach } from 'vitest';
-import { clearConversationRecovery } from '../conversation-recovery.js';
+import { clearConversationRecovery } from '../kernel/conversation-recovery.js';
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean | undefined;

@@ -2,12 +2,12 @@ import { useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { AgentReplicaState } from '@orchardworks/agent-client';
 import { AgentChildSessionList } from '@orchardworks/agent-client-web/react';
-import { LabWorkbench } from '../../src/components/LabWorkbench.js';
-import { SessionDirectory } from '../../src/components/SessionDirectory.js';
-import { ChatSessionManager } from '../../src/components/ChatSessionManager.js';
-import { CollapsedConversations } from '../../src/components/CollapsedConversations.js';
-import { SessionDirectoryClient } from '../../src/directory-client.js';
-import { useSessionEntries } from '../../src/hooks/useSessionEntries.js';
+import { LabWorkbench } from '../../src/conversation/LabWorkbench.js';
+import { SessionDirectory } from '../../src/features/sessions/SessionDirectory.js';
+import { ChatSessionManager } from '../../src/features/sessions/ChatSessionManager.js';
+import { CollapsedConversations } from '../../src/conversation/CollapsedConversations.js';
+import { SessionDirectoryClient } from '../../src/kernel/directory-client.js';
+import { useSessionEntries } from '../../src/features/sessions/useSessionEntries.js';
 import { replicaState } from '../../src/test/fixtures.js';
 import '../../src/session-view-styles';
 

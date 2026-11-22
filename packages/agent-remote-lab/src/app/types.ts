@@ -1,14 +1,14 @@
-import type { WorkbenchMode } from '../workbench-mode.js';
+import type { WorkbenchMode } from '../kernel/workbench-mode.js';
 import type { NativeSessionOwner, ResourceResponseState, AgentCommand, AgentCommandResult, AgentMessageOptions, AgentInteractionResponse, AgentPersistenceHandle, AgentProviderDescriptor, AgentSessionConfig, AgentSessionResponse, ResourceBinding } from '@orchardworks/agent-remote-protocol';
-import type { useSessionTracking } from '../hooks/useSessionTracking.js';
-import type { SessionConnectionMessage } from '../components/SessionConnectionNotice.js';
+import type { useSessionTracking } from '../features/sessions/useSessionTracking.js';
+import type { SessionConnectionMessage } from '../kernel/SessionConnectionNotice.js';
 import type { ReactNode } from 'react';
 import type { AgentReplicaState, RemoteAgentTransport, RemoteSessionStatus } from '@orchardworks/agent-client';
 import type { HostPairingService } from '../kernel/remote-host.js';
-import type { SessionDirectoryClient, OpenedSession, SessionSummary } from '../directory-client.js';
-import type { LabWorkbenchActions } from '../components/LabWorkbench.js';
-import type { useAskConversations } from '../hooks/useAskConversations.js';
-import type { SideSelections } from '../side-tree.js';
+import type { SessionDirectoryClient, OpenedSession, SessionSummary } from '../kernel/directory-client.js';
+import type { LabWorkbenchActions } from '../conversation/LabWorkbench.js';
+import type { useAskConversations } from '../features/team/useAskConversations.js';
+import type { SideSelections } from '../kernel/side-tree.js';
 import type { Dispatch, SetStateAction } from 'react';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
 import type { RequestedSessionSlice } from './useRequestedSession.js';
@@ -66,7 +66,7 @@ export interface AppActions extends LabWorkbenchActions {
   stopReader?(): void | Promise<void>;
 }
 
-import type { AccountFacts } from '../account.js';
+import type { AccountFacts } from '../kernel/account.js';
 export interface AppProps {
   baseUrl?: string;
   account?: AccountFacts;

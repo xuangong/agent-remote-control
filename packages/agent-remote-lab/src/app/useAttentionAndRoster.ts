@@ -1,20 +1,20 @@
 // Attention, tracking and the bot roster.
-import { attentionDestination, attentionSets, botDirectorySources as botDirectorySourcesOf, keySignature, readableSessions as readableSessionsOf } from '../state/attention-targets.js';
+import { attentionDestination, attentionSets, botDirectorySources as botDirectorySourcesOf, keySignature, readableSessions as readableSessionsOf } from '../features/sessions/attention-targets.js';
 import { windowPrimaryViewId } from '@orchardworks/agent-remote-protocol';
-import { useOtherSessions, type OtherSessionSource } from '../hooks/useOtherSessions.js';
-import { projectBotRoster, type BotRosterOptions } from '../bot-roster.js';
-import { sharedReminders } from '../bot-attention.js';
-import { useSharedFeedOf, type SharedFeedsSnapshot } from '../shared-feeds.js';
-import { sessionActivity } from '../session-activity-status.js';
+import { useOtherSessions, type OtherSessionSource } from '../features/chats/useOtherSessions.js';
+import { projectBotRoster, type BotRosterOptions } from '../kernel/bot-roster.js';
+import { sharedReminders } from '../features/chats/bot-attention.js';
+import { useSharedFeedOf, type SharedFeedsSnapshot } from '../kernel/shared-feeds.js';
+import { sessionActivity } from '../kernel/session-activity-status.js';
 import type { SessionStateRef } from '@orchardworks/agent-client';
-import { type SessionEntry, sessionKey } from '../session-tree.js';
-import { useSessionAttention } from '../hooks/useSessionAttention.js';
-import { useSessionTracking } from '../hooks/useSessionTracking.js';
-import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
+import { type SessionEntry, sessionKey } from '../kernel/session-tree.js';
+import { useSessionAttention } from '../kernel/useSessionAttention.js';
+import { useSessionTracking } from '../features/sessions/useSessionTracking.js';
+import { sessionConnectionFailure } from '../kernel/SessionConnectionNotice.js';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { compositionSelection } from '../session-composition.js';
-import { SessionDirectoryClient } from '../directory-client.js';
+import { compositionSelection } from '../kernel/session-composition.js';
+import { SessionDirectoryClient } from '../kernel/directory-client.js';
 import { viewKey } from './helpers.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
 import type { SideNavigationSlice } from './useSideNavigation.js';
@@ -60,7 +60,7 @@ export function useAttentionAndRoster(scope: Pick<AppInputs & WorkbenchShellSlic
   }, navigation.mode);
 
   // Bot mode reminds from the shared channel (below), so only Window mode's observations notify.
-  const observeAttention = useCallback((session: SessionEntry, value: import('../tracking-state.js').SessionObservation) => {
+  const observeAttention = useCallback((session: SessionEntry, value: import('../kernel/tracking-state.js').SessionObservation) => {
     if (windowModeRef.current && latestEligible.current.has(sessionKey(session))) attention.observe(session, value);
   }, [attention.observe]);
 

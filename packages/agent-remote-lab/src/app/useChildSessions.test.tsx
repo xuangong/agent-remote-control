@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
-import { DirectoryError } from '../directory-client.js';
+import { sessionConnectionFailure } from '../kernel/SessionConnectionNotice.js';
+import { DirectoryError } from '../kernel/directory-client.js';
 import { buildOpened, mockScope, renderHook } from '../test/render-hook.js';
 import { useChildSessions } from './useChildSessions.js';
 

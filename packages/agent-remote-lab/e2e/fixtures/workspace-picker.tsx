@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { browserLocale, LocaleContext } from '@orchardworks/agent-client-web/react';
-import { SessionConfiguration } from '../../src/components/SessionDirectory.js';
-import { SupportingRail } from '../../src/components/SupportingRail.js';
-import { SessionDirectoryClient, type CreateSessionOptions } from '../../src/directory-client.js';
+import { SessionConfiguration } from '../../src/features/sessions/SessionDirectory.js';
+import { SupportingRail } from '../../src/features/windows/SupportingRail.js';
+import { SessionDirectoryClient, type CreateSessionOptions } from '../../src/kernel/directory-client.js';
 import '../../src/ui/tokens.css';
 import '../../src/app.css';
 const directory = new SessionDirectoryClient(window.location.origin);

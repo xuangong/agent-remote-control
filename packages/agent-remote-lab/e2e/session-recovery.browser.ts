@@ -20,8 +20,8 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
     import './session-view-styles.ts';
     import { App } from './App.tsx';
     import { HttpWebSocketTransport } from '@orchardworks/agent-client';
-    import { SessionDirectoryClient } from './directory-client.ts';
-    import { saveLastSession } from './conversation-recovery.tsx';
+    import { SessionDirectoryClient } from './kernel/directory-client.ts';
+    import { saveLastSession } from './kernel/conversation-recovery.tsx';
     const base = ${JSON.stringify(baseUrl)};
     if (!localStorage.getItem('fixture-seeded')) {
       saveLastSession(base, ${JSON.stringify({ hostId: fixture.hostId, providerId: 'fixture', nativeSessionId: 'native', agentId: fixture.agentId })});

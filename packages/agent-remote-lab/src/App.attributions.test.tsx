@@ -5,10 +5,10 @@ import { PROTOCOL_VERSION, createWindowView, type Team, type WorkspaceWindow } f
 import { RemoteTeamClient } from '@orchardworks/agent-client';
 import { configureImageDraftPersistence } from '@orchardworks/agent-client-web/browser';
 import { App, type LabTransport } from './App.js';
-import { SessionDirectoryClient } from './directory-client.js';
-import * as workspaceHooks from './hooks/useWindowWorkspace.js';
-import { createWindowFeature } from './window-feature-views.js';
-import { saveStoredDisplay } from './stored-display.js';
+import { SessionDirectoryClient } from './kernel/directory-client.js';
+import * as workspaceHooks from './features/windows/useWindowWorkspace.js';
+import { createWindowFeature } from './kernel/window-feature-views.js';
+import { saveStoredDisplay } from './kernel/stored-display.js';
 import { render } from './test/setup.js';
 import { replicaState } from './test/fixtures.js';
 

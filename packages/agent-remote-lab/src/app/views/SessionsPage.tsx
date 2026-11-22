@@ -1,7 +1,7 @@
 // The All sessions and Favorites page.
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { sessionsPageTitle as sessionsPageTitleOf } from '../../state/panels.js';
-import { FavoritesHeading } from '../../components/SessionFavorites.js';
+import { sessionsPageTitle as sessionsPageTitleOf } from '../../features/windows/panels.js';
+import { FavoritesHeading } from '../../features/sessions/SessionFavorites.js';
 import { Toolbar } from '../../ui/Toolbar.js';
 import { IconButton } from '../../ui/IconButton.js';
 import { keepsEscape } from '../helpers.js';

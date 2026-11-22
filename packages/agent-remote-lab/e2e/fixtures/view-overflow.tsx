@@ -4,9 +4,9 @@ import type { AgentReplicaState } from '@orchardworks/agent-client';
 import { AgentCommandDetails, AgentTimeline, ProcessModeContext } from '@orchardworks/agent-client-web/react';
 import { App } from '../../src/App.js';
 import { openInWindowMode } from './window-mode.js';
-import { LabWorkbench } from '../../src/components/LabWorkbench.js';
-import { ReplicaInspector } from '../../src/components/ReplicaInspector.js';
-import { TraceView } from '../../src/components/TraceView.js';
+import { LabWorkbench } from '../../src/conversation/LabWorkbench.js';
+import { ReplicaInspector } from '../../src/features/diagnostics/ReplicaInspector.js';
+import { TraceView } from '../../src/features/diagnostics/TraceView.js';
 import { replicaState } from '../../src/test/fixtures.js';
 import '../../src/session-view-styles';
 

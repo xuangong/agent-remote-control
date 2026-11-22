@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client';
-import { RecordedPlaybackControls } from '../../src/components/RecordedPlaybackControls.js';
+import { RecordedPlaybackControls } from '../../src/features/diagnostics/RecordedPlaybackControls.js';
 import '../../src/session-view-styles';
 import '../../src/app.css';
 

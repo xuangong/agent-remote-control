@@ -4,8 +4,8 @@ import type { ChannelLink } from '@orchardworks/agent-client';
 import { SESSION_CONNECTION_PATTERN } from '@orchardworks/agent-e2e/faults/connection-words.mjs';
 import { render } from './test/setup.js';
 import { GatewayController } from './GatewayController.js';
-import type { AccountFacts } from './account.js';
-import { rememberWorkspaceAccess, forgetWorkspaceAccess, RelayLinkReport } from './workspace-access.js';
+import type { AccountFacts } from './kernel/account.js';
+import { rememberWorkspaceAccess, forgetWorkspaceAccess, RelayLinkReport } from './kernel/workspace-access.js';
 beforeEach(() => { localStorage.clear(); sessionStorage.clear(); });
 /** The account facts as buttons, standing in for the Settings page that reads them. */
 const accountButtons = (account?: AccountFacts) => account ? <>
@@ -345,11 +345,11 @@ it('removes local content when another tab signs out', async () => {
 
 it('shows stored rows on a cached unexpired lease before the status answers, and removes them and the records when the Relay answers 401', async () => {
   const { deviceStore } = await import('@orchardworks/agent-client/device-store');
-  const { saveStoredDisplay, readStoredDisplay } = await import('./stored-display.js');
+  const { saveStoredDisplay, readStoredDisplay } = await import('./kernel/stored-display.js');
   const { replicaState } = await import('./test/fixtures.js');
   const basePath = '/u/' + 'b'.repeat(64) + '/', scope = window.location.origin + basePath;
   const target = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'recorded-session', agentId: 'agent-1' };
-  const { setWorkspaceReady } = await import('./workspace-access.js');
+  const { setWorkspaceReady } = await import('./kernel/workspace-access.js');
   setWorkspaceReady(basePath, true);
   saveStoredDisplay(scope, target, replicaState);
   rememberWorkspaceAccess({ basePath, user: { id: 'alice' }, expiresAt: Date.now() + 60_000 });

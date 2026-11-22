@@ -1,0 +1,35 @@
+import { PreviewProvider, usePreviewController, useTranslate, type PreviewContextValue } from '@orchardworks/agent-client-web/react';
+import type { HttpPreviewClient } from '@orchardworks/agent-client';
+import type { RemoteHost } from '../../kernel/remote-host.js';
+import { HostPreviewList } from './HostPreviewList.js';
+
+export function HostPreviewGroups({ client, hosts, activeHostId, polling, onOpen, onOpenSource }: {
+  client: HttpPreviewClient; hosts: readonly RemoteHost[]; activeHostId?: string; polling: boolean;
+  onOpen(): void; onOpenSource(sessionId: string, itemId: string, hostId: string): void;
+}) {
+  const t = useTranslate();
+  const workspace = usePreviewController();
+  const owned = hosts.filter(host => host.access !== 'shared');
+  if (!owned.length) return null;
+  return <section className="lab-preview-groups" aria-label={t('hosts.preview.label')}>
+    <h2>{t('hosts.preview.title')}</h2>
+    {owned.map(host => host.id === activeHostId && workspace
+      ? <HostPreviewList key={host.id} hideEmpty hostName={host.name} controller={workspace} onOpen={onOpen} onOpenSource={(sessionId, itemId) => onOpenSource(sessionId, itemId, host.id)} />
+      : <PreviewProvider key={host.id} client={client} hostId={host.id} canManage polling={polling}>
+        <HostGroup host={host} workspace={workspace} onOpen={onOpen} onOpenSource={onOpenSource} />
+      </PreviewProvider>)}
+  </section>;
+}
+
+function HostGroup({ host, workspace, onOpen, onOpenSource }: {
+  host: RemoteHost; workspace?: PreviewContextValue; onOpen(): void; onOpenSource(sessionId: string, itemId: string, hostId: string): void;
+}) {
+  const controller = usePreviewController()!;
+  return <HostPreviewList hideEmpty hostName={host.name} controller={{ ...controller, unregister: async id => {
+    if (workspace) { await workspace.unregister(id, host.id); await controller.refresh(); }
+    else await controller.unregister(id);
+  }, open: (id, target) => {
+    const registration = controller.registrations.find(value => value.id === id);
+    return workspace && registration ? workspace.open(id, target, undefined, { hostId: host.id, registration }) : controller.open(id, target);
+  } }} onOpen={onOpen} onOpenSource={(sessionId, itemId) => onOpenSource(sessionId, itemId, host.id)} />;
+}

@@ -1,12 +1,12 @@
 // The Workbench mode, page visibility, access readiness and the Relay transport.
-import { useWorkbenchMode } from '../hooks/useWorkbenchMode.js';
-import { stopLayoutDiagnostics } from '../layout-diagnostics.js';
-import { RelayLinkReport, WorkspaceReady, workspaceFetch, workspaceSocket } from '../workspace-access.js';
+import { useWorkbenchMode } from '../kernel/useWorkbenchMode.js';
+import { stopLayoutDiagnostics } from '../kernel/layout-diagnostics.js';
+import { RelayLinkReport, WorkspaceReady, workspaceFetch, workspaceSocket } from '../kernel/workspace-access.js';
 import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { HttpWebSocketTransport } from '@orchardworks/agent-client';
-import { ReadingPositions } from '../conversation-recovery.js';
-import { useVisualViewport } from '../hooks/useVisualViewport.js';
-import { arrangeFloatingEntries } from '../hooks/useTrackingPosition.js';
+import { ReadingPositions } from '../kernel/conversation-recovery.js';
+import { useVisualViewport } from '../kernel/useVisualViewport.js';
+import { arrangeFloatingEntries } from '../kernel/useTrackingPosition.js';
 import type { LabTransport } from './types.js';
 import type { AppInputs } from './types.js';
 

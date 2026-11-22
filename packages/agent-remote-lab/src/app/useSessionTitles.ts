@@ -1,16 +1,16 @@
 // Title projection, native titles, prompt edit migrations and favorites recovery.
-import { confirmTitle, groupProjectionTitles, retitleSessions, titledSessions as titledSessionsOf, windowProjectionTitles } from '../state/session-titles.js';
-import { rekeySelections, swapKey } from '../state/side-layout.js';
-import { windowTitleEdits } from '../window-titles.js';
+import { confirmTitle, groupProjectionTitles, retitleSessions, titledSessions as titledSessionsOf, windowProjectionTitles } from '../features/sessions/session-titles.js';
+import { rekeySelections, swapKey } from '../features/windows/side-layout.js';
+import { windowTitleEdits } from '../features/windows/window-titles.js';
 import type { Team } from '@orchardworks/agent-remote-protocol';
-import { readPromptEditReservation, finishPromptEditReservation, type PromptEditReservation } from '../prompt-edit-intent.js';
+import { readPromptEditReservation, finishPromptEditReservation, type PromptEditReservation } from '../conversation/prompt-edit-intent.js';
 import { useSessionMigrations } from '../hooks/useSessionMigrations.js';
-import type { StarInput } from '../session-stars-client.js';
-import { sessionConnectionFailure } from '../components/SessionConnectionNotice.js';
+import type { StarInput } from '../features/sessions/session-stars-client.js';
+import { sessionConnectionFailure } from '../kernel/SessionConnectionNotice.js';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
-import { useNativeTitles } from '../hooks/useNativeTitles.js';
-import { sessionKey } from '../session-tree.js';
+import { SessionDirectoryClient, type OpenedSession } from '../kernel/directory-client.js';
+import { useNativeTitles } from '../features/sessions/useNativeTitles.js';
+import { sessionKey } from '../kernel/session-tree.js';
 import { viewKey } from './helpers.js';
 import type { SessionSuccessionBindingSlice } from './useSessionSuccessionBinding.js';
 import type { ViewSessionStateSlice } from './useViewSessionState.js';

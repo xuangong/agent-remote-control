@@ -1,11 +1,11 @@
 // The rail (desktop) or the tab bar (phone): the same four destinations, the current one from the Workbench's mode and page.
 import { useCallback } from 'react';
-import { usePhoneLayout } from '../../hooks/usePhoneLayout.js';
-import type { DestinationPlace } from '../../destinations.js';
+import { usePhoneLayout } from '../../kernel/usePhoneLayout.js';
+import type { DestinationPlace } from '../../kernel/destinations.js';
 import { NavigationRail } from '../../shell/NavigationRail.js';
 import { TabBar } from '../../shell/TabBar.js';
-import { useDeviceLink } from '../../shell/DeviceLinkIndicator.js';
-import { applePlatform } from '../../platform.js';
+import { useDeviceLink } from '../../kernel/DeviceLinkIndicator.js';
+import { applePlatform } from '../../kernel/platform.js';
 import type { AppScope } from '../types.js';
 
 /** Moves to a destination: Chats and Windows choose a mode, Settings and the directory open over the current one (a history entry the first time). */

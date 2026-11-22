@@ -2,7 +2,7 @@ import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import { App } from './App.js';
-import { SessionDirectoryClient } from './directory-client.js';
+import { SessionDirectoryClient } from './kernel/directory-client.js';
 import { render, setPromptText, promptText } from './test/setup.js';
 import { replicaState } from './test/fixtures.js';
 

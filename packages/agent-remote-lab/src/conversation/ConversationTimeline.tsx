@@ -4,8 +4,8 @@ import { memo, useContext, useLayoutEffect, useMemo, useRef, useState } from 're
 import { createPortal } from 'react-dom';
 import { sessionNoticeWords, type SessionNotice } from '@orchardworks/agent-client';
 import { AgentTimeline, ProcessModeContext, TimelineLettersVisible, TimelineSearch, useTranslate } from '@orchardworks/agent-client-web/react';
-import { SessionTimelineTools } from '../components/SessionTimelineTools.js';
-import { useTimelineScroll } from '../hooks/useTimelineScroll.js';
+import { SessionTimelineTools } from './SessionTimelineTools.js';
+import { useTimelineScroll } from './useTimelineScroll.js';
 import type { SessionWorkbenchProps } from './session-workbench-props.js';
 
 export const ConversationTimeline = memo(function ConversationTimeline({ nativeTakeover, readOnly, state, sessionStatus, attachingAgentId, visible, readingPositions, actions, revealEntry,

@@ -1,0 +1,45 @@
+import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useSessionMenuLayer } from '../kernel/useSessionMenuLayer.js';
+import { useTranslate } from '@orchardworks/agent-client-web/react';
+
+/** A containing toolbar can own disclosure for all supplied session actions. */
+export const SessionHeadingActionsPresentationContext = createContext<'adaptive' | 'inline'>('adaptive');
+
+/** Groups application actions in responsive or explicitly collapsed overflow. */
+export function SessionHeadingActions({ children, sessionKey, alwaysCollapsed = false }: { children: ReactNode; sessionKey?: string; alwaysCollapsed?: boolean }) {
+  const t = useTranslate();
+  const inline = useContext(SessionHeadingActionsPresentationContext) === 'inline';
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const container = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  useSessionMenuLayer(panel, trigger, open && !inline);
+  useEffect(() => setOpen(false), [sessionKey, inline]);
+  useEffect(() => {
+    if (!open || inline) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || container.current?.contains(event.target)) return;
+      // A child action may open a modal through a portal and return focus here.
+      if (event.target.closest('dialog[open]')) return;
+      setOpen(false);
+    };
+    document.addEventListener('pointerdown', dismiss);
+    return () => document.removeEventListener('pointerdown', dismiss);
+  }, [open, inline]);
+  if (inline) return <>{children}</>;
+  return <div ref={container} className="lab-session-heading-actions" data-open={open} data-always-collapsed={alwaysCollapsed || undefined}
+    onKeyDown={event => {
+      if (event.key === 'Escape' && open) {
+        event.preventDefault(); event.stopPropagation(); setOpen(false);
+        trigger.current?.focus({ preventScroll: true });
+      }
+    }}>
+    <button ref={trigger} type="button" className="lab-session-heading-actions-trigger"
+      aria-label={t('sessions.heading.moreActions')} title={t('sessions.heading.moreActions')} aria-expanded={open} aria-controls={id}
+      onClick={() => setOpen(value => !value)}>···</button>
+    {/* An action that opens its own place (the search field) closes the menu, which would otherwise stand over it. */}
+    <div ref={panel} id={id} className="lab-session-heading-actions-panel" hidden={alwaysCollapsed && !open}
+      onClick={event => { if (event.target instanceof Element && event.target.closest('[data-menu-close]')) setOpen(false); }}>{children}</div>
+  </div>;
+}

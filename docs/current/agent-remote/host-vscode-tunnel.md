@@ -37,7 +37,7 @@ Tests cover real fixture subprocesses, split output, process-group cleanup after
 - `packages/agent-controller/src/vscode-tunnel-output.ts`
 - `packages/agent-remote-protocol/src/vscode-tunnel.ts`
 - `packages/agent-relay-core/src/broker.ts`
-- `packages/agent-remote-lab/src/vscode-tunnel.tsx`
-- `packages/agent-remote-lab/src/components/HostVscodeTunnel.tsx`
+- `packages/agent-remote-lab/src/kernel/vscode-tunnel.tsx`
+- `packages/agent-remote-lab/src/features/computers/HostVscodeTunnel.tsx`
 
 CLI behavior was checked against Microsoft's [Remote Tunnels documentation](https://code.visualstudio.com/docs/remote/tunnels) and the installed version's [tunnel implementation](https://github.com/microsoft/vscode/blob/7debcd0e2acdea1c52de81bf9ee1620444407dda/cli/src/commands/tunnels.rs) and [shutdown signals](https://github.com/microsoft/vscode/blob/7debcd0e2acdea1c52de81bf9ee1620444407dda/cli/src/tunnels/shutdown_signal.rs).

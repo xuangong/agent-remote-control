@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { configureImageDraftPersistence } from '@orchardworks/agent-client-web/browser';
 import { App, type LabTransport } from './App.js';
-import { SessionDirectoryClient } from './directory-client.js';
+import { SessionDirectoryClient } from './kernel/directory-client.js';
 import { render } from './test/setup.js';
 import { replicaState } from './test/fixtures.js';
 

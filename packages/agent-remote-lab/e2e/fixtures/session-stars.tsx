@@ -1,14 +1,14 @@
 /// <reference types="vite/client" />
-import type { AccountFacts } from '../../src/account.js';
+import type { AccountFacts } from '../../src/kernel/account.js';
 import { createRoot } from 'react-dom/client';
 import { GatewayController } from '../../src/GatewayController.js';
 import type { HttpWebSocketTransport, RemoteAgentTransport, RemoteTransportListener } from '@orchardworks/agent-client';
 import type { AgentStatus } from '@orchardworks/agent-remote-protocol';
 import { App } from '../../src/App.js';
-import { SessionDirectoryClient } from '../../src/directory-client.js';
+import { SessionDirectoryClient } from '../../src/kernel/directory-client.js';
 import { replicaState } from '../../src/test/fixtures.js';
 import '../../src/session-view-styles.js';
-import { trackFocusModality } from '../../src/focus-modality.js';
+import { trackFocusModality } from '../../src/kernel/focus-modality.js';
 import { openInWindowMode } from './window-mode.js';
 
 const stopTrackingFocus = trackFocusModality(document);

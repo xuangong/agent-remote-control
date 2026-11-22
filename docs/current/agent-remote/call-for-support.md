@@ -15,7 +15,7 @@ A support group is a Team with `callForSupport` set (`packages/agent-remote-prot
 | Requester seats, coordinator and supporter extensions, deliveries, idle release, worktrees, bundles, patches, usage accounting, forgetting ended groups | Controller | `packages/agent-controller/src/team.ts`, `call-for-support-roles.ts`, `call-for-support-workspaces.ts`, `call-for-support-usage.ts` |
 | Worker tools and their injection | Controller | `packages/agent-controller/src/call-for-support-worker.ts`, `host.ts` |
 | Read-only sessions, tool namespaces | Provider adapters | `agent-provider-sdk` (`access`, `toolNamespaces`, `updateToolNamespaces`), Codex `session.ts`, Claude `session.ts`, `permission-modes.ts` |
-| Settings, Team panel, group views | Website | `packages/agent-remote-lab/src/components/call-for-support/` |
+| Settings, Team panel, group views | Website | `packages/agent-remote-lab/src/features/team/call-for-support/` |
 
 ## Key flows
 

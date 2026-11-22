@@ -1,0 +1,243 @@
+// @vitest-environment node
+import { expect, it, vi } from 'vitest';
+import type { WebSocket } from 'ws';
+import { AgentReplica, HttpWebSocketTransport, type RemoteAgentTransport, type RemoteSessionStatus, type WebSocketLike } from '@orchardworks/agent-client';
+import { ConversationConnections } from './conversation-connections.js';
+import { memoryRecordedRelay } from '@orchardworks/agent-relay-node/testing/memory-relay';
+import { waitFor } from '../test/wait.js';
+
+async function fixture(sessionChannels = false) {
+  const server = memoryRecordedRelay(), net = server.net, url = net.url;
+  const origin = process.env.AGENT_REMOTE_ORIGIN ?? 'http://127.0.0.1:6175';
+  const sockets: WebSocket[] = [];
+  const transport = new HttpWebSocketTransport(url, { fetch: net.fetch, sessionChannels, webSocketFactory: address => {
+    const socket = net.webSocket(address, { origin });
+    sockets.push(socket);
+    return socket as unknown as WebSocketLike;
+  } });
+  const created = await transport.createAgent('agent', 'recorded', { sessionId: 'native' });
+  const session = { hostId: 'host-a', providerId: 'recorded', nativeSessionId: created.payload.sessionId };
+  const connections = new ConversationConnections(transport);
+  const history = vi.spyOn(transport, 'fetchTimeline');
+  return { connections, session, sockets, history, server, transport,
+    async close() { connections.clear(); transport.dispose(); await server.close(); },
+  };
+}
+
+it('keeps a tracked subscription current over real HTTP/WebSocket without reconnecting on revisit', async () => {
+  const f = await fixture();
+  try {
+    f.connections.retainSessions('tracked', [f.session]);
+    expect(f.sockets).toHaveLength(0);
+    const first = f.connections.acquire('agent', new AgentReplica(), f.session);
+    let status: RemoteSessionStatus = 'idle';
+    first.client.subscribeStatus(value => { status = value; });
+    await waitFor(() => expect(status).toBe('ready'));
+    first.release();
+    const count = f.history.mock.calls.length;
+    const seq = first.replica.getState().timeline.nextSeq;
+    f.server.recorded.advance(f.session.nativeSessionId);
+    await waitFor(() => expect(first.replica.getState().timeline.nextSeq).toBeGreaterThan(seq));
+    const again = f.connections.acquire('agent', new AgentReplica(), f.session);
+    expect(again.client).toBe(first.client);
+    expect(again.replica).toBe(first.replica);
+    expect(status).toBe('ready');
+    expect(f.sockets).toHaveLength(1);
+    expect(f.history).toHaveBeenCalledTimes(count);
+    f.connections.retainSessions('tracked', []);
+    expect(status).toBe('ready');
+    again.release();
+    await Promise.resolve();
+    expect(status).toBe('idle');
+    expect(f.connections.agentIds).toEqual([]);
+  } finally { await f.close(); }
+});
+
+it.each([false, true])('retains an opened Team leader independently of tracking without preconnecting (channel=%s)', async sessionChannels => {
+  const f = await fixture(sessionChannels);
+  const wire: string[] = [];
+  f.transport.onProtocolMessage(event => { if (event.direction === 'outbound') wire.push(event.message.type); });
+  try {
+    f.connections.retainSessions('team-leaders', [f.session, { ...f.session, nativeSessionId: 'unopened-leader' }]);
+    expect(f.sockets).toHaveLength(0);
+    expect(f.connections.agentIds).toEqual([]);
+    const first = f.connections.acquire('agent', new AgentReplica(), f.session);
+    await waitFor(() => expect(first.client.getSessionState().connection).toBe('ready'));
+    first.release();
+    await Promise.resolve();
+    f.connections.retainSessions('tracked', []);
+    expect(first.client.getSessionState().connection).toBe('ready');
+    const before = first.replica.getState().timeline.nextSeq;
+    f.server.recorded.advance(f.session.nativeSessionId);
+    await waitFor(() => expect(first.replica.getState().timeline.nextSeq).toBeGreaterThan(before));
+    const requests = [...wire];
+    const again = f.connections.acquire('agent', new AgentReplica(), f.session);
+    expect(again.client).toBe(first.client);
+    expect(again.replica).toBe(first.replica);
+    expect(wire).toEqual(requests);
+    expect(f.sockets).toHaveLength(1);
+    again.release();
+    await Promise.resolve();
+    f.connections.retainSessions('tracked', [f.session]);
+    f.connections.retainSessions('team-leaders', []);
+    expect(first.client.getSessionState().connection).toBe('ready');
+    f.connections.retainSessions('tracked', []);
+    expect(first.client.getSessionState().connection).toBe('idle');
+    expect(f.connections.agentIds).toEqual([]);
+  } finally { await f.close(); }
+});
+
+it('removes a Team retention reason without closing a mounted view or retaining unrelated identities', async () => {
+  const f = await fixture();
+  try {
+    const lease = f.connections.acquire('agent', new AgentReplica(), f.session);
+    await waitFor(() => expect(lease.client.getSessionState().connection).toBe('ready'));
+    f.connections.retainSessions('team-leaders', [f.session]);
+    f.connections.retainSessions('team-leaders', [{ ...f.session, hostId: 'another-host' }]);
+    expect(lease.client.getSessionState().connection).toBe('ready');
+    lease.release();
+    await Promise.resolve();
+    expect(lease.client.getSessionState().connection).toBe('idle');
+    expect(f.connections.agentIds).toEqual([]);
+  } finally { await f.close(); }
+});
+
+it('reuses the existing recovery after a real socket disconnect and releases untracked background sessions', async () => {
+  const f = await fixture();
+  try {
+    f.connections.retainSessions('tracked', [f.session]);
+    const first = f.connections.acquire('agent', new AgentReplica(), f.session);
+    let status: RemoteSessionStatus = 'idle';
+    first.client.subscribeStatus(value => { status = value; });
+    await waitFor(() => expect(status).toBe('ready'));
+    first.release();
+    f.sockets[0]!.terminate();
+    await waitFor(() => expect(status).toBe('disconnected'));
+    const again = f.connections.acquire('agent', new AgentReplica(), f.session);
+    expect(again.client).toBe(first.client);
+    await waitFor(() => expect(status).toBe('ready'), { timeout: 4000 });
+    expect(f.sockets).toHaveLength(2);
+    again.release();
+    f.connections.retainSessions('tracked', []);
+    expect(status).toBe('idle');
+    expect(f.connections.find(f.session)).toBeUndefined();
+  } finally { await f.close(); }
+});
+
+it('isolates native identities and disposes retained subscriptions at scope teardown', async () => {
+  const f = await fixture();
+  try {
+    f.connections.retainSessions('tracked', [f.session]);
+    const lease = f.connections.acquire('agent', new AgentReplica(), f.session);
+    let status: RemoteSessionStatus = 'idle';
+    lease.client.subscribeStatus(value => { status = value; });
+    await waitFor(() => expect(status).toBe('ready'));
+    expect(f.connections.find({ ...f.session, hostId: 'host-b' })).toBeUndefined();
+    expect(f.connections.find({ ...f.session, providerId: 'other' })).toBeUndefined();
+    f.connections.clear();
+    lease.release();
+    expect(status).toBe('idle');
+    expect(f.connections.agentIds).toEqual([]);
+  } finally { await f.close(); }
+});
+
+
+it.each([false, true])('recovers timeline over the existing socket without HTTP history (channel=%s)', async sessionChannels => {
+  const f = await fixture(sessionChannels);
+  const wire: Array<{direction: string; type: string}> = [];
+  f.transport.onProtocolMessage(event => wire.push({direction: event.direction, type: event.message.type}));
+  try {
+    const lease = f.connections.acquire('agent', new AgentReplica(), f.session);
+    let status = ''; lease.client.subscribeStatus(value => { status = value; });
+    await waitFor(() => expect(status).toBe('ready'));
+    expect(f.history).not.toHaveBeenCalled();
+    expect(wire).toContainEqual({direction: 'outbound', type: 'timeline_request'});
+    wire.length = 0;
+    f.sockets[0]!.terminate();
+    await waitFor(() => expect(status).toBe('disconnected'));
+    const before = lease.replica.getState().timeline.nextSeq;
+    f.server.recorded.advance(f.session.nativeSessionId);
+    await waitFor(() => expect(status).toBe('ready'), {timeout: 4000});
+    expect(f.history).not.toHaveBeenCalled();
+    expect(lease.replica.getState().timeline.nextSeq).toBeGreaterThan(before);
+    const history = wire.findIndex(event => event.direction === 'outbound' && event.type === 'timeline_request');
+    const acknowledged = wire.findIndex(event => event.direction === 'inbound' && event.type === 'timeline_subscribed');
+    expect(history).toBeGreaterThanOrEqual(0);
+    expect(acknowledged).toBeGreaterThan(history);
+  } finally { await f.close(); }
+});
+
+it.each([false, true])('retains an unconfirmed native interruption after collecting an untracked connection (channel=%s)', async sessionChannels => {
+  const f = await fixture(sessionChannels);
+  const requests: boolean[] = [];
+  const connections = new ConversationConnections(f.transport, undefined, () => ({
+    async resumeNative(_owner, options) {
+      requests.push(options.checkOnly);
+      throw Object.assign(new Error('Native reply lost'), { code: 'ECONNRESET' });
+    },
+  }));
+  const owner = { kind: 'native_cli' as const, generation: 'native-owner' };
+  f.server.relay.sessionControls!.setNativeOwner('agent', owner);
+  try {
+    const first = connections.acquire('agent', new AgentReplica(), f.session);
+    await waitFor(() => expect(first.client.getSessionState()).toMatchObject({ connection: 'ready', control: { nativeOwner: owner } }));
+    await expect(first.client.takeControl()).rejects.toMatchObject({ code: 'ECONNRESET' });
+    await expect(first.client.takeControl()).rejects.toMatchObject({ code: 'ECONNRESET' });
+    first.release();
+    await Promise.resolve();
+    expect(connections.agentIds).toEqual([]);
+    const next = connections.acquire('agent', new AgentReplica(), f.session);
+    expect(next.client).not.toBe(first.client);
+    await waitFor(() => expect(next.client.getSessionState()).toMatchObject({ connection: 'ready', control: { nativeOwner: owner }, handoff: { phase: 'unknown' } }));
+    await expect(next.client.takeControl()).rejects.toMatchObject({ code: 'ECONNRESET' });
+    expect(requests).toEqual([false, true, true]);
+    expect(f.sockets).toHaveLength(sessionChannels ? 1 : 2);
+    next.release();
+  } finally { connections.clear(); await f.close(); }
+}, 8000);
+
+it.each([false, true])('reuses an untracked session across a same-turn view transfer (channel=%s)', async sessionChannels => {
+  const f = await fixture(sessionChannels);
+  const wire: string[] = [];
+  f.transport.onProtocolMessage(event => { if (event.direction === 'outbound') wire.push(event.message.type); });
+  try {
+    const first = f.connections.acquire('agent', new AgentReplica(), f.session);
+    await waitFor(() => expect(first.client.getSessionState().connection).toBe('ready'));
+    const initialWire = [...wire];
+    first.release();
+    const next = f.connections.acquire('agent', new AgentReplica(), f.session);
+    expect(next.client).toBe(first.client);
+    expect(next.replica).toBe(first.replica);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect(next.client.getSessionState().connection).toBe('ready');
+    expect(wire).toEqual(initialWire);
+    expect(f.sockets).toHaveLength(1);
+    next.release();
+    await waitFor(() => expect(f.connections.agentIds).toEqual([]));
+    expect(next.client.getSessionState().connection).toBe('idle');
+  } finally { await f.close(); }
+});
+
+it('reports a retained conversation as unused once no view shows it, and in use when one shows it again', async () => {
+  const intents: boolean[] = [];
+  const transport = { connect: vi.fn(() => ({ send() {}, close() {}, setActive: (active: boolean) => { intents.push(active); } })),
+    onDiagnostic: () => () => {}, onProtocolMessage: () => () => {} } as unknown as RemoteAgentTransport;
+  const connections = new ConversationConnections(transport);
+  const session = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native' };
+  try {
+    connections.retainSessions('window-sessions', [session]);
+    const shown = connections.acquire('agent', new AgentReplica(), session);
+    // A layout transfer releases and reacquires the view within one turn and changes nothing.
+    shown.release();
+    const moved = connections.acquire('agent', new AgentReplica(), session);
+    await Promise.resolve();
+    expect(intents).toEqual([]);
+    moved.release();
+    await Promise.resolve();
+    expect(intents).toEqual([false]);
+    connections.acquire('agent', new AgentReplica(), session).release();
+    await Promise.resolve();
+    expect(intents).toEqual([false, true, false]);
+    expect(transport.connect).toHaveBeenCalledOnce();
+  } finally { connections.clear(); }
+});

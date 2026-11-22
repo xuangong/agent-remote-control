@@ -1,14 +1,14 @@
 import { lazy, Suspense, StrictMode } from 'react';
-import { deviceChoices } from './device-choices.js';
+import { deviceChoices } from './kernel/device-choices.js';
 import { MotionProvider, browserMotionPort } from '@orchardworks/agent-client-web/primitives';
 import { createRoot } from 'react-dom/client';
 
-import { WorkspaceShell } from './components/WorkspaceShell.js';
+import { WorkspaceShell } from './features/windows/WorkspaceShell.js';
 import { GatewayController } from './GatewayController.js';
-import { previousWorkspacePath } from './workspace-access.js';
+import { previousWorkspacePath } from './kernel/workspace-access.js';
 import { startDeviceStore } from './device-store-start.js';
 import { loadChunkWithRecovery } from './chunk-recovery.js';
-import { keepInstalledAppStorage } from './installed-app.js';
+import { keepInstalledAppStorage } from './kernel/installed-app.js';
 const gatewayMode = document.querySelector('meta[name="agent-remote-auth"]')?.getAttribute('content') === 'gateway';
 // The installed app asks to keep its storage before it reads any, so a week away does not cost it its conversations or pending messages.
 void keepInstalledAppStorage();
@@ -17,7 +17,7 @@ const storedConversations = Promise.race([startDeviceStore(gatewayMode), new Pro
 const loadApp = () => loadChunkWithRecovery(() => Promise.all([import('./App.js'), storedConversations]).then(([module]) => ({ default: module.App })));
 const appModule = previousWorkspacePath() ? loadApp() : undefined;
 const App = lazy(() => appModule ?? loadApp());
-import { trackFocusModality } from './focus-modality.js';
+import { trackFocusModality } from './kernel/focus-modality.js';
 import './session-view-styles.js';
 
 // The stored appearance, language and motion are shown before anything renders, so the first paint already has them.

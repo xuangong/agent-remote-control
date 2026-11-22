@@ -1,8 +1,8 @@
-import { isConversationLayout, type ConversationLayout } from '../conversation-layout.js';
-import { conversationSessionStorage } from '../conversation-storage.js';
+import { isConversationLayout, type ConversationLayout } from '../conversation/conversation-layout.js';
+import { conversationSessionStorage } from '../kernel/conversation-storage.js';
 import { useEffect, useRef, useState } from 'react';
 import { controllerPath } from '@orchardworks/agent-remote-protocol/model';
-import { sessionKey, sessionRootKey, type SessionEntry } from '../session-tree.js';
+import { sessionKey, sessionRootKey, type SessionEntry } from '../kernel/session-tree.js';
 
 interface Visit { id: string; session: SessionEntry; root: string; sessionIntent?: 'history'; keepOriginal?: boolean; scope?: string; windowId?: string; layout?: ConversationLayout; layoutUpdated?: number }
 const storageKey = 'agent-remote-conversation-history';

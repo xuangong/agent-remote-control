@@ -7,14 +7,14 @@ import { PROTOCOL_VERSION, applyWindowOperation, createWindowView, type WindowMu
 import { configureImageDraftPersistence } from '@orchardworks/agent-client-web/browser';
 import { HttpWebSocketTransport } from '@orchardworks/agent-client';
 import { App, type LabTransport } from './App.js';
-import { SessionDirectoryClient, type OpenedSession, type SuccessionActionResult, type SuccessionDescription } from './directory-client.js';
-import { DraftStore } from './draft-store.js';
+import { SessionDirectoryClient, type OpenedSession, type SuccessionActionResult, type SuccessionDescription } from './kernel/directory-client.js';
+import { DraftStore } from './kernel/draft-store.js';
 import { replicaState } from './test/fixtures.js';
 import { render, unmount } from './test/setup.js';
-import * as workbenchComponents from './components/LabWorkbench.js';
-import { WorkspaceReady } from './workspace-access.js';
-import { TeamRefresh, type TeamRefreshPeriods } from './components/TeamMenu.js';
-import type { FavoritesSnapshot } from './session-stars-client.js';
+import * as workbenchComponents from './conversation/LabWorkbench.js';
+import { WorkspaceReady } from './kernel/workspace-access.js';
+import { TeamRefresh, type TeamRefreshPeriods } from './features/team/TeamMenu.js';
+import type { FavoritesSnapshot } from './features/sessions/session-stars-client.js';
 
 
 export function saveSessionComposition(scope: string, value: { path: OpenedSession[]; focus?: string; anchor?: string; addressKey: string }) {

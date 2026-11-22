@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { errorWords, translator } from '@orchardworks/agent-client';
-import { removalMessage } from './bot-removal.js';
-import { activityGroups, activityGroupLabel } from './session-activity-status.js';
-import { sessionStatusLabel } from './session-tree.js';
-import { creationUnavailableReason } from './state/creation-choice.js';
-import { createCompositionView } from './composition-views.js';
+import { removalMessage } from './features/chats/bot-removal.js';
+import { activityGroups, activityGroupLabel } from './kernel/session-activity-status.js';
+import { sessionStatusLabel } from './kernel/session-tree.js';
+import { creationUnavailableReason } from './features/sessions/creation-choice.js';
+import { createCompositionView } from './kernel/composition-views.js';
 
 const zh = translator('zh');
 

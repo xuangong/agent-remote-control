@@ -1,14 +1,14 @@
 // Ask, the Side sessions of a view and their selection, focus and anchor.
 import { createWindowView, type WindowEdit } from '@orchardworks/agent-remote-protocol';
-import { windowSessionBinding } from '../window-workspace.js';
-import { windowBindingKey } from '../window-composition.js';
+import { windowSessionBinding } from '../kernel/window-workspace.js';
+import { windowBindingKey } from '../kernel/window-composition.js';
 import { useEffect, useMemo } from 'react';
-import { compositionSession, compositionSelection } from '../session-composition.js';
-import type { OpenedSession } from '../directory-client.js';
-import { sessionKey } from '../session-tree.js';
-import { useAskConversations } from '../hooks/useAskConversations.js';
-import type { SideSelections } from '../side-tree.js';
-import { localEdges, mergeSides, openSideKeys as openSideKeysOf, sameEdges, selectedEdges, selectionSteps, sharedFamilySides as sharedFamilySidesOf } from '../state/side-layout.js';
+import { compositionSession, compositionSelection } from '../kernel/session-composition.js';
+import type { OpenedSession } from '../kernel/directory-client.js';
+import { sessionKey } from '../kernel/session-tree.js';
+import { useAskConversations } from '../features/team/useAskConversations.js';
+import type { SideSelections } from '../kernel/side-tree.js';
+import { localEdges, mergeSides, openSideKeys as openSideKeysOf, sameEdges, selectedEdges, selectionSteps, sharedFamilySides as sharedFamilySidesOf } from '../features/windows/side-layout.js';
 import { viewKey } from './helpers.js';
 import type { SessionSuccessionBindingSlice } from './useSessionSuccessionBinding.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';

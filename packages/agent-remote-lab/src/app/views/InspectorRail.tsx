@@ -1,6 +1,6 @@
 // The Replica Inspector rail.
-import { ReplicaInspector } from '../../components/ReplicaInspector.js';
-import { SupportingRail } from '../../components/SupportingRail.js';
+import { ReplicaInspector } from '../../features/diagnostics/ReplicaInspector.js';
+import { SupportingRail } from '../../features/windows/SupportingRail.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { AppScope } from '../types.js';
 

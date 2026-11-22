@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import jsQR from 'jsqr';
 import { renderSessionQr } from './share-qr.js';
-import { readSessionCode } from '../../agent-remote-lab/src/session-transfer.js';
+import { readSessionCode } from '../../agent-remote-lab/src/kernel/session-transfer.js';
 
 it('renders a compact terminal QR with a quiet border that decodes to a browser-accepted session link', async () => {
   const url = 'https://agents.xianliao.de5.net/?host=70b07c4c-a940-4359-b7f3-a88f13200772&provider=codex&session=01a0c221-54cd-7bd3-86df-554565d9d9ee';

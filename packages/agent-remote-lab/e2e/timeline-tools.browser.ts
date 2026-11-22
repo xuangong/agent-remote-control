@@ -14,7 +14,7 @@ beforeAll(async () => {
   const source = `
     import React, { useRef } from 'react'; import { createRoot } from 'react-dom/client';
     import './session-view-styles.ts';
-    import { SessionTimelineTools } from './components/SessionTimelineTools.tsx';
+    import { SessionTimelineTools } from './conversation/SessionTimelineTools.tsx';
     function View({ width }) {
       const timeline = useRef(null);
       return <div className="lab-session-view" data-width={width} style={{ width: width + 'px', height: '320px' }}>

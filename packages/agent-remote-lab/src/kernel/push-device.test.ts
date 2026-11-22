@@ -52,7 +52,7 @@ function device(options: { permission?: NotificationPermission; registered?: boo
   if (options.held) browser = subscription('https://fcm.googleapis.com/fcm/send/held', options.browserKey ?? KEY);
   let relay: PushDevice = { publicKey: KEY, ...(options.relayDevice ? { device: options.relayDevice } : {}) };
   const registration: PushRegistration = { pushManager: {
-    getSubscription: async () => browser,
+    getSubscription: async () => { log.push('ask browser'); return browser; },
     subscribe: async ({ applicationServerKey }) => { log.push(`subscribe ${applicationServerKey.length}`); browser = subscription('https://fcm.googleapis.com/fcm/send/new', KEY); return browser; },
   } };
   let locale: 'en' | 'zh' = 'en', paused = false;
@@ -81,17 +81,17 @@ describe('one tap', () => {
     const tap = d.controller.enable();
     expect(d.log).toEqual(['permission']);
     await tap;
-    expect(d.log).toEqual(['permission', 'subscribe 65', 'save https://fcm.googleapis.com/fcm/send/new en']);
+    expect(d.log).toEqual(['permission', 'ask browser', 'subscribe 65', 'save https://fcm.googleapis.com/fcm/send/new en']);
     expect(d.controller.view()).toEqual({ availability: 'available', status: 'on' });
   });
 
   it('reuses a subscription the browser holds with the Relay\'s key, and makes a new one for another key', async () => {
     const same = device({ held: true });
     await same.controller.enable();
-    expect(same.log).toEqual(['permission', 'save https://fcm.googleapis.com/fcm/send/held en']);
+    expect(same.log).toEqual(['permission', 'ask browser', 'save https://fcm.googleapis.com/fcm/send/held en']);
     const older = device({ held: true, browserKey: OTHER_KEY });
     await older.controller.enable();
-    expect(older.log).toEqual(['permission', 'unsubscribe https://fcm.googleapis.com/fcm/send/held', 'subscribe 65', 'save https://fcm.googleapis.com/fcm/send/new en']);
+    expect(older.log).toEqual(['permission', 'ask browser', 'unsubscribe https://fcm.googleapis.com/fcm/send/held', 'subscribe 65', 'save https://fcm.googleapis.com/fcm/send/new en']);
   });
 
   it('says why when the permission is refused, the browser cannot subscribe or the Relay refuses', async () => {
@@ -112,20 +112,27 @@ describe('one tap', () => {
     const d = device({ permission: 'granted' });
     await d.controller.enable();
     await d.controller.disable();
-    expect(d.log.slice(-2)).toEqual(['forget', 'unsubscribe https://fcm.googleapis.com/fcm/send/new']);
+    expect(d.log.slice(-3)).toEqual(['forget', 'ask browser', 'unsubscribe https://fcm.googleapis.com/fcm/send/new']);
     expect([d.controller.view().status, d.browser()]).toEqual(['off', null]);
   });
 });
 
 describe('a start and a change', () => {
+  it('asks the browser\'s push manager nothing at a start for a device the Relay keeps no subscription of', async () => {
+    const d = device({ held: true });
+    await d.controller.refresh();
+    expect(d.log).toEqual([]);
+    expect(d.controller.view()).toEqual({ availability: 'available', status: 'off' });
+  });
+
   it('forgets at the Relay a subscription the browser no longer holds, and tells it a new language or switch', async () => {
     const dropped = device({ relayDevice: { endpoint: 'https://fcm.googleapis.com/fcm/send/old', locale: 'en' } });
     await dropped.controller.refresh();
-    expect([dropped.log, dropped.controller.view().status]).toEqual([['forget'], 'off']);
+    expect([dropped.log, dropped.controller.view().status]).toEqual([['ask browser', 'forget'], 'off']);
     const d = device({ permission: 'granted' });
     await d.controller.enable();
     d.setLocale('zh'); d.setPaused(true);
     await d.controller.sync();
-    expect(d.log.at(-1)).toBe('save https://fcm.googleapis.com/fcm/send/new zh paused');
+    expect(d.log.slice(-2)).toEqual(['ask browser', 'save https://fcm.googleapis.com/fcm/send/new zh paused']);
   });
 });

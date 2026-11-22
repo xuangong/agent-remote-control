@@ -7,6 +7,7 @@
  *   Relay's VAPID key and gives the subscription to the Relay with the device's language and its own Notifications switch.
  * - Each page start reconciles the browser's subscription with what the Relay keeps (`reconcilePush`): a subscription the browser no
  *   longer holds is forgotten, one made with an older key is made again, and a new endpoint, language or switch is told to the Relay.
+ *   The push manager is asked only on a tap, and at a start only for a device the Relay keeps a subscription of.
  */
 import type { PushDevice, PushLocale, PushSubscriptionRequest } from '@orchardworks/agent-remote-protocol';
 
@@ -125,10 +126,14 @@ export function createPushDevice(ports: PushPorts, settings: PushSettings) {
   return {
     view: (): PushDeviceView => view,
     subscribe(listener: () => void): () => void { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    /** Asks the Relay and the browser, and brings them together (`reconcilePush`). */
+    /**
+     * Asks the Relay and the browser, and brings them together (`reconcilePush`). The browser's push manager is asked only about a
+     * device the Relay keeps a subscription of: a device that never turned push on costs no push manager call at a start (and WebKit's
+     * test build, which has no push daemon, hangs the page on one).
+     */
     async refresh(): Promise<void> {
-      const browser = await current();
-      try { relay = await ports.relay.device(); } catch { set({ status: view.status === 'checking' ? 'off' : view.status }); return; }
+      try { relay = await ports.relay.device(); } catch { await registration(); set({ status: view.status === 'checking' ? 'off' : view.status }); return; }
+      const browser = relay.device ? await current() : (await registration(), null);
       const action = reconcilePush(relay, browserPush(browser), { locale: settings.locale(), paused: settings.paused() });
       try {
         if (action === 'forget') relay = await ports.relay.unsubscribe();

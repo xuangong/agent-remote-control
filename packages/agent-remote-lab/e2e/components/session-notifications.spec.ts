@@ -7,7 +7,7 @@ const session = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native'
 async function setup(page: Page, displayed: boolean) {
   await page.goto('/e2e/fixtures/orchard-primitives.html');
   return page.evaluateHandle(async ({ session, displayed }) => {
-    const url = '/src/session-notifications.ts';
+    const url = '/src/kernel/session-notifications.ts';
     const { SessionAttentionNotifications } = await import(/* @vite-ignore */ url);
     const fixture = { notices: [], focused: 0, opened: [] } as unknown as NotificationFixture;
     class TestNotification {

@@ -458,6 +458,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       const broker = createHostBroker({ origin: auth.origin, publicUrl: auth.origin, keyLifetimeMs: options.keyLifetimeMs, ...options.hostLiveness, ...(options.brokerScheduler ? { scheduler: options.brokerScheduler } : {}), ...(options.controllerReleases ? { controllerReleases: options.controllerReleases } : {}),
         ownerSubject: grant.subject, durable, accountBacked, initialState, diagnostics, gatewaySetup: auth.provider === 'mainsite',
         teamResources: options.teamResources?.(grant.namespace),
+        assistantGroups: () => windows.list({ subject: grant.subject }).groups,
         outbox: { hostCall: (hostId, call) => sessionOutbox.hostCall(hostId, call) },
         ...(journalService ? { journalService } : {}),
         ...(options.successionEnrollment ? { successionEnrollment: { version: 1, origin: auth.origin, issuer: auth.issuer, namespace: grant.namespace, ownerSubject: grant.subject } as const, successionProjectionAllowance: allowance } : {}),

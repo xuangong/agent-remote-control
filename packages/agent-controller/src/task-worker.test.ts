@@ -171,7 +171,7 @@ describe('the main session\'s task tools', () => {
     expect(worker.enabled(ref)).toBe(true);
     expect(worker.enabledByDefault()).toBe(true);
     const tools = worker.namespace(() => ref, false).tools;
-    expect(tools.map(item => item.name).filter(name => name.includes('task'))).toEqual(['create_task', 'task_status', 'message_task', 'cancel_task', 'mark_task_done']);
+    expect(tools.map(item => item.name).filter(name => name.includes('task') || name.includes('assistant'))).toEqual(['create_task', 'task_status', 'list_assistants', 'message_assistant', 'message_task', 'cancel_task', 'mark_task_done']);
     await tool(tools, 'create_task').execute({ title: 'Collect logs', brief: 'Collect them.', done_when: 'Attached.', operationId: 'op' });
     expect(calls).toEqual([{ action: 'create_task', owner: { providerId: 'codex', nativeSessionId: 'main', title: 'Chief' }, operationId: 'op', title: 'Collect logs', brief: 'Collect them.', doneWhen: 'Attached.' }]);
     await tool(tools, 'task_status').execute({});
@@ -185,5 +185,32 @@ describe('the main session\'s task tools', () => {
     expect(worker.enabled(ref)).toBe(false);
     await expect(tool(worker.namespace(() => ref, true).tools, 'create_task').execute({ title: 'T', brief: 'B' })).rejects.toThrow('Update the Relay to use tasks.');
     expect(calls).toEqual([]);
+  });
+});
+
+describe('messages between assistants', () => {
+  const groups = [{ window: { id: 'g', title: 'g', revision: 1, views: [['v1', 'worker'], ['v2', 'tracker']].map(([id, nativeSessionId]) => ({ id, placement: 'primary',
+    binding: { hostId: 'host', providerId: 'codex', nativeSessionId, title: nativeSessionId } })) }, bots: { rank: 'm', members: { v1: { name: 'Chief' }, v2: { name: 'Tracker' } } } }] as never;
+  it('reaches the other main session between its turns, after its task updates, and the reply comes back', async () => {
+    const h = await supportHarness({ tasks: true, groups, sessions: ['tracker'] });
+    cleanups.push(() => h.close());
+    const chief = new WorkerSupport({ request: call => h.host(call), available: () => true, tasks: () => true, stateDirectory: h.directory, title: async () => 'Chief' });
+    const tracker = new WorkerSupport({ request: call => h.host(call), available: () => true, tasks: () => true, stateDirectory: h.directory, title: async () => 'Tracker' });
+    const tools = (worker: WorkerSupport, id: string) => worker.namespace(() => h.ref('codex', id), false).tools;
+    expect(JSON.parse(await tool(tools(chief, 'worker'), 'list_assistants').execute({}) as string)).toEqual({ assistants: [{ id: 'g/v2', name: 'Tracker' }] });
+    h.busy('tracker', true);
+    const sent = JSON.parse(await tool(tools(chief, 'worker'), 'message_assistant').execute({ to: 'Tracker', text: 'Is the branch cut?' }) as string);
+    expect(sent).toMatchObject({ outcome: 'delivered' });
+    await h.runtime.tick();
+    // A message never steers or queues into a running turn.
+    expect(h.sessions.get('tracker')!.deliveries).toEqual([]);
+    h.busy('tracker', false);
+    await h.runtime.tick();
+    expect(h.sessions.get('tracker')!.deliveries.map(delivery => [delivery.delivery, parseTaskInputs(delivery.text)])).toEqual([['immediate', [{ kind: 'assistant', messageId: sent.messageId, from: 'Chief', body: 'Is the branch cut?' }]]]);
+    await tool(tools(tracker, 'tracker'), 'message_assistant').execute({ to: 'Chief', text: 'Yes.', reply_to: sent.messageId });
+    await h.runtime.tick();
+    expect(parseTaskInputs(h.sessions.get('worker')!.deliveries[0]!.text)).toEqual([expect.objectContaining({ kind: 'assistant', from: 'Tracker', replyTo: sent.messageId, body: 'Yes.' })]);
+    // The main sessions keep their own tools.
+    expect(await h.runtime.extensions(h.ref('codex', 'tracker'))).toBeUndefined();
   });
 });

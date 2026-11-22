@@ -4,7 +4,7 @@ import { Value } from '@sinclair/typebox/value';
 import { TeamResource } from './team-resource.js';
 import { CallForSupportCallInput, CallForSupportFinding, CallForSupportGroup, CallForSupportMandate, CallForSupportReportStatus, CallForSupportRosterProposal,
   isCallForSupportGroup } from './call-for-support.js';
-import { TaskBrief, TaskDoneWhen, TaskOwner, TaskWorkspace, TaskReportStatus, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_QUESTION_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, isTeamTask } from './task.js';
+import { TaskBrief, TaskDoneWhen, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_HOP_LIMIT, ASSISTANT_MESSAGE_LIMIT, TaskReportStatus, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_QUESTION_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, isTeamTask } from './task.js';
 const object = { additionalProperties: false } as const;
 const id = Type.String({ minLength: 1, maxLength: 256 });
 const short = Type.String({ maxLength: 2048 });
@@ -49,6 +49,13 @@ export const TEAM_DELIVERY_RECEIPT_LIMIT = 200;
 /** Recoverable legacy delivery evidence whose original body has already been compacted. */
 export const TeamUnresolvedReceipt = Type.Object({ ...Type.Omit(TeamMessage, ['text', 'resources', 'status', 'acceptance']).properties, status: Type.Literal('accepted') }, object);
 export type TeamUnresolvedReceipt = Static<typeof TeamUnresolvedReceipt>;
+/**
+ * Two assistants' link: their keys in member order, and the latest messages between them with their hop along a reply chain,
+ * so a reply names a message it answers and a chain stops at the hop limit.
+ */
+export const TeamLink = Type.Object({ assistants: Type.Tuple([id, id]),
+  recent: Type.Array(Type.Object({ id: AssistantMessageId, from: id, hop: Type.Integer({ minimum: 1, maximum: ASSISTANT_MESSAGE_HOP_LIMIT }), operationId: id }, object), { maxItems: 64 }) }, object);
+export type TeamLink = Static<typeof TeamLink>;
 export const Team = Type.Object({ id, operationId: id, revision: Type.Integer({ minimum: 1 }), source: TeamSource,
   title: Type.String({ minLength: 1, maxLength: 256 }), status: enumOf('active', 'archiving', 'archived'),
   members: Type.Array(TeamMember, { minItems: 1, maxItems: 12 }), messages: Type.Array(TeamMessage, { maxItems: 200 }),
@@ -59,6 +66,8 @@ export const Team = Type.Object({ id, operationId: id, revision: Type.Integer({ 
   callForSupport: Type.Optional(CallForSupportGroup),
   /** Set for a task: the Leader is the worker session and the requester is the main session that owns the task. */
   task: Type.Optional(TeamTask),
+  /** Set for the link between two assistants: each member is one assistant's main session, bound where it is. */
+  link: Type.Optional(TeamLink),
 }, object);
 export type Team = Static<typeof Team>;
 export const TeamCreate = Type.Object({ operationId: id, source: TeamSource,
@@ -133,6 +142,10 @@ export const TeamHostCall = Type.Union([
     summary: Type.Optional(Type.String({ minLength: 1, maxLength: TASK_SUMMARY_LIMIT })) }, object),
   // A task's worker reports its result once.
   Type.Object({ action: Type.Literal('report_task'), teamId: id, memberId: id, status: TaskReportStatus, summary: Type.String({ minLength: 1, maxLength: TASK_SUMMARY_LIMIT }) }, object),
+  // An assistant's main session lists the account's other assistants, and messages one.
+  Type.Object({ action: Type.Literal('list_assistants'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object) }, object),
+  Type.Object({ action: Type.Literal('message_assistant'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object),
+    to: Type.String({ minLength: 1, maxLength: 300 }), operationId: id, text: Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT }), replyTo: Type.Optional(AssistantMessageId) }, object),
   // A task's worker asks its owner, and the worker's Host says what the person wrote to the worker directly.
   Type.Object({ action: Type.Literal('ask_owner'), teamId: id, memberId: id, question: Type.String({ minLength: 1, maxLength: TASK_QUESTION_LIMIT }) }, object),
   Type.Object({ action: Type.Literal('tell_task'), teamId: id, memberId: id, operationId: id, text: Type.String({ minLength: 1, maxLength: TASK_TOLD_LIMIT }) }, object),
@@ -144,12 +157,17 @@ export const TeamSeat = Type.Object({ teamId: id, source: TeamSource, member: Te
   /** The seat belongs to a Call For Support group serving this role. */
   callForSupport: Type.Optional(Type.Object({ role: Type.String({ minLength: 1, maxLength: 256 }), description: Type.String({ maxLength: 4000 }) }, object)),
   /** The seat belongs to a task: its worker as Leader, or the main session that owns it as requester. */
-  task: Type.Optional(Type.Object({ title: TaskTitle }, object)) }, object);
+  task: Type.Optional(Type.Object({ title: TaskTitle }, object)),
+  /** The seat is one assistant's main session in a link: bound where it is, it only receives messages. */
+  link: Type.Optional(Type.Object({ peer: Type.String({ minLength: 1, maxLength: 256 }) }, object)) }, object);
 export type TeamSeat = Static<typeof TeamSeat>;
 const groupFields = ['model', 'reasoningEffort', 'access', 'workspace', 'usage'] as const;
 /** A Call For Support group has exactly one requester after its Leader; a task has its worker and then its owner; other Teams have no requester and no group fields. */
 const validGroupShape = (value: Team) => {
   const group = value.callForSupport, requesters = value.members.filter(member => member.role === 'requester');
+  if (value.link) return !group && !value.task && value.members.length === 2 && value.members.every(member => member.role === 'requester')
+    && value.members.every(member => member.creation !== 'released' && groupFields.every(field => member[field] === undefined))
+    && value.messages.every(message => message.callForSupportCallId === undefined) && (value.unresolvedReceipts ?? []).every(receipt => receipt.callForSupportCallId === undefined);
   if (value.task) return !group && isTeamTask(value.task) && value.members.length === 2 && value.members[1]!.role === 'requester'
     && value.members.every(member => member.creation !== 'released') && value.members[1]!.access === undefined && value.members[1]!.workspace === undefined
     && (value.members[0]!.workspace === undefined || value.members[0]!.workspace.kind === 'worktree')
@@ -161,8 +179,9 @@ const validGroupShape = (value: Team) => {
     && value.messages.every(message => message.status !== 'queued' || value.members.find(member => member.id === message.to)?.creation !== 'released');
 };
 export const isTeam = (value: unknown): value is Team => Value.Check(Team, value)
-  && value.members[0]?.role === 'leader' && value.members.slice(1).every(member => member.role === 'member' || member.role === 'requester') && validGroupShape(value)
-  && value.members[0].hostId === value.source.hostId
+  // A link binds two main sessions; every other Team starts with its Leader.
+  && (value.link ? true : value.members[0]?.role === 'leader' && value.members.slice(1).every(member => member.role === 'member' || member.role === 'requester')) && validGroupShape(value)
+  && value.members[0]!.hostId === value.source.hostId
   && new Set(value.members.map(member => member.id)).size === value.members.length
   && new Set([...value.messages, ...(value.unresolvedReceipts ?? [])].map(message => message.id)).size === value.messages.length + (value.unresolvedReceipts?.length ?? 0)
   && (value.unresolvedReceipts ?? []).every(receipt => value.members.some(member => member.id === receipt.from) && value.members.some(member => member.id === receipt.to && (!receipt.resolvedTarget || member.providerId === receipt.resolvedTarget.providerId)))

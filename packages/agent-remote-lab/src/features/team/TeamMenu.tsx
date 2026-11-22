@@ -64,7 +64,7 @@ export function TeamMenu(props: Props) {
     const value = await client.list();
     // Tasks travel as Teams on the Relay; they show in their owner's conversation, not among Teams.
     if (currentClient.current === client && ticket === generation.current) {
-      setTeams(value.filter(team => !team.task)); setRosterClient(client); setLoadError('');
+      setTeams(value.filter(team => !team.task && !team.link)); setRosterClient(client); setLoadError('');
       props.onTasksChange?.(baseUrl, value.filter(team => !!team.task));
     }
   };

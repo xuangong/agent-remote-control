@@ -55,6 +55,7 @@ export const timeline = {
   'timeline.task.needsYou': 'A task needs you',
   'timeline.task.told': 'You wrote to a task',
   'timeline.task.open': 'Open',
+  'timeline.assistantMessages': { one: 'Message from {from}', other: '{count} messages from {from}' },
   'timeline.reasoning': 'Reasoning trace',
   'timeline.todo.board': 'TASK BOARD',
   'timeline.todo.plan': 'Execution plan',

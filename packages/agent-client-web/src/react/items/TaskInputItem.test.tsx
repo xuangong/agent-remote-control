@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { expect, it } from 'vitest';
-import { appendSessionReferences, joinTaskInputs, taskBriefText, taskResultText, taskUpdateText } from '@orchardworks/agent-remote-protocol';
+import { appendSessionReferences, assistantMessageText, joinTaskInputs, taskBriefText, taskResultText, taskUpdateText } from '@orchardworks/agent-remote-protocol';
 import { TaskDirectoryContext } from '../TaskDirectory.js';
 import { render } from '../../test/setup.js';
 import { UserMessageItem } from './MessageItem.js';
@@ -54,4 +54,15 @@ it('offers no Open on a brief, which is already in the worker\'s conversation', 
   const container = await render(<TaskDirectoryContext.Provider value={{ canOpen: () => true, open: () => {}, owned: () => [] }}><UserMessageItem item={message(text)} /></TaskDirectoryContext.Provider>);
   expect(container.querySelector('.agent-task-input')).not.toBeNull();
   expect(container.querySelector('.agent-task-open')).toBeNull();
+});
+
+it('folds messages from another assistant into one line per sender beside task cards', async () => {
+  const text = joinTaskInputs([taskResultText({ taskId: 't1', status: 'done', title: 'Collect logs', summary: 'Attached.' }),
+    assistantMessageText({ messageId: 'm000000000001', from: 'Tracker', body: 'Branch is cut.' }), assistantMessageText({ messageId: 'm000000000002', from: 'Tracker', replyTo: 'm00000000000a', body: 'Tag pushed.' })]);
+  const container = await render(<UserMessageItem item={message(text)} />);
+  expect(container.querySelectorAll('.agent-task-input')).toHaveLength(1);
+  const folded = container.querySelector('details.agent-assistant-messages')!;
+  expect(folded.querySelector('summary')?.textContent).toBe('2 messages from Tracker');
+  expect(folded.hasAttribute('open')).toBe(false);
+  expect(folded.textContent).toContain('Tag pushed.');
 });

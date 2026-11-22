@@ -1,3 +1,4 @@
+import type { WindowGroup } from '@orchardworks/agent-remote-protocol';
 import type { CallForSupportState } from './call-for-support-profiles.js';
 import type { SavedTeam } from './team-delivery.js';
 import type { TeamResourceStore } from './team-resources.js';
@@ -96,6 +97,8 @@ export interface HostBrokerOptions {
   /** Hosted authentication capability; never enables standalone Gateway access. */
   gatewaySetup?: boolean;
   teamResources?: TeamResourceStore;
+  /** The account's Window groups, whose bots are the assistants that message one another. */
+  assistantGroups?: () => readonly WindowGroup[];
   /** Messages waiting for this account's Hosts; Controllers that ask for it poll, claim and settle them over the uplink. */
   outbox?: { hostCall(hostId: string, call: unknown): Promise<unknown> };
   /** Where Host session journals are kept. Without it no Controller is granted journals. */

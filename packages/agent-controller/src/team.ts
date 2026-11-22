@@ -45,7 +45,8 @@ interface LocalSeat { seat: TeamSeat; creation: 'dispatching' | 'ready' | 'unkno
 /** One message to deliver, with the seat it reaches and its Team. */
 interface Delivery { record: LocalSeat; team: Team; message: TeamMessage }
 /** A main session reads what waits on it before the rest. */
-const taskUpdatePriority = (message: TeamMessage) => /^\[Task \S+ · (question|needs the person) · /.test(message.text) ? 0 : 1;
+/** At idle a main session reads what waits on it first, then other task updates, then other assistants' messages. */
+const taskUpdatePriority = (message: TeamMessage) => /^\[Task \S+ · (question|needs the person) · /.test(message.text) ? 0 : message.text.startsWith('[Message from ') ? 2 : 1;
 /** A task Team missing from the poll this long was removed by the Relay. */
 const TASK_MISSING_FORGET_MS = 10 * 60_000;
 const errorText = (error: unknown) => (error instanceof Error ? error.message : 'Team operation failed.').slice(0, 2048);
@@ -176,7 +177,7 @@ export class TeamRuntime implements SessionRole {
   private async createOnce(seat: TeamSeat): Promise<TeamMember> {
     await this.ready;
     if (!isTeamSeat(seat) || !this.access.available() || seat.member.role !== 'requester' && !this.access.supportedProviders().includes(seat.member.providerId)) throw new Error('Provider does not support Team tools on this Host.');
-    if (seat.task ? this.access.tasks?.() !== true : (seat.callForSupport || seat.member.role === 'requester') && this.access.callForSupport?.() !== true)
+    if (seat.task || seat.link ? this.access.tasks?.() !== true : (seat.callForSupport || seat.member.role === 'requester') && this.access.callForSupport?.() !== true)
       throw new Error(seat.task ? 'Update the Relay to use tasks.' : 'Update the Relay to use Call For Support.');
     const existing = this.records.find(item => item.seat.teamId === seat.teamId && item.seat.member.id === seat.member.id);
     if (existing) {
@@ -274,7 +275,8 @@ export class TeamRuntime implements SessionRole {
   }
   /** A support group's worker seat binds the existing worker session, or the session that holds its role now, and reports where it works. */
   private async bindWorker(seat: TeamSeat): Promise<TeamMember> {
-    if (seat.member.providerId !== seat.source.providerId || seat.member.nativeSessionId !== seat.source.nativeSessionId) throw new Error('The worker seat must name the worker session.');
+    // A link seat is an assistant's main session, which need not be the session that started the link.
+    if (!seat.link && (seat.member.providerId !== seat.source.providerId || seat.member.nativeSessionId !== seat.source.nativeSessionId)) throw new Error('The worker seat must name the worker session.');
     const current = this.access.sessionRouting.resolve(this.anchor(seat)).target;
     const worker = await this.access.acquire(current.providerId, current.nativeSessionId);
     try { seat.member.cwd = worker.agent.snapshot().payload.runtimeInfo.cwd; } finally { worker.release(); }
@@ -386,7 +388,7 @@ export class TeamRuntime implements SessionRole {
         // The live session decides for a held runtime: reported presence can lag a delivery that just started a turn.
         // A running task's worker stays held, so its ended turns, pending interactions and the person's input to it are seen.
         const working = !!record.seat.task && member.role === 'leader' && (team.task?.state === 'working' || team.task?.state === 'needs_input');
-        if ((record.seat.callForSupport || record.seat.task) && !working && !pending && member.activity === 'idle' && team.status !== 'archiving' && !(current && !idle(current.lease))) continue;
+        if ((record.seat.callForSupport || record.seat.task || record.seat.link) && !working && !pending && member.activity === 'idle' && team.status !== 'archiving' && !(current && !idle(current.lease))) continue;
         try {
           const target = this.access.sessionRouting.resolve(this.anchor(record.seat)).target;
           if (target.providerId !== member.providerId || target.nativeSessionId !== member.nativeSessionId) continue;
@@ -411,8 +413,9 @@ export class TeamRuntime implements SessionRole {
               // A claim survived but its local effect boundary did not. Never infer it was unexecuted.
               await this.settle(team.id, member.id, message.id, { status: 'unknown', resolvedTarget: message.resolvedTarget, error: 'Delivery claim has no local receipt. Inspect this session before resolving.' }); continue;
             }
-            if (message.status !== 'queued' || team.status !== 'active' || !availableDelivery(lease, !record.seat.callForSupport && !record.seat.task, !record.seat.task)) continue;
-            if (record.seat.task && member.role === 'requester') {
+            const quiet = !!record.seat.task || !!record.seat.link;
+            if (message.status !== 'queued' || team.status !== 'active' || !availableDelivery(lease, !record.seat.callForSupport && !quiet, !quiet)) continue;
+            if (quiet && member.role === 'requester') {
               const key = nativeSessionRefKey(target), batch = updates.get(key) ?? { lease, target, items: [] };
               batch.items.push({ record, team, message }); updates.set(key, batch);
             } else { await this.dispatch([{ record, team, message }], lease, target); dispatched = !!record.seat.task; }
@@ -531,7 +534,8 @@ export class TeamRuntime implements SessionRole {
     const first = items[0]!, seat = first.record.seat;
     // Support groups and tasks deliver between turns: steering races a turn that is ending, and their work does not need it.
     // The Relay frames what a requester and a task's worker read.
-    const framed = seat.member.role === 'requester' || !!seat.task, delivery = availableDelivery(lease, !seat.callForSupport && !seat.task, !seat.task);
+    const quiet = !!seat.task || !!seat.link;
+    const framed = seat.member.role === 'requester' || !!seat.task, delivery = availableDelivery(lease, !seat.callForSupport && !quiet, !quiet);
     if (!delivery || this.closed || !this.access.available()) return;
     this.access.sessionRouting.assertCurrent(this.anchor(seat), target);
     const receipts: Array<{ item: Delivery; receipt: LocalSeat['receipts'][string] }> = [];

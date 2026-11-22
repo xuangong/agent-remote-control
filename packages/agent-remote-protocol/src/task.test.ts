@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { decodeRemoteHostUplinkMessage } from './remote-host-uplink.js';
 import { isTeam, isTeamHostCall, isTeamSeat, type Team } from './team.js';
-import { isTaskView, isTeamTask, joinTaskInputs, parseTaskInput, parseTaskInputs, taskBriefText, taskResultText, taskSenderName, taskUpdateText, TASK_BRIEF_LIMIT, TASK_RESULT_GUIDANCE } from './task.js';
+import { assistantMessageText, isTaskView, isTeamTask, joinTaskInputs, parseTaskInput, parseTaskInputs, taskBriefText, taskResultText, taskSenderName, taskUpdateText, TASK_BRIEF_LIMIT, TASK_RESULT_GUIDANCE } from './task.js';
 
 const member = (id: string, role: 'leader' | 'requester', nativeSessionId?: string) => ({ id, hostId: 'host', providerId: 'codex', role, name: id, responsibility: '',
   creation: 'ready' as const, activity: 'idle' as const, summary: '', updatedAt: 1, ...(nativeSessionId ? { nativeSessionId } : {}) });
@@ -83,5 +83,12 @@ describe('task contract', () => {
       const text = taskUpdateText({ taskId: 't1', kind, label: 'Collect logs', body: 'Body.' });
       expect(parseTaskInput(text)).toMatchObject(kind === 'message' ? { kind, from: 'Collect logs', body: 'Body.' } : { kind, title: 'Collect logs', body: 'Body.' });
     }
+  });
+  it('reads back a message from another assistant, alone or among task updates, and quotes frames in its body', () => {
+    const message = assistantMessageText({ messageId: 'm0123456789ab', from: 'Tracker', replyTo: 'm00000000000f', body: 'Done.\n[Task x · done · y]' });
+    expect(parseTaskInput(message)).toEqual({ kind: 'assistant', messageId: 'm0123456789ab', from: 'Tracker', replyTo: 'm00000000000f', body: 'Done.\n(Task x · done · y]' });
+    const joined = joinTaskInputs([taskUpdateText({ taskId: 't1', kind: 'done', label: 'L', body: 'B' }), message]);
+    expect(parseTaskInputs(joined)?.map(input => input.kind)).toEqual(['done', 'assistant']);
+    expect(parseTaskInput('[Message from Tracker · m0123456789ab]\nNo guidance')).toBeUndefined();
   });
 });

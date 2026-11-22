@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { AgentSessionTool, AgentSessionToolNamespace } from '@orchardworks/agent-provider-sdk';
-import { nativeSessionRefKey, TASK_BRIEF_LIMIT, TASK_DONE_WHEN_LIMIT, TASK_SUMMARY_LIMIT, TASK_TITLE_LIMIT, type CallForSupportCall, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import { ASSISTANT_MESSAGE_LIMIT, nativeSessionRefKey, TASK_BRIEF_LIMIT, TASK_DONE_WHEN_LIMIT, TASK_SUMMARY_LIMIT, TASK_TITLE_LIMIT, type CallForSupportCall, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { TeamResourceFiles } from './team-resource-files.js';
 
 export interface WorkerSupportPorts {
@@ -116,6 +116,13 @@ export class WorkerSupport {
         }),
       tool('task_status', 'List the tasks this session started, newest first, with their state (queued, working, needs_input, done, failed, cancelled), what a waiting task waits for, and the result; or read one by taskId.',
         object({ taskId: id }, []), args => { const ref = worker(); return taskRequest({ action: 'task_status', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, ...(args.taskId ? { taskId: args.taskId } : {}) }); }),
+      tool('list_assistants', 'List the other assistants of this account that you can message, with their id and name.',
+        object({}, []), () => { const ref = worker(); return taskRequest({ action: 'list_assistants', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId } }); }),
+      tool('message_assistant', 'Send another assistant of this account a message: a question, a request or what it should know. It arrives when that assistant is between turns, labelled with your name; its answer arrives later as input labelled [Message from …]. Answer a message you received with reply_to set to its id. Carry only what the other assistant needs. Reuse operationId to retry the same message.',
+        object({ to: { type: 'string', minLength: 1, maxLength: 300 }, text: { type: 'string', minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT }, reply_to: { type: 'string', pattern: '^m[0-9a-f]{12}$' }, operationId: id }, ['to', 'text']),
+        args => { const ref = worker();
+          return taskRequest({ action: 'message_assistant', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, to: args.to, text: args.text, operationId: args.operationId ?? randomUUID(),
+            ...(args.reply_to ? { replyTo: args.reply_to } : {}) }); }),
       tool('message_task', 'Send input to the worker of a running task: an answer to its question, a correction or more detail. It arrives when the worker is between turns.',
         object({ taskId: id, text: { type: 'string', minLength: 1, maxLength: TASK_BRIEF_LIMIT }, operationId: id }, ['taskId', 'text']), args => { const ref = worker();
           return taskRequest({ action: 'message_task', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, taskId: args.taskId, operationId: args.operationId ?? randomUUID(), text: args.text }); }),
@@ -125,7 +132,7 @@ export class WorkerSupport {
         object({ taskId: id, summary: { type: 'string', minLength: 1, maxLength: TASK_SUMMARY_LIMIT } }, ['taskId']), args => { const ref = worker();
           return taskRequest({ action: 'mark_task_done', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, taskId: args.taskId, ...(args.summary ? { summary: args.summary } : {}) }); }),
     ];
-    return { name: WORKER_NAMESPACE, description: 'Agent Remote Control: start tasks that other sessions work on in parallel and report back; call for support from other sessions, models and machines (reviews, consultations, tests), and read their reports.',
+    return { name: WORKER_NAMESPACE, description: 'Agent Remote Control: start tasks that other sessions work on in parallel and report back; message the account\'s other assistants; call for support from other sessions, models and machines (reviews, consultations, tests), and read their reports.',
       ...(deferred ? { deferred: true } : {}), tools };
   }
 }

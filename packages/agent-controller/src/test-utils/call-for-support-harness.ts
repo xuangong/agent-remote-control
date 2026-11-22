@@ -3,7 +3,7 @@ import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentMessageOptions, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
-import type { AgentSnapshotPayload, CallForSupportProfileInput, NativeSessionRef, Team, TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import type { AgentSnapshotPayload, CallForSupportProfileInput, NativeSessionRef, Team, TeamHostCall, WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { createOperationCache, createOperationExecutor, type AgentManagerEvent, type SessionWireAgent } from '@orchardworks/agent-session-runtime';
 import type { AgentUsage } from '@orchardworks/agent-remote-protocol';
 import { TeamBroker } from '@orchardworks/agent-relay-core/testing';
@@ -17,7 +17,7 @@ export const reviewProfile: CallForSupportProfileInput = { name: 'Cross review',
   enableByDefault: false, mandate: { supporters: [{ providerId: 'claude', model: 'opus' }], maxSupporters: 2, workspaces: ['shared'], remoteHosts: [], approval: 'within_mandate' } };
 
 /** A Relay Team broker with Call For Support and a Controller Team runtime over fake native sessions. */
-export async function supportHarness(options: { callForSupport?: boolean; tasks?: boolean; toolNamespaces?: boolean; failCreate?: (creation: SessionCreation) => boolean;
+export async function supportHarness(options: { groups?: WindowGroup[]; sessions?: string[]; callForSupport?: boolean; tasks?: boolean; toolNamespaces?: boolean; failCreate?: (creation: SessionCreation) => boolean;
   /** Sees each Relay call from the Controller, which forward completes. */
   intercept?: (call: TeamHostCall, forward: (call: TeamHostCall) => Promise<unknown>) => Promise<unknown> } = {}) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'call-for-support-'))), cache = createOperationCache();
@@ -34,6 +34,7 @@ export async function supportHarness(options: { callForSupport?: boolean; tasks?
     sessions.set(id, { payload, deliveries: [] });
   };
   session('worker');
+  for (const id of options.sessions ?? []) session(id);
   const acquired: string[] = [], released: string[] = [], cancelled: string[] = [];
   const listeners = new Map<string, Set<(event: AgentManagerEvent) => void>>();
   const agent = (id: string): SessionWireAgent => ({
@@ -56,6 +57,7 @@ export async function supportHarness(options: { callForSupport?: boolean; tasks?
     callForSupport: { state: () => support, capable: () => true, assertHost() {}, readOnly: () => true, supportBundle: (_host, input) => runtime.supportBundle(input),
       supportPatch: (_host, input) => runtime.supportPatch(input) },
     tasks: { capable: () => options.tasks === true, assertHost() { if (options.tasks !== true) throw new Error('Update the Controller to use tasks.'); } },
+    ...(options.groups ? { assistants: { groups: () => options.groups!, capable: () => options.tasks === true } } : {}),
   });
   const created: Array<{ id: string; provider: string; creation: SessionCreation; extensions: AgentSessionExtensions }> = [];
   const access: TeamRuntimeAccess = {

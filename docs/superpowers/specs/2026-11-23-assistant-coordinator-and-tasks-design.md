@@ -349,6 +349,10 @@ how many and offers **Stop all tasks**.
 
 ### 7.1 Coordinator mode and plain mode
 
+> Superseded on 2026-11-23 (Q4, section 10): there is no mode. Every bot whose provider takes tools has them and the standing
+> instructions from its next attachment; the switch built on `feat/assistant-tasks-deployable` is removed in the plan's step 2.
+> The provider table of 7.2 still says how each CLI gets the tools.
+
 An assistant in **plain** mode is today's bot: one session, no task tools. **Coordinator** mode adds to the main
 session's extensions:
 
@@ -505,29 +509,12 @@ person or by another bot:
   (`update_mission`, on itself only), so the change survives a handoff or a compacted context. No bot rewrites another's mission. A bot it created may in turn
   organize bots of its own, within the limits below.
 - **The person stays above every organizer.** Created bots appear in Chats in their organizer's group, marked with who created
-  them. The person can open, message, rename, edit the mission of, pause or remove any bot.
-- **Limits.** Per account and per organizer: how many bots it may create, how deep organizers may nest, and on which Hosts and
-  providers; the limits are the person's, in Settings. A creation beyond them waits for the person to allow it.
-
-### 10.1 Each feature in the model
-
-| Today | In the model | Removed when done |
-|---|---|---|
-| **Call For Support** | **Bots asking bots.** A bot that needs a review, another model or another machine messages the bot whose mission fits, and that bot does the work its own way, with its own tasks. There is no profile, mandate or roster: the person decides which bots exist and what their missions are. |
-| **Team** | The Leader is a bot that organizes: its members are bots it created with their missions, and one-off work goes to its tasks' workers, reused with `continue_task`. `send_team_message` becomes `message_task`; member reports become `report_task`; `read_team` becomes `task_status`; Team resources become task attachments. | `teams.ts` queue and inbox, `team.ts` delivery, `team_message`, the Team panel and launcher |
-| **Side** | A task the person starts from the conversation (`/side`): its brief is the person's first message, no done-when, workspace `same`. Existing Side relations are listed as tasks. | Side-specific creation and relation kinds, after the relations are migrated |
-| **TPM** | **A bot whose mission is a piece of work.** It keeps that work's work item (10.4), gets it done by messaging the bots that do it and by its own tasks, and updates the progress as their replies, its task results and the person's words arrive; a timer is only its fallback (10.5). |
-| **Rooms** (this design, 6) | A group chat in Bot mode's list, instead of a row of the Teams panel (O71). | The Teams panel |
-
-What is dropped rather than carried over: every special kind of bot, profiles and their migration (the person sets up the bots and missions they want), the person's
-approval of a support roster (the person sees each bot's tasks and can stop them), and the structured findings of a support report
-(a message carries the answer as text and attachments).
-
-What the fold needs from messages, so that any bot can take part:
-
+  them. The person can open, message, rename, edit the mission of, pause or remove any bot, and stop any chain of work (10.7).
+- **No policy limits; an audit instead.** What bots do is recorded for the person to audit and act on (10.7), not refused on
+  their behalf.
 - **A reply is the receiver's answer.** The final text of the turn a message started goes back to the sender as the reply, with no
   tool call, so a bot on any provider (Copilot, OpenCode, a plain bot) can be asked. Only starting a message, a task or a room needs
-  the tools of coordinator mode.
+  tools, which every bot whose provider takes them has: there is no coordinator or plain mode (Q4).
 - **Seeing the work.** A bot asked to review another's change must see it: committed work through the shared repository,
   uncommitted work as a patch attached to the message, or a read-only task in the asking bot's directory on the same Host.
 
@@ -576,6 +563,37 @@ The person or the bot sets one (a name, an interval, an optional end); when due 
 `[Timer "<name>" · due]`, and missed ticks coalesce into one. Any input to the bot pushes its next tick back, so a timer never fires
 while progress is flowing. A bot that keeps an open work item has one by default (five minutes, as TPM's heartbeat). Reading another bot's
 conversation, where its peers allow it, is how a woken bot looks at quiet work.
+
+### 10.6 Tasks are temporary bots
+
+A task is a bot whose lifetime is the task: `create_task` creates a **temporary bot** whose mission is the brief (and done-when)
+and whose organizer is the bot that started it, and sends it its first message. It keeps the task states (working, needs input,
+done), its report coalescing and the person's approvals, and it has every ability of a bot: it may ask other bots and start tasks of
+its own. It is listed in its organizer's details, not in Chats, unless the person keeps it, which makes it a standing bot. After it
+is done and its result settled it stays a while, so its organizer can send it more work by message (no `continue_task`), and then
+retires. A Side is a temporary bot the person starts.
+
+### 10.7 An audit, not guardrails
+
+The person wants to see and intervene, not to be protected by refusals. So bot-to-bot work is recorded, not limited:
+
+- Every input the person sends opens a **chain**; a timer's tick opens one too. Each message, task, created bot and turn caused by
+  it carries the chain's id, with its model usage as the providers report it.
+- The **audit** shows each chain: what started it, the bots and tasks it reached, hops, turns, bots created, usage and duration,
+  live while it runs. The person can stop a chain (every queued input of it is withdrawn and its running turns cancelled), pause a
+  bot, or retire bots from there.
+- Thresholds the person sets (usage, hops, duration) **notify** the person, as a needs-you reminder; they never stop the work.
+- Only system protection still refuses: storage and capacity bounds of the Relay and the Host (8.4). The hop limit of messages
+  (`ASSISTANT_MESSAGE_HOP_LIMIT`), the running-task limit per session and the creation limits become audited facts with optional
+  notifications.
+
+### 10.8 Reports and span
+
+- A report or reply that crosses to another bot is **at most 300 characters**, written by the bot it describes (10, the mission);
+  the details stay where they are and are read on demand with `read_task` or attachments. The Relay refuses a longer report so the
+  bot shortens it, which keeps every organizer's context small. This is a bound on what crosses, not a policy on work.
+- An organizer manages **at most 12 bots directly**, standing or temporary. A thirteenth goes under a sub-organizer it creates;
+  its instructions say so, and the Relay refuses the thirteenth direct report with that advice.
 
 ## 11. Tests
 
@@ -647,7 +665,7 @@ ends with `pnpm verify`, as the repository requires.
 | Q1 | Is a coordinator's main session read-only? Read-only keeps it light and makes delegation necessary; full lets the person say "just fix this line". | Full by default, read-only as a per-assistant setting where the provider supports it |
 | Q2 | May an assistant message steer another assistant's running turn? | No (5.4 rule 1) |
 | Q3 | May an assistant create a task whose worker is another assistant, instead of messaging it? | No: it messages the other assistant, which starts its own tasks (10.1, Call For Support) |
-| Q4 | Do new assistants start in coordinator mode? | Yes where the provider takes tools; existing bots stay plain until switched |
+| Q4 | Do new assistants start in coordinator mode? | Decided 2026-11-23: there is no mode. Every bot, existing ones included, gets the tools and the standing instructions at its next attachment; a provider without tools can be asked (the reply is its answer) but cannot start work (10.1) |
 | Q5 | When are the Team, Support and TPM panels removed? | In each feature's migration step, once its e2e flows pass on the new path; no release with both views, since the owner updates every Controller (10.3) |
 
 ## 13. Out of scope

@@ -38,6 +38,10 @@ export function SessionWorkbench({ assistant, details, conversationTitle: _conve
     setOpen: setTileDetailsOpen } : undefined);
   const process = useProcessMode(processAssistant);
   const mode = assistantModeChoice(processAssistant);
+  const mission = processAssistant ? { text: processAssistant.details?.mission ?? '', save: (text: string) => {
+    const { mission: _previous, ...rest } = processAssistant.details ?? {};
+    processAssistant.update(text ? { ...rest, mission: text } : rest);
+  } } : undefined;
   const [lettersVisible] = useLettersVisible();
   const session = suppliedSessionState ?? remoteSessionState(state, connectionStatus);
   const sessionStatus = session.connection;
@@ -103,7 +107,7 @@ export function SessionWorkbench({ assistant, details, conversationTitle: _conve
       resourceScopeKey={JSON.stringify([state.agent?.id, selectedCommand.id])}
       onClose={() => setInspected(undefined)} /> : null}
     {tileChrome && !phone ? <TileDetailsPanel tileDetails={tileDetails} slotRef={setTileDetailsSlot} /> : null}
-    <ConversationDetails host={detailsHost} visible={visible} state={state} details={details} assistant={assistant} displayScope={displayScope} process={process} {...(mode ? { mode } : {})} session={session}
+    <ConversationDetails host={detailsHost} visible={visible} state={state} details={details} assistant={assistant} displayScope={displayScope} process={process} {...(mode ? { mode } : {})} {...(mission ? { mission } : {})} session={session}
       sessionStatus={sessionStatus} readOnly={readOnly} mutationBlocked={mutationBlocked} draftOnly={draftOnly} actions={actions} renderSessionSettingError={renderSessionSettingError}
       childrenFor={childrenFor} onOpenChildSession={onOpenChildSession} workspaceLink={workspaceLink} {...(nativeSession ? { nativeSession } : {})} />
   </SessionViewFrame>}</SessionAttributions></TimelineLettersVisible.Provider></ProcessModeContext.Provider>;

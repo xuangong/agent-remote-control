@@ -279,6 +279,24 @@ it('offers no working style for an assistant whose provider cannot be a coordina
   } finally { await app.close(); }
 });
 
+it("writes an assistant's mission in its details, keeping its other details, and clears it", async () => {
+  const group = botGroup('A'); group.bots!.members.A1 = { name: 'A1', label: 'Reviewer' };
+  const app = await open('bot-details-mission', [group], '/?mode=bot&section=A&bot=A1');
+  try {
+    const details = () => app.container.querySelector<HTMLElement>('.lab-assistant-details')!;
+    const field = () => details().querySelector<HTMLTextAreaElement>('textarea[aria-label="Mission"]')!;
+    await until(() => expect(field()).not.toBeNull());
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field(), 'Review every change before release.');
+      field().dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => visibleButton(details(), 'Save mission').click());
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ name: 'A1', label: 'Reviewer', mission: 'Review every change before release.' }));
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field(), '  ');
+      field().dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => visibleButton(details(), 'Save mission').click());
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ name: 'A1', label: 'Reviewer' }));
+  } finally { await app.close(); }
+});
+
 it("changes an assistant's avatar from its card, for every device", async () => {
   const app = await open('bot-details-avatar', [botGroup('A')], '/?mode=bot&section=A&bot=A1');
   try {

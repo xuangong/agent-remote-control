@@ -13,6 +13,7 @@ import { WhereItWorks } from './WhereItWorks.js';
 import { SessionsList, type AssistantSessions } from './SessionsList.js';
 import { FilesList } from './FilesList.js';
 import { TasksList } from './TasksList.js';
+import { MissionEditor, type MissionChoice } from './MissionEditor.js';
 import './assistant.css';
 
 /** Everything the details show of one assistant; each section shows only when its part is known. */
@@ -30,6 +31,8 @@ export interface AssistantRef {
   readonly process?: ProcessModeChoice;
   /** Coordinator or plain, for an assistant whose bot details the reader may change. */
   readonly mode?: AssistantModeChoice;
+  /** The mission, for an assistant whose bot details the reader may change. */
+  readonly mission?: MissionChoice;
   readonly settings?: ReactNode;
   readonly files?: readonly SessionFile[];
   readonly openFile?: (file: SessionFile, trigger: HTMLElement) => void;
@@ -59,6 +62,7 @@ export function AssistantDetails({ assistant, surface, onClose }: { assistant: A
         options={[{ value: 'coordinator', label: t('details.mode.coordinator') }, { value: 'plain', label: t('details.mode.plain') }]} />
       <p className="lab-assistant-hint">{t(assistant.mode.mode === 'coordinator' ? 'details.mode.coordinatorHint' : 'details.mode.plainHint')}</p>
     </div>) : null}
+    {assistant.mission ? section('mission', t('details.mission'), <MissionEditor mission={assistant.mission} />) : null}
     {assistant.where ? section('where', t('details.where'), <WhereItWorks where={assistant.where} />) : null}
     {assistant.sessions ? section('sessions', t('details.sessions'), <SessionsList sessions={assistant.sessions} />) : null}
     {assistant.tasks?.length ? section('tasks', t('details.tasks'), <TasksList tasks={assistant.tasks} />) : null}

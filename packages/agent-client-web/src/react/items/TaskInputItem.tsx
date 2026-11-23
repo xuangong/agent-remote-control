@@ -15,14 +15,20 @@ export function TaskInputItem({ inputs, resourceContext }: { readonly inputs: re
   // Other assistants' messages fold into one line per sender; task updates are cards.
   const messages = new Map<string, AssistantInput[]>();
   for (const input of inputs) if (input.kind === 'assistant') messages.set(input.from, [...messages.get(input.from) ?? [], input]);
+  // A temporary bot's progress folds the same way, one line per bot; its result and questions stay cards (bots design 10).
+  const progress = new Map<string, ProgressInput[]>();
+  for (const input of inputs) if (input.kind === 'progress' && 'title' in input) progress.set(input.title, [...progress.get(input.title) ?? [], input]);
   const rooms = inputs.filter((input): input is RoomInput => input.kind === 'room');
   const standing = inputs.filter((input): input is StandingInput => input.kind === 'standing');
   const timers = inputs.filter((input): input is TimerInput => input.kind === 'timer');
   return <div className="agent-timeline-item agent-task-inputs">
     {standing.map((input, index) => <details key={`standing:${index}`} className="agent-assistant-messages" data-standing-version={input.version}>
       <summary>{t('timeline.standingInstructions')}</summary><MarkdownContent markdown={input.body} resourceContext={resourceContext} /></details>)}
-    {inputs.map((input, index) => input.kind === 'assistant' || input.kind === 'room' || input.kind === 'standing' || input.kind === 'timer' ? null : <TaskInputCard key={`${input.taskId}:${index}`} input={input} resourceContext={resourceContext} />)}
+    {inputs.map((input, index) => input.kind === 'assistant' || input.kind === 'room' || input.kind === 'standing' || input.kind === 'timer' || input.kind === 'progress' ? null : <TaskInputCard key={`${input.taskId}:${index}`} input={input} resourceContext={resourceContext} />)}
     {[...messages].map(([from, items]) => <AssistantMessages key={from} from={from} items={items} resourceContext={resourceContext} />)}
+    {[...progress].map(([title, items]) => <details key={`progress:${title}`} className="agent-assistant-messages" data-task-progress={items[0]!.taskId}>
+      <summary>{t('timeline.task.progressFrom', { count: items.length, from: title })}</summary>
+      {items.map((item, index) => <MarkdownContent key={index} markdown={item.body} resourceContext={resourceContext} />)}</details>)}
     {rooms.map(room => <details key={room.roomId} className="agent-assistant-messages" data-room-id={room.roomId}>
       <summary>{t('timeline.roomTurn', { name: room.name, count: room.count })}</summary><MarkdownContent markdown={room.body} resourceContext={resourceContext} /></details>)}
     {timers.map((timer, index) => <details key={`timer:${index}`} className="agent-assistant-messages" data-timer={timer.name}>
@@ -33,6 +39,8 @@ type AssistantInput = Extract<TaskInput, { kind: 'assistant' }>;
 type RoomInput = Extract<TaskInput, { kind: 'room' }>;
 type StandingInput = Extract<TaskInput, { kind: 'standing' }>;
 type TimerInput = Extract<TaskInput, { kind: 'timer' }>;
+/** A task update (its kind is one of several), here a temporary bot's progress. */
+type ProgressInput = Extract<TaskInput, { title: string; body: string }>;
 
 /** Messages from another assistant: one quiet line that opens to the messages. */
 function AssistantMessages({ from, items, resourceContext }: { readonly from: string; readonly items: readonly AssistantInput[]; readonly resourceContext?: MarkdownResourceContext }) {

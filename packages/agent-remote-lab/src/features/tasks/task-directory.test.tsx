@@ -41,15 +41,17 @@ describe('the task directory', () => {
     expect(open).toHaveBeenCalledWith(expect.objectContaining({ nativeSessionId: 'n-session' }));
   });
 
-  it('stops a running task or marks it done from its row, and offers neither on a finished one', async () => {
+  it('stops a running task, marks it done or keeps its bot from its row, and offers only keeping on a finished one', async () => {
     const act = vi.fn(async () => {});
     const directory = taskDirectory([taskTeam('w', {}), taskTeam('d', { state: 'done', result: { status: 'done', summary: 'Done.', reportedAt: 3 } })], () => {}, act);
     const container = await render(<TaskDirectoryContext.Provider value={directory}><TasksList tasks={directory.owned({ providerId: 'claude', nativeSessionId: 'main' })} /></TaskDirectoryContext.Provider>);
     const rows = [...container.querySelectorAll('li')];
     for (const row of rows) await act_(() => row.querySelector<HTMLButtonElement>('.lab-assistant-session-toggle')!.click());
-    expect(rows.map(row => [...row.querySelectorAll('.lab-assistant-task-actions button')].map(button => button.textContent))).toEqual([['Mark done', 'Stop'], []]);
-    await act_(() => rows[0]!.querySelector<HTMLButtonElement>('.lab-assistant-task-actions button:last-child')!.click());
+    expect(rows.map(row => [...row.querySelectorAll('.lab-assistant-task-actions button')].map(button => button.textContent))).toEqual([['Mark done', 'Stop', 'Keep as a bot'], ['Keep as a bot']]);
+    await act_(() => [...rows[0]!.querySelectorAll<HTMLButtonElement>('.lab-assistant-task-actions button')].find(button => button.textContent === 'Stop')!.click());
     expect(act).toHaveBeenCalledWith('w', 'cancel_task');
+    await act_(() => rows[1]!.querySelector<HTMLButtonElement>('.lab-assistant-task-actions button')!.click());
+    expect(act).toHaveBeenCalledWith('d', 'keep_task');
   });
 
   it('shows a standing bot\'s work items from its inbox: open ones with their phase and next step first', async () => {
@@ -64,5 +66,12 @@ describe('the task directory', () => {
     expect(rows[1]!.textContent).toContain('Waiting');
     for (const row of rows) await act_(() => row.querySelector<HTMLButtonElement>('.lab-assistant-session-toggle')!.click());
     expect(rows[1]!.textContent).toContain('Next: Ask the person.');
+  });
+
+  it('lists the standing bots a bot organizes, from their records', () => {
+    const groups = [{ window: { id: 'g', views: [] }, bots: { rank: 'm', members: { a: { botId: 'b_' + '1'.repeat(32), name: 'Chief' }, b: { botId: 'b_' + '2'.repeat(32), name: 'Scribe', organizer: 'b_' + '1'.repeat(32) } } } }] as never;
+    const directory = taskDirectory([], () => {}, undefined, groups);
+    expect(directory.organized!('b_' + '1'.repeat(32))).toEqual([{ botId: 'b_' + '2'.repeat(32), name: 'Scribe' }]);
+    expect(directory.organized!('b_' + '2'.repeat(32))).toEqual([]);
   });
 });

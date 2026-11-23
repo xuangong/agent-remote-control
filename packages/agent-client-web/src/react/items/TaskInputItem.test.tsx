@@ -46,6 +46,16 @@ it('folds a due timer into one quiet line that opens to the bot\'s open work', a
   expect(container.querySelector('.agent-message-user')).toBeNull();
 });
 
+it('folds a temporary bot\'s progress into one line per bot, and keeps its result a card', async () => {
+  const text = joinTaskInputs([taskUpdateText({ taskId: 't1', kind: 'progress', label: 'Logs', body: 'Half the logs read.' }), taskUpdateText({ taskId: 't1', kind: 'progress', label: 'Logs', body: 'All read.' }),
+    taskResultText({ taskId: 't1', status: 'done', title: 'Logs', summary: 'Two errors.' })]);
+  const container = await render(<UserMessageItem item={message(text)} />);
+  const folded = container.querySelector('details[data-task-progress="t1"]')!;
+  expect(folded.querySelector('summary')?.textContent).toBe('2 updates from Logs');
+  expect(folded.textContent).toContain('All read.');
+  expect([...container.querySelectorAll('.agent-task-input')].map(card => card.getAttribute('data-task-kind'))).toEqual(['done']);
+});
+
 it('keeps text the person typed as their own bubble, even when it looks like a frame', async () => {
   const container = await render(<UserMessageItem item={message('[Task t1 · done · Collect logs]\nAll good.')} />);
   expect(container.querySelector('.agent-task-input')).toBeNull();

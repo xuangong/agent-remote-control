@@ -59,6 +59,7 @@ export const timeline: AreaMessages<typeof english> = {
   'timeline.roomTurn': { other: '轮到你在 {name} 发言 · {count} 条新消息' },
   'timeline.standingInstructions': '常驻指令已更新',
   'timeline.timerDue': '计时器“{name}”到期',
+  'timeline.task.progressFrom': { other: '{from} 的 {count} 条进展' },
   'timeline.assistantMessages': { other: '{from} 发来 {count} 条消息' },
   'timeline.reasoning': '思考过程',
   'timeline.todo.board': '任务板',

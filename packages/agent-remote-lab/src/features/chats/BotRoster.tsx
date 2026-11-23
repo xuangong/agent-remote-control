@@ -7,7 +7,7 @@ import type { BotPlace } from '../../kernel/workbench-mode.js';
 import { sessionKey } from '../../kernel/session-tree.js';
 import { Icon } from '../../ui/Icon.js';
 import { dateLocale, replyTime } from '../../kernel/reply-time.js';
-import { LocaleContext, useTranslate } from '@orchardworks/agent-client-web/react';
+import { LocaleContext, useTaskDirectory, useTranslate } from '@orchardworks/agent-client-web/react';
 import { contextMenuEvents } from '../../ui/ContextMenu.js';
 
 export function botPlaceKey(place: BotPlace): string {
@@ -20,6 +20,7 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
   /** Opens the row's context menu: at the pointer for a right-click, beside the row for Shift-F10 or the context menu key. */
   menu?(anchor: HTMLElement, point?: { x: number; y: number }): void }) {
   const t = useTranslate();
+  const directory = useTaskDirectory();
   const name = row.name, destination: BotPlace = { kind: 'bot', groupId: row.groupId, viewId: row.viewId };
   const locale = useContext(LocaleContext);
   const time = row.reply ? replyTime(row.reply.replyAt, undefined, dateLocale(locale), t) : undefined;
@@ -29,9 +30,12 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
   const quiet = row.assistant.state === 'idle' || row.assistant.state === 'unknown';
   // Needs you is not unread: it asks for the owner, so its dot is distinct and mute never quiets it.
   const needsYou = row.assistant.state === 'needs_you';
-  const sentence = draft && quiet ? undefined : row.assistant.sentence || undefined;
+  // A quiet bot that keeps work shows where its work stands (bots design 10): its latest open work item and phase.
+  const work = quiet ? directory?.work?.(row.session).find(item => item.phase !== 'done') : undefined;
+  const sentence = draft && quiet ? undefined : (work ? `${work.title} · ${t(`details.workPhase.${work.phase}`)}` : row.assistant.sentence) || undefined;
   // The role and label are tags beside the name, like a job title; screen readers hear them after the name.
-  const description = [row.role, row.details.label, sentence, draft ? `${t('assistants.draft')}: ${draft}` : undefined, row.unread ? t('assistants.unread') : undefined,
+  const organizedBy = row.organizer ? t('assistants.organizedBy', { name: row.organizer }) : undefined;
+  const description = [row.role, row.details.label, organizedBy, sentence, draft ? `${t('assistants.draft')}: ${draft}` : undefined, row.unread ? t('assistants.unread') : undefined,
     row.details.pinned ? t('assistants.pinned') : undefined, row.muted ? t('assistants.muted') : undefined, time].filter(Boolean).join(' · ');
   const menuEvents = menu ? contextMenuEvents(({ target, point }) => {
     const anchor = target.closest<HTMLElement>('.lab-bot-row');
@@ -47,6 +51,7 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
         <span className="lab-bot-name-line"><strong className="lab-bot-name">{name}</strong>
           {row.role ? <span className="lab-bot-role">{row.role}</span> : null}
           {row.details.label ? <span className="lab-bot-label">{row.details.label}</span> : null}
+          {organizedBy ? <span className="lab-bot-label" data-organizer>{organizedBy}</span> : null}
           {marks}
           {row.muted ? <span className="lab-bot-muted" aria-hidden="true"><Icon name="bell-off" size={13} /></span> : null}
           {time ? <span className="lab-bot-time" aria-hidden="true">{time}</span> : null}</span>

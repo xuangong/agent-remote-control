@@ -10,10 +10,12 @@ export interface TaskDirectory {
   open(taskId: string): void;
   /** The tasks a session owns, newest first. */
   owned(owner: { providerId: string; nativeSessionId: string }): readonly TaskView[];
+  /** The standing bots a bot organizes: the ones it created (bots design 10). */
+  organized?(botId: string): readonly { botId: string; name: string }[];
   /** A standing bot's work items, newest first (bots design 6). */
   work?(bot: { providerId: string; nativeSessionId: string }): readonly WorkItem[];
-  /** The person stops a running task or takes it as done. */
-  act(taskId: string, action: 'cancel_task' | 'mark_task_done'): Promise<void>;
+  /** The person stops a running task, takes it as done, or keeps its bot as a standing bot (bots design 10). */
+  act(taskId: string, action: 'cancel_task' | 'mark_task_done' | 'keep_task'): Promise<void>;
 }
 export const TaskDirectoryContext = createContext<TaskDirectory | undefined>(undefined);
 export const useTaskDirectory = (): TaskDirectory | undefined => useContext(TaskDirectoryContext);

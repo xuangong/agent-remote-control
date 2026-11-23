@@ -1,4 +1,6 @@
 import { forwardRef, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ComponentType } from 'react';
+import type { Team } from '@orchardworks/agent-remote-protocol';
+import { BotRooms } from './BotRooms.js';
 import type { useWindowWorkspace } from '../windows/useWindowWorkspace.js';
 import type { useWorkbenchMode } from '../../kernel/useWorkbenchMode.js';
 import type { useOtherSessions } from './useOtherSessions.js';
@@ -34,6 +36,8 @@ export interface BotSelection { loading: boolean; error?: string; retry(): Promi
 
 export interface BotWorkspaceProps {
   visible: boolean; compact: boolean; scope: string;
+  /** The account's rooms, from the Teams the page keeps (bots design 10). */
+  rooms?: readonly Team[];
   /** Settings or the directory is over this workspace: it keeps its conversation and its draft, but is out of sight and reach. */
   covered?: boolean;
   workspace: ReturnType<typeof useWindowWorkspace>;
@@ -72,7 +76,7 @@ export function botConversationShown(facts: { place?: BotPlace; phone: boolean; 
  * The details are closed by default below the compact width; at phone width one screen shows at a time, the list as home,
  * and the details open as a sheet.
  */
-export function BotWorkspace({ visible, covered = false, compact, scope, workspace, navigation, selected, roster, projectRoster, directory, describeConversation, mount: Mount = SessionConversationMount, hostName = id => id, botInfo, onNewBot, onPinToWindow, onSearch }: BotWorkspaceProps) {
+export function BotWorkspace({ visible, covered = false, compact, scope, rooms, workspace, navigation, selected, roster, projectRoster, directory, describeConversation, mount: Mount = SessionConversationMount, hostName = id => id, botInfo, onNewBot, onPinToWindow, onSearch }: BotWorkspaceProps) {
   const t = useTranslate();
   const names = useAssistantNames();
   const phone = usePhoneLayout();
@@ -186,7 +190,7 @@ export function BotWorkspace({ visible, covered = false, compact, scope, workspa
       {creation.state === 'unknown' ? <p className="lab-bot-notice" role="status">{t('navigation.botWorkspace.groupUnconfirmed')} <button type="button" onClick={() => void retryGroup()}>{t('common.retry')}</button></p> : null}
       {actions.notice}
       {groupActions.error ? <p className="lab-bot-notice" role="alert">{groupActions.error}</p> : groupActions.notice ? <p className="lab-bot-notice" role="status">{groupActions.notice}</p> : null}
-      <div className="lab-bot-roster-scroll" onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><SharedBotRoster model={roster} groups={workspace.groups} project={projectRoster} place={place} onSelect={open} hostName={hostName} compact={phone} menu={chatMenu}
+      <div className="lab-bot-roster-scroll" onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}>{rooms ? <BotRooms scope={scope} rooms={rooms} /> : null}<SharedBotRoster model={roster} groups={workspace.groups} project={projectRoster} place={place} onSelect={open} hostName={hostName} compact={phone} menu={chatMenu}
         directoryControls={<div className="lab-bot-directory-controls">
           {directory.sources.map(source => <div key={source.id}><small>{hostName(source.hostId)} · {source.providerId}</small>
             {!source.online ? <p>{t('navigation.botWorkspace.hostOffline')}</p> : null}{source.loading ? <p role="status">{t('navigation.botWorkspace.loadingSessions')}</p> : null}

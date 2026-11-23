@@ -27,6 +27,8 @@ export interface AssistantRef {
   readonly sessions?: AssistantSessions;
   /** The tasks the session on screen owns. */
   readonly tasks?: readonly TaskView[];
+  /** The standing bots this bot created and organizes. */
+  readonly bots?: readonly { botId: string; name: string }[];
   /** A standing bot's work items, which it keeps itself. */
   readonly work?: readonly WorkItem[];
   /** This assistant's own process mode; the device's default, notifications and letters are in Settings > Assistants. */
@@ -61,6 +63,7 @@ export function AssistantDetails({ assistant, surface, onClose }: { assistant: A
     {assistant.work?.length ? section('work', t('details.work'), <WorkList work={assistant.work} />) : null}
     {assistant.where ? section('where', t('details.where'), <WhereItWorks where={assistant.where} />) : null}
     {assistant.sessions ? section('sessions', t('details.sessions'), <SessionsList sessions={assistant.sessions} />) : null}
+    {assistant.bots?.length ? section('bots', t('details.bots'), <ul className="lab-assistant-chain lab-assistant-bots">{assistant.bots.map(bot => <li key={bot.botId}><span className="lab-assistant-session-title">{bot.name}</span></li>)}</ul>) : null}
     {assistant.tasks?.length ? section('tasks', t('details.tasks'), <TasksList tasks={assistant.tasks} />) : null}
     {assistant.settings ? section('model', t('details.model'), <div className="lab-assistant-settings">{assistant.settings}</div>) : null}
     {assistant.files ? section('files', t('details.files'), <FilesList files={assistant.files} {...(assistant.openFile ? { onOpen: assistant.openFile } : {})} />) : null}

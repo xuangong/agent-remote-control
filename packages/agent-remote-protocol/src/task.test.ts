@@ -103,6 +103,6 @@ it('reads a bot\'s standing instructions that arrived together with a message fr
   const text = joinTaskInputs([standingInstructionsText('Watch the build.'), assistantMessageText({ messageId: 'm123456789abc', from: 'Chief', body: 'Is it green?' })]);
   const inputs = parseTaskInputs(text)!;
   expect(inputs.map(input => input.kind)).toEqual(['standing', 'assistant']);
-  expect(inputs[0]).toMatchObject({ kind: 'standing', version: 1 });
+  expect(inputs[0]).toMatchObject({ kind: 'standing', version: 2 });
   expect((inputs[0] as { body: string }).body).toMatch(/Your mission:\nWatch the build\.$/);
 });

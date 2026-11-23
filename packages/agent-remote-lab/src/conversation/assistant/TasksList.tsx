@@ -14,7 +14,7 @@ export function TasksList({ tasks }: { tasks: readonly TaskView[] }) {
   const locale = useContext(LocaleContext);
   const directory = useTaskDirectory();
   const [pending, setPending] = useState(false), [error, setError] = useState<string>();
-  async function act(taskId: string, action: 'cancel_task' | 'mark_task_done') {
+  async function act(taskId: string, action: 'cancel_task' | 'mark_task_done' | 'keep_task') {
     if (!directory || pending) return;
     setPending(true); setError(undefined);
     try { await directory.act(taskId, action); } catch (reason) { setError(errorWords(reason, t, 'details.taskActionFailed')); } finally { setPending(false); }
@@ -35,7 +35,11 @@ export function TasksList({ tasks }: { tasks: readonly TaskView[] }) {
       {directory && (task.state === 'working' || task.state === 'needs_input' || task.state === 'queued') ? <div className="lab-assistant-task-actions">
         <button type="button" className="lab-assistant-action" disabled={pending} onClick={() => void act(task.taskId, 'mark_task_done')}>{t('details.taskMarkDone')}</button>
         <button type="button" className="lab-assistant-action" disabled={pending} onClick={() => void act(task.taskId, 'cancel_task')}>{t('details.taskStop')}</button>
+        <button type="button" className="lab-assistant-action" disabled={pending} onClick={() => void act(task.taskId, 'keep_task')}>{t('details.taskKeep')}</button>
       </div> : null}
+      {/* A finished bot may still be kept, with what it learned. */}
+      {directory && task.state === 'done' && task.worker.nativeSessionId ? <div className="lab-assistant-task-actions">
+        <button type="button" className="lab-assistant-action" disabled={pending} onClick={() => void act(task.taskId, 'keep_task')}>{t('details.taskKeep')}</button></div> : null}
       {task.result ? <p>{task.result.summary}</p> : null}
       {task.worker.nativeSessionId ? <Copyable label={t('details.sessionId')} value={task.worker.nativeSessionId} /> : null}
     </SessionRow>)}</ul>

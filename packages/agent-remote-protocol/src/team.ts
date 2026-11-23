@@ -127,6 +127,8 @@ export const TeamAction = Type.Union([
   // The person stops a task, or takes it as done.
   Type.Object({ teamId: id, action: Type.Literal('cancel_task') }, object),
   Type.Object({ teamId: id, action: Type.Literal('mark_task_done') }, object),
+  // The person keeps a temporary bot as a standing bot of its organizer's group (bots design 10).
+  Type.Object({ teamId: id, action: Type.Literal('keep_task') }, object),
   // The person writes in a room, or ends it.
   Type.Object({ teamId: id, action: Type.Literal('room_post'), operationId: id, text: Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT }) }, object),
   Type.Object({ teamId: id, action: Type.Literal('close_room') }, object),

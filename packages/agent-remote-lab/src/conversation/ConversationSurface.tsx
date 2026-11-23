@@ -105,7 +105,7 @@ export function SessionWorkbench({ assistant, details, conversationTitle: _conve
       resourceScopeKey={JSON.stringify([state.agent?.id, selectedCommand.id])}
       onClose={() => setInspected(undefined)} /> : null}
     {tileChrome && !phone ? <TileDetailsPanel tileDetails={tileDetails} slotRef={setTileDetailsSlot} /> : null}
-    <ConversationDetails host={detailsHost} visible={visible} state={state} details={details} assistant={assistant} displayScope={displayScope} process={process} {...(mission ? { mission } : {})} session={session}
+    <ConversationDetails host={detailsHost} visible={visible} state={state} details={details} assistant={assistant} displayScope={displayScope} process={process} {...(mission ? { mission } : {})} {...(processAssistant?.details?.botId ? { botId: processAssistant.details.botId } : {})} session={session}
       sessionStatus={sessionStatus} readOnly={readOnly} mutationBlocked={mutationBlocked} draftOnly={draftOnly} actions={actions} renderSessionSettingError={renderSessionSettingError}
       childrenFor={childrenFor} onOpenChildSession={onOpenChildSession} workspaceLink={workspaceLink} {...(nativeSession ? { nativeSession } : {})} />
   </SessionViewFrame>}</SessionAttributions></TimelineLettersVisible.Provider></ProcessModeContext.Provider>;

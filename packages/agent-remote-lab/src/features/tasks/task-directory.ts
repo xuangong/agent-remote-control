@@ -1,4 +1,4 @@
-import { taskView, type Team, type WorkItem } from '@orchardworks/agent-remote-protocol';
+import { taskView, type Team, type WindowGroup, type WorkItem } from '@orchardworks/agent-remote-protocol';
 import type { TaskDirectory } from '@orchardworks/agent-client-web/react';
 
 /** A worker session the page can open: a task's Leader once its session exists. */
@@ -11,13 +11,15 @@ export function taskWorker(tasks: readonly Team[] | undefined, taskId: string): 
 }
 
 /** The tasks and the bots' inboxes, as the Relay lists them. Task cards open a task's worker session the way the page opens any session. */
-export function taskDirectory(tasks: readonly Team[] | undefined, open: (worker: TaskWorker) => void, act: TaskDirectory['act'] = async () => {}): TaskDirectory {
+export function taskDirectory(tasks: readonly Team[] | undefined, open: (worker: TaskWorker) => void, act: TaskDirectory['act'] = async () => {}, groups: readonly WindowGroup[] = []): TaskDirectory {
   return {
     canOpen: taskId => !!taskWorker(tasks, taskId),
     open: taskId => { const worker = taskWorker(tasks, taskId); if (worker) open(worker); },
     act,
     owned: owner => (tasks ?? []).filter(team => team.task && team.members[1]?.providerId === owner.providerId && team.members[1].nativeSessionId === owner.nativeSessionId)
       .map(taskView).sort((a, b) => b.updatedAt - a.updatedAt),
+    // A bot's standing bots are the ones whose record names it as their organizer.
+    organized: botId => groups.flatMap(group => Object.values(group.bots?.members ?? {}).flatMap(item => item.organizer === botId && item.botId ? [{ botId: item.botId, name: item.name ?? item.botId }] : [])),
     // A standing bot's inbox is bound to its session; its work items travel on it.
     work: bot => [...(tasks ?? []).find(team => team.inbox && team.members[0]?.providerId === bot.providerId && team.members[0].nativeSessionId === bot.nativeSessionId)?.inbox?.work ?? []]
       .sort((a: WorkItem, b: WorkItem) => b.updatedAt - a.updatedAt),

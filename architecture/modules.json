@@ -808,7 +808,8 @@
       "uses": [
         "workbench-kernel",
         "workbench-conversation",
-        "workbench-windows"
+        "workbench-windows",
+        "workbench-team"
       ],
       "seams": [
         "S6"

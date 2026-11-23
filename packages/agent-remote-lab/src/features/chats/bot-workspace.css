@@ -207,3 +207,7 @@ button.lab-assistant-title:is(:hover, [aria-expanded="true"]):not(:disabled) { b
 /* Needs you: the brand dot inside a ring, so it differs from an unread dot by shape as well as by weight. */
 .lab-bot-needs-you { flex: none; width: 8px; height: 8px; margin-inline: auto 3px; border-radius: 50%; background: var(--orchard-brand);
   box-shadow: 0 0 0 2px var(--orchard-surface), 0 0 0 3.5px var(--orchard-brand); }
+
+/* Rooms above the bots in Chats (bots design 10): each a row that opens the room as a group chat. */
+.lab-bot-rooms h3 { margin: var(--orchard-space-s) var(--orchard-space-m) var(--orchard-space-xs); font-size: var(--orchard-type-caption-size); color: var(--orchard-text-secondary); }
+.lab-bot-rooms ul { list-style: none; margin: 0; padding: 0; }

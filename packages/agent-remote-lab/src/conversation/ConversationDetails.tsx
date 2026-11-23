@@ -16,10 +16,10 @@ import type { LabWorkbenchActions, SessionWorkbenchProps } from './session-workb
 const loadDetails = () => import('./assistant/AssistantDetails.js');
 const AssistantDetails = lazy(() => loadDetails().then(module => ({ default: module.AssistantDetails })));
 
-export function ConversationDetails({ host, visible, state, details, assistant, displayScope, process, mission, session, sessionStatus, readOnly, mutationBlocked, draftOnly, actions,
+export function ConversationDetails({ host, visible, state, details, assistant, displayScope, process, mission, botId, session, sessionStatus, readOnly, mutationBlocked, draftOnly, actions,
   renderSessionSettingError, childrenFor, onOpenChildSession, workspaceLink, nativeSession }: {
   host: AssistantDetailsHost | undefined; visible: boolean; state?: AgentReplicaState; details?: SessionWorkbenchProps['details']; assistant: SessionWorkbenchProps['assistant'];
-  displayScope?: string; process: ReturnType<typeof useProcessMode>; mission?: MissionChoice; session: RemoteSessionState; sessionStatus: RemoteSessionStatus;
+  displayScope?: string; process: ReturnType<typeof useProcessMode>; mission?: MissionChoice; /** The bot's record, when this conversation is a bot's. */ botId?: string; session: RemoteSessionState; sessionStatus: RemoteSessionStatus;
   readOnly: boolean; mutationBlocked: boolean; draftOnly: boolean; actions: LabWorkbenchActions; renderSessionSettingError?(error: unknown): ReactNode;
   childrenFor?(nativeSessionId: string): readonly AgentChildSessionView[]; onOpenChildSession?(child: AgentChildSessionView): void | Promise<void>; workspaceLink?: ReactNode;
   /** The session on screen, `<providerId>/<nativeSessionId>`. */
@@ -33,6 +33,7 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
   const detailsShown = !!host?.open && visible && (host.surface === 'sheet' || !!host.slot);
   const tasks = detailsShown && directory && providerId && rest.length ? directory.owned({ providerId, nativeSessionId: rest.join('/') }) : [];
   const work = detailsShown && directory?.work && providerId && rest.length ? directory.work({ providerId, nativeSessionId: rest.join('/') }) : [];
+  const bots = detailsShown && botId && directory?.organized ? directory.organized(botId) : [];
   const files = useMemo(() => detailsShown && state ? sessionFiles(state.timeline.entries) : [], [detailsShown, state?.timeline.entries]);
   const reportedSession = state?.agent?.runtimeInfo.sessionId;
   const lastTurn = detailsShown ? Date.parse(state?.timeline.entries.at(-1)?.timestamp ?? '') || undefined : undefined;
@@ -41,7 +42,7 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
     ...(host?.action ? { action: host.action } : {}), ...(host?.actions ? { actions: host.actions } : {}),
     ...(host?.where ? { where: host.where } : {}), ...(host?.setPicture ? { setPicture: host.setPicture } : {}),
     ...(host?.rename ? { rename: host.rename } : {}),
-    process, ...(mission ? { mission } : {}), ...(tasks.length ? { tasks } : {}), ...(work.length ? { work } : {}),
+    process, ...(mission ? { mission } : {}), ...(tasks.length ? { tasks } : {}), ...(work.length ? { work } : {}), ...(bots.length ? { bots } : {}),
     sessions: { ...details?.sessions, ...(lastTurn ? { time: lastTurn } : {}), ...(state?.agent?.cwd ? { directory: state.agent.cwd } : {}), ...(reportedSession ? { sessionId: reportedSession } : {}),
       subagents: reportedSession ? childrenFor?.(reportedSession) ?? [] : [], ...(onOpenChildSession ? { openSubagent: onOpenChildSession } : {}),
       tools: <>{details?.sessions?.tools}{workspaceLink}</> },

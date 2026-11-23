@@ -142,3 +142,11 @@ it('lists every assistant in the directory by group in catalog order, marking th
   // The Chats projection of the same groups leaves the group hidden in Bot mode out.
   expect(projectBotRoster([shown, hiddenGroup, windowOnly], [], { status: () => 'idle' }).sections.map(section => section.groupId)).toEqual(['shown', 'window-only']);
 });
+
+it('names the bot that created and organizes a bot, by its record (bots design 10)', () => {
+  const team = group('team', [createWindowView('chief', binding('chief'), 'primary'), createWindowView('scribe', binding('scribe'), 'primary')]);
+  team.bots!.members.chief = { botId: 'b_' + '1'.repeat(32), name: 'Chief' };
+  team.bots!.members.scribe = { botId: 'b_' + '2'.repeat(32), name: 'Scribe', organizer: 'b_' + '1'.repeat(32) };
+  const rows = projectBotRoster([team], [], { status: () => 'idle' }).sections[0]!.rows;
+  expect(rows.map(row => [row.name, row.organizer])).toEqual([['Chief', undefined], ['Scribe', 'Chief']]);
+});

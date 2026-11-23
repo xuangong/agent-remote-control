@@ -70,6 +70,14 @@ describe('bots calling as their own sessions', () => {
     expect(await f.broker.hostCall('mac', { action: 'stop_bot', owner: f.as('chief'), bot: 'Reviewer' })).toMatchObject({ status: 'cancelled' });
   });
 
+  it('keeps a temporary bot as a standing bot of its organizer\'s group when the person asks, and ends its task as done', async () => {
+    const f = fixture();
+    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review the release branch.', lifetime: 'temporary' });
+    await f.broker.action({ teamId: f.task().id, action: 'keep_task' });
+    expect(f.placed).toEqual([{ groupId: 'g', viewId: expect.stringMatching(/^bot-/), details: { botId: expect.stringMatching(/^b_[0-9a-f]{32}$/), name: 'Reviewer', mission: 'Review the release branch.', organizer: ids.chief } }]);
+    expect(f.task().task!.state).toBe('done');
+  });
+
   it('creates a standing bot in its organizer\'s group, with its mission and organizer, whose first message waits in its inbox', async () => {
     const f = fixture();
     const created = await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Scribe', mission: 'Keep the release notes.', lifetime: 'standing', message: 'Start from v0.3.' }) as { botId: string; status: string };

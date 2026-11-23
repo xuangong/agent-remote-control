@@ -201,6 +201,7 @@ export class TeamBroker {
       this.rooms?.arm();
       return this.project(changed);
     }
+    if (input.action === 'keep_task') return this.project(await (this.bots ?? fail(unavailableAssistants)).keep(input.teamId));
     if (input.action === 'cancel_task' || input.action === 'mark_task_done') {
       if (!this.tasks) fail(unavailableTasks);
       return this.project(await this.change(teams => { const team = find(teams, input.teamId); taskAction(team, input.action as 'cancel_task' | 'mark_task_done', this.ports.now()); return team; }));

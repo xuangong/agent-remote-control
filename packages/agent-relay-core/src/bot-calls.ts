@@ -7,7 +7,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { assistantMessageText, nativeSessionRefKey, taskView, type TeamHostCall, type TaskView, type TeamMember, type WorkItem } from '@orchardworks/agent-remote-protocol';
 import { accountDirectory, callerAssistant, type Assistant, type AssistantBrokerPorts, type AssistantMessages, type AssistantPorts } from './assistants.js';
-import { ownerTasks, type TaskGroups } from './tasks.js';
+import { ownerTasks, taskAction, type TaskGroups } from './tasks.js';
 import { ACCOUNT_TEAM_LIMIT, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
 import { pruneCoordination } from './coordination-retention.js';
@@ -111,6 +111,25 @@ export class BotCalls {
     const placed = !this.broker.ports.read().find(item => item.id === team.id)?.inbox?.pending;
     return { botId: team.inbox!.botId, status: placed ? 'ready' : 'waiting',
       message: placed ? `Bot "${call.name}" is ready in your group; it reads its mission first and reports in.` : `Bot "${call.name}" is recorded; its session starts when this computer can create it.` };
+  }
+  /**
+   * The person keeps a temporary bot (bots design 10): its session becomes a standing bot of its organizer's group, with its brief as
+   * its mission and the organizer recorded, and its task ends as done. Its work and conversation stay where they are.
+   */
+  async keep(teamId: string): Promise<SavedTeam> {
+    const team = this.broker.ports.read().find(item => item.id === teamId && item.task) ?? fail('No temporary bot has that id.');
+    const worker = team.members[0]!, organizer = this.organizerOf(this.temporary(team));
+    if (!worker.nativeSessionId || worker.creation !== 'ready') fail('This bot has no session to keep yet.');
+    const group = organizer?.standing ?? fail('Only a bot of a group can keep the bots it organizes; this one\'s organizer is not in one.');
+    const placeBot = this.ports.placeBot ?? fail('Standing bots cannot be created on this Relay.');
+    const botId = newBotId(), name = team.task!.title.slice(0, 60);
+    await placeBot(group.groupId, { id: `bot-${botId.slice(2, 14)}`, binding: { hostId: worker.hostId, providerId: worker.providerId, nativeSessionId: worker.nativeSessionId!, title: name } },
+      { botId, name, mission: team.task!.brief.slice(0, 4000), organizer: organizer!.key });
+    return this.broker.change(teams => {
+      const current = teams.find(item => item.id === teamId)!;
+      if (current.task!.state === 'working' || current.task!.state === 'needs_input') taskAction(current, 'mark_task_done', this.broker.ports.now());
+      return current;
+    });
   }
   /** A standing bot records a lasting change to how it works in its own mission (bots design 2.3). */
   async updateMission(hostId: string, call: Call<'update_mission'>) {

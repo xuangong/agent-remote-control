@@ -72,6 +72,8 @@ export class BotWork {
   }
   setTimer(bot: Assistant, call: Call<'set_timer'>): Promise<{ timers: BotTimer[] }> {
     return this.change(bot, (inbox, now) => {
+      // The work timer follows the open work items; a bot names its own timers otherwise.
+      if (call.name === 'work') fail('The work timer follows your open work items; name your timer otherwise.');
       const box = inbox.inbox!, timers = (box.timers ?? []).filter(timer => timer.name !== call.name);
       if (call.minutes > 0) {
         timers.push({ name: call.name, intervalMs: call.minutes * 60_000, dueAt: now + call.minutes * 60_000 });

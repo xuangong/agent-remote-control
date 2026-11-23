@@ -76,6 +76,7 @@ describe('a standing bot\'s work items and timers', () => {
     f.advance(600_000); await f.fire();
     expect(f.timerInputs()).toEqual([expect.objectContaining({ name: 'Check CI', body: '' })]);
     expect(await f.broker.hostCall('mac', { action: 'set_timer', owner: f.as('chief'), name: 'Check CI', minutes: 0 })).toEqual({ timers: [] });
+    await expect(f.broker.hostCall('mac', { action: 'set_timer', owner: f.as('chief'), name: 'work', minutes: 10 })).rejects.toThrow('work timer');
     await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
     await expect(f.broker.hostCall('mac', { action: 'update_work', owner: f.as('worker-1'), title: 'Review', summary: 'Reading.' })).rejects.toThrow('temporary bot');
   });

@@ -116,10 +116,10 @@ To verify:
 ## 5. Why it is not ready to deploy
 
 1. **Process.** No independent review, PR or remote CI yet.
-2. **It changes every session.** Every session of a Relay that runs tasks gets the task, assistant and room tools. Q4 says existing
-   bots stay plain until the person switches them, so a per-assistant coordinator/plain switch is needed first.
-3. **Storage grows.** Finished tasks are pruned. Links and ended rooms are not, and they count against the 1024 Teams of an account
-   and the Relay's state budget.
+2. ~~**It changes every session.**~~ Done on `feat/assistant-tasks-deployable`: only assistants in coordinator mode get the task,
+   assistant and room tools. Existing bots stay plain; new bots start as coordinators where the provider can be one (Claude Code,
+   Codex). Copilot stays plain (O70).
+3. ~~**Storage grows.**~~ Done there too: ended tasks, rooms and links are kept up to 200, 50 and 100 per account.
 4. **Known gaps.**
    - A link keeps the sessions it bound, so after the person points a bot at another session, messages reach the old one (O70).
    - Rooms close at the next action after their deadline, not on time (O71).
@@ -132,9 +132,10 @@ To verify:
 In this order:
 
 1. **Make it deployable:**
-   - add the coordinator/plain switch per assistant, defaulting existing bots to plain and new ones to coordinator;
-   - prune ended rooms and idle links like finished tasks;
-   - run the M1 to M4 flows live with Codex and Copilot;
+   - ~~add the coordinator/plain switch per assistant~~ and ~~prune ended rooms and idle links~~: done on
+     `feat/assistant-tasks-deployable` (plan, section Deployable);
+   - ~~run the flows live with Codex and Copilot~~: a Codex coordinator ran a task end to end; Copilot cannot follow a mode change
+     (it takes tools only when it attaches) and is not offered coordinator mode (O70);
    - open a PR, get the independent review, and deploy the Relay before the Controllers.
 2. **T0, the P2 operation queue,** as its own plan under the IM session service roadmap. Tell the owner which Controllers must be
    updated before the Relay depends on it.

@@ -14,28 +14,25 @@ const close: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const dispose of close.splice(0).reverse()) await dispose(); }, 5000);
 const ref = (nativeSessionId: string) => ({ controllerId: 'controller', providerId: 'codex', nativeSessionId });
 const heartbeat = { intervalMs: 30000, timeoutMs: 10000 };
-const claim: TeamHostCall = { action: 'claim', teamId: 'team', memberId: 'worker', messageId: 'message', expectedNativeSessionId: 'A' };
 
 async function legacyRelay() {
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await once(server, 'listening', { signal: AbortSignal.timeout(3000) });
   close.push(async () => { for (const socket of server.clients) socket.terminate(); await new Promise<void>(done => server.close(() => done())); });
-  const packets: any[] = [], sockets: WebSocket[] = [], invalid: unknown[] = [], offers: Array<string | null> = [];
-  let acknowledge = false;
-  server.on('connection', (socket, request) => {
+  const packets: any[] = [], sockets: WebSocket[] = [], invalid: unknown[] = [];
+  server.on('connection', socket => {
     sockets.push(socket);
     socket.on('message', data => {
       const packet = JSON.parse(data.toString());
-      if (decodeLegacy(data.toString()).status !== 'ok' && !acknowledge) { invalid.push(packet); socket.close(1008, 'Invalid uplink envelope'); return; }
+      if (decodeLegacy(data.toString()).status !== 'ok') { invalid.push(packet); socket.close(1008, 'Invalid uplink envelope'); return; }
       packets.push(packet);
       if (packet.type === 'register') {
-        offers.push(new URL(request.url!, 'http://localhost').searchParams.get('teamRecipients'));
-        socket.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host', teamManagement: true, ...(acknowledge ? { teamRecipients: 1 } : {}), heartbeat }));
+        socket.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host', teamManagement: true, heartbeat }));
       }
       if (packet.type === 'team_request') socket.send(JSON.stringify({ uplinkVersion: 2, type: 'team_response', requestId: packet.requestId, status: 200, body: JSON.stringify(packet.call.action === 'poll' ? [] : { resolvedTarget: ref('A') }) }));
     });
   });
-  return { server, packets, sockets, invalid, offers, acknowledge(value: boolean) { acknowledge = value; }, url: `ws://127.0.0.1:${(server.address() as { port: number }).port}/ws/remote-host` };
+  return { server, packets, sockets, invalid, url: `ws://127.0.0.1:${(server.address() as { port: number }).port}/ws/remote-host` };
 }
 
 async function client(url: string) {
@@ -44,28 +41,6 @@ async function client(url: string) {
     resolveSession: () => undefined, control: () => ({ status: 200, body: '{"update":"reachable"}' }), reconnectBaseDelayMs: 5, reconnectMaxDelayMs: 10 });
   close.push(() => result.close()); await result.ready; return result;
 }
-
-test('new Controller rejects unacknowledged recipient calls locally while legacy management, polling and heartbeat remain reachable', async () => {
-  const f = await legacyRelay(), host = await client(f.url);
-  await expect(host.teamRequest(claim)).rejects.toThrow(/Update the Relay/);
-  await expect(host.teamRequest({ action: 'settle', teamId: 'team', memberId: 'worker', messageId: 'message', outcome: 'unknown', resolvedTarget: ref('A') })).rejects.toThrow(/Update the Relay/);
-  expect(await host.teamRequest({ action: 'poll' })).toEqual([]);
-  f.sockets[0]!.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat', nonce: 'still-alive' }));
-  f.sockets[0]!.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_request', requestId: 'update', method: 'GET', path: '/remote/controller-update' }));
-  await expect.poll(() => f.packets.some(p => p.type === 'heartbeat_ack' && p.nonce === 'still-alive')).toBe(true);
-  await expect.poll(() => f.packets.find(p => p.type === 'rpc_response' && p.requestId === 'update')?.body).toBe('{"update":"reachable"}');
-  expect(f.offers).toEqual(['1']); expect(f.invalid).toEqual([]); expect(f.sockets[0]!.readyState).toBe(WebSocket.OPEN);
-}, 10000);
-
-test('recipient acknowledgement is reset after reconnecting to a downgraded Relay', async () => {
-  const f = await legacyRelay(); f.acknowledge(true); const host = await client(f.url);
-  expect(await host.teamRequest(claim)).toMatchObject({ resolvedTarget: ref('A') });
-  f.acknowledge(false); f.sockets[0]!.close();
-  await expect.poll(() => f.packets.filter(p => p.type === 'register').length).toBe(2);
-  await expect.poll(async () => { try { return await host.teamRequest({ action: 'poll' }); } catch { return undefined; } }).toEqual([]);
-  await expect(host.teamRequest(claim)).rejects.toThrow(/Update the Relay/);
-  expect(f.invalid).toEqual([]);
-}, 10000);
 
 function savedTeam(): SavedTeam {
   return { id: 'team', operationId: 'create', revision: 1, source: { hostId: 'host', providerId: 'codex', nativeSessionId: 'source', title: 'Source' }, title: 'Team', status: 'active',
@@ -107,9 +82,9 @@ async function currentRelay(team: SavedTeam | SavedTeam[] = savedTeam(), success
     return `ws://127.0.0.1:${(http.address() as { port: number }).port}/ws/remote-host`;
   }
   close.push(() => { broker.close(); });
-  const request = async (path = '', input?: unknown, recipientAware = false) => (await broker.handleRequest(new Request(`${origin}/v1/remote/teams${path}`, { headers: { ...(recipientAware ? { 'x-arc-team-recipients': '1' } : {}), 'content-type': 'application/json' }, ...(input ? { method: 'POST', body: JSON.stringify(input) } : {}) })))!;
-  async function connect(recipientAware = false, succession = false) {
-    const socket = memoryHostClient({ prepareUpgrade: request => broker.prepareUpgrade(request) }, `${origin}/ws/remote-host?team=1&tasks=1&coordinatorProvider=codex${recipientAware ? '&teamRecipients=1' : ''}${succession ? '&teamSuccession=1' : ''}`);
+  const request = async (path = '', input?: unknown) => (await broker.handleRequest(new Request(`${origin}/v1/remote/teams${path}`, { headers: { 'content-type': 'application/json' }, ...(input ? { method: 'POST', body: JSON.stringify(input) } : {}) })))!;
+  async function connect(succession = false) {
+    const socket = memoryHostClient({ prepareUpgrade: request => broker.prepareUpgrade(request) }, `${origin}/ws/remote-host?team=1&tasks=1&coordinatorProvider=codex${succession ? '&teamSuccession=1' : ''}`);
     close.push(() => { socket.terminate(); });
     const packets: any[] = []; socket.on('message', data => { const packet = JSON.parse(data.toString()); packets.push(packet); if (packet.type === 'heartbeat') socket.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat_ack', nonce: packet.nonce })); });
     await once(socket, 'open', { signal: AbortSignal.timeout(3000) });
@@ -126,15 +101,14 @@ async function currentRelay(team: SavedTeam | SavedTeam[] = savedTeam(), success
   return { listen, request, connect, snapshot: () => saved, restart() { broker.close(); broker = make(); } };
 }
 
-test('current Relay acknowledges Team succession only with exact recipients and when offered', async () => {
+test('current Relay acknowledges Team succession only when offered', async () => {
   const f = await currentRelay();
-  expect((await f.connect(true)).packets[0].teamSuccession).toBeUndefined();
-  expect((await f.connect(false, true)).packets[0].teamSuccession).toBeUndefined();
-  expect((await f.connect(true, true)).packets[0].teamSuccession).toBe(1);
+  expect((await f.connect()).packets[0].teamSuccession).toBeUndefined();
+  expect((await f.connect(true)).packets[0].teamSuccession).toBe(1);
 }, 10000);
 
 test('the Controller offers Team succession and learns from each registration whether the Relay supports it', async () => {
-  const f = await legacyRelay(); f.acknowledge(true);
+  const f = await legacyRelay();
   const host = await client(f.url);
   expect(host.teamSuccession).toBe(false);
   const current = await currentRelay(), modern = createRemoteHostUplinkClient({ relay: createAgentRemoteRelay({ providers: [] }), url: await current.listen(), installationId: 'controller', name: 'Host', remoteKey: 'key',

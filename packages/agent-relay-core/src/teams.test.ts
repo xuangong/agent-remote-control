@@ -166,7 +166,7 @@ it('retains legacy compact uncertainty through expiry, count and shared storage 
   expect(JSON.stringify(saved)).not.toContain('Original private body');
 });
 
-it('requires recipient-aware participants before replacing a Team role and retains legacy unresolved evidence', () => {
+it('requires a Controller that moves recipients before replacing a Team role and retains unresolved evidence', () => {
   const f = fixture(); let supported = false;
   f.ports.assertRecipientSupport = hostId => { if (hostId === 'win' && !supported) throw new Error('Update the Controller'); };
   const target = { controllerId: 'win', providerId: 'claude', nativeSessionId: f.worker.nativeSessionId! };
@@ -176,7 +176,6 @@ it('requires recipient-aware participants before replacing a Team role and retai
   saved[0]!.deliveryReceipts = [{ id: 'legacy', from: f.leader.id, to: f.worker.id, status: 'accepted', createdAt: 1, settledAt: 1, fingerprint: deliveryFingerprint({ to: f.worker.id, text: 'Old input' }) }];
   f.seed(saved); const restarted = f.restart();
   expect(restarted.hasUnsettledRecipient(target)).toBe(true);
-  expect(() => restarted.list(false)).toThrow('Update the Controller');
   expect(restarted.hasUnsettledRecipient(target)).toBe(true);
   expect(f.snapshot()[0]!.deliveryReceipts).toEqual(saved[0]!.deliveryReceipts);
 });

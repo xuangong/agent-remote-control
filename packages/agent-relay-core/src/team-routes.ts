@@ -29,9 +29,8 @@ export function createTeamRoutes(ports: TeamRoutesPorts): RouteGroup {
   return async (request, context, url, subject) => {
     if (url.pathname === '/v1/remote/teams' || url.pathname === '/v1/remote/teams/create' || url.pathname === '/v1/remote/teams/action') {
       requireOwner(subject);
-      const recipientAware = request.headers.get('x-arc-team-recipients') === '1';
       if (url.pathname === '/v1/remote/teams' && request.method === 'GET') {
-        try { return json(200, { teams: brokerState.teams.filter(team => hostAllowed(team.source.hostId, subject)).map(team => teams.readForClient(team.id, recipientAware)) }); }
+        try { return json(200, { teams: brokerState.teams.filter(team => hostAllowed(team.source.hostId, subject)).map(team => teams.readForClient(team.id)) }); }
         catch (error) { return json(409, { error: error instanceof Error ? error.message : 'Team request failed.' }); }
       }
       if (request.method !== 'POST') return json(405, { error: 'Method is not allowed.' });
@@ -41,7 +40,7 @@ export function createTeamRoutes(ports: TeamRoutesPorts): RouteGroup {
           requireAccess(input.source.hostId, principal(context));
           const result = await teams.startBot(input);
           requireOwner(principal(context)); requireAccess(input.source.hostId, principal(context));
-          return json(200, teams.readForClient(result.id, recipientAware));
+          return json(200, teams.readForClient(result.id));
         }
         if (url.pathname.endsWith('/action') && isTeamAction(input)) {
           const team = brokerState.teams.find(team => team.id === input.teamId);
@@ -49,7 +48,7 @@ export function createTeamRoutes(ports: TeamRoutesPorts): RouteGroup {
           requireAccess(team.source.hostId, principal(context));
           const result = await teams.action(input);
           requireOwner(principal(context)); requireAccess(team.source.hostId, principal(context));
-          return json(200, teams.readForClient(result.id, recipientAware));
+          return json(200, teams.readForClient(result.id));
         }
         return json(400, { error: 'Invalid Team request.' });
       } catch (error) { return json(409, { error: error instanceof Error ? error.message : 'Team request failed.' }); }

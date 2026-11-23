@@ -456,7 +456,7 @@ describe('host session routing of messages after registration', () => {
     const call = { action: 'poll' };
     await socket.receive(uplink({ type: 'team_request', requestId: 't1', call }));
     await flush();
-    expect(hostCall).toHaveBeenCalledWith(run.host()!.id, call, expect.any(Function), false);
+    expect(hostCall).toHaveBeenCalledWith(run.host()!.id, call, expect.any(Function));
     expect(socket.of('team_response')).toEqual([expect.objectContaining({ requestId: 't1', status: 200, body: '{"ok":true}' })]);
   });
 });

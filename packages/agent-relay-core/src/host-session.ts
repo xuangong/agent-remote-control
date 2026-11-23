@@ -43,7 +43,7 @@ import { type BrokerScheduler } from './transport.js';
  */
 export interface HostSessionGrants {
   enrollmentRequested?: 1 | 2 | 3;
-  teamRequested?: boolean; recipientsRequested?: boolean;
+  teamRequested?: boolean;
   statesRequested?: false | 1 | 2;
   successionRequested?: boolean;
   /** The Host asked for tasks, naming the providers whose sessions can be coordinators (they take the task tools). */
@@ -145,7 +145,7 @@ export function createHostSession(ports: HostSessionPorts) {
     host.streams.clear();
   }
   function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, grants: HostSessionGrants) {
-    const { enrollmentRequested, teamRequested = false, recipientsRequested = false, statesRequested = false, successionRequested = false, tasksRequested = false, statusRequested = false, outboxRequested = false, journalRequested = 0, shownRequested = false, controlRequested = false } = grants;
+    const { enrollmentRequested, teamRequested = false, statesRequested = false, successionRequested = false, tasksRequested = false, statusRequested = false, outboxRequested = false, journalRequested = 0, shownRequested = false, controlRequested = false } = grants;
     let host: Host | undefined;
     let pendingCredential: {hash: string; value: DeviceCredential} | undefined;
     let issuing: Promise<void> | undefined;
@@ -201,7 +201,7 @@ export function createHostSession(ports: HostSessionPorts) {
           send: message => send(journalHost, message), diagnostic: (event, details) => diagnostic(journalHost, { event, ...details }),
           published: (sessionKey, result) => journalPublished(journalHost.id, sessionKey, result) })
         : undefined;
-      send(host, { uplinkVersion: 2, type: 'registered', ...(statesRequested ? { sessionStates: statesRequested } : {}), ...(host.outbox === 1 ? { outbox: 1 as const } : {}), ...(controlRequested ? { control: 1 as const } : {}), ...(host.journal ? { journal: JOURNAL_VERSION } : {}), ...(host.teamRecipients === 1 ? { teamRecipients: 1 } : {}), ...(host.teamSuccession === 1 ? { teamSuccession: 1 } : {}), ...(host.tasks === 1 ? { tasks: 1 as const } : {}), ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion !== 1 ? { successionEnrollmentVersion: host.successionEnrollmentVersion } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
+      send(host, { uplinkVersion: 2, type: 'registered', ...(statesRequested ? { sessionStates: statesRequested } : {}), ...(host.outbox === 1 ? { outbox: 1 as const } : {}), ...(controlRequested ? { control: 1 as const } : {}), ...(host.journal ? { journal: JOURNAL_VERSION } : {}), ...(host.teamSuccession === 1 ? { teamSuccession: 1 } : {}), ...(host.tasks === 1 ? { tasks: 1 as const } : {}), ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion !== 1 ? { successionEnrollmentVersion: host.successionEnrollmentVersion } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
       if (retired || host.socket !== socket) return;
       host.ready = true;
       host.control = controlRequested ? true : undefined;
@@ -279,10 +279,10 @@ export function createHostSession(ports: HostSessionPorts) {
             ? existing.pairingPurpose ?? (existing.gatewayKeyRequested ? 'gateway-setup' : 'host-only')
             : credential.purpose ?? 'host-only';
           const providers = 'providers' in message ? [...message.providers] : [{ providerId: 'dsh', displayName: 'DeepSeek DSH' }];
-          const next = { id: existing?.id ?? recovery?.hostId ?? ids.uuid(), installationId: message.installationId, name: message.name, environment: message.environment, controller: message.controller, providerManagement: message.providerManagement, tpmManagement: message.tpmManagement, teamManagement: teamRequested ? true as const : undefined, teamRecipients: teamRequested && recipientsRequested ? 1 as const : undefined, teamSuccession: teamRequested && recipientsRequested && successionRequested ? 1 as const : undefined,
-            tasks: teamRequested && recipientsRequested && successionRequested && tasksRequested ? 1 as const : undefined,
+          const next = { id: existing?.id ?? recovery?.hostId ?? ids.uuid(), installationId: message.installationId, name: message.name, environment: message.environment, controller: message.controller, providerManagement: message.providerManagement, tpmManagement: message.tpmManagement, teamManagement: teamRequested ? true as const : undefined, teamSuccession: teamRequested && successionRequested ? 1 as const : undefined,
+            tasks: teamRequested && successionRequested && tasksRequested ? 1 as const : undefined,
             pairingPurpose: purpose,
-            coordinatorProviders: teamRequested && recipientsRequested && successionRequested && tasksRequested ? tasksRequested : undefined,
+            coordinatorProviders: teamRequested && successionRequested && tasksRequested ? tasksRequested : undefined,
             outbox: outboxRequested && options.outbox ? 1 as const : undefined,
             ...(existing?.gatewayKeyRequested ? { gatewayKeyRequested: true } : {}),
             ...(existing?.smartReading ? { smartReading: existing.smartReading } : {}),
@@ -351,7 +351,7 @@ export function createHostSession(ports: HostSessionPorts) {
         const current = host, generation = host.generation;
         void (async () => {
           let status = 200, body: string;
-          try { brokerState.assertHostCurrent(current, generation); body = JSON.stringify(await teams.hostCall(current.id, message.call, () => brokerState.assertHostCurrent(current, generation), current.teamRecipients === 1)); }
+          try { brokerState.assertHostCurrent(current, generation); body = JSON.stringify(await teams.hostCall(current.id, message.call, () => brokerState.assertHostCurrent(current, generation))); }
           catch (error) { status = 409; body = JSON.stringify({ error: error instanceof Error ? error.message : 'Team request failed.' }); }
           if (current.socket === socket && current.generation === generation) send(current, { uplinkVersion: 2, type: 'team_response', requestId: message.requestId, status, body });
         })().catch(() => closeConnection(1011, 'Team response delivery failed'));

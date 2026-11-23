@@ -59,7 +59,6 @@ export function createTeamService(ports: TeamServicePorts) {
     assertRecipient: target => ports.assertAssociationOpen(target),
     assertRecipientSupport(hostId, generic) {
       const host = ports.requireHost(hostId);
-      if (host.teamRecipients !== 1) throw new BrokerError(409, 'team_recipients_upgrade_required', 'Update the Controller before replacing a Team recipient.');
       if (generic && host.teamSuccession !== 1) throw new BrokerError(409, 'team_succession_upgrade_required', 'Update the Controller to hand off Team members.');
     },
     now, read: () => brokerState.teams,

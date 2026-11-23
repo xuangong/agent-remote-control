@@ -48,7 +48,6 @@ export type Host = {
   /** The Controller offered session control and the Relay acknowledged it: the Relay owns the leases of this Host's streams. Set on registration, never persisted. */
   control?: true;
   teamManagement?: true;
-  teamRecipients?: 1;
   /** Team recipients follow a generic succession of their session on this Host, including to another provider. */
   teamSuccession?: 1;
   /** The Host runs bots: temporary bots as tasks, inboxes, links and rooms of main sessions. */

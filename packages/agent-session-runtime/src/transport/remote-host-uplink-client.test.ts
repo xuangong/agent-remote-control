@@ -304,7 +304,7 @@ it.each([[true, true], [true, false], [false, true]])('requests bots only when a
   server.on('connection',(socket,request)=>{endpoint=request.url!;socket.on('message',data=>{
     const message=JSON.parse(data.toString());if(message.type==='register')registered=message;
     const offered=new URL(endpoint,'http://localhost').searchParams.get('tasks')==='1';
-    if(message.type==='register')socket.send(JSON.stringify({uplinkVersion:2,type:'registered',hostId:'host',heartbeat:{intervalMs:30000,timeoutMs:10000},teamManagement:true,teamRecipients:1,teamSuccession:1,...(acknowledged&&offered?{tasks:1}:{})}));
+    if(message.type==='register')socket.send(JSON.stringify({uplinkVersion:2,type:'registered',hostId:'host',heartbeat:{intervalMs:30000,timeoutMs:10000},teamManagement:true,teamSuccession:1,...(acknowledged&&offered?{tasks:1}:{})}));
   });});
   const relay=createAgentRemoteRelay({providers:[]});closeables.push(()=>relay.close());
   const client=createRemoteHostUplinkClient({relay,installationId:'host',name:'Host',remoteKey:'key',providers:[{providerId:'codex',displayName:'Codex'},{providerId:'opencode',displayName:'OpenCode'}],coordinatorProviders:['codex'],teamManagement:true,...(requested?{tasks:true as const}:{}),url:`ws://127.0.0.1:${(server.address() as {port:number}).port}/ws/remote-host`,resolveSession:()=>undefined,control:()=>({status:404,body:'{}'})});

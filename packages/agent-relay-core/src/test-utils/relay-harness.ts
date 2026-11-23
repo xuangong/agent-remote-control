@@ -135,8 +135,8 @@ export async function startRelayHarness(options: { store?: MemoryRelayStateStore
 
   /** A Controller connected for the account: it registers with the features it names, rotates its pairing key and answers heartbeats. */
   async function host(key: string, promptEditing = false, controller?: Record<string, unknown>, sessionRename = false, daemonControl = false, providerId = 'codex', installationId = 'harness-host',
-    tpmManagement = false, teamManagement = false, teamRecipients = false) {
-    const socket = await upgrade(teamManagement ? `/ws/remote-host?team=1${teamRecipients ? '&teamRecipients=1' : ''}` : '/ws/remote-host', { authorization: `Bearer ${key}` });
+    tpmManagement = false, teamManagement = false) {
+    const socket = await upgrade(teamManagement ? '/ws/remote-host?team=1' : '/ws/remote-host', { authorization: `Bearer ${key}` });
     const registered = nextMessage(socket);
     send(socket, { type: 'register', ...(controller ? { controller } : {}), ...(tpmManagement ? { tpmManagement: true } : {}), credentialRotation: true, installationId, name: 'Harness Host',
       providers: [{ providerId, displayName: providerId, ...(promptEditing ? { promptEditing: true } : {}), ...(sessionRename ? { sessionRename: true } : {}), ...(daemonControl ? { daemonControl: true } : {}) }] });

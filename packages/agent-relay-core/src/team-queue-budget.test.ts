@@ -35,12 +35,12 @@ async function connectedBroker(teams: SavedTeam[] = [savedTeam()], stateRoom?: (
   const origin = 'https://relay.example';
   const broker = createHostBroker({ origin, assistantGroups: () => [], initialState: saved, now: () => 100, ...(stateRoom ? { stateRoom } : {}), onStateChange(state) { saved = structuredClone(state); } });
   close.push(async () => { broker.close(); await broker.settled(); });
-  const socket = memoryHostClient(broker, `${origin}/ws/remote-host?team=1&teamRecipients=1&teamSuccession=1&tasks=1&coordinatorProvider=codex`);
+  const socket = memoryHostClient(broker, `${origin}/ws/remote-host?team=1&teamSuccession=1&tasks=1&coordinatorProvider=codex`);
   close.push(() => { socket.terminate(); });
   await once(socket, 'open', { signal: AbortSignal.timeout(3000) });
   const registered = once(socket, 'message', { signal: AbortSignal.timeout(3000) });
   socket.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: controllerId, name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
-  expect(JSON.parse((await registered)[0].toString())).toMatchObject({ type: 'registered', teamRecipients: 1 });
+  expect(JSON.parse((await registered)[0].toString())).toMatchObject({ type: 'registered', teamSuccession: 1 });
   let sequence = 0;
   return {
     snapshot: () => structuredClone(saved.teams!),

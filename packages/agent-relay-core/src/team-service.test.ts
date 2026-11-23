@@ -47,13 +47,11 @@ describe('the Host guards of Teams', () => {
     expect(() => (s.teams as any).ports.assertHost('h', 'codex')).not.toThrow();
   });
 
-  it('asks for a Controller update before replacing a Team recipient, and again for a generic handoff', () => {
-    const none = service([host('h')]);
-    expect(() => (none.teams as any).ports.assertRecipientSupport('h')).toThrowError(expect.objectContaining({ code: 'team_recipients_upgrade_required', status: 409 }));
-    const recipients = service([host('h', { teamRecipients: 1 as never })]);
+  it('asks for a Controller update before a generic handoff of a Team member', () => {
+    const recipients = service([host('h')]);
     expect(() => (recipients.teams as any).ports.assertRecipientSupport('h')).not.toThrow();
     expect(() => (recipients.teams as any).ports.assertRecipientSupport('h', true)).toThrowError(expect.objectContaining({ code: 'team_succession_upgrade_required', status: 409 }));
-    const handoff = service([host('h', { teamRecipients: 1 as never, teamSuccession: 1 as never })]);
+    const handoff = service([host('h', { teamSuccession: 1 as never })]);
     expect(() => (handoff.teams as any).ports.assertRecipientSupport('h', true)).not.toThrow();
   });
 });

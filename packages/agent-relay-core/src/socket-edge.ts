@@ -129,7 +129,7 @@ export function createSocketEdge(ports: SocketEdgePorts) {
         const asked = (name: string) => url.searchParams.get(name) === '1';
         const enrollment = url.searchParams.get('successionEnrollment');
         register(client, key, context, hash!, { enrollmentRequested: enrollment === '3' ? 3 : enrollment === '2' ? 2 : enrollment === '1' ? 1 : undefined,
-          teamRequested: asked('team'), recipientsRequested: asked('teamRecipients'),
+          teamRequested: asked('team'),
           statesRequested: !asked('sessionStates') ? false : asked('sessionReplyFacts') ? 2 : 1, successionRequested: asked('teamSuccession'),
           tasksRequested: asked('tasks') && namedProviders(url.searchParams.getAll('coordinatorProvider')), statusRequested: asked('hostStatus'), outboxRequested: asked('outbox'),
           journalRequested: url.searchParams.get('journal') === String(JOURNAL_VERSION) ? JOURNAL_VERSION : 0, shownRequested: asked('journalShown'), controlRequested: asked('control') });

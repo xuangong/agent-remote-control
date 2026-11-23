@@ -29,10 +29,11 @@ async function fixture(options: { tasks?: boolean } = {}) {
   const support = emptyCallForSupportState();
   let teams: SavedTeam[] = [];
   // The account's bots: one per session, in the mode the person chose.
-  const bots = new Map<string, 'coordinator' | 'plain'>();
+  const bots = new Map<string, 'coordinator' | 'plain'>(), missions = new Map<string, string>();
   const groups = () => [{ window: { id: 'g', title: 'g', revision: 1, views: [...bots.keys()].map((key, index) => { const [providerId, nativeSessionId] = key.split('/');
     return { id: `v${index}`, placement: 'primary', binding: { hostId: 'relay-host', providerId, nativeSessionId, title: nativeSessionId } }; }) },
-    bots: { rank: 'm', members: Object.fromEntries([...bots.values()].map((mode, index) => [`v${index}`, { mode }])) } }] as never;
+    bots: { rank: 'm', members: Object.fromEntries([...bots].map(([key, mode], index) => [`v${index}`,
+      { mode, botId: 'b_' + index.toString(16).padStart(32, '0'), ...(missions.has(key) ? { mission: missions.get(key) } : {}) }])) } }] as never;
   const broker = new TeamBroker({ read: () => teams, now: Date.now, assertHost() {}, async createSeat() { throw new Error('No seats here.'); },
     resolveSession: (_host, providerId, nativeSessionId) => ({ controllerId: 'host', providerId, nativeSessionId }),
     async change(update) { const next = structuredClone(teams), result = structuredClone(update(next)); teams = next; return result; },
@@ -57,7 +58,7 @@ async function fixture(options: { tasks?: boolean } = {}) {
     if (result.status !== 200) throw new Error(result.body);
     return JSON.parse(result.body);
   };
-  return { root, runtime, support, created, opened, sessions, control, mode: (providerId: string, nativeSessionId: string, mode: 'coordinator' | 'plain') => { bots.set(`${providerId}/${nativeSessionId}`, mode); },
+  return { root, runtime, support, created, opened, sessions, control, mode: (providerId: string, nativeSessionId: string, mode: 'coordinator' | 'plain', mission?: string) => { bots.set(`${providerId}/${nativeSessionId}`, mode); if (mission) missions.set(`${providerId}/${nativeSessionId}`, mission); },
     enable: (providerId: string, nativeSessionId: string, on: boolean) => setEnablement(support, (_h, p, n) => ({ controllerId: 'host', providerId: p, nativeSessionId: n }), { hostId: 'relay-host', providerId, nativeSessionId }, on ? [profile.id] : [], Date.now()),
     async close() { await runtime.close(); await rm(root, { recursive: true, force: true }); } };
 }
@@ -86,6 +87,24 @@ it('gives a Claude session the worker namespace only while it is enabled, also w
     f.enable('claude', 'claude-worker', false);
     await expect.poll(() => f.sessions.get('claude-worker')!.namespaces.at(-1)).toEqual([]);
     expect(f.sessions.get('claude-worker')!.namespaces).toHaveLength(2);
+  } finally { await f.close(); }
+});
+
+it('gives a bot\'s session its standing instructions with its mission when it opens, and a session that is no bot none', async () => {
+  const f = await fixture({ tasks: true });
+  try {
+    // The Controller learns the bots at its enablement poll; a runtime already open keeps what it opened with, so each round opens
+    // another bot, all registered at once.
+    for (let index = 1; index <= 40; index++) f.mode('claude', `claude-bot-${index}`, 'plain', 'Review every change before release.');
+    let round = 0, opened = '';
+    await expect.poll(async () => {
+      opened = `claude-bot-${++round}`;
+      await f.control('/remote/attach', { providerId: 'claude', nativeSessionId: opened });
+      return f.opened.find(entry => entry.id === opened)?.extensions?.instructions ?? '';
+    }).toContain('Your mission:\nReview every change before release.');
+    expect(f.opened.find(entry => entry.id === opened)!.extensions!.instructions).toContain('You are an assistant of Agent Remote Control.');
+    await f.control('/remote/attach', { providerId: 'claude', nativeSessionId: 'claude-other' });
+    expect(f.opened.find(entry => entry.id === 'claude-other')?.extensions?.instructions).toBeUndefined();
   } finally { await f.close(); }
 });
 

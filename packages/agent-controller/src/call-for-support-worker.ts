@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { AgentSessionTool, AgentSessionToolNamespace } from '@orchardworks/agent-provider-sdk';
 import { ASSISTANT_MESSAGE_LIMIT, nativeSessionRefKey, ROOM_MINUTES_LIMIT, TASK_BRIEF_LIMIT, TASK_DONE_WHEN_LIMIT, TASK_SUMMARY_LIMIT, TASK_TITLE_LIMIT, type CallForSupportCall, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { TeamResourceFiles } from './team-resource-files.js';
+import { botInstructions } from './bot-instructions.js';
 
 export interface WorkerSupportPorts {
   request(call: TeamHostCall): Promise<unknown>;
@@ -19,7 +20,7 @@ export interface WorkerSupportPorts {
   /** The provider keeps a session it starts from writing its working directory. */
   readOnly?(providerId: string): boolean;
 }
-type Enablement = { defaultEnabled: boolean; sessions: Map<string, boolean>; coordinators: Set<string> };
+type Enablement = { defaultEnabled: boolean; sessions: Map<string, boolean>; coordinators: Set<string>; bots: Map<string, string> };
 /** Which worker tools a session has: none, Call For Support only, or Call For Support with the task tools of a coordinator. */
 export type WorkerTools = 'none' | 'support' | 'tasks';
 type StatusCall = { roleId: string; requesterMemberId: string; call: CallForSupportCall };
@@ -38,7 +39,7 @@ const tool = (name: string, description: string, inputSchema: Record<string, unk
 
 /** A worker's own Call For Support tools and the enablement that decides where the Controller offers them. */
 export class WorkerSupport {
-  private enablement: Enablement = { defaultEnabled: false, sessions: new Map(), coordinators: new Set() };
+  private enablement: Enablement = { defaultEnabled: false, sessions: new Map(), coordinators: new Set(), bots: new Map() };
   private readonly listeners = new Set<() => void>();
   private readonly resources: TeamResourceFiles;
   private polling = false;
@@ -55,6 +56,11 @@ export class WorkerSupport {
     if (this.ports.tasks?.() === true && this.enablement.coordinators.has(key)) return 'tasks';
     return (this.enablement.sessions.get(key) ?? this.enablement.defaultEnabled) ? 'support' : 'none';
   }
+  /** The standing instructions of a bot's main session (base instructions and its mission); undefined for a session that is no bot. */
+  standing(ref: NativeSessionRef): string | undefined {
+    const mission = this.enablement.bots.get(nativeSessionRefKey(ref));
+    return mission === undefined ? undefined : botInstructions(mission || undefined);
+  }
   /** Whether a session the Controller is about to create will be offered the namespace: only a profile's default can say so yet, since it is nobody's main session. */
   enabledByDefault(): boolean { return this.ports.available() && this.enablement.defaultEnabled; }
   onChange(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
@@ -63,21 +69,27 @@ export class WorkerSupport {
     if (this.polling || !this.ports.available()) return;
     this.polling = true;
     try {
-      const value = await this.ports.request({ action: 'support_enablement' }) as { defaultEnabled?: unknown; sessions?: unknown; coordinators?: unknown };
+      const value = await this.ports.request({ action: 'support_enablement' }) as { defaultEnabled?: unknown; sessions?: unknown; coordinators?: unknown; bots?: unknown };
       if (!value || typeof value.defaultEnabled !== 'boolean' || !Array.isArray(value.sessions)) throw new Error('Invalid Call For Support enablement.');
       const sessions = new Map<string, boolean>();
       for (const entry of value.sessions as Array<{ providerId?: unknown; nativeSessionId?: unknown; enabled?: unknown }>) {
         if (typeof entry?.providerId !== 'string' || typeof entry.nativeSessionId !== 'string' || typeof entry.enabled !== 'boolean') continue;
         sessions.set(nativeSessionRefKey({ controllerId, providerId: entry.providerId, nativeSessionId: entry.nativeSessionId }), entry.enabled);
       }
+      const bots = new Map<string, string>();
+      for (const entry of Array.isArray(value.bots) ? value.bots as Array<{ providerId?: unknown; nativeSessionId?: unknown; mission?: unknown }> : []) {
+        if (typeof entry?.providerId === 'string' && typeof entry.nativeSessionId === 'string')
+          bots.set(nativeSessionRefKey({ controllerId, providerId: entry.providerId, nativeSessionId: entry.nativeSessionId }), typeof entry.mission === 'string' ? entry.mission : '');
+      }
       const coordinators = new Set<string>();
       for (const entry of Array.isArray(value.coordinators) ? value.coordinators as Array<{ providerId?: unknown; nativeSessionId?: unknown }> : []) {
         if (typeof entry?.providerId === 'string' && typeof entry.nativeSessionId === 'string') coordinators.add(nativeSessionRefKey({ controllerId, providerId: entry.providerId, nativeSessionId: entry.nativeSessionId }));
       }
-      const next = { defaultEnabled: value.defaultEnabled, sessions, coordinators }, tasks = this.ports.tasks?.() === true;
+      const next = { defaultEnabled: value.defaultEnabled, sessions, coordinators, bots }, tasks = this.ports.tasks?.() === true;
       const changed = tasks !== this.tasksOffered || next.defaultEnabled !== this.enablement.defaultEnabled || next.sessions.size !== this.enablement.sessions.size
         || [...next.sessions].some(([key, enabled]) => this.enablement.sessions.get(key) !== enabled)
-        || next.coordinators.size !== this.enablement.coordinators.size || [...next.coordinators].some(key => !this.enablement.coordinators.has(key));
+        || next.coordinators.size !== this.enablement.coordinators.size || [...next.coordinators].some(key => !this.enablement.coordinators.has(key))
+        || next.bots.size !== this.enablement.bots.size || [...next.bots].some(([key, mission]) => this.enablement.bots.get(key) !== mission);
       this.enablement = next; this.tasksOffered = tasks;
       if (changed) for (const listener of this.listeners) { try { listener(); } catch { /* Listeners cannot stop enablement. */ } }
     } finally { this.polling = false; }

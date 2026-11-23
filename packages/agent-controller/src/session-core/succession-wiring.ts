@@ -198,11 +198,14 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
     if (!workerSupport) return undefined;
     const capability = providers.require(providerId).adapter.descriptor.sessionExtensions?.toolNamespaces;
     const tools = holder ? workerSupport.tools(holder) : workerSupport.enabledByDefault() ? 'support' : 'none';
+    // A bot's main session gets its standing instructions when its runtime opens; a mission changed since then applies at the next open.
+    const standing = holder && providers.require(providerId).adapter.descriptor.sessionExtensions?.instructions ? workerSupport.standing(holder) : undefined;
+    const instructions = standing ? { instructions: standing } : {};
     // Tools fixed at creation include the task tools, deferred unless the session is a coordinator's, so switching an assistant to coordinator mode reaches it.
-    if (capability === 'creation') return { toolNamespaces: [workerSupport.namespace(actual, tools === 'none', true)] };
+    if (capability === 'creation') return { ...instructions, toolNamespaces: [workerSupport.namespace(actual, tools === 'none', true)] };
     // Without tool search, a session gets the namespace while enabled; an 'attachment' adapter receives an enablement change on its next attachment.
-    if ((capability === 'live' || capability === 'attachment') && tools !== 'none') return { toolNamespaces: [workerSupport.namespace(actual, false, tools === 'tasks')] };
-    return undefined;
+    if ((capability === 'live' || capability === 'attachment') && tools !== 'none') return { ...instructions, toolNamespaces: [workerSupport.namespace(actual, false, tools === 'tasks')] };
+    return standing ? instructions : undefined;
   }
   /** Applies enablement changes to live sessions whose provider can change tools during a session. */
   async function applyWorkerTools(): Promise<void> {

@@ -34,6 +34,20 @@ modules; `pnpm verify:changed` per commit; a real session in `pnpm local` for ea
 
 - [x] A room of assistants and people; a scheduler asks one member at a time with the new messages (c87009f9, 95aab522); what remains is O71
 
+## Deployable (handoff 6.1)
+
+- [x] Coordinator and plain mode per assistant (design 7.1, Q4): `mode` in the bot's details, absent is plain; the switch in the
+  assistant's details; new assistants start as coordinators. The Relay names the coordinators' main sessions in support enablement,
+  refuses tasks, messages and rooms a plain assistant starts, and neither lists nor reaches plain assistants. The Controller offers
+  the task tools only to coordinators; a Codex thread declares them at creation, deferred until it is one.
+- [x] Ended rooms and links pruned like finished tasks (`coordination-retention.ts`): 200 tasks, 50 rooms, 100 links per account.
+- [ ] M1 to M4 live with Codex and Copilot. Done in `pnpm local` (2026-11-23): a new Claude Code assistant started as a coordinator
+  from the page and listed `create_task`; switched to Plain in its details, the live session said it had none; switched back, it
+  created a task whose result came back. A new Codex assistant found the deferred `create_task`, and the result came back. A new
+  Copilot assistant got no tools: Copilot takes tools only when it attaches, it attached before its bot was written as a
+  coordinator, and the Controller never releases a Copilot session, so no later attachment brings them.
+- [ ] PR, independent review, Relay deployed before the Controllers.
+
 ## M5: one queue and the older mechanisms (T0, T5)
 
 - [x] Scoped against the IM session service P2 plan (below)

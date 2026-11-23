@@ -109,7 +109,7 @@ describe('the audit', () => {
     expect(task.members[0]!.interrupt).toBeGreaterThan(0);
     expect(tracker.messages.filter(message => message.chain === id && message.status === 'queued')).toEqual([]);
     expect(f.chain().stopped).toBeGreaterThan(0);
-    await expect(f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'm2', to: 'Tracker', text: 'Go on.', cause: person('u1') })).rejects.toThrow('The person stopped this work');
+    await expect(f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'm2', to: 'Tracker', text: 'Go on.', cause: person('u1') })).resolves.toMatchObject({ outcome: 'forbidden', reason: expect.stringContaining('The person stopped this work') });
     // The person's next input is a new chain.
     await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'm3', to: 'Tracker', text: 'New request.', cause: person('u2') });
     expect(f.broker.chains.list()).toHaveLength(2);
@@ -124,7 +124,7 @@ describe('the audit', () => {
     await f.broker.chainAction({ action: 'stop_bot', chainId: id, botId: ids.tracker });
     expect(f.state().find(team => team.inbox?.botId === ids.tracker)!.members[0]!.interrupt).toBeGreaterThan(0);
     expect(f.state().find(team => team.task)!.task!.state).toBe('working');
-    await expect(f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('tracker'), operationId: 't1', to: 'Chief', text: 'Holding.', cause: framed })).rejects.toThrow('stopped');
+    await expect(f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('tracker'), operationId: 't1', to: 'Chief', text: 'Holding.', cause: framed })).resolves.toMatchObject({ outcome: 'forbidden' });
     expect(await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'm2', to: 'Reviewer', text: 'Also the notes.', cause: person('u1') })).toBeDefined();
     expect(f.chain().stoppedBots).toEqual([ids.tracker]);
   });

@@ -1,6 +1,7 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
-import { BOT_MISSION_LIMIT, BotRecord, botIdentity, botPlacement, WindowBotDetails } from './index.js';
+import { BOT_MISSION_LIMIT, BotMessageResult, BotRecord, botIdentity, botPlacement, WindowBotDetails } from './index.js';
 
 const id = 'b_' + 'a'.repeat(32);
 
@@ -19,5 +20,15 @@ describe('bot records', () => {
     expect(Value.Check(WindowBotDetails, details)).toBe(true);
     expect(botIdentity(details)).toEqual({ name: 'Chief', label: 'Lead', mission: 'Coordinate.' });
     expect(botPlacement(details)).toEqual({ botId: id, pinned: true, rank: 'm', process: 'full' });
+  });
+});
+
+const botMessages = JSON.parse(readFileSync(new URL('./fixtures/bot-messages.v1.json', import.meta.url), 'utf8'));
+
+describe('the outcome of a message', () => {
+  it('is one of five outcomes with an optional id and reason, and nothing else', () => {
+    for (const result of botMessages.results.valid) expect(Value.Check(BotMessageResult, result)).toBe(true);
+    for (const result of botMessages.results.invalid) expect(Value.Check(BotMessageResult, result)).toBe(false);
+    expect(new Set(botMessages.results.valid.map((result: { outcome: string }) => result.outcome))).toEqual(new Set(['delivered', 'held', 'duplicate', 'forbidden', 'unreachable']));
   });
 });

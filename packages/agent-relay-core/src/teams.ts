@@ -10,7 +10,7 @@ import { BotChains, memoryChains, type ChainStore } from './chains.js';
 import { chainScope, inChain, seenBefore, stampChain, temporaryBotId } from './chain-scope.js';
 import { actOnBot, stopInTeams } from './audit.js';
 import { TaskGroups, taskAction, taskPresence, taskSettled, type TaskPorts } from './tasks.js';
-import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TurnCause, type BotChain, type ChainAction, type ChainView } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, type BotMessageResult, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TurnCause, type BotChain, type ChainAction, type ChainView } from '@orchardworks/agent-remote-protocol';
 
 export interface TeamBrokerPorts {
   /** Timers of the Relay, for what must happen on time: a room's deadline and a member's turn. */
@@ -174,11 +174,14 @@ export class TeamBroker {
     return worker?.nativeSessionId ? { hostId: worker.hostId, providerId: worker.providerId, nativeSessionId: worker.nativeSessionId } : undefined;
   }
   /** Runs a bot's call in the chain of the turn it is made in, then adds what it did to the chain (bots design 7). */
-  private async chained<T>(hostId: string, owner: { providerId: string; nativeSessionId: string }, cause: TurnCause | undefined, run: () => Promise<T>): Promise<T> {
+  private async chained<T>(hostId: string, owner: { providerId: string; nativeSessionId: string }, cause: TurnCause | undefined, run: () => Promise<T>, stopped?: (reason: string) => T): Promise<T> {
     const bot = this.bots ? (() => { try { return this.bots!.callerKey(hostId, owner); } catch { return undefined; } })() : undefined;
     if (!bot) return run();
     const found = this.chains.find(this.ports.read(), { hostId, ...owner }, cause), scope = chainScope(found.id);
-    if (this.chains.stopped(found.id, bot)) fail('The person stopped this work. Do not go on with it; when the person writes to you, tell them where it stands.');
+    if (this.chains.stopped(found.id, bot)) {
+      const reason = 'The person stopped this work. Do not go on with it; when the person writes to you, tell them where it stands.';
+      return stopped ? stopped(reason) : fail(reason);
+    }
     try { return await inChain(scope, run); }
     finally { await this.chains.record(scope, { cause: found.cause, bot }).catch(() => undefined); }
   }
@@ -203,7 +206,7 @@ export class TeamBroker {
       return tasks.create(hostId, call);
     }
     if (call.action === 'create_bot') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained(hostId, call.owner, call.cause, () => bots.create(hostId, call)); }
-    if (call.action === 'bot_message') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained(hostId, call.owner, call.cause, () => bots.message(hostId, call)); }
+    if (call.action === 'bot_message') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained<BotMessageResult>(hostId, call.owner, call.cause, () => bots.message(hostId, call), reason => ({ outcome: 'forbidden', reason })); }
     if (call.action === 'chain_turn') { const bots = this.bots ?? fail(unavailableAssistants), found = this.chains.find(this.ports.read(), { hostId, ...call.owner }, call.cause);
       await this.chains.record(chainScope(found.id), { cause: found.cause, bot: bots.callerKey(hostId, call.owner) }, { tokens: call.tokens, ...(call.costUsd !== undefined ? { costUsd: call.costUsd } : {}) }); return { chain: found.id }; }
     if (call.action === 'update_work' || call.action === 'complete_work' || call.action === 'set_timer') return (this.bots ?? fail(unavailableAssistants)).keepWork(hostId, call);

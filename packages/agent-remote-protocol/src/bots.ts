@@ -71,6 +71,20 @@ export const BotTimer = Type.Object({ name: Type.String({ minLength: 1, maxLengt
   work: Type.Optional(Type.Literal(true)) }, strict);
 export type BotTimer = Static<typeof BotTimer>;
 
+/**
+ * What a `message` call returns (bots design 3.2): `delivered` it is queued for a receiver that is ready; `held` it waits for the
+ * receiver's Host or session; `duplicate` the same `operationId` was already sent and nothing new was queued; `forbidden` the Relay
+ * refuses this sender now (the person stopped its chain); `unreachable` no bot answers to that name or it has retired. `reason`
+ * explains a refusal; `messageId` is the id a receiver answers with `reply_to`.
+ */
+export const BOT_MESSAGE_OUTCOMES = ['delivered', 'held', 'duplicate', 'forbidden', 'unreachable'] as const;
+export const BotMessageOutcome = Type.Union(BOT_MESSAGE_OUTCOMES.map(outcome => Type.Literal(outcome)));
+export type BotMessageOutcome = Static<typeof BotMessageOutcome>;
+export const BotMessageResult = Type.Object({ outcome: BotMessageOutcome, messageId: Type.Optional(Type.String({ pattern: '^m[0-9a-f]{12}$' })),
+  reason: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })) }, strict);
+export type BotMessageResult = Static<typeof BotMessageResult>;
+export const isBotMessageResult = (value: unknown): value is BotMessageResult => Value.Check(BotMessageResult, value);
+
 /** The bot details fields that belong to the bot rather than to its place in a group. */
 export const BOT_IDENTITY_FIELDS = ['name', 'label', 'picture', 'mission'] as const;
 type IdentityField = typeof BOT_IDENTITY_FIELDS[number];

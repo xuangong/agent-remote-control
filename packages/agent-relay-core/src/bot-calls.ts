@@ -5,7 +5,7 @@
  * an chief's to its temporary bot, and any other bot's, is input to that task; anything to a standing bot goes to its inbox.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { assistantMessageText, nativeSessionRefKey, taskView, type TeamHostCall, type TaskView, type TeamMember, type WorkItem } from '@orchardworks/agent-remote-protocol';
+import { assistantMessageText, nativeSessionRefKey, taskView, type BotMessageResult, type TeamHostCall, type TaskView, type TeamMember, type WorkItem } from '@orchardworks/agent-remote-protocol';
 import { accountDirectory, callerAssistant, type Assistant, type AssistantBrokerPorts, type AssistantMessages, type AssistantPorts } from './assistants.js';
 import { ownerTasks, taskAction, type TaskGroups } from './tasks.js';
 import { ACCOUNT_TEAM_LIMIT, type SavedTeam } from './team-delivery.js';
@@ -61,11 +61,12 @@ export class BotCalls {
   /** A bot's temporary staff: the tasks its session owns. */
   private staff(hostId: string, owner: Owner): SavedTeam[] { return ownerTasks(this.broker.ports.read(), this.broker.ports.resolveSession, hostId, owner); }
   /** The bot a name or id means, among the standing bots and the temporary bots still at work. */
-  private named(name: string, caller: Bot): Bot {
+  private named(name: string, caller: Bot): Bot | 'self' | undefined {
     const standing = accountDirectory(this.ports.groups()).filter(item => item.key.startsWith('b_')).map((item): Bot => ({ key: item.key, name: item.name, standing: item }));
     const temporary = this.broker.ports.read().filter(team => team.task && running(team)).map(team => this.temporary(team));
-    const matches = [...standing, ...temporary].filter(bot => bot.key !== caller.key && (bot.key === name || fold(bot.name) === fold(name)));
-    return matches.length === 1 ? matches[0]! : fail(NOT_FOUND);
+    const matches = [...standing, ...temporary].filter(bot => bot.key === name || fold(bot.name) === fold(name));
+    if (matches.length !== 1) return undefined;
+    return matches[0]!.key === caller.key ? 'self' : matches[0]!;
   }
 
   async create(hostId: string, call: Call<'create_bot'>) {
@@ -146,26 +147,50 @@ export class BotCalls {
     if (call.action === 'complete_work') return this.work.complete(self, call);
     return this.work.setTimer(self, call);
   }
-  async message(hostId: string, call: Call<'bot_message'>) {
+  /** Sends one message and says what became of it (bots design 3.2). A refusal is an outcome the sender reads, not an error. */
+  async message(hostId: string, call: Call<'bot_message'>): Promise<BotMessageResult> {
     const from = this.caller(hostId, call.owner), chief = this.chiefOf(from);
     // A room the sender is a member of: its turn's answer, a pass, or the room's result.
     const room = this.rooms.memberRoom(hostId, call.owner, call.to);
-    if (room) return this.rooms.speak(hostId, call.pass ? { action: 'room_pass', owner: call.owner, roomId: room.id }
-      : { action: 'room_say', owner: call.owner, roomId: room.id, text: call.text, ...(call.status === 'done' ? { done: true } : {}) });
+    if (room) {
+      await this.rooms.speak(hostId, call.pass ? { action: 'room_pass', owner: call.owner, roomId: room.id }
+        : { action: 'room_say', owner: call.owner, roomId: room.id, text: call.text, ...(call.status === 'done' ? { done: true } : {}) });
+      return { outcome: 'delivered' };
+    }
     const to = fold(call.to) === 'chief' && chief ? chief : this.named(call.to, from);
+    if (to === 'self') return { outcome: 'forbidden', reason: 'You cannot message yourself.' };
+    if (!to) return { outcome: 'unreachable', reason: NOT_FOUND };
+    return this.route(hostId, from, chief, to, call);
+  }
+  /** Where a message goes by who sends it to whom, and the outcome. */
+  private async route(hostId: string, from: Bot, chief: Bot | undefined, to: Bot, call: Pick<Call<'bot_message'>, 'owner' | 'operationId' | 'text' | 'status' | 'replyTo' | 'patch'>): Promise<BotMessageResult> {
     // A temporary bot to its chief: its report, its question or its progress.
     if (from.task && chief && to.key === chief.key) {
       const memberId = from.task.members[0]!.id;
-      if (call.status === 'done' || call.status === 'failed') return this.tasks.report(hostId, { action: 'report_task', teamId: from.task.id, memberId, status: call.status, summary: call.patch ? `${call.text}\n\n${call.patch}` : call.text });
-      if (call.status === 'needs_input') return this.tasks.ask(hostId, { action: 'ask_owner', teamId: from.task.id, memberId, question: call.text });
-      return this.tasks.progress(hostId, { teamId: from.task.id, memberId, operationId: call.operationId, text: call.text });
+      const send = () => call.status === 'done' || call.status === 'failed'
+        ? this.tasks.report(hostId, { action: 'report_task', teamId: from.task!.id, memberId, status: call.status, summary: call.patch ? `${call.text}\n\n${call.patch}` : call.text })
+        : call.status === 'needs_input' ? this.tasks.ask(hostId, { action: 'ask_owner', teamId: from.task!.id, memberId, question: call.text })
+          : this.tasks.progress(hostId, { teamId: from.task!.id, memberId, operationId: call.operationId, text: call.text });
+      return this.queued(from.task.id, from.task.members[1]!.id, send);
     }
     if (to.task) {
-      const mine = this.staff(hostId, call.owner).some(team => team.id === to.task!.id);
-      return mine ? this.tasks.message(hostId, { action: 'message_task', owner: call.owner, taskId: to.task.id, operationId: call.operationId, text: call.text })
-        : this.tasks.input(to.task.id, from.name, { operationId: call.operationId, text: call.text });
+      const team = this.broker.ports.read().find(item => item.id === to.task!.id);
+      if (!team || !running(team)) return { outcome: 'unreachable', reason: 'That bot has finished its work.' };
+      const mine = this.staff(hostId, call.owner).some(item => item.id === team.id);
+      const worker = team.members[0]!.id;
+      return this.queued(team.id, worker, () => mine ? this.tasks.message(hostId, { action: 'message_task', owner: call.owner, taskId: team.id, operationId: call.operationId, text: call.text })
+        : this.tasks.input(team.id, from.name, { operationId: call.operationId, text: call.text }));
     }
     return this.messages.deliver(from.standing ?? { key: from.key, name: from.name }, to.standing!, { operationId: call.operationId, text: call.text, ...(call.replyTo ? { replyTo: call.replyTo } : {}) });
+  }
+  /** Runs a send that queues one input for a member of a task's Team: delivered when it was queued for a ready seat, held when the seat is not ready, duplicate when nothing new was queued. */
+  private async queued(teamId: string, memberId: string, send: () => Promise<unknown>): Promise<BotMessageResult> {
+    const waiting = () => this.broker.ports.read().find(item => item.id === teamId)?.messages.filter(message => message.to === memberId).length ?? 0;
+    const before = waiting();
+    await send();
+    if (waiting() === before) return { outcome: 'duplicate' };
+    const seat = this.broker.ports.read().find(item => item.id === teamId)?.members.find(member => member.id === memberId);
+    return { outcome: seat?.creation === 'ready' ? 'delivered' : 'held' };
   }
   list(hostId: string, call: Call<'list_bots'>): { bots: BotListing[]; work?: WorkItem[] } {
     const self = this.caller(hostId, call.owner), chief = this.chiefOf(self);

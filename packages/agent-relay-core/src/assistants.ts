@@ -4,7 +4,7 @@
  * they are, whose deliveries wait for the receiver to be idle like task updates and arrive framed as [Message from …].
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { accountAssistants, assistantMessageText, assistantNamesIn, botViews, nativeSessionRefKey, viewAssistantKey,
+import { accountAssistants, assistantMessageText, assistantNamesIn, botViews, type BotMessageResult, nativeSessionRefKey, viewAssistantKey,
   type Team, type TeamHostCall, type TeamMember, type WindowBotDetails, type WindowGroup, type WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
 import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
@@ -101,7 +101,7 @@ export class AssistantMessages {
     return { assistants: directory.filter(item => item.key !== self.key && !item.hidden).map(item => ({ id: item.key, name: item.name, ...(item.label ? { label: item.label } : {}) })) };
   }
   /** A message to another bot arrives in its inbox, framed with the sender's name, between its turns (bots design 3). */
-  async message(hostId: string, call: MessageCall): Promise<{ messageId: string; outcome: 'delivered' | 'held' }> {
+  async message(hostId: string, call: MessageCall): Promise<BotMessageResult> {
     if (!this.ports.capable(hostId)) fail('Update the Controller to message assistants.');
     const directory = accountDirectory(this.ports.groups()), from = this.caller(hostId, call.owner, directory);
     const to = namedAssistant(directory, call.to, from);
@@ -109,13 +109,13 @@ export class AssistantMessages {
     return this.deliver(from, to, call);
   }
   /** Queues a message from a bot (standing or temporary) in a standing bot's inbox. */
-  async deliver(from: { key: string; name: string }, to: Assistant, call: { operationId: string; text: string; replyTo?: string }): Promise<{ messageId: string; outcome: 'delivered' | 'held' }> {
+  async deliver(from: { key: string; name: string }, to: Assistant, call: { operationId: string; text: string; replyTo?: string }): Promise<BotMessageResult> {
     const sent = await this.broker.change(teams => {
       const now = this.broker.ports.now();
       const inbox = this.inboxes.prepare(teams, to, now) ?? fail('Team capacity reached.');
       const recent = inbox.inbox!.recent ??= [];
       const existing = recent.find(item => item.operationId === call.operationId && item.from === from.key);
-      if (existing) return { messageId: existing.id };
+      if (existing) return { messageId: existing.id, duplicate: true };
       let hop = 1;
       if (call.replyTo) {
         // A temporary bot has no inbox: what reached it came as input to its task, so it names no earlier message.
@@ -132,8 +132,9 @@ export class AssistantMessages {
       recent.push({ id: messageId, from: from.key, hop, operationId: call.operationId });
       if (recent.length > RECENT_KEEP) recent.splice(0, recent.length - RECENT_KEEP);
       inbox.revision++; inbox.updatedAt = now;
-      return { messageId };
+      return { messageId, duplicate: false };
     });
+    if (sent.duplicate) return { outcome: 'duplicate', messageId: sent.messageId };
     // Binding a main session where it is never creates anything, so a Host that was offline is asked again with the next message.
     const receiver = await this.inboxes.bind(to);
     return { messageId: sent.messageId, outcome: receiver?.creation === 'ready' ? 'delivered' : 'held' };

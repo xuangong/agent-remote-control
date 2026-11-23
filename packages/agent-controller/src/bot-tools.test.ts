@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
-import type { TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import { readFileSync } from 'node:fs';
+import { isBotMessageResult, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { BotTools, workerToolsIn, WORKER_NAMESPACE } from './bot-tools.js';
 
 // The Relay names the bots' main sessions on this Host with their missions; the stub answers as it would.
@@ -43,4 +44,17 @@ it('counts a listed bots namespace as the tools a session was given, and a defer
   expect(workerToolsIn([namespace])).toBe('tasks');
   expect(workerToolsIn([{ ...namespace, deferred: true }])).toBe('none');
   expect(workerToolsIn(undefined)).toBe('none');
+});
+
+it('returns the outcome of a message to the bot as the tool result, whichever of the five the Relay names', async () => {
+  const fixtures = JSON.parse(readFileSync(new URL('../../agent-remote-protocol/src/fixtures/bot-messages.v1.json', import.meta.url), 'utf8')) as { results: { valid: unknown[] } };
+  const answers = [...fixtures.results.valid], calls: TeamHostCall[] = [];
+  const tools = new BotTools({ request: async call => { calls.push(call); return answers.shift(); }, tasks: () => true });
+  const message = tools.namespace(() => ref('chief'), false).tools.find(tool => tool.name === 'message')!;
+  expect(message.description).toMatch(/delivered.*held.*duplicate.*forbidden.*unreachable/s);
+  const told = [];
+  for (let index = 0; index < fixtures.results.valid.length; index++) told.push(JSON.parse(await message.execute({ to: 'Tracker', text: 'Hello.' }) as string));
+  expect(told).toEqual(fixtures.results.valid);
+  expect(told.every(isBotMessageResult)).toBe(true);
+  expect(calls[0]).toMatchObject({ action: 'bot_message', to: 'Tracker', text: 'Hello.' });
 });

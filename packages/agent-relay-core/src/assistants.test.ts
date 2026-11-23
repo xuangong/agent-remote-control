@@ -59,7 +59,7 @@ describe('assistants messaging one another', () => {
     const f = fixture();
     const sent = await f.broker.hostCall('mac', { action: 'message_assistant', owner: f.chief, to: 'tracker', text: 'Is the release branch cut?', operationId: 'op' }) as { messageId: string; outcome: string };
     expect(sent).toEqual({ messageId: expect.stringMatching(/^m[0-9a-f]{12}$/), outcome: 'delivered' });
-    expect(await f.broker.hostCall('mac', { action: 'message_assistant', owner: f.chief, to: 'Tracker', text: 'Is the release branch cut?', operationId: 'op' })).toEqual(sent);
+    expect(await f.broker.hostCall('mac', { action: 'message_assistant', owner: f.chief, to: 'Tracker', text: 'Is the release branch cut?', operationId: 'op' })).toEqual({ ...sent, outcome: 'duplicate' });
     const [inbox] = f.state();
     expect(inbox!.inbox?.botId).toBe(ids.tracker);
     expect(inbox!.members.map(member => [member.role, member.hostId, member.nativeSessionId, member.creation])).toEqual([['requester', 'pc', 'tracker', 'ready']]);

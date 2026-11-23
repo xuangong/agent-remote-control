@@ -181,6 +181,10 @@ Every bot's main session gets the same extensions, built by the Controller:
 
 - **Standing instructions**: the base instructions every bot shares (kept in the repository with a version, each change rerunning
   the behaviour scenarios of section 11), followed by the bot's mission.
+  They reach a session two ways. A session created for a bot gets them as its instructions. Every bot also receives them as a
+  message, `[Your standing instructions · v<version>]`, whenever they change (its mission was written or changed, or the base
+  instructions got a new version) and it has not received this text yet: Claude Code ignores instructions appended when a session
+  is resumed (checked on 2026-11-23 with `claude --resume … --append-system-prompt`), so a resumed bot would never see them.
 - **One tool namespace**, `agent_remote`:
 
 | Tool | Does |

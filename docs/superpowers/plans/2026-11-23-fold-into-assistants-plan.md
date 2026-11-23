@@ -20,6 +20,11 @@ Implementation plans: [1a, the bot store](2026-11-23-bots-1a-bot-store-plan.md);
 change, existing bots migrated on load with stable ids, assistant ids are bot ids, and the mission is written in a bot's details.
 Unit suites and `pnpm verify:changed` pass; in `pnpm local` a mission saved from the page and the bot's id survived a restart.
 
+1b (2026-11-23): the Relay names a Host's bots with their missions and the Controller opens a bot's session with the base
+instructions and its mission. Live, a resumed Claude session did not see them: Claude Code ignores appended instructions on
+`--resume`. So standing instructions also travel as a message when they change (design 5.1), built with step 2's delivery, which
+comes next. Chains (1c) move to step 4, where the audit needs them; nothing before the audit depends on them.
+
 - [ ] Bot record (design 2.1, closes O70): `botId` stable across handoffs and moves, name, label, picture, mission, organizer (a bot
   or the person), lifetime, main, status, work item, peers. Existing bots get ids from their group views; name, label and picture
   move out of `WindowBotDetails`.

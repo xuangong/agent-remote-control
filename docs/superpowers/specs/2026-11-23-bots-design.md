@@ -44,8 +44,8 @@ Three principles hold throughout:
 | `organizer` | The bot that created it, or the person. The person is the root of every organizer chain. |
 | `lifetime` | `standing` (listed in Chats) or `temporary` (listed under its organizer; retires after its work). |
 | `main` | Its current native session `<hostId>/<providerId>/<nativeSessionId>`; moved by handoff. |
-| `status` | `working`, `needs_input` (waiting for the person or its organizer), `idle`; and `retired`. |
-| `workItem` | The work item it was created for, if any. |
+| `status` | `working`; `needs_input` (it asked a bot or the person a question, 3.1); `blocked` (a native interaction only the person answers, 5.4); `idle`; `retired`. |
+| `createdFor` | The work item it was created for, if any (6.1). |
 | `peers` | Who may message it (default: every bot of the account) and read it (default: its organizers and the person). |
 
 A bot has no mode and no kind. Whether it can start work depends only on its provider taking tools (5.2); a bot whose provider
@@ -58,8 +58,8 @@ cannot is marked **answers only**: it receives messages and its answers return, 
 
 What comes back to the organizer is two messages:
 
-- **From the Relay, whether it started:** `[Bot "QA" · ready]`, `· waiting` (Host offline) or `· failed: <reason>`. A bot that did
-  not start cannot speak for itself.
+- **From the Relay, whether it started:** an ordinary message from the Relay, `progress` (`[Bot "QA" · ready]`, `· waiting` while
+  its Host is offline) or `failed` with the reason. A bot that did not start cannot speak for itself.
 - **From the new bot, its report-in:** its first turn reads its mission and the first message and answers with who it is, how it
   understands its mission, how it will start and what it asks. Its answer is the reply (3.3).
 
@@ -78,11 +78,14 @@ after a lasting change, a compaction or a handoff.
 
 ### 2.4 Lifetime
 
-- A **temporary** bot is created for one piece of work. When it reports `done` or `failed` and that report is delivered, it stays
-  for a while so its organizer can send it more work by message, then retires.
+- A **temporary** bot is created for one piece of work. After its `done` or `failed` report is delivered it stays 24 hours, so its
+  organizer can send it more work by message, then retires. Only its organizer and the person retire it or keep it.
 - A **standing** bot lives until its organizer or the person retires it. Bots created for a work item retire when the item
   completes, unless the person keeps them.
-- Retiring releases the bot's runtime; its conversation stays readable and opens as an ordinary session.
+- Retiring releases the bot's runtime; its conversation stays readable and opens as an ordinary session. A retired bot is
+  `unreachable`: messages to it are refused, and messages waiting for it go back to their senders as `unreachable`.
+- Retiring an organizer retires its temporary bots and moves its standing bots to the person, the root, who may hand them to another
+  organizer.
 
 ### 2.5 Span
 
@@ -100,9 +103,10 @@ message is to its receiver; without it, it is ordinary conversation:
 |---|---|---|
 | `progress` | Where my work stands | `report_team_progress` |
 | `done`, `failed` | My work is finished; this is the result | `report_task`, `report_support` |
-| `needs_input` | I need an answer to continue; my status becomes `needs_input` until one arrives | `ask_owner` |
+| `needs_input` | I need an answer to continue; my status becomes `needs_input` until the addressee, one of my organizers or the person answers | `ask_owner` |
 
-A bot reports to its organizer, not only to the bot it worked with. A report is written by the bot it describes.
+A bot reports to its organizer, not only to the bot it worked with: a reply goes to whoever asked, a report to the organizer. A
+report is written by the bot it describes.
 
 ### 3.2 Delivery
 
@@ -116,28 +120,29 @@ When the receiver becomes idle, everything waiting is delivered as **one input**
 2. questions its bots are waiting on it to answer (`needs_input`);
 3. its organizer;
 4. other bots, in arrival order;
-5. reports (`progress`, `done`, `failed`) and creation outcomes, newest per sender;
+5. reports (`progress`, `done`, `failed`), newest per sender;
 6. timers.
 
-Ten bots finishing during one long turn wake their organizer once.
+A reply takes the place of the message it answers. Ten bots finishing during one long turn wake their organizer once.
 
 Delivery is at most once: a durable `sending` receipt precedes the native call; after a restart, an input left `sending` settles
 `unknown` and is never sent again, and its sender is told. A receiver's Host that is offline holds messages until it returns. A
-handoff moves the receiver's `main`; waiting messages reach the successor. Every `message` call returns an outcome: `delivered`,
+handoff happens only while the bot is idle and moves its `main`; waiting messages reach the successor. Every `message` call returns an outcome: `delivered`,
 `held`, `duplicate`, `forbidden` or `unreachable`.
 
 ### 3.3 Replies
 
-A turn started by exactly one message returns its final text to that message's sender as the reply, with no tool call, so a bot on
+A turn started by exactly one message, which is not itself a reply, returns its final text to that message's sender as the reply, with no tool call, so a bot on
 any provider can be asked. A final text longer than 300 characters is cut there and ends with a pointer to the rest (`read_bot`),
 since the turn that wrote it is over. When several messages arrived together, the bot answers each with `reply_to`. A reply may be an
 acknowledgement ("received, working on it"); the result follows with `reply_to`. A turn that already answered its sender with
-`message` sends no second reply.
+`message` sends no second reply. Because a reply never earns an automatic reply, two bots cannot thank each other forever.
 
 ### 3.4 Bounds
 
 - A message that crosses to another bot is at most **300 characters**. Details stay where they are and are read on demand
-  (`read_bot`, attachments). The Relay refuses a longer one so the bot shortens it. Messages to the person are not bound.
+  (`read_bot`, attachments). Where the bot can still rewrite it, the Relay refuses a longer one so the bot shortens it in its own
+  words; only a final-text reply, whose turn is over, is cut (3.3). Messages to the person are not bound.
 - Attachments are files (a patch, a log, a git bundle) the receiver downloads to a verified local file and never applies by itself.
 
 ### 3.5 Frames
@@ -165,7 +170,8 @@ When the person writes to a bot that has an organizer, the organizer receives th
 A room is a message target with members (bots and the person) and a deadline. The Relay asks one member at a time, as a framed
 message carrying only what that member has not seen; the member answers with `message` to the room, passes, or says the room is
 done with its result. A member that does not answer in time loses its turn; the deadline and a turn limit close the room, on time,
-by a Relay timer. The person reads and writes a room as a group chat in Bot mode and can end it.
+by a Relay timer. The person reads and writes a room as a group chat in Bot mode and can end it. A room is a message target, not a
+fifth abstraction: its messages obey section 3 and belong to the chains that caused them.
 
 ## 5. Native sessions
 
@@ -220,14 +226,14 @@ describe both, shared repository first.
 Turns, their order, context and compaction stay the CLI's. ARC adds no concurrency inside a session and never rewrites native
 history; it keeps what it adds small: one frame per message, 300-character summaries, one input per idle. Each bot keeps its CLI's
 own permission settings. No bot answers another bot's native interactions (tool, plan or form approvals) or changes another bot's
-settings: those belong to the person. A native interaction pending in a bot makes its status `needs_input`; its organizer receives a
-frame saying what waits, and the person is reminded.
+settings: those belong to the person. A native interaction pending in a bot makes its status `blocked`; its organizer receives a
+frame saying what waits, and the person is reminded directly.
 
 ## 6. Work items and timers
 
 ### 6.1 Work items
 
-Every bot can keep work items, as every bot can create bots; a bot whose mission is a piece of work keeps one for it. A work item
+Every bot can keep work items (a list on the bot), as every bot can create bots; a bot whose mission is a piece of work keeps one for it. A work item
 holds what was agreed, a plan with acceptance, a todo, a phase (clarifying, agreed, in progress, verifying, waiting for the person,
 done), a one-line summary and the next action. A confirmation step completes only by the person's Agree; no tool accepts it.
 
@@ -264,7 +270,7 @@ Only system bounds refuse: sizes (3.4, and the Relay's and Host's storage and ca
 | Change its mission | edit it | by message, recorded by the bot | by message, for its own requests only |
 | Stop its turn, retire it | yes | yes | no |
 | Answer its native interactions | yes | no | no |
-| Answer its `needs_input` question | yes | yes | if the question was to it |
+| Answer its `needs_input` question | yes | yes | if the question was addressed to it |
 
 The Relay checks the sender of every message at submission and again at delivery, using the identity the sender's Controller
 stamped; a Controller is trusted only for its own sessions. Share recipients see conversations as today and do not message bots.
@@ -288,8 +294,8 @@ messages also stays: it is the person's action, not coordination.
 ## 10. Workbench
 
 - **Chats** lists standing bots, each organizer's bots in its group, marked with who created them. A bot's row shows its status and
-  its work item's one-line summary. Needs-you reminders are grouped by organizer; only interactions that only the person can answer
-  remind directly.
+  its work item's one-line summary. Needs-you reminders, unanswered `needs_input` questions included, are grouped by organizer; a
+  `blocked` bot reminds the person directly.
 - **A bot's conversation** shows its messages with their senders. Reports and messages between bots fold to one line per sender
   ("3 updates from Dev"), expandable; the bot's own words to the person stay full.
 - **A temporary bot** appears as a card where it was created; opening it shows its conversation beside the organizer's (a panel in

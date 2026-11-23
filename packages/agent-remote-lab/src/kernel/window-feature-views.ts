@@ -4,13 +4,11 @@ import type { WindowLayoutAuthority } from './window-workspace-context.js';
 export interface WindowAskSourceAnchor { hostId: string; providerId: string; nativeSessionId: string; roleKey?: string; agentId?: string; title?: string }
 
 type FeatureAssociation = NonNullable<WindowView['feature']>;
-export type WindowAppFeature =
-  | { kind: 'ask'; id: string; source?: WindowAskSourceAnchor }
-  | { kind: 'tpm'; id: string; hostId: string };
+export type WindowAppFeature = { kind: 'ask'; id: string; source?: WindowAskSourceAnchor };
 
 const nativeId = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 4096;
 
-/** Only validated application associations receive feature behavior. Unknown tags, such as the `team` of older state, remain ordinary views. */
+/** Only validated application associations receive feature behavior. Unknown tags, such as the `team` and `tpm` of older state, remain ordinary views. */
 export function parseWindowFeature(feature: FeatureAssociation | undefined): WindowAppFeature | undefined {
   if (!feature || !nativeId(feature.id)) return;
   if (feature.kind === 'ask') {
@@ -21,18 +19,14 @@ export function parseWindowFeature(feature: FeatureAssociation | undefined): Win
     return { kind: 'ask', id: feature.id, source: { hostId: m.sourceHostId!, providerId: m.sourceProviderId!, nativeSessionId: m.sourceNativeSessionId!,
       ...(m.sourceRoleKey ? { roleKey: m.sourceRoleKey } : {}), ...(m.sourceAgentId ? { agentId: m.sourceAgentId } : {}), ...(m.sourceTitle ? { title: m.sourceTitle } : {}) } };
   }
-  if (feature.kind === 'tpm' && nativeId(feature.metadata?.hostId)) {
-    return { kind: 'tpm', id: feature.id, hostId: feature.metadata.hostId };
-  }
 }
 
 export function createWindowFeature(feature: WindowAppFeature): FeatureAssociation {
-  if (feature.kind === 'ask') return { kind: feature.kind, id: feature.id, ...(feature.source ? { metadata: {
+  return { kind: feature.kind, id: feature.id, ...(feature.source ? { metadata: {
     sourceHostId: feature.source.hostId, sourceProviderId: feature.source.providerId, sourceNativeSessionId: feature.source.nativeSessionId,
     ...(feature.source.roleKey ? { sourceRoleKey: feature.source.roleKey } : {}), ...(feature.source.agentId ? { sourceAgentId: feature.source.agentId } : {}),
     ...(feature.source.title ? { sourceTitle: feature.source.title } : {}),
   } } : {}) };
-  return { kind: feature.kind, id: feature.id, metadata: { hostId: feature.hostId } };
 }
 
 export function featureView(window: WorkspaceWindow, kind: WindowAppFeature['kind'], id: string) {

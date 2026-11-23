@@ -14,7 +14,6 @@
   box-shadow: 0 4px 20px color-mix(in oklab, var(--orchard-shadow-ink) 16%, transparent), inset 0 0 0 1px var(--orchard-focus);
 }
 .lab-session-dock-pane [data-session-title-draggable], .lab-session-dock-pane [data-session-title-draggable] .agent-session-title,
-[data-session-title-draggable] .lab-tpm-title-button { touch-action: none; cursor: grab; user-select: none; }
 [data-session-title-draggable]:focus-visible { outline: 2px solid var(--orchard-focus); outline-offset: 2px; border-radius: 3px; }
 .lab-session-dock-pane[data-dragging] [data-session-title-draggable],
 .lab-session-dock-pane[data-dragging] [data-session-title-draggable] * { cursor: grabbing; }

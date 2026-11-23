@@ -17,10 +17,8 @@ import { DebugWorkbench } from '@orchardworks/agent-remote-debugger/testing/sess
 import { SessionWindow } from '../features/windows/SessionWindow.js';
 import { SessionFamily } from './SessionFamily.js';
 import { AskConversation } from '../features/team/AskConversation.js';
-import { TpmWorkspace } from '../features/team/TpmWorkspace.js';
 import { askParticipantKey } from '../features/team/useAskConversations.js';
 import type { SessionFork } from '../kernel/session-forks.js';
-import type { TpmItem } from '../kernel/tpm-main-sessions.js';
 import { SessionDirectoryClient, type OpenedSession, type SuccessionActionResult } from '../kernel/directory-client.js';
 import { SessionViewOperationsContext } from './session-view-operations.js';
 import { labSessionSuccessionDirectory } from '../kernel/session-succession-directory.js';
@@ -108,7 +106,7 @@ function fixture(images = false, unavailableImage = false, queue = false, quote?
 }
 
 const promptEditor = (view: ParentNode) => view.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
-type Placement = 'debugger' | 'main' | 'side' | 'window' | 'team-leader' | 'team-member' | 'compact-leader' | 'compact-member' | 'child' | 'ask' | 'tpm';
+type Placement = 'debugger' | 'main' | 'side' | 'window' | 'team-leader' | 'team-member' | 'compact-leader' | 'compact-member' | 'child' | 'ask';
 async function setupEdit(kind: Placement, options: { outcome?: 'ready' | 'unknown' | 'rejected' | 'cancelled'; holdCommit?: boolean; holdPrepare?: boolean; windowChild?: boolean; commitBoundaryChanged?: boolean; explicitRecipient?: boolean; unavailable?: boolean; historical?: boolean; images?: boolean; unavailableImage?: boolean; queue?: boolean; quote?: SessionExcerpt; receiveQuotes?(excerpts: readonly SessionExcerpt[]): void } = {}) {
   const f = fixture(options.images, options.unavailableImage, options.queue, options.quote);
   let recipientCurrent = true;
@@ -173,7 +171,6 @@ async function setupEdit(kind: Placement, options: { outcome?: 'ready' | 'unknow
       transport: f.transport, draftStore: drafts, draftBinding, imageDraftBinding, hostLabel: 'Local', offline: false, active: true, compact: kind.startsWith('compact-') };
     const record: SessionFork = { id: 'ask-record', mode: 'reference', source: { ...session, nativeSessionId: 'unrelated-main' }, target: session,
       capturedAt: 'now', delivery: 'sent', configured: true, options: {}, settings: [] };
-    const item: TpmItem = { key: 'work', hostId: 'local', hostName: 'Local', online: true, unread: false, work: { id: 'work', revision: 1, title: 'Work', providerId: 'recorded', mainNativeSessionId: 'unrelated-main', tpmNativeSessionId: 'A', phase: 'implementing', waiting: 'none', paused: false, summary: '', nextAction: '', document: '', acceptance: '', evidence: [], createdAt: 'now', updatedAt: 'now', nextCheckAt: 0, outbox: [] } };
     return <SessionViewOperationsContext.Provider value={{ storageScope: scope, transport: f.transport, enabled,
       resolveTarget: source => ({ target: 'parentNativeSessionId' in source && source.parentNativeSessionId || source.nativeSessionId === 'D' ? source : { ...source, nativeSessionId: current }, ...(options.historical ? { historyRoleId: 'history-role' } : {}) }),
       directory: () => labSessionSuccessionDirectory(new SessionDirectoryClient(scope, fetcher)), refreshSettled: async result => { if (result.record.phase === 'committed') { native = result.record.to!.nativeSessionId; update(native); } } }}><ConversationConnectionScope.Provider value={connections}>
@@ -181,8 +178,6 @@ async function setupEdit(kind: Placement, options: { outcome?: 'ready' | 'unknow
         onClose={() => {}} onOpenSource={() => {}} onOpenFork={() => {}} onFork={async () => ({})} />
       : kind === 'ask' ? <AskConversation entry={{ source: record.source, record, attached: true, attachedParticipant: askParticipantKey(record) }} transport={f.transport}
         draftBinding={draftBinding} imageDraftBinding={imageDraftBinding} triggerRef={trigger} storageScope={scope} onClose={() => {}} onToggleEnabled={() => {}} onClean={() => {}} onRetry={() => {}} onSendInput={() => {}} onDiscardInput={() => {}} />
-      : kind === 'tpm' ? <TpmWorkspace session={session} item={item} visible storageScope={scope} triggerRef={trigger} transport={f.transport} draftBinding={draftBinding}
-        onClose={() => {}} onShowList={() => {}} onOpenMain={() => {}} onAction={async () => {}} onResolve={async () => {}} onRetry={() => {}} />
       : kind.startsWith('compact-') || kind === 'child' ? <SessionFamily {...family} />
       : <SessionWindow entry={{ id: 'window', slotId: 'slot', managed: kind.startsWith('team-'), target: windowTarget }} baseUrl={scope} visible compact={false} hostLabel="Local" offline={false}
         transport={f.transport} draftStore={drafts} draftBinding={draftBinding} imageDraftBinding={imageDraftBinding} navigation={(source, state) => sessionViewNavigation({ source, state, entries: [] })} onFocus={() => {}} onClose={() => {}} />}
@@ -196,7 +191,7 @@ async function setupEdit(kind: Placement, options: { outcome?: 'ready' | 'unknow
 // Window views follow a successor through the shared Window layout. This harness renders SessionWindow without one,
 // so those views never observe B; they stay listed here until the harness provides a Window layout.
 it.skip.each(['window', 'team-leader', 'team-member'] as const)('edits the clicked %s prefix through its own client, follows B and restores without input', async () => {});
-it.each(['main', 'side', 'compact-leader', 'compact-member', 'ask', 'tpm'] as const)('edits the clicked %s prefix through its own client, follows B and restores without input', async kind => {
+it.each(['main', 'side', 'compact-leader', 'compact-member', 'ask'] as const)('edits the clicked %s prefix through its own client, follows B and restores without input', async kind => {
   const f = await setupEdit(kind);
   await vi.waitFor(() => expect(f.view.querySelectorAll('[data-prompt-editable]')).toHaveLength(2));
   await act(async () => (f.view.querySelectorAll('[data-prompt-editable]')[1]!.querySelector('[data-prompt-edit-action]') as HTMLButtonElement).click());
@@ -452,13 +447,13 @@ it('reports unsupported native capability and keeps separately opened history re
 // Window views follow a successor through the shared Window layout. This harness renders SessionWindow without one,
 // so those views never observe B; they stay listed here until the harness provides a Window layout.
 it.skip.each(['window', 'team-leader', 'team-member'] as const)('restores selected image bytes in the %s owner using only that view resources', async () => {});
-it.each(['main', 'side', 'compact-leader', 'compact-member', 'ask', 'tpm'] as const)('restores selected image bytes in the %s owner using only that view resources', async kind => {
+it.each(['main', 'side', 'compact-leader', 'compact-member', 'ask'] as const)('restores selected image bytes in the %s owner using only that view resources', async kind => {
   vi.stubGlobal('Blob', NativeBlob);
   const f = await setupEdit(kind, { images: true });
   await clickPrompt(f.view, 1);
   await vi.waitFor(() => expect(promptEditor(f.view).querySelector('[data-image-id]')).not.toBeNull());
   await vi.waitFor(() => expect(f.view.querySelector('.lab-handoff-notice')).toBeNull());
-  const imageBinding = kind === 'tpm' ? { scope: f.imageDraftBinding.scope, key: JSON.stringify([f.imageDraftBinding.scope, JSON.stringify(['local', 'recorded', 'A'])]) } : f.imageDraftBinding;
+  const imageBinding = f.imageDraftBinding;
   const saved = await inspectImageDraft(imageBinding);
   expect(Object.values(saved.snapshot().draft!.images)[0]!.blob?.size).toBe(10);
   expect(f.resourceRequests.length).toBeGreaterThan(0);

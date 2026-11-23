@@ -4,7 +4,7 @@ import { sessionKey } from '../../kernel/session-tree.js';
 /**
  * Edits that give a Window's views the titles confirmed for their sessions. An ordinary view is renamed in place by a
  * binding that expects the session it shows now: the edit is saved after any edit still in flight, and is refused if
- * the view shows another session by then. Views an Ask, Team or TPM manages refuse direct bindings, so they are renamed
+ * the view shows another session by then. Views an Ask or Team manages refuse direct bindings, so they are renamed
  * through one layout edit, issued before the bindings that would otherwise change the Window under it. A Window named after
  * its one primary session (as a group started from a new session is) follows that session's title; any other title stays.
  */

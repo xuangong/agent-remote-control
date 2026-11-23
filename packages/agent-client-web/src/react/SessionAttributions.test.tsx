@@ -8,7 +8,7 @@ import { type SessionDescription } from '@orchardworks/agent-client';
 const description: SessionDescription = {
   identity: { hostId: 'host-a', providerId: 'codex', nativeSessionId: 'task' },
   attributions: [
-    { id: 'role', kind: 'role', label: 'Role', value: 'TPM' },
+    { id: 'role', kind: 'role', label: 'Role', value: 'Team' },
     { id: 'main', kind: 'main', label: 'Main', value: 'Project A', detail: 'Mac mini',
       target: { kind: 'session', hostId: 'host-a', providerId: 'codex', nativeSessionId: 'main' } },
   ],

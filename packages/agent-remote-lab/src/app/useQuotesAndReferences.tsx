@@ -25,7 +25,7 @@ import type { SideSelectionSlice } from './useSideSelection.js';
 import type { ConversationConnectionsSlice } from './useConversationConnections.js';
 import type { PanelsAndShortcutsSlice } from './usePanelsAndShortcuts.js';
 import type { ActiveSessionSlice } from './useActiveSession.js';
-import type { SharedFeedsAndTpmSlice } from './useSharedFeedsAndTpm.js';
+import type { SharedFeedsSlice } from './useSharedFeeds.js';
 import type { CommunicationsAndForksSlice } from './useCommunicationsAndForks.js';
 import type { ProviderCreationSlice } from './useProviderCreation.js';
 import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';
@@ -38,7 +38,7 @@ import { quoteCreationId, quoteLanding, quoteSessionOptions, quoteStart, reloade
 import { askRestoreAllowed } from '../features/team/ask-visibility.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 
-export function useQuotesAndReferences(scope: Pick<AppInputs & RequestedSessionSlice & WorkbenchShellSlice & FocusedAskSlice & ViewSessionStateSlice & RemoteHostStateSlice & SessionSuccessionBindingSlice & SideSelectionSlice & ConversationConnectionsSlice & PanelsAndShortcutsSlice & ActiveSessionSlice & SharedFeedsAndTpmSlice & CommunicationsAndForksSlice & ProviderCreationSlice & WorkbenchRecordsSlice & WindowViewActionsSlice & TraceNavigationSlice, 'accessReady' | 'ask' | 'askSurfaceVisible' | 'askTriggerRef' | 'askView' | 'baseUrl' | 'compactLayout' | 'compositionProtected' | 'connections' | 'directory' | 'dispatchQuote' | 'earlierConversations' | 'earlierDirectory' | 'editWindow' | 'navigateAttributionRef' | 'openAsk' | 'pageOpen' | 'quote' | 'quoteSelection' | 'refreshRelations' | 'rememberSession' | 'remoteHosts' | 'replicaFor' | 'retryHosts' | 'selectedHost' | 'setDirectoryRevision' | 'sharedWindow' | 'sideSessions' | 'sourceCurrent' | 'succession' | 'transitioning' | 'transport' | 'viewNavigation' | 'windowWorkspace'>) {
+export function useQuotesAndReferences(scope: Pick<AppInputs & RequestedSessionSlice & WorkbenchShellSlice & FocusedAskSlice & ViewSessionStateSlice & RemoteHostStateSlice & SessionSuccessionBindingSlice & SideSelectionSlice & ConversationConnectionsSlice & PanelsAndShortcutsSlice & ActiveSessionSlice & SharedFeedsSlice & CommunicationsAndForksSlice & ProviderCreationSlice & WorkbenchRecordsSlice & WindowViewActionsSlice & TraceNavigationSlice, 'accessReady' | 'ask' | 'askSurfaceVisible' | 'askTriggerRef' | 'askView' | 'baseUrl' | 'compactLayout' | 'compositionProtected' | 'connections' | 'directory' | 'dispatchQuote' | 'earlierConversations' | 'earlierDirectory' | 'editWindow' | 'navigateAttributionRef' | 'openAsk' | 'pageOpen' | 'quote' | 'quoteSelection' | 'refreshRelations' | 'rememberSession' | 'remoteHosts' | 'replicaFor' | 'retryHosts' | 'selectedHost' | 'setDirectoryRevision' | 'sharedWindow' | 'sideSessions' | 'sourceCurrent' | 'succession' | 'transitioning' | 'transport' | 'viewNavigation' | 'windowWorkspace'>) {
   const t = useTranslate();
   const { accessReady, ask, askSurfaceVisible, askTriggerRef, askView, baseUrl, compactLayout, compositionProtected, connections, directory, dispatchQuote, earlierConversations, earlierDirectory, editWindow, navigateAttributionRef, openAsk, pageOpen, quote, quoteSelection, refreshRelations, rememberSession, remoteHosts, replicaFor, retryHosts, selectedHost, setDirectoryRevision, sharedWindow, sideSessions, sourceCurrent, succession, transitioning, transport, viewNavigation, windowWorkspace } = scope;
 

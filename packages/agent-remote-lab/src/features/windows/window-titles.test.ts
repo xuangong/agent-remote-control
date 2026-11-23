@@ -18,7 +18,7 @@ it('renames ordinary views in place and only for the session they still show', (
   expect(windowTitleEdits(initial, titles(['named', 'Plan']))).toEqual([]);
 });
 
-it('renames views an Ask, Team or TPM manages through one layout edit before the others', () => {
+it('renames views an Ask or Team manages through one layout edit before the others', () => {
   const managed = { ...createWindowView('ask', binding('asked', 'Session'), 'float'), bindingPolicy: 'managed' as const };
   const initial = window(createWindowView('main', binding('created', 'New session'), 'primary'), managed);
   const [layout, ...rest] = windowTitleEdits(initial, titles(['created', 'Fix the build'], ['asked', 'Why is CI red?']));

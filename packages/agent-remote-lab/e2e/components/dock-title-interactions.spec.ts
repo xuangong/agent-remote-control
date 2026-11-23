@@ -115,59 +115,6 @@ test('ordinary and empty panes keep placement and binding actions inside their m
   await page.screenshot({ path: info.outputPath('dock-title-action-menus.png') });
 });
 
-test('Ask and TPM keep placement actions collapsed and TPM title dragging preserves rename', async ({ page, isMobile }, info) => {
-  test.skip(isMobile, 'Wide floating and docked views share the same actions.');
-  await page.setViewportSize({ width: 1920, height: 1000 });
-  await page.goto('/e2e/fixtures/tpm-dock.html');
-  const list = page.getByRole('region', { name: 'TPM works', exact: true });
-  for (const name of ['Search delivery', 'Connection recovery']) {
-    await page.getByRole('button', { name: 'TPM works', exact: true }).click();
-    await list.locator('[data-tpm-work]').filter({ hasText: name }).click();
-    await list.getByRole('button', { name: 'Close TPM works' }).click();
-    const view = page.getByRole('dialog', { name: `TPM: ${name}`, exact: true });
-    await expect(view.getByRole('button', { name: `Dock ${name}`, exact: true, includeHidden: true })).toBeHidden();
-    await clickSessionAction(view, `Dock ${name}`);
-    await view.getByTestId('prompt-input').click();
-    await expect(view.getByRole('button', { name: `Float ${name}`, exact: true, includeHidden: true })).toBeHidden();
-  }
-  const first = page.getByRole('region', { name: 'Docked Search delivery', exact: true });
-  const second = page.getByRole('region', { name: 'Docked Connection recovery', exact: true });
-  await second.getByTestId('prompt-input').fill('Preserve the TPM draft');
-  await second.getByTestId('prompt-input').evaluate(element => element.setAttribute('data-instance', 'original-tpm'));
-  const rename = second.getByRole('button', { name: 'Rename TPM session', exact: true });
-  await rename.click();
-  const editor = second.getByRole('textbox', { name: 'TPM session name', exact: true });
-  await expect(editor).toHaveValue('Connection recovery');
-  await editor.fill('Recovery validation');
-  await second.getByRole('button', { name: 'Save', exact: true }).click();
-  const renamed = page.getByRole('region', { name: 'Docked Recovery validation', exact: true });
-  await expect(renamed).toBeVisible();
-  await expect(title(renamed)).toHaveAttribute('aria-label', 'Move Recovery validation');
-  const start = await point(renamed.getByRole('button', { name: 'Rename TPM session', exact: true }));
-  const destination = (await first.boundingBox())!;
-  await page.mouse.move(start.x, start.y); await page.mouse.down();
-  await page.mouse.move(destination.x + destination.width / 3, start.y, { steps: 16 }); await page.mouse.up();
-  await expect(renamed).toHaveCSS('order', '1'); await expect(first).toHaveCSS('order', '2');
-  await expect(renamed.getByRole('textbox', { name: 'TPM session name', exact: true })).toHaveCount(0);
-  await expect(renamed.getByTestId('prompt-input')).toHaveText('Preserve the TPM draft');
-  await expect(renamed.getByTestId('prompt-input')).toHaveAttribute('data-instance', 'original-tpm');
-  await expect.poll(() => translation(renamed)).toBe(0);
-  await clickSessionAction(renamed, 'Float Recovery validation');
-  await page.getByRole('dialog', { name: 'TPM: Recovery validation', exact: true }).getByRole('button', { name: 'Minimize TPM', exact: true }).click();
-  await page.getByRole('button', { name: 'Open Ask', exact: true }).click();
-  const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
-  const draft = ask.getByRole('textbox', { name: 'Ask draft' });
-  await draft.fill('Keep the Ask draft');
-  await expect(ask.getByRole('button', { name: 'Dock Ask', exact: true, includeHidden: true })).toBeHidden();
-  await clickSessionAction(ask, 'Dock Ask');
-  await draft.click();
-  await expect(ask.getByRole('button', { name: 'Float Ask', exact: true, includeHidden: true })).toBeHidden();
-  await expect(title(page.getByRole('region', { name: 'Docked Ask', exact: true }))).toHaveAttribute('aria-label', 'Move Ask');
-  await clickSessionAction(ask, 'Float Ask');
-  await expect(draft).toHaveValue('Keep the Ask draft');
-  await page.screenshot({ path: info.outputPath('ask-tpm-title-menus.png') });
-});
-
 test('narrow panes keep their selection and draft without exposing dock title dragging', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 900 }); await page.goto(fixture);
   const view = page.locator('.lab-bindable-session-window[data-view-id="peer"]');

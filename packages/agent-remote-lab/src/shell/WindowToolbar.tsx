@@ -14,7 +14,7 @@ export function WindowToolbar({ windowId, title, summary, leading, launchers, di
   botAppearance, onBotAppearance, onCopyLink, onAgentControl, onDelete }: {
   /** The Window shown; when another one takes the toolbar, an open rename ends without saving. */
   windowId: string; title: string; leading?: ReactNode; disabled?: boolean;
-  /** The Track, Team, TPM, Window and Ask entries, in a row of the toolbar, when the sidebar does not hold them. */
+  /** The Track, Team, Window and Ask entries, in a row of the toolbar, when the sidebar does not hold them. */
   launchers?: ReactNode;
   /** What the Window holds, as its sidebar row says it (`windowSummary`): "6 bots · 1 open". */
   summary: string;

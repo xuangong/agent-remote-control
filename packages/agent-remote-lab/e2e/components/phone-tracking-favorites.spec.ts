@@ -12,7 +12,6 @@ test('tracking is managed from the Favorites filter of the drawer, without row c
   let stars = [star, other];
   await page.addInitScript(({ star, orphan }) => {
     localStorage.setItem('agent-remote:track-view', 'true');
-    localStorage.setItem('agent-remote:tpm-view', 'false');
     localStorage.setItem(`agent-remote-tracking:${location.origin}/u/alice/`, JSON.stringify([star, orphan]));
   }, { star, orphan });
   await page.route('**/v1/session-migrations', route => route.fulfill({ json: { migrations: [] } }));

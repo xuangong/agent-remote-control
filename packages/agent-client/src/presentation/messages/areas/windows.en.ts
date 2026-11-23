@@ -160,7 +160,7 @@ export const windows = {
   'windows.error.viewManaged': 'This session view is closed or managed by its feature.',
   'windows.error.identityIncomplete': 'The selected session identity is incomplete.',
   'windows.error.viewLimit': 'Close a session view before opening more than {limit}.',
-  'windows.error.managedView': 'This view belongs to an Ask, Team, or TPM. Select an ordinary session view or create an empty view first.',
+  'windows.error.managedView': 'This view belongs to an Ask or Team. Select an ordinary session view or create an empty view first.',
   'windows.error.groupGone': 'This group is no longer available.',
   'windows.error.relatedNotOpened': 'The related session could not be opened.',
   'windows.error.sourceChanged': 'The source view changed. Open the Side session again.',

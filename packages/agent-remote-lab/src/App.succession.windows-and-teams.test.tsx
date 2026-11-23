@@ -330,51 +330,6 @@ it('opens Track beside a dock bot whose replacement is still saving, leaving tha
   expect(setup.windowDocument.selectedViewId).toBe(opened()!.id);
 });
 
-it.each(['dock', 'attached', 'empty-dock'] as const)('creates a TPM work from the selected %s binding without falling back to primary', async destination => {
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
-  localStorage.setItem('agent-remote:tpm-view', 'true');
-  const tpmCreate = vi.fn().mockRejectedValue(new Error('TPM creation observed'));
-  const hostService = {
-    hosts: async () => ({ hosts: [{ id: 'host', name: 'Fixture Host', online: true, teamManagement: true as const, providers: [] }] }),
-    pair: async () => { throw new Error('No pairing'); }, revoke: async () => {},
-    tpmList: async () => ({ supported: true, supportedProviders: ['recorded'], works: [] }),
-    tpmWork: async () => { throw new Error('No TPM detail expected'); }, tpmCreate,
-    tpmAction: async () => { throw new Error('No TPM action expected'); },
-  };
-  const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Source ${id}` });
-  const selected = createWindowView('feature-source', destination === 'empty-dock' ? undefined : binding('X'), destination === 'attached' ? 'attached' : 'dock');
-  if (destination === 'attached') selected.attachedTo = 'primary-A';
-  const document: WorkspaceWindow = { schemaVersion: 3, id: `feature-selected-${destination}`, title: 'Selected feature source', revision: 0,
-    selectedPrimaryViewId: 'primary-A', selectedViewId: 'primary-A', views: [createWindowView('primary-A', binding('A'), 'primary'), selected] };
-  const setup = { chain: [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document, hostService };
-  const f = await failureFixture(false, 'A', false, `&window=${document.id}`, setup);
-  await settleApp(() => expect(f.view.querySelector('[data-window-view-id="feature-source"]')).not.toBeNull());
-  await act(async () => f.view.querySelector<HTMLButtonElement>(':is(.lab-launcher-window, .lab-window-floating) [aria-label="Groups"]')!.click());
-  // The Windows entry's own row, not the hidden sidebar's.
-  const destinationOption = [...f.view.querySelectorAll<HTMLButtonElement>('[data-window-view-id="feature-source"]')].find(option => option.closest('.lab-launcher-window, .lab-window-floating'))!;
-  expect(destinationOption.closest('[hidden]')).toBeNull();
-  await act(async () => destinationOption.click());
-  await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Close groups"]')!.click());
-  await settleApp(() => expect(setup.windowDocument.selectedViewId).toBe('feature-source'));
-  if (destination !== 'attached') {
-    await settleApp(() => expect(f.view.querySelector('[data-primary-group-id="primary-A"]')?.hasAttribute('data-selected')).toBe(false));
-  }
-  await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="TPM works"]')!.click());
-  const create = () => f.view.querySelector<HTMLButtonElement>('[aria-label="Create TPM work"]');
-  if (destination === 'empty-dock') {
-    await settleApp(() => { expect(!create() || create()!.disabled).toBe(true); });
-    expect(tpmCreate).not.toHaveBeenCalled();
-    expect(f.view.querySelector('.lab-tpm-panel [data-creation-source]')).toBeNull();
-    return;
-  }
-  await settleApp(() => { expect(create()).toBeTruthy(); expect(create()!.disabled).toBe(false); });
-  await act(async () => create()!.click());
-  await settleApp(() => expect(tpmCreate).toHaveBeenCalledOnce());
-  expect(tpmCreate).toHaveBeenCalledWith('host', expect.objectContaining({ providerId: 'recorded', mainNativeSessionId: 'X', operationId: expect.any(String) }));
-  expect(setup.windowDocument.views.find(view => view.id === 'primary-A')?.binding?.nativeSessionId).toBe('A');
-});
-
-
 it('quotes messages of several turns selected in one session view into another view, which sends them with its next message', async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const real = workbenchComponents.LabWorkbench;

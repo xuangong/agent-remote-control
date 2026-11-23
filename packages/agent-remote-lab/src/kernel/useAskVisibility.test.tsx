@@ -36,7 +36,6 @@ async function command(container: HTMLElement, args: string) {
 it.each([false, true])('keeps Ask hidden by default for coarse pointer=%s independently from other views', async coarse => {
   vi.stubGlobal('matchMedia', () => ({ matches: coarse, addEventListener() {}, removeEventListener() {} }));
   localStorage.setItem('agent-remote:track-view', 'true');
-  localStorage.setItem('agent-remote:tpm-view', 'true');
   const container = await render(<Harness />);
   expect(visible(container)).toBe(false);
   await command(container, '');
@@ -44,7 +43,6 @@ it.each([false, true])('keeps Ask hidden by default for coarse pointer=%s indepe
   await command(container, '');
   expect(visible(container)).toBe(false);
   expect(localStorage.getItem('agent-remote:track-view')).toBe('true');
-  expect(localStorage.getItem('agent-remote:tpm-view')).toBe('true');
 }, 10000);
 
 it('handles visibility aliases through the global scope and rejects source-bound question text', async () => {

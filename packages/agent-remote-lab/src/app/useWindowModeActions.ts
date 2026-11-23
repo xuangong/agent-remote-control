@@ -25,12 +25,12 @@ import type { DocksAndBotSelectionSlice } from './useDocksAndBotSelection.js';
 import type { WindowViewActionsSlice } from './useWindowViewActions.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
 import type { ProviderStateSlice } from './useProviderState.js';
-import type { SharedFeedsAndTpmSlice } from './useSharedFeedsAndTpm.js';
+import type { SharedFeedsSlice } from './useSharedFeeds.js';
 import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';
 import type { AppInputs } from './types.js';
 
-export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBindingSlice & SessionOpeningSlice & ViewSessionStateSlice & PanelsAndShortcutsSlice & ActiveSessionSlice & DocksAndBotSelectionSlice & WindowViewActionsSlice & WorkbenchShellSlice & ProviderStateSlice & SharedFeedsAndTpmSlice & WorkbenchRecordsSlice, 'addSessionView' | 'askView' | 'baseUrl' | 'closeContext' | 'closeInspector' | 'closePage' | 'compactLayout' | 'createWindowFromMenu' | 'expandedKeys' | 'modeSteps' | 'navigation' | 'openDirectorySession' | 'openSession' | 'presentedViewId' | 'setQueuedModeSteps' | 'sharedViewForSlot' | 'sharedWindow' | 'showView' | 'sideRequests' | 'succession' | 'teamRoster' | 'tpmView' | 'windowActions' | 'windowWorkspace'>) {
-  const { addSessionView, askView, baseUrl, closeContext, closeInspector, closePage, compactLayout, createWindowFromMenu, expandedKeys, modeSteps, navigation, openDirectorySession, openSession, presentedViewId, setQueuedModeSteps, sharedViewForSlot, sharedWindow, showView, sideRequests, succession, teamRoster, tpmView, windowActions, windowWorkspace } = scope;
+export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBindingSlice & SessionOpeningSlice & ViewSessionStateSlice & PanelsAndShortcutsSlice & ActiveSessionSlice & DocksAndBotSelectionSlice & WindowViewActionsSlice & WorkbenchShellSlice & ProviderStateSlice & SharedFeedsSlice & WorkbenchRecordsSlice, 'addSessionView' | 'askView' | 'baseUrl' | 'closeContext' | 'closeInspector' | 'closePage' | 'compactLayout' | 'createWindowFromMenu' | 'expandedKeys' | 'modeSteps' | 'navigation' | 'openDirectorySession' | 'openSession' | 'presentedViewId' | 'setQueuedModeSteps' | 'sharedViewForSlot' | 'sharedWindow' | 'showView' | 'sideRequests' | 'succession' | 'teamRoster' | 'windowActions' | 'windowWorkspace'>) {
+  const { addSessionView, askView, baseUrl, closeContext, closeInspector, closePage, compactLayout, createWindowFromMenu, expandedKeys, modeSteps, navigation, openDirectorySession, openSession, presentedViewId, setQueuedModeSteps, sharedViewForSlot, sharedWindow, showView, sideRequests, succession, teamRoster, windowActions, windowWorkspace } = scope;
   const t = useTranslate();
 
   function isViewVisible(slotId: string) {
@@ -184,7 +184,6 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
         while (view?.attachedTo) view = current.views.find(parent => parent.id === view!.attachedTo);
         const feature = parseWindowFeature(view?.feature);
         if (feature?.kind === 'ask') askView.setVisible(true);
-        if (feature?.kind === 'tpm') tpmView.setVisible(true);
       }
       // Navigation finishes locally; Window save state owns background persistence feedback.
       void windowWorkspace.operate(operation).catch(() => {});

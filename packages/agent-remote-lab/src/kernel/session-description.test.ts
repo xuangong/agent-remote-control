@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import type { OpenedSession } from './directory-client.js';
-import type { TpmItem } from './tpm-main-sessions.js';
 import type { SessionFork } from './session-forks.js';
 import { describeSession } from './session-description.js';
 
@@ -11,12 +10,6 @@ const reference = (extra: Partial<SessionFork> = {}): SessionFork => ({
   id: 'side', mode: 'reference', source: session('main'), target: session('side'), capturedAt: '2026-10-16T00:00:00Z',
   delivery: 'sent', options: {}, settings: [], ...extra,
 } as SessionFork);
-const tpm = (): TpmItem => ({
-  key: 'tpm-work', hostId: 'mac', hostName: 'Mac', online: true, unread: false,
-  work: { id: 'work', revision: 1, title: 'Release tracking', providerId: 'codex', mainNativeSessionId: 'main', tpmNativeSessionId: 'tpm',
-    phase: 'clarifying', waiting: 'user', paused: false, summary: '', nextAction: '', document: '', acceptance: '', evidence: [],
-    createdAt: '2026-10-16', updatedAt: '2026-10-16', nextCheckAt: 0 },
-});
 const rows = (input: Parameters<typeof describeSession>[0]) => describeSession(input).attributions;
 
 describe('session attribution projection', () => {
@@ -114,24 +107,11 @@ describe('session attribution projection', () => {
     expect(linked.find(row => row.kind === 'side')?.target).toMatchObject({ nativeSessionId: 'edited-side' });
   });
 
-  it('uses current TPM main and describes its role origin without claiming original TPM context', () => {
-    const item = tpm();
-    item.work.mainBinding = { kind: 'primary_role', roleId: 'main-role', origin: { controllerId: 'installation', providerId: 'codex', nativeSessionId: 'original' } };
-    item.work.mainSessionRef = { controllerId: 'installation', providerId: 'claude', nativeSessionId: 'current' };
-    const description = rows({ session: session('tpm'), tpmWorks: [item] });
-    expect(description.find(row => row.kind === 'role')?.value).toBe('TPM');
-    expect(description.find(row => row.kind === 'main')?.target).toMatchObject({ hostId: 'mac', providerId: 'claude', nativeSessionId: 'current' });
-    expect(description.find(row => row.label === 'Role origin')?.target).toMatchObject({ hostId: 'mac', providerId: 'codex', nativeSessionId: 'original', sessionIntent: 'history' });
-    expect(description.some(row => row.label === 'Original source')).toBe(false);
-  });
-
-  it('keeps fixed Ask, Side and TPM sources exact instead of following later succession', () => {
+  it('keeps fixed Ask and Side sources exact instead of following later succession', () => {
     const fixed = { kind: 'fixed' as const, source: { controllerId: 'installation', providerId: 'codex', nativeSessionId: 'main' } };
     const fork = reference({ sourceBinding: fixed });
-    const item = tpm(); item.work.mainBinding = fixed;
     for (const description of [
       rows({ session: session('side'), asks: [fork] }), rows({ session: session('side'), forks: [fork] }),
-      rows({ session: session('tpm'), tpmWorks: [item] }),
     ]) {
       expect(description.find(row => row.label === 'Main' || row.label === 'Source')?.target).toMatchObject({
         hostId: 'mac', providerId: 'codex', nativeSessionId: 'main', sessionIntent: 'history',
@@ -151,11 +131,11 @@ describe('session attribution projection', () => {
   it('retains multiple distinct relationships and known reverse links without duplicates', () => {
     const side = reference();
     const ask = reference({ id: 'ask', target: session('ask') });
-    const input = { session: session('main'), forks: [side, side], asks: [ask], tpmWorks: [tpm()],
+    const input = { session: session('main'), forks: [side, side], asks: [ask],
       sessions: [session('child', { parentNativeSessionId: 'main' })] };
     const before = structuredClone(input);
     const description = rows(input);
-    expect(description.map(row => row.kind)).toEqual(expect.arrayContaining(['side', 'ask', 'tpm', 'child']));
+    expect(description.map(row => row.kind)).toEqual(expect.arrayContaining(['side', 'ask', 'child']));
     expect(description.filter(row => row.kind === 'side')).toHaveLength(1);
     expect(new Set(description.map(row => row.id)).size).toBe(description.length);
     expect(input).toEqual(before);

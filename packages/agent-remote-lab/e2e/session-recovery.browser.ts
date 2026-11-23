@@ -56,7 +56,7 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
   page.on('pageerror', error => errors.push(error.message)); page.on('websocket', () => sockets++);
   await page.goto(windowUrl);
   const input = page.getByTestId('prompt-input');
-  // The movable TPM, Window and Team entries float over the short conversation, so a message action is pressed without a pointer hit test.
+  // The movable Window and Team entries float over the short conversation, so a message action is pressed without a pointer hit test.
   await expect.poll(() => input.isEnabled()).toBe(true);
   expect(await page.locator('#lab-context').count()).toBe(0);
   await input.fill('Keep draft across background');

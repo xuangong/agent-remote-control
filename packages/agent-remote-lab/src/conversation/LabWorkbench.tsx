@@ -1,5 +1,4 @@
 import { TrackViewCommand, TrackViewScope } from '../kernel/useSessionAttention.js';
-import { TpmViewCommand, TpmViewScope } from '../kernel/useTpmVisibility.js';
 import { AskViewCommand, AskViewScope } from '../kernel/useAskVisibility.js';
 import { useContext, useMemo, type ComponentProps } from 'react';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
@@ -27,7 +26,6 @@ export function LabWorkbench({ draftBinding, displayBinding, operationBinding, s
   const source = sessionIdentity ?? operationBinding?.source;
   const relationships = showAttributions ? props.sessionDescription ?? (source ? descriptions?.describe(source) ?? describeSession({ session: source }) : undefined) : undefined;
   const trackCommand = useContext(TrackViewScope);
-  const tpmCommand = useContext(TpmViewScope);
   const askVisibility = useContext(AskViewScope);
   const sourceAskCommand = props.onExecuteConsoleCommand && props.consoleCommands?.find(command => command.id === AskViewCommand.id);
   const positions = useContext(RecoveryScope);
@@ -59,9 +57,8 @@ export function LabWorkbench({ draftBinding, displayBinding, operationBinding, s
     readOnly={props.readOnly || promptEdit.recoveringDraft}
     actions={{ ...props.actions, ...(promptEdit.editPrompt ? { editPrompt: promptEdit.editPrompt } : {}) }}
     imageDraftBinding={imageBinding}
-    consoleCommands={trackCommand || tpmCommand || askVisibility ? [...(trackCommand ? [TrackViewCommand] : []), ...(tpmCommand ? [TpmViewCommand] : []), ...(askVisibility ? [sourceAskCommand || AskViewCommand] : []), ...(props.consoleCommands ?? []).filter(command => !askVisibility || command.id !== AskViewCommand.id)] : props.consoleCommands}
-    onExecuteConsoleCommand={trackCommand || tpmCommand || askVisibility ? (id, args) => id === TrackViewCommand.id && trackCommand ? trackCommand(args)
-      : id === TpmViewCommand.id && tpmCommand ? tpmCommand(args)
+    consoleCommands={trackCommand || askVisibility ? [...(trackCommand ? [TrackViewCommand] : []), ...(askVisibility ? [sourceAskCommand || AskViewCommand] : []), ...(props.consoleCommands ?? []).filter(command => !askVisibility || command.id !== AskViewCommand.id)] : props.consoleCommands}
+    onExecuteConsoleCommand={trackCommand || askVisibility ? (id, args) => id === TrackViewCommand.id && trackCommand ? trackCommand(args)
       : id === AskViewCommand.id && askVisibility && (!sourceAskCommand || ['', 'on', 'off', 'enable', 'disable'].includes(args.trim().toLowerCase())) ? askVisibility(args)
       : props.onExecuteConsoleCommand ? props.onExecuteConsoleCommand(id, args) : Promise.reject(new Error(t('sessions.workbench.unknownCommand'))) : props.onExecuteConsoleCommand}
     readingPositions={positions} draftScope={draftScope}

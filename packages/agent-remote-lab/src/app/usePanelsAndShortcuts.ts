@@ -39,7 +39,7 @@ export function usePanelsAndShortcuts(scope: Pick<AppInputs & RequestedSessionSl
 
   const sidebar = useSidebarWidth(inspectorOpen);
 
-  // The Track, Team, TPM, Window and Ask entries render once and move between the sidebar's Shortcuts, the compact launcher bar
+  // The Track, Team, Window and Ask entries render once and move between the sidebar's Shortcuts, the compact launcher bar
   // and their floating places, so hiding or showing the sidebar or resizing the page never remounts them (Team would lose an open panel or a pending creation).
   const shortcutHost = useMovableHost(), askHost = useMovableHost();
 

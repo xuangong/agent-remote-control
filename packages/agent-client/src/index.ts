@@ -24,7 +24,7 @@ export * from './client/session-control-extension.js';
 
 export * from './client/timeline-search.js';
 
-export * from './client/remote-host-control-client.js';
+
 
 export * from './client/remote-team-client.js';
 export * from './client/remote-chain-client.js';

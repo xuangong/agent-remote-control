@@ -7,21 +7,19 @@ function initial(): WorkspaceWindow {
     views: [createWindowView('main', undefined, 'primary'), createWindowView('source')] };
 }
 it('keeps typed feature metadata stable and rejects unsupported business metadata', () => {
-  const feature = { kind: 'tpm' as const, id: 'work', hostId: 'stable-host' };
+  const feature = { kind: 'ask' as const, id: 'question' };
   expect(parseWindowFeature(createWindowFeature(feature))).toEqual(feature);
   expect(parseWindowFeature({ kind: 'other', id: 'team', metadata: { role: 'member' } })).toBeUndefined();
-  // The Team of older state is no feature any more: its view is an ordinary one.
+  // The Team and TPM of older state are no features any more: their views are ordinary ones.
   expect(parseWindowFeature({ kind: 'team', id: 'team', metadata: { role: 'member', memberId: 'stable-member' } })).toBeUndefined();
-  expect(parseWindowFeature({ kind: 'tpm', id: 'work' })).toBeUndefined();
+  expect(parseWindowFeature({ kind: 'tpm', id: 'work', metadata: { hostId: 'stable-host' } })).toBeUndefined();
 });
 it('uses explicit managed bindings and lifecycle edges for feature views', () => {
   let window = initial();
   const authority = { get window() { return window; }, operate(operation: Parameters<typeof applyWindowOperation>[1]) { window = applyWindowOperation(window, operation); } };
   openFeatureView(authority, { kind: 'ask', id: 'question' }, undefined, 'source');
-  openFeatureView(authority, { kind: 'tpm', id: 'work', hostId: 'host' }, undefined, 'source');
-  expect(window.views).toHaveLength(4);
+  expect(window.views).toHaveLength(3);
   expect(featureView(window, 'ask', 'question')).toMatchObject({ bindingPolicy: 'managed', closeWith: 'source' });
-  expect(featureView(window, 'tpm', 'work')).toMatchObject({ bindingPolicy: 'managed', closeWith: 'source' });
   window = applyWindowOperation(window, { type: 'view.close', viewId: 'source' });
   expect(window.views.map(view => view.id)).toEqual(['main']);
 });
@@ -29,8 +27,8 @@ it('does not dispatch unknown tags or malformed known associations as applicatio
   const window = initial();
   window.views[1]!.feature = { kind: 'external', id: 'same', metadata: { kind: 'ask', role: 'member' } };
   expect(featureView(window, 'ask', 'same')).toBeUndefined();
-  window.views[1]!.feature = { kind: 'tpm', id: 'same', metadata: { hostId: '' } };
-  expect(featureView(window, 'tpm', 'same')).toBeUndefined();
+  window.views[1]!.feature = { kind: 'ask', id: 'same', metadata: { sourceProviderId: 'codex' } };
+  expect(featureView(window, 'ask', 'same')).toBeUndefined();
 });
 it('round trips explicit Ask source references and rejects partial anchors', () => {
   const feature = { kind: 'ask' as const, id: 'ask', source: { hostId: 'host', providerId: 'codex', nativeSessionId: 'original', agentId: 'reference-agent', title: 'Original', roleKey: 'verified-locally' } };

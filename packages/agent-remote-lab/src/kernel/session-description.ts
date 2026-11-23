@@ -1,9 +1,7 @@
 import type { NativeSessionRef } from '@orchardworks/agent-remote-protocol';
 import { translator, type SessionAttribution, type SessionDescription, type SessionDescriptionIdentity, type Translate } from '@orchardworks/agent-client';
-import type { TpmItem } from './tpm-main-sessions.js';
 import { currentForkSource, sideLinkVisible, sideNavigationSource, sideNavigationTarget, type SessionFork } from './session-forks.js';
 import { sessionKey, type SessionEntry } from './session-tree.js';
-import { tpmMainTarget } from './tpm-main-sessions.js';
 
 type DescribedSession = SessionDescriptionIdentity & { title?: string };
 
@@ -12,7 +10,6 @@ export interface DescribeSessionInput {
   sessions?: readonly SessionEntry[];
   forks?: readonly SessionFork[];
   asks?: readonly SessionFork[];
-  tpmWorks?: readonly TpmItem[];
   hostNames?: ReadonlyMap<string, string>;
   /** The words of the reader's language; English when absent. */
   t?: Translate;
@@ -25,7 +22,7 @@ interface SourceEvidence {
 }
 
 /** Project existing owners' records; this description never owns a relationship graph. */
-export function describeSession({ session, sessions = [], forks = [], asks = [], tpmWorks = [], hostNames, t = translator('en') }: DescribeSessionInput): SessionDescription {
+export function describeSession({ session, sessions = [], forks = [], asks = [], hostNames, t = translator('en') }: DescribeSessionInput): SessionDescription {
   const known = new Map(sessions.map(entry => [sessionKey(entry), entry]));
   const currentKey = sessionKey(session);
   const current = { ...session, parentNativeSessionId: session.parentNativeSessionId ?? known.get(currentKey)?.parentNativeSessionId };
@@ -97,26 +94,6 @@ export function describeSession({ session, sessions = [], forks = [], asks = [],
         relatedIds.add(id);
       }
     }
-  }
-
-  for (const item of tpmWorks) {
-    const { work } = item;
-    if (!work.tpmNativeSessionId) continue;
-    const target = { hostId: item.hostId, providerId: work.providerId, nativeSessionId: work.tpmNativeSessionId, title: work.title };
-    const main = tpmMainTarget(item);
-    const prefix = `tpm:${JSON.stringify([item.hostId, work.id])}`;
-    if (matches(target)) {
-      addRole('TPM');
-      addSession(`${prefix}:main`, 'main', t('client.describe.main'), main, undefined, work.mainBinding?.kind === 'fixed');
-      const binding = work.mainBinding;
-      const origin = binding?.kind === 'fixed' ? binding.source : binding?.origin;
-      if (origin) {
-        const mapped = !work.mainSessionRef || work.mainSessionRef.controllerId === origin.controllerId;
-        addOrigin(`${prefix}:origin`, { ...origin, ...(mapped ? { session: { hostId: item.hostId, providerId: origin.providerId, nativeSessionId: origin.nativeSessionId } } : {}) }, main,
-          binding?.kind === 'primary_role' ? 'role-origin' : 'source');
-      }
-    }
-    if (matches(main) && !matches(target)) addSession(`${prefix}:related`, 'tpm', 'TPM', target, work.archived ? t('client.describe.archived') : undefined);
   }
 
   if (current.parentNativeSessionId && current.parentNativeSessionId !== current.nativeSessionId) {

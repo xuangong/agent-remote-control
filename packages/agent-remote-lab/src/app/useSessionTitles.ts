@@ -46,7 +46,7 @@ export function useSessionTitles(scope: Pick<AppInputs & SessionSuccessionBindin
   // In Bot mode the selected bot's group is named like the open Window: its sessions, and the group itself while it is named after its first session.
   const titledBotGroup = !windowMode ? selectedBot.group : undefined;
 
-  // Window views name sessions that need not be open on this page; Ask, Team and TPM views name their own.
+  // Window views name sessions that need not be open on this page; Ask and Team views name their own.
   const titledSessions = useMemo(() => titledSessionsOf(sessionEntries, [...sharedWindow?.views ?? [], ...titledBotGroup?.window.views ?? []]),
     [sessionEntries, sharedWindow?.views, titledBotGroup?.window.views]);
 

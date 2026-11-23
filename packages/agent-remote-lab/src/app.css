@@ -1,6 +1,5 @@
 @import "./features/diagnostics/trace.css";
 @import "./features/team/ask.css";
-@import "./features/team/tpm.css";
 
 @font-face {
   font-family: "Baloo 2 Digits";
@@ -425,7 +424,6 @@ textarea {
 .lab-workbench-heading-group, .lab-composer-region { min-width: 0; }
 .lab-composer-region > .lab-handoff-notice { position: relative; z-index: 6; margin: 0 12px 6px; }
 .lab-workbench-toolbar-heading:has(> .lab-workbench-heading-group:not([hidden])) { grid-template-rows: auto minmax(0, 1fr) auto; }
-.lab-workbench-with-todo.lab-workbench-toolbar-heading:has(> .lab-workbench-heading-group:not([hidden])) { grid-template-rows: auto auto minmax(0, 1fr) auto; }
 
 .lab-workbench-heading h2 { margin: 1px 0 0; color: var(--obs-text); font-size: 14px; font-weight: 650; line-height: 1.3; }
 .lab-timeline-stage { position: relative; min-height: 0; display: flex; flex-direction: column; }
@@ -1440,8 +1438,6 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-timeline-controls > .agent-session-search { position: absolute; z-index: 7; top: 6px; right: 6px; width: min(440px, calc(100% - 12px)); max-height: min(50%, 360px); overflow: auto; }
 @media (pointer: coarse) { .lab-timeline-search-trigger, .lab-session-heading .lab-timeline-search-trigger { width: 40px; min-height: 40px; } }
 
-.lab-workbench-layout.lab-workbench-with-todo { grid-template-rows: auto auto minmax(0, 1fr) auto; }
-.lab-workbench-layout.lab-workbench-with-todo.lab-workbench-toolbar-heading { grid-template-rows: auto minmax(0, 1fr) auto; }
 /* References belong to the next message: one compact row on the composer, like its pending queue, starting where the
    composer starts and clear of its collapse tab. Their row is the last thing above the composer. */
 .lab-composer-context:not([hidden]):has(> .lab-session-refs) { display: flex; flex-direction: column; }

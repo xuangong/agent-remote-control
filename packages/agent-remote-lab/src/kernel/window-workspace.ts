@@ -91,22 +91,12 @@ export function importCompositionWindow(document: CompositionDocument): Workspac
     view.closeWith = sourceViewId;
     views.push(view);
   }
-  const tpm = read(`agent-remote:recovery:${document.scope}:tpm-windows`);
-  for (const key of Array.isArray(tpm) ? tpm : []) {
-    if (typeof key !== 'string') continue;
-    try { const [hostId, workId] = JSON.parse(key); if (typeof hostId !== 'string' || typeof workId !== 'string') continue;
-      const view = createWindowView(`tpm-${crypto.randomUUID()}`, undefined, 'float');
-      view.feature = createWindowFeature({ kind: 'tpm', id: key, hostId });
-      view.bindingPolicy = 'managed';
-      views.push(view);
-    } catch { /* Invalid legacy catalog references remain in their original store. */ }
-  }
   const dock = read(`agent-remote:recovery:${document.scope}:workspace-dock`);
   const panes: Array<{id:string;width:number}> = Array.isArray(dock?.panes) ? dock.panes : [];
   for (const view of [...views]) {
     const oldId = [...ids].find(([, id]) => id === view.id)?.[0] ?? view.id;
     const owner = parseWindowFeature(view.feature)?.kind === 'ask' ? document.asks.find(owner => owner.id === view.feature!.id) : undefined;
-    const placementId = owner ? `ask:${owner.geometryScope}` : parseWindowFeature(view.feature)?.kind === 'tpm' ? `tpm:${view.feature!.id}` : oldId;
+    const placementId = owner ? `ask:${owner.geometryScope}` : oldId;
     const pane = panes.find(pane => pane.id === placementId);
     if (view.placement !== 'primary' && view.placement !== 'attached') view.placement = pane ? 'dock' : 'float';
     const width = view.placement === 'primary' ? dock?.baseWidth : pane?.width;
@@ -115,7 +105,7 @@ export function importCompositionWindow(document: CompositionDocument): Workspac
     const displayKey = owner?.display?.key ?? (view.id === main.id ? slot?.owners.display.key : oldId);
     const display = displayKey && read(`agent-remote:recovery:${document.scope}:view:${displayKey}`, true);
     if (display && ['preview', 'simple', 'content'].includes(display.mode) && typeof display.lettersVisible === 'boolean') view.display = { mode: display.mode, lettersVisible: display.lettersVisible };
-    const geometryScope = owner?.geometryScope ?? (parseWindowFeature(view.feature)?.kind === 'tpm' ? JSON.stringify([document.scope, 'tpm', view.feature!.id]) : JSON.stringify([document.scope, oldId]));
+    const geometryScope = owner?.geometryScope ?? JSON.stringify([document.scope, oldId]);
     const position = read(`agent-remote-ask:${geometryScope}:window-position`, true), size = read(`agent-remote-ask:${geometryScope}:window-size`, true);
     if (position && size && [position.x, position.y, size.width, size.height].every((value: unknown) => typeof value === 'number' && Number.isFinite(value))) view.geometry = { x: Math.max(0, Math.min(100000, position.x)), y: Math.max(0, Math.min(100000, position.y)), width: Math.max(240, Math.min(1600, size.width)), height: Math.max(120, Math.min(4000, size.height)) };
     if (view.binding && !view.attachedTo) {

@@ -111,21 +111,6 @@ it('reads a Host status and refuses one it cannot verify', async () => {
   expect(requests).toEqual(['/u/tenant/v1/remote/hosts/host%2Fone/status', '/u/tenant/v1/remote/hosts/host%2Fone/status']);
 });
 
-it('exposes validated TPM Host methods through the shared control client', async () => {
-  const requests: Array<{ method?: string; path?: string; body: string }> = [];
-  const work = { id: 'work', revision: 1, title: 'Delivery', providerId: 'codex', mainNativeSessionId: 'main', phase: 'clarifying', waiting: 'none', paused: false, summary: '', nextAction: '', document: '', acceptance: '', evidence: [], createdAt: '2026-10-09', updatedAt: '2026-10-09', nextCheckAt: 0 };
-  stubMemoryFetch(({ method, path, body }) => {
-    requests.push({ method, path, body });
-    return { json: path.endsWith('/tpm') ? { supported: true, works: [work] } : work };
-  });
-  const client = new RemoteHostClient('https://relay.example/u/tenant/');
-  expect((await client.tpmList('host')).works).toEqual([work]);
-  expect(await client.tpmWork('host', 'work')).toEqual(work);
-  expect(await client.tpmCreate('host', { providerId: 'codex', mainNativeSessionId: 'main', title: 'Delivery', requirement: 'Ship', operationId: 'create' })).toEqual(work);
-  expect(await client.tpmAction('host', 'work', { action: 'pause', revision: 1, operationId: 'pause' })).toEqual(work);
-  expect(requests.map(row => row.path)).toEqual(['/u/tenant/v1/remote/hosts/host/tpm', '/u/tenant/v1/remote/hosts/host/tpm/work?id=work', '/u/tenant/v1/remote/hosts/host/tpm/create', '/u/tenant/v1/remote/hosts/host/tpm/action']);
-});
-
 it('keeps Handoff description and all action requests scoped to one Host and operation', async () => {
   const requests: Array<{ path: string; body: unknown }> = [];
   stubMemoryFetch(({ path, body }) => {

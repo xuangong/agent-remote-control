@@ -1,19 +1,14 @@
-// Shared feeds and drafts, the Team and TPM services and menus.
+// Shared feeds and drafts, the Team roster and the New bot entry.
 import { hostProviders } from '../features/sessions/creation-choice.js';
 import { useSharedDrafts } from '../conversation/useSharedDraft.js';
 import { touchWindow } from '../features/windows/window-recency.js';
 import { useSharedFeedsSource } from '../kernel/shared-feeds.js';
 import { useWindowVisibility } from '../kernel/useWindowVisibility.js';
 import type { Team } from '@orchardworks/agent-remote-protocol';
-import type { SessionEntry } from '../kernel/session-tree.js';
 import { useTeamRoster } from '../kernel/useTeamRoster.js';
-import { useTpmVisibility } from '../kernel/useTpmVisibility.js';
-import { useTpmWork, type TpmService } from '../features/team/useTpmWork.js';
-import { useTpmMainSessions } from '../features/team/useTpmMainSessions.js';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { RemoteHost } from '../kernel/remote-host.js';
-import { SessionDirectoryClient, type OpenedSession } from '../kernel/directory-client.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
 import type { ActiveSessionSlice } from './useActiveSession.js';
 import type { SessionSuccessionBindingSlice } from './useSessionSuccessionBinding.js';
@@ -25,13 +20,11 @@ import type { WindowViewActionsSlice } from './useWindowViewActions.js';
 import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';
 import type { AppInputs } from './types.js';
 
-export function useSharedFeedsAndTpm(scope: Pick<AppInputs & WorkbenchShellSlice & ActiveSessionSlice & SessionSuccessionBindingSlice & RemoteHostStateSlice & ProviderStateSlice & RequestedSessionSlice & DocksAndBotSelectionSlice & WindowViewActionsSlice & WorkbenchRecordsSlice, 'accessReady' | 'accessReadyRef' | 'activated' | 'baseUrl' | 'directory' | 'favorites' | 'hostClient' | 'initialState' | 'presentedViewId' | 'providers' | 'remoteHosts' | 'retryHosts' | 'selectHost' | 'selectedBot' | 'selectedHost' | 'sessionEntries' | 'setNewBot' | 'setTeamRoster' | 'sharedWindow' | 'teamRoster' | 'transport' | 'windowMode' | 'windowOverviewAvailable' | 'windowOverviewOpen' | 'windowWorkspace'>) {
-  const { accessReady, accessReadyRef, activated, baseUrl, directory, favorites, hostClient, initialState, presentedViewId, providers, remoteHosts, retryHosts, selectHost, selectedBot, selectedHost, sessionEntries, setNewBot, setTeamRoster, sharedWindow, teamRoster, transport, windowMode, windowOverviewAvailable, windowOverviewOpen, windowWorkspace } = scope;
+export function useSharedFeeds(scope: Pick<AppInputs & WorkbenchShellSlice & ActiveSessionSlice & SessionSuccessionBindingSlice & RemoteHostStateSlice & ProviderStateSlice & RequestedSessionSlice & DocksAndBotSelectionSlice & WindowViewActionsSlice & WorkbenchRecordsSlice, 'accessReady' | 'activated' | 'baseUrl' | 'directory' | 'initialState' | 'providers' | 'remoteHosts' | 'retryHosts' | 'selectHost' | 'selectedBot' | 'selectedHost' | 'setNewBot' | 'setTeamRoster' | 'sharedWindow' | 'teamRoster' | 'transport' | 'windowMode' | 'windowOverviewAvailable' | 'windowOverviewOpen' | 'windowWorkspace'>) {
+  const { accessReady, activated, baseUrl, directory, initialState, providers, remoteHosts, retryHosts, selectHost, selectedBot, selectedHost, setNewBot, setTeamRoster, sharedWindow, teamRoster, transport, windowMode, windowOverviewAvailable, windowOverviewOpen, windowWorkspace } = scope;
 
   const t = useTranslate();
   const askTriggerRef = useRef<HTMLButtonElement>(null);
-
-  const tpmView = useTpmVisibility();
 
   const windowView = useWindowVisibility();
 
@@ -69,8 +62,6 @@ export function useSharedFeedsAndTpm(scope: Pick<AppInputs & WorkbenchShellSlice
   useTeamRoster({ baseUrl, enabled: accessReady && !!directory, teams: rosterTeams,
     publish: (baseUrl, teams, tasks) => { updateTeamRoster(baseUrl, teams); updateTaskRoster(baseUrl, tasks); } });
 
-  const [tpmListOpen, setTpmListOpen] = useState(false);
-
   // Most recent use orders the Window overview; a page in front counts as using its Window.
   useEffect(() => {
     const id = sharedWindow?.id;
@@ -80,12 +71,6 @@ export function useSharedFeedsAndTpm(scope: Pick<AppInputs & WorkbenchShellSlice
     window.addEventListener('focus', use); document.addEventListener('visibilitychange', use);
     return () => { window.removeEventListener('focus', use); document.removeEventListener('visibilitychange', use); };
   }, [baseUrl, sharedWindow?.id, windowMode]);
-
-  const tpmTriggerRef = useRef<HTMLButtonElement>(null);
-
-  const candidateTpmService = hostClient as Partial<TpmService>;
-
-  const tpmService = candidateTpmService.tpmList && candidateTpmService.tpmWork && candidateTpmService.tpmCreate && candidateTpmService.tpmAction ? candidateTpmService as TpmService : undefined;
 
   // The Hosts a session can run on: the Lab server itself when it has local providers, then the paired Hosts.
   const selectableHosts = useMemo(() => providers.length > 0 ? [{ id: 'local', name: t('team.host.labServer'), online: true }, ...remoteHosts] : remoteHosts, [providers.length, remoteHosts, t]);
@@ -108,25 +93,7 @@ export function useSharedFeedsAndTpm(scope: Pick<AppInputs & WorkbenchShellSlice
     setNewBot({ open: true });
   }
 
-  const attachTpm = useCallback(async (item: SessionEntry): Promise<OpenedSession> => {
-    if (!accessReadyRef.current) throw new Error(t('team.tpm.error.accessRestoring'));
-    const target = new SessionDirectoryClient(baseUrl, undefined, item.hostId ?? 'local');
-    const attached = await target.attach(item.providerId, item.nativeSessionId);
-    return { hostId: item.hostId, providerId: item.providerId, nativeSessionId: attached.nativeSessionId ?? item.nativeSessionId, title: item.title, agentId: attached.agentId };
-  }, [baseUrl, t]);
-
-  // TPM runs on Controllers, so only paired Hosts are asked for TPM works; the Lab server has none.
-  const tpm = useTpmWork(tpmService, remoteHosts, accessReady && !!directory, attachTpm, tpmView.visible, baseUrl, windowWorkspace.authority,
-    sharedWindow && presentedViewId ? { windowId: sharedWindow.id, viewId: presentedViewId } : undefined, tpmListOpen);
-
-  const tpmMainSessions = useTpmMainSessions(baseUrl, accessReady, tpmView.visible && (tpmListOpen || tpm.expanded), tpm.works, [...favorites.stars, ...sessionEntries], transport);
-
-  const tpmMainState = useRef({ scope: baseUrl, transport, hosts: remoteHosts, providers, works: tpm.works });
-
-  tpmMainState.current = { scope: baseUrl, transport, hosts: remoteHosts, providers, works: tpm.works };
-
-  const tpmMainRequest = useRef(0);
-  return { askTriggerRef, tpmView, windowView, sharedFeeds, sharedDrafts, updateTeamRoster, updateTaskRoster, tpmListOpen, setTpmListOpen, tpmTriggerRef, selectableHosts, openNewBot, tpm, tpmMainSessions, tpmMainState, tpmMainRequest };
+  return { askTriggerRef, windowView, sharedFeeds, sharedDrafts, updateTeamRoster, updateTaskRoster, selectableHosts, openNewBot };
 }
 
-export type SharedFeedsAndTpmSlice = ReturnType<typeof useSharedFeedsAndTpm>;
+export type SharedFeedsSlice = ReturnType<typeof useSharedFeeds>;

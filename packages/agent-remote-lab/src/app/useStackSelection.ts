@@ -17,10 +17,10 @@ import type { WindowViewActionsSlice } from './useWindowViewActions.js';
 import type { RemoteHostStateSlice } from './useRemoteHostState.js';
 import type { ProviderCreationSlice } from './useProviderCreation.js';
 import type { ProviderStateSlice } from './useProviderState.js';
-import type { SharedFeedsAndTpmSlice } from './useSharedFeedsAndTpm.js';
+import type { SharedFeedsSlice } from './useSharedFeeds.js';
 
 // Which sessions of the stack are expanded, and the layout the opened view is remembered by.
-export function useStackSelection(scope: Pick<AppInputs & HostAndStackSlice & ViewSessionStateSlice & SideSelectionSlice & SessionSuccessionBindingSlice & PanelsAndShortcutsSlice & ActiveSessionSlice & WorkbenchRecordsSlice & RequestedSessionSlice & ConversationConnectionsSlice & WorkbenchShellSlice & ViewTargetsSlice & WindowViewActionsSlice & RemoteHostStateSlice & ProviderCreationSlice & ProviderStateSlice & SharedFeedsAndTpmSlice, 'compactLayout' | 'sharedViewForSlot' | 'sharedWindow' | 'sideAnchor' | 'sideFocus' | 'sideSelections' | 'sideSessions' | 'sideTitle' | 'stackPath' | 'trackedViews' | 'visibleStackRoot'>, late: AppLate) {
+export function useStackSelection(scope: Pick<AppInputs & HostAndStackSlice & ViewSessionStateSlice & SideSelectionSlice & SessionSuccessionBindingSlice & PanelsAndShortcutsSlice & ActiveSessionSlice & WorkbenchRecordsSlice & RequestedSessionSlice & ConversationConnectionsSlice & WorkbenchShellSlice & ViewTargetsSlice & WindowViewActionsSlice & RemoteHostStateSlice & ProviderCreationSlice & ProviderStateSlice & SharedFeedsSlice, 'compactLayout' | 'sharedViewForSlot' | 'sharedWindow' | 'sideAnchor' | 'sideFocus' | 'sideSelections' | 'sideSessions' | 'sideTitle' | 'stackPath' | 'trackedViews' | 'visibleStackRoot'>, late: AppLate) {
   const { compactLayout, sharedViewForSlot, sharedWindow, sideAnchor, sideFocus, sideSelections, sideSessions, sideTitle, stackPath, trackedViews, visibleStackRoot } = scope;
 
   function rememberTrackedView(): void {

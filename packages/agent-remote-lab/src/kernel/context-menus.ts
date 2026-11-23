@@ -2,7 +2,7 @@
  * Which actions a context menu offers (I5d): one rule per menu, so a right-click, Shift-F10 and the ⋯ menus agree. Pure.
  *
  * A chat (an assistant in Chats or the directory): pin or unpin, mute or unmute and rename; an assistant that can move (not a
- * Side, which moves with the assistant it is beside, nor a Team, TPM or Support member) also moves to a group, and leaves the
+ * Side, which moves with the assistant it is beside, nor a Team or Support member) also moves to a group, and leaves the
  * group it is in unless that is the default group.
  *
  * A message: copy and quote any message with text, the person's or the assistant's reply; resend the person's message that was
@@ -13,7 +13,7 @@
 export type ChatMenuItem = 'pin' | 'unpin' | 'mute' | 'unmute' | 'rename' | 'move' | 'leaveGroup';
 export interface ChatMenuFacts {
   readonly pinned: boolean; readonly muted: boolean;
-  /** It is no Side and has no Team, TPM or Support role. */
+  /** It is no Side and has no Team or Support role. */
   readonly movable: boolean;
   /** It is in a group people made, not the default group. */
   readonly grouped: boolean;

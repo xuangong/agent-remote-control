@@ -1,6 +1,5 @@
 import { isSessionListingStatus, type SessionListingStatus } from '@orchardworks/agent-remote-protocol';
-import { RemoteHostControlClient, RemoteHostControlError, keyedError, withMessageKey, type MessageKey, type TpmActionInput } from '@orchardworks/agent-client';
-import type { TpmCreate, TpmList, TpmWork } from '@orchardworks/agent-remote-protocol';
+import { keyedError, withMessageKey, type MessageKey } from '@orchardworks/agent-client';
 import { isHostProviderSettings, type HostProviderChange, type HostProviderSettings } from '@orchardworks/agent-remote-protocol';
 import { isHostStatus, type HostStatus } from '@orchardworks/agent-remote-protocol';
 import { isSuccessionDescription, isSuccessionActionResult, type SuccessionDescription, type SuccessionActionResult, type NativePrefixSelection } from '@orchardworks/agent-remote-protocol';
@@ -122,17 +121,6 @@ export class RemoteHostClient implements HostPairingService {
       ? withMessageKey(new DirectoryError('A recent sign-in is required.', body.code, response.status, typeof body.requestId === 'string' ? body.requestId : undefined), 'hosts.error.recentSignIn')
       : failedResponse(body.error, 'Remote Host service is unavailable.', 'hosts.error.hostService', body.code, response.status, typeof body.requestId === 'string' ? body.requestId : undefined);
     return body as T;
-  }
-  tpmList(hostId: string): Promise<TpmList> { return this.tpm(client => client.tpmList(hostId, { signal: AbortSignal.timeout(15000) })); }
-  tpmWork(hostId: string, id: string): Promise<TpmWork> { return this.tpm(client => client.tpmWork(hostId, id, { signal: AbortSignal.timeout(15000) })); }
-  tpmCreate(hostId: string, input: TpmCreate): Promise<TpmWork> { return this.tpm(client => client.tpmCreate(hostId, input, { signal: AbortSignal.timeout(50000) })); }
-  tpmAction(hostId: string, id: string, input: TpmActionInput): Promise<TpmWork> { return this.tpm(client => client.tpmAction(hostId, id, input, { signal: AbortSignal.timeout(50000) })); }
-  private async tpm<T>(operation: (client: RemoteHostControlClient) => Promise<T>): Promise<T> {
-    try { return await operation(new RemoteHostControlClient(this.baseUrl, { fetch: workspaceFetch })); }
-    catch (error) {
-      if (error instanceof RemoteHostControlError) throw new DirectoryError(error.message, error.code, error.status, error.requestId);
-      throw error;
-    }
   }
   async hosts(): Promise<{ hosts: RemoteHost[] }> {
     return this.request<{ hosts: RemoteHost[] }>('hosts');

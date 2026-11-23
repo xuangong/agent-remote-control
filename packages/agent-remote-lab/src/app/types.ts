@@ -25,7 +25,7 @@ import type { SideSelectionSlice } from './useSideSelection.js';
 import type { ProviderCreationSlice } from './useProviderCreation.js';
 import type { ActiveSessionSlice } from './useActiveSession.js';
 import type { WindowViewActionsSlice } from './useWindowViewActions.js';
-import type { SharedFeedsAndTpmSlice } from './useSharedFeedsAndTpm.js';
+import type { SharedFeedsSlice } from './useSharedFeeds.js';
 import type { HostAndStackSlice } from './useHostAndStack.js';
 import type { SessionOpeningSlice } from './useSessionOpening.js';
 import type { FocusedAskSlice } from './useFocusedAsk.js';
@@ -120,4 +120,4 @@ export interface AppInputs {
 }
 
 /** Everything the hooks produced, in the order they ran. */
-export type AppScope = AppInputs & WorkbenchShellSlice & RequestedSessionSlice & WorkbenchRecordsSlice & ConversationConnectionsSlice & ViewTargetsSlice & ProviderStateSlice & SessionSuccessionBindingSlice & DocksAndBotSelectionSlice & ViewSessionStateSlice & PanelsAndShortcutsSlice & RemoteHostStateSlice & SideSelectionSlice & ProviderCreationSlice & ActiveSessionSlice & WindowViewActionsSlice & SharedFeedsAndTpmSlice & HostAndStackSlice & SessionOpeningSlice & FocusedAskSlice & WindowModeActionsSlice & SideNavigationSlice & AttentionAndRosterSlice & CommandSearchSlice & SessionTitlesSlice & TraceNavigationSlice & CommunicationsAndForksSlice & SendingAndSuccessionSlice & QuotesAndReferencesSlice & SessionViewPresentationSlice & ViewModelSlice;
+export type AppScope = AppInputs & WorkbenchShellSlice & RequestedSessionSlice & WorkbenchRecordsSlice & ConversationConnectionsSlice & ViewTargetsSlice & ProviderStateSlice & SessionSuccessionBindingSlice & DocksAndBotSelectionSlice & ViewSessionStateSlice & PanelsAndShortcutsSlice & RemoteHostStateSlice & SideSelectionSlice & ProviderCreationSlice & ActiveSessionSlice & WindowViewActionsSlice & SharedFeedsSlice & HostAndStackSlice & SessionOpeningSlice & FocusedAskSlice & WindowModeActionsSlice & SideNavigationSlice & AttentionAndRosterSlice & CommandSearchSlice & SessionTitlesSlice & TraceNavigationSlice & CommunicationsAndForksSlice & SendingAndSuccessionSlice & QuotesAndReferencesSlice & SessionViewPresentationSlice & ViewModelSlice;

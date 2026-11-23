@@ -8,7 +8,7 @@
  * - `retitleSessions` gives the listed session its new title and returns the same array when no listed session names
  *   it with another title.
  * - `titledSessions` are the sessions whose native title is asked for: every open entry, then the sessions of the
- *   shown Window and the shown bot group. A view that names its own sessions (a managed view: Ask, Team, TPM) is skipped.
+ *   shown Window and the shown bot group. A view that names its own sessions (a managed view: Ask, Team) is skipped.
  * - `windowProjectionTitles` returns the confirmed titles to project onto the shown Window now, or nothing: only for a
  *   confirmed Window (a cached one is read-only), when there are confirmed titles, and not twice for the same map.
  * - `groupProjectionTitles` returns them for the shown bot group when there is a group and either the map or the

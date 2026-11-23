@@ -14,20 +14,18 @@ import type { WindowViewActionsSlice } from './useWindowViewActions.js';
 import type { RemoteHostStateSlice } from './useRemoteHostState.js';
 import type { ProviderCreationSlice } from './useProviderCreation.js';
 import type { ProviderStateSlice } from './useProviderState.js';
-import type { SharedFeedsAndTpmSlice } from './useSharedFeedsAndTpm.js';
+import type { SharedFeedsSlice } from './useSharedFeeds.js';
 import type { AppInputs } from './types.js';
 import type { AppLate } from './types.js';
 import { useStackSelection } from './useStackSelection.js';
 import { useSessionBinding } from './useSessionBinding.js';
 import { useAgentCreation } from './useAgentCreation.js';
-import { useTpmMainOpening } from './useTpmMainOpening.js';
 
-export function useSessionOpening(scope: Pick<AppInputs & HostAndStackSlice & ViewSessionStateSlice & SideSelectionSlice & SessionSuccessionBindingSlice & PanelsAndShortcutsSlice & ActiveSessionSlice & WorkbenchRecordsSlice & RequestedSessionSlice & ConversationConnectionsSlice & WorkbenchShellSlice & ViewTargetsSlice & WindowViewActionsSlice & RemoteHostStateSlice & ProviderCreationSlice & ProviderStateSlice & SharedFeedsAndTpmSlice, 'accessReadyRef' | 'activeAgentId' | 'ancestors' | 'attach' | 'baseUrl' | 'closeContext' | 'closeInspector' | 'compactLayout' | 'compactLayoutRef' | 'createPlanning' | 'creationReservation' | 'creationUnavailableReason' | 'directory' | 'directoryDestination' | 'dispatchPanels' | 'editWindow' | 'letterRequest' | 'mountedTransport' | 'navigation' | 'openedSessions' | 'pendingViewRestore' | 'presentedSelection' | 'providerConnectionName' | 'providerId' | 'rememberSession' | 'replicaFor' | 'retryHosts' | 'selectedHost' | 'sessionEntries' | 'sessionOptions' | 'sessionWindows' | 'setCreationLocked' | 'setDetachedSideRoot' | 'setDirectoryRevision' | 'setFailure' | 'setNativeTakeover' | 'setNewBot' | 'setProviderName' | 'setSessionNotice' | 'setSideAnchor' | 'setSideFocus' | 'setTransitioning' | 'sharedViewForSlot' | 'sharedWindow' | 'showView' | 'sideAnchor' | 'sideFocus' | 'sideSelections' | 'sideSessions' | 'sideTitle' | 'stackPath' | 'succession' | 'tpm' | 'tpmMainRequest' | 'tpmMainState' | 'trackedViews' | 'transitionRef' | 'transport' | 'visibleStackRoot' | 'windowSession' | 'windowWorkspace'>, late: AppLate) {
+export function useSessionOpening(scope: Pick<AppInputs & HostAndStackSlice & ViewSessionStateSlice & SideSelectionSlice & SessionSuccessionBindingSlice & PanelsAndShortcutsSlice & ActiveSessionSlice & WorkbenchRecordsSlice & RequestedSessionSlice & ConversationConnectionsSlice & WorkbenchShellSlice & ViewTargetsSlice & WindowViewActionsSlice & RemoteHostStateSlice & ProviderCreationSlice & ProviderStateSlice & SharedFeedsSlice, 'accessReadyRef' | 'activeAgentId' | 'ancestors' | 'attach' | 'baseUrl' | 'closeContext' | 'closeInspector' | 'compactLayout' | 'compactLayoutRef' | 'createPlanning' | 'creationReservation' | 'creationUnavailableReason' | 'directory' | 'directoryDestination' | 'dispatchPanels' | 'editWindow' | 'letterRequest' | 'mountedTransport' | 'navigation' | 'openedSessions' | 'pendingViewRestore' | 'presentedSelection' | 'providerConnectionName' | 'providerId' | 'rememberSession' | 'replicaFor' | 'retryHosts' | 'selectedHost' | 'sessionEntries' | 'sessionOptions' | 'sessionWindows' | 'setCreationLocked' | 'setDetachedSideRoot' | 'setDirectoryRevision' | 'setFailure' | 'setNativeTakeover' | 'setNewBot' | 'setProviderName' | 'setSessionNotice' | 'setSideAnchor' | 'setSideFocus' | 'setTransitioning' | 'sharedViewForSlot' | 'sharedWindow' | 'showView' | 'sideAnchor' | 'sideFocus' | 'sideSelections' | 'sideSessions' | 'sideTitle' | 'stackPath' | 'succession' | 'trackedViews' | 'transitionRef' | 'transport' | 'visibleStackRoot' | 'windowSession' | 'windowWorkspace'>, late: AppLate) {
   const part1 = useStackSelection(scope, late);
   const part2 = useSessionBinding({ ...scope, ...part1 });
   const part3 = useAgentCreation({ ...scope, ...part1, ...part2 });
-  const part4 = useTpmMainOpening({ ...scope, ...part1, ...part2, ...part3 });
-  return { ...part1, ...part2, ...part3, ...part4 };
+  return { ...part1, ...part2, ...part3 };
 }
 
 export type SessionOpeningSlice = ReturnType<typeof useSessionOpening>;

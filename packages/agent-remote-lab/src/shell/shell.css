@@ -73,7 +73,7 @@
 .lab-tab-icon { position: relative; display: grid; }
 .lab-tab-icon > .lab-link-dot { right: -2px; bottom: 0; }
 
-/* The slots and the container that the Team, TPM, Track and Ask entries move between (see movable-host.tsx) add no box. */
+/* The slots and the container that the Team, Track and Ask entries move between (see movable-host.tsx) add no box. */
 .lab-movable-slot, .lab-movable-host { display: contents; }
 
 /* Shortcuts in the desktop sidebar: the capsules' triggers as full-width rows; their panels open beside the sidebar.
@@ -89,8 +89,8 @@
 .lab-sidebar-shortcut :where(.lab-session-popover-trigger) { background: transparent; }
 .lab-sidebar-shortcut > .lab-session-popover-trigger:hover:not(:disabled), .lab-sidebar-shortcut .lab-session-popover > .lab-session-popover-trigger:hover:not(:disabled) { color: var(--ui-label); background: var(--ui-row-hover); }
 /* Counts sit at the end of the row; badges keep their own colors. */
-.lab-sidebar-shortcut :is(.lab-team-count, .lab-tpm-count, .lab-tracking-counts) { margin-inline-start: auto; }
-.lab-sidebar-shortcut :is(.lab-team-count, .lab-tpm-count) { color: var(--ui-label-secondary); }
+.lab-sidebar-shortcut :is(.lab-team-count, .lab-tracking-counts) { margin-inline-start: auto; }
+.lab-sidebar-shortcut .lab-team-count { color: var(--ui-label-secondary); }
 .lab-sidebar-shortcut .lab-tracking-count { font-size: var(--ui-size-callout); }
 .lab-sidebar-shortcut .lab-tracking-badge { border-color: var(--ui-sidebar); }
 .lab-sidebar-shortcut .lab-session-popover-panel {
@@ -142,7 +142,7 @@
    Floating session views are placed against the main stage, so they start below the toolbar rather than under it. */
 .lab-window-workbench { --lab-window-toolbar-height: 52px; }
 /* Above the workbench's own layers (floating views at 45, dock controls up to 52, a dragged dock at 60), so View options
-   and other popovers opened from the toolbar are not covered; below the shell's Ask and TPM layers (145). */
+   and other popovers opened from the toolbar are not covered; below the shell's Ask layer (145). */
 .lab-window-workbench > .lab-window-toolbar { position: sticky; top: 0; z-index: 61; height: var(--lab-window-toolbar-height); }
 .lab-window-workbench:has(> .lab-window-toolbar) > .lab-session-windows .lab-ask-viewport { top: var(--lab-window-toolbar-height); }
 
@@ -203,7 +203,7 @@
   color: var(--orchard-text-strong); background: var(--orchard-surface); box-shadow: inset 0 -1px 0 var(--orchard-separator);
   font: 600 var(--orchard-type-footnote-size) / 1.4 var(--orchard-font-text); text-align: center; white-space: nowrap; }
 
-/* The launcher bar of the compact navigation: the Track, Team, TPM, Window and Ask entries as capsules in a row the layout
+/* The launcher bar of the compact navigation: the Track, Team, Window and Ask entries as capsules in a row the layout
    reserves. It wraps instead of overlapping, so no number of entries covers the conversation or the composer; with no entry
    shown it takes no space. A panel opens under the navigation across its width. */
 @media (max-width: 1180px) {

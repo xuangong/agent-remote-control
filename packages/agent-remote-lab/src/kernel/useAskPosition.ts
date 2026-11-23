@@ -70,7 +70,7 @@ export function useAskPosition(panel: RefObject<HTMLElement>, anchor: RefObject<
   const shared = useWindowLayout();
   let viewId = shared?.resolveViewId?.(`ask:${storageScope}`);
   if (shared && !viewId) {
-    try { const parts = JSON.parse(storageScope); if (Array.isArray(parts)) viewId = shared.resolveViewId?.(parts[1] === 'tpm' ? `tpm:${parts[2]}` : parts[1]); } catch { /* Ask identity can also be a plain scope. */ }
+    try { const parts = JSON.parse(storageScope); if (Array.isArray(parts)) viewId = shared.resolveViewId?.(parts[1]); } catch { /* Ask identity can also be a plain scope. */ }
   }
   const sharedView = shared?.window.views.find(view => view.id === viewId);
   const geometry = sharedView?.geometry;

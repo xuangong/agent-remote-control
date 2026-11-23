@@ -95,7 +95,7 @@ export function useGroupActions({ workspace, defaultTitle, onMoved }: { workspac
 
   /**
    * An assistant's own entries, as the chat menu rule orders them (kernel/context-menus.ts): Pin to top, Mute, Rename…, Move to
-   * group… and, in a group people made, Remove from it. A Side and a Team, TPM or Support member (they have a role) stay where they
+   * group… and, in a group people made, Remove from it. A Side and a Team or Support member (they have a role) stay where they
    * are. The details card renames by its name, so its menu leaves Rename… out (`rename: false`).
    */
   function assistantMenu(row: BotRow, { rename = true }: { rename?: boolean } = {}): MenuEntry[] {

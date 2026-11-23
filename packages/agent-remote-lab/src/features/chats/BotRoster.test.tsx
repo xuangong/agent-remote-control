@@ -26,7 +26,6 @@ it('renders accessible metadata and fallback Host identity without hidden member
 
 it('shows a bot like a teammate: name, role and label as tags, its sentence, Asks under it, and Host details only in its tooltip', async () => {
   const group = botGroup('A');
-  group.window.views[0] = { ...group.window.views[0]!, feature: { kind: 'tpm', id: 'work', metadata: { hostId: 'local' } }, bindingPolicy: 'managed' };
   group.window.views.push({ id: 'ask', binding: { ...botTarget('asked'), title: 'Why the delay?' }, closeWith: 'A1', feature: { kind: 'ask', id: 'ask-1' }, bindingPolicy: 'managed',
     placement: 'float', width: 440, collapsed: false, display: { mode: 'content', lettersVisible: true } });
   group.bots!.members = { A1: { name: 'A1', label: 'Release' } };
@@ -35,13 +34,13 @@ it('shows a bot like a teammate: name, role and label as tags, its sentence, Ask
   const container = await render(<BotRoster model={model} groups={[group]} hostName={id => id === 'local' ? 'Lab server' : id} onSelect={place => { selected = place; }} directoryControls={null} />);
   const row = visibleButton(container, 'A1');
   expect(row.querySelector('.lab-bot-name')?.textContent).toBe('A1');
-  expect(row.querySelector('.lab-bot-role')?.textContent).toBe('TPM');
+  expect(row.querySelector('.lab-bot-role')).toBeNull();
   expect(row.querySelector('.lab-bot-label')?.textContent).toBe('Release');
   expect(row.querySelector('.lab-bot-sentence')?.textContent).toBe('Wants to ask you something');
   expect(row.querySelector('.lab-bot-sentence')?.getAttribute('data-state')).toBe('needs_you');
   expect(row.textContent).not.toContain('recorded');
   expect(row.title).toBe('Lab server · recorded');
-  expect(row.getAttribute('aria-description')).toBe('TPM · Release · Wants to ask you something');
+  expect(row.getAttribute('aria-description')).toBe('Release · Wants to ask you something');
   const asks = container.querySelector('[data-bot-asks="A1"]')!;
   expect(asks.textContent).toBe('Why the delay?');
   await act(async () => asks.querySelector('button')!.click());

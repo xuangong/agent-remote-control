@@ -6,7 +6,7 @@ import type { Page } from '@playwright/test';
  */
 export const PROPER_NAMES: readonly string[] = [
   'Orchard', 'orchard', 'Claude', 'Code', 'Codex', 'Copilot', 'OpenCode', 'Agent', 'Host', 'Controller', 'VS', 'Bot', 'Trace', 'Inspector',
-  'Replica', 'English', 'Mac', 'mini', 'macOS', 'Linux', 'Windows', 'iOS', 'iPhone', 'Android', 'Google', 'GitHub', 'TPM', 'Team', 'Ask', 'Shift',
+  'Replica', 'English', 'Mac', 'mini', 'macOS', 'Linux', 'Windows', 'iOS', 'iPhone', 'Android', 'Google', 'GitHub', 'Team', 'Ask', 'Shift',
   'Enter', 'Return', 'Esc', 'Tab', 'ID', 'URL', 'CPU', 'OS', 'MCP', 'API', 'PNG', 'JPEG', 'WebP', 'KB', 'MB', 'GB', 'ms', 'Provider',
 ];
 

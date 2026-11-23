@@ -22,12 +22,12 @@ import type { ActiveSessionSlice } from './useActiveSession.js';
 import type { RequestedSessionSlice } from './useRequestedSession.js';
 import type { RemoteHostStateSlice } from './useRemoteHostState.js';
 import type { ProviderStateSlice } from './useProviderState.js';
-import type { SharedFeedsAndTpmSlice } from './useSharedFeedsAndTpm.js';
+import type { SharedFeedsSlice } from './useSharedFeeds.js';
 import type { WindowViewActionsSlice } from './useWindowViewActions.js';
 import type { AttentionAndRosterSlice } from './useAttentionAndRoster.js';
 import type { AppInputs } from './types.js';
 
-export function useCommandSearch(scope: Pick<AppInputs & SessionSuccessionBindingSlice & PanelsAndShortcutsSlice & WorkbenchShellSlice & WindowModeActionsSlice & ActiveSessionSlice & RequestedSessionSlice & RemoteHostStateSlice & ProviderStateSlice & SharedFeedsAndTpmSlice & WindowViewActionsSlice & AttentionAndRosterSlice, 'baseUrl' | 'botRoster' | 'closePage' | 'desktopContextVisible' | 'directory' | 'favorites' | 'inMode' | 'initialState' | 'modeSteps' | 'navigation' | 'openNewBot' | 'openNewSessionPanel' | 'openSearch' | 'openShortcuts' | 'providers' | 'queuedModeSteps' | 'remoteHosts' | 'searchOpen' | 'searchRuns' | 'sessionEntries' | 'setWindowOverviewOpen' | 'sharedFeeds' | 'sharedWindow' | 'showPanel' | 'switchMode' | 'toggleSidebar' | 'userScoped' | 'windowMode' | 'windowOverviewSupported' | 'windowWorkspace' | 'openInBotMode' | 'pinToWindow'>) {
+export function useCommandSearch(scope: Pick<AppInputs & SessionSuccessionBindingSlice & PanelsAndShortcutsSlice & WorkbenchShellSlice & WindowModeActionsSlice & ActiveSessionSlice & RequestedSessionSlice & RemoteHostStateSlice & ProviderStateSlice & SharedFeedsSlice & WindowViewActionsSlice & AttentionAndRosterSlice, 'baseUrl' | 'botRoster' | 'closePage' | 'desktopContextVisible' | 'directory' | 'favorites' | 'inMode' | 'initialState' | 'modeSteps' | 'navigation' | 'openNewBot' | 'openNewSessionPanel' | 'openSearch' | 'openShortcuts' | 'providers' | 'queuedModeSteps' | 'remoteHosts' | 'searchOpen' | 'searchRuns' | 'sessionEntries' | 'setWindowOverviewOpen' | 'sharedFeeds' | 'sharedWindow' | 'showPanel' | 'switchMode' | 'toggleSidebar' | 'userScoped' | 'windowMode' | 'windowOverviewSupported' | 'windowWorkspace' | 'openInBotMode' | 'pinToWindow'>) {
   const { baseUrl, botRoster, closePage, desktopContextVisible, directory, favorites, inMode, initialState, modeSteps, navigation, openNewBot, openNewSessionPanel, openSearch, openShortcuts, providers, queuedModeSteps, remoteHosts, searchOpen, searchRuns, sessionEntries, setWindowOverviewOpen, sharedFeeds, sharedWindow, showPanel, switchMode, toggleSidebar, userScoped, windowMode, windowOverviewSupported, windowWorkspace, openInBotMode, pinToWindow } = scope;
 
   const t = useTranslate();

@@ -159,7 +159,7 @@ export const windows: AreaMessages<typeof english> = {
   'windows.error.viewManaged': '这个会话视图已关闭，或由它的功能管理。',
   'windows.error.identityIncomplete': '选中的会话信息不完整。',
   'windows.error.viewLimit': '最多同时打开 {limit} 个会话视图，请先关一个。',
-  'windows.error.managedView': '这个视图属于 Ask、Team 或 TPM。请先选一个普通会话视图，或新建一个空视图。',
+  'windows.error.managedView': '这个视图属于 Ask 或 Team。请先选一个普通会话视图，或新建一个空视图。',
   'windows.error.groupGone': '这个分组已经不在了。',
   'windows.error.relatedNotOpened': '没能打开相关的会话。',
   'windows.error.sourceChanged': '来源视图变了。请重新打开 Side 会话。',

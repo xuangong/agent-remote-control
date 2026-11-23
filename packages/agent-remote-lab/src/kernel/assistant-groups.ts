@@ -164,7 +164,7 @@ export type MoveStep =
   | { readonly kind: 'create'; readonly group: WindowGroup }
   | { readonly kind: 'transfer'; readonly source: string; readonly target: string; readonly viewId: string }
   | { readonly kind: 'merge'; readonly source: string; readonly target: string };
-/** Why an assistant cannot move: it is gone, it is a Side (it moves with the assistant it is beside), a Team, TPM or Support member, or the group is full. */
+/** Why an assistant cannot move: it is gone, it is a Side (it moves with the assistant it is beside), a Team or Support member, or the group is full. */
 export type MoveRefusal = 'missing' | 'side' | 'managed' | 'full' | 'invalid';
 export type MovePlan = { readonly steps: readonly MoveStep[]; readonly place: AssistantPlace } | { readonly refused: MoveRefusal };
 

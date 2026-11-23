@@ -16,7 +16,7 @@ import { useSideSelection } from './app/useSideSelection.js';
 import { useProviderCreation } from './app/useProviderCreation.js';
 import { useActiveSession } from './app/useActiveSession.js';
 import { useWindowViewActions } from './app/useWindowViewActions.js';
-import { useSharedFeedsAndTpm } from './app/useSharedFeedsAndTpm.js';
+import { useSharedFeeds } from './app/useSharedFeeds.js';
 import { useHostAndStack } from './app/useHostAndStack.js';
 import { useSessionOpening } from './app/useSessionOpening.js';
 import { useFocusedAsk } from './app/useFocusedAsk.js';
@@ -70,7 +70,7 @@ function AppContent({
   const scope13 = { ...scope12, ...useProviderCreation(scope12, late) };
   const scope14 = { ...scope13, ...useActiveSession(scope13) };
   const scope15 = { ...scope14, ...useWindowViewActions(scope14) };
-  const scope16 = { ...scope15, ...useSharedFeedsAndTpm(scope15) };
+  const scope16 = { ...scope15, ...useSharedFeeds(scope15) };
   const scope17 = { ...scope16, ...useHostAndStack(scope16, late) };
   const scope18 = { ...scope17, ...useSessionOpening(scope17, late) };
   const scope19 = { ...scope18, ...useFocusedAsk(scope18, late) };

@@ -573,7 +573,7 @@ it('groups trusted quiet checks, preserves human and failed output, and reveals 
   const bg = (status: 'pending' | 'silent' | 'failed') => ({ id: 'review', kind: 'review' as const, status });
   const input = entry(1, { type: 'user_message', text: 'Private automatic input', background: bg('pending') });
   const answer = entry(2, { type: 'assistant_message', text: 'Quiet acknowledgement', background: bg('silent') });
-  const human = entry(3, { type: 'user_message', text: '[TPM review] A real question' });
+  const human = entry(3, { type: 'user_message', text: '[Review] A real question' });
   const container = await render(<AgentTimeline processMode="full" state={state([input, answer, human])} />);
   expect(container.textContent).not.toContain('Private automatic input');
   expect(container.textContent).not.toContain('Quiet acknowledgement');

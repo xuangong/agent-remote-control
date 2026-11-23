@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openSessionsPage } from '../all-sessions';
 
-/** The Track capsule, floating or (while the desktop sidebar shows) in the sidebar's Shortcuts. `.lab-tracking-floating` is also the class of the floating Window and TPM capsules. */
+/** The Track capsule, floating or (while the desktop sidebar shows) in the sidebar's Shortcuts. `.lab-tracking-floating` is also the class of the floating Window capsule. */
 const track = (page: Page) => page.locator('.lab-tracking-floating, .lab-sidebar-shortcut-track').filter({ has: page.getByRole('button', { name: 'Tracked sessions', exact: true }) });
 
 test.beforeEach(async ({ page }, testInfo) => {
@@ -9,7 +9,6 @@ test.beforeEach(async ({ page }, testInfo) => {
   test.skip(testInfo.project.name.includes('mobile'), 'The phone shell does not show the desktop sidebar these pages exercise.');
   await page.addInitScript(() => {
     localStorage.setItem('agent-remote:track-view', 'true');
-    localStorage.setItem('agent-remote:tpm-view', 'false');
   });
 });
 

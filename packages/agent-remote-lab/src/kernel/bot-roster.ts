@@ -74,9 +74,8 @@ export function sortDirectorySessions(entries: readonly DatedSessionEntry[]): Da
   return [...unique.values()].sort((a, b) => descending(a.updatedAt, b.updatedAt) || descending(a.createdAt, b.createdAt) || lexical(sessionKey(a), sessionKey(b)));
 }
 
-/** The role a bot's view carries: from its feature (TPM) or, for a Side, from being attached to its source. */
+/** The role a bot's view carries: for a Side, from being attached to its source. */
 export function botRole(view: WindowView, t: Translate = translator('en')): BotRole | undefined {
-  if (view.feature?.kind === 'tpm') return t('navigation.roleTpm');
   if (view.placement === 'attached') return t('navigation.roleSide');
 }
 

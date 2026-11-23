@@ -19,7 +19,7 @@ it('makes every session a bot with its role, except Asks, history, subagents and
   const views = ['primary', 'dock', 'float'].map(placement => createWindowView(placement, binding(placement), placement as 'primary' | 'dock' | 'float'));
   views.push(createWindowView('empty'), createWindowView('history', { ...binding('history'), sessionIntent: 'history' }), createWindowView('child', { ...binding('child'), parentNativeSessionId: 'parent' }),
     { ...createWindowView('side', binding('side'), 'attached'), attachedTo: 'primary' },
-    // A Team's views saved by an older build are bots with no role of their own.
+    // The Team and TPM views saved by an older build are bots with no role of their own.
     { ...createWindowView('lead', binding('lead')), bindingPolicy: 'managed', feature: { kind: 'team', id: 'release', metadata: { role: 'leader' } } },
     { ...createWindowView('member', binding('member')), bindingPolicy: 'managed', closeWith: 'lead', feature: { kind: 'team', id: 'release', metadata: { role: 'member', memberId: 'm1' } } },
     { ...createWindowView('coordinator', binding('coordinator')), bindingPolicy: 'managed', feature: { kind: 'team', id: 'support', metadata: { role: 'leader' } } },
@@ -27,7 +27,7 @@ it('makes every session a bot with its role, except Asks, history, subagents and
     { ...createWindowView('ask', binding('ask')), bindingPolicy: 'managed', closeWith: 'primary', feature: { kind: 'ask', id: 'ask-1' } });
   const rows = projectBotRoster([group('all', views)], [], { status: () => 'idle' }).sections[0]!.rows;
   expect(rows.map(row => [row.viewId, row.role])).toEqual([['primary', undefined], ['dock', undefined], ['float', undefined], ['side', 'Side'],
-    ['lead', undefined], ['member', undefined], ['coordinator', undefined], ['tpm', 'TPM']]);
+    ['lead', undefined], ['member', undefined], ['coordinator', undefined], ['tpm', undefined]]);
   expect(rows[0]!.asks).toEqual([{ viewId: 'ask', title: 'ask' }]);
   expect(rows.slice(1).every(row => row.asks.length === 0)).toBe(true);
 });

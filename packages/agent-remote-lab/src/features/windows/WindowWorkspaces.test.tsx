@@ -434,7 +434,8 @@ it('lists the group\'s bots by name, role and place, with Sides beside their sou
     { ...createWindowView('side', binding('b', 'Edge cases'), 'attached'), attachedTo: 'main' },
     { ...createWindowView('ask', binding('q', 'Why the delay?'), 'float'), feature: { kind: 'ask', id: 'q' }, closeWith: 'main' },
     { ...createWindowView('dock', binding('c', 'Docs writer')), collapsed: true },
-    { ...createWindowView('tpm', binding('d', 'Delivery')), feature: { kind: 'tpm', id: 'work' } },
+    // The TPM tag of older state carries no role either.
+    { ...createWindowView('tpm', binding('d', 'Delivery')), feature: { kind: 'tpm', id: 'work', metadata: { hostId: 'h' } } },
     // The Team tag of older state carries no role any more.
     { ...createWindowView('lead', binding('l', 'Reviewer')), feature: { kind: 'team', id: 'support', metadata: { role: 'leader' } } },
     createWindowView('sleepy', binding('e', 'Backups')),
@@ -458,7 +459,7 @@ it('lists the group\'s bots by name, role and place, with Sides beside their sou
     // The Ask belongs to its bot: one line under it.
     { id: 'ask', depth: '1', name: 'Why the delay?', tags: ['Ask'], detail: null },
     { id: 'dock', depth: undefined, name: 'Docs writer', tags: [], detail: 'Folded · Working' },
-    { id: 'tpm', depth: undefined, name: 'Delivery', tags: ['TPM'], detail: 'Open' },
+    { id: 'tpm', depth: undefined, name: 'Delivery', tags: [], detail: 'Open' },
     { id: 'lead', depth: undefined, name: 'Reviewer', tags: [], detail: 'Open' },
     // A sleeping bot is quiet, except for what asks for the owner.
     { id: 'sleepy', depth: undefined, name: 'Backups', tags: [], detail: 'Asleep · Needs you' },

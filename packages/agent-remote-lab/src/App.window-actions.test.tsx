@@ -4,7 +4,6 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, applyWindowOperation, createWindowView, type Team, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { configureImageDraftPersistence } from '@orchardworks/agent-client-web/browser';
 import { App, type LabTransport } from './App.js';
-import * as tpmMenu from './features/team/TpmMenu.js';
 import * as workspaceHooks from './features/windows/useWindowWorkspace.js';
 import * as successionHooks from './hooks/useSessionSuccession.js';
 import * as trackingMenu from './features/sessions/SessionTrackingMenu.js';
@@ -68,9 +67,7 @@ async function fixture(historyPlacement?: 'dock' | 'float', hiddenAskSource?: 'm
   vi.spyOn(SessionDirectoryClient.prototype, 'list').mockResolvedValue({ items: [], hasMore: false, revision: '1' });
   vi.spyOn(SessionDirectoryClient.prototype, 'workspaces').mockResolvedValue({ workspaces: [] });
   let workspace!: ReturnType<typeof useWindowWorkspace>;
-  let menu!: ComponentProps<typeof tpmMenu.TpmMenu>;
   vi.spyOn(workspaceHooks, 'useWindowWorkspace').mockImplementation((...args) => { workspace = useWindowWorkspace(...args); return workspace; });
-  vi.spyOn(tpmMenu, 'TpmMenu').mockImplementation(props => { menu = props; return null as never; });
   const transport: LabTransport = {
     listProviders: async () => [{ providerId: 'recorded', displayName: 'Recorded' }],
     createAgent: async () => { throw new Error('Team gathering must reuse its existing sessions.'); },
@@ -85,7 +82,7 @@ async function fixture(historyPlacement?: 'dock' | 'float', hiddenAskSource?: 'm
   };
   const container = await render(<App baseUrl={scope} transport={transport} directory={historyPlacement ? new SessionDirectoryClient(scope) : undefined} />);
   await vi.waitFor(() => expect(workspace.window?.id).toBe(first.id));
-  return { read: () => workspace, menu: () => menu, first, second, container };
+  return { read: () => workspace, first, second, container };
 }
 
 it('restores source families behind the visible selected Ask', async () => {
@@ -109,7 +106,6 @@ it.each(['main', 'ordinary-view', 'side-view'] as const)('shows the hidden Ask s
     expect(source?.querySelector('.lab-session-view')).not.toBeNull();
   });
   expect(test.container.querySelector('[role="dialog"][aria-label="Ask"]')).toBeNull();
-  expect(test.menu().main?.nativeSessionId).toBe(test.first.views.find(view => view.id === sourceViewId)?.binding?.nativeSessionId);
   expect(test.read().window?.selectedViewId).toBe('selected-ask');
   expect(test.read().window?.views.find(view => view.id === 'selected-ask')?.collapsed).toBe(false);
 }, 10000);

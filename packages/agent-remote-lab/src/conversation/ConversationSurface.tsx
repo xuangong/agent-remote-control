@@ -4,7 +4,7 @@ import { useCallback, useContext, useId, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { remoteSessionState, sessionActivityLabel, sessionNotice, sessionNoticeWords, type SessionFacts } from '@orchardworks/agent-client';
 import type { AgentCommand } from '@orchardworks/agent-remote-protocol';
-import { AgentCommandDetails, LocaleContext, PreviewDock, ProcessModeContext, SessionAttributions, SessionTodoPanel, TimelineLettersVisible, useTranslate } from '@orchardworks/agent-client-web/react';
+import { AgentCommandDetails, LocaleContext, PreviewDock, ProcessModeContext, SessionAttributions, TimelineLettersVisible, useTranslate } from '@orchardworks/agent-client-web/react';
 import { SessionViewFrame } from './SessionViewFrame.js';
 import { SessionViewOptions } from './SessionViewOptions.js';
 import { SessionHeadingActionsPresentationContext } from './SessionHeadingActions.js';
@@ -23,7 +23,7 @@ export type { LabWorkbenchActions, SessionWorkbenchProps } from './session-workb
 
 const noAuthenticationError = () => false;
 
-export function SessionWorkbench({ assistant, details, conversationTitle: _conversationTitle, nativeSession, sessionDescription, onNavigateAttribution, todo, processAssistant, sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, imageDraftBinding, imageRecipient, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, renderCommandError, readOnly: recordingReadOnly = false, draftOnly = false, opening = false, openFailed = false, mutationBlocked = false, pendingFirstInputContext, onPendingInputChange, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, headingStart, headingMode = 'inline', sessionManager, headingContext, composerContext, composerNotice, composerStatus, nativeTakeover, consoleCommands, onExecuteConsoleCommand, entrySelection, timelineStart, timelineEnd, sendLater, loadingNotice, host }: SessionWorkbenchProps) {
+export function SessionWorkbench({ assistant, details, conversationTitle: _conversationTitle, nativeSession, sessionDescription, onNavigateAttribution, processAssistant, sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, imageDraftBinding, imageRecipient, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, renderCommandError, readOnly: recordingReadOnly = false, draftOnly = false, opening = false, openFailed = false, mutationBlocked = false, pendingFirstInputContext, onPendingInputChange, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, headingStart, headingMode = 'inline', sessionManager, headingContext, composerContext, composerNotice, composerStatus, nativeTakeover, consoleCommands, onExecuteConsoleCommand, entrySelection, timelineStart, timelineEnd, sendLater, loadingNotice, host }: SessionWorkbenchProps) {
   const displayScope = draftSessionKey ?? state?.agent?.runtimeInfo.sessionId ?? attachingAgentId;
   const providedHost = useContext(AssistantDetailsHostContext);
   const assistantChrome = headingMode === 'assistant', tileChrome = headingMode === 'tile';
@@ -76,13 +76,12 @@ export function SessionWorkbench({ assistant, details, conversationTitle: _conve
   const hasTarget = (draftSessionKey ?? attachingAgentId) !== undefined;
   const hostNotice = notice?.kind === 'host_offline' && !(state === undefined && loadingNotice) || notice?.kind === 'usage_limited' ? sessionNoticeWords(notice, t, locale) : undefined;
   const viewOptions = <SessionViewOptions key={displayScope} process={process} />;
-  const layoutClass = [todo ? 'lab-workbench-with-todo' : '', selectedCommand ? 'lab-command-details-open' : '', headingMode !== 'inline' ? 'lab-workbench-toolbar-heading' : ''].filter(Boolean).join(' ');
+  const layoutClass = [selectedCommand ? 'lab-command-details-open' : '', headingMode !== 'inline' ? 'lab-workbench-toolbar-heading' : ''].filter(Boolean).join(' ');
   return <ProcessModeContext.Provider value={process.mode}><TimelineLettersVisible.Provider value={lettersVisible}>
     <SessionAttributions description={sessionDescription} onNavigate={onNavigateAttribution}>{({ toggle, details: attributionDetails }) => <SessionViewFrame className={layoutClass} nativeSession={nativeSession}>
     <ConversationHeading mode={headingMode} assistant={assistant} conversationPath={conversationPath} sessionManager={sessionManager} headingStart={headingStart} workspaceLink={workspaceLink}
       viewOptions={viewOptions} headingContext={headingContext} attributionToggle={toggle} attributionDetails={attributionDetails} activity={activity} activityLabel={activityLabel}
       host={host} notice={notice} titled={hasReplica || hasTarget} displayScope={displayScope} tileDetails={tileDetails} searchSlotRef={setHeadingSearchTarget} />
-    {todo ? <SessionTodoPanel key={displayScope} {...todo} disabled={todo.disabled || readOnly || mutationBlocked} /> : null}
     <PreviewDock sessionId={state?.agent?.id ?? attachingAgentId} />
     <ConversationTimeline toolsTargetRef={setTimelineToolsTarget} toolsCollapsible={headingMode === 'toolbar'} toolsScope={displayScope}
       searchTriggerTarget={headingMode === 'inline' || tileChrome ? headingSearchTarget : assistantChrome ? detailsHost?.tools ?? null : undefined} nativeTakeover={!!nativeTakeover} readOnly={readOnly} state={state} sessionStatus={sessionStatus} attachingAgentId={attachingAgentId}

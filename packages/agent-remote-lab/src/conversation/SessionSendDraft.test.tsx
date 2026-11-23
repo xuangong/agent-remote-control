@@ -15,10 +15,8 @@ import { SideConversation } from '../features/session-links/SideConversation.js'
 import { SessionWindow } from '../features/windows/SessionWindow.js';
 import { SessionFamily } from './SessionFamily.js';
 import { AskConversation } from '../features/team/AskConversation.js';
-import { TpmWorkspace } from '../features/team/TpmWorkspace.js';
 import { askParticipantKey } from '../features/team/useAskConversations.js';
 import type { SessionFork } from '../kernel/session-forks.js';
-import type { TpmItem } from '../kernel/tpm-main-sessions.js';
 import type { OpenedSession } from '../kernel/directory-client.js';
 import { sessionViewNavigation } from '../kernel/session-view-navigation.js';
 
@@ -104,7 +102,7 @@ async function submit({ view, sent }: { view: ParentNode; sent: unknown[] }, dis
   else expect(sent).toHaveLength(count);
 }
 
-type ViewKind = 'side' | 'window' | 'team-leader' | 'team-member' | 'compact-leader' | 'compact-member' | 'child' | 'ask' | 'tpm';
+type ViewKind = 'side' | 'window' | 'team-leader' | 'team-member' | 'compact-leader' | 'compact-member' | 'child' | 'ask';
 async function setup(kind: ViewKind, options: { images?: boolean; recipient?: ImageDraftRecipient } = {}) {
   const f = fixture(options.images);
   const scope = `confirmed-send-${kind}-${crypto.randomUUID()}`;
@@ -127,18 +125,12 @@ async function setup(kind: ViewKind, options: { images?: boolean; recipient?: Im
       transport: f.transport, draftStore: drafts, hostLabel: 'Local', offline: false, active: true, compact };
     const record: SessionFork = { id: 'ask-record', mode: 'reference', source: selected, target: selected, capturedAt: '2026-10-15T00:00:00Z',
       delivery: 'sent', configured: true, options: {}, settings: [] };
-    const item: TpmItem = { key: 'tpm-work', hostId: 'local', hostName: 'Local', online: true, unread: false, work: {
-      id: 'work', revision: 1, title: 'Work', providerId: 'recorded', mainNativeSessionId: 'main', phase: 'implementing', waiting: 'none', paused: false,
-      summary: '', nextAction: '', document: '', acceptance: '', evidence: [], createdAt: '2026-10-15T00:00:00Z', updatedAt: '2026-10-15T00:00:00Z', nextCheckAt: 0, outbox: [],
-    } };
     return <ConversationConnectionScope.Provider value={connections}>{kind === 'side'
     ? <SideConversation session={selected} transport={f.transport} store={new ForkStore(scope)} draftBinding={binding} imageDraftBinding={imageDraftBinding}
       onClose={() => {}} onOpenSource={() => {}} onOpenFork={() => {}} onFork={async () => ({})} />
     : kind === 'ask' ? <AskConversation entry={{ source: selected, record, attached: true, attachedParticipant: askParticipantKey(record) }} replica={replica}
       transport={f.transport} draftBinding={binding} imageDraftBinding={imageDraftBinding} imageRecipient={options.recipient} triggerRef={trigger} storageScope={scope}
       onClose={() => {}} onToggleEnabled={() => {}} onClean={() => {}} onRetry={() => {}} onSendInput={() => {}} onDiscardInput={() => {}} />
-    : kind === 'tpm' ? <TpmWorkspace session={selected} item={item} visible storageScope={scope} triggerRef={trigger}
-      transport={f.transport} draftBinding={binding} onClose={() => {}} onShowList={() => {}} onOpenMain={() => {}} onAction={async () => {}} onResolve={async () => {}} onRetry={() => {}} />
     : compact || kind === 'child' ? <SessionFamily {...family} />
     : <SessionWindow entry={{ id: 'ordinary-view', slotId: 'slot', managed, target: selected }} baseUrl="http://fixture" visible compact={false} hostLabel="Local" offline={false}
       transport={f.transport} draftStore={drafts} draftBinding={owner ? binding : undefined} imageDraftBinding={owner ? imageDraftBinding : undefined} navigation={(source, state) => sessionViewNavigation({ source, state, entries: [] })}
@@ -147,11 +139,11 @@ async function setup(kind: ViewKind, options: { images?: boolean; recipient?: Im
   const view = await render(<Harness />);
   lease.release();
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
-  const draftKey = owner || kind === 'tpm' ? binding.key : `session:${JSON.stringify(['local', 'recorded', kind])}`;
+  const draftKey = owner ? binding.key : `session:${JSON.stringify(['local', 'recorded', kind])}`;
   return { ...f, view, drafts, scope, draftKey, imageDraftBinding, replica, connections, switchSession: () => switchSession() };
 }
 
-it.each(['side', 'window', 'team-leader', 'team-member', 'compact-leader', 'compact-member', 'child', 'ask', 'tpm'] as const)('sends %s text once, clears the editor and persisted draft at once, and ignores the ACK for the draft', async kind => {
+it.each(['side', 'window', 'team-leader', 'team-member', 'compact-leader', 'compact-member', 'child', 'ask'] as const)('sends %s text once, clears the editor and persisted draft at once, and ignores the ACK for the draft', async kind => {
   const f = await setup(kind);
   await type(f.view, 'Confirmed input');
   expect(promptText(editor(f.view))).toBe('Confirmed input');

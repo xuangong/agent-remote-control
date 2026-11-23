@@ -44,12 +44,12 @@ describe('quote targets', () => {
     expect(quoteTargets([], window, source)[0]!.views[0]!.title).toBe('Untitled session');
   });
 
-  it('lists Team conversations but no other feature view', () => {
+  it('lists the views of removed Team and TPM features as ordinary views, but no Ask', () => {
     const window = buildWindow([
       buildView('team', 'dock', { feature: { kind: 'team', id: 't', metadata: { role: 'leader' } } as never }),
       buildView('ask', 'dock', { feature: { kind: 'ask', id: 'k' } as never }),
       buildView('tpm', 'dock', { feature: { kind: 'tpm', id: 'p', metadata: { hostId: 'h' } } as never }),
     ], 'team', { id: 'w' });
-    expect(quoteTargets([], window, source)[0]!.views.map(view => view.viewId)).toEqual(['team']);
+    expect(quoteTargets([], window, source)[0]!.views.map(view => view.viewId)).toEqual(['team', 'tpm']);
   });
 });

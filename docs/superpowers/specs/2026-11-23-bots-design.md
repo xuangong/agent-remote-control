@@ -268,6 +268,10 @@ pauses a bot, or retires bots. Thresholds the person sets (usage, hops, duration
 
 Only system bounds refuse: sizes (3.4, and the Relay's and Host's storage and capacity) and the span of an organizer (2.5).
 
+As built (4a): a turn's cause comes from its Host (the person's input by its message, or framed input); the Relay names the chain
+and stamps every message a call queues with it. Chains are kept per account, at most 100 for seven days. Reply depth is recorded,
+no longer refused.
+
 ## 8. Who may do what
 
 | Action | Person | Organizer, for its bots | Any bot it may message |

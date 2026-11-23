@@ -36,6 +36,20 @@ created, its longest reply depth, usage, start and last activity, and whether th
 - Tests: Relay unit tests with mock data (a person's chain through two bots and a created bot; a timer's chain; pruning); the
   Controller's chain on a delivered message and on a person's input; one E15 flow that reads the chain of a message exchange.
 
+Built (`feat/bots-4-chains`, 7fcdbda1). As planned, with these choices:
+
+- The Controller does not mint chain ids. It sends the cause of the turn (`{kind: 'person', messageId}` or `{kind: 'framed'}`),
+  noted from the session's latest live `user_message`; the Relay names a person's chain from the session and message id, so a
+  retried call lands in the same chain. Framed input continues the chain recorded on the member when the Relay handed it the
+  message (`TeamMember.chain`, set at claim).
+- The Relay runs each causing call in its chain's scope (`AsyncLocalStorage`, available in the Worker with `nodejs_compat`), and
+  the one Team change wrapper stamps and counts what the call added: messages, bots reached and created, reply depth. No message
+  path knows about chains. A room's turns moving on time keep the room's chain; a due timer starts one; a bot's standing
+  instructions belong to no chain.
+- Chains live in the account's broker state beside Call For Support state, at most 100, none past seven days, and are read at
+  `GET v1/remote/chains` with the names of their bots. That route is the first part of 4b.
+- Usage is the increase of the session's usage over the turn, by the same accounting as support groups.
+
 ### 4b. The audit view
 
 - `GET v1/chains`: the account's chains, newest first, with their bots by name.

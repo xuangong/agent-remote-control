@@ -36,4 +36,23 @@ modules; `pnpm verify:changed` per commit; a real session in `pnpm local` for ea
 
 ## M5: one queue and the older mechanisms (T0, T5)
 
-- [ ] To be scoped after M4 against the IM session service P2 plan
+- [x] Scoped against the IM session service P2 plan (below)
+
+M1 to M4 run on the Team delivery path. What moves them onto one queue and retires the older mechanisms cannot finish on this branch:
+T0 is the rest of P2 in the [IM session service roadmap](2026-11-15-im-session-service-roadmap.md), whose gate tells the owner
+when every Controller must be updated, and Q5 removes the old panels only after one release in which both views read the same
+records. The steps, in order:
+
+1. **T0, the operation queue (P2).** The queue of the [IM session service design](../specs/2026-11-15-im-session-service-design.md#operation-queue)
+   for `send_message` first: requesters, delivery choice, preconditions, claimed and sending receipts, echo with the sender. Its own
+   plan, under the P2 gate; the owner is told which Controllers must be updated before the Relay depends on it.
+2. **Tasks, links and rooms on the queue.** The framed inputs of M1 to M4 become operation kinds: `task_brief`, `task_input`,
+   `task_event` (coalesced at idle), `assistant_message` and `room_turn`. Their records leave the Team catalog for relay-core
+   `tasks`, `assistants` and `rooms` stores, and the Team kinds `task`, `link` and `room` with their seats are removed. Order at
+   idle across kinds (5.4 rule 4) comes with the queue. Closes O69's delivery rules.
+3. **T1, the assistant record** (O70): ids that survive moving between groups, name and picture moved from `WindowBotDetails`,
+   `peers`, coordinator and plain mode, per-turn limits. Links and rooms read it.
+4. **T5, the older mechanisms on tasks.** Call For Support calls become tasks with `read_only`, `worktree` or `remote` workspaces;
+   TPM intents become tasks of the TPM's main session; Team members' work becomes tasks of the Leader; Sides become tasks the person
+   started. Each feature's existing e2e flows must pass on the task path.
+5. **One release with both views**, then delete the Team, Support and TPM panels, queues and tools (Q5).

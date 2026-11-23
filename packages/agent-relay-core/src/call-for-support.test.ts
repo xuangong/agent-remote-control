@@ -117,10 +117,13 @@ it('tells a Host which of its sessions may call for support', async () => {
   await expect(f.broker.hostCall('win', { action: 'support_enablement' })).rejects.toThrow('Update the Controller');
 });
 
-it('tells a Host which of its sessions are coordinators\' main sessions, so only they get the task tools', async () => {
+it('tells a Host which of its sessions are bots, with their missions, and which are coordinators\' main sessions', async () => {
   const view = (id: string, hostId: string, nativeSessionId: string) => ({ id, placement: 'primary', binding: { hostId, providerId: 'codex', nativeSessionId, title: nativeSessionId } });
   const groups = [{ window: { id: 'g', title: 'g', revision: 1, views: [view('v1', 'mac', 'chief'), view('v2', 'mac', 'plain'), view('v3', 'linux', 'remote')] },
-    bots: { rank: 'm', members: { v1: { mode: 'coordinator' }, v2: { mode: 'plain' }, v3: { mode: 'coordinator' } } } }] as unknown as WindowGroup[];
+    bots: { rank: 'm', members: { v1: { botId: 'b_' + '1'.repeat(32), mode: 'coordinator', mission: 'Lead the release.' }, v2: { botId: 'b_' + '2'.repeat(32), mode: 'plain' },
+      v3: { mode: 'coordinator' } } } }] as unknown as WindowGroup[];
   const f = supportFixture({ groups });
-  expect(await f.broker.hostCall('mac', { action: 'support_enablement' })).toEqual({ defaultEnabled: false, sessions: [], coordinators: [{ providerId: 'codex', nativeSessionId: 'chief' }] });
+  // Every bot of the Host is named with its id and mission, so its session gets its standing instructions.
+  expect(await f.broker.hostCall('mac', { action: 'support_enablement' })).toEqual({ defaultEnabled: false, sessions: [], coordinators: [{ providerId: 'codex', nativeSessionId: 'chief' }],
+    bots: [{ providerId: 'codex', nativeSessionId: 'chief', botId: 'b_' + '1'.repeat(32), mission: 'Lead the release.' }, { providerId: 'codex', nativeSessionId: 'plain', botId: 'b_' + '2'.repeat(32) }] });
 });

@@ -237,7 +237,7 @@ export class TeamBroker {
     if (call.action === 'call_for_support' || call.action === 'support_status') return (this.groups ?? fail(unavailableGroups)).workerCall(hostId, call);
     if (call.action === 'support_enablement') {
       const enablement = (this.groups ?? fail(unavailableGroups)).enablement(hostId);
-      return this.assistants ? { ...enablement, coordinators: this.assistants.coordinators(hostId) } : enablement;
+      return this.assistants ? { ...enablement, coordinators: this.assistants.coordinators(hostId), bots: this.assistants.bots(hostId) } : enablement;
     }
     if (call.action === 'create_task') {
       const tasks = this.tasks ?? fail(unavailableTasks);

@@ -28,7 +28,7 @@ export interface AssistantPorts {
 type ListCall = Extract<TeamHostCall, { action: 'list_assistants' }>;
 type MessageCall = Extract<TeamHostCall, { action: 'message_assistant' }>;
 /** coordinator: in coordinator mode, so it has the task tools and other assistants reach it; a plain assistant is one session without them. */
-export interface Assistant { key: string; name: string; label?: string; hidden: boolean; coordinator: boolean; hostId: string; providerId: string; nativeSessionId: string }
+export interface Assistant { key: string; name: string; label?: string; mission?: string; hidden: boolean; coordinator: boolean; hostId: string; providerId: string; nativeSessionId: string }
 
 const RECENT_KEEP = 64;
 /** One answer for an assistant that does not exist and one this caller may not reach, so the roster cannot be probed. */
@@ -47,7 +47,7 @@ export function accountDirectory(groups: readonly WindowGroup[], coordinatorProv
     // The id is the bot's record, which a move between groups keeps; names follow the account's naming rule, keyed by place.
     const viewKey = viewAssistantKey(group.window.id, view.id), details = group.bots?.members[view.id];
     const key = details?.botId ?? viewKey;
-    return { key, name: names.get(viewKey) ?? view.binding.title, ...(details?.label ? { label: details.label } : {}), hidden: details?.hidden === true, coordinator: details?.mode === 'coordinator' && coordinatorProvider(view.binding.hostId, view.binding.providerId),
+    return { key, name: names.get(viewKey) ?? view.binding.title, ...(details?.label ? { label: details.label } : {}), ...(details?.mission ? { mission: details.mission } : {}), hidden: details?.hidden === true, coordinator: details?.mode === 'coordinator' && coordinatorProvider(view.binding.hostId, view.binding.providerId),
       hostId: view.binding.hostId, providerId: view.binding.providerId, nativeSessionId: view.binding.nativeSessionId };
   }));
 }
@@ -89,6 +89,15 @@ export class AssistantMessages {
     if (!this.ports.capable(hostId)) return [];
     return accountDirectory(this.ports.groups(), this.ports.coordinatorProvider).filter(item => item.coordinator && item.hostId === hostId).flatMap(item => {
       try { const current = this.broker.ports.resolveSession(item.hostId, item.providerId, item.nativeSessionId); return [{ providerId: current.providerId, nativeSessionId: current.nativeSessionId }]; }
+      catch { return []; }
+    });
+  }
+  /** Every bot whose main session is on the Host, as the session that holds its role now, with its mission: its standing instructions. */
+  bots(hostId: string): Array<{ providerId: string; nativeSessionId: string; botId: string; mission?: string }> {
+    if (!this.ports.capable(hostId)) return [];
+    return accountDirectory(this.ports.groups(), this.ports.coordinatorProvider).filter(item => item.hostId === hostId && item.key.startsWith('b_')).flatMap(item => {
+      try { const current = this.broker.ports.resolveSession(item.hostId, item.providerId, item.nativeSessionId);
+        return [{ providerId: current.providerId, nativeSessionId: current.nativeSessionId, botId: item.key, ...(item.mission ? { mission: item.mission } : {}) }]; }
       catch { return []; }
     });
   }

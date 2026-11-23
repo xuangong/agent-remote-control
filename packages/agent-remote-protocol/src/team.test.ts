@@ -77,10 +77,6 @@ const groupTeam = () => ({ id: 'team', operationId: 'op', revision: 1, source: {
     ledger: { text: '', revision: 0 }, usage: { tokens: 10 } },
 });
 
-it('accepts a Call For Support group with one requester after its coordinator', () => {
-  expect(isTeam(groupTeam())).toBe(true);
-});
-
 it('keeps groups and ordinary Teams apart', () => {
   const plain = groupTeam() as any; delete plain.callForSupport;
   expect(isTeam(plain)).toBe(false);
@@ -105,26 +101,3 @@ it('rejects groups that break their invariants', () => {
   for (const change of variants) { const team = groupTeam(); change(team); expect(isTeam(team)).toBe(false); }
 });
 
-it('admits Call For Support creation, actions and host calls', () => {
-  const source = { hostId: 'mac', providerId: 'codex', nativeSessionId: 'worker', title: 'Worker' };
-  expect(isTeamCreate({ operationId: 'op', source, callForSupport: { profileId: 'review', call: { task: 'Review.', deliverable: 'findings' } } })).toBe(true);
-  expect(isTeamCreate({ operationId: 'op', source, callForSupport: { profileId: 'review', call: { task: 'x'.repeat(12001), deliverable: 'findings' } } })).toBe(false);
-  for (const action of [{ teamId: 't', action: 'call_for_support', operationId: 'op', task: 'Again.', deliverable: 'findings', followUpOf: 'c1' },
-    { teamId: 't', action: 'resolve_roster', rosterId: 'r', decision: 'reject', note: 'Too many.' }, { teamId: 't', action: 'release_member', memberId: 'm' },
-    { teamId: 't', action: 'update_mandate', mandate: groupTeam().callForSupport.mandate, profileRevision: 2 }, { teamId: 't', action: 'resume_group' }]) {
-    expect(isTeamAction(action)).toBe(true);
-  }
-  expect(isTeamDelete({ teamId: 't' })).toBe(true);
-  expect(isTeamDelete({ teamId: 't', action: 'delete' })).toBe(false);
-  const seat = { teamId: 't', memberId: 'coordinator' };
-  for (const call of [{ ...seat, action: 'propose_roster', operationId: 'op', members: [{ name: 'R', responsibility: '', providerId: 'claude', model: 'opus', workspace: 'shared' }], rationale: '' },
-    { ...seat, action: 'report_support', callId: 'c1', operationId: 'op', report: { status: 'reported', summary: 'Done.', findings: [], resources: ['r1'] } },
-    { ...seat, action: 'write_ledger', revision: 0, text: 'Reviewed abcdef1.' }, { ...seat, action: 'release_supporter', target: 'reviewer' },
-    { ...seat, action: 'report_usage', tokens: 100, costUsd: 0.5 },
-    { action: 'call_for_support', worker: { providerId: 'codex', nativeSessionId: 'worker' }, operationId: 'op', profileId: 'review', task: 'Review.', deliverable: 'findings', context: { commit: 'abcdef1' } },
-    { action: 'support_status', worker: { providerId: 'codex', nativeSessionId: 'worker' }, roleId: 't' }]) {
-    expect(isTeamHostCall(call)).toBe(true);
-  }
-  expect(isTeamHostCall({ ...seat, action: 'report_usage', tokens: -1 })).toBe(false);
-  expect(isTeamHostCall({ ...seat, action: 'write_ledger', revision: 0, text: 'x'.repeat(16001) })).toBe(false);
-});

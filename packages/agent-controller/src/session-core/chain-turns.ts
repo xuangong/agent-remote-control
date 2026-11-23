@@ -6,7 +6,7 @@
 import { createHash } from 'node:crypto';
 import { nativeSessionRefKey, parseTaskInputs, type NativeSessionRef, type TurnCause } from '@orchardworks/agent-remote-protocol';
 import type { AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
-import { accountUsage, type SupportUsage } from '../call-for-support-usage.js';
+import { accountUsage, type SessionUsage } from '../session-usage.js';
 
 export interface TurnReport { cause: TurnCause; tokens: number; costUsd?: number }
 
@@ -25,7 +25,7 @@ export function inputCause(item: { text: string; messageId?: string; clientMessa
 
 /** Passes a session's stream through, noting the cause of each input and reporting each ended turn with its usage. */
 export function watchChainTurns(session: AgentSession, ref: NativeSessionRef, causes: TurnCauses, report: (turn: TurnReport) => void): AgentSession {
-  const usage: SupportUsage = { tokens: 0 };
+  const usage: SessionUsage = { tokens: 0 };
   let counted = { tokens: 0, costUsd: 0 };
   async function* observe(): AsyncGenerator<ProviderStreamItem> {
     const source = session.observe()[Symbol.asyncIterator]();

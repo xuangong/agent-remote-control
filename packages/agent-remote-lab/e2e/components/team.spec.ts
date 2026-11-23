@@ -6,7 +6,6 @@ const team={id:'team',operationId:'create',revision:1,title:'Diagnose across Hos
  {id:'member',name:'Windows validation',role:'member',hostId:'win',providerId:'codex',nativeSessionId:'member',creation:'ready',activity:'idle',responsibility:'Check service logs',summary:'',updatedAt:1},
 ]};
 test.beforeEach(async({page})=>{
- await page.route('**/v1/remote/call-for-support',route=>route.fulfill({json:{profiles:[],enablement:[]}}));
  await page.route('**/v1/remote/teams',route=>route.fulfill({json:{teams:[team]}}));
  await page.route('**/v1/remote/hosts/*/attach',route=>route.fulfill({json:{agentId:route.request().postDataJSON().nativeSessionId}}));
 });

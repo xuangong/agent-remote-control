@@ -19,8 +19,6 @@ export function teamViewTarget(document: CompositionDocument, teams: readonly Te
     && sessionKey({ hostId: member.hostId, providerId: member.providerId, nativeSessionId: member.nativeSessionId }) === sessionKey(source));
   if (matches.length !== 1) throw keyedError('team.binding.identityUnavailable');
   const member = matches[0]!;
-  // A released supporter takes no Team messages; its session stays open as an ordinary session.
-  if (member.creation === 'released') return;
   if (member.creation !== 'ready') throw member.error ? new Error(member.error) : keyedError('team.binding.notReady');
   if (!member.nativeSessionId) throw keyedError('team.binding.noLocator');
   return { ...source, teamId, teamMemberId: member.id, hostId: member.hostId, providerId: member.providerId, nativeSessionId: member.nativeSessionId, title: member.name };

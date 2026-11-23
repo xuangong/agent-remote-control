@@ -32,7 +32,7 @@ function SettingsSurface({ scope, group, phone, userScoped, directoryAvailable }
   const { account, attention, baseUrl, closeInspector, dispatchPanels, hostClient, hostsLoaded, navigation, openPreviewSource, previewClient, previewHost, remoteHosts, showView, vscodeTunnelClient, clientActions, retryHosts } = scope;
   const notice = useDeviceLink(phone);
   const context = useMemo<SettingsContext>(() => ({
-    facts: { account: !!account, supportAvailable: userScoped && directoryAvailable, notificationsAvailable: attention.notifications.available },
+    facts: { account: !!account, notificationsAvailable: attention.notifications.available },
     ...(account ? { account } : {}), baseUrl, notifications: attention.notifications,
     computers: { hosts: remoteHosts, loaded: hostsLoaded, service: hostClient, previewClient, tunnelService: vscodeTunnelClient, ...(previewHost && previewHost.access !== 'shared' ? { activePreviewHostId: previewHost.id } : {}),
       openPreviewSource: (sessionId, itemId, hostId) => { navigation.setMode('window'); void openPreviewSource(sessionId, itemId, hostId); }, onRevoked: retryHosts },

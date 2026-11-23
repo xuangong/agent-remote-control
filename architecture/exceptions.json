@@ -31,7 +31,7 @@
       "from": [
         "packages/agent-controller/**"
       ],
-      "max": 4,
+      "max": 3,
       "owner": "M10",
       "reason": "Controller tests wire the Relay, providers and the Workbench by file path. The wiring moves into the seam suites of agent-remote-seams and provider ./testing entries as M10 extracts session-core."
     },

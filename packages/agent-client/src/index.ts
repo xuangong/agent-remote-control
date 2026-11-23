@@ -27,7 +27,6 @@ export * from './client/timeline-search.js';
 export * from './client/remote-host-control-client.js';
 
 export * from './client/remote-team-client.js';
-export * from './client/remote-call-for-support-client.js';
 export * from './client/remote-chain-client.js';
 
 export * from './client/window-client.js';

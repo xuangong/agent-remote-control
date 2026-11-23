@@ -46,7 +46,6 @@ export interface HostSessionGrants {
   teamRequested?: boolean; resourcesRequested?: boolean; recipientsRequested?: boolean; inboxRequested?: boolean;
   statesRequested?: false | 1 | 2;
   successionRequested?: boolean;
-  callForSupportRequested?: false | string[];
   /** The Host asked for tasks, naming the providers whose sessions can be coordinators (they take the task tools). */
   tasksRequested?: false | string[];
   statusRequested?: boolean; outboxRequested?: boolean;
@@ -146,7 +145,7 @@ export function createHostSession(ports: HostSessionPorts) {
     host.streams.clear();
   }
   function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, grants: HostSessionGrants) {
-    const { enrollmentRequested, teamRequested = false, resourcesRequested = false, recipientsRequested = false, inboxRequested = false, statesRequested = false, successionRequested = false, callForSupportRequested = false, tasksRequested = false, statusRequested = false, outboxRequested = false, journalRequested = 0, shownRequested = false, controlRequested = false } = grants;
+    const { enrollmentRequested, teamRequested = false, resourcesRequested = false, recipientsRequested = false, inboxRequested = false, statesRequested = false, successionRequested = false, tasksRequested = false, statusRequested = false, outboxRequested = false, journalRequested = 0, shownRequested = false, controlRequested = false } = grants;
     let host: Host | undefined;
     let pendingCredential: {hash: string; value: DeviceCredential} | undefined;
     let issuing: Promise<void> | undefined;
@@ -202,7 +201,7 @@ export function createHostSession(ports: HostSessionPorts) {
           send: message => send(journalHost, message), diagnostic: (event, details) => diagnostic(journalHost, { event, ...details }),
           published: (sessionKey, result) => journalPublished(journalHost.id, sessionKey, result) })
         : undefined;
-      send(host, { uplinkVersion: 2, type: 'registered', ...(statesRequested ? { sessionStates: statesRequested } : {}), ...(host.outbox === 1 ? { outbox: 1 as const } : {}), ...(controlRequested ? { control: 1 as const } : {}), ...(host.journal ? { journal: JOURNAL_VERSION } : {}), ...(host.teamRecipients === 1 && inboxRequested ? { teamInbox: 1 } : {}), ...(host.teamRecipients === 1 ? { teamRecipients: 1 } : {}), ...(host.teamSuccession === 1 ? { teamSuccession: 1 } : {}), ...(host.callForSupport === 1 ? { callForSupport: 1 } : {}), ...(host.tasks === 1 ? { tasks: 1 as const } : {}), ...(host.teamManagement && resourcesRequested && options.teamResources ? {teamResources:true} : {}), ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion !== 1 ? { successionEnrollmentVersion: host.successionEnrollmentVersion } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
+      send(host, { uplinkVersion: 2, type: 'registered', ...(statesRequested ? { sessionStates: statesRequested } : {}), ...(host.outbox === 1 ? { outbox: 1 as const } : {}), ...(controlRequested ? { control: 1 as const } : {}), ...(host.journal ? { journal: JOURNAL_VERSION } : {}), ...(host.teamRecipients === 1 && inboxRequested ? { teamInbox: 1 } : {}), ...(host.teamRecipients === 1 ? { teamRecipients: 1 } : {}), ...(host.teamSuccession === 1 ? { teamSuccession: 1 } : {}), ...(host.tasks === 1 ? { tasks: 1 as const } : {}), ...(host.teamManagement && resourcesRequested && options.teamResources ? {teamResources:true} : {}), ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion !== 1 ? { successionEnrollmentVersion: host.successionEnrollmentVersion } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
       if (retired || host.socket !== socket) return;
       host.ready = true;
       host.control = controlRequested ? true : undefined;
@@ -280,10 +279,10 @@ export function createHostSession(ports: HostSessionPorts) {
             ? existing.pairingPurpose ?? (existing.gatewayKeyRequested ? 'gateway-setup' : 'host-only')
             : credential.purpose ?? 'host-only';
           const providers = 'providers' in message ? [...message.providers] : [{ providerId: 'dsh', displayName: 'DeepSeek DSH' }];
-          const next = { id: existing?.id ?? recovery?.hostId ?? ids.uuid(), installationId: message.installationId, name: message.name, environment: message.environment, controller: message.controller, providerManagement: message.providerManagement, tpmManagement: message.tpmManagement, teamManagement: teamRequested ? true as const : undefined, teamRecipients: teamRequested && recipientsRequested ? 1 as const : undefined, teamSuccession: teamRequested && recipientsRequested && successionRequested ? 1 as const : undefined, callForSupport: teamRequested && recipientsRequested && successionRequested && callForSupportRequested ? 1 as const : undefined,
-            tasks: teamRequested && recipientsRequested && successionRequested && callForSupportRequested && tasksRequested ? 1 as const : undefined,
-            readOnlyProviders: teamRequested && recipientsRequested && successionRequested && callForSupportRequested ? callForSupportRequested : undefined, pairingPurpose: purpose,
-            coordinatorProviders: teamRequested && recipientsRequested && successionRequested && callForSupportRequested && tasksRequested ? tasksRequested : undefined,
+          const next = { id: existing?.id ?? recovery?.hostId ?? ids.uuid(), installationId: message.installationId, name: message.name, environment: message.environment, controller: message.controller, providerManagement: message.providerManagement, tpmManagement: message.tpmManagement, teamManagement: teamRequested ? true as const : undefined, teamRecipients: teamRequested && recipientsRequested ? 1 as const : undefined, teamSuccession: teamRequested && recipientsRequested && successionRequested ? 1 as const : undefined,
+            tasks: teamRequested && recipientsRequested && successionRequested && tasksRequested ? 1 as const : undefined,
+            pairingPurpose: purpose,
+            coordinatorProviders: teamRequested && recipientsRequested && successionRequested && tasksRequested ? tasksRequested : undefined,
             outbox: outboxRequested && options.outbox ? 1 as const : undefined,
             ...(existing?.gatewayKeyRequested ? { gatewayKeyRequested: true } : {}),
             ...(existing?.smartReading ? { smartReading: existing.smartReading } : {}),

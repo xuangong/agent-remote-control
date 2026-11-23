@@ -1,6 +1,5 @@
 import type { BotChain, ChainThresholds } from '@orchardworks/agent-remote-protocol';
 import type { WindowGroup, WindowSessionBinding, WindowBotDetails } from '@orchardworks/agent-remote-protocol';
-import type { CallForSupportState } from './call-for-support-profiles.js';
 import type { SavedTeam } from './team-delivery.js';
 import type { TeamResourceStore } from './team-resources.js';
 import type { HostRecoverySelection, RevokedHost } from './host-recovery.js';
@@ -53,12 +52,8 @@ export type Host = {
   teamRecipients?: 1;
   /** Team recipients follow a generic succession of their session on this Host, including to another provider. */
   teamSuccession?: 1;
-  /** The Host runs Call For Support groups: requester seats, coordinators and supporters. */
-  callForSupport?: 1;
-  /** The Host runs tasks: main sessions as requester seats and workers as Leaders. It needs Call For Support. */
+  /** The Host runs bots: temporary bots as tasks, inboxes, links and rooms of main sessions. */
   tasks?: 1;
-  /** Providers the Host named, with its Call For Support request, as enforcing read-only sessions natively. */
-  readOnlyProviders?: string[];
   /** Providers the Host named, with its tasks request, as taking the task tools: their assistants can be coordinators. */
   coordinatorProviders?: string[];
   connectionId?: string; stopDiagnostics?(): void;
@@ -82,8 +77,6 @@ export class BrokerError extends Error {
 }
 export interface RemoteHostBrokerState {
   teams?: SavedTeam[];
-  /** Call For Support profiles and session enablement of this account. */
-  callForSupport?: CallForSupportState;
   /** The account's chains (bots design 7). */
   chains?: BotChain[];
   /** The person's thresholds for chains. */

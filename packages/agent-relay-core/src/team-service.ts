@@ -1,13 +1,11 @@
 /**
- * Teams and Call For Support on the Relay: the `TeamBroker` wired to the Relay's saved state, and the one commit path for the Call For
- * Support record.
+ * Teams on the Relay: the `TeamBroker` wired to the Relay's saved state, with the account's chains beside it.
  *
  * Contract. `teams` changes only through `TeamBroker`'s `change`, which commits one draft of `BrokerState`: only the Teams a change touches
  * are copied, measured and validated; a Team over its bound first loses its oldest settled receipts; a change may shrink a Team or the
  * Relay's saved state but never grow either past its bound (`Team storage capacity reached.`), and an unchanged result commits nothing.
- * `callForSupportChange` commits one validated Call For Support state, or nothing when it is unchanged. `resolveRole` names the session
- * that holds a role on a Host now, across handoffs; it throws when the Host is not known. A Host that does not announce Team or Call For
- * Support support is refused with a 409 that says to update the Controller.
+ * `resolveRole` names the session that holds a role on a Host now, across handoffs; it throws when the Host is not known. A Host that does
+ * not announce Teams or tasks is refused with a 409 that says to update the Controller.
  */
 import { validChains } from './broker-state.js';
 import type { BotChain, ChainThresholds } from '@orchardworks/agent-remote-protocol';
@@ -16,7 +14,6 @@ import { isDeepStrictEqual } from 'node:util';
 import { resolveRoleSuccession, type NativeSessionRef } from '@orchardworks/agent-remote-protocol';
 import type { BrokerState } from './broker-state.js';
 import { BrokerError, type Host, type HostBrokerOptions } from './broker-types.js';
-import { emptyCallForSupportState, validCallForSupportState, type CallForSupportState } from './call-for-support-profiles.js';
 import { committed, detached } from './drafts.js';
 import { TEAM_RECORD_BYTES, teamBytes, teamStateBytes, trimTeamDeliveryReceipts, validSavedTeam, type SavedTeam } from './team-delivery.js';
 import { TeamBroker, teamMessageBudgetBytes } from './teams.js';
@@ -43,14 +40,6 @@ export function createTeamService(ports: TeamServicePorts) {
     if (!host) throw new Error('Team recipient Host is unavailable.');
     return resolveRoleSuccession(ports.associationSource(host, providerId, anchorNativeId), ports.prefixRecords(host)).target;
   }
-  function callForSupportChange<T>(update: (state: CallForSupportState) => T): Promise<T> {
-    return brokerState.commit(draft => {
-      const next = structuredClone(brokerState.callForSupport ?? emptyCallForSupportState()), value = structuredClone(update(next));
-      if (isDeepStrictEqual(next, brokerState.callForSupport ?? emptyCallForSupportState())) return { value, unchanged: true, publish() {} };
-      if (!validCallForSupportState(next)) throw new Error('Invalid Call For Support state.');
-      draft.callForSupport = next; return { value, publish() { brokerState.callForSupport = next; } };
-    });
-  }
   const chains = {
     read: () => brokerState.chains ?? [],
     change: <T>(update: (chains: BotChain[]) => T) => brokerState.commit(draft => {
@@ -75,7 +64,6 @@ export function createTeamService(ports: TeamServicePorts) {
     },
     resources: options.teamResources,
     now, read: () => brokerState.teams,
-    ...(options.stateRoom ? { retention: () => options.stateRoom!().retention } : {}),
     change: update => brokerState.commit(draft => {
       // Only the Teams a change touches are copied, measured and validated; the others stay the committed objects.
       let value!: ReturnType<typeof update>;
@@ -106,20 +94,6 @@ export function createTeamService(ports: TeamServicePorts) {
     },
     // Hosts that run tasks also bind assistants' main sessions to links.
     ...(options.assistantGroups ? { assistants: { groups: options.assistantGroups, capable: (hostId: string) => brokerState.hosts.get(hostId)?.tasks === 1, ...(options.placeBot ? { placeBot: options.placeBot } : {}), ...(options.setMission ? { setMission: options.setMission } : {}) } } : {}),
-    callForSupport: {
-      state: () => brokerState.callForSupport,
-      capable: hostId => brokerState.hosts.get(hostId)?.callForSupport === 1,
-      assertHost(hostId) { if (ports.requireHost(hostId).callForSupport !== 1) throw new BrokerError(409, 'call_for_support_upgrade_required', 'Update the Controller to use Call For Support.'); },
-      readOnly: (hostId, providerId) => { const host = brokerState.hosts.get(hostId); return host?.callForSupport === 1 && !!host.readOnlyProviders?.includes(providerId) && host.providers.some(provider => provider.providerId === providerId); },
-      async supportPatch(hostId, input) {
-        const result = await ports.rpc(ports.requireHost(hostId), 'POST', '/remote/team/support-patch', undefined, JSON.stringify(input));
-        const value = JSON.parse(result.body); if (result.status !== 200) throw new Error(value.error ?? 'The supporter patch failed.'); return value;
-      },
-      async supportBundle(hostId, input) {
-        const result = await ports.rpc(ports.requireHost(hostId), 'POST', '/remote/team/support-bundle', undefined, JSON.stringify(input));
-        const value = JSON.parse(result.body); if (result.status !== 200) throw new Error(value.error ?? 'The support bundle failed.'); return value;
-      },
-    },
   });
-  return { teams, callForSupportChange, resolveRole };
+  return { teams, resolveRole };
 }

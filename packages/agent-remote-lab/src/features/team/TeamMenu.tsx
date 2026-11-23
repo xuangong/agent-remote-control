@@ -13,8 +13,6 @@ import { ShortcutPlacement } from '../../kernel/shortcut-placement.js';
 import { useWindowLayout } from '../../kernel/window-workspace-context.js';
 import { SessionDirectoryClient } from '../../kernel/directory-client.js';
 import { WorkspaceSelect, type WorkspaceSelection } from '../../kernel/WorkspaceSelect.js';
-import { SupportGroup, usageText } from './call-for-support/SupportGroup.js';
-import { SupportSession } from './call-for-support/SupportSession.js';
 import './team.css';
 
 interface Host { teamManagement?: true; id: string; name: string; online: boolean; providers?: Array<{providerId:string;displayName:string}> }
@@ -103,8 +101,7 @@ export function TeamMenu(props: Props) {
   useEffect(() => {
     // Temporary access or catalog failures must not discard the last confirmed retention set.
     if (!enabled || rosterClient !== client) return;
-    // Support coordinators are not kept connected: their runtimes are released while idle.
-    connections?.retainSessions('team-leaders', teams.filter(team => team.status !== 'archived' && !team.callForSupport).flatMap(team => team.members
+    connections?.retainSessions('team-leaders', teams.filter(team => team.status !== 'archived').flatMap(team => team.members
       .filter(member => member.role === 'leader' && member.creation === 'ready' && member.nativeSessionId)
       .map(member => ({ hostId: member.hostId, providerId: member.providerId, nativeSessionId: member.nativeSessionId! }))));
   }, [connections, client, rosterClient, enabled, teams]);
@@ -146,10 +143,6 @@ export function TeamMenu(props: Props) {
     setTeams(current => [...current.filter(value => value.id !== updated.id), updated]);
     setRosterClient(client);
   }
-  async function remove(teamId: string) {
-    await client.delete(teamId); if (currentClient.current !== client) return;
-    setTeams(current => current.filter(value => value.id !== teamId));
-  }
   async function create() {
     if (!source && !pendingCreate) return;
     const input = pendingCreate ?? { operationId: crypto.randomUUID(), source: structuredClone(source!), sourceViewId: props.sourceViewId,
@@ -181,17 +174,14 @@ export function TeamMenu(props: Props) {
         <ul className="lab-tpm-list">{group.map(item => <TeamListItem key={item.id} team={item} selected={!revealing && props.compact ? item.members.some(member => isCurrentMember(member, props.currentSession)) : selected === item.id} busy={busy}
           onOpen={() => void run(() => openTeam(item))} onRename={title => run(() => change({action:'rename',teamId:item.id,title}))}
           navigation={props.compact ? <TeamSessionNavigation team={item} hosts={hosts} busy={busy} currentSession={props.currentSession} onOpen={target => void run(() => openSession(target))} /> : undefined}
-          management={item.room ? <RoomView team={item} busy={busy} onChange={input => run(() => change(input))} /> : item.callForSupport
-            ? <SupportGroup team={item} hosts={hosts} busy={busy} onChange={input => run(() => change(input))} onDelete={() => run(() => remove(item.id))} onOpenSession={target => void run(() => openSession(target))} />
+          management={item.room ? <RoomView team={item} busy={busy} onChange={input => run(() => change(input))} />
             : <TeamManagement baseUrl={baseUrl} team={item} hosts={hosts} busy={busy} failure={error} onChange={input => run(() => change(input))} onOpenSession={target => void run(() => openSession(target))} />} />)}</ul></section>;
     });
   }
   if (!enabled) return null;
-  // A support roster waiting for approval or a role paused by its budget needs the user.
-  const attention = teams.some(team => team.status === 'active' && (team.callForSupport?.roster?.status === 'pending' || team.callForSupport?.status === 'paused_budget'));
   return <>
     <div ref={root} data-hidden={!visible || undefined} aria-hidden={!visible || undefined} {...rootProps} onKeyDown={event => { if (floating) handlers.onKeyDown?.(event); if (event.key === 'Escape') { setOpen(false); trigger.current?.focus(); } }}>
-      <button ref={trigger} className="lab-session-popover-trigger" aria-expanded={open} aria-label={attention ? t('team.team.menuWaiting') : t('team.team.menu')} onClick={() => { setOpen(!open); setRevealing(false); void refresh().catch(error => setError(errorMessage(t, error))); }}><span>Team</span><span className="lab-team-count">{teams.filter(item => item.status !== 'archived').length}</span>{attention ? <span className="lab-support-badge" data-tone="warning" aria-hidden="true">!</span> : null}</button>
+      <button ref={trigger} className="lab-session-popover-trigger" aria-expanded={open} aria-label={t('team.team.menu')} onClick={() => { setOpen(!open); setRevealing(false); void refresh().catch(error => setError(errorMessage(t, error))); }}><span>Team</span><span className="lab-team-count">{teams.filter(item => item.status !== 'archived').length}</span></button>
       {open ? <section className="lab-session-popover-panel lab-tpm-panel" aria-label={t('team.team.menu')}>
         <div className="lab-directory-heading"><h2>{t('team.team.menu')}</h2><button onClick={() => setOpen(false)} aria-label={t('team.team.closeMenu')}>×</button></div>
         {loading && !teams.length ? <p role="status">{t('team.team.loading')}</p> : null}
@@ -199,8 +189,6 @@ export function TeamMenu(props: Props) {
         {!teams.some(item => item.status !== 'archived') ? <p className="lab-control-note">{t('team.team.empty')}</p> : null}
         {teams.some(item => item.status === 'archived') ? <details><summary>{t('team.team.archived')}</summary>{groups(true)}</details> : null}
         {pendingCreate?.source || source ? <p className="lab-control-note" data-creation-source>{t('team.for')} <strong>{(pendingCreate?.source ?? source)!.title}</strong></p> : null}
-        {source && source.hostId !== 'local' && rosterClient === client ? <SupportSession baseUrl={baseUrl} source={source} teams={teams} teamClient={client} busy={busy}
-          run={action => run(action)} onTeam={team => { setTeams(current => [...current.filter(value => value.id !== team.id), team]); setRosterClient(client); }} /> : null}
         <button type="button" disabled={busy || !(pendingCreate?.source ?? source) || !hosts.some(host => host.id === (pendingCreate?.source ?? source)?.hostId && host.teamManagement && host.online)} onClick={() => void run(create)}>{pendingCreate ? t('team.team.checkPreviousCreation') : t('team.team.new')}</button>
         {!source || source.hostId === 'local' ? <p className="lab-control-note">{t('team.team.needHost')}</p> : null}
         {error || loadError ? <p role="alert">{error || loadError}</p> : null}
@@ -210,7 +198,7 @@ export function TeamMenu(props: Props) {
 }
 
 const memberRole = (t: Translate, team: Team, member: Team['members'][number]) => member.role === 'requester' ? t('team.team.roleWorker')
-  : member.role === 'leader' ? (team.callForSupport ? t('team.team.roleCoordinator') : t('team.team.roleLeader')) : team.callForSupport ? t('team.team.roleSupporter') : t('team.team.roleMember');
+  : member.role === 'leader' ? t('team.team.roleLeader') : t('team.team.roleMember');
 
 function TeamSessionNavigation({ team, hosts, busy, currentSession, onOpen }: {
   team: Team; hosts: Host[]; busy: boolean; currentSession: Props['currentSession']; onOpen(target: TeamSource & { teamId?: string; teamMemberId?: string }): void;
@@ -218,10 +206,10 @@ function TeamSessionNavigation({ team, hosts, busy, currentSession, onOpen }: {
   const t = useTranslate();
   return <nav className="lab-team-session-navigation" aria-label={t('team.team.sessionsOf', { title: team.title })}>
     {team.members.filter(member => member.creation !== 'abandoned').map(member => <button key={member.id} type="button"
-      disabled={busy || member.creation !== 'ready' && member.creation !== 'released' || !member.nativeSessionId}
+      disabled={busy || member.creation !== 'ready' || !member.nativeSessionId}
       aria-current={isCurrentMember(member, currentSession) ? 'page' : undefined}
       onClick={() => onOpen({ teamId: team.id, teamMemberId: member.id, hostId: member.hostId, providerId: member.providerId, nativeSessionId: member.nativeSessionId!, title: member.name })}>
-      <span>{member.name}</span><small>{memberRole(t, team, member)} · {hosts.find(host => host.id === member.hostId)?.name ?? member.hostId}{member.creation === 'released' ? ` · ${t('team.team.released')}` : member.creation !== 'ready' ? ` · ${t('team.team.notReady')}` : !member.nativeSessionId ? ` · ${t('team.team.executionUnavailable')}` : ''}</small>
+      <span>{member.name}</span><small>{memberRole(t, team, member)} · {hosts.find(host => host.id === member.hostId)?.name ?? member.hostId}{member.creation !== 'ready' ? ` · ${t('team.team.notReady')}` : !member.nativeSessionId ? ` · ${t('team.team.executionUnavailable')}` : ''}</small>
     </button>)}
   </nav>;
 }
@@ -236,9 +224,7 @@ function TeamListItem({ team, selected, busy, onOpen, onRename, navigation, mana
   return <li data-team-id={team.id}>
     <div className="lab-team-list-row">
       <button type="button" className="lab-session-row" aria-current={selected || undefined} onClick={onOpen}>
-        <span className="lab-tracked-description"><strong>{team.title}</strong><small>{team.callForSupport
-          ? `${team.callForSupport.status === 'paused_budget' ? t('team.team.supportPaused') : t('team.team.supportOpen', { count: team.callForSupport.calls.filter(call => call.status === 'open' || call.status === 'queued').length })}${team.callForSupport.roster?.status === 'pending' ? ` · ${t('team.team.rosterWaits')}` : ''} · ${usageText(team.callForSupport.usage, t)}`
-          : t(team.room ? 'team.room.members' : 'team.team.workers', { count: team.members.length })}{team.status !== 'active' ? ` · ${enumWords(t, teamStatusWords, team.status)}` : ''}</small></span>
+        <span className="lab-tracked-description"><strong>{team.title}</strong><small>{t(team.room ? 'team.room.members' : 'team.team.workers', { count: team.members.length })}{team.status !== 'active' ? ` · ${enumWords(t, teamStatusWords, team.status)}` : ''}</small></span>
       </button>
       <button ref={renameButton} type="button" className="lab-team-rename" disabled={busy} aria-label={t('team.team.renameTeam')} title={t('team.team.renameNamed', { title: team.title })} onClick={() => { setTitle(team.title); setEditing(true); }}>{t('common.rename')}</button>
     </div>

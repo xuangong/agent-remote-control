@@ -1,8 +1,7 @@
-import { assertTeamQueueCapacity, compactTeamDeliveries, teamNeedsCompaction, teamStateBytes, unresolvedTeamDelivery, stripPrivateTeamEvidence, replayTeamDelivery, validSavedTeam, type SavedTeam } from './team-delivery.js';
+import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, compactTeamDeliveries, teamNeedsCompaction, unresolvedTeamDelivery, stripPrivateTeamEvidence, replayTeamDelivery, validSavedTeam, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
 export { teamMessageBudgetBytes } from './team-delivery.js';
 import type { TeamResourceStore } from './team-resources.js';
-import { admitTeam, archiveIdleGroups, callForSupportNeedsCompaction, CallForSupportGroups, compactCallForSupport, pruneGroups, restoreGroup, type CallForSupportPorts } from './call-for-support.js';
 import { accountDirectory, AssistantMessages, type AssistantPorts } from './assistants.js';
 import { roomAction, Rooms } from './rooms.js';
 import { BotInboxes } from './inboxes.js';
@@ -26,13 +25,9 @@ export interface TeamBrokerPorts {
   resourceDraftTtlMs?: number;
   read(): SavedTeam[];
   change<T>(update: (teams: SavedTeam[]) => T): Promise<T>;
-  /** Bytes the Relay's state may grow before support groups are removed to make room; negative when it is over. */
-  retention?(): number;
   createSeat(hostId: string, seat: TeamSeat): Promise<TeamMember>;
   assertHost(hostId: string, providerId: string): void;
   now(): number;
-  /** Absent: this Relay has no Call For Support groups. */
-  callForSupport?: CallForSupportPorts;
   /** Absent: this Relay has no tasks. */
   tasks?: TaskPorts;
   /** The account's assistants, which message one another on links. */
@@ -47,11 +42,9 @@ type StoredRecipientAnchor = Pick<TeamMember, 'hostId' | 'providerId' | 'nativeS
 const withoutRecipient = <T extends { id: string; resolvedTarget?: NativeSessionRef }>(value: T): Omit<T, 'resolvedTarget'> => { const { resolvedTarget: _target, ...legacy } = value; return legacy; };
 const fail = (message: string): never => { throw new Error(message); };
 
-const unavailableGroups = 'Call For Support is unavailable on this Relay.';
 const unavailableTasks = 'Tasks are unavailable on this Relay.';
 const unavailableAssistants = 'Assistant messages are unavailable on this Relay.';
 const tasksUpgrade = 'Update the Controller to use tasks.';
-const callForSupportUpgrade = 'Update the Controller to use Call For Support.';
 const sameRecipient = (current: NativeSessionRef, anchor: StoredRecipientAnchor) => current.providerId === anchor.providerId && current.nativeSessionId === anchor.nativeSessionId;
 const find = (teams: SavedTeam[], id: string) => teams.find(team => team.id === id) ?? fail('Team not found.');
 const member = (team: Team, id: string) => team.members.find(item => item.id === id) ?? fail('Team member not found.');
@@ -60,14 +53,13 @@ function touch(team: Team, now: number) { team.revision++; team.updatedAt = now;
 /** Queued input that never ran can still be reported undelivered when its recipient is stopped. */
 const withdrawable = (message: TeamMessage, outcome: string) => message.status === 'accepted' && message.acceptance === 'queued' && outcome === 'rejected';
 function settleArchive(team: SavedTeam, now: number) {
-  if (team.status === 'archiving' && team.members.every(item => item.creation === 'abandoned' || item.creation === 'released' || item.creation === 'ready' && item.activity === 'idle' && item.updatedAt >= team.updatedAt)
+  if (team.status === 'archiving' && team.members.every(item => item.creation === 'abandoned' || item.creation === 'ready' && item.activity === 'idle' && item.updatedAt >= team.updatedAt)
     && ![...team.messages, ...(team.deliveryReceipts ?? [])].some(unresolvedTeamDelivery)) { team.status = 'archived'; touch(team, now); }
 }
 
 /** Membership authority and durable mailboxes; provider execution stays on Controllers. */
 export class TeamBroker {
   private creating = new Map<string, Promise<Team>>();
-  private readonly groups?: CallForSupportGroups;
   private readonly tasks?: TaskGroups;
   private readonly assistants?: AssistantMessages;
   private readonly rooms?: Rooms;
@@ -87,27 +79,20 @@ export class TeamBroker {
       if (this.tasks) this.bots = new BotCalls(lent, ports.assistants, this.tasks, this.assistants, this.inboxes, this.rooms, this.work);
       this.rooms.arm(); this.work.arm();
     }
-    if (ports.callForSupport) this.groups = new CallForSupportGroups({ ports, change: update => this.change(update), provision: (teamId, memberId) => this.provision(teamId, memberId),
-      project: team => this.project(team), resource: (team, memberId, resourceId) => this.resourceAccess(team, memberId, resourceId),
-      pinResources: (teamId, memberId, resourceIds, keep) => this.pinResources(teamId, memberId, resourceIds, keep) }, ports.callForSupport);
   }
   private async change<T>(update: (teams: SavedTeam[]) => T): Promise<T> {
     let removed = false;
     const value = await this.ports.change(teams => {
-      const retention = this.ports.retention?.(), before = retention === undefined ? 0 : teamStateBytes(this.ports.read());
       // teams is a draft: compaction reads the plain Teams and drafts only those it changes.
-      const compact = (support: boolean) => plain(teams).forEach((team, index) => {
+      const compact = () => plain(teams).forEach((team, index) => {
         const now = this.ports.now();
         if (teamNeedsCompaction(team, now)) compactTeamDeliveries(teams[index]!, now);
-        if (support && callForSupportNeedsCompaction(team)) compactCallForSupport(teams[index]!);
       });
-      compact(false);
+      compact();
       const existing = plain(teams).map(team => team.id), seen = seenBefore(plain(teams));
       const result = update(teams);
       stampChain(seen, teams);
-      compact(true);
-      archiveIdleGroups(teams, this.ports.now());
-      if (retention !== undefined) pruneGroups(teams, this.ports.now(), before + retention);
+      compact();
       const remaining = new Set(plain(teams).map(team => team.id));
       removed = existing.some(id => !remaining.has(id));
       return result;
@@ -169,16 +154,11 @@ export class TeamBroker {
     const team = structuredClone(saved); compactTeamDeliveries(team, this.ports.now()); return this.project(team, recipientAware);
   }); }
   async create(input: TeamCreate): Promise<Team> {
-    if (input.callForSupport) {
-      const groups = this.groups ?? fail(unavailableGroups);
-      return (await groups.call({ operationId: input.operationId, source: input.source, profileId: input.callForSupport.profileId, call: input.callForSupport.call, origin: 'user',
-        ...(input.callForSupport.fresh ? { fresh: true } : {}) })).team;
-    }
     this.ports.assertHost(input.source.hostId, input.source.providerId);
     const team = await this.change(teams => {
       const existing = teams.find(item => item.operationId === input.operationId);
       if (existing) { if (JSON.stringify(existing.source) !== JSON.stringify(input.source)) fail('Creation identity has different input.'); return existing; }
-      admitTeam(teams, this.ports.now());
+      if (plain(teams).length >= ACCOUNT_TEAM_LIMIT) fail('Team capacity reached.');
       const now = this.ports.now();
       const leader: TeamMember = { id: randomUUID(), role: 'leader', hostId: input.source.hostId, providerId: input.source.providerId,
         name: 'Leader', responsibility: 'Discuss requirements, implement directly, coordinate members, validate and report delivery.',
@@ -189,12 +169,6 @@ export class TeamBroker {
     return this.provision(team.id, team.members[0]!.id);
   }
   async action(input: TeamAction): Promise<Team> {
-    if (input.action === 'call_for_support') {
-      const groups = this.groups ?? fail(unavailableGroups);
-      return groups.userCall(input.teamId, { operationId: input.operationId, task: input.task, ...(input.context ? { context: input.context } : {}), deliverable: input.deliverable,
-        ...(input.followUpOf ? { followUpOf: input.followUpOf } : {}) });
-    }
-    if (input.action === 'resolve_roster' || input.action === 'release_member' || input.action === 'update_mandate' || input.action === 'resume_group') return (this.groups ?? fail(unavailableGroups)).userAction(input);
     if (input.action === 'room_post' || input.action === 'close_room') {
       if (!this.rooms) fail(unavailableAssistants);
       const changed = await this.change(teams => { const team = find(teams, input.teamId); roomAction(team, input as Parameters<typeof roomAction>[1], this.ports.now()); return team; });
@@ -213,9 +187,7 @@ export class TeamBroker {
         if (team.status === 'active') { team.status = 'archiving'; for (const message of team.messages) if (message.status === 'queued') message.status = 'canceled'; touch(team, now); }
       } else if (input.action === 'restore') {
         if (team.status !== 'archived') fail('Finish archiving before restoring this Team.');
-        // Controllers forgot an archived group's seats; provisioning below binds them again.
-        if (team.callForSupport) { (this.ports.callForSupport ?? fail(unavailableGroups)).assertHost(team.source.hostId); restoreGroup(teams, team, this.ports.resolveSession, now); }
-        else { team.status = 'active'; touch(team, now); }
+        team.status = 'active'; touch(team, now);
       }
       else if (input.action === 'rename') { team.title = input.title; touch(team, now); }
       else if (input.action === 'add_member') {
@@ -235,20 +207,7 @@ export class TeamBroker {
       } else if (input.action === 'retry_creation') { active(team); if (member(team, input.memberId).creation === 'abandoned') fail('Member was abandoned.'); }
       settleArchive(team, now); return team;
     });
-    if (input.action === 'restore' && result.callForSupport) return (this.groups ?? fail(unavailableGroups)).provision(result.id);
     return input.action === 'add_member' ? this.provision(result.id, input.operationId) : input.action === 'retry_creation' ? this.provision(result.id, input.memberId) : this.project(result);
-  }
-  /**
-   * Removes an archived support group, which a call would otherwise reopen. Its Controllers find it missing and forget its seats.
-   * Ordinary Teams are archived, never removed.
-   */
-  async delete(teamId: string): Promise<void> {
-    await this.change(teams => {
-      const team = find(teams, teamId);
-      if (!team.callForSupport) fail('Only support groups can be deleted. Archive this Team instead.');
-      if (team.status !== 'archived') fail('Archive the support group before deleting it.');
-      teams.splice(teams.indexOf(team), 1);
-    });
   }
   /** The account's chains, newest first, and the names of the bots they name: standing bots by their records, temporary ones by their tasks. */
   chainView(): ChainView {
@@ -295,22 +254,19 @@ export class TeamBroker {
   async hostCall(hostId: string, call: TeamHostCall, assertCurrent: () => void = () => {}, recipientAware = true): Promise<unknown> {
     assertCurrent();
     if (!recipientAware && (call.action === 'claim' && call.expectedNativeSessionId !== undefined || call.action === 'settle' && call.resolvedTarget)) fail(upgradeRequired);
-    // A Controller that does not run Call For Support groups never sees them.
-    // A Controller that does not run tasks never sees them either.
-    const visible = (team: SavedTeam) => (!team.callForSupport || this.ports.callForSupport?.capable(hostId) === true) && (!team.task || this.ports.tasks?.capable(hostId) === true)
+    // A Controller that does not run tasks never sees them.
+    const visible = (team: SavedTeam) => (!team.task || this.ports.tasks?.capable(hostId) === true)
       && (!team.link && !team.room && !team.inbox || this.ports.assistants?.capable(hostId) === true);
-    // A released member's Host keeps seeing its Team, to clean up what the member left.
-    if (call.action === 'poll') return this.ports.read().filter(team => team.status !== 'archived' && visible(team) && team.members.some(item => item.hostId === hostId && (item.creation === 'ready' || item.creation === 'released')))
+    if (call.action === 'poll') return this.ports.read().filter(team => team.status !== 'archived' && visible(team) && team.members.some(item => item.hostId === hostId && item.creation === 'ready'))
       // A paused bot's messages wait on the Relay until the person resumes it.
       .map(team => this.project(team.inbox?.paused ? { ...team, messages: team.messages.filter(message => message.status !== 'queued') } : team, recipientAware));
     const projectDelivery = <T extends { id: string; resolvedTarget?: NativeSessionRef }>(value: T) => recipientAware ? value : withoutRecipient(value);
-    if (call.action === 'call_for_support' || call.action === 'support_status') return (this.groups ?? fail(unavailableGroups)).workerCall(hostId, call);
-    if (call.action === 'support_enablement') {
-      const enablement = (this.groups ?? fail(unavailableGroups)).enablement(hostId);
-      if (!this.assistants) return enablement;
+    // The Host's sessions that are bots: they get the bots' tools and standing instructions. Bots another bot created join their group here.
+    if (call.action === 'bot_enablement') {
+      if (!this.assistants) return { bots: [] };
       await this.inboxes!.place(hostId);
       await this.inboxes!.ensure(this.assistants.hostBots(hostId));
-      return { ...enablement, bots: this.assistants.bots(hostId) };
+      return { bots: this.assistants.bots(hostId) };
     }
     if (call.action === 'create_task') {
       const tasks = this.tasks ?? fail(unavailableTasks);
@@ -335,17 +291,13 @@ export class TeamBroker {
     if (call.action === 'cancel_task' || call.action === 'mark_task_done') return (this.tasks ?? fail(unavailableTasks)).finish(hostId, call);
     if (call.action === 'ask_owner') { assertCurrent(); return (this.tasks ?? fail(unavailableTasks)).ask(hostId, call); }
     if (call.action === 'tell_task') { assertCurrent(); return (this.tasks ?? fail(unavailableTasks)).tell(hostId, call); }
-    if (call.action === 'support_group_states') return (this.groups ?? fail(unavailableGroups)).groupStates(hostId, call.teamIds);
-    if (call.action === 'propose_roster' || call.action === 'release_supporter' || call.action === 'report_support' || call.action === 'write_ledger' || call.action === 'report_usage' || call.action === 'collect_supporter_patch') {
-      assertCurrent(); return (this.groups ?? fail(unavailableGroups)).memberCall(hostId, call);
-    }
     if (call.action === 'resource_begin' || call.action === 'resource_chunk' || call.action === 'resource_finish' || call.action === 'resource_metadata' || call.action === 'resource_read') return this.resourceCall(hostId, call, assertCurrent);
     if (call.action === 'send' && call.resources?.length) await this.prepareResources(hostId,call,assertCurrent);
     return this.change(teams => {
       assertCurrent();
       const team = find(teams, call.teamId), self = member(team, call.memberId), now = this.ports.now();
       if (self.hostId !== hostId || self.creation !== 'ready') fail('This Host is not the registered Team member.');
-      if (!visible(team)) fail(team.task || team.link || team.room || team.inbox ? tasksUpgrade : callForSupportUpgrade);
+      if (!visible(team)) fail(tasksUpgrade);
       if (!recipientAware && !sameRecipient(this.resolveRecipientFromAnchor(self), self)) fail(upgradeRequired);
       if (call.action === 'read') return { ...this.project(team, recipientAware), receipts: team.deliveryReceipts?.map(({ fingerprint: _hash, settledAt: _time, ...receipt }) => projectDelivery(receipt)) ?? [] };
       if (call.action === 'acknowledge') {
@@ -392,7 +344,6 @@ export class TeamBroker {
         if (call.action === 'claim') {
           active(team); if (message.status !== 'queued') fail('Message is already claimed.');
           if (team.inbox?.paused) fail('The person paused this bot.');
-          if (team.callForSupport?.status === 'paused_budget' && self.role !== 'requester') fail('Support is paused by its budget.');
           const target = this.resolveRecipientFromAnchor(self);
           if (call.expectedNativeSessionId === undefined ? target.nativeSessionId !== self.nativeSessionId : call.expectedNativeSessionId !== target.nativeSessionId) fail('Team recipient moved or does not match the claim.');
           this.ports.assertRecipient?.(target);
@@ -407,8 +358,7 @@ export class TeamBroker {
       active(team);
       if (call.action === 'send') {
         const target = member(team, call.to);
-        if (self.role === 'requester') fail('The worker calls for support with call_for_support.');
-        if (target.role === 'requester') fail(team.task ? 'Report the task\'s result with report_task.' : 'Reports reach the worker through report_support.');
+        if (self.role === 'requester' || target.role === 'requester') fail(team.task ? 'Report the task\'s result with message.' : 'A main session receives messages here, it does not send them.');
         if (target.id === self.id || self.role !== 'leader' && target.role !== 'leader') fail('Members can communicate only with their Leader.');
         if (target.creation !== 'ready') fail('Target member is not registered.');
         const id = createHash('sha256').update(JSON.stringify([self.id, call.operationId])).digest('hex');
@@ -487,7 +437,6 @@ export class TeamBroker {
       assertCurrent();
       const team = find(this.ports.read(), call.teamId), self = member(team, call.memberId);
       if (self.hostId !== hostId || self.creation !== 'ready' && !(reading && (self.creation === 'reserved' || self.creation === 'unknown'))) fail('This Host is not the registered Team member.');
-      if (team.callForSupport && this.ports.callForSupport?.capable(hostId) !== true) fail(callForSupportUpgrade);
       if (team.task && this.ports.tasks?.capable(hostId) !== true) fail(tasksUpgrade);
       return {team,self};
     };
@@ -529,13 +478,12 @@ export class TeamBroker {
     let result: TeamMember;
     try {
       result = await this.ports.createSeat(item.hostId, { teamId, source: team.source, member: item,
-        ...(team.callForSupport ? { callForSupport: { role: team.callForSupport.role, description: team.callForSupport.description } } : {}),
         ...(team.task ? { task: { title: team.task.title } } : {}), ...(team.link ? { link: { peer: team.members.find(other => other.id !== item.id)!.name } } : {}), ...(team.room ? { room: { name: team.room.name } } : {}), ...(team.inbox ? { inbox: { botId: team.inbox.botId, ...(team.inbox.pending ? { mission: team.inbox.pending.mission } : {}) } } : {}) });
       if (!isTeamMember(result) || result.id !== item.id || result.hostId !== item.hostId || result.providerId !== item.providerId || result.role !== item.role || result.creation !== 'ready' || !result.nativeSessionId) fail('Invalid Host member registration.');
     } catch (error) { result = { ...item, creation: 'unknown', error: error instanceof Error ? error.message.slice(0, 2048) : 'Member creation is uncertain.' }; }
     return this.change(teams => {
       const current = find(teams, teamId), slot = member(current, memberId);
-      // A worker may have several support roles; any other session holds one Team seat.
+      // A main session may hold requester seats in several Teams (its tasks, links, rooms, inbox); any other session holds one Team seat.
       if (result.creation === 'ready' && teams.some(other => other.members.some(candidate => candidate !== slot && candidate.creation === 'ready' && candidate.hostId === result.hostId && candidate.providerId === result.providerId && candidate.nativeSessionId === result.nativeSessionId
         && (candidate.role !== 'requester' || result.role !== 'requester')))) fail('Native session is already bound to a Team member.');
       const registering = slot.creation !== 'ready' && slot.creation !== 'abandoned' && result.creation === 'ready';

@@ -10,8 +10,7 @@ const setup = (teamHost = 'h1') => {
   const brokerState = { teams: [{ id: 't1', source: { hostId: teamHost, providerId: 'codex', nativeSessionId: 'n1' } } as never] } as never;
   const teams = { action: async (input: { teamId: string }) => { done.push("action"); who = "guest"; during(); return { id: input.teamId }; }, delete: async () => { done.push('delete'); },
     readForClient: (id: string) => ({ id }) };
-  const route = createTeamRoutes({ access: run.access, brokerState, now: () => 1_000, teams: teams as never,
-    callForSupportChange: (async () => undefined) as never, resolveRole: (() => { throw new Error('unused'); }) as never });
+  const route = createTeamRoutes({ access: run.access, brokerState, teams: teams as never });
   return { ...run, route, done, who: () => who, during(action: () => void) { during = action; } };
 };
 
@@ -26,7 +25,6 @@ describe('Team routes', () => {
   it('answers 404 for a Team that does not exist, and acts on one that does', async () => {
     const run = setup();
     await expect(run.call(run.route, 'POST', '/v1/remote/teams/action', { ...resolve, teamId: 'missing' })).resolves.toMatchObject({ status: 404, body: { error: 'Team not found.' } });
-    await expect(run.call(run.route, 'POST', '/v1/remote/teams/delete', { teamId: 'missing' })).resolves.toMatchObject({ status: 404 });
     expect(run.done).toEqual([]);
     await expect(run.call(run.route, 'POST', '/v1/remote/teams/action', resolve)).resolves.toMatchObject({ status: 200, body: { id: 't1' } });
     expect(run.done).toEqual(['action']);
@@ -35,7 +33,6 @@ describe('Team routes', () => {
   it('refuses a Team whose Host the caller may not reach, without acting', async () => {
     const run = setup('gone');
     await expect(run.call(run.route, 'POST', '/v1/remote/teams/action', resolve)).resolves.toMatchObject({ status: 409, body: { error: 'Host is unavailable.' } });
-    await expect(run.call(run.route, 'POST', '/v1/remote/teams/delete', { teamId: 't1' })).resolves.toMatchObject({ status: 409 });
     expect(run.done).toEqual([]);
   });
 

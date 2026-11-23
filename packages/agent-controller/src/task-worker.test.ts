@@ -4,16 +4,16 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentSessionTool } from '@orchardworks/agent-provider-sdk';
 import { parseTaskInputs, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
-import { supportHarness } from './test-utils/call-for-support-harness.js';
-import { WorkerSupport } from './call-for-support-worker.js';
+import { botsHarness } from './test-utils/bots-harness.js';
+import { BotTools } from './bot-tools.js';
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { while (cleanups.length) await cleanups.pop()!(); });
-async function harness(toolNamespaces = false) { const h = await supportHarness({ tasks: true, toolNamespaces }); cleanups.push(() => h.close()); return h; }
+async function harness(toolNamespaces = false) { const h = await botsHarness({ tasks: true, toolNamespaces }); cleanups.push(() => h.close()); return h; }
 const owner = { providerId: 'codex', nativeSessionId: 'worker', title: 'Chief' };
 const createTask = { action: 'create_task' as const, owner, operationId: 'op', title: 'Collect logs', brief: 'Collect the build logs of the last run.' };
 /** Every bot's tools, as the Host gives them while the Relay runs tasks. */
-const BOT_TOOLS = ['call_for_support', 'support_status', 'read_support_report', 'download_support_resource', 'create_bot', 'message', 'list_bots', 'read_bot', 'update_mission', 'update_work', 'complete_work', 'set_timer', 'stop_bot', 'retire_bot', 'open_room'];
+const BOT_TOOLS = ['create_bot', 'message', 'list_bots', 'read_bot', 'update_mission', 'update_work', 'complete_work', 'set_timer', 'stop_bot', 'retire_bot', 'open_room'];
 const tool = (tools: readonly AgentSessionTool[] | undefined, name: string) => tools?.find(item => item.name === name) ?? (() => { throw new Error(`No ${name} tool.`); })();
 /** A temporary bot writes to its organizer: its result (done, failed), its question (needs_input) or progress. */
 const report = (tools: readonly AgentSessionTool[] | undefined, status: 'done' | 'failed' | 'needs_input' | 'progress', text: string) => tool(tools, 'message').execute({ to: 'organizer', text, status });
@@ -101,8 +101,8 @@ describe('a task between a main session and its worker', () => {
     await h.runtime.tick();
     const inputs = h.sessions.get('worker')!.deliveries.flatMap(delivery => parseTaskInputs(delivery.text) ?? []);
     expect(inputs.map(input => input.kind)).toEqual(['needs_you', 'question']);
-    const owner = new WorkerSupport({ request: call => h.host(call), available: () => true, tasks: () => true, stateDirectory: h.directory, title: async () => 'Chief' });
-    await tool(owner.namespace(() => h.ref('codex', 'worker'), false, true).tools, 'message').execute({ to: 'Collect logs', text: 'Use main.' });
+    const owner = new BotTools({ request: call => h.host(call), tasks: () => true, title: async () => 'Chief' });
+    await tool(owner.namespace(() => h.ref('codex', 'worker'), false).tools, 'message').execute({ to: 'Collect logs', text: 'Use main.' });
     await h.runtime.tick();
     expect(h.sessions.get(worker.id)!.deliveries.map(delivery => parseTaskInputs(delivery.text)?.[0]?.kind)).toEqual(['brief', 'message']);
     expect(h.team(taskId).task?.state).toBe('working');
@@ -128,8 +128,8 @@ describe('a task between a main session and its worker', () => {
     await h.runtime.tick();
     h.busy(worker.id, true);
     await h.runtime.tick();
-    const owner = new WorkerSupport({ request: call => h.host(call), available: () => true, tasks: () => true, stateDirectory: h.directory, title: async () => 'Chief' });
-    expect(JSON.parse(await tool(owner.namespace(() => h.ref('codex', 'worker'), false, true).tools, 'stop_bot').execute({ bot: 'Collect logs' }) as string)).toMatchObject({ status: 'cancelled' });
+    const owner = new BotTools({ request: call => h.host(call), tasks: () => true, title: async () => 'Chief' });
+    expect(JSON.parse(await tool(owner.namespace(() => h.ref('codex', 'worker'), false).tools, 'stop_bot').execute({ bot: 'Collect logs' }) as string)).toMatchObject({ status: 'cancelled' });
     expect(h.team(taskId).task?.state).toBe('cancelled');
     await h.runtime.tick();
     expect(h.cancelled).toEqual([worker.id]);
@@ -164,8 +164,8 @@ describe('a task between a main session and its worker', () => {
 describe('a standing bot another bot creates', () => {
   it('starts its session with its mission and every bot\'s tools, joins its organizer\'s group, and reads its first message', async () => {
     const h = await harness();
-    const chief = new WorkerSupport({ request: call => h.host(call), available: () => true, tasks: () => true, stateDirectory: h.directory, title: async () => 'Chief' });
-    const created = JSON.parse(await tool(chief.namespace(() => h.ref('codex', 'worker'), false, true).tools, 'create_bot')
+    const chief = new BotTools({ request: call => h.host(call), tasks: () => true, title: async () => 'Chief' });
+    const created = JSON.parse(await tool(chief.namespace(() => h.ref('codex', 'worker'), false).tools, 'create_bot')
       .execute({ name: 'Scribe', mission: 'Keep the release notes.', lifetime: 'standing', message: 'Start from v0.3.' }) as string);
     expect(created).toMatchObject({ status: 'ready' });
     const scribe = h.created[0]!;
@@ -183,8 +183,8 @@ describe('the main session\'s task tools', () => {
     cleanups.push(() => rm(directory, { recursive: true, force: true }));
     const calls: TeamHostCall[] = [];
     // The Relay names the bots' main sessions in its enablement; this one is the only bot.
-    const worker = new WorkerSupport({ request: async call => { if (call.action === 'support_enablement') return { defaultEnabled: false, sessions: [], bots: [{ providerId: 'codex', nativeSessionId: 'main', botId: 'b_' + '9'.repeat(32) }] };
-      calls.push(call); return { ok: true }; }, available: () => true, tasks: () => tasks, stateDirectory: directory, title: async () => 'Chief' });
+    const worker = new BotTools({ request: async call => { if (call.action === 'bot_enablement') return { bots: [{ providerId: 'codex', nativeSessionId: 'main', botId: 'b_' + '9'.repeat(32) }] };
+      calls.push(call); return { ok: true }; }, tasks: () => tasks, title: async () => 'Chief' });
     return { worker, calls };
   }
   const ref = { controllerId: 'controller', providerId: 'codex', nativeSessionId: 'main' };
@@ -193,11 +193,9 @@ describe('the main session\'s task tools', () => {
     expect(worker.tools(ref)).toBe('none');
     await worker.refresh('controller');
     expect(worker.tools(ref)).toBe('tasks');
-    // A session that is no bot, and a session the Controller is about to create, get nothing.
+    // A session that is no bot gets nothing.
     expect(worker.tools({ ...ref, nativeSessionId: 'plain' })).toBe('none');
-    expect(worker.enabledByDefault()).toBe(false);
-    expect(worker.namespace(() => ref, false, false).tools.map(item => item.name)).not.toContain('create_bot');
-    const tools = worker.namespace(() => ref, false, true).tools;
+    const tools = worker.namespace(() => ref, false).tools;
     expect(tools.map(item => item.name)).toEqual(BOT_TOOLS);
     await tool(tools, 'create_bot').execute({ name: 'Collect logs', mission: 'Collect them.', message: 'Start with the last run.', operationId: 'op' });
     expect(calls).toEqual([{ action: 'create_bot', owner: { providerId: 'codex', nativeSessionId: 'main', title: 'Chief' }, operationId: 'op', name: 'Collect logs', mission: 'Collect them.', lifetime: 'temporary', message: 'Start with the last run.' }]);
@@ -222,7 +220,7 @@ describe('the main session\'s task tools', () => {
     const { worker, calls } = await support(false);
     await worker.refresh('controller');
     expect(worker.enabled(ref)).toBe(false);
-    await expect(tool(worker.namespace(() => ref, true, true).tools, 'create_bot').execute({ name: 'T', mission: 'B' })).rejects.toThrow('Update the Relay to use tasks.');
+    await expect(tool(worker.namespace(() => ref, true).tools, 'create_bot').execute({ name: 'T', mission: 'B' })).rejects.toThrow('Update the Relay to use tasks.');
     expect(calls).toEqual([]);
   });
 });
@@ -233,28 +231,28 @@ describe('messages between assistants', () => {
   it('delivers a bot\'s standing instructions from its inbox between its turns, once', async () => {
     const bots = [{ window: { id: 'g', title: 'g', revision: 1, views: [{ id: 'v1', placement: 'primary', binding: { hostId: 'host', providerId: 'codex', nativeSessionId: 'tracker', title: 'tracker' } }] },
       bots: { rank: 'm', members: { v1: { botId: 'b_' + 'd'.repeat(32), name: 'Tracker', mission: 'Track the release.' } } } }] as never;
-    const h = await supportHarness({ tasks: true, groups: bots, sessions: ['tracker'] });
+    const h = await botsHarness({ tasks: true, groups: bots, sessions: ['tracker'] });
     cleanups.push(() => h.close());
     h.busy('tracker', true);
-    await h.host({ action: 'support_enablement' });
+    await h.host({ action: 'bot_enablement' });
     await h.runtime.tick();
     expect(h.sessions.get('tracker')!.deliveries).toEqual([]);
     h.busy('tracker', false);
     await h.runtime.tick();
     expect(h.sessions.get('tracker')!.deliveries).toEqual([{ delivery: 'immediate', text: expect.stringMatching(/^\[Your standing instructions · v2\]\n[\s\S]*Your mission:\nTrack the release\.$/) }]);
-    await h.host({ action: 'support_enablement' });
+    await h.host({ action: 'bot_enablement' });
     await h.runtime.tick();
     expect(h.sessions.get('tracker')!.deliveries).toHaveLength(1);
   });
 
   it('reaches the other main session between its turns, after its task updates, and the reply comes back', async () => {
-    const h = await supportHarness({ tasks: true, groups, sessions: ['tracker'] });
+    const h = await botsHarness({ tasks: true, groups, sessions: ['tracker'] });
     cleanups.push(() => h.close());
-    const chief = new WorkerSupport({ request: call => h.host(call), available: () => true, tasks: () => true, stateDirectory: h.directory, title: async () => 'Chief' });
-    const tracker = new WorkerSupport({ request: call => h.host(call), available: () => true, tasks: () => true, stateDirectory: h.directory, title: async () => 'Tracker' });
-    const tools = (worker: WorkerSupport, id: string) => worker.namespace(() => h.ref('codex', id), false, true).tools;
+    const chief = new BotTools({ request: call => h.host(call), tasks: () => true, title: async () => 'Chief' });
+    const tracker = new BotTools({ request: call => h.host(call), tasks: () => true, title: async () => 'Tracker' });
+    const tools = (worker: BotTools, id: string) => worker.namespace(() => h.ref('codex', id), false).tools;
     // Both bots first receive their standing instructions in their inboxes.
-    await h.host({ action: 'support_enablement' });
+    await h.host({ action: 'bot_enablement' });
     await h.runtime.tick();
     for (const id of ['worker', 'tracker']) h.sessions.get(id)!.deliveries.length = 0;
     expect(JSON.parse(await tool(tools(chief, 'worker'), 'list_bots').execute({}) as string)).toEqual({ bots: [{ id: 'b_' + '2'.repeat(32), name: 'Tracker', kind: 'standing' }] });
@@ -276,14 +274,14 @@ describe('messages between assistants', () => {
   });
 
   it('stops the running turn of a bot whose chain the person stopped, once', async () => {
-    const h = await supportHarness({ tasks: true, groups, sessions: ['tracker'] });
+    const h = await botsHarness({ tasks: true, groups, sessions: ['tracker'] });
     cleanups.push(() => h.close());
-    const chief = new WorkerSupport({ request: call => h.host(call), available: () => true, tasks: () => true, stateDirectory: h.directory, title: async () => 'Chief' });
-    await h.host({ action: 'support_enablement' });
+    const chief = new BotTools({ request: call => h.host(call), tasks: () => true, title: async () => 'Chief' });
+    await h.host({ action: 'bot_enablement' });
     await h.runtime.tick();
     // The person asked Chief; Chief's message carries that chain to Tracker, which starts a turn in it.
     chief.causes.set(h.ref('codex', 'worker'), { kind: 'person', messageId: 'u1' });
-    await tool(chief.namespace(() => h.ref('codex', 'worker'), false, true).tools, 'message').execute({ to: 'Tracker', text: 'Cut the branch.' });
+    await tool(chief.namespace(() => h.ref('codex', 'worker'), false).tools, 'message').execute({ to: 'Tracker', text: 'Cut the branch.' });
     await h.runtime.tick();
     h.busy('tracker', true);
     const [chain] = h.broker.chainView().chains;
@@ -295,10 +293,10 @@ describe('messages between assistants', () => {
   });
 
   it('asks the members of a room in turn, between their turns, and takes their answers', async () => {
-    const h = await supportHarness({ tasks: true, groups, sessions: ['tracker'] });
+    const h = await botsHarness({ tasks: true, groups, sessions: ['tracker'] });
     cleanups.push(() => h.close());
-    const support = (title: string) => new WorkerSupport({ request: call => h.host(call), available: () => true, tasks: () => true, stateDirectory: h.directory, title: async () => title });
-    const tools = (worker: WorkerSupport, id: string) => worker.namespace(() => h.ref('codex', id), false, true).tools;
+    const support = (title: string) => new BotTools({ request: call => h.host(call), tasks: () => true, title: async () => title });
+    const tools = (worker: BotTools, id: string) => worker.namespace(() => h.ref('codex', id), false).tools;
     const { roomId } = JSON.parse(await tool(tools(support('Chief'), 'worker'), 'open_room').execute({ name: 'Release', topic: 'Ready?', members: ['Tracker'], minutes: 30 }) as string);
     await h.runtime.tick();
     const turn = parseTaskInputs(h.sessions.get('tracker')!.deliveries[0]!.text);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { isTeam, type WindowGroup } from '@orchardworks/agent-remote-protocol';
-import { supportFixture } from './test-utils/call-for-support-fixture.js';
+import { TeamBroker } from './teams.js';
+import type { SavedTeam } from './team-delivery.js';
 
 // A bot's inbox is a Team of its main session alone. The groups and the Host are stubs; the broker and its validation are real.
 const botId = 'b_' + 'a'.repeat(32);
@@ -8,10 +9,18 @@ function fixture(mission?: string) {
   const details: Record<string, unknown> = { botId, name: 'Chief', ...(mission ? { mission } : {}) };
   const groups = [{ window: { id: 'g', title: 'g', revision: 1, views: [{ id: 'v1', placement: 'primary', binding: { hostId: 'mac', providerId: 'codex', nativeSessionId: 'chief', title: 'chief' } }] },
     bots: { rank: 'm', members: { v1: details } } }] as unknown as WindowGroup[];
-  const f = supportFixture({ groups });
-  const inboxes = () => f.teams().filter(team => team.inbox);
-  const poll = () => f.broker.hostCall('mac', { action: 'support_enablement' });
-  return { ...f, details, inboxes, poll };
+  let state: SavedTeam[] = [];
+  const broker = new TeamBroker({
+    resolveSession: (hostId, providerId, nativeSessionId) => ({ controllerId: hostId, providerId, nativeSessionId }),
+    read: () => state, now: () => 1, assertHost: () => {},
+    change: async update => { const draft = structuredClone(state); const result = structuredClone(update(draft)); state = draft; return result; },
+    createSeat: async (_, seat) => ({ ...seat.member, creation: 'ready', activity: 'idle', cwd: '/repo' }),
+    tasks: { capable: () => true, assertHost: () => {} },
+    assistants: { groups: () => groups, capable: () => true },
+  });
+  const inboxes = () => state.filter(team => team.inbox);
+  const poll = () => broker.hostCall('mac', { action: 'bot_enablement' });
+  return { broker, details, inboxes, poll };
 }
 
 describe('bot inboxes', () => {
@@ -44,7 +53,7 @@ describe('bot inboxes', () => {
 
   it('gives a Host inboxes only for the bots whose main session it holds', async () => {
     const f = fixture();
-    await f.broker.hostCall('linux', { action: 'support_enablement' });
+    await f.broker.hostCall('linux', { action: 'bot_enablement' });
     expect(f.inboxes()).toEqual([]);
   });
 });

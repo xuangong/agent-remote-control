@@ -92,7 +92,7 @@ export function createSessionCommands(ctx: SessionCoreContext, options: AgentHos
     const holder = ctx.nativeRef(ref);
     const extensions = await ctx.roles.extensions(ctx.genericSuccessionSource(holder) ?? holder, () => holder);
     const tools = !extensions && ctx.workerSupport ? ctx.workerSupport.tools(holder) : 'none';
-    const worker = tools !== 'none' ? [ctx.workerSupport!.namespace(() => holder, false, tools === 'tasks')] : [];
+    const worker = tools !== 'none' ? [ctx.workerSupport!.namespace(() => holder, false)] : [];
     return bindAgentSessionTools([...(extensions?.tools ?? []), ...[...(extensions?.toolNamespaces ?? []), ...worker].flatMap(namespace => namespace.tools)]);
   }
   function callRole(request: unknown, caller: SessionCaller): Promise<SessionCallResult> {

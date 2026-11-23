@@ -447,7 +447,7 @@ it('lists the group\'s bots by name, role and place, with Sides beside their sou
   const workspace = { window, group, windows: [window], groups: [group], readGroup: () => group, hasActiveWindow: true, unavailable: false, operate: vi.fn() } as unknown as ReturnType<typeof useWindowWorkspace>;
   const status = (session: WindowSessionBinding) => session.nativeSessionId === 'c' ? 'running' as const : session.nativeSessionId === 'e' ? 'waiting' as const : 'idle' as const;
   const container = await render(<AssistantNamesContext.Provider value={accountNames([group])}>
-    <WindowWorkspaces workspace={workspace} placement="sidebar" sessionStatus={status} supportTeam={teamId => teamId === 'support'} /></AssistantNamesContext.Provider>);
+    <WindowWorkspaces workspace={workspace} placement="sidebar" sessionStatus={status} /></AssistantNamesContext.Provider>);
   const rows = [...container.querySelectorAll<HTMLElement>('nav[aria-label="Session views"] [data-window-view-row]')];
   const read = (row: HTMLElement) => ({ id: row.dataset.windowViewRow, depth: row.dataset.depth, name: row.querySelector('strong')?.textContent,
     tags: [...row.querySelectorAll('.lab-bot-role, .lab-bot-label')].map(tag => tag.textContent), detail: row.querySelector('small')?.textContent ?? null });
@@ -458,7 +458,7 @@ it('lists the group\'s bots by name, role and place, with Sides beside their sou
     { id: 'ask', depth: '1', name: 'Why the delay?', tags: ['Ask'], detail: null },
     { id: 'dock', depth: undefined, name: 'Docs writer', tags: [], detail: 'Folded · Working' },
     { id: 'tpm', depth: undefined, name: 'Delivery', tags: ['TPM'], detail: 'Open' },
-    { id: 'lead', depth: undefined, name: 'Reviewer', tags: ['Support'], detail: 'Open' },
+    { id: 'lead', depth: undefined, name: 'Reviewer', tags: ['Team Leader'], detail: 'Open' },
     // A sleeping bot is quiet, except for what asks for the owner.
     { id: 'sleepy', depth: undefined, name: 'Backups', tags: [], detail: 'Asleep · Needs you' },
     { id: 'empty', depth: undefined, name: 'Empty view', tags: [], detail: null },

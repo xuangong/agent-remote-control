@@ -313,24 +313,24 @@ it.each([2, 1] as const)('sends reply facts only to a Relay that acknowledged th
   expect(reports[1]!.states).toEqual([acknowledged === 2 ? { ...idle, replyAt: 9, preview: 'Shipped.' } : idle]);
 });
 
-it.each([[true, true], [true, false], [false, true]])('requests Call For Support only when asked and tracks the acknowledgement (requested=%s, acknowledged=%s)', async (requested, acknowledged) => {
+it.each([[true, true], [true, false], [false, true]])('requests bots only when asked and tracks the acknowledgement (requested=%s, acknowledged=%s)', async (requested, acknowledged) => {
   const server = new WebSocketServer({host:'127.0.0.1',port:0}); await new Promise<void>(resolve=>server.once('listening',resolve));
   closeables.push(()=>new Promise<void>(resolve=>{for(const socket of server.clients)socket.terminate();server.close(()=>resolve());}));
   let endpoint='',registered:any;
   server.on('connection',(socket,request)=>{endpoint=request.url!;socket.on('message',data=>{
     const message=JSON.parse(data.toString());if(message.type==='register')registered=message;
-    const offered=new URL(endpoint,'http://localhost').searchParams.get('callForSupport')==='1';
-    if(message.type==='register')socket.send(JSON.stringify({uplinkVersion:2,type:'registered',hostId:'host',heartbeat:{intervalMs:30000,timeoutMs:10000},teamManagement:true,teamRecipients:1,teamSuccession:1,...(acknowledged&&offered?{callForSupport:1}:{})}));
+    const offered=new URL(endpoint,'http://localhost').searchParams.get('tasks')==='1';
+    if(message.type==='register')socket.send(JSON.stringify({uplinkVersion:2,type:'registered',hostId:'host',heartbeat:{intervalMs:30000,timeoutMs:10000},teamManagement:true,teamRecipients:1,teamSuccession:1,...(acknowledged&&offered?{tasks:1}:{})}));
   });});
   const relay=createAgentRemoteRelay({providers:[]});closeables.push(()=>relay.close());
-  const client=createRemoteHostUplinkClient({relay,installationId:'host',name:'Host',remoteKey:'key',providers:[{providerId:'codex',displayName:'Codex'},{providerId:'opencode',displayName:'OpenCode'}],readOnlyProviders:['codex'],teamManagement:true,...(requested?{callForSupport:true as const}:{}),url:`ws://127.0.0.1:${(server.address() as {port:number}).port}/ws/remote-host`,resolveSession:()=>undefined,control:()=>({status:404,body:'{}'})});
+  const client=createRemoteHostUplinkClient({relay,installationId:'host',name:'Host',remoteKey:'key',providers:[{providerId:'codex',displayName:'Codex'},{providerId:'opencode',displayName:'OpenCode'}],coordinatorProviders:['codex'],teamManagement:true,...(requested?{tasks:true as const}:{}),url:`ws://127.0.0.1:${(server.address() as {port:number}).port}/ws/remote-host`,resolveSession:()=>undefined,control:()=>({status:404,body:'{}'})});
   closeables.push(()=>client.close());await client.ready;
-  expect(new URL(endpoint,'http://localhost').searchParams.get('callForSupport')).toBe(requested?'1':null);
-  // Read-only providers ride on the request, never in the descriptors an older Relay validates strictly.
-  expect(new URL(endpoint,'http://localhost').searchParams.getAll('readOnlyProvider')).toEqual(requested?['codex']:[]);
+  expect(new URL(endpoint,'http://localhost').searchParams.get('tasks')).toBe(requested?'1':null);
+  // The providers whose sessions take the bots' tools ride on the request, never in the descriptors an older Relay validates strictly.
+  expect(new URL(endpoint,'http://localhost').searchParams.getAll('coordinatorProvider')).toEqual(requested?['codex']:[]);
   expect(registered.providers).toEqual([{providerId:'codex',displayName:'Codex'},{providerId:'opencode',displayName:'OpenCode'}]);
-  expect(client.callForSupport).toBe(requested&&acknowledged);
-  if(!(requested&&acknowledged))await expect(client.teamRequest({action:'support_enablement'})).rejects.toThrow('Update the Relay to use Call For Support.');
+  expect(client.tasks).toBe(requested&&acknowledged);
+  if(!(requested&&acknowledged))await expect(client.teamRequest({action:'bot_enablement'})).rejects.toThrow('Update the Relay to use tasks.');
 });
 
 it.each([true, false])('asks for the outbox, and polls and hears about waiting messages only once acknowledged (acknowledged=%s)', async acknowledged => {

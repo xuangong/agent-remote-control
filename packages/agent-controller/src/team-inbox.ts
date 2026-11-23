@@ -24,8 +24,7 @@ function deliveryStatus(message: DeliveryStatus) {
 }
 
 /** Whole incoming messages are the only bodies exposed by the agent-facing Team read. */
-/** group: include the Call For Support group state, which only its coordinator reads. */
-export function teamInbox(value: unknown, memberId: string, afterMessageId?: string, options: { group?: boolean } = {}) {
+export function teamInbox(value: unknown, memberId: string, afterMessageId?: string) {
   const team = teamResponse(value), receipts = team.receipts ?? [];
   const incoming = team.messages.filter(message => message.to === memberId).sort(deliveryOrder);
   const cursor = afterMessageId ? [...incoming, ...receipts].find(message => message.id === afterMessageId && message.to === memberId) : undefined;
@@ -47,7 +46,6 @@ export function teamInbox(value: unknown, memberId: string, afterMessageId?: str
     messages, inboxCount: incoming.length, hasMore, ...(hasMore ? { nextAfterMessageId: messages.at(-1)!.id } : {}),
     messageStatuses: statuses.slice(-statusLimit).map(deliveryStatus), messageStatusCount: statuses.length,
     receipts: receipts.slice(-statusLimit).map(deliveryStatus), receiptCount: receipts.length,
-    ...(options.group && team.callForSupport ? { callForSupport: team.callForSupport } : {}),
   };
 }
 

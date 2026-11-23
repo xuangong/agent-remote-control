@@ -107,8 +107,6 @@ export interface AgentHostRuntimeOptions {
   team?: { stateDirectory: string; request?: (call: TeamHostCall) => Promise<unknown>; tickMs?: number;
     /** The Relay routes Team recipients across a generic succession of their session. */
     genericSuccession?(): boolean;
-    /** The Relay sends this Controller Call For Support groups. */
-    callForSupport?(): boolean;
     /** The Relay runs tasks for this Controller's sessions. */
     tasks?(): boolean };
   /** Internal wiring until provider readiness and product projection are certified together. */

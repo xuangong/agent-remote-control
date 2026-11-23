@@ -197,14 +197,14 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
     const { providers, workerSupport } = ctx;
     if (!workerSupport) return undefined;
     const capability = providers.require(providerId).adapter.descriptor.sessionExtensions?.toolNamespaces;
-    const tools = holder ? workerSupport.tools(holder) : workerSupport.enabledByDefault() ? 'support' : 'none';
+    const tools = holder ? workerSupport.tools(holder) : 'none';
     // A bot's main session gets its standing instructions when its runtime opens; a mission changed since then applies at the next open.
     const standing = holder && providers.require(providerId).adapter.descriptor.sessionExtensions?.instructions ? workerSupport.standing(holder) : undefined;
     const instructions = standing ? { instructions: standing } : {};
     // Tools fixed at creation include the task tools, deferred unless the session is a bot's, so a session that becomes a bot later finds them.
-    if (capability === 'creation') return { ...instructions, toolNamespaces: [workerSupport.namespace(actual, tools === 'none', true)] };
+    if (capability === 'creation') return { ...instructions, toolNamespaces: [workerSupport.namespace(actual, tools === 'none')] };
     // Without tool search, a session gets the namespace while enabled; an 'attachment' adapter receives an enablement change on its next attachment.
-    if ((capability === 'live' || capability === 'attachment') && tools !== 'none') return { ...instructions, toolNamespaces: [workerSupport.namespace(actual, false, tools === 'tasks')] };
+    if ((capability === 'live' || capability === 'attachment') && tools !== 'none') return { ...instructions, toolNamespaces: [workerSupport.namespace(actual, false)] };
     return standing ? instructions : undefined;
   }
   /** Applies enablement changes to live sessions whose provider can change tools during a session. */
@@ -218,7 +218,7 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
       if (await roles.extensions(ref, () => ref)) continue;
       const tools = workerSupport.tools(ref);
       if (ledger.workerToolsApplied(binding.agentId) === tools) continue;
-      try { await session.updateToolNamespaces(tools === 'none' ? [] : [workerSupport.namespace(() => ref, false, tools === 'tasks')]); ledger.recordWorkerTools(binding.agentId, tools); }
+      try { await session.updateToolNamespaces(tools === 'none' ? [] : [workerSupport.namespace(() => ref, false)]); ledger.recordWorkerTools(binding.agentId, tools); }
       catch { /* The next enablement change or attachment applies it again. */ }
     }
   }

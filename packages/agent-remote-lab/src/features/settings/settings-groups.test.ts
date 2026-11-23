@@ -2,15 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { SETTINGS_GROUP_IDS } from '../../kernel/destinations.js';
 import { computerItems, settingsGroups, type SettingsFacts, type SettingsItemId } from './settings-groups.js';
 
-const everyFacts: SettingsFacts[] = [false, true].flatMap(account => [false, true].flatMap(supportAvailable => [false, true].map(notificationsAvailable => ({ account, supportAvailable, notificationsAvailable }))));
+const everyFacts: SettingsFacts[] = [false, true].flatMap(account => [false, true].map(notificationsAvailable => ({ account, notificationsAvailable })));
 
 describe('the Settings groups', () => {
   it.each([
-    [{ account: true, supportAvailable: true, notificationsAvailable: true }, {
+    [{ account: true, notificationsAvailable: true }, {
       general: ['theme', 'language', 'motion', 'defaultView', 'mobileDisplay'], assistants: ['processMode', 'notifications', 'push', 'letters', 'audit'],
-      computers: ['computers', 'pairing'], privacy: ['cache', 'supportSharing'], advanced: ['layoutDiagnostics', 'trace', 'inspector'],
+      computers: ['computers', 'pairing'], privacy: ['cache'], advanced: ['layoutDiagnostics', 'trace', 'inspector'],
       account: ['account', 'security', 'signOut', 'versions'] }],
-    [{ account: false, supportAvailable: false, notificationsAvailable: false }, {
+    [{ account: false, notificationsAvailable: false }, {
       general: ['theme', 'language', 'motion', 'defaultView', 'mobileDisplay'], assistants: ['processMode', 'push', 'letters', 'audit'],
       computers: ['computers', 'pairing'], privacy: ['cache'], advanced: ['layoutDiagnostics', 'trace', 'inspector'], account: ['versions'] }],
   ] as const)('%j', (facts, groups) => {

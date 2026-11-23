@@ -6,7 +6,7 @@ import type { RemoteHostSessionLease, SessionWireAgent } from '@orchardworks/age
 import { directoryNativeEffect } from '../directory-mutation.js';
 import { NativeSessionOwnerError } from '../native-session-owner.js';
 import { pendingReferenceNote } from '../session-refs.js';
-import { workerToolsIn } from '../call-for-support-worker.js';
+import { workerToolsIn } from '../bot-tools.js';
 import { watchChainTurns } from './chain-turns.js';
 import { hasHeldChild, mayReconcileIdle, mayReleaseIdle } from './idle-release.js';
 import { releaseGraceMs } from './residency.js';

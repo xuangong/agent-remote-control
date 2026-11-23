@@ -3,26 +3,20 @@ import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentMessageOptions, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
-import type { AgentSnapshotPayload, CallForSupportProfileInput, NativeSessionRef, Team, TeamHostCall, WindowGroup } from '@orchardworks/agent-remote-protocol';
+import type { AgentSnapshotPayload, NativeSessionRef, Team, TeamHostCall, WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { createOperationCache, createOperationExecutor, type AgentManagerEvent, type SessionWireAgent } from '@orchardworks/agent-session-runtime';
-import type { AgentUsage } from '@orchardworks/agent-remote-protocol';
 import { TeamBroker } from '@orchardworks/agent-relay-core/testing';
 import type { SavedTeam } from '@orchardworks/agent-relay-core/testing';
 import { PortableTeamResourceStore } from '@orchardworks/agent-relay-core';
-import { emptyCallForSupportState, executeProfileCommand, setEnablement } from '@orchardworks/agent-relay-core/testing';
-import { WorkerSupport } from '../call-for-support-worker.js';
-import { WorkerSupport } from '../call-for-support-worker.js';
+import { BotTools } from '../bot-tools.js';
 import { TeamRuntime, type TeamRuntimeAccess } from '../team.js';
 import type { SessionCreation } from '../role-session-creation.js';
 
-export const reviewProfile: CallForSupportProfileInput = { name: 'Cross review', description: 'Independent reviewers.', coordinator: { model: 'gpt-5.5', reasoningEffort: 'high' },
-  enableByDefault: false, mandate: { supporters: [{ providerId: 'claude', model: 'opus' }], maxSupporters: 2, workspaces: ['shared'], remoteHosts: [], approval: 'within_mandate' } };
-
-/** A Relay Team broker with Call For Support and a Controller Team runtime over fake native sessions. */
-export async function supportHarness(options: { groups?: WindowGroup[]; sessions?: string[]; callForSupport?: boolean; tasks?: boolean; toolNamespaces?: boolean; failCreate?: (creation: SessionCreation) => boolean;
+/** A Relay Team broker with bots and a Controller Team runtime over fake native sessions. */
+export async function botsHarness(options: { groups?: WindowGroup[]; sessions?: string[]; tasks?: boolean; toolNamespaces?: boolean; failCreate?: (creation: SessionCreation) => boolean;
   /** Sees each Relay call from the Controller, which forward completes. */
   intercept?: (call: TeamHostCall, forward: (call: TeamHostCall) => Promise<unknown>) => Promise<unknown> } = {}) {
-  const directory = await realpath(await mkdtemp(join(tmpdir(), 'call-for-support-'))), cache = createOperationCache();
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'bots-'))), cache = createOperationCache();
   // The worker works in a git repository with one commit.
   const git = (...args: string[]) => execFileSync('git', ['-C', directory, '-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { encoding: 'utf8' }).trim();
   git('init', '-q'); await writeFile(join(directory, 'a.txt'), 'one\n'); git('add', 'a.txt'); git('commit', '-qm', 'one');
@@ -49,7 +43,6 @@ export async function supportHarness(options: { groups?: WindowGroup[]; sessions
   let teams: SavedTeam[] = [];
   const groups: WindowGroup[] = options.groups ?? [{ window: { id: 'g0', title: 'g0', revision: 1, views: [{ id: 'chief', placement: 'primary',
     binding: { hostId: 'host', providerId: 'codex', nativeSessionId: 'worker', title: 'worker' } }] }, bots: { rank: 'm', members: { chief: { botId: 'b_' + 'c'.repeat(32), name: 'Chief' } } } }] as unknown as WindowGroup[];
-  const support = emptyCallForSupportState();
   const resolve = (_host: string, providerId: string, nativeSessionId: string) => ref(providerId, nativeSessionId);
   const rows = new Map<string, Uint8Array>();
   let runtime: TeamRuntime;
@@ -58,8 +51,6 @@ export async function supportHarness(options: { groups?: WindowGroup[]; sessions
     async createSeat(_host, seat) { return runtime.create(seat); },
     resources: new PortableTeamResourceStore({ storage: { async get(key) { return rows.get(key); }, async put(key, value) { rows.set(key, value); }, async delete(key) { rows.delete(key); },
       async list(prefix) { return [...rows.keys()].filter(key => key.startsWith(prefix)); } } }),
-    callForSupport: { state: () => support, capable: () => true, assertHost() {}, readOnly: () => true, supportBundle: (_host, input) => runtime.supportBundle(input),
-      supportPatch: (_host, input) => runtime.supportPatch(input) },
     tasks: { capable: () => options.tasks === true, assertHost() { if (options.tasks !== true) throw new Error('Update the Controller to use tasks.'); } },
     // The account's bots: by default one, Chief, whose main session is `worker`, so its tasks have a bot as organizer.
     assistants: { groups: () => groups, capable: () => options.tasks === true,
@@ -70,34 +61,25 @@ export async function supportHarness(options: { groups?: WindowGroup[]; sessions
   });
   const created: Array<{ id: string; provider: string; creation: SessionCreation; extensions: AgentSessionExtensions }> = [];
   // Every bot's tools, as a Host gives them to a temporary bot (a task's worker).
-  const bots = new WorkerSupport({ request: call => broker.hostCall('host', call), available: () => true, tasks: () => options.tasks === true, stateDirectory: await realpath(await mkdtemp(join(tmpdir(), 'bot-tools-'))),
+  const bots = new BotTools({ request: call => broker.hostCall('host', call), tasks: () => options.tasks === true,
     title: async () => 'Chief', readOnly: providerId => ['codex', 'claude'].includes(providerId), patch: ref => runtime.patchFor(ref) });
   const access: TeamRuntimeAccess = {
-    botTools: actual => bots.namespace(actual, false, true),
+    botTools: actual => bots.namespace(actual, false),
     controllerId: 'controller', available: () => true, supportedProviders: () => ['codex', 'claude', 'copilot'], readOnlyProviders: () => ['codex', 'claude'],
-    callForSupport: () => options.callForSupport ?? true, tasks: () => options.tasks === true, toolNamespaces: () => options.toolNamespaces === true, genericSuccession: () => true,
+    tasks: () => options.tasks === true, toolNamespaces: () => options.toolNamespaces === true, genericSuccession: () => true,
     sessionRouting: { resolve: anchor => ({ anchor, target: anchor, operationIds: [] }), assertCurrent: (anchor, target) => { if (anchor.nativeSessionId !== target.nativeSessionId) throw new Error('Wrong recipient'); } },
     async create(provider, creation, extensions) { if (options.failCreate?.(creation)) throw new Error('The native session could not start.'); const id = `native-${created.length}`; created.push({ id, provider, creation, extensions }); session(id, provider); return id; },
     async acquire(_provider, id) { if (!sessions.has(id)) throw new Error('Session is unavailable.'); acquired.push(id); return { agent: agent(id), release() { released.push(id); } }; },
-    execute: createOperationExecutor(cache, 'call-for-support-test'),
+    execute: createOperationExecutor(cache, 'bots-test'),
   };
-  const state = await realpath(await mkdtemp(join(tmpdir(), 'call-for-support-state-')));
+  const state = await realpath(await mkdtemp(join(tmpdir(), 'bots-state-')));
   const forward = (call: TeamHostCall) => broker.hostCall('host', call);
   runtime = new TeamRuntime(join(state, 'team'), access, call => options.intercept ? options.intercept(call, forward) : forward(call), 1_000_000);
-  const profile = (input: CallForSupportProfileInput = reviewProfile) => executeProfileCommand(support, { type: 'create', profile: input }, Date.now())!;
-  const enable = (profileIds: string[]) => setEnablement(support, resolve, { hostId: 'host', providerId: 'codex', nativeSessionId: 'worker' }, profileIds, Date.now());
   return {
-    directory, commit, git, broker, runtime, sessions, created, acquired, released, cancelled, ref, profile, enable,
+    directory, commit, git, broker, runtime, sessions, created, acquired, released, cancelled, ref,
     team: (id: string): Team => structuredClone(teams.find(team => team.id === id)!) as Team,
     teams: (): Team[] => structuredClone(teams) as Team[],
     host: (call: TeamHostCall) => broker.hostCall('host', call) as Promise<any>,
-    call: (input: Record<string, unknown>) => broker.hostCall('host', { action: 'call_for_support', worker: { providerId: 'codex', nativeSessionId: 'worker', title: 'Implement login' },
-      task: 'Review the change.', deliverable: 'findings', context: { commit }, ...input } as TeamHostCall) as Promise<any>,
-    /** A live usage report from a session, as its provider would stream it. */
-    usage(id: string, usage: AgentUsage, turnCompleted = false) {
-      const event = turnCompleted ? { type: 'turn_completed' as const, turnId: 'turn', usage } : { type: 'usage_updated' as const, usage };
-      for (const listener of listeners.get(id) ?? []) listener({ type: 'agent_stream', agentId: id, event: event as never, delivery: 'live', timestamp: new Date().toISOString() });
-    },
     /** A pending native interaction in a session, or none. */
     interaction(id: string, summary?: string) {
       sessions.get(id)!.payload.pendingInteractions = summary ? [{ kind: 'tool_approval', requestId: 'r', toolCallId: 'c', toolName: 'shell', summary, detail: { type: 'shell', command: 'npm test' }, allowedDecisions: ['allow', 'deny'] } as never] : [];

@@ -1,7 +1,7 @@
 import type { AgentUsage } from '@orchardworks/agent-remote-protocol';
 
-/** Cumulative usage of one session, kept with its seat so a restart never counts twice. */
-export interface SupportUsage {
+/** Cumulative usage of one session over its turns. */
+export interface SessionUsage {
   tokens: number;
   costUsd?: number;
   /** The last cumulative report and its scope, to count only increases. */
@@ -16,7 +16,7 @@ const tokensOf = (usage: AgentUsage): number | undefined =>
  * their increase, and a decrease means a new runtime that started from zero; turn totals add when the turn
  * completes; call totals add as reported. Returns whether the total changed.
  */
-export function accountUsage(total: SupportUsage, usage: AgentUsage, turnCompleted: boolean): boolean {
+export function accountUsage(total: SessionUsage, usage: AgentUsage, turnCompleted: boolean): boolean {
   const tokens = tokensOf(usage), cost = usage.totalCostUsd, scope = usage.tokenScope;
   if (tokens === undefined && cost === undefined) return false;
   let addTokens = 0, addCost = 0;

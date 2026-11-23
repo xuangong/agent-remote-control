@@ -12,7 +12,7 @@ import { windowSessionBinding } from '../../kernel/window-workspace.js';
 import type { SessionEntry } from '../../kernel/session-tree.js';
 import type { PresentationScope } from './scope.js';
 
-export type IdentityContributionInputs = Pick<PresentationScope, 'assistantNames' | 'bindDirectorySession' | 'favorites' | 'navigation' | 'openSession' | 'remoteHosts' | 'revealEarlier' | 'setSessionNotice' | 'sharedWindow' | 'succession' | 'supportTeams' | 'windowWorkspace'> & { t: Translate };
+export type IdentityContributionInputs = Pick<PresentationScope, 'assistantNames' | 'bindDirectorySession' | 'favorites' | 'navigation' | 'openSession' | 'remoteHosts' | 'revealEarlier' | 'setSessionNotice' | 'sharedWindow' | 'succession' | 'windowWorkspace'> & { t: Translate };
 
 /** A bot at work: running a turn, not waiting for the owner, and connected to its agent. */
 export function botWorking(state: AgentReplicaState | undefined): boolean {
@@ -22,7 +22,7 @@ export function botWorking(state: AgentReplicaState | undefined): boolean {
 }
 
 export const identityContribution = (inputs: IdentityContributionInputs) => (view: SessionViewContext): SessionViewContribution => {
-  const { assistantNames, bindDirectorySession, favorites, navigation, openSession, remoteHosts, revealEarlier, setSessionNotice, sharedWindow, succession, supportTeams, windowWorkspace, t } = inputs;
+  const { assistantNames, bindDirectorySession, favorites, navigation, openSession, remoteHosts, revealEarlier, setSessionNotice, sharedWindow, succession, windowWorkspace, t } = inputs;
   const { context, options, botPresentation, source, view: windowView, windowBot, host, available, openBot } = view;
 
   /** Stores an assistant's own name with its group, for every device; a group without bot details gets them first. */
@@ -51,7 +51,7 @@ export const identityContribution = (inputs: IdentityContributionInputs) => (vie
   const earlier = chain?.predecessor && !chain.history ? [...chain.ancestors].reverse().concat(chain.predecessor) : [];
   const details = {
     id: botViewId ?? windowView?.id ?? source.viewId, ...(botDetails?.picture ? { picture: botDetails.picture } : {}), name: assistant.name,
-    ...(botDetails?.label ? { label: botDetails.label } : {}), ...(windowView && botRole(windowView, teamId => supportTeams.has(teamId), t) ? { role: botRole(windowView, teamId => supportTeams.has(teamId), t)! } : {}),
+    ...(botDetails?.label ? { label: botDetails.label } : {}), ...(windowView && botRole(windowView, t) ? { role: botRole(windowView, t)! } : {}),
     mood: botWorking(context.state) ? 'working' as const : 'idle' as const,
     where: { host: host?.name ?? source.hostId, ...(host ? { online: host.online } : {}), provider: providerName(source.providerId) ?? source.providerId,
       earlier: earlier.map(session => providerName(session.providerId, session.hostId ?? source.hostId) ?? session.providerId) },

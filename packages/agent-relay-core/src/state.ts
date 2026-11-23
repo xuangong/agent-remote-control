@@ -1,4 +1,3 @@
-import { validCallForSupportState } from './call-for-support-profiles.js';
 import { validWindowState, type SavedWorkspaceWindow } from './window-workspaces.js';
 import { migrateBots, needsBotMigration, validBots, type SavedBot } from './bot-store.js';
 import { ACCOUNT_TEAM_LIMIT, validSavedTeam } from './team-delivery.js';
@@ -122,8 +121,7 @@ function validJournalDeletions(value: unknown): value is string[] {
 function validBroker(value: unknown): value is RemoteHostBrokerState {
   if (!record(value) || !Array.isArray(value.keys) || value.keys.length > 128 || !Array.isArray(value.hosts) || value.hosts.length > 128 ||
     !Array.isArray(value.bindings) || value.bindings.length > 4096 || !Array.isArray(value.creations) || value.creations.length > 4096) return false;
-  if (value.teams !== undefined && (!Array.isArray(value.teams) || value.teams.length > ACCOUNT_TEAM_LIMIT || !value.teams.every(validSavedTeam) || !unique(value.teams, (team: {id:string}) => team.id))) return false;
-  if (value.callForSupport !== undefined && !validCallForSupportState(value.callForSupport)) return false;
+  if (value.teams !== undefined && (!Array.isArray(value.teams) || value.teams.length > ACCOUNT_TEAM_LIMIT || !value.teams.every((team: unknown) => legacySupportTeam(team) || validSavedTeam(team)) || !unique(value.teams, (team: {id:string}) => team.id))) return false;
   if (value.chains !== undefined && !validChains(value.chains)) return false;
   if (value.chainThresholds !== undefined && !isChainThresholds(value.chainThresholds)) return false;
   if (value.associations !== undefined) { try { migrateBrokerAssociations(value.associations); } catch { return false; } }
@@ -285,9 +283,21 @@ function checkRelayState(value: unknown, auth: HostedAuthOptions, memo?: Validat
   }
   if (value.sessions.some((session: SavedHostedSession) => session.grant.profile !== undefined && (!record(session.grant.profile) || !string(session.grant.profile.name) || (session.grant.profile.email !== undefined && !string(session.grant.profile.email, 320))))) return invalid();
 }
+/** A Call For Support group, or that feature's saved state, of a Relay older than the folds of bots step 7: removed when it loads. */
+const legacySupportTeam = (team: unknown) => record(team) && Object.hasOwn(team, 'callForSupport');
+const hasLegacySupport = (value: HostedRelayState) => value.tenants.some(tenant => {
+  const broker = tenant.broker as (RemoteHostBrokerState & { callForSupport?: unknown }) | undefined;
+  return !!broker && (Object.hasOwn(broker, 'callForSupport') || !!broker.teams?.some(legacySupportTeam));
+});
 /** The validated state with legacy fields removed and Windows normalized; a copy the caller owns. */
 function migrateRelayState(value: HostedRelayState): HostedRelayState {
   const migrated = structuredClone(value) as HostedRelayState & { sessionSuccessions?: unknown };
+  for (const tenant of migrated.tenants) {
+    const broker = tenant.broker as (RemoteHostBrokerState & { callForSupport?: unknown }) | undefined;
+    if (!broker) continue;
+    delete broker.callForSupport;
+    if (broker.teams) broker.teams = broker.teams.filter(team => !legacySupportTeam(team));
+  }
   if (migrated.workspaceWindows) for (const row of migrated.workspaceWindows) if (row.window) row.window = decodeWorkspaceWindow(row.window)!;
   if (migrated.workspaceWindows && needsBotMigration(migrated.workspaceWindows)) migrateBots(migrated.workspaceWindows, migrated.bots ??= [], Date.now());
   delete migrated.sessionSuccessions;
@@ -313,7 +323,7 @@ export function checkedRelayState(value: unknown, auth: HostedAuthOptions): Host
     }
     return result;
   };
-  if (Object.hasOwn(value, 'sessionSuccessions') || value.workspaceWindows?.some(row => !normalized(row)) || (value.workspaceWindows !== undefined && needsBotMigration(value.workspaceWindows))) return migrateRelayState(value);
+  if (Object.hasOwn(value, 'sessionSuccessions') || hasLegacySupport(value) || value.workspaceWindows?.some(row => !normalized(row)) || (value.workspaceWindows !== undefined && needsBotMigration(value.workspaceWindows))) return migrateRelayState(value);
   return value;
 }
 /** Only the authenticated Node file adapter calls this explicit v1 migration. */

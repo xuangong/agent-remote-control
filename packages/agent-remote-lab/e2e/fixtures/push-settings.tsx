@@ -18,7 +18,7 @@ const touch = matchMedia('(pointer: coarse)').matches;
 function Fixture() {
   const push = usePushDevice(new URL('/u/alice/', location.origin).href, true, { locale: browserLocale(), paused: !enabled });
   const notifications: DeviceNotifications = { enabled, available: !touch, permission: 'default', requestFailed: false, request() {}, set() {}, push };
-  const items = settingsGroups({ account: true, supportAvailable: false, notificationsAvailable: !touch }).find(group => group.id === 'assistants')!.items;
+  const items = settingsGroups({ account: true, notificationsAvailable: !touch }).find(group => group.id === 'assistants')!.items;
   return <main className="lab-settings" style={{ padding: 16, maxWidth: 720 }}><AssistantSettings items={items} notifications={notifications} /></main>;
 }
 createRoot(document.getElementById('root')!).render(<LocaleProvider language={bindLanguage(document, localStorage, window)}><Fixture /></LocaleProvider>);

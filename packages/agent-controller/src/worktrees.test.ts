@@ -4,7 +4,7 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:f
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { collectPatch, createBundle, fetchBundle, prepareWorktree, removeWorktree, worktreePath } from './call-for-support-workspaces.js';
+import { collectPatch, createBundle, fetchBundle, prepareWorktree, removeWorktree, worktreePath } from './worktrees.js';
 
 const cleanup: string[] = [];
 afterEach(async () => { for (const path of cleanup.splice(0)) await rm(path, { recursive: true, force: true }); });

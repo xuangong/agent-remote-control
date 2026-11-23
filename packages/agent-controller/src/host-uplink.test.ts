@@ -27,7 +27,7 @@ function startHost(extra: Partial<Parameters<typeof createAgentHost>[0]> = {}) {
       const connection = { options, closed: false, client: undefined as unknown as RemoteHostUplinkClient };
       connection.client = {
         ready: Promise.resolve({ hostId: `host-${connections.length + 1}` }), close: async () => { connection.closed = true; },
-        teamRequest: async () => ({}), outboxRequest: async () => ({}), teamSuccession: false, callForSupport: false,
+        teamRequest: async () => ({}), outboxRequest: async () => ({}), teamSuccession: false,
       };
       connections.push(connection);
       return connection.client;

@@ -1,6 +1,6 @@
 import type { AgentSession } from '@orchardworks/agent-provider-sdk';
 import type { SessionWireAgent } from '@orchardworks/agent-session-runtime';
-import type { WorkerTools } from '../call-for-support-worker.js';
+import type { WorkerTools } from '../bot-tools.js';
 
 /** What a native attachment was opened from: the provider's session, and the identity of the creation result or prefix handle it was opened with. */
 export interface NativeAttachment { session: AgentSession; nativeCreation?: string; nativePrefix?: string }

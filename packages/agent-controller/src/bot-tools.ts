@@ -1,20 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { TurnCauses, type TurnReport } from './session-core/chain-turns.js';
-import { join } from 'node:path';
 import type { AgentSessionTool, AgentSessionToolNamespace } from '@orchardworks/agent-provider-sdk';
-import { ASSISTANT_MESSAGE_LIMIT, BOT_MESSAGE_LIMIT, nativeSessionRefKey, ROOM_MINUTES_LIMIT, TASK_BRIEF_LIMIT, TASK_TITLE_LIMIT, type CallForSupportCall, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
-import { TeamResourceFiles } from './team-resource-files.js';
+import { ASSISTANT_MESSAGE_LIMIT, BOT_MESSAGE_LIMIT, nativeSessionRefKey, ROOM_MINUTES_LIMIT, TASK_BRIEF_LIMIT, TASK_TITLE_LIMIT, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { botInstructions } from './bot-instructions.js';
 
-export interface WorkerSupportPorts {
+export interface BotToolsPorts {
   request(call: TeamHostCall): Promise<unknown>;
-  /** The Relay acknowledged Call For Support. */
-  available(): boolean;
-  /** The Relay acknowledged tasks, which every session without a role may then use. */
-  tasks?(): boolean;
-  /** A directory for downloaded support resources. */
-  stateDirectory: string;
-  /** A session's title, for the group the Relay creates. */
+  /** The Relay acknowledged bots. */
+  tasks(): boolean;
+  /** A session's title, which a bot's brief names it by. */
   title?(ref: NativeSessionRef): Promise<string | undefined>;
   /** The commit checked out in a session's working directory, where a worktree task starts. */
   head?(ref: NativeSessionRef): Promise<string>;
@@ -25,16 +19,13 @@ export interface WorkerSupportPorts {
   /** A worktree bot's patch, saved on this Host, as the line its organizer reads; undefined for any other bot. */
   patch?(ref: NativeSessionRef): Promise<string | undefined>;
 }
-type Enablement = { defaultEnabled: boolean; sessions: Map<string, boolean>; bots: Map<string, string> };
-/** Which worker tools a session has: none, Call For Support only, or Call For Support with the task tools every bot has. */
-export type WorkerTools = 'none' | 'support' | 'tasks';
-type StatusCall = { roleId: string; requesterMemberId: string; call: CallForSupportCall };
+/** Which tools a session has: none, or every bot's tools. */
+export type WorkerTools = 'none' | 'tasks';
 
 export const WORKER_NAMESPACE = 'agent_remote';
-/** The worker tools a session was given: listed (not deferred) worker namespaces, with or without the task tools. */
+/** The tools a session was given: a listed (not deferred) bots' namespace. */
 export function workerToolsIn(namespaces: readonly AgentSessionToolNamespace[] | undefined): WorkerTools {
-  const listed = namespaces?.find(namespace => namespace.name === WORKER_NAMESPACE && !namespace.deferred);
-  return !listed ? 'none' : listed.tools.some(item => item.name === 'create_task') ? 'tasks' : 'support';
+  return namespaces?.some(namespace => namespace.name === WORKER_NAMESPACE && !namespace.deferred) ? 'tasks' : 'none';
 }
 const id = { type: 'string', minLength: 1, maxLength: 256 };
 const object = (properties: Record<string, unknown>, required: string[]) => ({ type: 'object', properties, required, additionalProperties: false });
@@ -42,118 +33,71 @@ const fail = (message: string): never => { throw new Error(message); };
 const tool = (name: string, description: string, inputSchema: Record<string, unknown>, execute: (args: any) => Promise<unknown>): AgentSessionTool =>
   ({ name, description, inputSchema, execute: async args => JSON.stringify(await execute(args)) });
 
-/** A worker's own Call For Support tools and the enablement that decides where the Controller offers them. */
-export class WorkerSupport {
-  private enablement: Enablement = { defaultEnabled: false, sessions: new Map(), bots: new Map() };
+/** Every bot's tools, and which of this Host's sessions are bots, with their missions (bots design 5.1). */
+export class BotTools {
+  /** The bots' main sessions on this Host, with their missions. */
+  private bots = new Map<string, string>();
   private readonly listeners = new Set<() => void>();
-  private readonly resources: TeamResourceFiles;
   private polling = false;
   private loadedOnce = false;
   private polled?: Promise<void>;
-  private tasksOffered = false;
   /** What started each session's latest turn, which a bot's calls carry (bots design 7). */
   readonly causes = new TurnCauses();
-  constructor(private readonly ports: WorkerSupportPorts) {
-    this.resources = new TeamResourceFiles(join(ports.stateDirectory, 'support-resources'), call => ports.request(call));
-  }
+  constructor(private readonly ports: BotToolsPorts) {}
   /** A bot's turn ended: its Relay counts the turn and its usage in the turn's chain. */
   turnEnded(ref: NativeSessionRef, turn: TurnReport): void {
-    if (this.ports.tasks?.() !== true || this.tools(ref) !== 'tasks') return;
+    if (this.tools(ref) !== 'tasks') return;
     void this.ports.request({ action: 'chain_turn', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, cause: turn.cause, tokens: turn.tokens,
       ...(turn.costUsd !== undefined ? { costUsd: turn.costUsd } : {}) }).catch(() => undefined);
   }
-  /** Whether the session is offered the namespace: it is a bot's main session, or the user enabled it for support, explicitly or by a profile's default. */
+  /** Whether the session is offered the bots' namespace: it is a bot's main session. */
   enabled(ref: NativeSessionRef): boolean { return this.tools(ref) !== 'none'; }
-  /** The worker tools the session is offered. */
+  /** The tools the session is offered. */
   tools(ref: NativeSessionRef): WorkerTools {
-    if (!this.ports.available()) return 'none';
-    const key = nativeSessionRefKey(ref);
-    if (this.ports.tasks?.() === true && this.enablement.bots.has(key)) return 'tasks';
-    return (this.enablement.sessions.get(key) ?? this.enablement.defaultEnabled) ? 'support' : 'none';
+    return this.ports.tasks() && this.bots.has(nativeSessionRefKey(ref)) ? 'tasks' : 'none';
   }
   /** The standing instructions of a bot's main session (base instructions and its mission); undefined for a session that is no bot. */
   standing(ref: NativeSessionRef): string | undefined {
-    const mission = this.enablement.bots.get(nativeSessionRefKey(ref));
+    const mission = this.bots.get(nativeSessionRefKey(ref));
     return mission === undefined ? undefined : botInstructions(mission || undefined);
   }
-  /** Whether a session the Controller is about to create will be offered the namespace: only a profile's default can say so yet, since it is nobody's main session. */
-  enabledByDefault(): boolean { return this.ports.available() && this.enablement.defaultEnabled; }
   onChange(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   /**
    * Waits, at most `limitMs`, until enablement has been read once since the Controller started, so a session that opens right after a
    * restart still gets its standing instructions and tools. A Relay that does not answer in time leaves the session as it is.
    */
   async loaded(controllerId: string, limitMs = 3000): Promise<void> {
-    if (this.loadedOnce || !this.ports.available()) return;
+    if (this.loadedOnce || !this.ports.tasks()) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([(this.polled ?? this.refresh(controllerId)).catch(() => undefined), new Promise<void>(resolve => { timer = setTimeout(resolve, limitMs); })]);
     clearTimeout(timer);
   }
   /** Reads enablement from the Relay; listeners hear about any change. */
   async refresh(controllerId: string): Promise<void> {
-    if (this.polling || !this.ports.available()) return this.polled;
+    if (this.polling || !this.ports.tasks()) return this.polled;
     this.polling = true;
     this.polled = this.read(controllerId).finally(() => { this.polling = false; this.polled = undefined; });
     return this.polled;
   }
   private async read(controllerId: string): Promise<void> {
-    const value = await this.ports.request({ action: 'support_enablement' }) as { defaultEnabled?: unknown; sessions?: unknown; bots?: unknown };
-    if (!value || typeof value.defaultEnabled !== 'boolean' || !Array.isArray(value.sessions)) throw new Error('Invalid Call For Support enablement.');
-    const sessions = new Map<string, boolean>();
-    for (const entry of value.sessions as Array<{ providerId?: unknown; nativeSessionId?: unknown; enabled?: unknown }>) {
-      if (typeof entry?.providerId !== 'string' || typeof entry.nativeSessionId !== 'string' || typeof entry.enabled !== 'boolean') continue;
-      sessions.set(nativeSessionRefKey({ controllerId, providerId: entry.providerId, nativeSessionId: entry.nativeSessionId }), entry.enabled);
-    }
+    const value = await this.ports.request({ action: 'bot_enablement' }) as { bots?: unknown };
+    if (!value || !Array.isArray(value.bots)) throw new Error('Invalid bot enablement.');
     const bots = new Map<string, string>();
-    for (const entry of Array.isArray(value.bots) ? value.bots as Array<{ providerId?: unknown; nativeSessionId?: unknown; mission?: unknown }> : []) {
+    for (const entry of value.bots as Array<{ providerId?: unknown; nativeSessionId?: unknown; mission?: unknown }>) {
       if (typeof entry?.providerId === 'string' && typeof entry.nativeSessionId === 'string')
         bots.set(nativeSessionRefKey({ controllerId, providerId: entry.providerId, nativeSessionId: entry.nativeSessionId }), typeof entry.mission === 'string' ? entry.mission : '');
     }
-    const next = { defaultEnabled: value.defaultEnabled, sessions, bots }, tasks = this.ports.tasks?.() === true;
-    const changed = tasks !== this.tasksOffered || next.defaultEnabled !== this.enablement.defaultEnabled || next.sessions.size !== this.enablement.sessions.size
-      || [...next.sessions].some(([key, enabled]) => this.enablement.sessions.get(key) !== enabled)
-      || next.bots.size !== this.enablement.bots.size || [...next.bots].some(([key, mission]) => this.enablement.bots.get(key) !== mission);
-    this.enablement = next; this.tasksOffered = tasks; this.loadedOnce = true;
+    const changed = bots.size !== this.bots.size || [...bots].some(([key, mission]) => this.bots.get(key) !== mission);
+    this.bots = bots; this.loadedOnce = true;
     if (changed) for (const listener of this.listeners) { try { listener(); } catch { /* Listeners cannot stop enablement. */ } }
   }
   /**
-   * The worker's tools, bound to the session that runs them. deferred: found by search rather than listed. tasks: with the task,
-   * assistant and room tools every bot has; the Relay refuses them from a session that is no bot.
+   * Every bot's tools, bound to the session that runs them. deferred: found by search rather than listed. The Relay refuses them from a
+   * session that is no bot.
    */
-  namespace(actual: () => NativeSessionRef | undefined, deferred: boolean, tasks: boolean): AgentSessionToolNamespace {
-    const worker = () => actual() ?? fail('Call For Support is not attached to this session yet.');
-    const request = async (call: TeamHostCall) => { if (!this.ports.available()) fail('Update the Relay to use Call For Support.'); return this.ports.request(call); };
-    const status = async (input: { roleId?: string; callId?: string }) => { const ref = worker(); return request({ action: 'support_status', worker: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, ...input }); };
-    const call = async (callId: string) => await status({ callId }) as StatusCall;
-    const taskRequest = async (input: TeamHostCall) => { if (this.ports.tasks?.() !== true) fail('Update the Relay to use tasks.'); return this.ports.request(input); };
-    const context = object({ commit: { type: 'string', pattern: '^[0-9a-f]{7,64}$' }, base: { type: 'string', pattern: '^[0-9a-f]{7,64}$' },
-      files: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 2048 }, maxItems: 64 }, conversation: { type: 'boolean' } }, []);
-    const support = [
-      tool('call_for_support', 'Ask for support you cannot give yourself: an independent review, a stronger or different model, another machine or environment. Name a roleId from support_status to follow up with the same role and its context, or a profileId to call this session\'s role for that profile, starting one if it has none; either reopens an archived role, and with a profileId fresh: true starts a new role instead. Give the task and the deliverable. The coordinator runs on your Host in your working directory and reads your files in place, uncommitted changes included, so do not make snapshot commits or copies for it; say where the change is when it is outside your working directory, such as in a worktree. Give a commit only to pin the code reviewed, or when supporters work in their own worktree or on another machine. Calls are asynchronous: the report arrives later as input, so keep working. Reports are advice; you stay the owner of your task and workspace.',
-        object({ roleId: id, profileId: id, task: { type: 'string', minLength: 1, maxLength: 12000 }, context, deliverable: { type: 'string', enum: ['findings', 'answer', 'test_report', 'patch'] },
-          followUpOf: id, fresh: { type: 'boolean' }, operationId: id }, ['task', 'deliverable']),
-        async args => {
-          const ref = worker(), title = await this.ports.title?.(ref).catch(() => undefined);
-          return request({ action: 'call_for_support', worker: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId, ...(title ? { title: title.slice(0, 256) } : {}) },
-            operationId: args.operationId ?? randomUUID(), task: args.task, deliverable: args.deliverable, ...(args.context ? { context: args.context } : {}),
-            ...(args.roleId ? { roleId: args.roleId } : {}), ...(args.profileId ? { profileId: args.profileId } : {}), ...(args.followUpOf ? { followUpOf: args.followUpOf } : {}), ...(args.fresh ? { fresh: true } : {}) } as TeamHostCall);
-        }),
-      tool('support_status', 'List the support profiles enabled for this session and its support roles with their open calls and last report; or read one call by callId.',
-        object({ roleId: id, callId: id }, []), args => status({ ...(args.roleId ? { roleId: args.roleId } : {}), ...(args.callId ? { callId: args.callId } : {}) })),
-      tool('read_support_report', 'Read a delivered support report in full, or one finding with its evidence.',
-        object({ callId: id, findingId: { type: 'string', minLength: 1, maxLength: 64 } }, ['callId']), async args => {
-          const { roleId, call: found } = await call(args.callId);
-          if (!found.report) return { callId: found.id, roleId, status: found.status, message: 'This call has no report yet.' };
-          if (!args.findingId) return { callId: found.id, roleId, status: found.status, report: found.report };
-          return { callId: found.id, roleId, finding: found.report.findings.find(finding => finding.id === args.findingId) ?? fail('Finding not found in this report.') };
-        }),
-      tool('download_support_resource', 'Download a resource attached to a support report, such as a patch or a log, to a verified local file. It is never applied or executed: read it, then decide.',
-        object({ callId: id, resourceId: id, outputDirectory: { type: 'string', minLength: 1, maxLength: 4096 } }, ['callId', 'resourceId']), async args => {
-          const { roleId, requesterMemberId, call: found } = await call(args.callId);
-          if (!found.report?.resources?.some(resource => resource.resourceId === args.resourceId)) fail('The resource is not attached to this report.');
-          return this.resources.download(roleId, requesterMemberId, args.resourceId, args.outputDirectory);
-        }),
-    ];
+  namespace(actual: () => NativeSessionRef | undefined, deferred: boolean): AgentSessionToolNamespace {
+    const worker = () => actual() ?? fail('Bots are not attached to this session yet.');
+    const taskRequest = async (input: TeamHostCall) => { if (!this.ports.tasks()) fail('Update the Relay to use tasks.'); return this.ports.request(input); };
     const caller = () => { const ref = worker(); return { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }; };
     // What started the caller's turn, so the Relay finds its chain.
     const cause = () => { const found = this.causes.of(worker()); return found ? { cause: found } : {}; };
@@ -211,8 +155,7 @@ export class WorkerSupport {
           return taskRequest({ action: 'open_room', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, operationId: args.operationId ?? randomUUID(), name: args.name, topic: args.topic,
             members: args.members, minutes: args.minutes, ...cause() }); }),
     ];
-    const supportDescription = 'call for support from other sessions, models and machines (reviews, consultations, tests), and read their reports.';
-    return { name: WORKER_NAMESPACE, description: tasks ? `Agent Remote Control: start bots that work in parallel and report back, message the account's other bots, read and stop the bots you organize; ${supportDescription}` : `Agent Remote Control: ${supportDescription}`,
-      ...(deferred ? { deferred: true } : {}), tools: tasks ? [...support, ...coordination] : support };
+    return { name: WORKER_NAMESPACE, description: 'Agent Remote Control: start bots that work in parallel and report back, message the account\'s other bots, keep your work items, and read and stop the bots you organize.',
+      ...(deferred ? { deferred: true } : {}), tools: coordination };
   }
 }

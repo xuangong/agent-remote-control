@@ -42,8 +42,6 @@ export interface BotRosterOptions {
   current?(groupId: string, viewId: string, binding: WindowSessionBinding): BotSessionRef;
   /** The bot's sessions before its handoffs, when known, most recent first: its conversation continues into them. */
   earlier?(groupId: string, viewId: string, binding: WindowSessionBinding): BotSessionRef[];
-  /** Whether a Team is a Support roster (it has a call-for-support configuration); its leader then shows the Support role. */
-  supportTeam?(teamId: string): boolean;
   /** A session's latest reply, when known. */
   reply?(session: BotSessionRef): { replyAt: number; preview: string } | undefined;
   /** Whether a reply a session produced at replyAt is one the owner has not seen. */
@@ -77,11 +75,11 @@ export function sortDirectorySessions(entries: readonly DatedSessionEntry[]): Da
 }
 
 /** The role a bot's view carries: from its feature (Team, Support, TPM) or, for a Side, from being attached to its source. */
-export function botRole(view: WindowView, supportTeam?: (teamId: string) => boolean, t: Translate = translator('en')): BotRole | undefined {
+export function botRole(view: WindowView, t: Translate = translator('en')): BotRole | undefined {
   if (view.feature?.kind === 'tpm') return t('navigation.roleTpm');
   if (view.feature?.kind === 'team') {
     const role = view.feature.metadata?.role;
-    if (role === 'leader') return supportTeam?.(view.feature.id) ? t('navigation.roleSupport') : t('navigation.roleTeamLeader');
+    if (role === 'leader') return t('navigation.roleTeamLeader');
     if (role === 'member') return t('navigation.roleTeamMember');
   }
   if (view.placement === 'attached') return t('navigation.roleSide');
@@ -135,7 +133,7 @@ export function projectBotRoster(groups: readonly WindowGroup[], directory: read
       const host = options.host?.(session.hostId), activity = activities[index]!;
       const assistant = assistantStatus({ activity, ...(host ? { host } : {}), asleep: !!details.asleep, waitingToSend: waiting, ...(reply ? { replyPreview: reply.preview } : {}) }, options.t);
       return { groupId: group.window.id, viewId: view.id, binding: view.binding, name: names.view(group.window.id, view.id), session, details, activity, assistant,
-        ...(botRole(view, options.supportTeam, options.t) ? { role: botRole(view, options.supportTeam, options.t)! } : {}),
+        ...(botRole(view, options.t) ? { role: botRole(view, options.t)! } : {}),
         asks: asks.filter(ask => ask.closeWith === view.id).map(ask => ({ viewId: ask.id, title: ask.binding?.title ?? 'Ask' })),
         ...(reply ? { reply } : {}), ...(latest && options.unread?.(latest.owner, latest.reply.replyAt) ? { unread: true as const } : {}),
         ...(draft?.trim() ? { draft } : {}), ...(waiting ? { waiting: true as const } : {}), ...(details.muted || group.bots?.muted ? { muted: true as const } : {}),

@@ -124,10 +124,8 @@ export function describeSession({ session, sessions = [], forks = [], asks = [],
     const leader = team.members.find(member => member.role === 'leader');
     const leaderSession = leader?.nativeSessionId ? { ...leader, nativeSessionId: leader.nativeSessionId, title: leader.name } : undefined;
     const prefix = `team:${team.id}`;
-    const support = team.callForSupport;
-    const open = support?.calls.filter(call => call.status === 'open' || call.status === 'queued').length ?? 0;
-    const addTeam = () => add({ id: `${prefix}:group`, kind: 'team', label: support ? t('client.describe.support') : 'Team', value: support ? support.role : team.title,
-      ...(team.status === 'archived' ? { detail: t('client.describe.archived') } : support ? { detail: support.status === 'paused_budget' ? t('client.describe.paused') : t('client.describe.openCalls', { count: open }) } : {}),
+    const addTeam = () => add({ id: `${prefix}:group`, kind: 'team', label: 'Team', value: team.title,
+      ...(team.status === 'archived' ? { detail: t('client.describe.archived') } : {}),
       target: { kind: 'group', groupType: 'team', groupId: team.id } });
     const addMember = (member: Team['members'][number], kind: string, name: string) => {
       const id = `${prefix}:${kind}:${member.id}`;
@@ -140,7 +138,7 @@ export function describeSession({ session, sessions = [], forks = [], asks = [],
         : session.teamId === team.id && session.teamMemberId === member.id
           && (current.hostId ?? 'local') === member.hostId && current.providerId === member.providerId;
       if (!matchesMember) continue;
-      addRole(t(support ? member.role === 'leader' ? 'client.describe.supportCoordinator' : member.role === 'requester' ? 'client.describe.callsForSupport' : 'client.describe.supporter' : member.role === 'leader' ? 'client.describe.teamLeader' : 'client.describe.teamMember'));
+      addRole(t(member.role === 'leader' ? 'client.describe.teamLeader' : 'client.describe.teamMember'));
       addTeam();
       if (member.role === 'requester') continue;
       if (member.role !== 'leader' && leader) addMember(leader, 'leader', t('client.describe.leader'));

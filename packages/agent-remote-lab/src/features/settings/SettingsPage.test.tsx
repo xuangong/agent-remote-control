@@ -10,7 +10,7 @@ import { SettingsPage, type SettingsContext } from './SettingsPage.js';
 const notifications = { enabled: true, available: true, permission: 'granted' as const, requestFailed: false, request: vi.fn(), set: vi.fn(),
   push: { availability: 'unsupported' as const, status: 'off' as const, enable: vi.fn(), disable: vi.fn() } };
 const context = (overrides: Partial<SettingsContext> = {}): SettingsContext => ({
-  facts: { account: true, supportAvailable: false, notificationsAvailable: true }, account: { name: 'Xian', email: 'xian@example.com', ready: true, openSecurity: vi.fn(), signOut: vi.fn() }, baseUrl: 'http://localhost/',
+  facts: { account: true, notificationsAvailable: true }, account: { name: 'Xian', email: 'xian@example.com', ready: true, openSecurity: vi.fn(), signOut: vi.fn() }, baseUrl: 'http://localhost/',
   notifications, openTrace: vi.fn(), openInspector: vi.fn(),
   computers: { hosts: [{ id: 'studio', name: 'Studio', online: true }], loaded: true, service: { hosts: async () => ({ hosts: [] }), pair: async () => { throw new Error('unused'); } },
     previewClient: new HttpPreviewClient('http://localhost/'), tunnelService: { status: async () => { throw new Error('unused'); }, start: async () => { throw new Error('unused'); }, stop: async () => { throw new Error('unused'); } }, openPreviewSource: () => undefined, onRevoked: () => undefined },
@@ -38,7 +38,7 @@ it('lists the six groups in order beside the chosen one, General when none is ch
 });
 
 it('shows a signed-out device no account, security or sign out, and a device that cannot notify no notifications', async () => {
-  const container = await mount(<Harness initial="account" ctx={context({ facts: { account: false, supportAvailable: false, notificationsAvailable: false }, account: undefined })} />);
+  const container = await mount(<Harness initial="account" ctx={context({ facts: { account: false, notificationsAvailable: false }, account: undefined })} />);
   expect(container.textContent).not.toContain('Sign out');
   expect(container.textContent).toContain('Versions');
   await press(container, 'Assistants');

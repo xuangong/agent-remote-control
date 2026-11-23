@@ -1,4 +1,4 @@
-import { isTeam, type Team, type TeamAction, type TeamCreate, type TeamDelete } from '@orchardworks/agent-remote-protocol';
+import { isTeam, type Team, type TeamAction, type TeamCreate } from '@orchardworks/agent-remote-protocol';
 import { withMessageKey } from '../presentation/locale-choice.js';
 
 /** Mutations retain caller-owned identities and are never automatically retried. */
@@ -17,9 +17,4 @@ export class RemoteTeamClient {
   }
   async create(input: TeamCreate): Promise<Team> { const value = await this.request('/create', input); if (!isTeam(value)) throw withMessageKey(new Error('Invalid Team creation response.'), 'client.error.invalidTeamCreation'); return value; }
   async action(input: TeamAction): Promise<Team> { const value = await this.request('/action', input); if (!isTeam(value) || value.id !== input.teamId) throw withMessageKey(new Error('Invalid Team action response.'), 'client.error.invalidTeamAction'); return value; }
-  /** Removes an archived support group for good. */
-  async delete(teamId: string): Promise<void> {
-    const value = await this.request('/delete', { teamId } satisfies TeamDelete) as { teamId?: unknown; deleted?: unknown };
-    if (value.teamId !== teamId || value.deleted !== true) throw withMessageKey(new Error('Invalid Team deletion response.'), 'client.error.invalidTeamDeletion');
-  }
 }

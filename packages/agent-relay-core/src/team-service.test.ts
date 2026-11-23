@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createBrokerState } from './broker-state.js';
 import type { Host, RemoteHostBrokerState } from './broker-types.js';
-import { emptyCallForSupportState } from './call-for-support-profiles.js';
 import { createTeamService } from './team-service.js';
 
 const NOW = 1_000;
@@ -22,38 +21,6 @@ function service(hosts: Host[] = [], rpcResult: { status: number; body: string }
   });
   return { ...parts, brokerState, saves, calls };
 }
-
-describe('callForSupportChange', () => {
-  it('commits a changed state once and hands back what the change returned', async () => {
-    const s = service();
-    const value = await s.callForSupportChange(state => { state.enablement.push({ hostId: 'h', providerId: 'codex', nativeSessionId: 'n', profileIds: [], updatedAt: 5 }); return 'changed'; });
-    expect(value).toBe('changed');
-    expect(s.saves).toHaveLength(1);
-    expect(s.brokerState.callForSupport?.enablement).toHaveLength(1);
-  });
-
-  it('commits nothing for a change that leaves the state as it was', async () => {
-    const s = service();
-    expect(await s.callForSupportChange(() => 7)).toBe(7);
-    expect(s.saves).toEqual([]);
-    expect(s.brokerState.callForSupport ?? emptyCallForSupportState()).toEqual(emptyCallForSupportState());
-  });
-
-  it('refuses a state that is not valid and keeps the old one', async () => {
-    const s = service();
-    await expect(s.callForSupportChange(state => { state.profiles.push({ id: 'not a profile' } as never); })).rejects.toThrow('Invalid Call For Support state.');
-    expect(s.saves).toEqual([]);
-    expect(s.brokerState.callForSupport?.profiles ?? []).toEqual([]);
-  });
-
-  it('does not let the caller change the committed state afterwards through what it returned', async () => {
-    const s = service();
-    const entry = { hostId: 'h', providerId: 'codex', nativeSessionId: 'n', profileIds: [], updatedAt: 5 };
-    const returned = await s.callForSupportChange(state => { state.enablement.push(entry); return state.enablement; });
-    returned.push({ ...entry, nativeSessionId: 'other' });
-    expect(s.brokerState.callForSupport?.enablement).toHaveLength(1);
-  });
-});
 
 describe('the chains of an account', () => {
   it('saves a chain with the broker state, and a broker loads it back', async () => {
@@ -91,32 +58,3 @@ describe('the Host guards of Teams', () => {
   });
 });
 
-describe('Call For Support on a Host', () => {
-  it('is capable only on a Host that announced it, and refuses with the update words otherwise', () => {
-    const s = service([host('on', { callForSupport: 1 as never }), host('off')]);
-    const ports = (s.teams as any).ports.callForSupport;
-    expect(ports.capable('on')).toBe(true); expect(ports.capable('off')).toBe(false); expect(ports.capable('missing')).toBe(false);
-    expect(() => ports.assertHost('on')).not.toThrow();
-    expect(() => ports.assertHost('off')).toThrowError(expect.objectContaining({ code: 'call_for_support_upgrade_required' }));
-  });
-
-  it('is read-only for a provider the Host marked read-only, and only while that provider is served', () => {
-    const s = service([host('h', { callForSupport: 1 as never, readOnlyProviders: ['codex', 'gone'] as never, providers: [{ providerId: 'codex' } as never] })]);
-    const ports = (s.teams as any).ports.callForSupport;
-    expect(ports.readOnly('h', 'codex')).toBe(true); expect(ports.readOnly('h', 'gone')).toBe(false); expect(ports.readOnly('h', 'claude')).toBe(false);
-  });
-
-  it('reports the message the Host gave when a supporter patch or a bundle fails', async () => {
-    const s = service([host('h')], { status: 500, body: '{"error":"no room"}' });
-    const ports = (s.teams as any).ports.callForSupport;
-    await expect(ports.supportPatch('h', {})).rejects.toThrow('no room');
-    await expect(ports.supportBundle('h', {})).rejects.toThrow('no room');
-  });
-
-  it('forwards a supporter patch and a bundle to the Host', async () => {
-    const s = service([host('h')]);
-    const ports = (s.teams as any).ports.callForSupport;
-    await ports.supportPatch('h', { a: 1 }); await ports.supportBundle('h', { b: 2 });
-    expect(s.calls).toEqual([{ path: '/remote/team/support-patch', body: '{"a":1}' }, { path: '/remote/team/support-bundle', body: '{"b":2}' }]);
-  });
-});

@@ -15,7 +15,6 @@ import { labSessionSuccessionDirectory } from '../kernel/session-succession-dire
 import { TeamMenu } from '../features/team/TeamMenu.js';
 import { AskButton } from '../features/team/AskButton.js';
 import { CachePrivacySettings } from '../features/settings/CachePrivacySettings.js';
-import { CallForSupportSettings } from '../features/team/call-for-support/CallForSupportSettings.js';
 import { LayoutDiagnosticsSettings } from '../features/settings/LayoutDiagnosticsSettings.js';
 import { ControllerUpdates } from '../features/computers/ControllerUpdates.js';
 import { TpmMenu } from '../features/team/TpmMenu.js';

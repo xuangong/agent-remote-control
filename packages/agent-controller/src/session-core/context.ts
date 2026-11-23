@@ -11,7 +11,7 @@ import type { SessionSuccessionEnrollment } from '../session-succession-enrollme
 import type { SessionSuccessionService } from '../session-succession-service.js';
 import type { SessionSuccessionStore } from '../session-succession-store.js';
 import type { SessionSuccessionCoordinator } from '../session-succession.js';
-import type { WorkerSupport } from '../call-for-support-worker.js';
+import type { BotTools } from '../bot-tools.js';
 import type { SessionRoles } from '../session-role-succession.js';
 import type { TeamRuntime } from '../team.js';
 import type { TpmCoordinator, TpmSessionAccess } from '../tpm.js';
@@ -74,7 +74,7 @@ export interface SessionCoreContext {
   readonly terminalRefresh: TerminalRefresh;
   readonly automationAccess: TpmSessionAccess;
   readonly sessionCatalog: SessionCallerCatalog;
-  readonly workerSupport: WorkerSupport | undefined;
+  readonly workerSupport: BotTools | undefined;
   readonly ledger: AttachmentLedger;
   readonly successionConfig: AgentHostRuntimeOptions['succession'];
   readonly nativeSuccession: NativeSuccession;

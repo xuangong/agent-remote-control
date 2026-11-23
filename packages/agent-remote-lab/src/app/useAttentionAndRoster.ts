@@ -154,12 +154,11 @@ export function useAttentionAndRoster(scope: Pick<AppInputs & WorkbenchShellSlic
 
   const otherSessions = useOtherSessions(botDirectorySources, !windowMode && activated && accessReady);
 
-  const supportTeams = new Set(teamRoster?.baseUrl === baseUrl ? teamRoster.teams.filter(team => team.callForSupport).map(team => team.id) : []);
 
   const t = useTranslate();
   // Who the bots are, for App's own use (search, the selected bot), named in the reader's words as the roster on screen names
   // them; the roster on screen adds the shared IM state itself.
-  const botRoster = projectBotRoster(windowWorkspace.groups, otherSessions.sessions, { status: () => 'unknown', supportTeam: teamId => supportTeams.has(teamId),
+  const botRoster = projectBotRoster(windowWorkspace.groups, otherSessions.sessions, { status: () => 'unknown',
     current: currentBotSession, earlier: earlierBotSessions, t });
 
   // A muted assistant or group sends no reminders, and a group set to "needs you" only that one, in either mode.
@@ -180,7 +179,7 @@ export function useAttentionAndRoster(scope: Pick<AppInputs & WorkbenchShellSlic
     return online === undefined ? undefined : { online, ...(name ? { name } : {}) };
   };
   const rosterOptions = (shared: SharedFeedsSnapshot): BotRosterOptions => ({
-    status: session => sessionActivity(session, tracking.liveObservations, shared.states), supportTeam: teamId => supportTeams.has(teamId), host: hostFacts(shared), t,
+    status: session => sessionActivity(session, tracking.liveObservations, shared.states), host: hostFacts(shared), t,
     current: currentBotSession, earlier: earlierBotSessions, reply: session => shared.states?.reply(session), unread: (session, replyAt) => !!shared.reads?.unread(session, replyAt),
     draft: session => shared.drafts?.draft(session)?.text, waiting: session => (shared.outbox?.entries(session).length ?? 0) > 0 });
   const projectSharedRoster = (shared: SharedFeedsSnapshot) => projectBotRoster(windowWorkspace.groups, otherSessions.sessions, rosterOptions(shared));
@@ -234,7 +233,7 @@ export function useAttentionAndRoster(scope: Pick<AppInputs & WorkbenchShellSlic
 
   const selectedBotStatus = useSharedFeedOf(sharedFeeds, shared => selectedBotSessionRef ? sessionActivity(selectedBotSessionRef, tracking.liveObservations, shared.states) : undefined);
   late.tracking = tracking;
-  return { attention, tracking, openTrackedSession, windowSessionStatus, otherSessions, supportTeams, botRoster, projectSharedRoster, projectSharedDirectory, selectedBotStatus };
+  return { attention, tracking, openTrackedSession, windowSessionStatus, otherSessions, botRoster, projectSharedRoster, projectSharedDirectory, selectedBotStatus };
 }
 
 export type AttentionAndRosterSlice = ReturnType<typeof useAttentionAndRoster>;

@@ -1,12 +1,10 @@
 import { CachePrivacySettings } from './CachePrivacySettings.js';
-import { CallForSupportSettings } from '../team/call-for-support/CallForSupportSettings.js';
 import type { RemoteHost } from '../../kernel/remote-host.js';
 import type { SettingsItemId } from './settings-groups.js';
 
-/** Settings > Privacy and data: this device's cache and what a support call may share. */
+/** Settings > Privacy and data: this device's cache. */
 export function PrivacySettings({ items, baseUrl, hosts }: { items: readonly SettingsItemId[]; baseUrl: string; hosts: RemoteHost[] }) {
   return <>
     <CachePrivacySettings />
-    {items.includes('supportSharing') ? <CallForSupportSettings baseUrl={baseUrl} enabled hosts={hosts} /> : null}
   </>;
 }

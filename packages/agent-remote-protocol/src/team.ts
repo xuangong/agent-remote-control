@@ -4,8 +4,6 @@ import { Value } from '@sinclair/typebox/value';
 import { TeamResource } from './team-resource.js';
 import { BotId, BotMission, BotName, BotTimer, WorkItem, WORK_ITEM_LIMIT } from './bots.js';
 import { ChainId, TurnCause } from './chains.js';
-import { CallForSupportCallInput, CallForSupportFinding, CallForSupportGroup, CallForSupportMandate, CallForSupportReportStatus, CallForSupportRosterProposal,
-  isCallForSupportGroup } from './call-for-support.js';
 import { TaskBrief, TaskDoneWhen, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_LIMIT, ROOM_MINUTES_LIMIT, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, TaskReportStatus, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_QUESTION_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, isTeamTask } from './task.js';
 const object = { additionalProperties: false } as const;
 const id = Type.String({ minLength: 1, maxLength: 256 });
@@ -15,7 +13,7 @@ const enumOf = <T extends string>(...values: T[]) => Type.Union(values.map(value
 const gitObject = Type.String({ pattern: '^[0-9a-f]{7,64}$' });
 export const TeamSource = Type.Object({ hostId: id, providerId: id, nativeSessionId: id, title: Type.String({ minLength: 1, maxLength: 256 }) }, object);
 export type TeamSource = Static<typeof TeamSource>;
-/** Where a Call For Support supporter works: the worker's directory read-only, or its own worktree at a commit. */
+/** Where a temporary bot works beside its organizer: the same directory, its own worktree at a commit, or another machine's clone. */
 export const TeamMemberWorkspace = Type.Union([
   Type.Object({ kind: Type.Literal('shared') }, object),
   Type.Object({ kind: Type.Literal('worktree'), commit: gitObject }, object),
@@ -25,16 +23,14 @@ export const TeamMemberWorkspace = Type.Union([
 ]);
 export type TeamMemberWorkspace = Static<typeof TeamMemberWorkspace>;
 export const TeamMember = Type.Object({
-  /** requester: the worker of a Call For Support group, bound to its existing session. */
+  /** requester: an existing main session, bound where it is (a task's owner, a link's or room's assistant, a bot's inbox). */
   id, hostId: id, providerId: id, role: enumOf('leader', 'member', 'requester'), name: Type.String({ minLength: 1, maxLength: 256 }),
   responsibility: short, cwd: Type.Optional(short), nativeSessionId: Type.Optional(NativeSessionRef.properties.nativeSessionId),
-  /** released: a supporter no longer in the group; its session is kept for history and receives nothing. */
-  creation: enumOf('reserved', 'ready', 'unknown', 'abandoned', 'released'), activity: enumOf('unknown', 'idle', 'busy'),
+  creation: enumOf('reserved', 'ready', 'unknown', 'abandoned'), activity: enumOf('unknown', 'idle', 'busy'),
   summary: short, updatedAt: Type.Number(), error: Type.Optional(short),
   model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })), reasoningEffort: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
   /** The session must not write its working directory. */
   access: Type.Optional(Type.Literal('read_only')), workspace: Type.Optional(TeamMemberWorkspace),
-  usage: Type.Optional(Type.Object({ tokens: Type.Integer({ minimum: 0 }), costUsd: Type.Optional(Type.Number({ minimum: 0 })), updatedAt: Type.Number() }, object)),
   /** The chain of the latest input the Relay delivered to this member's session, and when (bots design 7). */
   chain: Type.Optional(Type.Object({ id: ChainId, at: Type.Number() }, object)),
   /** The person stopped what this member's session runs: its Host stops a running turn once for each value. */
@@ -47,8 +43,6 @@ export type TeamResourceUpload = Static<typeof TeamResourceUpload>;
 export const TeamMessage = Type.Object({ id, from: id, to: id, text, resources: Type.Optional(Type.Array(TeamResource, { minItems: 1, maxItems: 8 })),
   status: enumOf('queued', 'dispatching', 'accepted', 'rejected', 'unknown', 'canceled'),
   resolvedTarget: Type.Optional(NativeSessionRef), acceptance: Type.Optional(enumOf('started', 'queued', 'handled')), createdAt: Type.Number(), error: Type.Optional(short),
-  /** The Call For Support call this message carries or reports. */
-  callForSupportCallId: Type.Optional(id),
   /** The chain this message belongs to (bots design 7). */
   chain: Type.Optional(ChainId),
 }, object);
@@ -97,8 +91,6 @@ export const Team = Type.Object({ id, operationId: id, revision: Type.Integer({ 
   unresolvedReceipts: Type.Optional(Type.Array(TeamUnresolvedReceipt, { maxItems: TEAM_DELIVERY_RECEIPT_LIMIT })),
   resourceUploads: Type.Optional(Type.Array(TeamResourceUpload, { maxItems: 1024 })),
   createdAt: Type.Number(), updatedAt: Type.Number(),
-  /** Set for a Call For Support group: the Leader coordinates and the requester is the worker. */
-  callForSupport: Type.Optional(CallForSupportGroup),
   /** Set for a task: the Leader is the worker session and the requester is the main session that owns the task. */
   task: Type.Optional(TeamTask),
   /** Set for the link between two assistants: each member is one assistant's main session, bound where it is. */
@@ -109,7 +101,6 @@ export const Team = Type.Object({ id, operationId: id, revision: Type.Integer({ 
 }, object);
 export type Team = Static<typeof Team>;
 export const TeamCreate = Type.Object({ operationId: id, source: TeamSource,
-  callForSupport: Type.Optional(Type.Object({ profileId: id, call: CallForSupportCallInput, fresh: Type.Optional(Type.Boolean()) }, object)),
   /** The person starts a temporary bot organized by the source session (`/side`, bots design 9): its name and its mission. */
   bot: Type.Optional(Type.Object({ name: TaskTitle, mission: TaskBrief }, object)) }, object);
 export type TeamCreate = Static<typeof TeamCreate>;
@@ -121,11 +112,6 @@ export const TeamAction = Type.Union([
   Type.Object({ teamId: id, action: Type.Literal('retry_creation'), memberId: id }, object),
   Type.Object({ teamId: id, action: Type.Literal('abandon_creation'), memberId: id }, object),
   Type.Object({ teamId: id, action: Type.Literal('resolve_message'), messageId: id, outcome: enumOf('accepted', 'rejected') }, object),
-  Type.Object({ teamId: id, action: Type.Literal('call_for_support'), operationId: id, ...CallForSupportCallInput.properties, followUpOf: Type.Optional(id) }, object),
-  Type.Object({ teamId: id, action: Type.Literal('resolve_roster'), rosterId: id, decision: enumOf('approve', 'reject'), note: Type.Optional(short) }, object),
-  Type.Object({ teamId: id, action: Type.Literal('release_member'), memberId: id }, object),
-  Type.Object({ teamId: id, action: Type.Literal('update_mandate'), mandate: CallForSupportMandate, profileRevision: Type.Optional(Type.Integer({ minimum: 1 })) }, object),
-  Type.Object({ teamId: id, action: Type.Literal('resume_group') }, object),
   // The person stops a task, or takes it as done.
   Type.Object({ teamId: id, action: Type.Literal('cancel_task') }, object),
   Type.Object({ teamId: id, action: Type.Literal('mark_task_done') }, object),
@@ -136,9 +122,6 @@ export const TeamAction = Type.Union([
   Type.Object({ teamId: id, action: Type.Literal('close_room') }, object),
 ]);
 export type TeamAction = Static<typeof TeamAction>;
-/** Removes an archived Call For Support group for good, so its worker's next call for the profile starts a new group. */
-export const TeamDelete = Type.Object({ teamId: id }, object);
-export type TeamDelete = Static<typeof TeamDelete>;
 /** A bot calling as its own main session. */
 const BotCaller = Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object);
 /** A message that crosses from one bot to another (bots design 3.4). */
@@ -163,23 +146,8 @@ export const TeamHostCall = Type.Union([
     interaction: Type.Optional(Type.String({ minLength: 1, maxLength: TASK_TOLD_LIMIT })) }, object),
   Type.Object({ action: Type.Literal('claim'), teamId: id, memberId: id, messageId: id, expectedNativeSessionId: Type.Optional(NativeSessionRef.properties.nativeSessionId) }, object),
   Type.Object({ action: Type.Literal('settle'), teamId: id, memberId: id, messageId: id, resolvedTarget: Type.Optional(NativeSessionRef), outcome: enumOf('accepted', 'rejected', 'unknown'), acceptance: Type.Optional(enumOf('started', 'queued', 'handled')), error: Type.Optional(short) }, object),
-  // Call For Support coordinator.
-  Type.Object({ action: Type.Literal('propose_roster'), teamId: id, memberId: id, operationId: id, ...CallForSupportRosterProposal.properties }, object),
-  Type.Object({ action: Type.Literal('report_support'), teamId: id, memberId: id, callId: id, operationId: id,
-    report: Type.Object({ status: CallForSupportReportStatus, summary: Type.String({ minLength: 1, maxLength: 4000 }), findings: Type.Array(CallForSupportFinding, { maxItems: 64 }),
-      resources: Type.Optional(Type.Array(id, { minItems: 1, maxItems: 8, uniqueItems: true })) }, object) }, object),
-  Type.Object({ action: Type.Literal('write_ledger'), teamId: id, memberId: id, revision: Type.Integer({ minimum: 0 }), text: Type.String({ maxLength: 16000 }) }, object),
-  Type.Object({ action: Type.Literal('release_supporter'), teamId: id, memberId: id, target: id }, object),
-  Type.Object({ action: Type.Literal('collect_supporter_patch'), teamId: id, memberId: id, target: id, operationId: id }, object),
-  // A Controller reports cumulative usage of one of its members' sessions.
-  Type.Object({ action: Type.Literal('report_usage'), teamId: id, memberId: id, tokens: Type.Integer({ minimum: 0 }), costUsd: Type.Optional(Type.Number({ minimum: 0 })) }, object),
-  // A worker's own tools, by the worker's session on the calling Host.
-  Type.Object({ action: Type.Literal('call_for_support'), worker: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId, title: Type.Optional(TeamSource.properties.title) }, object),
-    operationId: id, roleId: Type.Optional(id), profileId: Type.Optional(id), ...CallForSupportCallInput.properties, followUpOf: Type.Optional(id), fresh: Type.Optional(Type.Boolean()) }, object),
-  Type.Object({ action: Type.Literal('support_status'), worker: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object),
-    roleId: Type.Optional(id), callId: Type.Optional(id) }, object),
-  // Which of the calling Host's sessions may call for support.
-  Type.Object({ action: Type.Literal('support_enablement') }, object),
+  // The calling Host's sessions that are bots, with their missions: they get the bots' tools and standing instructions.
+  Type.Object({ action: Type.Literal('bot_enablement') }, object),
   // A main session's task tools, by the main session on the calling Host.
   // workspace: where the worker works (default same); worktree needs the commit it starts from. provider and model choose the worker's agent.
   Type.Object({ action: Type.Literal('create_task'), owner: TaskOwner, operationId: id, title: TaskTitle, brief: TaskBrief, doneWhen: Type.Optional(TaskDoneWhen),
@@ -227,13 +195,9 @@ export const TeamHostCall = Type.Union([
   // A task's worker asks its owner, and the worker's Host says what the person wrote to the worker directly.
   Type.Object({ action: Type.Literal('ask_owner'), teamId: id, memberId: id, question: Type.String({ minLength: 1, maxLength: TASK_QUESTION_LIMIT }) }, object),
   Type.Object({ action: Type.Literal('tell_task'), teamId: id, memberId: id, operationId: id, text: Type.String({ minLength: 1, maxLength: TASK_TOLD_LIMIT }) }, object),
-  // The status of groups the calling Host holds seats in, so it can forget the seats of archived and removed groups.
-  Type.Object({ action: Type.Literal('support_group_states'), teamIds: Type.Array(id, { minItems: 1, maxItems: 64, uniqueItems: true }) }, object),
 ]);
 export type TeamHostCall = Static<typeof TeamHostCall>;
 export const TeamSeat = Type.Object({ teamId: id, source: TeamSource, member: TeamMember,
-  /** The seat belongs to a Call For Support group serving this role. */
-  callForSupport: Type.Optional(Type.Object({ role: Type.String({ minLength: 1, maxLength: 256 }), description: Type.String({ maxLength: 4000 }) }, object)),
   /** The seat belongs to a task: its worker as Leader, or the main session that owns it as requester. */
   task: Type.Optional(Type.Object({ title: TaskTitle }, object)),
   /** The seat is one assistant's main session in a link: bound where it is, it only receives messages. */
@@ -243,34 +207,24 @@ export const TeamSeat = Type.Object({ teamId: id, source: TeamSource, member: Te
   /** The seat is one assistant's main session in a room. */
   room: Type.Optional(Type.Object({ name: Type.String({ minLength: 1, maxLength: 120 }) }, object)) }, object);
 export type TeamSeat = Static<typeof TeamSeat>;
-const groupFields = ['model', 'reasoningEffort', 'access', 'workspace', 'usage'] as const;
-/** A Call For Support group has exactly one requester after its Leader; a task has its worker and then its owner; other Teams have no requester and no group fields. */
-const validGroupShape = (value: Team) => {
-  const group = value.callForSupport, requesters = value.members.filter(member => member.role === 'requester');
-  if (value.inbox) return !group && !value.task && !value.link && !value.room && value.members.length === 1
+/** What a member of a temporary bot's Team may carry about how its session works; any other member carries none. */
+const workerFields = ['model', 'reasoningEffort', 'access', 'workspace'] as const;
+const plainMember = (member: TeamMember) => workerFields.every(field => member[field] === undefined);
+/** A task has its worker and then its owner; an inbox, a link and a room bind main sessions; an ordinary Team has no requester. */
+const validShape = (value: Team) => {
+  const requesters = value.members.filter(member => member.role === 'requester');
+  if (value.inbox) return !value.task && !value.link && !value.room && value.members.length === 1
     // Bound where the bot already is (requester), or created for a bot another bot made (leader).
-    && (value.members[0]!.role === 'requester' || value.members[0]!.role === 'leader')
-    && value.members[0]!.creation !== 'released' && groupFields.every(field => value.members[0]![field] === undefined)
-    && value.messages.every(message => message.callForSupportCallId === undefined) && (value.unresolvedReceipts ?? []).every(receipt => receipt.callForSupportCallId === undefined);
-  if (value.room) return !group && !value.task && !value.link && value.members.length >= 2 && value.members.every(member => member.role === 'requester' && member.creation !== 'released'
-    && groupFields.every(field => member[field] === undefined)) && value.messages.every(message => message.callForSupportCallId === undefined)
-    && (value.unresolvedReceipts ?? []).every(receipt => receipt.callForSupportCallId === undefined);
-  if (value.link) return !group && !value.task && value.members.length === 2 && value.members.every(member => member.role === 'requester')
-    && value.members.every(member => member.creation !== 'released' && groupFields.every(field => member[field] === undefined))
-    && value.messages.every(message => message.callForSupportCallId === undefined) && (value.unresolvedReceipts ?? []).every(receipt => receipt.callForSupportCallId === undefined);
-  if (value.task) return !group && isTeamTask(value.task) && value.members.length === 2 && value.members[1]!.role === 'requester'
-    && value.members.every(member => member.creation !== 'released') && value.members[1]!.access === undefined && value.members[1]!.workspace === undefined
-    && (value.members[0]!.workspace === undefined || value.members[0]!.workspace.kind === 'worktree')
-    && value.messages.every(message => message.callForSupportCallId === undefined) && (value.unresolvedReceipts ?? []).every(receipt => receipt.callForSupportCallId === undefined);
-  if (!group) return !requesters.length && value.members.every(member => groupFields.every(field => member[field] === undefined) && member.creation !== 'released')
-    && value.messages.every(message => message.callForSupportCallId === undefined) && (value.unresolvedReceipts ?? []).every(receipt => receipt.callForSupportCallId === undefined);
-  return isCallForSupportGroup(group) && requesters.length === 1 && value.members[0]?.role !== 'requester'
-    && value.members.every(member => member.workspace?.kind !== 'shared' || member.access === 'read_only' && member.hostId === value.source.hostId)
-    && value.messages.every(message => message.status !== 'queued' || value.members.find(member => member.id === message.to)?.creation !== 'released');
+    && (value.members[0]!.role === 'requester' || value.members[0]!.role === 'leader') && plainMember(value.members[0]!);
+  if (value.room) return !value.task && !value.link && value.members.length >= 2 && value.members.every(member => member.role === 'requester' && plainMember(member));
+  if (value.link) return !value.task && value.members.length === 2 && value.members.every(member => member.role === 'requester' && plainMember(member));
+  if (value.task) return isTeamTask(value.task) && value.members.length === 2 && value.members[1]!.role === 'requester' && plainMember(value.members[1]!)
+    && (value.members[0]!.workspace === undefined || value.members[0]!.workspace.kind === 'worktree');
+  return !requesters.length && value.members.every(plainMember);
 };
 export const isTeam = (value: unknown): value is Team => Value.Check(Team, value)
   // A link binds two main sessions; every other Team starts with its Leader.
-  && (value.link || value.room || value.inbox ? true : value.members[0]?.role === 'leader' && value.members.slice(1).every(member => member.role === 'member' || member.role === 'requester')) && validGroupShape(value)
+  && (value.link || value.room || value.inbox ? true : value.members[0]?.role === 'leader' && value.members.slice(1).every(member => member.role === 'member' || member.role === 'requester')) && validShape(value)
   && value.members[0]!.hostId === value.source.hostId
   && new Set(value.members.map(member => member.id)).size === value.members.length
   && new Set([...value.messages, ...(value.unresolvedReceipts ?? [])].map(message => message.id)).size === value.messages.length + (value.unresolvedReceipts?.length ?? 0)
@@ -284,7 +238,6 @@ export const isTeam = (value: unknown): value is Team => Value.Check(Team, value
   && value.messages.every(message => value.members.some(member => member.id === message.from) && value.members.some(member => member.id === message.to));
 export const isTeamCreate = (value: unknown): value is TeamCreate => Value.Check(TeamCreate, value);
 export const isTeamAction = (value: unknown): value is TeamAction => Value.Check(TeamAction, value);
-export const isTeamDelete = (value: unknown): value is TeamDelete => Value.Check(TeamDelete, value);
 export const isTeamHostCall = (value: unknown): value is TeamHostCall => Value.Check(TeamHostCall, value);
 export const isTeamSeat = (value: unknown): value is TeamSeat => Value.Check(TeamSeat, value);
 

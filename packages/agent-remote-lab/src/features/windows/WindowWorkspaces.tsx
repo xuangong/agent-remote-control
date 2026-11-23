@@ -41,10 +41,10 @@ function StatusWord({ state }: { state: AssistantState }) {
  * (Open, Folded or Asleep) with Working, Needs you or Failed. An asleep bot is quiet except when it needs the owner. An Ask
  * is one line under its bot; other views keep their title.
  */
-function viewLine(t: Translate, view: WindowView, name: string, details: WindowBotDetails | undefined, status: SessionActivityStatus | undefined, supportTeam?: (teamId: string) => boolean) {
+function viewLine(t: Translate, view: WindowView, name: string, details: WindowBotDetails | undefined, status: SessionActivityStatus | undefined) {
   const live = liveState(status);
   if (isBotView(view)) {
-    const role = botRole(view, supportTeam, t), place = details?.asleep ? t('windows.place.asleep') : view.collapsed ? t('windows.place.folded') : t('windows.place.open');
+    const role = botRole(view, t), place = details?.asleep ? t('windows.place.asleep') : view.collapsed ? t('windows.place.folded') : t('windows.place.open');
     const shown = details?.asleep && live !== 'needs_you' ? undefined : live;
     return { name, tags: [role && <span key="role" className="lab-bot-role">{role}</span>, details?.label && <span key="label" className="lab-bot-label">{details.label}</span>],
       detail: <>{place}{shown ? <> · <StatusWord state={shown} /></> : null}</> };
@@ -54,7 +54,7 @@ function viewLine(t: Translate, view: WindowView, name: string, details: WindowB
   return { name: viewTitle(view, t), tags: [], detail: kind || live ? <>{kind}{kind && live ? ' · ' : null}{live ? <StatusWord state={live} /> : null}</> : undefined };
 }
 
-export function WindowWorkspaces({ workspace, current, active = true, sessionStatus, supportTeam, onOverview, onNavigate, onChooseView, onRemoveView, placement = 'panel', actions: sharedActions }: {
+export function WindowWorkspaces({ workspace, current, active = true, sessionStatus, onOverview, onNavigate, onChooseView, onRemoveView, placement = 'panel', actions: sharedActions }: {
   workspace: ReturnType<typeof useWindowWorkspace>; current?: WindowSessionBinding; active?: boolean;
   /**
    * Window actions shared with another surface (the Window toolbar), so both see one busy state and one notice. Their
@@ -64,7 +64,6 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
   /** Each session's status, as Track shows it; without it rows show no status. */
   sessionStatus?(session: WindowSessionBinding): SessionActivityStatus;
   /** Whether a Team is a Support roster, whose leader then shows the Support role, as in Bot mode. */
-  supportTeam?(teamId: string): boolean;
   /** Shows all Windows; with it the sidebar's Windows heading offers a "Show all Windows" button (the floating panel's WindowMenu has its own). */
   onOverview?(): void;
   /** Called after a Window is opened or a view is chosen, so a page shown instead of the Window can return to it. */
@@ -209,7 +208,7 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
         : <div className="lab-window-section-heading"><span>{t('windows.inThisWindow')}</span><button type="button" disabled={busy || workspace.unavailable} onClick={createView}>{t('windows.newSessionView')}</button></div>}
       <nav className="lab-window-list lab-window-views" aria-label={t('windows.sessionViews')}>{windowOutline(workspace.window.views).map(({ view, depth }) => {
         const details = workspace.group?.bots?.members[view.id];
-        const line = viewLine(t, view, names.view(workspace.window!.id, view.id), details, view.binding && sessionStatus?.(view.binding), supportTeam);
+        const line = viewLine(t, view, names.view(workspace.window!.id, view.id), details, view.binding && sessionStatus?.(view.binding));
         // Relationships are metadata, not levels: a Side is a bot beside its source; only an Ask nests under its bot.
         const nested = view.feature?.kind === 'ask' && depth === 1;
         return <div key={view.id} className="lab-window-row" data-window-view-row={view.id}

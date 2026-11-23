@@ -84,7 +84,7 @@ const hosts: RemoteHost[] = [
 const noService = async () => { throw new Error('This fixture has no Relay.'); };
 /** What the Settings page reads in a fixture: a signed-in account, two computers and no Relay. */
 const settingsContext: SettingsContext = {
-  facts: { account: true, supportAvailable: false, notificationsAvailable: !matchMedia('(pointer: coarse)').matches },
+  facts: { account: true, notificationsAvailable: !matchMedia('(pointer: coarse)').matches },
   account: { name: SAMPLE.names[0]!, email: 'chief@example.com', ready: true, openSecurity: () => {}, signOut: () => {} }, baseUrl: 'http://fixture/',
   notifications: { enabled: true, available: true, permission: 'granted', requestFailed: false, request: () => {}, set: () => {} },
   openTrace: () => {}, openInspector: () => {},

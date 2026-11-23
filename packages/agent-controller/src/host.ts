@@ -25,8 +25,8 @@ import { createHostStatusReader, hostStatusPaths } from './host-status.js';
 import { allowedWorkspace, protectHostDirectory } from './execution-policy.js';
 import { SessionRoles, type SessionRole } from './session-role-succession.js';
 import { roleSessionConfig } from './role-session-creation.js';
-import { headCommit } from './call-for-support-workspaces.js';
-import { WorkerSupport } from './call-for-support-worker.js';
+import { headCommit } from './worktrees.js';
+import { BotTools } from './bot-tools.js';
 import { createControllerPreviews } from './previews.js';
 import { createVscodeTunnelManager, type VscodeTunnelOptions } from './vscode-tunnel.js';
 import { createOperationCache, OperationCacheError } from '@orchardworks/agent-session-runtime';
@@ -107,7 +107,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   let uplinkUrl = options.uplink.url;
   const siteOrigin = () => { const url = new URL(uplinkUrl); url.protocol = url.protocol === 'ws:' ? 'http:' : 'https:'; return url.origin; };
   const runtime = createAgentHostRuntime({ ...options, hostId: registeredHostId, siteOrigin, ...(options.team ? { team: { ...options.team, request: (call: TeamHostCall) => connection.client.teamRequest(call),
-    genericSuccession: () => connection.client.teamSuccession, callForSupport: () => connection.client.callForSupport, tasks: () => connection.client.tasks === true } } : {}), controllerId: options.installationId,
+    genericSuccession: () => connection.client.teamSuccession, tasks: () => connection.client.tasks === true } } : {}), controllerId: options.installationId,
     ...(options.inputImages ? {} : stateDirectory ? { inputImages: { directory: join(stateDirectory, 'input-images') } } : {}),
     ...(options.inputResources ? {} : stateDirectory ? { inputResources: { directory: join(stateDirectory, 'input-resources') } } : {}),
     ...(options.sessionRepliesFile || !stateDirectory ? {} : { sessionRepliesFile: join(stateDirectory, 'session-replies.json') }),
@@ -152,8 +152,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     runtime.journals.available(undefined);
     const current = fence.begin();
     return { superseded: false, client: (options.uplinkClient ?? createRemoteHostUplinkClient)({ relay: runtime.relay, installationId: options.installationId, name: options.name, environment: options.environment, controller: options.controller?.identity,
-      ...(options.team ? { teamManagement: true, callForSupport: true, tasks: true,
-        readOnlyProviders: options.registrations.filter(({ adapter }) => adapter.descriptor.sessionAccess?.readOnly).map(({ adapter }) => adapter.descriptor.providerId),
+      ...(options.team ? { teamManagement: true, tasks: true,
         // A provider can be a coordinator's when its sessions get the task tools as the mode changes: during the session (live) or declared at creation.
         coordinatorProviders: options.registrations.filter(({ adapter }) => ['live', 'creation'].includes(adapter.descriptor.sessionExtensions?.toolNamespaces ?? '')).map(({ adapter }) => adapter.descriptor.providerId) } : {}),
       ...(options.tpm ? { tpmManagement: true } : {}),
@@ -476,12 +475,12 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   };
   const tpm = options.tpm ? new TpmCoordinator(options.tpm, automationAccess) : undefined;
   const team: TeamRuntime | undefined = options.team?.request ? new TeamRuntime(options.team.stateDirectory, {...automationAccess, sessionRouting: successionService?.roleRouting ?? automationAccess.sessionRouting!,
-    genericSuccession: () => !!successionService && options.team?.genericSuccession?.() === true, callForSupport: () => options.team?.callForSupport?.() === true,
+    genericSuccession: () => !!successionService && options.team?.genericSuccession?.() === true,
     tasks: () => options.team?.tasks?.() === true,
     toolNamespaces: providerId => !!providers.require(providerId).adapter.descriptor.sessionExtensions?.toolNamespaces,
     readOnlyProviders: () => automationAccess.supportedProviders().filter(providerId => providers.require(providerId).adapter.descriptor.sessionAccess?.readOnly),
     // A temporary bot uses every bot's tools; they exist once the worker support below does, before any seat attaches.
-    botTools: (actual): AgentSessionToolNamespace => workerSupport!.namespace(actual, false, true),
+    botTools: (actual): AgentSessionToolNamespace => workerSupport!.namespace(actual, false),
     execute: executeOperation('host:team')}, options.team.request, options.team.tickMs) : undefined;
   const roles = new SessionRoles([...(team ? [team] : []), ...(tpm ? [tpmRole(tpm)] : [])]);
   // A message that waited for this Host goes to the session that carries its conversation now, through the same access as roles.
@@ -495,8 +494,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     },
     acquire: automationAccess.acquire,
   } }) : undefined;
-  const workerSupport: WorkerSupport | undefined = options.team?.request ? new WorkerSupport({ request: options.team.request, available: () => options.team?.callForSupport?.() === true, tasks: () => options.team?.tasks?.() === true,
-    stateDirectory: options.team.stateDirectory, title: async ref => await providers.require(ref.providerId).directory.sessionTitle?.(ref.nativeSessionId),
+  const workerSupport: BotTools | undefined = options.team?.request ? new BotTools({ request: options.team.request, tasks: () => options.team?.tasks?.() === true,
+    title: async ref => await providers.require(ref.providerId).directory.sessionTitle?.(ref.nativeSessionId),
     head: async ref => {
       const lease = await automationAccess.acquire(ref.providerId, ref.nativeSessionId);
       let cwd: string | undefined;

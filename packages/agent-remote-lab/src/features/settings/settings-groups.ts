@@ -9,7 +9,7 @@ export type SettingsItemId =
   | 'theme' | 'language' | 'motion' | 'defaultView' | 'mobileDisplay'
   | 'processMode' | 'notifications' | 'push' | 'letters' | 'audit'
   | 'computers' | 'pairing'
-  | 'cache' | 'supportSharing'
+  | 'cache'
   | 'layoutDiagnostics' | 'trace' | 'inspector'
   | 'account' | 'security' | 'signOut' | 'versions';
 /** What a computer's page holds: its agents, its previews and VS Code tunnel, and for its owner its updates, smart reading and its keys. */
@@ -18,8 +18,6 @@ export type ComputerItemId = 'agents' | 'previews' | 'vscodeTunnel' | 'controlle
 export interface SettingsFacts {
   /** Signed in through the gateway, as an account that can sign out. */
   readonly account: boolean;
-  /** The reader's account may share support profiles (Call for support). */
-  readonly supportAvailable: boolean;
   /** This device can show desktop notifications (not a phone). */
   readonly notificationsAvailable: boolean;
 }
@@ -33,7 +31,7 @@ export function settingsGroups(facts: SettingsFacts): readonly SettingsGroup[] {
     // The audit of what the bots did, beside what all assistants share (bots design 7).
     { id: 'assistants', items: ['processMode', ...(facts.notificationsAvailable ? ['notifications' as const] : []), 'push', 'letters', 'audit'] },
     { id: 'computers', items: ['computers', 'pairing'] },
-    { id: 'privacy', items: ['cache', ...(facts.supportAvailable ? ['supportSharing' as const] : [])] },
+    { id: 'privacy', items: ['cache'] },
     { id: 'advanced', items: ['layoutDiagnostics', 'trace', 'inspector'] },
     { id: 'account', items: [...(facts.account ? ['account', 'security', 'signOut'] as const : []), 'versions'] },
   ];

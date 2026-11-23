@@ -57,7 +57,6 @@ export * from './creation-source.js';
 export { BackgroundActivity, mergeBackgroundActivity } from './background-activity.js';
 
 export * from './team.js';
-export * from './call-for-support.js';
 export * from './task.js';
 
 export * from './resource-input.js';

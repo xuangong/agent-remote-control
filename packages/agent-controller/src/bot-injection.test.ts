@@ -7,9 +7,7 @@ import type { AgentSession, AgentSessionExtensions, AgentSessionToolNamespace, P
 import { createAgentHostRuntime, type AgentHostDirectory } from './host.js';
 import { TeamBroker } from '@orchardworks/agent-relay-core/testing';
 import type { SavedTeam } from '@orchardworks/agent-relay-core/testing';
-import { emptyCallForSupportState, executeProfileCommand, setEnablement } from '@orchardworks/agent-relay-core/testing';
 import { createManagedStdioDirectory } from './stdio-directory.js';
-import { reviewProfile } from './test-utils/call-for-support-harness.js';
 
 class Native implements AgentSession {
   capabilities = { history: true, sendMessage: true, steer: false, cancel: false, readResource: false, interactions: { question: false, toolApproval: false, planApproval: false } };
@@ -24,9 +22,8 @@ class Native implements AgentSession {
   async dispose() { this.stop?.(); }
 }
 
-async function fixture(options: { tasks?: boolean; tickMs?: number } = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'cfs-injection-'));
-  const support = emptyCallForSupportState();
+async function fixture(options: { tickMs?: number } = {}) {
+  const root = await mkdtemp(join(tmpdir(), 'bot-injection-'));
   let teams: SavedTeam[] = [];
   // The account's bots: one per session, in the mode the person chose.
   const bots = new Set<string>(), missions = new Map<string, string>();
@@ -37,8 +34,7 @@ async function fixture(options: { tasks?: boolean; tickMs?: number } = {}) {
   const broker = new TeamBroker({ read: () => teams, now: Date.now, assertHost() {}, async createSeat() { throw new Error('No seats here.'); },
     resolveSession: (_host, providerId, nativeSessionId) => ({ controllerId: 'host', providerId, nativeSessionId }),
     async change(update) { const next = structuredClone(teams), result = structuredClone(update(next)); teams = next; return result; },
-    callForSupport: { state: () => support, capable: () => true, assertHost() {}, readOnly: () => true },
-    ...(options.tasks ? { tasks: { capable: () => true, assertHost() {} }, assistants: { groups, capable: () => true } } : {}) });
+    tasks: { capable: () => true, assertHost() {} }, assistants: { groups, capable: () => true } });
   const created: Array<{ providerId: string; input: Parameters<AgentHostDirectory['create']>[0] }> = [];
   const opened: Array<{ providerId: string; id: string; extensions?: AgentSessionExtensions }> = [];
   const sessions = new Map<string, Native>();
@@ -48,51 +44,35 @@ async function fixture(options: { tasks?: boolean; tickMs?: number } = {}) {
     close() {} });
   const adapter = (providerId: string, toolNamespaces: 'creation' | 'attachment' | 'live') => ({ descriptor: { providerId, displayName: providerId, sessionExtensions: { instructions: true, tools: true, toolNamespaces } },
     createSession: async () => { throw new Error('Use the directory.'); }, resumeSession: async () => { throw new Error('Use the directory.'); } });
-  const runtime = createAgentHostRuntime({ controllerId: 'host', team: { stateDirectory: join(root, 'team'), tickMs: options.tickMs ?? 10, callForSupport: () => true, ...(options.tasks ? { tasks: () => true } : {}), request: call => broker.hostCall('relay-host', call) },
+  const runtime = createAgentHostRuntime({ controllerId: 'host', team: { stateDirectory: join(root, 'team'), tickMs: options.tickMs ?? 10, tasks: () => true, request: call => broker.hostCall('relay-host', call) },
     registrations: [{ directory: directory('codex'), adapter: adapter('codex', 'creation') }, { directory: directory('claude'), adapter: adapter('claude', 'live') },
       { directory: directory('copilot'), adapter: adapter('copilot', 'attachment') }] });
-  const profile = executeProfileCommand(support, { type: 'create', profile: reviewProfile }, 1)!;
   let agents = 0;
   const control = async (path: string, body: Record<string, unknown>) => {
     const result = await runtime.control({ method: 'POST', path, body: JSON.stringify(body), sessionId: `agent-${++agents}` });
     if (result.status !== 200) throw new Error(result.body);
     return JSON.parse(result.body);
   };
-  return { root, runtime, support, created, opened, sessions, control, bot: (providerId: string, nativeSessionId: string, mission?: string) => { bots.add(`${providerId}/${nativeSessionId}`); if (mission) missions.set(`${providerId}/${nativeSessionId}`, mission); },
+  return { root, runtime, created, opened, sessions, control, bot: (providerId: string, nativeSessionId: string, mission?: string) => { bots.add(`${providerId}/${nativeSessionId}`); if (mission) missions.set(`${providerId}/${nativeSessionId}`, mission); },
     unbot: (providerId: string, nativeSessionId: string) => { bots.delete(`${providerId}/${nativeSessionId}`); },
-    enable: (providerId: string, nativeSessionId: string, on: boolean) => setEnablement(support, (_h, p, n) => ({ controllerId: 'host', providerId: p, nativeSessionId: n }), { hostId: 'relay-host', providerId, nativeSessionId }, on ? [profile.id] : [], Date.now()),
     async close() { await runtime.close(); await rm(root, { recursive: true, force: true }); } };
 }
 const worker = (extensions: AgentSessionExtensions | undefined) => extensions?.toolNamespaces?.find(namespace => namespace.name === 'agent_remote');
 
-it('declares the worker namespace on every Codex thread it creates, deferred until the session is enabled', async () => {
+const BOT_TOOLS = ['create_bot', 'message', 'list_bots', 'read_bot', 'update_mission', 'update_work', 'complete_work', 'set_timer', 'stop_bot', 'retire_bot', 'open_room'];
+it('declares the bots namespace, deferred, on every Codex thread it creates, so a thread that becomes a bot finds it', async () => {
   const f = await fixture();
   try {
     await f.control('/remote/create', { providerId: 'codex', operationId: randomUUID(), cwd: f.root });
-    expect(worker(f.created[0]!.input)).toMatchObject({ deferred: true, tools: [{ name: 'call_for_support' }, { name: 'support_status' }, { name: 'read_support_report' }, { name: 'download_support_resource' }, { name: 'create_bot' }, { name: 'message' }, { name: 'list_bots' }, { name: 'read_bot' }, { name: 'update_mission' }, { name: 'update_work' }, { name: 'complete_work' }, { name: 'set_timer' }, { name: 'stop_bot' }, { name: 'retire_bot' }, { name: 'open_room' }] });
-    // Tools fixed at creation carry the task tools too, so switching the assistant to coordinator mode later reaches the thread.
-    // Attachments rebind its executors; the thread keeps its declaration.
+    expect(worker(f.created[0]!.input)).toMatchObject({ deferred: true });
+    expect(worker(f.created[0]!.input)!.tools.map(tool => tool.name)).toEqual(BOT_TOOLS);
+    // Tools fixed at creation carry the bots' tools, so a thread that becomes a bot later finds them; attachments rebind their executors.
     expect(worker(f.opened.find(entry => entry.id === 'codex-0')?.extensions)).toBeDefined();
-    f.support.profiles[0]!.enableByDefault = true;
-    await expect.poll(async () => { await f.control('/remote/create', { providerId: 'codex', operationId: randomUUID(), cwd: f.root }); return worker(f.created.at(-1)!.input)?.deferred; }).toBeUndefined();
-  } finally { await f.close(); }
-});
-
-it('gives a Claude session the worker namespace only while it is enabled, also while it is open', async () => {
-  const f = await fixture();
-  try {
-    await f.control('/remote/attach', { providerId: 'claude', nativeSessionId: 'claude-worker' });
-    expect(worker(f.opened.at(-1)!.extensions)).toBeUndefined();
-    f.enable('claude', 'claude-worker', true);
-    await expect.poll(() => f.sessions.get('claude-worker')!.namespaces.at(-1)?.map(namespace => namespace.name)).toEqual(['agent_remote']);
-    f.enable('claude', 'claude-worker', false);
-    await expect.poll(() => f.sessions.get('claude-worker')!.namespaces.at(-1)).toEqual([]);
-    expect(f.sessions.get('claude-worker')!.namespaces).toHaveLength(2);
   } finally { await f.close(); }
 });
 
 it('gives a bot\'s session its standing instructions with its mission when it opens, and a session that is no bot none', async () => {
-  const f = await fixture({ tasks: true });
+  const f = await fixture();
   try {
     // The Controller learns the bots at its enablement poll; a runtime already open keeps what it opened with, so each round opens
     // another bot, all registered at once.
@@ -111,7 +91,7 @@ it('gives a bot\'s session its standing instructions with its mission when it op
 
 it('reads which sessions are bots before the first session opens after a start, so it opens with its instructions', async () => {
   // The enablement poll never comes round during this test: the first attachment reads enablement itself.
-  const f = await fixture({ tasks: true, tickMs: 60_000 });
+  const f = await fixture({ tickMs: 60_000 });
   try {
     f.bot('claude', 'claude-first', 'Keep the release notes.');
     await f.control('/remote/attach', { providerId: 'claude', nativeSessionId: 'claude-first' });
@@ -119,34 +99,31 @@ it('reads which sessions are bots before the first session opens after a start, 
   } finally { await f.close(); }
 });
 
-it('gives a live Claude session the task tools while it is a bot, and takes them back when it stops being one', async () => {
-  const f = await fixture({ tasks: true });
+it('gives a live Claude session the bots\' tools while it is a bot, and takes them back when it stops being one', async () => {
+  const f = await fixture();
   try {
     const names = () => f.sessions.get('claude-main')!.namespaces.at(-1)?.flatMap(namespace => namespace.tools.map(tool => tool.name));
     await f.control('/remote/attach', { providerId: 'claude', nativeSessionId: 'claude-main' });
     expect(worker(f.opened.at(-1)!.extensions)).toBeUndefined();
     f.bot('claude', 'claude-main');
     await expect.poll(names).toContain('create_bot');
-    // Support enabled too: leaving every group keeps the support tools and drops the task tools.
-    f.enable('claude', 'claude-main', true);
     f.unbot('claude', 'claude-main');
-    await expect.poll(names).toEqual(['call_for_support', 'support_status', 'read_support_report', 'download_support_resource']);
+    await expect.poll(() => f.sessions.get('claude-main')!.namespaces.at(-1)).toEqual([]);
   } finally { await f.close(); }
 });
-it('gives a Copilot session the worker tools when it is attached while enabled, including a session started elsewhere', async () => {
+it('gives a Copilot session the bots\' tools when it is attached as a bot, including a session started elsewhere', async () => {
   const f = await fixture();
   try {
     await f.control('/remote/attach', { providerId: 'copilot', nativeSessionId: 'copilot-0' });
     expect(worker(f.opened.at(-1)!.extensions)).toBeUndefined();
-    // Without tool search, the namespace comes undeferred, and only to sessions enabled when they are attached.
-    f.support.profiles[0]!.enableByDefault = true;
+    // Without tool search, the namespace comes undeferred, and only to bots' sessions when they are attached.
+    for (let index = 1; index <= 40; index++) f.bot('copilot', `copilot-${index}`);
     let attached = 0;
     await expect.poll(async () => {
       const id = `copilot-${++attached}`;
       await f.control('/remote/attach', { providerId: 'copilot', nativeSessionId: id });
-      return worker(f.opened.find(entry => entry.id === id)?.extensions);
-    }).toMatchObject({ name: 'agent_remote', tools: [{ name: 'call_for_support' }, { name: 'support_status' }, { name: 'read_support_report' }, { name: 'download_support_resource' }] });
-    // Enabled for support only, it is nobody's coordinator: no task tools.
+      return worker(f.opened.find(entry => entry.id === id)?.extensions)?.tools.map(tool => tool.name);
+    }).toEqual(BOT_TOOLS);
     expect(worker(f.opened.at(-1)!.extensions)).not.toHaveProperty('deferred');
   } finally { await f.close(); }
 });

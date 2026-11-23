@@ -9,14 +9,13 @@ import { useSharedStates } from '../../kernel/shared-feeds.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 /** The floating entry manages presentation; hiding it does not change the Window. */
-export function WindowMenu({ workspace, current, visible, inert = false, onOverview, sessionStatus, supportTeam, onRemoveView }: {
+export function WindowMenu({ workspace, current, visible, inert = false, onOverview, sessionStatus, onRemoveView }: {
   workspace: ReturnType<typeof useWindowWorkspace>; current?: WindowSessionBinding; visible: boolean; inert?: boolean;
   /** Shows every Window side by side; offered where the overview is available. */
   onOverview?(): void;
   /** Each session's status, as Track shows it. */
   sessionStatus?(session: WindowSessionBinding): SessionActivityStatus;
   /** Whether a Team is a Support roster, whose leader then shows the Support role. */
-  supportTeam?(teamId: string): boolean;
   onRemoveView?: ComponentProps<typeof WindowWorkspaces>['onRemoveView'];
 }) {
   const t = useTranslate();
@@ -57,7 +56,7 @@ export function WindowMenu({ workspace, current, visible, inert = false, onOverv
         {onOverview ? <button type="button" className="lab-window-overview-trigger" aria-label={t('windows.showAll')} title={t('windows.showAllTitle')} aria-keyshortcuts="Control+Shift+ArrowUp"
           onClick={() => { close(); onOverview(); }}>{t('windows.allWindows')}</button> : null}
         <button type="button" aria-label={t('windows.closePanel')} onClick={close}>×</button></div>
-      <div className="lab-window-panel-scroll"><WindowWorkspaces workspace={workspace} current={current} active={expanded} sessionStatus={sessionStatus} supportTeam={supportTeam} onRemoveView={onRemoveView} /></div>
+      <div className="lab-window-panel-scroll"><WindowWorkspaces workspace={workspace} current={current} active={expanded} sessionStatus={sessionStatus} onRemoveView={onRemoveView} /></div>
     </section>
     <span className="agent-visually-hidden" role="status">{pendingElsewhere ? t('windows.pendingElsewhereNote') : ''}</span>
   </div>;

@@ -27,7 +27,7 @@ export function TeamGatherButton({ baseUrl, entry, onGather }: {
       const leader = entry.teamMemberId ?? entry.target?.teamMemberId;
       if (!layout.groupRoot || !entry.target || (leader ? layout.groupRoot.teamMemberId !== leader : sessionKey(layout.groupRoot) !== sessionKey(entry.target))) throw new Error(t('team.gather.leaderChanged'));
       onGather(layout.dock);
-      const unavailable = team.members.filter(member => member.creation !== 'abandoned' && member.creation !== 'released' && member.role !== 'requester' && (member.creation !== 'ready' || !member.nativeSessionId)).length;
+      const unavailable = team.members.filter(member => member.creation !== 'abandoned' && member.role !== 'requester' && (member.creation !== 'ready' || !member.nativeSessionId)).length;
       if (unavailable) setNotice(t('team.gather.unavailableMembers', { count: unavailable }));
     } catch (error) { if (active.current) setNotice(errorWords(error, t, 'team.gather.loadFailed')); }
     finally { pending.current = false; if (active.current) setBusy(false); }

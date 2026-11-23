@@ -84,7 +84,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   });
   const access = createAccess({ state: brokerState, ownerSubject: options.ownerSubject });
   const { owner, hostAllowed, sessionAllowed, requireOwner, requireAccess, requireHost } = access;
-  const { teams, callForSupportChange, resolveRole } = createTeamService({ brokerState, options, now, requireHost,
+  const { teams } = createTeamService({ brokerState, options, now, requireHost,
     rpc: (...args) => rpc(...args), assertAssociationOpen: target => assertAssociationOpen(target),
     associationSource: (...args) => associationSource(...args), prefixRecords: host => prefixRecords(host) });
   const succession = createSuccession({ brokerState, enrollment: options.successionEnrollment, projectionAllowance: options.successionProjectionAllowance, ids, rpc: (...args: Parameters<typeof rpc>) => rpc(...args),
@@ -183,7 +183,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     admitClientMessages: createClientAdmission({ now, owner }) });
   const routes: RouteGroup[] = [
     createControllerRoutes({ access, brokerState, rpc, successionAction: succession.action, options }),
-    createTeamRoutes({ access, brokerState, now, teams, callForSupportChange, resolveRole }),
+    createTeamRoutes({ access, brokerState, teams }),
     createHostServiceRoutes({ access, brokerState, rpc }),
     createPreviewRoutes({ access, brokerState, now, rpc, previews }),
     createPairingRoutes({ access, brokerState, now, ids, rpc, disconnected, previews, deletion, journals, journalSessions, visibleHosts, credentialExpiry, accountBacked, keyHash, sessionBindings, options }),

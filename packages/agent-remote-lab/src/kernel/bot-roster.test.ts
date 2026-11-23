@@ -24,9 +24,9 @@ it('makes every session a bot with its role, except Asks, history, subagents and
     { ...createWindowView('coordinator', binding('coordinator')), bindingPolicy: 'managed', feature: { kind: 'team', id: 'support', metadata: { role: 'leader' } } },
     { ...createWindowView('tpm', binding('tpm')), bindingPolicy: 'managed', feature: { kind: 'tpm', id: 'work', metadata: { hostId: 'host' } } },
     { ...createWindowView('ask', binding('ask')), bindingPolicy: 'managed', closeWith: 'primary', feature: { kind: 'ask', id: 'ask-1' } });
-  const rows = projectBotRoster([group('all', views)], [], { status: () => 'idle', supportTeam: id => id === 'support' }).sections[0]!.rows;
+  const rows = projectBotRoster([group('all', views)], [], { status: () => 'idle' }).sections[0]!.rows;
   expect(rows.map(row => [row.viewId, row.role])).toEqual([['primary', undefined], ['dock', undefined], ['float', undefined], ['side', 'Side'],
-    ['lead', 'Team Leader'], ['member', 'Team member'], ['coordinator', 'Support'], ['tpm', 'TPM']]);
+    ['lead', 'Team Leader'], ['member', 'Team member'], ['coordinator', 'Team Leader'], ['tpm', 'TPM']]);
   expect(rows[0]!.asks).toEqual([{ viewId: 'ask', title: 'ask' }]);
   expect(rows.slice(1).every(row => row.asks.length === 0)).toBe(true);
 });

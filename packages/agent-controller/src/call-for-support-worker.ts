@@ -19,10 +19,17 @@ export interface WorkerSupportPorts {
   /** The provider keeps a session it starts from writing its working directory. */
   readOnly?(providerId: string): boolean;
 }
-type Enablement = { defaultEnabled: boolean; sessions: Map<string, boolean> };
+type Enablement = { defaultEnabled: boolean; sessions: Map<string, boolean>; coordinators: Set<string> };
+/** Which worker tools a session has: none, Call For Support only, or Call For Support with the task tools of a coordinator. */
+export type WorkerTools = 'none' | 'support' | 'tasks';
 type StatusCall = { roleId: string; requesterMemberId: string; call: CallForSupportCall };
 
 export const WORKER_NAMESPACE = 'agent_remote';
+/** The worker tools a session was given: listed (not deferred) worker namespaces, with or without the task tools. */
+export function workerToolsIn(namespaces: readonly AgentSessionToolNamespace[] | undefined): WorkerTools {
+  const listed = namespaces?.find(namespace => namespace.name === WORKER_NAMESPACE && !namespace.deferred);
+  return !listed ? 'none' : listed.tools.some(item => item.name === 'create_task') ? 'tasks' : 'support';
+}
 const id = { type: 'string', minLength: 1, maxLength: 256 };
 const object = (properties: Record<string, unknown>, required: string[]) => ({ type: 'object', properties, required, additionalProperties: false });
 const fail = (message: string): never => { throw new Error(message); };
@@ -31,7 +38,7 @@ const tool = (name: string, description: string, inputSchema: Record<string, unk
 
 /** A worker's own Call For Support tools and the enablement that decides where the Controller offers them. */
 export class WorkerSupport {
-  private enablement: Enablement = { defaultEnabled: false, sessions: new Map() };
+  private enablement: Enablement = { defaultEnabled: false, sessions: new Map(), coordinators: new Set() };
   private readonly listeners = new Set<() => void>();
   private readonly resources: TeamResourceFiles;
   private polling = false;
@@ -39,36 +46,47 @@ export class WorkerSupport {
   constructor(private readonly ports: WorkerSupportPorts) {
     this.resources = new TeamResourceFiles(join(ports.stateDirectory, 'support-resources'), call => ports.request(call));
   }
-  /** Whether the session is offered the namespace: tasks are on, or the user enabled it for support, explicitly or by a profile's default. */
-  enabled(ref: NativeSessionRef): boolean {
-    if (!this.ports.available()) return false;
-    if (this.ports.tasks?.() === true) return true;
-    return this.enablement.sessions.get(nativeSessionRefKey(ref)) ?? this.enablement.defaultEnabled;
+  /** Whether the session is offered the namespace: it is a coordinator's main session, or the user enabled it for support, explicitly or by a profile's default. */
+  enabled(ref: NativeSessionRef): boolean { return this.tools(ref) !== 'none'; }
+  /** The worker tools the session is offered. */
+  tools(ref: NativeSessionRef): WorkerTools {
+    if (!this.ports.available()) return 'none';
+    const key = nativeSessionRefKey(ref);
+    if (this.ports.tasks?.() === true && this.enablement.coordinators.has(key)) return 'tasks';
+    return (this.enablement.sessions.get(key) ?? this.enablement.defaultEnabled) ? 'support' : 'none';
   }
-  /** Whether a session the Controller is about to create will be offered the namespace: tasks, or a profile's default, can say so yet. */
-  enabledByDefault(): boolean { return this.ports.available() && (this.ports.tasks?.() === true || this.enablement.defaultEnabled); }
+  /** Whether a session the Controller is about to create will be offered the namespace: only a profile's default can say so yet, since it is nobody's main session. */
+  enabledByDefault(): boolean { return this.ports.available() && this.enablement.defaultEnabled; }
   onChange(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   /** Reads enablement from the Relay; listeners hear about any change. */
   async refresh(controllerId: string): Promise<void> {
     if (this.polling || !this.ports.available()) return;
     this.polling = true;
     try {
-      const value = await this.ports.request({ action: 'support_enablement' }) as { defaultEnabled?: unknown; sessions?: unknown };
+      const value = await this.ports.request({ action: 'support_enablement' }) as { defaultEnabled?: unknown; sessions?: unknown; coordinators?: unknown };
       if (!value || typeof value.defaultEnabled !== 'boolean' || !Array.isArray(value.sessions)) throw new Error('Invalid Call For Support enablement.');
       const sessions = new Map<string, boolean>();
       for (const entry of value.sessions as Array<{ providerId?: unknown; nativeSessionId?: unknown; enabled?: unknown }>) {
         if (typeof entry?.providerId !== 'string' || typeof entry.nativeSessionId !== 'string' || typeof entry.enabled !== 'boolean') continue;
         sessions.set(nativeSessionRefKey({ controllerId, providerId: entry.providerId, nativeSessionId: entry.nativeSessionId }), entry.enabled);
       }
-      const next = { defaultEnabled: value.defaultEnabled, sessions }, tasks = this.ports.tasks?.() === true;
+      const coordinators = new Set<string>();
+      for (const entry of Array.isArray(value.coordinators) ? value.coordinators as Array<{ providerId?: unknown; nativeSessionId?: unknown }> : []) {
+        if (typeof entry?.providerId === 'string' && typeof entry.nativeSessionId === 'string') coordinators.add(nativeSessionRefKey({ controllerId, providerId: entry.providerId, nativeSessionId: entry.nativeSessionId }));
+      }
+      const next = { defaultEnabled: value.defaultEnabled, sessions, coordinators }, tasks = this.ports.tasks?.() === true;
       const changed = tasks !== this.tasksOffered || next.defaultEnabled !== this.enablement.defaultEnabled || next.sessions.size !== this.enablement.sessions.size
-        || [...next.sessions].some(([key, enabled]) => this.enablement.sessions.get(key) !== enabled);
+        || [...next.sessions].some(([key, enabled]) => this.enablement.sessions.get(key) !== enabled)
+        || next.coordinators.size !== this.enablement.coordinators.size || [...next.coordinators].some(key => !this.enablement.coordinators.has(key));
       this.enablement = next; this.tasksOffered = tasks;
       if (changed) for (const listener of this.listeners) { try { listener(); } catch { /* Listeners cannot stop enablement. */ } }
     } finally { this.polling = false; }
   }
-  /** The worker's tools, bound to the session that runs them. deferred: found by search rather than listed. */
-  namespace(actual: () => NativeSessionRef | undefined, deferred: boolean): AgentSessionToolNamespace {
+  /**
+   * The worker's tools, bound to the session that runs them. deferred: found by search rather than listed. tasks: with the task,
+   * assistant and room tools of a coordinator; the Relay refuses them from a session that is not one.
+   */
+  namespace(actual: () => NativeSessionRef | undefined, deferred: boolean, tasks: boolean): AgentSessionToolNamespace {
     const worker = () => actual() ?? fail('Call For Support is not attached to this session yet.');
     const request = async (call: TeamHostCall) => { if (!this.ports.available()) fail('Update the Relay to use Call For Support.'); return this.ports.request(call); };
     const status = async (input: { roleId?: string; callId?: string }) => { const ref = worker(); return request({ action: 'support_status', worker: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, ...input }); };
@@ -76,7 +94,7 @@ export class WorkerSupport {
     const taskRequest = async (input: TeamHostCall) => { if (this.ports.tasks?.() !== true) fail('Update the Relay to use tasks.'); return this.ports.request(input); };
     const context = object({ commit: { type: 'string', pattern: '^[0-9a-f]{7,64}$' }, base: { type: 'string', pattern: '^[0-9a-f]{7,64}$' },
       files: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 2048 }, maxItems: 64 }, conversation: { type: 'boolean' } }, []);
-    const tools = [
+    const support = [
       tool('call_for_support', 'Ask for support you cannot give yourself: an independent review, a stronger or different model, another machine or environment. Name a roleId from support_status to follow up with the same role and its context, or a profileId to call this session\'s role for that profile, starting one if it has none; either reopens an archived role, and with a profileId fresh: true starts a new role instead. Give the task and the deliverable. The coordinator runs on your Host in your working directory and reads your files in place, uncommitted changes included, so do not make snapshot commits or copies for it; say where the change is when it is outside your working directory, such as in a worktree. Give a commit only to pin the code reviewed, or when supporters work in their own worktree or on another machine. Calls are asynchronous: the report arrives later as input, so keep working. Reports are advice; you stay the owner of your task and workspace.',
         object({ roleId: id, profileId: id, task: { type: 'string', minLength: 1, maxLength: 12000 }, context, deliverable: { type: 'string', enum: ['findings', 'answer', 'test_report', 'patch'] },
           followUpOf: id, fresh: { type: 'boolean' }, operationId: id }, ['task', 'deliverable']),
@@ -101,6 +119,8 @@ export class WorkerSupport {
           if (!found.report?.resources?.some(resource => resource.resourceId === args.resourceId)) fail('The resource is not attached to this report.');
           return this.resources.download(roleId, requesterMemberId, args.resourceId, args.outputDirectory);
         }),
+    ];
+    const coordination = [
       tool('create_task', 'Start a task: a separate session on this Host works on it while you keep talking with the person. Use it for work that takes more than a few steps, and start one task per independent piece of work. Write a brief that stands alone: the worker sees only the brief, and reads your conversation only if the brief says it is needed. workspace: same (default) works in your working directory alongside you; read_only investigates it without changing it; worktree works in its own git worktree at your current commit (uncommitted changes are not in it) and returns its changes as a patch. provider and model choose another agent or model for the worker. The result arrives later as input labelled [Task … · done] or [Task … · failed]; until then tell the person what you started and keep answering them. Reuse operationId to retry the same task after a lost response.',
         object({ title: { type: 'string', minLength: 1, maxLength: TASK_TITLE_LIMIT }, brief: { type: 'string', minLength: 1, maxLength: TASK_BRIEF_LIMIT },
           done_when: { type: 'string', minLength: 1, maxLength: TASK_DONE_WHEN_LIMIT }, workspace: { type: 'string', enum: ['same', 'read_only', 'worktree'] }, provider: id,
@@ -144,7 +164,8 @@ export class WorkerSupport {
         object({ taskId: id, summary: { type: 'string', minLength: 1, maxLength: TASK_SUMMARY_LIMIT } }, ['taskId']), args => { const ref = worker();
           return taskRequest({ action: 'mark_task_done', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, taskId: args.taskId, ...(args.summary ? { summary: args.summary } : {}) }); }),
     ];
-    return { name: WORKER_NAMESPACE, description: 'Agent Remote Control: start tasks that other sessions work on in parallel and report back; message the account\'s other assistants; call for support from other sessions, models and machines (reviews, consultations, tests), and read their reports.',
-      ...(deferred ? { deferred: true } : {}), tools };
+    const supportDescription = 'call for support from other sessions, models and machines (reviews, consultations, tests), and read their reports.';
+    return { name: WORKER_NAMESPACE, description: tasks ? `Agent Remote Control: start tasks that other sessions work on in parallel and report back; message the account's other assistants; ${supportDescription}` : `Agent Remote Control: ${supportDescription}`,
+      ...(deferred ? { deferred: true } : {}), tools: tasks ? [...support, ...coordination] : support };
   }
 }

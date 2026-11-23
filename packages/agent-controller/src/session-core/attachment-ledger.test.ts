@@ -65,12 +65,12 @@ describe('attachment ledger', () => {
 
   it('has no worker tools applied to an agent never recorded, and keeps the latest record', () => {
     const ledger = createAttachmentLedger();
-    expect(ledger.workerToolsApplied('agent-1')).toBe(false);
-    ledger.recordWorkerTools('agent-1', true);
-    expect(ledger.workerToolsApplied('agent-1')).toBe(true);
-    expect(ledger.workerToolsApplied('agent-2')).toBe(false);
-    ledger.recordWorkerTools('agent-1', false);
-    expect(ledger.workerToolsApplied('agent-1')).toBe(false);
+    expect(ledger.workerToolsApplied('agent-1')).toBe('none');
+    ledger.recordWorkerTools('agent-1', 'tasks');
+    expect(ledger.workerToolsApplied('agent-1')).toBe('tasks');
+    expect(ledger.workerToolsApplied('agent-2')).toBe('none');
+    ledger.recordWorkerTools('agent-1', 'support');
+    expect(ledger.workerToolsApplied('agent-1')).toBe('support');
   });
 
   it('keeps an agent uncertain from the mark until it is cleared, and no other agent with it', () => {

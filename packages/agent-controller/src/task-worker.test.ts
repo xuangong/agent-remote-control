@@ -98,7 +98,7 @@ describe('a task between a main session and its worker', () => {
     const inputs = h.sessions.get('worker')!.deliveries.flatMap(delivery => parseTaskInputs(delivery.text) ?? []);
     expect(inputs.map(input => input.kind)).toEqual(['needs_you', 'question']);
     const owner = new WorkerSupport({ request: call => h.host(call), available: () => true, tasks: () => true, stateDirectory: h.directory, title: async () => 'Chief' });
-    await tool(owner.namespace(() => h.ref('codex', 'worker'), false).tools, 'message_task').execute({ taskId, text: 'Use main.' });
+    await tool(owner.namespace(() => h.ref('codex', 'worker'), false, true).tools, 'message_task').execute({ taskId, text: 'Use main.' });
     await h.runtime.tick();
     expect(h.sessions.get(worker.id)!.deliveries.map(delivery => parseTaskInputs(delivery.text)?.[0]?.kind)).toEqual(['brief', 'message']);
     expect(h.team(taskId).task?.state).toBe('working');
@@ -125,7 +125,7 @@ describe('a task between a main session and its worker', () => {
     h.busy(worker.id, true);
     await h.runtime.tick();
     const owner = new WorkerSupport({ request: call => h.host(call), available: () => true, tasks: () => true, stateDirectory: h.directory, title: async () => 'Chief' });
-    expect(JSON.parse(await tool(owner.namespace(() => h.ref('codex', 'worker'), false).tools, 'cancel_task').execute({ taskId }) as string)).toEqual({ taskId, state: 'cancelled' });
+    expect(JSON.parse(await tool(owner.namespace(() => h.ref('codex', 'worker'), false, true).tools, 'cancel_task').execute({ taskId }) as string)).toEqual({ taskId, state: 'cancelled' });
     await h.runtime.tick();
     expect(h.cancelled).toEqual([worker.id]);
     expect(h.released).toContain(worker.id);
@@ -161,16 +161,22 @@ describe('the main session\'s task tools', () => {
     const directory = await mkdtemp(join(tmpdir(), 'task-tools-'));
     cleanups.push(() => rm(directory, { recursive: true, force: true }));
     const calls: TeamHostCall[] = [];
-    const worker = new WorkerSupport({ request: async call => { calls.push(call); return { ok: true }; }, available: () => true, tasks: () => tasks, stateDirectory: directory,
-      title: async () => 'Chief' });
+    // The Relay names the coordinators' main sessions in its enablement; this one is the only coordinator.
+    const worker = new WorkerSupport({ request: async call => { if (call.action === 'support_enablement') return { defaultEnabled: false, sessions: [], coordinators: [{ providerId: 'codex', nativeSessionId: 'main' }] };
+      calls.push(call); return { ok: true }; }, available: () => true, tasks: () => tasks, stateDirectory: directory, title: async () => 'Chief' });
     return { worker, calls };
   }
   const ref = { controllerId: 'controller', providerId: 'codex', nativeSessionId: 'main' };
-  it('offers every session the namespace while the Relay runs tasks, and starts a task as the session', async () => {
+  it('offers a coordinator\'s main session the task tools while the Relay runs tasks, and starts a task as the session', async () => {
     const { worker, calls } = await support(true);
-    expect(worker.enabled(ref)).toBe(true);
-    expect(worker.enabledByDefault()).toBe(true);
-    const tools = worker.namespace(() => ref, false).tools;
+    expect(worker.tools(ref)).toBe('none');
+    await worker.refresh('controller');
+    expect(worker.tools(ref)).toBe('tasks');
+    // A plain assistant's session, and a session the Controller is about to create, get nothing.
+    expect(worker.tools({ ...ref, nativeSessionId: 'plain' })).toBe('none');
+    expect(worker.enabledByDefault()).toBe(false);
+    expect(worker.namespace(() => ref, false, false).tools.map(item => item.name)).not.toContain('create_task');
+    const tools = worker.namespace(() => ref, false, true).tools;
     expect(tools.map(item => item.name).filter(name => name.includes('task') || name.includes('assistant') || name.includes('room'))).toEqual(['create_task', 'task_status', 'list_assistants', 'message_assistant', 'open_room', 'room_say', 'room_pass', 'message_task', 'cancel_task', 'mark_task_done']);
     await tool(tools, 'create_task').execute({ title: 'Collect logs', brief: 'Collect them.', done_when: 'Attached.', operationId: 'op' });
     expect(calls).toEqual([{ action: 'create_task', owner: { providerId: 'codex', nativeSessionId: 'main', title: 'Chief' }, operationId: 'op', title: 'Collect logs', brief: 'Collect them.', doneWhen: 'Attached.' }]);
@@ -182,21 +188,22 @@ describe('the main session\'s task tools', () => {
   });
   it('keeps the tools declared but refuses them while the Relay does not run tasks', async () => {
     const { worker, calls } = await support(false);
+    await worker.refresh('controller');
     expect(worker.enabled(ref)).toBe(false);
-    await expect(tool(worker.namespace(() => ref, true).tools, 'create_task').execute({ title: 'T', brief: 'B' })).rejects.toThrow('Update the Relay to use tasks.');
+    await expect(tool(worker.namespace(() => ref, true, true).tools, 'create_task').execute({ title: 'T', brief: 'B' })).rejects.toThrow('Update the Relay to use tasks.');
     expect(calls).toEqual([]);
   });
 });
 
 describe('messages between assistants', () => {
   const groups = [{ window: { id: 'g', title: 'g', revision: 1, views: [['v1', 'worker'], ['v2', 'tracker']].map(([id, nativeSessionId]) => ({ id, placement: 'primary',
-    binding: { hostId: 'host', providerId: 'codex', nativeSessionId, title: nativeSessionId } })) }, bots: { rank: 'm', members: { v1: { name: 'Chief' }, v2: { name: 'Tracker' } } } }] as never;
+    binding: { hostId: 'host', providerId: 'codex', nativeSessionId, title: nativeSessionId } })) }, bots: { rank: 'm', members: { v1: { name: 'Chief', mode: 'coordinator' }, v2: { name: 'Tracker', mode: 'coordinator' } } } }] as never;
   it('reaches the other main session between its turns, after its task updates, and the reply comes back', async () => {
     const h = await supportHarness({ tasks: true, groups, sessions: ['tracker'] });
     cleanups.push(() => h.close());
     const chief = new WorkerSupport({ request: call => h.host(call), available: () => true, tasks: () => true, stateDirectory: h.directory, title: async () => 'Chief' });
     const tracker = new WorkerSupport({ request: call => h.host(call), available: () => true, tasks: () => true, stateDirectory: h.directory, title: async () => 'Tracker' });
-    const tools = (worker: WorkerSupport, id: string) => worker.namespace(() => h.ref('codex', id), false).tools;
+    const tools = (worker: WorkerSupport, id: string) => worker.namespace(() => h.ref('codex', id), false, true).tools;
     expect(JSON.parse(await tool(tools(chief, 'worker'), 'list_assistants').execute({}) as string)).toEqual({ assistants: [{ id: 'g/v2', name: 'Tracker' }] });
     h.busy('tracker', true);
     const sent = JSON.parse(await tool(tools(chief, 'worker'), 'message_assistant').execute({ to: 'Tracker', text: 'Is the branch cut?' }) as string);
@@ -218,7 +225,7 @@ describe('messages between assistants', () => {
     const h = await supportHarness({ tasks: true, groups, sessions: ['tracker'] });
     cleanups.push(() => h.close());
     const support = (title: string) => new WorkerSupport({ request: call => h.host(call), available: () => true, tasks: () => true, stateDirectory: h.directory, title: async () => title });
-    const tools = (worker: WorkerSupport, id: string) => worker.namespace(() => h.ref('codex', id), false).tools;
+    const tools = (worker: WorkerSupport, id: string) => worker.namespace(() => h.ref('codex', id), false, true).tools;
     const { roomId } = JSON.parse(await tool(tools(support('Chief'), 'worker'), 'open_room').execute({ name: 'Release', topic: 'Ready?', members: ['Tracker'], minutes: 30 }) as string);
     await h.runtime.tick();
     const turn = parseTaskInputs(h.sessions.get('tracker')!.deliveries[0]!.text);

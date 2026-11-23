@@ -1,5 +1,6 @@
 import type { AgentSession } from '@orchardworks/agent-provider-sdk';
 import type { SessionWireAgent } from '@orchardworks/agent-session-runtime';
+import type { WorkerTools } from '../call-for-support-worker.js';
 
 /** What a native attachment was opened from: the provider's session, and the identity of the creation result or prefix handle it was opened with. */
 export interface NativeAttachment { session: AgentSession; nativeCreation?: string; nativePrefix?: string }
@@ -23,8 +24,8 @@ export interface AttachmentLedger {
   discardProjection(agentId: string, session?: AgentSession): boolean;
   recordAttachment(agent: SessionWireAgent, attachment: NativeAttachment): void;
   attachmentOf(agent: SessionWireAgent): NativeAttachment | undefined;
-  recordWorkerTools(agentId: string, applied: boolean): void;
-  workerToolsApplied(agentId: string): boolean;
+  recordWorkerTools(agentId: string, applied: WorkerTools): void;
+  workerToolsApplied(agentId: string): WorkerTools;
   markUncertain(agentId: string): void;
   clearUncertain(agentId: string): void;
   isUncertain(agentId: string): boolean;
@@ -33,7 +34,7 @@ export interface AttachmentLedger {
 export function createAttachmentLedger(): AttachmentLedger {
   const projections = new Map<string, AgentSession>();
   const attachments = new WeakMap<SessionWireAgent, NativeAttachment>();
-  const workerTools = new Map<string, boolean>();
+  const workerTools = new Map<string, WorkerTools>();
   const uncertain = new Set<string>();
   return {
     stageProjection: (agentId, session) => { projections.set(agentId, session); },
@@ -49,7 +50,7 @@ export function createAttachmentLedger(): AttachmentLedger {
     recordAttachment: (agent, attachment) => { attachments.set(agent, attachment); },
     attachmentOf: agent => attachments.get(agent),
     recordWorkerTools: (agentId, applied) => { workerTools.set(agentId, applied); },
-    workerToolsApplied: agentId => workerTools.get(agentId) ?? false,
+    workerToolsApplied: agentId => workerTools.get(agentId) ?? 'none',
     markUncertain: agentId => { uncertain.add(agentId); },
     clearUncertain: agentId => { uncertain.delete(agentId); },
     isUncertain: agentId => uncertain.has(agentId),

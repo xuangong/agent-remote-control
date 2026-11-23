@@ -46,6 +46,11 @@ export const WindowBotDetails = Type.Object({
   /** Muted: its chat sends no reminders and its unread replies show a quiet dot, on every device. */
   muted: Type.Optional(Type.Literal(true)),
   rank: Type.Optional(rank),
+  /**
+   * Coordinator: the assistant's main session gets the task tools, messages the account's other coordinators and joins rooms.
+   * Plain, or absent: one session without them. Both values are accepted so a bot can be switched back.
+   */
+  mode: Type.Optional(Type.Union([Type.Literal('coordinator'), Type.Literal('plain')])),
 }, strict);
 export type WindowBotDetails = Static<typeof WindowBotDetails>;
 /**

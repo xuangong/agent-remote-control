@@ -7,7 +7,7 @@ import { ROOM_TURN_TIMEOUT_MS } from './rooms.js';
 // A room asks one member at a time with the messages it has not seen. Groups and Hosts are stubs; the broker is real.
 const group: WindowGroup = { window: { id: 'g', title: 'g', revision: 1, views: [['v1', 'chief'], ['v2', 'tracker'], ['v3', 'scribe']].map(([id, nativeSessionId]) => ({ id, placement: 'primary',
   binding: { hostId: 'mac', providerId: 'claude', nativeSessionId, title: nativeSessionId } })) } as unknown as WindowGroup['window'],
-  bots: { rank: 'm', members: { v1: { name: 'Chief' }, v2: { name: 'Tracker' }, v3: { name: 'Scribe' } } } };
+  bots: { rank: 'm', members: { v1: { name: 'Chief', mode: 'coordinator' }, v2: { name: 'Tracker', mode: 'coordinator' }, v3: { name: 'Scribe', mode: 'coordinator' } } } };
 
 function fixture() {
   let state: SavedTeam[] = [], now = 1_000_000;

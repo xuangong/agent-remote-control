@@ -6,6 +6,7 @@ import type { RemoteHostSessionLease, SessionWireAgent } from '@orchardworks/age
 import { directoryNativeEffect } from '../directory-mutation.js';
 import { NativeSessionOwnerError } from '../native-session-owner.js';
 import { pendingReferenceNote } from '../session-refs.js';
+import { workerToolsIn } from '../call-for-support-worker.js';
 import { hasHeldChild, mayReconcileIdle, mayReleaseIdle } from './idle-release.js';
 import { releaseGraceMs } from './residency.js';
 import { withinResumeDeadline } from './resume-deadline.js';
@@ -155,7 +156,7 @@ export function createAttachment(ctx: SessionCoreContext) {
         // A generic successor holds the role of its source, so every attachment of it gets the same extensions.
         const extensions = nativePrefix ? await nativePrefixExtensions(nativePrefix.source, () => nativeSessionId)
           : await roles.extensions(genericSuccessionSource(attached) ?? attached, () => attached) ?? workerExtensions(providerId, attached, () => attached);
-        ledger.recordWorkerTools(proposedAgentId, !!extensions?.toolNamespaces?.some(namespace => namespace.name === 'agent_remote' && !namespace.deferred));
+        ledger.recordWorkerTools(proposedAgentId, workerToolsIn(extensions?.toolNamespaces));
         const open = () => source.open(nativeSessionId, { ...(takeOver ? { takeOver } : {}), ...(extensions ? { extensions } : {}), ...(nativePrefix ? { nativePrefix: nativePrefix.handle } : {}), ...(nativeCreation ? { nativeCreation, resumeHandle: succession?.contexts.forTarget(nativeRef({ providerId, nativeSessionId }))?.resumeHandle, resumeOptions: { initializeEmpty: succession?.contexts.canInitializeEmpty(nativeRef({ providerId, nativeSessionId })) === true } } : {}) });
         // A resume the CLI does not answer within its declared deadline frees the binding instead of holding it (gap 4).
         const behaviour = resolveAgentProviderBehaviour(providers.require(providerId).adapter.descriptor);

@@ -235,8 +235,15 @@ export class TeamBroker {
     if (call.action === 'poll') return this.ports.read().filter(team => team.status !== 'archived' && visible(team) && team.members.some(item => item.hostId === hostId && (item.creation === 'ready' || item.creation === 'released'))).map(team => this.project(team, recipientAware));
     const projectDelivery = <T extends { id: string; resolvedTarget?: NativeSessionRef }>(value: T) => recipientAware ? value : withoutRecipient(value);
     if (call.action === 'call_for_support' || call.action === 'support_status') return (this.groups ?? fail(unavailableGroups)).workerCall(hostId, call);
-    if (call.action === 'support_enablement') return (this.groups ?? fail(unavailableGroups)).enablement(hostId);
-    if (call.action === 'create_task') return (this.tasks ?? fail(unavailableTasks)).create(hostId, call);
+    if (call.action === 'support_enablement') {
+      const enablement = (this.groups ?? fail(unavailableGroups)).enablement(hostId);
+      return this.assistants ? { ...enablement, coordinators: this.assistants.coordinators(hostId) } : enablement;
+    }
+    if (call.action === 'create_task') {
+      const tasks = this.tasks ?? fail(unavailableTasks);
+      if (tasks.capable(hostId)) this.assistants?.assertCoordinator(hostId, call.owner);
+      return tasks.create(hostId, call);
+    }
     if (call.action === 'task_status') return (this.tasks ?? fail(unavailableTasks)).status(hostId, call);
     if (call.action === 'report_task') { assertCurrent(); return (this.tasks ?? fail(unavailableTasks)).report(hostId, call); }
     if (call.action === 'open_room') return (this.rooms ?? fail(unavailableAssistants)).open(hostId, call);

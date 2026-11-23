@@ -24,14 +24,20 @@ class Native implements AgentSession {
   async dispose() { this.stop?.(); }
 }
 
-async function fixture() {
+async function fixture(options: { tasks?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'cfs-injection-'));
   const support = emptyCallForSupportState();
   let teams: SavedTeam[] = [];
+  // The account's bots: one per session, in the mode the person chose.
+  const bots = new Map<string, 'coordinator' | 'plain'>();
+  const groups = () => [{ window: { id: 'g', title: 'g', revision: 1, views: [...bots.keys()].map((key, index) => { const [providerId, nativeSessionId] = key.split('/');
+    return { id: `v${index}`, placement: 'primary', binding: { hostId: 'relay-host', providerId, nativeSessionId, title: nativeSessionId } }; }) },
+    bots: { rank: 'm', members: Object.fromEntries([...bots.values()].map((mode, index) => [`v${index}`, { mode }])) } }] as never;
   const broker = new TeamBroker({ read: () => teams, now: Date.now, assertHost() {}, async createSeat() { throw new Error('No seats here.'); },
     resolveSession: (_host, providerId, nativeSessionId) => ({ controllerId: 'host', providerId, nativeSessionId }),
     async change(update) { const next = structuredClone(teams), result = structuredClone(update(next)); teams = next; return result; },
-    callForSupport: { state: () => support, capable: () => true, assertHost() {}, readOnly: () => true } });
+    callForSupport: { state: () => support, capable: () => true, assertHost() {}, readOnly: () => true },
+    ...(options.tasks ? { tasks: { capable: () => true, assertHost() {} }, assistants: { groups, capable: () => true } } : {}) });
   const created: Array<{ providerId: string; input: Parameters<AgentHostDirectory['create']>[0] }> = [];
   const opened: Array<{ providerId: string; id: string; extensions?: AgentSessionExtensions }> = [];
   const sessions = new Map<string, Native>();
@@ -41,7 +47,7 @@ async function fixture() {
     close() {} });
   const adapter = (providerId: string, toolNamespaces: 'creation' | 'attachment' | 'live') => ({ descriptor: { providerId, displayName: providerId, sessionExtensions: { instructions: true, tools: true, toolNamespaces } },
     createSession: async () => { throw new Error('Use the directory.'); }, resumeSession: async () => { throw new Error('Use the directory.'); } });
-  const runtime = createAgentHostRuntime({ controllerId: 'host', team: { stateDirectory: join(root, 'team'), tickMs: 10, callForSupport: () => true, request: call => broker.hostCall('relay-host', call) },
+  const runtime = createAgentHostRuntime({ controllerId: 'host', team: { stateDirectory: join(root, 'team'), tickMs: 10, callForSupport: () => true, ...(options.tasks ? { tasks: () => true } : {}), request: call => broker.hostCall('relay-host', call) },
     registrations: [{ directory: directory('codex'), adapter: adapter('codex', 'creation') }, { directory: directory('claude'), adapter: adapter('claude', 'live') },
       { directory: directory('copilot'), adapter: adapter('copilot', 'attachment') }] });
   const profile = executeProfileCommand(support, { type: 'create', profile: reviewProfile }, 1)!;
@@ -51,7 +57,7 @@ async function fixture() {
     if (result.status !== 200) throw new Error(result.body);
     return JSON.parse(result.body);
   };
-  return { root, runtime, support, created, opened, sessions, control,
+  return { root, runtime, support, created, opened, sessions, control, mode: (providerId: string, nativeSessionId: string, mode: 'coordinator' | 'plain') => { bots.set(`${providerId}/${nativeSessionId}`, mode); },
     enable: (providerId: string, nativeSessionId: string, on: boolean) => setEnablement(support, (_h, p, n) => ({ controllerId: 'host', providerId: p, nativeSessionId: n }), { hostId: 'relay-host', providerId, nativeSessionId }, on ? [profile.id] : [], Date.now()),
     async close() { await runtime.close(); await rm(root, { recursive: true, force: true }); } };
 }
@@ -62,6 +68,7 @@ it('declares the worker namespace on every Codex thread it creates, deferred unt
   try {
     await f.control('/remote/create', { providerId: 'codex', operationId: randomUUID(), cwd: f.root });
     expect(worker(f.created[0]!.input)).toMatchObject({ deferred: true, tools: [{ name: 'call_for_support' }, { name: 'support_status' }, { name: 'read_support_report' }, { name: 'download_support_resource' }, { name: 'create_task' }, { name: 'task_status' }, { name: 'list_assistants' }, { name: 'message_assistant' }, { name: 'open_room' }, { name: 'room_say' }, { name: 'room_pass' }, { name: 'message_task' }, { name: 'cancel_task' }, { name: 'mark_task_done' }] });
+    // Tools fixed at creation carry the task tools too, so switching the assistant to coordinator mode later reaches the thread.
     // Attachments rebind its executors; the thread keeps its declaration.
     expect(worker(f.opened.find(entry => entry.id === 'codex-0')?.extensions)).toBeDefined();
     f.support.profiles[0]!.enableByDefault = true;
@@ -82,6 +89,22 @@ it('gives a Claude session the worker namespace only while it is enabled, also w
   } finally { await f.close(); }
 });
 
+it('gives a live Claude session the task tools while its assistant is a coordinator, and takes them back when it is switched to plain', async () => {
+  const f = await fixture({ tasks: true });
+  try {
+    const names = () => f.sessions.get('claude-main')!.namespaces.at(-1)?.flatMap(namespace => namespace.tools.map(tool => tool.name));
+    f.mode('claude', 'claude-main', 'plain');
+    await f.control('/remote/attach', { providerId: 'claude', nativeSessionId: 'claude-main' });
+    expect(worker(f.opened.at(-1)!.extensions)).toBeUndefined();
+    f.mode('claude', 'claude-main', 'coordinator');
+    await expect.poll(names).toContain('create_task');
+    // Support enabled too: switching to plain keeps the support tools and drops the task tools.
+    f.enable('claude', 'claude-main', true);
+    f.mode('claude', 'claude-main', 'plain');
+    await expect.poll(names).toEqual(['call_for_support', 'support_status', 'read_support_report', 'download_support_resource']);
+  } finally { await f.close(); }
+});
+
 it('gives a Copilot session the worker tools when it is attached while enabled, including a session started elsewhere', async () => {
   const f = await fixture();
   try {
@@ -94,7 +117,8 @@ it('gives a Copilot session the worker tools when it is attached while enabled, 
       const id = `copilot-${++attached}`;
       await f.control('/remote/attach', { providerId: 'copilot', nativeSessionId: id });
       return worker(f.opened.find(entry => entry.id === id)?.extensions);
-    }).toMatchObject({ name: 'agent_remote', tools: [{ name: 'call_for_support' }, { name: 'support_status' }, { name: 'read_support_report' }, { name: 'download_support_resource' }, { name: 'create_task' }, { name: 'task_status' }, { name: 'list_assistants' }, { name: 'message_assistant' }, { name: 'open_room' }, { name: 'room_say' }, { name: 'room_pass' }, { name: 'message_task' }, { name: 'cancel_task' }, { name: 'mark_task_done' }] });
+    }).toMatchObject({ name: 'agent_remote', tools: [{ name: 'call_for_support' }, { name: 'support_status' }, { name: 'read_support_report' }, { name: 'download_support_resource' }] });
+    // Enabled for support only, it is nobody's coordinator: no task tools.
     expect(worker(f.opened.at(-1)!.extensions)).not.toHaveProperty('deferred');
   } finally { await f.close(); }
 });

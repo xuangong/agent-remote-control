@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { CallForSupportProfileInput, TeamHostCall, TeamSeat } from '@orchardworks/agent-remote-protocol';
+import type { CallForSupportProfileInput, TeamHostCall, TeamSeat, WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { TeamBroker, type TeamBrokerPorts } from '../teams.js';
 import { validSavedTeam, type SavedTeam } from '../team-delivery.js';
 import { emptyCallForSupportState, executeProfileCommand, setEnablement, type CallForSupportState } from '../call-for-support-profiles.js';
@@ -8,7 +8,7 @@ import { PortableTeamResourceStore } from '../team-resources.js';
 export const review: CallForSupportProfileInput = { name: 'Cross review', description: 'Independent reviewers.', coordinator: { model: 'gpt-5.5', reasoningEffort: 'high' }, enableByDefault: false,
   mandate: { supporters: [{ providerId: 'claude', model: 'opus' }], maxSupporters: 2, workspaces: ['shared'], remoteHosts: [], approval: 'every_roster' } };
 
-export function supportFixture(options: { capable?: string[]; readOnly?: boolean | ((hostId: string, providerId: string) => boolean); resourceClock?: { now(): number; ttlMs: number } } = {}) {
+export function supportFixture(options: { capable?: string[]; groups?: WindowGroup[]; readOnly?: boolean | ((hostId: string, providerId: string) => boolean); resourceClock?: { now(): number; ttlMs: number } } = {}) {
   let teams: SavedTeam[] = [], now = 100;
   const state: CallForSupportState = emptyCallForSupportState();
   const seats: TeamSeat[] = [];
@@ -40,6 +40,7 @@ export function supportFixture(options: { capable?: string[]; readOnly?: boolean
         return (await broker.hostCall(hostId, { ...seat, action: 'resource_finish' }) as { resource: unknown }).resource;
       },
     },
+    ...(options.groups ? { assistants: { groups: () => options.groups!, capable: (hostId: string) => (options.capable ?? ['mac', 'linux']).includes(hostId) } } : {}),
   };
   const broker = new TeamBroker(ports);
   const profile = (input: CallForSupportProfileInput = review) => executeProfileCommand(state, { type: 'create', profile: input }, 1)!;

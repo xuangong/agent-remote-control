@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { isTeam, type Team } from '@orchardworks/agent-remote-protocol';
+import { isTeam, type Team, type WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { review, supportFixture } from './test-utils/call-for-support-fixture.js';
 
 it('creates a group from a worker call: the worker seat binds first, then a read-only coordinator, then the call', async () => {
@@ -115,4 +115,12 @@ it('tells a Host which of its sessions may call for support', async () => {
   expect(await f.broker.hostCall('mac', { action: 'support_enablement' })).toEqual({ defaultEnabled: true,
     sessions: [{ providerId: 'codex', nativeSessionId: 'worker', enabled: true }, { providerId: 'codex', nativeSessionId: 'other', enabled: false }] });
   await expect(f.broker.hostCall('win', { action: 'support_enablement' })).rejects.toThrow('Update the Controller');
+});
+
+it('tells a Host which of its sessions are coordinators\' main sessions, so only they get the task tools', async () => {
+  const view = (id: string, hostId: string, nativeSessionId: string) => ({ id, placement: 'primary', binding: { hostId, providerId: 'codex', nativeSessionId, title: nativeSessionId } });
+  const groups = [{ window: { id: 'g', title: 'g', revision: 1, views: [view('v1', 'mac', 'chief'), view('v2', 'mac', 'plain'), view('v3', 'linux', 'remote')] },
+    bots: { rank: 'm', members: { v1: { mode: 'coordinator' }, v2: { mode: 'plain' }, v3: { mode: 'coordinator' } } } }] as unknown as WindowGroup[];
+  const f = supportFixture({ groups });
+  expect(await f.broker.hostCall('mac', { action: 'support_enablement' })).toEqual({ defaultEnabled: false, sessions: [], coordinators: [{ providerId: 'codex', nativeSessionId: 'chief' }] });
 });

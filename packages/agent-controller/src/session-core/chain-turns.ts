@@ -8,7 +8,8 @@ import { nativeSessionRefKey, parseTaskInputs, type NativeSessionRef, type TurnC
 import type { AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { accountUsage, type SessionUsage } from '../session-usage.js';
 
-export interface TurnReport { cause: TurnCause; tokens: number; costUsd?: number }
+/** An ended turn: what started it, what it cost, and the last text the bot wrote in it. */
+export interface TurnReport { cause: TurnCause; tokens: number; costUsd?: number; finalText?: string }
 
 /** The cause of each session's latest input, by native session. */
 export class TurnCauses {
@@ -17,9 +18,17 @@ export class TurnCauses {
   set(ref: NativeSessionRef, cause: TurnCause): void { this.causes.set(nativeSessionRefKey(ref), cause); }
 }
 
-/** The cause an input gives its turn: framed input is the Relay's, anything else the person's, named by its message. */
+/**
+ * The cause an input gives its turn: framed input is the Relay's, anything else the person's, named by its message. A framed input
+ * that is exactly one message from another bot, and not itself a reply, also names that message: the turn's final text answers it
+ * (bots design 3.3). Standing instructions are not messages; anything else beside the message means the turn answers none.
+ */
 export function inputCause(item: { text: string; messageId?: string; clientMessageId?: string }): TurnCause {
-  if (parseTaskInputs(item.text.trim())) return { kind: 'framed' };
+  const inputs = parseTaskInputs(item.text.trim());
+  if (inputs) {
+    const messages = inputs.filter(input => input.kind !== 'standing'), only = messages.length === 1 ? messages[0] : undefined;
+    return only?.kind === 'assistant' && !only.replyTo ? { kind: 'framed', answers: only.messageId } : { kind: 'framed' };
+  }
   return { kind: 'person', messageId: item.messageId ?? item.clientMessageId ?? createHash('sha256').update(item.text).digest('hex').slice(0, 64) };
 }
 
@@ -27,6 +36,8 @@ export function inputCause(item: { text: string; messageId?: string; clientMessa
 export function watchChainTurns(session: AgentSession, ref: NativeSessionRef, causes: TurnCauses, report: (turn: TurnReport) => void): AgentSession {
   const usage: SessionUsage = { tokens: 0 };
   let counted = { tokens: 0, costUsd: 0 };
+  // The bot's last run of assistant text in the turn: a tool call or another message starts a new run.
+  let final = '', writing = false, writingId: string | undefined;
   async function* observe(): AsyncGenerator<ProviderStreamItem> {
     const source = session.observe()[Symbol.asyncIterator]();
     try {
@@ -36,13 +47,19 @@ export function watchChainTurns(session: AgentSession, ref: NativeSessionRef, ca
         const item = result.value;
         if (item.type === 'observation' && item.delivery !== 'history') {
           const event = item.event;
-          if (event.type === 'timeline' && event.item.type === 'user_message' && !event.item.withdrawn && event.item.text.trim()) causes.set(ref, inputCause(event.item));
+          if (event.type === 'timeline' && event.item.type === 'user_message' && !event.item.withdrawn && event.item.text.trim()) { causes.set(ref, inputCause(event.item)); final = ''; writing = false; }
+          if (event.type === 'timeline' && event.item.type === 'assistant_message') {
+            if (!writing || event.item.messageId !== undefined && writingId !== undefined && event.item.messageId !== writingId) final = '';
+            final += event.item.text; writing = true; writingId = event.item.messageId;
+          } else if (event.type === 'timeline' && event.item.type !== 'reasoning' && event.item.type !== 'user_message') writing = false;
           if (event.type === 'usage_updated') accountUsage(usage, event.usage, false);
           if (event.type === 'turn_completed') {
             if (event.usage) accountUsage(usage, event.usage, true);
             const cause = causes.of(ref), tokens = usage.tokens - counted.tokens, cost = (usage.costUsd ?? 0) - counted.costUsd;
             counted = { tokens: usage.tokens, costUsd: usage.costUsd ?? 0 };
-            if (cause) report({ cause, tokens, ...(cost > 0 ? { costUsd: cost } : {}) });
+            const finalText = final.trim();
+            final = ''; writing = false;
+            if (cause) report({ cause, tokens, ...(cost > 0 ? { costUsd: cost } : {}), ...(finalText ? { finalText } : {}) });
           }
         }
         yield item;

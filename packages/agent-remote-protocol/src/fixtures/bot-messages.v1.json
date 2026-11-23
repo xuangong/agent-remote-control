@@ -1,18 +1,108 @@
 {
   "results": {
     "valid": [
-      { "outcome": "delivered", "messageId": "m0123456789ab" },
-      { "outcome": "held", "messageId": "m0123456789ab" },
-      { "outcome": "duplicate", "messageId": "m0123456789ab" },
-      { "outcome": "forbidden", "reason": "The person stopped this work." },
-      { "outcome": "unreachable", "reason": "No bot of this account answers to that name." }
+      {
+        "outcome": "delivered",
+        "messageId": "m0123456789ab"
+      },
+      {
+        "outcome": "held",
+        "messageId": "m0123456789ab"
+      },
+      {
+        "outcome": "duplicate",
+        "messageId": "m0123456789ab"
+      },
+      {
+        "outcome": "forbidden",
+        "reason": "The person stopped this work."
+      },
+      {
+        "outcome": "unreachable",
+        "reason": "No bot of this account answers to that name."
+      }
     ],
     "invalid": [
       {},
-      { "outcome": "sent" },
-      { "outcome": "delivered", "messageId": "not-an-id" },
-      { "outcome": "forbidden", "reason": "" },
-      { "outcome": "delivered", "state": "working" }
+      {
+        "outcome": "sent"
+      },
+      {
+        "outcome": "delivered",
+        "messageId": "not-an-id"
+      },
+      {
+        "outcome": "forbidden",
+        "reason": ""
+      },
+      {
+        "outcome": "delivered",
+        "state": "working"
+      }
+    ]
+  },
+  "calls": {
+    "valid": [
+      {
+        "action": "bot_reply",
+        "owner": {
+          "providerId": "codex",
+          "nativeSessionId": "tracker"
+        },
+        "text": "Yes, cut at noon.",
+        "cause": {
+          "kind": "framed",
+          "answers": "m0123456789ab"
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "action": "bot_reply",
+        "owner": {
+          "providerId": "codex",
+          "nativeSessionId": "tracker"
+        },
+        "text": "Yes.",
+        "cause": {
+          "kind": "framed"
+        }
+      },
+      {
+        "action": "bot_reply",
+        "owner": {
+          "providerId": "codex",
+          "nativeSessionId": "tracker"
+        },
+        "text": "Yes.",
+        "cause": {
+          "kind": "person",
+          "messageId": "u1"
+        }
+      },
+      {
+        "action": "bot_reply",
+        "owner": {
+          "providerId": "codex",
+          "nativeSessionId": "tracker"
+        },
+        "text": "",
+        "cause": {
+          "kind": "framed",
+          "answers": "m0123456789ab"
+        }
+      },
+      {
+        "action": "bot_reply",
+        "owner": {
+          "providerId": "codex",
+          "nativeSessionId": "tracker"
+        },
+        "cause": {
+          "kind": "framed",
+          "answers": "m0123456789ab"
+        }
+      }
     ]
   }
 }

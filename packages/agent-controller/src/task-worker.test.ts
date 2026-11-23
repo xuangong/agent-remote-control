@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentSessionTool } from '@orchardworks/agent-provider-sdk';
-import { parseTaskInputs, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import { BOT_INSTRUCTIONS_VERSION, parseTaskInputs, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { botsHarness } from './test-utils/bots-harness.js';
 import { BotTools } from './bot-tools.js';
 
@@ -39,7 +39,7 @@ describe('a task between a main session and its worker', () => {
     const worker = h.created[0]!;
     await h.runtime.tick();
     h.busy('worker', true);
-    expect(JSON.parse(await report(worker.extensions.tools, 'done', 'The logs are in /tmp/logs.') as string)).toMatchObject({ state: 'done' });
+    expect(JSON.parse(await report(worker.extensions.tools, 'done', 'The logs are in /tmp/logs.') as string)).toMatchObject({ outcome: 'delivered' });
     await h.runtime.tick();
     // The owner's provider has a native next-turn queue; a task result still waits for the turn to end.
     expect(h.sessions.get('worker')!.deliveries).toEqual([]);
@@ -60,7 +60,7 @@ describe('a task between a main session and its worker', () => {
     const { extensions } = h.created[0]!;
     expect(extensions.tools).toBeUndefined();
     expect(extensions.toolNamespaces?.map(namespace => [namespace.name, namespace.tools.map(item => item.name)])).toEqual([['agent_remote', BOT_TOOLS], ['agent_remote_task', ['read_source_session']]]);
-    expect(JSON.parse(await report(extensions.toolNamespaces![0]!.tools, 'failed', 'The runner is offline.') as string)).toMatchObject({ state: 'failed' });
+    expect(JSON.parse(await report(extensions.toolNamespaces![0]!.tools, 'failed', 'The runner is offline.') as string)).toMatchObject({ outcome: 'delivered' });
   });
 
   it('delivers the results of several tasks that finished during one turn as one input', async () => {
@@ -239,7 +239,7 @@ describe('messages between assistants', () => {
     expect(h.sessions.get('tracker')!.deliveries).toEqual([]);
     h.busy('tracker', false);
     await h.runtime.tick();
-    expect(h.sessions.get('tracker')!.deliveries).toEqual([{ delivery: 'immediate', text: expect.stringMatching(/^\[Your standing instructions · v2\]\n[\s\S]*Your mission:\nTrack the release\.$/) }]);
+    expect(h.sessions.get('tracker')!.deliveries).toEqual([{ delivery: 'immediate', text: expect.stringMatching(new RegExp(`^\\[Your standing instructions · v${BOT_INSTRUCTIONS_VERSION}\\]\\n[\\s\\S]*Your mission:\\nTrack the release\\.$`)) }]);
     await h.host({ action: 'bot_enablement' });
     await h.runtime.tick();
     expect(h.sessions.get('tracker')!.deliveries).toHaveLength(1);

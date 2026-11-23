@@ -146,4 +146,66 @@ describe('bots calling as their own sessions', () => {
     f.goOffline();
     expect(await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'o2', to: 'Tracker', text: 'Again.' })).toMatchObject({ outcome: 'held' });
   });
+
+  describe('replies from the final text of a turn', () => {
+    const inboxOf = (f: ReturnType<typeof fixture>, botId: string) => f.state().find(team => team.inbox?.botId === botId)!;
+    const received = async (f: ReturnType<typeof fixture>, text = 'Is the branch cut?') => {
+      await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('tracker'), operationId: 'q1', to: 'Chief', text });
+      return inboxOf(f, ids.chief).inbox!.recent!.at(-1)!.id;
+    };
+
+    it('sends the text back to the sender as a reply that names the message, once', async () => {
+      const f = fixture();
+      const asked = await received(f);
+      const reply = { action: 'bot_reply' as const, owner: f.as('chief'), text: 'Yes, cut at noon.', cause: { kind: 'framed' as const, answers: asked } };
+      expect(await f.broker.hostCall('mac', reply)).toMatchObject({ outcome: 'delivered', messageId: expect.stringMatching(/^m[0-9a-f]{12}$/) });
+      const tracker = inboxOf(f, ids.tracker);
+      expect(parseTaskInputs(tracker.messages.at(-1)!.text)).toEqual([expect.objectContaining({ kind: 'assistant', from: 'Chief', replyTo: asked, body: 'Yes, cut at noon.' })]);
+      expect(await f.broker.hostCall('mac', reply)).toMatchObject({ outcome: 'duplicate' });
+      expect(inboxOf(f, ids.tracker).messages).toHaveLength(tracker.messages.length);
+    });
+
+    it('cuts a final text at 300 characters with a pointer to the rest', async () => {
+      const f = fixture();
+      const asked = await received(f);
+      await f.broker.hostCall('mac', { action: 'bot_reply', owner: f.as('chief'), text: 'x'.repeat(2000), cause: { kind: 'framed', answers: asked } });
+      const [input] = parseTaskInputs(inboxOf(f, ids.tracker).messages.at(-1)!.text)!;
+      const body = (input as { body: string }).body;
+      expect(body).toHaveLength(300);
+      expect(body).toMatch(/^x+ … \[cut; read the rest of Chief's answer with read_bot\]$/);
+    });
+
+    it('sends nothing when the turn already answered its sender with message, to whom it was said or by reply_to', async () => {
+      const f = fixture();
+      const asked = await received(f);
+      const turn = { kind: 'framed' as const, answers: asked };
+      await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'a1', to: 'Tracker', text: 'Working on it.', cause: turn });
+      const before = inboxOf(f, ids.tracker).messages.length;
+      expect(await f.broker.hostCall('mac', { action: 'bot_reply', owner: f.as('chief'), text: 'Done.', cause: turn })).toMatchObject({ outcome: 'duplicate' });
+      expect(inboxOf(f, ids.tracker).messages).toHaveLength(before);
+      // A message to another bot in that turn does not count as answering the sender.
+      const f2 = fixture();
+      const asked2 = await received(f2);
+      await f2.broker.hostCall('mac', { action: 'create_bot', owner: f2.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
+      await f2.broker.hostCall('mac', { action: 'bot_message', owner: f2.as('chief'), operationId: 'a2', to: 'Reviewer', text: 'Look.', cause: { kind: 'framed', answers: asked2 } });
+      expect(await f2.broker.hostCall('mac', { action: 'bot_reply', owner: f2.as('chief'), text: 'Asked the reviewer.', cause: { kind: 'framed', answers: asked2 } })).toMatchObject({ outcome: 'delivered' });
+    });
+
+    it('answers a temporary bot that wrote, refuses a message that is not in the bot\'s inbox, and says so when the sender is gone', async () => {
+      const f = fixture();
+      await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
+      const worker = f.as(f.task().members[0]!.nativeSessionId!);
+      await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'w1', to: 'Tracker', text: 'Which branch?' });
+      const asked = inboxOf(f, ids.tracker).inbox!.recent!.at(-1)!.id;
+      expect(await f.broker.hostCall('mac', { action: 'bot_reply', owner: f.as('tracker'), text: 'release/0.3', cause: { kind: 'framed', answers: asked } })).toMatchObject({ outcome: 'delivered' });
+      expect(f.inputs(f.task(), 0).at(-1)).toMatchObject({ kind: 'message', from: 'Tracker', body: 'release/0.3' });
+      expect(await f.broker.hostCall('mac', { action: 'bot_reply', owner: f.as('tracker'), text: 'Hi', cause: { kind: 'framed', answers: 'm000000000000' } })).toMatchObject({ outcome: 'forbidden' });
+      // A temporary bot has no inbox, so it never answers from final text.
+      expect(await f.broker.hostCall('mac', { action: 'bot_reply', owner: worker, text: 'Hi', cause: { kind: 'framed', answers: asked } })).toMatchObject({ outcome: 'forbidden' });
+      await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'w2', to: 'Tracker', text: 'And the tag?' });
+      const second = inboxOf(f, ids.tracker).inbox!.recent!.at(-1)!.id;
+      await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'w3', to: 'chief', text: 'Done.', status: 'done' });
+      expect(await f.broker.hostCall('mac', { action: 'bot_reply', owner: f.as('tracker'), text: 'v0.3', cause: { kind: 'framed', answers: second } })).toMatchObject({ outcome: 'unreachable' });
+    });
+  });
 });

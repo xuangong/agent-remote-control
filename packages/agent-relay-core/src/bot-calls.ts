@@ -16,6 +16,7 @@ import type { Rooms } from './rooms.js';
 import type { BotWork } from './bot-work.js';
 import { newBotId } from './bot-store.js';
 import { temporaryBotId } from './chain-scope.js';
+import { cutReply } from './reply-text.js';
 
 type Call<A extends TeamHostCall['action']> = Extract<TeamHostCall, { action: A }>;
 type Owner = { providerId: string; nativeSessionId: string };
@@ -27,6 +28,7 @@ const fail = (message: string): never => { throw new Error(message); };
 const fold = (text: string) => text.trim().toLocaleLowerCase('en');
 const running = (team: SavedTeam) => team.status === 'active' && (team.task?.state === 'working' || team.task?.state === 'needs_input');
 export { temporaryBotId };
+type SendCall = Pick<Call<'bot_message'>, 'owner' | 'operationId' | 'text' | 'status' | 'replyTo' | 'patch' | 'cause'>;
 const NOT_FOUND = 'No bot of this account answers to that name. List them with list_bots.';
 
 export class BotCalls {
@@ -162,8 +164,16 @@ export class BotCalls {
     if (!to) return { outcome: 'unreachable', reason: NOT_FOUND };
     return this.route(hostId, from, chief, to, call);
   }
+  /** Sends where the sender and receiver say, and marks the messages a standing sender answered by it (bots design 3.3). */
+  private async route(hostId: string, from: Bot, chief: Bot | undefined, to: Bot, call: SendCall): Promise<BotMessageResult> {
+    const result = await this.send(hostId, from, chief, to, call);
+    // The turn answered its sender by this message, or this message names the one it answers.
+    const answers = [...call.replyTo ? [call.replyTo] : [], ...call.cause?.kind === 'framed' && call.cause.answers ? [call.cause.answers] : []];
+    if (from.standing && answers.length && (result.outcome === 'delivered' || result.outcome === 'held')) await this.inboxes.answered(from.standing, answers, to.key);
+    return result;
+  }
   /** Where a message goes by who sends it to whom, and the outcome. */
-  private async route(hostId: string, from: Bot, chief: Bot | undefined, to: Bot, call: Pick<Call<'bot_message'>, 'owner' | 'operationId' | 'text' | 'status' | 'replyTo' | 'patch'>): Promise<BotMessageResult> {
+  private async send(hostId: string, from: Bot, chief: Bot | undefined, to: Bot, call: SendCall): Promise<BotMessageResult> {
     // A temporary bot to its chief: its report, its question or its progress.
     if (from.task && chief && to.key === chief.key) {
       const memberId = from.task.members[0]!.id;
@@ -191,6 +201,26 @@ export class BotCalls {
     if (waiting() === before) return { outcome: 'duplicate' };
     const seat = this.broker.ports.read().find(item => item.id === teamId)?.members.find(member => member.id === memberId);
     return { outcome: seat?.creation === 'ready' ? 'delivered' : 'held' };
+  }
+  /**
+   * A standing bot's turn ended with a final text, and one message from another bot started it (bots design 3.3): the text goes
+   * back to that message's sender as the reply, cut where a bot's message is cut. Nothing is sent when the turn already answered.
+   */
+  async reply(hostId: string, call: Call<'bot_reply'>): Promise<BotMessageResult> {
+    const from = this.caller(hostId, call.owner), standing = from.standing;
+    const entry = standing && this.inboxes.current(this.broker.ports.read(), standing)?.inbox?.recent?.find(item => item.id === call.cause.answers);
+    if (!entry) return { outcome: 'forbidden', reason: 'No message of yours has that id.' };
+    if (entry.answered) return { outcome: 'duplicate', reason: 'This turn already answered it.' };
+    const to = this.byKey(entry.from);
+    if (!to) return { outcome: 'unreachable', reason: 'The sender is gone.' };
+    return this.route(hostId, from, undefined, to, { owner: call.owner, operationId: `reply-${entry.id}`, text: cutReply(call.text, from.name), replyTo: entry.id, cause: call.cause });
+  }
+  /** The bot an id means: a standing bot, or a temporary bot still at work. */
+  private byKey(key: string): Bot | undefined {
+    const standing = accountDirectory(this.ports.groups()).find(item => item.key === key && key.startsWith('b_'));
+    if (standing) return { key: standing.key, name: standing.name, standing };
+    const team = this.broker.ports.read().find(item => item.task && running(item) && temporaryBotId(item.id) === key);
+    return team ? this.temporary(team) : undefined;
   }
   list(hostId: string, call: Call<'list_bots'>): { bots: BotListing[]; work?: WorkItem[] } {
     const self = this.caller(hostId, call.owner), chief = this.chiefOf(self);

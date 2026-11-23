@@ -81,6 +81,16 @@ export class BotInboxes {
       if (inbox?.inbox) { inbox.inbox.instructions = instructionsHash(mission); inbox.revision++; inbox.updatedAt = this.broker.ports.now(); }
     });
   }
+  /** The bot answered these messages of its inbox, from the senders named: a reply from its final text then has nothing left to answer. */
+  async answered(bot: Assistant, ids: readonly string[], sender: string): Promise<void> {
+    const inbox = this.current(this.broker.ports.read(), bot);
+    if (!inbox?.inbox?.recent?.some(entry => ids.includes(entry.id) && entry.from === sender && !entry.answered)) return;
+    await this.broker.change(teams => {
+      const current = this.current(teams, bot);
+      for (const entry of current?.inbox?.recent ?? []) if (ids.includes(entry.id) && entry.from === sender) entry.answered = true;
+      if (current) { current.revision++; current.updatedAt = this.broker.ports.now(); }
+    });
+  }
   /** Binds the bot's inbox seat when it is not bound yet; the seat as it stands after. */
   async bind(bot: Assistant): Promise<TeamMember | undefined> {
     const inbox = this.current(this.broker.ports.read(), bot);

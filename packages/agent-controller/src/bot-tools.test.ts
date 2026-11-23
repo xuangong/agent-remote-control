@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { isBotMessageResult, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { BotTools, workerToolsIn, WORKER_NAMESPACE } from './bot-tools.js';
@@ -57,4 +57,32 @@ it('returns the outcome of a message to the bot as the tool result, whichever of
   expect(told).toEqual(fixtures.results.valid);
   expect(told.every(isBotMessageResult)).toBe(true);
   expect(calls[0]).toMatchObject({ action: 'bot_message', to: 'Tracker', text: 'Hello.' });
+});
+
+describe('the reply a bot\'s ended turn sends', () => {
+  const asked = { kind: 'framed' as const, answers: 'm0123456789ab' };
+  const ended = async (turn: Parameters<BotTools['turnEnded']>[1]) => {
+    const f = fixture([{ nativeSessionId: 'chief' }]);
+    await f.tools.refresh('controller');
+    f.calls.length = 0;
+    f.tools.turnEnded(ref('chief'), turn);
+    return f.calls;
+  };
+
+  it('is the final text, as a call the Host makes with no tool, when one message started the turn', async () => {
+    expect(await ended({ cause: asked, tokens: 5, finalText: 'Yes, cut at noon.' })).toEqual([
+      { action: 'chain_turn', owner: { providerId: 'codex', nativeSessionId: 'chief' }, cause: asked, tokens: 5 },
+      { action: 'bot_reply', owner: { providerId: 'codex', nativeSessionId: 'chief' }, text: 'Yes, cut at noon.', cause: asked }]);
+  });
+
+  it('is sent for no turn that answers no message, that said nothing, or that a session without bots ran', async () => {
+    expect((await ended({ cause: { kind: 'framed' }, tokens: 5, finalText: 'Done.' })).map(call => call.action)).toEqual(['chain_turn']);
+    expect((await ended({ cause: { kind: 'person', messageId: 'u1' }, tokens: 5, finalText: 'Done.' })).map(call => call.action)).toEqual(['chain_turn']);
+    expect((await ended({ cause: asked, tokens: 5 })).map(call => call.action)).toEqual(['chain_turn']);
+    const f = fixture([{ nativeSessionId: 'chief' }]);
+    await f.tools.refresh('controller');
+    f.calls.length = 0;
+    f.tools.turnEnded(ref('plain'), { cause: asked, tokens: 5, finalText: 'Done.' });
+    expect(f.calls).toEqual([]);
+  });
 });

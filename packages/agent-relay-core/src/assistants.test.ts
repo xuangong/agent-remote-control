@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isTeam, parseTaskInputs, type TeamSeat, type WindowGroup } from '@orchardworks/agent-remote-protocol';
+import { BOT_INSTRUCTIONS_VERSION, isTeam, parseTaskInputs, type TeamSeat, type WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { TeamBroker } from './teams.js';
 import type { SavedTeam } from './team-delivery.js';
 
@@ -64,7 +64,7 @@ describe('assistants messaging one another', () => {
     expect(inbox!.inbox?.botId).toBe(ids.tracker);
     expect(inbox!.members.map(member => [member.role, member.hostId, member.nativeSessionId, member.creation])).toEqual([['requester', 'pc', 'tracker', 'ready']]);
     expect(f.seats.map(seat => seat.inbox?.botId)).toEqual([ids.tracker]);
-    expect(inbox!.messages.map(message => message.text.split('\n')[0])).toEqual(['[Your standing instructions · v2]', expect.stringContaining('[Message from Chief')]);
+    expect(inbox!.messages.map(message => message.text.split('\n')[0])).toEqual([`[Your standing instructions · v${BOT_INSTRUCTIONS_VERSION}]`, expect.stringContaining('[Message from Chief')]);
     expect(parseTaskInputs(inbox!.messages[1]!.text)).toEqual([{ kind: 'assistant', messageId: sent.messageId, from: 'Chief', body: 'Is the release branch cut?' }]);
     // The receiving Controller sees the inbox, which stays a valid Team; the sender's does not.
     expect(await f.broker.hostCall('pc', { action: 'poll' })).toEqual([expect.objectContaining({ id: inbox!.id })]);

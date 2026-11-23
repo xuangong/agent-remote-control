@@ -44,11 +44,16 @@ export class BotTools {
   /** What started each session's latest turn, which a bot's calls carry (bots design 7). */
   readonly causes = new TurnCauses();
   constructor(private readonly ports: BotToolsPorts) {}
-  /** A bot's turn ended: its Relay counts the turn and its usage in the turn's chain. */
+  /**
+   * A bot's turn ended: its Relay counts the turn and its usage in the turn's chain. When one message from another bot started the
+   * turn, the turn's final text goes back to that message's sender as the reply (bots design 3.3): the Host sends it, with no tool call.
+   */
   turnEnded(ref: NativeSessionRef, turn: TurnReport): void {
     if (this.tools(ref) !== 'tasks') return;
-    void this.ports.request({ action: 'chain_turn', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, cause: turn.cause, tokens: turn.tokens,
-      ...(turn.costUsd !== undefined ? { costUsd: turn.costUsd } : {}) }).catch(() => undefined);
+    const owner = { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId };
+    void this.ports.request({ action: 'chain_turn', owner, cause: turn.cause, tokens: turn.tokens, ...(turn.costUsd !== undefined ? { costUsd: turn.costUsd } : {}) }).catch(() => undefined);
+    if (turn.cause.kind === 'framed' && turn.cause.answers && turn.finalText)
+      void this.ports.request({ action: 'bot_reply', owner, text: turn.finalText.slice(0, ASSISTANT_MESSAGE_LIMIT), cause: { kind: 'framed', answers: turn.cause.answers } }).catch(() => undefined);
   }
   /** Whether the session is offered the bots' namespace: it is a bot's main session. */
   enabled(ref: NativeSessionRef): boolean { return this.tools(ref) !== 'none'; }

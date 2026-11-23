@@ -60,7 +60,9 @@ export type TeamLink = Static<typeof TeamLink>;
  */
 export const TeamInbox = Type.Object({ botId: BotId, instructions: Type.Optional(Type.String({ pattern: '^[0-9a-f]{64}$' })),
   /** The latest messages other bots sent here, with their hop along a reply chain, so a reply names a message it answers. */
-  recent: Type.Optional(Type.Array(Type.Object({ id: AssistantMessageId, from: BotId, hop: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }), operationId: id }, object), { maxItems: 64 })),
+  recent: Type.Optional(Type.Array(Type.Object({ id: AssistantMessageId, from: BotId, hop: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }), operationId: id,
+    /** The bot answered its sender during the turn this message started, so that turn's final text sends no reply. */
+    answered: Type.Optional(Type.Literal(true)) }, object), { maxItems: 64 })),
   /** The person paused the bot: its messages wait until resumed (bots design 7). */
   paused: Type.Optional(Type.Literal(true)),
   /** The bot's work items and timers (bots design 6). */
@@ -144,6 +146,9 @@ export const TeamHostCall = Type.Union([
     pass: Type.Optional(Type.Boolean()),
     /** A worktree bot's result: where its patch was saved on its Host, added to the report by the Relay. */
     patch: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })) }, object),
+  // A standing bot's turn ended: its final text answers the one message that started it (bots design 3.3). The Host sends it, never the model.
+  Type.Object({ action: Type.Literal('bot_reply'), owner: BotCaller, text: Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT }),
+    cause: Type.Object({ kind: Type.Literal('framed'), answers: AssistantMessageId }, object) }, object),
   Type.Object({ action: Type.Literal('list_bots'), owner: BotCaller }, object),
   // A bot's turn ended: its Host counts the turn and its usage in the turn's chain.
   Type.Object({ action: Type.Literal('chain_turn'), owner: BotCaller, cause: TurnCause, tokens: Type.Integer({ minimum: 0 }), costUsd: Type.Optional(Type.Number({ minimum: 0 })) }, object),

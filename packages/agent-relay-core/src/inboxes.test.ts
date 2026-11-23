@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isTeam, type WindowGroup } from '@orchardworks/agent-remote-protocol';
+import { BOT_INSTRUCTIONS_VERSION, isTeam, type WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { TeamBroker } from './teams.js';
 import type { SavedTeam } from './team-delivery.js';
 
@@ -32,7 +32,7 @@ describe('bot inboxes', () => {
     expect(isTeam(inbox)).toBe(true);
     expect(inbox.members).toEqual([expect.objectContaining({ role: 'requester', hostId: 'mac', providerId: 'codex', nativeSessionId: 'chief', creation: 'ready' })]);
     expect(inbox.messages).toHaveLength(1);
-    expect(inbox.messages[0]!.text).toMatch(/^\[Your standing instructions · v2\]\n/);
+    expect(inbox.messages[0]!.text).toMatch(new RegExp(`^\\[Your standing instructions · v${BOT_INSTRUCTIONS_VERSION}\\]\\n`));
     expect(inbox.messages[0]!.text).toContain('Your mission:\nLead the release.');
     await f.poll();
     expect(f.inboxes()[0]!.messages).toHaveLength(1);
@@ -48,7 +48,7 @@ describe('bot inboxes', () => {
     expect(f.inboxes()).toEqual([]);
     f.details.mission = 'Watch the build.';
     await f.poll();
-    expect(f.inboxes()[0]!.messages.map(message => message.text.split('\n')[0])).toEqual(['[Your standing instructions · v2]']);
+    expect(f.inboxes()[0]!.messages.map(message => message.text.split('\n')[0])).toEqual([`[Your standing instructions · v${BOT_INSTRUCTIONS_VERSION}]`]);
   });
 
   it('gives a Host inboxes only for the bots whose main session it holds', async () => {

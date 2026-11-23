@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
-import { BOT_MISSION_LIMIT, BotMessageResult, BotRecord, botIdentity, botPlacement, WindowBotDetails } from './index.js';
+import { BOT_MISSION_LIMIT, BotMessageResult, BotRecord, isTeamHostCall, botIdentity, botPlacement, WindowBotDetails } from './index.js';
 
 const id = 'b_' + 'a'.repeat(32);
 
@@ -30,5 +30,10 @@ describe('the outcome of a message', () => {
     for (const result of botMessages.results.valid) expect(Value.Check(BotMessageResult, result)).toBe(true);
     for (const result of botMessages.results.invalid) expect(Value.Check(BotMessageResult, result)).toBe(false);
     expect(new Set(botMessages.results.valid.map((result: { outcome: string }) => result.outcome))).toEqual(new Set(['delivered', 'held', 'duplicate', 'forbidden', 'unreachable']));
+  });
+
+  it('has one call the Host makes when a turn ends, naming the one message it answers', () => {
+    for (const call of botMessages.calls.valid) expect(isTeamHostCall(call)).toBe(true);
+    for (const call of botMessages.calls.invalid) expect(isTeamHostCall(call)).toBe(false);
   });
 });

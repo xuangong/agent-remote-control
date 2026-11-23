@@ -78,7 +78,7 @@ export async function startStack(options: StackOptions = {}) {
   const origin = `http://127.0.0.1:${port}`;
   const workspace = await realpath(await mkdtemp(join(state, 'workspace-')));
   const successor = options.succession ? { workspace, ...(options.succession.beforeCreate ? { beforeCreate: options.succession.beforeCreate } : {}) } : undefined;
-  const provider = scriptedProvider({ ...options, succession: successor, ...(options.workspaces ? { workspaceRoot: workspace } : {}) });
+  const provider = scriptedProvider({ ...options, succession: successor, ...(options.workspaces ? { workspaceRoot: workspace } : {}), ...(options.tools ? { cwd: workspace } : {}) });
   const otherProviders = (options.otherProviders ?? []).map(other => scriptedProvider({ ...other, succession: successor }));
   const webDist = options.webDist ?? WORKBENCH_DIST;
   const update = options.controllerUpdate;

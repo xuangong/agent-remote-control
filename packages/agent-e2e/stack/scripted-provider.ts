@@ -16,7 +16,7 @@
  * active turn until the turn ends, as a real provider does, and a denied approval ends it.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { AgentRuntimeError, parseAgentPreparedTextInput, serializeAgentPreparedTextInput, type AgentInteractionResponse, type AgentProviderAdapter, type AgentToolDetail, type AgentSessionNativeEvidence, type ProviderObservation, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import { AgentRuntimeError, type AgentSessionTool, parseAgentPreparedTextInput, serializeAgentPreparedTextInput, type AgentInteractionResponse, type AgentProviderAdapter, type AgentToolDetail, type AgentSessionNativeEvidence, type ProviderObservation, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory, AgentHostProviderRegistration } from '@orchardworks/agent-remote-controller';
 import { NativeSessionOwnerError, type NativeOwnerIdentity } from '@orchardworks/agent-remote-controller/testing';
 import { ScriptedSession } from '@orchardworks/agent-remote-fixtures';
@@ -83,6 +83,13 @@ export interface ScriptedProviderOptions {
   succession?: { workspace: string; beforeCreate?(): Promise<void> };
   /** A folder the directory offers as a workspace to browse and start sessions in; the Controller's execution policy has to allow it. */
   workspaceRoot?: string;
+  /**
+   * Sessions take tools as a namespace while they run (`live`), as Claude Code does: the Controller's tools reach them when they
+   * open, are created or change, and a flow calls one in the model's place with `useTool`.
+   */
+  tools?: boolean;
+  /** The working directory sessions report, as a real CLI does: Team seats, tasks and bots start where it is. */
+  cwd?: string;
 }
 
 export function scriptedProvider(options: ScriptedProviderOptions = {}) {
@@ -93,6 +100,12 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
   const startedAt = Date.parse('2026-11-18T00:00:00.000Z');
   for (const [id, session] of Object.entries(options.sessions ?? {})) known.set(id, { ...session, history: [...session.history], createdAt: new Date(startedAt).toISOString(), updatedAt: new Date(startedAt).toISOString(), diverged: false });
   const live = new Map<string, ScriptedSessionHandle & ScriptedSession>();
+  /** What each session was given by the Controller: its instructions and its tools, as it opened, was created or was changed. */
+  const given = new Map<string, { instructions?: string; tools: AgentSessionTool[] }>();
+  const give = (id: string, extensions: { instructions?: string; tools?: readonly AgentSessionTool[]; toolNamespaces?: readonly { tools: readonly AgentSessionTool[] }[] } | undefined) => {
+    if (!options.tools || !extensions) return;
+    given.set(id, { ...(extensions.instructions ? { instructions: extensions.instructions } : {}), tools: [...(extensions.tools ?? []), ...(extensions.toolNamespaces ?? []).flatMap(namespace => namespace.tools)] });
+  };
   let created = 0;
   /** The working directory each session the page created was started in. */
   const startedIn = new Map<string, string | undefined>();
@@ -135,7 +148,7 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
     /** A scripted turn: the rows and state events of a real provider's turn, under one turn id. */
     const pendingApprovals = new Map<string, (response: AgentInteractionResponse) => void>();
     let turnCount = 0, eventCount = 0, status: 'idle' | 'running' = 'idle';
-    const runtimeInfo = () => ({ providerId, sessionId: nativeSessionId, status, ...(options.succession ? { cwd: options.succession.workspace } : options.workspaceRoot ? { cwd: startedIn.get(nativeSessionId) ?? options.workspaceRoot } : {}),
+    const runtimeInfo = () => ({ providerId, sessionId: nativeSessionId, status, ...(options.succession ? { cwd: options.succession.workspace } : options.workspaceRoot ? { cwd: startedIn.get(nativeSessionId) ?? options.workspaceRoot } : options.cwd ? { cwd: startedIn.get(nativeSessionId) ?? options.cwd } : {}),
       persistence: { providerId, sessionId: nativeSessionId, opaque: '{}' } });
     const playTurn = async (text: string, steps: ScriptedStep[]) => {
       const turnId = `${nativeSessionId}-turn-${++turnCount}`;
@@ -221,12 +234,15 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
         resolve(response);
       }) as ScriptedSession['respondToInteraction'],
     });
+    if (options.tools) (session as ScriptedSession & { updateToolNamespaces?(namespaces: readonly { tools: readonly AgentSessionTool[] }[]): Promise<void> }).updateToolNamespaces = async namespaces => {
+      given.set(nativeSessionId, { ...given.get(nativeSessionId), tools: namespaces.flatMap(namespace => namespace.tools) });
+    };
     live.set(nativeSessionId, session);
     return session;
   };
 
   const adapter: AgentProviderAdapter = {
-    descriptor: { providerId, displayName: options.displayName ?? 'Scripted', ...(options.succession ? { sessionExtensions: { instructions: true, tools: true } } : {}) },
+    descriptor: { providerId, displayName: options.displayName ?? 'Scripted', ...(options.tools ? { sessionExtensions: { instructions: true, tools: true, toolNamespaces: 'live' as const } } : options.succession ? { sessionExtensions: { instructions: true, tools: true } } : {}) },
     journal: { itemIdentity: 1 as const },
     ...(options.succession ? { readSessionHistory: async () => ({ entries: [] }), nativeEvidence: {
       availability: () => ({ status: 'configured' as const, version: 2 as const }),
@@ -244,7 +260,7 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
     providerId,
     list: async () => [...known].map(([nativeSessionId, saved]) => ({ nativeSessionId, providerId, title: saved.title, createdAt: saved.createdAt, updatedAt: saved.updatedAt, state: 'idle' as const })),
     workspaces: async () => options.workspaceRoot ? [{ id: 'root', name: 'Projects', path: options.workspaceRoot }] : [],
-    create: async config => { const id = `${providerId}-new-${++created}`; startedIn.set(id, config.cwd); known.set(id, { title: 'New session', history: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), diverged: false }); return id; },
+    create: async config => { const id = `${providerId}-new-${++created}`; startedIn.set(id, config.cwd); give(id, config); known.set(id, { title: 'New session', history: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), diverged: false }); return id; },
     canReleaseSession: () => true,
     ...(options.workspaceRoot && !options.succession ? { sessionWorkspace: async (nativeSessionId: string) => startedIn.get(nativeSessionId) ?? options.workspaceRoot! } : {}),
     ...(options.succession ? { sessionWorkspace: async () => options.succession!.workspace, supportsSourceReferences: true, supportsBoundedSourceCreate: async () => true,
@@ -260,6 +276,7 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
         if (openOptions.takeOver !== owner.generation) throw new NativeSessionOwnerError('native_owner_changed', 'The owner changed.', owner);
         owners.delete(nativeSessionId);
       }
+      give(nativeSessionId, openOptions?.extensions);
       return open(nativeSessionId);
     },
     async close() { await Promise.all([...live.values()].map(session => session.dispose())); },
@@ -270,6 +287,14 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
     /** The running session of this provider, once something has opened it. */
     session: (nativeSessionId: string) => live.get(nativeSessionId),
     known: () => [...known.keys()],
+    /** The instructions and tools the Controller gave a session, once it opened or was created with them. */
+    given: (nativeSessionId: string) => given.get(nativeSessionId),
+    /** Calls one of a session's tools as its model would, and reads the answer. */
+    async useTool(nativeSessionId: string, name: string, args: Record<string, unknown>): Promise<unknown> {
+      const tool = given.get(nativeSessionId)?.tools.find(item => item.name === name);
+      if (!tool) throw new Error(`Session ${nativeSessionId} has no tool ${name}.`);
+      return JSON.parse(await tool.execute(args) as string);
+    },
     /** The working directory the page chose for a session it created, by native session id. */
     startedIn: (nativeSessionId: string) => startedIn.get(nativeSessionId),
     /** The Host loses the session, as a deleted or never saved native session is lost: the directory no longer lists it and opening it is refused. */

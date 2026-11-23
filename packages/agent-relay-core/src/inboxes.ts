@@ -73,6 +73,13 @@ export class BotInboxes {
       });
     }
   }
+  /** The bot wrote this mission itself, so it has these standing instructions already: they count as sent. */
+  async known(bot: Assistant, mission: string): Promise<void> {
+    await this.broker.change(teams => {
+      const inbox = this.current(teams, bot);
+      if (inbox?.inbox) { inbox.inbox.instructions = instructionsHash(mission); inbox.revision++; inbox.updatedAt = this.broker.ports.now(); }
+    });
+  }
   /** Binds the bot's inbox seat when it is not bound yet; the seat as it stands after. */
   async bind(bot: Assistant): Promise<TeamMember | undefined> {
     const inbox = this.current(this.broker.ports.read(), bot);

@@ -108,6 +108,14 @@ export class BotCalls {
     return { botId: team.inbox!.botId, status: placed ? 'ready' : 'waiting',
       message: placed ? `Bot "${call.name}" is ready in your group; it reads its mission first and reports in.` : `Bot "${call.name}" is recorded; its session starts when this computer can create it.` };
   }
+  /** A standing bot records a lasting change to how it works in its own mission (bots design 2.3). */
+  async updateMission(hostId: string, call: Call<'update_mission'>) {
+    const self = this.caller(hostId, call.owner).standing ?? fail('A temporary bot\'s mission is its brief; tell your organizer what changed instead.');
+    const setMission = this.ports.setMission ?? fail('Missions cannot be changed on this Relay.');
+    await setMission(self.groupId, self.viewId, call.mission);
+    await this.inboxes.known(self, call.mission);
+    return { mission: call.mission };
+  }
   async message(hostId: string, call: Call<'bot_message'>) {
     const from = this.caller(hostId, call.owner), organizer = this.organizerOf(from);
     const to = fold(call.to) === 'organizer' && organizer ? organizer : this.named(call.to, from);

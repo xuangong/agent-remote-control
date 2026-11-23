@@ -182,6 +182,7 @@ export const TeamHostCall = Type.Union([
     /** A worktree bot's result: where its patch was saved on its Host, added to the report by the Relay. */
     patch: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })) }, object),
   Type.Object({ action: Type.Literal('list_bots'), owner: BotCaller }, object),
+  Type.Object({ action: Type.Literal('update_mission'), owner: BotCaller, mission: BotMission }, object),
   Type.Object({ action: Type.Literal('stop_bot'), owner: BotCaller, bot: Type.String({ minLength: 1, maxLength: 300 }) }, object),
   Type.Object({ action: Type.Literal('retire_bot'), owner: BotCaller, bot: Type.String({ minLength: 1, maxLength: 300 }) }, object),
   Type.Object({ action: Type.Literal('bot_session'), owner: BotCaller, bot: Type.String({ minLength: 1, maxLength: 300 }) }, object),

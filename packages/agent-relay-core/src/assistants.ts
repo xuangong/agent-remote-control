@@ -24,10 +24,12 @@ export interface AssistantPorts {
   capable(hostId: string): boolean;
   /** Places a bot another bot created in a group of the account. */
   placeBot?(groupId: string, view: { id: string; binding: WindowSessionBinding }, details: WindowBotDetails): Promise<void>;
+  /** Records a standing bot's own lasting change to its mission. */
+  setMission?(groupId: string, viewId: string, mission: string): Promise<void>;
 }
 type ListCall = Extract<TeamHostCall, { action: 'list_assistants' }>;
 type MessageCall = Extract<TeamHostCall, { action: 'message_assistant' }>;
-export interface Assistant { key: string; groupId: string; name: string; label?: string; mission?: string; hidden: boolean; hostId: string; providerId: string; nativeSessionId: string }
+export interface Assistant { key: string; groupId: string; viewId: string; name: string; label?: string; mission?: string; hidden: boolean; hostId: string; providerId: string; nativeSessionId: string }
 
 const RECENT_KEEP = 64;
 /** One answer for an assistant that does not exist and one this caller may not reach, so the roster cannot be probed. */
@@ -47,7 +49,7 @@ export function accountDirectory(groups: readonly WindowGroup[]): Assistant[] {
     // The id is the bot's record, which a move between groups keeps; names follow the account's naming rule, keyed by place.
     const viewKey = viewAssistantKey(group.window.id, view.id), details = group.bots?.members[view.id];
     const key = details?.botId ?? viewKey;
-    return { key, groupId: group.window.id, name: names.get(viewKey) ?? view.binding.title, ...(details?.label ? { label: details.label } : {}), ...(details?.mission ? { mission: details.mission } : {}), hidden: details?.hidden === true,
+    return { key, groupId: group.window.id, viewId: view.id, name: names.get(viewKey) ?? view.binding.title, ...(details?.label ? { label: details.label } : {}), ...(details?.mission ? { mission: details.mission } : {}), hidden: details?.hidden === true,
       hostId: view.binding.hostId, providerId: view.binding.providerId, nativeSessionId: view.binding.nativeSessionId };
   }));
 }

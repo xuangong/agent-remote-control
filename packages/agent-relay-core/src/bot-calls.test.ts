@@ -3,6 +3,7 @@ import { parseTaskInputs, type WindowGroup } from '@orchardworks/agent-remote-pr
 import { TeamBroker } from './teams.js';
 import type { SavedTeam } from './team-delivery.js';
 import { temporaryBotId } from './bot-calls.js';
+import { instructionsHash } from './inboxes.js';
 
 // Bots call as their own sessions. The groups and the Hosts are stubs; the broker, tasks, inboxes and their validation are real.
 const ids = { chief: 'b_' + '1'.repeat(32), tracker: 'b_' + '2'.repeat(32) };
@@ -24,7 +25,8 @@ function fixture() {
         const target = groups.find(item => item.window.id === groupId)!;
         (target.window.views as unknown[]).push({ id: view.id, placement: 'primary', binding: view.binding });
         target.bots!.members[view.id] = details; placed.push({ groupId, viewId: view.id, details: details as Record<string, unknown> });
-      } },
+      },
+      setMission: async (groupId, viewId, mission) => { groups.find(item => item.window.id === groupId)!.bots!.members[viewId] = { ...groups.find(item => item.window.id === groupId)!.bots!.members[viewId], mission }; } },
   });
   const as = (nativeSessionId: string) => ({ providerId: 'codex', nativeSessionId });
   const task = () => state.find(team => team.task)!;
@@ -80,5 +82,18 @@ describe('bots calling as their own sessions', () => {
     // The new bot answers its first message with reply_to.
     const scribe = f.as(inbox.members[0]!.nativeSessionId!), first = inbox.inbox!.recent![0]!.id;
     expect(await f.broker.hostCall('mac', { action: 'bot_message', owner: scribe, operationId: 'r1', to: 'Chief', text: 'The file exists.', replyTo: first })).toMatchObject({ outcome: 'delivered' });
+  });
+
+  it('lets a standing bot record a lasting change to its own mission, without sending it its instructions again', async () => {
+    const f = fixture();
+    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('tracker'), operationId: 'hi', to: 'Chief', text: 'Hello.' });
+    const before = f.state().find(team => team.inbox?.botId === ids.chief)!.messages.length;
+    expect(await f.broker.hostCall('mac', { action: 'update_mission', owner: f.as('chief'), mission: 'Lead the release; review every change first.' })).toEqual({ mission: 'Lead the release; review every change first.' });
+    expect((await f.broker.hostCall('mac', { action: 'list_bots', owner: f.as('tracker') }) as { bots: Array<{ name: string; mission?: string }> }).bots).toEqual([expect.objectContaining({ name: 'Chief', mission: 'Lead the release; review every change first.' })]);
+    // Its inbox counts the new standing instructions as sent, so the next poll queues nothing.
+    expect(f.state().find(team => team.inbox?.botId === ids.chief)!.inbox!.instructions).toBe(instructionsHash('Lead the release; review every change first.'));
+    expect(f.state().find(team => team.inbox?.botId === ids.chief)!.messages).toHaveLength(before);
+    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
+    await expect(f.broker.hostCall('mac', { action: 'update_mission', owner: f.as(f.task().members[0]!.nativeSessionId!), mission: 'Something else.' })).rejects.toThrow('mission is its brief');
   });
 });

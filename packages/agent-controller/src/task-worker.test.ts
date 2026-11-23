@@ -13,7 +13,7 @@ async function harness(toolNamespaces = false) { const h = await supportHarness(
 const owner = { providerId: 'codex', nativeSessionId: 'worker', title: 'Chief' };
 const createTask = { action: 'create_task' as const, owner, operationId: 'op', title: 'Collect logs', brief: 'Collect the build logs of the last run.' };
 /** Every bot's tools, as the Host gives them while the Relay runs tasks. */
-const BOT_TOOLS = ['call_for_support', 'support_status', 'read_support_report', 'download_support_resource', 'create_bot', 'message', 'list_bots', 'read_bot', 'stop_bot', 'retire_bot', 'open_room', 'room_say', 'room_pass'];
+const BOT_TOOLS = ['call_for_support', 'support_status', 'read_support_report', 'download_support_resource', 'create_bot', 'message', 'list_bots', 'read_bot', 'update_mission', 'stop_bot', 'retire_bot', 'open_room', 'room_say', 'room_pass'];
 const tool = (tools: readonly AgentSessionTool[] | undefined, name: string) => tools?.find(item => item.name === name) ?? (() => { throw new Error(`No ${name} tool.`); })();
 /** A temporary bot writes to its organizer: its result (done, failed), its question (needs_input) or progress. */
 const report = (tools: readonly AgentSessionTool[] | undefined, status: 'done' | 'failed' | 'needs_input' | 'progress', text: string) => tool(tools, 'message').execute({ to: 'organizer', text, status });

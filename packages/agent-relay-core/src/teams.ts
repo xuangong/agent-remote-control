@@ -254,6 +254,7 @@ export class TeamBroker {
     }
     if (call.action === 'create_bot') return (this.bots ?? fail(unavailableAssistants)).create(hostId, call);
     if (call.action === 'bot_message') return (this.bots ?? fail(unavailableAssistants)).message(hostId, call);
+    if (call.action === 'update_mission') return (this.bots ?? fail(unavailableAssistants)).updateMission(hostId, call);
     if (call.action === 'list_bots') return (this.bots ?? fail(unavailableAssistants)).list(hostId, call);
     if (call.action === 'stop_bot' || call.action === 'retire_bot' || call.action === 'bot_session') return (this.bots ?? fail(unavailableAssistants)).organize(hostId, call);
     if (call.action === 'task_status') return (this.tasks ?? fail(unavailableTasks)).status(hostId, call);

@@ -22,7 +22,7 @@ import type { Succession } from './succession-service.js';
 
 export interface TeamServicePorts {
   brokerState: BrokerState;
-  options: Pick<HostBrokerOptions, 'teamResources' | 'stateRoom' | 'assistantGroups' | 'placeBot'>;
+  options: Pick<HostBrokerOptions, 'teamResources' | 'stateRoom' | 'assistantGroups' | 'placeBot' | 'setMission'>;
   now: () => number;
   requireHost(hostId: string): Host;
   /** A Host call; read when used, because the Host session is built after the Teams. */
@@ -88,7 +88,7 @@ export function createTeamService(ports: TeamServicePorts) {
       assertHost(hostId) { if (ports.requireHost(hostId).tasks !== 1) throw new BrokerError(409, 'tasks_upgrade_required', 'Update the Controller to use tasks.'); },
     },
     // Hosts that run tasks also bind assistants' main sessions to links.
-    ...(options.assistantGroups ? { assistants: { groups: options.assistantGroups, capable: (hostId: string) => brokerState.hosts.get(hostId)?.tasks === 1, ...(options.placeBot ? { placeBot: options.placeBot } : {}) } } : {}),
+    ...(options.assistantGroups ? { assistants: { groups: options.assistantGroups, capable: (hostId: string) => brokerState.hosts.get(hostId)?.tasks === 1, ...(options.placeBot ? { placeBot: options.placeBot } : {}), ...(options.setMission ? { setMission: options.setMission } : {}) } } : {}),
     callForSupport: {
       state: () => brokerState.callForSupport,
       capable: hostId => brokerState.hosts.get(hostId)?.callForSupport === 1,

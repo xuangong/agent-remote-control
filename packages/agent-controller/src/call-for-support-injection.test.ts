@@ -69,7 +69,7 @@ it('declares the worker namespace on every Codex thread it creates, deferred unt
   const f = await fixture();
   try {
     await f.control('/remote/create', { providerId: 'codex', operationId: randomUUID(), cwd: f.root });
-    expect(worker(f.created[0]!.input)).toMatchObject({ deferred: true, tools: [{ name: 'call_for_support' }, { name: 'support_status' }, { name: 'read_support_report' }, { name: 'download_support_resource' }, { name: 'create_bot' }, { name: 'message' }, { name: 'list_bots' }, { name: 'read_bot' }, { name: 'stop_bot' }, { name: 'retire_bot' }, { name: 'open_room' }, { name: 'room_say' }, { name: 'room_pass' }] });
+    expect(worker(f.created[0]!.input)).toMatchObject({ deferred: true, tools: [{ name: 'call_for_support' }, { name: 'support_status' }, { name: 'read_support_report' }, { name: 'download_support_resource' }, { name: 'create_bot' }, { name: 'message' }, { name: 'list_bots' }, { name: 'read_bot' }, { name: 'update_mission' }, { name: 'stop_bot' }, { name: 'retire_bot' }, { name: 'open_room' }, { name: 'room_say' }, { name: 'room_pass' }] });
     // Tools fixed at creation carry the task tools too, so switching the assistant to coordinator mode later reaches the thread.
     // Attachments rebind its executors; the thread keeps its declaration.
     expect(worker(f.opened.find(entry => entry.id === 'codex-0')?.extensions)).toBeDefined();

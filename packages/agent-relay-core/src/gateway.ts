@@ -466,6 +466,13 @@ export function createHostedRelay(options: HostedRelayOptions) {
             operation: { type: 'batch', operations: [{ type: 'view.create', view: createWindowView(view.id, view.binding, 'primary') }, { type: 'bot.update', viewId: view.id, details }] } });
           if (outcome.result.status !== 'committed') throw new Error(outcome.result.message ?? 'The bot could not join its group.');
         },
+        setMission: async (groupId, viewId, mission) => {
+          const principal = { subject: grant.subject }, current = windows.inspect(principal, groupId);
+          const details = current.bots?.members[viewId] ?? {};
+          const outcome = await windows.mutate(principal, groupId, { operationId: randomUUID(), issuedAt: Date.now(), baseRevision: current.window.revision,
+            operation: { type: 'bot.update', viewId, details: { ...details, mission } } });
+          if (outcome.result.status !== 'committed') throw new Error(outcome.result.message ?? 'The mission could not be recorded.');
+        },
         outbox: { hostCall: (hostId, call) => sessionOutbox.hostCall(hostId, call) },
         ...(journalService ? { journalService } : {}),
         ...(options.successionEnrollment ? { successionEnrollment: { version: 1, origin: auth.origin, issuer: auth.issuer, namespace: grant.namespace, ownerSubject: grant.subject } as const, successionProjectionAllowance: allowance } : {}),

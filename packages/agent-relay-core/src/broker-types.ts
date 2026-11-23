@@ -103,6 +103,8 @@ export interface HostBrokerOptions {
   assistantGroups?: () => readonly WindowGroup[];
   /** Places a bot another bot created in a group of the account: its view of the session and its details (bots design 2.2). */
   placeBot?: (groupId: string, view: { id: string; binding: WindowSessionBinding }, details: WindowBotDetails) => Promise<void>;
+  /** Records a standing bot's own lasting change to its mission (bots design 2.3). */
+  setMission?: (groupId: string, viewId: string, mission: string) => Promise<void>;
   /** Messages waiting for this account's Hosts; Controllers that ask for it poll, claim and settle them over the uplink. */
   outbox?: { hostCall(hostId: string, call: unknown): Promise<unknown> };
   /** Where Host session journals are kept. Without it no Controller is granted journals. */

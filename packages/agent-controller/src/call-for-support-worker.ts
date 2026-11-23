@@ -177,6 +177,8 @@ export class WorkerSupport {
           const where = await taskRequest({ action: 'bot_session', owner: caller(), bot: args.bot }) as { providerId: string; nativeSessionId: string };
           return (this.ports.read ?? (() => fail('Reading bots is not available on this Host.')))({ ...worker(), providerId: where.providerId, nativeSessionId: where.nativeSessionId }, args.before);
         }),
+      tool('update_mission', 'Record a lasting change to how you work in your own mission, when the person or your organizer told you something meant to last. Write the whole mission as it now stands. A temporary bot\'s mission is its brief and does not change.',
+        object({ mission: { type: 'string', minLength: 1, maxLength: 4000 } }, ['mission']), args => taskRequest({ action: 'update_mission', owner: caller(), mission: args.mission })),
       tool('stop_bot', 'Stop a bot you organize: its running turn stops and it gets no more input. Its conversation stays readable.',
         object({ bot: { type: 'string', minLength: 1, maxLength: 300 } }, ['bot']), args => taskRequest({ action: 'stop_bot', owner: caller(), bot: args.bot })),
       tool('retire_bot', 'Retire a bot you organize when its work is no longer needed, taking what it has done as its result.',

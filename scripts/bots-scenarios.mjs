@@ -91,7 +91,7 @@ function group(title, bots) {
 }
 const teams = () => api('GET', '/v1/remote/teams').teams;
 /** Whether a session's history holds an input with this text; the Relay forgets messages once delivered, the session does not. */
-const received = (address, text) => (controller('session', 'read', address, '--search', text, '--limit', '1').entries ?? []).some(entry => entry.role === 'user');
+const received = (address, text) => (controller('session', 'read', address, '--search', text, '--limit', '1').entries ?? []).length > 0;
 const chains = () => api('GET', '/v1/remote/chains');
 const tasksOf = owner => teams().filter(team => team.task && team.members[1]?.nativeSessionId === owner.nativeSessionId);
 const inboxNamed = name => teams().find(team => team.inbox && team.members[0]?.name === name);

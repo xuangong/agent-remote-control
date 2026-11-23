@@ -45,7 +45,8 @@ it('E14: the installed app starts offline from its shell with its conversation, 
   expect(await page.title()).toMatch(/Orchard$/);
   await page.locator('.lab-frame').waitFor();
   await showsText(page, 'Notes is ready');
-  expect(await kept(page, first!)).toEqual(files);
+  // Everything it started with is still kept; code the page loaded on demand since (an assistant's details) joins it.
+  expect(await kept(page, first!)).toEqual(expect.arrayContaining(files));
 
   // A new build is deployed while the app is away: its page and its worker change.
   const index = await readFile(join(web, 'index.html'), 'utf8');

@@ -2,27 +2,14 @@ import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import { WINDOW_VIEW_LIMIT, WindowEdit, WorkspaceWindow, decodeWorkspaceWindow, isWorkspaceWindow, type WindowSessionBinding, type WindowView } from './window-workspace.js';
 import { WindowLayoutError, applyWindowOperation } from './window-workspace-operations.js';
+import { BotId, BotLabel, BotMission, BotName, BotPicture } from './bots.js';
+export { BotPicture, readBotPicture } from './bots.js';
 
 const strict = { additionalProperties: false } as const;
 const id = Type.String({ minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.:-]+$' });
 const counter = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
 /** A fractional index: ranks compare as strings and never end in 0, so a new one fits between any two others until the length limit. */
 const rank = Type.String({ minLength: 1, maxLength: 64, pattern: '^[0-9a-z]*[1-9a-z]$' });
-
-/** A bot's picture: a shape, a colour and which of six directions it looks (0 to 5; omitted means the default look). */
-export const BotPicture = Type.Object({
-  shape: Type.Union([Type.Literal('circle'), Type.Literal('squircle'), Type.Literal('triangle'), Type.Literal('sideways')]),
-  color: Type.String({ pattern: '^#[0-9a-f]{6}$' }),
-  gaze: Type.Optional(Type.Integer({ minimum: 0, maximum: 5 })),
-}, strict);
-export type BotPicture = Static<typeof BotPicture>;
-/** A stored picture in the current form: older rows hold `rounded` or `hexagon`, which read as `squircle` with the same colour; an invalid picture reads as none. */
-export function readBotPicture(stored: unknown): BotPicture | undefined {
-  if (!stored || typeof stored !== 'object') return undefined;
-  const picture = stored as { shape?: unknown };
-  const current = picture.shape === 'rounded' || picture.shape === 'hexagon' ? { ...picture, shape: 'squircle' } : picture;
-  return Value.Check(BotPicture, current) ? current : undefined;
-}
 
 /** What Bot mode shows for one bot beyond its session's title. */
 export const WindowBotDetails = Type.Object({
@@ -31,8 +18,8 @@ export const WindowBotDetails = Type.Object({
    * `assistantNames` rule of `@orchardworks/agent-client`) and stores that name with the bot's first edit. A session's title
    * is never the name.
    */
-  name: Type.Optional(Type.String({ minLength: 1, maxLength: 60 })),
-  label: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
+  name: Type.Optional(BotName),
+  label: Type.Optional(BotLabel),
   picture: Type.Optional(BotPicture),
   /**
    * How much of a turn the assistant view shows for this bot. Absent follows the device's default. All three modes are accepted, `concise` included,
@@ -46,6 +33,10 @@ export const WindowBotDetails = Type.Object({
   /** Muted: its chat sends no reminders and its unread replies show a quiet dot, on every device. */
   muted: Type.Optional(Type.Literal(true)),
   rank: Type.Optional(rank),
+  /** The bot's record at the Relay. Responses carry it; a change that leaves it out keeps the bot of the same view. */
+  botId: Type.Optional(BotId),
+  /** What the bot is for, in its record; its standing instructions after the base instructions. */
+  mission: Type.Optional(BotMission),
   /**
    * Coordinator: the assistant's main session gets the task tools, messages the account's other coordinators and joins rooms.
    * Plain, or absent: one session without them. Both values are accepted so a bot can be switched back.

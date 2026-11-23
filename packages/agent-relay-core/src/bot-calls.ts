@@ -12,6 +12,7 @@ import { ACCOUNT_TEAM_LIMIT, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
 import { pruneCoordination } from './coordination-retention.js';
 import type { BotInboxes } from './inboxes.js';
+import type { Rooms } from './rooms.js';
 import { newBotId } from './bot-store.js';
 
 type Call<A extends TeamHostCall['action']> = Extract<TeamHostCall, { action: A }>;
@@ -28,7 +29,7 @@ export const temporaryBotId = (teamId: string) => 'b_' + createHash('sha256').up
 const NOT_FOUND = 'No bot of this account answers to that name. List them with list_bots.';
 
 export class BotCalls {
-  constructor(private readonly broker: AssistantBrokerPorts, private readonly ports: AssistantPorts, private readonly tasks: TaskGroups, private readonly messages: AssistantMessages, private readonly inboxes: BotInboxes) {}
+  constructor(private readonly broker: AssistantBrokerPorts, private readonly ports: AssistantPorts, private readonly tasks: TaskGroups, private readonly messages: AssistantMessages, private readonly inboxes: BotInboxes, private readonly rooms: Rooms) {}
   private key(hostId: string, providerId: string, nativeSessionId: string): string | undefined {
     try { return nativeSessionRefKey(this.broker.ports.resolveSession(hostId, providerId, nativeSessionId)); } catch { return undefined; }
   }
@@ -118,6 +119,10 @@ export class BotCalls {
   }
   async message(hostId: string, call: Call<'bot_message'>) {
     const from = this.caller(hostId, call.owner), organizer = this.organizerOf(from);
+    // A room the sender is a member of: its turn's answer, a pass, or the room's result.
+    const room = this.rooms.memberRoom(hostId, call.owner, call.to);
+    if (room) return this.rooms.speak(hostId, call.pass ? { action: 'room_pass', owner: call.owner, roomId: room.id }
+      : { action: 'room_say', owner: call.owner, roomId: room.id, text: call.text, ...(call.status === 'done' ? { done: true } : {}) });
     const to = fold(call.to) === 'organizer' && organizer ? organizer : this.named(call.to, from);
     // A temporary bot to its organizer: its report, its question or its progress.
     if (from.task && organizer && to.key === organizer.key) {

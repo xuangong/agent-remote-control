@@ -9,6 +9,7 @@
  * that holds a role on a Host now, across handoffs; it throws when the Host is not known. A Host that does not announce Team or Call For
  * Support support is refused with a 409 that says to update the Controller.
  */
+import { defaultBrokerScheduler } from './transport.js';
 import { isDeepStrictEqual } from 'node:util';
 import { resolveRoleSuccession, type NativeSessionRef } from '@orchardworks/agent-remote-protocol';
 import type { BrokerState } from './broker-state.js';
@@ -22,7 +23,7 @@ import type { Succession } from './succession-service.js';
 
 export interface TeamServicePorts {
   brokerState: BrokerState;
-  options: Pick<HostBrokerOptions, 'teamResources' | 'stateRoom' | 'assistantGroups' | 'placeBot' | 'setMission'>;
+  options: Pick<HostBrokerOptions, 'teamResources' | 'stateRoom' | 'assistantGroups' | 'placeBot' | 'setMission' | 'scheduler'>;
   now: () => number;
   requireHost(hostId: string): Host;
   /** A Host call; read when used, because the Host session is built after the Teams. */
@@ -50,6 +51,7 @@ export function createTeamService(ports: TeamServicePorts) {
   }
   const teams = new TeamBroker({
     resolveSession: resolveRole,
+    scheduler: options.scheduler ?? defaultBrokerScheduler,
     assertRecipient: target => ports.assertAssociationOpen(target),
     assertRecipientSupport(hostId, generic) {
       const host = ports.requireHost(hostId);

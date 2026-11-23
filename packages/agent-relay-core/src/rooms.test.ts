@@ -11,7 +11,11 @@ const group: WindowGroup = { window: { id: 'g', title: 'g', revision: 1, views: 
 
 function fixture() {
   let state: SavedTeam[] = [], now = 1_000_000;
-  const broker = new TeamBroker({
+  // The Relay's timers, fired by the test when their time comes.
+  const timers = new Map<number, { at: number; run: () => void }>(); let next = 0;
+  const scheduler = { setTimeout: (run: () => void, delayMs: number) => { timers.set(++next, { at: now + delayMs, run }); return next; }, clearTimeout: (id: unknown) => { timers.delete(id as number); } };
+  const fire = async () => { for (const [id, timer] of [...timers]) if (timer.at <= now) { timers.delete(id); timer.run(); } await new Promise(resolve => setTimeout(resolve, 0)); };
+  const broker = new TeamBroker({ scheduler,
     resolveSession: (hostId, providerId, nativeSessionId) => ({ controllerId: hostId, providerId, nativeSessionId }),
     read: () => state, now: () => now, assertHost: () => {},
     change: async update => { const draft = structuredClone(state); const result = structuredClone(update(draft)); state = draft; return result; },
@@ -23,7 +27,7 @@ function fixture() {
   const room = () => state[0]!;
   const asked = () => { const team = room(); return team.members.find(member => member.id === team.room!.speaker)?.name; };
   const turns = (name: string) => room().messages.filter(message => message.to === room().members.find(member => member.name === name)!.id).map(message => parseTaskInputs(message.text)?.[0]);
-  return { broker, owner, room, asked, turns, advance: (ms: number) => { now += ms; } };
+  return { broker, owner, room, asked, turns, fire, advance: (ms: number) => { now += ms; } };
 }
 
 describe('rooms', () => {
@@ -96,5 +100,26 @@ describe('rooms', () => {
       expect(await f.broker.hostCall('mac', { action: 'room_say', owner: f.owner('tracker'), roomId, text: 'Here.', done: true })).toEqual({ roomId, state: 'done' });
       await expect(f.broker.hostCall('mac', { action: 'room_say', owner: f.owner('elsewhere'), roomId, text: 'Me?' })).rejects.toThrow('Room not found');
     } finally { (group.window.views[1] as { binding: { nativeSessionId: string } }).binding.nativeSessionId = 'tracker'; }
+  });
+
+  it('closes a room at its deadline and moves a turn on, on time, with nobody acting', async () => {
+    const f = fixture();
+    await f.broker.hostCall('mac', { action: 'open_room', owner: f.owner('chief'), operationId: 'r', name: 'Plan', topic: 'Plan the release.', members: ['Tracker', 'Scribe'], minutes: 30 });
+    expect(f.asked()).toBe('Tracker');
+    f.advance(ROOM_TURN_TIMEOUT_MS); await f.fire();
+    expect(f.asked()).toBe('Scribe');
+    f.advance(30 * 60_000); await f.fire();
+    expect(f.room().room!.state).toBe('closed');
+  });
+
+  it('takes a member\'s turn, pass and result as a message to the room', async () => {
+    const f = fixture();
+    await f.broker.hostCall('mac', { action: 'open_room', owner: f.owner('chief'), operationId: 'r', name: 'Plan', topic: 'Plan the release.', members: ['Tracker', 'Scribe'], minutes: 30 });
+    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.owner('tracker'), operationId: 'm1', to: 'Plan', text: 'Cut on Friday.' });
+    expect(f.asked()).toBe('Scribe');
+    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.owner('scribe'), operationId: 'm2', to: f.room().id, text: 'Nothing to add.', pass: true });
+    expect(f.asked()).toBe('Chief');
+    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.owner('chief'), operationId: 'm3', to: 'Plan', text: 'Friday it is.', status: 'done' });
+    expect(f.room().room).toMatchObject({ state: 'done', result: { text: 'Friday it is.' } });
   });
 });

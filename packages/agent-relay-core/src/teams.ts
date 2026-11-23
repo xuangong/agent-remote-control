@@ -12,6 +12,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TeamResource } from '@orchardworks/agent-remote-protocol';
 
 export interface TeamBrokerPorts {
+  /** Timers of the Relay, for what must happen on time: a room's deadline and a member's turn. */
+  scheduler?: { setTimeout(callback: () => void, delayMs: number): unknown; clearTimeout(timer: unknown): void };
   resolveSession(hostId: string, providerId: string, anchorNativeId: string): NativeSessionRef;
   assertRecipient?(target: NativeSessionRef): void;
   /** generic: the replacement is a generic succession, which may also change the recipient's provider. */
@@ -68,7 +70,8 @@ export class TeamBroker {
     if (ports.assistants) {
       const lent = { ports, change: <T>(update: (teams: SavedTeam[]) => T) => this.change(update), provision: (teamId: string, memberId: string) => this.provision(teamId, memberId) };
       this.inboxes = new BotInboxes(lent, ports.assistants); this.assistants = new AssistantMessages(lent, ports.assistants, this.inboxes); this.rooms = new Rooms(lent, ports.assistants);
-      if (this.tasks) this.bots = new BotCalls(lent, ports.assistants, this.tasks, this.assistants, this.inboxes);
+      if (this.tasks) this.bots = new BotCalls(lent, ports.assistants, this.tasks, this.assistants, this.inboxes, this.rooms);
+      this.rooms.arm();
     }
     if (ports.callForSupport) this.groups = new CallForSupportGroups({ ports, change: update => this.change(update), provision: (teamId, memberId) => this.provision(teamId, memberId),
       project: team => this.project(team), resource: (team, memberId, resourceId) => this.resourceAccess(team, memberId, resourceId),
@@ -179,7 +182,9 @@ export class TeamBroker {
     if (input.action === 'resolve_roster' || input.action === 'release_member' || input.action === 'update_mandate' || input.action === 'resume_group') return (this.groups ?? fail(unavailableGroups)).userAction(input);
     if (input.action === 'room_post' || input.action === 'close_room') {
       if (!this.rooms) fail(unavailableAssistants);
-      return this.project(await this.change(teams => { const team = find(teams, input.teamId); roomAction(team, input as Parameters<typeof roomAction>[1], this.ports.now()); return team; }));
+      const changed = await this.change(teams => { const team = find(teams, input.teamId); roomAction(team, input as Parameters<typeof roomAction>[1], this.ports.now()); return team; });
+      this.rooms?.arm();
+      return this.project(changed);
     }
     if (input.action === 'cancel_task' || input.action === 'mark_task_done') {
       if (!this.tasks) fail(unavailableTasks);

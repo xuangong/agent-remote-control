@@ -72,7 +72,36 @@ export function roomAction(team: SavedTeam, input: { action: 'room_post'; operat
 }
 
 export class Rooms {
+  private timer: unknown;
   constructor(private readonly broker: AssistantBrokerPorts, private readonly ports: AssistantPorts) {}
+  /**
+   * Sets the one timer for the next thing a room must do on time: close at its deadline, or move a turn on when its member did not
+   * answer (O71). It fires even when nobody acts, advances every open room that is due, and sets the next.
+   */
+  arm(): void {
+    const scheduler = this.broker.ports.scheduler;
+    if (!scheduler) return;
+    scheduler.clearTimeout(this.timer); this.timer = undefined;
+    const due = this.broker.ports.read().flatMap(team => team.room?.state === 'open' && team.status === 'active'
+      ? [team.room.deadline, ...(team.room.speaker && team.room.askedAt !== undefined ? [team.room.askedAt + ROOM_TURN_TIMEOUT_MS] : [])] : []);
+    if (!due.length) return;
+    const wait = Math.min(Math.max(0, Math.min(...due) - this.broker.ports.now()), 24 * 60 * 60_000);
+    this.timer = scheduler.setTimeout(() => { this.timer = undefined; void this.due().catch(() => undefined).finally(() => this.arm()); }, wait);
+  }
+  private async due(): Promise<void> {
+    await this.broker.change(teams => {
+      const now = this.broker.ports.now();
+      plain(teams).forEach((team, index) => { if (team.room?.state === 'open' && team.status === 'active') scheduleRoom(teams[index]!, now); });
+    });
+  }
+  /** The open room a member's session is in, by its id or name. */
+  memberRoom(hostId: string, owner: { providerId: string; nativeSessionId: string }, name: string): SavedTeam | undefined {
+    const resolve = this.broker.ports.resolveSession;
+    const key = (host: string, providerId: string, nativeSessionId: string) => { try { return nativeSessionRefKey(resolve(host, providerId, nativeSessionId)); } catch { return undefined; } };
+    const caller = key(hostId, owner.providerId, owner.nativeSessionId), fold = (text: string) => text.trim().toLocaleLowerCase('en');
+    return this.broker.ports.read().find(team => team.room?.state === 'open' && (team.id === name || fold(team.room.name) === fold(name))
+      && team.members.some(member => !!member.nativeSessionId && key(member.hostId, member.providerId, member.nativeSessionId) === caller));
+  }
   /** An assistant opens a room with others; it speaks first after the topic. */
   async open(hostId: string, call: OpenCall): Promise<{ roomId: string; members: string[] }> {
     if (!this.ports.capable(hostId)) fail('Update the Controller to use rooms.');
@@ -96,10 +125,16 @@ export class Rooms {
     });
     for (const member of created.members) await this.broker.provision(created.id, member.id).catch(() => undefined);
     await this.broker.change(teams => { const team = teams.find(item => item.id === created.id); if (team) scheduleRoom(team, this.broker.ports.now()); });
+    this.arm();
     return { roomId: created.id, members: created.members.map(member => member.name) };
   }
   /** The member asked to speak answers, or passes. */
-  speak(hostId: string, call: SayCall): Promise<{ roomId: string; state: TeamRoom['state'] }> {
+  async speak(hostId: string, call: SayCall): Promise<{ roomId: string; state: TeamRoom['state'] }> {
+    const spoken = await this.answer(hostId, call);
+    this.arm();
+    return spoken;
+  }
+  private answer(hostId: string, call: SayCall): Promise<{ roomId: string; state: TeamRoom['state'] }> {
     if (!this.ports.capable(hostId)) fail('Update the Controller to use rooms.');
     const resolve = this.broker.ports.resolveSession;
     const key = (host: string, providerId: string, nativeSessionId: string) => { try { return nativeSessionRefKey(resolve(host, providerId, nativeSessionId)); } catch { return undefined; } };

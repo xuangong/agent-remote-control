@@ -160,14 +160,14 @@ export class WorkerSupport {
             operationId: args.operationId ?? randomUUID(), name: args.name, mission: args.mission, lifetime: args.lifetime ?? 'temporary', ...(args.message ? { message: args.message } : {}),
             ...(workspace && workspace !== 'same' ? { workspace } : {}), ...(commit ? { commit } : {}), ...(args.provider ? { provider: args.provider } : {}), ...(args.model ? { model: args.model } : {}) });
         }),
-      tool('message', 'Send a message to another bot, in your own words and at most 300 characters: a bot you organize, your organizer (to: "organizer"), or any bot from list_bots, by name or id. When you write to your organizer, status says what it is: progress, done or failed (your result, once), or needs_input (you wait for its answer; then end your turn). The details stay where they are: the receiver reads them with read_bot when it needs them. Answer a message another bot sent you with reply_to set to its id. It arrives between the receiver\'s turns. Reuse operationId to retry.',
+      tool('message', 'Send a message to another bot, in your own words and at most 300 characters: a bot you organize, your organizer (to: "organizer"), any bot from list_bots by name or id, or a room you are in when it is your turn there (to: the room\'s name or id; pass: true when you have nothing to add; status done with the room\'s result when it has reached it). When you write to your organizer, status says what it is: progress, done or failed (your result, once), or needs_input (you wait for its answer; then end your turn). The details stay where they are: the receiver reads them with read_bot when it needs them. Answer a message another bot sent you with reply_to set to its id. It arrives between the receiver\'s turns. Reuse operationId to retry.',
         object({ to: { type: 'string', minLength: 1, maxLength: 300 }, text: { type: 'string', minLength: 1, maxLength: BOT_MESSAGE_LIMIT }, status: { type: 'string', enum: ['progress', 'done', 'failed', 'needs_input'] },
-          reply_to: { type: 'string', pattern: '^m[0-9a-f]{12}$' }, operationId: id }, ['to', 'text']),
+          reply_to: { type: 'string', pattern: '^m[0-9a-f]{12}$' }, pass: { type: 'boolean' }, operationId: id }, ['to', 'text']),
         async args => {
           // A worktree bot's result carries the path of its patch, saved on this Host where its organizer works.
           const patch = args.status === 'done' || args.status === 'failed' ? await this.ports.patch?.(worker()) : undefined;
           return taskRequest({ action: 'bot_message', owner: caller(), operationId: args.operationId ?? randomUUID(), to: args.to, text: args.text, ...(patch ? { patch } : {}),
-            ...(args.status ? { status: args.status } : {}), ...(args.reply_to ? { replyTo: args.reply_to } : {}) });
+            ...(args.status ? { status: args.status } : {}), ...(args.reply_to ? { replyTo: args.reply_to } : {}), ...(args.pass === true ? { pass: true } : {}) });
         }),
       tool('list_bots', 'List the bots you can message: the bots you organize with their status, your organizer if you have one, and the standing bots of this account with their missions.',
         object({}, []), () => taskRequest({ action: 'list_bots', owner: caller() })),
@@ -189,12 +189,6 @@ export class WorkerSupport {
         args => { const ref = worker();
           return taskRequest({ action: 'open_room', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, operationId: args.operationId ?? randomUUID(), name: args.name, topic: args.topic,
             members: args.members, minutes: args.minutes }); }),
-      tool('room_say', 'Speak in a room when it is your turn (input labelled [Room … · your turn]). Say done: true with the result when the room has reached what it was opened for.',
-        object({ room: id, text: { type: 'string', minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT }, done: { type: 'boolean' } }, ['room', 'text']),
-        args => { const ref = worker();
-          return taskRequest({ action: 'room_say', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, roomId: args.room, text: args.text, ...(args.done === true ? { done: true } : {}) }); }),
-      tool('room_pass', 'Pass your turn in a room when you have nothing to add.',
-        object({ room: id }, ['room']), args => { const ref = worker(); return taskRequest({ action: 'room_pass', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, roomId: args.room }); }),
     ];
     const supportDescription = 'call for support from other sessions, models and machines (reviews, consultations, tests), and read their reports.';
     return { name: WORKER_NAMESPACE, description: tasks ? `Agent Remote Control: start bots that work in parallel and report back, message the account's other bots, read and stop the bots you organize; ${supportDescription}` : `Agent Remote Control: ${supportDescription}`,

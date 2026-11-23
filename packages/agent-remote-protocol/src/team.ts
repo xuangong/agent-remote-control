@@ -179,6 +179,8 @@ export const TeamHostCall = Type.Union([
     message: Type.Optional(BotText), workspace: Type.Optional(TaskWorkspace), commit: Type.Optional(gitObject), provider: Type.Optional(id), model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })) }, object),
   Type.Object({ action: Type.Literal('bot_message'), owner: BotCaller, operationId: id, to: Type.String({ minLength: 1, maxLength: 300 }), text: BotText,
     replyTo: Type.Optional(AssistantMessageId), status: Type.Optional(Type.Union([Type.Literal('progress'), Type.Literal('done'), Type.Literal('failed'), Type.Literal('needs_input')])),
+    /** In a room: pass this turn instead of speaking. */
+    pass: Type.Optional(Type.Boolean()),
     /** A worktree bot's result: where its patch was saved on its Host, added to the report by the Relay. */
     patch: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })) }, object),
   Type.Object({ action: Type.Literal('list_bots'), owner: BotCaller }, object),

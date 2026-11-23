@@ -61,7 +61,9 @@ export type TeamLink = Static<typeof TeamLink>;
  * One bot's inbox (bots design 3): its main session as the only seat, bound where it is. Whatever reaches the bot arrives here as a
  * message the Relay framed, delivered between turns. `instructions`: the hash of the standing instructions it was last sent.
  */
-export const TeamInbox = Type.Object({ botId: BotId, instructions: Type.Optional(Type.String({ pattern: '^[0-9a-f]{64}$' })) }, object);
+export const TeamInbox = Type.Object({ botId: BotId, instructions: Type.Optional(Type.String({ pattern: '^[0-9a-f]{64}$' })),
+  /** The latest messages other bots sent here, with their hop along a reply chain, so a reply names a message it answers. */
+  recent: Type.Optional(Type.Array(Type.Object({ id: AssistantMessageId, from: BotId, hop: Type.Integer({ minimum: 1, maximum: ASSISTANT_MESSAGE_HOP_LIMIT }), operationId: id }, object), { maxItems: 64 })) }, object);
 export type TeamInbox = Static<typeof TeamInbox>;
 const roomText = Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT });
 /**

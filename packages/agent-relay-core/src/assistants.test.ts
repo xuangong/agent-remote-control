@@ -10,11 +10,13 @@ const group = (id: string, views: Array<[string, string, string]>, bots?: Window
     binding: { hostId, providerId: 'claude', nativeSessionId, title: `Session ${nativeSessionId}` } })) } as unknown as WindowGroup['window'],
   ...(bots ? { bots } : {}) });
 
+const ids = { chief: 'b_' + '1'.repeat(32), tracker: 'b_' + '2'.repeat(32), quiet: 'b_' + '3'.repeat(32), solo: 'b_' + '4'.repeat(32) };
 function fixture(options: { capable?: (hostId: string) => boolean; offline?: string; coordinatorProvider?: (hostId: string, providerId: string) => boolean; groups?: WindowGroup[] } = {}) {
   let state: SavedTeam[] = [], now = 100;
   const seats: TeamSeat[] = [];
   const groups = options.groups ?? [group('g1', [['v1', 'mac', 'chief'], ['v2', 'pc', 'tracker'], ['v3', 'mac', 'quiet'], ['v4', 'mac', 'solo']], { rank: 'm', members: {
-    v1: { name: 'Chief', mode: 'coordinator' }, v2: { name: 'Tracker', mode: 'coordinator' }, v3: { name: 'Quiet', hidden: true, mode: 'coordinator' }, v4: { name: 'Solo' } } })];
+    v1: { botId: ids.chief, name: 'Chief', mode: 'coordinator' }, v2: { botId: ids.tracker, name: 'Tracker', mode: 'coordinator' },
+    v3: { botId: ids.quiet, name: 'Quiet', hidden: true, mode: 'coordinator' }, v4: { botId: ids.solo, name: 'Solo' } } })];
   const broker = new TeamBroker({
     resolveSession: (hostId, providerId, nativeSessionId) => ({ controllerId: hostId, providerId, nativeSessionId }),
     read: () => state, now: () => ++now, assertHost: () => {},
@@ -50,7 +52,7 @@ describe('assistants messaging one another', () => {
 
   it('lists the account\'s other assistants by name to an assistant\'s main session, and to nothing else', async () => {
     const f = fixture();
-    expect(await f.broker.hostCall('mac', { action: 'list_assistants', owner: f.chief })).toEqual({ assistants: [{ id: 'g1/v2', name: 'Tracker' }] });
+    expect(await f.broker.hostCall('mac', { action: 'list_assistants', owner: f.chief })).toEqual({ assistants: [{ id: ids.tracker, name: 'Tracker' }] });
     await expect(f.broker.hostCall('mac', { action: 'list_assistants', owner: { providerId: 'claude', nativeSessionId: 'worker' } })).rejects.toThrow('Only an assistant');
   });
 
@@ -61,24 +63,24 @@ describe('assistants messaging one another', () => {
     await expect(f.broker.hostCall('pc', { action: 'list_assistants', owner: f.tracker })).rejects.toThrow('plain mode');
   });
 
-  it('delivers a framed message on a link of the two main sessions, once per operation', async () => {
+  it('delivers a framed message to the other bot\'s inbox, after its standing instructions, once per operation', async () => {
     const f = fixture();
     const sent = await f.broker.hostCall('mac', { action: 'message_assistant', owner: f.chief, to: 'tracker', text: 'Is the release branch cut?', operationId: 'op' }) as { messageId: string; outcome: string };
     expect(sent).toEqual({ messageId: expect.stringMatching(/^m[0-9a-f]{12}$/), outcome: 'delivered' });
     expect(await f.broker.hostCall('mac', { action: 'message_assistant', owner: f.chief, to: 'Tracker', text: 'Is the release branch cut?', operationId: 'op' })).toEqual(sent);
-    const [link] = f.state();
-    expect(link!.link?.assistants).toEqual(['g1/v1', 'g1/v2']);
-    expect(link!.members.map(member => [member.role, member.hostId, member.nativeSessionId, member.creation])).toEqual([['requester', 'mac', 'chief', 'ready'], ['requester', 'pc', 'tracker', 'ready']]);
-    expect(f.seats.map(seat => seat.link?.peer)).toEqual(['Tracker', 'Chief']);
-    expect(link!.messages).toHaveLength(1);
-    expect(parseTaskInputs(link!.messages[0]!.text)).toEqual([{ kind: 'assistant', messageId: sent.messageId, from: 'Chief', body: 'Is the release branch cut?' }]);
-    expect(link!.messages[0]!.to).toBe(link!.members[1]!.id);
-    // Each Controller sees the link, which stays a valid Team.
-    expect(await f.broker.hostCall('pc', { action: 'poll' })).toEqual([expect.objectContaining({ id: link!.id })]);
-    expect((await f.broker.hostCall('mac', { action: 'poll' }) as unknown[]).every(isTeam)).toBe(true);
+    const [inbox] = f.state();
+    expect(inbox!.inbox?.botId).toBe(ids.tracker);
+    expect(inbox!.members.map(member => [member.role, member.hostId, member.nativeSessionId, member.creation])).toEqual([['requester', 'pc', 'tracker', 'ready']]);
+    expect(f.seats.map(seat => seat.inbox?.botId)).toEqual([ids.tracker]);
+    expect(inbox!.messages.map(message => message.text.split('\n')[0])).toEqual(['[Your standing instructions · v1]', expect.stringContaining('[Message from Chief')]);
+    expect(parseTaskInputs(inbox!.messages[1]!.text)).toEqual([{ kind: 'assistant', messageId: sent.messageId, from: 'Chief', body: 'Is the release branch cut?' }]);
+    // The receiving Controller sees the inbox, which stays a valid Team; the sender's does not.
+    expect(await f.broker.hostCall('pc', { action: 'poll' })).toEqual([expect.objectContaining({ id: inbox!.id })]);
+    expect(await f.broker.hostCall('mac', { action: 'poll' })).toEqual([]);
+    expect(isTeam(inbox)).toBe(true);
   });
 
-  it('answers a message on the same link and stops a chain of replies at its limit', async () => {
+  it('answers a message it received and stops a chain of replies at its limit', async () => {
     const f = fixture();
     let last = (await f.broker.hostCall('mac', { action: 'message_assistant', owner: f.chief, to: 'Tracker', text: 'Ping 1', operationId: 'p1' }) as { messageId: string }).messageId;
     await expect(f.broker.hostCall('mac', { action: 'message_assistant', owner: f.chief, to: 'Tracker', text: 'Self', operationId: 'self', replyTo: last })).rejects.toThrow('reply_to must name');
@@ -89,15 +91,15 @@ describe('assistants messaging one another', () => {
     }
     const [hostId, owner, to] = sides[(ASSISTANT_MESSAGE_HOP_LIMIT + 1) % 2]!;
     await expect(f.broker.hostCall(hostId, { action: 'message_assistant', owner, to, text: 'One more', operationId: 'more', replyTo: last })).rejects.toThrow('tell the person');
-    expect(f.state()).toHaveLength(1);
-    const replies = f.state()[0]!.messages.map(message => parseTaskInputs(message.text)?.[0]).filter(input => input?.kind === 'assistant' && input.replyTo);
+    expect(f.state().map(team => team.inbox?.botId).sort()).toEqual([ids.chief, ids.tracker].sort());
+    const replies = f.state().flatMap(team => team.messages).map(message => parseTaskInputs(message.text)?.[0]).filter(input => input?.kind === 'assistant' && input.replyTo);
     expect(replies).toHaveLength(ASSISTANT_MESSAGE_HOP_LIMIT - 1);
   });
 
   it('refuses unknown, hidden-by-name ambiguity and self the same way, and holds a message for an offline Host', async () => {
     const f = fixture({ offline: 'pc' });
     for (const to of ['Nobody', 'Chief']) await expect(f.broker.hostCall('mac', { action: 'message_assistant', owner: f.chief, to, text: 'Hi', operationId: to })).rejects.toThrow('No assistant of this account');
-    expect(await f.broker.hostCall('mac', { action: 'message_assistant', owner: f.chief, to: 'g1/v2', text: 'Hi', operationId: 'held' })).toMatchObject({ outcome: 'held' });
+    expect(await f.broker.hostCall('mac', { action: 'message_assistant', owner: f.chief, to: ids.tracker, text: 'Hi', operationId: 'held' })).toMatchObject({ outcome: 'held' });
   });
 
   it('is refused to a Controller that does not run links', async () => {

@@ -9,7 +9,7 @@ import { accountAssistants, assistantMessageText, assistantNamesIn, ASSISTANT_ME
 import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
 import type { TeamBrokerPorts } from './teams.js';
-import { pruneCoordination } from './coordination-retention.js';
+import type { BotInboxes } from './inboxes.js';
 
 /** What the Team broker lends assistant messages. */
 export interface AssistantBrokerPorts {
@@ -77,7 +77,7 @@ export function assistantSeat(item: Assistant, now: number): TeamMember {
 }
 
 export class AssistantMessages {
-  constructor(private readonly broker: AssistantBrokerPorts, private readonly ports: AssistantPorts) {}
+  constructor(private readonly broker: AssistantBrokerPorts, private readonly ports: AssistantPorts, private readonly inboxes: BotInboxes) {}
   capable(hostId: string): boolean { return this.ports.capable(hostId); }
   private caller(hostId: string, owner: ListCall['owner'], directory: readonly Assistant[]): Assistant {
     return coordinatorCaller(this.broker.ports.resolveSession, hostId, owner, directory);
@@ -110,47 +110,38 @@ export class AssistantMessages {
     const directory = accountDirectory(this.ports.groups(), this.ports.coordinatorProvider), self = this.caller(hostId, call.owner, directory);
     return { assistants: directory.filter(item => item.key !== self.key && !item.hidden && item.coordinator).map(item => ({ id: item.key, name: item.name, ...(item.label ? { label: item.label } : {}) })) };
   }
+  /** A message to another bot arrives in its inbox, framed with the sender's name, between its turns (bots design 3). */
   async message(hostId: string, call: MessageCall): Promise<{ messageId: string; outcome: 'delivered' | 'held' }> {
     if (!this.ports.capable(hostId)) fail('Update the Controller to message assistants.');
     const directory = accountDirectory(this.ports.groups(), this.ports.coordinatorProvider), from = this.caller(hostId, call.owner, directory);
     const to = namedAssistant(directory, call.to, from);
+    if (!to.key.startsWith('b_') || !from.key.startsWith('b_')) fail(NOT_FOUND);
     const sent = await this.broker.change(teams => {
       const now = this.broker.ports.now();
-      let team = teams.find(item => item.link?.assistants.includes(from.key) && item.link.assistants.includes(to.key));
-      if (!team) {
-        pruneCoordination(teams, 1);
-        if (plain(teams).length >= ACCOUNT_TEAM_LIMIT) fail('Team capacity reached.');
-        const seat = (item: Assistant) => assistantSeat(item, now);
-        team = { id: randomUUID(), operationId: digest(['link', [from.key, to.key].sort()]), revision: 1, title: `${from.name} and ${to.name}`, status: 'active',
-          source: { hostId: from.hostId, providerId: from.providerId, nativeSessionId: from.nativeSessionId, title: from.name },
-          members: [seat(from), seat(to)], messages: [], link: { assistants: [from.key, to.key], recent: [] }, createdAt: now, updatedAt: now };
-        teams.push(team);
-      }
-      const link = team.link!, index = link.assistants.indexOf(from.key), sender = team.members[index]!, receiver = team.members[1 - index]!;
-      const existing = link.recent.find(item => item.operationId === call.operationId && item.from === sender.id);
-      if (existing) return { teamId: team.id, messageId: existing.id, receiver: receiver.id, sender: sender.id };
+      const inbox = this.inboxes.prepare(teams, to, now) ?? fail('Team capacity reached.');
+      const recent = inbox.inbox!.recent ??= [];
+      const existing = recent.find(item => item.operationId === call.operationId && item.from === from.key);
+      if (existing) return { messageId: existing.id };
       let hop = 1;
       if (call.replyTo) {
-        const parent = link.recent.find(item => item.id === call.replyTo && item.from === receiver.id) ?? fail('reply_to must name a message this assistant received from them.');
+        const own = this.inboxes.current(teams, from)?.inbox?.recent ?? [];
+        const parent = own.find(item => item.id === call.replyTo && item.from === to.key) ?? fail('reply_to must name a message this assistant received from them.');
         hop = parent.hop + 1;
         if (hop > ASSISTANT_MESSAGE_HOP_LIMIT) fail(`This exchange reached ${ASSISTANT_MESSAGE_HOP_LIMIT} messages. Stop here and tell the person what was said.`);
       }
-      const messageId = `m${digest([team.id, sender.id, call.operationId]).slice(0, 12)}`;
-      const message = { id: digest(['assistant-message', team.id, messageId]), from: sender.id, to: receiver.id, status: 'queued' as const, createdAt: now,
+      const seat = inbox.members[0]!, messageId = `m${digest([inbox.id, from.key, call.operationId]).slice(0, 12)}`;
+      const message = { id: digest(['assistant-message', inbox.id, messageId]), from: seat.id, to: seat.id, status: 'queued' as const, createdAt: now,
         text: assistantMessageText({ messageId, from: from.name, ...(call.replyTo ? { replyTo: call.replyTo } : {}), body: call.text }) };
-      assertTeamQueueCapacity(team, message);
-      team.messages.push(message);
-      link.recent.push({ id: messageId, from: sender.id, hop, operationId: call.operationId });
-      if (link.recent.length > RECENT_KEEP) link.recent.splice(0, link.recent.length - RECENT_KEEP);
-      team.revision++; team.updatedAt = now;
-      return { teamId: team.id, messageId, receiver: receiver.id, sender: sender.id };
+      assertTeamQueueCapacity(inbox, message);
+      inbox.messages.push(message);
+      recent.push({ id: messageId, from: from.key, hop, operationId: call.operationId });
+      if (recent.length > RECENT_KEEP) recent.splice(0, recent.length - RECENT_KEEP);
+      inbox.revision++; inbox.updatedAt = now;
+      return { messageId };
     });
     // Binding a main session where it is never creates anything, so a Host that was offline is asked again with the next message.
-    let receiver: TeamMember | undefined;
-    for (const memberId of [sent.sender, sent.receiver]) {
-      const team = await this.broker.provision(sent.teamId, memberId).catch(() => undefined);
-      if (memberId === sent.receiver) receiver = team?.members.find(item => item.id === memberId);
-    }
+    const receiver = await this.inboxes.bind(to);
     return { messageId: sent.messageId, outcome: receiver?.creation === 'ready' ? 'delivered' : 'held' };
   }
+
 }

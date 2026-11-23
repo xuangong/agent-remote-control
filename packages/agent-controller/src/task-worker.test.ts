@@ -197,7 +197,7 @@ describe('the main session\'s task tools', () => {
 
 describe('messages between assistants', () => {
   const groups = [{ window: { id: 'g', title: 'g', revision: 1, views: [['v1', 'worker'], ['v2', 'tracker']].map(([id, nativeSessionId]) => ({ id, placement: 'primary',
-    binding: { hostId: 'host', providerId: 'codex', nativeSessionId, title: nativeSessionId } })) }, bots: { rank: 'm', members: { v1: { name: 'Chief', mode: 'coordinator' }, v2: { name: 'Tracker', mode: 'coordinator' } } } }] as never;
+    binding: { hostId: 'host', providerId: 'codex', nativeSessionId, title: nativeSessionId } })) }, bots: { rank: 'm', members: { v1: { botId: 'b_' + '1'.repeat(32), name: 'Chief', mode: 'coordinator' }, v2: { botId: 'b_' + '2'.repeat(32), name: 'Tracker', mode: 'coordinator' } } } }] as never;
   it('delivers a bot\'s standing instructions from its inbox between its turns, once', async () => {
     const bots = [{ window: { id: 'g', title: 'g', revision: 1, views: [{ id: 'v1', placement: 'primary', binding: { hostId: 'host', providerId: 'codex', nativeSessionId: 'tracker', title: 'tracker' } }] },
       bots: { rank: 'm', members: { v1: { botId: 'b_' + 'd'.repeat(32), name: 'Tracker', mission: 'Track the release.' } } } }] as never;
@@ -221,7 +221,11 @@ describe('messages between assistants', () => {
     const chief = new WorkerSupport({ request: call => h.host(call), available: () => true, tasks: () => true, stateDirectory: h.directory, title: async () => 'Chief' });
     const tracker = new WorkerSupport({ request: call => h.host(call), available: () => true, tasks: () => true, stateDirectory: h.directory, title: async () => 'Tracker' });
     const tools = (worker: WorkerSupport, id: string) => worker.namespace(() => h.ref('codex', id), false, true).tools;
-    expect(JSON.parse(await tool(tools(chief, 'worker'), 'list_assistants').execute({}) as string)).toEqual({ assistants: [{ id: 'g/v2', name: 'Tracker' }] });
+    // Both bots first receive their standing instructions in their inboxes.
+    await h.host({ action: 'support_enablement' });
+    await h.runtime.tick();
+    for (const id of ['worker', 'tracker']) h.sessions.get(id)!.deliveries.length = 0;
+    expect(JSON.parse(await tool(tools(chief, 'worker'), 'list_assistants').execute({}) as string)).toEqual({ assistants: [{ id: 'b_' + '2'.repeat(32), name: 'Tracker' }] });
     h.busy('tracker', true);
     const sent = JSON.parse(await tool(tools(chief, 'worker'), 'message_assistant').execute({ to: 'Tracker', text: 'Is the branch cut?' }) as string);
     expect(sent).toMatchObject({ outcome: 'delivered' });

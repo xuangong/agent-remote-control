@@ -65,7 +65,7 @@ export class TeamBroker {
     if (ports.tasks) this.tasks = new TaskGroups({ ports, change: update => this.change(update), provision: (teamId, memberId) => this.provision(teamId, memberId) }, ports.tasks);
     if (ports.assistants) {
       const lent = { ports, change: <T>(update: (teams: SavedTeam[]) => T) => this.change(update), provision: (teamId: string, memberId: string) => this.provision(teamId, memberId) };
-      this.assistants = new AssistantMessages(lent, ports.assistants); this.rooms = new Rooms(lent, ports.assistants); this.inboxes = new BotInboxes(lent);
+      this.inboxes = new BotInboxes(lent); this.assistants = new AssistantMessages(lent, ports.assistants, this.inboxes); this.rooms = new Rooms(lent, ports.assistants);
     }
     if (ports.callForSupport) this.groups = new CallForSupportGroups({ ports, change: update => this.change(update), provision: (teamId, memberId) => this.provision(teamId, memberId),
       project: team => this.project(team), resource: (team, memberId, resourceId) => this.resourceAccess(team, memberId, resourceId),

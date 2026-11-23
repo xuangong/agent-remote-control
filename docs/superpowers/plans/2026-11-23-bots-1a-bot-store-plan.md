@@ -14,6 +14,11 @@ Design: [bots design](../specs/2026-11-23-bots-design.md) section 2.1; parent pl
 
 **Compatibility:** forward only, as decided for this work: an older Relay cannot read a state with `bot` records or `botId` in bot details. No intermediate release ships this alone.
 
+> **Found while executing (2026-11-23).** Two things the steps below did not foresee, fixed in the code: `reconcileBots` takes a
+> `changed` set of the rows the change wrote, because rows it did not write hold placement only and would read as identity cleared;
+> and the snapshot decoder compares `bots` as stored (like Window rows), since a snapshot from before bot records gains records when
+> it loads. `encodeValidatedHostedSnapshot` is exported so a test can write such a snapshot.
+
 ## File structure
 
 | File | Responsibility |

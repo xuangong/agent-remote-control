@@ -45,17 +45,22 @@ export function botIdsByView(subject: string, rows: readonly SavedWorkspaceWindo
 }
 
 /**
- * After a change to an account's groups: every bot view of a live row gets a record (by its `botId`, else the id its view had before
- * the change, else a new one), the record takes the identity its details carry, and the row keeps only placement and the id. A
- * standing bot no live row shows is retired; one shown again is brought back.
+ * After a change to an account's groups: every bot view of a row the change wrote (`changed`, by id) gets a record (by its `botId`,
+ * else the id its view had before the change, else a new one), the record takes the identity its details carry, and the row keeps
+ * only placement and the id. Rows the change did not write hold placement only and just keep their bots shown. A standing bot no
+ * live row shows is retired; one shown again is brought back.
  */
-export function reconcileBots(subject: string, rows: SavedWorkspaceWindow[], bots: SavedBot[], before: ReadonlyMap<string, string>, now: number, newId: () => string = newBotId): void {
+export function reconcileBots(subject: string, rows: SavedWorkspaceWindow[], bots: SavedBot[], changed: ReadonlySet<string>, before: ReadonlyMap<string, string>, now: number, newId: () => string = newBotId): void {
   const mine = new Map(bots.filter(bot => bot.subject === subject).map(bot => [bot.botId, bot]));
   const taken = new Set(bots.filter(bot => bot.subject !== subject).map(bot => bot.botId));
   const shown = new Set<string>();
   for (const row of rows) {
     if (row.subject !== subject || row.deleted || !row.window || !row.bots) continue;
     const views = new Set(groupBotViews({ window: row.window, bots: row.bots }).map(view => view.id));
+    if (!changed.has(row.id)) {
+      for (const viewId of views) { const botId = row.bots.members[viewId]?.botId; if (botId && mine.has(botId)) { shown.add(botId); delete mine.get(botId)!.retiredAt; } }
+      continue;
+    }
     for (const [viewId, details] of Object.entries(row.bots.members)) {
       if (!views.has(viewId)) continue;
       const known = (id: string | undefined) => id && !taken.has(id) && !shown.has(id) ? id : undefined;
@@ -97,6 +102,6 @@ export function migrateBots(rows: SavedWorkspaceWindow[], bots: SavedBot[], now:
   for (const subject of new Set(rows.map(row => row.subject))) {
     const before = new Map<string, string>();
     for (const row of rows) if (row.subject === subject && !row.deleted) for (const viewId of bound(row)) before.set(key(row.id, viewId), migrationBotId(subject, row.id, viewId));
-    reconcileBots(subject, rows, bots, before, now);
+    reconcileBots(subject, rows, bots, new Set(rows.filter(row => row.subject === subject).map(row => row.id)), before, now);
   }
 }

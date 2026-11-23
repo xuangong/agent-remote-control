@@ -11,6 +11,8 @@ import { encodeHostedSnapshot, decodeHostedSnapshot } from './record-codec.js';
 const auth = { origin: 'https://relay.example', issuer: 'https://gateway.example', secret: 'windows-test-secret-01234567890123456789' };
 const binding = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Session' };
 const window = (): WorkspaceWindow => ({ schemaVersion: 3, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: 'primary', selectedViewId: 'primary', views: [createWindowView('primary', binding, 'primary')] });
+/** Every bot read back carries its record's id. */
+const botId = expect.stringMatching(/^b_[0-9a-f]{32}$/);
 const servers: Server[] = []; const cleanups: Array<() => void> = [];
 afterEach(async () => { cleanups.splice(0).forEach(fn => fn()); await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()); }))); });
 async function fixture(initial?: HostedRelayState) {
@@ -318,7 +320,9 @@ it('keeps a section through layout edits and drops it with the group', async () 
   expect(created.body.result.status).toBe('committed');
   const renamed = await f.call('/linked/operations', 'POST', f.mutation('rename-linked', 0, { type: 'rename', title: 'Renamed' }));
   expect(renamed.body).toMatchObject({ result: { status: 'committed' }, window: { title: 'Renamed' }, bots: { rank: 'm', members: { writer: { label: 'Writer' } } } });
-  expect(f.saved().workspaceWindows![0]!.bots).toEqual({ rank: 'm', members: { writer: { label: 'Writer' } } });
+  // The group keeps the bot's placement and id; its record keeps who it is.
+  expect(f.saved().workspaceWindows![0]!.bots).toEqual({ rank: 'm', members: { writer: { botId } } });
+  expect(f.saved().bots).toEqual([expect.objectContaining({ subject: 'alice', label: 'Writer' })]);
   const deleted = await f.call('/linked', 'DELETE', f.mutation('delete-linked', 1, { type: 'delete' }));
   expect(deleted.body.result.status).toBe('committed');
   expect(deleted.body).not.toHaveProperty('bots');
@@ -365,9 +369,9 @@ it('keeps a sleeping bot asleep through storage restart until it is woken', asyn
   const asleep = await f.call('/window/operations', 'POST', f.mutation('sleep', 0, { type: 'batch', operations: [{ type: 'bots.add', rank: 'm' }, { type: 'bot.update', viewId, details: { asleep: true } }] }));
   expect(asleep.body).toMatchObject({ result: { status: 'committed', revision: 1 }, bots: { members: { [viewId]: { asleep: true } } } });
   const restarted = await fixture(f.saved());
-  expect((await restarted.call('/window')).body.bots.members[viewId]).toEqual({ asleep: true });
+  expect((await restarted.call('/window')).body.bots.members[viewId]).toEqual({ asleep: true, botId });
   const woken = await restarted.call('/window/operations', 'POST', restarted.mutation('wake', 1, { type: 'bot.update', viewId, details: {} }));
-  expect(woken.body.bots.members[viewId]).toEqual({});
+  expect(woken.body.bots.members[viewId]).toEqual({ botId });
 });
 
 it('counts a Side as a bot, so its session cannot be a bot in another section', async () => {
@@ -498,7 +502,7 @@ it('lists a saved group holding bots stored with the older picture shapes and wr
   const listed = (await f.call()).body.groups.find((group: { window: WorkspaceWindow }) => group.window.id === 'legacy');
   expect(listed.bots.members.main.picture).toEqual({ shape: 'squircle', color: '#2f6fed' });
   expect(listed.bots.members.review.picture).toEqual({ shape: 'squircle', color: '#35836b' });
-  expect(listed.bots.members.plain).toEqual({ label: 'No picture' });
+  expect(listed.bots.members.plain).toEqual({ label: 'No picture', botId });
   const update = (operationId: string, picture: unknown) => f.call('/legacy/operations', 'POST',
     f.mutation(operationId, 0, { type: 'bot.update', viewId: 'main', details: { label: 'Writes the release notes', picture } }));
   expect((await update('refused-hexagon', { shape: 'hexagon', color: '#2f6fed' })).status).toBe(400);
@@ -506,7 +510,9 @@ it('lists a saved group holding bots stored with the older picture shapes and wr
   const picture = { shape: 'triangle', color: '#2f6fed', gaze: 4 };
   expect((await update('write', picture)).body.result.status).toBe('committed');
   expect((await f.call('/legacy')).body.bots.members.main.picture).toEqual(picture);
-  expect(f.saved().workspaceWindows![0]!.bots.members.main.picture).toEqual(picture);
+  // The picture is stored in the bot's record, in the new form.
+  const mainId = f.saved().workspaceWindows![0]!.bots.members.main.botId;
+  expect(f.saved().bots!.find(bot => bot.botId === mainId)!.picture).toEqual(picture);
   const restarted = await fixture(f.saved());
   expect((await restarted.call('/legacy')).body.bots.members.main.picture).toEqual(picture);
 });
@@ -517,15 +523,15 @@ it('stores a bot\'s process mode through bot.update, keeps its other details and
   const stored: WorkspaceWindow = { schemaVersion: 3, id: 'modes', title: 'Modes', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views };
   const f = await fixture({ ...emptyRelayState(auth), workspaceWindows: [{ subject: 'alice', id: 'modes', window: stored, generation: 0, receipts: [], bots: processBots }] });
   const listed = (await f.call()).body.groups.find((group: { window: WorkspaceWindow }) => group.window.id === 'modes');
-  expect(listed.bots.members.review).toEqual({ process: 'process' });
-  expect(listed.bots.members.main).toEqual(processBots.members.main);
+  expect(listed.bots.members.review).toEqual({ process: 'process', botId });
+  expect(listed.bots.members.main).toEqual({ ...processBots.members.main, botId });
   const details = { label: 'Writes the release notes', picture: { shape: 'squircle', color: '#2f6fed' }, process: 'full', pinned: true };
   const update = (operationId: string, body: unknown) => f.call('/modes/operations', 'POST', f.mutation(operationId, 0, { type: 'bot.update', viewId: 'main', details: body }));
   expect((await update('set', details)).body.result.status).toBe('committed');
-  expect((await f.call('/modes')).body.bots.members.main).toEqual(details);
-  expect((await f.call('/modes')).body.bots.members.review).toEqual({ process: 'process' });
+  expect((await f.call('/modes')).body.bots.members.main).toEqual({ ...details, botId });
+  expect((await f.call('/modes')).body.bots.members.review).toEqual({ process: 'process', botId });
   const restarted = await fixture(f.saved());
-  expect((await restarted.call('/modes')).body.bots.members.main).toEqual(details);
+  expect((await restarted.call('/modes')).body.bots.members.main).toEqual({ ...details, botId });
   const refused = await update('bad', { process: 'verbose' });
   expect(refused.status).toBe(400);
 });
@@ -536,11 +542,11 @@ it('stores an assistant\'s name through bot.update, keeps its other details and 
   const stored: WorkspaceWindow = { schemaVersion: 3, id: 'names', title: 'Names', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views };
   const f = await fixture({ ...emptyRelayState(auth), workspaceWindows: [{ subject: 'alice', id: 'names', window: stored, generation: 0, receipts: [], bots: namedBots }] });
   const listed = (await f.call()).body.groups.find((group: { window: WorkspaceWindow }) => group.window.id === 'names');
-  expect(listed.bots.members.review).toEqual({ name: '团团' });
-  expect(listed.bots.members.plain).toEqual({ label: 'Called by its generated name' });
+  expect(listed.bots.members.review).toEqual({ name: '团团', botId });
+  expect(listed.bots.members.plain).toEqual({ label: 'Called by its generated name', botId });
   const update = (operationId: string, body: unknown) => f.call('/names/operations', 'POST', f.mutation(operationId, 0, { type: 'bot.update', viewId: 'plain', details: body }));
   expect((await update('rename', { name: 'Pebbles', label: 'Called by its generated name' })).body.result.status).toBe('committed');
-  expect((await f.call('/names')).body.bots.members.plain).toEqual({ name: 'Pebbles', label: 'Called by its generated name' });
+  expect((await f.call('/names')).body.bots.members.plain).toEqual({ name: 'Pebbles', label: 'Called by its generated name', botId });
   const restarted = await fixture(f.saved());
   expect((await restarted.call('/names')).body.bots.members.plain.name).toBe('Pebbles');
   expect((await update('empty', { name: '' })).status).toBe(400);
@@ -557,7 +563,7 @@ it('stores a group\'s mute and notifications and a chat\'s mute, and reads them 
   expect((await operate('unmute', 0, { type: 'section.settings' })).body.result.status).toBe('committed');
   expect((await operate('mute-chat', 1, { type: 'bot.update', viewId: 'review', details: { name: 'Pebbles', muted: true } })).body.result.status).toBe('committed');
   const after = (await f.call('/quiet')).body.bots;
-  expect([after.muted, after.notifications, after.members.review]).toEqual([undefined, undefined, { name: 'Pebbles', muted: true }]);
+  expect([after.muted, after.notifications, after.members.review]).toEqual([undefined, undefined, { name: 'Pebbles', muted: true, botId }]);
   const restarted = await fixture(f.saved());
   expect((await restarted.call('/quiet')).body.bots.members.review.muted).toBe(true);
   expect((await operate('bad', 2, { type: 'section.settings', notifications: 'none' })).status).toBe(400);

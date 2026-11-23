@@ -330,10 +330,11 @@ messages also stays: it is the person's action, not coordination.
 | Providers | Unchanged; native behaviour stays in adapters |
 | Workbench | Chats, conversation, temporary bot panel, details, rooms, audit |
 
-**Today** (`feat/assistant-tasks`, `feat/assistant-tasks-deployable`): tasks, assistant messages and rooms run on the Team
-delivery path, which already gives claims, durable receipts and settlement. The plan moves them to the bot and message records
-above; later, the P2 operation queue of the [IM session service](2026-11-15-im-session-service-design.md) carries messages without
-changing the tools.
+**As built for the first deployment** (`feat/bots-1-record`): standing bots are Relay records beside the Window rows; every bot has
+an inbox, a Team whose only seat is its main session, through which its messages and standing instructions arrive; a temporary bot
+is a task seen as a bot (name = title, mission = brief, organizer = owner, session = worker, `botId` derived from the Team). All run
+on the Team delivery path, which gives claims, durable receipts and settlement. The P2 operation queue of the
+[IM session service](2026-11-15-im-session-service-design.md) later carries the same messages without changing the tools.
 
 ## 13. Decisions
 

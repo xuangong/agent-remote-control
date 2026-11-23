@@ -58,6 +58,16 @@ that renames its tools later. How the rest is built:
 - Then: standing bots from `create_bot` placed in the organizer's group, `update_mission` for standing bots, replies from final
   text, attachments with bundles, the person's words to an organized bot, and the e2e flows of design 11.
 
+Built (2026-11-23, `feat/bots-1-record`): every bot's tools (`create_bot` temporary and standing, `message` with `status`,
+`list_bots`, `read_bot`, `update_mission`, `stop_bot`, `retire_bot`, the room tools) for main sessions and temporary bots alike; a
+standing bot created by a bot starts with its instructions and tools, joins its organizer's group, and can answer its first message;
+300-character messages and 12 bots per organizer; e2e flow E15 (temporary bots reporting as one input, a message and its answer
+between standing bots, a standing bot created and placed). Live with Claude Code: a temporary bot reported its count, and a standing
+bot wrote its file and reported to its organizer.
+
+After the first deployment, because each only adds to the tools: replies from final text (bots on providers without tools),
+attachments with git bundles (machines without a shared repository), and the person's words to a standing bot that has an organizer.
+
 
 - [ ] No mode (design 2.1): remove the coordinator/plain switch, `mode`, and `coordinatorProvider`; every bot whose provider takes
   tools gets the `agent_remote` namespace (design 5.1) and standing instructions at its next attachment; others are answers only.

@@ -103,14 +103,29 @@ models run with step 5's scenarios.
 
 ## Step 4: the audit
 
-- [ ] The audit view (design 7): chains live, stop a chain or one bot's part of it, pause, retire; thresholds that notify.
-- [ ] The earlier refusals (hop limit, running tasks per session, creation limits) are removed; only system bounds and the span
-  refuse.
+- [x] The audit view (design 7): chains live, stop a chain or one bot's part of it, pause, retire; thresholds that notify.
+  Plan and what was built: [step 4](2026-11-23-bots-4-audit-plan.md).
+- [x] The earlier refusals are removed: the reply hop limit is gone and depth is recorded. The running-task limit is the span of
+  an organizer (12), which stays; there was no creation limit beyond it.
 
 ## Step 5: behaviour scenarios
 
 - [ ] `pnpm test:bots` with the release walkthrough (design 11). The base instructions are tuned here until it passes with Claude
   Code and Codex; every later change to them reruns it.
+
+First rounds (2026-11-23, `scripts/bots-scenarios.mjs`, on this checkout's local instance): scenarios `temporary` (an organizer
+splits a request between two temporary bots, which write files and report; it sums up), `standing` (it creates a standing
+reviewer that answers by message; the person's lasting change goes into the reviewer's mission; a work item runs to its end) and
+`shared` (a second organizer asks the same reviewer). Found and fixed:
+
+- An organizer asked for bots used Claude Code's own subagents: bots without a mission never got the base instructions, and
+  nothing said bots are not subagents. Base instructions v2 say so, as does `create_bot`; the scenarios give organizers a mission.
+- `update_work`, `complete_work` and `set_timer` cloned an immer draft and failed in the Relay; the unit tests now use drafts.
+- A settled message of a chain failed validation as a receipt and held its inbox; fixed, with a test that settles.
+- A reviewer kept a lasting change in Claude Code's memory files; the base instructions now name `update_mission`.
+
+Not yet in the scenarios: the bundle and shared-repository loops (they need step 2's attachments), the person speaking to a
+temporary bot, and counting tool calls per organizer turn.
 
 ## Step 6: the Workbench
 

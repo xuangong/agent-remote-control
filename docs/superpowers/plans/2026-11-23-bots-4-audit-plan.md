@@ -65,6 +65,19 @@ Built (`feat/bots-4-chains`, 7fcdbda1). As planned, with these choices:
   attention path; nothing stops.
 - Defaults: off until the person sets them; the audit page offers them.
 
+Built: 4b (f4155245, bc116879) and 4c (bc116879).
+
+- The audit is an item of Settings > Assistants rather than a page of its own: the decisions sit where the person sets how all
+  bots behave, and the section loads its code only when shown. Each chain is a row with its cause, counts and tokens; it opens to
+  its bots, each with the decisions that apply to its kind.
+- Stopping marks `interrupt` on every member whose current chain is the stopped one; its Host cancels that session's running
+  turn once per value. A stopped temporary bot is cancelled as a task. A later call in a stopped chain, or by a bot whose part
+  was stopped, is refused with a sentence the bot can pass on.
+- Pausing holds a standing bot's queued messages on the Relay (the poll does not show them and a claim is refused).
+- Thresholds are kept per account beside the chains. Passing one is recorded on the chain (`passed`) and pushed once per chain
+  and threshold as a needs-you reminder for the chain's first bot, through the Relay's push reminders, unless a visible page
+  shows that bot.
+
 ## Bounds that stay
 
 Sizes (messages of 300 characters, briefs, queues, Relay and Host storage) and the span of an organizer (12 bots). They refuse

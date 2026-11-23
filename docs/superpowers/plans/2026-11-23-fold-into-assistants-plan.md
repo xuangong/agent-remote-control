@@ -23,6 +23,10 @@ messages run in production.
   a worker's tool approval answered by the person; assistant A messages B and B replies; a worker's Host offline until it returns.
   Chromium and WebKit. These are the gates of every step below, since Side, Call For Support and TPM have no flow of their own and
   Team has one case in E7.
+- [ ] **The assistant record (T1, O70)** first: ids that survive moving groups, the session a bot shows now, name and label as its
+  responsibility, peers. Links, rooms, timers and reading a peer's conversation all rest on it.
+- [ ] **A reply is the receiver's answer** (design 10.1): the final text of the turn a message started returns to the sender, so a
+  bot on any provider can be asked; plain bots can receive messages.
 - [ ] **Attachments on messages and task results.** A message or a report carries files (a patch, a log) as resources, as Team
   resources do today; the receiver downloads one to a verified local file, never applies it.
 - [ ] **Assistant limits.** Per assistant: running tasks, task depth, and an optional budget measured as Call For Support usage is
@@ -38,18 +42,18 @@ messages run in production.
 - [ ] Delete Side creation and relation kinds, `/btw` follows `/side`.
 - Gate: flows 1 and 2 with a task the person started; the Side cases of the component tier rewritten against task threads.
 
-## Step 2: Call For Support becomes expert assistants
+## Step 2: Call For Support becomes bots with responsibilities
 
-- [ ] A profile migrates to an assistant: its name, coordinator provider, model and Host; its budget to the assistant's limits;
-  its read-only and worktree workspaces to the workspace its tasks use by default. The migration runs once in the Relay and is
-  idempotent; the person sees the new assistants in Chats.
-- [ ] Coordinator instructions say when to ask an expert assistant (an independent review, another model or machine) and that its
-  answer is advice.
+- [ ] Coordinator instructions say that other bots have responsibilities (name and label from `list_assistants`), that a bot asks
+  the one whose responsibility fits for a review, another model or another machine, and that the answer is advice.
+- [ ] Verify in `pnpm local` that bots do this unprompted: a coordinator facing a change that needs an independent review messages
+  the bot labelled for reviews.
+- [ ] Profiles are not migrated: the person sets up the bots they want. The support settings say so once, then go.
 - [ ] Delete profiles, enablement, support groups, calls, rosters and approval, ledgers, report framing, the four support tools,
-  the support settings and panel views, `callForSupport` and `readOnlyProvider` negotiation where tasks replace them, and the
-  `support_enablement` host call (the coordinators move to their own call).
-- Gate: a session asks an expert on another provider for a review; the expert runs a read-only task and answers with findings and
-  an attached patch; a follow-up reaches the same expert with its context. Flow 4 extended with the attachment.
+  the support settings and panel views, the `callForSupport` and `readOnlyProvider` negotiation, and the `support_enablement` host
+  call (the coordinators move to a call of their own).
+- Gate: bot A asks bot B (on another provider) to review an uncommitted change; B sees it (attached patch or read-only task) and
+  answers; a follow-up reaches B with its context. Flow 4 extended accordingly.
 
 ## Step 3: Team
 
@@ -64,8 +68,9 @@ messages run in production.
 ## Step 4: timers, then TPM
 
 - [ ] **Timers on assistants** (design 10.4): set by the person or the assistant (`set_timer`, `clear_timer`), stored with the
-  assistant in the Relay, delivered as `[Timer "<name>" · due]` when the main session is idle, missed ticks coalesced, ticks with no
-  change folded as background checks. The heartbeat of [session companions](../../session-companions.md) is removed in favour of it.
+  assistant in the Relay, delivered as `[Timer "<name>" · due]` when the main session is idle, missed ticks coalesced. A timer that
+  watches another bot is skipped, without waking the model, when that bot's conversation has nothing new, and may fire early when it
+  has; ticks that change nothing are folded as background checks. The heartbeat of [session companions](../../session-companions.md) is removed in favour of it.
 - [ ] Reading a peer's conversation at a tick, allowed by the watched assistant's peers.
 - [ ] Todo and confirmation become companions any assistant may switch on, not TPM's own.
 - [ ] A TPM becomes a project manager assistant: a timer (five minutes by default, as the heartbeat), messages with the assistant

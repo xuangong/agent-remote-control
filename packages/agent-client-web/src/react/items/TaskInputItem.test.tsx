@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { expect, it } from 'vitest';
-import { appendSessionReferences, assistantMessageText, joinTaskInputs, standingInstructionsText, roomTurnText, taskBriefText, timerText, taskResultText, taskUpdateText } from '@orchardworks/agent-remote-protocol';
+import { BOT_INSTRUCTIONS_VERSION, appendSessionReferences, assistantMessageText, joinTaskInputs, personWroteText, standingInstructionsText, roomTurnText, taskBriefText, timerText, taskResultText, taskUpdateText } from '@orchardworks/agent-remote-protocol';
 import { TaskDirectoryContext } from '../TaskDirectory.js';
 import { render } from '../../test/setup.js';
 import { UserMessageItem } from './MessageItem.js';
@@ -32,7 +32,7 @@ it('shows a worker its brief with who asked and the done-when line, also when a 
 
 it('folds a bot\'s standing instructions into one quiet line, never the person\'s bubble', async () => {
   const container = await render(<UserMessageItem item={message(standingInstructionsText('Watch the build.'))} />);
-  const folded = container.querySelector('details[data-standing-version="2"]')!;
+  const folded = container.querySelector(`details[data-standing-version="${BOT_INSTRUCTIONS_VERSION}"]`)!;
   expect(folded.querySelector('summary')?.textContent).toBe('Standing instructions updated');
   expect(folded.textContent).toContain('Watch the build.');
   expect(container.querySelector('.agent-message-user')).toBeNull();
@@ -43,6 +43,14 @@ it('folds a due timer into one quiet line that opens to the bot\'s open work', a
   const folded = container.querySelector('details[data-timer="work"]')!;
   expect(folded.querySelector('summary')?.textContent).toBe('Timer "work" is due');
   expect(folded.textContent).toContain('Release notes · waiting · next: Publish');
+  expect(container.querySelector('.agent-message-user')).toBeNull();
+});
+
+it('folds what the person wrote to a bot into one quiet line that opens to their words', async () => {
+  const container = await render(<UserMessageItem item={message(personWroteText({ bot: 'QA', text: 'Skip the flaky test.' }))} />);
+  const folded = container.querySelector('details[data-person-wrote="QA"]')!;
+  expect(folded.querySelector('summary')?.textContent).toBe('The person wrote to QA');
+  expect(folded.textContent).toContain('Skip the flaky test.');
   expect(container.querySelector('.agent-message-user')).toBeNull();
 });
 

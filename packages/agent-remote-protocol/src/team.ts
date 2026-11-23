@@ -149,6 +149,9 @@ export const TeamHostCall = Type.Union([
   // A standing bot's turn ended: its final text answers the one message that started it (bots design 3.3). The Host sends it, never the model.
   Type.Object({ action: Type.Literal('bot_reply'), owner: BotCaller, text: Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT }),
     cause: Type.Object({ kind: Type.Literal('framed'), answers: AssistantMessageId }, object) }, object),
+  // The person wrote into a standing bot's session: its chief, if a bot, hears it (bots design 3.5). The Host sends it from its record of the input.
+  Type.Object({ action: Type.Literal('bot_told'), owner: BotCaller, text: Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT }),
+    cause: Type.Object({ kind: Type.Literal('person'), messageId: Type.String({ minLength: 1, maxLength: 256 }) }, object) }, object),
   Type.Object({ action: Type.Literal('list_bots'), owner: BotCaller }, object),
   // A bot's turn ended: its Host counts the turn and its usage in the turn's chain.
   Type.Object({ action: Type.Literal('chain_turn'), owner: BotCaller, cause: TurnCause, tokens: Type.Integer({ minimum: 0 }), costUsd: Type.Optional(Type.Number({ minimum: 0 })) }, object),

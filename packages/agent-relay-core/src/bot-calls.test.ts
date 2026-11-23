@@ -68,6 +68,9 @@ describe('bots calling as their own sessions', () => {
     expect(parseTaskInputs(inbox.messages.at(-1)!.text)).toEqual([expect.objectContaining({ kind: 'assistant', from: 'Reviewer', body: 'Thanks.' })]);
     await expect(f.broker.hostCall('mac', { action: 'stop_bot', owner: f.as('tracker'), bot: 'Reviewer' })).rejects.toThrow('None of your staff');
     expect(await f.broker.hostCall('mac', { action: 'bot_session', owner: f.as('chief'), bot: 'Reviewer' })).toEqual(worker);
+    // Any standing bot can be read, which is where a cut reply points; a bot that does not exist cannot.
+    expect(await f.broker.hostCall('mac', { action: 'bot_session', owner: f.as('chief'), bot: 'Tracker' })).toEqual(f.as('tracker'));
+    await expect(f.broker.hostCall('mac', { action: 'bot_session', owner: f.as('chief'), bot: 'Nobody' })).rejects.toThrow('No bot of this account');
     expect(await f.broker.hostCall('mac', { action: 'stop_bot', owner: f.as('chief'), bot: 'Reviewer' })).toMatchObject({ status: 'cancelled' });
   });
 
@@ -145,6 +148,22 @@ describe('bots calling as their own sessions', () => {
     const f = fixture();
     f.goOffline();
     expect(await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'o2', to: 'Tracker', text: 'Again.' })).toMatchObject({ outcome: 'held' });
+  });
+
+  it('tells a bot\'s chief what the person wrote to the bot, once, and nobody when the person is its chief', async () => {
+    const f = fixture();
+    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Scribe', mission: 'Keep the release notes.', lifetime: 'standing' });
+    const scribe = f.as(f.state().find(team => team.inbox?.pending === undefined && team.members[0]!.nativeSessionId?.startsWith('worker-'))!.members[0]!.nativeSessionId!);
+    const wrote = { action: 'bot_told' as const, owner: scribe, text: 'Skip   the\nflaky test.', cause: { kind: 'person' as const, messageId: 'u1' } };
+    expect(await f.broker.hostCall('mac', wrote)).toMatchObject({ outcome: 'delivered' });
+    const chief = f.state().find(team => team.inbox?.botId === ids.chief)!;
+    expect(parseTaskInputs(chief.messages.at(-1)!.text)).toEqual([{ kind: 'person_wrote', bot: 'Scribe', body: 'Skip the flaky test.' }]);
+    expect(await f.broker.hostCall('mac', wrote)).toMatchObject({ outcome: 'duplicate' });
+    expect(f.state().find(team => team.inbox?.botId === ids.chief)!.messages).toHaveLength(chief.messages.length);
+    // Its chief is the person, or it is a temporary bot, whose chief hears the person through its task.
+    expect(await f.broker.hostCall('mac', { ...wrote, owner: f.as('tracker') })).toMatchObject({ outcome: 'unreachable' });
+    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op2', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
+    expect(await f.broker.hostCall('mac', { ...wrote, owner: f.as(f.task().members[0]!.nativeSessionId!) })).toMatchObject({ outcome: 'forbidden' });
   });
 
   describe('replies from the final text of a turn', () => {

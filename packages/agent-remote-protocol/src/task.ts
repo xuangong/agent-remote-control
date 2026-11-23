@@ -79,7 +79,7 @@ export function taskView(team: Team): TaskView {
 }
 
 /** A payload line that would read as a frame is quoted, so only the Relay opens one. */
-export const quoteFrames = (text: string) => text.replace(/^\[(?=(Task|Tasks|Team|Support|Message from|Room)\b)/gm, '(');
+export const quoteFrames = (text: string) => text.replace(/^\[(?=(Task|Tasks|Team|Support|Message from|Room|The person wrote to)\b)/gm, '(');
 const heading = (text: string) => text.replace(/[\r\n\]]+/g, ' ').trim() || '…';
 /**
  * How a brief names the session that started the task: the first line of its title, at most 80 characters. A CLI may title a
@@ -157,6 +157,14 @@ export function roomTurnText(input: { roomId: string; name: string; messages: Re
   return [`[Room "${heading(input.name).replace(/"/g, "'")}" · ${input.roomId} · your turn · ${count} new ${count === 1 ? 'message' : 'messages'} · ends in ${Math.max(0, Math.ceil(input.minutesLeft))} min]`,
     ...input.messages.map(message => quoteFrames(`${heading(message.name)}: ${message.text}`)), ROOM_GUIDANCE].join('\n');
 }
+/** What the person wrote into a bot's session reaches the bot's chief as this much of it (bots design 3.5). */
+export const PERSON_WROTE_LIMIT = 300;
+export const PERSON_WROTE_GUIDANCE = 'The person wrote this to that bot directly, and the bot has it. Take it into account so you do not act on an outdated picture; it is not addressed to you.';
+/** The frame the chief reads: written from the record of what the person wrote, on one line, never from a bot's words. */
+export function personWroteText(input: { bot: string; text: string }): string {
+  const line = input.text.replace(/\s+/g, ' ').trim();
+  return [`[The person wrote to ${heading(input.bot)}] ${line.length > PERSON_WROTE_LIMIT ? `${line.slice(0, PERSON_WROTE_LIMIT - 1)}…` : line || '…'}`, PERSON_WROTE_GUIDANCE].join('\n');
+}
 /** A bot's timer came due after a quiet while. */
 export const TIMER_GUIDANCE = 'Nothing has reached you for a while. Look at your open work: read your staff with read_bot, update your work items, and act or wait as the work needs. A quiet check that changes nothing needs no message.';
 export function timerText(input: { name: string; work: ReadonlyArray<{ title: string; phase: string; next?: string }> }): string {
@@ -165,6 +173,7 @@ export function timerText(input: { name: string; work: ReadonlyArray<{ title: st
 /** The frame of a bot's standing instructions, written by `standingInstructionsText`. */
 const standingFrame = /^\[Your standing instructions · v(\d+)\]$/;
 const timerFrame = /^\[Timer "(.+)" · due\]$/;
+const personWroteFrame = /^\[The person wrote to ([^\]]+)\] (.+)$/;
 const roomFrame = /^\[Room "(.+)" · (\S+) · your turn · (\d+) new messages? · ends in (\d+) min\]$/;
 export type TaskInput =
   | { kind: 'brief'; taskId: string; from: string; title: string; brief: string; doneWhen?: string }
@@ -177,13 +186,17 @@ export type TaskInput =
   /** The bot's standing instructions, sent when they changed (bots design 5.1). */
   | { kind: 'standing'; version: number; body: string }
   /** A bot's quiet timer came due, with its open work. */
-  | { kind: 'timer'; name: string; body: string };
+  | { kind: 'timer'; name: string; body: string }
+  /** What the person wrote to one of the receiver's bots. */
+  | { kind: 'person_wrote'; bot: string; body: string };
 const wordKinds = new Map(Object.entries(kindWords).map(([kind, word]) => [word, kind as TaskInputKind]));
 const framePattern = new RegExp(`^\\[Task (\\S+) · (${Object.values(kindWords).join('|')}) · (.+)\\]$`);
 /** Reads one brief or update the Relay framed; any other text, or a frame without its closing guidance, is not a task input. */
 function parseOne(lines: string[]): TaskInput | undefined {
   const standing = standingFrame.exec(lines[0] ?? '');
   if (standing) return lines.length >= 2 ? { kind: 'standing', version: Number(standing[1]), body: lines.slice(1).join('\n').trimEnd() } : undefined;
+  const wrote = personWroteFrame.exec(lines[0] ?? '');
+  if (wrote) return lines.length === 2 && lines[1] === PERSON_WROTE_GUIDANCE ? { kind: 'person_wrote', bot: wrote[1]!, body: wrote[2]! } : undefined;
   const timer = timerFrame.exec(lines[0] ?? '');
   if (timer) return lines.length >= 2 && lines.at(-1) === TIMER_GUIDANCE ? { kind: 'timer', name: timer[1]!, body: lines.slice(1, -1).join('\n') } : undefined;
   const room = roomFrame.exec(lines[0] ?? '');
@@ -209,7 +222,7 @@ function parseOne(lines: string[]): TaskInput | undefined {
 export const joinTaskInputs = (texts: readonly string[]): string => texts.join('\n\n');
 /** Reads one or several task inputs the Relay framed and the Controller joined; anything else is not task input. */
 export function parseTaskInputs(text: string): TaskInput[] | undefined {
-  const lines = text.split('\n'), starts = lines.flatMap((line, index) => (framePattern.test(line) || assistantFrame.test(line) || roomFrame.test(line) || standingFrame.test(line) || timerFrame.test(line)) && (index === 0 || lines[index - 1] === '') ? [index] : []);
+  const lines = text.split('\n'), starts = lines.flatMap((line, index) => (framePattern.test(line) || assistantFrame.test(line) || roomFrame.test(line) || standingFrame.test(line) || timerFrame.test(line) || personWroteFrame.test(line)) && (index === 0 || lines[index - 1] === '') ? [index] : []);
   if (starts[0] !== 0) return undefined;
   const inputs: TaskInput[] = [];
   for (const [position, start] of starts.entries()) {

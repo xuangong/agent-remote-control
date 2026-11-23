@@ -215,6 +215,17 @@ export class BotCalls {
     if (!to) return { outcome: 'unreachable', reason: 'The sender is gone.' };
     return this.route(hostId, from, undefined, to, { owner: call.owner, operationId: `reply-${entry.id}`, text: cutReply(call.text, from.name), replyTo: entry.id, cause: call.cause });
   }
+  /**
+   * The person wrote into a standing bot's session (bots design 3.5): its chief, when a bot, reads the first 300 characters framed
+   * as what they are. Nothing is queued for a bot whose chief is the person, who already sees it.
+   */
+  async told(hostId: string, call: Call<'bot_told'>): Promise<BotMessageResult> {
+    const self = this.caller(hostId, call.owner), bot = self.standing;
+    if (!bot) return { outcome: 'forbidden', reason: 'A temporary bot\'s chief hears the person through its task.' };
+    const chief = bot.chief ? this.byKey(bot.chief) : undefined;
+    if (!chief?.standing) return { outcome: 'unreachable', reason: 'The person is its chief, or its chief is gone.' };
+    return this.messages.deliver(bot, chief.standing, { operationId: call.cause.messageId, text: call.text, frame: 'person' });
+  }
   /** The bot an id means: a standing bot, or a temporary bot still at work. */
   private byKey(key: string): Bot | undefined {
     const standing = accountDirectory(this.ports.groups()).find(item => item.key === key && key.startsWith('b_'));
@@ -232,16 +243,20 @@ export class BotCalls {
     const work = self.standing && this.work.items(self.standing);
     return { bots: [...above, ...mine, ...standing], ...(work?.length ? { work } : {}) };
   }
-  /** The chief's hold on one of its temporary bots: stop its work, retire it, or read where its session is. */
-  async manageStaff(hostId: string, call: Call<'stop_bot' | 'retire_bot' | 'bot_session'>) {
+  /** Where a bot's conversation is, for `read_bot`: one of the caller's staff, or any standing bot of the account (the person's bots are not secret from each other). */
+  readSession(hostId: string, call: Call<'bot_session'>): { providerId: string; nativeSessionId: string } {
+    const self = this.caller(hostId, call.owner);
+    const team = this.staff(hostId, call.owner).find(item => temporaryBotId(item.id) === call.bot || fold(item.task!.title) === fold(call.bot));
+    const found = team?.members[0] ?? (() => { const bot = this.named(call.bot, self); return typeof bot === 'object' ? bot.standing : undefined; })();
+    if (!found?.nativeSessionId || found.hostId !== hostId) fail(found ? 'That bot runs on another computer; ask it with message instead.' : NOT_FOUND);
+    const current = this.broker.ports.resolveSession(found!.hostId, found!.providerId, found!.nativeSessionId!);
+    return { providerId: current.providerId, nativeSessionId: current.nativeSessionId };
+  }
+  /** The chief's hold on one of its temporary bots: stop its work, retire it. */
+  async manageStaff(hostId: string, call: Call<'stop_bot' | 'retire_bot'>) {
     this.caller(hostId, call.owner);
     const team = this.staff(hostId, call.owner).find(item => temporaryBotId(item.id) === call.bot || fold(item.task!.title) === fold(call.bot))
       ?? fail('None of your staff has that name; list them with list_bots.');
-    if (call.action === 'bot_session') {
-      const worker = team.members[0]!;
-      if (!worker.nativeSessionId || worker.hostId !== hostId) fail('That bot runs on another computer; ask it with message instead.');
-      return { providerId: worker.providerId, nativeSessionId: worker.nativeSessionId };
-    }
     if (!running(team)) return { botId: temporaryBotId(team.id), status: team.task!.state };
     const done = await this.tasks.finish(hostId, call.action === 'stop_bot' ? { action: 'cancel_task', owner: call.owner, taskId: team.id }
       : { action: 'mark_task_done', owner: call.owner, taskId: team.id, summary: 'Retired by its chief.' });

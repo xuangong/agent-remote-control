@@ -4,7 +4,7 @@
  * they are, whose deliveries wait for the receiver to be idle like task updates and arrive framed as [Message from …].
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { accountAssistants, assistantMessageText, assistantNamesIn, botViews, type BotMessageResult, nativeSessionRefKey, viewAssistantKey,
+import { accountAssistants, assistantMessageText, assistantNamesIn, botViews, personWroteText, type BotMessageResult, nativeSessionRefKey, viewAssistantKey,
   type Team, type TeamHostCall, type TeamMember, type WindowBotDetails, type WindowGroup, type WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
 import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
@@ -30,7 +30,7 @@ export interface AssistantPorts {
 }
 type ListCall = Extract<TeamHostCall, { action: 'list_assistants' }>;
 type MessageCall = Extract<TeamHostCall, { action: 'message_assistant' }>;
-export interface Assistant { key: string; groupId: string; viewId: string; name: string; label?: string; mission?: string; hidden: boolean; hostId: string; providerId: string; nativeSessionId: string }
+export interface Assistant { key: string; groupId: string; viewId: string; name: string; label?: string; mission?: string; chief?: string; hidden: boolean; hostId: string; providerId: string; nativeSessionId: string }
 
 const RECENT_KEEP = 64;
 /** One answer for an assistant that does not exist and one this caller may not reach, so the roster cannot be probed. */
@@ -50,7 +50,7 @@ export function accountDirectory(groups: readonly WindowGroup[]): Assistant[] {
     // The id is the bot's record, which a move between groups keeps; names follow the account's naming rule, keyed by place.
     const viewKey = viewAssistantKey(group.window.id, view.id), details = group.bots?.members[view.id];
     const key = details?.botId ?? viewKey;
-    return { key, groupId: group.window.id, viewId: view.id, name: names.get(viewKey) ?? view.binding.title, ...(details?.label ? { label: details.label } : {}), ...(details?.mission ? { mission: details.mission } : {}), hidden: details?.hidden === true,
+    return { key, groupId: group.window.id, viewId: view.id, name: names.get(viewKey) ?? view.binding.title, ...(details?.label ? { label: details.label } : {}), ...(details?.mission ? { mission: details.mission } : {}), ...(details?.chief ? { chief: details.chief } : {}), hidden: details?.hidden === true,
       hostId: view.binding.hostId, providerId: view.binding.providerId, nativeSessionId: view.binding.nativeSessionId };
   }));
 }
@@ -109,7 +109,7 @@ export class AssistantMessages {
     return this.deliver(from, to, call);
   }
   /** Queues a message from a bot (standing or temporary) in a standing bot's inbox. */
-  async deliver(from: { key: string; name: string }, to: Assistant, call: { operationId: string; text: string; replyTo?: string }): Promise<BotMessageResult> {
+  async deliver(from: { key: string; name: string }, to: Assistant, call: { operationId: string; text: string; replyTo?: string; frame?: 'person' }): Promise<BotMessageResult> {
     const sent = await this.broker.change(teams => {
       const now = this.broker.ports.now();
       const inbox = this.inboxes.prepare(teams, to, now) ?? fail('Team capacity reached.');
@@ -126,7 +126,8 @@ export class AssistantMessages {
       }
       const seat = inbox.members[0]!, messageId = `m${digest([inbox.id, from.key, call.operationId]).slice(0, 12)}`;
       const message = { id: digest(['assistant-message', inbox.id, messageId]), from: seat.id, to: seat.id, status: 'queued' as const, createdAt: now,
-        text: assistantMessageText({ messageId, from: from.name, ...(call.replyTo ? { replyTo: call.replyTo } : {}), body: call.text }) };
+        // The person's words to a bot are framed as what they are, from the record; any other text is a bot's message.
+        text: call.frame === 'person' ? personWroteText({ bot: from.name, text: call.text }) : assistantMessageText({ messageId, from: from.name, ...(call.replyTo ? { replyTo: call.replyTo } : {}), body: call.text }) };
       assertTeamQueueCapacity(inbox, message);
       inbox.messages.push(message); pushBackTimers(inbox, now);
       recent.push({ id: messageId, from: from.key, hop, operationId: call.operationId });

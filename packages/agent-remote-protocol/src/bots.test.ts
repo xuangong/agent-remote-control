@@ -32,7 +32,7 @@ describe('the outcome of a message', () => {
     expect(new Set(botMessages.results.valid.map((result: { outcome: string }) => result.outcome))).toEqual(new Set(['delivered', 'held', 'duplicate', 'forbidden', 'unreachable']));
   });
 
-  it('has one call the Host makes when a turn ends, naming the one message it answers', () => {
+  it('has the calls the Host makes by itself: the reply of a turn naming the one message it answers, and the words the person wrote to a bot', () => {
     for (const call of botMessages.calls.valid) expect(isTeamHostCall(call)).toBe(true);
     for (const call of botMessages.calls.invalid) expect(isTeamHostCall(call)).toBe(false);
   });

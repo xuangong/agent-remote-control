@@ -32,8 +32,11 @@ export function inputCause(item: { text: string; messageId?: string; clientMessa
   return { kind: 'person', messageId: item.messageId ?? item.clientMessageId ?? createHash('sha256').update(item.text).digest('hex').slice(0, 64) };
 }
 
-/** Passes a session's stream through, noting the cause of each input and reporting each ended turn with its usage. */
-export function watchChainTurns(session: AgentSession, ref: NativeSessionRef, causes: TurnCauses, report: (turn: TurnReport) => void): AgentSession {
+/** What the person wrote into the session: their words and the id of the message. */
+export interface PersonInput { messageId: string; text: string }
+
+/** Passes a session's stream through, noting the cause of each input, reporting each ended turn with its usage, and each input the person typed. */
+export function watchChainTurns(session: AgentSession, ref: NativeSessionRef, causes: TurnCauses, report: (turn: TurnReport) => void, written: (input: PersonInput) => void = () => {}): AgentSession {
   const usage: SessionUsage = { tokens: 0 };
   let counted = { tokens: 0, costUsd: 0 };
   // The bot's last run of assistant text in the turn: a tool call or another message starts a new run.
@@ -47,7 +50,11 @@ export function watchChainTurns(session: AgentSession, ref: NativeSessionRef, ca
         const item = result.value;
         if (item.type === 'observation' && item.delivery !== 'history') {
           const event = item.event;
-          if (event.type === 'timeline' && event.item.type === 'user_message' && !event.item.withdrawn && event.item.text.trim()) { causes.set(ref, inputCause(event.item)); final = ''; writing = false; }
+          if (event.type === 'timeline' && event.item.type === 'user_message' && !event.item.withdrawn && event.item.text.trim()) {
+            const cause = inputCause(event.item);
+            causes.set(ref, cause); final = ''; writing = false;
+            if (cause.kind === 'person') written({ messageId: cause.messageId, text: event.item.text.trim() });
+          }
           if (event.type === 'timeline' && event.item.type === 'assistant_message') {
             if (!writing || event.item.messageId !== undefined && writingId !== undefined && event.item.messageId !== writingId) final = '';
             final += event.item.text; writing = true; writingId = event.item.messageId;

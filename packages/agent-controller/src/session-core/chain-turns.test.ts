@@ -3,7 +3,7 @@ import { assistantMessageText, joinTaskInputs, standingInstructionsText } from '
 import { describe, expect, it } from 'vitest';
 
 import { boundary, ScriptedSession } from '../test-utils/journal-scripted-session.js';
-import { inputCause, TurnCauses, watchChainTurns, type TurnReport } from './chain-turns.js';
+import { inputCause, TurnCauses, watchChainTurns, type PersonInput, type TurnReport } from './chain-turns.js';
 
 let sequence = 0;
 const event = (value: ProviderObservation['event'], delivery: 'live' | 'history' = 'live'): ProviderObservation => ({ type: 'observation', sourceKey: `fake:${++sequence}`, occurredAt: 0, delivery, event: value });
@@ -13,10 +13,10 @@ const ref = { controllerId: 'mac', providerId: 'fake', nativeSessionId: 'native'
 
 function watched() {
   const session = new ScriptedSession('fake', 'native', [boundary()]);
-  const causes = new TurnCauses(), turns: TurnReport[] = [], items: ProviderStreamItem[] = [];
-  void (async () => { for await (const item of watchChainTurns(session, ref, causes, turn => turns.push(turn)).observe()) items.push(item); })();
+  const causes = new TurnCauses(), turns: TurnReport[] = [], items: ProviderStreamItem[] = [], written: PersonInput[] = [];
+  void (async () => { for await (const item of watchChainTurns(session, ref, causes, turn => turns.push(turn), input => written.push(input)).observe()) items.push(item); })();
   const settle = () => new Promise(resolve => setTimeout(resolve, 0));
-  return { session, causes, turns, items, settle };
+  return { session, causes, turns, items, written, settle };
 }
 
 describe('the causes and usage of a bot\'s turns', () => {
@@ -101,5 +101,16 @@ describe('the final text of a turn', () => {
     session.push(completed({ tokenScope: 'turn', totalTokens: 5 }));
     await settle();
     expect(turns).toEqual([{ cause: { kind: 'person', messageId: 'u1' }, tokens: 5, finalText: 'Done.' }]);
+  });
+});
+
+describe('what the person types into the session', () => {
+  it('is reported with its message id, and neither input the Relay framed nor replayed history is', async () => {
+    const { session, written, settle } = watched();
+    session.push(input('  Skip the flaky test.  ', 'u1'));
+    session.push(input(message('m0123456789ab')));
+    session.push(input('An old request.', 'u0', 'history'));
+    await settle();
+    expect(written).toEqual([{ messageId: 'u1', text: 'Skip the flaky test.' }]);
   });
 });

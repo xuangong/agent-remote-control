@@ -21,16 +21,19 @@ export function TaskInputItem({ inputs, resourceContext }: { readonly inputs: re
   const rooms = inputs.filter((input): input is RoomInput => input.kind === 'room');
   const standing = inputs.filter((input): input is StandingInput => input.kind === 'standing');
   const timers = inputs.filter((input): input is TimerInput => input.kind === 'timer');
+  const wrote = inputs.filter((input): input is PersonWroteInput => input.kind === 'person_wrote');
   return <div className="agent-timeline-item agent-task-inputs">
     {standing.map((input, index) => <details key={`standing:${index}`} className="agent-assistant-messages" data-standing-version={input.version}>
       <summary>{t('timeline.standingInstructions')}</summary><MarkdownContent markdown={input.body} resourceContext={resourceContext} /></details>)}
-    {inputs.map((input, index) => input.kind === 'assistant' || input.kind === 'room' || input.kind === 'standing' || input.kind === 'timer' || input.kind === 'progress' ? null : <TaskInputCard key={`${input.taskId}:${index}`} input={input} resourceContext={resourceContext} />)}
+    {inputs.map((input, index) => input.kind === 'assistant' || input.kind === 'room' || input.kind === 'standing' || input.kind === 'timer' || input.kind === 'person_wrote' || input.kind === 'progress' ? null : <TaskInputCard key={`${input.taskId}:${index}`} input={input} resourceContext={resourceContext} />)}
     {[...messages].map(([from, items]) => <AssistantMessages key={from} from={from} items={items} resourceContext={resourceContext} />)}
     {[...progress].map(([title, items]) => <details key={`progress:${title}`} className="agent-assistant-messages" data-task-progress={items[0]!.taskId}>
       <summary>{t('timeline.task.progressFrom', { count: items.length, from: title })}</summary>
       {items.map((item, index) => <MarkdownContent key={index} markdown={item.body} resourceContext={resourceContext} />)}</details>)}
     {rooms.map(room => <details key={room.roomId} className="agent-assistant-messages" data-room-id={room.roomId}>
       <summary>{t('timeline.roomTurn', { name: room.name, count: room.count })}</summary><MarkdownContent markdown={room.body} resourceContext={resourceContext} /></details>)}
+    {wrote.map((input, index) => <details key={`wrote:${index}`} className="agent-assistant-messages" data-person-wrote={input.bot}>
+      <summary>{t('timeline.personWrote', { bot: input.bot })}</summary><MarkdownContent markdown={input.body} resourceContext={resourceContext} /></details>)}
     {timers.map((timer, index) => <details key={`timer:${index}`} className="agent-assistant-messages" data-timer={timer.name}>
       <summary>{t('timeline.timerDue', { name: timer.name })}</summary>{timer.body ? <MarkdownContent markdown={timer.body} resourceContext={resourceContext} /> : null}</details>)}
   </div>;
@@ -39,6 +42,7 @@ type AssistantInput = Extract<TaskInput, { kind: 'assistant' }>;
 type RoomInput = Extract<TaskInput, { kind: 'room' }>;
 type StandingInput = Extract<TaskInput, { kind: 'standing' }>;
 type TimerInput = Extract<TaskInput, { kind: 'timer' }>;
+type PersonWroteInput = Extract<TaskInput, { kind: 'person_wrote' }>;
 /** A task update (its kind is one of several), here a temporary bot's progress. */
 type ProgressInput = Extract<TaskInput, { title: string; body: string }>;
 
@@ -51,7 +55,7 @@ function AssistantMessages({ from, items, resourceContext }: { readonly from: st
   </details>;
 }
 
-function TaskInputCard({ input, resourceContext }: { readonly input: Exclude<TaskInput, AssistantInput | RoomInput | StandingInput | TimerInput>; readonly resourceContext?: MarkdownResourceContext }) {
+function TaskInputCard({ input, resourceContext }: { readonly input: Exclude<TaskInput, AssistantInput | RoomInput | StandingInput | TimerInput | PersonWroteInput>; readonly resourceContext?: MarkdownResourceContext }) {
   const t = useTranslate();
   const directory = useTaskDirectory();
   const kicker = input.kind === 'brief' ? t('timeline.task.brief', { from: input.from }) : input.kind === 'message' ? t('timeline.task.message', { from: input.from })

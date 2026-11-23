@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { TurnCauses, type TurnReport } from './session-core/chain-turns.js';
+import { TurnCauses, type PersonInput, type TurnReport } from './session-core/chain-turns.js';
 import type { AgentSessionTool, AgentSessionToolNamespace } from '@orchardworks/agent-provider-sdk';
-import { ASSISTANT_MESSAGE_LIMIT, BOT_MESSAGE_LIMIT, nativeSessionRefKey, ROOM_MINUTES_LIMIT, TASK_BRIEF_LIMIT, TASK_TITLE_LIMIT, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import { ASSISTANT_MESSAGE_LIMIT, BOT_MESSAGE_LIMIT, nativeSessionRefKey, PERSON_WROTE_LIMIT, ROOM_MINUTES_LIMIT, TASK_BRIEF_LIMIT, TASK_TITLE_LIMIT, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { botInstructions } from './bot-instructions.js';
 
 export interface BotToolsPorts {
@@ -54,6 +54,14 @@ export class BotTools {
     void this.ports.request({ action: 'chain_turn', owner, cause: turn.cause, tokens: turn.tokens, ...(turn.costUsd !== undefined ? { costUsd: turn.costUsd } : {}) }).catch(() => undefined);
     if (turn.cause.kind === 'framed' && turn.cause.answers && turn.finalText)
       void this.ports.request({ action: 'bot_reply', owner, text: turn.finalText.slice(0, ASSISTANT_MESSAGE_LIMIT), cause: { kind: 'framed', answers: turn.cause.answers } }).catch(() => undefined);
+  }
+  /**
+   * The person wrote into a bot's session: its Relay tells its chief, if a bot, the first 300 characters framed as what they are
+   * (bots design 3.5). The Host sends the person's own words from the record of the input, never a model's.
+   */
+  personWrote(ref: NativeSessionRef, input: PersonInput): void {
+    if (this.tools(ref) !== 'tasks') return;
+    void this.ports.request({ action: 'bot_told', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, text: input.text.slice(0, PERSON_WROTE_LIMIT), cause: { kind: 'person', messageId: input.messageId } }).catch(() => undefined);
   }
   /** Whether the session is offered the bots' namespace: it is a bot's main session. */
   enabled(ref: NativeSessionRef): boolean { return this.tools(ref) !== 'none'; }
@@ -131,7 +139,7 @@ export class BotTools {
         }),
       tool('list_bots', 'List the bots you can message: your staff with their status, your chief if you have one, and the standing bots of this account with their missions.',
         object({}, []), () => taskRequest({ action: 'list_bots', owner: caller() })),
-      tool('read_bot', 'Read a bounded page of the recent conversation of one of your staff, to see what it did without asking it. Pass before from a previous page to read further back.',
+      tool('read_bot', 'Read a bounded page of the recent conversation of one of your staff or of any standing bot, to see what it did or the rest of what it answered, without asking it. Pass before from a previous page to read further back.',
         object({ bot: { type: 'string', minLength: 1, maxLength: 300 }, before: { type: 'object', properties: { epoch: { type: 'string' }, seq: { type: 'integer' } }, required: ['epoch', 'seq'], additionalProperties: false } }, ['bot']),
         async args => {
           const where = await taskRequest({ action: 'bot_session', owner: caller(), bot: args.bot }) as { providerId: string; nativeSessionId: string };

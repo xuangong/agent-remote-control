@@ -54,6 +54,18 @@
           "kind": "framed",
           "answers": "m0123456789ab"
         }
+      },
+      {
+        "action": "bot_told",
+        "owner": {
+          "providerId": "codex",
+          "nativeSessionId": "tracker"
+        },
+        "text": "Skip the flaky test.",
+        "cause": {
+          "kind": "person",
+          "messageId": "u1"
+        }
       }
     ],
     "invalid": [
@@ -101,6 +113,29 @@
         "cause": {
           "kind": "framed",
           "answers": "m0123456789ab"
+        }
+      },
+      {
+        "action": "bot_told",
+        "owner": {
+          "providerId": "codex",
+          "nativeSessionId": "tracker"
+        },
+        "text": "Skip it.",
+        "cause": {
+          "kind": "framed"
+        }
+      },
+      {
+        "action": "bot_told",
+        "owner": {
+          "providerId": "codex",
+          "nativeSessionId": "tracker"
+        },
+        "text": "",
+        "cause": {
+          "kind": "person",
+          "messageId": "u1"
         }
       }
     ]

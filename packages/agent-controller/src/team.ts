@@ -49,7 +49,7 @@ const bound = (seat: TeamSeat) => !!(seat.task || seat.link || seat.room || seat
 interface Delivery { record: LocalSeat; team: Team; message: TeamMessage }
 /** A main session reads what waits on it before the rest. */
 /** At idle a main session reads what waits on it first, then other task updates, then other assistants' messages. */
-const taskUpdatePriority = (message: TeamMessage) => /^\[Task \S+ · (question|needs the person) · /.test(message.text) ? 0 : message.text.startsWith('[Message from ') || message.text.startsWith('[Room ') ? 2 : 1;
+const taskUpdatePriority = (message: TeamMessage) => /^\[Task \S+ · (question|needs the person) · /.test(message.text) || message.text.startsWith('[The person wrote to ') ? 0 : message.text.startsWith('[Message from ') || message.text.startsWith('[Room ') ? 2 : 1;
 /** A task Team missing from the poll this long was removed by the Relay. */
 const TASK_MISSING_FORGET_MS = 10 * 60_000;
 const errorText = (error: unknown) => (error instanceof Error ? error.message : 'Team operation failed.').slice(0, 2048);

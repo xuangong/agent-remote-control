@@ -86,3 +86,14 @@ describe('the reply a bot\'s ended turn sends', () => {
     expect(f.calls).toEqual([]);
   });
 });
+
+describe('what the person wrote to a bot', () => {
+  it('goes to the Relay as the person\'s own words, at most 300 characters, only for a bot\'s session', async () => {
+    const f = fixture([{ nativeSessionId: 'tracker' }]);
+    await f.tools.refresh('controller');
+    f.calls.length = 0;
+    f.tools.personWrote(ref('tracker'), { messageId: 'u1', text: 'x'.repeat(1000) });
+    f.tools.personWrote(ref('plain'), { messageId: 'u2', text: 'Hello.' });
+    expect(f.calls).toEqual([{ action: 'bot_told', owner: { providerId: 'codex', nativeSessionId: 'tracker' }, text: 'x'.repeat(300), cause: { kind: 'person', messageId: 'u1' } }]);
+  });
+});

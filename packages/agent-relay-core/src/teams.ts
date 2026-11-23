@@ -208,12 +208,14 @@ export class TeamBroker {
     if (call.action === 'create_bot') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained(hostId, call.owner, call.cause, () => bots.create(hostId, call)); }
     if (call.action === 'bot_message') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained<BotMessageResult>(hostId, call.owner, call.cause, () => bots.message(hostId, call), reason => ({ outcome: 'forbidden', reason })); }
     if (call.action === 'bot_reply') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained<BotMessageResult>(hostId, call.owner, call.cause, () => bots.reply(hostId, call), reason => ({ outcome: 'forbidden', reason })); }
+    if (call.action === 'bot_told') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained<BotMessageResult>(hostId, call.owner, call.cause, () => bots.told(hostId, call), reason => ({ outcome: 'forbidden', reason })); }
     if (call.action === 'chain_turn') { const bots = this.bots ?? fail(unavailableAssistants), found = this.chains.find(this.ports.read(), { hostId, ...call.owner }, call.cause);
       await this.chains.record(chainScope(found.id), { cause: found.cause, bot: bots.callerKey(hostId, call.owner) }, { tokens: call.tokens, ...(call.costUsd !== undefined ? { costUsd: call.costUsd } : {}) }); return { chain: found.id }; }
     if (call.action === 'update_work' || call.action === 'complete_work' || call.action === 'set_timer') return (this.bots ?? fail(unavailableAssistants)).keepWork(hostId, call);
     if (call.action === 'update_mission') return (this.bots ?? fail(unavailableAssistants)).updateMission(hostId, call);
     if (call.action === 'list_bots') return (this.bots ?? fail(unavailableAssistants)).list(hostId, call);
-    if (call.action === 'stop_bot' || call.action === 'retire_bot' || call.action === 'bot_session') return (this.bots ?? fail(unavailableAssistants)).manageStaff(hostId, call);
+    if (call.action === 'stop_bot' || call.action === 'retire_bot') return (this.bots ?? fail(unavailableAssistants)).manageStaff(hostId, call);
+    if (call.action === 'bot_session') return (this.bots ?? fail(unavailableAssistants)).readSession(hostId, call);
     if (call.action === 'task_status') return (this.tasks ?? fail(unavailableTasks)).status(hostId, call);
     if (call.action === 'report_task') { assertCurrent(); return (this.tasks ?? fail(unavailableTasks)).report(hostId, call); }
     if (call.action === 'open_room') { const rooms = this.rooms ?? fail(unavailableAssistants); return this.chained(hostId, call.owner, call.cause, () => rooms.open(hostId, call)); }

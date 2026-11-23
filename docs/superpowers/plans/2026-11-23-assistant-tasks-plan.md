@@ -56,3 +56,15 @@ records. The steps, in order:
    TPM intents become tasks of the TPM's main session; Team members' work becomes tasks of the Leader; Sides become tasks the person
    started. Each feature's existing e2e flows must pass on the task path.
 5. **One release with both views**, then delete the Team, Support and TPM panels, queues and tools (Q5).
+
+## Verification (2026-11-23)
+
+- Each milestone ran in `pnpm local` with real Claude Code sessions: two tasks finishing during one turn arrived as one input; a
+  card and a details row opened the worker; a worker's question was answered with `message_task`, its file write waited for the
+  person and finished once approved; the person's words to a waiting worker reached its owner; Stop from the details stopped the
+  worker and told the owner; two assistants exchanged a message and its reply; a room of two assistants reached a result, and a
+  second room waited for the person's message before deciding.
+- `pnpm verify` and the e2e flows pass at the M1, M3 and final heads. Unit suites need an English locale on this machine
+  (`App.bot-attention` formats times in the system locale).
+- The component tier at the M1, M3 and final heads: every failure was a WebKit or layout timeout that passed when run alone, as
+  O65 records.

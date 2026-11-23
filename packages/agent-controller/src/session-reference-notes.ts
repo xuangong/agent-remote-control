@@ -8,8 +8,7 @@ export interface ReferenceNotes {
 }
 
 /**
- * Tells a session's agent about changed references with its next input, whoever sends it: a page, the CLI, a Team or
- * a TPM. The note follows the sender's text and precedes any excerpts; a note that could not be prepared is left out
+ * Tells a session's agent about changed references with its next input, whoever sends it: a page, the CLI, or a Team. The note follows the sender's text and precedes any excerpts; a note that could not be prepared is left out
  * rather than holding the input back.
  */
 export function withReferenceNotes(session: AgentSession, notes: ReferenceNotes): AgentSession {

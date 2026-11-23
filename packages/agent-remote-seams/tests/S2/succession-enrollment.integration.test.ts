@@ -1,10 +1,10 @@
-/** S2, The Controller's succession service against the Relay's association state: a handoff derived from broker enrollment, frozen, committed, cancelled and replayed. The Relay is real and in memory; the Controller's role, context and TPM state are memory files; nothing listens on a port. */
+/** S2, The Controller's succession service against the Relay's association state: a handoff derived from broker enrollment, frozen, committed, cancelled and replayed. The Relay is real and in memory; the Controller's role and context state are memory files; nothing listens on a port. */
 import WebSocket from 'ws';
 import { expect, test } from 'vitest';
 import { successionHostFixture as fixture, ref, sendOverWebSocket, handoffRequest as request } from '@orchardworks/agent-remote-controller/succession-host-testing';
 import { enrollmentTransport } from './support/succession-relay.js';
 test('authenticated broker enrollment derives a role, freezes associations and commits over a real uplink',async()=>{
-  const f=await fixture(false,true);const transport=await enrollmentTransport(f);
+  const f=await fixture(true);const transport=await enrollmentTransport(f);
   try {
     const input={operationId:'trusted-handoff',providerId:'fixture',nativeSessionId:'A',expectedRevision:1};
     expect((await transport.action('prepare',{...input,authority:transport.authority}))!.status).toBe(400);
@@ -24,7 +24,7 @@ test('authenticated broker enrollment derives a role, freezes associations and c
 });
 
 test('real HTTP and WebSocket cancel a blocked create without activating its late candidate', async () => {
-  const f = await fixture(false, true), transport = await enrollmentTransport(f);
+  const f = await fixture(true), transport = await enrollmentTransport(f);
   let enter!: () => void, release!: () => void;
   const entered = new Promise<void>(resolve => { enter = resolve; }), blocked = new Promise<void>(resolve => { release = resolve; });
   f.beforeIdleCreate(async () => { enter(); await blocked; });
@@ -52,7 +52,7 @@ test('real HTTP and WebSocket cancel a blocked create without activating its lat
 
 
 test.each([{installationId:'foreign'},{enrollment:false}])('mismatched Controller or unnegotiated peer fails before native creation: %j',async options=>{
-  const f=await fixture(false,true);const transport=await enrollmentTransport(f,undefined,options);
+  const f=await fixture(true);const transport=await enrollmentTransport(f,undefined,options);
   try {
     expect((await transport.action('prepare',{providerId:'fixture',nativeSessionId:'A',operationId:'forbidden-peer',expectedRevision:1}))!.status).toBe(409);
     expect(f.creates()).toBe(0);expect(transport.saved().associations!.freezes).toEqual([]);
@@ -60,7 +60,7 @@ test.each([{installationId:'foreign'},{enrollment:false}])('mismatched Controlle
 });
 
 test('real uplink authorizes snapshot provenance on its source provider and retains both create identities', async () => {
-  const f = await fixture(false, true, undefined, true), transport = await enrollmentTransport(f);
+  const f = await fixture(true, undefined, true), transport = await enrollmentTransport(f);
   const path = `/v1/remote/hosts/${transport.hostId}/create`;
   try {
     await transport.request(`/v1/remote/hosts/${transport.hostId}/attach`, { providerId:'fixture', nativeSessionId:'A' });

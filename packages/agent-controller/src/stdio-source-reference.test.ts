@@ -84,10 +84,10 @@ it('composes user tools and instructions, dynamically routes source reads, and r
     await directory.close(); await expect(read.execute({})).rejects.toThrow(/closed/i);
     f.setModel('changed-native-model');
     directory = createManagedStdioDirectory('claude', 'Claude', f.provider, [], undefined, new SessionReferenceStore(root, 'claude'));
-    const reopened = await directory.open('reader', { extensions: { instructions: 'TPM instructions', tools: [userTool] } });
+    const reopened = await directory.open('reader', { extensions: { instructions: 'Role instructions', tools: [userTool] } });
     expect((await reopened.runtimeInfo()).model).toBe('changed-native-model'); expect(f.handles).toEqual(['{}']);
     const recovered = f.configurations.at(-1)!;
-    expect(recovered.instructions).toContain('User instructions'); expect(recovered.instructions).toContain('TPM instructions');
+    expect(recovered.instructions).toContain('User instructions'); expect(recovered.instructions).toContain('Role instructions');
     expect(recovered.systemPrompt).toBe('User native base'); expect(recovered.tools!.map(tool => tool.name)).toEqual(['user_tool', 'read_source_session']);
     expect(JSON.parse(await recovered.tools!.find(tool => tool.name === 'read_source_session')!.execute({}))).toMatchObject({ sourceSessionId: 'A' });
     await expect(read.execute({})).rejects.toThrow(/closed|ready/i);

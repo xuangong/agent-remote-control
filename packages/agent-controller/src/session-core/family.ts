@@ -7,7 +7,7 @@ import type { HandoffAdmissionState } from '@orchardworks/agent-session-runtime'
  * - A native family is a session's binding, the children bound under it (`parentNativeSessionId`) and their children, all of one provider.
  *   `nativeFamily` returns them in discovery order, the session's own binding first when it is bound.
  * - A session is quiescent for a succession when its runtime is connected, synchronized, open, idle, with no active turn, no pending
- *   interaction, no command or setting work, and no unsettled Team or TPM recipient. Each child needs the same, except that a closed child does not
+ *   interaction, no command or setting work, and no unsettled Team recipient. Each child needs the same, except that a closed child does not
  *   block it: an unreadable child state does.
  * - `handoffRefusal` returns the first refusal and nothing when the session may proceed:
  *   `succession_not_quiescent` for work, `succession_boundary_changed` when the timeline cursor moved past a captured boundary.

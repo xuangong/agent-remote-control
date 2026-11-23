@@ -7,7 +7,7 @@
 import { join } from 'node:path';
 import { expect, test, vi } from 'vitest';
 import type { SuccessionAssociationFreeze, TrustedSuccessionContext } from '@orchardworks/agent-remote-protocol';
-import { successionHostFixture as fixture, ref, Native, EvidenceNative, TpmStore, SessionSuccessionCoordinator, SessionSuccessionBoundary, sendOverWebSocket } from './succession-host-testing.js';
+import { successionHostFixture as fixture, ref, Native, EvidenceNative, SessionSuccessionCoordinator, SessionSuccessionBoundary, sendOverWebSocket } from './succession-host-testing.js';
 
 type Host = Awaited<ReturnType<typeof fixture>>;
 const authority = { version: 1 as const, origin: 'http://relay.example', issuer: 'https://issuer.example', namespace: 'tenant', ownerSubject: 'owner' };
@@ -33,7 +33,7 @@ test('answers only a POST from this Controller, and reports a refusal as a 409 w
   const other = await enroll(f, { action: 'describe', ...source }, trusted(2, { installationId: 'another-controller' }));
   expect(other).toMatchObject({ status: 409, body: { code: 'succession_enrollment_failed' } });
   expect((await enroll(f, { action: 'describe', ...source })).status).toBe(200);
-}, false, true));
+}, true));
 
 test('describe takes an exact source selection and the real workspace of that source', withHost(async f => {
   for (const input of [{ action: 'describe', providerId: 'fixture', nativeSessionId: 'A', extra: 1 }, { action: 'describe', providerId: 1, nativeSessionId: 'A' },
@@ -42,21 +42,21 @@ test('describe takes an exact source selection and the real workspace of that so
   const answer = (await enroll(f, { action: 'describe', ...source })).body;
   expect(answer).toMatchObject({ role: { origin: ref('A'), current: ref('A'), workspace: { canonicalCwd: f.root } }, lineage: [ref('A')], relationUpdates: 1, associationRevision: 0 });
   expect(f.creates()).toBe(0);
-}, false, true));
+}, true));
 
 test('a native prefix selection is described only after the Relay acknowledged enrollment version 3', withHost(async f => {
   const preparation = { kind: 'native_prefix', turnId: 'turn', messageId: 'message' };
   expect((await enroll(f, { action: 'describe', ...source, preparation }, trusted(2))).status).toBe(409);
   expect((await enroll(f, { action: 'describe', ...source, preparation: { kind: 'native_prefix', turnId: 'turn' } }, trusted(3))).status).toBe(409);
   expect((await enroll(f, { action: 'describe', ...source, preparation }, trusted(3))).status).toBe(200);
-}, false, true, undefined, false, false, false, true));
+}, true, undefined, false, false, false, true));
 
 test('describe refuses a primary role that another association authority already owns', withHost(async f => {
   expect((await act(f, 'prepare', await freezeOf(f, 'op'))).status).toBe(200);
   const foreign = { ...authority, namespace: 'other-tenant' };
   const described = await enroll(f, { action: 'describe', ...source }, trusted(2, { authority: foreign }));
   expect(described).toMatchObject({ status: 409, body: { error: 'Primary role belongs to another association authority.' } });
-}, false, true));
+}, true));
 
 test('a freeze must be complete, from this Controller and authority, and no newer than the acknowledged version', withHost(async f => {
   const freeze = await freezeOf(f, 'op');
@@ -67,14 +67,14 @@ test('a freeze must be complete, from this Controller and authority, and no newe
   expect((await act(f, 'prepare', { ...freeze, version: 3 }, {}, trusted(2))).status).toBe(409);
   expect(await act(f, 'prepare', { ...freeze, version: 3 }, {}, trusted(2))).toMatchObject({ body: { code: 'succession_enrollment_unavailable' } });
   expect(f.creates()).toBe(0);
-}, false, true));
+}, true));
 
 test('new preparation needs a version 2 freeze, before any native effect', withHost(async f => {
   const legacy = { ...(await freezeOf(f, 'legacy')), version: 1 } as Record<string, unknown>; delete legacy.maxProjectionBytes;
   expect(await act(f, 'prepare', legacy, {}, trusted(1))).toMatchObject({ status: 409, body: { code: 'succession_preparation_unavailable' } });
   expect(await act(f, 'prepare', legacy)).toMatchObject({ status: 409, body: { code: 'succession_preparation_unavailable' } });
   expect(f.creates()).toBe(0);
-}, false, true));
+}, true));
 
 test('prepare saves the freeze with the role, enrolls only the linked direct readers and answers ready', withHost(async f => {
   const reader = (id: string, linked = true) => ({ relationId: `${id}-relation`, kind: 'side', readerRef: ref(id), sourceRef: ref('A'), linked, revision: 0 });
@@ -86,7 +86,7 @@ test('prepare saves the freeze with the role, enrolls only the linked direct rea
   expect(state.roles[0].enrollments.map((item: { request: { operationId: string } }) => item.request.operationId)).toEqual(['op']);
   expect(state.roles[0].participants.map((item: { before: { nativeSessionId: string } }) => item.before.nativeSessionId)).toEqual(['side']);
   expect(state.roles[0].associationAuthority).toEqual(authority);
-}, false, true));
+}, true));
 
 test('the same freeze is prepared once; a changed freeze under the same operation is refused', withHost(async f => {
   const freeze = await freezeOf(f, 'op');
@@ -95,7 +95,7 @@ test('the same freeze is prepared once; a changed freeze under the same operatio
   expect(f.creates()).toBe(1);
   expect(first.body.record.operationId).toBe('op');
   expect(await act(f, 'status', { ...freeze, token: 'other-token' })).toMatchObject({ status: 409, body: { error: 'Frozen association receipt changed.' } });
-}, false, true));
+}, true));
 
 test('commit, status, reconcile, release and cancel act only on an enrolled freeze, and a commit moves the role to the candidate', withHost(async f => {
   const freeze = await freezeOf(f, 'op');
@@ -108,13 +108,13 @@ test('commit, status, reconcile, release and cancel act only on an enrolled free
   expect(committed).toMatchObject({ status: 200, body: { record: { phase: 'committed', committedRevision: 2 }, role: { current: ref('B'), revision: 2, workspace: { canonicalCwd: f.root } } } });
   expect((await act(f, 'release', freeze)).status).toBe(200);
   expect((await act(f, 'status', freeze)).body.record.phase).toBe('committed');
-}, false, true));
+}, true));
 
 test('cancel of an enrolled freeze cancels the prepared operation and keeps the role on its source', withHost(async f => {
   const freeze = await freezeOf(f, 'op');
   expect((await act(f, 'prepare', freeze)).status).toBe(200);
   expect(await act(f, 'cancel', freeze)).toMatchObject({ status: 200, body: { record: { phase: 'cancelled' }, role: { current: ref('A'), revision: 1 } } });
-}, false, true));
+}, true));
 
 test('cancel of a freeze that was never enrolled is recorded durably against its historical source', withHost(async f => {
   const freeze = await freezeOf(f, 'never-prepared');
@@ -122,7 +122,7 @@ test('cancel of a freeze that was never enrolled is recorded durably against its
   expect(f.creates()).toBe(0);
   expect(await act(f, 'prepare', freeze)).toMatchObject({ body: { record: { phase: 'cancelled' } } });
   expect(f.creates()).toBe(0);
-}, false, true));
+}, true));
 
 test('status asks for context only after a committed generic handoff, and reads the attachment of the target', withHost(async f => {
   const freeze = await freezeOf(f, 'op');
@@ -132,7 +132,7 @@ test('status asks for context only after a committed generic handoff, and reads 
   expect((await act(f, 'status', freeze)).body.context).toBeUndefined();
   const early = await freezeOf(f, 'second', { request: { operationId: 'second', roleId: freeze.request.roleId, expectedRevision: 2, from: ref('B') }, lineage: [ref('A'), ref('B')] });
   expect((await act(f, 'status', early, { includeContext: true })).status).toBe(409);
-}, false, true));
+}, true));
 
 /** A committed handoff A to B whose reader `side` is linked to A, and the reservation the Relay sends to unlink that reader. */
 async function committedWithSideReader(f: Host) {
@@ -157,14 +157,14 @@ test('a relation request carries only its action and a strict reservation from t
   expect((await relation(f, 'relation_status', { ...reservation, controllerId: 'another-controller' })).status).toBe(409);
   expect((await relation(f, 'relation_status', reservation, {}, trusted(2, { authority: { ...authority, namespace: 'other-tenant' } }))).status).toBe(409);
   expect((await relation(f, 'relation_unknown', reservation)).status).toBe(409);
-}, false, true));
+}, true));
 
 test('relation_status answers the saved receipt, or none, after authorizing the three sessions it names', withHost(async f => {
   const { reservation } = await committedWithSideReader(f);
   expect(await relation(f, 'relation_status', reservation)).toMatchObject({ status: 200, body: { receipt: null } });
   expect((await relation(f, 'relation_reserve', reservation)).status).toBe(200);
   expect(await relation(f, 'relation_status', reservation)).toMatchObject({ status: 200, body: { receipt: { phase: 'reserved', reservation: { operationId: 'unlink' } } } });
-}, false, true));
+}, true));
 
 test('a relation change goes reserved, applied, released, and a reservation that conflicts with the saved one is refused', withHost(async f => {
   const { reservation } = await committedWithSideReader(f);
@@ -178,14 +178,14 @@ test('a relation change goes reserved, applied, released, and a reservation that
   expect((await relation(f, 'relation_release', reservation)).status).toBe(409);
   expect((await relation(f, 'relation_release', reservation, { associationRevision: 1.5 })).status).toBe(409);
   expect(await relation(f, 'relation_release', reservation, { associationRevision: revision })).toMatchObject({ status: 200, body: { receipt: { phase: 'released' } } });
-}, false, true));
+}, true));
 
 test('a relation reservation is validated against the provider grants, so a missing durable grant refuses it', withHost(async f => {
   const { reservation } = await committedWithSideReader(f);
   f.grants.splice(0);
   expect(await relation(f, 'relation_reserve', reservation)).toMatchObject({ status: 409 });
   expect(await relation(f, 'relation_status', reservation)).toMatchObject({ body: { receipt: null } });
-}, false, true));
+}, true));
 
 const created = '00000000-0000-4000-8000-000000000001';
 const createSource = (f: Host, operationId = created) => f.host.enrollFromRelay({ method: 'POST', path: '/remote/create', sessionId: 'proposed', operationScope: 'scope',
@@ -198,7 +198,7 @@ test('source-result answers the retained result of an exact source creation, and
   expect((await createSource(f)).status).toBe(200);
   expect(await sourceResult(f)).toMatchObject({ status: 200, body: { source: ref('A'), reader: ref('source-1'), operationId: created } });
   expect(f.sourceCreates()).toBe(1);
-}, false, true));
+}, true));
 
 test('source-result is strict about its fields, its scope and the parameters that identify the creation', withHost(async f => {
   await createSource(f);
@@ -213,36 +213,13 @@ test('source-result is strict about its fields, its scope and the parameters tha
   expect((await sourceResult(f, { parameters: { sourceNativeSessionId: 'A', model: 'other' } })).status).toBe(409);
   expect((await sourceResult(f, {}, 'another-scope')).status).toBe(409);
   expect((await sourceResult(f)).status).toBe(200);
-}, false, true));
+}, true));
 
 test('a retained source result is refused once its durable native grant is gone', withHost(async f => {
   await createSource(f);
   f.grants.splice(0);
   expect(await sourceResult(f)).toMatchObject({ status: 409, body: { error: 'Persisted source creation no longer has its durable native grant.' } });
-}, false, true));
-
-const tpmWork = (creation: 'accepted' | 'unknown', main = 'A') => ({ version: 1 as const, createKey: 'tpm-key', createFingerprint: 'tpm-fingerprint', creation, requirement: 'Done', dirty: false, lastReviewAt: 0, actions: {},
-  work: { id: 'tpm-work', revision: 1, title: 'Work', providerId: 'fixture', mainNativeSessionId: main, tpmNativeSessionId: 'cold-tpm', phase: 'completed', waiting: 'none', paused: false, summary: 'Done',
-    nextAction: '', document: 'Plan', acceptance: 'Accepted', evidence: ['verified'], createdAt: '2026-10-10T00:00:00.000Z', updatedAt: '2026-10-10T00:00:00.000Z', nextCheckAt: 0, outbox: [] } });
-const withTpm = (record: ReturnType<typeof tpmWork>) => async (root: string, files: Parameters<NonNullable<Parameters<typeof fixture>[2]>>[1]) => {
-  const store = new TpmStore(join(root, 'tpm'), files.tpm); await store.ready; await store.insert(record as never);
-};
-
-test('prepare enrolls the TPM works of the source lineage as participants that keep their own session', withHost(async f => {
-  expect((await act(f, 'prepare', await freezeOf(f, 'op'))).status).toBe(200);
-  expect(f.stateFiles.roles.json('state.json').roles[0].participants).toEqual([{ relationId: 'tpm:tpm-work', kind: 'tpm', before: ref('cold-tpm'), after: ref('cold-tpm') }]);
-  expect(f.sessions.has('cold-tpm')).toBe(false);
-}, true, true, withTpm(tpmWork('accepted'))));
-
-test('prepare ignores the TPM works of another main session', withHost(async f => {
-  expect((await act(f, 'prepare', await freezeOf(f, 'op'))).status).toBe(200);
-  expect(f.stateFiles.roles.json('state.json').roles[0].participants).toEqual([]);
-}, true, true, withTpm(tpmWork('accepted', 'unrelated'))));
-
-test('prepare refuses while a TPM work of the source lineage has an unresolved creation, before any native effect', withHost(async f => {
-  expect(await act(f, 'prepare', await freezeOf(f, 'op'))).toMatchObject({ status: 409, body: { error: 'TPM association creation is unresolved.' } });
-  expect(f.creates()).toBe(0);
-}, true, true, withTpm(tpmWork('unknown'))));
+}, true));
 
 test('an exact retry of a source creation returns its saved reader without another native creation', withHost(async f => {
   const first = await createSource(f), retry = await createSource(f);
@@ -250,7 +227,7 @@ test('an exact retry of a source creation returns its saved reader without anoth
   expect(JSON.parse(retry.body).nativeSessionId).toBe('source-1');
   expect(f.sourceCreates()).toBe(1);
   expect(f.stateFiles.roles.json('state.json').associationResults).toHaveLength(1);
-}, false, true));
+}, true));
 
 test('a source creation whose native result is lost keeps its admission, answers no witness and is never created again', withHost(async f => {
   f.loseSourceCreation();
@@ -260,27 +237,27 @@ test('a source creation whose native result is lost keeps its admission, answers
   expect((await createSource(f)).status).toBeGreaterThanOrEqual(400);
   expect(f.sourceCreates()).toBe(1);
   expect(f.stateFiles.roles.json('state.json').associationAdmissions).toHaveLength(1);
-}, false, true));
+}, true));
 
 test('a request that arrives right after a restart waits for the saved state to be restored', withHost(async f => {
   const freeze = await freezeOf(f, 'op');
   expect((await act(f, 'prepare', freeze)).status).toBe(200);
   await f.restart();
   expect(await act(f, 'status', freeze)).toMatchObject({ status: 200, body: { record: { operationId: 'op', phase: 'unknown' } } });
-}, false, true));
+}, true));
 
-test('describe lists the readers of the role as source participants, and leaves TPM works out of them', withHost(async f => {
+test('describe lists the readers of the role as source participants', withHost(async f => {
   const { described } = await committedWithSideReader(f);
   expect(described.sourceParticipants).toEqual([{ relationId: expect.any(String), kind: 'side', readerRef: ref('side') }]);
   expect(described.lineage).toEqual([ref('A'), ref('B')]);
-}, true, true, withTpm(tpmWork('accepted'))));
+}, true));
 
 test('a fresh relation reservation is refused while a transient handoff fence holds one of its sessions', async () => {
   for (const held of ['A', 'B', 'side']) {
     let boundary: SessionSuccessionBoundary | undefined;
     const install = SessionSuccessionCoordinator.prototype.setAdmission;
     const spy = vi.spyOn(SessionSuccessionCoordinator.prototype, 'setAdmission').mockImplementation(function (this: SessionSuccessionCoordinator, admission) { boundary = admission as SessionSuccessionBoundary; install.call(this, admission); });
-    const f = await fixture(false, true);
+    const f = await fixture(true);
     try {
       const { reservation } = await committedWithSideReader(f);
       f.sessions.set('C', new Native('C', f.root)); await f.attach('C');
@@ -303,7 +280,7 @@ test('a projection larger than the ceiling the Relay froze is refused before any
   expect(await act(f, 'prepare', freeze)).toMatchObject({ status: 409, body: { code: 'succession_projection_capacity_exceeded' } });
   expect(f.creates()).toBe(0);
   expect(await act(f, 'cancel', freeze)).toMatchObject({ status: 200, body: { record: { phase: 'cancelled' } } });
-}, false, true));
+}, true));
 
 test('a committed output that no longer fits its frozen ceiling answers the invariant code on every action and keeps its evidence', withHost(async f => {
   const freeze = await freezeOf(f, 'op');
@@ -316,7 +293,7 @@ test('a committed output that no longer fits its frozen ceiling answers the inva
     expect(await act(f, action, tampered), action).toMatchObject({ status: 409, body: { code: 'succession_projection_invariant_failed' } });
   expect(f.stateFiles.roles.json('state.json').roles[0].operations[0].phase).toBe('committed');
   expect(f.creates()).toBe(1);
-}, false, true));
+}, true));
 
 test('status with context reads the target\'s attachment and settles its first input from native proof', withHost(async f => {
   const freeze = await freezeOf(f, 'handoff');
@@ -331,4 +308,4 @@ test('status with context reads the target\'s attachment and settles its first i
   b.materialized = true;
   expect(await status()).toMatchObject({ context: { state: 'materialized' } });
   expect(b.dispatches).toBe(1);
-}, false, true, undefined, false, true));
+}, true, undefined, false, true));

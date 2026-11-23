@@ -15,7 +15,7 @@ interface AdmittedOperation {
 interface RoleDestination { roleId: string; roleRevision: number }
 type SettingMutationResult = Awaited<ReturnType<NonNullable<AgentSession['setSessionSetting']>>>;
 
-/** Host-owned native dispatch boundary shared by browser, HTTP and TPM operations. */
+/** Host-owned native dispatch boundary shared by browser and HTTP operations. */
 export class SessionSuccessionBoundary {
   private readonly context = new AsyncLocalStorage<AdmittedOperation>();
   private readonly dispatcher: SessionSuccessionInputDispatcher;

@@ -136,11 +136,10 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
     };
   }
   function bindHandoff(directory: AgentHostDirectory) {
-    const { mutationFamily, sessions, nativeRef, operationCache, relay, successionBoundary, tpm } = ctx;
+    const { mutationFamily, sessions, nativeRef, operationCache, relay, successionBoundary } = ctx;
     if (successionBoundary) directory.setSessionHandoffAdmission?.((nativeSessionId, current, next) =>
       admitNativeOwnerTransfer(operationCache, successionBoundary, mutationFamily([nativeRef({ providerId: directory.providerId, nativeSessionId })]), current, next));
     directory.setSessionHandoffHandler?.(async (nativeSessionId, next) => {
-    await tpm?.handoff(directory.providerId, nativeSessionId);
     const family = sessions.family(directory.providerId, nativeSessionId);
     for (const binding of family) relay.sessionControls?.setNativeOwner(binding.agentId, next);
     for (const binding of family.reverse()) await relay.closeAgent(binding.agentId);
@@ -180,17 +179,15 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
   }
   /** Rebuild each native attachment from stable role anchors and its own actual recipient. */
   async function nativePrefixExtensions(source: NativeSessionRef, actual: () => string | undefined): Promise<AgentSessionExtensions> {
-    const { providers, successionService, team, tpm } = ctx;
+    const { providers, successionService, team } = ctx;
     const directory = providers.require(source.providerId).directory;
     const ancestry = nativePrefixSegmentAncestors(source, successionService!.store.all().flatMap(state => state.operations.filter(row => row.phase === 'committed')));
     const grants = (await directory.sourceReferences?.() ?? []).filter(grant => ancestry.some(ref => ref.nativeSessionId === grant.nativeSessionId));
     if (grants.length > 1) throw new Error('Source reference ancestry is ambiguous.');
     const sourceTools = grants.length === 1 && !!directory.setSourceReferenceAncestors && !!directory.setSourceBindingReader;
     const teamTools = await team?.extensions(source, () => { const id = actual(); return id ? { ...source, nativeSessionId: id } : undefined; });
-    const tpmTools = await tpm?.extensions(source.providerId, source.nativeSessionId, actual);
-    if (teamTools && tpmTools) throw new SuccessionPreparationRejected('succession_prefix_extensions_unavailable', 'Native recipient has conflicting role extensions.');
-    if (directory.requiresController?.(source.nativeSessionId) && !sourceTools && !teamTools && !tpmTools) throw new SuccessionPreparationRejected('succession_prefix_extensions_unavailable', 'Native prefix extensions cannot be reconstructed.');
-    return teamTools ?? tpmTools ?? workerExtensions(source.providerId, source, () => { const id = actual(); return id ? { ...source, nativeSessionId: id } : undefined; }) ?? {};
+    if (directory.requiresController?.(source.nativeSessionId) && !sourceTools && !teamTools) throw new SuccessionPreparationRejected('succession_prefix_extensions_unavailable', 'Native prefix extensions cannot be reconstructed.');
+    return teamTools ?? workerExtensions(source.providerId, source, () => { const id = actual(); return id ? { ...source, nativeSessionId: id } : undefined; }) ?? {};
   }
   /** Worker tools for a session without a role: declared at creation where providers fix tools then, present only while enabled elsewhere. */
   function workerExtensions(providerId: string, holder: NativeSessionRef | undefined, actual: () => NativeSessionRef | undefined): AgentSessionExtensions | undefined {
@@ -236,7 +233,7 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
     }
   }
   async function inspectSuccession(source: NativeSessionRef, lease: RemoteHostSessionLease, preparation?: NativePrefixSelection) {
-    const { assertHandoffState, sessions, liveAgent, ledger, nativeSuccession, operationCache, succession, successionBoundary, successionService, team, tpm } = ctx;
+    const { assertHandoffState, sessions, liveAgent, ledger, nativeSuccession, operationCache, succession, successionBoundary, successionService, team } = ctx;
     const session = ledger.attachmentOf(lease.agent)?.session;
     if (preparation ? !session?.promptEditEvidence || session.promptEditEvidence.version !== 1 : !nativeSuccession && (!session || !hasCurrentNativeEvidence(session))) throw new SuccessionPreparationRejected('succession_unsupported_provider', 'This provider has not certified quiescent succession.');
     const context = succession?.contexts.forTarget(source);
@@ -245,7 +242,7 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
     const binding = sessions.byNative(source.providerId, source.nativeSessionId);
     const managedPrefix = !!binding && liveAgent(binding.agentId) === lease.agent && !!successionBoundary && succession!.contexts.coverageAvailable(source);
     const state = preparation ? { ...await session!.promptEditEvidence!.inspectReadiness(), managed: managedPrefix } : nativeSuccession ? await nativeSuccession.inspect(source) : { ...await session!.nativeEvidence!.inspectReadiness(), managed: succession!.contexts.coverageAvailable(source) };
-    if (operationCache.hasUnsettledMutation(nativeSessionRefKey(source)) || (tpm?.hasUnsettledRecipient(source) || team?.hasUnsettledRecipient(source))) {
+    if (operationCache.hasUnsettledMutation(nativeSessionRefKey(source)) || team?.hasUnsettledRecipient(source)) {
       throw new SuccessionPreparationRejected('succession_delivery_unresolved', 'Reconcile unsettled operations before succession.');
     }
     assertHandoffState(source);

@@ -13,7 +13,7 @@ import { ClaudeAgentProvider } from './provider.js';
 import { Channel } from './channel.js';
 
 const userTool: AgentSessionTool = { name: 'user_tool', description: 'Read user context', inputSchema: { type: 'object' }, execute: async () => 'User context' };
-const tpmTool: AgentSessionTool = { name: 'read_work_record', description: 'Read the current work record', inputSchema: { type: 'object' }, execute: async () => 'Current work record' };
+const roleTool: AgentSessionTool = { name: 'read_work_record', description: 'Read the current work record', inputSchema: { type: 'object' }, execute: async () => 'Current work record' };
 
 it.each([undefined, 'Custom base', ''])('restores the Claude source tool through real MCP with base prompt %j', async systemPrompt => {
   const root = await mkdtemp(join(tmpdir(), 'arc-claude-source-mcp-'));
@@ -66,9 +66,9 @@ it.each([undefined, 'Custom base', ''])('restores the Claude source tool through
     expect(reads).toEqual([source, nextSource]);
     await directory.close(); await first.close();
     directory = createClaudeSessionDirectory(provider(), [], undefined, new SessionReferenceStore(join(root, 'references'), 'claude'));
-    await directory.open(id, { extensions: { instructions: 'TPM instructions', tools: [userTool, tpmTool] } });
+    await directory.open(id, { extensions: { instructions: 'Role instructions', tools: [userTool, roleTool] } });
     expect(startupResults[1]).toMatchObject({ isError: true, content: [{ type: 'text', text: expect.stringMatching(/identity.*ready/i) }] });
-    assertPrompt(captures[1]!); expect(JSON.stringify(captures[1]!.systemPrompt)).toContain('TPM instructions');
+    assertPrompt(captures[1]!); expect(JSON.stringify(captures[1]!.systemPrompt)).toContain('Role instructions');
     expect(captures[1]!.resume).toBe(id); expect(captures[1]!.model).toBeUndefined();
     const cold = clients[1]!;
     expect((await cold.listTools()).tools.map(tool => tool.name)).toEqual(['user_tool', 'read_work_record', 'read_source_session']);

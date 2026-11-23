@@ -204,13 +204,13 @@ test('source complete-result pre-rename failure retains the exact admission and 
   const directory = await root(), store = new SessionSuccessionStore(directory); await store.ready;
   const sourceWitness = { version: 1 as const, scope: 'scope', operationId: 'source-operation' };
   const id = createHash('sha256').update(JSON.stringify([sourceWitness.scope, sourceWitness.operationId])).digest('hex');
-  await store.admitAssociation(id, 'fingerprint', ref('A'), true, undefined, sourceWitness);
+  await store.admitAssociation(id, 'fingerprint', ref('A'), true, sourceWitness);
   const prior = await fs.readFile(join(directory, 'state.json'), 'utf8');
   vi.mocked(fs.open).mockRejectedValueOnce(new Error('temporary result write unavailable'));
   await expect(store.completeSourceAssociation({ id, fingerprint: 'fingerprint', scope: 'scope', operationId: 'source-operation', source: ref('A'), reader: ref('\ud800'.repeat(512)) })).rejects.toMatchObject({ code: 'succession_publication_rejected' });
   expect(store.sourceResult(id, 'fingerprint')).toBeUndefined(); expect(await fs.readFile(join(directory, 'state.json'), 'utf8')).toBe(prior);
   const restored = new SessionSuccessionStore(directory); await restored.ready;
-  await expect(restored.admitAssociation(id, 'fingerprint', ref('A'), true, undefined, sourceWitness)).rejects.toThrow(/unresolved/);
+  await expect(restored.admitAssociation(id, 'fingerprint', ref('A'), true, sourceWitness)).rejects.toThrow(/unresolved/);
   await restored.completeSourceAssociation({ id, fingerprint: 'fingerprint', scope: 'scope', operationId: 'source-operation', source: ref('A'), reader: ref('\ud800'.repeat(512)) });
   expect(restored.sourceResult(id, 'fingerprint')!.reader).toEqual(ref('\ud800'.repeat(512)));
 });
@@ -219,7 +219,7 @@ test('source complete-result directory-sync uncertainty withholds in-memory sett
   const directory = await root(), store = new SessionSuccessionStore(directory); await store.ready;
   const sourceWitness = { version: 1 as const, scope: 'scope', operationId: 'source-operation' };
   const id = createHash('sha256').update(JSON.stringify([sourceWitness.scope, sourceWitness.operationId])).digest('hex');
-  await store.admitAssociation(id, 'fingerprint', ref('A'), true, undefined, sourceWitness);
+  await store.admitAssociation(id, 'fingerprint', ref('A'), true, sourceWitness);
   const original = await vi.importActual<typeof fs>('node:fs/promises');
   vi.mocked(fs.open).mockImplementation(async (...args) => {
     const file = await original.open(...args);

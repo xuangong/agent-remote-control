@@ -4,7 +4,7 @@ import { AGENT_NATIVE_EVIDENCE_REASONS, type AgentEmptyCreationResult } from '@o
 import { expect, test, vi } from 'vitest';
 import { successionHostFixture as fixture, SessionSuccessionStore, Native, EvidenceNative, PromptNative, ref, sendOverWebSocket, deferredBoundary, handoffRequest as request, nativePrefixRequest } from './succession-host-testing.js';
 test.each([undefined, 'started'] as const)('prepared first WebSocket input acknowledges exact submitted text with native acceptance %s', async disposition => {
- const f=await fixture(false,false,undefined,false,true);
+ const f=await fixture(false,undefined,false,true);
  try {
   expect((await f.control('prepare',request)).payload.phase).toBe('ready');
   await f.control('commit',{operationId:'handoff',expectedRevision:1});
@@ -23,7 +23,7 @@ test.each([undefined, 'started'] as const)('prepared first WebSocket input ackno
  } finally {await f.close();}
 });
 test.each([false,true])('Host native evidence dispatch and independent readback preserve uncertainty, lost response %s',async lost=>{
- const f=await fixture(false,false,undefined,false,true,true);
+ const f=await fixture(false,undefined,false,true,true);
  try{
   expect((await f.control('prepare',request)).payload.phase).toBe('ready');
   expect(f.creates()).toBe(0);expect(f.evidenceCreates()).toBe(1);
@@ -48,7 +48,7 @@ test.each([false,true])('Host native evidence dispatch and independent readback 
  }finally{await f.close();}
 });
 test('Host refuses a known-rejected creation before candidate workspace reads or open',async()=>{
- const f=await fixture(false,false,undefined,false,true);
+ const f=await fixture(false,undefined,false,true);
  try{
   f.creationResult({status:'known_rejected',handle:{providerId:'fixture',sessionId:'B',opaque:'recovery only'},code:'native_evidence_stale',reason:AGENT_NATIVE_EVIDENCE_REASONS.native_evidence_stale});
   expect((await f.control('prepare',request)).payload.phase).toBe('rejected');
@@ -59,7 +59,7 @@ test('Host refuses a known-rejected creation before candidate workspace reads or
  }finally{await f.close();}
 });
 test.each(['known_rejected', 'created'] as const)('Host preserves cancelled late %s creation evidence during explicit attach and restore', async status => {
- const f = await fixture(false, false, undefined, false, true, true);
+ const f = await fixture(false, undefined, false, true, true);
  let release = () => {}; let entered = false;
  let running: ReturnType<typeof f.control> | undefined;
  const gate = new Promise<void>(resolve => { release = resolve; });
@@ -118,7 +118,7 @@ test.each(['known_rejected', 'created'] as const)('Host preserves cancelled late
  } finally { release(); await running?.catch(() => undefined); await f.close(); }
 });
 test('Host reopens the saved creation handle after restart without replaying creation',async()=>{
- const f=await fixture(false,false,undefined,false,true);
+ const f=await fixture(false,undefined,false,true);
  try{
   expect((await f.control('prepare',request)).payload.phase).toBe('ready');
   const original=f.creationOptions.find(Boolean);await f.restart();
@@ -127,7 +127,7 @@ test('Host reopens the saved creation handle after restart without replaying cre
  }finally{await f.close();}
 });
 test('Host refuses an unavailable evidence channel instead of dispatching through ordinary input',async()=>{
- const f=await fixture(false,false,undefined,false,true);
+ const f=await fixture(false,undefined,false,true);
  try{
   expect((await f.control('prepare',request)).payload.phase).toBe('ready');
   expect((await f.control('commit',{operationId:'handoff',expectedRevision:1})).payload.phase).toBe('committed');
@@ -139,7 +139,7 @@ test('Host refuses an unavailable evidence channel instead of dispatching throug
  }finally{await f.close();}
 });
 test('Host retains the source token across candidate reads and refuses stale facts at final commit',async()=>{
- const f=await fixture(false,false,undefined,false,true);
+ const f=await fixture(false,undefined,false,true);
  try{
   expect((await f.control('prepare',request)).payload.phase).toBe('ready');
   const a=f.sessions.get('A') as EvidenceNative, b=f.sessions.get('B') as EvidenceNative;
@@ -150,7 +150,7 @@ test('Host retains the source token across candidate reads and refuses stale fac
  }finally{await f.close();}
 });
 test('Host rejects a replaced projection with the same native B even when tokens claim current',async()=>{
- const f=await fixture(false,false,undefined,false,true);let proceed!:()=>void;
+ const f=await fixture(false,undefined,false,true);let proceed!:()=>void;
  try{
   expect((await f.control('prepare',request)).payload.phase).toBe('ready');
   const old=await f.attach('B'),b=f.sessions.get('B') as EvidenceNative; b.nativeEvidence.isCurrent=()=>true;
@@ -162,7 +162,7 @@ test('Host rejects a replaced projection with the same native B even when tokens
  }finally{proceed?.();await f.close();}
 });
 test.each(['commit', 'partial-acquisition'] as const)('Host releases actual native leases after %s',async phase=>{
- const f=await fixture(false,false,undefined,false,true);let proceed:()=>void=()=>{};let spy:ReturnType<typeof vi.spyOn>|undefined;
+ const f=await fixture(false,undefined,false,true);let proceed:()=>void=()=>{};let spy:ReturnType<typeof vi.spyOn>|undefined;
  try{
   expect((await f.control('prepare',request)).payload.phase).toBe('ready');
   const a=f.sessions.get('A') as EvidenceNative,b=f.sessions.get('B') as EvidenceNative;
@@ -183,7 +183,7 @@ test.each(['commit', 'partial-acquisition'] as const)('Host releases actual nati
  }finally{proceed();spy?.mockRestore();await f.close();}
 });
 test('Host independent evidence readback rechecks the protected attachment workspace',async()=>{
- const f=await fixture(false,false,undefined,false,true,true);
+ const f=await fixture(false,undefined,false,true,true);
  try{
   expect((await f.control('prepare',request)).payload.phase).toBe('ready');
   expect((await f.control('commit',{operationId:'handoff',expectedRevision:1})).payload.phase).toBe('committed');
@@ -214,80 +214,6 @@ test('unsupported pair and a busy source fail before idle candidate creation',as
 test('a busy candidate prevents readiness and later source work prevents commit',async()=>{
  const f=await fixture();try{f.busy('B');expect((await f.control('prepare',request)).payload.phase).toBe('rejected');expect(f.creates()).toBe(1);expect(f.sessions.get('B')!.sent).toEqual([]);}finally{await f.close();}
  const g=await fixture();try{expect((await g.control('prepare',request)).payload.phase).toBe('ready');g.busy('A');expect((await g.control('commit',{operationId:'handoff',expectedRevision:1})).status).toBe(409);}finally{await g.close();}
-});
-
-test('real Host TPM first postcommit main input consumes durable context once and preserves its own session',async()=>{
-  const f=await fixture(true);
-  try {
-    const created=await f.host.control({method:'POST',path:'/remote/tpm/create',body:JSON.stringify({providerId:'fixture',mainNativeSessionId:'A',operationId:'create-tpm',requirement:'Track the original requirement'})});
-    expect(created.status).toBe(200);
-    const work=JSON.parse(created.body) as TpmWork;
-    const current=async()=>JSON.parse((await f.host.control({method:'GET',path:`/remote/tpm/work?id=${work.id}`})).body) as TpmWork;
-    await expect.poll(async()=>(await current()).outbox?.[0]?.status).toBe('accepted');
-    const tpmId=work.tpmNativeSessionId!; const tools=f.tpmConfigurations[0]!.tools!;
-    const call=async(name:string,input:unknown)=>JSON.parse(await tools.find(tool=>tool.name===name)!.execute(input));
-    const todo=(await current()).todo!;
-    await call('update_todo_step',{revision:todo.revision,stepId:todo.steps[0]!.id,status:'in_progress',note:'Clarifying the approved work'});
-    expect(await f.control('prepare',request)).toMatchObject({status:200,payload:{phase:'ready',to:ref('B')}});
-        const context=async()=>f.stateFiles.contexts.json('context.json').attachments[0];
-    const captured=await context();
-    expect(captured).toMatchObject({state:'pending',target:ref('B'),roleRevision:2,deliveries:[]});
-    expect(captured.text).toContain('Original requirement');
-    expect(f.sessions.get('A')!.sent).toEqual([]);expect(f.sessions.get('B')!.sent).toEqual([]);
-    expect(await f.control('commit',{operationId:'handoff',expectedRevision:1})).toMatchObject({status:200,payload:{phase:'committed'}});
-    expect(f.sessions.get('A')!.sent).toEqual([]);expect(f.sessions.get('B')!.sent).toEqual([]);
-    const input={operationId:'postcommit-consultation',todoStepId:todo.steps[0]!.id,purpose:'consultation',text:'Assess the next concrete step'};
-    const intent=await call('send_main_message',input);
-    await expect.poll(async()=>(await current()).outbox?.find(item=>item.id===intent.id)?.status).not.toMatch(/^(prepared|dispatching)$/);
-    const observed=await current(); const settled=observed.outbox!.find(item=>item.id===intent.id)!;
-    expect(settled.status,JSON.stringify({error:settled.error,health:observed.health})).toBe('accepted');
-    const sent=f.sessions.get('B')!.sent;
-    expect(sent).toHaveLength(1);expect(sent[0]).toContain('quoted conversation history');
-    expect(sent[0]).toContain(captured.text);expect(sent[0]).toContain(input.text);
-    const persisted=f.stateFiles.tpm.json(`${work.id}.json`);
-    expect(persisted.work.tpmNativeSessionId).toBe(tpmId);
-    expect(persisted.work.outbox.find((item:{id:string})=>item.id===intent.id)).toMatchObject({status:'accepted',resolvedTarget:ref('B'),roleRevision:2});
-    const executionHash=createHash('sha256').update(JSON.stringify(['host:tpm',intent.id])).digest('hex');
-    const executionId=`${executionHash.slice(0,8)}-${executionHash.slice(8,12)}-8${executionHash.slice(13,16)}-${((parseInt(executionHash[16]!,16)&3)|8).toString(16)}${executionHash.slice(17,20)}-${executionHash.slice(20,32)}`;
-    expect(await context()).toMatchObject({state:'accepted',deliveries:[{operationId:createHash('sha256').update(JSON.stringify(['host:tpm',executionId])).digest('hex'),target:ref('B'),roleRevision:2,includesContext:true}]});
-    expect(await call('send_main_message',input)).toMatchObject({id:intent.id,status:'accepted'});
-    expect(f.sessions.get('B')!.sent).toHaveLength(1);expect(f.sessions.get('A')!.sent).toEqual([]);
-    expect(f.tpmConfigurations).toHaveLength(1);expect((await current()).tpmNativeSessionId).toBe(tpmId);
-  } finally { await f.close(); }
-});
-
-test('a revision-rejected TPM recovery cannot leave an unresolved association admission',async()=>{
-  const f=await fixture(true,true,async (root,files)=>{const store=new SessionSuccessionStore(join(root,'roles'),files.roles);await store.ready;await store.ensureRole(ref('A'),root);});
-  try {
-    f.loseTpmCreation(true);
-    expect((await f.host.control({method:'POST',path:'/remote/tpm/create',body:JSON.stringify({providerId:'fixture',mainNativeSessionId:'A',operationId:'stale-recovery-create'})})).status).toBe(409);
-    const path=(await f.stateFiles.tpm.list()).find(path=>path.endsWith('.json'))!;
-    const {work}=f.stateFiles.tpm.json(path);
-    const stale=await f.host.control({method:'POST',path:'/remote/tpm/action',body:JSON.stringify({id:work.id,revision:work.revision-1,action:'resolve',intentId:'creation',resolution:'accepted',nativeSessionId:'tpm-1',operationId:'stale-recovery'})});
-    expect(stale.status).toBe(409);expect(JSON.parse(stale.body).error).toMatch(/work changed/);
-    const state=f.stateFiles.roles.json('state.json');
-    expect(state.associationAdmissions).toHaveLength(1);
-    const recovered=await f.host.control({method:'POST',path:'/remote/tpm/action',body:JSON.stringify({id:work.id,revision:work.revision,action:'resolve',intentId:'creation',resolution:'accepted',nativeSessionId:'tpm-1',operationId:'correct-recovery'})});
-    expect(recovered.status,recovered.body).toBe(200);
-    expect(f.stateFiles.roles.json('state.json').associationAdmissions).toEqual([]);
-  }finally{await f.close();}
-});
-
-
-test('a TPM recovery failure after native access retains its unresolved admission',async()=>{
-  const f=await fixture(true,true,async (root,files)=>{const store=new SessionSuccessionStore(join(root,'roles'),files.roles);await store.ready;await store.ensureRole(ref('A'),root);});
-  try {
-    f.loseTpmCreation(true);
-    expect((await f.host.control({method:'POST',path:'/remote/tpm/create',body:JSON.stringify({providerId:'fixture',mainNativeSessionId:'A',operationId:'unknown-recovery-create'})})).status).toBe(409);
-    const path=(await f.stateFiles.tpm.list()).find(path=>path.endsWith('.json'))!;
-    const {work}=f.stateFiles.tpm.json(path);
-    let inspections=0;f.sessions.get('tpm-1')!.runtimeInfo=async()=>{inspections++;throw new Error('Native recovery outcome is unavailable.');};
-    const body=JSON.stringify({id:work.id,revision:work.revision,action:'resolve',intentId:'creation',resolution:'accepted',nativeSessionId:'tpm-1',operationId:'unknown-recovery'});
-    expect((await f.host.control({method:'POST',path:'/remote/tpm/action',body})).status).toBe(409);
-    expect(f.stateFiles.roles.json('state.json').associationAdmissions).toHaveLength(2);
-    const repeated=await f.host.control({method:'POST',path:'/remote/tpm/action',body});
-    expect(repeated.status).toBe(409);expect(JSON.parse(repeated.body).error).toMatch(/unresolved/);expect(inspections).toBe(1);
-  }finally{await f.close();}
 });
 
 test('real WebSocket validation admission blocks first handoff and is released after rejection', async () => {
@@ -440,91 +366,8 @@ test('bulk stop rejects all captured targets before any cancellation when one so
   } finally { await f.close(); }
 }, 10000);
 
-async function acceptanceTpmWork(f: Awaited<ReturnType<typeof fixture>>) {
-  const created = await f.host.control({ method: 'POST', path: '/remote/tpm/create', body: JSON.stringify({
-    providerId: 'fixture', mainNativeSessionId: 'A', operationId: 'acceptance-tpm', requirement: 'Track one consultation',
-  }) });
-  expect(created.status).toBe(200); const work = JSON.parse(created.body) as TpmWork;
-  const current = async () => JSON.parse((await f.host.control({ method: 'GET', path: `/remote/tpm/work?id=${work.id}` })).body) as TpmWork;
-  await expect.poll(async () => (await current()).outbox?.[0]?.status).toBe('accepted');
-  const tools = f.tpmConfigurations[0]!.tools!;
-  const call = async (name: string, input: unknown) => JSON.parse(await tools.find(tool => tool.name === name)!.execute(input));
-  const todo = (await current()).todo!;
-  await call('update_todo_step', { revision: todo.revision, stepId: todo.steps[0]!.id, status: 'in_progress', note: 'Discussing the requirement' });
-  const input = { operationId: 'consult-once', todoStepId: todo.steps[0]!.id, purpose: 'consultation', text: 'Assess this work once' };
-  return { work, current, call, input };
-}
-
-test.each([false, true])('real Host TPM ordinary late acceptance releases the original handoff gate, lost response %s', async lost => {
-  const f = await fixture(true);
-  try {
-    const tpm = await acceptanceTpmWork(f), a = f.sessions.get('A')!; let notify: AgentMessageOptions['onAcceptance'];
-    a.sendMessage = async (text: string, options?: AgentMessageOptions) => {
-      a.sent.push(text); notify = options?.onAcceptance;
-      if (lost) throw new Error('Ordinary native response lost');
-    };
-    const receipt = await tpm.call('send_main_message', tpm.input);
-    await expect.poll(async () => (await tpm.current()).outbox!.find(item => item.id === receipt.id)?.status).toBe(lost ? 'unknown' : 'accepted');
-    expect((await f.control('prepare', { ...request, operationId: 'blocked' })).payload.phase).toBe('rejected');
-    expect(f.creates()).toBe(0);
-    notify!({ disposition: 'queued' });
-    await expect.poll(async () => (await tpm.current()).outbox!.find(item => item.id === receipt.id)?.acceptance).toBe('queued');
-    expect((await f.control('prepare', { ...request, operationId: 'still-queued' })).payload.phase).toBe('rejected');
-    expect(f.creates()).toBe(0);
-    notify!({ disposition: 'started' });
-    await expect.poll(async () => (await tpm.current()).outbox!.find(item => item.id === receipt.id)?.acceptance).toBe('started');
-    const persisted = f.stateFiles.tpm.json(`${tpm.work.id}.json`);
-    expect(persisted.work.outbox.find((item: { id: string }) => item.id === receipt.id)).toMatchObject({ status: 'accepted', acceptance: 'started', resolvedTarget: ref('A'), roleRevision: 1 });
-    expect((await f.control('prepare', request)).payload.phase).toBe('ready');
-    expect(f.creates()).toBe(1); expect(a.sent).toHaveLength(1);
-    expect(await tpm.call('send_main_message', tpm.input)).toMatchObject({ id: receipt.id, acceptance: 'started' });
-    expect(a.sent).toHaveLength(1);
-  } finally { await f.close(); }
-}, 10000);
-
-test.each([false, true])('real Host TPM prepared late execution evidence releases the next handoff gate, lost response %s', async lost => {
-  const f = await fixture(true, false, undefined, false, true, true);
-  try {
-    const tpm = await acceptanceTpmWork(f);
-    expect((await f.control('prepare', request)).payload.phase).toBe('ready');
-    expect((await f.control('commit', { operationId: 'handoff', expectedRevision: 1 })).payload.phase).toBe('committed');
-    const b = f.sessions.get('B') as EvidenceNative; b.dispatchFailure = lost;
-    const receipt = await tpm.call('send_main_message', tpm.input);
-    await expect.poll(async () => (await tpm.current()).outbox!.find(item => item.id === receipt.id)?.status).toBe(lost ? 'unknown' : 'accepted');
-    expect(b.dispatches).toBe(1); expect(b.preparations).toBe(1); expect(b.sent[0]).toContain('Original requirement');
-    const next = { ...request, from: ref('B'), expectedRevision: 2 };
-    expect((await f.control('prepare', { ...next, operationId: 'unresolved-next' })).payload.phase).toBe('rejected');
-    b.materialized = true; b.unresolved = false; let started = false;
-    const inspect = b.nativeEvidence.inspectInput;
-    b.nativeEvidence.inspectInput = async witness => {
-      const result = await inspect(witness);
-      return started && result.status === 'materialized' ? { ...result, execution: { disposition: 'started', nativeExecutionId: 'exact-R' } } : result;
-    };
-    expect((await f.control('reconcile', { operationId: 'handoff' })).payload.materialized).toBe(true);
-    expect((await tpm.current()).outbox!.find(item => item.id === receipt.id)?.acceptance).toBeUndefined();
-    expect((await f.control('prepare', { ...next, operationId: 'materialized-without-execution' })).payload.phase).toBe('rejected');
-    expect(f.evidenceCreates()).toBe(1);
-    started = true;
-    expect((await f.control('reconcile', { operationId: 'handoff' })).payload.materialized).toBe(true);
-    await expect.poll(async () => (await tpm.current()).outbox!.find(item => item.id === receipt.id)?.acceptance).toBe('started');
-    const persisted = f.stateFiles.tpm.json(`${tpm.work.id}.json`);
-    expect(persisted.work.outbox.find((item: { id: string }) => item.id === receipt.id)).toMatchObject({ status: 'accepted', acceptance: 'started', resolvedTarget: ref('B'), roleRevision: 2 });
-    let nextCreates = 0;
-    f.providerEvidence!.createEmpty = async config => {
-      expect(config).toMatchObject({ cwd: f.root, selectionSourceSessionId: 'B' }); nextCreates++;
-      f.sessions.set('C', new EvidenceNative('C', f.root));
-      return { status: 'created', handle: { providerId: 'fixture', sessionId: 'C', opaque: 'exact C handle' } };
-    };
-    expect((await f.control('prepare', { ...next, operationId: 'next' })).payload.phase).toBe('ready');
-    expect(nextCreates).toBe(1); expect(b.dispatches).toBe(1); expect(b.preparations).toBe(1);
-    expect(await tpm.call('send_main_message', tpm.input)).toMatchObject({ id: receipt.id, acceptance: 'started' });
-    expect(b.sent).toHaveLength(1); expect(f.sessions.get('C')!.sent).toEqual([]);
-  } finally { await f.close(); }
-}, 10000);
-
-
 test('Host grants empty initialization only before input and withdraws it on cold unknown restore', async () => {
- const f=await fixture(false,false,undefined,false,true,true);
+ const f=await fixture(false,undefined,false,true,true);
  try {
   expect((await f.control('prepare',request)).payload.phase).toBe('ready');
   expect(f.resumeOptions).toContainEqual({initializeEmpty:true});
@@ -541,7 +384,7 @@ test('Host grants empty initialization only before input and withdraws it on col
 },10000);
 
 test('native prefix Host uses settled prompt evidence and exact committed handle through restart and normal first WebSocket input',async()=>{
- const f=await fixture(false,false,undefined,false,false,true,true);
+ const f=await fixture(false,undefined,false,false,true,true);
  try {
   expect((await f.control('prepare',nativePrefixRequest)).payload.phase).toBe('ready');
   expect(f.prefixForks()).toBe(1); expect(f.prefixVerifications()).toBe(1);
@@ -557,7 +400,7 @@ test('native prefix Host uses settled prompt evidence and exact committed handle
  }finally{await f.close();}
 });
 test.each(['A','B'])('native prefix Host retains %s evidence across native branch readback',async id=>{
- const f=await fixture(false,false,undefined,false,false,false,true);
+ const f=await fixture(false,undefined,false,false,false,true);
  try{
   f.onPrefixVerify(async()=>{(f.sessions.get(id) as PromptNative).epoch++;});
   expect((await f.control('prepare',nativePrefixRequest)).payload.phase).toBe('rejected');
@@ -567,7 +410,7 @@ test.each(['A','B'])('native prefix Host retains %s evidence across native branc
 });
 
 test('native prefix Host restart keeps the saved source observation and rejects a replaced timeline epoch',async()=>{
- const f=await fixture(false,false,undefined,false,false,false,true);
+ const f=await fixture(false,undefined,false,false,false,true);
  try{
   expect((await f.control('prepare',nativePrefixRequest)).payload.phase).toBe('ready');
   const original=f.stateFiles.roles.json('state.json').roles[0].localPreparations[0].capture;

@@ -229,22 +229,6 @@ test('terminal enrolled decisions stay fenced across restart until the exact dur
 });
 
 
-test('recovered TPM evidence settles only its exact persisted admission',async()=>{
-  const {store,directory}=await fixture();
-  const recovery={createKey:'["scope","create-tpm"]',createFingerprint:'a'.repeat(64)};
-  await store.admitAssociation('tpm','fingerprint',source,false,recovery);
-  await store.admitAssociation('unrelated','other',source);
-  recovery.createKey='tampered';
-  const restored=new SessionSuccessionStore(directory);await restored.ready;
-  const evidence={createKey:'["scope","create-tpm"]',createFingerprint:'a'.repeat(64)};
-  await expect(restored.settleRecoveredAssociation({...evidence,createFingerprint:'b'.repeat(64)},source)).rejects.toThrow(/conflict/);
-  await expect(restored.settleRecoveredAssociation(evidence,target)).rejects.toThrow(/conflict/);
-  await restored.settleRecoveredAssociation(evidence,source);
-  const state=JSON.parse(await readFile(join(directory,'state.json'),'utf8'));
-  expect(state.associationAdmissions.map((item:{id:string})=>item.id)).toEqual(['unrelated']);
-});
-
-
 test('persists exact source creation result atomically with admission settlement and replays after restart',async()=>{
   const {store,directory}=await fixture();
   await store.admitAssociation('source-op','fingerprint',source,true);
@@ -271,7 +255,7 @@ test('failed native-result persistence retains admission and never publishes a r
 });
 
 
-test('reserves bounded native-result capacity before dispatch while keeping TPM admissions independent',async()=>{
+test('reserves bounded native-result capacity before dispatch while keeping other admissions independent',async()=>{
   const {directory}=await fixture();
   const path=join(directory,'state.json'),state=JSON.parse(await readFile(path,'utf8'));
   state.associationResults=Array.from({length:1023},(_,index)=>({id:`result-${index}`,fingerprint:'fingerprint',scope:'scope',operationId:`result-${index}`,source,reader:target}));
@@ -283,10 +267,10 @@ test('reserves bounded native-result capacity before dispatch while keeping TPM 
   ]);
   expect(outcomes.map(item=>item.status)).toEqual(['fulfilled','rejected']);
   expect((outcomes[1] as PromiseRejectedResult).reason.message).toMatch(/result storage is full/);
-  await restored.admitAssociation('tpm','fingerprint',source,false,{createKey:'tpm-create',createFingerprint:'a'.repeat(64)});
+  await restored.admitAssociation('plain','fingerprint',source);
   const reopened=new SessionSuccessionStore(directory);await reopened.ready;
   await expect(reopened.admitAssociation('third','fingerprint',source,true)).rejects.toThrow(/result storage is full/);
-  await expect(reopened.completeSourceAssociation({id:'tpm',fingerprint:'fingerprint',scope:'scope',operationId:'tpm',source,reader:target})).rejects.toThrow(/admission/);
+  await expect(reopened.completeSourceAssociation({id:'plain',fingerprint:'fingerprint',scope:'scope',operationId:'plain',source,reader:target})).rejects.toThrow(/admission/);
   await reopened.completeSourceAssociation({id:'first',fingerprint:'fingerprint',scope:'scope',operationId:'first',source,reader:target});
   expect(JSON.parse(await readFile(path,'utf8')).associationResults).toHaveLength(1024);
   await expect(reopened.admitAssociation('fourth','fingerprint',source,true)).rejects.toThrow(/result storage is full/);
@@ -301,4 +285,19 @@ test('migrates valid version 2 while rejecting missing or null durable admission
  }
  await writeFile(path,JSON.stringify(saved));const migrated=new SessionSuccessionStore(directory);await migrated.ready;
  expect(JSON.parse(await readFile(path,'utf8')).version).toBe(8);expect(migrated.read('role').role.current).toEqual(source);
+});
+
+test('a store an older build wrote loses the TPM participants and the admissions of a TPM creation, and loads unchanged afterwards', async () => {
+  const { directory, store } = await fixture();
+  await store.setParticipants('role', 1, 0, [{ relationId: 'side', kind: 'side', before: target, after: target }]);
+  const path = join(directory, 'state.json'), state = JSON.parse(await readFile(path, 'utf8'));
+  state.roles[0].participants.push({ relationId: 'tpm:work', kind: 'tpm', before: target, after: target });
+  state.associationAdmissions = [{ id: 'tpm-create', fingerprint: 'fingerprint', source, recovery: { createKey: 'tpm-create', createFingerprint: 'a'.repeat(64) } }, { id: 'plain', fingerprint: 'fingerprint', source }];
+  await writeFile(path, JSON.stringify(state));
+  const restored = new SessionSuccessionStore(directory); await restored.ready;
+  expect(restored.read('role').participants.map(item => item.kind)).toEqual(['side']);
+  const saved = JSON.parse(await readFile(path, 'utf8'));
+  expect(saved.associationAdmissions.map((item: { id: string }) => item.id)).toEqual(['plain']);
+  const again = new SessionSuccessionStore(directory); await again.ready;
+  expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(saved);
 });

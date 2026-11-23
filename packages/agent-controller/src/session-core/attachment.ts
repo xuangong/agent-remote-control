@@ -114,7 +114,7 @@ export function createAttachment(ctx: SessionCoreContext) {
     } catch (error) { release(); parent?.release(); throw error; }
   }
   async function project(providerId: string, proposedAgentId: string, nativeSessionId: string, parentNativeSessionId?: string, takeOver?: string, takeoverAdmitted = false, takeoverScope = 'host:takeover', qualifiedResult = false): Promise<Binding> {
-    const { admission, sessions, directoryOperation, genericSuccessionSource, nativePrefixExtensions, workerExtensions, idle, journals, liveAgent, ledger, nativeRef, originalCreation, originalNativePrefix, providers, relay, roles, sessionRefs, succession, successionBoundary, successionReady, tpm } = ctx;
+    const { admission, sessions, directoryOperation, genericSuccessionSource, nativePrefixExtensions, workerExtensions, idle, journals, liveAgent, ledger, nativeRef, originalCreation, originalNativePrefix, providers, relay, roles, sessionRefs, succession, successionBoundary, successionReady } = ctx;
     await successionReady;
     const nativeCreation = originalCreation(nativeRef({ providerId, nativeSessionId }));
     const creationIdentity = nativeCreation ? serializeAgentEmptyCreationResult(nativeCreation) : undefined;
@@ -185,8 +185,7 @@ export function createAttachment(ctx: SessionCoreContext) {
           pending: () => pendingReferenceNote({ providerId, nativeSessionId }, sessionRefs),
           delivered: revision => sessionRefs.store.markDelivered({ providerId, nativeSessionId }, revision),
         }) : watched;
-        const annotated = tpm ? await tpm.annotateSession(providerId, nativeSessionId, noted) : noted;
-        const session = successionBoundary ? successionBoundary.wrap(nativeRef(binding), annotated) : annotated;
+        const session = successionBoundary ? successionBoundary.wrap(nativeRef(binding), noted) : noted;
         if (admission.closed) {
           await session.dispose().catch(() => undefined);
           throw new HostRequestError(503, 'host_closed', 'Agent Host is closed.');

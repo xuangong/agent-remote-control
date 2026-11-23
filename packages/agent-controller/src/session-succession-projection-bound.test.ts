@@ -28,7 +28,7 @@ function ceiling(role: Awaited<ReturnType<typeof fixture>>['role'], participants
 
 test('whole staged projection exact fit admits many participants and one byte short publishes nothing', async () => {
   const f = await fixture();
-  const participants = Array.from({ length: 200 }, (_, index) => ({ relationId: `r-${index}`, kind: 'tpm' as const, before: ref(`r-${index}`), after: ref(`r-${index}`) }));
+  const participants = Array.from({ length: 200 }, (_, index) => ({ relationId: `r-${index}`, kind: 'side' as const, before: ref(`r-${index}`), after: ref(`r-${index}`) }));
   const bytes = ceiling(f.role, participants);
   await expect(f.store.beginEnrolled(freeze(bytes - 1), participants, f.store.generation, true)).rejects.toMatchObject({ code: 'succession_projection_capacity_exceeded' });
   expect(f.store.read('role')).toMatchObject({ associationRevision: 0, participants: [], operations: [] });
@@ -44,7 +44,7 @@ test('the projection bound includes an association revision growing from nine to
   const f = await fixture();
   for (let revision = 0; revision < 9; revision++) {
     const target = ref(`reader-${revision}`);
-    await f.store.setParticipants('role', 1, revision, [{ relationId: `r-${revision}`, kind: 'tpm', before: target, after: target }]);
+    await f.store.setParticipants('role', 1, revision, [{ relationId: `r-${revision}`, kind: 'side', before: target, after: target }]);
   }
   const bytes = ceiling(f.role, [], 10);
   expect(bytes).toBe(ceiling(f.role, [], 9) + 1);
@@ -55,7 +55,7 @@ test('the projection bound includes an association revision growing from nine to
 }, 10000);
 
 test('maximal JSON escaping and optional recovery fields fit the frozen bound', async () => {
-  const f = await fixture(), participants = [{ relationId: max, kind: 'tpm' as const, before: ref(max), after: ref(max) }];
+  const f = await fixture(), participants = [{ relationId: max, kind: 'side' as const, before: ref(max), after: ref(max) }];
   const bytes = ceiling(f.role, participants), receipt = freeze(bytes);
   await f.store.beginEnrolled(receipt, participants, f.store.generation, true);
   const largestCapture = { epoch: max, seq: Number.MAX_SAFE_INTEGER, capturedAt: max };

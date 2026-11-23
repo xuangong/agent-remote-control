@@ -1,6 +1,6 @@
 ---
 name: agent-remote
-description: Work with Agent Remote Control from the shell with agent-remote-controller - list, read, create and drive agent sessions (Claude Code, Codex, Copilot, OpenCode) on any of the user's computers, answer their requests, manage references, Windows and Hosts, and run the commands of a bot, Team or TPM role. Use when the user refers to another session or an earlier conversation, asks what other agents did, wants work continued, checked or delegated in another session, or asks to arrange Windows or manage Hosts.
+description: Work with Agent Remote Control from the shell with agent-remote-controller - list, read, create and drive agent sessions (Claude Code, Codex, Copilot, OpenCode) on any of the user's computers, answer their requests, manage references, Windows and Hosts, and run the commands of a bot role. Use when the user refers to another session or an earlier conversation, asks what other agents did, wants work continued, checked or delegated in another session, or asks to arrange Windows or manage Hosts.
 ---
 
 # Agent Remote Control
@@ -64,7 +64,7 @@ A session can reference others: the source a Side or Ask was opened from (`origi
 
 ## Your role
 
-When your session is a bot, a Team member or a TPM, its role has commands:
+When your session is a bot, its role has commands:
 
 ```sh
 agent-remote-controller role list
@@ -104,7 +104,7 @@ Without `--host` they are about this computer's Host. Updating a Controller or s
 
 ## Anything else
 
-`agent-remote-controller api METHOD /v1/... [--body JSON]` sends any website request as the signed-in user, such as Team, TPM, chain and bot management. Prefer the commands above when they cover the task.
+`agent-remote-controller api METHOD /v1/... [--body JSON]` sends any website request as the signed-in user, such as Team, chain and bot management. Prefer the commands above when they cover the task.
 
 ## Errors
 

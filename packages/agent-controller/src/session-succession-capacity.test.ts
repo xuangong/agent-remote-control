@@ -55,7 +55,7 @@ test('concurrent unrelated role writes preserve actual participant, terminal and
   const files = memoryStateFiles(), store = new SessionSuccessionStore(directory, files, LIMIT); await store.ready;
   await store.createRole({ id: 'role', revision: 1, origin: ref('A'), current: ref('A'), workspace: { controllerId: 'host', canonicalCwd: directory } });
   const before = files.json('state.json');
-  const participants = Array.from({ length: 10 }, (_, index) => ({ relationId: `${index}-引号"\\`.repeat(30), kind: 'tpm' as const, before: ref(`reader-${index}`), after: ref(`reader-${index}`) }));
+  const participants = Array.from({ length: 10 }, (_, index) => ({ relationId: `${index}-引号"\\`.repeat(30), kind: 'ask' as const, before: ref(`reader-${index}`), after: ref(`reader-${index}`) }));
   const freeze = { version: 2 as const, maxProjectionBytes: 8 * 1024 * 1024, token: 'token-中\\"'.repeat(20), authority: { version: 1 as const, origin: 'https://relay.example', issuer: 'https://issuer.example', namespace: 'tenant', ownerSubject: 'owner' }, controllerId: 'host', request, associationRevision: 0, lineage: [ref('A')], relations: [] };
   await store.beginEnrolled(freeze, participants, store.generation, true);
   const admitted = files.json('state.json');

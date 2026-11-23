@@ -273,7 +273,7 @@ export class SessionSuccessionContextStore {
       state.attachments.push(record); return record;
     });
   }
-  /** Shared across dispatchers so two devices/TPM cannot race the first native call. */
+  /** Shared across dispatchers so two devices cannot race the first native call. */
   serialized<T>(target: NativeSessionRef, run: () => Promise<T>): Promise<T> {
     const key = nativeSessionRefKey(target);
     const next = (this.dispatchTails.get(key) ?? Promise.resolve()).catch(() => undefined).then(run);

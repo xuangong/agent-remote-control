@@ -1,9 +1,9 @@
-/** S2, The Controller's succession service against the Relay's relation edits and cold grants: what a freeze fences, and what a restart recovers. The Relay is real and in memory; the Controller's role, context and TPM state are memory files; nothing listens on a port. */
+/** S2, The Controller's succession service against the Relay's relation edits and cold grants: what a freeze fences, and what a restart recovers. The Relay is real and in memory; the Controller's role and context state are memory files; nothing listens on a port. */
 import { expect, test } from 'vitest';
 import { successionHostFixture as fixture, ref } from '@orchardworks/agent-remote-controller/succession-host-testing';
 import { enrollmentTransport, coldAssociations } from './support/succession-relay.js';
 test('cold complete grants enroll only linked direct readers and preserve immutable provenance',async()=>{
-  const f=await fixture(false,true);const transport=await enrollmentTransport(f,coldAssociations());
+  const f=await fixture(true);const transport=await enrollmentTransport(f,coldAssociations());
   try {
     f.grants.push(...[{nativeSessionId:'side',sourceNativeSessionId:'A'},{nativeSessionId:'ask',sourceNativeSessionId:'A'},{nativeSessionId:'unlinked',sourceNativeSessionId:'A'},{nativeSessionId:'nested',sourceNativeSessionId:'side'}]);
     const input={operationId:'cold',providerId:'fixture',nativeSessionId:'A',expectedRevision:1};
@@ -21,7 +21,7 @@ test('cold complete grants enroll only linked direct readers and preserve immuta
 });
 
 test('lost source creation response recovers its original durable result without native replay',async()=>{
-  const f=await fixture(false,true,undefined,false,false,false,false);const initial=coldAssociations();initial.bindings=initial.bindings.filter(item=>item.nativeSessionId==='A');
+  const f=await fixture(true,undefined,false,false,false,false);const initial=coldAssociations();initial.bindings=initial.bindings.filter(item=>item.nativeSessionId==='A');
   const transport=await enrollmentTransport(f,initial,{rpcTimeoutMs:200});// the dropped response is answered by the RPC timeout
 
   try {
@@ -55,7 +55,7 @@ test('lost source creation response recovers its original durable result without
 
 
 test('trusted postcommit unlink and relink reconcile cold direct readers and keep nested Ask fixed', async () => {
-  const f = await fixture(false, true); const transport = await enrollmentTransport(f, coldAssociations());
+  const f = await fixture(true); const transport = await enrollmentTransport(f, coldAssociations());
   try {
     f.grants.push(...[{nativeSessionId:'side',sourceNativeSessionId:'A'},{nativeSessionId:'ask',sourceNativeSessionId:'A'},{nativeSessionId:'unlinked',sourceNativeSessionId:'A'},{nativeSessionId:'nested',sourceNativeSessionId:'side'}]);
     expect((await transport.action('prepare',{operationId:'relations',providerId:'fixture',nativeSessionId:'A',expectedRevision:1}))!.status).toBe(200);

@@ -1,9 +1,9 @@
-/** S2, What the Controller and the Relay negotiate before a handoff: projection ceiling, legacy peers, retries and committed-output invariants. The Relay is real and in memory; the Controller's role, context and TPM state are memory files; nothing listens on a port. */
+/** S2, What the Controller and the Relay negotiate before a handoff: projection ceiling, legacy peers, retries and committed-output invariants. The Relay is real and in memory; the Controller's role and context state are memory files; nothing listens on a port. */
 import { expect, test } from 'vitest';
 import { successionHostFixture as fixture } from '@orchardworks/agent-remote-controller/succession-host-testing';
 import { enrollmentTransport } from './support/succession-relay.js';
 test('negotiated v2 saves an exact ceiling and unsupported producer certification refuses before create', async () => {
-  const f=await fixture(false,true), transport=await enrollmentTransport(f);
+  const f=await fixture(true), transport=await enrollmentTransport(f);
   try {
     f.unbounded();
     const response=await transport.action('prepare',{operationId:'unbounded',providerId:'fixture',nativeSessionId:'A',expectedRevision:1});
@@ -16,7 +16,7 @@ test('negotiated v2 saves an exact ceiling and unsupported producer certificatio
 },10000);
 
 test.each([{noAllowance:true},{legacyRelay:true}])('new Host retains ordinary connection when preparation cannot be negotiated or admitted: %j', async options => {
-  const f=await fixture(false,true), transport=await enrollmentTransport(f,undefined,options);
+  const f=await fixture(true), transport=await enrollmentTransport(f,undefined,options);
   try {
     expect((await transport.request(`/v1/remote/hosts/${transport.hostId}/catalog`,{providerId:'fixture'})).status).toBeLessThan(500);
     expect((await transport.action('prepare',{operationId:'unavailable',providerId:'fixture',nativeSessionId:'A',expectedRevision:1})).status).toBe(409);
@@ -30,7 +30,7 @@ test.each([{noAllowance:true},{legacyRelay:true}])('new Host retains ordinary co
 },10000);
 
 test('old Host on upgraded Relay is legacy-recovery-only and gets no strict v2 acknowledgment field', async () => {
-  const f=await fixture(false,true), transport=await enrollmentTransport(f,undefined,{legacyHost:true});
+  const f=await fixture(true), transport=await enrollmentTransport(f,undefined,{legacyHost:true});
   try {
     const response=await transport.action('prepare',{operationId:'old-new',providerId:'fixture',nativeSessionId:'A',expectedRevision:1});
     expect(response.status).toBe(409);expect(await response.json()).toMatchObject({code:'succession_preparation_unavailable'});
@@ -39,7 +39,7 @@ test('old Host on upgraded Relay is legacy-recovery-only and gets no strict v2 a
 },10000);
 
 test('saved bounded recovery is explicitly unavailable on an old Relay while ordinary connection and records remain intact',async()=>{
-  const options={legacyRelay:false},f=await fixture(false,true),transport=await enrollmentTransport(f,undefined,options);
+  const options={legacyRelay:false},f=await fixture(true),transport=await enrollmentTransport(f,undefined,options);
   try{
     const input={operationId:'retained',providerId:'fixture',nativeSessionId:'A',expectedRevision:1};
     expect((await transport.action('prepare',input)).status).toBe(200);

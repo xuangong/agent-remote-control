@@ -54,7 +54,7 @@ it.each(['codex','claude','copilot'] as const)('%s reports native create complet
   }finally{await h.directory.close();}
 },5000);
 
-it.each(['codex', 'claude', 'copilot'] as const)('%s rejects binding TPM extensions to a cached ordinary runtime', async providerId => {
+it.each(['codex', 'claude', 'copilot'] as const)('%s rejects binding role extensions to a cached ordinary runtime', async providerId => {
   const h = harness(providerId); const calls: string[] = [];
   try {
     const id = await h.directory.create({});
@@ -65,7 +65,7 @@ it.each(['codex', 'claude', 'copilot'] as const)('%s rejects binding TPM extensi
   } finally { await h.directory.close(); }
 });
 
-it.each(['codex', 'claude', 'copilot'] as const)('%s reuses equivalent TPM extensions with fresh callback closures', async providerId => {
+it.each(['codex', 'claude', 'copilot'] as const)('%s reuses equivalent role extensions with fresh callback closures', async providerId => {
   const h = harness(providerId); const calls: string[] = [];
   try {
     const id = await h.directory.create(extensions(calls));
@@ -119,8 +119,8 @@ it.each(['claude', 'copilot'] as const)('%s checks extension identity after wait
   h.pauseResume(async () => { started(); await gate; });
   try {
     const ordinary = h.directory.open('native'); await ready;
-    const tpm = h.directory.open('native', { extensions: extensions(calls) });
-    const rejected = expect(tpm).rejects.toThrow(/extensions.*reopen/i);
+    const opened = h.directory.open('native', { extensions: extensions(calls) });
+    const rejected = expect(opened).rejects.toThrow(/extensions.*reopen/i);
     release(); await ordinary; await rejected;
     expect(h.resumed).toHaveLength(1); expect(h.disposals()).toBe(0); expect(calls).toEqual([]);
   } finally { release(); await h.directory.close(); }

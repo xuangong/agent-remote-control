@@ -7,8 +7,6 @@ import { afterEach, expect, test } from 'vitest';
 import { SessionSuccessionContextStore } from './session-succession-context.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
 import { diskStateFiles, SuccessionPublicationRejected, SuccessionPublicationUnknown } from './succession-persistence.js';
-import { TpmStore } from './tpm-store.js';
-import { tpmRecord } from './test-utils/tpm-record.js';
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
@@ -46,12 +44,4 @@ test('the succession context store restores what it published', async () => {
   await store.attach({ operationId: 'input', roleId: 'input', roleRevision: 2, source: ref('s'), target: ref('t'), boundary: { epoch: 'epoch', seq: 1 }, capturedAt: '2026-10-10T00:00:00Z', text: '[]', itemCount: 0 });
   const reopened = new SessionSuccessionContextStore(directory); await reopened.ready;
   expect(reopened.read('input').state).toBe('pending');
-});
-
-test('the TPM store restores what it published', async () => {
-  const directory = await root(), store = new TpmStore(directory); await store.ready;
-  const record = tpmRecord(); record.work.id = 'work'; record.work.title = 'Example';
-  await store.insert(record);
-  const reopened = new TpmStore(directory); await reopened.ready;
-  expect(reopened.get('work').work.title).toBe('Example');
 });

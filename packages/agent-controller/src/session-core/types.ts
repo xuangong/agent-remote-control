@@ -9,7 +9,6 @@ import type { SessionSuccessionStore } from '../session-succession-store.js';
 import type { SessionSuccessionContextStore } from '../session-succession-context.js';
 import type { SessionSuccessionCoordinator } from '../session-succession.js';
 import type { NativeSessionRef, TrustedSuccessionContext } from '@orchardworks/agent-remote-protocol';
-import type { TpmOptions } from '../tpm.js';
 import type { StateFiles } from '../state-file.js';
 import type { NativeOwnerIdentity, NativeHandoffGrant } from '../native-session-owner.js';
 import type { HostExecutionPolicy } from '../execution-policy.js';
@@ -103,7 +102,6 @@ export interface AgentHostRuntimeOptions {
   cancelTimeoutMs?: number;
   executionPolicy?: HostExecutionPolicy;
   operationCache?: OperationCacheOptions;
-  tpm?: TpmOptions;
   team?: { stateDirectory: string; request?: (call: TeamHostCall) => Promise<unknown>; tickMs?: number;
     /** The Relay routes Team recipients across a generic succession of their session. */
     genericSuccession?(): boolean;

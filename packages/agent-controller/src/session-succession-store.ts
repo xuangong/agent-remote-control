@@ -33,14 +33,25 @@ export interface SuccessionRoleState {
 }
 export interface SourceAssociationResult { id: string; fingerprint: string; scope: string; operationId: string; source: NativeSessionRef; reader: NativeSessionRef }
 export interface SourceWitnessDescriptor { version: 1; scope: string; operationId: string }
-export interface AssociationRecovery { createKey: string; createFingerprint: string }
-interface StoreState { version: 8; associationResults: SourceAssociationResult[]; roles: SuccessionRoleState[]; associationAdmissions: Array<{ id: string; fingerprint: string; source: NativeSessionRef; sourceReader?: true; recovery?: AssociationRecovery; sourceWitness?: SourceWitnessDescriptor }> }
+interface StoreState { version: 8; associationResults: SourceAssociationResult[]; roles: SuccessionRoleState[]; associationAdmissions: Array<{ id: string; fingerprint: string; source: NativeSessionRef; sourceReader?: true; sourceWitness?: SourceWitnessDescriptor }> }
 type Advance = Pick<SuccessionRecord, 'phase'> & Partial<Pick<SuccessionRecord, 'to' | 'prepared' | 'failureCode'>>;
 const terminal = (phase: SuccessionPhase) => ['committed', 'rejected', 'cancelled'].includes(phase);
 const fingerprint = (request: SuccessionRequest) => JSON.stringify([request.operationId, request.roleId, request.expectedRevision, nativeSessionRefKey(request.from), request.targetProviderId ?? request.from.providerId, ...(request.preparation ? [nativePrefixSelectionKey(request.preparation)] : [])]);
 /** The cache retains the native-ID string, whose reviewed 512-unit JSON maximum is 3074 bytes. */
 export const SOURCE_WITNESS_RESULT_BYTES = jsonBytes(largestSuccessionId);
 
+/** A TPM is not carried anymore: its participants leave the roles and the prepared handoffs of an earlier store, and the admissions of its creation go. */
+function dropTpmParticipants(stored: { roles?: Array<{ participants?: Array<{ kind: string }>; operations?: Array<{ prepared?: { participants?: Array<{ kind: string }> } }> }>; associationAdmissions?: Array<{ recovery?: unknown }> }): boolean {
+  let dropped = false;
+  // An admission that waited for a TPM's creation to be recovered can never be settled now.
+  if (stored.associationAdmissions?.some(item => item.recovery !== undefined)) { stored.associationAdmissions = stored.associationAdmissions.filter(item => item.recovery === undefined); dropped = true; }
+  const without = (list: Array<{ kind: string }>) => { const kept = list.filter(item => item.kind !== 'tpm'); if (kept.length !== list.length) dropped = true; return kept; };
+  for (const item of stored.roles ?? []) {
+    if (item.participants) item.participants = without(item.participants);
+    for (const op of item.operations ?? []) if (op.prepared?.participants) op.prepared.participants = without(op.prepared.participants);
+  }
+  return dropped;
+}
 /** One owning Controller serializes role decisions; publication follows atomic file replacement. */
 export class SessionSuccessionStore {
   readonly ready: Promise<void>;
@@ -164,7 +175,7 @@ export class SessionSuccessionStore {
     const id = sourceParticipantId(input.readerRef, input.relationId), key = nativeSessionRefKey(input.readerRef);
     const member = item.participants.find(participant => participant.relationId === id);
     if (!!member !== input.previousMember || member && (member.kind !== input.kind || nativeSessionRefKey(member.before) !== key || nativeSessionRefKey(member.after) !== key)) throw new Error('Relation participant membership changed.');
-    if (state.roles.some(role => role.participants.some(participant => participant.kind !== 'tpm' && nativeSessionRefKey(participant.after) === key
+    if (state.roles.some(role => role.participants.some(participant => nativeSessionRefKey(participant.after) === key
       && (role !== item || participant.relationId !== id)))) throw new Error('Reader belongs to another relation or role.');
   }
 
@@ -213,8 +224,8 @@ export class SessionSuccessionStore {
     const prior = this.state.associationAdmissions.find(item => item.id === id);
     if (prior) throw new Error(prior.fingerprint === fingerprint ? 'Source association outcome is unresolved.' : 'Source association identity conflict.');
   }
-  admitAssociation(id: string, fingerprint: string, source: NativeSessionRef, sourceReader = false, recovery?: AssociationRecovery, sourceWitness?: SourceWitnessDescriptor): Promise<void> {
-    source = structuredClone(source); recovery = structuredClone(recovery); sourceWitness = structuredClone(sourceWitness);
+  admitAssociation(id: string, fingerprint: string, source: NativeSessionRef, sourceReader = false, sourceWitness?: SourceWitnessDescriptor): Promise<void> {
+    source = structuredClone(source); sourceWitness = structuredClone(sourceWitness);
     return this.mutate(state => {
       const prior = state.associationAdmissions.find(item => item.id === id);
       if (prior) throw new Error(prior.fingerprint === fingerprint ? 'Source association outcome is unresolved.' : 'Source association identity conflict.');
@@ -223,7 +234,7 @@ export class SessionSuccessionStore {
       if (role && nativeSessionRefKey(role.role.current) !== nativeSessionRefKey(source)) throw new Error('Source session has been superseded.');
       if (sourceReader && state.associationResults.length + state.associationAdmissions.filter(item => item.sourceReader).length >= 1024) throw new SourceAssociationCapacityError('Source creation result storage is full.');
       if (state.associationAdmissions.length >= 1024) throw new SourceAssociationCapacityError('Source association admission storage is full. Resolve unsettled operations.');
-      state.associationAdmissions.push({ id, fingerprint, source, ...(sourceReader ? { sourceReader: true as const } : {}), ...(recovery ? { recovery } : {}), ...(sourceWitness !== undefined ? { sourceWitness } : {}) });
+      state.associationAdmissions.push({ id, fingerprint, source, ...(sourceReader ? { sourceReader: true as const } : {}), ...(sourceWitness !== undefined ? { sourceWitness } : {}) });
     });
   }
   sourceResult(id: string, fingerprint: string): SourceAssociationResult | undefined {
@@ -241,14 +252,6 @@ export class SessionSuccessionStore {
       if (state.associationResults.length >= 1024 || state.associationResults.some(item => item.id === input.id)) throw new Error('Source creation result storage is full or conflicting.');
       state.associationResults.push(input);
       state.associationAdmissions = state.associationAdmissions.filter(item => item.id !== input.id);
-    });
-  }
-  settleRecoveredAssociation(recovery: AssociationRecovery, source: NativeSessionRef): Promise<void> {
-    const evidence = structuredClone(recovery), target = structuredClone(source);
-    return this.mutate(state => {
-      const pending = state.associationAdmissions.filter(item => item.recovery?.createKey === evidence.createKey);
-      if (pending.some(item => item.recovery?.createFingerprint !== evidence.createFingerprint || nativeSessionRefKey(item.source) !== nativeSessionRefKey(target))) throw new Error('Recovered source association evidence conflicts with admission.');
-      state.associationAdmissions = state.associationAdmissions.filter(item => item.recovery?.createKey !== evidence.createKey);
     });
   }
   settleAssociation(id: string, fingerprint: string, allowMissing = false): Promise<void> {
@@ -647,7 +650,7 @@ export class SessionSuccessionStore {
   private validate(state: StoreState): void {
     if (!state || state.version !== 8 || !Array.isArray(state.roles) || state.roles.length > 1024) throw new Error('Unsupported succession storage format/version.');
     if (!Array.isArray(state.associationAdmissions) || state.associationAdmissions.length > 1024 || new Set(state.associationAdmissions.map(item => item.id)).size !== state.associationAdmissions.length
-      || state.associationAdmissions.some(item => !item.id || !item.fingerprint || item.id.length > 512 || item.fingerprint.length > 512 || !isNativeSessionRef(item.source) || item.sourceReader !== undefined && item.sourceReader !== true || item.recovery !== undefined && (typeof item.recovery.createKey !== 'string' || !item.recovery.createKey || item.recovery.createKey.length > 16384 || !/^[a-f0-9]{64}$/.test(item.recovery.createFingerprint)))) throw new Error('Invalid source association admission.');
+      || state.associationAdmissions.some(item => !item.id || !item.fingerprint || item.id.length > 512 || item.fingerprint.length > 512 || !isNativeSessionRef(item.source) || item.sourceReader !== undefined && item.sourceReader !== true)) throw new Error('Invalid source association admission.');
     for (const admission of state.associationAdmissions) if (admission.sourceWitness !== undefined) {
       const witness = admission.sourceWitness;
       if (!admission.sourceReader || !witness || typeof witness !== 'object' || Array.isArray(witness) || Object.keys(witness).some(name => !['version', 'scope', 'operationId'].includes(name))
@@ -762,6 +765,7 @@ export class SessionSuccessionStore {
     if (text === undefined) { this.loaded = true; return; }
     if (Buffer.byteLength(text) > this.storeBytes) throw new Error('Succession storage size limit exceeded.');
     const parsed = JSON.parse(text);
+    const droppedTpm = dropTpmParticipants(parsed);
     const legacyPreparation = [1, 2, 3].includes(parsed.version);
     const legacyProjection = legacyPreparation || parsed.version === 4;
     const legacyWitness = legacyProjection || parsed.version === 5;
@@ -775,7 +779,7 @@ export class SessionSuccessionStore {
     if (parsed.version === 1 && (parsed.associationAdmissions !== undefined || parsed.associationResults !== undefined || parsed.roles.some((item: SuccessionRoleState) => item.associationAuthority || item.enrollments || item.releasedEnrollments))) throw new Error('Ambiguous legacy association storage.');
     if ((parsed.version === 1 || parsed.version === 2) && parsed.roles.some((item: SuccessionRoleState) => item.relationChanges !== undefined)) throw new Error('Ambiguous legacy relation change storage.');
     const state: StoreState = migrated ? { ...parsed, version: 8, associationAdmissions: parsed.version === 1 ? [] : parsed.associationAdmissions, associationResults: parsed.version === 1 ? [] : parsed.associationResults } : parsed; this.validate(state);
-    let changed = migrated;
+    let changed = migrated || droppedTpm;
     for (const item of state.roles) for (const op of item.operations) if (!terminal(op.phase) && op.phase !== 'unknown') {
       op.resumePhase = op.phase as SuccessionRecord['resumePhase']; op.phase = 'unknown';
       op.failureCode = 'succession_recovery_required'; changed = true;

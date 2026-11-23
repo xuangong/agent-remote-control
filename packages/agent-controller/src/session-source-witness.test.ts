@@ -20,7 +20,7 @@ async function fixture() {
   const store = new SessionSuccessionStore(directory, files); await store.ready;
   return { files, store };
 }
-const admit = (store: SessionSuccessionStore, value: ReturnType<typeof input>) => store.admitAssociation(value.id, value.fingerprint, value.source, true, undefined, value.sourceWitness);
+const admit = (store: SessionSuccessionStore, value: ReturnType<typeof input>) => store.admitAssociation(value.id, value.fingerprint, value.source, true, value.sourceWitness);
 function fill(state: any, desiredBytes: number) {
   padInBulk(state, state.associationResults, index => ({ id: `fill-${index}`, fingerprint: 'fingerprint', scope: 'x'.repeat(16384), operationId: `fill-${index}`, source: ref('unrelated-source'), reader: ref('unrelated-reader') }), desiredBytes, 17000);
   while (jsonBytes(state) < desiredBytes - 17000) {
@@ -98,14 +98,14 @@ test.each([
   { version: 1, scope: 'scope', operationId: 'operation', extra: true },
 ].map(descriptor => [descriptor]))('rejects malformed source witness descriptors before publication', async descriptor => {
   const f = await fixture(), value = input();
-  await expect(f.store.admitAssociation(value.id, value.fingerprint, value.source, true, undefined, descriptor as never)).rejects.toThrow(/witness/);
+  await expect(f.store.admitAssociation(value.id, value.fingerprint, value.source, true, descriptor as never)).rejects.toThrow(/witness/);
   expect(f.files.files.has('state.json')).toBe(false);
 });
 
 test('witness identity, mode and exact completion cannot be changed or extended', async () => {
   const f = await fixture(), value = input();
-  await expect(f.store.admitAssociation('wrong-id', value.fingerprint, value.source, true, undefined, value.sourceWitness)).rejects.toThrow(/witness/);
-  await expect(f.store.admitAssociation(value.id, value.fingerprint, value.source, false, undefined, value.sourceWitness)).rejects.toThrow(/witness/);
+  await expect(f.store.admitAssociation('wrong-id', value.fingerprint, value.source, true, value.sourceWitness)).rejects.toThrow(/witness/);
+  await expect(f.store.admitAssociation(value.id, value.fingerprint, value.source, false, value.sourceWitness)).rejects.toThrow(/witness/);
   await admit(f.store, value);
   for (const invalid of [
     { ...result(value), scope: 'different' }, { ...result(value), operationId: 'different' },

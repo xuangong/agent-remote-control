@@ -27,7 +27,7 @@ test('requires admitted identity and serializes first inputs from different devi
  const f=await fixture();
  await expect(f.session.sendMessage('bypass')).rejects.toThrow(/identity/i);
  const first = f.boundary.run(operation('one'),'browser',()=>f.session.sendMessage('first'));
- const second = f.boundary.run(operation('two'),'tpm',()=>f.session.sendMessage('second'));
+ const second = f.boundary.run(operation('two'),'role',()=>f.session.sendMessage('second'));
  await first; await expect(second).rejects.toThrow(/unresolved/i);
  expect(f.messages).toHaveLength(1); expect(f.messages[0]).toContain('source work'); expect(f.messages[0]).toContain('first');
  expect(f.contexts.read('handoff').state).toBe('accepted');
@@ -37,7 +37,7 @@ test('injects rich input without dropping images and keeps scoped identities dis
  await f.boundary.run(operation('same'),'browser',()=>f.session.sendMessageContent!([{type:'text',text:'look'},image]));
  const parts=f.messages[0] as AgentInputPart[];
  expect(parts.at(-1)).toEqual(image); expect(parts[0]).toMatchObject({type:'text',text:expect.stringContaining('source work')});
- await expect(f.boundary.run(operation('same'),'tpm',()=>f.session.sendMessage('different'))).rejects.toThrow(/unresolved/i);
+ await expect(f.boundary.run(operation('same'),'role',()=>f.session.sendMessage('different'))).rejects.toThrow(/unresolved/i);
 });
 test('leaves definite rejection pending and fences execution commands and superseded mutations',async()=>{
  const f=await fixture(); f.reject();

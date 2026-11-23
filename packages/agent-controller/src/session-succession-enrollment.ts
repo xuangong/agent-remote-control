@@ -7,9 +7,7 @@ import { successionAuthorityKey, successionFreezeKey, isNativePrefixSelection, i
 import type { AgentRemoteHttpResult, RemoteHostControlRequest } from '@orchardworks/agent-session-runtime';
 import type { AgentHostDirectory, AgentHostProviderRegistration } from './session-core/types.js';
 import { SuccessionCapacityError } from './succession-persistence.js';
-import type { TpmRecord } from './tpm-store.js';
 import { sourceWitnessId, SuccessionProjectionCapacityError, SuccessionProjectionInvariantError } from './session-succession-store.js';
-import type { AssociationRecovery } from './session-succession-store.js';
 import type { SessionSuccessionService } from './session-succession-service.js';
 export type EnrollmentMutation = <T>(scope: string, operationId: string, kind: string, targets: readonly NativeSessionRef[], parameters: unknown,
   dispatch: () => Promise<T>, validate?: () => Promise<void>) => Promise<T>;
@@ -19,7 +17,7 @@ const json = (status: number, value: unknown): AgentRemoteHttpResult => ({ statu
 /** Only the registered uplink callback owns this endpoint; its JSON body is never authority. */
 export class SessionSuccessionEnrollment {
   constructor(private readonly service: SessionSuccessionService, private readonly controllerId: string,
-    private readonly registrations: () => AgentHostProviderRegistration[], private readonly works: () => TpmRecord[],
+    private readonly registrations: () => AgentHostProviderRegistration[],
     private readonly authorize: (source: NativeSessionRef) => Promise<void>, private readonly admitMutation: EnrollmentMutation) {}
 
   async control(request: RemoteHostControlRequest, context: TrustedSuccessionContext): Promise<AgentRemoteHttpResult> {
@@ -87,7 +85,7 @@ export class SessionSuccessionEnrollment {
         const state = this.service.store.read(role.id);
         if (state.associationAuthority && successionAuthorityKey(state.associationAuthority) !== successionAuthorityKey(context.authority)) throw new Error('Primary role belongs to another association authority.');
         const description = await this.service.describe(role, source, this.registrations().map(({ adapter }) => ({ providerId: adapter.descriptor.providerId, displayName: adapter.descriptor.displayName })), input.preparation);
-        return json(200, { ...description, lineage: this.service.store.lineage(state), relationUpdates: 1, associationRevision: state.associationRevision, sourceParticipants: state.participants.filter(row => row.kind !== 'tpm').map(row => ({ relationId: row.relationId, kind: row.kind, readerRef: row.after })) });
+        return json(200, { ...description, lineage: this.service.store.lineage(state), relationUpdates: 1, associationRevision: state.associationRevision, sourceParticipants: state.participants.map(row => ({ relationId: row.relationId, kind: row.kind, readerRef: row.after })) });
       }
       if (Object.keys(input).some(name => !['action', 'freeze', 'includeContext'].includes(name)) || !isSuccessionAssociationFreeze(input.freeze)
         || input.includeContext !== undefined && (input.action !== 'status' || input.includeContext !== true)) throw new Error('A complete frozen association receipt is required.');
@@ -112,18 +110,7 @@ export class SessionSuccessionEnrollment {
               sourceRef: { controllerId: this.controllerId, providerId: directory.providerId, nativeSessionId: grant.sourceNativeSessionId } });
           }
           const participants: SuccessionParticipant[] = this.service.bindings(freeze.request.from.providerId).sourceParticipants(state.role.id,
-            freeze.relations.map(relation => ({ ...relation, relationId: sourceParticipantId(relation.readerRef, relation.relationId), nativeSessionId: relation.readerRef.nativeSessionId, sourceNativeSessionId: relation.sourceRef.nativeSessionId })), grants)
-            .filter(participant => participant.kind !== 'tpm');
-          const lineage = new Set(freeze.lineage.map(key));
-          for (const item of this.works()) {
-            const work = item.work;
-            const source = work.mainBinding?.kind === 'fixed' ? work.mainBinding.source : work.mainSessionRef
-              ?? { controllerId: this.controllerId, providerId: work.providerId, nativeSessionId: work.mainNativeSessionId };
-            if (!(work.mainBinding?.kind === 'primary_role' && work.mainBinding.roleId === state.role.id) && !lineage.has(key(source))) continue;
-            if (item.creation !== 'accepted' || !work.tpmNativeSessionId) throw new Error('TPM association creation is unresolved.');
-            const target = { controllerId: this.controllerId, providerId: work.providerId, nativeSessionId: work.tpmNativeSessionId };
-            participants.push({ relationId: `tpm:${work.id}`, kind: 'tpm', before: target, after: target } as SuccessionParticipant);
-          }
+            freeze.relations.map(relation => ({ ...relation, relationId: sourceParticipantId(relation.readerRef, relation.relationId), nativeSessionId: relation.readerRef.nativeSessionId, sourceNativeSessionId: relation.sourceRef.nativeSessionId })), grants);
           record = await this.service.coordinator.prepareEnrolled(freeze, participants, generation);
         }
         this.service.store.assertCommittedProjection(freeze.request.operationId);
@@ -178,7 +165,7 @@ export class SessionSuccessionEnrollment {
     if (previous) return previous.reader.nativeSessionId;
     this.service.coordinator.assertAdmission(source);
     const id=sourceWitnessId(scope,operationId),fingerprint=this.sourceFingerprint(source,parameters);
-    try { await this.service.store.admitAssociation(id,fingerprint,source,true,undefined,qualified ? { version: 1, scope, operationId } : undefined); }
+    try { await this.service.store.admitAssociation(id,fingerprint,source,true,qualified ? { version: 1, scope, operationId } : undefined); }
     catch (error) {
       // Only the owning pre-write capacity check proves a fresh callback was never entered.
       if (qualified && error instanceof SuccessionCapacityError) throw new AgentOperationRejectedError('operation_capacity_exceeded', error.message);
@@ -193,31 +180,12 @@ export class SessionSuccessionEnrollment {
     await this.service.store.completeSourceAssociation({id,fingerprint,scope,operationId,source,reader});
     return nativeId;
   }
-  async tpmSource(source: NativeSessionRef): Promise<NativeSessionRef> {
-    await this.service.ready;
-    return this.service.store.all().find(item => this.service.store.lineage(item).some(ref => key(ref) === key(source)))?.role.current ?? source;
-  }
-  async tpmMutation<T>(scope: string, operationId: string, source: NativeSessionRef, parameters: unknown, dispatch: () => Promise<T>, verify: (result: T) => Promise<boolean>): Promise<T> {
-    return this.mutation(scope, operationId, await this.tpmSource(source), parameters, dispatch, verify, false,
-      { createKey: JSON.stringify([scope, operationId]), createFingerprint: createHash('sha256').update(JSON.stringify(parameters)).digest('hex') });
-  }
-  async recoverTpm(record: TpmRecord): Promise<void> {
-    if (record.creation !== 'accepted' || !record.work.tpmNativeSessionId) throw new Error('TPM creation requires verified durable native evidence.');
-    const source = record.work.mainSessionRef ?? { controllerId: this.controllerId, providerId: record.work.providerId, nativeSessionId: record.work.mainNativeSessionId };
-    await this.service.store.settleRecoveredAssociation({ createKey: record.createKey, createFingerprint: record.createFingerprint }, source);
-  }
-  async recoverTpmAction(record: TpmRecord, scope: string, operationId: string, source: NativeSessionRef, parameters: unknown): Promise<void> {
-    const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-    if (record.creation !== 'accepted' || !record.work.tpmNativeSessionId || record.actions[hash([scope, operationId])]?.fingerprint !== hash(parameters)) throw new Error('TPM recovery action has no matching durable receipt.');
-    await this.recoverTpm(record);
-    await this.service.store.settleAssociation(hash([scope, operationId]), hash([source, parameters]), true);
-  }
-  async mutation<T>(scope: string, operationId: string, source: NativeSessionRef, parameters: unknown, dispatch: () => Promise<T>, verify: (result: T) => Promise<boolean>, sourceReader = false, recovery?: AssociationRecovery): Promise<T> {
+  async mutation<T>(scope: string, operationId: string, source: NativeSessionRef, parameters: unknown, dispatch: () => Promise<T>, verify: (result: T) => Promise<boolean>, sourceReader = false): Promise<T> {
     await this.service.ready;
     this.service.coordinator.assertAdmission(source);
     const id = createHash('sha256').update(JSON.stringify([scope, operationId])).digest('hex');
     const fingerprint = createHash('sha256').update(JSON.stringify([source, parameters])).digest('hex');
-    await this.service.store.admitAssociation(id, fingerprint, source, sourceReader, recovery);
+    await this.service.store.admitAssociation(id, fingerprint, source, sourceReader);
     let result: T;
     try { result = await dispatch(); }
     catch (error) {

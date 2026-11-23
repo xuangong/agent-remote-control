@@ -78,7 +78,7 @@ agent-remote-controller window list
 
 In a session the Controller manages (`AGENT_REMOTE_SESSION_TOKEN` and
 `AGENT_REMOTE_SESSION_SOCKET` set), commands act as that session, and `role` runs
-the commands of its Team, support or TPM role. In an ordinary terminal they act as
+the commands of its bot role. In an ordinary terminal they act as
 the Host owner through the running Controller. Other Hosts, Windows, stars and
 handoffs go through the Relay with the command line's own sign-in:
 

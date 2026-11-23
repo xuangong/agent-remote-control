@@ -10,9 +10,6 @@ import { createOpenCodeSessionDirectory } from './opencode-directory.js';
 import { LocalSessionSuccession } from './local-session-runtime.js';
 import { SessionReferenceStore } from './session-reference.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
-import { TpmStore } from './tpm-store.js';
-import { TpmCoordinator } from './tpm.js';
-import { SessionSuccessionService } from './session-succession-service.js';
 
 const ref = (providerId: string, nativeSessionId: string) => ({ controllerId: 'host', providerId, nativeSessionId });
 async function commitGeneric(store: SessionSuccessionStore, providerId: string, cwd: string) {
@@ -25,14 +22,6 @@ async function commitGeneric(store: SessionSuccessionStore, providerId: string, 
   await store.advance(request.operationId, 'quiescing', { phase: 'transferring' });
   await store.advance(request.operationId, 'transferring', { phase: 'ready', prepared: { ...request, to: ref(providerId, 'B'), workspace, associationRevision: 0, participants: [], capture: { epoch: 'e', seq: 1, capturedAt: 'now' } } });
   await store.commit(request.operationId);
-}
-
-async function seedExecutionRole(root: string, providerId: string, role: 'none' | 'tpm') {
-  const tpmDirectory = join(root, 'tpm');
-  if (role === 'tpm') {
-    const store = new TpmStore(tpmDirectory); await store.ready;
-    await store.insert({ version: 1, createKey: 'key', createFingerprint: 'hash', creation: 'accepted', requirement: 'Verify', dirty: false, lastReviewAt: 0, actions: {}, work: { id: 'work', revision: 1, title: 'Work', providerId, mainNativeSessionId: 'source', tpmNativeSessionId: 'A', phase: 'clarifying', waiting: 'user', paused: true, delegated: true, summary: '', nextAction: '', document: '', acceptance: '', evidence: [], createdAt: '2026-10-15T00:00:00Z', updatedAt: '2026-10-15T00:00:00Z', nextCheckAt: 0, outbox: [] } });
-  }
 }
 
 function providerFixture(providerId: string, root: string) {
@@ -57,20 +46,18 @@ function providerFixture(providerId: string, root: string) {
   return { provider, bound };
 }
 
-// A TPM session keeps its native history across a generic succession.
-for (const providerId of ['codex', 'opencode'] as const) for (const role of ['none', 'tpm'] as const) test.each(['A', 'B'])(
-  `${providerId} HTTP cold attach %s after generic succession gives only the current holder its ${role} execution tools`, async nativeSessionId => {
+for (const providerId of ['codex', 'opencode'] as const) test.each(['A', 'B'])(
+  `${providerId} HTTP cold attach %s after generic succession gives a session without a role no execution tools`, async nativeSessionId => {
     const root = await realpath(await mkdtemp(join(tmpdir(), 'arc-generic-attachment-')));
-    const teamDirectory = join(root, 'team'), tpmDirectory = join(root, 'tpm');
+    const teamDirectory = join(root, 'team');
     await commitGeneric(new SessionSuccessionStore(join(root, 'roles')), providerId, root);
-    await seedExecutionRole(root, providerId, role);
     const { provider, bound } = providerFixture(providerId, root), references = new SessionReferenceStore(join(root, 'references'), providerId);
     const directory = providerId === 'codex'
       ? createCodexSessionDirectory({ ...provider, listSessions: async () => ({ sessions: [] }) }, [], references)
       : createOpenCodeSessionDirectory({ ...provider, listSessions: async () => [] }, [], references, true);
     const host = createAgentHostRuntime({ succession: { controllerId: 'host', stateDirectory: root },
       team: { stateDirectory: teamDirectory, tickMs: 1_000_000, request: async () => [] },
-      tpm: { stateDirectory: tpmDirectory, tickMs: 1_000_000 }, registrations: [{ directory, adapter: provider }] });
+      registrations: [{ directory, adapter: provider }] });
     const server = createServer((request, response) => { void (async () => {
       let body = ''; for await (const chunk of request) body += chunk;
       const result = await host.control({ method: 'POST', path: '/remote/attach', sessionId: 'history', body });
@@ -105,28 +92,4 @@ test('local resumed generic successor has its own attachment without inherited s
     expect(bound.get('B')?.tools ?? []).toEqual([]);
     expect(() => local.service.executionRouting.resolve(ref('codex', 'A'))).toThrow(/generic succession/);
   } finally { await local.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
-}, 5000);
-
-
-test.each(['tpm'] as const)('retained %s tools cannot execute on a predecessor after generic succession', async role => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'arc-generic-role-')));
-  await seedExecutionRole(root, 'codex', role);
-  const unavailable = async (): Promise<never> => { throw new Error('No native effects are expected for role authorization.'); };
-  const service = new SessionSuccessionService(root, 'host', {
-    supports: async () => false, inspect: unavailable, createIdle: unavailable,
-    captureTimeline: unavailable, authorizeRead: unavailable, readHistory: unavailable, reconcileDelivery: async () => undefined,
-  });
-  const access = { controllerId: 'host', sessionRouting: service.executionRouting, available: () => true,
-    supportedProviders: () => ['codex'], acquire: unavailable, create: unavailable, execute: unavailable };
-  const runtime = new TpmCoordinator({ stateDirectory: join(root, 'tpm'), tickMs: 1_000_000 }, access);
-  try {
-    await service.ready; await runtime.ready;
-    const extensions = await runtime.extensions('codex', 'A');
-    const retained = extensions!.tools!.find(tool => tool.name === 'read_work')!;
-    expect(JSON.parse(await retained.execute({})).id).toBe('work');
-    await commitGeneric(service.store, 'codex', root);
-    await expect(retained.execute({})).rejects.toThrow(/generic succession/);
-    await expect(runtime.extensions('codex', 'A')).resolves.toBeUndefined();
-    await expect(runtime.extensions('codex', 'B')).resolves.toBeUndefined();
-  } finally { await runtime.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 5000);

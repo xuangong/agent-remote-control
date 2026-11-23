@@ -1,8 +1,7 @@
-import { TeamRuntime } from './team.js';
+import { TeamRuntime, type TeamRuntimeAccess } from './team.js';
 import { type JournalRelayMessage, type OutboxHostCall, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { directoryNativeEffect, directoryOperationId } from './directory-mutation.js';
 import { SessionSuccessionEnrollment } from './session-succession-enrollment.js';
-import { successionTpmRouting } from './session-succession-tpm.js';
 import { SessionSuccessionService } from './session-succession-service.js';
 import { SuccessionPreparationRejected } from './local-succession-preparation.js';
 import { SessionSuccessionBoundary } from './session-succession-boundary.js';
@@ -10,7 +9,6 @@ import { type SessionSuccessionStore } from './session-succession-store.js';
 import type { SessionSuccessionContextStore } from './session-succession-context.js';
 import type { SessionSuccessionCoordinator } from './session-succession.js';
 import { nativeSessionRefKey, type NativeSessionRef, type TrustedSuccessionContext } from '@orchardworks/agent-remote-protocol';
-import { TpmCoordinator, type TpmSessionAccess } from './tpm.js';
 import { createBoundSessions } from './session-core/bound-sessions.js';
 import type { HostProviderDiscovery } from './provider-discovery.js';
 import { createCodexDaemonControl } from './codex-daemon-control.js';
@@ -23,7 +21,7 @@ import { createIdleSessions } from './idle-sessions.js';
 import { createShownSessions } from './session-core/shown-sessions.js';
 import { createHostStatusReader, hostStatusPaths } from './host-status.js';
 import { allowedWorkspace, protectHostDirectory } from './execution-policy.js';
-import { SessionRoles, type SessionRole } from './session-role-succession.js';
+import { SessionRoles } from './session-role-succession.js';
 import { roleSessionConfig } from './role-session-creation.js';
 import { headCommit } from './worktrees.js';
 import { BotTools } from './bot-tools.js';
@@ -155,7 +153,6 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       ...(options.team ? { teamManagement: true, tasks: true,
         // A provider can be a coordinator's when its sessions get the task tools as the mode changes: during the session (live) or declared at creation.
         coordinatorProviders: options.registrations.filter(({ adapter }) => ['live', 'creation'].includes(adapter.descriptor.sessionExtensions?.toolNamespaces ?? '')).map(({ adapter }) => adapter.descriptor.providerId) } : {}),
-      ...(options.tpm ? { tpmManagement: true } : {}),
       hostStatus: true,
       ...(runtime.outbox ? { outbox: {
         onAvailable: (available: boolean) => { fence.whenCurrent(current, () => runtime.outbox!.setAvailable(available)); },
@@ -376,7 +373,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     const live = own && liveAgent(own.agentId);
     const refusal = handoffRefusal({ bound: !!own, own: live?.handoffAdmissionState(), ownCursor: live?.timelineCursor(), ...(captured ? { captured } : {}), allowMissing,
       children: family.filter(binding => binding !== own).map(child => liveAgent(child.agentId)?.handoffAdmissionState()),
-      unsettledRecipient: !!(tpm?.hasUnsettledRecipient(target) || team?.hasUnsettledRecipient(target)) });
+      unsettledRecipient: !!team?.hasUnsettledRecipient(target) });
     if (refusal) throw new SuccessionPreparationRejected(refusal.code, refusal.message);
   }
   function mutationFamily(targets: readonly NativeSessionRef[]): NativeSessionRef[] {
@@ -439,41 +436,30 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     },
   });
   const { callSession, callRole, sessionRefs } = createSessionCommands(ctx, options);
-  const automationAccess: TpmSessionAccess = {
+  const automationAccess: TeamRuntimeAccess = {
     controllerId: successionConfig?.controllerId ?? options.controllerId ?? 'local',
     sessionRouting: successionService?.executionRouting ?? {
       resolve: anchor => ({ anchor, target: anchor, operationIds: [] }),
       assertCurrent: (anchor, actual) => { if (admission.stopped || nativeSessionRefKey(anchor) !== nativeSessionRefKey(actual)) throw new Error('Execution recipient is unavailable.'); },
     },
-    ...(successionService ? { mainRouting: successionTpmRouting(successionService, successionConfig!.controllerId, successionWiring.acquireNative) } : {}),
     available: () => !admission.stopped,
     supportedProviders: () => providers.all().filter(({ adapter }) => options.providerEnabled?.(adapter.descriptor.providerId) !== false
       && adapter.descriptor.sessionExtensions?.instructions && adapter.descriptor.sessionExtensions?.tools).map(({ adapter }) => adapter.descriptor.providerId),
     async acquire(providerId, nativeSessionId) {
-      if (admission.stopped || options.providerEnabled?.(providerId) === false) throw new Error('TPM session provider is unavailable.');
+      if (admission.stopped || options.providerEnabled?.(providerId) === false) throw new Error('Session provider is unavailable.');
       const binding = await tracked(project(providerId, randomUUID(), nativeSessionId));
       const lease = await acquireSession(binding.agentId);
-      if (!lease) throw new Error('TPM native session is unavailable.');
+      if (!lease) throw new Error('Native session is unavailable.');
       try { if (options.executionPolicy) await allowedWorkspace(options.executionPolicy, lease.agent.snapshot().payload.runtimeInfo.cwd); }
       catch (error) { lease.release(); throw error; }
       return lease;
-    },
-    async recover(providerId, nativeSessionId, extensions) {
-      if (admission.stopped || options.providerEnabled?.(providerId) === false) throw new Error('TPM provider is unavailable.');
-      const existing = sessions.byNative(providerId, nativeSessionId);
-      if (existing && (liveAgent(existing.agentId) || sessions.isPending(providerId, nativeSessionId))) throw new Error('Close the recovered session before binding it as a TPM.');
-      const session = await directoryNativeEffect(successionBoundary?.currentEntry(), successionBoundary?.currentEntry()?.targets ?? [], async () => providers.require(providerId).directory.open(nativeSessionId, { extensions }));
-      const info = await session.runtimeInfo();
-      if (info.sessionId !== nativeSessionId) throw new Error('Recovered native session identity does not match.');
-      if (options.executionPolicy) await allowedWorkspace(options.executionPolicy, info.cwd);
     },
     async create(providerId, creation, extensions) {
       const config = roleSessionConfig(providers.require(providerId).adapter.descriptor, creation, extensions);
       return directoryNativeEffect(successionBoundary?.currentEntry(), successionBoundary?.currentEntry()?.targets ?? [], evidence => providers.require(providerId).directory.create(config, evidence));
     },
-    execute: executeOperation('host:tpm'),
+    execute: executeOperation('host:team'),
   };
-  const tpm = options.tpm ? new TpmCoordinator(options.tpm, automationAccess) : undefined;
   const team: TeamRuntime | undefined = options.team?.request ? new TeamRuntime(options.team.stateDirectory, {...automationAccess, sessionRouting: successionService?.roleRouting ?? automationAccess.sessionRouting!,
     genericSuccession: () => !!successionService && options.team?.genericSuccession?.() === true,
     tasks: () => options.team?.tasks?.() === true,
@@ -481,8 +467,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     readOnlyProviders: () => automationAccess.supportedProviders().filter(providerId => providers.require(providerId).adapter.descriptor.sessionAccess?.readOnly),
     // A temporary bot uses every bot's tools; they exist once the worker support below does, before any seat attaches.
     botTools: (actual): AgentSessionToolNamespace => workerSupport!.namespace(actual, false),
-    execute: executeOperation('host:team')}, options.team.request, options.team.tickMs) : undefined;
-  const roles = new SessionRoles([...(team ? [team] : []), ...(tpm ? [tpmRole(tpm)] : [])]);
+  }, options.team.request, options.team.tickMs) : undefined;
+  const roles = new SessionRoles(team ? [team] : []);
   // A message that waited for this Host goes to the session that carries its conversation now, through the same access as roles.
   const outbox = options.outbox ? new SessionOutbox({ file: options.outbox.file, request: options.outbox.request, access: {
     available: automationAccess.available,
@@ -516,10 +502,9 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   workerSupport?.onChange(() => { void successionWiring.applyWorkerTools().catch(() => undefined); });
   const workerSupportTimer = workerSupport ? setInterval(() => { if (!admission.closed) void workerSupport.refresh(automationAccess.controllerId).catch(() => undefined); }, options.team?.tickMs ?? 3000) : undefined;
   workerSupportTimer?.unref?.();
-  const enrollment = successionService ? new SessionSuccessionEnrollment(successionService, successionConfig!.controllerId, () => providers.all(), () => tpm?.store.all() ?? [], source => successionWiring.authorizeSuccessionRead(source, source), directoryOperation) : undefined;
+  const enrollment = successionService ? new SessionSuccessionEnrollment(successionService, successionConfig!.controllerId, () => providers.all(), source => successionWiring.authorizeSuccessionRead(source, source), directoryOperation) : undefined;
   const enrollFromRelay = async (request: RemoteHostControlRequest, context: TrustedSuccessionContext) => {
     if (!options.succession?.enrollment || !enrollment || admission.stopped) return json(403, { code: 'succession_enrollment_unavailable', error: 'Trusted succession enrollment is unavailable.' });
-    await tpm?.ready;
     if (request.path === '/remote/create') {
       if (request.method !== 'POST' || context.installationId !== successionConfig!.controllerId) return json(403, { code: 'succession_enrollment_unavailable', error: 'Succession Controller authority does not match.' });
       return control(request, structuredClone(context));
@@ -528,7 +513,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   };
   Object.assign(ctx, {
     options, admission, relay, sessions, idle, shown, operationCache, hostStatus, cancelTimeoutMs, successionReady, successionService, succession, successionBoundary,
-    tpm, team, enrollment, sessionRefs, roles, workerSupport, ledger, successionConfig, nativeSuccession,
+    team, enrollment, sessionRefs, roles, workerSupport, ledger, successionConfig, nativeSuccession,
     providers, journals, terminalRefresh, automationAccess, sessionCatalog, create, controlRequest, genericSuccessionSource,
     nativePrefixExtensions: successionWiring.nativePrefixExtensions,
     liveAgent, nativeRef, mutationFamily, directoryOperation, tracked, project, callSession, authorizeSuccessionRead: successionWiring.authorizeSuccessionRead,
@@ -549,7 +534,6 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       await bounded(journals.drain(1000), shutdownTimeoutMs).catch(() => undefined);
       journals.close();
       await bounded(outbox?.close() ?? Promise.resolve(), shutdownTimeoutMs).catch(() => undefined);
-      await bounded(tpm?.close() ?? Promise.resolve(), shutdownTimeoutMs).catch(() => undefined);
       try {
         await bounded(successionBoundary?.close() ?? Promise.resolve(), shutdownTimeoutMs);
       } finally {
@@ -572,13 +556,4 @@ async function receiveRelayDiagnostics(body: string | undefined, sink: AgentHost
   if (!entries) return { status: 400, body: '{"error":"Invalid relay diagnostic batch."}' };
   try { await sink(entries); return { status: 204, body: '' }; }
   catch { return { status: 503, body: '{"error":"Relay diagnostics could not be appended."}' }; }
-}
-
-/** TPM sessions keep their native history: a prompt edit can branch one, a generic handoff cannot move it. */
-function tpmRole(tpm: TpmCoordinator): SessionRole {
-  return {
-    extensions: (holder, actual) => tpm.extensions(holder.providerId, holder.nativeSessionId, () => actual()?.nativeSessionId),
-    genericSuccession: async holder => await tpm.extensions(holder.providerId, holder.nativeSessionId)
-      ? { allowed: false, reason: 'A TPM session keeps its native history, so it cannot be handed off. Edit a prompt instead.' } : undefined,
-  };
 }

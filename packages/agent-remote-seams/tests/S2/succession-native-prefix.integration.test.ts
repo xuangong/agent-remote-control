@@ -1,10 +1,10 @@
-/** S2, A native-prefix handoff through the Relay: the projection gap blocks input, cancel reaches the Host, and the allowance is checked before any native effect. The Relay is real and in memory; the Controller's role, context and TPM state are memory files; nothing listens on a port. */
+/** S2, A native-prefix handoff through the Relay: the projection gap blocks input, cancel reaches the Host, and the allowance is checked before any native effect. The Relay is real and in memory; the Controller's role and context state are memory files; nothing listens on a port. */
 import WebSocket from 'ws';
 import { expect, test } from 'vitest';
 import { successionHostFixture as fixture, ref, sendOverWebSocket, nativePrefixRequest } from '@orchardworks/agent-remote-controller/succession-host-testing';
 import { enrollmentTransport } from './support/succession-relay.js';
 test('native prefix enrolled Host blocks WebSocket input and background dispatch throughout projection gap', async () => {
-  const f = await fixture(false, true, undefined, false, false, true, true), transport = await enrollmentTransport(f);
+  const f = await fixture(true, undefined, false, false, true, true), transport = await enrollmentTransport(f);
   try {
     const input = { operationId: 'handoff', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1, preparation: nativePrefixRequest.preparation };
     expect(await (await transport.action('describe', { providerId: 'fixture', nativeSessionId: 'A', preparation: input.preparation })).json()).toMatchObject({ eligibility: { status: 'ready' } });

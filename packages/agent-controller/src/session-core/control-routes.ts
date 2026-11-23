@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { isTeamSeat, isSuccessionRequest, isNativeSessionRef, isTpmCreate, isTpmAction, nativeSessionRefKey, type TrustedSuccessionContext } from '@orchardworks/agent-remote-protocol';
+import { isTeamSeat, isSuccessionRequest, isNativeSessionRef, nativeSessionRefKey, type TrustedSuccessionContext } from '@orchardworks/agent-remote-protocol';
 import { AgentOperationRejectedError, AgentRuntimeError } from '@orchardworks/agent-provider-sdk';
 import { OperationCacheError, UnsupportedAgentCapabilityError, type AgentRemoteHttpResult, type RemoteHostControlRequest } from '@orchardworks/agent-session-runtime';
 
@@ -23,7 +23,7 @@ import { boundedSourceIdentity, failureResponse, HostRequestError, json, parseAt
  *   start failure instead of starting the session again until its backoff expires (an explicit takeover always tries), and adds the request identity to
  *   an error answer. Request parsing and failure answers are `requests.ts`.
  * - `controlRequest` refuses while the Controller is closed, and refuses mutations while it drains. Then it routes by path: Host status, succession,
- *   Team, TPM, catalog and workspace reads, session references, rename, folder creation, stop, create and attach. A route reads only what its
+ *   Team, catalog and workspace reads, session references, rename, folder creation, stop, create and attach. A route reads only what its
  *   parser accepted.
  * - `create` runs through the operation cache once per operation identity, with the succession admission of the source it reads; `cancelAgent` bounds a native cancel
  *   by the cancel deadline and reports cancelled, unsupported or failed.
@@ -126,7 +126,7 @@ export function createControlRoutes(ctx: SessionCoreContext) {
     return result.status >= 400 ? { ...result, body: JSON.stringify({ ...data, requestId }) } : result;
   }
   async function controlRequest(request: RemoteHostControlRequest, context?: TrustedSuccessionContext): Promise<AgentRemoteHttpResult> {
-    const { admission, authorizeSuccessionRead, sessions, callSession, directoryOperation, enrollment, hostStatus, liveAgent, markShared, mutationFamily, nativeRef, operationCache, options, project, providers, sessionRefs, succession, successionBoundary, successionReady, successionService, team, tpm, tracked } = ctx;
+    const { admission, authorizeSuccessionRead, sessions, callSession, directoryOperation, enrollment, hostStatus, liveAgent, markShared, mutationFamily, nativeRef, operationCache, options, project, providers, sessionRefs, succession, successionBoundary, successionReady, successionService, team, tracked } = ctx;
     try {
       await successionReady;
       const refusal = admission.refuse(request.method);
@@ -171,65 +171,6 @@ export function createControlRoutes(ctx: SessionCoreContext) {
         if (request.method !== 'POST' || !isTeamSeat(payload)) return json(400, {error: 'Invalid Team session request.'});
         try { return json(200, await team.create(payload)); }
         catch (error) { return json(409, {error: error instanceof Error ? error.message : 'Team session creation failed.'}); }
-      }
-      if (url.pathname.startsWith('/remote/tpm')) {
-        if (!tpm) return json(404, { code: 'tpm_unavailable', error: 'TPM is unavailable on this Controller.' });
-        try {
-          await tpm.ready;
-          if (request.method === 'GET' && url.pathname === '/remote/tpm') return json(200, await tpm.list(url.searchParams.get('cursor') ?? undefined));
-          if (request.method === 'GET' && url.pathname === '/remote/tpm/work') return json(200, await tpm.get(requiredString(url.searchParams.get('id'), 'id')));
-          if (request.method === 'POST' && url.pathname === '/remote/tpm/create' && isTpmCreate(payload)) {
-            const scope = operationScope(request);
-            const create = () => tpm.create(payload, scope);
-            const source = nativeRef({ providerId: payload.providerId, nativeSessionId: payload.mainNativeSessionId });
-            const current = enrollment ? await enrollment.tpmSource(source) : source;
-            const existing = tpm.store.all().some(record => record.createKey === JSON.stringify([scope, payload.operationId]));
-            const work = await (existing ? create() : directoryOperation(scope, payload.operationId, 'tpm_create', [source, current], payload,
-              () => enrollment ? enrollment.tpmMutation(scope, payload.operationId, source, payload, create,
-                async work => tpm.store.get(work.id).creation === 'accepted' && !!tpm.store.get(work.id).work.tpmNativeSessionId) : create()));
-            if (enrollment && tpm.store.get(work.id).creation === 'accepted') await enrollment.recoverTpm(tpm.store.get(work.id));
-            return json(200, work);
-          }
-          if (request.method === 'POST' && url.pathname === '/remote/tpm/action' && isTpmAction(payload)) {
-            const validateRecovery = async () => {
-              try { tpm.validateCreationRecovery(payload, operationScope(request)); }
-              catch (error) {
-                if (error instanceof AgentOperationRejectedError) throw new OperationCacheError(error.code, error.message);
-                throw error;
-              }
-            };
-            if (enrollment && payload.action === 'resolve' && payload.intentId === 'creation') {
-              const work = tpm.store.get(payload.id).work;
-              const source = work.mainSessionRef ?? nativeRef({providerId:work.providerId, nativeSessionId:work.mainNativeSessionId});
-              if (tpm.store.get(work.id).creation === 'accepted') {
-                const updated = await tpm.action(payload, operationScope(request));
-                await enrollment.recoverTpmAction(tpm.store.get(updated.id), operationScope(request), payload.operationId, source, payload);
-                return json(200, updated);
-              }
-              const current = await enrollment.tpmSource(source);
-              const targets = [source, current, ...(payload.nativeSessionId ? [nativeRef({ providerId: work.providerId, nativeSessionId: payload.nativeSessionId })] : [])];
-              return json(200, await directoryOperation(operationScope(request), payload.operationId, 'tpm_creation_recovery', targets, payload,
-                () => enrollment.mutation(operationScope(request), payload.operationId, source, payload,
-                  () => tpm.action(payload, operationScope(request)), async updated => {
-                    const record = tpm.store.get(updated.id);
-                    if (record.creation !== 'accepted' || !record.work.tpmNativeSessionId) return false;
-                    await enrollment.recoverTpm(record);
-                    return true;
-                  }), validateRecovery));
-            }
-            if (payload.action === 'resolve' && payload.intentId === 'creation' && payload.resolution === 'accepted'
-              && tpm.store.get(payload.id).creation !== 'accepted') {
-              const record = tpm.store.get(payload.id);
-              const targets = [nativeRef({ providerId: record.work.providerId, nativeSessionId: record.work.mainNativeSessionId }),
-                ...(payload.nativeSessionId ? [nativeRef({ providerId: record.work.providerId, nativeSessionId: payload.nativeSessionId })] : [])];
-              return json(200, await directoryOperation(operationScope(request), payload.operationId, 'tpm_creation_recovery', targets, payload,
-                () => tpm.action(payload, operationScope(request)), validateRecovery));
-            }
-            return json(200, await tpm.action(payload, operationScope(request)));
-          }
-          return json(400, { code: 'invalid_tpm_request', error: 'Invalid TPM request.' });
-        } catch (error) { return json(409, { code: 'tpm_request_failed', error: error instanceof OperationCacheError && error.code === 'operation_outcome_unknown'
-          ? `TPM operation remains unresolved. ${error.message}` : error instanceof Error ? error.message : 'TPM request failed.' }); }
       }
       const selectedProvider = request.method === 'GET' ? url.searchParams.get('providerId') : payload?.providerId;
       const existing = request.sessionId ? sessions.byAgent(request.sessionId) : undefined;

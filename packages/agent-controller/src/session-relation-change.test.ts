@@ -27,17 +27,17 @@ async function fixture() {
   const initialBinding = new SessionSourceBindings(store, 'controller', 'p', Buffer.alloc(32, 42));
   const originalPage = await initialBinding.read(reader, ref('A'), {}, async () => ({ entries: [], nextCursor: 'page' }));
   const participant = { relationId: sourceParticipantId(reader, 'side'), kind: 'side' as const, before: reader, after: reader };
-  const tpm = { relationId: 'tpm:work', kind: 'tpm' as const, before: ref('T'), after: ref('T') };
+  const other = { relationId: 'ask:other', kind: 'ask' as const, before: ref('T'), after: ref('T') };
   const request = { roleId: 'role', operationId: 'succession', expectedRevision: 1, from: ref('A'), targetProviderId: 'other' };
   const freeze = { version: 2 as const, maxProjectionBytes: 8 * 1024 * 1024, authority, token: 'freeze', controllerId: 'controller', request, associationRevision: 0, lineage: [ref('A')], relations: [] };
-  await store.beginEnrolled(freeze, [participant, tpm], store.generation);
+  await store.beginEnrolled(freeze, [participant, other], store.generation);
   await store.advance('succession', 'preparing', { phase: 'quiescing', to: ref('A', 'other') });
   await store.advance('succession', 'quiescing', { phase: 'transferring' });
-  await store.advance('succession', 'transferring', { phase: 'ready', prepared: { ...request, to: ref('A', 'other'), workspace, associationRevision: 1, participants: [participant, tpm], capture: { epoch: 'e', seq: 1, capturedAt: '2026-10-10T00:00:00.000Z' } } });
+  await store.advance('succession', 'transferring', { phase: 'ready', prepared: { ...request, to: ref('A', 'other'), workspace, associationRevision: 1, participants: [participant, other], capture: { epoch: 'e', seq: 1, capturedAt: '2026-10-10T00:00:00.000Z' } } });
   await store.commit('succession'); await store.releaseEnrollment(freeze);
   const reservation: RelationChangeReservation = { version: 1, operationId: 'unlink', token: 'token', authority, hostId: 'authenticated-host', controllerId: 'controller', roleId: 'role', expectedRoleRevision: 2, origin: ref('A'), current: ref('A', 'other'), lineage: [ref('A'), ref('A', 'other')], associationRevision: 1, catalogRevision: 7, relationId: 'side', kind: 'side', readerRef: reader, sourceRef: ref('A'), expectedRelationRevision: 0, previousLinked: true, linked: false, previousMember: true, relations: [{ relationId: 'side', kind: 'side', readerRef: reader, sourceRef: ref('A'), linked: true, revision: 0 }] };
   const binding = new SessionSourceBindings(store, 'controller', 'p', Buffer.alloc(32, 42), { readRouted: async source => ({ entries: [{ id: 'entry', role: 'assistant', text: source.providerId }], nextCursor: 'next' }), authorizeRead: async () => {} });
-  return { store, directory, reader, participant, tpm, reservation, binding, originalPage };
+  return { store, directory, reader, participant, other, reservation, binding, originalPage };
 }
 test('durably gates one reader and applies only its stable participant with exact replay', async () => {
   const f = await fixture(), before = f.store.read('role');
@@ -49,7 +49,7 @@ test('durably gates one reader and applies only its stable participant with exac
   expect(await restored.reserveRelationChange(f.reservation, -1)).toEqual(reserved);
   const applied = await restored.applyRelationChange(f.reservation);
   expect(await restored.applyRelationChange(f.reservation)).toEqual(applied);
-  expect(restored.read('role').participants).toEqual([f.tpm]);
+  expect(restored.read('role').participants).toEqual([f.other]);
   expect(restored.read('role').operations).toEqual(before.operations);
   await restored.releaseRelationChange(f.reservation, applied.associationRevision);
   await restored.releaseRelationChange(f.reservation, applied.associationRevision);
@@ -93,7 +93,7 @@ test('unlink preserves a signed native A cursor and relink restores the full cur
   const relink = { ...f.reservation, operationId: 'relink', token: 'relink-token', associationRevision: 2, catalogRevision: 10, expectedRelationRevision: 1, previousLinked: false, previousMember: false, linked: true, relations: f.reservation.relations.map(row => ({ ...row, linked: false, revision: 1 })) };
   await f.store.reserveRelationChange(relink, f.store.generation);
   const joined = await f.store.applyRelationChange(relink); await f.store.releaseRelationChange(relink, joined.associationRevision);
-  expect(f.store.read('role').participants).toEqual([f.tpm, f.participant]);
+  expect(f.store.read('role').participants).toEqual([f.other, f.participant]);
   expect((await f.binding.read(f.reader, ref('A'), {}, async () => ({ entries: [] }))).sourceRef).toEqual(ref('A', 'other'));
 });
 
@@ -103,7 +103,7 @@ test('failed reservation publication leaves the overlay and read gate unchanged'
   await expect(f.store.reserveRelationChange(f.reservation, f.store.generation)).rejects.toMatchObject({ code: 'succession_publication_rejected' });
   expect(f.store.readerAssociationState(f.reader).pending).toBe(false);
   expect(f.store.relationChange('unlink')).toBeUndefined();
-  expect(f.store.read('role').participants).toEqual([f.participant, f.tpm]);
+  expect(f.store.read('role').participants).toEqual([f.participant, f.other]);
   expect(await readFile(path, 'utf8')).toBe(saved);
 });
 test('reservation while authorization awaits closes the native dispatch boundary', async () => {

@@ -13,8 +13,7 @@ import type { SessionSuccessionStore } from '../session-succession-store.js';
 import type { SessionSuccessionCoordinator } from '../session-succession.js';
 import type { BotTools } from '../bot-tools.js';
 import type { SessionRoles } from '../session-role-succession.js';
-import type { TeamRuntime } from '../team.js';
-import type { TpmCoordinator, TpmSessionAccess } from '../tpm.js';
+import type { TeamRuntime, TeamRuntimeAccess } from '../team.js';
 import type { JournalPublisher } from '../publisher/journal-publisher.js';
 import type { TerminalRefresh } from '../publisher/terminal-refresh.js';
 import type { SessionRefContext } from '../session-refs.js';
@@ -46,7 +45,7 @@ export type IdleLeases = Pick<ReturnType<typeof createIdleSessions>, 'retain' | 
  *
  * Contract. The context holds no state of its own. Each piece of shared state has one owner module that is the only place assigning it, and the context
  * carries that owner's interface: `providers` (registrations and their catalogs), `sessions` (bindings and families), `ledger` (prepared sessions, native
- * attachments, worker tools, idle uncertainty), `operationCache` and `idle` (owned by their own modules). Its functions are the ones the modules call across concerns. A member that is optional configuration (`tpm`, `team`, `enrollment`,
+ * attachments, worker tools, idle uncertainty), `operationCache` and `idle` (owned by their own modules). Its functions are the ones the modules call across concerns. A member that is optional configuration (`team`, `enrollment`,
  * `succession`) is undefined when the Controller was not configured with it.
  */
 export interface SessionCoreContext {
@@ -64,7 +63,6 @@ export interface SessionCoreContext {
   readonly successionService: SessionSuccessionService | undefined;
   readonly succession: SuccessionHandle | undefined;
   readonly successionBoundary: SessionSuccessionBoundary | undefined;
-  readonly tpm: TpmCoordinator | undefined;
   readonly team: TeamRuntime | undefined;
   readonly enrollment: SessionSuccessionEnrollment | undefined;
   readonly sessionRefs: SessionRefContext | undefined;
@@ -72,7 +70,7 @@ export interface SessionCoreContext {
   readonly providers: ProviderRegistry;
   readonly journals: JournalPublisher;
   readonly terminalRefresh: TerminalRefresh;
-  readonly automationAccess: TpmSessionAccess;
+  readonly automationAccess: TeamRuntimeAccess;
   readonly sessionCatalog: SessionCallerCatalog;
   readonly workerSupport: BotTools | undefined;
   readonly ledger: AttachmentLedger;

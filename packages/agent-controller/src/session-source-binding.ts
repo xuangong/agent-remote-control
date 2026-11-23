@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { AgentHistoryPage, AgentHistoryQuery } from '@orchardworks/agent-provider-sdk';
-import { nativeSessionRefKey, type NativeSessionRef, type SourceBinding } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, type NativeSessionRef, type SourceBinding, type SuccessionParticipant } from '@orchardworks/agent-remote-protocol';
 import type { SessionSuccessionContextStore, SuccessionContextRecord } from './session-succession-context.js';
 import type { SessionExecutionRouting } from './session-succession-service.js';
 import type { SessionSuccessionStore } from './session-succession-store.js';
@@ -63,7 +63,7 @@ export class SessionSourceBindings {
     const reader = (item: SourceGrantEnrollment | SourceRelationEnrollment) => item.readerRef ? this.ref(item.readerRef) : ref(item.nativeSessionId);
     const source = (item: SourceGrantEnrollment | SourceRelationEnrollment) => item.sourceRef ? this.ref(item.sourceRef) : ref(item.sourceNativeSessionId);
     const lineage = new Set([nativeSessionRefKey(state.role.origin), ...state.operations.filter(op => op.phase === 'committed').map(op => nativeSessionRefKey(op.to!))]);
-    const participants = state.participants.filter(item => item.kind === 'tpm');
+    const participants: SuccessionParticipant[] = [];
     for (const grant of grants) {
       if (!lineage.has(nativeSessionRefKey(source(grant)))) continue;
       const matches = relations.filter(relation => sameRef(reader(relation), reader(grant)));
@@ -203,7 +203,6 @@ export class SessionSourceBindings {
       if (!latest?.prepared) continue;
       const lineage = new Set([nativeSessionRefKey(item.role.origin), ...committed.map(op => nativeSessionRefKey(op.to!))]);
       for (const participant of item.participants) {
-        if (participant.kind === 'tpm') continue;
         const key = nativeSessionRefKey(participant.after);
         if (readers.has(key)) throw new Error('Source session belongs to more than one primary role.');
         readers.set(key, { source: item.role.current, roleId: item.role.id, roleRevision: item.role.revision, lineage });

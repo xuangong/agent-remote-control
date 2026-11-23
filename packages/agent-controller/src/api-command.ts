@@ -5,7 +5,7 @@ import { relayError, relayRequest, type CliCredentials } from './relay-client.js
 const help = `Usage: agent-remote-controller api <GET|POST|PUT|DELETE> <path> [--body JSON | --body-file PATH|-]
 
 Sends one request to the Relay as the signed-in user, as the website does: /v1/... paths in your
-account (for example /v1/remote/teams, /v1/remote/hosts/<hostId>/tpm), /auth/... paths at the site.
+account (for example /v1/remote/teams), /auth/... paths at the site.
 For what the other commands do not cover. Prints the JSON answer; exit 0 on 2xx, 1 otherwise.
 `;
 

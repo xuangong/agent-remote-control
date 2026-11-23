@@ -40,7 +40,7 @@ describe('the quiescence rule of a succession', () => {
     ['has a pending interaction', { own: quiet({ pendingInteractions: 1 }) }],
     ['has command work', { own: quiet({ commandWork: 1 }) }],
     ['has setting work', { own: quiet({ settingWork: true }) }],
-    ['has an unsettled Team or TPM recipient', { unsettledRecipient: true }],
+    ['has an unsettled Team recipient', { unsettledRecipient: true }],
   ] as Array<[string, Partial<HandoffInput>]>)('refuses a session that %s', (_name, change) => {
     expect(handoffRefusal(input(change))).toEqual({ code: 'succession_not_quiescent', message: 'Session has active, unknown or unsynchronized Host work.' });
   });

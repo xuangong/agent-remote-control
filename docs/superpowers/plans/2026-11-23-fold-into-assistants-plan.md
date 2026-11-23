@@ -61,13 +61,19 @@ messages run in production.
   its launcher. E7's Team case is rewritten for a coordinator with tasks.
 - Gate: flows 1 to 5; E7 rewritten; a room in Bot mode reaches a result.
 
-## Step 4: TPM
+## Step 4: timers, then TPM
 
-- [ ] Map TPM's companions ([session companions](../../session-companions.md): todo, confirmation, heartbeat) onto a project manager assistant: messages
-  with the assistant it watches, a scheduled reminder for the heartbeat, its todo as its own state.
+- [ ] **Timers on assistants** (design 10.4): set by the person or the assistant (`set_timer`, `clear_timer`), stored with the
+  assistant in the Relay, delivered as `[Timer "<name>" · due]` when the main session is idle, missed ticks coalesced, ticks with no
+  change folded as background checks. The heartbeat of [session companions](../../session-companions.md) is removed in favour of it.
+- [ ] Reading a peer's conversation at a tick, allowed by the watched assistant's peers.
+- [ ] Todo and confirmation become companions any assistant may switch on, not TPM's own.
+- [ ] A TPM becomes a project manager assistant: a timer (five minutes by default, as the heartbeat), messages with the assistant
+  it watches, its todo and confirmations; `complete_work` becomes ending its work and clearing the timer.
 - [ ] Migrate existing TPM sessions to project manager assistants.
 - [ ] Delete `tpm_intent`, TPM's delivery path and its launcher.
-- Gate: the TPM flows the mapping names, written first as e2e flows on the new path.
+- Gate: e2e flows written first on the new path: a timer tick reads the watched assistant and messages it; a quiet tick folds and
+  sends no reminder; a confirmation waits for the person's Agree; ending the work clears the timer.
 
 ## Rules for every step
 

@@ -481,7 +481,7 @@ Ask stays beside them as the person's way to look without touching (10.2). Decid
 | **Call For Support** | An **expert assistant**: a profile becomes an assistant with its own provider, model, Host and working directory, for example "Reviewer · Opus · Mac mini". A session that needs support messages it (`message_assistant`); the expert splits the work into its own tasks and answers with a message, attaching a patch or a log where needed. Follow-ups reach the same assistant, which keeps its context. Read-only and worktree work are task workspaces. A profile's budget becomes the assistant's `limits`. | Profiles, enablement, support groups, calls, rosters and their approval, ledgers, report framing, `call_for_support`, `support_status`, `read_support_report`, `download_support_resource`, the support settings and Team panel views |
 | **Team** | The Leader is a coordinator; members are its tasks' workers, reused across tasks with `continue_task`. A member the person wants to keep and talk to becomes an assistant of its own. `send_team_message` becomes `message_task`; member reports become `report_task`; `read_team` becomes `task_status`; Team resources become task attachments. | `teams.ts` queue and inbox, `team.ts` delivery, `team_message`, the Team panel and launcher |
 | **Side** | A task the person starts from the conversation (`/side`): its brief is the person's first message, no done-when, workspace `same`. Existing Side relations are listed as tasks. | Side-specific creation and relation kinds, after the relations are migrated |
-| **TPM** | A **project manager assistant**: it and the assistant it watches talk by messages; its heartbeat is a scheduled reminder to itself, its todo and confirmations are its own state. Comes last, after its companions ([session companions](../../session-companions.md)) are mapped. | `tpm_intent`, TPM's own delivery path and launcher |
+| **TPM** | A **project manager assistant** with a **timer** (10.4): it and the assistant it watches talk by messages; at each tick it reads that assistant's conversation and decides whether to act; its todo and confirmations are the generic companions ([session companions](../../session-companions.md)) any assistant may use. | `tpm_intent`, TPM's own delivery path and launcher |
 | **Rooms** (this design, 6) | A group chat in Bot mode's list, instead of a row of the Teams panel (O71). | The Teams panel |
 
 What is dropped rather than carried over: the person's approval of a support roster (the person sees the expert's tasks in its
@@ -505,9 +505,20 @@ session's own way to look is `read_task` (7.1).
 
 ### 10.3 Order
 
-Side, then Call For Support, then Team, then TPM. Each migration keeps what the person sees working, passes that feature's existing
+All four fold, decided by the owner. Side, then Call For Support, then Team, then timers on assistants (10.4) with TPM. Each migration keeps what the person sees working, passes that feature's existing
 e2e flows on the new path, migrates its records (profiles to expert assistants, Side relations to tasks), and then deletes the old
 path in the same step. The plan: [fold features into assistants](../plans/2026-11-23-fold-into-assistants-plan.md).
+
+### 10.4 Timers
+
+Any assistant may carry timers, which the person or the assistant sets: a name, an interval (or a time), an optional end, and
+what it is for. When one is due, the Relay delivers `[Timer "<name>" · due]` with that purpose to the assistant's main session
+the next time it is idle, like any other framed input; ticks missed while it was busy or offline coalesce into one. An assistant
+that may read another assistant's conversation (its peers allow it) does so at the tick, as Ask reads a session. A tick whose turn
+changes nothing is folded as a background check, as TPM's quiet reviews are today, and sends no reminder.
+
+This replaces TPM's heartbeat and its event-driven reviews: watching becomes "every N minutes, read and decide". Timers come
+right after the folding steps and before TPM moves (plan, step 4).
 
 ## 11. Tests
 

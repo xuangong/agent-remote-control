@@ -472,7 +472,7 @@ L2 and L3 detail (tool calls, frames, operation states) stay one step away, as O
 
 There is **one kind of bot**. A bot has a name, a **mission** (what it is for and how it sees its place) and the same abilities as
 every other bot: it starts **tasks**, **messages** other bots and is messaged by them, joins **rooms**,
-keeps **work items** (10.4), may carry a **timer** (10.5), and creates other bots and writes their missions. A bot can serve another bot and have other bots serve it, so no bot
+keeps **work items** (10.4), may carry a **timer** (10.5), and creates other bots, writing their first missions. A bot can serve another bot and have other bots serve it, so no bot
 needs a special kind: a reviewer, a tester on another machine or a project manager is an ordinary bot whose mission says so.
 
 Every older way of making sessions work together becomes bots, tasks, messages and rooms, so there are no separate modes to learn
@@ -485,12 +485,14 @@ person or by another bot:
 
 - **A bot builds its team.** The person tells one bot how they want to work: what roles the work needs, how the team is formed and
   how it runs. That bot creates the bots it needs (`create_assistant`: name, mission, provider, model, Host and working directory),
-  writes their missions, and works with them by messages and rooms. It stays their **organizer**: it can rewrite their missions as
-  the work changes (`set_mission`) and retire them when they are no longer needed (`retire_assistant`). A bot it created may in turn
+  writes their missions, and works with them by messages and rooms. It stays their **organizer** and retires them when they are no
+  longer needed (`retire_assistant`).
+- **Changing how a bot works is a message.** After creation, the organizer (or the person, or any bot) adjusts a bot's way of
+  working by telling it, as people do. The bot keeps its own mission: when what it was told is meant to last, it records it there
+  (`update_mission`, on itself only), so the change survives a handoff or a compacted context. No bot rewrites another's mission. A bot it created may in turn
   organize bots of its own, within the limits below.
 - **The person stays above every organizer.** Created bots appear in Chats in their organizer's group, marked with who created
-  them. The person can open, message, rename, rewrite the mission of, pause or remove any bot; a mission the person wrote is not
-  rewritten by an organizer without the person agreeing in the organizer's conversation.
+  them. The person can open, message, rename, edit the mission of, pause or remove any bot.
 - **Limits.** Per account and per organizer: how many bots it may create, how deep organizers may nest, and on which Hosts and
   providers; the limits are the person's, in Settings. A creation beyond them waits for the person to allow it.
 

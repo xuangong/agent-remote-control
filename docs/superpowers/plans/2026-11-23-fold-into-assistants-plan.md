@@ -27,11 +27,12 @@ messages run in production.
 - [ ] **The assistant record (T1, O70)** first: ids that survive moving groups, the session a bot shows now, name, label,
   **mission**, **organizer** (the bot that created it, if any), peers. The mission reaches the main session as its standing
   instructions and is shown to other bots by `list_assistants`.
-- [ ] **Bots create bots** (design 10, the mission): `create_assistant` (name, mission, provider, model, Host, directory),
-  `set_mission` and `retire_assistant` for the bots a bot organizes; created bots shown in Chats in the organizer's group with who
+- [ ] **Bots create bots** (design 10, the mission): `create_assistant` (name, first mission, provider, model, Host, directory)
+  and `retire_assistant` for the bots a bot organizes; `update_mission` for a bot's own mission only, used when a message tells it
+  something meant to last; created bots shown in Chats in the organizer's group with who
   created them; the person's limits per account and organizer (count, nesting, Hosts, providers) in Settings, a creation beyond them
   waiting for the person. Gate: the person describes a team to one bot; it creates two bots with missions, gives one a piece of work
-  by message, rewrites the other's mission, and the person sees all three in Chats and can change any of them. Links, rooms, timers and reading a peer's conversation all rest on it.
+  by message, changes how the other works by message (which records it in its own mission), and the person sees all three in Chats and can change any of them. Links, rooms, timers and reading a peer's conversation all rest on it.
 - [ ] **A reply is the receiver's answer** (design 10.1): the final text of the turn a message started returns to the sender, so a
   bot on any provider can be asked; plain bots can receive messages.
 - [ ] **Attachments on messages and task results.** A message or a report carries files (a patch, a log) as resources, as Team

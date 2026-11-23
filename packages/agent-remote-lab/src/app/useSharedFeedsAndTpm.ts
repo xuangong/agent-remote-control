@@ -7,6 +7,7 @@ import { useWindowVisibility } from '../kernel/useWindowVisibility.js';
 import { useTeamVisibility } from '../kernel/useTeamVisibility.js';
 import type { Team } from '@orchardworks/agent-remote-protocol';
 import type { SessionEntry } from '../kernel/session-tree.js';
+import { useTeamRoster } from '../kernel/useTeamRoster.js';
 import { useTpmVisibility } from '../kernel/useTpmVisibility.js';
 import { useTpmWork, type TpmService } from '../features/team/useTpmWork.js';
 import { useTpmMainSessions } from '../features/team/useTpmMainSessions.js';
@@ -23,10 +24,11 @@ import type { RequestedSessionSlice } from './useRequestedSession.js';
 import type { DocksAndBotSelectionSlice } from './useDocksAndBotSelection.js';
 import type { WindowViewActionsSlice } from './useWindowViewActions.js';
 import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';
+import type { ConversationConnectionsSlice } from './useConversationConnections.js';
 import type { AppInputs } from './types.js';
 
-export function useSharedFeedsAndTpm(scope: Pick<AppInputs & WorkbenchShellSlice & ActiveSessionSlice & SessionSuccessionBindingSlice & RemoteHostStateSlice & ProviderStateSlice & RequestedSessionSlice & DocksAndBotSelectionSlice & WindowViewActionsSlice & WorkbenchRecordsSlice, 'accessReady' | 'accessReadyRef' | 'activated' | 'baseUrl' | 'directory' | 'favorites' | 'hostClient' | 'initialState' | 'presentedViewId' | 'providers' | 'remoteHosts' | 'retryHosts' | 'selectHost' | 'selectedBot' | 'selectedHost' | 'sessionEntries' | 'setNewBot' | 'setTeamRoster' | 'sharedWindow' | 'transport' | 'windowMode' | 'windowOverviewAvailable' | 'windowOverviewOpen' | 'windowWorkspace'>) {
-  const { accessReady, accessReadyRef, activated, baseUrl, directory, favorites, hostClient, initialState, presentedViewId, providers, remoteHosts, retryHosts, selectHost, selectedBot, selectedHost, sessionEntries, setNewBot, setTeamRoster, sharedWindow, transport, windowMode, windowOverviewAvailable, windowOverviewOpen, windowWorkspace } = scope;
+export function useSharedFeedsAndTpm(scope: Pick<AppInputs & WorkbenchShellSlice & ActiveSessionSlice & SessionSuccessionBindingSlice & RemoteHostStateSlice & ProviderStateSlice & RequestedSessionSlice & DocksAndBotSelectionSlice & WindowViewActionsSlice & WorkbenchRecordsSlice & ConversationConnectionsSlice, 'accessReady' | 'accessReadyRef' | 'activated' | 'baseUrl' | 'connections' | 'directory' | 'favorites' | 'hostClient' | 'initialState' | 'presentedViewId' | 'providers' | 'remoteHosts' | 'retryHosts' | 'selectHost' | 'selectedBot' | 'selectedHost' | 'sessionEntries' | 'setNewBot' | 'setTeamRoster' | 'sharedWindow' | 'teamConversationsOpen' | 'teamRoster' | 'transport' | 'windowMode' | 'windowOverviewAvailable' | 'windowOverviewOpen' | 'windowWorkspace'>) {
+  const { accessReady, accessReadyRef, activated, baseUrl, connections, directory, favorites, hostClient, initialState, presentedViewId, providers, remoteHosts, retryHosts, selectHost, selectedBot, selectedHost, sessionEntries, setNewBot, setTeamRoster, sharedWindow, teamConversationsOpen, teamRoster, transport, windowMode, windowOverviewAvailable, windowOverviewOpen, windowWorkspace } = scope;
 
   const t = useTranslate();
   const askTriggerRef = useRef<HTMLButtonElement>(null);
@@ -68,6 +70,12 @@ export function useSharedFeedsAndTpm(scope: Pick<AppInputs & WorkbenchShellSlice
 
   const updateTeamRoster = useCallback((baseUrl: string, teams: Team[]) => setTeamRoster(current => ({ baseUrl, teams, ...(current?.baseUrl === baseUrl && current.tasks ? { tasks: current.tasks } : {}) })), []);
   const updateTaskRoster = useCallback((baseUrl: string, tasks: Team[]) => setTeamRoster(current => ({ baseUrl, teams: current?.baseUrl === baseUrl ? current.teams : [], tasks })), []);
+
+  const upsertTeam = useCallback((baseUrl: string, team: Team) => setTeamRoster(current => ({ baseUrl, teams: [...(current?.baseUrl === baseUrl ? current.teams : []).filter(value => value.id !== team.id), team],
+    ...(current?.baseUrl === baseUrl && current.tasks ? { tasks: current.tasks } : {}) })), []);
+  const rosterTeams = teamRoster?.baseUrl === baseUrl ? teamRoster.teams : undefined;
+  const teamLoader = useTeamRoster({ baseUrl, enabled: accessReady && !!directory, following: teamConversationsOpen, teams: rosterTeams, connections,
+    publish: (baseUrl, teams, tasks) => { updateTeamRoster(baseUrl, teams); updateTaskRoster(baseUrl, tasks); } });
 
   const [tpmListOpen, setTpmListOpen] = useState(false);
 
@@ -126,7 +134,7 @@ export function useSharedFeedsAndTpm(scope: Pick<AppInputs & WorkbenchShellSlice
   tpmMainState.current = { scope: baseUrl, transport, hosts: remoteHosts, providers, works: tpm.works };
 
   const tpmMainRequest = useRef(0);
-  return { askTriggerRef, tpmView, teamView, teamReveal, setTeamReveal, windowView, sharedFeeds, sharedDrafts, updateTeamRoster, updateTaskRoster, tpmListOpen, setTpmListOpen, tpmTriggerRef, selectableHosts, openNewBot, tpm, tpmMainSessions, tpmMainState, tpmMainRequest };
+  return { askTriggerRef, tpmView, teamView, teamReveal, setTeamReveal, windowView, sharedFeeds, sharedDrafts, updateTeamRoster, updateTaskRoster, upsertTeam, teamLoader, tpmListOpen, setTpmListOpen, tpmTriggerRef, selectableHosts, openNewBot, tpm, tpmMainSessions, tpmMainState, tpmMainRequest };
 }
 
 export type SharedFeedsAndTpmSlice = ReturnType<typeof useSharedFeedsAndTpm>;

@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { TeamMenu } from './TeamMenu.js';
+import { TeamMenuHarness } from './TeamMenuHarness.js';
 import { render } from '../../test/setup.js';
 import type { Team } from '@orchardworks/agent-remote-protocol';
 
@@ -37,7 +37,7 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); requests.length = 0; actions.length = 0; localStorage.clear(); });
 
 async function openEditor() {
-  const view = await render(<TeamMenu baseUrl="https://team.test/" enabled hosts={hosts} onOpen={async () => true} onOpenSession={async () => true} />);
+  const view = await render(<TeamMenuHarness baseUrl="https://team.test/" enabled hosts={hosts} onOpen={async () => true} onOpenSession={async () => true} />);
   await act(async () => button(view, 'Teams').click());
   await act(async () => button(view, 'Add member').click());
   return document.querySelector<HTMLDialogElement>('[data-team-dialog]')!;

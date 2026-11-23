@@ -12,7 +12,7 @@ vi.mock('../../conversation/useConversationSession.js',()=>({useConversationSess
 vi.mock('../../conversation/LabWorkbench.js',()=>({LabWorkbench:(props:any)=><div data-testid="standard-session-view">{props.conversationPath}<textarea aria-label="Message" /></div>}));
 import { createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { WindowLayoutContext } from '../../kernel/window-workspace-context.js';
-import { TeamMenu } from './TeamMenu.js';
+import { TeamMenuHarness } from './TeamMenuHarness.js';
 import { LocaleContext } from '@orchardworks/agent-client-web/react';
 import { ShortcutPlacement } from '../../kernel/shortcut-placement.js';
 import { SessionTrackingMenu } from '../sessions/SessionTrackingMenu.js';
@@ -21,7 +21,7 @@ const team:Team={id:'team',operationId:'create',revision:1,title:'Cross-platform
   {id:'leader',hostId:'mac',providerId:'fixture',nativeSessionId:'leader-session',role:'leader',name:'Leader',responsibility:'Coordinate',creation:'ready',activity:'idle',summary:'',updatedAt:1},
   {id:'worker',hostId:'win',providerId:'fixture',nativeSessionId:'worker-session',role:'member',name:'Windows',responsibility:'Verify',creation:'ready',activity:'idle',summary:'',updatedAt:1},
 ],messages:[],createdAt:1,updatedAt:1};
-function App(){return <TeamMenu baseUrl="https://team.test" enabled hosts={[]} onOpen={async team=>{fixture.attached.push(team.id);return true;}} onOpenSession={async target=>{fixture.attached.push(target.nativeSessionId);return true;}}/>;}
+function App(){return <TeamMenuHarness baseUrl="https://team.test" enabled hosts={[]} onOpen={async team=>{fixture.attached.push(team.id);return true;}} onOpenSession={async target=>{fixture.attached.push(target.nativeSessionId);return true;}}/>;}
 afterEach(()=>{localStorage.clear();sessionStorage.clear();fixture.attached=[];fixture.teams=[];fixture.actions=[];fixture.deleted=[];fixture.failure='';fixture.listFailure='';fixture.create=undefined;});
 it('shares the loaded Team roster with Track even when the Team menu is hidden', async () => {
   fixture.teams = [structuredClone(team)];
@@ -35,7 +35,7 @@ it('shares the loaded Team roster with Track even when the Team menu is hidden',
   function SharedMenu() {
     const [teams, setTeams] = useState<Team[]>([]);
     const [receive] = useState(() => (_scope: string, teams: Team[]) => setTeams(teams));
-    return <><TeamMenu baseUrl="https://team.test" enabled visible={false} hosts={[]} onTeamsChange={receive} onOpen={async () => true} onOpenSession={async () => true} />
+    return <><TeamMenuHarness baseUrl="https://team.test" enabled visible={false} hosts={[]} onTeamsChange={receive} onOpen={async () => true} onOpenSession={async () => true} />
       <SessionTrackingMenu tracking={tracking} teams={teams} busy={false} inert={false} onOpen={open} /></>;
   }
   const view = await render(<SharedMenu />);
@@ -64,7 +64,7 @@ it('reveals an attribution target without opening sessions and accepts repeated 
   function Harness() {
     const [request, setRequest] = useState<{ teamId: string; requestId: string }>();
     reveal = requestId => setRequest({ teamId: team.id, requestId });
-    return <TeamMenu baseUrl="https://team.test" enabled hosts={[]} reveal={request}
+    return <TeamMenuHarness baseUrl="https://team.test" enabled hosts={[]} reveal={request}
       onOpen={async value => { fixture.attached.push(value.id); return true; }}
       onOpenSession={async value => { fixture.attached.push(value.nativeSessionId); return true; }} />;
   }
@@ -86,7 +86,7 @@ it('reveals an attribution target without opening sessions and accepts repeated 
 it('reveals an archived Team once its roster arrives and keeps compact navigation unchanged', async () => {
   fixture.teams = [{ ...structuredClone(team), status: 'archived' }];
   const opened = vi.fn(async () => true);
-  const view = await render(<TeamMenu baseUrl="https://team.test" enabled compact hosts={[]}
+  const view = await render(<TeamMenuHarness baseUrl="https://team.test" enabled compact hosts={[]}
     currentSession={{ hostId: 'other-host', providerId: 'fixture', nativeSessionId: 'elsewhere' }}
     reveal={{ teamId: team.id, requestId: 'archived-target' }} onOpen={opened} onOpenSession={opened} />);
   const target = button(view, 'Cross-platform diagnosis');
@@ -115,7 +115,7 @@ it('switches compact Team sessions in both directions through ordinary session n
   const opened = vi.fn(async (_target: TeamSource) => true);
   function CompactApp() {
     const [current, setCurrent] = useState<TeamSource>({ hostId: 'mac', providerId: 'fixture', nativeSessionId: 'leader-session', title: 'Leader' });
-    return <TeamMenu baseUrl="https://team.test" enabled compact currentSession={current} hosts={[{ id: 'win', name: 'Office Windows', online: false }]}
+    return <TeamMenuHarness baseUrl="https://team.test" enabled compact currentSession={current} hosts={[{ id: 'win', name: 'Office Windows', online: false }]}
       onOpen={async () => true} onOpenSession={async target => { await opened(target); setCurrent(target); return true; }} />;
   }
   const view = await render(<CompactApp />);
@@ -141,7 +141,7 @@ it('keeps compact member navigation available after failure and disables unfinis
     { ...team.members[1]!, id: 'removed', name: 'Abandoned', creation: 'abandoned' },
   ] }];
   const opened = vi.fn(async () => false);
-  const view = await render(<TeamMenu baseUrl="https://team.test" enabled compact hosts={[]}
+  const view = await render(<TeamMenuHarness baseUrl="https://team.test" enabled compact hosts={[]}
     currentSession={{ hostId: 'other-host', providerId: 'fixture', nativeSessionId: 'worker-session' }}
     onOpen={async () => true} onOpenSession={opened} />);
   await act(async () => button(view, 'Teams').click());
@@ -180,7 +180,7 @@ it('retains opened leaders across menu hiding, access restoration and catalog fa
   let setEnabled!: (value: boolean) => void, setVisible!: (value: boolean) => void;
   function Harness() {
     const [enabled, enable] = useState(true), [visible, show] = useState(true); setEnabled = enable; setVisible = show;
-    return <ConversationConnectionScope.Provider value={f.connections}><TeamMenu baseUrl="https://team.test" enabled={enabled} visible={visible} hosts={[]} onOpen={async () => true} onOpenSession={async () => true} /></ConversationConnectionScope.Provider>;
+    return <ConversationConnectionScope.Provider value={f.connections}><TeamMenuHarness baseUrl="https://team.test" enabled={enabled} visible={visible} hosts={[]} onOpen={async () => true} onOpenSession={async () => true} /></ConversationConnectionScope.Provider>;
   }
   try {
     const view = await render(<Harness />);
@@ -265,7 +265,7 @@ it.each((['primary', 'dock', 'attached', 'float'] as const).flatMap(placement =>
   function Harness() {
     const [, update] = useState(0); refresh = () => update(value => value + 1);
     const selected = window.views.find(view => view.id === window.selectedViewId)!;
-    return <WindowLayoutContext.Provider value={{ window, operate() {} }}><TeamMenu baseUrl="https://team.test" enabled
+    return <WindowLayoutContext.Provider value={{ window, operate() {} }}><TeamMenuHarness baseUrl="https://team.test" enabled
       hosts={[{ id: 'mac', name: 'Mac', online: true, teamManagement: true }]} source={selected.binding}
       sourceViewId={`${window.id}/${selected.id}`} onOpen={opened} onOpenSession={async () => true} onTeamsChange={catalog} /></WindowLayoutContext.Provider>;
   }
@@ -292,7 +292,7 @@ it('retries an uncertain Team creation with its original source and operation id
   fixture.create = async input => { requests.push(input); if (requests.length === 1) throw new Error('Receipt lost'); return structuredClone(team); };
   function Harness() {
     const [, update] = useState(0); refresh = () => update(value => value + 1);
-    return <TeamMenu baseUrl="https://team.test" enabled hosts={[{ id: 'mac', name: 'Mac', online: true, teamManagement: true }]}
+    return <TeamMenuHarness baseUrl="https://team.test" enabled hosts={[{ id: 'mac', name: 'Mac', online: true, teamManagement: true }]}
       source={source} sourceViewId="origin/b" onOpen={opened} onOpenSession={async () => true} />;
   }
   const view = await render(<Harness />);

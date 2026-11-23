@@ -13,7 +13,7 @@ import { replicaState } from './test/fixtures.js';
 import { render, unmount } from './test/setup.js';
 import * as workbenchComponents from './conversation/LabWorkbench.js';
 import { WorkspaceReady } from './kernel/workspace-access.js';
-import { TeamRefresh, type TeamRefreshPeriods } from './features/team/TeamMenu.js';
+import { TeamRefresh, type TeamRefreshPeriods } from './kernel/useTeamRoster.js';
 import type { FavoritesSnapshot } from './features/sessions/session-stars-client.js';
 
 

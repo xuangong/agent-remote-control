@@ -3,12 +3,12 @@ import { createPortal } from 'react-dom';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { Translate } from '@orchardworks/agent-client';
 import { enumWords, memberActivityWords, memberRoleWords, messageStatusWords, teamStatusWords } from './team-words.js';
-import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
-import { errorWords, RemoteTeamClient, watchList } from '@orchardworks/agent-client';
+import { useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { errorWords, RemoteTeamClient } from '@orchardworks/agent-client';
 import type { Team, TeamAction, TeamSource } from '@orchardworks/agent-remote-protocol';
 import { workspaceFetch } from '../../kernel/workspace-access.js';
 import { useTrackingPosition } from '../../kernel/useTrackingPosition.js';
-import { ConversationConnectionScope } from '../../conversation/conversation-connections.js';
+import type { TeamRosterControls } from '../../kernel/useTeamRoster.js';
 import { ShortcutPlacement } from '../../kernel/shortcut-placement.js';
 import { useWindowLayout } from '../../kernel/window-workspace-context.js';
 import { SessionDirectoryClient } from '../../kernel/directory-client.js';
@@ -18,22 +18,16 @@ import './team.css';
 interface Host { teamManagement?: true; id: string; name: string; online: boolean; providers?: Array<{providerId:string;displayName:string}> }
 interface Props {
   baseUrl: string; enabled: boolean; visible?: boolean; hosts: Host[]; source?: TeamSource;
-  /** A Team member's conversation is open: its seat follows the member's successor through the roster, which then refreshes closely. */
-  following?: boolean;
+  /** The loaded Teams of `baseUrl`, and the loader that keeps them current. */
+  teams: readonly Team[] | undefined; roster: TeamRosterControls;
   compact?: boolean; currentSession?: Pick<TeamSource, 'providerId' | 'nativeSessionId'> & { hostId?: string };
   sourceViewId?: string;
   reveal?: { teamId: string; requestId: string };
   onOpen(team: Team, sourceViewId?: string): Promise<boolean>; onOpenSession(target: TeamSource & { teamId?: string; teamMemberId?: string }): Promise<boolean>;
-  onTeamsChange?(baseUrl: string, teams: Team[]): void;
-  /** Tasks, which the Relay keeps as Teams; the page shows them in their owners' conversations. */
-  /** The tasks, and the bots' inboxes that carry their work items. */
-  onTasksChange?(baseUrl: string, tasks: Team[]): void;
+  /** A Team this menu created or changed. */
+  onTeamChange(baseUrl: string, team: Team): void;
 }
-/** How often the Team roster refreshes while someone looks at it or a Team is forming (`watchingMs`), and otherwise (`idleMs`). */
-export interface TeamRefreshPeriods { watchingMs: number; idleMs: number }
-export const TEAM_REFRESH_PERIODS: TeamRefreshPeriods = { watchingMs: 4_000, idleMs: 30_000 };
-/** The periods the roster refreshes at; a page keeps `TEAM_REFRESH_PERIODS`, and a test passes shorter ones instead of waiting them out. */
-export const TeamRefresh = createContext<TeamRefreshPeriods>(TEAM_REFRESH_PERIODS);
+const NO_TEAMS: readonly Team[] = [];
 const errorMessage = (t: Translate, error: unknown) => errorWords(error, t, 'team.team.operationFailed');
 const isCurrentMember = (member: Team['members'][number], current: Props['currentSession']) => !!current
   && member.hostId === (current.hostId ?? 'local') && member.providerId === current.providerId && member.nativeSessionId === current.nativeSessionId;
@@ -43,10 +37,9 @@ export function TeamMenu(props: Props) {
   const client = useMemo(() => new RemoteTeamClient(baseUrl, workspaceFetch), [baseUrl]);
   const layout = useWindowLayout();
   const currentPresentation = useRef({ layout, onOpen: props.onOpen }); currentPresentation.current = { layout, onOpen: props.onOpen };
-  const connections = useContext(ConversationConnectionScope);
-  const [rosterClient, setRosterClient] = useState<RemoteTeamClient>();
-  const [teams, setTeams] = useState<Team[]>([]), [selected, setSelected] = useState('');
-  const [open, setOpen] = useState(false), [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(''), [loadError, setLoadError] = useState('');
+  const teams = props.teams ?? NO_TEAMS, { roster } = props, { loading, loadError } = roster;
+  const [selected, setSelected] = useState('');
+  const [open, setOpen] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [revealing, setRevealing] = useState(false);
   const [pendingCreate, setPendingCreate] = useState<{operationId:string;source:TeamSource;sourceViewId?:string;origin?:{windowId:string;viewId:string}}>();
 
@@ -57,58 +50,11 @@ export function TeamMenu(props: Props) {
   const trigger = useRef<HTMLButtonElement>(null);
   const revealedRequest = useRef<string>();
   const currentClient = useRef(client); currentClient.current = client;
-  const generation = useRef(0), mutating = useRef(false);
-  const refresh = async () => {
-    if (mutating.current) return;
-    const ticket = ++generation.current;
-    const value = await client.list();
-    // Tasks travel as Teams on the Relay; they show in their owner's conversation, not among Teams.
-    if (currentClient.current === client && ticket === generation.current) {
-      setTeams(value.filter(team => !team.task && !team.link && !team.inbox)); setRosterClient(client); setLoadError('');
-      props.onTasksChange?.(baseUrl, value.filter(team => !!team.task || !!team.inbox));
-    }
-  };
-  useEffect(() => {
-    setTeams([]); setRosterClient(undefined); setSelected(''); setError(''); setLoadError(''); setPendingCreate(undefined);
-  }, [client]);
-  const loader = useRef<() => Promise<void>>();
-  useEffect(() => {
-    ++generation.current;
-    if (!enabled) { setLoading(false); return; }
-    let stopped = false, inFlight = false;
-    const load = async () => { if (stopped || inFlight || document.visibilityState === 'hidden') return; inFlight = true;
-      try { await refresh(); }
-      catch (error) { if (!stopped) setLoadError(errorMessage(t, error)); } finally { inFlight = false; if (!stopped) setLoading(false); }
-    };
-    loader.current = load;
-    setLoading(true);
-    const unwatch = watchList(load);
-    return () => { stopped = true; ++generation.current; if (loader.current === load) loader.current = undefined; unwatch(); };
-  }, [client, enabled, baseUrl]);
-  // The roster follows changes closely while someone looks at it, a Team is forming or a member's conversation is open (its
-  // seat follows the member's successor through the roster); otherwise it stays current for
-  // roles and attention twice a minute instead of polling every few seconds on every open page (stage 6).
-  const forming = !!pendingCreate || teams.some(team => team.status === 'active' && team.members.some(member => member.creation === 'reserved'));
-  const watching = open || revealing || forming || !!props.following;
-  const periods = useContext(TeamRefresh);
-  useEffect(() => {
-    if (!enabled) return;
-    // Something to follow just appeared (a member's conversation opened, a Team began forming): refresh at once.
-    if (watching) void loader.current?.();
-    const timer = setInterval(() => void loader.current?.(), watching ? periods.watchingMs : periods.idleMs);
-    return () => clearInterval(timer);
-  }, [client, enabled, baseUrl, watching, periods]);
-  useEffect(() => {
-    // Temporary access or catalog failures must not discard the last confirmed retention set.
-    if (!enabled || rosterClient !== client) return;
-    connections?.retainSessions('team-leaders', teams.filter(team => team.status !== 'archived').flatMap(team => team.members
-      .filter(member => member.role === 'leader' && member.creation === 'ready' && member.nativeSessionId)
-      .map(member => ({ hostId: member.hostId, providerId: member.providerId, nativeSessionId: member.nativeSessionId! }))));
-  }, [connections, client, rosterClient, enabled, teams]);
-  useEffect(() => () => connections?.retainSessions('team-leaders', []), [connections, client]);
-  useEffect(() => {
-    if (rosterClient === client) props.onTeamsChange?.(baseUrl, teams);
-  }, [baseUrl, client, rosterClient, teams, props.onTeamsChange]);
+  const mutating = useRef(false);
+  useEffect(() => { setSelected(''); setError(''); setPendingCreate(undefined); }, [client]);
+  // The roster follows changes closely while the panel is open or revealing a Team, or a creation is pending.
+  const watching = open || revealing || !!pendingCreate;
+  useEffect(() => { roster.watch(watching); return () => roster.watch(false); }, [roster, watching]);
   useEffect(() => { if (!visible) setOpen(false); }, [visible]);
   useEffect(() => {
     if (!enabled || !visible || !props.reveal) return;
@@ -134,14 +80,13 @@ export function TeamMenu(props: Props) {
   }, [open, root]);
   async function run(action: () => Promise<void>) {
     if (mutating.current) return false;
-    mutating.current = true; ++generation.current; setBusy(true); setError('');
+    mutating.current = true; const resume = roster.hold(); setBusy(true); setError('');
     try { await action(); return true; } catch (error) { if (currentClient.current === client) setError(errorMessage(t, error)); return false; }
-    finally { ++generation.current; mutating.current = false; setBusy(false); }
+    finally { resume(); mutating.current = false; setBusy(false); }
   }
   async function change(input: TeamAction) {
     const updated = await client.action(input); if (currentClient.current !== client) return;
-    setTeams(current => [...current.filter(value => value.id !== updated.id), updated]);
-    setRosterClient(client);
+    props.onTeamChange(baseUrl, updated);
   }
   async function create() {
     if (!source && !pendingCreate) return;
@@ -149,7 +94,7 @@ export function TeamMenu(props: Props) {
       ...(layout?.window.selectedViewId ? { origin: { windowId: layout.window.id, viewId: layout.window.selectedViewId } } : {}) }; setPendingCreate(input);
     const { sourceViewId, origin, ...request } = input;
     const created = await client.create(request); if (currentClient.current !== client) return;
-    setTeams(current => [...current.filter(value => value.id !== created.id), created]); setRosterClient(client); setPendingCreate(undefined);
+    props.onTeamChange(baseUrl, created); setPendingCreate(undefined);
     if (origin) {
       const current = currentPresentation.current.layout?.window;
       const binding = current?.id === origin.windowId ? current.views.find(view => view.id === origin.viewId)?.binding : undefined;
@@ -181,7 +126,7 @@ export function TeamMenu(props: Props) {
   if (!enabled) return null;
   return <>
     <div ref={root} data-hidden={!visible || undefined} aria-hidden={!visible || undefined} {...rootProps} onKeyDown={event => { if (floating) handlers.onKeyDown?.(event); if (event.key === 'Escape') { setOpen(false); trigger.current?.focus(); } }}>
-      <button ref={trigger} className="lab-session-popover-trigger" aria-expanded={open} aria-label={t('team.team.menu')} onClick={() => { setOpen(!open); setRevealing(false); void refresh().catch(error => setError(errorMessage(t, error))); }}><span>Team</span><span className="lab-team-count">{teams.filter(item => item.status !== 'archived').length}</span></button>
+      <button ref={trigger} className="lab-session-popover-trigger" aria-expanded={open} aria-label={t('team.team.menu')} onClick={() => { setOpen(!open); setRevealing(false); void roster.refresh().catch(error => setError(errorMessage(t, error))); }}><span>Team</span><span className="lab-team-count">{teams.filter(item => item.status !== 'archived').length}</span></button>
       {open ? <section className="lab-session-popover-panel lab-tpm-panel" aria-label={t('team.team.menu')}>
         <div className="lab-directory-heading"><h2>{t('team.team.menu')}</h2><button onClick={() => setOpen(false)} aria-label={t('team.team.closeMenu')}>×</button></div>
         {loading && !teams.length ? <p role="status">{t('team.team.loading')}</p> : null}

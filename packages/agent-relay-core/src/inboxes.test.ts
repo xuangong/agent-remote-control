@@ -33,6 +33,15 @@ describe('bot inboxes', () => {
     expect(f.inboxes()[0]!.messages.map(message => message.text.split('Your mission:\n')[1])).toEqual(['Lead the release.', 'Ship on Friday.']);
   });
 
+  it('leaves a bot without a mission quiet until another bot messages it, which brings its instructions along', async () => {
+    const f = fixture();
+    await f.poll();
+    expect(f.inboxes()).toEqual([]);
+    f.details.mission = 'Watch the build.';
+    await f.poll();
+    expect(f.inboxes()[0]!.messages.map(message => message.text.split('\n')[0])).toEqual(['[Your standing instructions · v1]']);
+  });
+
   it('gives a Host inboxes only for the bots whose main session it holds', async () => {
     const f = fixture();
     await f.broker.hostCall('linux', { action: 'support_enablement' });

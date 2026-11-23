@@ -234,10 +234,11 @@ describe('messages between assistants', () => {
     expect(h.sessions.get('tracker')!.deliveries).toEqual([]);
     h.busy('tracker', false);
     await h.runtime.tick();
-    expect(h.sessions.get('tracker')!.deliveries.map(delivery => [delivery.delivery, parseTaskInputs(delivery.text)])).toEqual([['immediate', [{ kind: 'assistant', messageId: sent.messageId, from: 'Chief', body: 'Is the branch cut?' }]]]);
+    // The first message brings the receiver's standing instructions along, in the same input.
+    expect(h.sessions.get('tracker')!.deliveries.map(delivery => [delivery.delivery, parseTaskInputs(delivery.text)?.map(input => input.kind === 'standing' ? input.kind : input)])).toEqual([['immediate', ['standing', { kind: 'assistant', messageId: sent.messageId, from: 'Chief', body: 'Is the branch cut?' }]]]);
     await tool(tools(tracker, 'tracker'), 'message_assistant').execute({ to: 'Chief', text: 'Yes.', reply_to: sent.messageId });
     await h.runtime.tick();
-    expect(parseTaskInputs(h.sessions.get('worker')!.deliveries[0]!.text)).toEqual([expect.objectContaining({ kind: 'assistant', from: 'Tracker', replyTo: sent.messageId, body: 'Yes.' })]);
+    expect(parseTaskInputs(h.sessions.get('worker')!.deliveries[0]!.text)?.filter(input => input.kind !== 'standing')).toEqual([expect.objectContaining({ kind: 'assistant', from: 'Tracker', replyTo: sent.messageId, body: 'Yes.' })]);
     // The main sessions keep their own tools.
     expect(await h.runtime.extensions(h.ref('codex', 'tracker'))).toBeUndefined();
   });

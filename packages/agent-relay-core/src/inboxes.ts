@@ -58,9 +58,15 @@ export class BotInboxes {
     if (inbox.members[0]!.creation === 'ready') return inbox.members[0];
     return (await this.broker.provision(inbox.id, inbox.members[0]!.id).catch(() => undefined))?.members[0];
   }
-  /** Gives every bot an inbox bound to its current main session, with its standing instructions sent when they changed. */
+  /**
+   * Sends a bot with a mission its standing instructions when it was not sent that text yet. A bot without one is left quiet: it
+   * gets them with the first message another bot sends it (`prepare`), so a deployment wakes no bot by itself.
+   */
   async ensure(bots: readonly Assistant[]): Promise<void> {
-    const pending = (teams: readonly SavedTeam[]) => bots.filter(bot => { const inbox = this.current(teams, bot); return !inbox || inbox.inbox!.instructions !== instructionsHash(bot.mission); });
+    const pending = (teams: readonly SavedTeam[]) => bots.filter(bot => {
+      const sent = this.current(teams, bot)?.inbox?.instructions;
+      return sent ? sent !== instructionsHash(bot.mission) : !!bot.mission;
+    });
     if (pending(this.broker.ports.read()).length) await this.broker.change(teams => { const now = this.broker.ports.now(); for (const bot of pending(plain(teams))) this.prepare(teams, bot, now); });
     // Binding a main session where it is never creates anything, so a Host that was offline is asked again at its next poll.
     for (const bot of bots) await this.bind(bot);

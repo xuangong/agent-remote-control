@@ -156,6 +156,8 @@ export function roomTurnText(input: { roomId: string; name: string; messages: Re
   return [`[Room "${heading(input.name).replace(/"/g, "'")}" · ${input.roomId} · your turn · ${count} new ${count === 1 ? 'message' : 'messages'} · ends in ${Math.max(0, Math.ceil(input.minutesLeft))} min]`,
     ...input.messages.map(message => quoteFrames(`${heading(message.name)}: ${message.text}`)), ROOM_GUIDANCE].join('\n');
 }
+/** The frame of a bot's standing instructions, written by `standingInstructionsText`. */
+const standingFrame = /^\[Your standing instructions · v(\d+)\]$/;
 const roomFrame = /^\[Room "(.+)" · (\S+) · your turn · (\d+) new messages? · ends in (\d+) min\]$/;
 export type TaskInput =
   | { kind: 'brief'; taskId: string; from: string; title: string; brief: string; doneWhen?: string }
@@ -164,11 +166,15 @@ export type TaskInput =
   /** Not a task's: a message from another assistant, which arrives with task updates. */
   | { kind: 'assistant'; messageId: string; from: string; replyTo?: string; body: string }
   /** A room asking this member to speak. */
-  | { kind: 'room'; roomId: string; name: string; count: number; body: string };
+  | { kind: 'room'; roomId: string; name: string; count: number; body: string }
+  /** The bot's standing instructions, sent when they changed (bots design 5.1). */
+  | { kind: 'standing'; version: number; body: string };
 const wordKinds = new Map(Object.entries(kindWords).map(([kind, word]) => [word, kind as TaskInputKind]));
 const framePattern = new RegExp(`^\\[Task (\\S+) · (${Object.values(kindWords).join('|')}) · (.+)\\]$`);
 /** Reads one brief or update the Relay framed; any other text, or a frame without its closing guidance, is not a task input. */
 function parseOne(lines: string[]): TaskInput | undefined {
+  const standing = standingFrame.exec(lines[0] ?? '');
+  if (standing) return lines.length >= 2 ? { kind: 'standing', version: Number(standing[1]), body: lines.slice(1).join('\n').trimEnd() } : undefined;
   const room = roomFrame.exec(lines[0] ?? '');
   if (room) return lines.length >= 2 && lines.at(-1) === ROOM_GUIDANCE ? { kind: 'room', name: room[1]!, roomId: room[2]!, count: Number(room[3]), body: lines.slice(1, -1).join('\n') } : undefined;
   const message = assistantFrame.exec(lines[0] ?? '');
@@ -192,7 +198,7 @@ function parseOne(lines: string[]): TaskInput | undefined {
 export const joinTaskInputs = (texts: readonly string[]): string => texts.join('\n\n');
 /** Reads one or several task inputs the Relay framed and the Controller joined; anything else is not task input. */
 export function parseTaskInputs(text: string): TaskInput[] | undefined {
-  const lines = text.split('\n'), starts = lines.flatMap((line, index) => (framePattern.test(line) || assistantFrame.test(line) || roomFrame.test(line)) && (index === 0 || lines[index - 1] === '') ? [index] : []);
+  const lines = text.split('\n'), starts = lines.flatMap((line, index) => (framePattern.test(line) || assistantFrame.test(line) || roomFrame.test(line) || standingFrame.test(line)) && (index === 0 || lines[index - 1] === '') ? [index] : []);
   if (starts[0] !== 0) return undefined;
   const inputs: TaskInput[] = [];
   for (const [position, start] of starts.entries()) {

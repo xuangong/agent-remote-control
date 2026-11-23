@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { expect, it } from 'vitest';
-import { appendSessionReferences, assistantMessageText, joinTaskInputs, roomTurnText, taskBriefText, taskResultText, taskUpdateText } from '@orchardworks/agent-remote-protocol';
+import { appendSessionReferences, assistantMessageText, joinTaskInputs, standingInstructionsText, roomTurnText, taskBriefText, taskResultText, taskUpdateText } from '@orchardworks/agent-remote-protocol';
 import { TaskDirectoryContext } from '../TaskDirectory.js';
 import { render } from '../../test/setup.js';
 import { UserMessageItem } from './MessageItem.js';
@@ -28,6 +28,14 @@ it('shows a worker its brief with who asked and the done-when line, also when a 
   expect(card.textContent).toContain('Task from Chief');
   expect(card.textContent).toContain('Collect the build logs.');
   expect(card.querySelector('.agent-task-done-when')?.textContent).toBe('Done when: The logs are attached.');
+});
+
+it('folds a bot\'s standing instructions into one quiet line, never the person\'s bubble', async () => {
+  const container = await render(<UserMessageItem item={message(standingInstructionsText('Watch the build.'))} />);
+  const folded = container.querySelector('details[data-standing-version="1"]')!;
+  expect(folded.querySelector('summary')?.textContent).toBe('Standing instructions updated');
+  expect(folded.textContent).toContain('Watch the build.');
+  expect(container.querySelector('.agent-message-user')).toBeNull();
 });
 
 it('keeps text the person typed as their own bubble, even when it looks like a frame', async () => {

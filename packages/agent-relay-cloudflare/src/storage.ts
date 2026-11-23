@@ -28,6 +28,7 @@ export class SqliteRelayStore implements RelayStateStore {
     // The fingerprint identity keeps its original name: stored state is bound to it.
     const fingerprint = createHmac('sha256', auth.secret).update(JSON.stringify(['agent-remote-cloudflare', 1, ...JSON.parse(hostedAuthStorageIdentity(auth))])).digest('hex');
     storage.transactionSync(() => {
+      storage.sql.exec('DROP TABLE IF EXISTS relay_team_resource_chunks');
       storage.sql.exec(`CREATE TABLE IF NOT EXISTS relay_metadata (
         id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL, origin TEXT NOT NULL, issuer TEXT NOT NULL, fingerprint TEXT NOT NULL
       )`);

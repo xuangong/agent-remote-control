@@ -27,6 +27,12 @@ async function relay(initial: HostedRelayState, accounting = true) {
     accounting ? costs : undefined, value => metrics.push(value));
   return { state, storage, manifests, mismatches, metrics, costs };
 }
+test('opening the store drops the table of the removed Team file transfers', () => {
+  const { db, storage } = sqliteStorage();
+  db.exec('CREATE TABLE relay_team_resource_chunks (namespace TEXT NOT NULL, key TEXT NOT NULL, value BLOB NOT NULL, PRIMARY KEY (namespace, key))');
+  new SqliteRelayStore(storage, auth);
+  expect(db.prepare("SELECT name FROM sqlite_master WHERE name = 'relay_team_resource_chunks'").all()).toEqual([]);
+});
 function savedTeam(id: string, textBytes: number) {
   const member = (memberId: string, role: 'requester') => ({ id: memberId, hostId: 'host', providerId: 'codex', nativeSessionId: `${id}-${memberId}`,
     role, name: memberId, responsibility: '', creation: 'ready' as const, activity: 'idle' as const, summary: '', updatedAt: 1 });

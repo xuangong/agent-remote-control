@@ -101,6 +101,10 @@ export class AssistantMessages {
     const directory = accountDirectory(this.ports.groups()), from = this.caller(hostId, call.owner, directory);
     const to = namedAssistant(directory, call.to, from);
     if (!to.key.startsWith('b_') || !from.key.startsWith('b_')) fail(NOT_FOUND);
+    return this.deliver(from, to, call);
+  }
+  /** Queues a message from a bot (standing or temporary) in a standing bot's inbox. */
+  async deliver(from: { key: string; name: string }, to: Assistant, call: { operationId: string; text: string; replyTo?: string }): Promise<{ messageId: string; outcome: 'delivered' | 'held' }> {
     const sent = await this.broker.change(teams => {
       const now = this.broker.ports.now();
       const inbox = this.inboxes.prepare(teams, to, now) ?? fail('Team capacity reached.');
@@ -109,7 +113,8 @@ export class AssistantMessages {
       if (existing) return { messageId: existing.id };
       let hop = 1;
       if (call.replyTo) {
-        const own = this.inboxes.current(teams, from)?.inbox?.recent ?? [];
+        // A temporary bot has no inbox: what reached it came as input to its task, so it names no earlier message.
+        const own = 'hostId' in from ? this.inboxes.current(teams, from as Assistant)?.inbox?.recent ?? [] : [];
         const parent = own.find(item => item.id === call.replyTo && item.from === to.key) ?? fail('reply_to must name a message this assistant received from them.');
         hop = parent.hop + 1;
         if (hop > ASSISTANT_MESSAGE_HOP_LIMIT) fail(`This exchange reached ${ASSISTANT_MESSAGE_HOP_LIMIT} messages. Stop here and tell the person what was said.`);

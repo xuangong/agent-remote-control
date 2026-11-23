@@ -14,7 +14,8 @@ export const TASK_BRIEF_LIMIT = 8000;
 export const TASK_DONE_WHEN_LIMIT = 1000;
 export const TASK_SUMMARY_LIMIT = 4000;
 /** Tasks one main session may have running (queued or working) at once. */
-export const TASK_RUNNING_LIMIT = 4;
+/** The bots an organizer runs at once (bots design 2.5); a task is a temporary bot. */
+export const TASK_RUNNING_LIMIT = 12;
 
 /**
  * working: the worker has the brief or is being created; needs_input: it waits on its owner or the person (see TaskWaiting);
@@ -95,19 +96,20 @@ export function taskSenderName(title: string | undefined): string {
  * question (the worker asks), needs_you (the worker waits on the person, or stopped without reporting), told (the person wrote to
  * the worker).
  */
-export type TaskInputKind = 'brief' | 'message' | 'reminder' | 'done' | 'failed' | 'cancelled' | 'question' | 'needs_you' | 'told';
-const kindWords: Record<TaskInputKind, string> = { brief: 'brief', message: 'message', reminder: 'report', done: 'done', failed: 'failed', cancelled: 'stopped', question: 'question',
+export type TaskInputKind = 'brief' | 'message' | 'reminder' | 'progress' | 'done' | 'failed' | 'cancelled' | 'question' | 'needs_you' | 'told';
+const kindWords: Record<TaskInputKind, string> = { brief: 'brief', message: 'message', reminder: 'report', progress: 'progress', done: 'done', failed: 'failed', cancelled: 'stopped', question: 'question',
   needs_you: 'needs the person', told: 'the person wrote' };
 export const TASK_GUIDANCE: Record<TaskInputKind, string> = {
   brief: 'Do the work with your own tools, where your instructions say. '
-    + 'Read the owner\'s conversation with read_source_session only when the brief is not enough. '
-    + 'When you finish, call report_task once with status done or failed and a summary the owner can act on without reading your conversation.',
-  message: 'This is input about your task. Continue it; when you finish, call report_task once.',
-  reminder: 'Your last turn ended without a report. If the task is done or cannot be done, call report_task now; if you need something, ask with ask_owner.',
+    + 'Read your organizer\'s conversation with read_source_session only when the brief is not enough. '
+    + 'When you finish, message your organizer once with status done or failed: what you did, what you found and where, in your own words and at most 300 characters.',
+  message: 'This is input about your work. Continue it; when you finish, message your organizer with status done or failed.',
+  reminder: 'Your last turn ended without a report. If the work is done or cannot be done, message your organizer now with status done or failed; if you need something, message it with status needs_input.',
+  progress: 'This is progress from a bot you organize. Take it into account; it reports again when it finishes or needs you.',
   done: 'This is the worker\'s report. Check what matters before relying on it, then tell the person what it means for their request.',
   failed: 'This is the worker\'s report. Check what matters before relying on it, then tell the person what it means for their request.',
   cancelled: 'The person stopped this task; its worker does no more. Take it into account for their request.',
-  question: 'The worker waits for your answer. Answer with message_task, or ask the person first if only they can decide.',
+  question: 'The bot waits for your answer. Answer it with message, or ask the person first if only they can decide.',
   needs_you: 'The worker waits on the person, who sees the request in the task. Tell the person if they may not have noticed; do not answer it yourself.',
   told: 'The person wrote this to the worker directly. Take it into account; the worker already has it.',
 };

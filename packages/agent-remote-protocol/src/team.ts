@@ -121,6 +121,11 @@ export type TeamAction = Static<typeof TeamAction>;
 /** Removes an archived Call For Support group for good, so its worker's next call for the profile starts a new group. */
 export const TeamDelete = Type.Object({ teamId: id }, object);
 export type TeamDelete = Static<typeof TeamDelete>;
+/** A bot calling as its own main session. */
+const BotCaller = Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object);
+/** A message that crosses from one bot to another (bots design 3.4). */
+export const BOT_MESSAGE_LIMIT = 300;
+const BotText = Type.String({ minLength: 1, maxLength: BOT_MESSAGE_LIMIT });
 export const TeamHostCall = Type.Union([
   Type.Object({ action: Type.Literal('poll') }, object),
   Type.Object({ action: Type.Literal('resource_begin'), teamId: id, memberId: id, operationId: id,
@@ -167,6 +172,15 @@ export const TeamHostCall = Type.Union([
   Type.Object({ action: Type.Literal('cancel_task'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), taskId: id }, object),
   Type.Object({ action: Type.Literal('mark_task_done'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), taskId: id,
     summary: Type.Optional(Type.String({ minLength: 1, maxLength: TASK_SUMMARY_LIMIT })) }, object),
+  // Every bot's own calls, made as its main session (bots design 5.1). A temporary bot is a task: its organizer is the task's owner.
+  Type.Object({ action: Type.Literal('create_bot'), owner: TaskOwner, operationId: id, name: TaskTitle, mission: TaskBrief, lifetime: Type.Union([Type.Literal('temporary'), Type.Literal('standing')]),
+    message: Type.Optional(BotText), workspace: Type.Optional(TaskWorkspace), commit: Type.Optional(gitObject), provider: Type.Optional(id), model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })) }, object),
+  Type.Object({ action: Type.Literal('bot_message'), owner: BotCaller, operationId: id, to: Type.String({ minLength: 1, maxLength: 300 }), text: BotText,
+    replyTo: Type.Optional(AssistantMessageId), status: Type.Optional(Type.Union([Type.Literal('progress'), Type.Literal('done'), Type.Literal('failed'), Type.Literal('needs_input')])) }, object),
+  Type.Object({ action: Type.Literal('list_bots'), owner: BotCaller }, object),
+  Type.Object({ action: Type.Literal('stop_bot'), owner: BotCaller, bot: Type.String({ minLength: 1, maxLength: 300 }) }, object),
+  Type.Object({ action: Type.Literal('retire_bot'), owner: BotCaller, bot: Type.String({ minLength: 1, maxLength: 300 }) }, object),
+  Type.Object({ action: Type.Literal('bot_session'), owner: BotCaller, bot: Type.String({ minLength: 1, maxLength: 300 }) }, object),
   // A task's worker reports its result once.
   Type.Object({ action: Type.Literal('report_task'), teamId: id, memberId: id, status: TaskReportStatus, summary: Type.String({ minLength: 1, maxLength: TASK_SUMMARY_LIMIT }) }, object),
   // An assistant's main session lists the account's other assistants, and messages one.

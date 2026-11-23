@@ -244,6 +244,24 @@ export class TaskGroups {
       return { taskId: team.id, state: item.state };
     });
   }
+  /** The temporary bot the task is tells its organizer where its work stands. */
+  progress(hostId: string, call: { teamId: string; memberId: string; operationId: string; text: string }): Promise<{ taskId: string; state: TeamTask['state'] }> {
+    return this.workerChange(hostId, call, (team, self, item, now) => {
+      if (!running(item.state)) fail('This task is no longer running.');
+      enqueue(team, self, owner(team), ['task-progress', team.id, call.operationId], taskUpdateText({ taskId: team.id, kind: 'progress', label: item.title, body: call.text }), now);
+      return { taskId: team.id, state: item.state };
+    });
+  }
+  /** A bot that does not organize the temporary bot writes to it: the worker reads it as input from that bot. */
+  input(teamId: string, from: string, call: { operationId: string; text: string }): Promise<{ taskId: string; state: TeamTask['state'] }> {
+    return this.broker.change(teams => {
+      const team = teams.find(item => item.id === teamId) ?? fail('Task not found.'), item = task(team), now = this.broker.ports.now();
+      if (team.status !== 'active' || !running(item.state)) fail('This bot has finished its work.');
+      enqueue(team, owner(team), team.members[0]!, ['task-input', team.id, from, call.operationId], taskUpdateText({ taskId: team.id, kind: 'message', label: from, body: call.text }), now);
+      resume(team, item, now);
+      return { taskId: team.id, state: item.state };
+    });
+  }
   /** The person wrote to the worker directly: the owner is told, and what the worker waited for may have arrived. */
   tell(hostId: string, call: TellCall): Promise<{ taskId: string; state: TeamTask['state'] }> {
     return this.workerChange(hostId, call, (team, self, item, now) => {

@@ -3,7 +3,7 @@
  * read groups merged with their records (`mergeBots`), and every change to groups is followed by `reconcileBots`.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { botIdentity, botPlacement, groupBotViews, isBotRecord, BOT_IDENTITY_FIELDS, type BotRecord, type WindowBotDetails, type WindowGroup } from '@orchardworks/agent-remote-protocol';
+import { botIdentity, botPlacement, groupBotViews, isBotRecord, readBotPicture, BOT_IDENTITY_FIELDS, type BotRecord, type WindowBotDetails, type WindowGroup } from '@orchardworks/agent-remote-protocol';
 import type { SavedWorkspaceWindow } from './window-workspaces.js';
 
 export type SavedBot = BotRecord & { subject: string };
@@ -73,4 +73,30 @@ export function reconcileBots(subject: string, rows: SavedWorkspaceWindow[], bot
     }
   }
   for (const record of mine.values()) if (record.lifetime === 'standing' && !shown.has(record.botId) && record.retiredAt === undefined) record.retiredAt = now;
+}
+
+/** Stored bot details with each picture read in the current form; stored rows may hold shapes an older build wrote. Anything that is not bots is returned as it is. */
+export function readStoredBots(bots: unknown): unknown {
+  const members = (bots as { members?: unknown } | null)?.members;
+  if (!members || typeof members !== 'object' || Array.isArray(members)) return bots;
+  return { ...(bots as object), members: Object.fromEntries(Object.entries(members).map(([viewId, details]) => {
+    if (!details || typeof details !== 'object' || !('picture' in details)) return [viewId, details];
+    const { picture, ...rest } = details as { picture: unknown };
+    const read = readBotPicture(picture);
+    return [viewId, read ? { ...rest, picture: read } : rest];
+  })) };
+}
+const bound = (row: SavedWorkspaceWindow) => row.window && row.bots ? groupBotViews({ window: row.window, bots: row.bots }).map(view => view.id) : [];
+/** Whether some live row holds a bot view without a record. */
+export function needsBotMigration(rows: readonly SavedWorkspaceWindow[]): boolean {
+  return rows.some(row => !row.deleted && bound(row).some(viewId => !row.bots!.members[viewId]?.botId));
+}
+/** Gives every bot view of every account a record, with `migrationBotId` for those without one. Pictures are read in the current form first. */
+export function migrateBots(rows: SavedWorkspaceWindow[], bots: SavedBot[], now: number): void {
+  for (const row of rows) if (!row.deleted && row.bots) row.bots = readStoredBots(row.bots) as typeof row.bots;
+  for (const subject of new Set(rows.map(row => row.subject))) {
+    const before = new Map<string, string>();
+    for (const row of rows) if (row.subject === subject && !row.deleted) for (const viewId of bound(row)) before.set(key(row.id, viewId), migrationBotId(subject, row.id, viewId));
+    reconcileBots(subject, rows, bots, before, now);
+  }
 }

@@ -13,7 +13,7 @@ export const HOSTED_CHUNK_BYTES = 262144;
 export const HOSTED_RECORD_KINDS = ['relayHeader', 'tenant', 'brokerHeader', 'associationHeader', 'favoritesHeader',
   'session', 'loginChallenge', 'consumedProof', 'securityEvent', 'sessionStar', 'favoritesTree', 'sessionMigration',
   'sessionTitle', 'deviceKey', 'host', 'binding', 'creation', 'preview', 'pairing', 'share', 'reservation',
-  'workspaceWindow', 'revokedHost', 'admission', 'freeze', 'relationChange', 'relationReset', 'favoritesReceipt', 'team', 'sessionRead', 'sessionReadAccount', 'sessionDraft', 'outboxEntry'] as const;
+  'workspaceWindow', 'revokedHost', 'admission', 'freeze', 'relationChange', 'relationReset', 'favoritesReceipt', 'team', 'sessionRead', 'sessionReadAccount', 'sessionDraft', 'outboxEntry', 'bot'] as const;
 export type HostedRecordKind = typeof HOSTED_RECORD_KINDS[number];
 type Identity<K extends HostedRecordKind = HostedRecordKind> = [K, string, string];
 type JsonObject = Record<string, unknown>;
@@ -39,12 +39,12 @@ type HostedBrokerHeader = Omit<Broker, 'keys' | 'hosts' | 'bindings' | 'creation
 type HostedTenantHeader = Omit<Tenant, 'broker' | 'favoritesSuccession'> & {
   broker: Identity<'brokerHeader'>; favoritesSuccession?: Identity<'favoritesHeader'>;
 };
-type HostedRelayHeader = Omit<HostedRelayState, 'workspaceWindows' | 'tenants' | 'sessions' | 'loginChallenges' | 'consumedProofs' | 'securityEvents' | 'sessionStars' | 'favoritesTrees' | 'sessionMigrations' | 'sessionTitles' | 'sessionReads' | 'sessionReadAccounts' | 'sessionDrafts' | 'outbox'> & {
+type HostedRelayHeader = Omit<HostedRelayState, 'workspaceWindows' | 'bots' | 'tenants' | 'sessions' | 'loginChallenges' | 'consumedProofs' | 'securityEvents' | 'sessionStars' | 'favoritesTrees' | 'sessionMigrations' | 'sessionTitles' | 'sessionReads' | 'sessionReadAccounts' | 'sessionDrafts' | 'outbox'> & {
   workspaceWindows?: Identity<'workspaceWindow'>[];
   tenants: Identity<'tenant'>[]; sessions: Identity<'session'>[]; loginChallenges: Identity<'loginChallenge'>[];
   consumedProofs: Identity<'consumedProof'>[]; securityEvents?: Identity<'securityEvent'>[]; sessionStars?: Identity<'sessionStar'>[];
   favoritesTrees?: Identity<'favoritesTree'>[]; sessionMigrations?: Identity<'sessionMigration'>[]; sessionTitles?: Identity<'sessionTitle'>[];
-  sessionReads?: Identity<'sessionRead'>[]; sessionReadAccounts?: Identity<'sessionReadAccount'>[]; sessionDrafts?: Identity<'sessionDraft'>[]; outbox?: Identity<'outboxEntry'>[];
+  sessionReads?: Identity<'sessionRead'>[]; sessionReadAccounts?: Identity<'sessionReadAccount'>[]; sessionDrafts?: Identity<'sessionDraft'>[]; outbox?: Identity<'outboxEntry'>[]; bots?: Identity<'bot'>[];
 };
 export type HostedManifest = {
   format: number; kind: HostedRecordKind; identity: string; byte_length: number; chunk_count: number; digest: string;
@@ -162,7 +162,8 @@ function sameFields(previous: object, next: object): boolean {
   const before = Object.entries(previous), after = Object.entries(next);
   return before.length === after.length && after.every(([key, value], index) => key === before[index]![0] && value === before[index]![1] && immutable(value));
 }
-function encodeValidatedHostedSnapshot(state: HostedRelayState, format: HostedSnapshotFormat, cache?: HostedRecordCache, mode: 'records' | 'costs' = 'records'): HostedSnapshot {
+/** Encodes a state as it is, without validating or migrating it: what an older Relay stored, for tests of loading it. */
+export function encodeValidatedHostedSnapshot(state: HostedRelayState, format: HostedSnapshotFormat, cache?: HostedRecordCache, mode: 'records' | 'costs' = 'records'): HostedSnapshot {
   const records = new Map<string, HostedEncodedRecord>();
   const tuples = new Set<string>(); const hashes = new Map<string, string>(); const costs: HostedRecordCost[] = [];
   const previous = cache?.entries, next = new Map<string, CachedRecord>();
@@ -233,6 +234,7 @@ function encodeValidatedHostedSnapshot(state: HostedRelayState, format: HostedSn
     sessionReadAccounts: references(state.sessionReadAccounts, 'sessionReadAccount', '', value => value.subject),
     sessionDrafts: references(state.sessionDrafts, 'sessionDraft', '', value => JSON.stringify([value.subject, value.hostId, value.providerId, value.nativeSessionId])),
     outbox: references(state.outbox, 'outboxEntry', '', value => JSON.stringify([value.subject, value.id])),
+    bots: references(state.bots, 'bot', '', value => JSON.stringify([value.subject, value.botId])),
     tenants: stable(['references', 'tenant', ''], state.tenants.map(tenant => {
       const owner = tenant.namespace; const source = tenant.broker;
       const broker: HostedBrokerHeader = { ...source,
@@ -369,6 +371,7 @@ export function decodeHostedSnapshot(manifests: HostedManifest[], chunks: Hosted
   collection(relay, 'sessionReadAccounts', 'sessionReadAccount', '');
   collection(relay, 'sessionDrafts', 'sessionDraft', '');
   collection(relay, 'outbox', 'outboxEntry', '');
+  collection(relay, 'bots', 'bot', '');
   if (!Array.isArray(relay.tenants)) invalid('tenant order');
   relay.tenants = relay.tenants.map((ref: unknown) => {
     if (!Array.isArray(ref) || typeof ref[2] !== 'string') invalid('tenant reference');
@@ -409,8 +412,12 @@ export function decodeHostedSnapshot(manifests: HostedManifest[], chunks: Hosted
   // Validate identities against the original Window bytes after their owning
   // validator has accepted them; normalization must not invalidate old digests.
   const verifying = cache && new HostedRecordCache(cache.options);
-  const expected = encodeValidatedHostedSnapshot({ ...state,
-    ...(relay.workspaceWindows === undefined ? {} : { workspaceWindows: relay.workspaceWindows as HostedRelayState['workspaceWindows'] }) }, format, verifying).records;
+  // Bots are compared as stored too: a snapshot written before bot records moves its bots into records when it loads.
+  const stored: HostedRelayState = { ...state,
+    ...(relay.workspaceWindows === undefined ? {} : { workspaceWindows: relay.workspaceWindows as HostedRelayState['workspaceWindows'] }) };
+
+  if (relay.bots === undefined) delete stored.bots; else stored.bots = relay.bots as HostedRelayState['bots'];
+  const expected = encodeValidatedHostedSnapshot(stored, format, verifying).records;
   if (expected.size !== manifests.length) invalid('identity coverage');
   for (const manifest of manifests) {
     const wanted = expected.get(physicalKey(manifest.kind, manifest.identity))?.manifest;

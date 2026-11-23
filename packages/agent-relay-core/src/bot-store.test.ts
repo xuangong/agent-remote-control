@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { WindowGroup } from '@orchardworks/agent-remote-protocol';
-import { mergeBots, migrationBotId, reconcileBots, validBots, type SavedBot } from './bot-store.js';
+import { mergeBots, migrateBots, migrationBotId, needsBotMigration, reconcileBots, validBots, type SavedBot } from './bot-store.js';
 import type { SavedWorkspaceWindow } from './window-workspaces.js';
 
 const view = (id: string, nativeSessionId: string) => ({ id, placement: 'primary', binding: { hostId: 'mac', providerId: 'claude', nativeSessionId, title: nativeSessionId } });
@@ -64,5 +64,19 @@ describe('the bot store', () => {
     expect(validBots([record])).toBe(true);
     expect(validBots([record, record])).toBe(false);
     expect(validBots([{ ...record, subject: '' }])).toBe(false);
+  });
+});
+
+
+describe('moving existing bots into records', () => {
+  it('gives every existing bot view a record with an id derived from its place, once', () => {
+    const rows = [row('g1', { v1: { name: 'Chief', picture: { shape: 'rounded', color: '#ff8a3d' }, pinned: true } })];
+    expect(needsBotMigration(rows)).toBe(true);
+    const bots: SavedBot[] = [];
+    migrateBots(rows, bots, 5);
+    expect(rows[0]!.bots!.members.v1).toEqual({ botId: migrationBotId('me', 'g1', 'v1'), pinned: true });
+    // An older picture shape reads in the current form before it moves.
+    expect(bots).toEqual([expect.objectContaining({ botId: migrationBotId('me', 'g1', 'v1'), name: 'Chief', picture: { shape: 'squircle', color: '#ff8a3d' } })]);
+    expect(needsBotMigration(rows)).toBe(false);
   });
 });

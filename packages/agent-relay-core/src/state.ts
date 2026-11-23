@@ -1,5 +1,6 @@
 import { validCallForSupportState } from './call-for-support-profiles.js';
 import { validWindowState, type SavedWorkspaceWindow } from './window-workspaces.js';
+import { migrateBots, needsBotMigration, validBots, type SavedBot } from './bot-store.js';
 import { ACCOUNT_TEAM_LIMIT, validSavedTeam } from './team-delivery.js';
 import { validFavoritesSuccession, type FavoritesSuccessionProgress } from './favorites-succession.js';
 import { validBrokerAssociations, migrateBrokerAssociations } from './succession-associations.js';
@@ -34,6 +35,8 @@ export interface HostedRelayState {
   version: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
   successionAccounting?: true;
   workspaceWindows?: SavedWorkspaceWindow[];
+  /** Each account's bots (bots design 2.1), one record each; groups refer to them by `botId`. */
+  bots?: SavedBot[];
   securityEvents?: SecurityEvent[];
   sessionStars?: SavedSessionStar[];
   favoritesTrees?: SavedFavoritesTree[];
@@ -148,7 +151,7 @@ function validBroker(value: unknown): value is RemoteHostBrokerState {
 /** Frozen parts of committed state that passed validation; equal identity is equal content because nobody can change them. */
 interface ValidationMemo {
   tenants: WeakSet<object>; sessions: WeakSet<object>; challenges: WeakSet<object>; proofs: WeakSet<object>; events: WeakSet<object>;
-  windows: WeakSet<object>; migrations: WeakSet<object>; stars: WeakSet<object>; titles: WeakSet<object>; reads: WeakSet<object>; drafts: WeakSet<object>; outbox: WeakSet<object>; push: WeakSet<object>; authorities: WeakSet<object>;
+  windows: WeakSet<object>; bots: WeakSet<object>; migrations: WeakSet<object>; stars: WeakSet<object>; titles: WeakSet<object>; reads: WeakSet<object>; drafts: WeakSet<object>; outbox: WeakSet<object>; push: WeakSet<object>; authorities: WeakSet<object>;
   progress: WeakSet<object>; favorites: WeakMap<object, WeakSet<object>>; normalized: WeakMap<object, boolean>;
   /** Whole collections that passed, with their uniqueness and per-account counts. */
   lists: Record<'sessions' | 'tenants' | 'challenges' | 'proofs' | 'events' | 'migrations' | 'stars' | 'reads' | 'drafts' | 'outbox' | 'push', WeakSet<object>>;
@@ -156,7 +159,7 @@ interface ValidationMemo {
 const memos = new WeakMap<HostedAuthOptions, ValidationMemo>();
 function memoFor(auth: HostedAuthOptions): ValidationMemo {
   let memo = memos.get(auth);
-  if (!memo) memos.set(auth, memo = { tenants: new WeakSet(), sessions: new WeakSet(), challenges: new WeakSet(), proofs: new WeakSet(), events: new WeakSet(),
+  if (!memo) memos.set(auth, memo = { tenants: new WeakSet(), sessions: new WeakSet(), challenges: new WeakSet(), proofs: new WeakSet(), events: new WeakSet(), bots: new WeakSet(),
     windows: new WeakSet(), migrations: new WeakSet(), stars: new WeakSet(), titles: new WeakSet(), reads: new WeakSet(), drafts: new WeakSet(), outbox: new WeakSet(), push: new WeakSet(), authorities: new WeakSet(), progress: new WeakSet(),
     favorites: new WeakMap(), normalized: new WeakMap(),
     lists: { sessions: new WeakSet(), tenants: new WeakSet(), challenges: new WeakSet(), proofs: new WeakSet(), events: new WeakSet(), migrations: new WeakSet(), stars: new WeakSet(), reads: new WeakSet(), drafts: new WeakSet(), outbox: new WeakSet(), push: new WeakSet() } });
@@ -190,6 +193,7 @@ function checkRelayState(value: unknown, auth: HostedAuthOptions, memo?: Validat
   if (auth.provider === 'google' && value.sessions.some((session: SavedHostedSession) => !value.googleIdentities?.some((identity: { subject: string }) => identity.subject === session.grant.subject))) return invalid();
   if (value.securityEvents !== undefined && (!Array.isArray(value.securityEvents) || value.securityEvents.length > 4096 || !once(memo?.lists.events, value.securityEvents, (events: unknown[]) => events.every((event: unknown) => once(memo?.events, event, (event: unknown) => record(event) && string(event.id) && string(event.subject) && time(event.at) && string(event.action, 128) && ['allowed', 'denied'].includes(event.outcome) && (event.hostId === undefined || string(event.hostId))))))) return invalid();
   if (value.workspaceWindows !== undefined && !once(memo?.windows, value.workspaceWindows, validWindowState)) return invalid();
+  if (value.bots !== undefined && !once(memo?.bots, value.bots, validBots)) return invalid();
   if (!value.tenants.every((tenant: HostedRelayState['tenants'][number]) => once(memo?.authorities, tenant, tenant => validSuccessionAuthorities({ config: value.config, tenants: [tenant] } as HostedRelayState)))) return invalid();
   if (Object.hasOwn(value, 'sessionSuccessions') && (value.version >= 6 || !validLegacySuccessionMirrors(value.sessionSuccessions, value as HostedRelayState))) throw new Error('Invalid legacy succession mirror state.');
   if (value.sessionMigrations !== undefined && (!Array.isArray(value.sessionMigrations) || value.sessionMigrations.length > 16384 || !once(memo?.lists.migrations, value.sessionMigrations, (migrations: any[]) => {
@@ -281,6 +285,7 @@ function checkRelayState(value: unknown, auth: HostedAuthOptions, memo?: Validat
 function migrateRelayState(value: HostedRelayState): HostedRelayState {
   const migrated = structuredClone(value) as HostedRelayState & { sessionSuccessions?: unknown };
   if (migrated.workspaceWindows) for (const row of migrated.workspaceWindows) if (row.window) row.window = decodeWorkspaceWindow(row.window)!;
+  if (migrated.workspaceWindows && needsBotMigration(migrated.workspaceWindows)) migrateBots(migrated.workspaceWindows, migrated.bots ??= [], Date.now());
   delete migrated.sessionSuccessions;
   return migrated;
 }
@@ -304,7 +309,7 @@ export function checkedRelayState(value: unknown, auth: HostedAuthOptions): Host
     }
     return result;
   };
-  if (Object.hasOwn(value, 'sessionSuccessions') || value.workspaceWindows?.some(row => !normalized(row))) return migrateRelayState(value);
+  if (Object.hasOwn(value, 'sessionSuccessions') || value.workspaceWindows?.some(row => !normalized(row)) || (value.workspaceWindows !== undefined && needsBotMigration(value.workspaceWindows))) return migrateRelayState(value);
   return value;
 }
 /** Only the authenticated Node file adapter calls this explicit v1 migration. */

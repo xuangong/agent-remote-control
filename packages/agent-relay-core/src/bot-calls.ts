@@ -5,7 +5,7 @@
  * an organizer's to its temporary bot, and any other bot's, is input to that task; anything to a standing bot goes to its inbox.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { assistantMessageText, nativeSessionRefKey, taskView, type TeamHostCall, type TaskView, type TeamMember } from '@orchardworks/agent-remote-protocol';
+import { assistantMessageText, nativeSessionRefKey, taskView, type TeamHostCall, type TaskView, type TeamMember, type WorkItem } from '@orchardworks/agent-remote-protocol';
 import { accountDirectory, callerAssistant, type Assistant, type AssistantBrokerPorts, type AssistantMessages, type AssistantPorts } from './assistants.js';
 import { ownerTasks, type TaskGroups } from './tasks.js';
 import { ACCOUNT_TEAM_LIMIT, type SavedTeam } from './team-delivery.js';
@@ -13,6 +13,7 @@ import { plain } from './drafts.js';
 import { pruneCoordination } from './coordination-retention.js';
 import type { BotInboxes } from './inboxes.js';
 import type { Rooms } from './rooms.js';
+import type { BotWork } from './bot-work.js';
 import { newBotId } from './bot-store.js';
 
 type Call<A extends TeamHostCall['action']> = Extract<TeamHostCall, { action: A }>;
@@ -29,7 +30,7 @@ export const temporaryBotId = (teamId: string) => 'b_' + createHash('sha256').up
 const NOT_FOUND = 'No bot of this account answers to that name. List them with list_bots.';
 
 export class BotCalls {
-  constructor(private readonly broker: AssistantBrokerPorts, private readonly ports: AssistantPorts, private readonly tasks: TaskGroups, private readonly messages: AssistantMessages, private readonly inboxes: BotInboxes, private readonly rooms: Rooms) {}
+  constructor(private readonly broker: AssistantBrokerPorts, private readonly ports: AssistantPorts, private readonly tasks: TaskGroups, private readonly messages: AssistantMessages, private readonly inboxes: BotInboxes, private readonly rooms: Rooms, private readonly work: BotWork) {}
   private key(hostId: string, providerId: string, nativeSessionId: string): string | undefined {
     try { return nativeSessionRefKey(this.broker.ports.resolveSession(hostId, providerId, nativeSessionId)); } catch { return undefined; }
   }
@@ -117,6 +118,13 @@ export class BotCalls {
     await this.inboxes.known(self, call.mission);
     return { mission: call.mission };
   }
+  /** A standing bot keeps its work items and timers (bots design 6); a temporary bot's work is its brief. */
+  async keepWork(hostId: string, call: Call<'update_work' | 'complete_work' | 'set_timer'>) {
+    const self = this.caller(hostId, call.owner).standing ?? fail('A temporary bot\'s work is its brief; report progress to your organizer with message.');
+    if (call.action === 'update_work') return this.work.update(self, call);
+    if (call.action === 'complete_work') return this.work.complete(self, call);
+    return this.work.setTimer(self, call);
+  }
   async message(hostId: string, call: Call<'bot_message'>) {
     const from = this.caller(hostId, call.owner), organizer = this.organizerOf(from);
     // A room the sender is a member of: its turn's answer, a pass, or the room's result.
@@ -138,13 +146,15 @@ export class BotCalls {
     }
     return this.messages.deliver(from.standing ?? { key: from.key, name: from.name }, to.standing!, { operationId: call.operationId, text: call.text, ...(call.replyTo ? { replyTo: call.replyTo } : {}) });
   }
-  list(hostId: string, call: Call<'list_bots'>): { bots: BotListing[] } {
+  list(hostId: string, call: Call<'list_bots'>): { bots: BotListing[]; work?: WorkItem[] } {
     const self = this.caller(hostId, call.owner), organizer = this.organizerOf(self);
     const standing = accountDirectory(this.ports.groups()).filter(item => item.key.startsWith('b_') && item.key !== self.key && !item.hidden)
       .map((item): BotListing => ({ id: item.key, name: item.name, kind: 'standing', ...(item.label ? { label: item.label } : {}), ...(item.mission ? { mission: item.mission } : {}) }));
     const mine = this.organized(hostId, call.owner).map((team): BotListing => ({ id: temporaryBotId(team.id), name: team.task!.title, kind: 'temporary', organizer: 'you', status: taskView(team).state, mission: team.task!.brief }));
     const above = organizer?.task ? [{ id: organizer.key, name: organizer.name, kind: 'temporary' as const, mission: organizer.task.task!.brief }] : [];
-    return { bots: [...above, ...mine, ...standing] };
+    // A standing bot also reads its own work items here.
+    const work = self.standing && this.work.items(self.standing);
+    return { bots: [...above, ...mine, ...standing], ...(work?.length ? { work } : {}) };
   }
   /** The organizer's hold on one of its temporary bots: stop its work, retire it, or read where its session is. */
   async organize(hostId: string, call: Call<'stop_bot' | 'retire_bot' | 'bot_session'>) {

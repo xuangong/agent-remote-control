@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { expect, it } from 'vitest';
-import { appendSessionReferences, assistantMessageText, joinTaskInputs, standingInstructionsText, roomTurnText, taskBriefText, taskResultText, taskUpdateText } from '@orchardworks/agent-remote-protocol';
+import { appendSessionReferences, assistantMessageText, joinTaskInputs, standingInstructionsText, roomTurnText, taskBriefText, timerText, taskResultText, taskUpdateText } from '@orchardworks/agent-remote-protocol';
 import { TaskDirectoryContext } from '../TaskDirectory.js';
 import { render } from '../../test/setup.js';
 import { UserMessageItem } from './MessageItem.js';
@@ -35,6 +35,14 @@ it('folds a bot\'s standing instructions into one quiet line, never the person\'
   const folded = container.querySelector('details[data-standing-version="1"]')!;
   expect(folded.querySelector('summary')?.textContent).toBe('Standing instructions updated');
   expect(folded.textContent).toContain('Watch the build.');
+  expect(container.querySelector('.agent-message-user')).toBeNull();
+});
+
+it('folds a due timer into one quiet line that opens to the bot\'s open work', async () => {
+  const container = await render(<UserMessageItem item={message(timerText({ name: 'work', work: [{ title: 'Release notes', phase: 'waiting', next: 'Publish' }] }))} />);
+  const folded = container.querySelector('details[data-timer="work"]')!;
+  expect(folded.querySelector('summary')?.textContent).toBe('Timer "work" is due');
+  expect(folded.textContent).toContain('Release notes · waiting · next: Publish');
   expect(container.querySelector('.agent-message-user')).toBeNull();
 });
 

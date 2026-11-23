@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { TaskView } from '@orchardworks/agent-remote-protocol';
+import type { TaskView, WorkItem } from '@orchardworks/agent-remote-protocol';
 
 /**
  * What the page knows about tasks, for task cards: whether a task's worker session can be opened, and opening it. The page supplies it;
@@ -10,6 +10,8 @@ export interface TaskDirectory {
   open(taskId: string): void;
   /** The tasks a session owns, newest first. */
   owned(owner: { providerId: string; nativeSessionId: string }): readonly TaskView[];
+  /** A standing bot's work items, newest first (bots design 6). */
+  work?(bot: { providerId: string; nativeSessionId: string }): readonly WorkItem[];
   /** The person stops a running task or takes it as done. */
   act(taskId: string, action: 'cancel_task' | 'mark_task_done'): Promise<void>;
 }

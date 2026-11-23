@@ -10,6 +10,7 @@ import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, type SavedTeam } from './t
 import { plain } from './drafts.js';
 import type { TeamBrokerPorts } from './teams.js';
 import type { BotInboxes } from './inboxes.js';
+import { pushBackTimers } from './bot-work.js';
 
 /** What the Team broker lends assistant messages. */
 export interface AssistantBrokerPorts {
@@ -127,7 +128,7 @@ export class AssistantMessages {
       const message = { id: digest(['assistant-message', inbox.id, messageId]), from: seat.id, to: seat.id, status: 'queued' as const, createdAt: now,
         text: assistantMessageText({ messageId, from: from.name, ...(call.replyTo ? { replyTo: call.replyTo } : {}), body: call.text }) };
       assertTeamQueueCapacity(inbox, message);
-      inbox.messages.push(message);
+      inbox.messages.push(message); pushBackTimers(inbox, now);
       recent.push({ id: messageId, from: from.key, hop, operationId: call.operationId });
       if (recent.length > RECENT_KEEP) recent.splice(0, recent.length - RECENT_KEEP);
       inbox.revision++; inbox.updatedAt = now;

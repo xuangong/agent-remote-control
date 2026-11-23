@@ -28,6 +28,7 @@ interface Props {
   onOpen(team: Team, sourceViewId?: string): Promise<boolean>; onOpenSession(target: TeamSource & { teamId?: string; teamMemberId?: string }): Promise<boolean>;
   onTeamsChange?(baseUrl: string, teams: Team[]): void;
   /** Tasks, which the Relay keeps as Teams; the page shows them in their owners' conversations. */
+  /** The tasks, and the bots' inboxes that carry their work items. */
   onTasksChange?(baseUrl: string, tasks: Team[]): void;
 }
 /** How often the Team roster refreshes while someone looks at it or a Team is forming (`watchingMs`), and otherwise (`idleMs`). */
@@ -66,7 +67,7 @@ export function TeamMenu(props: Props) {
     // Tasks travel as Teams on the Relay; they show in their owner's conversation, not among Teams.
     if (currentClient.current === client && ticket === generation.current) {
       setTeams(value.filter(team => !team.task && !team.link && !team.inbox)); setRosterClient(client); setLoadError('');
-      props.onTasksChange?.(baseUrl, value.filter(team => !!team.task));
+      props.onTasksChange?.(baseUrl, value.filter(team => !!team.task || !!team.inbox));
     }
   };
   useEffect(() => {

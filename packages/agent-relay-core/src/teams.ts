@@ -7,6 +7,7 @@ import { AssistantMessages, type AssistantPorts } from './assistants.js';
 import { roomAction, Rooms } from './rooms.js';
 import { BotInboxes } from './inboxes.js';
 import { BotCalls } from './bot-calls.js';
+import { BotWork } from './bot-work.js';
 import { TaskGroups, taskAction, taskPresence, taskSettled, type TaskPorts } from './tasks.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TeamResource } from '@orchardworks/agent-remote-protocol';
@@ -65,13 +66,15 @@ export class TeamBroker {
   private readonly rooms?: Rooms;
   private readonly inboxes?: BotInboxes;
   private readonly bots?: BotCalls;
+  private readonly work?: BotWork;
   constructor(private readonly ports: TeamBrokerPorts) {
     if (ports.tasks) this.tasks = new TaskGroups({ ports, change: update => this.change(update), provision: (teamId, memberId) => this.provision(teamId, memberId) }, ports.tasks);
     if (ports.assistants) {
       const lent = { ports, change: <T>(update: (teams: SavedTeam[]) => T) => this.change(update), provision: (teamId: string, memberId: string) => this.provision(teamId, memberId) };
       this.inboxes = new BotInboxes(lent, ports.assistants); this.assistants = new AssistantMessages(lent, ports.assistants, this.inboxes); this.rooms = new Rooms(lent, ports.assistants);
-      if (this.tasks) this.bots = new BotCalls(lent, ports.assistants, this.tasks, this.assistants, this.inboxes, this.rooms);
-      this.rooms.arm();
+      this.work = new BotWork(lent, this.inboxes);
+      if (this.tasks) this.bots = new BotCalls(lent, ports.assistants, this.tasks, this.assistants, this.inboxes, this.rooms, this.work);
+      this.rooms.arm(); this.work.arm();
     }
     if (ports.callForSupport) this.groups = new CallForSupportGroups({ ports, change: update => this.change(update), provision: (teamId, memberId) => this.provision(teamId, memberId),
       project: team => this.project(team), resource: (team, memberId, resourceId) => this.resourceAccess(team, memberId, resourceId),
@@ -259,6 +262,7 @@ export class TeamBroker {
     }
     if (call.action === 'create_bot') return (this.bots ?? fail(unavailableAssistants)).create(hostId, call);
     if (call.action === 'bot_message') return (this.bots ?? fail(unavailableAssistants)).message(hostId, call);
+    if (call.action === 'update_work' || call.action === 'complete_work' || call.action === 'set_timer') return (this.bots ?? fail(unavailableAssistants)).keepWork(hostId, call);
     if (call.action === 'update_mission') return (this.bots ?? fail(unavailableAssistants)).updateMission(hostId, call);
     if (call.action === 'list_bots') return (this.bots ?? fail(unavailableAssistants)).list(hostId, call);
     if (call.action === 'stop_bot' || call.action === 'retire_bot' || call.action === 'bot_session') return (this.bots ?? fail(unavailableAssistants)).organize(hostId, call);

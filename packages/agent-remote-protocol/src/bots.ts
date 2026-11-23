@@ -46,6 +46,31 @@ export const BotRecord = Type.Object({
 export type BotRecord = Static<typeof BotRecord>;
 export const isBotRecord = (value: unknown): value is BotRecord => Value.Check(BotRecord, value);
 
+const workText = Type.String({ minLength: 1, maxLength: 300 });
+/**
+ * A bot's record of a piece of work (bots design 6.1): what it is, where it stands in the bot's own words, and what comes next. The
+ * bot keeps it with update_work and complete_work; the person reads it in the bot's details.
+ */
+export const WorkItem = Type.Object({
+  id: Type.String({ pattern: '^w_[0-9a-f]{12}$' }),
+  title: Type.String({ minLength: 1, maxLength: 120 }),
+  phase: Type.Union([Type.Literal('clarifying'), Type.Literal('agreed'), Type.Literal('in_progress'), Type.Literal('verifying'), Type.Literal('waiting'), Type.Literal('done')]),
+  summary: workText,
+  next: Type.Optional(workText),
+  acceptance: Type.Optional(Type.String({ minLength: 1, maxLength: 2000 })),
+  updatedAt: time,
+}, strict);
+export type WorkItem = Static<typeof WorkItem>;
+/** Open work items a bot keeps at once; done ones beyond the newest few are dropped. */
+export const WORK_ITEM_LIMIT = 20;
+/**
+ * A bot's fallback timer (bots design 6.2): due after `intervalMs` of quiet, pushed back by every message to the bot. `work` marks the
+ * one the Relay keeps for a bot with open work.
+ */
+export const BotTimer = Type.Object({ name: Type.String({ minLength: 1, maxLength: 60 }), intervalMs: Type.Integer({ minimum: 60_000, maximum: 7 * 24 * 60 * 60_000 }), dueAt: time,
+  work: Type.Optional(Type.Literal(true)) }, strict);
+export type BotTimer = Static<typeof BotTimer>;
+
 /** The bot details fields that belong to the bot rather than to its place in a group. */
 export const BOT_IDENTITY_FIELDS = ['name', 'label', 'picture', 'mission'] as const;
 type IdentityField = typeof BOT_IDENTITY_FIELDS[number];

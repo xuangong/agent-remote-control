@@ -1,6 +1,6 @@
 import { useId, type ReactNode } from 'react';
 import { PROCESS_MODES, type ProcessMode, type SessionFile } from '@orchardworks/agent-client';
-import type { BotPicture, TaskView } from '@orchardworks/agent-remote-protocol';
+import type { BotPicture, TaskView, WorkItem } from '@orchardworks/agent-remote-protocol';
 import type { AvatarMood } from '@orchardworks/agent-client-web/theme';
 import { SegmentedControl, Sheet } from '@orchardworks/agent-client-web/primitives';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
@@ -12,6 +12,7 @@ import { WhereItWorks } from './WhereItWorks.js';
 import { SessionsList, type AssistantSessions } from './SessionsList.js';
 import { FilesList } from './FilesList.js';
 import { TasksList } from './TasksList.js';
+import { WorkList } from './WorkList.js';
 import { MissionEditor, type MissionChoice } from './MissionEditor.js';
 import './assistant.css';
 
@@ -26,6 +27,8 @@ export interface AssistantRef {
   readonly sessions?: AssistantSessions;
   /** The tasks the session on screen owns. */
   readonly tasks?: readonly TaskView[];
+  /** A standing bot's work items, which it keeps itself. */
+  readonly work?: readonly WorkItem[];
   /** This assistant's own process mode; the device's default, notifications and letters are in Settings > Assistants. */
   readonly process?: ProcessModeChoice;
   /** The mission, for an assistant whose bot details the reader may change. */
@@ -55,6 +58,7 @@ export function AssistantDetails({ assistant, surface, onClose }: { assistant: A
         <SegmentedControl<ProcessMode> label={t('process.assistant')} options={options} value={assistant.process.mode} onChange={assistant.process.chooseForAssistant} /></div>
     </div>) : null}
     {assistant.mission ? section('mission', t('details.mission'), <MissionEditor mission={assistant.mission} />) : null}
+    {assistant.work?.length ? section('work', t('details.work'), <WorkList work={assistant.work} />) : null}
     {assistant.where ? section('where', t('details.where'), <WhereItWorks where={assistant.where} />) : null}
     {assistant.sessions ? section('sessions', t('details.sessions'), <SessionsList sessions={assistant.sessions} />) : null}
     {assistant.tasks?.length ? section('tasks', t('details.tasks'), <TasksList tasks={assistant.tasks} />) : null}

@@ -1,16 +1,19 @@
 // The assistant's details for a conversation: what its place and its presentation know, with this conversation's process
 // mode, settings and files. They open in the host's panel, as a sheet on a phone, or in a tile's own panel.
-import { useContext, useMemo, type ReactNode } from 'react';
+import { lazy, Suspense, useContext, useMemo, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { sessionFiles, timelineEntryKey, type AgentReplicaState, type RemoteSessionState, type RemoteSessionStatus } from '@orchardworks/agent-client';
 import { FilePreviewContext, useTaskDirectory, useTranslate, type AgentChildSessionView } from '@orchardworks/agent-client-web/react';
-import { AssistantDetails, type AssistantRef } from './assistant/AssistantDetails.js';
+import type { AssistantRef } from './assistant/AssistantDetails.js';
 import { ModelSettings } from './assistant/ModelSettings.js';
 import { PlanningControl } from './PlanningControl.js';
 import type { AssistantDetailsHost } from './assistant/details-host.js';
 import type { useProcessMode } from './useProcessMode.js';
 import type { MissionChoice } from './assistant/MissionEditor.js';
 import type { LabWorkbenchActions, SessionWorkbenchProps } from './session-workbench-props.js';
+
+/** The details open on the reader's click, so their code loads then. */
+const AssistantDetails = lazy(() => import('./assistant/AssistantDetails.js').then(module => ({ default: module.AssistantDetails })));
 
 export function ConversationDetails({ host, visible, state, details, assistant, displayScope, process, mission, session, sessionStatus, readOnly, mutationBlocked, draftOnly, actions,
   renderSessionSettingError, childrenFor, onOpenChildSession, workspaceLink, nativeSession }: {
@@ -27,6 +30,7 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
   const [providerId, ...rest] = nativeSession?.split('/') ?? [];
   const detailsShown = !!host?.open && visible && (host.surface === 'sheet' || !!host.slot);
   const tasks = detailsShown && directory && providerId && rest.length ? directory.owned({ providerId, nativeSessionId: rest.join('/') }) : [];
+  const work = detailsShown && directory?.work && providerId && rest.length ? directory.work({ providerId, nativeSessionId: rest.join('/') }) : [];
   const files = useMemo(() => detailsShown && state ? sessionFiles(state.timeline.entries) : [], [detailsShown, state?.timeline.entries]);
   const reportedSession = state?.agent?.runtimeInfo.sessionId;
   const lastTurn = detailsShown ? Date.parse(state?.timeline.entries.at(-1)?.timestamp ?? '') || undefined : undefined;
@@ -35,7 +39,7 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
     ...(host?.action ? { action: host.action } : {}), ...(host?.actions ? { actions: host.actions } : {}),
     ...(host?.where ? { where: host.where } : {}), ...(host?.setPicture ? { setPicture: host.setPicture } : {}),
     ...(host?.rename ? { rename: host.rename } : {}),
-    process, ...(mission ? { mission } : {}), ...(tasks.length ? { tasks } : {}),
+    process, ...(mission ? { mission } : {}), ...(tasks.length ? { tasks } : {}), ...(work.length ? { work } : {}),
     sessions: { ...details?.sessions, ...(lastTurn ? { time: lastTurn } : {}), ...(state?.agent?.cwd ? { directory: state.agent.cwd } : {}), ...(reportedSession ? { sessionId: reportedSession } : {}),
       subagents: reportedSession ? childrenFor?.(reportedSession) ?? [] : [], ...(onOpenChildSession ? { openSubagent: onOpenChildSession } : {}),
       tools: <>{details?.sessions?.tools}{workspaceLink}</> },
@@ -48,6 +52,6 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
         resources: state.resources, ...(actions.resolveResource ? { resolveResource: actions.resolveResource } : {}), ...(actions.requestResource ? { requestResource: actions.requestResource } : {}) } });
     } } : {}),
   } : undefined;
-  const panel = assistantRef && host ? <AssistantDetails assistant={assistantRef} surface={host.surface} onClose={() => host.setOpen(false)} /> : null;
+  const panel = assistantRef && host ? <Suspense fallback={null}><AssistantDetails assistant={assistantRef} surface={host.surface} onClose={() => host.setOpen(false)} /></Suspense> : null;
   return panel && host?.surface === 'panel' && host.slot ? createPortal(panel, host.slot) : panel;
 }

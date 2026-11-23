@@ -58,6 +58,7 @@ export const timeline = {
   'timeline.task.open': 'Open',
   'timeline.roomTurn': { one: 'Your turn in {name} · 1 new message', other: 'Your turn in {name} · {count} new messages' },
   'timeline.standingInstructions': 'Standing instructions updated',
+  'timeline.timerDue': 'Timer "{name}" is due',
   'timeline.assistantMessages': { one: 'Message from {from}', other: '{count} messages from {from}' },
   'timeline.reasoning': 'Reasoning trace',
   'timeline.todo.board': 'TASK BOARD',

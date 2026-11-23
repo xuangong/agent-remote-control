@@ -2,7 +2,7 @@ import { Type, type Static } from '@sinclair/typebox';
 import { NativeSessionRef } from './session-succession.js';
 import { Value } from '@sinclair/typebox/value';
 import { TeamResource } from './team-resource.js';
-import { BotId, BotMission, BotName } from './bots.js';
+import { BotId, BotMission, BotName, BotTimer, WorkItem, WORK_ITEM_LIMIT } from './bots.js';
 import { CallForSupportCallInput, CallForSupportFinding, CallForSupportGroup, CallForSupportMandate, CallForSupportReportStatus, CallForSupportRosterProposal,
   isCallForSupportGroup } from './call-for-support.js';
 import { TaskBrief, TaskDoneWhen, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_HOP_LIMIT, ASSISTANT_MESSAGE_LIMIT, ROOM_MINUTES_LIMIT, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, TaskReportStatus, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_QUESTION_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, isTeamTask } from './task.js';
@@ -64,6 +64,9 @@ export type TeamLink = Static<typeof TeamLink>;
 export const TeamInbox = Type.Object({ botId: BotId, instructions: Type.Optional(Type.String({ pattern: '^[0-9a-f]{64}$' })),
   /** The latest messages other bots sent here, with their hop along a reply chain, so a reply names a message it answers. */
   recent: Type.Optional(Type.Array(Type.Object({ id: AssistantMessageId, from: BotId, hop: Type.Integer({ minimum: 1, maximum: ASSISTANT_MESSAGE_HOP_LIMIT }), operationId: id }, object), { maxItems: 64 })),
+  /** The bot's work items and timers (bots design 6). */
+  work: Type.Optional(Type.Array(WorkItem, { maxItems: WORK_ITEM_LIMIT })),
+  timers: Type.Optional(Type.Array(BotTimer, { maxItems: 8 })),
   /** A standing bot another bot created: its seat creates its session, then the Relay places it in its organizer's group (bots design 2.2). */
   pending: Type.Optional(Type.Object({ name: BotName, mission: BotMission, organizer: BotId, groupId: id, message: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })) }, object)) }, object);
 export type TeamInbox = Static<typeof TeamInbox>;
@@ -185,6 +188,10 @@ export const TeamHostCall = Type.Union([
     patch: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })) }, object),
   Type.Object({ action: Type.Literal('list_bots'), owner: BotCaller }, object),
   Type.Object({ action: Type.Literal('update_mission'), owner: BotCaller, mission: BotMission }, object),
+  Type.Object({ action: Type.Literal('update_work'), owner: BotCaller, work: Type.Optional(WorkItem.properties.id), title: Type.Optional(WorkItem.properties.title), phase: Type.Optional(WorkItem.properties.phase),
+    summary: Type.Optional(WorkItem.properties.summary), next: Type.Optional(WorkItem.properties.summary), acceptance: Type.Optional(Type.String({ minLength: 1, maxLength: 2000 })) }, object),
+  Type.Object({ action: Type.Literal('complete_work'), owner: BotCaller, work: WorkItem.properties.id, summary: WorkItem.properties.summary }, object),
+  Type.Object({ action: Type.Literal('set_timer'), owner: BotCaller, name: BotTimer.properties.name, minutes: Type.Integer({ minimum: 0, maximum: 7 * 24 * 60 }) }, object),
   Type.Object({ action: Type.Literal('stop_bot'), owner: BotCaller, bot: Type.String({ minLength: 1, maxLength: 300 }) }, object),
   Type.Object({ action: Type.Literal('retire_bot'), owner: BotCaller, bot: Type.String({ minLength: 1, maxLength: 300 }) }, object),
   Type.Object({ action: Type.Literal('bot_session'), owner: BotCaller, bot: Type.String({ minLength: 1, maxLength: 300 }) }, object),

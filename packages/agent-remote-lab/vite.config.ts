@@ -12,7 +12,8 @@ export default defineConfig({
   root,
   // Measured after stage 6 (2026-11-14): entry 63.6 KB and App 544 KB gzip; about 10% to grow before a build fails. I5d (2026-11-22) took
   // the App chunk to about 602 KB with the desktop's keyboard, context menus and their words in both languages, and raised its budget to
-  // 610 KB; the next growth loads the Chinese catalogue as its own chunk, for a Chinese reader only, as the I4 plan says.
+  // 610 KB. The words of both languages are not in it but in the `locale` chunk beside it, so a Chinese chunk would not shrink it.
+  // The bots' work items (2026-11-23) passed it; an assistant's details now load when the reader opens them (about 4 KB).
   plugins: [react(), bundleBudget([{ chunk: 'entry', gzipBytes: 70_000 }, { chunk: 'App', gzipBytes: 610_000 }]),
     // The installed app's service worker (/sw.js) with this build's shell: the entry and the App chunk it loads at once.
     appShellWorker({ worker: fileURLToPath(new URL('./src/app-shell/service-worker.ts', import.meta.url)), startChunks: ['App'] }), {

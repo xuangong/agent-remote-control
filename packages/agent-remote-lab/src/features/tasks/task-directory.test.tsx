@@ -1,10 +1,11 @@
 import { act } from 'react';
 const act_ = (work: () => void) => act(async () => work());
 import { describe, expect, it, vi } from 'vitest';
-import type { Team, TeamTask } from '@orchardworks/agent-remote-protocol';
+import type { Team, TeamTask, WorkItem } from '@orchardworks/agent-remote-protocol';
 import { TaskDirectoryContext } from '@orchardworks/agent-client-web/react';
 import { render } from '../../test/setup.js';
 import { TasksList } from '../../conversation/assistant/TasksList.js';
+import { WorkList } from '../../conversation/assistant/WorkList.js';
 import { taskDirectory } from './task-directory.js';
 
 function taskTeam(id: string, task: Partial<TeamTask>, worker: { ready?: boolean; owner?: string } = {}): Team {
@@ -49,5 +50,19 @@ describe('the task directory', () => {
     expect(rows.map(row => [...row.querySelectorAll('.lab-assistant-task-actions button')].map(button => button.textContent))).toEqual([['Mark done', 'Stop'], []]);
     await act_(() => rows[0]!.querySelector<HTMLButtonElement>('.lab-assistant-task-actions button:last-child')!.click());
     expect(act).toHaveBeenCalledWith('w', 'cancel_task');
+  });
+
+  it('shows a standing bot\'s work items from its inbox: open ones with their phase and next step first', async () => {
+    const item = (id: string, phase: WorkItem['phase'], updatedAt: number, next?: string): WorkItem => ({ id, title: `Work ${id}`, phase, summary: `Summary ${id}`, updatedAt, ...(next ? { next } : {}) });
+    const inbox = { ...taskTeam('i', {}), task: undefined, members: [{ ...taskTeam('i', {}).members[1]!, nativeSessionId: 'scribe' }],
+      inbox: { botId: 'b_' + '3'.repeat(32), work: [item('w_000000000001', 'done', 9), item('w_000000000002', 'waiting', 5, 'Ask the person.'), item('w_000000000003', 'in_progress', 7)] } } as Team;
+    const directory = taskDirectory([inbox], () => {});
+    expect(directory.work!({ providerId: 'claude', nativeSessionId: 'other' })).toEqual([]);
+    const container = await render(<WorkList work={directory.work!({ providerId: 'claude', nativeSessionId: 'scribe' })} />);
+    const rows = [...container.querySelectorAll('li')];
+    expect(rows.map(row => row.querySelector('.lab-assistant-session-title')!.textContent)).toEqual(['Work w_000000000003', 'Work w_000000000002', 'Work w_000000000001']);
+    expect(rows[1]!.textContent).toContain('Waiting');
+    for (const row of rows) await act_(() => row.querySelector<HTMLButtonElement>('.lab-assistant-session-toggle')!.click());
+    expect(rows[1]!.textContent).toContain('Next: Ask the person.');
   });
 });

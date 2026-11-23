@@ -43,8 +43,20 @@ Built on `feat/bots-1-record` (2026-11-23), toward the first deployment:
   others, one of which answered with `message_assistant`.
 - **No mode.** The coordinator and plain switch is gone; every bot gets the task, message and room tools; any bot reaches any other.
 
-Left for after the first deployment: replies from final text (3.3) for bots whose provider takes no tools, `create_bot` and the
-other bot tools, the `message` tool with `status`, and tasks as temporary bots. Until then tasks keep their own tools.
+Decided with the owner (2026-11-23): step 2 is finished before the first deployment, so what ships is the model, not a stage
+that renames its tools later. How the rest is built:
+
+- **A temporary bot is a projection of its task Team.** Its name is the task's title, its mission the brief, its organizer the
+  task's owner, its session the worker, its status the task's state; its `botId` is derived from the Team's id. No second record
+  to keep in step, and the task cards and the details list keep showing them.
+- **Every bot has the same `agent_remote` tools, called as its own session:** `create_bot`, `message` (with `status`),
+  `list_bots`, `read_bot`, `stop_bot`, `retire_bot`, `update_mission`, and the room tools. A worker gets them too, instead of
+  `report_task` and `ask_owner`. The Relay maps each `message` by who sends it to whom: a temporary bot to its organizer is a report
+  (`done`, `failed`), a question (`needs_input`) or progress; an organizer to its temporary bot is input to the task; anything to a
+  standing bot goes to its inbox.
+- Messages between bots are at most 300 characters; an organizer runs at most 12 bots.
+- Then: standing bots from `create_bot` placed in the organizer's group, `update_mission` for standing bots, replies from final
+  text, attachments with bundles, the person's words to an organized bot, and the e2e flows of design 11.
 
 
 - [ ] No mode (design 2.1): remove the coordinator/plain switch, `mode`, and `coordinatorProvider`; every bot whose provider takes

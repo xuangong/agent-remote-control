@@ -237,7 +237,7 @@ function TeamListItem({ team, selected, busy, onOpen, onRename, navigation, mana
       <button type="button" className="lab-session-row" aria-current={selected || undefined} onClick={onOpen}>
         <span className="lab-tracked-description"><strong>{team.title}</strong><small>{team.callForSupport
           ? `${team.callForSupport.status === 'paused_budget' ? t('team.team.supportPaused') : t('team.team.supportOpen', { count: team.callForSupport.calls.filter(call => call.status === 'open' || call.status === 'queued').length })}${team.callForSupport.roster?.status === 'pending' ? ` · ${t('team.team.rosterWaits')}` : ''} · ${usageText(team.callForSupport.usage, t)}`
-          : t('team.team.workers', { count: team.members.length })}{team.status !== 'active' ? ` · ${enumWords(t, teamStatusWords, team.status)}` : ''}</small></span>
+          : t(team.room ? 'team.room.members' : 'team.team.workers', { count: team.members.length })}{team.status !== 'active' ? ` · ${enumWords(t, teamStatusWords, team.status)}` : ''}</small></span>
       </button>
       <button ref={renameButton} type="button" className="lab-team-rename" disabled={busy} aria-label={t('team.team.renameTeam')} title={t('team.team.renameNamed', { title: team.title })} onClick={() => { setTitle(team.title); setEditing(true); }}>{t('common.rename')}</button>
     </div>

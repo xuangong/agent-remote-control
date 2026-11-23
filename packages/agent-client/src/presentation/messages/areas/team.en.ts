@@ -222,6 +222,7 @@ export const team = {
   'team.team.empty': 'Start with a Leader. Discuss the work, then add members.',
   'team.team.archived': 'Archived',
   'team.room.label': 'Room {name}',
+  'team.room.members': { one: '{count} assistant', other: '{count} assistants' },
   'team.room.speaking': '{name} is speaking',
   'team.room.waiting': 'Waiting for something new',
   'team.room.done': 'Done',

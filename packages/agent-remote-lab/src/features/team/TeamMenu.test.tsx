@@ -385,6 +385,7 @@ it('shows a room with what was said and who speaks, and sends the person\'s mess
   await act(async () => button(view, 'Teams').click());
   const shown = view.querySelector('.lab-room')!;
   expect(shown.querySelector('[role="status"]')?.textContent).toBe('Chief is speaking');
+  expect(view.textContent).toContain('2 assistants');
   expect([...shown.querySelectorAll('.lab-room-transcript li strong')].map(item => item.textContent)).toEqual(['Chief', 'Tracker']);
   const box = shown.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message to the room"]')!;
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, 'Ship it.'); box.dispatchEvent(new Event('input', { bubbles: true })); });

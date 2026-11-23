@@ -222,6 +222,7 @@ export const team: AreaMessages<typeof english> = {
   'team.team.empty': '先从一位组长开始。聊聊要做的事，再添加成员。',
   'team.team.archived': '已归档',
   'team.room.label': '房间 {name}',
+  'team.room.members': { other: '{count} 位助手' },
   'team.room.speaking': '{name} 正在发言',
   'team.room.waiting': '等待新的消息',
   'team.room.done': '已完成',

@@ -530,6 +530,11 @@ a Team of the two main sessions bound where they are, framed as `[Message from <
 task updates; a reply names the message it answers and a chain stops at six messages. The conversation folds them into one line
 per sender. What T1 still owes is tracked in open item O70.
 
+Rooms run on the same path (part of T6, `agent-relay-core/src/rooms.ts`): an assistant opens a room of other assistants with
+`open_room` for a number of minutes; the Relay asks one member at a time, as `[Room "<name>" · <id> · your turn · N new messages ·
+ends in M min]` with only the messages it has not seen, between that member's turns; members answer with `room_say` (`done` with the
+result) or `room_pass`; the person reads, writes and ends a room in the Teams panel. What remains is tracked in open item O71.
+
 
 | Step | Delivers | Gate |
 |---|---|---|

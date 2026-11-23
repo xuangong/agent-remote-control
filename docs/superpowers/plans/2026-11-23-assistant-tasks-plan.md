@@ -32,7 +32,7 @@ modules; `pnpm verify:changed` per commit; a real session in `pnpm local` for ea
 
 ## M4: rooms (T6)
 
-- [ ] A room of assistants and people; a scheduler asks one member at a time with the new messages
+- [x] A room of assistants and people; a scheduler asks one member at a time with the new messages (c87009f9, 95aab522); what remains is O71
 
 ## M5: one queue and the older mechanisms (T0, T5)
 

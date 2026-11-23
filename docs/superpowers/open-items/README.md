@@ -105,4 +105,5 @@ open
 | [O68](O68.md) | Deeper screens still drawn with the legacy controls | the I5d finish pass (2026-11-22), which restyled the main screens and Settings' General, Privacy and data, Advanced and the support profiles | the next change to `workbench-computers`, `workbench-windows`, `workbench-sessions` or the toast | open |
 | [O69](O69.md) | Tasks on the Team path lack the rest of the task model | step T2a of the assistant tasks design (2026-11-23) | T2 and T3 of that design, after the P2 operation queue | open |
 | [O70](O70.md) | Assistants are a directory over the Window groups, not their own record | M3 of the assistant tasks plan (2026-11-23) | T1 of the assistant tasks design | open |
+| [O71](O71.md) | Rooms live in the Teams panel and are opened only by an assistant | M4 of the assistant tasks plan (2026-11-23) | T6 of the assistant tasks design | open |
 <!-- open-items:end -->

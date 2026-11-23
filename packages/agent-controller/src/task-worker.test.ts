@@ -241,7 +241,7 @@ describe('messages between assistants', () => {
     expect(h.sessions.get('tracker')!.deliveries).toEqual([]);
     h.busy('tracker', false);
     await h.runtime.tick();
-    expect(h.sessions.get('tracker')!.deliveries).toEqual([{ delivery: 'immediate', text: expect.stringMatching(/^\[Your standing instructions · v1\]\n[\s\S]*Your mission:\nTrack the release\.$/) }]);
+    expect(h.sessions.get('tracker')!.deliveries).toEqual([{ delivery: 'immediate', text: expect.stringMatching(/^\[Your standing instructions · v2\]\n[\s\S]*Your mission:\nTrack the release\.$/) }]);
     await h.host({ action: 'support_enablement' });
     await h.runtime.tick();
     expect(h.sessions.get('tracker')!.deliveries).toHaveLength(1);

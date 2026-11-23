@@ -32,7 +32,7 @@ it('shows a worker its brief with who asked and the done-when line, also when a 
 
 it('folds a bot\'s standing instructions into one quiet line, never the person\'s bubble', async () => {
   const container = await render(<UserMessageItem item={message(standingInstructionsText('Watch the build.'))} />);
-  const folded = container.querySelector('details[data-standing-version="1"]')!;
+  const folded = container.querySelector('details[data-standing-version="2"]')!;
   expect(folded.querySelector('summary')?.textContent).toBe('Standing instructions updated');
   expect(folded.textContent).toContain('Watch the build.');
   expect(container.querySelector('.agent-message-user')).toBeNull();

@@ -23,7 +23,7 @@ describe('bot inboxes', () => {
     expect(isTeam(inbox)).toBe(true);
     expect(inbox.members).toEqual([expect.objectContaining({ role: 'requester', hostId: 'mac', providerId: 'codex', nativeSessionId: 'chief', creation: 'ready' })]);
     expect(inbox.messages).toHaveLength(1);
-    expect(inbox.messages[0]!.text).toMatch(/^\[Your standing instructions · v1\]\n/);
+    expect(inbox.messages[0]!.text).toMatch(/^\[Your standing instructions · v2\]\n/);
     expect(inbox.messages[0]!.text).toContain('Your mission:\nLead the release.');
     await f.poll();
     expect(f.inboxes()[0]!.messages).toHaveLength(1);
@@ -39,7 +39,7 @@ describe('bot inboxes', () => {
     expect(f.inboxes()).toEqual([]);
     f.details.mission = 'Watch the build.';
     await f.poll();
-    expect(f.inboxes()[0]!.messages.map(message => message.text.split('\n')[0])).toEqual(['[Your standing instructions · v1]']);
+    expect(f.inboxes()[0]!.messages.map(message => message.text.split('\n')[0])).toEqual(['[Your standing instructions · v2]']);
   });
 
   it('gives a Host inboxes only for the bots whose main session it holds', async () => {

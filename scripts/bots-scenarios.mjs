@@ -50,6 +50,7 @@ async function settled(address, after, timeoutMs = TURN_MS) {
       .catch(error => { if (error.code === 'history_unavailable' && Date.now() < deadline) return {}; throw error; });
     const [newest] = read.entries ?? [], state = read.session?.state;
     if (state === 'waiting') { approve(address); await delay(2000); continue; }
+    approveAll();
     // Bots keep working between turns: the session counts as settled once it stayed idle for a while.
     quiet = newest && newest.id !== after && state !== 'running' ? quiet + 1 : 0;
     if (quiet >= 4) return newest;
@@ -57,10 +58,15 @@ async function settled(address, after, timeoutMs = TURN_MS) {
     await delay(3000);
   }
 }
+/** The person answers what any of the scenario's sessions asks: on this instance every session is one the scenario started. */
+function approveAll() {
+  for (const session of controller('session', 'list', '--limit', '50').sessions ?? []) if (session.state === 'waiting') approve(session.address);
+}
 /** Waits for a fact to hold, reading it again every few seconds. */
 async function until(what, read, timeoutMs = TURN_MS) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
+    approveAll();
     const value = read();
     if (value) return value;
     if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}.`);
@@ -107,12 +113,13 @@ const organizer = await organizerBot(`Organizer ${tag}`);
 if (run('temporary')) {
   // An organizer splits the person's request between temporary bots, which report back; it sums up for the person.
   const [a, b] = [`alpha-${tag}.txt`, `beta-${tag}.txt`];
-  const reply = await say(organizer.address, `Use two temporary bots working in parallel: one creates ${a} containing the word alpha, the other creates ${b} containing the word beta, both in your working directory. When both have reported, tell me in one line what each did.`);
+  await say(organizer.address, `Use two temporary bots working in parallel: one creates ${a} containing the word alpha, the other creates ${b} containing the word beta, both in your working directory. When both have reported, tell me in one line what each did.`);
   const done = await until('both temporary bots to report', () => { const own = tasksOf(organizer); return own.length >= 2 && own.every(team => ['done', 'failed'].includes(team.task.state)) && own; });
   check('temporary: the organizer started two temporary bots', done.length === 2, `${done.length} started`);
   check('temporary: both reported done', done.every(team => team.task.state === 'done'), done.map(team => team.task.state).join(', '));
   check('temporary: both files exist', existsSync(file(a)) && existsSync(file(b)) && readFileSync(file(a), 'utf8').includes('alpha') && readFileSync(file(b), 'utf8').includes('beta'));
-  const final = await settled(organizer.address, reply.id).catch(() => reply);
+  // Its summary may have come with the reply already; the latest entry once it is quiet is what the person reads.
+  const final = await settled(organizer.address, undefined);
   check('temporary: the organizer summed up for the person', /alpha|beta|\.txt/i.test(final.text ?? ''), (final.text ?? '').slice(0, 120));
   const view = chains(), chain = view.chains.find(item => item.bot && view.names[item.bot] === organizer.name && item.cause === 'person' && item.created >= 2);
   check('temporary: one chain from the person\'s input holds both bots', !!chain, chain ? `created ${chain.created}, messages ${chain.messages}, turns ${chain.turns}, tokens ${chain.usage.tokens}` : 'none');

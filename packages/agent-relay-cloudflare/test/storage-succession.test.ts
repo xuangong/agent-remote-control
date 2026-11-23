@@ -503,7 +503,7 @@ test('full recovery registration construction fits the saved claim and ends only
       os: { platform: label, name: label, arch: label, release: label }, wsl: false, container: false,
       shell: { name: label, source: 'environment' }, shells: Array(16).fill(tool), browsers: Array(16).fill(tool), vscode: { status: 'not-found' } },
       controller: { version: '999999999.999999999.999999999', revision: 'f'.repeat(40), platform: '\ud800'.repeat(32), arch: '\ud800'.repeat(32), nodeMajor: 100, remoteUpdate: false },
-      providerManagement: true, tpmManagement: true, providers: Array.from({ length: 64 }, (_, index) => ({ providerId: '\ud800'.repeat(510) + String(index).padStart(2, '0'), displayName: '\ud800'.repeat(512), promptEditing: true, sessionRename: true, daemonControl: true })) };
+      providerManagement: true, providers: Array.from({ length: 64 }, (_, index) => ({ providerId: '\ud800'.repeat(510) + String(index).padStart(2, '0'), displayName: '\ud800'.repeat(512), promptEditing: true, sessionRename: true, daemonControl: true })) };
     await peer.connect(invitation.key, metadata);
     const saved = reopen(f.storage).initial;
     expect(saved.tenants[0]!.broker.hosts[0]).toMatchObject(metadata);

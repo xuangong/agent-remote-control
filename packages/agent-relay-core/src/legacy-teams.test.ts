@@ -49,3 +49,11 @@ it('drops the file transfers of a Team an older Relay saved, and loads it unchan
   expect(kept.messages).toEqual([{ id: 'm1', from: 'bot', to: 'bot', text: 'hello', status: 'queued', createdAt: 1 }]);
   expect(validateRelayState(structuredClone(loaded), auth)).toEqual(loaded);
 });
+
+it('drops the tag and managed binding of a view that showed a TPM work, and the view stays a plain session', () => {
+  const loaded = state([inbox]); const window = loaded.workspaceWindows![0]!.window!;
+  window.views[1] = { ...window.views[1]!, feature: { kind: 'tpm', id: 'work-1', metadata: { hostId: 'mac' } }, bindingPolicy: 'managed' };
+  const migrated = validateRelayState(loaded, auth).workspaceWindows![0]!.window!.views;
+  expect(migrated.every(view => view.feature === undefined && view.bindingPolicy === undefined)).toBe(true);
+  expect(migrated[1]!.binding?.nativeSessionId).toBe('native-a');
+});

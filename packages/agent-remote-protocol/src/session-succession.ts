@@ -23,7 +23,7 @@ const request = { preparation: Type.Optional(NativePrefixSelection), operationId
 export const SuccessionRequest = Type.Object(request, object);
 export type SuccessionRequest = Static<typeof SuccessionRequest>;
 export const SuccessionParticipant = Type.Object({ relationId: id,
-  kind: Type.Union([Type.Literal('side'), Type.Literal('ask'), Type.Literal('tpm')]), before: NativeSessionRef, after: NativeSessionRef }, object);
+  kind: Type.Union([Type.Literal('side'), Type.Literal('ask')]), before: NativeSessionRef, after: NativeSessionRef }, object);
 export type SuccessionParticipant = Static<typeof SuccessionParticipant>;
 export const PreparedSuccession = Type.Object({ ...request, associationRevision: counter,
   to: NativeSessionRef, workspace: SuccessionWorkspace,

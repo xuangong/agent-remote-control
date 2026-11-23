@@ -41,14 +41,13 @@ export function createHostViews({ brokerState, access, accountBacked, ownerSubje
     });
   }
   function visibleHosts(subject?: string) {
-    return [...brokerState.hosts.values()].filter(host => hostAllowed(host.id, subject)).map(({ id, name, providers: named, legacyDsh, socket, ready, credentialRotation, environment, controller, providerManagement, tpmManagement, teamManagement, hostStatus, outbox, control, tasks, coordinatorProviders }) => {
+    return [...brokerState.hosts.values()].filter(host => hostAllowed(host.id, subject)).map(({ id, name, providers: named, legacyDsh, socket, ready, credentialRotation, environment, controller, providerManagement, teamManagement, hostStatus, outbox, control, tasks, coordinatorProviders }) => {
     // A provider whose assistants can be coordinators: the Host runs tasks and gives that provider's sessions the task tools.
     const providers = named.map(provider => tasks === 1 && coordinatorProviders?.includes(provider.providerId) ? { ...provider, coordinator: true as const } : provider);
     return {
       ...(outbox ? { outbox } : {}),
       ...(control ? { sessionControl: true as const } : {}),
       ...(teamManagement ? { teamManagement } : {}),
-      ...(tpmManagement ? { tpmManagement } : {}),
       ...(hostStatus ? { hostStatus } : {}),
       ...(providerManagement ? { providerManagement } : {}),
       ...(controller ? { controller } : {}),

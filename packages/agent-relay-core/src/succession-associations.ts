@@ -49,6 +49,11 @@ export function migrateBrokerAssociations(value: unknown): BrokerAssociationStat
     if ((candidate as unknown as BrokerAssociationState).freezes?.some(row => row.receipt.version === 3 || row.receipt.request.preparation)) throw new Error('Legacy association storage cannot certify native prefix.');
     candidate = { ...candidate, version: 6 };
   }
+  // A TPM's relation is not carried anymore: its participants are dropped from the receipts of earlier handoffs.
+  for (const row of (candidate as unknown as BrokerAssociationState).freezes ?? []) {
+    const prepared = row.projection?.receipt.prepared as { participants: Array<{ kind: string }> } | undefined;
+    if (prepared?.participants?.some(item => item.kind === 'tpm')) prepared.participants = prepared.participants.filter(item => item.kind !== 'tpm');
+  }
   if (!validBrokerAssociations(candidate)) throw new Error('Invalid durable association state.');
   return candidate;
 }

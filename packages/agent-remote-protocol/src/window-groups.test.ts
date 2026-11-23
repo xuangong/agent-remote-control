@@ -26,7 +26,6 @@ it('counts every view with a current session as a bot except Asks, history, suba
   expect(isBotView(createWindowView('dock', session('b')))).toBe(true);
   expect(isBotView({ ...createWindowView('side', session('d'), 'attached'), attachedTo: 'main' })).toBe(true);
   expect(isBotView({ ...createWindowView('team', session('f')), feature: { kind: 'team', id: 'release', metadata: { role: 'member' } }, bindingPolicy: 'managed' })).toBe(true);
-  expect(isBotView({ ...createWindowView('tpm', session('t')), feature: { kind: 'tpm', id: 'work', metadata: { hostId: 'mac' } }, bindingPolicy: 'managed' })).toBe(true);
   expect(isBotView({ ...createWindowView('ask', session('e'), 'float'), feature: { kind: 'ask', id: 'ask-1' }, bindingPolicy: 'managed' })).toBe(false);
   expect(isBotView(createWindowView('empty'))).toBe(false);
   expect(isBotView(createWindowView('past', { ...session('c'), sessionIntent: 'history' }))).toBe(false);

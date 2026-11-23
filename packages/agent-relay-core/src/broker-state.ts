@@ -128,8 +128,8 @@ export function createBrokerState(options: BrokerStateOptions): BrokerState {
         ...(state.journalDeletions.length > 0 ? { journalDeletions: [...state.journalDeletions] } : {}), ...(options.keepsAssociations ? { associations: state.associations } : {}),
         pairings: structuredClone(state.pairings), previews: structuredClone(state.previews?.snapshot() ?? []), ...(options.keepsSharing ? { sharing: state.sharing.snapshot() } : {}),
         keys: [...keys].map(([key, value]) => [key, structuredClone(value)]),
-        hosts: structuredClone([...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment, pairingPurpose, controller, providerManagement, tpmManagement, teamManagement, outbox, smartReading }) => ({
-          ...(outbox ? { outbox } : {}), ...(smartReading ? { smartReading: [...smartReading] } : {}), ...(teamManagement ? { teamManagement } : {}), ...(tpmManagement ? { tpmManagement } : {}),
+        hosts: structuredClone([...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment, pairingPurpose, controller, providerManagement, teamManagement, outbox, smartReading }) => ({
+          ...(outbox ? { outbox } : {}), ...(smartReading ? { smartReading: [...smartReading] } : {}), ...(teamManagement ? { teamManagement } : {}),
           ...(providerManagement ? { providerManagement } : {}), ...(controller ? { controller } : {}), ...(pairingPurpose ? { pairingPurpose } : {}), ...(environment ? { environment } : {}),
           id, installationId, name, providers, legacyDsh, ...(credentialRotation ? { credentialRotation } : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) }))),
         bindings: structuredClone([...bindings.values()].map(({ generation: _generation, recovery: _recovery, ...binding }) => binding)),

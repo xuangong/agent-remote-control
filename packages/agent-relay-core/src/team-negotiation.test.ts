@@ -5,7 +5,6 @@ import { afterEach, expect, test } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-session-runtime';
 import { isTeam, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
-import { decodeLegacyRemoteHostUplinkMessage as decodeLegacy } from '@orchardworks/agent-remote-protocol/testing';
 import { createHostBroker, type RemoteHostBrokerState } from './broker.js';
 import { memoryHostClient, relaySocket } from './test-utils/ws-relay-socket.js';
 import { type SavedTeam } from './team-delivery.js';
@@ -15,16 +14,15 @@ afterEach(async () => { for (const dispose of close.splice(0).reverse()) await d
 const ref = (nativeSessionId: string) => ({ controllerId: 'controller', providerId: 'codex', nativeSessionId });
 const heartbeat = { intervalMs: 30000, timeoutMs: 10000 };
 
-async function legacyRelay() {
+async function relayWithoutSuccession() {
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await once(server, 'listening', { signal: AbortSignal.timeout(3000) });
   close.push(async () => { for (const socket of server.clients) socket.terminate(); await new Promise<void>(done => server.close(() => done())); });
-  const packets: any[] = [], sockets: WebSocket[] = [], invalid: unknown[] = [];
+  const packets: any[] = [], sockets: WebSocket[] = [];
   server.on('connection', socket => {
     sockets.push(socket);
     socket.on('message', data => {
       const packet = JSON.parse(data.toString());
-      if (decodeLegacy(data.toString()).status !== 'ok') { invalid.push(packet); socket.close(1008, 'Invalid uplink envelope'); return; }
       packets.push(packet);
       if (packet.type === 'register') {
         socket.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host', teamManagement: true, heartbeat }));
@@ -32,7 +30,7 @@ async function legacyRelay() {
       if (packet.type === 'team_request') socket.send(JSON.stringify({ uplinkVersion: 2, type: 'team_response', requestId: packet.requestId, status: 200, body: JSON.stringify(packet.call.action === 'poll' ? [] : { resolvedTarget: ref('A') }) }));
     });
   });
-  return { server, packets, sockets, invalid, url: `ws://127.0.0.1:${(server.address() as { port: number }).port}/ws/remote-host` };
+  return { server, packets, sockets, url: `ws://127.0.0.1:${(server.address() as { port: number }).port}/ws/remote-host` };
 }
 
 async function client(url: string) {
@@ -108,7 +106,7 @@ test('current Relay acknowledges Team succession only when offered', async () =>
 }, 10000);
 
 test('the Controller offers Team succession and learns from each registration whether the Relay supports it', async () => {
-  const f = await legacyRelay();
+  const f = await relayWithoutSuccession();
   const host = await client(f.url);
   expect(host.teamSuccession).toBe(false);
   const current = await currentRelay(), modern = createRemoteHostUplinkClient({ relay: createAgentRemoteRelay({ providers: [] }), url: await current.listen(), installationId: 'controller', name: 'Host', remoteKey: 'key',

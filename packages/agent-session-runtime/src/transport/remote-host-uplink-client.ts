@@ -72,7 +72,6 @@ export interface RemoteHostUplinkClientOptions {
   readonly name: string;
   readonly environment?: HostEnvironment;
   readonly controller?: ControllerIdentity;
-  readonly tpmManagement?: true;
   /** Answer Host status reads (sessions, CPU, memory and disks); advertised so a Relay asks only Controllers that can. */
   readonly hostStatus?: true;
   readonly teamManagement?: true;
@@ -299,7 +298,6 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         ...(options.onCredential ? { credentialRotation: true } : {}),
         ...(options.environment ? { environment: options.environment } : {}),
         ...(options.controller ? { controller: options.controller } : {}),
-        ...(options.tpmManagement ? { tpmManagement: true } : {}),
         ...(options.providerChanges ? { providerManagement: true } : {}),
         name: options.name, ...(options.providers === undefined ? { providerId: 'dsh' } : { providers: options.providerChanges?.current() ?? options.providers }),
       }));

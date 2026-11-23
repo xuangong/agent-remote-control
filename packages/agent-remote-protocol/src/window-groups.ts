@@ -112,8 +112,8 @@ export class WindowGroupError extends WindowLayoutError {
 }
 
 /**
- * A bot is a view showing a current session: ordinary sessions, Sides (attached views) and the managed sessions of Teams,
- * TPM works and Support rosters. Asks, history views, subagents' views and empty views are not bots; an Ask nests under its bot.
+ * A bot is a view showing a current session: ordinary sessions, Sides (attached views) and sessions a feature manages.
+ * Asks, history views, subagents' views and empty views are not bots; an Ask nests under its bot.
  */
 export function isBotView(view: WindowView): view is WindowView & { binding: WindowSessionBinding } {
   return view.binding !== undefined && view.binding.sessionIntent === undefined
@@ -231,8 +231,7 @@ function edit(group: WindowGroup, item: WindowGroupEdit): WindowGroup {
       return { ...group, bots: { ...section, ...(item.muted ? { muted: true as const } : {}), ...(item.notifications === 'needs_you' ? { notifications: item.notifications } : {}) } };
     }
     default: {
-      // Rule 1: a bot keeps its conversation; the title and role details of that session may change. A managed bot (a Team member,
-      // a TPM or Support session) never takes view.bind: its feature rebinds it through the layout, like succession.
+      // Rule 1: a bot keeps its conversation; the title and role details of that session may change. A managed bot never takes view.bind: its feature rebinds it through the layout, like succession.
       if (item.type === 'view.bind' && rebindsBot(group, group.window.views.find(candidate => candidate.id === item.viewId), item.binding)) {
         fail('bot_view', 'A bot keeps its conversation. Open the other session beside it.');
       }

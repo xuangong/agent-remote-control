@@ -1,8 +1,8 @@
 /**
  * What Relay state of earlier builds holds and this build no longer has, dropped when the state loads and not converted:
- * ordinary Teams (a Team of none of a task, a link, a bot's inbox or a room, which the person made from a panel), the `team` tags
- * and managed bindings of the Window views that showed their members, and the file transfers of a Team (uploads, grants and
- * message attachments). The Window views stay plain sessions.
+ * ordinary Teams (a Team of none of a task, a link, a bot's inbox or a room, which the person made from a panel), the `team` and
+ * `tpm` tags and managed bindings of the Window views that showed their members and TPM works, and the file transfers of a Team
+ * (uploads, grants and message attachments). The Window views stay plain sessions.
  */
 import type { Team } from '@orchardworks/agent-remote-protocol';
 import type { SavedWorkspaceWindow } from './window-workspaces.js';
@@ -15,17 +15,18 @@ export const isOrdinaryTeam = (team: unknown): boolean => {
 interface Broker { teams?: Team[] }
 type Tenant = { subject: string; broker: Broker };
 
-const taggedByTeam = (row: SavedWorkspaceWindow) => !row.deleted && !!row.window?.views.some(view => view.feature?.kind === 'team');
+const removedFeatures = new Set(['team', 'tpm']);
+const taggedByRemovedFeature = (row: SavedWorkspaceWindow) => !row.deleted && !!row.window?.views.some(view => view.feature !== undefined && removedFeatures.has(view.feature.kind));
 
-/** Whether the state still holds an ordinary Team or a view tagged for one. */
+/** Whether the state still holds an ordinary Team or a view tagged for a removed feature. */
 export const hasLegacyTeams = (tenants: readonly Tenant[], rows: readonly SavedWorkspaceWindow[] = []): boolean =>
-  tenants.some(tenant => tenant.broker?.teams?.some(isOrdinaryTeam)) || rows.some(taggedByTeam);
+  tenants.some(tenant => tenant.broker?.teams?.some(isOrdinaryTeam)) || rows.some(taggedByRemovedFeature);
 
-/** Removes every ordinary Team, and the `team` tag and managed binding of every view that carries one. */
+/** Removes every ordinary Team, and the `team` or `tpm` tag and managed binding of every view that carries one. */
 export function dropLegacyTeams(tenants: Tenant[], rows: SavedWorkspaceWindow[]): void {
   for (const tenant of tenants) if (tenant.broker?.teams) tenant.broker.teams = tenant.broker.teams.filter(team => !isOrdinaryTeam(team));
   for (const row of rows) for (const view of row.window?.views ?? []) {
-    if (view.feature?.kind !== 'team') continue;
+    if (view.feature === undefined || !removedFeatures.has(view.feature.kind)) continue;
     delete view.feature;
     if (view.bindingPolicy === 'managed') delete view.bindingPolicy;
   }

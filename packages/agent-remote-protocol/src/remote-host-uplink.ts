@@ -43,7 +43,7 @@ const closeCode = Type.Union([
 
 const requestPath = Type.String({
   maxLength: 8192,
-  pattern: '^/(remote/(catalog(?:/(?:revision|session|listing))?|workspaces|workspace-folders(?:/create)?(?=\\?|$)|models|succession/enrollment(?=$)|diagnostics/relay(?=$)|controller-update(?=$)|codex-daemon(?=$)|host-status(?=$)|team/(?:create-seat|support-bundle|support-patch)(?=$)|tpm(?:/(?:work|create|action))?(?=\\?|$)|provider-settings(?=$)|session/rename(?=$)|session/refs(?=\\?|$)|session/call(?=$)|child/attach|attach|create|stop|vscode-tunnel(?:/(?:start|stop))?(?=$)|previews(?:/unregister)?)|v1/(providers|sessions))(?:[/?][^#]*)?$',
+  pattern: '^/(remote/(catalog(?:/(?:revision|session|listing))?|workspaces|workspace-folders(?:/create)?(?=\\?|$)|models|succession/enrollment(?=$)|diagnostics/relay(?=$)|controller-update(?=$)|codex-daemon(?=$)|host-status(?=$)|team/(?:create-seat|support-bundle|support-patch)(?=$)|provider-settings(?=$)|session/rename(?=$)|session/refs(?=\\?|$)|session/call(?=$)|child/attach|attach|create|stop|vscode-tunnel(?:/(?:start|stop))?(?=$)|previews(?:/unregister)?)|v1/(providers|sessions))(?:[/?][^#]*)?$',
 });
 
 export const RemoteHostUplinkMessage = Type.Union([
@@ -54,9 +54,9 @@ export const RemoteHostUplinkMessage = Type.Union([
   Type.Object({ ...rpc, type: Type.Literal('outbox_response'), status: Type.Integer({ minimum: 200, maximum: 599 }), body: Type.String() }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('outbox_ready') }, object),
   Type.Union([
-    Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity, environment: Type.Optional(HostEnvironment), controller: Type.Optional(ControllerIdentity), providerManagement: Type.Optional(Type.Literal(true)), tpmManagement: Type.Optional(Type.Literal(true)), credentialRotation: Type.Optional(Type.Literal(true)),
+    Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity, environment: Type.Optional(HostEnvironment), controller: Type.Optional(ControllerIdentity), providerManagement: Type.Optional(Type.Literal(true)), credentialRotation: Type.Optional(Type.Literal(true)),
       providerId: Type.Literal('dsh') }, object),
-    Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity, environment: Type.Optional(HostEnvironment), controller: Type.Optional(ControllerIdentity), providerManagement: Type.Optional(Type.Literal(true)), tpmManagement: Type.Optional(Type.Literal(true)), credentialRotation: Type.Optional(Type.Literal(true)),
+    Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity, environment: Type.Optional(HostEnvironment), controller: Type.Optional(ControllerIdentity), providerManagement: Type.Optional(Type.Literal(true)), credentialRotation: Type.Optional(Type.Literal(true)),
       providers: Type.Array(provider, { minItems: 0, maxItems: 64 }) }, object),
   ]),
   Type.Object({ uplinkVersion: version, type: Type.Literal('credential_issued'), credential: Type.String({ minLength: 1, maxLength: 512, pattern: '^[!-~]+$' }) }, object),
@@ -141,7 +141,7 @@ function validRemoteHostUplinkMessage(value: unknown): value is RemoteHostUplink
     if (pathname === '/remote/previews' || pathname === '/remote/controller-update' || pathname === '/remote/codex-daemon' || pathname === '/remote/provider-settings'
       || pathname === '/remote/session/refs' || pathname === '/remote/catalog/listing') return value.method === 'GET' ? value.body === undefined : value.body !== undefined;
     if (pathname.startsWith('/remote/')) {
-      const isRead = pathname === '/remote/tpm' || pathname === '/remote/tpm/work' || pathname === '/remote/catalog' || pathname === '/remote/catalog/revision'
+      const isRead = pathname === '/remote/catalog' || pathname === '/remote/catalog/revision'
         || pathname === '/remote/catalog/session' || pathname === '/remote/workspaces' || pathname === '/remote/workspace-folders' || pathname === '/remote/models' || pathname === '/remote/vscode-tunnel' || pathname === '/remote/host-status';
       if ((isRead && (value.method !== 'GET' || value.body !== undefined))
         || (!isRead && (value.method !== 'POST' || value.body === undefined))) return false;

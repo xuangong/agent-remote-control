@@ -47,6 +47,13 @@ test('retains committed evidence when a current mapping or provider is removed',
   const contradictory = saved(); contradictory.tenants[0]!.broker.hosts[0]!.installationId = 'other';
   expect(() => validateRelayState(contradictory, auth)).toThrow();
 });
+test('drops the TPM participants of earlier handoffs when the associations load', () => {
+  const initial = saved(), freeze = initial.tenants[0]!.broker.associations!.freezes[1]!;
+  freeze.projection!.receipt.prepared!.participants = [{ relationId: 'tpm:work', kind: 'tpm', before: ref('A'), after: ref('A') }] as never;
+  const loaded = migrateBrokerAssociations(initial.tenants[0]!.broker.associations);
+  expect(loaded.freezes[1]!.projection!.receipt.prepared!.participants).toEqual([]);
+  expect(migrateBrokerAssociations(loaded)).toEqual(loaded);
+});
 test('rejects changed freeze request, reordered lineage and reused executors', () => {
   for (const mutate of [
     (value: ReturnType<typeof saved>) => { value.tenants[0]!.broker.associations!.freezes[0]!.receipt.request.from = ref('wrong'); },

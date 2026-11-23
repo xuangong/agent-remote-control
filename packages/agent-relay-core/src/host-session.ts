@@ -279,7 +279,7 @@ export function createHostSession(ports: HostSessionPorts) {
             ? existing.pairingPurpose ?? (existing.gatewayKeyRequested ? 'gateway-setup' : 'host-only')
             : credential.purpose ?? 'host-only';
           const providers = 'providers' in message ? [...message.providers] : [{ providerId: 'dsh', displayName: 'DeepSeek DSH' }];
-          const next = { id: existing?.id ?? recovery?.hostId ?? ids.uuid(), installationId: message.installationId, name: message.name, environment: message.environment, controller: message.controller, providerManagement: message.providerManagement, tpmManagement: message.tpmManagement, teamManagement: teamRequested ? true as const : undefined, teamSuccession: teamRequested && successionRequested ? 1 as const : undefined,
+          const next = { id: existing?.id ?? recovery?.hostId ?? ids.uuid(), installationId: message.installationId, name: message.name, environment: message.environment, controller: message.controller, providerManagement: message.providerManagement, teamManagement: teamRequested ? true as const : undefined, teamSuccession: teamRequested && successionRequested ? 1 as const : undefined,
             tasks: teamRequested && successionRequested && tasksRequested ? 1 as const : undefined,
             pairingPurpose: purpose,
             coordinatorProviders: teamRequested && successionRequested && tasksRequested ? tasksRequested : undefined,

@@ -34,7 +34,6 @@ export type Host = {
   sessionStates?: HostStates;
   successionEnrollmentVersion?: 1 | 2 | 3;
   providerManagement?: true;
-  tpmManagement?: true;
   /** The Controller answers Host status reads; it said so when it connected. */
   hostStatus?: true;
   /** The Controller delivers messages from the outbox; it said so when it last connected, and the Host keeps it while offline. */
@@ -87,7 +86,7 @@ export interface RemoteHostBrokerState {
   previews?: HostPreviewState[];
   sharing?: HostSharingState;
   keys: Array<[string, DeviceCredential]>;
-  hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh' | 'credentialRotation' | 'gatewayKeyRequested' | 'environment' | 'pairingPurpose' | 'controller' | 'providerManagement' | 'tpmManagement' | 'teamManagement' | 'outbox' | 'smartReading'>>;
+  hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh' | 'credentialRotation' | 'gatewayKeyRequested' | 'environment' | 'pairingPurpose' | 'controller' | 'providerManagement' | 'teamManagement' | 'outbox' | 'smartReading'>>;
   bindings: Array<Omit<Binding, 'generation' | 'recovery'>>;
   creations: Array<[string, { fingerprint: string; agentId: string }]>;
 }

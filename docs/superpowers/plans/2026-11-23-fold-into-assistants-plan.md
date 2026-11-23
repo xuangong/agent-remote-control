@@ -14,6 +14,8 @@ once a step ships (Relay first, then Controllers).
 
 ## Step 1: the bot record and the chain
 
+Implementation plans: [1a, the bot store](2026-11-23-bots-1a-bot-store-plan.md); 1b (standing instructions) and 1c (chains) follow.
+
 - [ ] Bot record (design 2.1, closes O70): `botId` stable across handoffs and moves, name, label, picture, mission, organizer (a bot
   or the person), lifetime, main, status, work item, peers. Existing bots get ids from their group views; name, label and picture
   move out of `WindowBotDetails`.

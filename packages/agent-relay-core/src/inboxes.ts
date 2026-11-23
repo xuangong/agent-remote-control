@@ -8,7 +8,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { botInstructions, nativeSessionRefKey, standingInstructionsText, type TeamMember } from '@orchardworks/agent-remote-protocol';
 import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
-import { assistantSeat, type Assistant, type AssistantBrokerPorts } from './assistants.js';
+import { assistantSeat, type Assistant, type AssistantBrokerPorts, type AssistantPorts } from './assistants.js';
 import { pruneCoordination } from './coordination-retention.js';
 
 const digest = (value: unknown) => createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex');
@@ -16,7 +16,7 @@ const digest = (value: unknown) => createHash('sha256').update(typeof value === 
 export const instructionsHash = (mission: string | undefined) => digest(botInstructions(mission));
 
 export class BotInboxes {
-  constructor(private readonly broker: AssistantBrokerPorts) {}
+  constructor(private readonly broker: AssistantBrokerPorts, private readonly ports?: Pick<AssistantPorts, 'placeBot'>) {}
   private sessionKey(hostId: string, providerId: string, nativeSessionId: string): string | undefined {
     try { return nativeSessionRefKey(this.broker.ports.resolveSession(hostId, providerId, nativeSessionId)); } catch { return undefined; }
   }
@@ -50,6 +50,28 @@ export class BotInboxes {
       inbox.revision++; inbox.updatedAt = now;
     }
     return inbox;
+  }
+  /**
+   * Places the standing bots other bots created whose sessions on this Host are ready: their view and details go into the organizer's
+   * group, and the inbox becomes an ordinary one. The session was created with its standing instructions, so they count as sent. A
+   * placement that fails is tried again at the Host's next poll.
+   */
+  async place(hostId: string): Promise<void> {
+    if (!this.ports?.placeBot) return;
+    const ready = this.broker.ports.read().filter(team => team.inbox?.pending && team.status === 'active' && team.members[0]!.creation === 'ready' && team.members[0]!.hostId === hostId);
+    for (const team of ready) {
+      const seat = team.members[0]!, pending = team.inbox!.pending!;
+      try {
+        await this.ports.placeBot(pending.groupId, { id: `bot-${team.inbox!.botId.slice(2, 14)}`, binding: { hostId: seat.hostId, providerId: seat.providerId, nativeSessionId: seat.nativeSessionId!, title: pending.name } },
+          { botId: team.inbox!.botId, name: pending.name, mission: pending.mission, organizer: pending.organizer });
+      } catch { continue; }
+      await this.broker.change(teams => {
+        const current = teams.find(item => item.id === team.id);
+        if (!current?.inbox?.pending) return;
+        current.inbox = { botId: current.inbox.botId, instructions: instructionsHash(pending.mission), ...(current.inbox.recent ? { recent: current.inbox.recent } : {}) };
+        current.revision++; current.updatedAt = this.broker.ports.now();
+      });
+    }
   }
   /** Binds the bot's inbox seat when it is not bound yet; the seat as it stands after. */
   async bind(bot: Assistant): Promise<TeamMember | undefined> {

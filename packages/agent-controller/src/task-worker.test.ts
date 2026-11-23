@@ -161,6 +161,22 @@ describe('a task between a main session and its worker', () => {
   });
 });
 
+describe('a standing bot another bot creates', () => {
+  it('starts its session with its mission and every bot\'s tools, joins its organizer\'s group, and reads its first message', async () => {
+    const h = await harness();
+    const chief = new WorkerSupport({ request: call => h.host(call), available: () => true, tasks: () => true, stateDirectory: h.directory, title: async () => 'Chief' });
+    const created = JSON.parse(await tool(chief.namespace(() => h.ref('codex', 'worker'), false, true).tools, 'create_bot')
+      .execute({ name: 'Scribe', mission: 'Keep the release notes.', lifetime: 'standing', message: 'Start from v0.3.' }) as string);
+    expect(created).toMatchObject({ status: 'ready' });
+    const scribe = h.created[0]!;
+    expect(scribe.creation.cwd).toBe(h.directory);
+    expect(scribe.extensions.instructions).toContain('Your mission:\nKeep the release notes.');
+    expect(scribe.extensions.tools?.map(item => item.name)).toEqual(BOT_TOOLS);
+    await h.runtime.tick(); await h.runtime.tick();
+    expect(h.sessions.get(scribe.id)!.deliveries.flatMap(delivery => parseTaskInputs(delivery.text) ?? [])).toEqual([expect.objectContaining({ kind: 'assistant', from: 'Chief', body: 'Start from v0.3.' })]);
+  });
+});
+
 describe('the main session\'s task tools', () => {
   async function support(tasks: boolean) {
     const directory = await mkdtemp(join(tmpdir(), 'task-tools-'));

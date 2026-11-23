@@ -16,7 +16,7 @@ import { createRelayPush } from './push/relay-push.js';
 import type { PushConfiguration } from './push/push-config.js';
 import type { ReminderState } from './push/push-reminders.js';
 import { PROTOCOL_VERSION, encodeSessionChannelServerMessage, SESSION_STATE_LIMIT, type SessionChannelServerMessage, type SessionStateHost, type SessionStateRef, type SessionStateUpdate } from '@orchardworks/agent-remote-protocol';
-import { acceptSessionChannel } from '@orchardworks/agent-remote-protocol';
+import { acceptSessionChannel, createWindowView } from '@orchardworks/agent-remote-protocol';
 import { createSessionStars, StarError } from './session-stars.js';
 import { sessionSubscriptionRefusal, unavailableRoute } from '@orchardworks/agent-remote-protocol/model';
 import { createSecurityPolicy } from './security.js';
@@ -24,7 +24,7 @@ import { authenticationFailure } from './auth-error.js';
 import { cliApprovalPage, createCliAuthorizations } from './cli-access.js';
 import { authenticationCallback } from './auth-callback.js';
 import { controllerPath, readControllerLocation } from '@orchardworks/agent-remote-protocol/model';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createHostBroker, USER_STREAM_LIMIT, type RemoteHostBrokerState, type HostBrokerOptions } from './broker.js';
 import type { JournalStore } from '@orchardworks/agent-remote-journal';
 import { createHostJournals, type HostJournals } from './host-journals.js';
@@ -459,6 +459,13 @@ export function createHostedRelay(options: HostedRelayOptions) {
         ownerSubject: grant.subject, durable, accountBacked, initialState, diagnostics, gatewaySetup: auth.provider === 'mainsite',
         teamResources: options.teamResources?.(grant.namespace),
         assistantGroups: () => windows.list({ subject: grant.subject }).groups,
+        // A bot another bot created joins its organizer's group: a view of its session, and its details.
+        placeBot: async (groupId, view, details) => {
+          const principal = { subject: grant.subject }, current = windows.inspect(principal, groupId);
+          const outcome = await windows.mutate(principal, groupId, { operationId: randomUUID(), issuedAt: Date.now(), baseRevision: current.window.revision,
+            operation: { type: 'batch', operations: [{ type: 'view.create', view: createWindowView(view.id, view.binding, 'primary') }, { type: 'bot.update', viewId: view.id, details }] } });
+          if (outcome.result.status !== 'committed') throw new Error(outcome.result.message ?? 'The bot could not join its group.');
+        },
         outbox: { hostCall: (hostId, call) => sessionOutbox.hostCall(hostId, call) },
         ...(journalService ? { journalService } : {}),
         ...(options.successionEnrollment ? { successionEnrollment: { version: 1, origin: auth.origin, issuer: auth.issuer, namespace: grant.namespace, ownerSubject: grant.subject } as const, successionProjectionAllowance: allowance } : {}),

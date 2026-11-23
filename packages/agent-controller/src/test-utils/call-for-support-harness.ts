@@ -47,6 +47,8 @@ export async function supportHarness(options: { groups?: WindowGroup[]; sessions
     async sendMessage(text: string, messageOptions?: AgentMessageOptions) { sessions.get(id)!.deliveries.push({ text, delivery: messageOptions?.delivery }); return { disposition: 'started' }; },
   } as unknown as SessionWireAgent);
   let teams: SavedTeam[] = [];
+  const groups: WindowGroup[] = options.groups ?? [{ window: { id: 'g0', title: 'g0', revision: 1, views: [{ id: 'chief', placement: 'primary',
+    binding: { hostId: 'host', providerId: 'codex', nativeSessionId: 'worker', title: 'worker' } }] }, bots: { rank: 'm', members: { chief: { botId: 'b_' + 'c'.repeat(32), name: 'Chief' } } } }] as unknown as WindowGroup[];
   const support = emptyCallForSupportState();
   const resolve = (_host: string, providerId: string, nativeSessionId: string) => ref(providerId, nativeSessionId);
   const rows = new Map<string, Uint8Array>();
@@ -60,9 +62,11 @@ export async function supportHarness(options: { groups?: WindowGroup[]; sessions
       supportPatch: (_host, input) => runtime.supportPatch(input) },
     tasks: { capable: () => options.tasks === true, assertHost() { if (options.tasks !== true) throw new Error('Update the Controller to use tasks.'); } },
     // The account's bots: by default one, Chief, whose main session is `worker`, so its tasks have a bot as organizer.
-    assistants: { groups: () => options.groups ?? [{ window: { id: 'g0', title: 'g0', revision: 1, views: [{ id: 'chief', placement: 'primary',
-      binding: { hostId: 'host', providerId: 'codex', nativeSessionId: 'worker', title: 'worker' } }] }, bots: { rank: 'm', members: { chief: { botId: 'b_' + 'c'.repeat(32), name: 'Chief' } } } }] as unknown as WindowGroup[],
-      capable: () => options.tasks === true },
+    assistants: { groups: () => groups, capable: () => options.tasks === true,
+      placeBot: async (groupId, view, details) => {
+        const target = groups.find(item => item.window.id === groupId)!;
+        (target.window.views as unknown[]).push({ id: view.id, placement: 'primary', binding: view.binding }); target.bots!.members[view.id] = details;
+      } },
   });
   const created: Array<{ id: string; provider: string; creation: SessionCreation; extensions: AgentSessionExtensions }> = [];
   // Every bot's tools, as a Host gives them to a temporary bot (a task's worker).
@@ -85,6 +89,7 @@ export async function supportHarness(options: { groups?: WindowGroup[]; sessions
   return {
     directory, commit, git, broker, runtime, sessions, created, acquired, released, cancelled, ref, profile, enable,
     team: (id: string): Team => structuredClone(teams.find(team => team.id === id)!) as Team,
+    teams: (): Team[] => structuredClone(teams) as Team[],
     host: (call: TeamHostCall) => broker.hostCall('host', call) as Promise<any>,
     call: (input: Record<string, unknown>) => broker.hostCall('host', { action: 'call_for_support', worker: { providerId: 'codex', nativeSessionId: 'worker', title: 'Implement login' },
       task: 'Review the change.', deliverable: 'findings', context: { commit }, ...input } as TeamHostCall) as Promise<any>,

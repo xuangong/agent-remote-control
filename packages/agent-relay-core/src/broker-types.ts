@@ -1,4 +1,4 @@
-import type { WindowGroup } from '@orchardworks/agent-remote-protocol';
+import type { WindowGroup, WindowSessionBinding, WindowBotDetails } from '@orchardworks/agent-remote-protocol';
 import type { CallForSupportState } from './call-for-support-profiles.js';
 import type { SavedTeam } from './team-delivery.js';
 import type { TeamResourceStore } from './team-resources.js';
@@ -101,6 +101,8 @@ export interface HostBrokerOptions {
   teamResources?: TeamResourceStore;
   /** The account's Window groups, whose bots are the assistants that message one another. */
   assistantGroups?: () => readonly WindowGroup[];
+  /** Places a bot another bot created in a group of the account: its view of the session and its details (bots design 2.2). */
+  placeBot?: (groupId: string, view: { id: string; binding: WindowSessionBinding }, details: WindowBotDetails) => Promise<void>;
   /** Messages waiting for this account's Hosts; Controllers that ask for it poll, claim and settle them over the uplink. */
   outbox?: { hostCall(hostId: string, call: unknown): Promise<unknown> };
   /** Where Host session journals are kept. Without it no Controller is granted journals. */

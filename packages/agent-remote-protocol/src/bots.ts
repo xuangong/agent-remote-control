@@ -55,10 +55,11 @@ export type BotIdentity = Partial<Pick<BotRecord, IdentityField>>;
 export function botIdentity<T extends BotIdentity>(details: T): BotIdentity {
   return Object.fromEntries(BOT_IDENTITY_FIELDS.filter(key => details[key] !== undefined).map(key => [key, details[key]])) as BotIdentity;
 }
-/** The placement part of bot details, as the group keeps it: everything but identity. */
-export function botPlacement<T extends BotIdentity>(details: T): Omit<T, IdentityField> {
+/** The placement part of bot details, as the group keeps it: everything but identity and the organizer, which the record keeps. */
+export function botPlacement<T extends BotIdentity & { organizer?: string }>(details: T): Omit<T, IdentityField | 'organizer'> {
   const placement = { ...details } as T;
   for (const key of BOT_IDENTITY_FIELDS) delete placement[key];
+  delete placement.organizer;
   return placement;
 }
 

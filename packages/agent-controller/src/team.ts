@@ -335,6 +335,12 @@ export class TeamRuntime implements SessionRole {
     });
     // A task's worker reads its brief as input and reports once; it has no Team inbox. Its tools come as a namespace where the
     // provider takes one, so reporting never waits for the person's approval.
+    // A standing bot another bot created: its session starts with its standing instructions and every bot's tools.
+    if (seat.inbox) {
+      const bots = this.access.botTools?.(actual);
+      const instructions = `${botInstructions(seat.inbox.mission)} ${locationInstructions(seat)}`;
+      return this.access.toolNamespaces?.(member.providerId) ? { instructions, ...(bots ? { toolNamespaces: [bots] } : {}) } : { instructions, ...(bots ? { tools: bots.tools } : {}) };
+    }
     if (seat.task) {
       // A temporary bot has every bot's tools, called as its own session; it reports to its organizer with message.
       const bots = this.access.botTools?.(actual);
@@ -547,7 +553,7 @@ export class TeamRuntime implements SessionRole {
     // Support groups and tasks deliver between turns: steering races a turn that is ending, and their work does not need it.
     // The Relay frames what a requester and a task's worker read.
     const quiet = !!seat.task || !!seat.link || !!seat.room || !!seat.inbox;
-    const framed = seat.member.role === 'requester' || !!seat.task, delivery = availableDelivery(lease, !seat.callForSupport && !quiet, !quiet);
+    const framed = seat.member.role === 'requester' || !!seat.task || !!seat.inbox, delivery = availableDelivery(lease, !seat.callForSupport && !quiet, !quiet);
     if (!delivery || this.closed || !this.access.available()) return;
     this.access.sessionRouting.assertCurrent(this.anchor(seat), target);
     const receipts: Array<{ item: Delivery; receipt: LocalSeat['receipts'][string] }> = [];

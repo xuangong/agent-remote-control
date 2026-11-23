@@ -4,11 +4,15 @@
  * worker. A message goes where its sender and receiver say: a temporary bot's to its organizer is a report, a question or progress;
  * an organizer's to its temporary bot, and any other bot's, is input to that task; anything to a standing bot goes to its inbox.
  */
-import { createHash } from 'node:crypto';
-import { nativeSessionRefKey, taskView, type TeamHostCall, type TaskView } from '@orchardworks/agent-remote-protocol';
+import { createHash, randomUUID } from 'node:crypto';
+import { assistantMessageText, nativeSessionRefKey, taskView, type TeamHostCall, type TaskView, type TeamMember } from '@orchardworks/agent-remote-protocol';
 import { accountDirectory, callerAssistant, type Assistant, type AssistantBrokerPorts, type AssistantMessages, type AssistantPorts } from './assistants.js';
 import { ownerTasks, type TaskGroups } from './tasks.js';
-import type { SavedTeam } from './team-delivery.js';
+import { ACCOUNT_TEAM_LIMIT, type SavedTeam } from './team-delivery.js';
+import { plain } from './drafts.js';
+import { pruneCoordination } from './coordination-retention.js';
+import type { BotInboxes } from './inboxes.js';
+import { newBotId } from './bot-store.js';
 
 type Call<A extends TeamHostCall['action']> = Extract<TeamHostCall, { action: A }>;
 type Owner = { providerId: string; nativeSessionId: string };
@@ -24,7 +28,7 @@ export const temporaryBotId = (teamId: string) => 'b_' + createHash('sha256').up
 const NOT_FOUND = 'No bot of this account answers to that name. List them with list_bots.';
 
 export class BotCalls {
-  constructor(private readonly broker: AssistantBrokerPorts, private readonly ports: AssistantPorts, private readonly tasks: TaskGroups, private readonly messages: AssistantMessages) {}
+  constructor(private readonly broker: AssistantBrokerPorts, private readonly ports: AssistantPorts, private readonly tasks: TaskGroups, private readonly messages: AssistantMessages, private readonly inboxes: BotInboxes) {}
   private key(hostId: string, providerId: string, nativeSessionId: string): string | undefined {
     try { return nativeSessionRefKey(this.broker.ports.resolveSession(hostId, providerId, nativeSessionId)); } catch { return undefined; }
   }
@@ -61,12 +65,46 @@ export class BotCalls {
   }
 
   async create(hostId: string, call: Call<'create_bot'>) {
-    this.caller(hostId, call.owner);
-    if (call.lifetime === 'standing') fail('Standing bots are created by the person for now; start a temporary bot for this work.');
+    const self = this.caller(hostId, call.owner);
+    if (call.lifetime === 'standing') return this.createStanding(hostId, self, call);
     const brief = call.message ? `${call.mission}\n\n${call.message}` : call.mission;
     const created = await this.tasks.create(hostId, { action: 'create_task', owner: call.owner, operationId: call.operationId, title: call.name, brief,
       ...(call.workspace ? { workspace: call.workspace } : {}), ...(call.commit ? { commit: call.commit } : {}), ...(call.provider ? { provider: call.provider } : {}), ...(call.model ? { model: call.model } : {}) });
     return { botId: temporaryBotId(created.taskId), status: created.state, message: created.message.replace(/^Task \S+/, `Bot "${call.name}"`) };
+  }
+  /**
+   * A standing bot another bot creates (bots design 2.2): its inbox's seat creates its session where its organizer works, with its
+   * standing instructions; once ready, it is placed in its organizer's group (`BotInboxes.place`). Its first message waits in its inbox.
+   */
+  private async createStanding(hostId: string, self: Bot, call: Call<'create_bot'>) {
+    if (!self.standing) fail('A temporary bot asks its organizer for a standing bot.');
+    if (!this.ports.placeBot) fail('Standing bots cannot be created on this Relay.');
+    const providerId = call.provider ?? call.owner.providerId;
+    this.broker.ports.assertHost(hostId, providerId);
+    const team = await this.broker.change(teams => {
+      const existing = teams.find(item => item.operationId === call.operationId && item.inbox);
+      if (existing) return existing;
+      pruneCoordination(teams, 1);
+      if (plain(teams).length >= ACCOUNT_TEAM_LIMIT) fail('Team capacity reached.');
+      const now = this.broker.ports.now(), botId = newBotId();
+      const seat: TeamMember = { id: randomUUID(), role: 'leader', hostId, providerId, name: call.name, responsibility: call.mission.slice(0, 2048), creation: 'reserved', activity: 'unknown',
+        summary: '', updatedAt: now, ...(call.model ? { model: call.model } : {}) };
+      const created: SavedTeam = { id: randomUUID(), operationId: call.operationId, revision: 1, title: `${call.name}'s inbox`, status: 'active',
+        source: { hostId, providerId: call.owner.providerId, nativeSessionId: call.owner.nativeSessionId, title: self.name }, members: [seat], messages: [],
+        inbox: { botId, pending: { name: call.name, mission: call.mission, organizer: self.key, groupId: self.standing!.groupId } }, createdAt: now, updatedAt: now };
+      if (call.message) {
+        const messageId = `m${createHash('sha256').update(JSON.stringify([created.id, self.key, call.operationId])).digest('hex').slice(0, 12)}`;
+        created.messages.push({ id: createHash('sha256').update(JSON.stringify(['first-message', created.id])).digest('hex'), from: seat.id, to: seat.id, status: 'queued', createdAt: now,
+          text: assistantMessageText({ messageId, from: self.name, body: call.message }) });
+      }
+      teams.push(created);
+      return created;
+    });
+    await this.broker.provision(team.id, team.members[0]!.id).catch(() => undefined);
+    await this.inboxes.place(hostId);
+    const placed = !this.broker.ports.read().find(item => item.id === team.id)?.inbox?.pending;
+    return { botId: team.inbox!.botId, status: placed ? 'ready' : 'waiting',
+      message: placed ? `Bot "${call.name}" is ready in your group; it reads its mission first and reports in.` : `Bot "${call.name}" is recorded; its session starts when this computer can create it.` };
   }
   async message(hostId: string, call: Call<'bot_message'>) {
     const from = this.caller(hostId, call.owner), organizer = this.organizerOf(from);

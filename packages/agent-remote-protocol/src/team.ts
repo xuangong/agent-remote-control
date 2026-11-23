@@ -2,7 +2,7 @@ import { Type, type Static } from '@sinclair/typebox';
 import { NativeSessionRef } from './session-succession.js';
 import { Value } from '@sinclair/typebox/value';
 import { TeamResource } from './team-resource.js';
-import { BotId } from './bots.js';
+import { BotId, BotMission, BotName } from './bots.js';
 import { CallForSupportCallInput, CallForSupportFinding, CallForSupportGroup, CallForSupportMandate, CallForSupportReportStatus, CallForSupportRosterProposal,
   isCallForSupportGroup } from './call-for-support.js';
 import { TaskBrief, TaskDoneWhen, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_HOP_LIMIT, ASSISTANT_MESSAGE_LIMIT, ROOM_MINUTES_LIMIT, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, TaskReportStatus, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_QUESTION_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, isTeamTask } from './task.js';
@@ -63,7 +63,9 @@ export type TeamLink = Static<typeof TeamLink>;
  */
 export const TeamInbox = Type.Object({ botId: BotId, instructions: Type.Optional(Type.String({ pattern: '^[0-9a-f]{64}$' })),
   /** The latest messages other bots sent here, with their hop along a reply chain, so a reply names a message it answers. */
-  recent: Type.Optional(Type.Array(Type.Object({ id: AssistantMessageId, from: BotId, hop: Type.Integer({ minimum: 1, maximum: ASSISTANT_MESSAGE_HOP_LIMIT }), operationId: id }, object), { maxItems: 64 })) }, object);
+  recent: Type.Optional(Type.Array(Type.Object({ id: AssistantMessageId, from: BotId, hop: Type.Integer({ minimum: 1, maximum: ASSISTANT_MESSAGE_HOP_LIMIT }), operationId: id }, object), { maxItems: 64 })),
+  /** A standing bot another bot created: its seat creates its session, then the Relay places it in its organizer's group (bots design 2.2). */
+  pending: Type.Optional(Type.Object({ name: BotName, mission: BotMission, organizer: BotId, groupId: id, message: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })) }, object)) }, object);
 export type TeamInbox = Static<typeof TeamInbox>;
 const roomText = Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT });
 /**
@@ -210,8 +212,8 @@ export const TeamSeat = Type.Object({ teamId: id, source: TeamSource, member: Te
   task: Type.Optional(Type.Object({ title: TaskTitle }, object)),
   /** The seat is one assistant's main session in a link: bound where it is, it only receives messages. */
   link: Type.Optional(Type.Object({ peer: Type.String({ minLength: 1, maxLength: 256 }) }, object)),
-  /** The seat is one bot's main session, receiving its inbox. */
-  inbox: Type.Optional(Type.Object({ botId: BotId }, object)),
+  /** The seat is one bot's main session, receiving its inbox; mission: a bot this seat creates, which starts with it. */
+  inbox: Type.Optional(Type.Object({ botId: BotId, mission: Type.Optional(BotMission) }, object)),
   /** The seat is one assistant's main session in a room. */
   room: Type.Optional(Type.Object({ name: Type.String({ minLength: 1, maxLength: 120 }) }, object)) }, object);
 export type TeamSeat = Static<typeof TeamSeat>;
@@ -219,7 +221,9 @@ const groupFields = ['model', 'reasoningEffort', 'access', 'workspace', 'usage']
 /** A Call For Support group has exactly one requester after its Leader; a task has its worker and then its owner; other Teams have no requester and no group fields. */
 const validGroupShape = (value: Team) => {
   const group = value.callForSupport, requesters = value.members.filter(member => member.role === 'requester');
-  if (value.inbox) return !group && !value.task && !value.link && !value.room && value.members.length === 1 && value.members[0]!.role === 'requester'
+  if (value.inbox) return !group && !value.task && !value.link && !value.room && value.members.length === 1
+    // Bound where the bot already is (requester), or created for a bot another bot made (leader).
+    && (value.members[0]!.role === 'requester' || value.members[0]!.role === 'leader')
     && value.members[0]!.creation !== 'released' && groupFields.every(field => value.members[0]![field] === undefined)
     && value.messages.every(message => message.callForSupportCallId === undefined) && (value.unresolvedReceipts ?? []).every(receipt => receipt.callForSupportCallId === undefined);
   if (value.room) return !group && !value.task && !value.link && value.members.length >= 2 && value.members.every(member => member.role === 'requester' && member.creation !== 'released'

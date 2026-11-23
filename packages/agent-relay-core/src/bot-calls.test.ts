@@ -6,24 +6,30 @@ import { temporaryBotId } from './bot-calls.js';
 
 // Bots call as their own sessions. The groups and the Hosts are stubs; the broker, tasks, inboxes and their validation are real.
 const ids = { chief: 'b_' + '1'.repeat(32), tracker: 'b_' + '2'.repeat(32) };
-const group = { window: { id: 'g', title: 'g', revision: 1, views: [['v1', 'chief'], ['v2', 'tracker']].map(([id, nativeSessionId]) => ({ id, placement: 'primary',
+const group = () => ({ window: { id: 'g', title: 'g', revision: 1, views: [['v1', 'chief'], ['v2', 'tracker']].map(([id, nativeSessionId]) => ({ id, placement: 'primary',
   binding: { hostId: 'mac', providerId: 'codex', nativeSessionId, title: nativeSessionId } })) },
-  bots: { rank: 'm', members: { v1: { botId: ids.chief, name: 'Chief' }, v2: { botId: ids.tracker, name: 'Tracker' } } } } as unknown as WindowGroup;
+  bots: { rank: 'm', members: { v1: { botId: ids.chief, name: 'Chief' }, v2: { botId: ids.tracker, name: 'Tracker' } } } }) as unknown as WindowGroup;
 
 function fixture() {
   let state: SavedTeam[] = [], now = 100, workers = 0;
+  const groups = [group()], placed: Array<{ groupId: string; viewId: string; details: Record<string, unknown> }> = [];
   const broker = new TeamBroker({
     resolveSession: (hostId, providerId, nativeSessionId) => ({ controllerId: hostId, providerId, nativeSessionId }),
     read: () => state, now: () => ++now, assertHost: () => {},
     change: async update => { const draft = structuredClone(state); const result = structuredClone(update(draft)); state = draft; return result; },
     createSeat: async (_hostId, seat) => ({ ...seat.member, creation: 'ready', activity: 'idle', cwd: '/repo', ...(seat.member.nativeSessionId ? {} : { nativeSessionId: `worker-${++workers}` }) }),
     tasks: { capable: () => true, assertHost: () => {} },
-    assistants: { groups: () => [group], capable: () => true },
+    assistants: { groups: () => groups, capable: () => true,
+      placeBot: async (groupId, view, details) => {
+        const target = groups.find(item => item.window.id === groupId)!;
+        (target.window.views as unknown[]).push({ id: view.id, placement: 'primary', binding: view.binding });
+        target.bots!.members[view.id] = details; placed.push({ groupId, viewId: view.id, details: details as Record<string, unknown> });
+      } },
   });
   const as = (nativeSessionId: string) => ({ providerId: 'codex', nativeSessionId });
   const task = () => state.find(team => team.task)!;
   const inputs = (team: SavedTeam, to: number) => team.messages.filter(message => message.to === team.members[to]!.id).flatMap(message => parseTaskInputs(message.text) ?? []);
-  return { broker, as, task, inputs, state: () => state };
+  return { broker, as, task, inputs, placed, state: () => state };
 }
 
 describe('bots calling as their own sessions', () => {
@@ -58,5 +64,18 @@ describe('bots calling as their own sessions', () => {
     await expect(f.broker.hostCall('mac', { action: 'stop_bot', owner: f.as('tracker'), bot: 'Reviewer' })).rejects.toThrow('You do not organize');
     expect(await f.broker.hostCall('mac', { action: 'bot_session', owner: f.as('chief'), bot: 'Reviewer' })).toEqual(worker);
     expect(await f.broker.hostCall('mac', { action: 'stop_bot', owner: f.as('chief'), bot: 'Reviewer' })).toMatchObject({ status: 'cancelled' });
+  });
+
+  it('creates a standing bot in its organizer\'s group, with its mission and organizer, whose first message waits in its inbox', async () => {
+    const f = fixture();
+    const created = await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Scribe', mission: 'Keep the release notes.', lifetime: 'standing', message: 'Start from v0.3.' }) as { botId: string; status: string };
+    expect(created).toMatchObject({ botId: expect.stringMatching(/^b_[0-9a-f]{32}$/), status: 'ready' });
+    expect(f.placed).toEqual([{ groupId: 'g', viewId: expect.stringMatching(/^bot-/), details: { botId: created.botId, name: 'Scribe', mission: 'Keep the release notes.', organizer: ids.chief } }]);
+    const inbox = f.state().find(team => team.inbox?.botId === created.botId)!;
+    // Its session was created with its standing instructions, so only its first message waits.
+    expect(inbox.inbox).toEqual({ botId: created.botId, instructions: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    expect(inbox.members).toEqual([expect.objectContaining({ role: 'leader', creation: 'ready', nativeSessionId: expect.stringMatching(/^worker-/) })]);
+    expect(inbox.messages.map(message => parseTaskInputs(message.text)?.[0])).toEqual([expect.objectContaining({ kind: 'assistant', from: 'Chief', body: 'Start from v0.3.' })]);
+    expect((await f.broker.hostCall('mac', { action: 'list_bots', owner: f.as('chief') }) as { bots: Array<{ name: string }> }).bots.map(bot => bot.name)).toEqual(['Tracker', 'Scribe']);
   });
 });

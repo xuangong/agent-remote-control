@@ -5,7 +5,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { accountAssistants, assistantMessageText, assistantNamesIn, ASSISTANT_MESSAGE_HOP_LIMIT, botViews, nativeSessionRefKey, viewAssistantKey,
-  type Team, type TeamHostCall, type TeamMember, type WindowGroup } from '@orchardworks/agent-remote-protocol';
+  type Team, type TeamHostCall, type TeamMember, type WindowBotDetails, type WindowGroup, type WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
 import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
 import type { TeamBrokerPorts } from './teams.js';
@@ -22,10 +22,12 @@ export interface AssistantPorts {
   groups(): readonly WindowGroup[];
   /** The Host runs links; others never see them. */
   capable(hostId: string): boolean;
+  /** Places a bot another bot created in a group of the account. */
+  placeBot?(groupId: string, view: { id: string; binding: WindowSessionBinding }, details: WindowBotDetails): Promise<void>;
 }
 type ListCall = Extract<TeamHostCall, { action: 'list_assistants' }>;
 type MessageCall = Extract<TeamHostCall, { action: 'message_assistant' }>;
-export interface Assistant { key: string; name: string; label?: string; mission?: string; hidden: boolean; hostId: string; providerId: string; nativeSessionId: string }
+export interface Assistant { key: string; groupId: string; name: string; label?: string; mission?: string; hidden: boolean; hostId: string; providerId: string; nativeSessionId: string }
 
 const RECENT_KEEP = 64;
 /** One answer for an assistant that does not exist and one this caller may not reach, so the roster cannot be probed. */
@@ -45,7 +47,7 @@ export function accountDirectory(groups: readonly WindowGroup[]): Assistant[] {
     // The id is the bot's record, which a move between groups keeps; names follow the account's naming rule, keyed by place.
     const viewKey = viewAssistantKey(group.window.id, view.id), details = group.bots?.members[view.id];
     const key = details?.botId ?? viewKey;
-    return { key, name: names.get(viewKey) ?? view.binding.title, ...(details?.label ? { label: details.label } : {}), ...(details?.mission ? { mission: details.mission } : {}), hidden: details?.hidden === true,
+    return { key, groupId: group.window.id, name: names.get(viewKey) ?? view.binding.title, ...(details?.label ? { label: details.label } : {}), ...(details?.mission ? { mission: details.mission } : {}), hidden: details?.hidden === true,
       hostId: view.binding.hostId, providerId: view.binding.providerId, nativeSessionId: view.binding.nativeSessionId };
   }));
 }

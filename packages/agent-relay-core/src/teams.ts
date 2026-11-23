@@ -67,8 +67,8 @@ export class TeamBroker {
     if (ports.tasks) this.tasks = new TaskGroups({ ports, change: update => this.change(update), provision: (teamId, memberId) => this.provision(teamId, memberId) }, ports.tasks);
     if (ports.assistants) {
       const lent = { ports, change: <T>(update: (teams: SavedTeam[]) => T) => this.change(update), provision: (teamId: string, memberId: string) => this.provision(teamId, memberId) };
-      this.inboxes = new BotInboxes(lent); this.assistants = new AssistantMessages(lent, ports.assistants, this.inboxes); this.rooms = new Rooms(lent, ports.assistants);
-      if (this.tasks) this.bots = new BotCalls(lent, ports.assistants, this.tasks, this.assistants);
+      this.inboxes = new BotInboxes(lent, ports.assistants); this.assistants = new AssistantMessages(lent, ports.assistants, this.inboxes); this.rooms = new Rooms(lent, ports.assistants);
+      if (this.tasks) this.bots = new BotCalls(lent, ports.assistants, this.tasks, this.assistants, this.inboxes);
     }
     if (ports.callForSupport) this.groups = new CallForSupportGroups({ ports, change: update => this.change(update), provision: (teamId, memberId) => this.provision(teamId, memberId),
       project: team => this.project(team), resource: (team, memberId, resourceId) => this.resourceAccess(team, memberId, resourceId),
@@ -243,6 +243,7 @@ export class TeamBroker {
     if (call.action === 'support_enablement') {
       const enablement = (this.groups ?? fail(unavailableGroups)).enablement(hostId);
       if (!this.assistants) return enablement;
+      await this.inboxes!.place(hostId);
       await this.inboxes!.ensure(this.assistants.hostBots(hostId));
       return { ...enablement, bots: this.assistants.bots(hostId) };
     }
@@ -457,7 +458,7 @@ export class TeamBroker {
     try {
       result = await this.ports.createSeat(item.hostId, { teamId, source: team.source, member: item,
         ...(team.callForSupport ? { callForSupport: { role: team.callForSupport.role, description: team.callForSupport.description } } : {}),
-        ...(team.task ? { task: { title: team.task.title } } : {}), ...(team.link ? { link: { peer: team.members.find(other => other.id !== item.id)!.name } } : {}), ...(team.room ? { room: { name: team.room.name } } : {}), ...(team.inbox ? { inbox: { botId: team.inbox.botId } } : {}) });
+        ...(team.task ? { task: { title: team.task.title } } : {}), ...(team.link ? { link: { peer: team.members.find(other => other.id !== item.id)!.name } } : {}), ...(team.room ? { room: { name: team.room.name } } : {}), ...(team.inbox ? { inbox: { botId: team.inbox.botId, ...(team.inbox.pending ? { mission: team.inbox.pending.mission } : {}) } } : {}) });
       if (!isTeamMember(result) || result.id !== item.id || result.hostId !== item.hostId || result.providerId !== item.providerId || result.role !== item.role || result.creation !== 'ready' || !result.nativeSessionId) fail('Invalid Host member registration.');
     } catch (error) { result = { ...item, creation: 'unknown', error: error instanceof Error ? error.message.slice(0, 2048) : 'Member creation is uncertain.' }; }
     return this.change(teams => {

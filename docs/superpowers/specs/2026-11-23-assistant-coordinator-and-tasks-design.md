@@ -494,6 +494,12 @@ person or by another bot:
   its questions. The organizer corrects a misreading by message. After that, members message the organizer when they finish, get
   stuck or need a decision; several arriving while it is busy reach it as one input at idle, decisions first, as task updates do,
   and the organizer sums them up in its work items.
+- **Each bot speaks for its own understanding.** A model's grasp of its work lives in its own context, and only the bot can say
+  what it is. So the instructions every bot gets require it to say, in its own words, how it understands its mission and where
+  its work stands: in its report-in; again whenever that understanding may have moved (a message changed how it works, it
+  recorded something in its mission, its context was compacted, or a handoff gave it a new session); and in every progress report.
+  The Relay's frames (`ready`, `failed`, online or not) say only whether a bot is alive; they are never taken for its progress, and
+  no summary crossing to another bot is written by anyone but the bot it describes.
 - **Changing how a bot works is a message.** After creation, the organizer (or the person, or any bot) adjusts a bot's way of
   working by telling it, as people do. The bot keeps its own mission: when what it was told is meant to last, it records it there
   (`update_mission`, on itself only), so the change survives a handoff or a compacted context. No bot rewrites another's mission. A bot it created may in turn

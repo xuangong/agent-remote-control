@@ -54,8 +54,8 @@ export function useSessionViewPresentation(scope: Pick<PresentationScope, 'assis
 
   /** The facts every contribution reads about one view. */
   function sessionViewContext(context: FamilySessionPresentationContext, options: SessionViewOptions): SessionViewContext {
-    const team = options.team === true, botPresentation = !!options.bot || options.fallback === true;
-    const source: SessionViewSource = { ...(team ? context.session : withConfirmedTitle(context.session)), hostId: context.session.hostId ?? 'local', viewId: context.viewId!, ...(options.bot ? { bot: options.bot } : options.fallback ? { fallback: true as const } : {}) };
+    const botPresentation = !!options.bot || options.fallback === true;
+    const source: SessionViewSource = { ...withConfirmedTitle(context.session), hostId: context.session.hostId ?? 'local', viewId: context.viewId!, ...(options.bot ? { bot: options.bot } : options.fallback ? { fallback: true as const } : {}) };
     const botGroup = options.bot ? windowWorkspace.readGroup(options.bot.groupId) : undefined;
     const view = options.bot ? botGroup?.window.views.find(item => item.id === options.bot!.viewId) : sharedWindow?.views.find(item => item.id === context.windowViewId);
     // In a group with bot details, a bot's pane in Window mode is the same bot: its conversation goes on into its earlier
@@ -64,14 +64,14 @@ export function useSessionViewPresentation(scope: Pick<PresentationScope, 'assis
     const windowBot = !botPresentation && !!view && isBotView(view) && !!sharedWindow && !!windowWorkspace.readGroup(sharedWindow.id)?.bots;
     const host = remoteHosts.find(item => item.id === source.hostId);
     return {
-      context, options, team, botPresentation, source, view, windowBot, host,
+      context, options, botPresentation, source, view, windowBot, host,
       isPrimary: view?.placement === 'primary',
       fork: forkStore.find(source),
       sourceForks: forkStore.linked().filter(item => item.target && sessionKey(sideNavigationSource(item)) === sessionKey(source)),
       available: accessReady && !context.offline && context.status === 'ready' && !context.pending && sourceCurrent(source),
       // Quoting happens between the session views of shared Windows.
       quoteView: !botPresentation && sharedWindow && context.windowViewId && !source.parentNativeSessionId ? context.windowViewId : undefined,
-      openBot: !botPresentation && !team && sharedWindow && view && isBotView(view) ? () => void openInBotMode(sharedWindow.id, view.id) : undefined,
+      openBot: !botPresentation && sharedWindow && view && isBotView(view) ? () => void openInBotMode(sharedWindow.id, view.id) : undefined,
       provisional: windowWorkspace.provisional,
       assertCurrent: () => assertSourceCurrent(source),
     };

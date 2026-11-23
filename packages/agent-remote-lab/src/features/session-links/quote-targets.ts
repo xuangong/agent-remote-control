@@ -28,7 +28,7 @@ export function quoteTargets(
     views: window.views.filter(view => {
       const feature = parseWindowFeature(view.feature);
       return view.id !== source.viewId && !!view.binding && view.binding.sessionIntent !== 'history' && !view.binding.parentNativeSessionId
-        && (!feature || feature.kind === 'team') && sessionKey(view.binding) !== sessionKey(source.session);
+        && !feature && sessionKey(view.binding) !== sessionKey(source.session);
     }).map(view => ({ viewId: view.id, title: view.binding!.title || t('client.quote.untitledSession'), detail: t(placement[view.placement]) })),
   })).filter(window => window.current || window.views.length).sort((a, b) => Number(b.current) - Number(a.current));
 }

@@ -21,7 +21,7 @@ export type SessionViewCommand = NonNullable<SessionViewProps['consoleCommands']
 /** The props that several contributions combine; the merge sets them. */
 export type MergedSessionViewProp = 'actions' | 'consoleCommands' | 'onExecuteConsoleCommand' | 'composerStatus' | 'composerContext' | 'composerNotice' | 'mutationBlocked';
 
-export interface SessionViewOptions { team?: boolean; bot?: { groupId: string; viewId: string }; fallback?: boolean }
+export interface SessionViewOptions { bot?: { groupId: string; viewId: string }; fallback?: boolean }
 
 /** The session a view presents, with the view that holds it and, in Bot mode, the bot it belongs to. */
 export type SessionViewSource = OpenedSession & { hostId: string; viewId: string; bot?: { groupId: string; viewId: string }; fallback?: true };
@@ -33,7 +33,6 @@ export type ConsoleCommandHandler = (id: string, args: string) => Promise<AgentC
 export interface SessionViewContext {
   readonly context: FamilySessionPresentationContext;
   readonly options: SessionViewOptions;
-  readonly team: boolean;
   /** Bot mode's conversation, or a session listed under Other sessions. */
   readonly botPresentation: boolean;
   readonly source: SessionViewSource;

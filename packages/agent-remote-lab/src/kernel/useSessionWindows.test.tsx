@@ -41,21 +41,7 @@ it('keeps focus and independent view identity across empty binding, rebinding an
   expect(result.current.entries).toEqual([]);
 });
 
-it('retains Team ownership without consuming a user view displaying the same session', async () => {
-  const { result } = await harness();
-  let id = '';
-  await act(async () => { id = result.current.create(); result.current.bind(id, target('leader')); });
-  await act(async () => { result.current.open([target('leader'), target('member')], target('leader'), 'team'); });
-  const leader = result.current.entries.find(entry => entry.groupId === 'team')!;
-  expect(result.current.entries).toHaveLength(3);
-  expect(() => result.current.bind(leader.id, target('other'))).toThrow();
-  await act(async () => { result.current.close(leader.id); });
-  expect(result.current.entries.map(entry => entry.id)).toEqual([id]);
-  await act(async () => { result.current.gather(leader, [target('member')]); });
-  expect(result.current.entries).toHaveLength(1);
-});
-
-it('imports old targets once with stable dock IDs and group references', async () => {
+it('imports old targets once with stable dock IDs and close references, and leaves their Team tags out', async () => {
   const id = (name: string) => `session:${JSON.stringify(['host', 'recorded', name])}`;
   sessionStorage.setItem('agent-remote:recovery:windows:session-windows', JSON.stringify([
     { target: target('leader'), groupId: 'team' }, { target: target('member'), closeWith: id('leader') },
@@ -64,38 +50,22 @@ it('imports old targets once with stable dock IDs and group references', async (
   expect(result.current.entries.map(entry => entry.id)).toEqual([id('leader'), id('member')]);
   expect(document.windows![1]).toMatchObject({ closeWith: id('leader'), managed: true });
   expect(document.windows![0]).not.toHaveProperty('target');
+  expect(document.windows![0]).not.toHaveProperty('groupId');
 });
 
-it('restores close groups, gathers once, and does not resurrect a closed leader', async () => {
+it('closes the views of a close group with their root, and reads saved views that carry Team tags', async () => {
   const initial = await harness();
-  await act(async () => {
-    initial.result.current.open([target('leader'), target('member')], target('leader'), 'team');
-    initial.result.current.open([target('other')]);
-  });
-  const { result } = await harness(parseComposition(JSON.parse(JSON.stringify(initial.document)), 'windows'));
-  const root = result.current.entries.find(view => view.groupId === 'team')!;
-  const member = result.current.entries.find(view => view.target?.nativeSessionId === 'member')!;
-  await act(async () => { result.current.close(member.id); });
-  expect(result.current.entries.map(view => view.target?.nativeSessionId)).toEqual(['leader', 'other']);
-  await act(async () => { result.current.gather(root, [target('leader'), target('member')]); });
-  const opened = result.current.entries.find(view => view.target?.nativeSessionId === 'member')!;
-  await act(async () => { result.current.gather(root, [target('leader'), target('member')]); });
-  expect(result.current.entries.find(view => view.id === opened.id)?.dockRequest).toBe(opened.dockRequest);
-  await act(async () => { result.current.close(root.id); result.current.gather(root, [target('member')]); });
-  expect(result.current.entries.map(view => view.target?.nativeSessionId)).toEqual(['other']);
+  for (const name of ['leader', 'member', 'other']) initial.document.slots.push(createCompositionSlot(name, { ...target(name) }, 'windows'));
+  initial.document.windows = [{ id: 'view:leader', slotId: 'leader', managed: true }, { id: 'view:member', slotId: 'member', managed: true, closeWith: 'view:leader' }, { id: 'view:other', slotId: 'other' }];
+  const saved = JSON.parse(JSON.stringify(initial.document));
+  Object.assign(saved.windows[0], { groupId: 'team', teamMemberId: 'lead' });
+  const { result, document } = await harness(parseComposition(saved, 'windows'));
+  expect(document.windows![0]).toEqual({ id: 'view:leader', slotId: 'leader', managed: true });
+  await act(async () => { result.current.close('view:member'); });
+  expect(result.current.entries.map(view => view.id)).toEqual(['view:leader', 'view:other']);
+  await act(async () => { result.current.close('view:leader'); });
+  expect(result.current.entries.map(view => view.id)).toEqual(['view:other']);
 });
-
-it('deduplicates ordinary opens and checks the full group capacity before adding bindings', async () => {
-  const { result, document } = await harness();
-  await act(async () => { result.current.open([target('same'), target('same')]); });
-  await act(async () => { result.current.open([target('same')]); });
-  expect(result.current.entries).toHaveLength(1);
-  await act(async () => { for (let i = 0; i < 18; i++) result.current.create(); });
-  const before = JSON.stringify(document);
-  expect(() => result.current.open([target('member')], target('leader'), 'team')).toThrow('Close a session view');
-  expect(JSON.stringify(document)).toBe(before);
-});
-
 
 it('keeps a focused view while selecting an identical native ID on another Host and Provider', async () => {
   const { result, document } = await harness();
@@ -158,31 +128,14 @@ it('keeps an empty shared Window empty until a view is explicitly created and al
   expect(operations).toHaveLength(2);
 });
 
-it('opens the same local session once before the first render commits', async () => {
-  const document = createCompositionDocument('local-open');
-  let window: WorkspaceWindow = { schemaVersion: 3, id: 'local-open', title: 'Window', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
-  let current!: ReturnType<typeof useSessionWindows>;
-  function Harness() {
-    const [, save] = useReducer(n => n + 1, 0);
-    current = useSessionWindows(document.scope, { document, save,
-      ensureView: selection => ensureWindowCompositionSlot(document, window.id, 'fallback', selection),
-      shared: { window, readWindow: () => window, operate(operation) { window = applyWindowOperation(window, operation); save(); } },
-    });
-    return <output>{current.entries.length}</output>;
-  }
-  const element = await render(<Harness />);
-  await act(async () => { current.open([target('same')]); current.open([target('same')]); });
-  expect(window.views.filter(view => view.binding?.nativeSessionId === 'same')).toHaveLength(1);
-  expect(window.revision).toBe(1);
-  expect(element.querySelector('output')?.textContent).toBe('1');
-});
-
-it('renders unknown and malformed feature associations as replaceable ordinary session views', async () => {
+it('renders unknown, malformed and removed feature associations as ordinary session views', async () => {
   const document = createCompositionDocument('opaque-features');
   let window: WorkspaceWindow = { schemaVersion: 3, id: 'opaque', title: 'Window', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'unknown', views: [
     createWindowView('main', undefined, 'primary'),
     { ...createWindowView('unknown', target('ordinary')), feature: { kind: 'external', id: 'tool', metadata: { role: 'member' } } },
     { ...createWindowView('invalid-team', target('other')), feature: { kind: 'team', id: 'team', metadata: { role: 'unsupported', memberId: 'member' } } },
+    // A Team's view saved by an older build loads as an ordinary view too.
+    { ...createWindowView('saved-team', target('member')), feature: { kind: 'team', id: 'team', metadata: { role: 'member', memberId: 'member' } }, bindingPolicy: 'managed' as const },
   ] };
   let current!: ReturnType<typeof useSessionWindows>;
   function Harness() {
@@ -195,10 +148,7 @@ it('renders unknown and malformed feature associations as replaceable ordinary s
     return null;
   }
   await render(<Harness />);
-  expect(current.entries.map(entry => [entry.id, entry.managed, entry.groupId])).toEqual([
-    ['unknown', false, undefined], ['invalid-team', false, undefined],
-  ]);
-  expect(current.entries.every(entry => !entry.target?.teamId)).toBe(true);
+  expect(current.entries.map(entry => [entry.id, entry.managed])).toEqual([['unknown', false], ['invalid-team', false], ['saved-team', true]]);
   expect(current.activeId).toBe('unknown');
   await act(async () => current.bind('unknown', target('replacement')));
   expect(current.entries[0]?.target?.nativeSessionId).toBe('replacement');

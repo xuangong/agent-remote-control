@@ -71,21 +71,23 @@ it('rejects a queued stale full layout instead of overwriting an earlier local e
   expect(store.getSnapshot().title).toBe('New');
 });
 
-it('migrates Team members from composition and legacy snapshots with stable roster identities', async () => {
+it('imports the views of an older Team without its tags, keeping their close edges', async () => {
   const { importCompositionWindow } = await import('./window-workspace.js');
   const { createCompositionDocument, createCompositionSlot } = await import('./session-composition.js');
-  const target = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'retired', title: 'Member', teamId: 'team', teamMemberId: 'member' };
+  const target = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'retired', title: 'Member' };
   const slot = createCompositionSlot('team-slot', target, 'team-migration');
   const document = createCompositionDocument('team-migration', [slot]);
-  document.windows = [{ id: 'leader', groupId: 'team', managed: true }, { id: 'member', slotId: slot.id, closeWith: 'leader', managed: true, teamMemberId: 'member' }];
-  expect(importCompositionWindow(document).views.find(view => view.id === 'member')?.feature).toMatchObject({ kind: 'team', id: 'team', metadata: { memberId: 'member', role: 'member' } });
+  document.windows = [{ id: 'leader', managed: true }, { id: 'member', slotId: slot.id, closeWith: 'leader', managed: true }];
+  const imported = importCompositionWindow(document).views.find(view => view.id === 'member')!;
+  expect(imported).toMatchObject({ closeWith: 'leader' });
+  expect(imported.feature).toBeUndefined();
   const legacy = createCompositionDocument('legacy-team-migration');
-  const root = { ...target, nativeSessionId: 'leader', teamMemberId: 'leader' };
   sessionStorage.setItem('agent-remote:recovery:legacy-team-migration:session-windows', JSON.stringify([
-    { target: root, groupId: 'team' }, { target, closeWith: `session:${JSON.stringify(['host', 'recorded', 'leader'])}` },
+    { target: { ...target, nativeSessionId: 'leader' }, groupId: 'team' }, { target, closeWith: `session:${JSON.stringify(['host', 'recorded', 'leader'])}` },
   ]));
-  const migrated = importCompositionWindow(legacy);
-  expect(migrated.views.find(view => view.binding?.nativeSessionId === 'retired')?.feature).toMatchObject({ kind: 'team', id: 'team', metadata: { memberId: 'member', role: 'member' } });
+  const migrated = importCompositionWindow(legacy).views.find(view => view.binding?.nativeSessionId === 'retired')!;
+  expect(migrated.feature).toBeUndefined();
+  expect(migrated.closeWith).toBeDefined();
 });
 
 it('leaves failed import candidates unclaimed and claims only a committed Window', async () => {

@@ -259,10 +259,10 @@ it('opens a subagent beside the views its source already shows and reuses the pa
   expect([...view.querySelectorAll('.lab-session-family-pane')].map(pane => pane.getAttribute('aria-label'))).toEqual(['Root', 'Side', '/root/reviewer', '/root/reviewer/evidence']);
 });
 
-it('opens a Team member subagent with a Window binding that leaves out Team fields', async () => {
+it('opens a subagent with a Window binding of the session identity only', async () => {
   const session = { hostId: 'local', providerId: 'recorded', nativeSessionId: 'native', agentId: 'agent', title: 'Leader' };
   const { agentId: _, ...binding } = session;
-  const target = { ...binding, teamId: 'team', teamMemberId: 'leader' };
+  const target = binding;
   const reviewer = { nativeSessionId: 'reviewer', title: 'Reviewer', createdAt: 'now', status: 'idle' as const, observation: 'live' as const };
   const replica = new AgentReplica();
   replica.applySnapshot({ protocolVersion: '1.8.0', type: 'agent_snapshot', payload: { ...replicaState.agent!, id: 'agent',

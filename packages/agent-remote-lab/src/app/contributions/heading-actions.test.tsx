@@ -84,7 +84,6 @@ describe('the heading of a session view', () => {
     const named = setup({}, { host: renameable });
     title(named).props.onRename();
     expect(named.setRenamingSession).toHaveBeenCalledWith({ scope: 'http://relay', session: expect.objectContaining({ nativeSessionId: 's1' }) });
-    expect(title(setup({}, { host: renameable, team: true })).props.onRename).toBeUndefined();
     expect(title(setup({ userScoped: false }, { host: renameable })).props.onRename).toBeUndefined();
     expect(title(setup({}, { host: { ...renameable, access: 'shared' } })).props.onRename).toBeUndefined();
   });

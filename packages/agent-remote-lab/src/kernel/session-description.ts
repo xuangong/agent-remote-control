@@ -5,7 +5,7 @@ import { currentForkSource, sideLinkVisible, sideNavigationSource, sideNavigatio
 import { sessionKey, type SessionEntry } from './session-tree.js';
 import { tpmMainTarget } from './tpm-main-sessions.js';
 
-type DescribedSession = SessionDescriptionIdentity & { title?: string; teamId?: string; teamMemberId?: string };
+type DescribedSession = SessionDescriptionIdentity & { title?: string };
 
 export interface DescribeSessionInput {
   session: DescribedSession;

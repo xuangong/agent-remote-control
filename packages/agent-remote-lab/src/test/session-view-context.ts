@@ -25,7 +25,7 @@ export function buildSessionViewContext(facts: ContextFacts = {}): SessionViewCo
       session: source, viewId: source.viewId, windowViewId: source.viewId, state: replicaState, actions: {}, offline: false, pending: false, status: 'ready',
       operationBinding: { historical: false }, sessionState: { readOnly: false }, ...context,
     } as unknown as FamilySessionPresentationContext,
-    options: {}, team: false, botPresentation: false, source, view: undefined, windowBot: false, isPrimary: false, fork: undefined, sourceForks: [],
+    options: {}, botPresentation: false, source, view: undefined, windowBot: false, isPrimary: false, fork: undefined, sourceForks: [],
     host: buildHost(), available: true, quoteView: undefined, openBot: undefined, provisional: false, assertCurrent: () => {},
     ...rest,
   };

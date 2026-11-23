@@ -4,8 +4,6 @@ import type { OpenedSession } from './directory-client.js';
 
 export interface SessionEntry extends Partial<AgentChildSession> {
   hostId?: string;
-  teamId?: string;
-  teamMemberId?: string;
   providerId: string;
   nativeSessionId: string;
   title: string;

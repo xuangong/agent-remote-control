@@ -7,8 +7,6 @@ export interface CompositionWindow {
   slotId?: string;
   managed?: boolean;
   closeWith?: string;
-  groupId?: string;
-  teamMemberId?: string;
 }
 export const SESSION_VIEW_LIMIT = 20;
 
@@ -19,10 +17,10 @@ export function parseCompositionWindows(value: unknown, slots: ReadonlySet<strin
     if (!view || typeof view.id !== 'string' || !view.id || view.id === 'main' || ids.has(view.id)
       || view.slotId !== undefined && !slots.has(view.slotId)
       || view.managed !== undefined && typeof view.managed !== 'boolean'
-      || [view.closeWith, view.groupId, view.teamMemberId].some(value => value !== undefined && (typeof value !== 'string' || !value))) throw new Error('Invalid session view.');
+      || [view.closeWith].some(value => value !== undefined && (typeof value !== 'string' || !value))) throw new Error('Invalid session view.');
     ids.add(view.id);
     return { id: view.id, ...(view.slotId ? { slotId: view.slotId } : {}), ...(view.managed ? { managed: true } : {}),
-      ...(view.closeWith ? { closeWith: view.closeWith } : {}), ...(view.groupId ? { groupId: view.groupId } : {}), ...(view.teamMemberId ? { teamMemberId: view.teamMemberId } : {}) };
+      ...(view.closeWith ? { closeWith: view.closeWith } : {}) };
   });
   if (windows.some(view => view.closeWith && (view.closeWith === view.id || !ids.has(view.closeWith)))) throw new Error('Invalid session view group.');
   return windows;

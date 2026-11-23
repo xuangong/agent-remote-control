@@ -18,9 +18,9 @@ export type HeadingActionsContributionInputs = Pick<PresentationScope, 'baseUrl'
 
 export const headingActionsContribution = (inputs: HeadingActionsContributionInputs) => (view: SessionViewContext): SessionViewContribution => {
   const { baseUrl, compactLayout, conversationHistory, directory, favorites, openLocalView, openSession, sessionEntries, setRenamingSession, sharedWindow, succession, userScoped, t, foldsOnClose, closeView } = inputs;
-  const { context, team, botPresentation, source, view: windowView, isPrimary, host, available, openBot } = view;
+  const { context, botPresentation, source, view: windowView, isPrimary, host, available, openBot } = view;
   if (botPresentation) return { props: { sessionManager: undefined, conversationPath: undefined } };
-  const mayRename = !team && userScoped && host?.online && host.access !== 'shared' && host.providers?.some(provider => provider.providerId === source.providerId && provider.sessionRename);
+  const mayRename = userScoped && host?.online && host.access !== 'shared' && host.providers?.some(provider => provider.providerId === source.providerId && provider.sessionRename);
   return {
     props: {
       sessionManager: <>{context.controls}{isPrimary ? <IconButton icon="close" data-pane-selection-ignore label={t('sessions.presentation.closeGroup', { title: source.title })}

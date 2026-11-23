@@ -140,7 +140,7 @@ async function setup(kind: ViewKind, options: { images?: boolean; recipient?: Im
     : kind === 'tpm' ? <TpmWorkspace session={selected} item={item} visible storageScope={scope} triggerRef={trigger}
       transport={f.transport} draftBinding={binding} onClose={() => {}} onShowList={() => {}} onOpenMain={() => {}} onAction={async () => {}} onResolve={async () => {}} onRetry={() => {}} />
     : compact || kind === 'child' ? <SessionFamily {...family} />
-    : <SessionWindow entry={{ id: 'ordinary-view', slotId: 'slot', managed, ...(managed ? { groupId: 'team' } : {}), target: selected }} baseUrl="http://fixture" visible compact={false} hostLabel="Local" offline={false}
+    : <SessionWindow entry={{ id: 'ordinary-view', slotId: 'slot', managed, target: selected }} baseUrl="http://fixture" visible compact={false} hostLabel="Local" offline={false}
       transport={f.transport} draftStore={drafts} draftBinding={owner ? binding : undefined} imageDraftBinding={owner ? imageDraftBinding : undefined} navigation={(source, state) => sessionViewNavigation({ source, state, entries: [] })}
       onFocus={() => {}} onClose={() => {}} />}</ConversationConnectionScope.Provider>;
   }

@@ -139,8 +139,6 @@ export function windowCompositionMapping(document: CompositionDocument, window: 
   return new Map(window.views.flatMap(view => {
     if (!view.binding) return [];
     const slot = ensureWindowCompositionSlot(document, window.id, view.id, view.binding);
-    const feature = parseWindowFeature(view.feature);
-    if (feature?.kind === 'team') slot.metadata = { title: slot.metadata?.title ?? view.binding!.title, ...slot.metadata, teamId: feature.id, ...(feature.memberId ? { teamMemberId: feature.memberId } : {}) };
     return [[view.id, slot] as const];
   }));
 }

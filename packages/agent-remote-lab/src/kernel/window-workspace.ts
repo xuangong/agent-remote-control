@@ -58,26 +58,12 @@ export function importCompositionWindow(document: CompositionDocument): Workspac
     const slot = document.slots.find(slot => slot.id === entry.slotId), selected = slot && compositionSelection(slot);
     const view = createWindowView(ids.get(entry.id)!, selected && windowSessionBinding(selected, slot?.intent.kind === 'history' ? 'history' : undefined));
     if (entry.closeWith && ids.has(entry.closeWith)) view.closeWith = ids.get(entry.closeWith);
-    const root = entry.closeWith ? document.windows?.find(root => root.id === entry.closeWith) : entry;
-    const teamId = entry.groupId ?? root?.groupId ?? slot?.metadata?.teamId;
-    const memberId = entry.teamMemberId ?? slot?.metadata?.teamMemberId;
-    if (teamId) {
-      view.feature = createWindowFeature({ kind: 'team', id: teamId, ...(memberId ? { memberId } : {}), role: entry.closeWith ? 'member' : 'leader' });
-      view.bindingPolicy = 'managed';
-    }
     return view;
   })];
   for (const entry of legacyEntries) {
     const oldId = `session:${sessionKey(entry.target)}`;
     if (ids.has(oldId)) continue;
     const view = createWindowView(validId(oldId), windowSessionBinding(entry.target)); ids.set(oldId, view.id);
-    const root = entry.closeWith ? legacyEntries.find(root => `session:${sessionKey(root.target)}` === entry.closeWith) : entry;
-    const teamId = entry.groupId ?? root?.groupId ?? entry.target.teamId;
-    const memberId = entry.teamMemberId ?? entry.target.teamMemberId;
-    if (teamId) {
-      view.feature = createWindowFeature({ kind: 'team', id: teamId, ...(memberId ? { memberId } : {}), role: entry.closeWith ? 'member' : 'leader' });
-      view.bindingPolicy = 'managed';
-    }
     views.push(view);
   }
   for (const entry of legacyEntries) { const id = ids.get(`session:${sessionKey(entry.target)}`), parent = ids.get(entry.closeWith); if (id && parent && id !== parent) views.find(view => view.id === id)!.closeWith = parent; }

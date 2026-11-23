@@ -7,10 +7,11 @@ function initial(): WorkspaceWindow {
     views: [createWindowView('main', undefined, 'primary'), createWindowView('source')] };
 }
 it('keeps typed feature metadata stable and rejects unsupported business metadata', () => {
-  const feature = { kind: 'team' as const, id: 'team', role: 'member' as const, memberId: 'stable-member' };
+  const feature = { kind: 'tpm' as const, id: 'work', hostId: 'stable-host' };
   expect(parseWindowFeature(createWindowFeature(feature))).toEqual(feature);
   expect(parseWindowFeature({ kind: 'other', id: 'team', metadata: { role: 'member' } })).toBeUndefined();
-  expect(parseWindowFeature({ kind: 'team', id: 'team', metadata: { role: 'unknown' } })).toBeUndefined();
+  // The Team of older state is no feature any more: its view is an ordinary one.
+  expect(parseWindowFeature({ kind: 'team', id: 'team', metadata: { role: 'member', memberId: 'stable-member' } })).toBeUndefined();
   expect(parseWindowFeature({ kind: 'tpm', id: 'work' })).toBeUndefined();
 });
 it('uses explicit managed bindings and lifecycle edges for feature views', () => {

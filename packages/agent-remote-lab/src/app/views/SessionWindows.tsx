@@ -18,7 +18,7 @@ export function SessionWindows({ scope }: { readonly scope: Pick<AppScope, 'acti
           offline={entry.target ? remoteHosts.find(host => host.id === entry.target!.hostId)?.online === false : false}
           onSessionBound={entry.managed ? undefined : receiveViewSession}
           missing={!!entry.target && missingSessions.has(sessionKey(entry.target))} onSessionUnavailable={markSessionMissing}
-          sessionPresentation={context => presentSessionView(context, { team: !!entry.groupId || !!entry.teamMemberId })}
+          sessionPresentation={context => presentSessionView(context, {})}
           transport={transport} draftStore={messageDrafts} {...windowDraftBinding(entry)} navigation={viewNavigation} onClose={() => sessionWindows.close(entry.id)}
           {...windowPaneFolding(entry.id)} />)}</div>
   </>;

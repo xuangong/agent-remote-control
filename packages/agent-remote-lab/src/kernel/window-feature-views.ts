@@ -6,12 +6,11 @@ export interface WindowAskSourceAnchor { hostId: string; providerId: string; nat
 type FeatureAssociation = NonNullable<WindowView['feature']>;
 export type WindowAppFeature =
   | { kind: 'ask'; id: string; source?: WindowAskSourceAnchor }
-  | { kind: 'tpm'; id: string; hostId: string }
-  | { kind: 'team'; id: string; role: 'leader' | 'member'; memberId?: string };
+  | { kind: 'tpm'; id: string; hostId: string };
 
 const nativeId = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 4096;
 
-/** Only validated application associations receive feature behavior. Unknown tags remain ordinary views. */
+/** Only validated application associations receive feature behavior. Unknown tags, such as the `team` of older state, remain ordinary views. */
 export function parseWindowFeature(feature: FeatureAssociation | undefined): WindowAppFeature | undefined {
   if (!feature || !nativeId(feature.id)) return;
   if (feature.kind === 'ask') {
@@ -25,12 +24,6 @@ export function parseWindowFeature(feature: FeatureAssociation | undefined): Win
   if (feature.kind === 'tpm' && nativeId(feature.metadata?.hostId)) {
     return { kind: 'tpm', id: feature.id, hostId: feature.metadata.hostId };
   }
-  if (feature.kind === 'team') {
-    const role = feature.metadata?.role;
-    const memberId = feature.metadata?.memberId;
-    if (role !== 'leader' && role !== 'member' || memberId !== undefined && !nativeId(memberId)) return;
-    return { kind: 'team', id: feature.id, role, ...(memberId ? { memberId } : {}) };
-  }
 }
 
 export function createWindowFeature(feature: WindowAppFeature): FeatureAssociation {
@@ -39,8 +32,7 @@ export function createWindowFeature(feature: WindowAppFeature): FeatureAssociati
     ...(feature.source.roleKey ? { sourceRoleKey: feature.source.roleKey } : {}), ...(feature.source.agentId ? { sourceAgentId: feature.source.agentId } : {}),
     ...(feature.source.title ? { sourceTitle: feature.source.title } : {}),
   } } : {}) };
-  if (feature.kind === 'tpm') return { kind: feature.kind, id: feature.id, metadata: { hostId: feature.hostId } };
-  return { kind: feature.kind, id: feature.id, metadata: { role: feature.role, ...(feature.memberId ? { memberId: feature.memberId } : {}) } };
+  return { kind: feature.kind, id: feature.id, metadata: { hostId: feature.hostId } };
 }
 
 export function featureView(window: WorkspaceWindow, kind: WindowAppFeature['kind'], id: string) {

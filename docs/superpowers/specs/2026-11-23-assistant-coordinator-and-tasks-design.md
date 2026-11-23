@@ -470,25 +470,36 @@ L2 and L3 detail (tool calls, frames, operation states) stay one step away, as O
 
 ## 10. What happens to Side, Team, Call For Support and TPM
 
-There is **one kind of bot**. A bot has a name, a **mission** (what it is for and how it sees its place, in the person's words)
-and the same abilities as every other bot: it starts **tasks**, **messages** other bots and is messaged by them, joins **rooms**,
-keeps **work items** (10.4) and may carry a **timer** (10.5). A bot can serve another bot and have other bots serve it, so no bot
+There is **one kind of bot**. A bot has a name, a **mission** (what it is for and how it sees its place) and the same abilities as
+every other bot: it starts **tasks**, **messages** other bots and is messaged by them, joins **rooms**,
+keeps **work items** (10.4), may carry a **timer** (10.5), and creates other bots and writes their missions. A bot can serve another bot and have other bots serve it, so no bot
 needs a special kind: a reviewer, a tester on another machine or a project manager is an ordinary bot whose mission says so.
 
 Every older way of making sessions work together becomes bots, tasks, messages and rooms, so there are no separate modes to learn
 and no separate panels. Ask stays beside them as the person's way to look without touching (10.2). Decided by the owner on
 2026-11-23.
 
-**The mission.** The person writes it when creating a bot or later in its details; a bot may propose a change, which the person
-accepts. It reaches the bot's main session as its standing instructions (`AgentSessionExtensions.instructions`) and other bots see
-it in `list_assistants`, so they know whom to ask. The label stays a short tag beside the name.
+**The mission.** It reaches the bot's main session as its standing instructions (`AgentSessionExtensions.instructions`) and other
+bots see it in `list_assistants`, so they know whom to ask. The label stays a short tag beside the name. A mission is written by the
+person or by another bot:
+
+- **A bot builds its team.** The person tells one bot how they want to work: what roles the work needs, how the team is formed and
+  how it runs. That bot creates the bots it needs (`create_assistant`: name, mission, provider, model, Host and working directory),
+  writes their missions, and works with them by messages and rooms. It stays their **organizer**: it can rewrite their missions as
+  the work changes (`set_mission`) and retire them when they are no longer needed (`retire_assistant`). A bot it created may in turn
+  organize bots of its own, within the limits below.
+- **The person stays above every organizer.** Created bots appear in Chats in their organizer's group, marked with who created
+  them. The person can open, message, rename, rewrite the mission of, pause or remove any bot; a mission the person wrote is not
+  rewritten by an organizer without the person agreeing in the organizer's conversation.
+- **Limits.** Per account and per organizer: how many bots it may create, how deep organizers may nest, and on which Hosts and
+  providers; the limits are the person's, in Settings. A creation beyond them waits for the person to allow it.
 
 ### 10.1 Each feature in the model
 
 | Today | In the model | Removed when done |
 |---|---|---|
 | **Call For Support** | **Bots asking bots.** A bot that needs a review, another model or another machine messages the bot whose mission fits, and that bot does the work its own way, with its own tasks. There is no profile, mandate or roster: the person decides which bots exist and what their missions are. |
-| **Team** | The Leader is a bot; members are its tasks' workers, reused across tasks with `continue_task`. A member the person wants to keep and talk to becomes a bot of its own. `send_team_message` becomes `message_task`; member reports become `report_task`; `read_team` becomes `task_status`; Team resources become task attachments. | `teams.ts` queue and inbox, `team.ts` delivery, `team_message`, the Team panel and launcher |
+| **Team** | The Leader is a bot that organizes: its members are bots it created with their missions, and one-off work goes to its tasks' workers, reused with `continue_task`. `send_team_message` becomes `message_task`; member reports become `report_task`; `read_team` becomes `task_status`; Team resources become task attachments. | `teams.ts` queue and inbox, `team.ts` delivery, `team_message`, the Team panel and launcher |
 | **Side** | A task the person starts from the conversation (`/side`): its brief is the person's first message, no done-when, workspace `same`. Existing Side relations are listed as tasks. | Side-specific creation and relation kinds, after the relations are migrated |
 | **TPM** | **A bot whose mission is a piece of work.** It keeps that work's work item (10.4), gets it done by messaging the bots that do it and by its own tasks, and updates the progress as their replies, its task results and the person's words arrive; a timer is only its fallback (10.5). |
 | **Rooms** (this design, 6) | A group chat in Bot mode's list, instead of a row of the Teams panel (O71). | The Teams panel |

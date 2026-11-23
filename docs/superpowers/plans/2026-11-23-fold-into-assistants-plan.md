@@ -25,8 +25,13 @@ messages run in production.
   Chromium and WebKit. These are the gates of every step below, since Side, Call For Support and TPM have no flow of their own and
   Team has one case in E7.
 - [ ] **The assistant record (T1, O70)** first: ids that survive moving groups, the session a bot shows now, name, label,
-  **mission**, peers. The mission is set by the person (a bot may propose a change), reaches the main session as its standing
-  instructions, and is shown to other bots by `list_assistants`. Links, rooms, timers and reading a peer's conversation all rest on it.
+  **mission**, **organizer** (the bot that created it, if any), peers. The mission reaches the main session as its standing
+  instructions and is shown to other bots by `list_assistants`.
+- [ ] **Bots create bots** (design 10, the mission): `create_assistant` (name, mission, provider, model, Host, directory),
+  `set_mission` and `retire_assistant` for the bots a bot organizes; created bots shown in Chats in the organizer's group with who
+  created them; the person's limits per account and organizer (count, nesting, Hosts, providers) in Settings, a creation beyond them
+  waiting for the person. Gate: the person describes a team to one bot; it creates two bots with missions, gives one a piece of work
+  by message, rewrites the other's mission, and the person sees all three in Chats and can change any of them. Links, rooms, timers and reading a peer's conversation all rest on it.
 - [ ] **A reply is the receiver's answer** (design 10.1): the final text of the turn a message started returns to the sender, so a
   bot on any provider can be asked; plain bots can receive messages.
 - [ ] **Attachments on messages and task results.** A message or a report carries files (a patch, a log) as resources, as Team

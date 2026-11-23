@@ -47,7 +47,8 @@ export class BotCalls {
     const standing = directory.find(item => this.key(item.hostId, item.providerId, item.nativeSessionId) === key);
     if (standing) return { key: standing.key, name: standing.name, standing };
     const parent = this.broker.ports.read().find(team => team.task && this.key(team.members[0]!.hostId, team.members[0]!.providerId, team.members[0]!.nativeSessionId!) === key);
-    return parent ? this.temporary(parent) : undefined;
+    // The task's owner session is the organizer whether or not it is a bot of the groups now.
+    return parent ? this.temporary(parent) : { key: `session:${key}`, name: seat.name };
   }
   /** The temporary bots a bot organizes: the tasks its session owns. */
   private organized(hostId: string, owner: Owner): SavedTeam[] { return ownerTasks(this.broker.ports.read(), this.broker.ports.resolveSession, hostId, owner); }
@@ -73,7 +74,7 @@ export class BotCalls {
     // A temporary bot to its organizer: its report, its question or its progress.
     if (from.task && organizer && to.key === organizer.key) {
       const memberId = from.task.members[0]!.id;
-      if (call.status === 'done' || call.status === 'failed') return this.tasks.report(hostId, { action: 'report_task', teamId: from.task.id, memberId, status: call.status, summary: call.text });
+      if (call.status === 'done' || call.status === 'failed') return this.tasks.report(hostId, { action: 'report_task', teamId: from.task.id, memberId, status: call.status, summary: call.patch ? `${call.text}\n\n${call.patch}` : call.text });
       if (call.status === 'needs_input') return this.tasks.ask(hostId, { action: 'ask_owner', teamId: from.task.id, memberId, question: call.text });
       return this.tasks.progress(hostId, { teamId: from.task.id, memberId, operationId: call.operationId, text: call.text });
     }

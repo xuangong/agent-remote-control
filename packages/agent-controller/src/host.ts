@@ -32,7 +32,7 @@ import { createVscodeTunnelManager, type VscodeTunnelOptions } from './vscode-tu
 import { createOperationCache, OperationCacheError } from '@orchardworks/agent-session-runtime';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { resolveAgentProviderBehaviour, type AgentSession, type AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
+import { resolveAgentProviderBehaviour, type AgentSession, type AgentSessionConfig, type AgentSessionToolNamespace } from '@orchardworks/agent-provider-sdk';
 import { type HostEnvironment } from '@orchardworks/agent-remote-protocol';
 import { createSessionStatePublisher, liveSessionState } from './session-state-publisher.js';
 import { createSessionReplies } from './session-replies.js';
@@ -475,11 +475,13 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     execute: executeOperation('host:tpm'),
   };
   const tpm = options.tpm ? new TpmCoordinator(options.tpm, automationAccess) : undefined;
-  const team = options.team?.request ? new TeamRuntime(options.team.stateDirectory, {...automationAccess, sessionRouting: successionService?.roleRouting ?? automationAccess.sessionRouting!,
+  const team: TeamRuntime | undefined = options.team?.request ? new TeamRuntime(options.team.stateDirectory, {...automationAccess, sessionRouting: successionService?.roleRouting ?? automationAccess.sessionRouting!,
     genericSuccession: () => !!successionService && options.team?.genericSuccession?.() === true, callForSupport: () => options.team?.callForSupport?.() === true,
     tasks: () => options.team?.tasks?.() === true,
     toolNamespaces: providerId => !!providers.require(providerId).adapter.descriptor.sessionExtensions?.toolNamespaces,
     readOnlyProviders: () => automationAccess.supportedProviders().filter(providerId => providers.require(providerId).adapter.descriptor.sessionAccess?.readOnly),
+    // A temporary bot uses every bot's tools; they exist once the worker support below does, before any seat attaches.
+    botTools: (actual): AgentSessionToolNamespace => workerSupport!.namespace(actual, false, true),
     execute: executeOperation('host:team')}, options.team.request, options.team.tickMs) : undefined;
   const roles = new SessionRoles([...(team ? [team] : []), ...(tpm ? [tpmRole(tpm)] : [])]);
   // A message that waited for this Host goes to the session that carries its conversation now, through the same access as roles.
@@ -493,7 +495,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     },
     acquire: automationAccess.acquire,
   } }) : undefined;
-  const workerSupport = options.team?.request ? new WorkerSupport({ request: options.team.request, available: () => options.team?.callForSupport?.() === true, tasks: () => options.team?.tasks?.() === true,
+  const workerSupport: WorkerSupport | undefined = options.team?.request ? new WorkerSupport({ request: options.team.request, available: () => options.team?.callForSupport?.() === true, tasks: () => options.team?.tasks?.() === true,
     stateDirectory: options.team.stateDirectory, title: async ref => await providers.require(ref.providerId).directory.sessionTitle?.(ref.nativeSessionId),
     head: async ref => {
       const lease = await automationAccess.acquire(ref.providerId, ref.nativeSessionId);
@@ -502,7 +504,16 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       if (!cwd) throw new Error('This session\'s working directory is unknown.');
       return headCommit(cwd);
     },
-    readOnly: providerId => !!providers.get(providerId)?.adapter.descriptor.sessionAccess?.readOnly }) : undefined;
+    readOnly: providerId => !!providers.get(providerId)?.adapter.descriptor.sessionAccess?.readOnly,
+    patch: async (ref): Promise<string | undefined> => team?.patchFor(ref),
+    read: async (ref, before) => {
+      const lease = await automationAccess.acquire(ref.providerId, ref.nativeSessionId);
+      try {
+        const page = (await lease.agent.fetchTimeline({ requestId: randomUUID(), agentId: lease.agent.agentId, direction: before ? 'before' : 'tail', limit: 20, ...(before ? { cursor: before } : {}) })).payload;
+        let remaining = 48000; const entries = page.entries.filter(entry => { remaining -= JSON.stringify(entry).length; return remaining >= 0; });
+        return { ...page, entries, truncated: entries.length !== page.entries.length };
+      } finally { lease.release(); }
+    } }) : undefined;
   workerSupport?.onChange(() => { void successionWiring.applyWorkerTools().catch(() => undefined); });
   const workerSupportTimer = workerSupport ? setInterval(() => { if (!admission.closed) void workerSupport.refresh(automationAccess.controllerId).catch(() => undefined); }, options.team?.tickMs ?? 3000) : undefined;
   workerSupportTimer?.unref?.();

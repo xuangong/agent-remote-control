@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { AgentSessionTool, AgentSessionToolNamespace } from '@orchardworks/agent-provider-sdk';
-import { ASSISTANT_MESSAGE_LIMIT, nativeSessionRefKey, ROOM_MINUTES_LIMIT, TASK_BRIEF_LIMIT, TASK_DONE_WHEN_LIMIT, TASK_SUMMARY_LIMIT, TASK_TITLE_LIMIT, type CallForSupportCall, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import { ASSISTANT_MESSAGE_LIMIT, BOT_MESSAGE_LIMIT, nativeSessionRefKey, ROOM_MINUTES_LIMIT, TASK_BRIEF_LIMIT, TASK_TITLE_LIMIT, type CallForSupportCall, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { TeamResourceFiles } from './team-resource-files.js';
 import { botInstructions } from './bot-instructions.js';
 
@@ -19,6 +19,10 @@ export interface WorkerSupportPorts {
   head?(ref: NativeSessionRef): Promise<string>;
   /** The provider keeps a session it starts from writing its working directory. */
   readOnly?(providerId: string): boolean;
+  /** A bounded page of a session's recent conversation on this Host. */
+  read?(ref: NativeSessionRef, before?: { epoch: string; seq: number }): Promise<unknown>;
+  /** A worktree bot's patch, saved on this Host, as the line its organizer reads; undefined for any other bot. */
+  patch?(ref: NativeSessionRef): Promise<string | undefined>;
 }
 type Enablement = { defaultEnabled: boolean; sessions: Map<string, boolean>; bots: Map<string, string> };
 /** Which worker tools a session has: none, Call For Support only, or Call For Support with the task tools every bot has. */
@@ -141,29 +145,42 @@ export class WorkerSupport {
           return this.resources.download(roleId, requesterMemberId, args.resourceId, args.outputDirectory);
         }),
     ];
+    const caller = () => { const ref = worker(); return { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }; };
     const coordination = [
-      tool('create_task', 'Start a task: a separate session on this Host works on it while you keep talking with the person. Use it for work that takes more than a few steps, and start one task per independent piece of work. Write a brief that stands alone: the worker sees only the brief, and reads your conversation only if the brief says it is needed. workspace: same (default) works in your working directory alongside you; read_only investigates it without changing it; worktree works in its own git worktree at your current commit (uncommitted changes are not in it) and returns its changes as a patch. provider and model choose another agent or model for the worker. The result arrives later as input labelled [Task … · done] or [Task … · failed]; until then tell the person what you started and keep answering them. Reuse operationId to retry the same task after a lost response.',
-        object({ title: { type: 'string', minLength: 1, maxLength: TASK_TITLE_LIMIT }, brief: { type: 'string', minLength: 1, maxLength: TASK_BRIEF_LIMIT },
-          done_when: { type: 'string', minLength: 1, maxLength: TASK_DONE_WHEN_LIMIT }, workspace: { type: 'string', enum: ['same', 'read_only', 'worktree'] }, provider: id,
-          model: { type: 'string', minLength: 1, maxLength: 256 }, operationId: id }, ['title', 'brief']),
+      tool('create_bot', 'Start a temporary bot for one piece of work. It runs in parallel on this Host in a session of its own, while you keep talking with the person, and reports back to you as input labelled [Task … · done] or [Task … · failed], or asks you [Task … · question]. Give it a short name and a mission that stands alone: it sees only the mission and its first message, and reads your conversation only if the mission says so. workspace: same (default) works in your working directory alongside you; read_only investigates it without changing it; worktree works in its own git worktree at your current commit and returns its changes as a patch. provider and model choose another agent or model. Then tell the person what you started. Reuse operationId to retry after a lost response.',
+        object({ name: { type: 'string', minLength: 1, maxLength: TASK_TITLE_LIMIT }, mission: { type: 'string', minLength: 1, maxLength: TASK_BRIEF_LIMIT },
+          message: { type: 'string', minLength: 1, maxLength: BOT_MESSAGE_LIMIT }, workspace: { type: 'string', enum: ['same', 'read_only', 'worktree'] }, provider: id,
+          model: { type: 'string', minLength: 1, maxLength: 256 }, operationId: id }, ['name', 'mission']),
         async args => {
           const ref = worker(), title = await this.ports.title?.(ref).catch(() => undefined);
           const workspace = args.workspace as 'same' | 'read_only' | 'worktree' | undefined;
           if (workspace === 'read_only' && !this.ports.readOnly?.(args.provider ?? ref.providerId)) fail('This agent cannot work read-only here; use workspace worktree or same.');
-          const commit = workspace === 'worktree' ? await (this.ports.head ?? (() => fail('Worktree tasks are not available on this Host.')))(ref) : undefined;
-          return taskRequest({ action: 'create_task', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId, ...(title ? { title: title.slice(0, 256) } : {}) },
-            operationId: args.operationId ?? randomUUID(), title: args.title, brief: args.brief, ...(args.done_when ? { doneWhen: args.done_when } : {}),
+          const commit = workspace === 'worktree' ? await (this.ports.head ?? (() => fail('Worktree bots are not available on this Host.')))(ref) : undefined;
+          return taskRequest({ action: 'create_bot', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId, ...(title ? { title: title.slice(0, 256) } : {}) },
+            operationId: args.operationId ?? randomUUID(), name: args.name, mission: args.mission, lifetime: 'temporary', ...(args.message ? { message: args.message } : {}),
             ...(workspace && workspace !== 'same' ? { workspace } : {}), ...(commit ? { commit } : {}), ...(args.provider ? { provider: args.provider } : {}), ...(args.model ? { model: args.model } : {}) });
         }),
-      tool('task_status', 'List the tasks this session started, newest first, with their state (queued, working, needs_input, done, failed, cancelled), what a waiting task waits for, and the result; or read one by taskId.',
-        object({ taskId: id }, []), args => { const ref = worker(); return taskRequest({ action: 'task_status', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, ...(args.taskId ? { taskId: args.taskId } : {}) }); }),
-      tool('list_assistants', 'List the other assistants of this account that you can message, with their id and name.',
-        object({}, []), () => { const ref = worker(); return taskRequest({ action: 'list_assistants', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId } }); }),
-      tool('message_assistant', 'Send another assistant of this account a message: a question, a request or what it should know. It arrives when that assistant is between turns, labelled with your name; its answer arrives later as input labelled [Message from …]. Answer a message you received with reply_to set to its id. Carry only what the other assistant needs. Reuse operationId to retry the same message.',
-        object({ to: { type: 'string', minLength: 1, maxLength: 300 }, text: { type: 'string', minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT }, reply_to: { type: 'string', pattern: '^m[0-9a-f]{12}$' }, operationId: id }, ['to', 'text']),
-        args => { const ref = worker();
-          return taskRequest({ action: 'message_assistant', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, to: args.to, text: args.text, operationId: args.operationId ?? randomUUID(),
-            ...(args.reply_to ? { replyTo: args.reply_to } : {}) }); }),
+      tool('message', 'Send a message to another bot, in your own words and at most 300 characters: a bot you organize, your organizer (to: "organizer"), or any bot from list_bots, by name or id. When you write to your organizer, status says what it is: progress, done or failed (your result, once), or needs_input (you wait for its answer; then end your turn). The details stay where they are: the receiver reads them with read_bot when it needs them. Answer a message another bot sent you with reply_to set to its id. It arrives between the receiver\'s turns. Reuse operationId to retry.',
+        object({ to: { type: 'string', minLength: 1, maxLength: 300 }, text: { type: 'string', minLength: 1, maxLength: BOT_MESSAGE_LIMIT }, status: { type: 'string', enum: ['progress', 'done', 'failed', 'needs_input'] },
+          reply_to: { type: 'string', pattern: '^m[0-9a-f]{12}$' }, operationId: id }, ['to', 'text']),
+        async args => {
+          // A worktree bot's result carries the path of its patch, saved on this Host where its organizer works.
+          const patch = args.status === 'done' || args.status === 'failed' ? await this.ports.patch?.(worker()) : undefined;
+          return taskRequest({ action: 'bot_message', owner: caller(), operationId: args.operationId ?? randomUUID(), to: args.to, text: args.text, ...(patch ? { patch } : {}),
+            ...(args.status ? { status: args.status } : {}), ...(args.reply_to ? { replyTo: args.reply_to } : {}) });
+        }),
+      tool('list_bots', 'List the bots you can message: the bots you organize with their status, your organizer if you have one, and the standing bots of this account with their missions.',
+        object({}, []), () => taskRequest({ action: 'list_bots', owner: caller() })),
+      tool('read_bot', 'Read a bounded page of the recent conversation of a bot you organize, to see what it did without asking it. Pass before from a previous page to read further back.',
+        object({ bot: { type: 'string', minLength: 1, maxLength: 300 }, before: { type: 'object', properties: { epoch: { type: 'string' }, seq: { type: 'integer' } }, required: ['epoch', 'seq'], additionalProperties: false } }, ['bot']),
+        async args => {
+          const where = await taskRequest({ action: 'bot_session', owner: caller(), bot: args.bot }) as { providerId: string; nativeSessionId: string };
+          return (this.ports.read ?? (() => fail('Reading bots is not available on this Host.')))({ ...worker(), providerId: where.providerId, nativeSessionId: where.nativeSessionId }, args.before);
+        }),
+      tool('stop_bot', 'Stop a bot you organize: its running turn stops and it gets no more input. Its conversation stays readable.',
+        object({ bot: { type: 'string', minLength: 1, maxLength: 300 } }, ['bot']), args => taskRequest({ action: 'stop_bot', owner: caller(), bot: args.bot })),
+      tool('retire_bot', 'Retire a bot you organize when its work is no longer needed, taking what it has done as its result.',
+        object({ bot: { type: 'string', minLength: 1, maxLength: 300 } }, ['bot']), args => taskRequest({ action: 'retire_bot', owner: caller(), bot: args.bot })),
       tool('open_room', 'Open a room: a conversation of you and other assistants of this account (by name) about a topic, for a set number of minutes. The topic is your first message; the room then asks one member at a time to speak, with the messages it has not seen, and you are asked again when there is something new. The person sees the room and may write in it.',
         object({ name: { type: 'string', minLength: 1, maxLength: 120 }, topic: { type: 'string', minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT },
           members: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 300 }, minItems: 1, maxItems: 7 }, minutes: { type: 'integer', minimum: 1, maximum: ROOM_MINUTES_LIMIT }, operationId: id }, ['name', 'topic', 'members', 'minutes']),
@@ -176,17 +193,9 @@ export class WorkerSupport {
           return taskRequest({ action: 'room_say', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, roomId: args.room, text: args.text, ...(args.done === true ? { done: true } : {}) }); }),
       tool('room_pass', 'Pass your turn in a room when you have nothing to add.',
         object({ room: id }, ['room']), args => { const ref = worker(); return taskRequest({ action: 'room_pass', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, roomId: args.room }); }),
-      tool('message_task', 'Send input to the worker of a running task: an answer to its question, a correction or more detail. It arrives when the worker is between turns.',
-        object({ taskId: id, text: { type: 'string', minLength: 1, maxLength: TASK_BRIEF_LIMIT }, operationId: id }, ['taskId', 'text']), args => { const ref = worker();
-          return taskRequest({ action: 'message_task', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, taskId: args.taskId, operationId: args.operationId ?? randomUUID(), text: args.text }); }),
-      tool('cancel_task', 'Stop a running task: its worker stops and gets no more input. Its session stays readable.',
-        object({ taskId: id }, ['taskId']), args => { const ref = worker(); return taskRequest({ action: 'cancel_task', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, taskId: args.taskId }); }),
-      tool('mark_task_done', 'Take a running task as done without its report, for example when the person says it is enough; summary records why.',
-        object({ taskId: id, summary: { type: 'string', minLength: 1, maxLength: TASK_SUMMARY_LIMIT } }, ['taskId']), args => { const ref = worker();
-          return taskRequest({ action: 'mark_task_done', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, taskId: args.taskId, ...(args.summary ? { summary: args.summary } : {}) }); }),
     ];
     const supportDescription = 'call for support from other sessions, models and machines (reviews, consultations, tests), and read their reports.';
-    return { name: WORKER_NAMESPACE, description: tasks ? `Agent Remote Control: start tasks that other sessions work on in parallel and report back; message the account's other assistants; ${supportDescription}` : `Agent Remote Control: ${supportDescription}`,
+    return { name: WORKER_NAMESPACE, description: tasks ? `Agent Remote Control: start bots that work in parallel and report back, message the account's other bots, read and stop the bots you organize; ${supportDescription}` : `Agent Remote Control: ${supportDescription}`,
       ...(deferred ? { deferred: true } : {}), tools: tasks ? [...support, ...coordination] : support };
   }
 }

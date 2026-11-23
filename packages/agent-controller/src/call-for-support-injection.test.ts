@@ -69,7 +69,7 @@ it('declares the worker namespace on every Codex thread it creates, deferred unt
   const f = await fixture();
   try {
     await f.control('/remote/create', { providerId: 'codex', operationId: randomUUID(), cwd: f.root });
-    expect(worker(f.created[0]!.input)).toMatchObject({ deferred: true, tools: [{ name: 'call_for_support' }, { name: 'support_status' }, { name: 'read_support_report' }, { name: 'download_support_resource' }, { name: 'create_task' }, { name: 'task_status' }, { name: 'list_assistants' }, { name: 'message_assistant' }, { name: 'open_room' }, { name: 'room_say' }, { name: 'room_pass' }, { name: 'message_task' }, { name: 'cancel_task' }, { name: 'mark_task_done' }] });
+    expect(worker(f.created[0]!.input)).toMatchObject({ deferred: true, tools: [{ name: 'call_for_support' }, { name: 'support_status' }, { name: 'read_support_report' }, { name: 'download_support_resource' }, { name: 'create_bot' }, { name: 'message' }, { name: 'list_bots' }, { name: 'read_bot' }, { name: 'stop_bot' }, { name: 'retire_bot' }, { name: 'open_room' }, { name: 'room_say' }, { name: 'room_pass' }] });
     // Tools fixed at creation carry the task tools too, so switching the assistant to coordinator mode later reaches the thread.
     // Attachments rebind its executors; the thread keeps its declaration.
     expect(worker(f.opened.find(entry => entry.id === 'codex-0')?.extensions)).toBeDefined();
@@ -126,7 +126,7 @@ it('gives a live Claude session the task tools while it is a bot, and takes them
     await f.control('/remote/attach', { providerId: 'claude', nativeSessionId: 'claude-main' });
     expect(worker(f.opened.at(-1)!.extensions)).toBeUndefined();
     f.bot('claude', 'claude-main');
-    await expect.poll(names).toContain('create_task');
+    await expect.poll(names).toContain('create_bot');
     // Support enabled too: leaving every group keeps the support tools and drops the task tools.
     f.enable('claude', 'claude-main', true);
     f.unbot('claude', 'claude-main');

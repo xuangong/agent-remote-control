@@ -10,6 +10,8 @@ import { TeamBroker } from '@orchardworks/agent-relay-core/testing';
 import type { SavedTeam } from '@orchardworks/agent-relay-core/testing';
 import { PortableTeamResourceStore } from '@orchardworks/agent-relay-core';
 import { emptyCallForSupportState, executeProfileCommand, setEnablement } from '@orchardworks/agent-relay-core/testing';
+import { WorkerSupport } from '../call-for-support-worker.js';
+import { WorkerSupport } from '../call-for-support-worker.js';
 import { TeamRuntime, type TeamRuntimeAccess } from '../team.js';
 import type { SessionCreation } from '../role-session-creation.js';
 
@@ -57,10 +59,17 @@ export async function supportHarness(options: { groups?: WindowGroup[]; sessions
     callForSupport: { state: () => support, capable: () => true, assertHost() {}, readOnly: () => true, supportBundle: (_host, input) => runtime.supportBundle(input),
       supportPatch: (_host, input) => runtime.supportPatch(input) },
     tasks: { capable: () => options.tasks === true, assertHost() { if (options.tasks !== true) throw new Error('Update the Controller to use tasks.'); } },
-    ...(options.groups ? { assistants: { groups: () => options.groups!, capable: () => options.tasks === true } } : {}),
+    // The account's bots: by default one, Chief, whose main session is `worker`, so its tasks have a bot as organizer.
+    assistants: { groups: () => options.groups ?? [{ window: { id: 'g0', title: 'g0', revision: 1, views: [{ id: 'chief', placement: 'primary',
+      binding: { hostId: 'host', providerId: 'codex', nativeSessionId: 'worker', title: 'worker' } }] }, bots: { rank: 'm', members: { chief: { botId: 'b_' + 'c'.repeat(32), name: 'Chief' } } } }] as unknown as WindowGroup[],
+      capable: () => options.tasks === true },
   });
   const created: Array<{ id: string; provider: string; creation: SessionCreation; extensions: AgentSessionExtensions }> = [];
+  // Every bot's tools, as a Host gives them to a temporary bot (a task's worker).
+  const bots = new WorkerSupport({ request: call => broker.hostCall('host', call), available: () => true, tasks: () => options.tasks === true, stateDirectory: await realpath(await mkdtemp(join(tmpdir(), 'bot-tools-'))),
+    title: async () => 'Chief', readOnly: providerId => ['codex', 'claude'].includes(providerId), patch: ref => runtime.patchFor(ref) });
   const access: TeamRuntimeAccess = {
+    botTools: actual => bots.namespace(actual, false, true),
     controllerId: 'controller', available: () => true, supportedProviders: () => ['codex', 'claude', 'copilot'], readOnlyProviders: () => ['codex', 'claude'],
     callForSupport: () => options.callForSupport ?? true, tasks: () => options.tasks === true, toolNamespaces: () => options.toolNamespaces === true, genericSuccession: () => true,
     sessionRouting: { resolve: anchor => ({ anchor, target: anchor, operationIds: [] }), assertCurrent: (anchor, target) => { if (anchor.nativeSessionId !== target.nativeSessionId) throw new Error('Wrong recipient'); } },

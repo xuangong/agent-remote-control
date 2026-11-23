@@ -3,12 +3,13 @@ import { teamInbox, teamMemberUpdate } from './team-inbox.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, open, rename } from 'node:fs/promises';
 import { join } from 'node:path';
-import { AgentOperationRejectedError, bindAgentSessionTools, type AgentInputAcceptance, type AgentSessionExtensions, type AgentSessionTool } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, bindAgentSessionTools, type AgentInputAcceptance, type AgentSessionExtensions, type AgentSessionTool, type AgentSessionToolNamespace } from '@orchardworks/agent-provider-sdk';
 import type { SessionExecutionRouting } from './session-succession-service.js';
 import type { RoleSuccessionDecision, SessionRole } from './session-role-succession.js';
 import type { SessionCreation } from './role-session-creation.js';
 import { coordinatorInstructions, coordinatorTools, locationInstructions, supporterInstructions } from './call-for-support-roles.js';
-import { askOwnerTool, reportTaskTool, TASK_WORKER_NAMESPACE, taskWorkerInstructions } from './task-roles.js';
+import { TASK_WORKER_NAMESPACE, taskWorkerInstructions } from './task-roles.js';
+import { botInstructions } from './bot-instructions.js';
 import { collectPatch, createBundle, fetchBundle, prepareWorktree, removeWorktree, repositoryRoot, worktreePath } from './call-for-support-workspaces.js';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { accountUsage, type SupportUsage } from './call-for-support-usage.js';
@@ -17,6 +18,8 @@ import { isNativeSessionRef, joinTaskInputs, nativeSessionRefKey, parseTaskInput
 import { OperationCacheError, type AgentManagerEvent, type RemoteHostSessionLease, type SessionWireOperationExecutor } from '@orchardworks/agent-session-runtime';
 
 export interface TeamRuntimeAccess {
+  /** Every bot's tools, bound to the session that calls them: what a temporary bot (a task's worker) uses to report and message. */
+  botTools?(actual: () => NativeSessionRef | undefined): AgentSessionToolNamespace;
   controllerId: string;
   /** Role routing: a seat follows every committed succession of its session, including one to another provider. */
   sessionRouting: SessionExecutionRouting;
@@ -237,15 +240,21 @@ export class TeamRuntime implements SessionRole {
     }
   }
   /** A worktree task's summary with the path of its patch appended; the summary alone when the worktree changed nothing. */
-  private async withPatch(seat: TeamSeat, summary: string): Promise<string> {
+  /** A worktree bot's patch against its commit, saved on this Host, as the line its organizer reads; undefined without changes. */
+  private async patchLine(seat: TeamSeat): Promise<string | undefined> {
     const record = this.records.find(item => item.seat.teamId === seat.teamId && item.seat.member.id === seat.member.id), workspace = seat.member.workspace;
     if (!record?.worktree || record.worktree.removed || workspace?.kind !== 'worktree') throw new Error('This task\'s worktree is not on this Host.');
     const patch = await collectPatch(record.worktree.path, workspace.commit);
-    if (!patch) return summary;
+    if (!patch) return undefined;
     const directory = join(this.directory, 'task-patches'), file = join(directory, `${seat.teamId}.patch`);
     await mkdir(directory, { recursive: true }); await writeFile(file, patch);
-    const line = `\n\nPatch of the worktree's changes against ${workspace.commit.slice(0, 12)} (apply with git apply): ${file}`;
-    return summary.slice(0, TASK_SUMMARY_LIMIT - line.length) + line;
+    return `Patch of the worktree's changes against ${workspace.commit.slice(0, 12)} (apply with git apply): ${file}`;
+  }
+  /** The patch line of the worktree bot whose session this is; undefined for any other session. */
+  async patchFor(ref: NativeSessionRef): Promise<string | undefined> {
+    const record = this.records.find(item => item.seat.task && item.seat.member.role === 'leader' && item.seat.member.workspace?.kind === 'worktree'
+      && item.seat.member.providerId === ref.providerId && item.seat.member.nativeSessionId === ref.nativeSessionId);
+    return record ? this.patchLine(record.seat) : undefined;
   }
   /** Removes a seat's worktree once; a failure is retried on a later tick. */
   private async removeSeatWorktree(record: LocalSeat): Promise<void> {
@@ -327,12 +336,15 @@ export class TeamRuntime implements SessionRole {
     // A task's worker reads its brief as input and reports once; it has no Team inbox. Its tools come as a namespace where the
     // provider takes one, so reporting never waits for the person's approval.
     if (seat.task) {
-      // A worktree task's report carries the path of its patch, saved on this Host where its owner works.
-      const report = reportTaskTool(async input => call(member.workspace?.kind === 'worktree' ? { ...input, summary: await this.withPatch(seat, input.summary) } : input));
-      const taskTools = bindAgentSessionTools([readSource, report, askOwnerTool(input => call(input))], assertCurrent), instructions = `${taskWorkerInstructions(seat)} ${locationInstructions(seat)}`;
+      // A temporary bot has every bot's tools, called as its own session; it reports to its organizer with message.
+      const bots = this.access.botTools?.(actual);
+      const standing = botInstructions(undefined);
+      const instructions = `${standing}\n\n${taskWorkerInstructions(seat)} ${locationInstructions(seat)}`;
       const access = member.access ? { access: member.access } : {};
-      return this.access.toolNamespaces?.(member.providerId) ? { instructions, ...access, toolNamespaces: [{ name: TASK_WORKER_NAMESPACE, description: 'Agent Remote Control: this task\'s own tools, to read its owner\'s conversation, ask it, and report the result.', tools: taskTools }] }
-        : { instructions, ...access, tools: taskTools };
+      const own = bindAgentSessionTools([readSource], assertCurrent);
+      return this.access.toolNamespaces?.(member.providerId)
+        ? { instructions, ...access, toolNamespaces: [...(bots ? [bots] : []), { name: TASK_WORKER_NAMESPACE, description: 'Agent Remote Control: read your organizer\'s conversation.', tools: own }] }
+        : { instructions, ...access, tools: [...own, ...(bots?.tools ?? [])] };
     }
     const tools = [
       tool('read_team', 'Read members, responsibilities, progress, compact delivery status and a bounded page of complete messages addressed to you. This does not consume messages. Fully read incoming messages, then acknowledge their IDs with acknowledge_team_messages before acting. Use nextAfterMessageId as afterMessageId while hasMore is true. Accepted input is not completed work.', { afterMessageId: id }, [], async args => teamInbox(await call({ action: 'read' }), member.id, args.afterMessageId, { group: coordinator })),

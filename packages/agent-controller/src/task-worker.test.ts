@@ -198,6 +198,23 @@ describe('the main session\'s task tools', () => {
 describe('messages between assistants', () => {
   const groups = [{ window: { id: 'g', title: 'g', revision: 1, views: [['v1', 'worker'], ['v2', 'tracker']].map(([id, nativeSessionId]) => ({ id, placement: 'primary',
     binding: { hostId: 'host', providerId: 'codex', nativeSessionId, title: nativeSessionId } })) }, bots: { rank: 'm', members: { v1: { name: 'Chief', mode: 'coordinator' }, v2: { name: 'Tracker', mode: 'coordinator' } } } }] as never;
+  it('delivers a bot\'s standing instructions from its inbox between its turns, once', async () => {
+    const bots = [{ window: { id: 'g', title: 'g', revision: 1, views: [{ id: 'v1', placement: 'primary', binding: { hostId: 'host', providerId: 'codex', nativeSessionId: 'tracker', title: 'tracker' } }] },
+      bots: { rank: 'm', members: { v1: { botId: 'b_' + 'd'.repeat(32), name: 'Tracker', mission: 'Track the release.' } } } }] as never;
+    const h = await supportHarness({ tasks: true, groups: bots, sessions: ['tracker'] });
+    cleanups.push(() => h.close());
+    h.busy('tracker', true);
+    await h.host({ action: 'support_enablement' });
+    await h.runtime.tick();
+    expect(h.sessions.get('tracker')!.deliveries).toEqual([]);
+    h.busy('tracker', false);
+    await h.runtime.tick();
+    expect(h.sessions.get('tracker')!.deliveries).toEqual([{ delivery: 'immediate', text: expect.stringMatching(/^\[Your standing instructions · v1\]\n[\s\S]*Your mission:\nTrack the release\.$/) }]);
+    await h.host({ action: 'support_enablement' });
+    await h.runtime.tick();
+    expect(h.sessions.get('tracker')!.deliveries).toHaveLength(1);
+  });
+
   it('reaches the other main session between its turns, after its task updates, and the reply comes back', async () => {
     const h = await supportHarness({ tasks: true, groups, sessions: ['tracker'] });
     cleanups.push(() => h.close());

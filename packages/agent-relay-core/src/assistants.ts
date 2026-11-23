@@ -92,10 +92,14 @@ export class AssistantMessages {
       catch { return []; }
     });
   }
+  /** The bots whose main session is on the Host, as the directory has them. */
+  hostBots(hostId: string): Assistant[] {
+    if (!this.ports.capable(hostId)) return [];
+    return accountDirectory(this.ports.groups(), this.ports.coordinatorProvider).filter(item => item.hostId === hostId && item.key.startsWith('b_'));
+  }
   /** Every bot whose main session is on the Host, as the session that holds its role now, with its mission: its standing instructions. */
   bots(hostId: string): Array<{ providerId: string; nativeSessionId: string; botId: string; mission?: string }> {
-    if (!this.ports.capable(hostId)) return [];
-    return accountDirectory(this.ports.groups(), this.ports.coordinatorProvider).filter(item => item.hostId === hostId && item.key.startsWith('b_')).flatMap(item => {
+    return this.hostBots(hostId).flatMap(item => {
       try { const current = this.broker.ports.resolveSession(item.hostId, item.providerId, item.nativeSessionId);
         return [{ providerId: current.providerId, nativeSessionId: current.nativeSessionId, botId: item.key, ...(item.mission ? { mission: item.mission } : {}) }]; }
       catch { return []; }

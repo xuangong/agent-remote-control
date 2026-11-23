@@ -2,6 +2,7 @@ import { Type, type Static } from '@sinclair/typebox';
 import { NativeSessionRef } from './session-succession.js';
 import { Value } from '@sinclair/typebox/value';
 import { TeamResource } from './team-resource.js';
+import { BotId } from './bots.js';
 import { CallForSupportCallInput, CallForSupportFinding, CallForSupportGroup, CallForSupportMandate, CallForSupportReportStatus, CallForSupportRosterProposal,
   isCallForSupportGroup } from './call-for-support.js';
 import { TaskBrief, TaskDoneWhen, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_HOP_LIMIT, ASSISTANT_MESSAGE_LIMIT, ROOM_MINUTES_LIMIT, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, TaskReportStatus, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_QUESTION_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, isTeamTask } from './task.js';
@@ -56,6 +57,12 @@ export type TeamUnresolvedReceipt = Static<typeof TeamUnresolvedReceipt>;
 export const TeamLink = Type.Object({ assistants: Type.Tuple([id, id]),
   recent: Type.Array(Type.Object({ id: AssistantMessageId, from: id, hop: Type.Integer({ minimum: 1, maximum: ASSISTANT_MESSAGE_HOP_LIMIT }), operationId: id }, object), { maxItems: 64 }) }, object);
 export type TeamLink = Static<typeof TeamLink>;
+/**
+ * One bot's inbox (bots design 3): its main session as the only seat, bound where it is. Whatever reaches the bot arrives here as a
+ * message the Relay framed, delivered between turns. `instructions`: the hash of the standing instructions it was last sent.
+ */
+export const TeamInbox = Type.Object({ botId: BotId, instructions: Type.Optional(Type.String({ pattern: '^[0-9a-f]{64}$' })) }, object);
+export type TeamInbox = Static<typeof TeamInbox>;
 const roomText = Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT });
 /**
  * A room: assistants' main sessions, bound where they are, and the people of the account, talking one member at a time. speaker: the
@@ -80,6 +87,7 @@ export const Team = Type.Object({ id, operationId: id, revision: Type.Integer({ 
   task: Type.Optional(TeamTask),
   /** Set for the link between two assistants: each member is one assistant's main session, bound where it is. */
   link: Type.Optional(TeamLink),
+  inbox: Type.Optional(TeamInbox),
   /** Set for a room of assistants and people; every member is an assistant's main session. */
   room: Type.Optional(TeamRoom),
 }, object);
@@ -184,6 +192,8 @@ export const TeamSeat = Type.Object({ teamId: id, source: TeamSource, member: Te
   task: Type.Optional(Type.Object({ title: TaskTitle }, object)),
   /** The seat is one assistant's main session in a link: bound where it is, it only receives messages. */
   link: Type.Optional(Type.Object({ peer: Type.String({ minLength: 1, maxLength: 256 }) }, object)),
+  /** The seat is one bot's main session, receiving its inbox. */
+  inbox: Type.Optional(Type.Object({ botId: BotId }, object)),
   /** The seat is one assistant's main session in a room. */
   room: Type.Optional(Type.Object({ name: Type.String({ minLength: 1, maxLength: 120 }) }, object)) }, object);
 export type TeamSeat = Static<typeof TeamSeat>;
@@ -191,6 +201,9 @@ const groupFields = ['model', 'reasoningEffort', 'access', 'workspace', 'usage']
 /** A Call For Support group has exactly one requester after its Leader; a task has its worker and then its owner; other Teams have no requester and no group fields. */
 const validGroupShape = (value: Team) => {
   const group = value.callForSupport, requesters = value.members.filter(member => member.role === 'requester');
+  if (value.inbox) return !group && !value.task && !value.link && !value.room && value.members.length === 1 && value.members[0]!.role === 'requester'
+    && value.members[0]!.creation !== 'released' && groupFields.every(field => value.members[0]![field] === undefined)
+    && value.messages.every(message => message.callForSupportCallId === undefined) && (value.unresolvedReceipts ?? []).every(receipt => receipt.callForSupportCallId === undefined);
   if (value.room) return !group && !value.task && !value.link && value.members.length >= 2 && value.members.every(member => member.role === 'requester' && member.creation !== 'released'
     && groupFields.every(field => member[field] === undefined)) && value.messages.every(message => message.callForSupportCallId === undefined)
     && (value.unresolvedReceipts ?? []).every(receipt => receipt.callForSupportCallId === undefined);
@@ -209,7 +222,7 @@ const validGroupShape = (value: Team) => {
 };
 export const isTeam = (value: unknown): value is Team => Value.Check(Team, value)
   // A link binds two main sessions; every other Team starts with its Leader.
-  && (value.link || value.room ? true : value.members[0]?.role === 'leader' && value.members.slice(1).every(member => member.role === 'member' || member.role === 'requester')) && validGroupShape(value)
+  && (value.link || value.room || value.inbox ? true : value.members[0]?.role === 'leader' && value.members.slice(1).every(member => member.role === 'member' || member.role === 'requester')) && validGroupShape(value)
   && value.members[0]!.hostId === value.source.hostId
   && new Set(value.members.map(member => member.id)).size === value.members.length
   && new Set([...value.messages, ...(value.unresolvedReceipts ?? [])].map(message => message.id)).size === value.messages.length + (value.unresolvedReceipts?.length ?? 0)

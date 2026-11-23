@@ -5,6 +5,7 @@ import type { TeamResourceStore } from './team-resources.js';
 import { admitTeam, archiveIdleGroups, callForSupportNeedsCompaction, CallForSupportGroups, compactCallForSupport, pruneGroups, restoreGroup, type CallForSupportPorts } from './call-for-support.js';
 import { AssistantMessages, type AssistantPorts } from './assistants.js';
 import { roomAction, Rooms } from './rooms.js';
+import { BotInboxes } from './inboxes.js';
 import { TaskGroups, taskAction, taskPresence, taskSettled, type TaskPorts } from './tasks.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TeamResource } from '@orchardworks/agent-remote-protocol';
@@ -59,11 +60,12 @@ export class TeamBroker {
   private readonly tasks?: TaskGroups;
   private readonly assistants?: AssistantMessages;
   private readonly rooms?: Rooms;
+  private readonly inboxes?: BotInboxes;
   constructor(private readonly ports: TeamBrokerPorts) {
     if (ports.tasks) this.tasks = new TaskGroups({ ports, change: update => this.change(update), provision: (teamId, memberId) => this.provision(teamId, memberId) }, ports.tasks);
     if (ports.assistants) {
       const lent = { ports, change: <T>(update: (teams: SavedTeam[]) => T) => this.change(update), provision: (teamId: string, memberId: string) => this.provision(teamId, memberId) };
-      this.assistants = new AssistantMessages(lent, ports.assistants); this.rooms = new Rooms(lent, ports.assistants);
+      this.assistants = new AssistantMessages(lent, ports.assistants); this.rooms = new Rooms(lent, ports.assistants); this.inboxes = new BotInboxes(lent);
     }
     if (ports.callForSupport) this.groups = new CallForSupportGroups({ ports, change: update => this.change(update), provision: (teamId, memberId) => this.provision(teamId, memberId),
       project: team => this.project(team), resource: (team, memberId, resourceId) => this.resourceAccess(team, memberId, resourceId),
@@ -230,14 +232,16 @@ export class TeamBroker {
     // A Controller that does not run Call For Support groups never sees them.
     // A Controller that does not run tasks never sees them either.
     const visible = (team: SavedTeam) => (!team.callForSupport || this.ports.callForSupport?.capable(hostId) === true) && (!team.task || this.ports.tasks?.capable(hostId) === true)
-      && (!team.link && !team.room || this.ports.assistants?.capable(hostId) === true);
+      && (!team.link && !team.room && !team.inbox || this.ports.assistants?.capable(hostId) === true);
     // A released member's Host keeps seeing its Team, to clean up what the member left.
     if (call.action === 'poll') return this.ports.read().filter(team => team.status !== 'archived' && visible(team) && team.members.some(item => item.hostId === hostId && (item.creation === 'ready' || item.creation === 'released'))).map(team => this.project(team, recipientAware));
     const projectDelivery = <T extends { id: string; resolvedTarget?: NativeSessionRef }>(value: T) => recipientAware ? value : withoutRecipient(value);
     if (call.action === 'call_for_support' || call.action === 'support_status') return (this.groups ?? fail(unavailableGroups)).workerCall(hostId, call);
     if (call.action === 'support_enablement') {
       const enablement = (this.groups ?? fail(unavailableGroups)).enablement(hostId);
-      return this.assistants ? { ...enablement, coordinators: this.assistants.coordinators(hostId), bots: this.assistants.bots(hostId) } : enablement;
+      if (!this.assistants) return enablement;
+      await this.inboxes!.ensure(this.assistants.hostBots(hostId));
+      return { ...enablement, coordinators: this.assistants.coordinators(hostId), bots: this.assistants.bots(hostId) };
     }
     if (call.action === 'create_task') {
       const tasks = this.tasks ?? fail(unavailableTasks);
@@ -264,7 +268,7 @@ export class TeamBroker {
       assertCurrent();
       const team = find(teams, call.teamId), self = member(team, call.memberId), now = this.ports.now();
       if (self.hostId !== hostId || self.creation !== 'ready') fail('This Host is not the registered Team member.');
-      if (!visible(team)) fail(team.task || team.link || team.room ? tasksUpgrade : callForSupportUpgrade);
+      if (!visible(team)) fail(team.task || team.link || team.room || team.inbox ? tasksUpgrade : callForSupportUpgrade);
       if (!recipientAware && !sameRecipient(this.resolveRecipientFromAnchor(self), self)) fail(upgradeRequired);
       if (call.action === 'read') return { ...this.project(team, recipientAware), receipts: team.deliveryReceipts?.map(({ fingerprint: _hash, settledAt: _time, ...receipt }) => projectDelivery(receipt)) ?? [] };
       if (call.action === 'acknowledge') {
@@ -446,7 +450,7 @@ export class TeamBroker {
     try {
       result = await this.ports.createSeat(item.hostId, { teamId, source: team.source, member: item,
         ...(team.callForSupport ? { callForSupport: { role: team.callForSupport.role, description: team.callForSupport.description } } : {}),
-        ...(team.task ? { task: { title: team.task.title } } : {}), ...(team.link ? { link: { peer: team.members.find(other => other.id !== item.id)!.name } } : {}), ...(team.room ? { room: { name: team.room.name } } : {}) });
+        ...(team.task ? { task: { title: team.task.title } } : {}), ...(team.link ? { link: { peer: team.members.find(other => other.id !== item.id)!.name } } : {}), ...(team.room ? { room: { name: team.room.name } } : {}), ...(team.inbox ? { inbox: { botId: team.inbox.botId } } : {}) });
       if (!isTeamMember(result) || result.id !== item.id || result.hostId !== item.hostId || result.providerId !== item.providerId || result.role !== item.role || result.creation !== 'ready' || !result.nativeSessionId) fail('Invalid Host member registration.');
     } catch (error) { result = { ...item, creation: 'unknown', error: error instanceof Error ? error.message.slice(0, 2048) : 'Member creation is uncertain.' }; }
     return this.change(teams => {

@@ -1,0 +1,61 @@
+/**
+ * Bots' inboxes on the Team path (bots design 3): one Team per bot, whose only seat is the bot's main session, bound where it is.
+ * Whatever reaches the bot arrives there as a message the Relay framed and is delivered between its turns, at most once. The first
+ * thing sent is the bot's standing instructions, again whenever they change: a resumed Claude Code session ignores instructions
+ * appended when it opens (design 5.1).
+ */
+import { createHash, randomUUID } from 'node:crypto';
+import { botInstructions, nativeSessionRefKey, standingInstructionsText } from '@orchardworks/agent-remote-protocol';
+import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, type SavedTeam } from './team-delivery.js';
+import { plain } from './drafts.js';
+import { assistantSeat, type Assistant, type AssistantBrokerPorts } from './assistants.js';
+import { pruneCoordination } from './coordination-retention.js';
+
+const digest = (value: unknown) => createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex');
+/** Which standing instructions a bot was sent: the hash of their text. */
+export const instructionsHash = (mission: string | undefined) => digest(botInstructions(mission));
+
+export class BotInboxes {
+  constructor(private readonly broker: AssistantBrokerPorts) {}
+  private sessionKey(hostId: string, providerId: string, nativeSessionId: string): string | undefined {
+    try { return nativeSessionRefKey(this.broker.ports.resolveSession(hostId, providerId, nativeSessionId)); } catch { return undefined; }
+  }
+  /** The bot's active inbox whose seat is the session the bot shows now. */
+  private current(teams: readonly SavedTeam[], bot: Assistant): SavedTeam | undefined {
+    const key = this.sessionKey(bot.hostId, bot.providerId, bot.nativeSessionId);
+    return teams.find(team => team.inbox?.botId === bot.key && team.status === 'active'
+      && this.sessionKey(team.members[0]!.hostId, team.members[0]!.providerId, team.members[0]!.nativeSessionId!) === key);
+  }
+  /**
+   * Gives every bot an inbox bound to its current main session and queues its standing instructions when it has not been sent
+   * this text yet. An inbox left on a session the bot no longer shows is archived. Seats not yet bound are bound.
+   */
+  async ensure(bots: readonly Assistant[]): Promise<void> {
+    const pending = (teams: readonly SavedTeam[]) => bots.filter(bot => { const inbox = this.current(teams, bot); return !inbox || inbox.inbox!.instructions !== instructionsHash(bot.mission); });
+    if (pending(this.broker.ports.read()).length) await this.broker.change(teams => {
+      const now = this.broker.ports.now();
+      for (const bot of pending(plain(teams))) {
+        let inbox = this.current(teams, bot);
+        if (!inbox) {
+          for (const stale of teams) if (stale.inbox?.botId === bot.key && stale.status === 'active') { stale.status = 'archiving'; stale.revision++; stale.updatedAt = now; }
+          pruneCoordination(teams, 1);
+          if (plain(teams).length >= ACCOUNT_TEAM_LIMIT) continue;
+          inbox = { id: randomUUID(), operationId: digest(['inbox', bot.key, now]), revision: 1, title: `${bot.name}'s inbox`, status: 'active',
+            source: { hostId: bot.hostId, providerId: bot.providerId, nativeSessionId: bot.nativeSessionId, title: bot.name },
+            members: [assistantSeat(bot, now)], messages: [], inbox: { botId: bot.key }, createdAt: now, updatedAt: now };
+          teams.push(inbox);
+        }
+        const hash = instructionsHash(bot.mission), seat = inbox.members[0]!;
+        const message = { id: digest(['standing', inbox.id, hash]), from: seat.id, to: seat.id, text: standingInstructionsText(bot.mission), status: 'queued' as const, createdAt: now };
+        if (!inbox.messages.some(item => item.id === message.id)) { assertTeamQueueCapacity(inbox, message); inbox.messages.push(message); }
+        inbox.inbox = { botId: bot.key, instructions: hash };
+        inbox.revision++; inbox.updatedAt = now;
+      }
+    });
+    // Binding a main session where it is never creates anything, so a Host that was offline is asked again at its next poll.
+    for (const bot of bots) {
+      const inbox = this.current(this.broker.ports.read(), bot);
+      if (inbox && inbox.members[0]!.creation !== 'ready') await this.broker.provision(inbox.id, inbox.members[0]!.id).catch(() => undefined);
+    }
+  }
+}

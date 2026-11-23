@@ -1,7 +1,7 @@
 # Assistants that coordinate: one main session, tasks on worker sessions
 
-Status: proposal (2026-11-23), not approved. It changes the Relay state, the public protocol, the Controller and the
-Workbench; section 12 lists the owner's decisions it needs before step T1.
+Status: **superseded** on 2026-11-23 by the [bots design](2026-11-23-bots-design.md), which keeps its delivery and
+native-session mechanics in shorter form. Kept as the record of what `feat/assistant-tasks` built (sections 12.1) and why.
 
 Related: [IM session service](2026-11-15-im-session-service-design.md) (the operation queue this design depends on),
 [Orchard](2026-11-20-orchard-im-experience-design.md) (the assistant experience),

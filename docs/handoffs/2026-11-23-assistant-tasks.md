@@ -15,6 +15,10 @@ Read with it:
 - the open items [O69](../superpowers/open-items/O69.md), [O70](../superpowers/open-items/O70.md) and
   [O71](../superpowers/open-items/O71.md).
 
+> **Update 2026-11-23.** The direction moved on: the [bots design](../superpowers/specs/2026-11-23-bots-design.md) supersedes
+> the coordinator and tasks design, and the [bots plan](../superpowers/plans/2026-11-23-fold-into-assistants-plan.md) replaces
+> section 6 below from its "Before" step on. Sections 2 to 5 and 7 still describe what this branch built.
+
 ## 1. Where things stand
 
 | Item | State |

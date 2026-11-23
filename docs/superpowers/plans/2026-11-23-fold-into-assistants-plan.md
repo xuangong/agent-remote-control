@@ -1,148 +1,78 @@
-# Fold Side, Call For Support, Team and TPM into assistants: plan
+# Bots: plan
 
-Decided 2026-11-23 with the owner; the design is section 10 of
-[assistant coordinator and tasks](../specs/2026-11-23-assistant-coordinator-and-tasks-design.md#10-what-happens-to-side-team-call-for-support-and-tpm).
+Builds the [bots design](../specs/2026-11-23-bots-design.md), decided with the owner on 2026-11-23: one kind of bot with a
+mission, messages between bots, chains for the audit, work items for progress; Side, Call For Support, Team and TPM folded in.
 
-## Goal
+## Before
 
-One kind of bot: a name, a mission, and the abilities every bot has (tasks, messages both ways, rooms, work items, a timer). A bot
-can serve other bots and be served by them, so no bot is a special kind. Ask stays as the way to look at any
-session without touching it. Every older way of making sessions work together is rebuilt on these and then deleted, with its
-records migrated, its panels and launchers removed, and its tools gone from every CLI.
+`feat/assistant-tasks` with `feat/assistant-tasks-deployable` is merged and deployed (Relay first), so tasks, messages between
+assistants and rooms run in production. Each step below is one branch that ends with `pnpm verify`, the e2e flows on Chromium and
+WebKit, and a check in `pnpm local`; protocol fixtures, schemas and compatibility metadata change with the step that changes them.
+No release keeps an old path beside its replacement: the owner updates every Controller, so the Relay requires the new capability
+once a step ships (Relay first, then Controllers).
 
-Out of this plan: T0 (the P2 operation queue) and moving tasks, links and rooms off the Team path. The migrations here use the task
-and message tools as they are; when T0 lands, those tools keep their names and only their delivery changes.
+## Step 1: the bot record and the chain
 
-## Before the migrations
+- [ ] Bot record (design 2.1, closes O70): `botId` stable across handoffs and moves, name, label, picture, mission, organizer (a bot
+  or the person), lifetime, main, status, work item, peers. Existing bots get ids from their group views; name, label and picture
+  move out of `WindowBotDetails`.
+- [ ] Mission as standing instructions; base instructions in the repository with a version (design 5.1).
+- [ ] Chains (design 7): every input the person sends and every timer tick opens one; messages and created bots carry its id and
+  the usage providers report.
 
-`feat/assistant-tasks` (with `feat/assistant-tasks-deployable`) is merged and deployed, Relay first, so assistants, tasks and
-messages run in production.
+## Step 2: one kind of bot
 
-## Step 0: the assistant record and the chain
+- [ ] No mode (design 2.1): remove the coordinator/plain switch, `mode`, and `coordinatorProvider`; every bot whose provider takes
+  tools gets the `agent_remote` namespace (design 5.1) and standing instructions at its next attachment; others are answers only.
+- [ ] `create_bot`, `retire_bot`, `list_bots`, `read_bot`, `stop_bot`, `update_mission` (design 2, 5.1); creation outcome framed to
+  the organizer and the first turn returned as the report-in (2.2); span of 12 (2.5); lifetime and retirement (2.4).
+- [ ] `message` (design 3): `status` for progress, done, failed and needs input; delivery at idle in one order, combined into one
+  input; replies from final text (3.3); 300-character bound (3.4); outcomes; `[The person wrote to …]` to organizers (3.5).
+- [ ] Tasks become temporary bots: `create_task`, `report_task`, `ask_owner`, `message_task`, `task_status` and the task Team kind
+  are replaced by `create_bot` and `message`; existing tasks are listed as retired temporary bots.
+- [ ] Attachments, git bundles included (3.4, 5.3).
+- [ ] Gate: the person describes a team to one bot; it creates two bots with missions; each reports in; the organizer gives one work
+  by message and changes how the other works by message (recorded in its own mission); a Copilot bot answers a question; the
+  person sees all of it in Chats and can change any bot. The e2e flows of design 11, written here, pass.
 
-- [ ] **The assistant record (T1, O70)**: ids that survive moving groups, the session a bot shows now, name, label, **mission**,
-  **organizer**, **lifetime** (standing or temporary), peers. The mission reaches the main session as its standing instructions and
-  is shown to other bots by `list_assistants`. Links, rooms, timers and reading a peer's conversation rest on it.
-- [ ] **Chains** (design 10.7): every input the person sends, and every timer tick, opens a chain; messages, tasks, created bots and
-  turns carry its id, with the usage providers report.
+## Step 3: rooms, work items and timers
 
-## Step 1: one kind of bot
+- [ ] Rooms as message targets with a Relay timer closing them on time (design 4, closes O71).
+- [ ] Work items for every bot with todo and confirmation (design 6.1); `complete_work` retires the bots created for the item.
+- [ ] Fallback timers pushed back by every message (design 6.2); the companions' heartbeat removed.
+- [ ] Gate: a bot keeping a work item asks a working bot and the reply updates the item the person sees; a confirmation waits for
+  Agree; a quiet interval wakes the bot once and a message pushes it back; a room of two bots and the person reaches a result.
 
-- [ ] **No mode** (design Q4): remove the coordinator/plain switch, its `mode` field and `coordinatorProvider` negotiation; every
-  bot whose provider takes tools gets them and the standing instructions at its next attachment, existing bots included.
-- [ ] **A reply is the receiver's answer** (design 10.1): the final text of the turn a message started returns to the sender, unless
-  that turn already answered with a tool; bots on providers without tools can be asked and are marked "answers only".
-- [ ] **Tasks are temporary bots** (design 10.6): `create_task` creates one and sends its first message; task states, coalescing and
-  approvals stay; it may ask bots and start tasks; listed in its organizer's details; kept by the person to become standing; after a
-  settled result it takes more work by message for a while, then retires. `continue_task` is not built.
-- [ ] **Bots create bots** (design 10, the mission): `create_assistant` (name, first mission, provider, model, Host, directory),
-  `retire_assistant` for the bots a bot organizes, `update_mission` on a bot's own mission only; created bots in Chats in the
-  organizer's group with who created them; the creation outcome framed to the organizer, the new bot's first turn returned as its
-  report-in.
-- [ ] **Each bot speaks for its own understanding**: the standing instructions require the report-in, a fresh one after a change,
-  a compaction or a handoff, and every progress report in the bot's own words.
-- [ ] **Reports and span** (design 10.8): reports and replies that cross are at most 300 characters (today `TASK_SUMMARY_LIMIT` is
-  4000); details through `read_task` (built here) and attachments; at most 12 bots managed directly (today 4 running tasks per
-  session), the thirteenth refused with the advice to create a sub-organizer.
-- [ ] **Attachments on messages and task results**: files (a patch, a log, a git bundle) as resources; the receiver downloads one to
-  a verified local file, never applies it; a bundle is fetched as a branch it only reads.
-- [ ] **Working together** (design 10.9):
-  - the person as root organizer (no 300-character bound on replies to the person, no span limit);
-  - code across machines: the shared git repository first (push, tell remote, branch and commit), a git bundle otherwise, both in
-    the standing instructions;
-  - `read_bot` for an organizer over the bots it organizes; outcomes reported to the organizer;
-  - the final text replies only when one message started the turn; otherwise `reply_to` for each; acknowledgements allowed;
-  - a serving bot starts a temporary bot per request;
-  - only the organizer or the person changes a mission;
-  - "the person wrote" for every organized bot;
-  - one order at idle: the person, approvals and decisions, the organizer, other bots, reports;
-  - bots created for a work item retire with it unless kept;
-  - needs-you reminders grouped by organizer, interactions only the person can answer remind directly;
-  - the audit stops one bot's part of a chain.
-- [ ] **Explicit delivery outcomes**: delivered, duplicate, forbidden, unreachable.
-- [ ] **E2E flows for the model** (design 11, flows 1 to 5, rewritten for bots): two temporary bots report and the organizer sums
-  up; one is interrupted from its thread; a worker's tool approval answered by the person; bot A messages B and B's answer comes
-  back; a worker's Host offline until it returns. Chromium and WebKit; the gates of every later step.
-- Gate: the person describes a team to one bot; it creates two bots with missions; each reports in with how it understands its
-  mission; the organizer gives one a piece of work by message and changes how the other works by message (which records it in its
-  own mission); a Copilot bot answers a question; the person sees all of it in Chats and can change any bot.
+## Step 4: the audit
 
-## Step 2: the audit (design 10.7)
+- [ ] The audit view (design 7): chains live, stop a chain or one bot's part of it, pause, retire; thresholds that notify.
+- [ ] The earlier refusals (hop limit, running tasks per session, creation limits) are removed; only system bounds and the span
+  refuse.
 
-- [ ] The audit view: each chain with what started it, the bots and tasks it reached, hops, turns, bots created, usage and
-  duration, live while it runs; stop a chain, pause a bot, retire bots from there.
-- [ ] The person's thresholds (usage, hops, duration) notify as a needs-you reminder and never stop work.
-- [ ] The hop limit, the running-task limit and creation limits stop refusing and become audited facts; only storage and capacity
-  bounds still refuse.
+## Step 5: behaviour scenarios
 
-## Step 3: behaviour scenarios
+- [ ] `pnpm test:bots` with the release walkthrough (design 11). The base instructions are tuned here until it passes with Claude
+  Code and Codex; every later change to them reruns it.
 
-- [ ] `pnpm test:bots` (local/native tier, by hand or nightly) with real Claude Code and Codex: a described team is created and every
-  bot reports in with its mission; the main conversation's turns stay short and it does not do the work itself; a change needing a
-  review goes to the bot whose mission fits; an adjusted bot restates its understanding and records what lasts; after a compaction a
-  bot rereads its work items and restates; a chain past a threshold notifies the person.
-- [ ] The walkthrough as a scenario: an organizer, three standing bots, temporary bots under one, a reviewer serving two teams
-  (one temporary bot per request), a test and fix loop between two bots over a shared repository and over a bundle, the person
-  speaking to a member (its organizer is told), and the work item completing (its bots retire).
-- [ ] Checks read facts only: bots, missions, report-ins, hops, turns, tool calls per main turn, report lengths.
-- [ ] The standing instructions live in the repository with a version; every change reruns the scenarios.
+## Step 6: the Workbench
 
-## Step 4: the Workbench of the model
+- [ ] Design 10: Chats grouped by organizer with status and work item lines; grouped reminders; folded lines between bots; the
+  temporary bot beside its organizer with Send, Interrupt, Queue, Stop and Keep; details with bots, work items and the mission;
+  rooms in Bot mode.
 
-- [ ] A task's thread beside the main conversation in Bot mode, with Interrupt, Queue, Mark done and Stop.
-- [ ] The organizer's details as its team: standing and temporary bots with states and unread dots.
-- [ ] Rooms as group chats in Bot mode, closed on time by a Relay timer (O71).
+## Step 7: fold the older features
 
-## Step 5: Side
+Each fold migrates its records, rewrites the feature's e2e cases on bots, and deletes the old path in the same branch (design 9).
 
-- [ ] `/side` starts a temporary bot of the current bot: its mission is the person's first message, workspace `same`; its thread
-  is the Side view.
-- [ ] Existing Side relations are listed as temporary bots (done, openable); new Sides are only temporary bots.
-- [ ] Delete Side creation and relation kinds, `/btw` follows `/side`.
-- Gate: flows 1 and 2 with a task the person started; the Side cases of the component tier rewritten against task threads.
+- [ ] Side: `/side` creates a temporary bot; existing Side relations listed as retired temporary bots.
+- [ ] Call For Support: profiles are not migrated; the support settings say so once, then go, with groups, calls, rosters, ledgers,
+  report framing, the four tools, `callForSupport`, `readOnlyProvider` and `support_enablement`. Gate: a bot asks the bot whose
+  mission is reviewing to review an uncommitted change, which it sees through a shared repository or a bundle.
+- [ ] Team: a Leader becomes an organizer and its members the bots it organizes (standing when they had their own conversation with
+  the person, temporary otherwise); the Team queue, inbox, `team_message`, panel and launcher go; E7's Team case is rewritten.
+- [ ] TPM: a TPM becomes a bot whose mission is its work, its work items, todo and confirmations carried over; `tpm_intent`, its
+  delivery, workspace and launcher go.
 
-## Step 6: Call For Support becomes bots asking bots
+## Later
 
-- [ ] The standing instructions say that other bots have missions (from `list_assistants`), that a bot asks the one whose mission
-  fits for a review, another model or another machine, and that the answer is advice.
-- [ ] Verify in `pnpm local` that bots do this unprompted: a bot facing a change that needs an independent review messages
-  the bot whose mission is reviewing.
-- [ ] Profiles are not migrated: the person sets up the bots they want. The support settings say so once, then go.
-- [ ] Delete profiles, enablement, support groups, calls, rosters and approval, ledgers, report framing, the four support tools,
-  the support settings and panel views, the `callForSupport` and `readOnlyProvider` negotiation, and the `support_enablement` host
-  call.
-- Gate: bot A asks bot B (on another provider) to review an uncommitted change; B sees it (attached patch or read-only task) and
-  answers; a follow-up reaches B with its context. Flow 4 extended accordingly.
-
-## Step 7: Team
-
-- [ ] A Team's Leader becomes an organizer bot; its members become bots it organizes, standing if they had their own conversation
-  with the person, temporary otherwise.
-- [ ] Existing Teams migrate that way, keeping each member's session.
-- [ ] Delete the Team queue and inbox, Team delivery for kinds other than task, link and room, `team_message`, the Teams panel and
-  its launcher. E7's Team case is rewritten for an organizer and its bots.
-- Gate: flows 1 to 5; E7 rewritten.
-
-## Step 8: work items and timers, then TPM
-
-- [ ] **Work items for every bot** (design 10.4): plan, acceptance, todo, phase, summary and next action; `update_work`,
-  `complete_work` and the todo and confirmation companions offered to every bot, not only to a TPM.
-- [ ] Progress moves with inputs: replies from the bots it asked, its task results, the person's words and decisions. Turns that
-  change nothing visible fold as background checks.
-- [ ] The person sees work items in the bot's details and its chat row's business line; plan, acceptance and todo one step away.
-- [ ] **A fallback timer** (design 10.5): `set_timer`, `clear_timer`; due only after a quiet interval, pushed back by any input,
-  missed ticks coalesced; five minutes by default for a bot with an open work item. It replaces the heartbeat of session companions.
-- [ ] A TPM becomes a bot whose mission is its work: its work items, todo and confirmations carry over; the main session it coordinated is
-  the bot it messages.
-- [ ] Delete `tpm_intent`, TPM's own delivery path, workspace and launcher.
-- Gate: e2e flows written first: a progress bot asks a working bot, its reply updates the work item the person sees; a
-  confirmation waits for Agree; with no input for the interval the timer wakes the bot once, and an input before then pushes it
-  back; `complete_work` ends the item.
-
-## Rules for every step
-
-- One step per branch; it ends with `pnpm verify`, the e2e flows on Chromium and WebKit, and a check in `pnpm local`.
-- Protocol fixtures, public schemas, replay and compatibility metadata change with the step that changes them.
-- No release keeps both the old and the new path: the owner updates every Controller, so the Relay may require the new capability
-  once the step ships (Relay first, then Controllers).
-- `architecture/exceptions.json` entries for deleted modules are removed; nothing is added.
+The P2 operation queue (IM session service) carries messages without changing the tools.

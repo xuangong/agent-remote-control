@@ -57,7 +57,8 @@ export function compactTeamDeliveries(team: SavedTeam, now: number): void {
   const pending: TeamMessage[] = [];
   for (const message of team.messages) {
     if (pendingTeamMessage(message)) { pending.push(message); continue; }
-    const { text, resources, ...result } = message;
+    // A receipt keeps what proves the delivery; the chain was recorded on the member that took the message.
+    const { text, resources, chain: _chain, ...result } = message;
     receipts.set(message.id, { ...result, fingerprint: deliveryFingerprint({ to: message.to, text, resources: resources?.map(resource => resource.resourceId) }), settledAt: now });
   }
   team.messages = pending;

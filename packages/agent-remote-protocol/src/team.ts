@@ -109,7 +109,9 @@ export const Team = Type.Object({ id, operationId: id, revision: Type.Integer({ 
 }, object);
 export type Team = Static<typeof Team>;
 export const TeamCreate = Type.Object({ operationId: id, source: TeamSource,
-  callForSupport: Type.Optional(Type.Object({ profileId: id, call: CallForSupportCallInput, fresh: Type.Optional(Type.Boolean()) }, object)) }, object);
+  callForSupport: Type.Optional(Type.Object({ profileId: id, call: CallForSupportCallInput, fresh: Type.Optional(Type.Boolean()) }, object)),
+  /** The person starts a temporary bot organized by the source session (`/side`, bots design 9): its name and its mission. */
+  bot: Type.Optional(Type.Object({ name: TaskTitle, mission: TaskBrief }, object)) }, object);
 export type TeamCreate = Static<typeof TeamCreate>;
 export const TeamAction = Type.Union([
   Type.Object({ teamId: id, action: Type.Literal('add_member'), operationId: id, hostId: id, providerId: id,

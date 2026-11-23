@@ -257,6 +257,13 @@ export class TeamBroker {
     for (const team of this.ports.read()) if (team.task && wanted.has(temporaryBotId(team.id))) { names[temporaryBotId(team.id)] = team.task.title; kinds[temporaryBotId(team.id)] = 'temporary'; }
     return { chains, names, kinds, thresholds: this.chains.thresholds(), paused: this.ports.read().filter(team => team.inbox?.paused).map(team => team.inbox!.botId) };
   }
+  /** The person starts a temporary bot organized by a session (`/side`, bots design 9): a task of that session, its mission the brief. */
+  async startBot(input: TeamCreate): Promise<SavedTeam> {
+    const tasks = this.tasks ?? fail(unavailableTasks), bot = input.bot ?? fail('A bot needs a name and a mission.');
+    const created = await tasks.create(input.source.hostId, { action: 'create_task', owner: { providerId: input.source.providerId, nativeSessionId: input.source.nativeSessionId,
+      ...(input.source.title ? { title: input.source.title } : {}) }, operationId: input.operationId, title: bot.name, brief: bot.mission });
+    return this.ports.read().find(team => team.id === created.taskId) ?? fail('The bot could not be started.');
+  }
   /** The person's decision from the audit: stop a chain or a bot's part of it, pause or resume a standing bot, retire a temporary one. */
   async chainAction(action: ChainAction): Promise<unknown> {
     if (action.action === 'stop' || action.action === 'stop_bot') {

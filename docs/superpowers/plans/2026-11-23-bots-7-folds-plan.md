@@ -35,9 +35,9 @@ Smallest and least shared first, so each fold leaves less for the next:
 
 - The Team roster loads in the workbench, not in the Teams panel (`kernel/useTeamRoster.ts`): tasks, rooms and the inboxes that carry work
   items read it. It refreshes twice a minute, and every 4 s while a room is open.
-- Decided with the owner (2026-11-23): a Team's Leader becomes a bot, the chief of the members shown in its group, which become
-  standing bots, its staff, with the Leader recorded as their chief. Members never shown stay plain sessions. Team inboxes and messages are
-  dropped. Rooms already show in Chats. Vocabulary: chief / staff (zh 主管 / 成员).
+- Decided with the owner (2026-11-23, revised 2026-11-24): ordinary Teams are dropped, not converted. Data loss is acceptable and no
+  compromise approach is built: no conversion of a Leader into a chief or of members into staff, no transition code for older peers.
+  Rooms already show in Chats. Vocabulary: chief / staff (zh 主管 / 成员).
 - Deleted: the Team queue entry points (`send`, `acknowledge`, `describe_member`, `report`, the registration message), the actions that made
   or changed an ordinary Team (create, `add_member`, `retry_creation`, `abandon_creation`, `rename`, `archive`, `restore`,
   `resolve_message`), the Controller's seats and tools for them (`read_team`, `acknowledge_team_messages`, `send_team_message`,
@@ -45,31 +45,40 @@ Smallest and least shared first, so each fold leaves less for the next:
   gather button, Team layout and view binding, the `/team` command, Team attributions and Track's "Main:" line, and their tests.
   `TeamCreate` now carries a bot (`/side`); that is the only way a Team is made by the person.
 - Kept: `Team` as the delivery substrate of tasks, inboxes, links and rooms, with its queue, claim, settle, presence, receipts and budgets,
-  and `read` for the Controller's own receipts. `isTeam` still accepts an ordinary Team's shape, so an older Relay's state loads and migrates.
+  and `read` for the Controller's own receipts. `isTeam` accepts only those four shapes.
 
-### Migration
+### Old state
 
-`migrateRelayState` (`legacy-teams.ts`, after the bot records of earlier builds) removes every Team with none of task, link, inbox or room.
-For each, the Window views tagged with its id (`feature.kind` `team`) lose the tag and the managed binding; if the group appears in Bot mode
-(a group without a section gains one), each of them becomes a standing bot (record made with `reconcileBots`, id `migrationBotId`): the
-Leader's view named by the Team's title, the others by the member's name with its responsibility as the mission. The Leader's bot is then
-recorded as `chief` of the others; with no Leader view in a group, the staff stay the person's. Members with no view stay plain sessions.
-A group hidden in Bot mode only loses the tags; its views are not made bots. The bots get their inbox Teams from the Controller's
-`bot_enablement`, as any standing bot does. The run is idempotent: the Teams are gone afterwards. Tests: `legacy-teams.test.ts`.
+`migrateRelayState` (`legacy-teams.ts`) drops what the build no longer has when state loads, and converts nothing:
+
+- every Team with none of task, link, inbox or room (`isOrdinaryTeam`; state validation lets it pass so it can be dropped);
+- the `team` tag and the managed binding of every Window view that carries one; the view stays a plain session;
+- the file-transfer fields of a Team (`resourceUploads`, `resourceGrants`, message `resources`).
+
+Idempotent: the state loads unchanged afterwards. Test: `legacy-teams.test.ts`. The lab kernel reads a view saved with a `team` tag as an
+ordinary view and imports old local compositions without their Team fields. An older Controller that sends a removed call is refused by
+the ordinary uplink validation; nothing special is built for it.
+
+### Also done
+
+- File transfers are gone: the Relay resource store, the `resource_begin/chunk/finish/metadata/read` Host calls, `resourceUploads` and message
+  `resources` on a Team, the `teamResources` uplink negotiation, the Cloudflare storage (`team-resource-storage.ts`), and their tests. The
+  delivery fingerprint still hashes an empty attachment list, so stored receipts keep matching.
+- The lab kernel has no managed Team windows: no `gather`, no `open`, no `teamId` / `teamMemberId` on entries, slots or targets, no feature
+  kind `team`, no Team roles in the roster, no `team` flag on a session view.
+- A bot's inbox seat is covered by a prefix-handoff test (`bot-seat-succession.test.ts`), for the requester seat bound in place and the leader
+  seat the Controller created for a standing bot.
+- The Relay tests' Team fixtures are links, since the ordinary shape is not a Team.
 
 ### Left for later
 
-- Resources: only ordinary Teams used them (the upload and download tools, `send` attachments, the two Hosts' transfers). Their Relay store,
-  `resource_*` Host calls, `teamResources` negotiation and Cloudflare storage still exist with no caller; removing them touches the uplink
-  protocol and every Relay, so it is its own step.
-- The kernel keeps its handling of managed Team windows (`gather`, `teamId` and `teamMemberId` on session entries, feature kind `team`), which
-  nothing creates now.
-- Controller tests that used an ordinary seat to prove role succession (`team-prefix`, `team-generic-succession`, the `team` roles of
-  `native-prefix-role-runtime`) were removed with it; the bots' seats are covered by the dispatch, injection and E15 tests, but not by a
-  prefix-handoff test of their own.
 - The App-level attribution navigation tests (`App.attributions.test.tsx`) used a Team as the relation; `session-attribution-navigation.test.ts`
   keeps the window operations.
 - E7's Team case became "a temporary bot a bot started survives a Controller restart and still reports to its chief"; E15 did not cover a restart.
+- The recipient-unaware paths of the Team broker (`recipientAware` false) are reachable only by a Controller that runs tasks without exact
+  recipients, which the uplink negotiation does not allow; the tests that drove them through ordinary Teams were removed.
+- A Cloudflare Relay keeps the empty `relay_team_resource_chunks` table, and a Node Relay's `<state file>.resources` directory stays on disk.
+- `docs/current/agent-remote/call-for-support.md` still describes the folded support groups.
 
 ## 7d. TPM
 

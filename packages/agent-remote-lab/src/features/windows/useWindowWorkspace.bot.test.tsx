@@ -68,10 +68,10 @@ it('starts a group from a new session, shown in both modes with bot details, wit
   await vi.waitFor(async () => { await act(async () => {}); expect(read().window?.id).toBe('a'); }, { timeout: 3000, interval: 5 });
   const before = read().window, url = location.href;
   let created!: { groupId: string; viewId: string };
-  await act(async () => { created = await read().createBotGroup({ hostId: 'h', providerId: 'p', nativeSessionId: 'new', title: 'New session' }, true); });
+  await act(async () => { created = await read().createBotGroup({ hostId: 'h', providerId: 'p', nativeSessionId: 'new', title: 'New session' }); });
   const made = read().readGroup(created.groupId)!;
   expect(read().window).toEqual(before); expect(location.href).toBe(url);
-  expect(made.presentation).toBeUndefined(); expect(made.bots).toEqual({ rank: 'm', members: { [created.viewId]: { picture: { shape: expect.any(String), color: expect.stringMatching(/^#[0-9a-f]{6}$/), gaze: expect.any(Number) }, mode: 'coordinator' } } }); expect(made.window.title).toBe('New session');
+  expect(made.presentation).toBeUndefined(); expect(made.bots).toEqual({ rank: 'm', members: { [created.viewId]: { picture: { shape: expect.any(String), color: expect.stringMatching(/^#[0-9a-f]{6}$/), gaze: expect.any(Number) } } } }); expect(made.window.title).toBe('New session');
   expect(made.window.views).toEqual([expect.objectContaining({ id: created.viewId, placement: 'primary', binding: { hostId: 'h', providerId: 'p', nativeSessionId: 'new', title: 'New session' } })]);
   expect(made.window.selectedPrimaryViewId).toBe(created.viewId);
 });

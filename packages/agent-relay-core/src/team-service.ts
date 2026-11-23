@@ -88,8 +88,7 @@ export function createTeamService(ports: TeamServicePorts) {
       assertHost(hostId) { if (ports.requireHost(hostId).tasks !== 1) throw new BrokerError(409, 'tasks_upgrade_required', 'Update the Controller to use tasks.'); },
     },
     // Hosts that run tasks also bind assistants' main sessions to links.
-    ...(options.assistantGroups ? { assistants: { groups: options.assistantGroups, capable: (hostId: string) => brokerState.hosts.get(hostId)?.tasks === 1,
-      coordinatorProvider: (hostId: string, providerId: string) => { const host = brokerState.hosts.get(hostId); return host?.tasks === 1 && !!host.coordinatorProviders?.includes(providerId); } } } : {}),
+    ...(options.assistantGroups ? { assistants: { groups: options.assistantGroups, capable: (hostId: string) => brokerState.hosts.get(hostId)?.tasks === 1 } } : {}),
     callForSupport: {
       state: () => brokerState.callForSupport,
       capable: hostId => brokerState.hosts.get(hostId)?.callForSupport === 1,

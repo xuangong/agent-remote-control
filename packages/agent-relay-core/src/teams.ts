@@ -241,11 +241,11 @@ export class TeamBroker {
       const enablement = (this.groups ?? fail(unavailableGroups)).enablement(hostId);
       if (!this.assistants) return enablement;
       await this.inboxes!.ensure(this.assistants.hostBots(hostId));
-      return { ...enablement, coordinators: this.assistants.coordinators(hostId), bots: this.assistants.bots(hostId) };
+      return { ...enablement, bots: this.assistants.bots(hostId) };
     }
     if (call.action === 'create_task') {
       const tasks = this.tasks ?? fail(unavailableTasks);
-      if (tasks.capable(hostId)) this.assistants?.assertCoordinator(hostId, call.owner);
+      if (tasks.capable(hostId)) this.assistants?.assertBot(hostId, call.owner);
       return tasks.create(hostId, call);
     }
     if (call.action === 'task_status') return (this.tasks ?? fail(unavailableTasks)).status(hostId, call);

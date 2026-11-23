@@ -29,11 +29,11 @@ async function fixture(options: { tasks?: boolean; tickMs?: number } = {}) {
   const support = emptyCallForSupportState();
   let teams: SavedTeam[] = [];
   // The account's bots: one per session, in the mode the person chose.
-  const bots = new Map<string, 'coordinator' | 'plain'>(), missions = new Map<string, string>();
+  const bots = new Set<string>(), missions = new Map<string, string>();
   const groups = () => [{ window: { id: 'g', title: 'g', revision: 1, views: [...bots.keys()].map((key, index) => { const [providerId, nativeSessionId] = key.split('/');
     return { id: `v${index}`, placement: 'primary', binding: { hostId: 'relay-host', providerId, nativeSessionId, title: nativeSessionId } }; }) },
-    bots: { rank: 'm', members: Object.fromEntries([...bots].map(([key, mode], index) => [`v${index}`,
-      { mode, botId: 'b_' + index.toString(16).padStart(32, '0'), ...(missions.has(key) ? { mission: missions.get(key) } : {}) }])) } }] as never;
+    bots: { rank: 'm', members: Object.fromEntries([...bots].map((key, index) => [`v${index}`,
+      { botId: 'b_' + index.toString(16).padStart(32, '0'), ...(missions.has(key) ? { mission: missions.get(key) } : {}) }])) } }] as never;
   const broker = new TeamBroker({ read: () => teams, now: Date.now, assertHost() {}, async createSeat() { throw new Error('No seats here.'); },
     resolveSession: (_host, providerId, nativeSessionId) => ({ controllerId: 'host', providerId, nativeSessionId }),
     async change(update) { const next = structuredClone(teams), result = structuredClone(update(next)); teams = next; return result; },
@@ -58,7 +58,8 @@ async function fixture(options: { tasks?: boolean; tickMs?: number } = {}) {
     if (result.status !== 200) throw new Error(result.body);
     return JSON.parse(result.body);
   };
-  return { root, runtime, support, created, opened, sessions, control, mode: (providerId: string, nativeSessionId: string, mode: 'coordinator' | 'plain', mission?: string) => { bots.set(`${providerId}/${nativeSessionId}`, mode); if (mission) missions.set(`${providerId}/${nativeSessionId}`, mission); },
+  return { root, runtime, support, created, opened, sessions, control, bot: (providerId: string, nativeSessionId: string, mission?: string) => { bots.add(`${providerId}/${nativeSessionId}`); if (mission) missions.set(`${providerId}/${nativeSessionId}`, mission); },
+    unbot: (providerId: string, nativeSessionId: string) => { bots.delete(`${providerId}/${nativeSessionId}`); },
     enable: (providerId: string, nativeSessionId: string, on: boolean) => setEnablement(support, (_h, p, n) => ({ controllerId: 'host', providerId: p, nativeSessionId: n }), { hostId: 'relay-host', providerId, nativeSessionId }, on ? [profile.id] : [], Date.now()),
     async close() { await runtime.close(); await rm(root, { recursive: true, force: true }); } };
 }
@@ -95,7 +96,7 @@ it('gives a bot\'s session its standing instructions with its mission when it op
   try {
     // The Controller learns the bots at its enablement poll; a runtime already open keeps what it opened with, so each round opens
     // another bot, all registered at once.
-    for (let index = 1; index <= 40; index++) f.mode('claude', `claude-bot-${index}`, 'plain', 'Review every change before release.');
+    for (let index = 1; index <= 40; index++) f.bot('claude', `claude-bot-${index}`, 'Review every change before release.');
     let round = 0, opened = '';
     await expect.poll(async () => {
       opened = `claude-bot-${++round}`;
@@ -112,28 +113,26 @@ it('reads which sessions are bots before the first session opens after a start, 
   // The enablement poll never comes round during this test: the first attachment reads enablement itself.
   const f = await fixture({ tasks: true, tickMs: 60_000 });
   try {
-    f.mode('claude', 'claude-first', 'plain', 'Keep the release notes.');
+    f.bot('claude', 'claude-first', 'Keep the release notes.');
     await f.control('/remote/attach', { providerId: 'claude', nativeSessionId: 'claude-first' });
     expect(f.opened.find(entry => entry.id === 'claude-first')?.extensions?.instructions).toContain('Your mission:\nKeep the release notes.');
   } finally { await f.close(); }
 });
 
-it('gives a live Claude session the task tools while its assistant is a coordinator, and takes them back when it is switched to plain', async () => {
+it('gives a live Claude session the task tools while it is a bot, and takes them back when it stops being one', async () => {
   const f = await fixture({ tasks: true });
   try {
     const names = () => f.sessions.get('claude-main')!.namespaces.at(-1)?.flatMap(namespace => namespace.tools.map(tool => tool.name));
-    f.mode('claude', 'claude-main', 'plain');
     await f.control('/remote/attach', { providerId: 'claude', nativeSessionId: 'claude-main' });
     expect(worker(f.opened.at(-1)!.extensions)).toBeUndefined();
-    f.mode('claude', 'claude-main', 'coordinator');
+    f.bot('claude', 'claude-main');
     await expect.poll(names).toContain('create_task');
-    // Support enabled too: switching to plain keeps the support tools and drops the task tools.
+    // Support enabled too: leaving every group keeps the support tools and drops the task tools.
     f.enable('claude', 'claude-main', true);
-    f.mode('claude', 'claude-main', 'plain');
+    f.unbot('claude', 'claude-main');
     await expect.poll(names).toEqual(['call_for_support', 'support_status', 'read_support_report', 'download_support_resource']);
   } finally { await f.close(); }
 });
-
 it('gives a Copilot session the worker tools when it is attached while enabled, including a session started elsewhere', async () => {
   const f = await fixture();
   try {

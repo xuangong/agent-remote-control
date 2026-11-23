@@ -37,11 +37,6 @@ export const WindowBotDetails = Type.Object({
   botId: Type.Optional(BotId),
   /** What the bot is for, in its record; its standing instructions after the base instructions. */
   mission: Type.Optional(BotMission),
-  /**
-   * Coordinator: the assistant's main session gets the task tools, messages the account's other coordinators and joins rooms.
-   * Plain, or absent: one session without them. Both values are accepted so a bot can be switched back.
-   */
-  mode: Type.Optional(Type.Union([Type.Literal('coordinator'), Type.Literal('plain')])),
 }, strict);
 export type WindowBotDetails = Static<typeof WindowBotDetails>;
 /**

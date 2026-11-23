@@ -11,7 +11,7 @@ const group = (id: string, views: Array<[string, string, string]>, bots?: Window
   ...(bots ? { bots } : {}) });
 
 const ids = { chief: 'b_' + '1'.repeat(32), tracker: 'b_' + '2'.repeat(32), quiet: 'b_' + '3'.repeat(32), solo: 'b_' + '4'.repeat(32) };
-function fixture(options: { capable?: (hostId: string) => boolean; offline?: string; coordinatorProvider?: (hostId: string, providerId: string) => boolean; groups?: WindowGroup[] } = {}) {
+function fixture(options: { capable?: (hostId: string) => boolean; offline?: string; groups?: WindowGroup[] } = {}) {
   let state: SavedTeam[] = [], now = 100;
   const seats: TeamSeat[] = [];
   const groups = options.groups ?? [group('g1', [['v1', 'mac', 'chief'], ['v2', 'pc', 'tracker'], ['v3', 'mac', 'quiet'], ['v4', 'mac', 'solo']], { rank: 'm', members: {
@@ -23,7 +23,7 @@ function fixture(options: { capable?: (hostId: string) => boolean; offline?: str
     change: async update => { const draft = structuredClone(state); const result = structuredClone(update(draft)); state = draft; return result; },
     createSeat: async (hostId, seat) => { if (hostId === options.offline) throw new Error('The Host is offline.'); seats.push(seat); return { ...seat.member, creation: 'ready', activity: 'idle', cwd: '/repo' }; },
     tasks: { capable: () => true, assertHost: () => {} },
-    assistants: { groups: () => groups, capable: options.capable ?? (() => true), ...(options.coordinatorProvider ? { coordinatorProvider: options.coordinatorProvider } : {}) },
+    assistants: { groups: () => groups, capable: options.capable ?? (() => true) },
   });
   const chief = { providerId: 'claude', nativeSessionId: 'chief' }, tracker = { providerId: 'claude', nativeSessionId: 'tracker' };
   const solo = { providerId: 'claude', nativeSessionId: 'solo' };
@@ -39,28 +39,20 @@ describe('assistants messaging one another', () => {
     expect(await f.broker.hostCall('pc', { action: 'list_assistants', owner: f.tracker })).toEqual({ assistants: [{ id: botId, name: 'Chief' }] });
   });
 
-  it('reaches only assistants in coordinator mode, and only they start tasks, messages and rooms', async () => {
+  it('lets every bot reach every other bot, and a session that is no bot start nothing', async () => {
     const f = fixture();
-    await expect(f.broker.hostCall('mac', { action: 'message_assistant', owner: f.chief, to: 'Solo', text: 'Hello.', operationId: 'op' })).rejects.toThrow('Solo is a plain assistant');
-    await expect(f.broker.hostCall('mac', { action: 'open_room', owner: f.chief, operationId: 'room', name: 'Plan', topic: 'Plan.', members: ['Solo'], minutes: 5 })).rejects.toThrow('plain assistant');
-    for (const call of [{ action: 'list_assistants', owner: f.solo }, { action: 'message_assistant', owner: f.solo, to: 'Chief', text: 'Hello.', operationId: 'op' },
-      { action: 'open_room', owner: f.solo, operationId: 'room', name: 'Plan', topic: 'Plan.', members: ['Chief'], minutes: 5 },
-      { action: 'create_task', owner: f.solo, operationId: 'task', title: 'Fix', brief: 'Fix it.' }] as const)
-      await expect(f.broker.hostCall('mac', call)).rejects.toThrow('plain mode');
-    expect(f.state()).toEqual([]);
+    expect(await f.broker.hostCall('mac', { action: 'message_assistant', owner: f.solo, to: 'Chief', text: 'Hello.', operationId: 'op' })).toMatchObject({ outcome: 'delivered' });
+    expect(await f.broker.hostCall('mac', { action: 'message_assistant', owner: f.chief, to: 'Solo', text: 'Hello.', operationId: 'op' })).toMatchObject({ outcome: 'delivered' });
+    const stranger = { providerId: 'claude', nativeSessionId: 'stranger' };
+    for (const call of [{ action: 'list_assistants', owner: stranger }, { action: 'message_assistant', owner: stranger, to: 'Chief', text: 'Hello.', operationId: 'op' },
+      { action: 'create_task', owner: stranger, operationId: 'task', title: 'Fix', brief: 'Fix it.' }] as const)
+      await expect(f.broker.hostCall('mac', call)).rejects.toThrow('Only an assistant');
   });
 
   it('lists the account\'s other assistants by name to an assistant\'s main session, and to nothing else', async () => {
     const f = fixture();
-    expect(await f.broker.hostCall('mac', { action: 'list_assistants', owner: f.chief })).toEqual({ assistants: [{ id: ids.tracker, name: 'Tracker' }] });
+    expect(await f.broker.hostCall('mac', { action: 'list_assistants', owner: f.chief })).toEqual({ assistants: [{ id: ids.tracker, name: 'Tracker' }, { id: ids.solo, name: 'Solo' }] });
     await expect(f.broker.hostCall('mac', { action: 'list_assistants', owner: { providerId: 'claude', nativeSessionId: 'worker' } })).rejects.toThrow('Only an assistant');
-  });
-
-  it('treats a coordinator whose provider cannot take the task tools on its Host as plain', async () => {
-    const f = fixture({ coordinatorProvider: hostId => hostId !== 'pc' });
-    expect(await f.broker.hostCall('mac', { action: 'list_assistants', owner: f.chief })).toEqual({ assistants: [] });
-    await expect(f.broker.hostCall('mac', { action: 'message_assistant', owner: f.chief, to: 'Tracker', text: 'Hello.', operationId: 'op' })).rejects.toThrow('Tracker is a plain assistant');
-    await expect(f.broker.hostCall('pc', { action: 'list_assistants', owner: f.tracker })).rejects.toThrow('plain mode');
   });
 
   it('delivers a framed message to the other bot\'s inbox, after its standing instructions, once per operation', async () => {

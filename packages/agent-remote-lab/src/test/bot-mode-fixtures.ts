@@ -30,8 +30,7 @@ export function visibleButton(container: ParentNode, label: string) {
 }
 export async function mountBotApp(scope: string, options: { hosted?: boolean; holdMessages?: boolean; timeline?: ProjectedTimelineEntry[]; holdInspect?: boolean; serverProviders?: boolean;
   /** The listed Host: offline, or with a Controller that delivers from the outbox. */
-  /** coordinator: the Host offers coordinator mode for its provider. */
-  host?: { online?: boolean; outbox?: 1; coordinator?: boolean };
+  host?: { online?: boolean; outbox?: 1 };
   /** Sessions the Host reports missing when the page attaches them. */
   missing?: readonly string[] } = {}) {
   let workspace!: ReturnType<typeof workspaceHooks.useWindowWorkspace>;
@@ -141,7 +140,7 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
   let setAccessReady!: (ready: boolean) => void, setScope!: (scope: string) => void;
   let hostOnline = options.host?.online ?? true;
   const hostService = { hosts: async () => ({ hosts: options.hosted ? [{ id: 'local', name: 'Test Host', online: hostOnline, sessionControl: true as const, access: 'owner' as const, ...(options.host?.outbox ? { outbox: options.host.outbox } : {}),
-    providers: [{ providerId: 'recorded', displayName: 'Recorded Provider', ...(options.host?.coordinator ? { coordinator: true as const } : {}) }] }] : [] }), pair: async () => { throw new Error('No pairing.'); } };
+    providers: [{ providerId: 'recorded', displayName: 'Recorded Provider' }] }] : [] }), pair: async () => { throw new Error('No pairing.'); } };
   function Access() {
     const inheritedReady = useContext(WorkspaceReady);
     const [ready, setReady] = useState(true), [baseUrl, changeScope] = useState(scope); setAccessReady = setReady; setScope = changeScope;

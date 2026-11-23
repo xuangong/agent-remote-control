@@ -119,7 +119,7 @@ it('starts a new bot in its own group, named after its session, and opens its co
     const made = () => app.workspace().groups.find(group => group.window.views.some(view => view.binding?.nativeSessionId === 'N1'));
     await until(() => expect(made()).toBeDefined());
     expect(made()!.window.title).toBe('New session'); expect(made()!.presentation).toBeUndefined();
-    // Its only bot detail is the avatar it was given at creation: this provider cannot be a coordinator's, so it starts plain.
+    // Its only bot detail is the avatar it was given at creation.
     expect(Object.keys(made()!.bots?.members ?? {})).toEqual(['main']); expect(Object.keys(made()!.bots!.members.main!)).toEqual(['picture']);
     await until(() => expect(new URL(location.href).searchParams.get('bot')).toBe('main'));
     expect(new URL(location.href).searchParams.get('section')).toBe(made()!.window.id);

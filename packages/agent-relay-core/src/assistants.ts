@@ -22,13 +22,10 @@ export interface AssistantPorts {
   groups(): readonly WindowGroup[];
   /** The Host runs links; others never see them. */
   capable(hostId: string): boolean;
-  /** The Host gives this provider's sessions the task tools, so its assistants can be coordinators; absent, every provider can. */
-  coordinatorProvider?(hostId: string, providerId: string): boolean;
 }
 type ListCall = Extract<TeamHostCall, { action: 'list_assistants' }>;
 type MessageCall = Extract<TeamHostCall, { action: 'message_assistant' }>;
-/** coordinator: in coordinator mode, so it has the task tools and other assistants reach it; a plain assistant is one session without them. */
-export interface Assistant { key: string; name: string; label?: string; mission?: string; hidden: boolean; coordinator: boolean; hostId: string; providerId: string; nativeSessionId: string }
+export interface Assistant { key: string; name: string; label?: string; mission?: string; hidden: boolean; hostId: string; providerId: string; nativeSessionId: string }
 
 const RECENT_KEEP = 64;
 /** One answer for an assistant that does not exist and one this caller may not reach, so the roster cannot be probed. */
@@ -41,13 +38,14 @@ const fold = (text: string) => text.trim().toLocaleLowerCase('en');
  * The account's assistants: every bot view, named by the account's naming rule, with the session it shows now. One in coordinator
  * mode whose provider cannot take the task tools works as a plain one.
  */
-export function accountDirectory(groups: readonly WindowGroup[], coordinatorProvider: AssistantPorts['coordinatorProvider'] = () => true): Assistant[] {
+/** The account's assistants: every bot view, named by the account's naming rule, with the session it shows now. */
+export function accountDirectory(groups: readonly WindowGroup[]): Assistant[] {
   const names = assistantNamesIn(accountAssistants(groups), 'en');
   return groups.flatMap(group => botViews(group).map(view => {
     // The id is the bot's record, which a move between groups keeps; names follow the account's naming rule, keyed by place.
     const viewKey = viewAssistantKey(group.window.id, view.id), details = group.bots?.members[view.id];
     const key = details?.botId ?? viewKey;
-    return { key, name: names.get(viewKey) ?? view.binding.title, ...(details?.label ? { label: details.label } : {}), ...(details?.mission ? { mission: details.mission } : {}), hidden: details?.hidden === true, coordinator: details?.mode === 'coordinator' && coordinatorProvider(view.binding.hostId, view.binding.providerId),
+    return { key, name: names.get(viewKey) ?? view.binding.title, ...(details?.label ? { label: details.label } : {}), ...(details?.mission ? { mission: details.mission } : {}), hidden: details?.hidden === true,
       hostId: view.binding.hostId, providerId: view.binding.providerId, nativeSessionId: view.binding.nativeSessionId };
   }));
 }
@@ -62,13 +60,7 @@ export function callerAssistant(resolve: TeamBrokerPorts['resolveSession'], host
 /** The assistant a name or id means, other than the caller; one answer for unknown and unreachable. */
 export function namedAssistant(directory: readonly Assistant[], name: string, caller: Assistant): Assistant {
   const named = directory.filter(item => item.key === name || fold(item.name) === fold(name));
-  const found = named.length === 1 && named[0]!.key !== caller.key ? named[0]! : fail(NOT_FOUND);
-  return found.coordinator ? found : fail(`${found.name} is a plain assistant: it has no tools to answer. Ask the person to switch it to coordinator mode.`);
-}
-/** The calling session's assistant, which must be in coordinator mode to start tasks, messages and rooms. */
-export function coordinatorCaller(resolve: TeamBrokerPorts['resolveSession'], hostId: string, owner: { providerId: string; nativeSessionId: string }, directory: readonly Assistant[]): Assistant {
-  const caller = callerAssistant(resolve, hostId, owner, directory);
-  return caller.coordinator ? caller : fail('This assistant is in plain mode. The person can switch it to coordinator mode in its details.');
+  return named.length === 1 && named[0]!.key !== caller.key ? named[0]! : fail(NOT_FOUND);
 }
 /** An assistant's main session as a seat bound where it is. */
 export function assistantSeat(item: Assistant, now: number): TeamMember {
@@ -80,22 +72,15 @@ export class AssistantMessages {
   constructor(private readonly broker: AssistantBrokerPorts, private readonly ports: AssistantPorts, private readonly inboxes: BotInboxes) {}
   capable(hostId: string): boolean { return this.ports.capable(hostId); }
   private caller(hostId: string, owner: ListCall['owner'], directory: readonly Assistant[]): Assistant {
-    return coordinatorCaller(this.broker.ports.resolveSession, hostId, owner, directory);
+    return callerAssistant(this.broker.ports.resolveSession, hostId, owner, directory);
   }
-  /** Throws unless the session is the main session of an assistant in coordinator mode. */
-  assertCoordinator(hostId: string, owner: ListCall['owner']): void { this.caller(hostId, owner, accountDirectory(this.ports.groups(), this.ports.coordinatorProvider)); }
-  /** The main sessions of the Host's coordinators, as the sessions that hold their role now: the Controller offers them the task tools. */
-  coordinators(hostId: string): Array<{ providerId: string; nativeSessionId: string }> {
-    if (!this.ports.capable(hostId)) return [];
-    return accountDirectory(this.ports.groups(), this.ports.coordinatorProvider).filter(item => item.coordinator && item.hostId === hostId).flatMap(item => {
-      try { const current = this.broker.ports.resolveSession(item.hostId, item.providerId, item.nativeSessionId); return [{ providerId: current.providerId, nativeSessionId: current.nativeSessionId }]; }
-      catch { return []; }
-    });
-  }
+  /** Throws unless the session is the main session of a bot. */
+  assertBot(hostId: string, owner: ListCall['owner']): void { this.caller(hostId, owner, accountDirectory(this.ports.groups())); }
+
   /** The bots whose main session is on the Host, as the directory has them. */
   hostBots(hostId: string): Assistant[] {
     if (!this.ports.capable(hostId)) return [];
-    return accountDirectory(this.ports.groups(), this.ports.coordinatorProvider).filter(item => item.hostId === hostId && item.key.startsWith('b_'));
+    return accountDirectory(this.ports.groups()).filter(item => item.hostId === hostId && item.key.startsWith('b_'));
   }
   /** Every bot whose main session is on the Host, as the session that holds its role now, with its mission: its standing instructions. */
   bots(hostId: string): Array<{ providerId: string; nativeSessionId: string; botId: string; mission?: string }> {
@@ -107,13 +92,13 @@ export class AssistantMessages {
   }
   list(hostId: string, call: ListCall): { assistants: Array<{ id: string; name: string; label?: string }> } {
     if (!this.ports.capable(hostId)) fail('Update the Controller to message assistants.');
-    const directory = accountDirectory(this.ports.groups(), this.ports.coordinatorProvider), self = this.caller(hostId, call.owner, directory);
-    return { assistants: directory.filter(item => item.key !== self.key && !item.hidden && item.coordinator).map(item => ({ id: item.key, name: item.name, ...(item.label ? { label: item.label } : {}) })) };
+    const directory = accountDirectory(this.ports.groups()), self = this.caller(hostId, call.owner, directory);
+    return { assistants: directory.filter(item => item.key !== self.key && !item.hidden).map(item => ({ id: item.key, name: item.name, ...(item.label ? { label: item.label } : {}) })) };
   }
   /** A message to another bot arrives in its inbox, framed with the sender's name, between its turns (bots design 3). */
   async message(hostId: string, call: MessageCall): Promise<{ messageId: string; outcome: 'delivered' | 'held' }> {
     if (!this.ports.capable(hostId)) fail('Update the Controller to message assistants.');
-    const directory = accountDirectory(this.ports.groups(), this.ports.coordinatorProvider), from = this.caller(hostId, call.owner, directory);
+    const directory = accountDirectory(this.ports.groups()), from = this.caller(hostId, call.owner, directory);
     const to = namedAssistant(directory, call.to, from);
     if (!to.key.startsWith('b_') || !from.key.startsWith('b_')) fail(NOT_FOUND);
     const sent = await this.broker.change(teams => {

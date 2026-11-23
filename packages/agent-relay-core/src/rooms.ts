@@ -10,7 +10,7 @@ import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, type SavedTeam } from './t
 import { plain } from './drafts.js';
 import type { TeamBrokerPorts } from './teams.js';
 import { pruneCoordination } from './coordination-retention.js';
-import { accountDirectory, assistantSeat, coordinatorCaller, namedAssistant, type AssistantBrokerPorts, type AssistantPorts } from './assistants.js';
+import { accountDirectory, assistantSeat, callerAssistant, namedAssistant, type AssistantBrokerPorts, type AssistantPorts } from './assistants.js';
 
 type OpenCall = Extract<TeamHostCall, { action: 'open_room' }>;
 type SayCall = Extract<TeamHostCall, { action: 'room_say' | 'room_pass' }>;
@@ -76,7 +76,7 @@ export class Rooms {
   /** An assistant opens a room with others; it speaks first after the topic. */
   async open(hostId: string, call: OpenCall): Promise<{ roomId: string; members: string[] }> {
     if (!this.ports.capable(hostId)) fail('Update the Controller to use rooms.');
-    const directory = accountDirectory(this.ports.groups(), this.ports.coordinatorProvider), opener = coordinatorCaller(this.broker.ports.resolveSession, hostId, call.owner, directory);
+    const directory = accountDirectory(this.ports.groups()), opener = callerAssistant(this.broker.ports.resolveSession, hostId, call.owner, directory);
     const others = call.members.map(name => namedAssistant(directory, name, opener));
     if (new Set(others.map(item => item.key)).size !== others.length) fail('Name each member once.');
     const created = await this.broker.change(teams => {

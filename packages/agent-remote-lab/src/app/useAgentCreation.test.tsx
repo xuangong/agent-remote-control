@@ -82,15 +82,11 @@ describe('creating without a directory', () => {
 });
 
 describe('creating a bot', () => {
-  it('starts a bot as a coordinator when its Host marks the provider as one', async () => {
-    const scope = await create({ selectedHost: { id: 'local', providers: [{ providerId: 'codex', displayName: 'Codex', coordinator: true }] } }, true);
-    expect(scope.windowWorkspace.createBotGroup).toHaveBeenCalledWith(expect.objectContaining({ nativeSessionId: 'native-new' }), true);
-  });
+
   it('creates the session, then a group named after it, and selects its view', async () => {
     const scope = await create({}, true);
     expect(scope.directory.create).toHaveBeenCalledWith('codex', expect.any(String), { cwd: '/work' });
-    // The Host names no provider that can be a coordinator's: the bot starts plain.
-    expect(scope.windowWorkspace.createBotGroup).toHaveBeenCalledWith(expect.objectContaining({ nativeSessionId: 'native-new' }), false);
+    expect(scope.windowWorkspace.createBotGroup).toHaveBeenCalledWith(expect.objectContaining({ nativeSessionId: 'native-new' }));
     expect(scope.navigation.select).toHaveBeenCalledWith({ kind: 'bot', groupId: 'G', viewId: 'V' });
     expect(scope.setNewBot).toHaveBeenCalledWith({ open: false });
     expect(scope.bindDirectorySession).not.toHaveBeenCalled();

@@ -20,8 +20,8 @@ export interface WorkerSupportPorts {
   /** The provider keeps a session it starts from writing its working directory. */
   readOnly?(providerId: string): boolean;
 }
-type Enablement = { defaultEnabled: boolean; sessions: Map<string, boolean>; coordinators: Set<string>; bots: Map<string, string> };
-/** Which worker tools a session has: none, Call For Support only, or Call For Support with the task tools of a coordinator. */
+type Enablement = { defaultEnabled: boolean; sessions: Map<string, boolean>; bots: Map<string, string> };
+/** Which worker tools a session has: none, Call For Support only, or Call For Support with the task tools every bot has. */
 export type WorkerTools = 'none' | 'support' | 'tasks';
 type StatusCall = { roleId: string; requesterMemberId: string; call: CallForSupportCall };
 
@@ -39,7 +39,7 @@ const tool = (name: string, description: string, inputSchema: Record<string, unk
 
 /** A worker's own Call For Support tools and the enablement that decides where the Controller offers them. */
 export class WorkerSupport {
-  private enablement: Enablement = { defaultEnabled: false, sessions: new Map(), coordinators: new Set(), bots: new Map() };
+  private enablement: Enablement = { defaultEnabled: false, sessions: new Map(), bots: new Map() };
   private readonly listeners = new Set<() => void>();
   private readonly resources: TeamResourceFiles;
   private polling = false;
@@ -49,13 +49,13 @@ export class WorkerSupport {
   constructor(private readonly ports: WorkerSupportPorts) {
     this.resources = new TeamResourceFiles(join(ports.stateDirectory, 'support-resources'), call => ports.request(call));
   }
-  /** Whether the session is offered the namespace: it is a coordinator's main session, or the user enabled it for support, explicitly or by a profile's default. */
+  /** Whether the session is offered the namespace: it is a bot's main session, or the user enabled it for support, explicitly or by a profile's default. */
   enabled(ref: NativeSessionRef): boolean { return this.tools(ref) !== 'none'; }
   /** The worker tools the session is offered. */
   tools(ref: NativeSessionRef): WorkerTools {
     if (!this.ports.available()) return 'none';
     const key = nativeSessionRefKey(ref);
-    if (this.ports.tasks?.() === true && this.enablement.coordinators.has(key)) return 'tasks';
+    if (this.ports.tasks?.() === true && this.enablement.bots.has(key)) return 'tasks';
     return (this.enablement.sessions.get(key) ?? this.enablement.defaultEnabled) ? 'support' : 'none';
   }
   /** The standing instructions of a bot's main session (base instructions and its mission); undefined for a session that is no bot. */
@@ -84,7 +84,7 @@ export class WorkerSupport {
     return this.polled;
   }
   private async read(controllerId: string): Promise<void> {
-    const value = await this.ports.request({ action: 'support_enablement' }) as { defaultEnabled?: unknown; sessions?: unknown; coordinators?: unknown; bots?: unknown };
+    const value = await this.ports.request({ action: 'support_enablement' }) as { defaultEnabled?: unknown; sessions?: unknown; bots?: unknown };
     if (!value || typeof value.defaultEnabled !== 'boolean' || !Array.isArray(value.sessions)) throw new Error('Invalid Call For Support enablement.');
     const sessions = new Map<string, boolean>();
     for (const entry of value.sessions as Array<{ providerId?: unknown; nativeSessionId?: unknown; enabled?: unknown }>) {
@@ -96,21 +96,16 @@ export class WorkerSupport {
       if (typeof entry?.providerId === 'string' && typeof entry.nativeSessionId === 'string')
         bots.set(nativeSessionRefKey({ controllerId, providerId: entry.providerId, nativeSessionId: entry.nativeSessionId }), typeof entry.mission === 'string' ? entry.mission : '');
     }
-    const coordinators = new Set<string>();
-    for (const entry of Array.isArray(value.coordinators) ? value.coordinators as Array<{ providerId?: unknown; nativeSessionId?: unknown }> : []) {
-      if (typeof entry?.providerId === 'string' && typeof entry.nativeSessionId === 'string') coordinators.add(nativeSessionRefKey({ controllerId, providerId: entry.providerId, nativeSessionId: entry.nativeSessionId }));
-    }
-    const next = { defaultEnabled: value.defaultEnabled, sessions, coordinators, bots }, tasks = this.ports.tasks?.() === true;
+    const next = { defaultEnabled: value.defaultEnabled, sessions, bots }, tasks = this.ports.tasks?.() === true;
     const changed = tasks !== this.tasksOffered || next.defaultEnabled !== this.enablement.defaultEnabled || next.sessions.size !== this.enablement.sessions.size
       || [...next.sessions].some(([key, enabled]) => this.enablement.sessions.get(key) !== enabled)
-      || next.coordinators.size !== this.enablement.coordinators.size || [...next.coordinators].some(key => !this.enablement.coordinators.has(key))
       || next.bots.size !== this.enablement.bots.size || [...next.bots].some(([key, mission]) => this.enablement.bots.get(key) !== mission);
     this.enablement = next; this.tasksOffered = tasks; this.loadedOnce = true;
     if (changed) for (const listener of this.listeners) { try { listener(); } catch { /* Listeners cannot stop enablement. */ } }
   }
   /**
    * The worker's tools, bound to the session that runs them. deferred: found by search rather than listed. tasks: with the task,
-   * assistant and room tools of a coordinator; the Relay refuses them from a session that is not one.
+   * assistant and room tools every bot has; the Relay refuses them from a session that is no bot.
    */
   namespace(actual: () => NativeSessionRef | undefined, deferred: boolean, tasks: boolean): AgentSessionToolNamespace {
     const worker = () => actual() ?? fail('Call For Support is not attached to this session yet.');

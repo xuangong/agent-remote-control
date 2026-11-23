@@ -85,8 +85,11 @@ export function readStoredBots(bots: unknown): unknown {
   const members = (bots as { members?: unknown } | null)?.members;
   if (!members || typeof members !== 'object' || Array.isArray(members)) return bots;
   return { ...(bots as object), members: Object.fromEntries(Object.entries(members).map(([viewId, details]) => {
-    if (!details || typeof details !== 'object' || !('picture' in details)) return [viewId, details];
-    const { picture, ...rest } = details as { picture: unknown };
+    if (!details || typeof details !== 'object') return [viewId, details];
+    // `mode` was a coordinator or plain switch that a build before one kind of bot (bots design 2.1) stored; it reads as nothing.
+    const { mode: _mode, ...kept } = details as { mode?: unknown };
+    if (!('picture' in kept)) return [viewId, kept];
+    const { picture, ...rest } = kept as { picture: unknown };
     const read = readBotPicture(picture);
     return [viewId, read ? { ...rest, picture: read } : rest];
   })) };

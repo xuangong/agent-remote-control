@@ -161,18 +161,18 @@ describe('the main session\'s task tools', () => {
     const directory = await mkdtemp(join(tmpdir(), 'task-tools-'));
     cleanups.push(() => rm(directory, { recursive: true, force: true }));
     const calls: TeamHostCall[] = [];
-    // The Relay names the coordinators' main sessions in its enablement; this one is the only coordinator.
-    const worker = new WorkerSupport({ request: async call => { if (call.action === 'support_enablement') return { defaultEnabled: false, sessions: [], coordinators: [{ providerId: 'codex', nativeSessionId: 'main' }] };
+    // The Relay names the bots' main sessions in its enablement; this one is the only bot.
+    const worker = new WorkerSupport({ request: async call => { if (call.action === 'support_enablement') return { defaultEnabled: false, sessions: [], bots: [{ providerId: 'codex', nativeSessionId: 'main', botId: 'b_' + '9'.repeat(32) }] };
       calls.push(call); return { ok: true }; }, available: () => true, tasks: () => tasks, stateDirectory: directory, title: async () => 'Chief' });
     return { worker, calls };
   }
   const ref = { controllerId: 'controller', providerId: 'codex', nativeSessionId: 'main' };
-  it('offers a coordinator\'s main session the task tools while the Relay runs tasks, and starts a task as the session', async () => {
+  it('offers a bot\'s main session the task tools while the Relay runs tasks, and starts a task as the session', async () => {
     const { worker, calls } = await support(true);
     expect(worker.tools(ref)).toBe('none');
     await worker.refresh('controller');
     expect(worker.tools(ref)).toBe('tasks');
-    // A plain assistant's session, and a session the Controller is about to create, get nothing.
+    // A session that is no bot, and a session the Controller is about to create, get nothing.
     expect(worker.tools({ ...ref, nativeSessionId: 'plain' })).toBe('none');
     expect(worker.enabledByDefault()).toBe(false);
     expect(worker.namespace(() => ref, false, false).tools.map(item => item.name)).not.toContain('create_task');

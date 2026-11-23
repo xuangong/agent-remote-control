@@ -96,6 +96,8 @@ export class BotCalls {
         const messageId = `m${createHash('sha256').update(JSON.stringify([created.id, self.key, call.operationId])).digest('hex').slice(0, 12)}`;
         created.messages.push({ id: createHash('sha256').update(JSON.stringify(['first-message', created.id])).digest('hex'), from: seat.id, to: seat.id, status: 'queued', createdAt: now,
           text: assistantMessageText({ messageId, from: self.name, body: call.message }) });
+        // Recorded as received from the organizer, so the new bot answers it with reply_to.
+        created.inbox!.recent = [{ id: messageId, from: self.key, hop: 1, operationId: call.operationId }];
       }
       teams.push(created);
       return created;

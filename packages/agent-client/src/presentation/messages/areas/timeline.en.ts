@@ -54,6 +54,7 @@ export const timeline = {
   'timeline.task.question': 'Question from a task',
   'timeline.task.needsYou': 'A task needs you',
   'timeline.task.told': 'You wrote to a task',
+  'timeline.task.progress': 'Progress',
   'timeline.task.open': 'Open',
   'timeline.roomTurn': { one: 'Your turn in {name} · 1 new message', other: 'Your turn in {name} · {count} new messages' },
   'timeline.standingInstructions': 'Standing instructions updated',

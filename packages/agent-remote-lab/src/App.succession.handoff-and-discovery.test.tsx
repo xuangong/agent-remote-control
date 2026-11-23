@@ -554,7 +554,7 @@ it.each(['A', 'B'])('retains a completed old-source creation before rejecting ne
   const oldPrimary = primary, oldRecipient = succession.imageRecipient;
   const release = f.holdCreate();
   let pending!: Promise<unknown>;
-  await act(async () => { pending = oldPrimary.onExecuteConsoleCommand!('console:side', 'Retained first input').catch(error => error); });
+  await act(async () => { pending = oldPrimary.onExecuteConsoleCommand!('console:fork', 'Retained first input').catch(error => error); });
   await waitFor(() => expect(f.requests.some(item => item.url.endsWith('/create'))).toBe(true));
   const current = initial === 'A' ? 'B' : 'C';
   const next = committed(initial, current, initial === 'A' ? 2 : 3); f.chain.push(next);

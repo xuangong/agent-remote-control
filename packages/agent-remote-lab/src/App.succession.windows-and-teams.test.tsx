@@ -430,10 +430,9 @@ it.each([false, true])('offers Side and Handoff in a Team member view, keeping t
   const commands = member!.consoleCommands?.map(command => command.id) ?? [];
   expect(commands).toEqual(expect.arrayContaining(['console:side', 'console:fork', 'console:handoff']));
   expect(f.view.querySelector('[data-view-id="team-worker"] .agent-session-title')?.textContent).toBe('Worker');
-  // A Side reads the member's session and opens beside its view.
-  await act(async () => { await member!.onExecuteConsoleCommand!('console:side', ''); });
-  expect(f.requests.find(request => request.url.endsWith('/create'))?.body).toMatchObject({ providerId: 'recorded', sourceNativeSessionId: current, conversationKind: 'side' });
-  await settleApp(() => expect(setup.windowDocument.views.find(view => view.attachedTo === 'team-worker')?.binding?.nativeSessionId).toBe('S'));
+  // A Side is a temporary bot the member's session organizes, its mission what the person wrote (bots design 9).
+  await act(async () => { await member!.onExecuteConsoleCommand!('console:side', 'Check the logs.').catch(() => undefined); });
+  expect(f.requests.find(request => request.url.endsWith('/v1/remote/teams/create'))?.body).toMatchObject({ source: { providerId: 'recorded', nativeSessionId: current }, bot: { name: 'Check the logs.', mission: 'Check the logs.' } });
   await act(async () => { await member!.onExecuteConsoleCommand!('console:handoff', 'claude'); });
   await settleApp(() => expect(f.requests.find(request => request.url.endsWith('/succession/describe'))?.body).toEqual({ providerId: 'recorded', nativeSessionId: current }));
   expect(f.requests.some(request => request.url.endsWith('/succession/prepare'))).toBe(false);

@@ -56,10 +56,10 @@ async function setup({ used = 0, limit = 1, outcome = 'success', empty = false, 
   return { container, create, hosts, selectHost, requests, refresh, setLimit: (next: number) => { quota = { ...quota, limit: next }; } };
 }
 
-async function sideCommand(container: HTMLElement): Promise<void> {
+async function forkCommand(container: HTMLElement): Promise<void> {
   const input = container.querySelector<HTMLTextAreaElement>('[data-testid="workbench"] [data-testid="prompt-input"]')!;
   await act(async () => {
-    setPromptText(input, '/side');
+    setPromptText(input, '/fork');
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
@@ -141,22 +141,20 @@ it('allows retrying an uncertain creation at the limit with the same reservation
   expect(creates[1]?.body?.requestId).toBe(creates[0]?.body?.requestId);
 });
 
-it('checks the source Host quota for side sessions even when a different Host is selected', async () => {
+it('checks the source Host quota for forks even when a different Host is selected', async () => {
   window.history.replaceState(null, '', '/?host=shared');
   const f = await setup({ active: true, used: 1 });
   await f.selectHost('owner');
-  await sideCommand(f.container);
+  await forkCommand(f.container);
   expect(f.requests.some(({ path }) => path.endsWith('/create'))).toBe(false);
   expect(f.container.textContent).toContain('Session creation limit reached');
-  expect(f.container.querySelector('[aria-label="Side conversation"]')).toBeNull();
 });
 
-it('refreshes the shared quota after creating a side conversation', async () => {
+it('refreshes the shared quota after creating a fork', async () => {
   window.history.replaceState(null, '', '/?host=shared');
   const f = await setup({ active: true });
-  await sideCommand(f.container);
+  await forkCommand(f.container);
   expect(f.requests.filter(({ path }) => path.endsWith('/create')).map(({ path }) => path)).toEqual(['/v1/remote/hosts/shared/create']);
-  expect(f.container.querySelector('[aria-label="Side conversation"]')).not.toBeNull();
   expect(f.container.textContent).toContain('Session creation allowance used: 1 / 1');
   expect(f.create().disabled).toBe(true);
 });

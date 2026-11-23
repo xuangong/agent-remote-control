@@ -11,11 +11,9 @@
  *   is `dsh`, planning only if the source supports it and had it active). A remote `dsh` source stands in a
  *   registered workspace instead (`needsWorkspaceLookup`, `workspaceOptions`), and a source workspace that is no
  *   longer registered refuses the fork.
- * - `withForkContext`: a `/side` is a reference of the source (a Side conversation of its native session); any other
- *   fork copies the conversation from the source's native session.
+ * - `withForkContext`: a fork copies the conversation from the source's native session. (`/side` starts a temporary bot instead.)
  * - `forkedSession`: the new session is titled after the source and keeps the time its context was captured.
  * - `firstInputPending`: the text after the command is sent as the first input unless the fork already delivered it.
- * - `selectsSideAfterFork`: a `/side` whose link is visible selects the new Side beside its source.
  */
 import type { CreateSessionOptions } from '../../kernel/directory-client.js';
 import { withMessageKey } from '@orchardworks/agent-client';
@@ -57,14 +55,8 @@ export function forkCreateOptions(agent: ForkSourceAgent, providerId: string): C
     ...(agent.capabilities.planning && providerId !== 'dsh' ? { planning: agent.planningActive } : {}) };
 }
 
-export function withForkContext(options: CreateSessionOptions, mode: string | undefined,
-  source: { readonly providerId: string; readonly nativeSessionId: string }): CreateSessionOptions {
-  return mode === 'reference' ? { ...options, sourceNativeSessionId: source.nativeSessionId, conversationKind: 'side' }
-    : { ...options, creationSource: { providerId: source.providerId, nativeSessionId: source.nativeSessionId } };
-}
-
-export function copiesConversation(commandId: string): boolean {
-  return commandId !== 'console:side';
+export function withForkContext(options: CreateSessionOptions, source: { readonly providerId: string; readonly nativeSessionId: string }): CreateSessionOptions {
+  return { ...options, creationSource: { providerId: source.providerId, nativeSessionId: source.nativeSessionId } };
 }
 
 export function forkedSession(source: { readonly providerId: string; readonly hostId?: string; readonly title: string },
@@ -77,6 +69,3 @@ export function firstInputPending(args: string, delivery: string | undefined): b
   return args.trim() !== '' && delivery !== 'sent';
 }
 
-export function selectsSideAfterFork(commandId: string, linkVisible: boolean): boolean {
-  return commandId === 'console:side' && linkVisible;
-}

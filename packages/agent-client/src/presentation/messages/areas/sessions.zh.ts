@@ -559,6 +559,7 @@ export const sessions: AreaMessages<typeof english> = {
   'sessions.requested.invalidLink': '会话链接不对。',
   'sessions.requested.host': '请求的 Host',
   'sessions.side.sourceChanged': '来源视图变了，请重新打开这段 Side 会话。',
+  'sessions.side.missionNeeded': '在 /side 后面写上机器人要做的事。',
   'sessions.forks.openFailed': '分出的会话没打开。',
   'sessions.forks.cannotFork': '这段会话不能分叉。',
   'sessions.forks.inProgress': '已经有一个分叉正在创建。',

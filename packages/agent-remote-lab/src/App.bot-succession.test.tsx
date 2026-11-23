@@ -1,6 +1,7 @@
 import { act, useContext, type ComponentProps } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { SessionSuccessionReplay } from '@orchardworks/agent-remote-protocol';
+import type { SessionSuccessionReplay, Team } from '@orchardworks/agent-remote-protocol';
+import { RemoteTeamClient } from '@orchardworks/agent-client';
 import * as workbench from './conversation/LabWorkbench.js';
 import * as dialogs from './conversation/SessionSuccessionDialog.js';
 import * as managerComponents from './features/sessions/ChatSessionManager.js';
@@ -95,12 +96,21 @@ it('opens and hides a bot Handoff\'s details in Window mode while the bot\'s con
   await app.close();
 });
 
-it("opens a Side from a bot in Bot mode, as a bot of the same group beside it", async () => {
-  vi.spyOn(SessionDirectoryClient.prototype, 'create').mockResolvedValue({ agentId: 'agent-S', nativeSessionId: 'S' });
+/** The Relay starts the temporary bot a /side asks for; its session S is ready at once. */
+const sideBot = (source: string) => {
+  const member = (id: string, nativeSessionId: string, role: 'leader' | 'requester') => ({ id, role, hostId: 'host', providerId: 'recorded', nativeSessionId, name: id, responsibility: '', creation: 'ready' as const, activity: 'idle' as const, summary: '', updatedAt: 1 });
+  vi.spyOn(RemoteTeamClient.prototype, 'create').mockResolvedValue({ id: 'side-task', operationId: 'side', revision: 1, title: 'Check the logs.', status: 'active', createdAt: 1, updatedAt: 1,
+    source: { hostId: 'host', providerId: 'recorded', nativeSessionId: source, title: source }, members: [member('worker', 'S', 'leader'), member('owner', source, 'requester')], messages: [],
+    task: { title: 'Check the logs.', brief: 'Check the logs.', state: 'working', createdAt: 1, updatedAt: 1 } } as Team);
+  vi.spyOn(SessionDirectoryClient.prototype, 'attach').mockResolvedValue({ agentId: 'agent-S', nativeSessionId: 'S' } as never);
+};
+
+it("opens a Side, a temporary bot of a bot in Bot mode, beside it in the same group", async () => {
+  sideBot('B1');
   const app = await setup('bot-side');
   const other = structuredClone(app.hostedGroups.get('A'));
   expect(leaves.get('B1')!.consoleCommands?.map(command => command.id)).toContain('console:side');
-  await act(async () => { await leaves.get('B1')!.onExecuteConsoleCommand!('console:side', ''); });
+  await act(async () => { await leaves.get('B1')!.onExecuteConsoleCommand!('console:side', 'Check the logs.'); });
   // The Side is a view of B attached to B1, so it is a bot of B with the Side role, and Bot mode shows it.
   await until(() => expect(app.hostedGroups.get('B')!.window.views.find(view => view.binding?.nativeSessionId === 'S')).toMatchObject({ placement: 'attached', attachedTo: 'B1' }));
   expect(app.hostedGroups.get('A')).toEqual(other);
@@ -118,11 +128,11 @@ it("opens a Side from a bot in Bot mode, as a bot of the same group beside it", 
 });
 
 it('opens a Side from a bot of the shown Window in Bot mode, and offers none to a session that is not a bot', async () => {
-  vi.spyOn(SessionDirectoryClient.prototype, 'create').mockResolvedValue({ agentId: 'agent-S', nativeSessionId: 'S' });
+  sideBot('A1');
   const app = await setup('bot-side-shown');
   await act(async () => app.button('A1').click());
   await until(() => expect(leaves.get('A1')?.consoleCommands?.map(command => command.id)).toContain('console:side'));
-  await act(async () => { await leaves.get('A1')!.onExecuteConsoleCommand!('console:side', ''); });
+  await act(async () => { await leaves.get('A1')!.onExecuteConsoleCommand!('console:side', 'Check the logs.'); });
   await until(() => expect(app.hostedGroups.get('A')!.window.views.find(view => view.binding?.nativeSessionId === 'S')).toMatchObject({ placement: 'attached', attachedTo: 'A1' }));
   // The Side is called by the name stored with it when it was made, never by the fork's title.
   const sideA = app.hostedGroups.get('A')!.window.views.find(view => view.binding?.nativeSessionId === 'S')!;

@@ -211,7 +211,7 @@ export const client: AreaMessages<typeof english> = {
   'client.fork.parentFirst': '要打开这个嵌套的子代理，先打开它的直接上级会话。',
   'client.fork.askDescription': '开关全局 Ask 视图；可用 on/off，或为这段会话附上一个问题',
   'client.fork.forkDescription': '带着这段对话的上下文，新建一个独立会话',
-  'client.fork.sideDescription': '在这段对话旁边，打开一个独立的对话',
+  'client.fork.sideDescription': '在这段对话旁边启动一个临时机器人，去做 /side 后面写的事',
   'client.fork.handoffDescription': '在新会话里继续这段对话，也可以换一个 provider',
   'client.fork.handoffUsage': '用 /handoff 或 /handoff <provider>，例如 /handoff claude。',
 

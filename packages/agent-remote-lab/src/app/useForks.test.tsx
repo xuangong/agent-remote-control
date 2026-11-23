@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildOpened, mockScope, renderHook } from '../test/render-hook.js';
+import { RemoteTeamClient } from '@orchardworks/agent-client';
 
 vi.mock('../conversation/fork-actions.js', async importOriginal => ({ ...await importOriginal<typeof import('../conversation/fork-actions.js')>(), configureFork: vi.fn(async () => undefined), sendForkInput: vi.fn(async () => undefined) }));
 
 const { ForkStore } = await import('../kernel/session-forks.js');
-const { sendForkInput } = await import('../conversation/fork-actions.js');
 const { useForks } = await import('./useForks.js');
 
 const source = buildOpened('source');
@@ -35,47 +35,33 @@ async function mount(facts: Record<string, unknown> = {}) {
   return { ...built, hook: result.current };
 }
 
-describe('creating a Side from a conversation command', () => {
-  it('asks the Host for a session that references the source, titled after it, and selects it beside the source', async () => {
+describe('starting a temporary bot with /side', () => {
+  const team = (ready: boolean) => ({ id: 'side-task', members: [{ id: 'worker', role: 'leader', hostId: 'local', providerId: 'codex', ...(ready ? { nativeSessionId: 'worker-session' } : {}), creation: ready ? 'ready' : 'reserved' }] }) as never;
+  it('asks the Relay for a temporary bot this session organizes, with the text as its mission, and opens it beside the session', async () => {
+    const created = vi.spyOn(RemoteTeamClient.prototype, 'create').mockResolvedValue(team(true));
     const { scope, hook } = await mount();
-    await hook.createFork(sourceState, source as never, 'console:side', '');
-    expect(scope.directory.create).toHaveBeenCalledWith('codex', expect.any(String), { cwd: '/work', model: 'gpt', sourceNativeSessionId: 'source', conversationKind: 'side' });
-    expect(scope.rememberSession).toHaveBeenCalledWith(source);
-    expect(scope.rememberSession).toHaveBeenCalledWith(expect.objectContaining({ agentId: 'agent-fork', title: 'Fork of source' }));
-    expect(scope.setDirectoryRevision).toHaveBeenCalled();
-    expect(scope.selectSide).toHaveBeenCalledWith(source, expect.objectContaining({ agentId: 'agent-fork' }));
-    expect(scope.forkBusy.current).toBe(false);
-    expect(scope.forkReservation.current).toBeUndefined();
-  });
-  it('puts the text after the command in the draft of the new session and sends it as the first input', async () => {
-    const { scope, draft, hook } = await mount();
-    await hook.createFork(sourceState, source as never, 'console:side', ' why? ');
-    expect(sendForkInput).toHaveBeenCalledWith(scope.transport, store, expect.anything(), 'why?');
-    expect(scope.setForkInputStatus).toHaveBeenNthCalledWith(1, { agentId: 'agent-fork', pending: true });
-    expect(scope.setForkInputStatus).toHaveBeenLastCalledWith(undefined);
-    expect(draft.get('draft')).toBe('');
-  });
-  it('keeps the first input in the draft and reports its failure when it could not be sent', async () => {
-    vi.mocked(sendForkInput).mockRejectedValueOnce(new Error('not delivered'));
-    const { scope, draft, hook } = await mount();
-    await expect(hook.createFork(sourceState, source as never, 'console:side', 'why?')).rejects.toThrow('not delivered');
-    expect(draft.get('draft')).toBe('why?');
-    expect(scope.setForkInputStatus).toHaveBeenLastCalledWith({ agentId: 'agent-fork', pending: false, error: 'not delivered' });
+    await hook.createFork(sourceState, source as never, 'console:side', ' Check the logs. ');
+    expect(created).toHaveBeenCalledWith({ operationId: expect.any(String), source: { hostId: source.hostId ?? 'local', providerId: source.providerId, nativeSessionId: source.nativeSessionId, title: source.title },
+      bot: { name: 'Check the logs.', mission: 'Check the logs.' } });
+    expect(scope.directory.create).not.toHaveBeenCalled();
+    expect(scope.directory.attach).toHaveBeenCalledWith('codex', 'worker-session');
+    expect(scope.selectSide).toHaveBeenCalledWith(source, expect.objectContaining({ agentId: 'agent-attached', nativeSessionId: 'worker-session', title: 'Check the logs.' }));
     expect(scope.forkBusy.current).toBe(false);
   });
-  it('reuses the record of an attempt that was interrupted, so the Host creates it once', async () => {
+  it('names the bot after the first line of its mission, at most 60 characters', async () => {
+    const created = vi.spyOn(RemoteTeamClient.prototype, 'create').mockResolvedValue(team(false));
     const { scope, hook } = await mount();
-    scope.directory.create.mockRejectedValueOnce(new Error('offline'));
-    await expect(hook.createFork(sourceState, source as never, 'console:side', '')).rejects.toThrow('offline');
-    const [, operationId] = scope.directory.create.mock.calls[0] as unknown as [string, string];
-    await hook.createFork(sourceState, source as never, 'console:side', '');
-    expect(scope.directory.create.mock.calls[1]![1]).toBe(operationId);
+    const line = 'Read every log of the last release and list the errors that repeat';
+    await hook.createFork(sourceState, source as never, 'console:side', `${line}\nThen stop.`);
+    expect(created.mock.calls[0]![0].bot).toEqual({ name: `${line.slice(0, 59)}…`, mission: `${line}\nThen stop.` });
+    // Its session does not exist yet: it opens from its card once it does.
+    expect(scope.selectSide).not.toHaveBeenCalled();
   });
-  it('checks the Hosts again after creating on a remote Host', async () => {
-    const remote = buildOpened('source', { hostId: 'remote' });
-    const { scope, hook } = await mount({ remoteHosts: [{ id: 'remote' }], selectedHost: { id: 'remote' } });
-    await hook.createFork(sourceState, remote as never, 'console:side', '');
-    expect(scope.retryHosts).toHaveBeenCalled();
+  it('asks for the text when there is none, and starts nothing', async () => {
+    const created = vi.spyOn(RemoteTeamClient.prototype, 'create');
+    const { hook } = await mount();
+    await expect(hook.createFork(sourceState, source as never, 'console:side', '  ')).rejects.toThrow('Write what the bot should do after /side.');
+    expect(created).not.toHaveBeenCalled();
   });
 });
 
@@ -98,7 +84,7 @@ describe('a fork that is refused', () => {
   });
   it('does not create beyond the session quota of the Host', async () => {
     const { scope, hook } = await mount({ remoteHosts: [{ id: 'local', sessionQuota: { used: 5, limit: 5 } }] });
-    await expect(hook.createFork(sourceState, source as never, 'console:side', '')).rejects.toThrow('Session creation limit reached.');
+    await expect(hook.createFork(sourceState, source as never, 'console:fork', '')).rejects.toThrow('Session creation limit reached.');
     expect(scope.directory.create).not.toHaveBeenCalled();
     expect(scope.forkBusy.current).toBe(false);
   });

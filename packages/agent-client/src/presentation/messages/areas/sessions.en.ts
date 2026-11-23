@@ -559,6 +559,7 @@ export const sessions = {
   'sessions.requested.invalidLink': 'Invalid session link.',
   'sessions.requested.host': 'Requested Host',
   'sessions.side.sourceChanged': 'The source view changed. Open the Side session again.',
+  'sessions.side.missionNeeded': 'Write what the bot should do after /side.',
   'sessions.forks.openFailed': 'Forked session could not be opened.',
   'sessions.forks.cannotFork': 'This session cannot be forked.',
   'sessions.forks.inProgress': 'A session fork is already being created.',

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { copiesConversation, firstInputPending, forkCommandRoute, forkCreateOptions, forkedSession, forkKey, forkSettings, needsWorkspaceLookup, selectsSideAfterFork, withForkContext, workspaceOptions } from './fork-plan.js';
+import { firstInputPending, forkCommandRoute, forkCreateOptions, forkedSession, forkKey, forkSettings, needsWorkspaceLookup, withForkContext, workspaceOptions } from './fork-plan.js';
 
 describe('what a conversation command does', () => {
   it.each(['', '  ', 'on', 'OFF', ' Enable ', 'disable'])('treats /ask %j as a setting of the Ask', args => expect(forkCommandRoute('console:ask', args)).toBe('ask-setting'));
@@ -50,16 +50,9 @@ describe('where a forked session starts', () => {
 
 describe('the context of a fork', () => {
   const source = { providerId: 'codex', nativeSessionId: 'native' };
-  it('is a reference of the source for a Side', () => {
-    expect(withForkContext({ cwd: '/w' }, 'reference', source)).toEqual({ cwd: '/w', sourceNativeSessionId: 'native', conversationKind: 'side' });
-  });
-  it('copies the conversation from the source otherwise', () => {
-    expect(withForkContext({ cwd: '/w' }, 'copy', source)).toEqual({ cwd: '/w', creationSource: { providerId: 'codex', nativeSessionId: 'native' } });
-    expect(withForkContext({}, undefined, source)).toEqual({ creationSource: { providerId: 'codex', nativeSessionId: 'native' } });
-  });
-  it('captures the conversation for every command but /side', () => {
-    expect(copiesConversation('console:fork')).toBe(true);
-    expect(copiesConversation('console:side')).toBe(false);
+  it('copies the conversation from the source', () => {
+    expect(withForkContext({ cwd: '/w' }, source)).toEqual({ cwd: '/w', creationSource: { providerId: 'codex', nativeSessionId: 'native' } });
+    expect(withForkContext({}, source)).toEqual({ creationSource: { providerId: 'codex', nativeSessionId: 'native' } });
   });
 });
 
@@ -77,10 +70,5 @@ describe('the forked session', () => {
     expect(firstInputPending('hello', 'sent')).toBe(false);
     expect(firstInputPending('  ', undefined)).toBe(false);
     expect(firstInputPending('', undefined)).toBe(false);
-  });
-  it('selects the new Side only for a /side with a visible link', () => {
-    expect(selectsSideAfterFork('console:side', true)).toBe(true);
-    expect(selectsSideAfterFork('console:side', false)).toBe(false);
-    expect(selectsSideAfterFork('console:fork', true)).toBe(false);
   });
 });

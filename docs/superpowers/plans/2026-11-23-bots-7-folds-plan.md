@@ -33,11 +33,43 @@ Smallest and least shared first, so each fold leaves less for the next:
 
 ## 7c. Team
 
-- The Team roster loads in the workbench, not in the Teams panel.
+- The Team roster loads in the workbench, not in the Teams panel (`kernel/useTeamRoster.ts`): tasks, rooms and the inboxes that carry work
+  items read it. It refreshes twice a minute, and every 4 s while a room is open.
 - Decided with the owner (2026-11-23): a Team's Leader becomes a bot, the chief of the members shown in its group, which become
   standing bots, its staff, with the Leader recorded as their chief. Members never shown stay plain sessions. Team inboxes and messages are
-  dropped. Rooms already show in Chats.
-- Deleted: the Team queue, inbox, `team_message`, the Teams panel and launcher; E7's Team case rewritten on bots.
+  dropped. Rooms already show in Chats. Vocabulary: chief / staff (zh 主管 / 成员).
+- Deleted: the Team queue entry points (`send`, `acknowledge`, `describe_member`, `report`, the registration message), the actions that made
+  or changed an ordinary Team (create, `add_member`, `retry_creation`, `abandon_creation`, `rename`, `archive`, `restore`,
+  `resolve_message`), the Controller's seats and tools for them (`read_team`, `acknowledge_team_messages`, `send_team_message`,
+  `report_team_progress`, `describe_team_member`, the two resource tools), the `teamInbox` negotiation, the Teams panel and launcher, the
+  gather button, Team layout and view binding, the `/team` command, Team attributions and Track's "Main:" line, and their tests.
+  `TeamCreate` now carries a bot (`/side`); that is the only way a Team is made by the person.
+- Kept: `Team` as the delivery substrate of tasks, inboxes, links and rooms, with its queue, claim, settle, presence, receipts and budgets,
+  and `read` for the Controller's own receipts. `isTeam` still accepts an ordinary Team's shape, so an older Relay's state loads and migrates.
+
+### Migration
+
+`migrateRelayState` (`legacy-teams.ts`, after the bot records of earlier builds) removes every Team with none of task, link, inbox or room.
+For each, the Window views tagged with its id (`feature.kind` `team`) lose the tag and the managed binding; if the group appears in Bot mode
+(a group without a section gains one), each of them becomes a standing bot (record made with `reconcileBots`, id `migrationBotId`): the
+Leader's view named by the Team's title, the others by the member's name with its responsibility as the mission. The Leader's bot is then
+recorded as `chief` of the others; with no Leader view in a group, the staff stay the person's. Members with no view stay plain sessions.
+A group hidden in Bot mode only loses the tags; its views are not made bots. The bots get their inbox Teams from the Controller's
+`bot_enablement`, as any standing bot does. The run is idempotent: the Teams are gone afterwards. Tests: `legacy-teams.test.ts`.
+
+### Left for later
+
+- Resources: only ordinary Teams used them (the upload and download tools, `send` attachments, the two Hosts' transfers). Their Relay store,
+  `resource_*` Host calls, `teamResources` negotiation and Cloudflare storage still exist with no caller; removing them touches the uplink
+  protocol and every Relay, so it is its own step.
+- The kernel keeps its handling of managed Team windows (`gather`, `teamId` and `teamMemberId` on session entries, feature kind `team`), which
+  nothing creates now.
+- Controller tests that used an ordinary seat to prove role succession (`team-prefix`, `team-generic-succession`, the `team` roles of
+  `native-prefix-role-runtime`) were removed with it; the bots' seats are covered by the dispatch, injection and E15 tests, but not by a
+  prefix-handoff test of their own.
+- The App-level attribution navigation tests (`App.attributions.test.tsx`) used a Team as the relation; `session-attribution-navigation.test.ts`
+  keeps the window operations.
+- E7's Team case became "a temporary bot a bot started survives a Controller restart and still reports to its chief"; E15 did not cover a restart.
 
 ## 7d. TPM
 

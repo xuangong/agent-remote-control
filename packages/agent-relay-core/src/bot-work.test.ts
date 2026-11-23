@@ -3,6 +3,7 @@ import { isTeam, parseTaskInputs, type WindowGroup } from '@orchardworks/agent-r
 import { TeamBroker } from './teams.js';
 import type { SavedTeam } from './team-delivery.js';
 import { WAITING_TIMER_MS, WORK_TIMER_MS } from './bot-work.js';
+import { committed, detached } from './drafts.js';
 
 // A standing bot keeps work items and quiet timers on its inbox. Groups and Hosts are stubs; the broker and its timers are real.
 const ids = { chief: 'b_' + '1'.repeat(32), tracker: 'b_' + '2'.repeat(32) };
@@ -19,7 +20,8 @@ function fixture() {
   const broker = new TeamBroker({ scheduler,
     resolveSession: (hostId, providerId, nativeSessionId) => ({ controllerId: hostId, providerId, nativeSessionId }),
     read: () => state, now: () => now, assertHost: () => {},
-    change: async update => { const draft = structuredClone(state); const result = structuredClone(update(draft)); state = draft; return result; },
+    // Drafts as the Relay's state makes them, so what a change returns is detached as there.
+    change: async update => { let result: unknown; state = committed.produce(state, draft => { result = structuredClone(detached(update(draft))); }); return result as never; },
     createSeat: async (_, seat) => ({ ...seat.member, creation: 'ready', activity: 'idle', cwd: '/repo', ...(seat.member.nativeSessionId ? {} : { nativeSessionId: 'worker-1' }) }),
     tasks: { capable: () => true, assertHost: () => {} },
     assistants: { groups: () => groups, capable: () => true },
@@ -28,7 +30,7 @@ function fixture() {
   const inbox = (botId = ids.chief) => state.find(team => team.inbox?.botId === botId)!;
   const timerInputs = () => inbox().messages.flatMap(message => parseTaskInputs(message.text) ?? []).filter(input => input.kind === 'timer');
   // The bot read everything queued for it.
-  const read = () => { for (const message of inbox().messages) message.status = 'delivered'; };
+  const read = () => { state = committed.produce(state, draft => { for (const team of draft) if (team.inbox?.botId === ids.chief) for (const message of team.messages) { message.status = 'accepted'; message.acceptance = 'handled'; } }); };
   return { broker, as, inbox, timerInputs, read, fire, advance: (ms: number) => { now += ms; } };
 }
 type Item = { id: string; phase: string };

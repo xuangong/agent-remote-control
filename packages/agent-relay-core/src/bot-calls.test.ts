@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseTaskInputs, type WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { TeamBroker } from './teams.js';
+import { committed, detached } from './drafts.js';
 import type { SavedTeam } from './team-delivery.js';
 import { temporaryBotId } from './bot-calls.js';
 import { instructionsHash } from './inboxes.js';
@@ -17,7 +18,8 @@ function fixture() {
   const broker = new TeamBroker({
     resolveSession: (hostId, providerId, nativeSessionId) => ({ controllerId: hostId, providerId, nativeSessionId }),
     read: () => state, now: () => ++now, assertHost: () => {},
-    change: async update => { const draft = structuredClone(state); const result = structuredClone(update(draft)); state = draft; return result; },
+    // Drafts as the Relay's state makes them.
+    change: async update => { let result: unknown; state = committed.produce(state, draft => { result = structuredClone(detached(update(draft))); }); return result as never; },
     createSeat: async (_hostId, seat) => ({ ...seat.member, creation: 'ready', activity: 'idle', cwd: '/repo', ...(seat.member.nativeSessionId ? {} : { nativeSessionId: `worker-${++workers}` }) }),
     tasks: { capable: () => true, assertHost: () => {} },
     assistants: { groups: () => groups, capable: () => true,

@@ -61,7 +61,8 @@ export class BotWork {
       for (const key of ['title', 'phase', 'summary', 'next', 'acceptance'] as const) if (call[key] !== undefined) (item as Record<string, unknown>)[key] = call[key];
       item.updatedAt = now;
       syncWorkTimer(inbox, now);
-      return structuredClone(item);
+      // The Team change hands back a detached copy of what it returns.
+      return item;
     });
   }
   complete(bot: Assistant, call: Call<'complete_work'>): Promise<WorkItem> {
@@ -69,7 +70,7 @@ export class BotWork {
       const item = (inbox.inbox!.work ?? []).find(entry => entry.id === call.work) ?? fail('No work item by that id.');
       item.phase = 'done'; item.summary = call.summary; delete item.next; item.updatedAt = now;
       syncWorkTimer(inbox, now);
-      return structuredClone(item);
+      return item;
     });
   }
   setTimer(bot: Assistant, call: Call<'set_timer'>): Promise<{ timers: BotTimer[] }> {
@@ -82,7 +83,7 @@ export class BotWork {
         if (timers.length > 8) fail('A bot keeps at most 8 timers.');
       }
       box.timers = timers;
-      return { timers: structuredClone(timers) };
+      return { timers };
     });
   }
   /** The bot's work items, newest first. */

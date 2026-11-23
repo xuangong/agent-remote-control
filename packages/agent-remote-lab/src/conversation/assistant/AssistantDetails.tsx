@@ -6,6 +6,7 @@ import { SegmentedControl, Sheet } from '@orchardworks/agent-client-web/primitiv
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { MenuEntry } from '../../ui/Menu.js';
 import type { ProcessModeChoice } from '../useProcessMode.js';
+import type { AssistantMode, AssistantModeChoice } from '../assistantMode.js';
 import type { AssistantWhere } from './details-host.js';
 import { AssistantCard, type CardAction } from './AssistantCard.js';
 import { WhereItWorks } from './WhereItWorks.js';
@@ -27,6 +28,8 @@ export interface AssistantRef {
   readonly tasks?: readonly TaskView[];
   /** This assistant's own process mode; the device's default, notifications and letters are in Settings > Assistants. */
   readonly process?: ProcessModeChoice;
+  /** Coordinator or plain, for an assistant whose bot details the reader may change. */
+  readonly mode?: AssistantModeChoice;
   readonly settings?: ReactNode;
   readonly files?: readonly SessionFile[];
   readonly openFile?: (file: SessionFile, trigger: HTMLElement) => void;
@@ -50,6 +53,11 @@ export function AssistantDetails({ assistant, surface, onClose }: { assistant: A
     {assistant.process?.chooseForAssistant ? section('process', t('process.heading'), <div className="lab-assistant-process">
       <div className="lab-process-choice"><span>{t('process.assistant')}</span>
         <SegmentedControl<ProcessMode> label={t('process.assistant')} options={options} value={assistant.process.mode} onChange={assistant.process.chooseForAssistant} /></div>
+    </div>) : null}
+    {assistant.mode ? section('mode', t('details.mode'), <div className="lab-assistant-process">
+      <SegmentedControl<AssistantMode> label={t('details.mode')} value={assistant.mode.mode} onChange={assistant.mode.choose}
+        options={[{ value: 'coordinator', label: t('details.mode.coordinator') }, { value: 'plain', label: t('details.mode.plain') }]} />
+      <p className="lab-assistant-hint">{t(assistant.mode.mode === 'coordinator' ? 'details.mode.coordinatorHint' : 'details.mode.plainHint')}</p>
     </div>) : null}
     {assistant.where ? section('where', t('details.where'), <WhereItWorks where={assistant.where} />) : null}
     {assistant.sessions ? section('sessions', t('details.sessions'), <SessionsList sessions={assistant.sessions} />) : null}

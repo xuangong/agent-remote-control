@@ -609,13 +609,13 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     retrySave: () => currentStore.current?.retry() ?? Promise.resolve(),
     sectionCreationState, retrySection: () => createSectionRequest(undefined, true),
     acquireGroup, readGroup, operateGroup, refreshGroups,
-    /** Starts a group from a new session: its Window holds the session as the primary view, and it shows in both modes, named after the session. */
+    /** Starts a group from a new session: its Window holds the session as the primary view, and it shows in both modes, named after the session. A new assistant is a coordinator. */
     async createBotGroup(binding: WindowSessionBinding): Promise<{ groupId: string; viewId: string }> {
       if (pendingSection()) throw keyedError('windows.error.unconfirmedGroup');
       const viewId = 'main';
       const groupId = await createSectionRequest(undefined, false, () => ({
         window: { ...emptyWindow(), title: binding.title || 'New session', views: [createWindowView(viewId, binding, 'primary')], selectedPrimaryViewId: viewId, selectedViewId: viewId },
-        bots: { rank: appendedRank(catalog.groups), members: { [viewId]: { picture: newAssistantPicture(viewId, catalog.groups) } } } }));
+        bots: { rank: appendedRank(catalog.groups), members: { [viewId]: { picture: newAssistantPicture(viewId, catalog.groups), mode: 'coordinator' } } } }));
       return { groupId, viewId };
     },
     /** Creates an empty group with this name, listed after the others. */

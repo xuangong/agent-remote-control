@@ -254,6 +254,22 @@ it("chooses the process mode for this assistant, keeping its other details, and 
   } finally { await app.close(); }
 });
 
+it('switches an existing bot, plain until then, to coordinator and back, keeping its other details', async () => {
+  const group = botGroup('A'); group.bots!.members.A1 = { name: 'A1', label: 'Reviewer' };
+  const app = await open('bot-details-mode', [group], '/?mode=bot&section=A&bot=A1');
+  try {
+    const details = () => app.container.querySelector<HTMLElement>('.lab-assistant-details')!;
+    const control = () => details().querySelector<HTMLElement>('[aria-label="Working style"]')!;
+    await until(() => expect(control()).not.toBeNull());
+    expect(control().querySelector('[aria-pressed="true"]')?.textContent).toBe('Plain');
+    await act(async () => visibleButton(control(), 'Coordinator').click());
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ name: 'A1', label: 'Reviewer', mode: 'coordinator' }));
+    await until(() => expect(details().querySelector('.lab-assistant-hint')?.textContent).toContain('Starts tasks'));
+    await act(async () => visibleButton(control(), 'Plain').click());
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ name: 'A1', label: 'Reviewer' }));
+  } finally { await app.close(); }
+});
+
 it("changes an assistant's avatar from its card, for every device", async () => {
   const app = await open('bot-details-avatar', [botGroup('A')], '/?mode=bot&section=A&bot=A1');
   try {

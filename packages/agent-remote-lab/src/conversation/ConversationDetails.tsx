@@ -9,12 +9,13 @@ import { ModelSettings } from './assistant/ModelSettings.js';
 import { PlanningControl } from './PlanningControl.js';
 import type { AssistantDetailsHost } from './assistant/details-host.js';
 import type { useProcessMode } from './useProcessMode.js';
+import type { AssistantModeChoice } from './assistantMode.js';
 import type { LabWorkbenchActions, SessionWorkbenchProps } from './session-workbench-props.js';
 
-export function ConversationDetails({ host, visible, state, details, assistant, displayScope, process, session, sessionStatus, readOnly, mutationBlocked, draftOnly, actions,
+export function ConversationDetails({ host, visible, state, details, assistant, displayScope, process, mode, session, sessionStatus, readOnly, mutationBlocked, draftOnly, actions,
   renderSessionSettingError, childrenFor, onOpenChildSession, workspaceLink, nativeSession }: {
   host: AssistantDetailsHost | undefined; visible: boolean; state?: AgentReplicaState; details?: SessionWorkbenchProps['details']; assistant: SessionWorkbenchProps['assistant'];
-  displayScope?: string; process: ReturnType<typeof useProcessMode>; session: RemoteSessionState; sessionStatus: RemoteSessionStatus;
+  displayScope?: string; process: ReturnType<typeof useProcessMode>; mode?: AssistantModeChoice; session: RemoteSessionState; sessionStatus: RemoteSessionStatus;
   readOnly: boolean; mutationBlocked: boolean; draftOnly: boolean; actions: LabWorkbenchActions; renderSessionSettingError?(error: unknown): ReactNode;
   childrenFor?(nativeSessionId: string): readonly AgentChildSessionView[]; onOpenChildSession?(child: AgentChildSessionView): void | Promise<void>; workspaceLink?: ReactNode;
   /** The session on screen, `<providerId>/<nativeSessionId>`. */
@@ -34,7 +35,7 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
     ...(host?.action ? { action: host.action } : {}), ...(host?.actions ? { actions: host.actions } : {}),
     ...(host?.where ? { where: host.where } : {}), ...(host?.setPicture ? { setPicture: host.setPicture } : {}),
     ...(host?.rename ? { rename: host.rename } : {}),
-    process, ...(tasks.length ? { tasks } : {}),
+    process, ...(mode ? { mode } : {}), ...(tasks.length ? { tasks } : {}),
     sessions: { ...details?.sessions, ...(lastTurn ? { time: lastTurn } : {}), ...(state?.agent?.cwd ? { directory: state.agent.cwd } : {}), ...(reportedSession ? { sessionId: reportedSession } : {}),
       subagents: reportedSession ? childrenFor?.(reportedSession) ?? [] : [], ...(onOpenChildSession ? { openSubagent: onOpenChildSession } : {}),
       tools: <>{details?.sessions?.tools}{workspaceLink}</> },

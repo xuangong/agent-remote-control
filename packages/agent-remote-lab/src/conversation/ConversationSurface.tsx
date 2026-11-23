@@ -11,6 +11,7 @@ import { SessionHeadingActionsPresentationContext } from './SessionHeadingAction
 import { AssistantDetailsHostContext, type AssistantDetailsHost } from './assistant/details-host.js';
 import { usePhoneLayout } from '../kernel/usePhoneLayout.js';
 import { useLettersVisible, useProcessMode } from './useProcessMode.js';
+import { assistantModeChoice } from './assistantMode.js';
 import { ConversationComposer } from './ConversationComposer.js';
 import { ConversationDetails } from './ConversationDetails.js';
 import { ConversationHeading, TileDetailsPanel, type TileDetails } from './ConversationHeading.js';
@@ -36,6 +37,7 @@ export function SessionWorkbench({ assistant, details, conversationTitle: _conve
   const detailsHost: AssistantDetailsHost | undefined = providedHost ?? (tileChrome ? { surface: phone ? 'sheet' : 'panel', slot: tileDetailsSlot, open: tileDetailsOpen,
     setOpen: setTileDetailsOpen } : undefined);
   const process = useProcessMode(processAssistant);
+  const mode = assistantModeChoice(processAssistant);
   const [lettersVisible] = useLettersVisible();
   const session = suppliedSessionState ?? remoteSessionState(state, connectionStatus);
   const sessionStatus = session.connection;
@@ -101,7 +103,7 @@ export function SessionWorkbench({ assistant, details, conversationTitle: _conve
       resourceScopeKey={JSON.stringify([state.agent?.id, selectedCommand.id])}
       onClose={() => setInspected(undefined)} /> : null}
     {tileChrome && !phone ? <TileDetailsPanel tileDetails={tileDetails} slotRef={setTileDetailsSlot} /> : null}
-    <ConversationDetails host={detailsHost} visible={visible} state={state} details={details} assistant={assistant} displayScope={displayScope} process={process} session={session}
+    <ConversationDetails host={detailsHost} visible={visible} state={state} details={details} assistant={assistant} displayScope={displayScope} process={process} {...(mode ? { mode } : {})} session={session}
       sessionStatus={sessionStatus} readOnly={readOnly} mutationBlocked={mutationBlocked} draftOnly={draftOnly} actions={actions} renderSessionSettingError={renderSessionSettingError}
       childrenFor={childrenFor} onOpenChildSession={onOpenChildSession} workspaceLink={workspaceLink} {...(nativeSession ? { nativeSession } : {})} />
   </SessionViewFrame>}</SessionAttributions></TimelineLettersVisible.Provider></ProcessModeContext.Provider>;

@@ -119,8 +119,8 @@ it('starts a new bot in its own group, named after its session, and opens its co
     const made = () => app.workspace().groups.find(group => group.window.views.some(view => view.binding?.nativeSessionId === 'N1'));
     await until(() => expect(made()).toBeDefined());
     expect(made()!.window.title).toBe('New session'); expect(made()!.presentation).toBeUndefined();
-    // Its only bot detail is the avatar it was given at creation.
-    expect(Object.keys(made()!.bots?.members ?? {})).toEqual(['main']); expect(Object.keys(made()!.bots!.members.main!)).toEqual(['picture']);
+    // Its bot details are the avatar it was given at creation and coordinator mode, which every new assistant starts in.
+    expect(Object.keys(made()!.bots?.members ?? {})).toEqual(['main']); expect(Object.keys(made()!.bots!.members.main!)).toEqual(['picture', 'mode']); expect(made()!.bots!.members.main!.mode).toBe('coordinator');
     await until(() => expect(new URL(location.href).searchParams.get('bot')).toBe('main'));
     expect(new URL(location.href).searchParams.get('section')).toBe(made()!.window.id);
     await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());

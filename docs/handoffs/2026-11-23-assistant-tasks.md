@@ -17,7 +17,8 @@ Read with it:
 
 > **Update 2026-11-23.** The direction moved on: the [bots design](../superpowers/specs/2026-11-23-bots-design.md) supersedes
 > the coordinator and tasks design, and the [bots plan](../superpowers/plans/2026-11-23-fold-into-assistants-plan.md) replaces
-> section 6 below from its "Before" step on. Sections 2 to 5 and 7 still describe what this branch built.
+> section 6 below from its "Before" step on. Sections 2 to 5 and 7 still describe what this branch built. The stack for the first
+> deployment is handed over in [bots, first deployment](2026-11-23-bots.md).
 
 ## 1. Where things stand
 

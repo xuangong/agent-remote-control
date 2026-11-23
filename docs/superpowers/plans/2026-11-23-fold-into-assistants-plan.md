@@ -65,19 +65,62 @@ standing bot created by a bot starts with its instructions and tools, joins its 
 between standing bots, a standing bot created and placed). Live with Claude Code: a temporary bot reported its count, and a standing
 bot wrote its file and reported to its chief.
 
-After the first deployment, because each only adds to the tools: replies from final text (bots on providers without tools),
-attachments with git bundles (machines without a shared repository), and the person's words to a standing bot that has a chief.
+Built (2026-11-24, `feat/bots-4-chains`), the rest of step 2. Owner rules: the end state only, no transition code for older peers
+(the owner updates every Controller and Relay together), audit and notify rather than guardrails.
+
+- **Outcomes (design 3.2).** `message` returns `{ outcome, messageId?, reason? }` with one of `delivered`, `held`, `duplicate`,
+  `forbidden`, `unreachable` (`BotMessageResult`, with a protocol fixture `bot-messages.v1.json` that the protocol, Relay and
+  Controller tests all read). A refusal is an outcome the sender reads, not an error: an unknown or retired bot (one answer for
+  both, so the roster cannot be probed) is `unreachable`; the bot itself, and a chain the person stopped, are `forbidden`; a
+  repeated `operationId`, or a call that queued nothing new, is `duplicate`; a seat that is not ready is `held`. For a task's Team
+  the outcome is read from what the call queued for the receiving seat, so every route (report, question, progress, input) answers
+  the same way. Malformed calls and the 300-character bound stay errors, since the bot can shorten and retry.
+- **Replies from final text (design 3.3).** The Host watches each bot's stream (`watchChainTurns`): the last run of its assistant
+  text in a turn is the final text, and the cause of the turn names the one message that started it (`TurnCause` framed `answers`)
+  when that input is exactly one message from another bot that is not a reply (standing instructions beside it do not count; two
+  messages, a person steering the turn, a timer or a reply make the turn answer none). When such a turn ends the Host sends
+  `bot_reply` with the text, never a tool call; the Relay sends it to the message's sender as a reply (`reply to m…`, so it earns no
+  reply), cut at 300 characters with a pointer to `read_bot`, and sends nothing when the turn already answered its sender: every
+  `bot_message` of that turn carries the same cause, and a message to the sender (or with `reply_to`) marks the inbox entry
+  `answered`. Chosen over having the Controller track tool calls by name, which depends on how each provider names tools. Standing
+  bots only: a temporary bot ends its turns with its report (`done`, `failed`), and its missed report already has a reminder.
+  `read_bot` now reads any standing bot of the account, not only one's staff, so the pointer works for the bot that asked; design
+  8's `peers` are not built, and the audit and the account's single owner stand in for them.
+- **The person's words to a bot with a bot chief (design 3.5).** When the person types into a standing bot's session the Host sends
+  `bot_told` from its record of the input; the Relay queues `[The person wrote to <name>] <first 300 characters>` (one line) in the
+  chief's inbox, once per message, and the chief's input is framed, so it is never taken for the person's words. The frame is
+  written by the Relay from the record like every other frame (design 12 says Controller; every frame as built, the standing
+  instructions and timers included, is written by the Relay), and the client folds it to one line. A bot whose chief is the person
+  queues nothing. A temporary bot's chief already hears the person through `tell_task`.
+- **Attachments (design 3.4, 5.3).** A `message` may carry up to 3 files of at most 8 MiB, named by path (absolute, or relative to
+  the bot's working directory). The Controller uploads each with `attachment_begin`, `attachment_chunk` (32 KiB, in order) and
+  `attachment_finish` Host calls; the Relay checks size and sha256 against the declaration and lists the files after the
+  sender's 300 characters (`id · name · type · bytes · sha256`), so the bound stays on the sender's own words. The receiver calls
+  `download_attachment`, which reads the chunks, checks size and sha256 and saves the file under the temporary directory
+  (`agent-remote-attachments/<id>/<name>`, owner-only, kept a day), and returns its path; nothing applies it. Storage is a
+  key-value port (`AttachmentStorage`): memory, a directory beside the Node Relay's state file, and a SQLite table of the
+  Durable Object on Cloudflare; the store keeps unfinished uploads an hour, files a day, at most 512 files and 128 MiB per account.
+  No negotiation flag and no resumable upload: the Controller and Relay are updated together, and a failed upload starts again. The
+  old Team resource machinery was far larger (scopes, grants, pins, a negotiated uplink capability); a file's id is the capability
+  here, and only a message tells a bot an id.
+- **Base instructions v4** say: a reply from final text, shared repository first and a bundle only without one (the receiver
+  fetches it into a branch it reads), a received file is never applied on its own, and what `[The person wrote to …]` means.
+- **Tests.** Relay unit tests on the broker (outcomes, replies, told, attachments), the file store with a fake clock, a Cloudflare
+  storage test, Controller tests with the real broker and team runtime (replies through a watched session, told, upload and
+  download with a tampered chunk), a real-transport test (`bot-attachments.transport.test.ts`: the Controller's uplink client over
+  a loopback WebSocket to the Relay's host broker), and three E15 flows (a reply from final text with the person's words to the
+  bot, and an attachment downloaded).
 
 
-- [ ] No mode (design 2.1): remove the coordinator/plain switch, `mode`, and `coordinatorProvider`; every bot whose provider takes
+- [x] No mode (design 2.1): remove the coordinator/plain switch, `mode`, and `coordinatorProvider`; every bot whose provider takes
   tools gets the `agent_remote` namespace (design 5.1) and standing instructions at its next attachment; others are answers only.
-- [ ] `create_bot`, `retire_bot`, `list_bots`, `read_bot`, `stop_bot`, `update_mission` (design 2, 5.1); creation outcome framed to
+- [x] `create_bot`, `retire_bot`, `list_bots`, `read_bot`, `stop_bot`, `update_mission` (design 2, 5.1); creation outcome framed to
   the chief and the first turn returned as the report-in (2.2); span of 12 (2.5); lifetime and retirement (2.4).
-- [ ] `message` (design 3): `status` for progress, done, failed and needs input; delivery at idle in one order, combined into one
+- [x] `message` (design 3): `status` for progress, done, failed and needs input; delivery at idle in one order, combined into one
   input; replies from final text (3.3); 300-character bound (3.4); outcomes; `[The person wrote to …]` to chiefs (3.5).
-- [ ] Tasks become temporary bots: `create_task`, `report_task`, `ask_owner`, `message_task`, `task_status` and the task Team kind
+- [x] Tasks become temporary bots: `create_task`, `report_task`, `ask_owner`, `message_task`, `task_status` and the task Team kind
   are replaced by `create_bot` and `message`; existing tasks are listed as retired temporary bots.
-- [ ] Attachments, git bundles included (3.4, 5.3).
+- [x] Attachments, git bundles included (3.4, 5.3).
 - [ ] Gate: the person describes a team to one bot; it creates two bots with missions; each reports in; the chief gives one work
   by message and changes how the other works by message (recorded in its own mission); a Copilot bot answers a question; the
   person sees all of it in Chats and can change any bot. The e2e flows of design 11, written here, pass.

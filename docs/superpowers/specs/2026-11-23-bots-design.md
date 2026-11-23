@@ -165,6 +165,14 @@ is information: it never grants a permission or answers an interaction.
 When the person writes to a bot that has an chief, the chief receives the person's words (first 300 characters) framed
 `[The person wrote to <bot>]`, so it does not act on an outdated picture.
 
+As built (`feat/bots-4-chains`, details in the [plan](../plans/2026-11-23-fold-into-assistants-plan.md)): `message` returns its
+outcome as `{ outcome, messageId?, reason? }`; a refusal is an outcome, not an error. A standing bot's turn started by one
+message answers its sender from its final text: the Host reports the ended turn and the Relay sends the reply (cut at 300
+characters, pointing to `read_bot`, which reads any standing bot of the account) unless a `message` of that turn already did.
+The Relay writes the `[The person wrote to <bot>]` frame from the Host's record of the person's input, like every other frame.
+An attachment is up to 3 files of 8 MiB, uploaded in chunks and checked by sha256, listed after the sender's 300 characters,
+kept a day, and downloaded by `download_attachment` to a verified file in the temporary directory that nothing applies.
+
 ## 4. Rooms
 
 A room is a message target with members (bots and the person) and a deadline. The Relay asks one member at a time, as a framed

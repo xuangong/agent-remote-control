@@ -487,6 +487,13 @@ person or by another bot:
   how it runs. That bot creates the bots it needs (`create_assistant`: name, mission, provider, model, Host and working directory),
   writes their missions, and works with them by messages and rooms. It stays their **organizer** and retires them when they are no
   longer needed (`retire_assistant`).
+- **A new bot reports in.** Two things reach the organizer's main session. The Relay frames the creation outcome, as it frames a
+  task result: `[Bot "<name>" · ready]`, `· waiting for the person` (beyond the limits) or `· failed: <reason>`, since a bot that
+  did not start cannot speak for itself. Then the new bot's first turn, which reads its mission and the organizer's first message
+  if any, is its reply (10.1, a reply is the receiver's answer): who it is, how it understands its mission, how it will start, and
+  its questions. The organizer corrects a misreading by message. After that, members message the organizer when they finish, get
+  stuck or need a decision; several arriving while it is busy reach it as one input at idle, decisions first, as task updates do,
+  and the organizer sums them up in its work items.
 - **Changing how a bot works is a message.** After creation, the organizer (or the person, or any bot) adjusts a bot's way of
   working by telling it, as people do. The bot keeps its own mission: when what it was told is meant to last, it records it there
   (`update_mission`, on itself only), so the change survives a handoff or a compacted context. No bot rewrites another's mission. A bot it created may in turn

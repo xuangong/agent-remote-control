@@ -1,6 +1,6 @@
 // The assistant's details for a conversation: what its place and its presentation know, with this conversation's process
 // mode, settings and files. They open in the host's panel, as a sheet on a phone, or in a tile's own panel.
-import { lazy, Suspense, useContext, useMemo, type ReactNode } from 'react';
+import { lazy, Suspense, useContext, useEffect, useMemo, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { sessionFiles, timelineEntryKey, type AgentReplicaState, type RemoteSessionState, type RemoteSessionStatus } from '@orchardworks/agent-client';
 import { FilePreviewContext, useTaskDirectory, useTranslate, type AgentChildSessionView } from '@orchardworks/agent-client-web/react';
@@ -12,8 +12,9 @@ import type { useProcessMode } from './useProcessMode.js';
 import type { MissionChoice } from './assistant/MissionEditor.js';
 import type { LabWorkbenchActions, SessionWorkbenchProps } from './session-workbench-props.js';
 
-/** The details open on the reader's click, so their code loads then. */
-const AssistantDetails = lazy(() => import('./assistant/AssistantDetails.js').then(module => ({ default: module.AssistantDetails })));
+/** The details' code stays out of the App chunk; a conversation that can show them loads it once it is on screen, before a click. */
+const loadDetails = () => import('./assistant/AssistantDetails.js');
+const AssistantDetails = lazy(() => loadDetails().then(module => ({ default: module.AssistantDetails })));
 
 export function ConversationDetails({ host, visible, state, details, assistant, displayScope, process, mission, session, sessionStatus, readOnly, mutationBlocked, draftOnly, actions,
   renderSessionSettingError, childrenFor, onOpenChildSession, workspaceLink, nativeSession }: {
@@ -25,6 +26,7 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
   nativeSession?: string;
 }) {
   const t = useTranslate();
+  useEffect(() => { if (host) void loadDetails().catch(() => undefined); }, [!!host]);
   const filePreview = useContext(FilePreviewContext);
   const directory = useTaskDirectory();
   const [providerId, ...rest] = nativeSession?.split('/') ?? [];

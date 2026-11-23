@@ -376,6 +376,7 @@ const checks: Record<string, Check> = {
     await press(tile.getByRole('button', { name: /^Details of / }));
     // Over the window on a wide screen, a sheet on a phone.
     const panel = page.locator('.lab-tile-details:visible, dialog.orchard-sheet[open]').first();
+    await expect(panel.locator('.lab-assistant-row').first()).toBeVisible();
     const rows = Object.fromEntries(await panel.locator('.lab-assistant-row').evaluateAll(nodes => nodes.map(row => [row.firstElementChild?.textContent, row.lastElementChild?.textContent])));
     expect(rows).toMatchObject({ Agent: 'Recorded', Machine: 'Work Mac' });
     // The session's row opens to its ID.

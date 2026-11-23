@@ -12,7 +12,6 @@ import { SessionReferenceStore } from './session-reference.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
 import { TpmStore } from './tpm-store.js';
 import { TpmCoordinator } from './tpm.js';
-import { TeamRuntime } from './team.js';
 import { SessionSuccessionService } from './session-succession-service.js';
 
 const ref = (providerId: string, nativeSessionId: string) => ({ controllerId: 'host', providerId, nativeSessionId });
@@ -28,12 +27,8 @@ async function commitGeneric(store: SessionSuccessionStore, providerId: string, 
   await store.commit(request.operationId);
 }
 
-async function seedExecutionRole(root: string, providerId: string, role: 'none' | 'team' | 'tpm') {
-  const teamDirectory = join(root, 'team'), tpmDirectory = join(root, 'tpm');
-  if (role === 'team') {
-    const seat = { teamId: 'team', source: { hostId: 'relay-host', providerId, nativeSessionId: 'source', title: 'Source' }, member: { id: 'member', hostId: 'relay-host', providerId, nativeSessionId: 'A', role: 'leader', name: 'Role', responsibility: 'Verify', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 } };
-    await mkdir(teamDirectory); await writeFile(join(teamDirectory, 'seats.json'), JSON.stringify([{ seat, creation: 'ready', receipts: {} }]));
-  }
+async function seedExecutionRole(root: string, providerId: string, role: 'none' | 'tpm') {
+  const tpmDirectory = join(root, 'tpm');
   if (role === 'tpm') {
     const store = new TpmStore(tpmDirectory); await store.ready;
     await store.insert({ version: 1, createKey: 'key', createFingerprint: 'hash', creation: 'accepted', requirement: 'Verify', dirty: false, lastReviewAt: 0, actions: {}, work: { id: 'work', revision: 1, title: 'Work', providerId, mainNativeSessionId: 'source', tpmNativeSessionId: 'A', phase: 'clarifying', waiting: 'user', paused: true, delegated: true, summary: '', nextAction: '', document: '', acceptance: '', evidence: [], createdAt: '2026-10-15T00:00:00Z', updatedAt: '2026-10-15T00:00:00Z', nextCheckAt: 0, outbox: [] } });
@@ -62,8 +57,8 @@ function providerFixture(providerId: string, root: string) {
   return { provider, bound };
 }
 
-// A Team seat follows a generic succession to the session that took it over; a TPM session keeps its native history.
-for (const providerId of ['codex', 'opencode'] as const) for (const role of ['none', 'team', 'tpm'] as const) test.each(['A', 'B'])(
+// A TPM session keeps its native history across a generic succession.
+for (const providerId of ['codex', 'opencode'] as const) for (const role of ['none', 'tpm'] as const) test.each(['A', 'B'])(
   `${providerId} HTTP cold attach %s after generic succession gives only the current holder its ${role} execution tools`, async nativeSessionId => {
     const root = await realpath(await mkdtemp(join(tmpdir(), 'arc-generic-attachment-')));
     const teamDirectory = join(root, 'team'), tpmDirectory = join(root, 'tpm');
@@ -89,7 +84,7 @@ for (const providerId of ['codex', 'opencode'] as const) for (const role of ['no
       const agent = host.resolveSession(JSON.parse(body).agentId)!;
       expect(agent.snapshot().payload.runtimeInfo.sessionId).toBe(nativeSessionId);
       const tools = (bound.get(nativeSessionId)?.tools ?? []).map(tool => tool.name);
-      if (role === 'team' && nativeSessionId === 'B') expect(tools).toContain('read_team'); else expect(tools).toEqual([]);
+      expect(tools).toEqual([]);
       expect(() => host.executionRouting!.resolve(ref(providerId, 'A'))).toThrow(/generic succession/);
       expect(host.executionRouting!.resolve(ref(providerId, 'B')).target).toEqual(ref(providerId, 'B'));
       expect(await references.list()).toEqual([]);
@@ -113,7 +108,7 @@ test('local resumed generic successor has its own attachment without inherited s
 }, 5000);
 
 
-test.each(['team', 'tpm'] as const)('retained %s tools cannot execute on a predecessor after generic succession', async role => {
+test.each(['tpm'] as const)('retained %s tools cannot execute on a predecessor after generic succession', async role => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'arc-generic-role-')));
   await seedExecutionRole(root, 'codex', role);
   const unavailable = async (): Promise<never> => { throw new Error('No native effects are expected for role authorization.'); };
@@ -121,28 +116,17 @@ test.each(['team', 'tpm'] as const)('retained %s tools cannot execute on a prede
     supports: async () => false, inspect: unavailable, createIdle: unavailable,
     captureTimeline: unavailable, authorizeRead: unavailable, readHistory: unavailable, reconcileDelivery: async () => undefined,
   });
-  const access = { controllerId: 'host', sessionRouting: role === 'team' ? service.roleRouting : service.executionRouting, available: () => true,
+  const access = { controllerId: 'host', sessionRouting: service.executionRouting, available: () => true,
     supportedProviders: () => ['codex'], acquire: unavailable, create: unavailable, execute: unavailable };
-  const team = { id: 'team', operationId: 'create', title: 'Team', revision: 1, status: 'active', createdAt: 1, updatedAt: 1,
-    source: { hostId: 'relay-host', providerId: 'codex', nativeSessionId: 'source', title: 'Source' },
-    members: [{ id: 'member', hostId: 'relay-host', providerId: 'codex', nativeSessionId: 'A', role: 'leader', name: 'Role', responsibility: 'Verify', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 }],
-    messages: [] };
-  const runtime = role === 'team'
-    ? new TeamRuntime(join(root, 'team'), access, async () => team, 1_000_000)
-    : new TpmCoordinator({ stateDirectory: join(root, 'tpm'), tickMs: 1_000_000 }, access);
+  const runtime = new TpmCoordinator({ stateDirectory: join(root, 'tpm'), tickMs: 1_000_000 }, access);
   try {
     await service.ready; await runtime.ready;
-    const extensions = runtime instanceof TeamRuntime ? await runtime.extensions(ref('codex', 'A')) : await runtime.extensions('codex', 'A');
-    const retained = extensions!.tools!.find(tool => tool.name === (role === 'team' ? 'read_team' : 'read_work'))!;
-    expect(JSON.parse(await retained.execute({})).id).toBe(role === 'team' ? 'team' : 'work');
+    const extensions = await runtime.extensions('codex', 'A');
+    const retained = extensions!.tools!.find(tool => tool.name === 'read_work')!;
+    expect(JSON.parse(await retained.execute({})).id).toBe('work');
     await commitGeneric(service.store, 'codex', root);
-    await expect(retained.execute({})).rejects.toThrow(role === 'team' ? /no longer current/ : /generic succession/);
-    if (runtime instanceof TeamRuntime) {
-      await expect(runtime.extensions(ref('codex', 'A'))).resolves.toBeUndefined();
-      expect((await runtime.extensions(ref('codex', 'B')))?.tools?.map(tool => tool.name)).toContain('read_team');
-    } else {
-      await expect(runtime.extensions('codex', 'A')).resolves.toBeUndefined();
-      await expect(runtime.extensions('codex', 'B')).resolves.toBeUndefined();
-    }
+    await expect(retained.execute({})).rejects.toThrow(/generic succession/);
+    await expect(runtime.extensions('codex', 'A')).resolves.toBeUndefined();
+    await expect(runtime.extensions('codex', 'B')).resolves.toBeUndefined();
   } finally { await runtime.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 5000);

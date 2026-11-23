@@ -1,5 +1,3 @@
-import { TeamResourceFiles } from './team-resource-files.js';
-import { teamInbox, teamMemberUpdate } from './team-inbox.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, open, rename } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -41,18 +39,12 @@ interface LocalSeat { seat: TeamSeat; creation: 'dispatching' | 'ready' | 'unkno
   /** The last stop the person asked of this seat's session that its turn was stopped for (bots design 7). */
   interrupted?: number;
   receipts: Record<string, { text: string; status: 'dispatching' | 'accepted' | 'rejected' | 'unknown'; error?: string; acceptance?: AgentInputAcceptance['disposition']; resolvedTarget?: NativeSessionRef }> }
-/**
- * Where a Team member is, and what that means for files: members on one Host share its file system and read each other's files in
- * place; only members on other Hosts need transfers.
- */
+/** Where a bot's session runs. */
 function locationInstructions(seat: TeamSeat): string {
-  return [
-    `You are on Host ${seat.member.hostId}${seat.member.cwd ? `, working in ${seat.member.cwd}` : ''}.`,
-    'read_team lists every member with its hostId and working directory (cwd); onYourHost marks the members on your Host.',
-    'Members on your Host share its file system: read their files in place, within your permissions, instead of asking for snapshots, copies or uploads.',
-    'Transfer files only to or from members on other Hosts, whose paths do not exist here.',
-  ].join(' ');
+  return `You are on Host ${seat.member.hostId}${seat.member.cwd ? `, working in ${seat.member.cwd}` : ''}.`;
 }
+/** A seat of a bot: a task's worker or owner, a link, a room or an inbox. An ordinary Team's seat is none of these. */
+const bound = (seat: TeamSeat) => !!(seat.task || seat.link || seat.room || seat.inbox || seat.member.role === 'requester');
 /** One message to deliver, with the seat it reaches and its Team. */
 interface Delivery { record: LocalSeat; team: Team; message: TeamMessage }
 /** A main session reads what waits on it before the rest. */
@@ -102,7 +94,6 @@ export class TeamRuntime implements SessionRole {
   private persistence: Promise<unknown> = Promise.resolve();
   private creations = new Map<string, Promise<TeamMember>>();
   private leases = new Map<string, { target: NativeSessionRef; lease: RemoteHostSessionLease; unsubscribe?: () => void }>();
-  private readonly resourceFiles: TeamResourceFiles;
   private ticking = false;
   private closed = false;
   /** Recipients with a claim request in flight, before its receipt is durable. */
@@ -114,7 +105,6 @@ export class TeamRuntime implements SessionRole {
   private readonly boundAt = new Map<string, number>();
   private readonly timer: ReturnType<typeof setInterval>;
   constructor(private readonly directory: string, private readonly access: TeamRuntimeAccess, private readonly request: (call: TeamHostCall) => Promise<unknown>, tickMs = 3000) {
-    this.resourceFiles = new TeamResourceFiles(directory, request);
     this.ready = this.restore();
     void this.ready.catch(() => undefined);
     this.timer = setInterval(() => { void this.tick().catch(() => {}); }, tickMs); this.timer.unref?.();
@@ -128,6 +118,13 @@ export class TeamRuntime implements SessionRole {
     if (legacy.length) {
       this.records = this.records.filter(record => !legacy.includes(record));
       for (const record of legacy) if (record.worktree && !record.worktree.removed) await removeWorktree(record.worktree.root, record.worktree.path).catch(() => undefined);
+      await this.save();
+    }
+    // Seats of ordinary Teams, which bots replaced (bots design 9): forgotten with the worktrees they left. Seats of tasks, links, rooms and inboxes stay.
+    const ordinary = Array.isArray(this.records) ? this.records.filter(record => record?.seat && !bound(record.seat)) : [];
+    if (ordinary.length) {
+      this.records = this.records.filter(record => !ordinary.includes(record));
+      for (const record of ordinary) if (record.worktree && !record.worktree.removed) await removeWorktree(record.worktree.root, record.worktree.path).catch(() => undefined);
       await this.save();
     }
     if (!Array.isArray(this.records) || this.records.length > 384 || this.records.some(record => !record || !isTeamSeat(record.seat) || record.creation === 'ready' && !record.seat.member.nativeSessionId || !record.receipts || typeof record.receipts !== 'object' || Array.isArray(record.receipts) || Object.values(record.receipts).some(receipt => !receipt || typeof receipt.text !== 'string' || !['dispatching','accepted','rejected','unknown'].includes(receipt.status) || receipt.acceptance !== undefined && !['started','queued','handled'].includes(receipt.acceptance) || receipt.resolvedTarget !== undefined && (!isNativeSessionRef(receipt.resolvedTarget) || receipt.resolvedTarget.controllerId !== this.access.controllerId)) || !['dispatching','ready','unknown'].includes(record.creation))) throw new Error('Invalid saved Team bindings.');
@@ -192,6 +189,7 @@ export class TeamRuntime implements SessionRole {
   }
   private async createOnce(seat: TeamSeat): Promise<TeamMember> {
     await this.ready;
+    if (isTeamSeat(seat) && !bound(seat)) throw new Error('Teams of a person\'s own making no longer exist; start a bot instead.');
     if (!isTeamSeat(seat) || !this.access.available() || seat.member.role !== 'requester' && !this.access.supportedProviders().includes(seat.member.providerId)) throw new Error('Provider does not support Team tools on this Host.');
     if ((seat.task || seat.link || seat.room || seat.inbox || seat.member.role === 'requester') && this.access.tasks?.() !== true) throw new Error('Update the Relay to use tasks.');
     const existing = this.records.find(item => item.seat.teamId === seat.teamId && item.seat.member.id === seat.member.id);
@@ -282,7 +280,6 @@ export class TeamRuntime implements SessionRole {
     };
     const request = async (input: TeamHostCall) => { assertCurrent(); const value = await this.request(input); assertCurrent(); return value; };
     const call = (input: Omit<TeamHostCall, 'teamId' | 'memberId'>) => request({ ...input, teamId, memberId: member.id } as TeamHostCall);
-    const text = { type: 'string', minLength: 1, maxLength: 16000 }, id = { type: 'string', minLength: 1, maxLength: 256 };
     const tool = (name: string, description: string, properties: Record<string, unknown>, required: string[], execute: (args: Record<string, string>) => Promise<unknown>): AgentSessionTool => ({
       name, description, inputSchema: { type: 'object', properties, required, additionalProperties: false }, execute: async args => JSON.stringify(await execute(args as Record<string, string>)),
     });
@@ -313,24 +310,7 @@ export class TeamRuntime implements SessionRole {
         ? { instructions, ...access, toolNamespaces: [...(bots ? [bots] : []), { name: TASK_WORKER_NAMESPACE, description: 'Agent Remote Control: read your chief\'s conversation.', tools: own }] }
         : { instructions, ...access, tools: [...own, ...(bots?.tools ?? [])] };
     }
-    const tools = [
-      tool('read_team', 'Read members, responsibilities, progress, compact delivery status and a bounded page of complete messages addressed to you. This does not consume messages. Fully read incoming messages, then acknowledge their IDs with acknowledge_team_messages before acting. Use nextAfterMessageId as afterMessageId while hasMore is true. Accepted input is not completed work.', { afterMessageId: id }, [], async args => teamInbox(await call({ action: 'read' }), member.id, args.afterMessageId)),
-      tool('acknowledge_team_messages', 'Acknowledge incoming message IDs you have completely read through read_team before acting on them. This records receipt, not task completion, and prevents later native reinjection. Never acknowledge unread or truncated bodies. Retry the same IDs after a lost response; accepted delivery receipts are idempotent. Claimed or uncertain native deliveries cannot be cleared by this tool.', { messageIds: { type: 'array', items: id, minItems: 1, maxItems: 32, uniqueItems: true } }, ['messageIds'], args => request({ action: 'acknowledge', teamId, memberId: member.id, messageIds: args.messageIds as unknown as string[], expectedNativeSessionId: actual()!.nativeSessionId })),
-      tool('send_team_message', 'Send a task, question or evidence. Reuse operationId for the same request. Delivery is asynchronous; inspect read_team for its receipt. Members may send only to their Leader. Attach up to 8 uploaded or received resource IDs using resources; file bytes are not embedded in text.', { to: id, operationId: id, text, resources: {type:'array',items:id,minItems:1,maxItems:8,uniqueItems:true} }, ['to', 'operationId', 'text'], args => request({ action: 'send', teamId, memberId: member.id, to: args.to!, operationId: args.operationId!, text: args.text!, ...(args.resources ? {resources:args.resources as unknown as string[]} : {}) })),
-      tool('upload_team_resource', 'Upload a regular file from an absolute path on this Host, up to 50 MiB. Reuse operationId to resume. Returns a verified resourceId for send_team_message resources; does not send or execute the file.', {path:{type:'string',minLength:1,maxLength:4096},operationId:id}, ['path','operationId'], args => this.resourceFiles.upload(teamId,member.id,args.path!,args.operationId!, assertCurrent)),
-      tool('download_team_resource', 'Download a resource you uploaded or received to this Host and verify size and SHA256. Returns a localPath. Optional outputDirectory must be absolute. Existing different files are never overwritten; downloaded files are never executed.', {resourceId:id,outputDirectory:{type:'string',minLength:1,maxLength:4096}}, ['resourceId'], args => this.resourceFiles.download(teamId,member.id,args.resourceId!,args.outputDirectory, assertCurrent)),
-      tool('report_team_progress', 'Record current progress, blocking questions or completion evidence. Also message the Leader when it needs to act.', { summary: { type: 'string', maxLength: 2048 } }, ['summary'], async args => teamMemberUpdate(await request({ action: 'report', teamId, memberId: member.id, summary: args.summary! }), member.id)),
-    ];
-    if (member.role === 'leader') {
-      tools.push(tool('describe_team_member', 'Record responsibilities agreed with the user. Include task scope, environment, permissions, dependencies and expected evidence. This does not dispatch work or grant native permissions.', { target: id, responsibility: { type: 'string', maxLength: 2048 } }, ['target', 'responsibility'], async args => teamMemberUpdate(await request({ action: 'describe_member', teamId, memberId: member.id, target: args.target!, responsibility: args.responsibility! }), args.target!)));
-      tools.push(readSource);
-    }
-    const inboxInstructions = ' After completely reading incoming messages from read_team, acknowledge those IDs with acknowledge_team_messages before acting on them. This confirms receipt, not task completion. Never acknowledge unread or truncated message bodies. Follow hasMore with nextAfterMessageId to read additional pages. Retry acknowledgement with the same IDs after a lost response; no user confirmation is needed.';
-    const location = ` ${locationInstructions(seat)}`;
-    return { instructions: (member.role === 'leader'
-      ? `You are the executing Leader of Team ${teamId}, member ${member.id}. Discuss requirements with the user, analyze and implement directly, coordinate registered members, validate evidence and report delivery. Read the source session for necessary context, but do not ask its agent to do your work. Read read_team before delegating. Establish each member's responsibilities with the user and record them with describe_team_member. Remote paths and environments are independent. Shared working directories do not isolate file edits: coordinate changes with the user. Do not assume members remain available. Native permissions still apply. Await responses instead of repeatedly sending the same task.`
-      : `You are worker ${member.id} in Team ${teamId}. Read read_team to find your Leader and current responsibility. Directly investigate, implement and verify assigned tasks in your local environment. Return evidence or clarification questions to the Leader with send_team_message. Do not implement until a task is assigned. Do not assume the paths of members on other Hosts exist here. Do not delegate to other members or change your authority. Native permissions still apply.`) + location + inboxInstructions,
-      tools: bindAgentSessionTools(tools, assertCurrent), ...(member.access ? { access: member.access } : {}) };
+    throw new Error('Only bots carry Team tools.');
   }
   async tick(): Promise<void> {
     if (this.closed || this.ticking || !this.access.available()) return;
@@ -348,22 +328,20 @@ export class TeamRuntime implements SessionRole {
       for (const record of this.records.filter(item => item.creation === 'ready')) {
         const team = (value as Team[]).find(team => team.id === record.seat.teamId);
         try { await this.reconcileReceipts(record, team); } catch { /* Retry receipt reads independently of other seats and lease cleanup. */ }
-        if (team?.status === 'archiving') await this.removeSeatWorktree(record);
       }
       for (const team of value as Team[]) for (const member of team.members) {
         const record = this.records.find(item => item.seat.teamId === team.id && item.seat.member.id === member.id && item.creation === 'ready');
         if (!record || member.creation !== 'ready') continue;
         if (!member.nativeSessionId) continue;
         if (member.interrupt !== undefined && member.interrupt !== record.interrupted) await this.interrupt(record, member.interrupt).catch(() => undefined);
-        // A runtime of a task, link, room or inbox is held while something must reach it, until it reports idle, and while an archive needs
-        // its presence; otherwise the Host releases it when idle and the next delivery resumes the same session.
-        // Ordinary Teams keep every member held: the user drives their sessions directly, and only a held runtime reports that presence.
+        // A runtime of a task, link, room or inbox is held while something must reach it and until it reports idle; otherwise the Host
+        // releases it when idle and the next delivery resumes the same session.
         const pending = team.messages.some(item => item.to === member.id && (['queued','dispatching','unknown'].includes(item.status) || item.status === 'accepted' && !['started','handled'].includes(item.acceptance ?? '')));
         const leaseKey = `${team.id}:${member.id}`, current = this.leases.get(leaseKey);
         // The live session decides for a held runtime: reported presence can lag a delivery that just started a turn.
         // A running task's worker stays held, so its ended turns, pending interactions and the person's input to it are seen.
         const working = !!record.seat.task && member.role === 'leader' && (team.task?.state === 'working' || team.task?.state === 'needs_input');
-        if ((record.seat.task || record.seat.link || record.seat.room || record.seat.inbox) && !working && !pending && member.activity === 'idle' && team.status !== 'archiving' && !(current && !idle(current.lease))) continue;
+        if (!working && !pending && member.activity === 'idle' && !(current && !idle(current.lease))) continue;
         try {
           const target = this.access.sessionRouting.resolve(this.anchor(record.seat)).target;
           if (target.providerId !== member.providerId || target.nativeSessionId !== member.nativeSessionId) continue;
@@ -386,9 +364,8 @@ export class TeamRuntime implements SessionRole {
               // A claim survived but its local effect boundary did not. Never infer it was unexecuted.
               await this.settle(team.id, member.id, message.id, { status: 'unknown', resolvedTarget: message.resolvedTarget, error: 'Delivery claim has no local receipt. Inspect this session before resolving.' }); continue;
             }
-            const quiet = !!record.seat.task || !!record.seat.link || !!record.seat.room || !!record.seat.inbox;
-            if (message.status !== 'queued' || team.status !== 'active' || !availableDelivery(lease, !quiet, !quiet)) continue;
-            if (quiet && member.role === 'requester') {
+            if (message.status !== 'queued' || team.status !== 'active' || !availableDelivery(lease, false, false)) continue;
+            if (member.role === 'requester') {
               const key = nativeSessionRefKey(target), batch = updates.get(key) ?? { lease, target, items: [] };
               batch.items.push({ record, team, message }); updates.set(key, batch);
             } else { await this.dispatch([{ record, team, message }], lease, target); dispatched = !!record.seat.task; }
@@ -472,9 +449,8 @@ export class TeamRuntime implements SessionRole {
   private async dispatch(items: Delivery[], lease: RemoteHostSessionLease, target: NativeSessionRef) {
     const first = items[0]!, seat = first.record.seat;
     // Tasks, links, rooms and inboxes deliver between turns: steering races a turn that is ending, and their work does not need it.
-    // The Relay frames what a requester and a task's worker read.
-    const quiet = !!seat.task || !!seat.link || !!seat.room || !!seat.inbox;
-    const framed = seat.member.role === 'requester' || !!seat.task || !!seat.inbox, delivery = availableDelivery(lease, !quiet, !quiet);
+    // The Relay frames what a bot reads.
+    const delivery = availableDelivery(lease, false, false);
     if (!delivery || this.closed || !this.access.available()) return;
     this.access.sessionRouting.assertCurrent(this.anchor(seat), target);
     const receipts: Array<{ item: Delivery; receipt: LocalSeat['receipts'][string] }> = [];
@@ -485,13 +461,7 @@ export class TeamRuntime implements SessionRole {
       }
       if (this.closed || !this.access.available() || !deliveryAllowed(lease, delivery)) throw new AgentOperationRejectedError('team_not_ready', 'Team session is not ready for this input delivery.');
     };
-    const textOf = ({ team, message }: Delivery) => {
-      if (framed) return message.text;
-      const sender = team.members.find(member => member.id === message.from);
-      const attachments = message.resources?.map((resource,index) => `[resource #${index+1}] ${JSON.stringify(resource)} (Use download_team_resource with resourceId to obtain a verified local file.)`).join('\n');
-      // An ordinary Team member reads who sent each message and its resources.
-      return `[Team ${team.id}; message ${message.id}; from ${sender?.name ?? message.from}]\n${message.text}${attachments ? `\n\nAttached resources:\n${attachments}` : ''}`;
-    };
+    const textOf = ({ message }: Delivery) => message.text;
     const settleAll = () => Promise.all(receipts.map(({ item, receipt }) => this.settle(item.team.id, item.record.seat.member.id, item.message.id, receipt)));
     try {
       // Succession must not prepare between the claims and their durable receipts, which then take over as the fence.

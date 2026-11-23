@@ -18,7 +18,7 @@ import { TpmStore } from './tpm-store.js';
 import { TeamBroker } from '@orchardworks/agent-relay-core/testing';
 import type { SavedTeam } from '@orchardworks/agent-relay-core/testing';
 
-for (const providerId of ['codex', 'opencode', 'claude'] as const) test.each(['leader', 'member', 'tpm'] as const)(`${providerId} first prefix attachment restores %s tools with exact recipient and release fencing`, async role => {
+for (const providerId of ['codex', 'opencode', 'claude'] as const) test.each(['tpm'] as const)(`${providerId} first prefix attachment restores %s tools with exact recipient and release fencing`, async role => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'arc-prefix-role-'))), teamDirectory = join(root, 'team'), tpmDirectory = join(root, 'tpm');
   // The TPM, role and context state live in memory; the Team seats stay on disk, which the Team runtime has no port for.
   const tpmFiles = memoryStateFiles(), stateFiles = { roles: memoryStateFiles(), contexts: memoryStateFiles() };
@@ -73,7 +73,7 @@ for (const providerId of ['codex', 'opencode', 'claude'] as const) test.each(['l
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`, authority = { version: 1 as const, origin, issuer: 'issuer', namespace: 'tenant', ownerSubject: 'owner' }, context = { authority, installationId: 'host', successionEnrollmentVersion: 3 as const };
   const post = async (path: string, body: unknown, agent?: string) => { const response = await fetch(origin + path, { method: 'POST', body: JSON.stringify(body), headers: agent ? { 'x-agent': agent } : {}, signal: AbortSignal.timeout(3000) }); return { status: response.status, data: await response.json() }; };
-  const tool = () => bound.get('B')!.tools!.find(tool => tool.name === (role === 'tpm' ? 'read_work' : 'read_team'))!;
+  const tool = () => bound.get('B')!.tools!.find(tool => tool.name === 'read_work')!;
   const readWork = async () => { const response = await fetch(origin + '/remote/tpm/work?id=work', { signal: AbortSignal.timeout(3000) }); expect(response.status).toBe(200); return response.json(); };
   const exerciseTpmTakeover = async (afterRestart: boolean) => {
     let before = await readWork();
@@ -122,28 +122,10 @@ for (const providerId of ['codex', 'opencode', 'claude'] as const) test.each(['l
   };
   try {
     expect((await post('/remote/attach', { providerId, nativeSessionId: 'A' }, 'A')).status).toBe(200);
-    const old = bound.get('A')!.tools!.find(tool => tool.name === (role === 'tpm' ? 'read_work' : 'read_team'))!;
+    const old = bound.get('A')!.tools!.find(tool => tool.name === 'read_work')!;
     const preparation = { kind: 'native_prefix' as const, turnId: 'turn', messageId: 'message' }, described = await post('/enroll', { action: 'describe', providerId, nativeSessionId: 'A', preparation });
     expect(described.status).toBe(200);
     const from = { controllerId: 'host', providerId, nativeSessionId: 'A' }, freeze = { version: 3 as const, token: 'freeze', authority, controllerId: 'host', maxProjectionBytes: 2 * 1024 * 1024, associationRevision: 0, lineage: [from], relations: [], request: { roleId: described.data.role.id, operationId: 'prefix', expectedRevision: 1, from, preparation } };
-    if (role !== 'tpm') {
-      allowPoll = true;
-      await post('/team', { action: 'send', teamId: 'team', memberId: 'peer', to: 'member', operationId: 'claim-first', text: 'Isolated A input' });
-      await poll(() => claimEntered).toBe(true);
-      const blocked = { ...freeze, token: 'blocked', request: { ...freeze.request, operationId: 'blocked' } };
-      expect(await post('/enroll', { action: 'prepare', freeze: blocked })).toMatchObject({ status: 200, data: { record: { phase: 'rejected' } } });
-      expect(forks).toBe(0); expect(deliveries).toEqual([]);
-      expect((await post('/enroll', { action: 'release', freeze: blocked })).status).toBe(200);
-      releaseClaim!();
-      await poll(() => teams[0]!.messages[0]?.acceptance).toBe('queued');
-      expect(deliveries).toEqual(['A']);
-      const queued = { ...blocked, token: 'queued', request: { ...blocked.request, operationId: 'queued' } };
-      expect(await post('/enroll', { action: 'prepare', freeze: queued })).toMatchObject({ status: 200, data: { record: { phase: 'rejected' } } });
-      expect((await post('/enroll', { action: 'release', freeze: queued })).status).toBe(200);
-      acceptance!({ disposition: 'started' });
-      await poll(() => teams[0]!.messages.length).toBe(0);
-      allowPoll = false;
-    }
     expect(await post('/enroll', { action: 'prepare', freeze })).toMatchObject({ status: 200, data: { record: { phase: 'ready' } } });
     const first = tool(); await expect(first.execute({})).rejects.toThrow(/current|reserved|admission/);
     const restoredCandidate = make();
@@ -152,24 +134,15 @@ for (const providerId of ['codex', 'opencode', 'claude'] as const) test.each(['l
       expect(attached.status).toBe(200);
       await expect(tool().execute({})).rejects.toThrow(/current|reserved|admission/);
     } finally { await restoredCandidate.close(); }
-    if (role !== 'tpm') {
-      await post('/team', { action: 'send', teamId: 'team', memberId: 'peer', to: 'member', operationId: 'freeze-first', text: 'Isolated B input' });
-      allowPoll = true; const before = polls;
-      await poll(() => polls).toBeGreaterThan(before + 1);
-      expect(teams[0]!.messages[0]?.status).toBe('queued'); expect(deliveries).toEqual(['A']);
-    }
     expect(await post('/enroll', { action: 'commit', freeze })).toMatchObject({ status: 200, data: { record: { phase: 'committed' } } });
     await expect(old.execute({})).rejects.toThrow(/current/); await expect(first.execute({})).rejects.toThrow(/reserved|admission/);
-    if (role !== 'tpm') { const before = polls; await poll(() => polls).toBeGreaterThan(before + 1); expect(teams[0]!.messages[0]?.status).toBe('queued'); expect(deliveries).toEqual(['A']); }
     expect((await post('/enroll', { action: 'release', freeze })).status).toBe(200);
-    if (role !== 'tpm') { await poll(() => teams[0]!.messages.length).toBe(0); expect(deliveries).toEqual(['A', 'B']); allowPoll = false; }
-    expect(JSON.parse(await first.execute({}))).toMatchObject(role === 'tpm' ? { id: 'work', tpmNativeSessionId: 'B' } : { id: 'team' });
-    if (role === 'tpm') await exerciseTpmTakeover(false);
+    expect(JSON.parse(await first.execute({}))).toMatchObject({ id: 'work', tpmNativeSessionId: 'B' });
+    await exerciseTpmTakeover(false);
     await host.close(); host = make(); expect((await post('/remote/attach', { providerId, nativeSessionId: 'B' }, 'B')).status).toBe(200);
-    expect(JSON.parse(await tool().execute({}))).toMatchObject(role === 'tpm' ? { id: 'work', tpmNativeSessionId: 'B' } : { id: 'team' });
-    if (role === 'tpm') await exerciseTpmTakeover(true);
+    expect(JSON.parse(await tool().execute({}))).toMatchObject({ id: 'work', tpmNativeSessionId: 'B' });
+    await exerciseTpmTakeover(true);
     expect(forks).toBe(1);
-    if (role === 'tpm') { const store = new TpmStore(tpmDirectory, tpmFiles); await store.ready; expect(store.get('work').work.tpmNativeSessionId).toBe('A'); }
-    else expect(JSON.parse(await readFile(join(teamDirectory, 'seats.json'), 'utf8'))[0].seat).toEqual(seat);
+    { const store = new TpmStore(tpmDirectory, tpmFiles); await store.ready; expect(store.get('work').work.tpmNativeSessionId).toBe('A'); }
   } finally { releaseClaim?.(); allowPoll = false; await host.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);

@@ -48,7 +48,7 @@ const provider: AgentProviderAdapter = {
   async resumeSession(handle) { const session = sessions.get(handle.sessionId); if (!session) throw new Error('Missing fixture session'); return session; },
 };
 const server = createProtocolValidationServer({ providers: [provider], labOrigin: process.env.AGENT_REMOTE_ORIGIN!,
-  imageDirectory: join(root, 'images'), resourceDirectory: join(root, 'resources'), teamResourceDirectory: join(root, 'team-resources'), successionStateDirectory: join(root, 'succession') });
+  imageDirectory: join(root, 'images'), resourceDirectory: join(root, 'resources'), successionStateDirectory: join(root, 'succession') });
 const address = await server.http.listen(Number(process.env.AGENT_REMOTE_PORT), '127.0.0.1');
 process.stdout.write(`Working cache fixture listening on ${address.url}\n`);
 async function close() { await server.close(); await rm(root, { recursive: true, force: true }); process.exit(0); }

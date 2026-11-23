@@ -1,7 +1,5 @@
-import { createHostedRelay, createPartitionJournals, hostedAuthFromEnv, hostedRecordEncodingCosts, PortableTeamResourceStore, pushFromEnvironment, type HostedAuthEnvironment, type HostedRecordKind, type JournalPartitionApi, type PushEnvironment, type RelayScheduler } from '@orchardworks/agent-relay-core';
+import { createHostedRelay, createPartitionJournals, hostedAuthFromEnv, hostedRecordEncodingCosts, pushFromEnvironment, type HostedAuthEnvironment, type HostedRecordKind, type JournalPartitionApi, type PushEnvironment, type RelayScheduler } from '@orchardworks/agent-relay-core';
 import { createStateCommitLog } from './state-commit-log.js';
-import { SqliteTeamResourceStorage } from './team-resource-storage.js';
-import { createHmac } from 'node:crypto';
 import { SqliteRelayStore } from './storage.js';
 import { SqliteDiagnosticStore } from './diagnostic-storage.js';
 import { WorkerRelaySocket } from './socket.js';
@@ -68,7 +66,6 @@ export class RelayObject {
     const push = pushFromEnvironment(this.env, auth.origin);
     if (push.problem) console.error(`Configuration error: ${push.problem}`);
     this.core = createHostedRelay({ ...auth, hostLiveness: this.hostLiveness(), ...(journalService ? { journalService } : {}), ...(this.env.AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS ? { authorityOutageGraceMs: Number(this.env.AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS) } : {}), previewOrigin: this.env.AGENT_REMOTE_PREVIEW_URL, previewDomain: this.env.AGENT_REMOTE_PREVIEW_DOMAIN, storage, successionEnrollment: true, diagnosticStorage: new SqliteDiagnosticStore(this.context.storage, auth),
-      teamResources: namespace => new PortableTeamResourceStore({ storage: new SqliteTeamResourceStorage(this.context.storage, createHmac('sha256', auth.secret).update(JSON.stringify([auth.origin, auth.issuer, namespace])).digest('hex')) }),
       successionEncodingCosts: hostedRecordEncodingCosts(auth, verification('capacity')), onStateCommit: metrics => log!.commit(metrics),
       diagnosticContext: { runtimeInstanceId: this.runtimeInstanceId, workerVersionId: this.env.CF_VERSION_METADATA?.id, startReason }, scheduler, clientAddress: request => request.headers.get('cf-connecting-ip') ?? 'unknown',
       ...(push.configuration ? { push: push.configuration } : {}), onPushProblem: problem => console.error(`Configuration error: ${problem}`) });

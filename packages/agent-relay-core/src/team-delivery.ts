@@ -2,33 +2,31 @@ import { createHash } from 'node:crypto';
 import { TEAM_DELIVERY_RECEIPT_LIMIT, isTeam, type Team, type TeamMessage } from '@orchardworks/agent-remote-protocol';
 import { plain } from './drafts.js';
 
-type DeliveryReceipt = Omit<TeamMessage, 'text' | 'resources'> & { fingerprint: string; settledAt: number };
-type ResourceGrant = { resourceId: string; memberIds: string[] };
+type DeliveryReceipt = Omit<TeamMessage, 'text'> & { fingerprint: string; settledAt: number };
 
 /** Stored role anchors and Relay-only evidence, without client projection evidence. */
 export interface SavedTeam extends Omit<Team, 'unresolvedReceipts'> {
   unresolvedReceipts?: never;
   deliveryReceipts?: DeliveryReceipt[];
-  resourceGrants?: ResourceGrant[];
 }
 
 /** Teams an account may hold. Each is stored as its own record, and a commit encodes only the Teams it changed. */
 export const ACCOUNT_TEAM_LIMIT = 1024;
 /**
  * Bytes of one Team's record. Its parts have their own bounds (128 KiB of message input, 64 KiB of a support group,
- * 32 KiB of receipts); this one bounds the rest, such as delivery evidence and uploads, as the account's Team state did
+ * 32 KiB of receipts); this one bounds the rest, such as delivery evidence, as the account's Team state did
  * before each Team had its own record, so no Team has less room than it had then.
  */
 export const TEAM_RECORD_BYTES = 2 * 1024 * 1024;
 const receiptLifetimeMs = 24 * 60 * 60 * 1000;
 const receiptCount = TEAM_DELIVERY_RECEIPT_LIMIT;
 const receiptBytes = 32 * 1024;
-// Input capacity stays stable while delivery evidence grows. Resources, recipients,
+// Input capacity stays stable while delivery evidence grows. Recipients,
 // and settlement metadata remain bounded by their schemas and the full state limit.
 export const teamMessageBudgetBytes = (team: Team) => Buffer.byteLength(JSON.stringify(team.messages.map(({ id, from, to, text, createdAt }) => ({ id, from, to, text, createdAt }))));
 
 export function stripPrivateTeamEvidence(team: SavedTeam): Omit<Team, 'unresolvedReceipts'> {
-  const { deliveryReceipts: _receipts, resourceGrants: _grants, ...value } = team;
+  const { deliveryReceipts: _receipts, ...value } = team;
   return value;
 }
 
@@ -40,26 +38,20 @@ export function pendingTeamMessage(message: TeamMessage): boolean {
   return message.status === 'queued' || unresolvedTeamDelivery(message);
 }
 
-export function deliveryFingerprint(input: { to: string; text: string; resources?: string[] }): string {
-  return createHash('sha256').update(JSON.stringify([input.to, input.text, input.resources ?? []])).digest('hex');
+/** The third element is the attachment list receipts of earlier builds hashed; it stays so their stored fingerprints still match. */
+export function deliveryFingerprint(input: { to: string; text: string }): string {
+  return createHash('sha256').update(JSON.stringify([input.to, input.text, []])).digest('hex');
 }
 
 /** Migrate old inline history and release settled bodies in the same durable commit. */
 export function compactTeamDeliveries(team: SavedTeam, now: number): void {
-  const grants = new Map((team.resourceGrants ?? []).map(grant => [grant.resourceId, grant]));
-  for (const message of team.messages.filter(message => !pendingTeamMessage(message))) for (const resource of message.resources ?? []) {
-    let grant = grants.get(resource.resourceId);
-    if (!grant) { grant = { resourceId: resource.resourceId, memberIds: [] }; grants.set(resource.resourceId, grant); }
-    if (!grant.memberIds.includes(message.to)) grant.memberIds.push(message.to);
-  }
-  if (grants.size) team.resourceGrants = [...grants.values()];
   const receipts = new Map((team.deliveryReceipts ?? []).filter(receipt => unresolvedTeamDelivery(receipt) || receipt.settledAt + receiptLifetimeMs > now).map(receipt => [receipt.id, receipt]));
   const pending: TeamMessage[] = [];
   for (const message of team.messages) {
     if (pendingTeamMessage(message)) { pending.push(message); continue; }
     // A receipt keeps what proves the delivery; the chain was recorded on the member that took the message.
-    const { text, resources, chain: _chain, ...result } = message;
-    receipts.set(message.id, { ...result, fingerprint: deliveryFingerprint({ to: message.to, text, resources: resources?.map(resource => resource.resourceId) }), settledAt: now });
+    const { text, chain: _chain, ...result } = message;
+    receipts.set(message.id, { ...result, fingerprint: deliveryFingerprint({ to: message.to, text }), settledAt: now });
   }
   team.messages = pending;
   const retained = [...receipts.values()];
@@ -116,7 +108,6 @@ export function teamStateBytes(teams: readonly SavedTeam[]): number {
  */
 export function teamNeedsCompaction(team: SavedTeam, now: number): boolean {
   if (team.messages.some(message => !pendingTeamMessage(message))) return true;
-  if (team.resourceGrants && new Set(team.resourceGrants.map(grant => grant.resourceId)).size !== team.resourceGrants.length) return true;
   const receipts = team.deliveryReceipts;
   if (!receipts) return false;
   return !receipts.length || receipts.some(receipt => !unresolvedTeamDelivery(receipt) && receipt.settledAt + receiptLifetimeMs <= now)
@@ -140,12 +131,6 @@ export function validSavedTeam(value: unknown): value is SavedTeam {
     if (!isTeam({ ...visible, messages }) || messages.some(message => pendingTeamMessage(message) && !(message.status === 'accepted' && message.acceptance === undefined))
       || messages.some(receipt => team.messages.some(message => message.id === receipt.id))) return false;
   }
-  const grants = team.resourceGrants;
-  if (grants !== undefined && (!Array.isArray(grants) || grants.length > 1024 || new Set(grants.map(grant => grant?.resourceId)).size !== grants.length
-    || !grants.every(grant => grant && Object.keys(grant).every(key => ['resourceId', 'memberIds'].includes(key))
-      && team.resourceUploads?.some(upload => upload.resource.resourceId === grant.resourceId)
-      && Array.isArray(grant.memberIds) && grant.memberIds.length > 0 && grant.memberIds.length <= team.members.length
-      && new Set(grant.memberIds).size === grant.memberIds.length && grant.memberIds.every(id => team.members.some(member => member.id === id))))) return false;
   return true;
 }
 

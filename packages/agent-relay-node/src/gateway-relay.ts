@@ -1,11 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer } from 'ws';
-import { createHmac } from 'node:crypto';
-import { join } from 'node:path';
 import { SqlJournalStore } from '@orchardworks/agent-remote-journal-sqlite';
 import { openNodeJournalDatabase, type NodeJournalDatabase } from '@orchardworks/agent-remote-journal-sqlite/node';
-import { InputResourceStore } from '@orchardworks/agent-session-runtime';
 import { BROKER_MAX_FRAME_BYTES, createHostedRelay, createHostJournals, type HostJournals, hostedAuthStorageIdentity, hostedRecordEncodingCosts, isPreviewDomain, migrateLegacyNodeState, resolveHostedAuth, type HostedAuthOptions, type HostJournalsOptions, type HostedRelayOptions } from '@orchardworks/agent-relay-core';
 import { openGatewayState } from './gateway-state.js';
 import { openGatewayDiagnostics } from './gateway-diagnostics.js';
@@ -138,7 +135,6 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
           ...(options.push ? { push: options.push } : {}), ...(options.onPushProblem ? { onPushProblem: options.onPushProblem } : {}),
           ...(storage ? { successionEnrollment: true, successionEncodingCosts: { ...hostedRecordEncodingCosts(auth), acceptsSnapshot: storage.acceptsSnapshot } } : {}),
           ...(options.stateFile ? { diagnosticStorage: openGatewayDiagnostics(options.stateFile, auth) } : {}),
-          ...(options.stateFile ? { teamResources: (namespace: string) => new InputResourceStore({ directory: join(options.stateFile + '.resources', createHmac('sha256', auth.secret).update(JSON.stringify([auth.origin, auth.issuer, namespace])).digest('hex')) }) } : {}),
           ...(journalService ? { journalService } : {}),
           ...(storage ? { storage: { initial, commit: value => storage!.commit(value), close: () => storage!.close() } } : {}) });
         return { port: address.port, url: auth.origin };

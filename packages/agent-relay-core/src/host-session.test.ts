@@ -449,6 +449,17 @@ describe('host session routing of messages after registration', () => {
     expect(run.host()!.streams.size).toBe(0);
   });
 
+  it('refuses a removed Team file transfer an older Controller asks for, and keeps the connection', async () => {
+    const hostCall = vi.fn();
+    const run = hostSessionFixture({ ports: { teams: { hostCall } as never } });
+    const socket = await run.connect();
+    await socket.receive(uplink({ type: 'team_request', requestId: 't2', call: { action: 'resource_begin', teamId: 'team', memberId: 'member', operationId: 'op', name: 'a.zip', mediaType: 'application/zip', byteLength: 1, sha256: 'a'.repeat(64) } }));
+    await flush();
+    expect(hostCall).not.toHaveBeenCalled();
+    expect(socket.of('team_response')).toEqual([expect.objectContaining({ requestId: 't2', status: 409, body: expect.stringContaining('no longer available') })]);
+    expect(socket.closes).toEqual([]);
+  });
+
   it('answers a Team request on the connection that asked, with the Team broker\'s answer', async () => {
     const hostCall = vi.fn(async () => ({ ok: true }));
     const run = hostSessionFixture({ ports: { teams: { hostCall } as never } });

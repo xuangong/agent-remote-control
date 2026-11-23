@@ -13,7 +13,6 @@ export interface ProtocolValidationServerOptions {
   labOrigin: string;
   imageDirectory?: string;
   resourceDirectory?: string;
-  teamResourceDirectory?: string;
   successionStateDirectory?: string;
   directories?: readonly SessionDirectorySource[];
   connectLocalSession?: RemoteHostBrokerOptions['connectLocalSession'];
@@ -29,7 +28,7 @@ export function createProtocolValidationServer(options: ProtocolValidationServer
     mutationPolicy: createLocalLabMutationPolicy(options.labOrigin),
   });
   directory.install(http.server, relay, options.labOrigin);
-  const broker = createRemoteHostBroker({ origin: options.labOrigin, ...(options.connectLocalSession ? { connectLocalSession: options.connectLocalSession } : {}), teamResources: new InputResourceStore({directory:options.teamResourceDirectory ?? join(homedir(), '.agent-remote-control', 'lab-team-resources')}) });
+  const broker = createRemoteHostBroker({ origin: options.labOrigin, ...(options.connectLocalSession ? { connectLocalSession: options.connectLocalSession } : {}) });
   broker.install(http.server);
   return {
     relay,

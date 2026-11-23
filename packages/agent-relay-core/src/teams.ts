@@ -1,7 +1,6 @@
 import { compactTeamDeliveries, teamNeedsCompaction, unresolvedTeamDelivery, stripPrivateTeamEvidence, validSavedTeam, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
 export { teamMessageBudgetBytes } from './team-delivery.js';
-import type { TeamResourceStore } from './team-resources.js';
 import { accountDirectory, AssistantMessages, type AssistantPorts } from './assistants.js';
 import { roomAction, Rooms } from './rooms.js';
 import { BotInboxes } from './inboxes.js';
@@ -11,8 +10,7 @@ import { BotChains, memoryChains, type ChainStore } from './chains.js';
 import { chainScope, inChain, seenBefore, stampChain, temporaryBotId } from './chain-scope.js';
 import { actOnBot, stopInTeams } from './audit.js';
 import { TaskGroups, taskAction, taskPresence, taskSettled, type TaskPorts } from './tasks.js';
-import { createHash } from 'node:crypto';
-import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TeamResource, type TurnCause, type BotChain, type ChainAction, type ChainView } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TurnCause, type BotChain, type ChainAction, type ChainView } from '@orchardworks/agent-remote-protocol';
 
 export interface TeamBrokerPorts {
   /** Timers of the Relay, for what must happen on time: a room's deadline and a member's turn. */
@@ -21,8 +19,6 @@ export interface TeamBrokerPorts {
   assertRecipient?(target: NativeSessionRef): void;
   /** generic: the replacement is a generic succession, which may also change the recipient's provider. */
   assertRecipientSupport?(hostId: string, generic?: boolean): void;
-  resources?: TeamResourceStore;
-  resourceDraftTtlMs?: number;
   read(): SavedTeam[];
   change<T>(update: (teams: SavedTeam[]) => T): Promise<T>;
   createSeat(hostId: string, seat: TeamSeat): Promise<TeamMember>;
@@ -76,24 +72,19 @@ export class TeamBroker {
     }
   }
   private async change<T>(update: (teams: SavedTeam[]) => T): Promise<T> {
-    let removed = false;
-    const value = await this.ports.change(teams => {
+    return this.ports.change(teams => {
       // teams is a draft: compaction reads the plain Teams and drafts only those it changes.
       const compact = () => plain(teams).forEach((team, index) => {
         const now = this.ports.now();
         if (teamNeedsCompaction(team, now)) compactTeamDeliveries(teams[index]!, now);
       });
       compact();
-      const existing = plain(teams).map(team => team.id), seen = seenBefore(plain(teams));
+      const seen = seenBefore(plain(teams));
       const result = update(teams);
       stampChain(seen, teams);
       compact();
-      const remaining = new Set(plain(teams).map(team => team.id));
-      removed = existing.some(id => !remaining.has(id));
       return result;
     });
-    if (removed) await this.retainResources();
-    return value;
   }
   private project(source: SavedTeam, recipientAware = true): Team {
     const saved = plain(source);
@@ -244,7 +235,6 @@ export class TeamBroker {
     if (call.action === 'cancel_task' || call.action === 'mark_task_done') return (this.tasks ?? fail(unavailableTasks)).finish(hostId, call);
     if (call.action === 'ask_owner') { assertCurrent(); return (this.tasks ?? fail(unavailableTasks)).ask(hostId, call); }
     if (call.action === 'tell_task') { assertCurrent(); return (this.tasks ?? fail(unavailableTasks)).tell(hostId, call); }
-    if (call.action === 'resource_begin' || call.action === 'resource_chunk' || call.action === 'resource_finish' || call.action === 'resource_metadata' || call.action === 'resource_read') return this.resourceCall(hostId, call, assertCurrent);
     return this.change(teams => {
       assertCurrent();
       const team = find(teams, call.teamId), self = member(team, call.memberId), now = this.ports.now();
@@ -285,76 +275,6 @@ export class TeamBroker {
       }
       active(team);
       return fail('This Host call is not available.');
-    });
-  }
-  private resourceAccess(team: SavedTeam, memberId: string, resourceId: string): TeamResource {
-    const upload = team.resourceUploads?.find(item => item.resource.resourceId === resourceId);
-    const grant = team.resourceGrants?.find(grant => grant.resourceId === resourceId);
-    const referenced=!!grant || team.messages.some(message=>message.resources?.some(resource=>resource.resourceId===resourceId));
-    if (!upload || !referenced && upload.expiresAt <= this.ports.now() || upload.ownerMemberId !== memberId && !grant?.memberIds.includes(memberId) && !team.messages.some(message => message.to === memberId && message.resources?.some(resource => resource.resourceId === resourceId))) fail('Resource access is not granted to this member.');
-    return upload!.resource;
-  }
-  /** Verifies the stored bytes of resources a member may attach; keep pins them for as long as their Team exists. */
-  private async pinResources(teamId: string, memberId: string, resourceIds: string[], keep = true): Promise<void> {
-    const store = this.ports.resources ?? fail('Team resource storage is unavailable on this Relay.');
-    for (const resourceId of resourceIds) {
-      const team = structuredClone(find(this.ports.read(), teamId)); compactTeamDeliveries(team, this.ports.now());
-      const ref = this.resourceAccess(team, memberId, resourceId);
-      // An unpinned upload (a collected patch, a bundle) expires a day after its last use.
-      const actual = await store.getMetadata(`team:${teamId}`, resourceId).catch(() => fail(`Resource ${resourceId} is no longer stored; collect or upload it again.`));
-      if ((['resourceId', 'name', 'mediaType', 'sha256', 'byteLength'] as const).some(key => ref[key] !== actual[key])) fail('Resource metadata does not match stored bytes.');
-      if (keep) await store.pin(`team:${teamId}`, resourceId);
-    }
-  }
-  /**
-   * Removed Teams' resources go with them. Every Team that no longer exists is swept, so resources a failed or interrupted sweep
-   * left behind go with the next removal; a failure never fails the change that removed a Team.
-   */
-  private async retainResources(): Promise<void> {
-    await this.ports.resources?.retain(() => this.ports.read().map(team => `team:${team.id}`)).catch(() => undefined);
-  }
-  private pruneResourceUploads(team:SavedTeam) {
-    if(!team.resourceUploads)return;
-    const referenced=new Set([...(team.resourceGrants ?? []).map(grant => grant.resourceId), ...team.messages.flatMap(message=>message.resources?.map(resource=>resource.resourceId)??[])]);
-    team.resourceUploads=team.resourceUploads.filter(upload=>upload.expiresAt>this.ports.now()||referenced.has(upload.resource.resourceId));
-  }
-  private async resourceCall(hostId: string, call: Extract<TeamHostCall, { action: `resource_${string}` }>, assertCurrent: () => void): Promise<unknown> {
-    const store = this.ports.resources ?? fail('Team resource storage is unavailable on this Relay.');
-    // A member still being created may read what was granted to it, such as the bundle it starts from.
-    const reading = call.action === 'resource_metadata' || call.action === 'resource_read';
-    const authorize = () => {
-      assertCurrent();
-      const team = find(this.ports.read(), call.teamId), self = member(team, call.memberId);
-      if (self.hostId !== hostId || self.creation !== 'ready' && !(reading && (self.creation === 'reserved' || self.creation === 'unknown'))) fail('This Host is not the registered Team member.');
-      if (team.task && this.ports.tasks?.capable(hostId) !== true) fail(tasksUpgrade);
-      return {team,self};
-    };
-    const {team,self} = authorize(), scope = `team:${team.id}`;
-    if (call.action === 'resource_metadata' || call.action === 'resource_read') {
-      this.resourceAccess(team,self.id,call.resourceId);
-      const result = call.action === 'resource_metadata' ? await store.getMetadata(scope,call.resourceId) : await store.readChunk(scope,call.resourceId,call.offset);
-      authorize(); return result;
-    }
-    active(team);
-    if (call.action !== 'resource_begin' && call.action !== 'resource_chunk' && call.action !== 'resource_finish') throw new Error('Invalid resource operation.');
-    const uploadId = createHash('sha256').update(JSON.stringify([self.id,call.operationId])).digest('hex');
-    if (call.action === 'resource_begin') {
-      const result = await store.begin(scope,{uploadId,name:call.name,mediaType:call.mediaType,byteLength:call.byteLength,sha256:call.sha256});authorize();
-      await this.change(teams=>{assertCurrent();const current=find(teams,team.id);this.pruneResourceUploads(current);const existing=current.resourceUploads?.find(item=>item.resource.resourceId===result.resource?.resourceId);if(existing)existing.expiresAt=this.ports.now()+(this.ports.resourceDraftTtlMs??86400000);});return result;
-    }
-    if (call.action === 'resource_chunk') {const result=await store.chunk(scope,{uploadId,offset:call.offset,contentBase64:call.contentBase64});authorize();return result;}
-    const result = await store.finish(scope,uploadId);
-    if (!result.resource) fail('Resource upload is incomplete.');
-    return this.change(teams => {
-      assertCurrent();const current=find(teams,team.id),owner=member(current,self.id);active(current);
-      if(owner.hostId!==hostId||owner.creation!=='ready')fail('This Host is not the registered Team member.');
-      this.pruneResourceUploads(current);
-      const uploads=current.resourceUploads??=[];
-      if(!uploads.some(item=>item.resource.resourceId===result.resource!.resourceId)){
-        if(uploads.length>=1024)fail('Team resource capacity reached.');
-        uploads.push({ownerMemberId:self.id,expiresAt:this.ports.now()+(this.ports.resourceDraftTtlMs??86400000),resource:result.resource!});touch(current,this.ports.now());
-      }
-      return result;
     });
   }
   private provision(teamId: string, memberId: string): Promise<Team> {

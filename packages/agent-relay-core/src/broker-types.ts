@@ -1,7 +1,6 @@
 import type { BotChain, ChainThresholds } from '@orchardworks/agent-remote-protocol';
 import type { WindowGroup, WindowSessionBinding, WindowBotDetails } from '@orchardworks/agent-remote-protocol';
 import type { SavedTeam } from './team-delivery.js';
-import type { TeamResourceStore } from './team-resources.js';
 import type { HostRecoverySelection, RevokedHost } from './host-recovery.js';
 import type { BrokerAssociationState } from './succession-associations.js';
 import type { BoundedSuccessionAssociationFreeze, NativePrefixSuccessionAssociationFreeze } from '@orchardworks/agent-remote-protocol';
@@ -96,7 +95,6 @@ export interface RemoteHostBrokerState {
 export interface HostBrokerOptions {
   /** Hosted authentication capability; never enables standalone Gateway access. */
   gatewaySetup?: boolean;
-  teamResources?: TeamResourceStore;
   /** The account's Window groups, whose bots are the assistants that message one another. */
   assistantGroups?: () => readonly WindowGroup[];
   /** Places a bot another bot created in a group of the account: its view of the session and its details (bots design 2.2). */

@@ -60,3 +60,15 @@ it('tells an ordinary Team from the Teams a bot is delivered through', () => {
   expect(isOrdinaryTeam(inbox)).toBe(false);
   expect(isOrdinaryTeam({ ...ordinary, link: { assistants: ['a', 'b'], recent: [] } })).toBe(false);
 });
+
+it('drops the file transfers of a Team an older Relay saved, and loads it unchanged afterwards', () => {
+  const file = { resourceId: 'r1', name: 'notes.txt', mediaType: 'text/plain', byteLength: 3, sha256: 'a'.repeat(64) };
+  const message = { id: 'm1', from: 'bot', to: 'bot', text: 'hello', status: 'queued', createdAt: 1, resources: [file] };
+  const saved = { ...inbox, messages: [message], resourceUploads: [{ ownerMemberId: 'bot', expiresAt: 9, resource: file }], resourceGrants: [{ resourceId: 'r1', memberIds: ['bot'] }] };
+  const loaded = validateRelayState(state([saved as unknown as Team]), auth);
+  const kept = loaded.tenants[0]!.broker.teams![0]! as unknown as Record<string, unknown>;
+  expect(kept).not.toHaveProperty('resourceUploads');
+  expect(kept).not.toHaveProperty('resourceGrants');
+  expect(kept.messages).toEqual([{ id: 'm1', from: 'bot', to: 'bot', text: 'hello', status: 'queued', createdAt: 1 }]);
+  expect(validateRelayState(structuredClone(loaded), auth)).toEqual(loaded);
+});

@@ -18,7 +18,6 @@ export * from './preview-domain.js';
 export * from './file-frame.js';
 export * from './static-site.js';
 export * from './controller-releases.js';
-export * from './team-resources.js';
 
 export * from './hosted-auth.js';
 export * from './auth-provider.js';

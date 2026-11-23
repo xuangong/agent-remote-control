@@ -68,7 +68,6 @@ export type HostedRelayOptions = HostedAuthOptions & {
   journals?: JournalStore;
   /** A journal service built elsewhere, such as one that reaches journal partitions; used instead of `journals`. */
   journalService?: HostJournals;
-  teamResources?: (namespace: string) => import('./team-resources.js').TeamResourceStore;
   diagnosticContext?: RelayDiagnosticContext;
   scheduler?: RelayScheduler;
   /** The timers of each account's Broker: credential expiry, heartbeats and deadlines. Defaults to real timers. */
@@ -457,7 +456,6 @@ export function createHostedRelay(options: HostedRelayOptions) {
       } : undefined;
       const broker = createHostBroker({ origin: auth.origin, publicUrl: auth.origin, keyLifetimeMs: options.keyLifetimeMs, ...options.hostLiveness, ...(options.brokerScheduler ? { scheduler: options.brokerScheduler } : {}), ...(options.controllerReleases ? { controllerReleases: options.controllerReleases } : {}),
         ownerSubject: grant.subject, durable, accountBacked, initialState, diagnostics, gatewaySetup: auth.provider === 'mainsite',
-        teamResources: options.teamResources?.(grant.namespace),
         assistantGroups: () => windows.list({ subject: grant.subject }).groups,
         // A bot another bot created joins its chief's group: a view of its session, and its details.
         placeBot: async (groupId, view, details) => {

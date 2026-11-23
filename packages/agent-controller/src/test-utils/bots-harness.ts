@@ -7,7 +7,6 @@ import type { AgentSnapshotPayload, NativeSessionRef, Team, TeamHostCall, Window
 import { createOperationCache, createOperationExecutor, type AgentManagerEvent, type SessionWireAgent } from '@orchardworks/agent-session-runtime';
 import { TeamBroker } from '@orchardworks/agent-relay-core/testing';
 import type { SavedTeam } from '@orchardworks/agent-relay-core/testing';
-import { PortableTeamResourceStore } from '@orchardworks/agent-relay-core';
 import { BotTools } from '../bot-tools.js';
 import { TeamRuntime, type TeamRuntimeAccess } from '../team.js';
 import type { SessionCreation } from '../role-session-creation.js';
@@ -44,13 +43,10 @@ export async function botsHarness(options: { groups?: WindowGroup[]; sessions?: 
   const groups: WindowGroup[] = options.groups ?? [{ window: { id: 'g0', title: 'g0', revision: 1, views: [{ id: 'chief', placement: 'primary',
     binding: { hostId: 'host', providerId: 'codex', nativeSessionId: 'worker', title: 'worker' } }] }, bots: { rank: 'm', members: { chief: { botId: 'b_' + 'c'.repeat(32), name: 'Chief' } } } }] as unknown as WindowGroup[];
   const resolve = (_host: string, providerId: string, nativeSessionId: string) => ref(providerId, nativeSessionId);
-  const rows = new Map<string, Uint8Array>();
   let runtime: TeamRuntime;
   const broker = new TeamBroker({ read: () => teams, now: Date.now, assertHost() {}, resolveSession: resolve,
     async change(update) { const draft = structuredClone(teams), result = structuredClone(update(draft)); teams = draft; return result; },
     async createSeat(_host, seat) { return runtime.create(seat); },
-    resources: new PortableTeamResourceStore({ storage: { async get(key) { return rows.get(key); }, async put(key, value) { rows.set(key, value); }, async delete(key) { rows.delete(key); },
-      async list(prefix) { return [...rows.keys()].filter(key => key.startsWith(prefix)); } } }),
     tasks: { capable: () => options.tasks === true, assertHost() { if (options.tasks !== true) throw new Error('Update the Controller to use tasks.'); } },
     // The account's bots: by default one, Chief, whose main session is `worker`, so its tasks have a bot as chief.
     assistants: { groups: () => groups, capable: () => options.tasks === true,

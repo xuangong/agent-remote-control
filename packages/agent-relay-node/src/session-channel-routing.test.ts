@@ -40,7 +40,7 @@ async function fixture() {
   const server = createProtocolValidationServer({
     providers: [createRecordedLabProvider().provider], labOrigin: origin,
     imageDirectory: join(directory, 'images'), resourceDirectory: join(directory, 'resources'),
-    teamResourceDirectory: join(directory, 'team'), successionStateDirectory: join(directory, 'successions'),
+    successionStateDirectory: join(directory, 'successions'),
   });
   cleanup.push(() => server.close());
   const { url } = await server.http.listen(0, '127.0.0.1');

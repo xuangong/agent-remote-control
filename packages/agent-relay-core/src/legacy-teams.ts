@@ -13,6 +13,24 @@ export const isOrdinaryTeam = (team: unknown): boolean => {
   const value = team as Partial<Team> | null;
   return !!value && typeof value === 'object' && !value.task && !value.link && !value.inbox && !value.room;
 };
+/**
+ * Files shared within a Team (uploads, grants and message attachments) were removed with the ordinary Teams that used them. A Team
+ * saved by an older Relay may still carry them; they are dropped when its state loads.
+ */
+const hasResources = (team: unknown): boolean => {
+  const value = team as { messages?: unknown } | null;
+  return !!value && typeof value === 'object' && (Object.hasOwn(value, 'resourceUploads') || Object.hasOwn(value, 'resourceGrants')
+    || Array.isArray(value.messages) && value.messages.some(message => !!message && typeof message === 'object' && Object.hasOwn(message, 'resources')));
+};
+/** The Team without its legacy resource fields; a Team that has none is returned itself. */
+export function withoutLegacyTeamResources<T>(team: T): T {
+  if (!hasResources(team)) return team;
+  const { resourceUploads: _uploads, resourceGrants: _grants, ...rest } = team as T & { resourceUploads?: unknown; resourceGrants?: unknown; messages?: Record<string, unknown>[] };
+  return { ...rest, ...(rest.messages ? { messages: rest.messages.map(({ resources: _resources, ...message }) => message) } : {}) } as T;
+}
+/** Whether some tenant still holds a Team with legacy resource fields. */
+export const hasLegacyTeamResources = (tenants: readonly Tenant[]): boolean => tenants.some(tenant => tenant.broker?.teams?.some(hasResources));
+
 /** The first rank-ordered slot for a group that gains a section: after every section the person ordered. */
 const NEW_SECTION_RANK = 'z';
 interface Broker { teams?: Team[] }

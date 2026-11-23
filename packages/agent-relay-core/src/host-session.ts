@@ -41,9 +41,16 @@ import { type BrokerScheduler } from './transport.js';
  * Ports: the scheduler (every timer), the clock, `RelayIds` (nonces, request and connection ids, tokens), `BrokerState`, the
  * journal service and its deletion, the previews registry, the Team broker's Host calls, the outbox, diagnostics.
  */
+/** The request id of a `team_request` for one of the Team file transfers this Relay no longer serves, if the frame is one. */
+function removedTeamResourceRequest(raw: string): string | undefined {
+  try {
+    const frame = JSON.parse(raw) as { type?: unknown; requestId?: unknown; call?: { action?: unknown } };
+    return frame.type === 'team_request' && typeof frame.requestId === 'string' && typeof frame.call?.action === 'string' && /^resource_(begin|chunk|finish|metadata|read)$/.test(frame.call.action) ? frame.requestId : undefined;
+  } catch { return undefined; }
+}
 export interface HostSessionGrants {
   enrollmentRequested?: 1 | 2 | 3;
-  teamRequested?: boolean; resourcesRequested?: boolean; recipientsRequested?: boolean;
+  teamRequested?: boolean; recipientsRequested?: boolean;
   statesRequested?: false | 1 | 2;
   successionRequested?: boolean;
   /** The Host asked for tasks, naming the providers whose sessions can be coordinators (they take the task tools). */
@@ -57,7 +64,7 @@ export interface HostSessionGrants {
 
 export interface HostSessionPorts {
   brokerState: BrokerState;
-  options: Pick<HostBrokerOptions, 'diagnostics' | 'rpcTimeoutMs' | 'creationTimeoutMs' | 'registrationDeadlineMs' | 'successionEnrollment' | 'outbox' | 'journalDeletionWaitMs' | 'journalRequestTimeoutMs' | 'teamResources' | 'onSessionStates'>;
+  options: Pick<HostBrokerOptions, 'diagnostics' | 'rpcTimeoutMs' | 'creationTimeoutMs' | 'registrationDeadlineMs' | 'successionEnrollment' | 'outbox' | 'journalDeletionWaitMs' | 'journalRequestTimeoutMs' | 'onSessionStates'>;
   accountBacked: boolean;
   heartbeat: { intervalMs: number; timeoutMs: number };
   now(): number;
@@ -145,7 +152,7 @@ export function createHostSession(ports: HostSessionPorts) {
     host.streams.clear();
   }
   function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, grants: HostSessionGrants) {
-    const { enrollmentRequested, teamRequested = false, resourcesRequested = false, recipientsRequested = false, statesRequested = false, successionRequested = false, tasksRequested = false, statusRequested = false, outboxRequested = false, journalRequested = 0, shownRequested = false, controlRequested = false } = grants;
+    const { enrollmentRequested, teamRequested = false, recipientsRequested = false, statesRequested = false, successionRequested = false, tasksRequested = false, statusRequested = false, outboxRequested = false, journalRequested = 0, shownRequested = false, controlRequested = false } = grants;
     let host: Host | undefined;
     let pendingCredential: {hash: string; value: DeviceCredential} | undefined;
     let issuing: Promise<void> | undefined;
@@ -201,7 +208,7 @@ export function createHostSession(ports: HostSessionPorts) {
           send: message => send(journalHost, message), diagnostic: (event, details) => diagnostic(journalHost, { event, ...details }),
           published: (sessionKey, result) => journalPublished(journalHost.id, sessionKey, result) })
         : undefined;
-      send(host, { uplinkVersion: 2, type: 'registered', ...(statesRequested ? { sessionStates: statesRequested } : {}), ...(host.outbox === 1 ? { outbox: 1 as const } : {}), ...(controlRequested ? { control: 1 as const } : {}), ...(host.journal ? { journal: JOURNAL_VERSION } : {}), ...(host.teamRecipients === 1 ? { teamRecipients: 1 } : {}), ...(host.teamSuccession === 1 ? { teamSuccession: 1 } : {}), ...(host.tasks === 1 ? { tasks: 1 as const } : {}), ...(host.teamManagement && resourcesRequested && options.teamResources ? {teamResources:true} : {}), ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion !== 1 ? { successionEnrollmentVersion: host.successionEnrollmentVersion } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
+      send(host, { uplinkVersion: 2, type: 'registered', ...(statesRequested ? { sessionStates: statesRequested } : {}), ...(host.outbox === 1 ? { outbox: 1 as const } : {}), ...(controlRequested ? { control: 1 as const } : {}), ...(host.journal ? { journal: JOURNAL_VERSION } : {}), ...(host.teamRecipients === 1 ? { teamRecipients: 1 } : {}), ...(host.teamSuccession === 1 ? { teamSuccession: 1 } : {}), ...(host.tasks === 1 ? { tasks: 1 as const } : {}), ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion !== 1 ? { successionEnrollmentVersion: host.successionEnrollmentVersion } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
       if (retired || host.socket !== socket) return;
       host.ready = true;
       host.control = controlRequested ? true : undefined;
@@ -249,7 +256,12 @@ export function createHostSession(ports: HostSessionPorts) {
       if (socket.readyState !== RELAY_SOCKET_OPEN || brokerState.keys.get(credentialHash) !== credential) return closeConnection(1008, 'Device credential revoked');
       if (context.connectionExpiresAt && Math.min(credential.expires, context.connectionExpiresAt() ?? credential.expires) <= now()) return closeConnection(credential.expires <= now() ? 1008 : (context.connectionExpiryCode?.() ?? 1008), 'Credential expired');
       const decoded = binary ? undefined : decodeRemoteHostUplinkMessage(raw.toString());
-      if (!decoded || decoded.status !== 'ok') return closeConnection(1008, 'Invalid uplink envelope');
+      if (decoded?.status !== 'ok') {
+        // An older Controller may still ask for the file transfers that were removed; it is told so and stays connected.
+        const removed = host && !binary ? removedTeamResourceRequest(raw.toString()) : undefined;
+        if (!removed) return closeConnection(1008, 'Invalid uplink envelope');
+        return send(host!, { uplinkVersion: 2, type: 'team_response', requestId: removed, status: 409, body: JSON.stringify({ error: 'Team file transfers are no longer available on this Relay.' }) });
+      }
       const message = decoded.value;
       if (!host) {
         if (message.type !== 'register' || credential.claimedAt !== undefined || credential.expires <= now() || (credential.installationId && credential.installationId !== message.installationId)) return closeConnection(1008, 'Registration is not authorized');

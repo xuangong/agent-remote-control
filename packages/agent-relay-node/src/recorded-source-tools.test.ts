@@ -13,7 +13,7 @@ it('creates a source-bound recorded session over HTTP and executes its fixed sou
   const origin = 'http://127.0.0.1:5175';
   const server = createProtocolValidationServer({
     providers: [provider], labOrigin: origin, successionStateDirectory: join(root, 'state'),
-    imageDirectory: join(root, 'images'), resourceDirectory: join(root, 'resources'), teamResourceDirectory: join(root, 'team-resources'),
+    imageDirectory: join(root, 'images'), resourceDirectory: join(root, 'resources'),
   });
   try {
     const { url } = await server.http.listen(0);

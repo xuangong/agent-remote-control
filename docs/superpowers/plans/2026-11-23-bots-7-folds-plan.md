@@ -34,14 +34,16 @@ Smallest and least shared first, so each fold leaves less for the next:
 ## 7c. Team
 
 - The Team roster loads in the workbench, not in the Teams panel.
-- A Team's Leader becomes an organizer and its members the bots it organizes: standing when they had their own conversation with
-  the person, temporary otherwise. Rooms already show in Chats.
+- Decided with the owner (2026-11-23): a Team's Leader becomes a bot that organizes the members shown in its group, which become
+  standing bots with the Leader recorded as their organizer. Members never shown stay plain sessions. Team inboxes and messages are
+  dropped. Rooms already show in Chats.
 - Deleted: the Team queue, inbox, `team_message`, the Teams panel and launcher; E7's Team case rewritten on bots.
 
 ## 7d. TPM
 
-- A TPM becomes a bot whose mission is its work; its intents become work items with their todo and confirmations, which complete
-  only by the person's Agree; `complete_work` retires the bots created for the item.
+- Decided with the owner (2026-11-23): history only. A TPM becomes a standing bot whose mission is its work; its intents stay
+  readable in its conversation and are not carried into work items. Tracking work need not be the work items: a goal tool or other
+  tools may serve later.
 - Deleted: `tpm_intent`, TPM delivery, workspace, launcher, the companions' heartbeat; TPM tests rewritten on bots.
 
 ## Checks

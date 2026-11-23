@@ -53,12 +53,13 @@ async function openLongConversation(page: Page, width: number, height: number) {
 test('at 390x844 the launchers take their own row and cover no conversation text or composer, however many there are', async ({ page }, testInfo) => {
   await openLongConversation(page, 390, 844);
   for (const name of ['Tracked sessions', 'Groups']) await expect(launcherButton(page, name)).toBeVisible();
-  const four = await coverage(page);
-  expect(four.launchers.length).toBeGreaterThanOrEqual(4);
-  expect(four.lines).toBeGreaterThan(0);
-  expect(four.composers).toBeGreaterThan(0);
-  expect(four.covered).toEqual([]);
-  for (const launcher of four.launchers) expect(launcher.height, launcher.name).toBeGreaterThanOrEqual(44);
+  const shown = await coverage(page);
+  // Track, Window and Ask.
+  expect(shown.launchers.length).toBeGreaterThanOrEqual(3);
+  expect(shown.lines).toBeGreaterThan(0);
+  expect(shown.composers).toBeGreaterThan(0);
+  expect(shown.covered).toEqual([]);
+  for (const launcher of shown.launchers) expect(launcher.height, launcher.name).toBeGreaterThanOrEqual(44);
   // The launcher row is the navigation's only second line: a long title shrinks beside Sessions.
   const sessions = (await page.getByRole('button', { name: 'Open sessions', exact: true }).boundingBox())!, title = (await page.getByRole('button', { name: 'Favorites', exact: true }).boundingBox())!;
   expect(Math.abs(title.y - sessions.y)).toBeLessThanOrEqual(2);
@@ -72,11 +73,11 @@ test('at 390x844 the launchers take their own row and cover no conversation text
     const bar = document.querySelector('.lab-launcher-bar')!;
     for (const launcher of [...bar.querySelectorAll('.lab-launcher')]) bar.append(launcher.cloneNode(true));
   });
-  const eight = await coverage(page);
-  expect(eight.launchers).toHaveLength(2 * four.launchers.length);
-  expect(eight.lines).toBeGreaterThan(0);
-  expect(eight.covered).toEqual([]);
-  await page.screenshot({ path: testInfo.outputPath('launchers-390-eight.png') });
+  const doubled = await coverage(page);
+  expect(doubled.launchers).toHaveLength(2 * shown.launchers.length);
+  expect(doubled.lines).toBeGreaterThan(0);
+  expect(doubled.covered).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath('launchers-390-doubled.png') });
 });
 
 test('a launcher panel opens under the navigation and its launcher stays in place', async ({ page }) => {

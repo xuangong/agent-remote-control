@@ -10,7 +10,7 @@ const group = (id: string, views: Array<[string, string, string]>, bots?: Window
     binding: { hostId, providerId: 'claude', nativeSessionId, title: `Session ${nativeSessionId}` } })) } as unknown as WindowGroup['window'],
   ...(bots ? { bots } : {}) });
 
-function fixture(options: { capable?: (hostId: string) => boolean; offline?: string } = {}) {
+function fixture(options: { capable?: (hostId: string) => boolean; offline?: string; coordinatorProvider?: (hostId: string, providerId: string) => boolean } = {}) {
   let state: SavedTeam[] = [], now = 100;
   const seats: TeamSeat[] = [];
   const groups = [group('g1', [['v1', 'mac', 'chief'], ['v2', 'pc', 'tracker'], ['v3', 'mac', 'quiet'], ['v4', 'mac', 'solo']], { rank: 'm', members: {
@@ -21,7 +21,7 @@ function fixture(options: { capable?: (hostId: string) => boolean; offline?: str
     change: async update => { const draft = structuredClone(state); const result = structuredClone(update(draft)); state = draft; return result; },
     createSeat: async (hostId, seat) => { if (hostId === options.offline) throw new Error('The Host is offline.'); seats.push(seat); return { ...seat.member, creation: 'ready', activity: 'idle', cwd: '/repo' }; },
     tasks: { capable: () => true, assertHost: () => {} },
-    assistants: { groups: () => groups, capable: options.capable ?? (() => true) },
+    assistants: { groups: () => groups, capable: options.capable ?? (() => true), ...(options.coordinatorProvider ? { coordinatorProvider: options.coordinatorProvider } : {}) },
   });
   const chief = { providerId: 'claude', nativeSessionId: 'chief' }, tracker = { providerId: 'claude', nativeSessionId: 'tracker' };
   const solo = { providerId: 'claude', nativeSessionId: 'solo' };
@@ -44,6 +44,13 @@ describe('assistants messaging one another', () => {
     const f = fixture();
     expect(await f.broker.hostCall('mac', { action: 'list_assistants', owner: f.chief })).toEqual({ assistants: [{ id: 'g1/v2', name: 'Tracker' }] });
     await expect(f.broker.hostCall('mac', { action: 'list_assistants', owner: { providerId: 'claude', nativeSessionId: 'worker' } })).rejects.toThrow('Only an assistant');
+  });
+
+  it('treats a coordinator whose provider cannot take the task tools on its Host as plain', async () => {
+    const f = fixture({ coordinatorProvider: hostId => hostId !== 'pc' });
+    expect(await f.broker.hostCall('mac', { action: 'list_assistants', owner: f.chief })).toEqual({ assistants: [] });
+    await expect(f.broker.hostCall('mac', { action: 'message_assistant', owner: f.chief, to: 'Tracker', text: 'Hello.', operationId: 'op' })).rejects.toThrow('Tracker is a plain assistant');
+    await expect(f.broker.hostCall('pc', { action: 'list_assistants', owner: f.tracker })).rejects.toThrow('plain mode');
   });
 
   it('delivers a framed message on a link of the two main sessions, once per operation', async () => {

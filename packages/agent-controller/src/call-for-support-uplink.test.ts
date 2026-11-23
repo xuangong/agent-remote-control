@@ -9,9 +9,10 @@ import { createAgentHost, type AgentHostDirectory } from './host.js';
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose(); });
 
-const registration = (providerId: string, readOnly: boolean) => ({
+const registration = (providerId: string, readOnly: boolean, toolNamespaces?: 'live' | 'creation' | 'attachment') => ({
   directory: { providerId, list: async () => [], workspaces: async () => [], create: async () => { throw new Error('Unused.'); }, open: async () => { throw new Error('Unused.'); } } satisfies AgentHostDirectory,
-  adapter: { descriptor: { providerId, displayName: providerId, ...(readOnly ? { sessionAccess: { readOnly: true as const } } : {}) },
+  adapter: { descriptor: { providerId, displayName: providerId, ...(readOnly ? { sessionAccess: { readOnly: true as const } } : {}),
+    ...(toolNamespaces ? { sessionExtensions: { instructions: true, tools: true, toolNamespaces } } : {}) },
     createSession: async () => { throw new Error('Unused.'); }, resumeSession: async () => { throw new Error('Unused.'); } },
 });
 
@@ -25,12 +26,15 @@ it('names read-only providers with the Call For Support request and keeps them o
   })));
   const root = await mkdtemp(join(tmpdir(), 'cfs-uplink-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
-  const host = createAgentHost({ installationId: 'cfs-uplink', name: 'Host', registrations: [registration('codex', true), registration('opencode', false)],
+  const host = createAgentHost({ installationId: 'cfs-uplink', name: 'Host', registrations: [registration('codex', true, 'creation'), registration('opencode', false), registration('claude', false, 'live'), registration('copilot', false, 'attachment')],
     team: { stateDirectory: root }, uplink: { url: `ws://127.0.0.1:${(server.address() as { port: number }).port}/ws/remote-host`, remoteKey: 'key' } });
   cleanup.push(() => host.close());
   const { url, register } = await connected;
   expect(url.searchParams.get('callForSupport')).toBe('1');
   expect(url.searchParams.getAll('readOnlyProvider')).toEqual(['codex']);
+  // Coordinators need the task tools as their mode changes: providers that take them live or declare them at creation, not at attachment.
+  expect(url.searchParams.get('tasks')).toBe('1');
+  expect(url.searchParams.getAll('coordinatorProvider')).toEqual(['codex', 'claude']);
   // Read-only providers are named in the request, not in the provider descriptors.
-  expect(register.providers).toEqual([{ providerId: 'codex', displayName: 'codex', sessionCommands: true }, { providerId: 'opencode', displayName: 'opencode', sessionCommands: true }]);
+  expect(register.providers).toEqual(['codex', 'opencode', 'claude', 'copilot'].map(providerId => ({ providerId, displayName: providerId, sessionCommands: true })));
 });

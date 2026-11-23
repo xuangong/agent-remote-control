@@ -85,6 +85,8 @@ export interface RemoteHostUplinkClientOptions {
    * They travel in the connection's query, which older Relays ignore, never in the provider descriptors they validate strictly.
    */
   readonly readOnlyProviders?: readonly string[];
+  /** Providers whose sessions take the task tools, so their assistants can be coordinators; sent with the tasks request, in the query too. */
+  readonly coordinatorProviders?: readonly string[];
   readonly providers?: readonly { providerId: string; displayName: string; promptEditing?: true; sessionRename?: true; sessionReferences?: true; referenceNotes?: true; sessionCommands?: true; daemonControl?: true }[];
   readonly providerChanges?: { current(): NonNullable<RemoteHostUplinkClientOptions['providers']>; subscribe(listener: () => void): () => void };
   readonly remoteKey: string;
@@ -214,7 +216,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     endpoint.searchParams.set('control', '1');
     if (options.journal) endpoint.searchParams.set('journal', String(JOURNAL_VERSION));
     if (options.journal?.shown) endpoint.searchParams.set('journalShown', '1');
-    if (options.teamManagement) { endpoint.searchParams.set('team', '1'); endpoint.searchParams.set('teamInbox', '1'); endpoint.searchParams.set('teamRecipients', '1'); endpoint.searchParams.set('teamSuccession', '1'); endpoint.searchParams.set('teamResources', '1'); if (options.callForSupport) { endpoint.searchParams.set('callForSupport', '1'); for (const providerId of options.readOnlyProviders ?? []) endpoint.searchParams.append('readOnlyProvider', providerId); if (options.tasks) endpoint.searchParams.set('tasks', '1'); } }
+    if (options.teamManagement) { endpoint.searchParams.set('team', '1'); endpoint.searchParams.set('teamInbox', '1'); endpoint.searchParams.set('teamRecipients', '1'); endpoint.searchParams.set('teamSuccession', '1'); endpoint.searchParams.set('teamResources', '1'); if (options.callForSupport) { endpoint.searchParams.set('callForSupport', '1'); for (const providerId of options.readOnlyProviders ?? []) endpoint.searchParams.append('readOnlyProvider', providerId); if (options.tasks) { endpoint.searchParams.set('tasks', '1'); for (const providerId of options.coordinatorProviders ?? []) endpoint.searchParams.append('coordinatorProvider', providerId); } } }
     const socket: UplinkSocket = (options.connect ?? connectWebSocket)(endpoint, { authorization: `Bearer ${remoteKey}`, maxPayload: UPLINK_MAX_FRAME_BYTES, handshakeTimeout: registrationTimeout });
     let registered = false;
     let registeredHostId: string | undefined;

@@ -22,6 +22,8 @@ export interface AssistantPorts {
   groups(): readonly WindowGroup[];
   /** The Host runs links; others never see them. */
   capable(hostId: string): boolean;
+  /** The Host gives this provider's sessions the task tools, so its assistants can be coordinators; absent, every provider can. */
+  coordinatorProvider?(hostId: string, providerId: string): boolean;
 }
 type ListCall = Extract<TeamHostCall, { action: 'list_assistants' }>;
 type MessageCall = Extract<TeamHostCall, { action: 'message_assistant' }>;
@@ -35,12 +37,15 @@ const fail = (message: string): never => { throw new Error(message); };
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const fold = (text: string) => text.trim().toLocaleLowerCase('en');
 
-/** The account's assistants: every bot view, named by the account's naming rule, with the session it shows now. */
-export function accountDirectory(groups: readonly WindowGroup[]): Assistant[] {
+/**
+ * The account's assistants: every bot view, named by the account's naming rule, with the session it shows now. One in coordinator
+ * mode whose provider cannot take the task tools works as a plain one.
+ */
+export function accountDirectory(groups: readonly WindowGroup[], coordinatorProvider: AssistantPorts['coordinatorProvider'] = () => true): Assistant[] {
   const names = assistantNamesIn(accountAssistants(groups), 'en');
   return groups.flatMap(group => botViews(group).map(view => {
     const key = viewAssistantKey(group.window.id, view.id), details = group.bots?.members[view.id];
-    return { key, name: names.get(key) ?? view.binding.title, ...(details?.label ? { label: details.label } : {}), hidden: details?.hidden === true, coordinator: details?.mode === 'coordinator',
+    return { key, name: names.get(key) ?? view.binding.title, ...(details?.label ? { label: details.label } : {}), hidden: details?.hidden === true, coordinator: details?.mode === 'coordinator' && coordinatorProvider(view.binding.hostId, view.binding.providerId),
       hostId: view.binding.hostId, providerId: view.binding.providerId, nativeSessionId: view.binding.nativeSessionId };
   }));
 }
@@ -76,23 +81,23 @@ export class AssistantMessages {
     return coordinatorCaller(this.broker.ports.resolveSession, hostId, owner, directory);
   }
   /** Throws unless the session is the main session of an assistant in coordinator mode. */
-  assertCoordinator(hostId: string, owner: ListCall['owner']): void { this.caller(hostId, owner, accountDirectory(this.ports.groups())); }
+  assertCoordinator(hostId: string, owner: ListCall['owner']): void { this.caller(hostId, owner, accountDirectory(this.ports.groups(), this.ports.coordinatorProvider)); }
   /** The main sessions of the Host's coordinators, as the sessions that hold their role now: the Controller offers them the task tools. */
   coordinators(hostId: string): Array<{ providerId: string; nativeSessionId: string }> {
     if (!this.ports.capable(hostId)) return [];
-    return accountDirectory(this.ports.groups()).filter(item => item.coordinator && item.hostId === hostId).flatMap(item => {
+    return accountDirectory(this.ports.groups(), this.ports.coordinatorProvider).filter(item => item.coordinator && item.hostId === hostId).flatMap(item => {
       try { const current = this.broker.ports.resolveSession(item.hostId, item.providerId, item.nativeSessionId); return [{ providerId: current.providerId, nativeSessionId: current.nativeSessionId }]; }
       catch { return []; }
     });
   }
   list(hostId: string, call: ListCall): { assistants: Array<{ id: string; name: string; label?: string }> } {
     if (!this.ports.capable(hostId)) fail('Update the Controller to message assistants.');
-    const directory = accountDirectory(this.ports.groups()), self = this.caller(hostId, call.owner, directory);
+    const directory = accountDirectory(this.ports.groups(), this.ports.coordinatorProvider), self = this.caller(hostId, call.owner, directory);
     return { assistants: directory.filter(item => item.key !== self.key && !item.hidden && item.coordinator).map(item => ({ id: item.key, name: item.name, ...(item.label ? { label: item.label } : {}) })) };
   }
   async message(hostId: string, call: MessageCall): Promise<{ messageId: string; outcome: 'delivered' | 'held' }> {
     if (!this.ports.capable(hostId)) fail('Update the Controller to message assistants.');
-    const directory = accountDirectory(this.ports.groups()), from = this.caller(hostId, call.owner, directory);
+    const directory = accountDirectory(this.ports.groups(), this.ports.coordinatorProvider), from = this.caller(hostId, call.owner, directory);
     const to = namedAssistant(directory, call.to, from);
     const sent = await this.broker.change(teams => {
       const now = this.broker.ports.now();

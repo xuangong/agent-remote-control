@@ -45,11 +45,11 @@ const sheet = () => document.querySelector<HTMLDialogElement>('dialog.orchard-sh
 async function type(input: HTMLInputElement, value: string) {
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
 }
-async function open(name: string, groups: Parameters<typeof seedGroup>[1][], place: string) {
+async function open(name: string, groups: Parameters<typeof seedGroup>[1][], place: string, host?: { coordinator?: boolean }) {
   const scope = `http://localhost/${name}/`;
   for (const group of groups) seedGroup(scope, group);
   history.replaceState(null, '', place);
-  const app = await mountBotApp(scope, { hosted: true });
+  const app = await mountBotApp(scope, { hosted: true, ...(host ? { host } : {}) });
   await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
   return app;
 }
@@ -256,7 +256,7 @@ it("chooses the process mode for this assistant, keeping its other details, and 
 
 it('switches an existing bot, plain until then, to coordinator and back, keeping its other details', async () => {
   const group = botGroup('A'); group.bots!.members.A1 = { name: 'A1', label: 'Reviewer' };
-  const app = await open('bot-details-mode', [group], '/?mode=bot&section=A&bot=A1');
+  const app = await open('bot-details-mode', [group], '/?mode=bot&section=A&bot=A1', { coordinator: true });
   try {
     const details = () => app.container.querySelector<HTMLElement>('.lab-assistant-details')!;
     const control = () => details().querySelector<HTMLElement>('[aria-label="Working style"]')!;
@@ -267,6 +267,15 @@ it('switches an existing bot, plain until then, to coordinator and back, keeping
     await until(() => expect(details().querySelector('.lab-assistant-hint')?.textContent).toContain('Starts tasks'));
     await act(async () => visibleButton(control(), 'Plain').click());
     await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ name: 'A1', label: 'Reviewer' }));
+  } finally { await app.close(); }
+});
+
+it('offers no working style for an assistant whose provider cannot be a coordinator on its Host', async () => {
+  const group = botGroup('A'); group.bots!.members.A1 = { name: 'A1', mode: 'coordinator' };
+  const app = await open('bot-details-no-mode', [group], '/?mode=bot&section=A&bot=A1');
+  try {
+    await until(() => expect(app.container.querySelector('.lab-assistant-details [aria-label="This assistant"]')).not.toBeNull());
+    expect(app.container.querySelector('.lab-assistant-details [aria-label="Working style"]')).toBeNull();
   } finally { await app.close(); }
 });
 

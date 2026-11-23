@@ -1,7 +1,8 @@
 // What the Workbench knows of a Host and how it pairs one: the types every feature reads, served by the Relay's Host routes.
 import type { HostProviderChange, HostProviderSettings, CodexDaemonRestart, CodexDaemonStatus, ControllerIdentity, ControllerReleaseDiscovery, ControllerUpdateStatus, HostEnvironment, HostStatus, PairingPurpose } from '@orchardworks/agent-remote-protocol';
 
-export interface HostProvider { providerId: string; displayName: string; daemonControl?: true; sessionRename?: true; sessionReferences?: true; referenceNotes?: true; sessionCommands?: true }
+/** coordinator: the Host runs tasks and gives this provider's sessions the task tools, so its assistants can be coordinators. */
+export interface HostProvider { providerId: string; displayName: string; coordinator?: true; daemonControl?: true; sessionRename?: true; sessionReferences?: true; referenceNotes?: true; sessionCommands?: true }
 export interface RemoteHost {
   id: string; name: string; online: boolean; managed?: boolean; providers?: HostProvider[]; providerId?: string;
   controller?: ControllerIdentity;

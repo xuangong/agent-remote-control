@@ -52,7 +52,8 @@ export function useAgentCreation(scope: Pick<AppInputs & HostAndStackSlice & Vie
         setDirectoryRevision((current) => current + 1);
         // The session exists now: a group that is not confirmed stays in the roster with Retry.
         setNewBot({ open: false });
-        const created = await windowWorkspace.createBotGroup(windowSessionBinding(session));
+        const coordinator = !!selectedHost.providers?.some(provider => provider.providerId === reservation.providerId && provider.coordinator);
+        const created = await windowWorkspace.createBotGroup(windowSessionBinding(session), coordinator);
         navigation.select({ kind: 'bot', groupId: created.groupId, viewId: created.viewId });
         return;
       }

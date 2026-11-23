@@ -57,8 +57,8 @@ export async function readBody(request: Request): Promise<Record<string, unknown
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new BrokerError(400, 'invalid_request', 'The request body must be an object.');
   return value as Record<string, unknown>;
 }
-/** The read-only providers a Host named with its Call For Support request: at most 64 valid identities, the rest ignored. */
-export function readOnlyProviders(values: string[]): string[] {
+/** Providers a Host names in its handshake (read-only, coordinator): at most 64 valid identities, the rest ignored. */
+export function namedProviders(values: string[]): string[] {
   return [...new Set(values.filter(value => value.trim() && value.length <= 512))].slice(0, 64);
 }
 

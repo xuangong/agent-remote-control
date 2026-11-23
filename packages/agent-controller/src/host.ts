@@ -153,7 +153,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     const current = fence.begin();
     return { superseded: false, client: (options.uplinkClient ?? createRemoteHostUplinkClient)({ relay: runtime.relay, installationId: options.installationId, name: options.name, environment: options.environment, controller: options.controller?.identity,
       ...(options.team ? { teamManagement: true, callForSupport: true, tasks: true,
-        readOnlyProviders: options.registrations.filter(({ adapter }) => adapter.descriptor.sessionAccess?.readOnly).map(({ adapter }) => adapter.descriptor.providerId) } : {}),
+        readOnlyProviders: options.registrations.filter(({ adapter }) => adapter.descriptor.sessionAccess?.readOnly).map(({ adapter }) => adapter.descriptor.providerId),
+        // A provider can be a coordinator's when its sessions get the task tools as the mode changes: during the session (live) or declared at creation.
+        coordinatorProviders: options.registrations.filter(({ adapter }) => ['live', 'creation'].includes(adapter.descriptor.sessionExtensions?.toolNamespaces ?? '')).map(({ adapter }) => adapter.descriptor.providerId) } : {}),
       ...(options.tpm ? { tpmManagement: true } : {}),
       hostStatus: true,
       ...(runtime.outbox ? { outbox: {

@@ -58,6 +58,8 @@ export type Host = {
   tasks?: 1;
   /** Providers the Host named, with its Call For Support request, as enforcing read-only sessions natively. */
   readOnlyProviders?: string[];
+  /** Providers the Host named, with its tasks request, as taking the task tools: their assistants can be coordinators. */
+  coordinatorProviders?: string[];
   connectionId?: string; stopDiagnostics?(): void;
   pairingPurpose?: PairingPurpose;
   environment?: HostEnvironment;

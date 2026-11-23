@@ -41,7 +41,10 @@ export function createHostViews({ brokerState, access, accountBacked, ownerSubje
     });
   }
   function visibleHosts(subject?: string) {
-    return [...brokerState.hosts.values()].filter(host => hostAllowed(host.id, subject)).map(({ id, name, providers, legacyDsh, socket, ready, credentialRotation, environment, controller, providerManagement, tpmManagement, teamManagement, hostStatus, outbox, control }) => ({
+    return [...brokerState.hosts.values()].filter(host => hostAllowed(host.id, subject)).map(({ id, name, providers: named, legacyDsh, socket, ready, credentialRotation, environment, controller, providerManagement, tpmManagement, teamManagement, hostStatus, outbox, control, tasks, coordinatorProviders }) => {
+    // A provider whose assistants can be coordinators: the Host runs tasks and gives that provider's sessions the task tools.
+    const providers = named.map(provider => tasks === 1 && coordinatorProviders?.includes(provider.providerId) ? { ...provider, coordinator: true as const } : provider);
+    return {
       ...(outbox ? { outbox } : {}),
       ...(control ? { sessionControl: true as const } : {}),
       ...(teamManagement ? { teamManagement } : {}),
@@ -55,7 +58,8 @@ export function createHostViews({ brokerState, access, accountBacked, ownerSubje
       ...(ownerSubject ? { access: owner(subject) ? 'owner' as const : 'shared' as const } : {}),
       ...(!owner(subject) && subject ? { sessionQuota: brokerState.sharing.quota(id, subject) } : {}),
       ...(legacyDsh ? { providerId: 'dsh' } : providers.length === 1 ? { providerId: providers[0]!.providerId } : {}),
-    }));
+    };
+    });
   }
   return { receiveSessionStates, sessionStates, visibleHosts };
 }

@@ -44,6 +44,8 @@ export function useLettersVisible(): [boolean, (visible: boolean) => void] {
 /** An assistant whose bot details the reader may change: its stored details and how to replace them (`bot.update`). */
 export interface ProcessAssistant {
   readonly details: WindowBotDetails | undefined;
+  /** Its provider can be a coordinator's on its Host, so the details offer coordinator and plain mode. */
+  readonly coordinatorAvailable?: boolean;
   update(details: WindowBotDetails): void;
 }
 

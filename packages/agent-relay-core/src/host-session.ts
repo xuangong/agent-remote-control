@@ -7,7 +7,6 @@ import { retainedRecoveryInstallations } from './host-recovery.js';
 import { relayDiagnosticsForVersion, RELAY_DIAGNOSTIC_PATH, type RelayDiagnostic } from '@orchardworks/agent-remote-protocol/model';
 import { BROKER_MAX_FRAME_BYTES, RELAY_SOCKET_OPEN, type BrokerRequestContext, type RelaySocket } from './transport.js';
 import { createJournalConnection, isJournalHostMessage } from './journal-uplink.js';
-import { readOnlyProviders } from './request-input.js';
 import { diagnosticOperation, diagnosticCloseReason } from './host-diagnostics.js';
 import { BrokerError, type DeviceCredential, type Host, type HostBrokerOptions, type RpcResponse } from './broker-types.js';
 import { type BrokerState } from './broker-state.js';
@@ -48,7 +47,8 @@ export interface HostSessionGrants {
   statesRequested?: false | 1 | 2;
   successionRequested?: boolean;
   callForSupportRequested?: false | string[];
-  tasksRequested?: boolean;
+  /** The Host asked for tasks, naming the providers whose sessions can be coordinators (they take the task tools). */
+  tasksRequested?: false | string[];
   statusRequested?: boolean; outboxRequested?: boolean;
   journalRequested?: 0 | typeof JOURNAL_VERSION;
   /** The Controller takes the sessions pages show (`journalShown=1`), with the journal grant. */
@@ -283,6 +283,7 @@ export function createHostSession(ports: HostSessionPorts) {
           const next = { id: existing?.id ?? recovery?.hostId ?? ids.uuid(), installationId: message.installationId, name: message.name, environment: message.environment, controller: message.controller, providerManagement: message.providerManagement, tpmManagement: message.tpmManagement, teamManagement: teamRequested ? true as const : undefined, teamRecipients: teamRequested && recipientsRequested ? 1 as const : undefined, teamSuccession: teamRequested && recipientsRequested && successionRequested ? 1 as const : undefined, callForSupport: teamRequested && recipientsRequested && successionRequested && callForSupportRequested ? 1 as const : undefined,
             tasks: teamRequested && recipientsRequested && successionRequested && callForSupportRequested && tasksRequested ? 1 as const : undefined,
             readOnlyProviders: teamRequested && recipientsRequested && successionRequested && callForSupportRequested ? callForSupportRequested : undefined, pairingPurpose: purpose,
+            coordinatorProviders: teamRequested && recipientsRequested && successionRequested && callForSupportRequested && tasksRequested ? tasksRequested : undefined,
             outbox: outboxRequested && options.outbox ? 1 as const : undefined,
             ...(existing?.gatewayKeyRequested ? { gatewayKeyRequested: true } : {}),
             ...(existing?.smartReading ? { smartReading: existing.smartReading } : {}),

@@ -74,6 +74,7 @@ export const identityContribution = (inputs: IdentityContributionInputs) => (vie
   };
   const processAssistant = botGroupId && botViewId ? {
     details: botDetails,
+    coordinatorAvailable: !!host?.providers?.some(provider => provider.providerId === source.providerId && provider.coordinator),
     update: (next: WindowBotDetails) => { void windowWorkspace.operateGroup(botGroupId, { type: 'bot.update', viewId: botViewId, details: next }).catch(error => setSessionNotice(sessionConnectionFailure(error, false, t))); },
   } : undefined;
   return {

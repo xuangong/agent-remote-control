@@ -46,6 +46,8 @@ modules; `pnpm verify:changed` per commit; a real session in `pnpm local` for ea
   created a task whose result came back. A new Codex assistant found the deferred `create_task`, and the result came back. A new
   Copilot assistant got no tools: Copilot takes tools only when it attaches, it attached before its bot was written as a
   coordinator, and the Controller never releases a Copilot session, so no later attachment brings them.
+  Decision: coordinator mode only where the provider takes tools live or at creation; the Controller names them
+  (`coordinatorProvider`), the Relay treats other coordinators as plain, and the page offers the switch only for them (O70).
 - [ ] PR, independent review, Relay deployed before the Controllers.
 
 ## M5: one queue and the older mechanisms (T0, T5)

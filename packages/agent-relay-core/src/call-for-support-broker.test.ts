@@ -40,6 +40,15 @@ it('acknowledges Call For Support only for a Host that also follows Team recipie
   expect((await register('team=1&teamRecipients=1&teamSuccession=1')).message).not.toHaveProperty('callForSupport');
 });
 
+it('marks the providers whose assistants can be coordinators, only for a Host that runs tasks', async () => {
+  const tasks = await register('team=1&teamRecipients=1&teamSuccession=1&callForSupport=1&tasks=1&coordinatorProvider=codex');
+  expect(tasks.message).toMatchObject({ tasks: 1 });
+  expect(tasks.hosts[0].providers).toEqual([{ providerId: 'codex', displayName: 'Codex', coordinator: true }, { providerId: 'opencode', displayName: 'OpenCode' }]);
+  const without = await register('team=1&teamRecipients=1&teamSuccession=1&coordinatorProvider=codex&tasks=1');
+  expect(without.message).not.toHaveProperty('tasks');
+  expect(without.hosts[0].providers).toEqual([{ providerId: 'codex', displayName: 'Codex' }, { providerId: 'opencode', displayName: 'OpenCode' }]);
+});
+
 it('serves profiles and session enablement to the account owner and keeps them across a restart', async () => {
   let saved: RemoteHostBrokerState | undefined;
   const initialState: RemoteHostBrokerState = { keys: [], hosts: [{ id: 'mac', installationId: 'controller', name: 'Mac', providers: [{ providerId: 'codex', displayName: 'Codex' }], legacyDsh: false }],

@@ -8,9 +8,12 @@ export interface AssistantModeChoice {
   choose(mode: AssistantMode): void;
 }
 
-/** The mode stored in the bot's details, absent meaning plain, and how to change it; undefined for a view that is no assistant. */
+/**
+ * The mode stored in the bot's details, absent meaning plain, and how to change it; undefined for a view that is no assistant, or
+ * whose provider cannot be a coordinator's on its Host.
+ */
 export function assistantModeChoice(assistant: ProcessAssistant | undefined): AssistantModeChoice | undefined {
-  if (!assistant) return undefined;
+  if (!assistant?.coordinatorAvailable) return undefined;
   return {
     mode: assistant.details?.mode === 'coordinator' ? 'coordinator' : 'plain',
     choose(mode) {

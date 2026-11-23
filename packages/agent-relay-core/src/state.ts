@@ -1,6 +1,6 @@
 import { validWindowState, type SavedWorkspaceWindow } from './window-workspaces.js';
 import { migrateBots, needsBotMigration, validBots, type SavedBot } from './bot-store.js';
-import { dropLegacyTeams, hasLegacyTeamResources, hasLegacyTeams, withoutLegacyTeamResources } from './legacy-teams.js';
+import { dropLegacyTeams, hasLegacyTeamResources, hasLegacyTeams, isOrdinaryTeam, withoutLegacyTeamResources } from './legacy-teams.js';
 import { ACCOUNT_TEAM_LIMIT, validSavedTeam } from './team-delivery.js';
 import { validFavoritesSuccession, type FavoritesSuccessionProgress } from './favorites-succession.js';
 import { validBrokerAssociations, migrateBrokerAssociations } from './succession-associations.js';
@@ -122,7 +122,7 @@ function validJournalDeletions(value: unknown): value is string[] {
 function validBroker(value: unknown): value is RemoteHostBrokerState {
   if (!record(value) || !Array.isArray(value.keys) || value.keys.length > 128 || !Array.isArray(value.hosts) || value.hosts.length > 128 ||
     !Array.isArray(value.bindings) || value.bindings.length > 4096 || !Array.isArray(value.creations) || value.creations.length > 4096) return false;
-  if (value.teams !== undefined && (!Array.isArray(value.teams) || value.teams.length > ACCOUNT_TEAM_LIMIT || !value.teams.every((team: unknown) => legacySupportTeam(team) || validSavedTeam(withoutLegacyTeamResources(team))) || !unique(value.teams, (team: {id:string}) => team.id))) return false;
+  if (value.teams !== undefined && (!Array.isArray(value.teams) || value.teams.length > ACCOUNT_TEAM_LIMIT || !value.teams.every((team: unknown) => legacySupportTeam(team) || isOrdinaryTeam(team) || validSavedTeam(withoutLegacyTeamResources(team))) || !unique(value.teams, (team: {id:string}) => team.id))) return false;
   if (value.chains !== undefined && !validChains(value.chains)) return false;
   if (value.chainThresholds !== undefined && !isChainThresholds(value.chainThresholds)) return false;
   if (value.associations !== undefined) { try { migrateBrokerAssociations(value.associations); } catch { return false; } }
@@ -300,8 +300,8 @@ function migrateRelayState(value: HostedRelayState): HostedRelayState {
     if (broker.teams) broker.teams = broker.teams.filter(team => !legacySupportTeam(team)).map(withoutLegacyTeamResources);
   }
   if (migrated.workspaceWindows) for (const row of migrated.workspaceWindows) if (row.window) row.window = decodeWorkspaceWindow(row.window)!;
+  if (hasLegacyTeams(migrated.tenants, migrated.workspaceWindows)) dropLegacyTeams(migrated.tenants, migrated.workspaceWindows ?? []);
   if (migrated.workspaceWindows && needsBotMigration(migrated.workspaceWindows)) migrateBots(migrated.workspaceWindows, migrated.bots ??= [], Date.now());
-  if (hasLegacyTeams(migrated.tenants)) dropLegacyTeams(migrated.tenants, migrated.workspaceWindows ??= [], migrated.bots ??= [], Date.now());
   delete migrated.sessionSuccessions;
   return migrated;
 }
@@ -325,7 +325,7 @@ export function checkedRelayState(value: unknown, auth: HostedAuthOptions): Host
     }
     return result;
   };
-  if (Object.hasOwn(value, 'sessionSuccessions') || hasLegacySupport(value) || hasLegacyTeams(value.tenants) || hasLegacyTeamResources(value.tenants) || value.workspaceWindows?.some(row => !normalized(row)) || (value.workspaceWindows !== undefined && needsBotMigration(value.workspaceWindows))) return migrateRelayState(value);
+  if (Object.hasOwn(value, 'sessionSuccessions') || hasLegacySupport(value) || hasLegacyTeams(value.tenants, value.workspaceWindows) || hasLegacyTeamResources(value.tenants) || value.workspaceWindows?.some(row => !normalized(row)) || (value.workspaceWindows !== undefined && needsBotMigration(value.workspaceWindows))) return migrateRelayState(value);
   return value;
 }
 /** Only the authenticated Node file adapter calls this explicit v1 migration. */

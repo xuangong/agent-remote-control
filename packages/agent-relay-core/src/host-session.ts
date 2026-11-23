@@ -41,13 +41,6 @@ import { type BrokerScheduler } from './transport.js';
  * Ports: the scheduler (every timer), the clock, `RelayIds` (nonces, request and connection ids, tokens), `BrokerState`, the
  * journal service and its deletion, the previews registry, the Team broker's Host calls, the outbox, diagnostics.
  */
-/** The request id of a `team_request` for one of the Team file transfers this Relay no longer serves, if the frame is one. */
-function removedTeamResourceRequest(raw: string): string | undefined {
-  try {
-    const frame = JSON.parse(raw) as { type?: unknown; requestId?: unknown; call?: { action?: unknown } };
-    return frame.type === 'team_request' && typeof frame.requestId === 'string' && typeof frame.call?.action === 'string' && /^resource_(begin|chunk|finish|metadata|read)$/.test(frame.call.action) ? frame.requestId : undefined;
-  } catch { return undefined; }
-}
 export interface HostSessionGrants {
   enrollmentRequested?: 1 | 2 | 3;
   teamRequested?: boolean; recipientsRequested?: boolean;
@@ -256,12 +249,7 @@ export function createHostSession(ports: HostSessionPorts) {
       if (socket.readyState !== RELAY_SOCKET_OPEN || brokerState.keys.get(credentialHash) !== credential) return closeConnection(1008, 'Device credential revoked');
       if (context.connectionExpiresAt && Math.min(credential.expires, context.connectionExpiresAt() ?? credential.expires) <= now()) return closeConnection(credential.expires <= now() ? 1008 : (context.connectionExpiryCode?.() ?? 1008), 'Credential expired');
       const decoded = binary ? undefined : decodeRemoteHostUplinkMessage(raw.toString());
-      if (decoded?.status !== 'ok') {
-        // An older Controller may still ask for the file transfers that were removed; it is told so and stays connected.
-        const removed = host && !binary ? removedTeamResourceRequest(raw.toString()) : undefined;
-        if (!removed) return closeConnection(1008, 'Invalid uplink envelope');
-        return send(host!, { uplinkVersion: 2, type: 'team_response', requestId: removed, status: 409, body: JSON.stringify({ error: 'Team file transfers are no longer available on this Relay.' }) });
-      }
+      if (!decoded || decoded.status !== 'ok') return closeConnection(1008, 'Invalid uplink envelope');
       const message = decoded.value;
       if (!host) {
         if (message.type !== 'register' || credential.claimedAt !== undefined || credential.expires <= now() || (credential.installationId && credential.installationId !== message.installationId)) return closeConnection(1008, 'Registration is not authorized');

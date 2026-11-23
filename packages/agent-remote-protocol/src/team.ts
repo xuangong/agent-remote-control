@@ -186,9 +186,8 @@ export type TeamSeat = Static<typeof TeamSeat>;
 /** What a member of a temporary bot's Team may carry about how its session works; any other member carries none. */
 const workerFields = ['model', 'reasoningEffort', 'access', 'workspace'] as const;
 const plainMember = (member: TeamMember) => workerFields.every(field => member[field] === undefined);
-/** A task has its worker and then its owner; an inbox, a link and a room bind main sessions; an ordinary Team has no requester. */
+/** A task has its worker and then its owner; an inbox, a link and a room bind main sessions. A Team is one of these four. */
 const validShape = (value: Team) => {
-  const requesters = value.members.filter(member => member.role === 'requester');
   if (value.inbox) return !value.task && !value.link && !value.room && value.members.length === 1
     // Bound where the bot already is (requester), or created for a bot another bot made (leader).
     && (value.members[0]!.role === 'requester' || value.members[0]!.role === 'leader') && plainMember(value.members[0]!);
@@ -196,7 +195,7 @@ const validShape = (value: Team) => {
   if (value.link) return !value.task && value.members.length === 2 && value.members.every(member => member.role === 'requester' && plainMember(member));
   if (value.task) return isTeamTask(value.task) && value.members.length === 2 && value.members[1]!.role === 'requester' && plainMember(value.members[1]!)
     && (value.members[0]!.workspace === undefined || value.members[0]!.workspace.kind === 'worktree');
-  return !requesters.length && value.members.every(plainMember);
+  return false;
 };
 export const isTeam = (value: unknown): value is Team => Value.Check(Team, value)
   // A link binds two main sessions; every other Team starts with its Leader.

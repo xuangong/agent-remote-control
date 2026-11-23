@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import { expect, it } from 'vitest';
 import { createWindowView, type Team, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { emptyRelayState, validateRelayState, type HostedRelayState } from './state.js';
-import { migrationBotId } from './bot-store.js';
 import { isOrdinaryTeam } from './legacy-teams.js';
 
 const auth = { origin: 'https://relay.example', issuer: 'https://issuer.example', secret: 'legacy-teams-test-secret-0123456789' };
@@ -23,42 +22,20 @@ function state(teams: Team[], row: Record<string, unknown> = {}): HostedRelaySta
       broker: { keys: [], bindings: [], creations: [], hosts: [{ id: 'mac', installationId: 'machine', name: 'Machine', providers: [{ providerId: 'claude', displayName: 'Claude' }], legacyDsh: false }], teams: teams as never } }] };
 }
 
-it('makes the Leader of an ordinary Team the chief of the members its group shows', () => {
+it('loads state that holds an ordinary Team without it, its views plain, and keeps the Teams bots are delivered through', () => {
   const loaded = validateRelayState(state([ordinary, inbox], { bots: { rank: 'm', members: {} } }), auth);
   expect(loaded.tenants[0]!.broker.teams!.map(item => item.id)).toEqual(['inbox']);
   const views = loaded.workspaceWindows![0]!.window!.views;
   expect(views.every(view => view.feature === undefined && view.bindingPolicy === undefined)).toBe(true);
-  const chief = migrationBotId('owner', 'g1', 'vl'), staff = migrationBotId('owner', 'g1', 'va');
-  expect(loaded.workspaceWindows![0]!.bots!.members).toEqual({ vl: { botId: chief }, va: { botId: staff } });
-  expect(loaded.bots).toHaveLength(2);
-  expect(loaded.bots!.find(bot => bot.botId === chief)).toMatchObject({ subject: 'owner', name: 'Team t1', chief: { kind: 'person' }, lifetime: 'standing' });
-  expect(loaded.bots!.find(bot => bot.botId === staff)).toMatchObject({ name: 'Windows check', mission: 'Verify on Windows', chief: { kind: 'bot', botId: chief } });
-  // The member the group never showed stays a plain session: it is nowhere in the bots.
-  expect(JSON.stringify(loaded)).not.toContain('"native-b"');
-});
-
-it('migrates a group without a section, and once: the loaded state loads unchanged', () => {
-  const loaded = validateRelayState(state([ordinary]), auth);
-  expect(loaded.workspaceWindows![0]!.bots!.members).toEqual({ vl: { botId: migrationBotId('owner', 'g1', 'vl') }, va: { botId: migrationBotId('owner', 'g1', 'va') } });
-  expect(validateRelayState(structuredClone(loaded), auth)).toEqual(loaded);
-});
-
-it('keeps the bot a Team session already was, and gives it its chief', () => {
-  const loaded = validateRelayState(state([ordinary], { bots: { rank: 'm', members: { va: { name: 'Mine', mission: 'My own' } } } }), auth);
-  const records = loaded.bots!;
-  expect(records.find(bot => bot.botId === loaded.workspaceWindows![0]!.bots!.members.va!.botId)).toMatchObject({ name: 'Mine', mission: 'My own', chief: { kind: 'bot' } });
-});
-
-it('only tags the views of a group that is hidden in Bot mode', () => {
-  const loaded = validateRelayState(state([ordinary], { presentation: { bots: false } }), auth);
-  expect(loaded.workspaceWindows![0]!.window!.views.every(view => view.feature === undefined)).toBe(true);
+  expect(views.map(view => view.binding?.nativeSessionId)).toEqual(['native-lead', 'native-a']);
   expect(loaded.bots ?? []).toEqual([]);
+  expect(validateRelayState(structuredClone(loaded), auth)).toEqual(loaded);
 });
 
 it('tells an ordinary Team from the Teams a bot is delivered through', () => {
   expect(isOrdinaryTeam(ordinary)).toBe(true);
   expect(isOrdinaryTeam(inbox)).toBe(false);
-  expect(isOrdinaryTeam({ ...ordinary, link: { assistants: ['a', 'b'], recent: [] } })).toBe(false);
+  expect(isOrdinaryTeam(team('task', ordinary.members, { task: {} as never }))).toBe(false);
 });
 
 it('drops the file transfers of a Team an older Relay saved, and loads it unchanged afterwards', () => {

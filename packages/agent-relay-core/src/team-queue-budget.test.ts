@@ -17,8 +17,8 @@ function savedTeam(id = 'team'): SavedTeam {
     id, operationId: id, revision: 1, source: { hostId: 'host', providerId: 'codex', nativeSessionId: 'source', title: 'Source' },
     title: 'Team', status: 'active', createdAt: 1, updatedAt: 1,
     members: ['leader', 'worker'].map((id, index) => ({ id, hostId: 'host', providerId: 'codex', nativeSessionId: index ? nativeSessionId : 'leader-session',
-      role: index ? 'member' : 'leader', name: id, responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 })),
-    messages: [],
+      role: 'requester', name: id, responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 })),
+    messages: [], link: { assistants: ['leader', 'worker'], recent: [] },
   };
 }
 
@@ -33,9 +33,9 @@ async function connectedBroker(teams: SavedTeam[] = [savedTeam()], stateRoom?: (
     bindings: [], creations: [], teams,
   };
   const origin = 'https://relay.example';
-  const broker = createHostBroker({ origin, initialState: saved, now: () => 100, ...(stateRoom ? { stateRoom } : {}), onStateChange(state) { saved = structuredClone(state); } });
+  const broker = createHostBroker({ origin, assistantGroups: () => [], initialState: saved, now: () => 100, ...(stateRoom ? { stateRoom } : {}), onStateChange(state) { saved = structuredClone(state); } });
   close.push(async () => { broker.close(); await broker.settled(); });
-  const socket = memoryHostClient(broker, `${origin}/ws/remote-host?team=1&teamRecipients=1`);
+  const socket = memoryHostClient(broker, `${origin}/ws/remote-host?team=1&teamRecipients=1&teamSuccession=1&tasks=1&coordinatorProvider=codex`);
   close.push(() => { socket.terminate(); });
   await once(socket, 'open', { signal: AbortSignal.timeout(3000) });
   const registered = once(socket, 'message', { signal: AbortSignal.timeout(3000) });

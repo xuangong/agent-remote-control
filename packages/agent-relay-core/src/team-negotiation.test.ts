@@ -5,10 +5,10 @@ import { afterEach, expect, test } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-session-runtime';
 import { isTeam, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
-import { isLegacyTeam, decodeLegacyRemoteHostUplinkMessage as decodeLegacy } from '@orchardworks/agent-remote-protocol/testing';
+import { decodeLegacyRemoteHostUplinkMessage as decodeLegacy } from '@orchardworks/agent-remote-protocol/testing';
 import { createHostBroker, type RemoteHostBrokerState } from './broker.js';
 import { memoryHostClient, relaySocket } from './test-utils/ws-relay-socket.js';
-import { deliveryFingerprint, type SavedTeam } from './team-delivery.js';
+import { type SavedTeam } from './team-delivery.js';
 
 const close: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const dispose of close.splice(0).reverse()) await dispose(); }, 5000);
@@ -69,8 +69,9 @@ test('recipient acknowledgement is reset after reconnecting to a downgraded Rela
 
 function savedTeam(): SavedTeam {
   return { id: 'team', operationId: 'create', revision: 1, source: { hostId: 'host', providerId: 'codex', nativeSessionId: 'source', title: 'Source' }, title: 'Team', status: 'active',
-    members: ['leader', 'worker'].map((id, index) => ({ id, hostId: 'host', providerId: 'codex', nativeSessionId: index ? 'A' : 'L', role: index ? 'member' : 'leader', name: id, responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 })),
-    messages: [{ id: 'message', from: 'leader', to: 'worker', text: 'Fixture', status: 'queued', createdAt: 1 }], createdAt: 1, updatedAt: 1 };
+    members: ['leader', 'worker'].map((id, index) => ({ id, hostId: 'host', providerId: 'codex', nativeSessionId: index ? 'A' : 'L', role: 'requester', name: id, responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 })),
+    messages: [{ id: 'message', from: 'leader', to: 'worker', text: 'Fixture', status: 'queued', createdAt: 1 }], createdAt: 1, updatedAt: 1,
+    link: { assistants: ['leader', 'worker'], recent: [] } };
 }
 
 async function currentRelay(team: SavedTeam | SavedTeam[] = savedTeam(), successor = false) {
@@ -86,7 +87,7 @@ async function currentRelay(team: SavedTeam | SavedTeam[] = savedTeam(), success
       receipt: { version: 3, maxProjectionBytes: 10000, token: 'token', authority: { version: 1, origin, issuer: 'issuer', namespace: 'tenant', ownerSubject: 'owner' }, controllerId: 'controller', request, associationRevision: 0, lineage: [ref('A')], relations: [] },
       projection: { version: 1, role: { id: 'role', revision: 2, origin: ref('A'), current: ref('B'), workspace }, receipt: { ...request, to: ref('B'), phase: 'committed', committedRevision: 2, startedAt: 'now', updatedAt: 'now', prepared: { ...request, to: ref('B'), workspace, participants: [], associationRevision: 0, capture: { epoch: 'e', seq: 1, capturedAt: 'now' } } } } }] };
   }
-  const make = () => createHostBroker({ origin, initialState: saved, heartbeatIntervalMs: 200, heartbeatTimeoutMs: 100, onStateChange(state) { saved = structuredClone(state); } }); broker = make();
+  const make = () => createHostBroker({ origin, assistantGroups: () => [], initialState: saved, heartbeatIntervalMs: 200, heartbeatTimeoutMs: 100, onStateChange(state) { saved = structuredClone(state); } }); broker = make();
   const prepare = (url: string, headers: Record<string, string>) => broker.prepareUpgrade(new Request(url, { headers }));
   /** A real loopback listener in front of the Relay, for the one test whose subject is a Controller's own uplink client. */
   async function listen() {
@@ -108,7 +109,7 @@ async function currentRelay(team: SavedTeam | SavedTeam[] = savedTeam(), success
   close.push(() => { broker.close(); });
   const request = async (path = '', input?: unknown, recipientAware = false) => (await broker.handleRequest(new Request(`${origin}/v1/remote/teams${path}`, { headers: { ...(recipientAware ? { 'x-arc-team-recipients': '1' } : {}), 'content-type': 'application/json' }, ...(input ? { method: 'POST', body: JSON.stringify(input) } : {}) })))!;
   async function connect(recipientAware = false, succession = false) {
-    const socket = memoryHostClient({ prepareUpgrade: request => broker.prepareUpgrade(request) }, `${origin}/ws/remote-host?team=1${recipientAware ? '&teamRecipients=1' : ''}${succession ? '&teamSuccession=1' : ''}`);
+    const socket = memoryHostClient({ prepareUpgrade: request => broker.prepareUpgrade(request) }, `${origin}/ws/remote-host?team=1&tasks=1&coordinatorProvider=codex${recipientAware ? '&teamRecipients=1' : ''}${succession ? '&teamSuccession=1' : ''}`);
     close.push(() => { socket.terminate(); });
     const packets: any[] = []; socket.on('message', data => { const packet = JSON.parse(data.toString()); packets.push(packet); if (packet.type === 'heartbeat') socket.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat_ack', nonce: packet.nonce })); });
     await once(socket, 'open', { signal: AbortSignal.timeout(3000) });
@@ -140,56 +141,6 @@ test('the Controller offers Team succession and learns from each registration wh
     teamManagement: true, providers: [], resolveSession: () => undefined, control: () => ({ status: 200, body: '{}' }) });
   close.push(() => modern.close()); await modern.ready;
   expect(modern.teamSuccession).toBe(true);
-}, 10000);
-
-test('legacy Controller ordinary claims, polls and cached browser responses stay valid while exact recipients persist across restart', async () => {
-  const f = await currentRelay(), legacy = await f.connect();
-  expect(decodeLegacy(JSON.stringify(legacy.packets[0])).status).toBe('ok');
-  const accepted = await legacy.call({ action: 'claim', teamId: 'team', memberId: 'worker', messageId: 'message' });
-  expect(accepted.status).toBe(200); expect(accepted.value.resolvedTarget).toBeUndefined();
-  const poll = await legacy.call({ action: 'poll' }); expect(poll.status).toBe(200); expect(poll.value.every(isLegacyTeam)).toBe(true);
-  expect(f.snapshot().teams![0]!.messages[0]!.resolvedTarget).toEqual(ref('A'));
-  for (const response of [await f.request()]) {
-    expect(response.status).toBe(200); const body = await response.json(); expect((body.teams ?? [body]).every(isLegacyTeam)).toBe(true);
-  }
-  const current = (await (await f.request('', undefined, true)).json()).teams; expect(current.every(isTeam)).toBe(true); expect(current[0]!.messages[0]!.resolvedTarget).toEqual(ref('A'));
-  await expect.poll(() => legacy.packets.some(p => p.type === 'heartbeat')).toBe(true);
-  f.restart(); const modern = await f.connect(true); expect(modern.packets[0].teamRecipients).toBe(1);
-  expect((await modern.call({ action: 'poll' })).value[0].messages[0].resolvedTarget).toEqual(ref('A'));
-  expect((await modern.call({ action: 'settle', teamId: 'team', memberId: 'worker', messageId: 'message', resolvedTarget: ref('A'), outcome: 'accepted', acceptance: 'started' })).status).toBe(200);
-  expect(f.snapshot().teams![0]!.deliveryReceipts![0]!.resolvedTarget).toEqual(ref('A'));
-}, 10000);
-
-test('legacy browser lists filter unavailable source Hosts before rejecting recipient-incompatible Teams', async () => {
-  const hidden = savedTeam();
-  hidden.id = 'hidden'; hidden.operationId = 'hidden-create'; hidden.source.hostId = 'unavailable';
-  hidden.members.forEach(member => { member.hostId = 'unavailable'; });
-  hidden.messages = [];
-  hidden.deliveryReceipts = [{ id: 'hidden-receipt', from: 'leader', to: 'worker', status: 'accepted', createdAt: 1, settledAt: 1, fingerprint: deliveryFingerprint({ to: 'worker', text: 'Compacted private input' }) }];
-  const f = await currentRelay([savedTeam(), hidden]);
-  const response = await f.request();
-  expect(response.status).toBe(200);
-  const body = await response.json();
-  expect(body.teams.map((team: { id: string }) => team.id)).toEqual(['team']);
-  expect(body.teams.every(isLegacyTeam)).toBe(true);
-  expect(f.snapshot().teams!.find(team => team.id === hidden.id)!.deliveryReceipts).toEqual(hidden.deliveryReceipts);
-}, 10000);
-
-
-test('a downgraded Controller cannot claim or settle a persisted successor and current peers keep exact recipients', async () => {
-  const team = savedTeam(); team.messages.push({ id: 'pending-B', from: 'leader', to: 'worker', text: 'Pending', status: 'unknown', resolvedTarget: ref('B'), createdAt: 1 });
-  const f = await currentRelay(team, true), legacy = await f.connect();
-  const polled = await legacy.call({ action: 'poll' }); expect(polled.status).toBe(409); expect(polled.value.error).toMatch(/Update the Controller/);
-  expect((await legacy.call({ action: 'claim', teamId: 'team', memberId: 'worker', messageId: 'message' })).status).toBe(409);
-  expect((await legacy.call({ action: 'settle', teamId: 'team', memberId: 'worker', messageId: 'pending-B', outcome: 'accepted', acceptance: 'started' })).status).toBe(409);
-  expect(f.snapshot().teams![0]!.messages.find(m => m.id === 'pending-B')).toMatchObject({ status: 'unknown', resolvedTarget: ref('B') });
-  expect((await f.request()).status).toBe(409);
-  const modern = await f.connect(true);
-  const poll = await modern.call({ action: 'poll' }); expect(poll.status).toBe(200); expect(poll.value[0].members[1].nativeSessionId).toBe('B');
-  const claimed = await modern.call({ ...claim, expectedNativeSessionId: 'B' }); expect(claimed.status).toBe(200); expect(claimed.value.resolvedTarget).toEqual(ref('B'));
-  expect(f.snapshot().teams![0]!.members[1]!.nativeSessionId).toBe('A');
-  f.restart(); const downgraded = await f.connect(); expect(downgraded.packets[0].teamRecipients).toBeUndefined();
-  expect((await downgraded.call({ action: 'poll' })).status).toBe(409); expect(downgraded.socket.readyState).toBe(WebSocket.OPEN);
 }, 10000);
 
 test('the Relay acknowledges bots when offered, and the Controller learns it from registration', async () => {

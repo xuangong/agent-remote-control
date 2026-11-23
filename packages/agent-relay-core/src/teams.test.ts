@@ -10,12 +10,12 @@ function fixture() {
   const ports: ConstructorParameters<typeof TeamBroker>[0] = { resolveSession: (hostId, providerId, nativeSessionId) => ({ controllerId: hostId, providerId, nativeSessionId }),
     read: () => state, now: () => ++now, assertHost: () => {},
     change: async update => { const draft = structuredClone(state); const result = structuredClone(update(draft)); state = draft; return result; },
-    createSeat: async () => { throw new Error('Unexpected seat creation.'); } };
+    createSeat: async () => { throw new Error('Unexpected seat creation.'); }, assistants: { groups: () => [], capable: () => true } as never };
   const broker = new TeamBroker(ports);
-  const seat = (id: string, hostId: string, role: 'leader' | 'member', providerId: string) => ({ id, hostId, providerId, nativeSessionId: `native-${id}`, role, name: id, responsibility: '',
+  const seat = (id: string, hostId: string, _role: 'leader' | 'member', providerId: string) => ({ id, hostId, providerId, nativeSessionId: `native-${id}`, role: 'requester' as const, name: id, responsibility: '',
     creation: 'ready' as const, activity: 'idle' as const, summary: '', updatedAt: 1 });
   const saved: SavedTeam = { id: 'team', operationId: 'create', revision: 1, source: { hostId: 'mac', providerId: 'codex', nativeSessionId: 'main', title: 'Project' }, title: 'Team', status: 'active',
-    members: [seat('lead', 'mac', 'leader', 'codex'), seat('work', 'win', 'member', 'claude')], messages: [], createdAt: 1, updatedAt: 1 };
+    members: [seat('lead', 'mac', 'leader', 'codex'), seat('work', 'win', 'member', 'claude')], messages: [], createdAt: 1, updatedAt: 1, link: { assistants: ['lead', 'work'], recent: [] } };
   state = [saved];
   return { broker, ports, team: saved, leader: saved.members[0]!, worker: saved.members[1]!, snapshot: () => structuredClone(state), seed: (teams: SavedTeam[]) => { state = structuredClone(teams); },
     restart: () => new TeamBroker(ports),

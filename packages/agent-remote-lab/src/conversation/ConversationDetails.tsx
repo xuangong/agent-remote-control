@@ -33,7 +33,7 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
   const detailsShown = !!host?.open && visible && (host.surface === 'sheet' || !!host.slot);
   const tasks = detailsShown && directory && providerId && rest.length ? directory.owned({ providerId, nativeSessionId: rest.join('/') }) : [];
   const work = detailsShown && directory?.work && providerId && rest.length ? directory.work({ providerId, nativeSessionId: rest.join('/') }) : [];
-  const bots = detailsShown && botId && directory?.organized ? directory.organized(botId) : [];
+  const bots = detailsShown && botId && directory?.staff ? directory.staff(botId) : [];
   const files = useMemo(() => detailsShown && state ? sessionFiles(state.timeline.entries) : [], [detailsShown, state?.timeline.entries]);
   const reportedSession = state?.agent?.runtimeInfo.sessionId;
   const lastTurn = detailsShown ? Date.parse(state?.timeline.entries.at(-1)?.timestamp ?? '') || undefined : undefined;

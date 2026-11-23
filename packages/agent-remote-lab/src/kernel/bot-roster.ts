@@ -30,8 +30,8 @@ export interface BotRow {
   hiddenInChats?: true;
   /** Muted, itself or with its group: no reminders, and a quiet unread dot. */
   muted?: true;
-  /** The name of the bot that created this one and organizes it (bots design 10). */
-  organizer?: string;
+  /** The name of this bot's chief, the bot that created it (bots design 10). */
+  chief?: string;
 }
 /** `hidden` lists the views of this group's bots hidden in Bot mode, which the group can show again. */
 export interface BotSection { groupId: string; title: string; rows: BotRow[]; hidden: string[]; unread?: true; /** Only in the directory: the group is hidden in Bot mode. */ hiddenInChats?: true }
@@ -94,7 +94,7 @@ export function projectBotRoster(groups: readonly WindowGroup[], directory: read
   const names = options.names ?? accountNames(groups, options.t);
   const everyone = options.everyone === true;
   const shownGroups = everyone ? groups : groups.filter(hasBotAppearance);
-  // Each bot's name by its record's id, so a bot's row names the bot that organizes it.
+  // Each bot's name by its record's id, so a bot's row names its chief.
   const byBotId = new Map(groups.flatMap(group => Object.entries(group.bots?.members ?? {}).flatMap(([viewId, item]) => item.botId ? [[item.botId, names.view(group.window.id, viewId)] as const] : [])));
   const candidatesOf = new Map(shownGroups.map(group => {
     const members = group.bots?.members ?? {};
@@ -138,7 +138,7 @@ export function projectBotRoster(groups: readonly WindowGroup[], directory: read
         ...(reply ? { reply } : {}), ...(latest && options.unread?.(latest.owner, latest.reply.replyAt) ? { unread: true as const } : {}),
         ...(draft?.trim() ? { draft } : {}), ...(waiting ? { waiting: true as const } : {}), ...(details.muted || group.bots?.muted ? { muted: true as const } : {}),
         ...(everyone && (details.hidden || !hasBotAppearance(group)) ? { hiddenInChats: true as const } : {}),
-        ...(details.organizer && byBotId.has(details.organizer) ? { organizer: byBotId.get(details.organizer)! } : {}) };
+        ...(details.chief && byBotId.has(details.chief) ? { chief: byBotId.get(details.chief)! } : {}) };
     });
     const hidden = botViews(group).filter(view => members[view.id]?.hidden).map(view => view.id);
     return [{ groupId: group.window.id, title: group.window.title, rows, hidden,

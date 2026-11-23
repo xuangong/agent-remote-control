@@ -33,7 +33,7 @@ export function mergeBots(subject: string, group: WindowGroup, bots: readonly Sa
   const byId = new Map(bots.filter(bot => bot.subject === subject).map(bot => [bot.botId, bot]));
   return { ...group, bots: { ...group.bots, members: Object.fromEntries(Object.entries(group.bots.members).map(([viewId, details]) => {
     const record = details.botId ? byId.get(details.botId) : undefined;
-    return [viewId, record ? { ...botPlacement(details), ...botIdentity(record), ...(record.organizer.kind === 'bot' ? { organizer: record.organizer.botId } : {}) } : details];
+    return [viewId, record ? { ...botPlacement(details), ...botIdentity(record), ...(record.chief.kind === 'bot' ? { chief: record.chief.botId } : {}) } : details];
   })) } };
 }
 
@@ -66,9 +66,9 @@ export function reconcileBots(subject: string, rows: SavedWorkspaceWindow[], bot
       const known = (id: string | undefined) => id && !taken.has(id) && !shown.has(id) ? id : undefined;
       const botId = known(details.botId) ?? known(before.get(key(row.id, viewId))) ?? newId();
       let record = mine.get(botId);
-      // The organizer is set when the record is made, by the Relay placing a bot another bot created; a later change cannot set it.
-      const organizer = details.organizer && mine.has(details.organizer) ? { kind: 'bot' as const, botId: details.organizer } : { kind: 'person' as const };
-      if (!record) { record = { subject, botId, organizer, lifetime: 'standing', createdAt: now, updatedAt: now }; bots.push(record); mine.set(botId, record); }
+      // The chief is set when the record is made, by the Relay placing a bot another bot created; a later change cannot set it.
+      const chief = details.chief && mine.has(details.chief) ? { kind: 'bot' as const, botId: details.chief } : { kind: 'person' as const };
+      if (!record) { record = { subject, botId, chief, lifetime: 'standing', createdAt: now, updatedAt: now }; bots.push(record); mine.set(botId, record); }
       const identity = botIdentity(details as WindowBotDetails);
       if (BOT_IDENTITY_FIELDS.some(field => JSON.stringify(record![field]) !== JSON.stringify(identity[field]))) {
         for (const field of BOT_IDENTITY_FIELDS) { if (identity[field] === undefined) delete record[field]; else (record as Record<string, unknown>)[field] = identity[field]; }

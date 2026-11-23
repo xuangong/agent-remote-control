@@ -459,7 +459,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         ownerSubject: grant.subject, durable, accountBacked, initialState, diagnostics, gatewaySetup: auth.provider === 'mainsite',
         teamResources: options.teamResources?.(grant.namespace),
         assistantGroups: () => windows.list({ subject: grant.subject }).groups,
-        // A bot another bot created joins its organizer's group: a view of its session, and its details.
+        // A bot another bot created joins its chief's group: a view of its session, and its details.
         placeBot: async (groupId, view, details) => {
           const principal = { subject: grant.subject }, current = windows.inspect(principal, groupId);
           const outcome = await windows.mutate(principal, groupId, { operationId: randomUUID(), issuedAt: Date.now(), baseRevision: current.window.revision,

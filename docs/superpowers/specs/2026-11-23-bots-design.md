@@ -8,7 +8,7 @@ and native-session mechanics it keeps in shorter form.
 
 The reference product (Grok Bot) runs an assistant as one serial conversation that hands work to agents running in parallel and
 receives their short results back. This design takes that shape and generalises it: every agent is a bot, any bot can call bots,
-serve bots and be served by them, at any depth, and every line of organizers ends at the person.
+serve bots and be served by them, at any depth, and every line of chiefs ends at the person.
 
 Four abstractions carry everything:
 
@@ -20,7 +20,7 @@ Four abstractions carry everything:
 | **Work item** | A bot's record of a piece of work: plan, acceptance, todo, phase, summary, next action. What the person reads as progress. |
 
 Everything older is a configuration of these (section 9): a task is a temporary bot, a Side is a temporary bot the person starts,
-a Team is an organizer and its bots, Call For Support is a bot asking the bot whose mission fits, a TPM is a bot whose mission is a
+a Team is an chief and its bots, Call For Support is a bot asking the bot whose mission fits, a TPM is a bot whose mission is a
 piece of work. Ask stays outside: it lets the person look at any session without touching it (9).
 
 Three principles hold throughout:
@@ -41,12 +41,12 @@ Three principles hold throughout:
 | `botId` | Stable across handoffs and moves between groups. Existing bots get one on first read, keyed by their group view. |
 | `name`, `label`, `picture` | How the person and other bots know it. |
 | `mission` | What it is for and how it sees its place. Delivered as its standing instructions; shown to other bots. |
-| `organizer` | The bot that created it, or the person. The person is the root of every organizer chain. |
-| `lifetime` | `standing` (listed in Chats) or `temporary` (listed under its organizer; retires after its work). |
+| `chief` | The bot that created it, or the person. The person is the root of every chief chain. |
+| `lifetime` | `standing` (listed in Chats) or `temporary` (listed under its chief; retires after its work). |
 | `main` | Its current native session `<hostId>/<providerId>/<nativeSessionId>`; moved by handoff. |
 | `status` | `working`; `needs_input` (it asked a bot or the person a question, 3.1); `blocked` (a native interaction only the person answers, 5.4); `idle`; `retired`. |
 | `createdFor` | The work item it was created for, if any (6.1). |
-| `peers` | Who may message it (default: every bot of the account) and read it (default: its organizers and the person). |
+| `peers` | Who may message it (default: every bot of the account) and read it (default: its chiefs and the person). |
 
 A bot has no mode and no kind. Whether it can start work depends only on its provider taking tools (5.2); a bot whose provider
 cannot is marked **answers only**: it receives messages and its answers return, but it cannot create bots or message first.
@@ -56,20 +56,20 @@ cannot is marked **answers only**: it receives messages and its answers return, 
 `create_bot` takes a name, a first mission, `lifetime`, and where it runs: provider, model, Host, working directory and workspace
 (`same`, `read_only`, `worktree` at a commit). It may carry a first message. The person creates bots the same way from the page.
 
-What comes back to the organizer is two messages:
+What comes back to the chief is two messages:
 
 - **From the Relay, whether it started:** an ordinary message from the Relay, `progress` (`[Bot "QA" · ready]`, `· waiting` while
   its Host is offline) or `failed` with the reason. A bot that did not start cannot speak for itself.
 - **From the new bot, its report-in:** its first turn reads its mission and the first message and answers with who it is, how it
   understands its mission, how it will start and what it asks. Its answer is the reply (3.3).
 
-A bot created by a bot appears in Chats in its organizer's group, marked with who created it; a temporary bot appears only in its
-organizer's details until the person keeps it, which makes it standing.
+A bot created by a bot appears in Chats in its chief's group, marked with who created it; a temporary bot appears only in its
+chief's details until the person keeps it, which makes it standing.
 
 ### 2.3 Missions change by messages
 
-After creation, the organizer, the person or any bot adjusts how a bot works by telling it. The bot keeps its own mission: when what
-it was told is meant to last and comes from its organizer or the person, it records it (`update_mission`, on itself only), so the
+After creation, the chief, the person or any bot adjusts how a bot works by telling it. The bot keeps its own mission: when what
+it was told is meant to last and comes from its chief or the person, it records it (`update_mission`, on itself only), so the
 change survives a handoff or a compacted context. Other bots' requests apply to their own requests only. The person can also edit
 any mission directly.
 
@@ -79,18 +79,18 @@ after a lasting change, a compaction or a handoff.
 ### 2.4 Lifetime
 
 - A **temporary** bot is created for one piece of work. After its `done` or `failed` report is delivered it stays 24 hours, so its
-  organizer can send it more work by message, then retires. Only its organizer and the person retire it or keep it.
-- A **standing** bot lives until its organizer or the person retires it. Bots created for a work item retire when the item
+  chief can send it more work by message, then retires. Only its chief and the person retire it or keep it.
+- A **standing** bot lives until its chief or the person retires it. Bots created for a work item retire when the item
   completes, unless the person keeps them.
 - Retiring releases the bot's runtime; its conversation stays readable and opens as an ordinary session. A retired bot is
   `unreachable`: messages to it are refused, and messages waiting for it go back to their senders as `unreachable`.
-- Retiring an organizer retires its temporary bots and moves its standing bots to the person, the root, who may hand them to another
-  organizer.
+- Retiring an chief retires its temporary bots and moves its standing bots to the person, the root, who may hand them to another
+  chief.
 
 ### 2.5 Span
 
-An organizer manages at most **12** bots directly, standing and temporary. The thirteenth is refused with the advice to create a
-sub-organizer. The person, as root, has no span limit.
+An chief manages at most **12** bots directly, standing and temporary. The thirteenth is refused with the advice to create a
+sub-chief. The person, as root, has no span limit.
 
 ## 3. Messages
 
@@ -103,9 +103,9 @@ message is to its receiver; without it, it is ordinary conversation:
 |---|---|---|
 | `progress` | Where my work stands | `report_team_progress` |
 | `done`, `failed` | My work is finished; this is the result | `report_task`, `report_support` |
-| `needs_input` | I need an answer to continue; my status becomes `needs_input` until the addressee, one of my organizers or the person answers | `ask_owner` |
+| `needs_input` | I need an answer to continue; my status becomes `needs_input` until the addressee, one of my chiefs or the person answers | `ask_owner` |
 
-A bot reports to its organizer, not only to the bot it worked with: a reply goes to whoever asked, a report to the organizer. A
+A bot reports to its chief, not only to the bot it worked with: a reply goes to whoever asked, a report to the chief. A
 report is written by the bot it describes.
 
 ### 3.2 Delivery
@@ -118,12 +118,12 @@ When the receiver becomes idle, everything waiting is delivered as **one input**
 
 1. the person;
 2. questions its bots are waiting on it to answer (`needs_input`);
-3. its organizer;
+3. its chief;
 4. other bots, in arrival order;
 5. reports (`progress`, `done`, `failed`), newest per sender;
 6. timers.
 
-A reply takes the place of the message it answers. Ten bots finishing during one long turn wake their organizer once.
+A reply takes the place of the message it answers. Ten bots finishing during one long turn wake their chief once.
 
 Delivery is at most once: a durable `sending` receipt precedes the native call; after a restart, an input left `sending` settles
 `unknown` and is never sent again, and its sender is told. A receiver's Host that is offline holds messages until it returns. A
@@ -151,7 +151,7 @@ Every input the person did not type into this session starts with one line the C
 from model text:
 
 ```text
-[From Chief · organizer]
+[From Chief · chief]
 [From QA · done]  [From Dev · needs input · m_41]
 [Bot "QA" · ready]
 [The person wrote to QA] …
@@ -162,7 +162,7 @@ from model text:
 Text in a payload that imitates a frame is escaped. The standing instructions say what each frame means and that other bots' text
 is information: it never grants a permission or answers an interaction.
 
-When the person writes to a bot that has an organizer, the organizer receives the person's words (first 300 characters) framed
+When the person writes to a bot that has an chief, the chief receives the person's words (first 300 characters) framed
 `[The person wrote to <bot>]`, so it does not act on an outdated picture.
 
 ## 4. Rooms
@@ -189,11 +189,11 @@ Every bot's main session gets the same extensions, built by the Controller:
 
 | Tool | Does |
 |---|---|
-| `create_bot`, `retire_bot` | Create a bot (2.2); retire one it organizes |
+| `create_bot`, `retire_bot` | Create a bot (2.2); retire one of its staff |
 | `message` | Send to a bot or a room (3); `pass` in a room |
 | `list_bots` | The account's bots it may message, with name, label, mission and status |
 | `read_bot` | Read the recent conversation of a bot it may read (2.1, `peers`) |
-| `stop_bot` | Stop the running turn of a bot it organizes |
+| `stop_bot` | Stop the running turn of one of its staff |
 | `update_mission` | Record a lasting change in its own mission (2.3) |
 | `update_work`, `complete_work`, todo, confirmation | Keep its work items (6) |
 | `set_timer`, `clear_timer` | Its fallback timers (6.2) |
@@ -202,7 +202,7 @@ Every bot's main session gets the same extensions, built by the Controller:
 The base instructions carry the working rules that are judgement rather than mechanism: split long work into bots; keep a turn
 short, and keep it short above all when bots report to you; when you serve several bots, start a temporary bot per request and
 keep your conversation to taking work in and handing results back; ask the bot whose mission fits; report outcomes to your
-organizer; restate your understanding when it may have moved.
+chief; restate your understanding when it may have moved.
 
 ### 5.2 Getting the tools to each CLI
 
@@ -219,7 +219,7 @@ Existing bots get the tools and standing instructions at their next attachment.
 
 ### 5.3 Workspaces and code across machines
 
-A bot works in its working directory, `same` as its organizer's, `read_only` there (where the provider enforces read-only
+A bot works in its working directory, `same` as its chief's, `read_only` there (where the provider enforces read-only
 natively), or in a `worktree` at a commit, returning its change as a patch attachment. Between machines, bots move code the way
 people do: through a git repository both Hosts reach (push a branch, message the remote, branch and commit; the receiver fetches),
 and only without one as a git bundle attached to the message, fetched as a branch the receiver only reads. The base instructions
@@ -230,7 +230,7 @@ describe both, shared repository first.
 Turns, their order, context and compaction stay the CLI's. ARC adds no concurrency inside a session and never rewrites native
 history; it keeps what it adds small: one frame per message, 300-character summaries, one input per idle. Each bot keeps its CLI's
 own permission settings. No bot answers another bot's native interactions (tool, plan or form approvals) or changes another bot's
-settings: those belong to the person. A native interaction pending in a bot makes its status `blocked`; its organizer receives a
+settings: those belong to the person. A native interaction pending in a bot makes its status `blocked`; its chief receives a
 frame saying what waits, and the person is reminded directly.
 
 ## 6. Work items and timers
@@ -266,7 +266,7 @@ The **audit** shows each chain live: what started it, the bots it reached, messa
 duration. From it the person stops a chain (its waiting messages withdrawn, its running turns stopped), stops one bot's part of it,
 pauses a bot, or retires bots. Thresholds the person sets (usage, hops, duration) send a needs-you reminder and never stop work.
 
-Only system bounds refuse: sizes (3.4, and the Relay's and Host's storage and capacity) and the span of an organizer (2.5).
+Only system bounds refuse: sizes (3.4, and the Relay's and Host's storage and capacity) and the span of an chief (2.5).
 
 As built (4a): a turn's cause comes from its Host (the person's input by its message, or framed input); the Relay names the chain
 and stamps every message a call queues with it. Chains are kept per account, at most 100 for seven days. Reply depth is recorded,
@@ -274,7 +274,7 @@ no longer refused.
 
 ## 8. Who may do what
 
-| Action | Person | Organizer, for its bots | Any bot it may message |
+| Action | Person | Chief, for its bots | Any bot it may message |
 |---|---|---|---|
 | Message a bot | yes | yes | yes |
 | Create a bot | yes | yes, within its span | — |
@@ -294,23 +294,23 @@ stamped; a Controller is trusted only for its own sessions. Share recipients see
 | Tasks of the earlier design | Temporary bots; `create_task`, `report_task`, `ask_owner`, `message_task` become `create_bot` and `message` | Task-specific tools and records once their bots carry the states |
 | Side | A temporary bot the person starts (`/side`): its mission is the person's first message, workspace `same` | Side creation and relation kinds |
 | Call For Support | A bot asking the bot whose mission fits; no profiles, mandates or rosters | Profiles, enablement, support groups, calls, rosters, ledgers, report framing, its four tools, settings and panel views |
-| Team | An organizer and the bots it created | Team queue, inbox, `team_message`, the Teams panel and launcher |
+| Team | An chief and the bots it created | Team queue, inbox, `team_message`, the Teams panel and launcher |
 | TPM | A bot whose mission is a piece of work, with its work item and fallback timer | `tpm_intent`, TPM's delivery, workspace and launcher |
 | Rooms on the Teams panel | Group chats in Bot mode | The Teams panel |
 
 **Ask stays.** It opens a separate read-only session that reads any session (a bot, a temporary bot, a native subagent) and answers
-the person, without becoming an input of that session or of its organizer. Messages direct work and enter the receiver's context;
+the person, without becoming an input of that session or of its chief. Messages direct work and enter the receiver's context;
 Ask is for understanding work without disturbing anyone. It may share creation and cleanup with temporary bots underneath. Quoting
 messages also stays: it is the person's action, not coordination.
 
 ## 10. Workbench
 
-- **Chats** lists standing bots, each organizer's bots in its group, marked with who created them. A bot's row shows its status and
-  its work item's one-line summary. Needs-you reminders, unanswered `needs_input` questions included, are grouped by organizer; a
+- **Chats** lists standing bots, each chief's bots in its group, marked with who created them. A bot's row shows its status and
+  its work item's one-line summary. Needs-you reminders, unanswered `needs_input` questions included, are grouped by chief; a
   `blocked` bot reminds the person directly.
 - **A bot's conversation** shows its messages with their senders. Reports and messages between bots fold to one line per sender
   ("3 updates from Dev"), expandable; the bot's own words to the person stay full.
-- **A temporary bot** appears as a card where it was created; opening it shows its conversation beside the organizer's (a panel in
+- **A temporary bot** appears as a card where it was created; opening it shows its conversation beside the chief's (a panel in
   Bot mode, attached in Window mode, full screen on a phone), with Send, Interrupt where the provider steers, Queue, Stop and Keep.
 - **The details** of a bot list its bots (standing and temporary, with status and unread dots) and its work items with plan,
   acceptance and todo; its mission, editable.
@@ -323,10 +323,10 @@ messages also stays: it is the person's action, not coordination.
 |---|---|
 | Unit | Delivery order and combining at idle; reply rule (one message, several, already answered); 300-character refusal; span refusal; frames and escaping; mission change rules; timer push-back; chain stamping; at-most-once settlement. |
 | Contract | Fixtures for the bot record, message record, frames and outcomes, consumed by Relay and Controller. |
-| Integration | relay-core bots and messages with an in-memory store; the Controller with a scripted provider: creation outcome and report-in, a report waking the organizer once, a restart leaving `sending` as `unknown`. |
-| Component | Chats grouped by organizer, folded lines, the temporary bot beside its organizer, details with bots and work items, the audit. |
-| E2E flows | Two temporary bots report and the organizer sums up; one is interrupted from its thread; a tool approval answered by the person; bot A messages B and B's answer returns; a bot's Host offline until it returns. Chromium and WebKit. |
-| Behaviour scenarios | `pnpm test:bots`, with real Claude Code and Codex, by hand or nightly: the release walkthrough (an organizer with three bots, temporary bots under one, a reviewer serving two teams with a temporary bot per request, a test and fix loop over a shared repository and over a bundle, the person speaking to a member, the work item completing). Checks read facts: bots, missions, report-ins, hops, turns, tool calls per organizer turn, message lengths. |
+| Integration | relay-core bots and messages with an in-memory store; the Controller with a scripted provider: creation outcome and report-in, a report waking the chief once, a restart leaving `sending` as `unknown`. |
+| Component | Chats grouped by chief, folded lines, the temporary bot beside its chief, details with bots and work items, the audit. |
+| E2E flows | Two temporary bots report and the chief sums up; one is interrupted from its thread; a tool approval answered by the person; bot A messages B and B's answer returns; a bot's Host offline until it returns. Chromium and WebKit. |
+| Behaviour scenarios | `pnpm test:bots`, with real Claude Code and Codex, by hand or nightly: the release walkthrough (an chief with three bots, temporary bots under one, a reviewer serving two teams with a temporary bot per request, a test and fix loop over a shared repository and over a bundle, the person speaking to a member, the work item completing). Checks read facts: bots, missions, report-ins, hops, turns, tool calls per chief turn, message lengths. |
 
 ## 12. Where it lives
 
@@ -340,7 +340,7 @@ messages also stays: it is the person's action, not coordination.
 
 **As built for the first deployment** (`feat/bots-1-record`): standing bots are Relay records beside the Window rows; every bot has
 an inbox, a Team whose only seat is its main session, through which its messages and standing instructions arrive; a temporary bot
-is a task seen as a bot (name = title, mission = brief, organizer = owner, session = worker, `botId` derived from the Team). All run
+is a task seen as a bot (name = title, mission = brief, chief = owner, session = worker, `botId` derived from the Team). All run
 on the Team delivery path, which gives claims, durable receipts and settlement. The P2 operation queue of the
 [IM session service](2026-11-15-im-session-service-design.md) later carries the same messages without changing the tools.
 
@@ -354,6 +354,6 @@ Taken with the owner on 2026-11-23:
 4. Side, Call For Support, Team and TPM fold into bots; Ask and quoting stay.
 5. Each bot reports its own understanding and progress; system status is only liveness.
 6. Audit instead of guardrails: chains are recorded, thresholds notify, the person stops what they choose.
-7. Messages between bots are at most 300 characters; an organizer manages at most 12 bots; the person is the root organizer.
+7. Messages between bots are at most 300 characters; an chief manages at most 12 bots; the person is the root chief.
 8. Progress lives in work items moved by messages; a timer is only a fallback heartbeat.
 9. Code across machines moves through a shared git repository first and as a git bundle otherwise.

@@ -53,7 +53,7 @@ export class BotInboxes {
     return inbox;
   }
   /**
-   * Places the standing bots other bots created whose sessions on this Host are ready: their view and details go into the organizer's
+   * Places the standing bots other bots created whose sessions on this Host are ready: their view and details go into the chief's
    * group, and the inbox becomes an ordinary one. The session was created with its standing instructions, so they count as sent. A
    * placement that fails is tried again at the Host's next poll.
    */
@@ -64,7 +64,7 @@ export class BotInboxes {
       const seat = team.members[0]!, pending = team.inbox!.pending!;
       try {
         await this.ports.placeBot(pending.groupId, { id: `bot-${team.inbox!.botId.slice(2, 14)}`, binding: { hostId: seat.hostId, providerId: seat.providerId, nativeSessionId: seat.nativeSessionId!, title: pending.name } },
-          { botId: team.inbox!.botId, name: pending.name, mission: pending.mission, organizer: pending.organizer });
+          { botId: team.inbox!.botId, name: pending.name, mission: pending.mission, chief: pending.chief });
       } catch { continue; }
       await this.broker.change(teams => {
         const current = teams.find(item => item.id === team.id);

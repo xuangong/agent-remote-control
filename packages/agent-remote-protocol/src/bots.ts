@@ -37,7 +37,7 @@ export const BotRecord = Type.Object({
   label: Type.Optional(BotLabel),
   picture: Type.Optional(BotPicture),
   mission: Type.Optional(BotMission),
-  organizer: Type.Union([Type.Object({ kind: Type.Literal('person') }, strict), Type.Object({ kind: Type.Literal('bot'), botId: BotId }, strict)]),
+  chief: Type.Union([Type.Object({ kind: Type.Literal('person') }, strict), Type.Object({ kind: Type.Literal('bot'), botId: BotId }, strict)]),
   lifetime: Type.Union([Type.Literal('standing'), Type.Literal('temporary')]),
   createdAt: time,
   updatedAt: time,
@@ -80,11 +80,11 @@ export type BotIdentity = Partial<Pick<BotRecord, IdentityField>>;
 export function botIdentity<T extends BotIdentity>(details: T): BotIdentity {
   return Object.fromEntries(BOT_IDENTITY_FIELDS.filter(key => details[key] !== undefined).map(key => [key, details[key]])) as BotIdentity;
 }
-/** The placement part of bot details, as the group keeps it: everything but identity and the organizer, which the record keeps. */
-export function botPlacement<T extends BotIdentity & { organizer?: string }>(details: T): Omit<T, IdentityField | 'organizer'> {
+/** The placement part of bot details, as the group keeps it: everything but identity and the chief, which the record keeps. */
+export function botPlacement<T extends BotIdentity & { chief?: string }>(details: T): Omit<T, IdentityField | 'chief'> {
   const placement = { ...details } as T;
   for (const key of BOT_IDENTITY_FIELDS) delete placement[key];
-  delete placement.organizer;
+  delete placement.chief;
   return placement;
 }
 
@@ -97,7 +97,7 @@ const BASE = `You are an assistant of Agent Remote Control. The person, and othe
 - You are a bot, and so are the other assistants of this account. Bots are sessions the person sees and talks to; you start them with create_bot and talk to them with message, from your agent_remote tools. When the person or another bot asks for bots, use these tools, never your own subagents or task tools, which nobody else can see or reach.
 - Keep each turn short. Answer what you can at once; split long work and hand it out to bots, then tell the person what you started. When results come back, read them, decide, and sum them up for the person in your own words.
 - When you report to anyone, say in your own words how you understand your work and where it stands. Keep reports to other assistants under 300 characters and leave the details where they can be read.
-- When the person, or the assistant that organizes you, tells you something that should change how you work from now on, record it in your mission with update_mission, writing the whole mission as it now stands (not in a memory file of your own), follow it, and say how you now understand your mission.`;
+- When the person, or your chief, tells you something that should change how you work from now on, record it in your mission with update_mission, writing the whole mission as it now stands (not in a memory file of your own), follow it, and say how you now understand your mission.`;
 
 /** The instructions of a bot with this mission, or of a bot without one. */
 export function botInstructions(mission: string | undefined): string {

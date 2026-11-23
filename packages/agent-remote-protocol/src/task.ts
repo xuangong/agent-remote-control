@@ -14,7 +14,7 @@ export const TASK_BRIEF_LIMIT = 8000;
 export const TASK_DONE_WHEN_LIMIT = 1000;
 export const TASK_SUMMARY_LIMIT = 4000;
 /** Tasks one main session may have running (queued or working) at once. */
-/** The bots an organizer runs at once (bots design 2.5); a task is a temporary bot. */
+/** The bots an chief runs at once (bots design 2.5); a task is a temporary bot. */
 export const TASK_RUNNING_LIMIT = 12;
 
 /**
@@ -101,11 +101,11 @@ const kindWords: Record<TaskInputKind, string> = { brief: 'brief', message: 'mes
   needs_you: 'needs the person', told: 'the person wrote' };
 export const TASK_GUIDANCE: Record<TaskInputKind, string> = {
   brief: 'Do the work with your own tools, where your instructions say. '
-    + 'Read your organizer\'s conversation with read_source_session only when the brief is not enough. '
-    + 'When you finish, message your organizer once with status done or failed: what you did, what you found and where, in your own words and at most 300 characters.',
-  message: 'This is input about your work. Continue it; when you finish, message your organizer with status done or failed.',
-  reminder: 'Your last turn ended without a report. If the work is done or cannot be done, message your organizer now with status done or failed; if you need something, message it with status needs_input.',
-  progress: 'This is progress from a bot you organize. Take it into account; it reports again when it finishes or needs you.',
+    + 'Read your chief\'s conversation with read_source_session only when the brief is not enough. '
+    + 'When you finish, message your chief once with status done or failed: what you did, what you found and where, in your own words and at most 300 characters.',
+  message: 'This is input about your work. Continue it; when you finish, message your chief with status done or failed.',
+  reminder: 'Your last turn ended without a report. If the work is done or cannot be done, message your chief now with status done or failed; if you need something, message it with status needs_input.',
+  progress: 'This is progress from one of your staff. Take it into account; it reports again when it finishes or needs you.',
   done: 'This is the worker\'s report. Check what matters before relying on it, then tell the person what it means for their request.',
   failed: 'This is the worker\'s report. Check what matters before relying on it, then tell the person what it means for their request.',
   cancelled: 'The person stopped this task; its worker does no more. Take it into account for their request.',
@@ -158,7 +158,7 @@ export function roomTurnText(input: { roomId: string; name: string; messages: Re
     ...input.messages.map(message => quoteFrames(`${heading(message.name)}: ${message.text}`)), ROOM_GUIDANCE].join('\n');
 }
 /** A bot's timer came due after a quiet while. */
-export const TIMER_GUIDANCE = 'Nothing has reached you for a while. Look at your open work: read the bots you organize with read_bot, update your work items, and act or wait as the work needs. A quiet check that changes nothing needs no message.';
+export const TIMER_GUIDANCE = 'Nothing has reached you for a while. Look at your open work: read your staff with read_bot, update your work items, and act or wait as the work needs. A quiet check that changes nothing needs no message.';
 export function timerText(input: { name: string; work: ReadonlyArray<{ title: string; phase: string; next?: string }> }): string {
   return [`[Timer "${heading(input.name).replace(/"/g, "'")}" · due]`, ...input.work.map(item => quoteFrames(`${heading(item.title)} · ${item.phase}${item.next ? ` · next: ${item.next}` : ''}`)), TIMER_GUIDANCE].join('\n');
 }

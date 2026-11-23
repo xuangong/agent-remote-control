@@ -59,14 +59,14 @@ describe('chains', () => {
     expect(between.every(message => message.chain === id)).toBe(true);
   });
 
-  it('counts a created bot, its brief and its report in its organizer\'s chain, and a turn\'s usage', async () => {
+  it('counts a created bot, its brief and its report in its chief\'s chain, and a turn\'s usage', async () => {
     const f = fixture();
     await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'c1', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary', cause: person('u1') });
     const task = f.state().find(team => team.task)!, chain = f.chain();
     expect(chain).toMatchObject({ cause: 'person', created: 1, bots: [ids.chief, temporaryBotId(task.id)] });
     expect(task.messages[0]!.chain).toBe(chain.id);
     await f.deliver('worker-1');
-    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('worker-1'), operationId: 'd1', to: 'organizer', text: 'Looks fine.', status: 'done', cause: framed });
+    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('worker-1'), operationId: 'd1', to: 'chief', text: 'Looks fine.', status: 'done', cause: framed });
     await f.broker.hostCall('mac', { action: 'chain_turn', owner: f.as('worker-1'), cause: framed, tokens: 1200, costUsd: 0.02 });
     expect(f.broker.chains.list()).toHaveLength(1);
     expect(f.chain()).toMatchObject({ id: chain.id, turns: 1, usage: { tokens: 1200, costUsd: 0.02 } });

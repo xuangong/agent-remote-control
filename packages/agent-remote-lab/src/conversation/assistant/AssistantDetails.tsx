@@ -27,7 +27,7 @@ export interface AssistantRef {
   readonly sessions?: AssistantSessions;
   /** The tasks the session on screen owns. */
   readonly tasks?: readonly TaskView[];
-  /** The standing bots this bot created and organizes. */
+  /** This bot's standing staff, the bots it created. */
   readonly bots?: readonly { botId: string; name: string }[];
   /** A standing bot's work items, which it keeps itself. */
   readonly work?: readonly WorkItem[];

@@ -175,16 +175,16 @@ it('marks needs you with its own ringed dot in place of the unread one, and a mu
   expect(muted.getAttribute('aria-description')).toContain('Muted');
 });
 
-it('marks a bot with the bot that organizes it, and a quiet bot shows where its open work stands', async () => {
+it('marks a bot with its chief, and a quiet bot shows where its open work stands', async () => {
   const group = botGroup('A');
   group.window.views.push(createWindowView('A2', botTarget('A2'), 'primary'));
-  group.bots!.members = { A1: { name: 'Chief', botId: 'b_' + '1'.repeat(32) }, A2: { name: 'Scribe', botId: 'b_' + '2'.repeat(32), organizer: 'b_' + '1'.repeat(32) } };
+  group.bots!.members = { A1: { name: 'Chief', botId: 'b_' + '1'.repeat(32) }, A2: { name: 'Scribe', botId: 'b_' + '2'.repeat(32), chief: 'b_' + '1'.repeat(32) } };
   const model = projectBotRoster([group], [], { status: () => 'idle' });
   const directory = { canOpen: () => false, open: () => {}, owned: () => [], act: async () => {},
     work: (bot: { nativeSessionId: string }) => bot.nativeSessionId === 'A2' ? [{ id: 'w_000000000001', title: 'Release notes', phase: 'waiting' as const, summary: 'Waiting.', updatedAt: 1 }] : [] };
   const container = await render(<TaskDirectoryContext.Provider value={directory}><BotRoster model={model} groups={[group]} onSelect={() => {}} directoryControls={null} /></TaskDirectoryContext.Provider>);
   const scribe = visibleButton(container, 'Scribe');
-  expect(scribe.querySelector('[data-organizer]')?.textContent).toBe('by Chief');
+  expect(scribe.querySelector('[data-chief]')?.textContent).toBe('Staff of Chief');
   expect(scribe.querySelector('.lab-bot-sentence')?.textContent).toBe('Release notes · Waiting');
-  expect(visibleButton(container, 'Chief').querySelector('[data-organizer]')).toBeNull();
+  expect(visibleButton(container, 'Chief').querySelector('[data-chief]')).toBeNull();
 });

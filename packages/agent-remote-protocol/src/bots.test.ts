@@ -7,7 +7,7 @@ const id = 'b_' + 'a'.repeat(32);
 describe('bot records', () => {
   it('accepts a standing bot of the person with identity and mission, and refuses unknown fields', () => {
     const record = { botId: id, name: 'Chief', label: 'Lead', picture: { shape: 'circle', color: '#ff8a3d' }, mission: 'Coordinate the release.',
-      organizer: { kind: 'person' }, lifetime: 'standing', createdAt: 1, updatedAt: 2 };
+      chief: { kind: 'person' }, lifetime: 'standing', createdAt: 1, updatedAt: 2 };
     expect(Value.Check(BotRecord, record)).toBe(true);
     expect(Value.Check(BotRecord, { ...record, mode: 'coordinator' })).toBe(false);
     expect(Value.Check(BotRecord, { ...record, botId: 'chief' })).toBe(false);

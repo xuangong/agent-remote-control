@@ -17,7 +17,7 @@ describe('the bot store', () => {
     reconcileBots('me', rows, bots, all(rows), new Map(), 10, newId);
     const botId = rows[0]!.bots!.members.v1!.botId!;
     expect(rows[0]!.bots!.members.v1).toEqual({ botId, pinned: true });
-    expect(bots).toEqual([{ subject: 'me', botId, name: 'Chief', label: 'Lead', mission: 'Coordinate.', organizer: { kind: 'person' }, lifetime: 'standing', createdAt: 10, updatedAt: 10 }]);
+    expect(bots).toEqual([{ subject: 'me', botId, name: 'Chief', label: 'Lead', mission: 'Coordinate.', chief: { kind: 'person' }, lifetime: 'standing', createdAt: 10, updatedAt: 10 }]);
     expect(mergeBots('me', { window: rows[0]!.window!, bots: rows[0]!.bots } as WindowGroup, bots).bots!.members.v1).toEqual({ botId, pinned: true, name: 'Chief', label: 'Lead', mission: 'Coordinate.' });
   });
 
@@ -61,17 +61,17 @@ describe('the bot store', () => {
   });
 
   it('never touches another account, and refuses an id another account holds', () => {
-    const bots: SavedBot[] = [{ subject: 'other', botId: newId(), organizer: { kind: 'person' }, lifetime: 'standing', createdAt: 1, updatedAt: 1 }];
+    const bots: SavedBot[] = [{ subject: 'other', botId: newId(), chief: { kind: 'person' }, lifetime: 'standing', createdAt: 1, updatedAt: 1 }];
     const rows = [row('g1', { v1: { botId: bots[0]!.botId, name: 'Mine' } })];
     reconcileBots('me', rows, bots, all(rows), new Map(), 10, newId);
     expect(rows[0]!.bots!.members.v1!.botId).not.toBe(bots[0]!.botId);
-    expect(bots.filter(bot => bot.subject === 'other')).toEqual([{ subject: 'other', botId: bots[0]!.botId, organizer: { kind: 'person' }, lifetime: 'standing', createdAt: 1, updatedAt: 1 }]);
+    expect(bots.filter(bot => bot.subject === 'other')).toEqual([{ subject: 'other', botId: bots[0]!.botId, chief: { kind: 'person' }, lifetime: 'standing', createdAt: 1, updatedAt: 1 }]);
   });
 
   it('derives the same id for an existing bot on every load, and validates stored records', () => {
     expect(migrationBotId('me', 'g1', 'v1')).toBe(migrationBotId('me', 'g1', 'v1'));
     expect(migrationBotId('me', 'g1', 'v1')).toMatch(/^b_[0-9a-f]{32}$/);
-    const record = { subject: 'me', botId: newId(), organizer: { kind: 'person' }, lifetime: 'standing', createdAt: 1, updatedAt: 1 };
+    const record = { subject: 'me', botId: newId(), chief: { kind: 'person' }, lifetime: 'standing', createdAt: 1, updatedAt: 1 };
     expect(validBots([record])).toBe(true);
     expect(validBots([record, record])).toBe(false);
     expect(validBots([{ ...record, subject: '' }])).toBe(false);

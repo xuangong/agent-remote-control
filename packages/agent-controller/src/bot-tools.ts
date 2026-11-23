@@ -16,7 +16,7 @@ export interface BotToolsPorts {
   readOnly?(providerId: string): boolean;
   /** A bounded page of a session's recent conversation on this Host. */
   read?(ref: NativeSessionRef, before?: { epoch: string; seq: number }): Promise<unknown>;
-  /** A worktree bot's patch, saved on this Host, as the line its organizer reads; undefined for any other bot. */
+  /** A worktree bot's patch, saved on this Host, as the line its chief reads; undefined for any other bot. */
   patch?(ref: NativeSessionRef): Promise<string | undefined>;
 }
 /** Which tools a session has: none, or every bot's tools. */
@@ -115,26 +115,26 @@ export class BotTools {
             operationId: args.operationId ?? randomUUID(), name: args.name, mission: args.mission, lifetime: args.lifetime ?? 'temporary', ...cause(), ...(args.message ? { message: args.message } : {}),
             ...(workspace && workspace !== 'same' ? { workspace } : {}), ...(commit ? { commit } : {}), ...(args.provider ? { provider: args.provider } : {}), ...(args.model ? { model: args.model } : {}) });
         }),
-      tool('message', 'Send a message to another bot, in your own words and at most 300 characters: a bot you organize, your organizer (to: "organizer"), any bot from list_bots by name or id, or a room you are in when it is your turn there (to: the room\'s name or id; pass: true when you have nothing to add; status done with the room\'s result when it has reached it). When you write to your organizer, status says what it is: progress, done or failed (your result, once), or needs_input (you wait for its answer; then end your turn). The details stay where they are: the receiver reads them with read_bot when it needs them. Answer a message another bot sent you with reply_to set to its id. It arrives between the receiver\'s turns. Reuse operationId to retry.',
+      tool('message', 'Send a message to another bot, in your own words and at most 300 characters: one of your staff, your chief (to: "chief"), any bot from list_bots by name or id, or a room you are in when it is your turn there (to: the room\'s name or id; pass: true when you have nothing to add; status done with the room\'s result when it has reached it). When you write to your chief, status says what it is: progress, done or failed (your result, once), or needs_input (you wait for its answer; then end your turn). The details stay where they are: the receiver reads them with read_bot when it needs them. Answer a message another bot sent you with reply_to set to its id. It arrives between the receiver\'s turns. Reuse operationId to retry.',
         object({ to: { type: 'string', minLength: 1, maxLength: 300 }, text: { type: 'string', minLength: 1, maxLength: BOT_MESSAGE_LIMIT }, status: { type: 'string', enum: ['progress', 'done', 'failed', 'needs_input'] },
           reply_to: { type: 'string', pattern: '^m[0-9a-f]{12}$' }, pass: { type: 'boolean' }, operationId: id }, ['to', 'text']),
         async args => {
-          // A worktree bot's result carries the path of its patch, saved on this Host where its organizer works.
+          // A worktree bot's result carries the path of its patch, saved on this Host where its chief works.
           const patch = args.status === 'done' || args.status === 'failed' ? await this.ports.patch?.(worker()) : undefined;
           return taskRequest({ action: 'bot_message', owner: caller(), operationId: args.operationId ?? randomUUID(), to: args.to, text: args.text, ...(patch ? { patch } : {}), ...cause(),
             ...(args.status ? { status: args.status } : {}), ...(args.reply_to ? { replyTo: args.reply_to } : {}), ...(args.pass === true ? { pass: true } : {}) });
         }),
-      tool('list_bots', 'List the bots you can message: the bots you organize with their status, your organizer if you have one, and the standing bots of this account with their missions.',
+      tool('list_bots', 'List the bots you can message: your staff with their status, your chief if you have one, and the standing bots of this account with their missions.',
         object({}, []), () => taskRequest({ action: 'list_bots', owner: caller() })),
-      tool('read_bot', 'Read a bounded page of the recent conversation of a bot you organize, to see what it did without asking it. Pass before from a previous page to read further back.',
+      tool('read_bot', 'Read a bounded page of the recent conversation of one of your staff, to see what it did without asking it. Pass before from a previous page to read further back.',
         object({ bot: { type: 'string', minLength: 1, maxLength: 300 }, before: { type: 'object', properties: { epoch: { type: 'string' }, seq: { type: 'integer' } }, required: ['epoch', 'seq'], additionalProperties: false } }, ['bot']),
         async args => {
           const where = await taskRequest({ action: 'bot_session', owner: caller(), bot: args.bot }) as { providerId: string; nativeSessionId: string };
           return (this.ports.read ?? (() => fail('Reading bots is not available on this Host.')))({ ...worker(), providerId: where.providerId, nativeSessionId: where.nativeSessionId }, args.before);
         }),
-      tool('update_mission', 'Record a lasting change to how you work in your own mission, when the person or your organizer told you something meant to last. Write the whole mission as it now stands. A temporary bot\'s mission is its brief and does not change.',
+      tool('update_mission', 'Record a lasting change to how you work in your own mission, when the person or your chief told you something meant to last. Write the whole mission as it now stands. A temporary bot\'s mission is its brief and does not change.',
         object({ mission: { type: 'string', minLength: 1, maxLength: 4000 } }, ['mission']), args => taskRequest({ action: 'update_mission', owner: caller(), mission: args.mission })),
-      tool('update_work', 'Keep a work item of yours, so the person and your organizer see where your work stands without asking: create one with a title and a summary, or update one by its id (work). phase: clarifying, agreed, in_progress, verifying, waiting (for the person or another bot) or done. next says what happens next; acceptance how to tell it is done. While a work item is open, a quiet timer reminds you of it when nothing reaches you for a while. list_bots shows your work items. A temporary bot reports with message instead.',
+      tool('update_work', 'Keep a work item of yours, so the person and your chief see where your work stands without asking: create one with a title and a summary, or update one by its id (work). phase: clarifying, agreed, in_progress, verifying, waiting (for the person or another bot) or done. next says what happens next; acceptance how to tell it is done. While a work item is open, a quiet timer reminds you of it when nothing reaches you for a while. list_bots shows your work items. A temporary bot reports with message instead.',
         object({ work: { type: 'string', pattern: '^w_[0-9a-f]{12}$' }, title: { type: 'string', minLength: 1, maxLength: 120 }, phase: { type: 'string', enum: ['clarifying', 'agreed', 'in_progress', 'verifying', 'waiting', 'done'] },
           summary: { type: 'string', minLength: 1, maxLength: 300 }, next: { type: 'string', minLength: 1, maxLength: 300 }, acceptance: { type: 'string', minLength: 1, maxLength: 2000 } }, []),
         args => taskRequest({ action: 'update_work', owner: caller(), ...Object.fromEntries((['work', 'title', 'phase', 'summary', 'next', 'acceptance'] as const).flatMap(key => args[key] !== undefined ? [[key, args[key]]] : [])) })),
@@ -144,9 +144,9 @@ export class BotTools {
       tool('set_timer', 'Set a named timer that reminds you after the given minutes of quiet: every message that reaches you pushes it back, so it only fires when nothing happens. Use it to look after work that waits on others. minutes 0 clears it.',
         object({ name: { type: 'string', minLength: 1, maxLength: 60 }, minutes: { type: 'integer', minimum: 0, maximum: 10080 } }, ['name', 'minutes']),
         args => taskRequest({ action: 'set_timer', owner: caller(), name: args.name, minutes: args.minutes })),
-      tool('stop_bot', 'Stop a bot you organize: its running turn stops and it gets no more input. Its conversation stays readable.',
+      tool('stop_bot', 'Stop one of your staff: its running turn stops and it gets no more input. Its conversation stays readable.',
         object({ bot: { type: 'string', minLength: 1, maxLength: 300 } }, ['bot']), args => taskRequest({ action: 'stop_bot', owner: caller(), bot: args.bot })),
-      tool('retire_bot', 'Retire a bot you organize when its work is no longer needed, taking what it has done as its result.',
+      tool('retire_bot', 'Retire one of your staff when its work is no longer needed, taking what it has done as its result.',
         object({ bot: { type: 'string', minLength: 1, maxLength: 300 } }, ['bot']), args => taskRequest({ action: 'retire_bot', owner: caller(), bot: args.bot })),
       tool('open_room', 'Open a room: a conversation of you and other assistants of this account (by name) about a topic, for a set number of minutes. The topic is your first message; the room then asks one member at a time to speak, with the messages it has not seen, and you are asked again when there is something new. The person sees the room and may write in it.',
         object({ name: { type: 'string', minLength: 1, maxLength: 120 }, topic: { type: 'string', minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT },
@@ -155,7 +155,7 @@ export class BotTools {
           return taskRequest({ action: 'open_room', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, operationId: args.operationId ?? randomUUID(), name: args.name, topic: args.topic,
             members: args.members, minutes: args.minutes, ...cause() }); }),
     ];
-    return { name: WORKER_NAMESPACE, description: 'Agent Remote Control: start bots that work in parallel and report back, message the account\'s other bots, keep your work items, and read and stop the bots you organize.',
+    return { name: WORKER_NAMESPACE, description: 'Agent Remote Control: start bots that work in parallel and report back, message the account\'s other bots, keep your work items, and read and stop your staff.',
       ...(deferred ? { deferred: true } : {}), tools: coordination };
   }
 }

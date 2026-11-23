@@ -1,8 +1,8 @@
 /**
  * Every bot's own calls (bots design 2, 3, 5.1), made as its main session. A standing bot is a bot of the Window groups; a temporary
- * bot is a task, seen as a bot: its name is the task's title, its mission the brief, its organizer the task's owner, its session the
- * worker. A message goes where its sender and receiver say: a temporary bot's to its organizer is a report, a question or progress;
- * an organizer's to its temporary bot, and any other bot's, is input to that task; anything to a standing bot goes to its inbox.
+ * bot is a task, seen as a bot: its name is the task's title, its mission the brief, its chief the task's owner, its session the
+ * worker. A message goes where its sender and receiver say: a temporary bot's to its chief is a report, a question or progress;
+ * an chief's to its temporary bot, and any other bot's, is input to that task; anything to a standing bot goes to its inbox.
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { assistantMessageText, nativeSessionRefKey, taskView, type TeamHostCall, type TaskView, type TeamMember, type WorkItem } from '@orchardworks/agent-remote-protocol';
@@ -21,7 +21,7 @@ type Call<A extends TeamHostCall['action']> = Extract<TeamHostCall, { action: A 
 type Owner = { providerId: string; nativeSessionId: string };
 /** A bot as the calls see it. A temporary bot carries its task. */
 export type Bot = { key: string; name: string; standing?: Assistant; task?: SavedTeam };
-export interface BotListing { id: string; name: string; label?: string; mission?: string; kind: 'standing' | 'temporary'; organizer?: 'you'; status?: TaskView['state'] }
+export interface BotListing { id: string; name: string; label?: string; mission?: string; kind: 'standing' | 'temporary'; chief?: 'you'; status?: TaskView['state'] }
 
 const fail = (message: string): never => { throw new Error(message); };
 const fold = (text: string) => text.trim().toLocaleLowerCase('en');
@@ -47,19 +47,19 @@ export class BotCalls {
     const standing = callerAssistant(this.broker.ports.resolveSession, hostId, owner, accountDirectory(this.ports.groups()));
     return { key: standing.key, name: standing.name, standing };
   }
-  /** The temporary bot's organizer, if the bot is one: its task's owner session, as a standing or a temporary bot. */
-  private organizerOf(bot: Bot): Bot | undefined {
+  /** The temporary bot's chief, if the bot is one: its task's owner session, as a standing or a temporary bot. */
+  private chiefOf(bot: Bot): Bot | undefined {
     if (!bot.task) return undefined;
     const seat = bot.task.members[1]!, key = this.key(seat.hostId, seat.providerId, seat.nativeSessionId!);
     const directory = accountDirectory(this.ports.groups());
     const standing = directory.find(item => this.key(item.hostId, item.providerId, item.nativeSessionId) === key);
     if (standing) return { key: standing.key, name: standing.name, standing };
     const parent = this.broker.ports.read().find(team => team.task && this.key(team.members[0]!.hostId, team.members[0]!.providerId, team.members[0]!.nativeSessionId!) === key);
-    // The task's owner session is the organizer whether or not it is a bot of the groups now.
+    // The task's owner session is the chief whether or not it is a bot of the groups now.
     return parent ? this.temporary(parent) : { key: `session:${key}`, name: seat.name };
   }
-  /** The temporary bots a bot organizes: the tasks its session owns. */
-  private organized(hostId: string, owner: Owner): SavedTeam[] { return ownerTasks(this.broker.ports.read(), this.broker.ports.resolveSession, hostId, owner); }
+  /** A bot's temporary staff: the tasks its session owns. */
+  private staff(hostId: string, owner: Owner): SavedTeam[] { return ownerTasks(this.broker.ports.read(), this.broker.ports.resolveSession, hostId, owner); }
   /** The bot a name or id means, among the standing bots and the temporary bots still at work. */
   private named(name: string, caller: Bot): Bot {
     const standing = accountDirectory(this.ports.groups()).filter(item => item.key.startsWith('b_')).map((item): Bot => ({ key: item.key, name: item.name, standing: item }));
@@ -77,11 +77,11 @@ export class BotCalls {
     return { botId: temporaryBotId(created.taskId), status: created.state, message: created.message.replace(/^Task \S+/, `Bot "${call.name}"`) };
   }
   /**
-   * A standing bot another bot creates (bots design 2.2): its inbox's seat creates its session where its organizer works, with its
-   * standing instructions; once ready, it is placed in its organizer's group (`BotInboxes.place`). Its first message waits in its inbox.
+   * A standing bot another bot creates (bots design 2.2): its inbox's seat creates its session where its chief works, with its
+   * standing instructions; once ready, it is placed in its chief's group (`BotInboxes.place`). Its first message waits in its inbox.
    */
   private async createStanding(hostId: string, self: Bot, call: Call<'create_bot'>) {
-    if (!self.standing) fail('A temporary bot asks its organizer for a standing bot.');
+    if (!self.standing) fail('A temporary bot asks its chief for a standing bot.');
     if (!this.ports.placeBot) fail('Standing bots cannot be created on this Relay.');
     const providerId = call.provider ?? call.owner.providerId;
     this.broker.ports.assertHost(hostId, providerId);
@@ -95,12 +95,12 @@ export class BotCalls {
         summary: '', updatedAt: now, ...(call.model ? { model: call.model } : {}) };
       const created: SavedTeam = { id: randomUUID(), operationId: call.operationId, revision: 1, title: `${call.name}'s inbox`, status: 'active',
         source: { hostId, providerId: call.owner.providerId, nativeSessionId: call.owner.nativeSessionId, title: self.name }, members: [seat], messages: [],
-        inbox: { botId, pending: { name: call.name, mission: call.mission, organizer: self.key, groupId: self.standing!.groupId } }, createdAt: now, updatedAt: now };
+        inbox: { botId, pending: { name: call.name, mission: call.mission, chief: self.key, groupId: self.standing!.groupId } }, createdAt: now, updatedAt: now };
       if (call.message) {
         const messageId = `m${createHash('sha256').update(JSON.stringify([created.id, self.key, call.operationId])).digest('hex').slice(0, 12)}`;
         created.messages.push({ id: createHash('sha256').update(JSON.stringify(['first-message', created.id])).digest('hex'), from: seat.id, to: seat.id, status: 'queued', createdAt: now,
           text: assistantMessageText({ messageId, from: self.name, body: call.message }) });
-        // Recorded as received from the organizer, so the new bot answers it with reply_to.
+        // Recorded as received from the chief, so the new bot answers it with reply_to.
         created.inbox!.recent = [{ id: messageId, from: self.key, hop: 1, operationId: call.operationId }];
       }
       teams.push(created);
@@ -113,18 +113,18 @@ export class BotCalls {
       message: placed ? `Bot "${call.name}" is ready in your group; it reads its mission first and reports in.` : `Bot "${call.name}" is recorded; its session starts when this computer can create it.` };
   }
   /**
-   * The person keeps a temporary bot (bots design 10): its session becomes a standing bot of its organizer's group, with its brief as
-   * its mission and the organizer recorded, and its task ends as done. Its work and conversation stay where they are.
+   * The person keeps a temporary bot (bots design 10): its session becomes a standing bot of its chief's group, with its brief as
+   * its mission and the chief recorded, and its task ends as done. Its work and conversation stay where they are.
    */
   async keep(teamId: string): Promise<SavedTeam> {
     const team = this.broker.ports.read().find(item => item.id === teamId && item.task) ?? fail('No temporary bot has that id.');
-    const worker = team.members[0]!, organizer = this.organizerOf(this.temporary(team));
+    const worker = team.members[0]!, chief = this.chiefOf(this.temporary(team));
     if (!worker.nativeSessionId || worker.creation !== 'ready') fail('This bot has no session to keep yet.');
-    const group = organizer?.standing ?? fail('Only a bot of a group can keep the bots it organizes; this one\'s organizer is not in one.');
+    const group = chief?.standing ?? fail('Only a bot of a group can keep its staff; this one\'s chief is not in one.');
     const placeBot = this.ports.placeBot ?? fail('Standing bots cannot be created on this Relay.');
     const botId = newBotId(), name = team.task!.title.slice(0, 60);
     await placeBot(group.groupId, { id: `bot-${botId.slice(2, 14)}`, binding: { hostId: worker.hostId, providerId: worker.providerId, nativeSessionId: worker.nativeSessionId!, title: name } },
-      { botId, name, mission: team.task!.brief.slice(0, 4000), organizer: organizer!.key });
+      { botId, name, mission: team.task!.brief.slice(0, 4000), chief: chief!.key });
     return this.broker.change(teams => {
       const current = teams.find(item => item.id === teamId)!;
       if (current.task!.state === 'working' || current.task!.state === 'needs_input') taskAction(current, 'mark_task_done', this.broker.ports.now());
@@ -133,7 +133,7 @@ export class BotCalls {
   }
   /** A standing bot records a lasting change to how it works in its own mission (bots design 2.3). */
   async updateMission(hostId: string, call: Call<'update_mission'>) {
-    const self = this.caller(hostId, call.owner).standing ?? fail('A temporary bot\'s mission is its brief; tell your organizer what changed instead.');
+    const self = this.caller(hostId, call.owner).standing ?? fail('A temporary bot\'s mission is its brief; tell your chief what changed instead.');
     const setMission = this.ports.setMission ?? fail('Missions cannot be changed on this Relay.');
     await setMission(self.groupId, self.viewId, call.mission);
     await this.inboxes.known(self, call.mission);
@@ -141,47 +141,47 @@ export class BotCalls {
   }
   /** A standing bot keeps its work items and timers (bots design 6); a temporary bot's work is its brief. */
   async keepWork(hostId: string, call: Call<'update_work' | 'complete_work' | 'set_timer'>) {
-    const self = this.caller(hostId, call.owner).standing ?? fail('A temporary bot\'s work is its brief; report progress to your organizer with message.');
+    const self = this.caller(hostId, call.owner).standing ?? fail('A temporary bot\'s work is its brief; report progress to your chief with message.');
     if (call.action === 'update_work') return this.work.update(self, call);
     if (call.action === 'complete_work') return this.work.complete(self, call);
     return this.work.setTimer(self, call);
   }
   async message(hostId: string, call: Call<'bot_message'>) {
-    const from = this.caller(hostId, call.owner), organizer = this.organizerOf(from);
+    const from = this.caller(hostId, call.owner), chief = this.chiefOf(from);
     // A room the sender is a member of: its turn's answer, a pass, or the room's result.
     const room = this.rooms.memberRoom(hostId, call.owner, call.to);
     if (room) return this.rooms.speak(hostId, call.pass ? { action: 'room_pass', owner: call.owner, roomId: room.id }
       : { action: 'room_say', owner: call.owner, roomId: room.id, text: call.text, ...(call.status === 'done' ? { done: true } : {}) });
-    const to = fold(call.to) === 'organizer' && organizer ? organizer : this.named(call.to, from);
-    // A temporary bot to its organizer: its report, its question or its progress.
-    if (from.task && organizer && to.key === organizer.key) {
+    const to = fold(call.to) === 'chief' && chief ? chief : this.named(call.to, from);
+    // A temporary bot to its chief: its report, its question or its progress.
+    if (from.task && chief && to.key === chief.key) {
       const memberId = from.task.members[0]!.id;
       if (call.status === 'done' || call.status === 'failed') return this.tasks.report(hostId, { action: 'report_task', teamId: from.task.id, memberId, status: call.status, summary: call.patch ? `${call.text}\n\n${call.patch}` : call.text });
       if (call.status === 'needs_input') return this.tasks.ask(hostId, { action: 'ask_owner', teamId: from.task.id, memberId, question: call.text });
       return this.tasks.progress(hostId, { teamId: from.task.id, memberId, operationId: call.operationId, text: call.text });
     }
     if (to.task) {
-      const mine = this.organized(hostId, call.owner).some(team => team.id === to.task!.id);
+      const mine = this.staff(hostId, call.owner).some(team => team.id === to.task!.id);
       return mine ? this.tasks.message(hostId, { action: 'message_task', owner: call.owner, taskId: to.task.id, operationId: call.operationId, text: call.text })
         : this.tasks.input(to.task.id, from.name, { operationId: call.operationId, text: call.text });
     }
     return this.messages.deliver(from.standing ?? { key: from.key, name: from.name }, to.standing!, { operationId: call.operationId, text: call.text, ...(call.replyTo ? { replyTo: call.replyTo } : {}) });
   }
   list(hostId: string, call: Call<'list_bots'>): { bots: BotListing[]; work?: WorkItem[] } {
-    const self = this.caller(hostId, call.owner), organizer = this.organizerOf(self);
+    const self = this.caller(hostId, call.owner), chief = this.chiefOf(self);
     const standing = accountDirectory(this.ports.groups()).filter(item => item.key.startsWith('b_') && item.key !== self.key && !item.hidden)
       .map((item): BotListing => ({ id: item.key, name: item.name, kind: 'standing', ...(item.label ? { label: item.label } : {}), ...(item.mission ? { mission: item.mission } : {}) }));
-    const mine = this.organized(hostId, call.owner).map((team): BotListing => ({ id: temporaryBotId(team.id), name: team.task!.title, kind: 'temporary', organizer: 'you', status: taskView(team).state, mission: team.task!.brief }));
-    const above = organizer?.task ? [{ id: organizer.key, name: organizer.name, kind: 'temporary' as const, mission: organizer.task.task!.brief }] : [];
+    const mine = this.staff(hostId, call.owner).map((team): BotListing => ({ id: temporaryBotId(team.id), name: team.task!.title, kind: 'temporary', chief: 'you', status: taskView(team).state, mission: team.task!.brief }));
+    const above = chief?.task ? [{ id: chief.key, name: chief.name, kind: 'temporary' as const, mission: chief.task.task!.brief }] : [];
     // A standing bot also reads its own work items here.
     const work = self.standing && this.work.items(self.standing);
     return { bots: [...above, ...mine, ...standing], ...(work?.length ? { work } : {}) };
   }
-  /** The organizer's hold on one of its temporary bots: stop its work, retire it, or read where its session is. */
-  async organize(hostId: string, call: Call<'stop_bot' | 'retire_bot' | 'bot_session'>) {
+  /** The chief's hold on one of its temporary bots: stop its work, retire it, or read where its session is. */
+  async manageStaff(hostId: string, call: Call<'stop_bot' | 'retire_bot' | 'bot_session'>) {
     this.caller(hostId, call.owner);
-    const team = this.organized(hostId, call.owner).find(item => temporaryBotId(item.id) === call.bot || fold(item.task!.title) === fold(call.bot))
-      ?? fail('You do not organize a bot by that name; list them with list_bots.');
+    const team = this.staff(hostId, call.owner).find(item => temporaryBotId(item.id) === call.bot || fold(item.task!.title) === fold(call.bot))
+      ?? fail('None of your staff has that name; list them with list_bots.');
     if (call.action === 'bot_session') {
       const worker = team.members[0]!;
       if (!worker.nativeSessionId || worker.hostId !== hostId) fail('That bot runs on another computer; ask it with message instead.');
@@ -189,7 +189,7 @@ export class BotCalls {
     }
     if (!running(team)) return { botId: temporaryBotId(team.id), status: team.task!.state };
     const done = await this.tasks.finish(hostId, call.action === 'stop_bot' ? { action: 'cancel_task', owner: call.owner, taskId: team.id }
-      : { action: 'mark_task_done', owner: call.owner, taskId: team.id, summary: 'Retired by its organizer.' });
+      : { action: 'mark_task_done', owner: call.owner, taskId: team.id, summary: 'Retired by its chief.' });
     return { botId: temporaryBotId(team.id), status: done.state };
   }
 }

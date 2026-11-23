@@ -68,10 +68,10 @@ describe('the task directory', () => {
     expect(rows[1]!.textContent).toContain('Next: Ask the person.');
   });
 
-  it('lists the standing bots a bot organizes, from their records', () => {
-    const groups = [{ window: { id: 'g', views: [] }, bots: { rank: 'm', members: { a: { botId: 'b_' + '1'.repeat(32), name: 'Chief' }, b: { botId: 'b_' + '2'.repeat(32), name: 'Scribe', organizer: 'b_' + '1'.repeat(32) } } } }] as never;
+  it('lists a bot\'s standing staff, from their records', () => {
+    const groups = [{ window: { id: 'g', views: [] }, bots: { rank: 'm', members: { a: { botId: 'b_' + '1'.repeat(32), name: 'Chief' }, b: { botId: 'b_' + '2'.repeat(32), name: 'Scribe', chief: 'b_' + '1'.repeat(32) } } } }] as never;
     const directory = taskDirectory([], () => {}, undefined, groups);
-    expect(directory.organized!('b_' + '1'.repeat(32))).toEqual([{ botId: 'b_' + '2'.repeat(32), name: 'Scribe' }]);
-    expect(directory.organized!('b_' + '2'.repeat(32))).toEqual([]);
+    expect(directory.staff!('b_' + '1'.repeat(32))).toEqual([{ botId: 'b_' + '2'.repeat(32), name: 'Scribe' }]);
+    expect(directory.staff!('b_' + '2'.repeat(32))).toEqual([]);
   });
 });

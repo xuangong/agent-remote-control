@@ -18,8 +18,8 @@ export function taskDirectory(tasks: readonly Team[] | undefined, open: (worker:
     act,
     owned: owner => (tasks ?? []).filter(team => team.task && team.members[1]?.providerId === owner.providerId && team.members[1].nativeSessionId === owner.nativeSessionId)
       .map(taskView).sort((a, b) => b.updatedAt - a.updatedAt),
-    // A bot's standing bots are the ones whose record names it as their organizer.
-    organized: botId => groups.flatMap(group => Object.values(group.bots?.members ?? {}).flatMap(item => item.organizer === botId && item.botId ? [{ botId: item.botId, name: item.name ?? item.botId }] : [])),
+    // A bot's standing bots are the ones whose record names it as their chief.
+    staff: botId => groups.flatMap(group => Object.values(group.bots?.members ?? {}).flatMap(item => item.chief === botId && item.botId ? [{ botId: item.botId, name: item.name ?? item.botId }] : [])),
     // A standing bot's inbox is bound to its session; its work items travel on it.
     work: bot => [...(tasks ?? []).find(team => team.inbox && team.members[0]?.providerId === bot.providerId && team.members[0].nativeSessionId === bot.nativeSessionId)?.inbox?.work ?? []]
       .sort((a: WorkItem, b: WorkItem) => b.updatedAt - a.updatedAt),

@@ -35,7 +35,7 @@ describe('tasks on the Team broker', () => {
     expect(team!.messages[0]).toMatchObject({ from: team!.members[1]!.id, to: team!.members[0]!.id, status: 'queued' });
     expect(team!.messages[0]!.text).toMatch(new RegExp(`^\\[Task ${result.taskId} · brief · from Chief\\]`));
     expect(team!.messages[0]!.text).toContain('Done when: The logs are attached.');
-    expect(team!.messages[0]!.text).toContain('message your organizer once with status done or failed');
+    expect(team!.messages[0]!.text).toContain('message your chief once with status done or failed');
   });
 
   it('returns the same task for a repeated operation and refuses different input under its identity', async () => {

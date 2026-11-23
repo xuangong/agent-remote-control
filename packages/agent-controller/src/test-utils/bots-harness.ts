@@ -52,7 +52,7 @@ export async function botsHarness(options: { groups?: WindowGroup[]; sessions?: 
     resources: new PortableTeamResourceStore({ storage: { async get(key) { return rows.get(key); }, async put(key, value) { rows.set(key, value); }, async delete(key) { rows.delete(key); },
       async list(prefix) { return [...rows.keys()].filter(key => key.startsWith(prefix)); } } }),
     tasks: { capable: () => options.tasks === true, assertHost() { if (options.tasks !== true) throw new Error('Update the Controller to use tasks.'); } },
-    // The account's bots: by default one, Chief, whose main session is `worker`, so its tasks have a bot as organizer.
+    // The account's bots: by default one, Chief, whose main session is `worker`, so its tasks have a bot as chief.
     assistants: { groups: () => groups, capable: () => options.tasks === true,
       placeBot: async (groupId, view, details) => {
         const target = groups.find(item => item.window.id === groupId)!;

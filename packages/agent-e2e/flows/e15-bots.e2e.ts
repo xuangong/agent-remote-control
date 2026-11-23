@@ -1,6 +1,6 @@
 // E15, bots that call bots (bots design 11): the real page, Relay and Controller, with scripted sessions that take tools. A flow calls a
 // bot's tool in its model's place (`useTool`); everything the call causes runs for real: tasks and their workers, inboxes, framed inputs,
-// delivery between turns, and a standing bot joining its organizer's group.
+// delivery between turns, and a standing bot joining its chief's group.
 import { randomUUID } from 'node:crypto';
 import type { Browser, BrowserContext } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
@@ -46,10 +46,10 @@ it('E15: a bot starts two temporary bots; both report while it is idle, as one i
   await expect.poll(workers, { timeout: 20_000 }).toHaveLength(2);
   for (const worker of workers()) await hasTools(worker);
   const [logs, tests] = workers();
-  await stack.provider.useTool(logs!, 'message', { to: 'organizer', text: 'Logs saved in /tmp/logs.', status: 'done' });
-  await stack.provider.useTool(tests!, 'message', { to: 'organizer', text: 'Two tests fail.', status: 'failed' });
+  await stack.provider.useTool(logs!, 'message', { to: 'chief', text: 'Logs saved in /tmp/logs.', status: 'done' });
+  await stack.provider.useTool(tests!, 'message', { to: 'chief', text: 'Two tests fail.', status: 'failed' });
   await expect.poll(() => inputs('chief').map(input => input.kind).sort(), { timeout: 20_000 }).toEqual(['done', 'failed']);
-  // Both results reached the organizer in one input.
+  // Both results reached the chief in one input.
   expect(stack.provider.session('chief')!.sent.filter(text => parseTaskInputs(text))).toHaveLength(1);
   await showsText(page, 'Two tests fail.');
   await context.close();

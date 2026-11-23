@@ -37,7 +37,7 @@ async function mount(facts: Record<string, unknown> = {}) {
 
 describe('starting a temporary bot with /side', () => {
   const team = (ready: boolean) => ({ id: 'side-task', members: [{ id: 'worker', role: 'leader', hostId: 'local', providerId: 'codex', ...(ready ? { nativeSessionId: 'worker-session' } : {}), creation: ready ? 'ready' : 'reserved' }] }) as never;
-  it('asks the Relay for a temporary bot this session organizes, with the text as its mission, and opens it beside the session', async () => {
+  it('asks the Relay for a temporary bot of this session\'s staff, with the text as its mission, and opens it beside the session', async () => {
     const created = vi.spyOn(RemoteTeamClient.prototype, 'create').mockResolvedValue(team(true));
     const { scope, hook } = await mount();
     await hook.createFork(sourceState, source as never, 'console:side', ' Check the logs. ');

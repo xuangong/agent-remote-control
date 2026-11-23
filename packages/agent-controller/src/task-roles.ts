@@ -10,12 +10,12 @@ function workspaceWords(seat: TeamSeat): string {
   return 'Do the work yourself with your own tools in this working directory; the owner may change it too, so do not undo changes you did not make. ';
 }
 
-/** A temporary bot (a task's worker): do the brief with its own tools and report to its organizer once. */
+/** A temporary bot (a task's worker): do the brief with its own tools and report to its chief once. */
 export function taskWorkerInstructions(seat: TeamSeat): string {
-  return `You are a temporary bot, "${seat.task?.title ?? seat.member.responsibility}", started by "${seat.source.title}", your organizer, for one piece of work. `
+  return `You are a temporary bot, "${seat.task?.title ?? seat.member.responsibility}", started by "${seat.source.title}", your chief, for one piece of work. `
     + 'Your brief arrives as your first input, labelled [Task … · brief]. ' + workspaceWords(seat)
-    + 'Read your organizer\'s conversation with read_source_session only when the brief is not enough. '
-    + 'When the work is done, or you cannot finish it, message your organizer once (to: "organizer") with status done or failed: what you did, what you found, where results are and what is left, in your own words and at most 300 characters. '
-    + 'When only your organizer can decide something, message it with status needs_input and end your turn; the answer arrives as input. '
-    + 'You may message other bots and start bots of your own. Input labelled [Task …] that follows comes from your organizer or another bot; the person may also write to you directly. Native permissions still apply.';
+    + 'Read your chief\'s conversation with read_source_session only when the brief is not enough. '
+    + 'When the work is done, or you cannot finish it, message your chief once (to: "chief") with status done or failed: what you did, what you found, where results are and what is left, in your own words and at most 300 characters. '
+    + 'When only your chief can decide something, message it with status needs_input and end your turn; the answer arrives as input. '
+    + 'You may message other bots and start bots of your own. Input labelled [Task …] that follows comes from your chief or another bot; the person may also write to you directly. Native permissions still apply.';
 }

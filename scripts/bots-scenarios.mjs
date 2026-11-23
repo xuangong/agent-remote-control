@@ -99,45 +99,45 @@ const run = name => !wanted.length || wanted.includes(name);
 const file = name => join(workspace, name);
 const tag = randomUUID().slice(0, 6);
 
-const ORGANIZER = 'You organize the person\'s work with bots: split each request between temporary bots, or standing bots for roles that recur, and sum up their results for the person.';
+const CHIEF = 'You are the person\'s chief of staff: you run their work with bots, your staff: split each request between temporary bots, or standing bots for roles that recur, and sum up their results for the person.';
 /** A bot in a group of its own, once it has read its standing instructions. */
-async function organizerBot(name) {
-  const created = await bot(name, ORGANIZER), before = newest(created.address);
+async function chiefBot(name) {
+  const created = await bot(name, CHIEF), before = newest(created.address);
   group(`Scenarios ${name}`, [created]);
   await until(`${name}'s standing instructions`, () => teams().find(team => team.inbox && team.members[0]?.nativeSessionId === created.nativeSessionId && team.inbox.instructions), 2 * 60_000);
   await settled(created.address, before);
   return created;
 }
-const organizer = await organizerBot(`Organizer ${tag}`);
+const chief = await chiefBot(`Chief ${tag}`);
 
 if (run('temporary')) {
-  // An organizer splits the person's request between temporary bots, which report back; it sums up for the person.
+  // An chief splits the person's request between temporary bots, which report back; it sums up for the person.
   const [a, b] = [`alpha-${tag}.txt`, `beta-${tag}.txt`];
-  await say(organizer.address, `Use two temporary bots working in parallel: one creates ${a} containing the word alpha, the other creates ${b} containing the word beta, both in your working directory. When both have reported, tell me in one line what each did.`);
-  const done = await until('both temporary bots to report', () => { const own = tasksOf(organizer); return own.length >= 2 && own.every(team => ['done', 'failed'].includes(team.task.state)) && own; });
-  check('temporary: the organizer started two temporary bots', done.length === 2, `${done.length} started`);
+  await say(chief.address, `Use two temporary bots working in parallel: one creates ${a} containing the word alpha, the other creates ${b} containing the word beta, both in your working directory. When both have reported, tell me in one line what each did.`);
+  const done = await until('both temporary bots to report', () => { const own = tasksOf(chief); return own.length >= 2 && own.every(team => ['done', 'failed'].includes(team.task.state)) && own; });
+  check('temporary: the chief started two temporary bots', done.length === 2, `${done.length} started`);
   check('temporary: both reported done', done.every(team => team.task.state === 'done'), done.map(team => team.task.state).join(', '));
   check('temporary: both files exist', existsSync(file(a)) && existsSync(file(b)) && readFileSync(file(a), 'utf8').includes('alpha') && readFileSync(file(b), 'utf8').includes('beta'));
   // Its summary may have come with the reply already; the latest entry once it is quiet is what the person reads.
-  const final = await settled(organizer.address, undefined);
-  check('temporary: the organizer summed up for the person', /alpha|beta|\.txt/i.test(final.text ?? ''), (final.text ?? '').slice(0, 120));
-  const view = chains(), chain = view.chains.find(item => item.bot && view.names[item.bot] === organizer.name && item.cause === 'person' && item.created >= 2);
+  const final = await settled(chief.address, undefined);
+  check('temporary: the chief summed up for the person', /alpha|beta|\.txt/i.test(final.text ?? ''), (final.text ?? '').slice(0, 120));
+  const view = chains(), chain = view.chains.find(item => item.bot && view.names[item.bot] === chief.name && item.cause === 'person' && item.created >= 2);
   check('temporary: one chain from the person\'s input holds both bots', !!chain, chain ? `created ${chain.created}, messages ${chain.messages}, turns ${chain.turns}, tokens ${chain.usage.tokens}` : 'none');
 }
 
 let reviewer;
 if (run('standing') || run('shared')) {
-  // An organizer creates a standing bot with a mission; it reports in, works with the organizer by message, takes the person's
+  // An chief creates a standing bot with a mission; it reports in, works with the chief by message, takes the person's
   // lasting change into its own mission, and keeps a work item to its end.
   const target = `review-${tag}.txt`;
   execFileSync('/bin/sh', ['-c', `printf 'The release ships on Friday.\\n' > '${file(target)}'`]);
-  await say(organizer.address, `Create a standing bot named Reviewer ${tag} whose mission is to review text files in this working directory when a bot or the person asks, and to answer in one line. Then ask it to review ${target}.`);
+  await say(chief.address, `Create a standing bot named Reviewer ${tag} whose mission is to review text files in this working directory when a bot or the person asks, and to answer in one line. Then ask it to review ${target}.`);
   const inbox = await until('the standing reviewer', () => inboxNamed(`Reviewer ${tag}`));
-  check('standing: the organizer created a standing reviewer', !!inbox.inbox.botId && !inbox.inbox.pending, inbox.inbox.botId);
+  check('standing: the chief created a standing reviewer', !!inbox.inbox.botId && !inbox.inbox.pending, inbox.inbox.botId);
   reviewer = { name: `Reviewer ${tag}`, nativeSessionId: inbox.members[0].nativeSessionId, address: `${hostId}/${inbox.members[0].providerId}/${inbox.members[0].nativeSessionId}` };
   await settled(reviewer.address, undefined);
-  const answered = await until('the reviewer\'s answer to its organizer', () => received(organizer.address, `[Message from Reviewer ${tag}`)).catch(() => false);
-  check('standing: the reviewer answered its organizer by message', answered);
+  const answered = await until('the reviewer\'s answer to its chief', () => received(chief.address, `[Message from Reviewer ${tag}`)).catch(() => false);
+  check('standing: the reviewer answered its chief by message', answered);
   if (run('standing')) {
     await say(reviewer.address, 'From now on, also give the number of words of every file you review.');
     const mission = await until('the reviewer to record its mission', () => {
@@ -153,11 +153,11 @@ if (run('standing') || run('shared')) {
 }
 
 if (run('shared') && reviewer) {
-  // A second organizer asks the same reviewer: it serves both teams, and each answer reaches the one who asked.
-  const second = await organizerBot(`Planner ${tag}`);
+  // A second chief asks the same reviewer: it serves both teams, and each answer reaches the one who asked.
+  const second = await chiefBot(`Planner ${tag}`);
   await say(second.address, `Ask the bot ${reviewer.name} to review review-${tag}.txt and tell me its answer.`);
-  const answered = await until('the reviewer\'s answer to the second organizer', () => received(second.address, `[Message from ${reviewer.name}`)).catch(() => false);
-  check('shared: the reviewer answered a second organizer', answered);
+  const answered = await until('the reviewer\'s answer to the second chief', () => received(second.address, `[Message from ${reviewer.name}`)).catch(() => false);
+  check('shared: the reviewer answered a second chief', answered);
 }
 
 const failed = results.filter(item => !item.ok);

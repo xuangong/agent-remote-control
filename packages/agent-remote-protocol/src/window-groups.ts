@@ -37,8 +37,8 @@ export const WindowBotDetails = Type.Object({
   botId: Type.Optional(BotId),
   /** What the bot is for, in its record; its standing instructions after the base instructions. */
   mission: Type.Optional(BotMission),
-  /** The bot that created it and organizes it, in its record; absent, the person. Responses carry it; a change cannot set it. */
-  organizer: Type.Optional(BotId),
+  /** Its chief: the bot that created it, in its record; absent, the person. Responses carry it; a change cannot set it. */
+  chief: Type.Optional(BotId),
 }, strict);
 export type WindowBotDetails = Static<typeof WindowBotDetails>;
 /**

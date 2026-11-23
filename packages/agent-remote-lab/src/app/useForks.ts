@@ -114,8 +114,8 @@ export function useForks(scope: Pick<AppInputs & WorkbenchShellSlice & SessionSu
     } finally { forkBusy.current = false; }
   }
   /**
-   * `/side <text>` starts a temporary bot organized by this session (bots design 9): its mission is the text, it works where its
-   * organizer does, and it opens beside it once its session exists. It reports to its organizer like any temporary bot.
+   * `/side <text>` starts a temporary bot whose chief is this session (bots design 9): its mission is the text, it works where its
+   * chief does, and it opens beside it once its session exists. It reports to its chief like any temporary bot.
    */
   async function startSideBot(source: OpenedSession, args: string): Promise<AgentCommandResult> {
     const mission = args.trim();

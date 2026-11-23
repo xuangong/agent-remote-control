@@ -13,7 +13,7 @@ const enumOf = <T extends string>(...values: T[]) => Type.Union(values.map(value
 const gitObject = Type.String({ pattern: '^[0-9a-f]{7,64}$' });
 export const TeamSource = Type.Object({ hostId: id, providerId: id, nativeSessionId: id, title: Type.String({ minLength: 1, maxLength: 256 }) }, object);
 export type TeamSource = Static<typeof TeamSource>;
-/** Where a temporary bot works beside its organizer: the same directory, its own worktree at a commit, or another machine's clone. */
+/** Where a temporary bot works beside its chief: the same directory, its own worktree at a commit, or another machine's clone. */
 export const TeamMemberWorkspace = Type.Union([
   Type.Object({ kind: Type.Literal('shared') }, object),
   Type.Object({ kind: Type.Literal('worktree'), commit: gitObject }, object),
@@ -70,8 +70,8 @@ export const TeamInbox = Type.Object({ botId: BotId, instructions: Type.Optional
   /** The bot's work items and timers (bots design 6). */
   work: Type.Optional(Type.Array(WorkItem, { maxItems: WORK_ITEM_LIMIT })),
   timers: Type.Optional(Type.Array(BotTimer, { maxItems: 8 })),
-  /** A standing bot another bot created: its seat creates its session, then the Relay places it in its organizer's group (bots design 2.2). */
-  pending: Type.Optional(Type.Object({ name: BotName, mission: BotMission, organizer: BotId, groupId: id, message: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })) }, object)) }, object);
+  /** A standing bot another bot created: its seat creates its session, then the Relay places it in its chief's group (bots design 2.2). */
+  pending: Type.Optional(Type.Object({ name: BotName, mission: BotMission, chief: BotId, groupId: id, message: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })) }, object)) }, object);
 export type TeamInbox = Static<typeof TeamInbox>;
 const roomText = Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT });
 /**
@@ -101,7 +101,7 @@ export const Team = Type.Object({ id, operationId: id, revision: Type.Integer({ 
 }, object);
 export type Team = Static<typeof Team>;
 export const TeamCreate = Type.Object({ operationId: id, source: TeamSource,
-  /** The person starts a temporary bot organized by the source session (`/side`, bots design 9): its name and its mission. */
+  /** The person starts a temporary bot whose chief is the source session (`/side`, bots design 9): its name and its mission. */
   bot: Type.Optional(Type.Object({ name: TaskTitle, mission: TaskBrief }, object)) }, object);
 export type TeamCreate = Static<typeof TeamCreate>;
 export const TeamAction = Type.Union([
@@ -115,7 +115,7 @@ export const TeamAction = Type.Union([
   // The person stops a task, or takes it as done.
   Type.Object({ teamId: id, action: Type.Literal('cancel_task') }, object),
   Type.Object({ teamId: id, action: Type.Literal('mark_task_done') }, object),
-  // The person keeps a temporary bot as a standing bot of its organizer's group (bots design 10).
+  // The person keeps a temporary bot as a standing bot of its chief's group (bots design 10).
   Type.Object({ teamId: id, action: Type.Literal('keep_task') }, object),
   // The person writes in a room, or ends it.
   Type.Object({ teamId: id, action: Type.Literal('room_post'), operationId: id, text: Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT }) }, object),
@@ -158,7 +158,7 @@ export const TeamHostCall = Type.Union([
   Type.Object({ action: Type.Literal('cancel_task'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), taskId: id }, object),
   Type.Object({ action: Type.Literal('mark_task_done'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), taskId: id,
     summary: Type.Optional(Type.String({ minLength: 1, maxLength: TASK_SUMMARY_LIMIT })) }, object),
-  // Every bot's own calls, made as its main session (bots design 5.1). A temporary bot is a task: its organizer is the task's owner.
+  // Every bot's own calls, made as its main session (bots design 5.1). A temporary bot is a task: its chief is the task's owner.
   Type.Object({ action: Type.Literal('create_bot'), owner: TaskOwner, operationId: id, name: TaskTitle, mission: TaskBrief, lifetime: Type.Union([Type.Literal('temporary'), Type.Literal('standing')]),
     message: Type.Optional(BotText), workspace: Type.Optional(TaskWorkspace), commit: Type.Optional(gitObject), provider: Type.Optional(id), model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
     cause: Type.Optional(TurnCause) }, object),

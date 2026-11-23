@@ -216,7 +216,7 @@ export class TeamBroker {
     for (const team of this.ports.read()) if (team.task && wanted.has(temporaryBotId(team.id))) { names[temporaryBotId(team.id)] = team.task.title; kinds[temporaryBotId(team.id)] = 'temporary'; }
     return { chains, names, kinds, thresholds: this.chains.thresholds(), paused: this.ports.read().filter(team => team.inbox?.paused).map(team => team.inbox!.botId) };
   }
-  /** The person starts a temporary bot organized by a session (`/side`, bots design 9): a task of that session, its mission the brief. */
+  /** The person starts a temporary bot whose chief is a session (`/side`, bots design 9): a task of that session, its mission the brief. */
   async startBot(input: TeamCreate): Promise<SavedTeam> {
     const tasks = this.tasks ?? fail(unavailableTasks), bot = input.bot ?? fail('A bot needs a name and a mission.');
     const created = await tasks.create(input.source.hostId, { action: 'create_task', owner: { providerId: input.source.providerId, nativeSessionId: input.source.nativeSessionId,
@@ -280,7 +280,7 @@ export class TeamBroker {
     if (call.action === 'update_work' || call.action === 'complete_work' || call.action === 'set_timer') return (this.bots ?? fail(unavailableAssistants)).keepWork(hostId, call);
     if (call.action === 'update_mission') return (this.bots ?? fail(unavailableAssistants)).updateMission(hostId, call);
     if (call.action === 'list_bots') return (this.bots ?? fail(unavailableAssistants)).list(hostId, call);
-    if (call.action === 'stop_bot' || call.action === 'retire_bot' || call.action === 'bot_session') return (this.bots ?? fail(unavailableAssistants)).organize(hostId, call);
+    if (call.action === 'stop_bot' || call.action === 'retire_bot' || call.action === 'bot_session') return (this.bots ?? fail(unavailableAssistants)).manageStaff(hostId, call);
     if (call.action === 'task_status') return (this.tasks ?? fail(unavailableTasks)).status(hostId, call);
     if (call.action === 'report_task') { assertCurrent(); return (this.tasks ?? fail(unavailableTasks)).report(hostId, call); }
     if (call.action === 'open_room') { const rooms = this.rooms ?? fail(unavailableAssistants); return this.chained(hostId, call.owner, call.cause, () => rooms.open(hostId, call)); }

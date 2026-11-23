@@ -80,7 +80,7 @@ Built: 4b (f4155245, bc116879) and 4c (bc116879).
 
 ## Bounds that stay
 
-Sizes (messages of 300 characters, briefs, queues, Relay and Host storage) and the span of an organizer (12 bots). They refuse
+Sizes (messages of 300 characters, briefs, queues, Relay and Host storage) and the span of a chief (12 bots). They refuse
 with a message that says which bound, as now.
 
 ## Order and checks

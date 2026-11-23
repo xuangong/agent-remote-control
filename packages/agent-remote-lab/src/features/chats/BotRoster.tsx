@@ -34,8 +34,8 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
   const work = quiet ? directory?.work?.(row.session).find(item => item.phase !== 'done') : undefined;
   const sentence = draft && quiet ? undefined : (work ? `${work.title} · ${t(`details.workPhase.${work.phase}`)}` : row.assistant.sentence) || undefined;
   // The role and label are tags beside the name, like a job title; screen readers hear them after the name.
-  const organizedBy = row.organizer ? t('assistants.organizedBy', { name: row.organizer }) : undefined;
-  const description = [row.role, row.details.label, organizedBy, sentence, draft ? `${t('assistants.draft')}: ${draft}` : undefined, row.unread ? t('assistants.unread') : undefined,
+  const staffOf = row.chief ? t('assistants.staffOf', { name: row.chief }) : undefined;
+  const description = [row.role, row.details.label, staffOf, sentence, draft ? `${t('assistants.draft')}: ${draft}` : undefined, row.unread ? t('assistants.unread') : undefined,
     row.details.pinned ? t('assistants.pinned') : undefined, row.muted ? t('assistants.muted') : undefined, time].filter(Boolean).join(' · ');
   const menuEvents = menu ? contextMenuEvents(({ target, point }) => {
     const anchor = target.closest<HTMLElement>('.lab-bot-row');
@@ -51,7 +51,7 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
         <span className="lab-bot-name-line"><strong className="lab-bot-name">{name}</strong>
           {row.role ? <span className="lab-bot-role">{row.role}</span> : null}
           {row.details.label ? <span className="lab-bot-label">{row.details.label}</span> : null}
-          {organizedBy ? <span className="lab-bot-label" data-organizer>{organizedBy}</span> : null}
+          {staffOf ? <span className="lab-bot-label" data-chief>{staffOf}</span> : null}
           {marks}
           {row.muted ? <span className="lab-bot-muted" aria-hidden="true"><Icon name="bell-off" size={13} /></span> : null}
           {time ? <span className="lab-bot-time" aria-hidden="true">{time}</span> : null}</span>

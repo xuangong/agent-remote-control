@@ -240,7 +240,7 @@ export class TeamRuntime implements SessionRole {
     }
   }
   /** A worktree task's summary with the path of its patch appended; the summary alone when the worktree changed nothing. */
-  /** A worktree bot's patch against its commit, saved on this Host, as the line its organizer reads; undefined without changes. */
+  /** A worktree bot's patch against its commit, saved on this Host, as the line its chief reads; undefined without changes. */
   private async patchLine(seat: TeamSeat): Promise<string | undefined> {
     const record = this.records.find(item => item.seat.teamId === seat.teamId && item.seat.member.id === seat.member.id), workspace = seat.member.workspace;
     if (!record?.worktree || record.worktree.removed || workspace?.kind !== 'worktree') throw new Error('This task\'s worktree is not on this Host.');
@@ -303,14 +303,14 @@ export class TeamRuntime implements SessionRole {
       return this.access.toolNamespaces?.(member.providerId) ? { instructions, ...(bots ? { toolNamespaces: [bots] } : {}) } : { instructions, ...(bots ? { tools: bots.tools } : {}) };
     }
     if (seat.task) {
-      // A temporary bot has every bot's tools, called as its own session; it reports to its organizer with message.
+      // A temporary bot has every bot's tools, called as its own session; it reports to its chief with message.
       const bots = this.access.botTools?.(actual);
       const standing = botInstructions(undefined);
       const instructions = `${standing}\n\n${taskWorkerInstructions(seat)} ${locationInstructions(seat)}`;
       const access = member.access ? { access: member.access } : {};
       const own = bindAgentSessionTools([readSource], assertCurrent);
       return this.access.toolNamespaces?.(member.providerId)
-        ? { instructions, ...access, toolNamespaces: [...(bots ? [bots] : []), { name: TASK_WORKER_NAMESPACE, description: 'Agent Remote Control: read your organizer\'s conversation.', tools: own }] }
+        ? { instructions, ...access, toolNamespaces: [...(bots ? [bots] : []), { name: TASK_WORKER_NAMESPACE, description: 'Agent Remote Control: read your chief\'s conversation.', tools: own }] }
         : { instructions, ...access, tools: [...own, ...(bots?.tools ?? [])] };
     }
     const tools = [

@@ -244,7 +244,7 @@ export class TaskGroups {
       return { taskId: team.id, state: item.state };
     });
   }
-  /** The temporary bot the task is tells its organizer where its work stands. */
+  /** The temporary bot the task is tells its chief where its work stands. */
   progress(hostId: string, call: { teamId: string; memberId: string; operationId: string; text: string }): Promise<{ taskId: string; state: TeamTask['state'] }> {
     return this.workerChange(hostId, call, (team, self, item, now) => {
       if (!running(item.state)) fail('This task is no longer running.');
@@ -252,7 +252,7 @@ export class TaskGroups {
       return { taskId: team.id, state: item.state };
     });
   }
-  /** A bot that does not organize the temporary bot writes to it: the worker reads it as input from that bot. */
+  /** A bot that is not the temporary bot's chief writes to it: the worker reads it as input from that bot. */
   input(teamId: string, from: string, call: { operationId: string; text: string }): Promise<{ taskId: string; state: TeamTask['state'] }> {
     return this.broker.change(teams => {
       const team = teams.find(item => item.id === teamId) ?? fail('Task not found.'), item = task(team), now = this.broker.ports.now();

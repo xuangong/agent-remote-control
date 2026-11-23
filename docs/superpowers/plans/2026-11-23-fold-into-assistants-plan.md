@@ -34,6 +34,19 @@ comes next. Chains (1c) move to step 4, where the audit needs them; nothing befo
 
 ## Step 2: one kind of bot
 
+Built on `feat/bots-1-record` (2026-11-23), toward the first deployment:
+
+- **Inboxes.** Every bot has an inbox, a Team whose only seat is its main session, bound where it is; the Relay keeps it on the
+  session the bot shows. Its standing instructions (base text, version 1, and mission, `standingInstructionsText` in the protocol)
+  are queued there whenever the bot has not been sent that text; messages from other bots are queued there too (links are no longer
+  created), with reply chains kept on the receiving inbox. Live: a new bot reported in from its instructions, and a bot messaged two
+  others, one of which answered with `message_assistant`.
+- **No mode.** The coordinator and plain switch is gone; every bot gets the task, message and room tools; any bot reaches any other.
+
+Left for after the first deployment: replies from final text (3.3) for bots whose provider takes no tools, `create_bot` and the
+other bot tools, the `message` tool with `status`, and tasks as temporary bots. Until then tasks keep their own tools.
+
+
 - [ ] No mode (design 2.1): remove the coordinator/plain switch, `mode`, and `coordinatorProvider`; every bot whose provider takes
   tools gets the `agent_remote` namespace (design 5.1) and standing instructions at its next attachment; others are answers only.
 - [ ] `create_bot`, `retire_bot`, `list_bots`, `read_bot`, `stop_bot`, `update_mission` (design 2, 5.1); creation outcome framed to

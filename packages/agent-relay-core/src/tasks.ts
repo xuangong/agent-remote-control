@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { nativeSessionRefKey, TASK_RUNNING_LIMIT, taskBriefText, taskResultText, taskSenderName, taskUpdateText, taskView, TASK_TOLD_LIMIT, type Team, type TeamMessage, type TeamHostCall, type TeamMember, type TeamTask, type TaskView } from '@orchardworks/agent-remote-protocol';
-import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, unresolvedTeamDelivery, type SavedTeam } from './team-delivery.js';
+import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
+import { pruneCoordination } from './coordination-retention.js';
 import type { TeamBrokerPorts } from './teams.js';
 
 /** What the Team broker lends tasks. */
@@ -25,8 +26,6 @@ type OwnerCall = Extract<TeamHostCall, { action: 'cancel_task' | 'mark_task_done
 type AskCall = Extract<TeamHostCall, { action: 'ask_owner' }>;
 type TellCall = Extract<TeamHostCall, { action: 'tell_task' }>;
 
-/** Finished tasks kept per account; older ones, whose deliveries are settled, are removed. */
-export const TASK_FINISHED_KEEP = 200;
 const STATUS_LIMIT = 20;
 const fail = (message: string): never => { throw new Error(message); };
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -133,19 +132,6 @@ export function ownerTasks(teams: SavedTeam[], resolve: TeamBrokerPorts['resolve
   });
 }
 
-const settled = (team: SavedTeam) => ![...team.messages, ...(team.deliveryReceipts ?? [])].some(message => message.status === 'queued' || unresolvedTeamDelivery(message));
-/** Removes the oldest finished tasks with settled deliveries beyond the kept number, and makes room for one more Team at the account limit. */
-export function pruneTasks(teams: SavedTeam[], reserve = 0): void {
-  const view = plain(teams);
-  const removable = view.filter(team => team.task && finished(team.task.state) && settled(team)).sort((a, b) => a.task!.updatedAt - b.task!.updatedAt);
-  const finishedCount = view.filter(team => team.task && finished(team.task.state)).length;
-  let excess = Math.max(finishedCount - TASK_FINISHED_KEEP, view.length + reserve - ACCOUNT_TEAM_LIMIT, 0);
-  for (const team of removable) {
-    if (excess <= 0) break;
-    teams.splice(plain(teams).findIndex(item => item.id === team.id), 1); excess--;
-  }
-}
-
 /** Task creation, status and reports, on top of the Team broker. */
 export class TaskGroups {
   constructor(private readonly broker: TaskBrokerPorts, private readonly ports: TaskPorts) {}
@@ -169,7 +155,7 @@ export class TaskGroups {
       }
       const count = ownerTasks(plain(teams), resolve, hostId, call.owner).filter(team => running(team.task!.state)).length;
       if (count >= TASK_RUNNING_LIMIT) fail(`This session already has ${count} tasks running. Wait for a result before starting another.`);
-      pruneTasks(teams, 1);
+      pruneCoordination(teams, 1);
       if (plain(teams).length >= ACCOUNT_TEAM_LIMIT) fail('Team capacity reached.');
       const worker: TeamMember = { id: randomUUID(), role: 'leader', hostId, providerId, name: 'Worker', responsibility: call.title,
         creation: 'reserved', activity: 'unknown', summary: '', updatedAt: now, ...(call.model ? { model: call.model } : {}),

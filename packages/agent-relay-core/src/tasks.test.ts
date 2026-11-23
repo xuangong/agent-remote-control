@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { isTeam, parseTaskInput, TASK_RUNNING_LIMIT, type TaskView, type TeamSeat } from '@orchardworks/agent-remote-protocol';
 import { TeamBroker } from './teams.js';
 import { validSavedTeam, type SavedTeam } from './team-delivery.js';
-import { briefText, pruneTasks, quoteFrames, TASK_FINISHED_KEEP } from './tasks.js';
+import { briefText, quoteFrames } from './tasks.js';
 
 function fixture(options: { capable?: (hostId: string) => boolean; create?: (seat: TeamSeat) => Promise<TeamSeat['member']> } = {}) {
   let state: SavedTeam[] = [], now = 100;
@@ -104,21 +104,6 @@ describe('tasks on the Team broker', () => {
     tasks = false;
     expect(await f.broker.hostCall('mac', { action: 'poll' })).toEqual([]);
     await expect(f.broker.hostCall('mac', create('again'))).rejects.toThrow('Update the Controller to use tasks.');
-  });
-
-  it('keeps a bounded number of finished tasks whose deliveries settled', () => {
-    const team = (index: number, state: 'working' | 'done', status: 'queued' | 'accepted'): SavedTeam => ({ id: `t${index}`, operationId: `o${index}`, revision: 1,
-      source: { hostId: 'mac', providerId: 'codex', nativeSessionId: 'main', title: 'Chief' }, title: 'T', status: 'active', createdAt: index, updatedAt: index,
-      members: [{ id: 'w', role: 'leader', hostId: 'mac', providerId: 'codex', name: 'Worker', responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 },
-        { id: 'o', role: 'requester', hostId: 'mac', providerId: 'codex', nativeSessionId: 'main', name: 'Chief', responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 }],
-      messages: [{ id: `m${index}`, from: 'w', to: 'o', text: 'result', status, ...(status === 'accepted' ? { acceptance: 'started' as const } : {}), createdAt: index }],
-      task: { title: 'T', brief: 'B', state, ...(state === 'done' ? { result: { status: 'done' as const, summary: 'S', reportedAt: index } } : {}), createdAt: index, updatedAt: index } });
-    const teams = [...Array.from({ length: TASK_FINISHED_KEEP + 3 }, (_, index) => team(index, 'done', 'accepted')), team(9000, 'done', 'queued'), team(9001, 'working', 'accepted')];
-    pruneTasks(teams);
-    expect(teams.filter(item => item.task?.state === 'done')).toHaveLength(TASK_FINISHED_KEEP);
-    expect(teams.map(item => item.id)).not.toContain('t0');
-    // A result still on its way, and a running task, are never removed.
-    expect(teams.map(item => item.id)).toEqual(expect.arrayContaining(['t9000', 't9001']));
   });
 
   it('quotes payload lines that would read as frames', () => {

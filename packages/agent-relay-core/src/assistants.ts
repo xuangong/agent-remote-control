@@ -9,7 +9,7 @@ import { accountAssistants, assistantMessageText, assistantNamesIn, ASSISTANT_ME
 import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
 import type { TeamBrokerPorts } from './teams.js';
-import { pruneTasks } from './tasks.js';
+import { pruneCoordination } from './coordination-retention.js';
 
 /** What the Team broker lends assistant messages. */
 export interface AssistantBrokerPorts {
@@ -98,7 +98,7 @@ export class AssistantMessages {
       const now = this.broker.ports.now();
       let team = teams.find(item => item.link?.assistants.includes(from.key) && item.link.assistants.includes(to.key));
       if (!team) {
-        pruneTasks(teams, 1);
+        pruneCoordination(teams, 1);
         if (plain(teams).length >= ACCOUNT_TEAM_LIMIT) fail('Team capacity reached.');
         const seat = (item: Assistant) => assistantSeat(item, now);
         team = { id: randomUUID(), operationId: digest(['link', [from.key, to.key].sort()]), revision: 1, title: `${from.name} and ${to.name}`, status: 'active',

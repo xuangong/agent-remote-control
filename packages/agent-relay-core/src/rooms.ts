@@ -9,7 +9,7 @@ import { nativeSessionRefKey, roomTurnText, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIM
 import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
 import type { TeamBrokerPorts } from './teams.js';
-import { pruneTasks } from './tasks.js';
+import { pruneCoordination } from './coordination-retention.js';
 import { accountDirectory, assistantSeat, coordinatorCaller, namedAssistant, type AssistantBrokerPorts, type AssistantPorts } from './assistants.js';
 
 type OpenCall = Extract<TeamHostCall, { action: 'open_room' }>;
@@ -82,7 +82,7 @@ export class Rooms {
     const created = await this.broker.change(teams => {
       const existing = teams.find(team => team.operationId === call.operationId && team.room);
       if (existing) return existing;
-      pruneTasks(teams, 1);
+      pruneCoordination(teams, 1);
       if (plain(teams).length >= ACCOUNT_TEAM_LIMIT) fail('Team capacity reached.');
       const now = this.broker.ports.now(), members = [opener, ...others].map(item => assistantSeat(item, now));
       const team: SavedTeam = { id: randomUUID(), operationId: call.operationId, revision: 1, title: call.name, status: 'active', members, messages: [],

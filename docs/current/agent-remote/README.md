@@ -85,7 +85,6 @@ flowchart LR
 | [web.md](web.md) | Headless recovery and React DOM presentation. |
 | [debugger.md](debugger.md) | Terminal presentation over the shared headless client. |
 | [lab.md](lab.md) | The workbench, temporary Host pairing, discovery, creation, and protocol validation. |
-| [call-for-support.md](call-for-support.md) | Support groups: profiles, enablement, calls, rosters, reports, workspaces, worker tools and usage. |
 | [cli.md](cli.md) | `agent-remote-controller`: session, role, host, window, login and api commands; who asks, session credentials, sandbox access and the `agent-remote` skill. |
 | [host-vscode-tunnel.md](host-vscode-tunnel.md) | Host-owned VS Code process lifetime, device authorization, resource reclamation, and workspace links. |
 

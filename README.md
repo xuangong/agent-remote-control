@@ -22,7 +22,7 @@ Use **Ask** for a separate contextual discussion and **/side** for a related wor
 
 ### Talk to your agents like a chat list
 
-Switch to **Bot mode** to see every session of your Windows as a bot in a list, grouped by Window, with its role (Side, Team, TPM, Support), its latest reply, an unread dot and its draft, then open one conversation at a time; on a phone it is a list and a chat, like a messaging app. Bots can live on different Hosts in one group. Fold or put a bot to sleep, label it, hand it off to another provider, or open a Side beside it; send to a bot whose Host is offline and the message waits on every device until the Host is back. See [Bots and Windows](docs/guides/bot-window-workbench.md).
+Switch to **Bot mode** to see every session of your Windows as a bot in a list, grouped by Window, with its place in the group (chief or staff), its latest reply, an unread dot and its draft, then open one conversation at a time; on a phone it is a list and a chat, like a messaging app. Bots can live on different Hosts in one group. Fold or put a bot to sleep, label it, hand it off to another provider, or start a temporary bot beside it; send to a bot whose Host is offline and the message waits on every device until the Host is back. See [Bots and Windows](docs/guides/bot-window-workbench.md).
 
 ### Keep and share your Window layouts
 
@@ -36,7 +36,7 @@ An agent can also inspect and arrange a Window through `agent-remote-controller 
 
 ### Do it from the command line
 
-Everything the website does, `agent-remote-controller` does from a shell, for you and for your agents: list, read, create and drive sessions on any of your Hosts, answer their requests, hand them off, manage references, Windows and Hosts, and run a session's Team, support or TPM role. Agents learn the commands from the `agent-remote` skill the Controller gives them. On a computer without a running Controller, or for other Hosts and Windows, run `agent-remote-controller login` once and approve it in your browser. See [command line](docs/current/agent-remote/cli.md).
+Everything the website does, `agent-remote-controller` does from a shell, for you and for your agents: list, read, create and drive sessions on any of your Hosts, answer their requests, hand them off, manage references, Windows and Hosts, and run the tools of a session's bot role. Agents learn the commands from the `agent-remote` skill the Controller gives them. On a computer without a running Controller, or for other Hosts and Windows, run `agent-remote-controller login` once and approve it in your browser. See [command line](docs/current/agent-remote/cli.md).
 
 ### Put a chief and its staff on work that spans machines
 

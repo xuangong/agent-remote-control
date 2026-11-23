@@ -91,7 +91,7 @@ role list
 role <command> [--OPTION VALUE]... [--input JSON | --input-file PATH|-]
 ```
 
-A role command runs one of the tools of the role the calling session holds, with the tool's own handler and JSON schema check (`role-routes.ts`): the Team tools of a member or Leader, a support coordinator's and supporter's tools, a TPM's tools, or, for a session without a role, the worker's Call For Support tools while they are enabled. Commands are the tool names in kebab-case; options are the input's fields in kebab-case, repeated for arrays and JSON for objects. Only a session's own shell has a role.
+A role command runs one of the tools of the role the calling session holds, with the tool's own handler and JSON schema check (`role-routes.ts`): the bot tools of a chief, a staff bot or a standing bot. Commands are the tool names in kebab-case; options are the input's fields in kebab-case, repeated for arrays and JSON for objects. Only a session's own shell has a role.
 
 The tools are still given to the sessions as before. Commands alone would ask Codex sessions in the user's own sandbox to approve every call, since their sandbox blocks the session socket until a command runs outside it; the tools run in the Controller and need no approval.
 

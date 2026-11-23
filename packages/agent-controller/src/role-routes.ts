@@ -2,8 +2,7 @@ import type { AgentSessionTool } from '@orchardworks/agent-provider-sdk';
 import type { SessionCaller, SessionCallResult } from './session-routes.js';
 
 /**
- * Role commands: what the role a session holds lets it do (a Team member, a support coordinator or supporter, a TPM, a
- * worker that calls for support), run from that session's shell. Each command is one of the role's tools, run by the
+ * Role commands: what the role a session holds as a bot lets it do, run from that session's shell. Each command is one of the role's tools, run by the
  * same handler with the same checks; only the transport differs.
  */
 export const commandName = (tool: string) => tool.replaceAll('_', '-');

@@ -466,8 +466,6 @@ A Call For Support worker's `requester` seat carries no Team tools, so the worke
 keeps no role and moves freely; the seat follows by role routing, and reports go to
 the session that holds it now. The worker's own `agent_remote` tools are given again
 on each attachment, and a successor created empty declares them like role extensions.
-A read-only coordinator or supporter seat moves only to a provider that enforces
-read-only sessions ([Call For Support](call-for-support.md)).
 
 ## Provider evidence and recovery
 

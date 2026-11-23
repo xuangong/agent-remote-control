@@ -153,6 +153,8 @@ export function createAttachment(ctx: SessionCoreContext) {
           }
         }
         const attached = nativeRef({ providerId, nativeSessionId });
+        // A bot's standing instructions and tools come from enablement, which a Controller that just started may not have read yet.
+        await ctx.workerSupport?.loaded(attached.controllerId);
         // A generic successor holds the role of its source, so every attachment of it gets the same extensions.
         const extensions = nativePrefix ? await nativePrefixExtensions(nativePrefix.source, () => nativeSessionId)
           : await roles.extensions(genericSuccessionSource(attached) ?? attached, () => attached) ?? workerExtensions(providerId, attached, () => attached);

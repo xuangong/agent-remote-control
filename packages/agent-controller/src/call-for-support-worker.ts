@@ -43,6 +43,8 @@ export class WorkerSupport {
   private readonly listeners = new Set<() => void>();
   private readonly resources: TeamResourceFiles;
   private polling = false;
+  private loadedOnce = false;
+  private polled?: Promise<void>;
   private tasksOffered = false;
   constructor(private readonly ports: WorkerSupportPorts) {
     this.resources = new TeamResourceFiles(join(ports.stateDirectory, 'support-resources'), call => ports.request(call));
@@ -64,35 +66,47 @@ export class WorkerSupport {
   /** Whether a session the Controller is about to create will be offered the namespace: only a profile's default can say so yet, since it is nobody's main session. */
   enabledByDefault(): boolean { return this.ports.available() && this.enablement.defaultEnabled; }
   onChange(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
+  /**
+   * Waits, at most `limitMs`, until enablement has been read once since the Controller started, so a session that opens right after a
+   * restart still gets its standing instructions and tools. A Relay that does not answer in time leaves the session as it is.
+   */
+  async loaded(controllerId: string, limitMs = 3000): Promise<void> {
+    if (this.loadedOnce || !this.ports.available()) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([(this.polled ?? this.refresh(controllerId)).catch(() => undefined), new Promise<void>(resolve => { timer = setTimeout(resolve, limitMs); })]);
+    clearTimeout(timer);
+  }
   /** Reads enablement from the Relay; listeners hear about any change. */
   async refresh(controllerId: string): Promise<void> {
-    if (this.polling || !this.ports.available()) return;
+    if (this.polling || !this.ports.available()) return this.polled;
     this.polling = true;
-    try {
-      const value = await this.ports.request({ action: 'support_enablement' }) as { defaultEnabled?: unknown; sessions?: unknown; coordinators?: unknown; bots?: unknown };
-      if (!value || typeof value.defaultEnabled !== 'boolean' || !Array.isArray(value.sessions)) throw new Error('Invalid Call For Support enablement.');
-      const sessions = new Map<string, boolean>();
-      for (const entry of value.sessions as Array<{ providerId?: unknown; nativeSessionId?: unknown; enabled?: unknown }>) {
-        if (typeof entry?.providerId !== 'string' || typeof entry.nativeSessionId !== 'string' || typeof entry.enabled !== 'boolean') continue;
-        sessions.set(nativeSessionRefKey({ controllerId, providerId: entry.providerId, nativeSessionId: entry.nativeSessionId }), entry.enabled);
-      }
-      const bots = new Map<string, string>();
-      for (const entry of Array.isArray(value.bots) ? value.bots as Array<{ providerId?: unknown; nativeSessionId?: unknown; mission?: unknown }> : []) {
-        if (typeof entry?.providerId === 'string' && typeof entry.nativeSessionId === 'string')
-          bots.set(nativeSessionRefKey({ controllerId, providerId: entry.providerId, nativeSessionId: entry.nativeSessionId }), typeof entry.mission === 'string' ? entry.mission : '');
-      }
-      const coordinators = new Set<string>();
-      for (const entry of Array.isArray(value.coordinators) ? value.coordinators as Array<{ providerId?: unknown; nativeSessionId?: unknown }> : []) {
-        if (typeof entry?.providerId === 'string' && typeof entry.nativeSessionId === 'string') coordinators.add(nativeSessionRefKey({ controllerId, providerId: entry.providerId, nativeSessionId: entry.nativeSessionId }));
-      }
-      const next = { defaultEnabled: value.defaultEnabled, sessions, coordinators, bots }, tasks = this.ports.tasks?.() === true;
-      const changed = tasks !== this.tasksOffered || next.defaultEnabled !== this.enablement.defaultEnabled || next.sessions.size !== this.enablement.sessions.size
-        || [...next.sessions].some(([key, enabled]) => this.enablement.sessions.get(key) !== enabled)
-        || next.coordinators.size !== this.enablement.coordinators.size || [...next.coordinators].some(key => !this.enablement.coordinators.has(key))
-        || next.bots.size !== this.enablement.bots.size || [...next.bots].some(([key, mission]) => this.enablement.bots.get(key) !== mission);
-      this.enablement = next; this.tasksOffered = tasks;
-      if (changed) for (const listener of this.listeners) { try { listener(); } catch { /* Listeners cannot stop enablement. */ } }
-    } finally { this.polling = false; }
+    this.polled = this.read(controllerId).finally(() => { this.polling = false; this.polled = undefined; });
+    return this.polled;
+  }
+  private async read(controllerId: string): Promise<void> {
+    const value = await this.ports.request({ action: 'support_enablement' }) as { defaultEnabled?: unknown; sessions?: unknown; coordinators?: unknown; bots?: unknown };
+    if (!value || typeof value.defaultEnabled !== 'boolean' || !Array.isArray(value.sessions)) throw new Error('Invalid Call For Support enablement.');
+    const sessions = new Map<string, boolean>();
+    for (const entry of value.sessions as Array<{ providerId?: unknown; nativeSessionId?: unknown; enabled?: unknown }>) {
+      if (typeof entry?.providerId !== 'string' || typeof entry.nativeSessionId !== 'string' || typeof entry.enabled !== 'boolean') continue;
+      sessions.set(nativeSessionRefKey({ controllerId, providerId: entry.providerId, nativeSessionId: entry.nativeSessionId }), entry.enabled);
+    }
+    const bots = new Map<string, string>();
+    for (const entry of Array.isArray(value.bots) ? value.bots as Array<{ providerId?: unknown; nativeSessionId?: unknown; mission?: unknown }> : []) {
+      if (typeof entry?.providerId === 'string' && typeof entry.nativeSessionId === 'string')
+        bots.set(nativeSessionRefKey({ controllerId, providerId: entry.providerId, nativeSessionId: entry.nativeSessionId }), typeof entry.mission === 'string' ? entry.mission : '');
+    }
+    const coordinators = new Set<string>();
+    for (const entry of Array.isArray(value.coordinators) ? value.coordinators as Array<{ providerId?: unknown; nativeSessionId?: unknown }> : []) {
+      if (typeof entry?.providerId === 'string' && typeof entry.nativeSessionId === 'string') coordinators.add(nativeSessionRefKey({ controllerId, providerId: entry.providerId, nativeSessionId: entry.nativeSessionId }));
+    }
+    const next = { defaultEnabled: value.defaultEnabled, sessions, coordinators, bots }, tasks = this.ports.tasks?.() === true;
+    const changed = tasks !== this.tasksOffered || next.defaultEnabled !== this.enablement.defaultEnabled || next.sessions.size !== this.enablement.sessions.size
+      || [...next.sessions].some(([key, enabled]) => this.enablement.sessions.get(key) !== enabled)
+      || next.coordinators.size !== this.enablement.coordinators.size || [...next.coordinators].some(key => !this.enablement.coordinators.has(key))
+      || next.bots.size !== this.enablement.bots.size || [...next.bots].some(([key, mission]) => this.enablement.bots.get(key) !== mission);
+    this.enablement = next; this.tasksOffered = tasks; this.loadedOnce = true;
+    if (changed) for (const listener of this.listeners) { try { listener(); } catch { /* Listeners cannot stop enablement. */ } }
   }
   /**
    * The worker's tools, bound to the session that runs them. deferred: found by search rather than listed. tasks: with the task,

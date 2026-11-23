@@ -24,7 +24,7 @@ class Native implements AgentSession {
   async dispose() { this.stop?.(); }
 }
 
-async function fixture(options: { tasks?: boolean } = {}) {
+async function fixture(options: { tasks?: boolean; tickMs?: number } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'cfs-injection-'));
   const support = emptyCallForSupportState();
   let teams: SavedTeam[] = [];
@@ -48,7 +48,7 @@ async function fixture(options: { tasks?: boolean } = {}) {
     close() {} });
   const adapter = (providerId: string, toolNamespaces: 'creation' | 'attachment' | 'live') => ({ descriptor: { providerId, displayName: providerId, sessionExtensions: { instructions: true, tools: true, toolNamespaces } },
     createSession: async () => { throw new Error('Use the directory.'); }, resumeSession: async () => { throw new Error('Use the directory.'); } });
-  const runtime = createAgentHostRuntime({ controllerId: 'host', team: { stateDirectory: join(root, 'team'), tickMs: 10, callForSupport: () => true, ...(options.tasks ? { tasks: () => true } : {}), request: call => broker.hostCall('relay-host', call) },
+  const runtime = createAgentHostRuntime({ controllerId: 'host', team: { stateDirectory: join(root, 'team'), tickMs: options.tickMs ?? 10, callForSupport: () => true, ...(options.tasks ? { tasks: () => true } : {}), request: call => broker.hostCall('relay-host', call) },
     registrations: [{ directory: directory('codex'), adapter: adapter('codex', 'creation') }, { directory: directory('claude'), adapter: adapter('claude', 'live') },
       { directory: directory('copilot'), adapter: adapter('copilot', 'attachment') }] });
   const profile = executeProfileCommand(support, { type: 'create', profile: reviewProfile }, 1)!;
@@ -105,6 +105,16 @@ it('gives a bot\'s session its standing instructions with its mission when it op
     expect(f.opened.find(entry => entry.id === opened)!.extensions!.instructions).toContain('You are an assistant of Agent Remote Control.');
     await f.control('/remote/attach', { providerId: 'claude', nativeSessionId: 'claude-other' });
     expect(f.opened.find(entry => entry.id === 'claude-other')?.extensions?.instructions).toBeUndefined();
+  } finally { await f.close(); }
+});
+
+it('reads which sessions are bots before the first session opens after a start, so it opens with its instructions', async () => {
+  // The enablement poll never comes round during this test: the first attachment reads enablement itself.
+  const f = await fixture({ tasks: true, tickMs: 60_000 });
+  try {
+    f.mode('claude', 'claude-first', 'plain', 'Keep the release notes.');
+    await f.control('/remote/attach', { providerId: 'claude', nativeSessionId: 'claude-first' });
+    expect(f.opened.find(entry => entry.id === 'claude-first')?.extensions?.instructions).toContain('Your mission:\nKeep the release notes.');
   } finally { await f.close(); }
 });
 

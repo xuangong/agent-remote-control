@@ -84,11 +84,22 @@ attachments with git bundles (machines without a shared repository), and the per
 
 ## Step 3: rooms, work items and timers
 
-- [ ] Rooms as message targets with a Relay timer closing them on time (design 4, closes O71).
-- [ ] Work items for every bot with todo and confirmation (design 6.1); `complete_work` retires the bots created for the item.
-- [ ] Fallback timers pushed back by every message (design 6.2); the companions' heartbeat removed.
+- [x] Rooms as message targets with a Relay timer closing them on time (design 4, closes O71).
+- [x] Work items for standing bots (design 6.1): `update_work`, `complete_work`, read with `list_bots` and in the bot's details.
+- [ ] Work items' todo and confirmation, and `complete_work` retiring the bots created for the item: with the TPM fold (step 7),
+  whose todo and confirmations they replace.
+- [x] Fallback timers pushed back by every message (design 6.2): `set_timer`, and the default timer of open work.
+- [ ] The companions' heartbeat removed: with the TPM fold (step 7).
 - [ ] Gate: a bot keeping a work item asks a working bot and the reply updates the item the person sees; a confirmation waits for
   Agree; a quiet interval wakes the bot once and a message pushes it back; a room of two bots and the person reaches a result.
+
+Built (2026-11-23, `feat/bots-3-rooms-work`): rooms are message targets (`message` to a room, `pass`, `status done` for its
+result) and move on time on the Relay's scheduler. A standing bot keeps up to 20 work items and 8 timers on its inbox; a temporary
+bot's work is its brief and it reports with `message`. Open work keeps a timer named `work`: five minutes, thirty while all of it
+waits. A due timer queues `[Timer "<name>" · due]` with the open work, unless something is already on its way to the bot; every
+message queued for the bot pushes its timers back. The page folds a due timer into one line and shows the work items in the bot's
+details. Verified by Relay unit tests on a fake scheduler (`bot-work.test.ts`, `rooms.test.ts`); the gate's live checks with real
+models run with step 5's scenarios.
 
 ## Step 4: the audit
 

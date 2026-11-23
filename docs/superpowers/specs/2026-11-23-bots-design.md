@@ -251,7 +251,11 @@ handoff instead of remembering them. A turn that changes nothing visible is fold
 A timer is a fallback, not a driver: it wakes a bot when nothing has happened for a while, so quiet work is looked at. It has a
 name, an interval and an optional end. It is due only after a quiet interval: every message to the bot pushes it back, so it never
 fires while progress flows. A due timer is a message (`[Timer "<name>" · due]`) and waits for idle like any other; missed ticks
-coalesce. A bot with an open work item has one by default, every five minutes.
+coalesce. A bot with an open work item has one by default, every five minutes, or thirty while all its open work waits.
+
+As built: work items and timers live on a standing bot's inbox (at most 20 items, done ones dropped first, and 8 timers); a
+temporary bot's work item is its brief. A due timer is queued only when nothing else is on its way to the bot, and carries the
+bot's open work (title, phase, next action).
 
 ## 7. Chains and the audit
 

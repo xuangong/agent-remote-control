@@ -125,3 +125,17 @@ describe('what the Relay pushes', () => {
     expect(r.payloads()[0]).toMatchObject({ name: 'Shown', url: '/?mode=bot&section=shown&bot=v1' });
   });
 });
+
+describe('a reminder outside a change of state', () => {
+  it('reminds once per identity that a session needs the person, unless a page shows it or no device can take it', async () => {
+    const r = relay({ devices: [subscription('phone'), subscription('tablet', { paused: true })] });
+    const release = r.presence.add('alice', session('s1'), () => true);
+    expect(r.reminders.remind('alice', session('s1'), 'chain:c_1:tokens')).toBeUndefined();
+    release();
+    expect(r.reminders.remind('alice', session('s1'), 'chain:c_1:tokens')).toEqual({ subject: 'alice', session: session('s1'), kind: 'needs_you', devices: ['phone'] });
+    expect(r.reminders.remind('alice', session('s1'), 'chain:c_1:tokens')).toBeUndefined();
+    expect(r.reminders.remind('alice', session('unknown'), 'chain:c_1:depth')).toBeUndefined();
+    await r.reminders.settled();
+    expect(r.payloads()).toEqual([expect.objectContaining({ kind: 'needs_you', name: 'Chief', url: '/?mode=bot&section=g1&bot=v1' })]);
+  });
+});

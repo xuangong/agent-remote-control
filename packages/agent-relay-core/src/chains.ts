@@ -5,11 +5,13 @@
  * go first.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { CHAIN_BOT_LIMIT, CHAIN_LIMIT, CHAIN_RETENTION_MS, type BotChain, type TurnCause } from '@orchardworks/agent-remote-protocol';
+import { CHAIN_BOT_LIMIT, CHAIN_LIMIT, CHAIN_RETENTION_MS, type BotChain, type ChainThresholds, type TurnCause } from '@orchardworks/agent-remote-protocol';
 import type { SavedTeam } from './team-delivery.js';
 import type { ChainScope } from './chain-scope.js';
 
-export interface ChainStore { read(): readonly BotChain[]; change<T>(update: (chains: BotChain[]) => T): Promise<T> }
+export interface ChainStore { read(): readonly BotChain[]; change<T>(update: (chains: BotChain[]) => T): Promise<T>;
+  thresholds(): ChainThresholds; setThresholds(thresholds: ChainThresholds): Promise<void> }
+export type Passed = NonNullable<BotChain['passed']>[number];
 type Session = { providerId: string; nativeSessionId: string };
 const fail = (message: string): never => { throw new Error(message); };
 const chainId = (parts: unknown[]) => 'c_' + createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 16);
@@ -18,12 +20,15 @@ export const timerChainId = (inboxId: string, timer: string, at: number) => chai
 
 /** An in-memory store, for a broker without saved state. */
 export function memoryChains(): ChainStore {
-  let chains: BotChain[] = [];
-  return { read: () => chains, change: async update => { const draft = structuredClone(chains); const value = update(draft); chains = draft; return value; } };
+  let chains: BotChain[] = [], thresholds: ChainThresholds = {};
+  return { read: () => chains, change: async update => { const draft = structuredClone(chains); const value = update(draft); chains = draft; return value; },
+    thresholds: () => thresholds, setThresholds: async next => { thresholds = structuredClone(next); } };
 }
 
 export class BotChains {
-  constructor(private readonly store: ChainStore, private readonly now: () => number, private readonly sameSession: (a: Session & { hostId: string }, b: Session & { hostId: string }) => boolean) {}
+  constructor(private readonly store: ChainStore, private readonly now: () => number, private readonly sameSession: (a: Session & { hostId: string }, b: Session & { hostId: string }) => boolean,
+    /** A chain passed one of the person's thresholds: told once for each. */
+    private readonly passed: (chain: BotChain, passed: Passed[]) => void = () => {}) {}
   /**
    * The chain of a bot's turn. The person's input names one by its message; input the Relay framed belongs to the chain of the latest
    * message the Relay handed to that session; a turn with neither starts a chain of its own.
@@ -40,7 +45,8 @@ export class BotChains {
   /** Adds what a call in a chain did, starting the chain at this bot if it is new. */
   async record(scope: ChainScope, start: { cause: BotChain['cause']; bot: string }, turn?: { tokens: number; costUsd?: number }): Promise<void> {
     if (!turn && !scope.messages && !scope.created && !scope.bots.size) return;
-    await this.store.change(chains => {
+    const limits = this.store.thresholds();
+    const crossed = await this.store.change(chains => {
       const now = this.now();
       let chain = chains.find(item => item.id === scope.id);
       if (!chain) {
@@ -54,9 +60,19 @@ export class BotChains {
         if (turn.costUsd !== undefined) chain.usage.costUsd = (chain.usage.costUsd ?? 0) + turn.costUsd;
       }
       chain.updatedAt = now;
+      // What the chain passed for the first time, measured against the person's thresholds as they are now.
+      const over = { tokens: limits.tokens !== undefined && chain.usage.tokens >= limits.tokens, depth: limits.depth !== undefined && chain.depth >= limits.depth,
+        minutes: limits.minutes !== undefined && now - chain.startedAt >= limits.minutes * 60_000 };
+      const passed = (Object.keys(over) as Passed[]).filter(key => over[key] && !chain!.passed?.includes(key));
+      if (passed.length) chain.passed = [...chain.passed ?? [], ...passed];
+      const found = structuredClone(chain);
       prune(chains, now);
+      return passed.length ? { chain: found, passed } : undefined;
     });
+    if (crossed) this.passed(crossed.chain, crossed.passed);
   }
+  thresholds(): ChainThresholds { return this.store.thresholds(); }
+  setThresholds(thresholds: ChainThresholds): Promise<void> { return this.store.setThresholds(thresholds); }
   /** Marks a chain, or one bot's part of it, as stopped by the person. */
   async stop(id: string, botId?: string): Promise<void> {
     await this.store.change(chains => {

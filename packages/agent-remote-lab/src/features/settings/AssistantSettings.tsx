@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { PROCESS_MODES, type ProcessMode } from '@orchardworks/agent-client';
 import { Pill, SegmentedControl, Toggle } from '@orchardworks/agent-client-web/primitives';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
@@ -5,6 +6,9 @@ import { useDeviceProcessMode, useLettersVisible, writeDeviceProcessMode } from 
 import type { PushDeviceControls } from '../../kernel/usePushDevice.js';
 import type { SettingsItemId } from './settings-groups.js';
 import { SettingsRow, SettingsSection } from './SettingsRow.js';
+
+/** The audit loads with the section that shows it. */
+const BotAudit = lazy(() => import('./BotAudit.js').then(module => ({ default: module.BotAudit })));
 
 /** This device's session notifications as the attention hook keeps them. */
 export interface DeviceNotifications {
@@ -16,7 +20,7 @@ export interface DeviceNotifications {
 }
 
 /** Settings > Assistants: what every assistant on this device shares, which each assistant's own details can override only for the process display. */
-export function AssistantSettings({ items, notifications }: { items: readonly SettingsItemId[]; notifications: DeviceNotifications }) {
+export function AssistantSettings({ items, notifications, baseUrl }: { items: readonly SettingsItemId[]; notifications: DeviceNotifications; baseUrl?: string }) {
   const t = useTranslate();
   const mode = useDeviceProcessMode() ?? 'concise';
   const [letters, setLetters] = useLettersVisible();
@@ -37,6 +41,10 @@ export function AssistantSettings({ items, notifications }: { items: readonly Se
         <Toggle label={t('settings.letters')} checked={letters} onChange={setLetters} />
       </SettingsRow>
     </SettingsSection>
+    {items.includes('audit') && baseUrl !== undefined ? <SettingsSection title={t('settings.audit')}>
+      <p className="lab-setting-note">{t('settings.audit.hint')}</p>
+      <Suspense fallback={null}><BotAudit baseUrl={baseUrl} /></Suspense>
+    </SettingsSection> : null}
   </>;
 }
 

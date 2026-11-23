@@ -28,6 +28,7 @@ export * from './client/remote-host-control-client.js';
 
 export * from './client/remote-team-client.js';
 export * from './client/remote-call-for-support-client.js';
+export * from './client/remote-chain-client.js';
 
 export * from './client/window-client.js';
 export type { SessionDescriptionIdentity, SessionAttributionTarget, SessionAttribution, SessionDescription } from './session-description.js';

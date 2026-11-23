@@ -10,7 +10,7 @@
  * Support support is refused with a 409 that says to update the Controller.
  */
 import { validChains } from './broker-state.js';
-import type { BotChain } from '@orchardworks/agent-remote-protocol';
+import type { BotChain, ChainThresholds } from '@orchardworks/agent-remote-protocol';
 import { defaultBrokerScheduler } from './transport.js';
 import { isDeepStrictEqual } from 'node:util';
 import { resolveRoleSuccession, type NativeSessionRef } from '@orchardworks/agent-remote-protocol';
@@ -25,7 +25,7 @@ import type { Succession } from './succession-service.js';
 
 export interface TeamServicePorts {
   brokerState: BrokerState;
-  options: Pick<HostBrokerOptions, 'teamResources' | 'stateRoom' | 'assistantGroups' | 'placeBot' | 'setMission' | 'scheduler'>;
+  options: Pick<HostBrokerOptions, 'teamResources' | 'stateRoom' | 'assistantGroups' | 'placeBot' | 'setMission' | 'scheduler' | 'alertChain'>;
   now: () => number;
   requireHost(hostId: string): Host;
   /** A Host call; read when used, because the Host session is built after the Teams. */
@@ -58,8 +58,13 @@ export function createTeamService(ports: TeamServicePorts) {
       if (!validChains(next)) throw new Error('Invalid chains.');
       draft.chains = next; return { value, publish() { brokerState.chains = next; } };
     }),
+    thresholds: () => brokerState.chainThresholds ?? {},
+    setThresholds: (thresholds: ChainThresholds) => brokerState.commit(draft => {
+      const next = structuredClone(thresholds);
+      draft.chainThresholds = next; return { value: undefined, publish() { brokerState.chainThresholds = next; } };
+    }),
   };
-  const teams = new TeamBroker({ chains,
+  const teams = new TeamBroker({ chains, ...(options.alertChain ? { alertChain: options.alertChain } : {}),
     resolveSession: resolveRole,
     scheduler: options.scheduler ?? defaultBrokerScheduler,
     assertRecipient: target => ports.assertAssociationOpen(target),

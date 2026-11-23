@@ -69,3 +69,11 @@ input.lab-assistant-card-name { width: 100%; background: var(--orchard-surface);
 }
 .lab-assistant-tasks .lab-assistant-identity p { white-space: pre-wrap; }
 .lab-assistant-task-actions { display: flex; gap: var(--orchard-space-xs); }
+
+/* The audit of the bots' work (Settings > Assistants): thresholds above the chains, and each chain's bots with their decisions. */
+.lab-bot-audit-thresholds { display: flex; flex-wrap: wrap; align-items: end; gap: var(--orchard-space-s); margin-bottom: var(--orchard-space-m); }
+.lab-bot-audit-thresholds h4, .lab-bot-audit-thresholds p { flex-basis: 100%; margin: 0; }
+.lab-bot-audit-thresholds label { display: grid; gap: var(--orchard-space-xs); font-size: var(--orchard-type-caption-size); color: var(--orchard-text-secondary); }
+.lab-bot-audit-thresholds input { width: 8em; }
+.lab-bot-audit-bots { list-style: none; margin: var(--orchard-space-s) 0 0; padding: 0; display: grid; gap: var(--orchard-space-s); }
+.lab-bot-audit-bots li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--orchard-space-xs); }

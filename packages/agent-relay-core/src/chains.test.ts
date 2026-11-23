@@ -15,7 +15,7 @@ const group = () => ({ window: { id: 'g', title: 'g', revision: 1, views: [['v1'
 
 function fixture() {
   let state: SavedTeam[] = [], now = 1_000, workers = 0;
-  const groups = [group()];
+  const groups = [group()], alerts: Array<{ session: string; identity: string }> = [];
   const broker = new TeamBroker({
     resolveSession: (hostId, providerId, nativeSessionId) => ({ controllerId: hostId, providerId, nativeSessionId }),
     read: () => state, now: () => ++now, assertHost: () => {},
@@ -24,6 +24,7 @@ function fixture() {
     createSeat: async (_, seat) => ({ ...seat.member, creation: 'ready', activity: 'idle', cwd: '/repo', ...(seat.member.nativeSessionId ? {} : { nativeSessionId: `worker-${++workers}` }) }),
     tasks: { capable: () => true, assertHost: () => {} },
     assistants: { groups: () => groups, capable: () => true },
+    alertChain: (session, identity) => { alerts.push({ session: session.nativeSessionId, identity }); },
   });
   const as = (nativeSessionId: string) => ({ providerId: 'claude', nativeSessionId });
   /** The Host hands every queued message of a session to it, as its Controller does between turns. */
@@ -33,7 +34,7 @@ function fixture() {
         await broker.hostCall('mac', { action: 'claim', teamId: team.id, memberId: member.id, messageId: message.id, expectedNativeSessionId: nativeSessionId });
   };
   const chain = () => broker.chains.list()[0]!;
-  return { broker, as, deliver, chain, state: () => state };
+  return { broker, as, deliver, chain, alerts, state: () => state, advance: (ms: number) => { now += ms; } };
 }
 const person = (messageId: string) => ({ kind: 'person' as const, messageId });
 const framed = { kind: 'framed' as const };
@@ -71,6 +72,19 @@ describe('chains', () => {
     expect(f.chain()).toMatchObject({ id: chain.id, turns: 1, usage: { tokens: 1200, costUsd: 0.02 } });
     expect(f.broker.chainView().names).toEqual({ [ids.chief]: 'Chief', [temporaryBotId(task.id)]: 'Reviewer' });
     expect(f.state().find(team => team.task)!.messages.at(-1)!.chain).toBe(chain.id);
+  });
+
+  it('settles a delivered message of a chain, which leaves the inbox for the next one', async () => {
+    const f = fixture();
+    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'a', to: 'Tracker', text: 'One.', cause: person('u1') });
+    await f.deliver('tracker');
+    const inbox = () => f.state().find(team => team.inbox?.botId === ids.tracker)!;
+    for (const message of inbox().messages.filter(item => item.status === 'dispatching'))
+      await f.broker.hostCall('mac', { action: 'settle', teamId: inbox().id, memberId: inbox().members[0]!.id, messageId: message.id, outcome: 'accepted', acceptance: 'started',
+        resolvedTarget: message.resolvedTarget! });
+    expect(inbox().messages).toEqual([]);
+    expect(inbox().deliveryReceipts!.every(receipt => !('chain' in receipt))).toBe(true);
+    expect(inbox().members[0]!.chain?.id).toBe(f.chain().id);
   });
 
   it('starts a new chain for each input of the person, and one for a turn with no known cause', async () => {
@@ -128,6 +142,26 @@ describe('the audit', () => {
     const task = f.state().find(team => team.task)!;
     expect(await f.broker.chainAction({ action: 'retire_bot', botId: temporaryBotId(task.id) })).toEqual({ botId: temporaryBotId(task.id), state: 'done' });
     await expect(f.broker.chainAction({ action: 'retire_bot', botId: ids.tracker })).rejects.toThrow('standing bot');
+  });
+});
+
+describe('thresholds that notify', () => {
+  it('tells the person once for each threshold a chain passes, as a reminder for its first bot, and stops nothing', async () => {
+    const f = fixture();
+    await f.broker.chainAction({ action: 'set_thresholds', thresholds: { tokens: 1000, depth: 2, minutes: 30 } });
+    let sent = await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'o1', to: 'Tracker', text: 'Status?', cause: person('u1') }) as { messageId: string };
+    const id = f.chain().id;
+    expect(f.alerts).toEqual([]);
+    await f.broker.hostCall('mac', { action: 'chain_turn', owner: f.as('chief'), cause: person('u1'), tokens: 1500 });
+    await f.deliver('tracker');
+    sent = await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('tracker'), operationId: 'r1', to: 'Chief', text: 'Green.', replyTo: sent.messageId, cause: framed }) as { messageId: string };
+    await f.broker.hostCall('mac', { action: 'chain_turn', owner: f.as('chief'), cause: person('u1'), tokens: 10 });
+    f.advance(31 * 60_000);
+    await f.broker.hostCall('mac', { action: 'chain_turn', owner: f.as('chief'), cause: person('u1'), tokens: 10 });
+    expect(f.alerts).toEqual(['tokens', 'depth', 'minutes'].map(item => ({ session: 'chief', identity: `chain:${id}:${item}` })));
+    expect(f.chain()).toMatchObject({ passed: ['tokens', 'depth', 'minutes'] });
+    expect(f.chain().stopped).toBeUndefined();
+    expect(f.broker.chainView().thresholds).toEqual({ tokens: 1000, depth: 2, minutes: 30 });
   });
 });
 

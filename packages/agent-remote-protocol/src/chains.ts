@@ -36,9 +36,20 @@ export const BotChain = Type.Object({ id: ChainId, cause: Type.Union([Type.Liter
   bots: Type.Array(BotId, { minItems: 1, maxItems: CHAIN_BOT_LIMIT }), messages: count, turns: count, created: count, depth: count, usage: ChainUsage,
   startedAt: time, updatedAt: time, stopped: Type.Optional(time),
   /** Bots whose part of the chain the person stopped. */
-  stoppedBots: Type.Optional(Type.Array(BotId, { maxItems: CHAIN_BOT_LIMIT })) }, object);
+  stoppedBots: Type.Optional(Type.Array(BotId, { maxItems: CHAIN_BOT_LIMIT })),
+  /** The person's thresholds this chain passed, each told to the person once. */
+  passed: Type.Optional(Type.Array(Type.Union([Type.Literal('tokens'), Type.Literal('depth'), Type.Literal('minutes')]), { maxItems: 3, uniqueItems: true })) }, object);
 export type BotChain = Static<typeof BotChain>;
 export const isBotChain = (value: unknown): value is BotChain => Value.Check(BotChain, value);
+
+/**
+ * The person's thresholds for a chain (bots design 7): its usage in tokens, its reply depth, and how long it has run. Passing one
+ * tells the person once, as a reminder that the chain's first bot needs them; nothing stops.
+ */
+export const ChainThresholds = Type.Object({ tokens: Type.Optional(Type.Integer({ minimum: 1 })), depth: Type.Optional(Type.Integer({ minimum: 1, maximum: 10_000 })),
+  minutes: Type.Optional(Type.Integer({ minimum: 1, maximum: 7 * 24 * 60 })) }, object);
+export type ChainThresholds = Static<typeof ChainThresholds>;
+export const isChainThresholds = (value: unknown): value is ChainThresholds => Value.Check(ChainThresholds, value);
 
 /**
  * What the person does from the audit (bots design 7). stop: the chain's waiting messages are withdrawn, its running turns stopped and
@@ -51,8 +62,9 @@ export const ChainAction = Type.Union([
   Type.Object({ action: Type.Literal('pause_bot'), botId: BotId }, object),
   Type.Object({ action: Type.Literal('resume_bot'), botId: BotId }, object),
   Type.Object({ action: Type.Literal('retire_bot'), botId: BotId }, object),
+  Type.Object({ action: Type.Literal('set_thresholds'), thresholds: ChainThresholds }, object),
 ]);
 export type ChainAction = Static<typeof ChainAction>;
 export const isChainAction = (value: unknown): value is ChainAction => Value.Check(ChainAction, value);
-/** The audit's view: the account's chains, newest first, the names of their bots, and which standing bots are paused. */
-export interface ChainView { chains: BotChain[]; names: Record<string, string>; paused: string[] }
+/** The audit's view: the account's chains, newest first, the names and kinds of their bots, and which standing bots are paused. */
+export interface ChainView { chains: BotChain[]; names: Record<string, string>; paused: string[]; kinds: Record<string, 'standing' | 'temporary'>; thresholds: ChainThresholds }

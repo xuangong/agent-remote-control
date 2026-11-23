@@ -108,6 +108,7 @@ export const client = {
   'client.error.previewRequestFailed': 'Preview request failed ({status}). Check that preview tunneling is enabled for this Host.',
   'client.error.previewInvalidResponse': 'The preview service returned an invalid response. Retry after checking the Controller connection.',
   'client.error.teamUnavailable': 'Team service is unavailable.',
+  'client.error.auditUnavailable': 'The audit is unavailable.',
   'client.error.invalidTeamCatalog': 'Invalid Team catalog.',
   'client.error.invalidTeamCreation': 'Invalid Team creation response.',
   'client.error.invalidTeamAction': 'Invalid Team action response.',

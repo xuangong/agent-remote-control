@@ -108,6 +108,7 @@ export const client: AreaMessages<typeof english> = {
   'client.error.previewRequestFailed': '预览请求失败了（{status}）。请确认这台 Host 已开启预览隧道。',
   'client.error.previewInvalidResponse': '预览服务返回的内容不对。检查 Controller 的连接后再试。',
   'client.error.teamUnavailable': 'Team 服务现在用不了。',
+  'client.error.auditUnavailable': '工作记录现在用不了。',
   'client.error.invalidTeamCatalog': 'Team 列表不对。',
   'client.error.invalidTeamCreation': '创建 Team 的回应不对。',
   'client.error.invalidTeamAction': 'Team 操作的回应不对。',

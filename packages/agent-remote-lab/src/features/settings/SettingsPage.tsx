@@ -68,7 +68,7 @@ export function SettingsPage({ context, group, phone, onGroup, linkNotice }: {
       <div><h1>{current ? title(current) : ''}</h1><p>{current ? t(`settings.${current}.hint` as const) : ''}</p></div>
     </header>
     {current === 'general' ? <GeneralSettings /> : null}
-    {current === 'assistants' ? <AssistantSettings items={items} notifications={context.notifications} /> : null}
+    {current === 'assistants' ? <AssistantSettings items={items} notifications={context.notifications} baseUrl={context.baseUrl} /> : null}
     {current === 'computers' ? <ComputerSettings services={context.computers} visible /> : null}
     {current === 'privacy' ? <PrivacySettings items={items} baseUrl={context.baseUrl} hosts={[...context.computers.hosts]} /> : null}
     {current === 'advanced' ? <AdvancedSettings openTrace={context.openTrace} openInspector={context.openInspector} {...(context.playback ? { playback: context.playback } : {})} /> : null}

@@ -113,6 +113,20 @@ export function createPushReminders(ports: PushRemindersPorts) {
       }
       return reminders;
     },
+    /**
+     * Reminds the account that a session needs it, outside a change of its state: once per identity, to its devices that are signed
+     * in and not paused, and not while a visible page shows the session.
+     */
+    remind(subject: string, session: PresenceSession, identity: string): SentReminder | undefined {
+      const key = JSON.stringify([subject, identity]);
+      if (sent.has(key) || ports.presence.shows(subject, session)) return undefined;
+      const groups = ports.groups(subject), assistant = assistantsOf(groups).get(sessionKey(session));
+      const devices = ports.subscriptions.list(subject).filter(item => !item.paused && ports.signedIn(subject, item.device)).map(item => item.device);
+      if (!assistant || !devices.length) return undefined;
+      remember(key);
+      push(subject, { ...session, state: 'waiting', changedAt: ports.now() }, 'needs_you', assistant, devices, groups);
+      return { subject, session, kind: 'needs_you', devices };
+    },
     /** Resolves when every push under way has its outcome. */
     async settled(): Promise<void> { while (pending.size) await Promise.all([...pending]); },
   };

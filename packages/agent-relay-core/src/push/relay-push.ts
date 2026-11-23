@@ -17,7 +17,7 @@ import type { PushConfiguration } from './push-config.js';
 import { createPushReminders, type ReminderState } from './push-reminders.js';
 import { createPushSender } from './push-sender.js';
 import { createPushSubscriptions, deviceSubscription, PushSubscriptionsError } from './push-subscriptions.js';
-import { createSessionPresence } from './session-presence.js';
+import { createSessionPresence, type PresenceSession } from './session-presence.js';
 import { importVapidKeys } from './web-push.js';
 
 export interface RelayPushOptions {
@@ -56,6 +56,8 @@ export function createRelayPush(options: RelayPushOptions) {
     presence,
     /** Looks at the session states after a change and pushes the reminders they are worth. */
     observe(): void { if (ready) reminders?.observe(); },
+    /** Reminds the account that a session needs it, once per identity, unless a page shows it (a chain past a threshold, bots design 7). */
+    remind(subject: string, session: PresenceSession, identity: string): void { if (ready) reminders?.remind(subject, session, identity); },
     async request(method: string, subject: string, device: string | undefined, body: () => Promise<unknown>): Promise<PushAnswer> {
       await keys;
       if (!device) return { status: 409, body: { code: 'push_device_unknown', error: 'This sign-in has no device the Relay can keep a subscription for.' } };

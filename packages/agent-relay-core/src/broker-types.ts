@@ -1,4 +1,4 @@
-import type { BotChain } from '@orchardworks/agent-remote-protocol';
+import type { BotChain, ChainThresholds } from '@orchardworks/agent-remote-protocol';
 import type { WindowGroup, WindowSessionBinding, WindowBotDetails } from '@orchardworks/agent-remote-protocol';
 import type { CallForSupportState } from './call-for-support-profiles.js';
 import type { SavedTeam } from './team-delivery.js';
@@ -86,6 +86,8 @@ export interface RemoteHostBrokerState {
   callForSupport?: CallForSupportState;
   /** The account's chains (bots design 7). */
   chains?: BotChain[];
+  /** The person's thresholds for chains. */
+  chainThresholds?: ChainThresholds;
   revokedHosts?: RevokedHost[];
   /** Hosts that were revoked and whose journals are not yet confirmed deleted. */
   journalDeletions?: string[];
@@ -106,6 +108,8 @@ export interface HostBrokerOptions {
   assistantGroups?: () => readonly WindowGroup[];
   /** Places a bot another bot created in a group of the account: its view of the session and its details (bots design 2.2). */
   placeBot?: (groupId: string, view: { id: string; binding: WindowSessionBinding }, details: WindowBotDetails) => Promise<void>;
+  /** A chain passed one of the person's thresholds: a needs-you reminder for the chain's first bot, once per identity (bots design 7). */
+  alertChain?: (session: { hostId: string; providerId: string; nativeSessionId: string }, identity: string) => void;
   /** Records a standing bot's own lasting change to its mission (bots design 2.3). */
   setMission?: (groupId: string, viewId: string, mission: string) => Promise<void>;
   /** Messages waiting for this account's Hosts; Controllers that ask for it poll, claim and settle them over the uplink. */

@@ -7,7 +7,7 @@ import type { SettingsGroupId } from '../../kernel/destinations.js';
 
 export type SettingsItemId =
   | 'theme' | 'language' | 'motion' | 'defaultView' | 'mobileDisplay'
-  | 'processMode' | 'notifications' | 'push' | 'letters'
+  | 'processMode' | 'notifications' | 'push' | 'letters' | 'audit'
   | 'computers' | 'pairing'
   | 'cache' | 'supportSharing'
   | 'layoutDiagnostics' | 'trace' | 'inspector'
@@ -30,7 +30,8 @@ export function settingsGroups(facts: SettingsFacts): readonly SettingsGroup[] {
   return [
     { id: 'general', items: ['theme', 'language', 'motion', 'defaultView', 'mobileDisplay'] },
     // Push has a row on every device: where it does not work, the row says why.
-    { id: 'assistants', items: ['processMode', ...(facts.notificationsAvailable ? ['notifications' as const] : []), 'push', 'letters'] },
+    // The audit of what the bots did, beside what all assistants share (bots design 7).
+    { id: 'assistants', items: ['processMode', ...(facts.notificationsAvailable ? ['notifications' as const] : []), 'push', 'letters', 'audit'] },
     { id: 'computers', items: ['computers', 'pairing'] },
     { id: 'privacy', items: ['cache', ...(facts.supportAvailable ? ['supportSharing' as const] : [])] },
     { id: 'advanced', items: ['layoutDiagnostics', 'trace', 'inspector'] },

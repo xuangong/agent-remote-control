@@ -1,4 +1,4 @@
-import { isBotChain, CHAIN_LIMIT, type BotChain } from '@orchardworks/agent-remote-protocol';
+import { isBotChain, isChainThresholds, CHAIN_LIMIT, type BotChain, type ChainThresholds } from '@orchardworks/agent-remote-protocol';
 import { freeze } from 'immer';
 import { BrokerError, type Binding, type DeviceCredential, type Host, type RemoteHostBrokerState } from './broker-types.js';
 import { type CallForSupportState, validCallForSupportState } from './call-for-support-profiles.js';
@@ -40,6 +40,7 @@ export interface BrokerState {
   teams: SavedTeam[];
   callForSupport: CallForSupportState | undefined;
   chains: BotChain[] | undefined;
+  chainThresholds: ChainThresholds | undefined;
   sharing: HostSharing;
   /** The registry whose snapshot is part of the saved state; set once by the composition. */
   previews: { snapshot(): HostPreviewState[] } | undefined;
@@ -92,6 +93,8 @@ export function createBrokerState(options: BrokerStateOptions): BrokerState {
   if (callForSupport && !validCallForSupportState(callForSupport)) throw new Error('Invalid saved Call For Support state.');
   const chains = initialState?.chains && structuredClone(initialState.chains);
   if (chains && !validChains(chains)) throw new Error('Invalid saved chains.');
+  const chainThresholds = initialState?.chainThresholds && structuredClone(initialState.chainThresholds);
+  if (chainThresholds && !isChainThresholds(chainThresholds)) throw new Error('Invalid saved chain thresholds.');
   const savedTeams: SavedTeam[] = structuredClone(initialState?.teams ?? []);
   if (!savedTeams.every(validSavedTeam)) throw new Error('Invalid saved Teams.');
   for (const team of savedTeams) { compactTeamDeliveries(team, now()); trimTeamDeliveryReceipts(team, TEAM_RECORD_BYTES); }
@@ -110,6 +113,7 @@ export function createBrokerState(options: BrokerStateOptions): BrokerState {
     teams: freeze(savedTeams, true),
     callForSupport,
     chains,
+    chainThresholds,
     sharing: new HostSharing(initialState?.sharing, () => {}),
     previews: undefined,
     validTeams: new WeakSet<SavedTeam>(),
@@ -125,7 +129,7 @@ export function createBrokerState(options: BrokerStateOptions): BrokerState {
       catch (error) { throw new BrokerError(409, 'host_recovery_capacity', error instanceof Error ? error.message : 'Retained Host identities are unavailable.'); }
     },
     snapshot() {
-      return { teams: state.teams, ...(state.callForSupport ? { callForSupport: state.callForSupport } : {}), ...(state.chains?.length ? { chains: state.chains } : {}), ...(state.revokedHosts ? { revokedHosts: structuredClone(state.revokedHosts) } : {}),
+      return { teams: state.teams, ...(state.callForSupport ? { callForSupport: state.callForSupport } : {}), ...(state.chains?.length ? { chains: state.chains } : {}), ...(state.chainThresholds ? { chainThresholds: state.chainThresholds } : {}), ...(state.revokedHosts ? { revokedHosts: structuredClone(state.revokedHosts) } : {}),
         ...(state.journalDeletions.length > 0 ? { journalDeletions: [...state.journalDeletions] } : {}), ...(options.keepsAssociations ? { associations: state.associations } : {}),
         pairings: structuredClone(state.pairings), previews: structuredClone(state.previews?.snapshot() ?? []), ...(options.keepsSharing ? { sharing: state.sharing.snapshot() } : {}),
         keys: [...keys].map(([key, value]) => [key, structuredClone(value)]),

@@ -21,6 +21,7 @@ import type { HostedGrant } from './auth.js';
 import { hostedAuthStateConfig, hostedAuthNamespace, validAllowedEmail, type HostedAuthOptions } from './hosted-auth.js';
 import type { RemoteHostBrokerState } from './broker.js';
 import { validChains } from './broker-state.js';
+import { isChainThresholds } from '@orchardworks/agent-remote-protocol';
 import type { HostPreviewState } from './host-previews.js';
 import { validPreviewNames } from './preview-names.js';
 import { assertSuccessionCapacity, isSuccessionCapacityError, requireSuccessionEncodingCosts, type SuccessionEncodingCosts } from './succession-capacity.js';
@@ -124,6 +125,7 @@ function validBroker(value: unknown): value is RemoteHostBrokerState {
   if (value.teams !== undefined && (!Array.isArray(value.teams) || value.teams.length > ACCOUNT_TEAM_LIMIT || !value.teams.every(validSavedTeam) || !unique(value.teams, (team: {id:string}) => team.id))) return false;
   if (value.callForSupport !== undefined && !validCallForSupportState(value.callForSupport)) return false;
   if (value.chains !== undefined && !validChains(value.chains)) return false;
+  if (value.chainThresholds !== undefined && !isChainThresholds(value.chainThresholds)) return false;
   if (value.associations !== undefined) { try { migrateBrokerAssociations(value.associations); } catch { return false; } }
   if (value.revokedHosts !== undefined && !validRevokedHosts(value.revokedHosts)) return false;
   if (value.journalDeletions !== undefined && !validJournalDeletions(value.journalDeletions)) return false;

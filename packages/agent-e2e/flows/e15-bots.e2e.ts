@@ -88,3 +88,21 @@ it('E15: a bot creates a standing bot, which joins its group in the page and rea
   await expect.poll(() => inputs(scribe()!).filter(input => input.kind === 'assistant'), { timeout: 20_000 }).toEqual([expect.objectContaining({ from: 'Chief', body: 'Start from v0.3.' })]);
   await context.close();
 });
+
+it('E15: the person stops a chain from the audit in Settings, and a bot\'s next call in it is refused', async () => {
+  const { context, page } = await openPage(browser, stack.origin + '/?page=settings&group=assistants');
+  await team(context);
+  await hasTools('chief'); await hasTools('tracker');
+  const sent = await stack.provider.useTool('chief', 'message', { to: 'Tracker', text: 'Draft the notes.' }) as { messageId: string };
+  await expect.poll(() => inputs('tracker').some(input => input.kind === 'assistant' && input.body === 'Draft the notes.'), { timeout: 20_000 }).toBe(true);
+  // The new group opened in the page; the person goes to Settings > Assistants.
+  await page.goto(stack.origin + '/?page=settings&group=assistants');
+  // The newest chain is the one this message continued; it lists Tracker among its bots.
+  const row = page.locator('.lab-bot-audit > ul > li').first();
+  await row.locator('.lab-assistant-session-toggle').click();
+  await expect.poll(() => row.innerText(), { timeout: 20_000 }).toContain('Tracker');
+  await row.getByRole('button', { name: 'Stop', exact: true }).click();
+  await expect.poll(() => row.locator('small').innerText(), { timeout: 20_000 }).toContain('Stopped');
+  await expect(stack.provider.useTool('tracker', 'message', { to: 'Chief', text: 'Notes drafted.', reply_to: sent.messageId })).rejects.toThrow('The person stopped this work');
+  await context.close();
+});

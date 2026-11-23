@@ -39,6 +39,8 @@ export interface TeamBrokerPorts {
   assistants?: AssistantPorts;
   /** Where the account's chains are kept; in memory when absent. */
   chains?: ChainStore;
+  /** A chain passed one of the person's thresholds: remind the person that this session, the chain's first bot, needs them, once per identity. */
+  alertChain?(session: { hostId: string; providerId: string; nativeSessionId: string }, identity: string): void;
 }
 const upgradeRequired = 'Update the Controller for exact Team recipients. Reload the browser after updating the Relay to inspect this Team safely.';
 type StoredRecipientAnchor = Pick<TeamMember, 'hostId' | 'providerId' | 'nativeSessionId'>;
@@ -75,7 +77,8 @@ export class TeamBroker {
   readonly chains: BotChains;
   constructor(private readonly ports: TeamBrokerPorts) {
     const key = (session: { hostId: string; providerId: string; nativeSessionId: string }) => { try { return nativeSessionRefKey(ports.resolveSession(session.hostId, session.providerId, session.nativeSessionId)); } catch { return undefined; } };
-    this.chains = new BotChains(ports.chains ?? memoryChains(), () => ports.now(), (a, b) => { const left = key(a); return left !== undefined && left === key(b); });
+    this.chains = new BotChains(ports.chains ?? memoryChains(), () => ports.now(), (a, b) => { const left = key(a); return left !== undefined && left === key(b); },
+      (chain, passed) => { const session = this.botSession(chain.bot); if (session) for (const item of passed) ports.alertChain?.(session, `chain:${chain.id}:${item}`); });
     if (ports.tasks) this.tasks = new TaskGroups({ ports, change: update => this.change(update), provision: (teamId, memberId) => this.provision(teamId, memberId) }, ports.tasks);
     if (ports.assistants) {
       const lent = { ports, change: <T>(update: (teams: SavedTeam[]) => T) => this.change(update), provision: (teamId: string, memberId: string) => this.provision(teamId, memberId) };
@@ -248,10 +251,10 @@ export class TeamBroker {
   }
   /** The account's chains, newest first, and the names of the bots they name: standing bots by their records, temporary ones by their tasks. */
   chainView(): ChainView {
-    const chains = this.chains.list(), wanted = new Set(chains.flatMap(chain => chain.bots)), names: Record<string, string> = {};
-    for (const bot of this.ports.assistants ? accountDirectory(this.ports.assistants.groups()) : []) if (wanted.has(bot.key)) names[bot.key] = bot.name;
-    for (const team of this.ports.read()) if (team.task && wanted.has(temporaryBotId(team.id))) names[temporaryBotId(team.id)] = team.task.title;
-    return { chains, names, paused: this.ports.read().filter(team => team.inbox?.paused).map(team => team.inbox!.botId) };
+    const chains = this.chains.list(), wanted = new Set(chains.flatMap(chain => chain.bots)), names: Record<string, string> = {}, kinds: ChainView['kinds'] = {};
+    for (const bot of this.ports.assistants ? accountDirectory(this.ports.assistants.groups()) : []) if (wanted.has(bot.key)) { names[bot.key] = bot.name; kinds[bot.key] = 'standing'; }
+    for (const team of this.ports.read()) if (team.task && wanted.has(temporaryBotId(team.id))) { names[temporaryBotId(team.id)] = team.task.title; kinds[temporaryBotId(team.id)] = 'temporary'; }
+    return { chains, names, kinds, thresholds: this.chains.thresholds(), paused: this.ports.read().filter(team => team.inbox?.paused).map(team => team.inbox!.botId) };
   }
   /** The person's decision from the audit: stop a chain or a bot's part of it, pause or resume a standing bot, retire a temporary one. */
   async chainAction(action: ChainAction): Promise<unknown> {
@@ -262,7 +265,15 @@ export class TeamBroker {
       const result = await this.change(teams => stopInTeams(teams, action.chainId, botId, this.ports.now()));
       return { chainId: action.chainId, ...(botId ? { botId } : {}), ...result };
     }
+    if (action.action === 'set_thresholds') { await this.chains.setThresholds(action.thresholds); return { thresholds: action.thresholds }; }
     return this.change(teams => actOnBot(teams, action, this.ports.now()));
+  }
+  /** Where a bot's main session is: a standing bot's view, or a temporary bot's worker. */
+  private botSession(botId: string): { hostId: string; providerId: string; nativeSessionId: string } | undefined {
+    const standing = this.ports.assistants ? accountDirectory(this.ports.assistants.groups()).find(bot => bot.key === botId) : undefined;
+    if (standing) return { hostId: standing.hostId, providerId: standing.providerId, nativeSessionId: standing.nativeSessionId };
+    const worker = this.ports.read().find(team => team.task && temporaryBotId(team.id) === botId)?.members[0];
+    return worker?.nativeSessionId ? { hostId: worker.hostId, providerId: worker.providerId, nativeSessionId: worker.nativeSessionId } : undefined;
   }
   /** Runs a bot's call in the chain of the turn it is made in, then adds what it did to the chain (bots design 7). */
   private async chained<T>(hostId: string, owner: { providerId: string; nativeSessionId: string }, cause: TurnCause | undefined, run: () => Promise<T>): Promise<T> {

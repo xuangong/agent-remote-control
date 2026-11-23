@@ -466,6 +466,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
             operation: { type: 'batch', operations: [{ type: 'view.create', view: createWindowView(view.id, view.binding, 'primary') }, { type: 'bot.update', viewId: view.id, details }] } });
           if (outcome.result.status !== 'committed') throw new Error(outcome.result.message ?? 'The bot could not join its group.');
         },
+        alertChain: (session, identity) => push.remind(grant.subject, session, identity),
         setMission: async (groupId, viewId, mission) => {
           const principal = { subject: grant.subject }, current = windows.inspect(principal, groupId);
           const details = current.bots?.members[viewId] ?? {};

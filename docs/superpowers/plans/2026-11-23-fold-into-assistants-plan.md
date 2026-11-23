@@ -44,8 +44,21 @@ messages run in production.
 - [ ] **Reports and span** (design 10.8): reports and replies that cross are at most 300 characters (today `TASK_SUMMARY_LIMIT` is
   4000); details through `read_task` (built here) and attachments; at most 12 bots managed directly (today 4 running tasks per
   session), the thirteenth refused with the advice to create a sub-organizer.
-- [ ] **Attachments on messages and task results**: files (a patch, a log) as resources; the receiver downloads one to a verified
-  local file, never applies it.
+- [ ] **Attachments on messages and task results**: files (a patch, a log, a git bundle) as resources; the receiver downloads one to
+  a verified local file, never applies it; a bundle is fetched as a branch it only reads.
+- [ ] **Working together** (design 10.9):
+  - the person as root organizer (no 300-character bound on replies to the person, no span limit);
+  - code across machines: the shared git repository first (push, tell remote, branch and commit), a git bundle otherwise, both in
+    the standing instructions;
+  - `read_bot` for an organizer over the bots it organizes; outcomes reported to the organizer;
+  - the final text replies only when one message started the turn; otherwise `reply_to` for each; acknowledgements allowed;
+  - a serving bot starts a temporary bot per request;
+  - only the organizer or the person changes a mission;
+  - "the person wrote" for every organized bot;
+  - one order at idle: the person, approvals and decisions, the organizer, other bots, reports;
+  - bots created for a work item retire with it unless kept;
+  - needs-you reminders grouped by organizer, interactions only the person can answer remind directly;
+  - the audit stops one bot's part of a chain.
 - [ ] **Explicit delivery outcomes**: delivered, duplicate, forbidden, unreachable.
 - [ ] **E2E flows for the model** (design 11, flows 1 to 5, rewritten for bots): two temporary bots report and the organizer sums
   up; one is interrupted from its thread; a worker's tool approval answered by the person; bot A messages B and B's answer comes
@@ -68,6 +81,9 @@ messages run in production.
   bot reports in with its mission; the main conversation's turns stay short and it does not do the work itself; a change needing a
   review goes to the bot whose mission fits; an adjusted bot restates its understanding and records what lasts; after a compaction a
   bot rereads its work items and restates; a chain past a threshold notifies the person.
+- [ ] The walkthrough as a scenario: an organizer, three standing bots, temporary bots under one, a reviewer serving two teams
+  (one temporary bot per request), a test and fix loop between two bots over a shared repository and over a bundle, the person
+  speaking to a member (its organizer is told), and the work item completing (its bots retire).
 - [ ] Checks read facts only: bots, missions, report-ins, hops, turns, tool calls per main turn, report lengths.
 - [ ] The standing instructions live in the repository with a version; every change reruns the scenarios.
 

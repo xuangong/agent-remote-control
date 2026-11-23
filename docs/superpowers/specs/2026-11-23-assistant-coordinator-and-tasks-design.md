@@ -595,6 +595,30 @@ The person wants to see and intervene, not to be protected by refusals. So bot-t
 - An organizer manages **at most 12 bots directly**, standing or temporary. A thirteenth goes under a sub-organizer it creates;
   its instructions say so, and the Relay refuses the thirteenth direct report with that advice.
 
+### 10.9 Working together
+
+A walkthrough of a release (an organizer, three standing bots, temporary bots under one of them, a reviewer serving two teams, the
+person stepping in) showed the model holds: bots call bots, serve and are served at several levels, and long legitimate
+exchanges (a test and fix loop of eight rounds) would have been cut by a hop limit, which 10.7 removed. It also showed the rules
+that let many bots work together. Decided by the owner on 2026-11-23.
+
+**The person is the root organizer.** A bot the person creates has the person as its organizer, so every chain of organizers ends
+at the person and all work serves them. The same rules hold for the person as for any organizer, except that a reply to the person
+is not bound to 300 characters and the person may organize any number of bots.
+
+| Situation | Rule |
+|---|---|
+| Code on another machine | When both Hosts reach a shared git repository, bots use it as people do: push a branch and tell the other bot the remote, branch and commit, which it fetches. Without one, the change travels as a git bundle attached to the message, which the receiver fetches into its repository as a branch it only reads. The standing instructions describe both, shared repository first. |
+| An organizer cannot see what its bots tell one another | An organizer may read the conversations of the bots it organizes (`read_bot`, which `read_task` becomes). The standing instructions tell every bot to report outcomes to its organizer, not only to the bot it worked with. |
+| Who a reply goes to | The final text of a turn is the reply only when exactly one message started that turn. When several arrived together, the bot answers each with `reply_to`. A reply may be an acknowledgement ("received, working on it"); the result follows later with `reply_to`. |
+| A bot serving several bots | A bot that serves others starts a temporary bot for each request and keeps its main conversation to taking work in and handing results back, so requests do not pile into one context. A behaviour scenario checks it. |
+| Conflicting requests | Only the bot's organizer or the person can change its mission; what other bots ask applies to their own requests only. |
+| The person speaks to an organized bot | The bot tells its organizer what the person said, in at most 300 characters, as a task's worker does today (`the person wrote`). |
+| Bottlenecks | A bot that organizes others keeps its turns short and does not take long work itself. At idle, its inputs arrive in one order: the person, then approvals and decisions, then its organizer, then other bots' messages, then reports. |
+| Bots left behind | Bots created for a work item retire when it completes, unless the person keeps them. |
+| Too many reminders | Needs-you reminders are grouped by organizer; only interactions that only the person can answer, such as a tool approval, remind the person directly. |
+| Stopping part of the work | The audit stops one bot's work within a chain as well as the whole chain. |
+
 ## 11. Tests
 
 | Layer | What |

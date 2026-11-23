@@ -10,9 +10,10 @@ import { BotCalls } from './bot-calls.js';
 import { BotWork } from './bot-work.js';
 import { BotChains, memoryChains, type ChainStore } from './chains.js';
 import { chainScope, inChain, seenBefore, stampChain, temporaryBotId } from './chain-scope.js';
+import { actOnBot, stopInTeams } from './audit.js';
 import { TaskGroups, taskAction, taskPresence, taskSettled, type TaskPorts } from './tasks.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TeamResource, type TurnCause, type BotChain } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TeamResource, type TurnCause, type BotChain, type ChainAction, type ChainView } from '@orchardworks/agent-remote-protocol';
 
 export interface TeamBrokerPorts {
   /** Timers of the Relay, for what must happen on time: a room's deadline and a member's turn. */
@@ -246,17 +247,29 @@ export class TeamBroker {
     });
   }
   /** The account's chains, newest first, and the names of the bots they name: standing bots by their records, temporary ones by their tasks. */
-  chainView(): { chains: BotChain[]; names: Record<string, string> } {
+  chainView(): ChainView {
     const chains = this.chains.list(), wanted = new Set(chains.flatMap(chain => chain.bots)), names: Record<string, string> = {};
     for (const bot of this.ports.assistants ? accountDirectory(this.ports.assistants.groups()) : []) if (wanted.has(bot.key)) names[bot.key] = bot.name;
     for (const team of this.ports.read()) if (team.task && wanted.has(temporaryBotId(team.id))) names[temporaryBotId(team.id)] = team.task.title;
-    return { chains, names };
+    return { chains, names, paused: this.ports.read().filter(team => team.inbox?.paused).map(team => team.inbox!.botId) };
+  }
+  /** The person's decision from the audit: stop a chain or a bot's part of it, pause or resume a standing bot, retire a temporary one. */
+  async chainAction(action: ChainAction): Promise<unknown> {
+    if (action.action === 'stop' || action.action === 'stop_bot') {
+      if (!this.chains.list().some(chain => chain.id === action.chainId)) fail('No chain of this account has that id.');
+      const botId = action.action === 'stop_bot' ? action.botId : undefined;
+      await this.chains.stop(action.chainId, botId);
+      const result = await this.change(teams => stopInTeams(teams, action.chainId, botId, this.ports.now()));
+      return { chainId: action.chainId, ...(botId ? { botId } : {}), ...result };
+    }
+    return this.change(teams => actOnBot(teams, action, this.ports.now()));
   }
   /** Runs a bot's call in the chain of the turn it is made in, then adds what it did to the chain (bots design 7). */
   private async chained<T>(hostId: string, owner: { providerId: string; nativeSessionId: string }, cause: TurnCause | undefined, run: () => Promise<T>): Promise<T> {
     const bot = this.bots ? (() => { try { return this.bots!.callerKey(hostId, owner); } catch { return undefined; } })() : undefined;
     if (!bot) return run();
     const found = this.chains.find(this.ports.read(), { hostId, ...owner }, cause), scope = chainScope(found.id);
+    if (this.chains.stopped(found.id, bot)) fail('The person stopped this work. Do not go on with it; when the person writes to you, tell them where it stands.');
     try { return await inChain(scope, run); }
     finally { await this.chains.record(scope, { cause: found.cause, bot }).catch(() => undefined); }
   }
@@ -268,7 +281,9 @@ export class TeamBroker {
     const visible = (team: SavedTeam) => (!team.callForSupport || this.ports.callForSupport?.capable(hostId) === true) && (!team.task || this.ports.tasks?.capable(hostId) === true)
       && (!team.link && !team.room && !team.inbox || this.ports.assistants?.capable(hostId) === true);
     // A released member's Host keeps seeing its Team, to clean up what the member left.
-    if (call.action === 'poll') return this.ports.read().filter(team => team.status !== 'archived' && visible(team) && team.members.some(item => item.hostId === hostId && (item.creation === 'ready' || item.creation === 'released'))).map(team => this.project(team, recipientAware));
+    if (call.action === 'poll') return this.ports.read().filter(team => team.status !== 'archived' && visible(team) && team.members.some(item => item.hostId === hostId && (item.creation === 'ready' || item.creation === 'released')))
+      // A paused bot's messages wait on the Relay until the person resumes it.
+      .map(team => this.project(team.inbox?.paused ? { ...team, messages: team.messages.filter(message => message.status !== 'queued') } : team, recipientAware));
     const projectDelivery = <T extends { id: string; resolvedTarget?: NativeSessionRef }>(value: T) => recipientAware ? value : withoutRecipient(value);
     if (call.action === 'call_for_support' || call.action === 'support_status') return (this.groups ?? fail(unavailableGroups)).workerCall(hostId, call);
     if (call.action === 'support_enablement') {
@@ -357,6 +372,7 @@ export class TeamBroker {
         }
         if (call.action === 'claim') {
           active(team); if (message.status !== 'queued') fail('Message is already claimed.');
+          if (team.inbox?.paused) fail('The person paused this bot.');
           if (team.callForSupport?.status === 'paused_budget' && self.role !== 'requester') fail('Support is paused by its budget.');
           const target = this.resolveRecipientFromAnchor(self);
           if (call.expectedNativeSessionId === undefined ? target.nativeSessionId !== self.nativeSessionId : call.expectedNativeSessionId !== target.nativeSessionId) fail('Team recipient moved or does not match the claim.');

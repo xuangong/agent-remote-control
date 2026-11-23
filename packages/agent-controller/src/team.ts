@@ -44,6 +44,8 @@ interface LocalSeat { seat: TeamSeat; creation: 'dispatching' | 'ready' | 'unkno
   worktree?: { root: string; path: string; removed?: true };
   /** A coordinator's or supporter's usage, and what the Relay last accepted of it. */
   usage?: SupportUsage & { reported?: { tokens: number; costUsd?: number; at: number } };
+  /** The last stop the person asked of this seat's session that its turn was stopped for (bots design 7). */
+  interrupted?: number;
   receipts: Record<string, { text: string; status: 'dispatching' | 'accepted' | 'rejected' | 'unknown'; error?: string; acceptance?: AgentInputAcceptance['disposition']; resolvedTarget?: NativeSessionRef }> }
 /** One message to deliver, with the seat it reaches and its Team. */
 interface Delivery { record: LocalSeat; team: Team; message: TeamMessage }
@@ -398,6 +400,7 @@ export class TeamRuntime implements SessionRole {
         const record = this.records.find(item => item.seat.teamId === team.id && item.seat.member.id === member.id && item.creation === 'ready');
         if (!record || member.creation !== 'ready') continue;
         if (!member.nativeSessionId) continue;
+        if (member.interrupt !== undefined && member.interrupt !== record.interrupted) await this.interrupt(record, member.interrupt).catch(() => undefined);
         // A support group member's runtime is held while something must reach it, until it reports idle, and while an archive needs its presence;
         // otherwise the Host releases it when idle and the next delivery resumes the same session.
         // Ordinary Teams keep every member held: the user drives their sessions directly, and only a held runtime reports that presence.
@@ -629,6 +632,17 @@ export class TeamRuntime implements SessionRole {
       }
     }
     if (receipts.length) { await this.save(); await settleAll(); }
+  }
+  /** The person stopped what this seat's session works on: a running turn stops, once for each stop the Relay records. */
+  private async interrupt(record: LocalSeat, at: number): Promise<void> {
+    const target = this.access.sessionRouting.resolve(this.anchor(record.seat)).target;
+    const held = [...this.leases.values()].find(item => nativeSessionRefKey(item.target) === nativeSessionRefKey(target));
+    const lease = held?.lease ?? await this.access.acquire(target.providerId, target.nativeSessionId);
+    try {
+      if (!idle(lease)) await this.access.execute(lease.agent, { operationId: operationId(`chain-stop:${record.seat.teamId}:${record.seat.member.id}:${at}`), kind: 'cancel', parameters: null, maximumResultBytes: 4096 },
+        { dispatch: async () => { await lease.agent.cancel?.(); } });
+    } finally { if (!held) lease.release(); }
+    record.interrupted = at; await this.save();
   }
   private release(key: string, held: { lease: RemoteHostSessionLease; unsubscribe?: () => void }) { held.unsubscribe?.(); held.lease.release(); this.leases.delete(key); }
   /** What the person writes to a task's worker directly reaches its owner too; the Relay's own framed inputs do not. */

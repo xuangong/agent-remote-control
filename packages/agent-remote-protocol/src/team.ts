@@ -37,6 +37,8 @@ export const TeamMember = Type.Object({
   usage: Type.Optional(Type.Object({ tokens: Type.Integer({ minimum: 0 }), costUsd: Type.Optional(Type.Number({ minimum: 0 })), updatedAt: Type.Number() }, object)),
   /** The chain of the latest input the Relay delivered to this member's session, and when (bots design 7). */
   chain: Type.Optional(Type.Object({ id: ChainId, at: Type.Number() }, object)),
+  /** The person stopped what this member's session runs: its Host stops a running turn once for each value. */
+  interrupt: Type.Optional(Type.Number()),
 }, object);
 export type TeamMember = Static<typeof TeamMember>;
 export { TeamResource };
@@ -69,6 +71,8 @@ export type TeamLink = Static<typeof TeamLink>;
 export const TeamInbox = Type.Object({ botId: BotId, instructions: Type.Optional(Type.String({ pattern: '^[0-9a-f]{64}$' })),
   /** The latest messages other bots sent here, with their hop along a reply chain, so a reply names a message it answers. */
   recent: Type.Optional(Type.Array(Type.Object({ id: AssistantMessageId, from: BotId, hop: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }), operationId: id }, object), { maxItems: 64 })),
+  /** The person paused the bot: its messages wait until resumed (bots design 7). */
+  paused: Type.Optional(Type.Literal(true)),
   /** The bot's work items and timers (bots design 6). */
   work: Type.Optional(Type.Array(WorkItem, { maxItems: WORK_ITEM_LIMIT })),
   timers: Type.Optional(Type.Array(BotTimer, { maxItems: 8 })),

@@ -1,6 +1,6 @@
 import { TeamBroker } from './teams.js';
 import { CallForSupportProfileError, executeProfileCommand, isCallForSupportProfileCommand, projectEnablement, setEnablement, type CallForSupportState } from './call-for-support-profiles.js';
-import { isTeamCreate, isTeamAction, isTeamDelete, type NativeSessionRef } from '@orchardworks/agent-remote-protocol';
+import { isChainAction, isTeamCreate, isTeamAction, isTeamDelete, type NativeSessionRef } from '@orchardworks/agent-remote-protocol';
 import { SharingError } from './host-sharing.js';
 import { readBody, principal, type RouteGroup } from './request-input.js';
 import { json } from './http-replies.js';
@@ -71,6 +71,14 @@ export function createTeamRoutes(ports: TeamRoutesPorts): RouteGroup {
     if (url.pathname === '/v1/remote/chains') {
       requireOwner(subject);
       return request.method === 'GET' ? json(200, teams.chainView()) : json(405, { error: 'Method is not allowed.' });
+    }
+    if (url.pathname === '/v1/remote/chains/action') {
+      requireOwner(subject);
+      if (request.method !== 'POST') return json(405, { error: 'Method is not allowed.' });
+      const input = await readBody(request); requireOwner(principal(context));
+      if (!isChainAction(input)) return json(400, { error: 'Invalid audit request.' });
+      try { return json(200, await teams.chainAction(input)); }
+      catch (error) { return json(409, { error: error instanceof Error ? error.message : 'Audit request failed.' }); }
     }
     if (url.pathname === '/v1/remote/call-for-support' || url.pathname === '/v1/remote/call-for-support/profiles' || url.pathname === '/v1/remote/call-for-support/enablement') {
       requireOwner(subject);

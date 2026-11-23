@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CHAIN_LIMIT, CHAIN_RETENTION_MS, parseTaskInputs, type BotChain, type WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { TeamBroker } from './teams.js';
+import { committed, detached } from './drafts.js';
 import type { SavedTeam } from './team-delivery.js';
 import { BotChains, memoryChains } from './chains.js';
 import { chainScope, temporaryBotId } from './chain-scope.js';
@@ -18,7 +19,8 @@ function fixture() {
   const broker = new TeamBroker({
     resolveSession: (hostId, providerId, nativeSessionId) => ({ controllerId: hostId, providerId, nativeSessionId }),
     read: () => state, now: () => ++now, assertHost: () => {},
-    change: async update => { const draft = structuredClone(state); const result = structuredClone(update(draft)); state = draft; return result; },
+    // Drafts as the Relay's state makes them.
+    change: async update => { let result: unknown; state = committed.produce(state, draft => { result = structuredClone(detached(update(draft))); }); return result as never; },
     createSeat: async (_, seat) => ({ ...seat.member, creation: 'ready', activity: 'idle', cwd: '/repo', ...(seat.member.nativeSessionId ? {} : { nativeSessionId: `worker-${++workers}` }) }),
     tasks: { capable: () => true, assertHost: () => {} },
     assistants: { groups: () => groups, capable: () => true },
@@ -77,6 +79,55 @@ describe('chains', () => {
     await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'b', to: 'Tracker', text: 'Two.', cause: person('u2') });
     await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('tracker'), operationId: 'c', to: 'Chief', text: 'Three.', cause: framed });
     expect(f.broker.chains.list().map(chain => chain.cause).sort()).toEqual(['bot', 'person', 'person']);
+  });
+});
+
+describe('the audit', () => {
+  it('stops a chain: its waiting messages are withdrawn, its turns and temporary bots stopped, and a later call in it refused', async () => {
+    const f = fixture();
+    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'c1', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary', cause: person('u1') });
+    await f.deliver('worker-1');
+    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'm1', to: 'Tracker', text: 'Hold the build.', cause: person('u1') });
+    const id = f.chain().id;
+    expect(await f.broker.chainAction({ action: 'stop', chainId: id })).toMatchObject({ withdrawn: 1, stopped: 1 });
+    const task = f.state().find(team => team.task)!, tracker = f.state().find(team => team.inbox?.botId === ids.tracker)!;
+    expect(task.task!.state).toBe('cancelled');
+    expect(task.members[0]!.interrupt).toBeGreaterThan(0);
+    expect(tracker.messages.filter(message => message.chain === id && message.status === 'queued')).toEqual([]);
+    expect(f.chain().stopped).toBeGreaterThan(0);
+    await expect(f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'm2', to: 'Tracker', text: 'Go on.', cause: person('u1') })).rejects.toThrow('The person stopped this work');
+    // The person's next input is a new chain.
+    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'm3', to: 'Tracker', text: 'New request.', cause: person('u2') });
+    expect(f.broker.chains.list()).toHaveLength(2);
+  });
+
+  it('stops one bot\'s part of a chain and leaves the rest running', async () => {
+    const f = fixture();
+    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'c1', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary', cause: person('u1') });
+    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'm1', to: 'Tracker', text: 'Hold the build.', cause: person('u1') });
+    await f.deliver('tracker');
+    const id = f.chain().id;
+    await f.broker.chainAction({ action: 'stop_bot', chainId: id, botId: ids.tracker });
+    expect(f.state().find(team => team.inbox?.botId === ids.tracker)!.members[0]!.interrupt).toBeGreaterThan(0);
+    expect(f.state().find(team => team.task)!.task!.state).toBe('working');
+    await expect(f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('tracker'), operationId: 't1', to: 'Chief', text: 'Holding.', cause: framed })).rejects.toThrow('stopped');
+    expect(await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'm2', to: 'Reviewer', text: 'Also the notes.', cause: person('u1') })).toBeDefined();
+    expect(f.chain().stoppedBots).toEqual([ids.tracker]);
+  });
+
+  it('holds a paused bot\'s messages until it is resumed, and retires a temporary bot with what it did', async () => {
+    const f = fixture();
+    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'm1', to: 'Tracker', text: 'Hold the build.', cause: person('u1') });
+    expect(await f.broker.chainAction({ action: 'pause_bot', botId: ids.tracker })).toEqual({ botId: ids.tracker, state: 'paused' });
+    const polled = () => (f.broker.hostCall('mac', { action: 'poll' }) as Promise<Array<{ inbox?: { botId: string }; messages: unknown[] }>>).then(teams => teams.find(team => team.inbox?.botId === ids.tracker)?.messages.length);
+    expect(await polled()).toBe(0);
+    expect(f.broker.chainView().paused).toEqual([ids.tracker]);
+    await f.broker.chainAction({ action: 'resume_bot', botId: ids.tracker });
+    expect(await polled()).toBeGreaterThan(0);
+    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'c1', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary', cause: person('u1') });
+    const task = f.state().find(team => team.task)!;
+    expect(await f.broker.chainAction({ action: 'retire_bot', botId: temporaryBotId(task.id) })).toEqual({ botId: temporaryBotId(task.id), state: 'done' });
+    await expect(f.broker.chainAction({ action: 'retire_bot', botId: ids.tracker })).rejects.toThrow('standing bot');
   });
 });
 

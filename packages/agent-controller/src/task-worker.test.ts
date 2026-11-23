@@ -275,6 +275,25 @@ describe('messages between assistants', () => {
     expect(await h.runtime.extensions(h.ref('codex', 'tracker'))).toBeUndefined();
   });
 
+  it('stops the running turn of a bot whose chain the person stopped, once', async () => {
+    const h = await supportHarness({ tasks: true, groups, sessions: ['tracker'] });
+    cleanups.push(() => h.close());
+    const chief = new WorkerSupport({ request: call => h.host(call), available: () => true, tasks: () => true, stateDirectory: h.directory, title: async () => 'Chief' });
+    await h.host({ action: 'support_enablement' });
+    await h.runtime.tick();
+    // The person asked Chief; Chief's message carries that chain to Tracker, which starts a turn in it.
+    chief.causes.set(h.ref('codex', 'worker'), { kind: 'person', messageId: 'u1' });
+    await tool(chief.namespace(() => h.ref('codex', 'worker'), false, true).tools, 'message').execute({ to: 'Tracker', text: 'Cut the branch.' });
+    await h.runtime.tick();
+    h.busy('tracker', true);
+    const [chain] = h.broker.chainView().chains;
+    await h.broker.chainAction({ action: 'stop', chainId: chain!.id });
+    await h.runtime.tick();
+    expect(h.cancelled).toEqual(['tracker']);
+    await h.runtime.tick();
+    expect(h.cancelled).toEqual(['tracker']);
+  });
+
   it('asks the members of a room in turn, between their turns, and takes their answers', async () => {
     const h = await supportHarness({ tasks: true, groups, sessions: ['tracker'] });
     cleanups.push(() => h.close());

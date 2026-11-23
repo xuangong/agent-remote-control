@@ -11,6 +11,7 @@ import type { ChainScope } from './chain-scope.js';
 
 export interface ChainStore { read(): readonly BotChain[]; change<T>(update: (chains: BotChain[]) => T): Promise<T> }
 type Session = { providerId: string; nativeSessionId: string };
+const fail = (message: string): never => { throw new Error(message); };
 const chainId = (parts: unknown[]) => 'c_' + createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 16);
 /** A chain a timer starts when it comes due. */
 export const timerChainId = (inboxId: string, timer: string, at: number) => chainId(['timer', inboxId, timer, at]);
@@ -55,6 +56,19 @@ export class BotChains {
       chain.updatedAt = now;
       prune(chains, now);
     });
+  }
+  /** Marks a chain, or one bot's part of it, as stopped by the person. */
+  async stop(id: string, botId?: string): Promise<void> {
+    await this.store.change(chains => {
+      const chain = chains.find(item => item.id === id) ?? fail('No chain of this account has that id.');
+      if (botId) { if (!(chain.stoppedBots ??= []).includes(botId)) chain.stoppedBots.push(botId); } else chain.stopped = this.now();
+      chain.updatedAt = this.now();
+    });
+  }
+  /** Whether the person stopped this chain, or this bot's part of it. */
+  stopped(id: string, botId: string): boolean {
+    const chain = this.store.read().find(item => item.id === id);
+    return !!chain && (chain.stopped !== undefined || !!chain.stoppedBots?.includes(botId));
   }
   list(): BotChain[] { return [...this.store.read()].sort((a, b) => b.updatedAt - a.updatedAt); }
 }

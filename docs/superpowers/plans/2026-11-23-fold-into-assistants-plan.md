@@ -16,6 +16,10 @@ once a step ships (Relay first, then Controllers).
 
 Implementation plans: [1a, the bot store](2026-11-23-bots-1a-bot-store-plan.md); 1b (standing instructions) and 1c (chains) follow.
 
+1a is built on `feat/bots-1-record` (2026-11-23): bot records beside the Window rows, merged on read and reconciled after each
+change, existing bots migrated on load with stable ids, assistant ids are bot ids, and the mission is written in a bot's details.
+Unit suites and `pnpm verify:changed` pass; in `pnpm local` a mission saved from the page and the bot's id survived a restart.
+
 - [ ] Bot record (design 2.1, closes O70): `botId` stable across handoffs and moves, name, label, picture, mission, organizer (a bot
   or the person), lifetime, main, status, work item, peers. Existing bots get ids from their group views; name, label and picture
   move out of `WindowBotDetails`.

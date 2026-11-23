@@ -46,6 +46,9 @@ describe('a standing bot\'s work items and timers', () => {
     expect(f.timerInputs()).toEqual([]);
     f.advance(1); await f.fire();
     expect(f.timerInputs()).toEqual([expect.objectContaining({ name: 'work', body: 'Release notes · in_progress · next: Ask Tracker for the build.' })]);
+    // The reminder starts a chain of its own at the bot.
+    expect(f.broker.chains.list()).toEqual([expect.objectContaining({ cause: 'timer', bot: ids.chief, messages: 1 })]);
+    expect(f.inbox().messages.at(-1)!.chain).toBe(f.broker.chains.list()[0]!.id);
     // While the reminder still waits for the bot, the timer only waits again.
     f.advance(WORK_TIMER_MS); await f.fire();
     expect(f.timerInputs()).toHaveLength(1);

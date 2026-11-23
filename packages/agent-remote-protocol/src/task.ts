@@ -133,8 +133,7 @@ export function taskResultText(input: { taskId: string; status: TaskReportStatus
 export function taskUpdateText(input: { taskId: string; kind: Exclude<TaskInputKind, 'brief'>; label: string; body: string }): string {
   return [`[Task ${input.taskId} · ${kindWords[input.kind]} · ${input.kind === 'message' ? `from ${heading(input.label)}` : heading(input.label)}]`, quoteFrames(input.body), TASK_GUIDANCE[input.kind]].join('\n');
 }
-/** Hops along one reply_to chain between assistants, and what one message carries. */
-export const ASSISTANT_MESSAGE_HOP_LIMIT = 6;
+/** What one message between assistants carries. */
 export const ASSISTANT_MESSAGE_LIMIT = 8000;
 /** An assistant message's id: m and twelve hexadecimal digits. */
 export const AssistantMessageId = Type.String({ pattern: '^m[0-9a-f]{12}$' });

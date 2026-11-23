@@ -15,6 +15,7 @@ import type { BotInboxes } from './inboxes.js';
 import type { Rooms } from './rooms.js';
 import type { BotWork } from './bot-work.js';
 import { newBotId } from './bot-store.js';
+import { temporaryBotId } from './chain-scope.js';
 
 type Call<A extends TeamHostCall['action']> = Extract<TeamHostCall, { action: A }>;
 type Owner = { providerId: string; nativeSessionId: string };
@@ -25,8 +26,7 @@ export interface BotListing { id: string; name: string; label?: string; mission?
 const fail = (message: string): never => { throw new Error(message); };
 const fold = (text: string) => text.trim().toLocaleLowerCase('en');
 const running = (team: SavedTeam) => team.status === 'active' && (team.task?.state === 'working' || team.task?.state === 'needs_input');
-/** A temporary bot's id, derived from its task. */
-export const temporaryBotId = (teamId: string) => 'b_' + createHash('sha256').update(JSON.stringify(['temporary', teamId])).digest('hex').slice(0, 32);
+export { temporaryBotId };
 const NOT_FOUND = 'No bot of this account answers to that name. List them with list_bots.';
 
 export class BotCalls {
@@ -34,6 +34,8 @@ export class BotCalls {
   private key(hostId: string, providerId: string, nativeSessionId: string): string | undefined {
     try { return nativeSessionRefKey(this.broker.ports.resolveSession(hostId, providerId, nativeSessionId)); } catch { return undefined; }
   }
+  /** The calling bot's id. */
+  callerKey(hostId: string, owner: Owner): string { return this.caller(hostId, owner).key; }
   private temporary(team: SavedTeam): Bot { return { key: temporaryBotId(team.id), name: team.task!.title, task: team }; }
   /** The calling bot: a standing bot whose view shows this session, or a temporary bot whose worker it is. */
   private caller(hostId: string, owner: Owner): Bot {

@@ -206,6 +206,17 @@ describe('the main session\'s task tools', () => {
     // A provider that cannot keep a session read-only is refused before anything is asked of the Relay.
     await expect(tool(tools, 'create_bot').execute({ name: 'T', mission: 'B', workspace: 'read_only' })).rejects.toThrow('cannot work read-only');
     expect(calls).toHaveLength(2);
+    // After the person's input, a call carries its cause, and the turn's end reports to the turn's chain.
+    worker.causes.set(ref, { kind: 'person', messageId: 'u1' });
+    await tool(tools, 'message').execute({ to: 'Tracker', text: 'Status?', operationId: 'm1' });
+    expect(calls[2]).toMatchObject({ action: 'bot_message', cause: { kind: 'person', messageId: 'u1' } });
+    worker.turnEnded(ref, { cause: { kind: 'person', messageId: 'u1' }, tokens: 42 });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(calls[3]).toEqual({ action: 'chain_turn', owner: { providerId: 'codex', nativeSessionId: 'main' }, cause: { kind: 'person', messageId: 'u1' }, tokens: 42 });
+    // A session that is no bot reports no turn.
+    worker.turnEnded({ ...ref, nativeSessionId: 'plain' }, { cause: { kind: 'framed' }, tokens: 1 });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(calls).toHaveLength(4);
   });
   it('keeps the tools declared but refuses them while the Relay does not run tasks', async () => {
     const { worker, calls } = await support(false);

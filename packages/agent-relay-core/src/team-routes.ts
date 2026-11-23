@@ -67,6 +67,11 @@ export function createTeamRoutes(ports: TeamRoutesPorts): RouteGroup {
         return json(400, { error: 'Invalid Team request.' });
       } catch (error) { return json(409, { error: error instanceof Error ? error.message : 'Team request failed.' }); }
     }
+    // The account's chains, newest first, with the names of the bots they reached (bots design 7).
+    if (url.pathname === '/v1/remote/chains') {
+      requireOwner(subject);
+      return request.method === 'GET' ? json(200, teams.chainView()) : json(405, { error: 'Method is not allowed.' });
+    }
     if (url.pathname === '/v1/remote/call-for-support' || url.pathname === '/v1/remote/call-for-support/profiles' || url.pathname === '/v1/remote/call-for-support/enablement') {
       requireOwner(subject);
       const resolveVisible = (hostId: string, providerId: string, nativeSessionId: string) => hostAllowed(hostId, subject) ? resolveRole(hostId, providerId, nativeSessionId) : undefined;

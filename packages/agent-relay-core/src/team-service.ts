@@ -9,6 +9,8 @@
  * that holds a role on a Host now, across handoffs; it throws when the Host is not known. A Host that does not announce Team or Call For
  * Support support is refused with a 409 that says to update the Controller.
  */
+import { validChains } from './broker-state.js';
+import type { BotChain } from '@orchardworks/agent-remote-protocol';
 import { defaultBrokerScheduler } from './transport.js';
 import { isDeepStrictEqual } from 'node:util';
 import { resolveRoleSuccession, type NativeSessionRef } from '@orchardworks/agent-remote-protocol';
@@ -49,7 +51,15 @@ export function createTeamService(ports: TeamServicePorts) {
       draft.callForSupport = next; return { value, publish() { brokerState.callForSupport = next; } };
     });
   }
-  const teams = new TeamBroker({
+  const chains = {
+    read: () => brokerState.chains ?? [],
+    change: <T>(update: (chains: BotChain[]) => T) => brokerState.commit(draft => {
+      const next = structuredClone(brokerState.chains ?? []), value = structuredClone(update(next));
+      if (!validChains(next)) throw new Error('Invalid chains.');
+      draft.chains = next; return { value, publish() { brokerState.chains = next; } };
+    }),
+  };
+  const teams = new TeamBroker({ chains,
     resolveSession: resolveRole,
     scheduler: options.scheduler ?? defaultBrokerScheduler,
     assertRecipient: target => ports.assertAssociationOpen(target),

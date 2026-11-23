@@ -3,14 +3,16 @@ import { plain } from './drafts.js';
 export { teamMessageBudgetBytes } from './team-delivery.js';
 import type { TeamResourceStore } from './team-resources.js';
 import { admitTeam, archiveIdleGroups, callForSupportNeedsCompaction, CallForSupportGroups, compactCallForSupport, pruneGroups, restoreGroup, type CallForSupportPorts } from './call-for-support.js';
-import { AssistantMessages, type AssistantPorts } from './assistants.js';
+import { accountDirectory, AssistantMessages, type AssistantPorts } from './assistants.js';
 import { roomAction, Rooms } from './rooms.js';
 import { BotInboxes } from './inboxes.js';
 import { BotCalls } from './bot-calls.js';
 import { BotWork } from './bot-work.js';
+import { BotChains, memoryChains, type ChainStore } from './chains.js';
+import { chainScope, inChain, seenBefore, stampChain, temporaryBotId } from './chain-scope.js';
 import { TaskGroups, taskAction, taskPresence, taskSettled, type TaskPorts } from './tasks.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TeamResource } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TeamResource, type TurnCause, type BotChain } from '@orchardworks/agent-remote-protocol';
 
 export interface TeamBrokerPorts {
   /** Timers of the Relay, for what must happen on time: a room's deadline and a member's turn. */
@@ -34,6 +36,8 @@ export interface TeamBrokerPorts {
   tasks?: TaskPorts;
   /** The account's assistants, which message one another on links. */
   assistants?: AssistantPorts;
+  /** Where the account's chains are kept; in memory when absent. */
+  chains?: ChainStore;
 }
 const upgradeRequired = 'Update the Controller for exact Team recipients. Reload the browser after updating the Relay to inspect this Team safely.';
 type StoredRecipientAnchor = Pick<TeamMember, 'hostId' | 'providerId' | 'nativeSessionId'>;
@@ -67,12 +71,15 @@ export class TeamBroker {
   private readonly inboxes?: BotInboxes;
   private readonly bots?: BotCalls;
   private readonly work?: BotWork;
+  readonly chains: BotChains;
   constructor(private readonly ports: TeamBrokerPorts) {
+    const key = (session: { hostId: string; providerId: string; nativeSessionId: string }) => { try { return nativeSessionRefKey(ports.resolveSession(session.hostId, session.providerId, session.nativeSessionId)); } catch { return undefined; } };
+    this.chains = new BotChains(ports.chains ?? memoryChains(), () => ports.now(), (a, b) => { const left = key(a); return left !== undefined && left === key(b); });
     if (ports.tasks) this.tasks = new TaskGroups({ ports, change: update => this.change(update), provision: (teamId, memberId) => this.provision(teamId, memberId) }, ports.tasks);
     if (ports.assistants) {
       const lent = { ports, change: <T>(update: (teams: SavedTeam[]) => T) => this.change(update), provision: (teamId: string, memberId: string) => this.provision(teamId, memberId) };
       this.inboxes = new BotInboxes(lent, ports.assistants); this.assistants = new AssistantMessages(lent, ports.assistants, this.inboxes); this.rooms = new Rooms(lent, ports.assistants);
-      this.work = new BotWork(lent, this.inboxes);
+      this.work = new BotWork(lent, this.inboxes, this.chains);
       if (this.tasks) this.bots = new BotCalls(lent, ports.assistants, this.tasks, this.assistants, this.inboxes, this.rooms, this.work);
       this.rooms.arm(); this.work.arm();
     }
@@ -91,8 +98,9 @@ export class TeamBroker {
         if (support && callForSupportNeedsCompaction(team)) compactCallForSupport(teams[index]!);
       });
       compact(false);
-      const existing = plain(teams).map(team => team.id);
+      const existing = plain(teams).map(team => team.id), seen = seenBefore(plain(teams));
       const result = update(teams);
+      stampChain(seen, teams);
       compact(true);
       archiveIdleGroups(teams, this.ports.now());
       if (retention !== undefined) pruneGroups(teams, this.ports.now(), before + retention);
@@ -237,6 +245,21 @@ export class TeamBroker {
       teams.splice(teams.indexOf(team), 1);
     });
   }
+  /** The account's chains, newest first, and the names of the bots they name: standing bots by their records, temporary ones by their tasks. */
+  chainView(): { chains: BotChain[]; names: Record<string, string> } {
+    const chains = this.chains.list(), wanted = new Set(chains.flatMap(chain => chain.bots)), names: Record<string, string> = {};
+    for (const bot of this.ports.assistants ? accountDirectory(this.ports.assistants.groups()) : []) if (wanted.has(bot.key)) names[bot.key] = bot.name;
+    for (const team of this.ports.read()) if (team.task && wanted.has(temporaryBotId(team.id))) names[temporaryBotId(team.id)] = team.task.title;
+    return { chains, names };
+  }
+  /** Runs a bot's call in the chain of the turn it is made in, then adds what it did to the chain (bots design 7). */
+  private async chained<T>(hostId: string, owner: { providerId: string; nativeSessionId: string }, cause: TurnCause | undefined, run: () => Promise<T>): Promise<T> {
+    const bot = this.bots ? (() => { try { return this.bots!.callerKey(hostId, owner); } catch { return undefined; } })() : undefined;
+    if (!bot) return run();
+    const found = this.chains.find(this.ports.read(), { hostId, ...owner }, cause), scope = chainScope(found.id);
+    try { return await inChain(scope, run); }
+    finally { await this.chains.record(scope, { cause: found.cause, bot }).catch(() => undefined); }
+  }
   async hostCall(hostId: string, call: TeamHostCall, assertCurrent: () => void = () => {}, recipientAware = true): Promise<unknown> {
     assertCurrent();
     if (!recipientAware && (call.action === 'claim' && call.expectedNativeSessionId !== undefined || call.action === 'settle' && call.resolvedTarget)) fail(upgradeRequired);
@@ -260,15 +283,17 @@ export class TeamBroker {
       if (tasks.capable(hostId)) this.assistants?.assertBot(hostId, call.owner);
       return tasks.create(hostId, call);
     }
-    if (call.action === 'create_bot') return (this.bots ?? fail(unavailableAssistants)).create(hostId, call);
-    if (call.action === 'bot_message') return (this.bots ?? fail(unavailableAssistants)).message(hostId, call);
+    if (call.action === 'create_bot') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained(hostId, call.owner, call.cause, () => bots.create(hostId, call)); }
+    if (call.action === 'bot_message') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained(hostId, call.owner, call.cause, () => bots.message(hostId, call)); }
+    if (call.action === 'chain_turn') { const bots = this.bots ?? fail(unavailableAssistants), found = this.chains.find(this.ports.read(), { hostId, ...call.owner }, call.cause);
+      await this.chains.record(chainScope(found.id), { cause: found.cause, bot: bots.callerKey(hostId, call.owner) }, { tokens: call.tokens, ...(call.costUsd !== undefined ? { costUsd: call.costUsd } : {}) }); return { chain: found.id }; }
     if (call.action === 'update_work' || call.action === 'complete_work' || call.action === 'set_timer') return (this.bots ?? fail(unavailableAssistants)).keepWork(hostId, call);
     if (call.action === 'update_mission') return (this.bots ?? fail(unavailableAssistants)).updateMission(hostId, call);
     if (call.action === 'list_bots') return (this.bots ?? fail(unavailableAssistants)).list(hostId, call);
     if (call.action === 'stop_bot' || call.action === 'retire_bot' || call.action === 'bot_session') return (this.bots ?? fail(unavailableAssistants)).organize(hostId, call);
     if (call.action === 'task_status') return (this.tasks ?? fail(unavailableTasks)).status(hostId, call);
     if (call.action === 'report_task') { assertCurrent(); return (this.tasks ?? fail(unavailableTasks)).report(hostId, call); }
-    if (call.action === 'open_room') return (this.rooms ?? fail(unavailableAssistants)).open(hostId, call);
+    if (call.action === 'open_room') { const rooms = this.rooms ?? fail(unavailableAssistants); return this.chained(hostId, call.owner, call.cause, () => rooms.open(hostId, call)); }
     if (call.action === 'room_say' || call.action === 'room_pass') return (this.rooms ?? fail(unavailableAssistants)).speak(hostId, call);
     if (call.action === 'list_assistants') return (this.assistants ?? fail(unavailableAssistants)).list(hostId, call);
     if (call.action === 'message_assistant') return (this.assistants ?? fail(unavailableAssistants)).message(hostId, call);
@@ -337,6 +362,8 @@ export class TeamBroker {
           if (call.expectedNativeSessionId === undefined ? target.nativeSessionId !== self.nativeSessionId : call.expectedNativeSessionId !== target.nativeSessionId) fail('Team recipient moved or does not match the claim.');
           this.ports.assertRecipient?.(target);
           message.resolvedTarget = structuredClone(target); message.status = 'dispatching'; self.activity = 'busy';
+          // The session now works in this message's chain (bots design 7).
+          if (message.chain) self.chain = { id: message.chain, at: now };
         }
         else { if (!recipientAware && message.resolvedTarget && nativeSessionRefKey(message.resolvedTarget) !== nativeSessionRefKey(this.resolveRecipientFromAnchor(self))) fail(upgradeRequired); if (call.resolvedTarget && (!message.resolvedTarget || nativeSessionRefKey(call.resolvedTarget) !== nativeSessionRefKey(message.resolvedTarget))) fail('Team receipt recipient changed.'); if (message.status !== 'dispatching' && message.status !== 'unknown' && message.status !== call.outcome && !withdrawable(message, call.outcome)) fail('Message is already settled.'); message.status = call.outcome; if (message.acceptance !== 'started' && message.acceptance !== 'handled') message.acceptance = call.acceptance; message.error = call.error; }
         if (call.action === 'settle') taskSettled(team, message, now);

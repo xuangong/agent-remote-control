@@ -65,6 +65,15 @@ it('E15: a bot messages another bot in its inbox, which answers it, between thei
   await expect.poll(() => inputs('tracker').filter(input => input.kind === 'assistant'), { timeout: 20_000 }).toEqual([expect.objectContaining({ from: 'Chief', body: 'Is the build green?' })]);
   await stack.provider.useTool('tracker', 'message', { to: 'Chief', text: 'Green.', reply_to: sent.messageId });
   await expect.poll(() => inputs('chief').filter(input => input.kind === 'assistant'), { timeout: 20_000 }).toEqual([expect.objectContaining({ from: 'Tracker', body: 'Green.', replyTo: sent.messageId })]);
+  // The answer came from the turn the question started, so both are one chain, which the account's audit reads.
+  const status = await (await context.request.get(stack.origin + '/auth/status')).json() as { basePath: string };
+  const audit = await (await context.request.get(stack.origin + status.basePath + 'v1/remote/chains')).json() as { chains: Array<{ bots: string[]; messages: number; depth: number }>; names: Record<string, string> };
+  const exchange = audit.chains.filter(chain => chain.bots.some(bot => audit.names[bot] === 'Tracker'));
+  expect(exchange).toHaveLength(1);
+  // Chief asked from the turn its last input started, so the exchange continues that turn's chain.
+  expect(exchange[0]!.depth).toBe(2);
+  expect(exchange[0]!.messages).toBeGreaterThanOrEqual(2);
+  expect(exchange[0]!.bots.map(bot => audit.names[bot])).toEqual(expect.arrayContaining(['Chief', 'Tracker']));
   await context.close();
 });
 

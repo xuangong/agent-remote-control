@@ -4,7 +4,7 @@
  * they are, whose deliveries wait for the receiver to be idle like task updates and arrive framed as [Message from …].
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { accountAssistants, assistantMessageText, assistantNamesIn, ASSISTANT_MESSAGE_HOP_LIMIT, botViews, nativeSessionRefKey, viewAssistantKey,
+import { accountAssistants, assistantMessageText, assistantNamesIn, botViews, nativeSessionRefKey, viewAssistantKey,
   type Team, type TeamHostCall, type TeamMember, type WindowBotDetails, type WindowGroup, type WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
 import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
@@ -121,8 +121,8 @@ export class AssistantMessages {
         // A temporary bot has no inbox: what reached it came as input to its task, so it names no earlier message.
         const own = 'hostId' in from ? this.inboxes.current(teams, from as Assistant)?.inbox?.recent ?? [] : [];
         const parent = own.find(item => item.id === call.replyTo && item.from === to.key) ?? fail('reply_to must name a message this assistant received from them.');
+        // The depth is recorded in the chain, not refused (bots design 7).
         hop = parent.hop + 1;
-        if (hop > ASSISTANT_MESSAGE_HOP_LIMIT) fail(`This exchange reached ${ASSISTANT_MESSAGE_HOP_LIMIT} messages. Stop here and tell the person what was said.`);
       }
       const seat = inbox.members[0]!, messageId = `m${digest([inbox.id, from.key, call.operationId]).slice(0, 12)}`;
       const message = { id: digest(['assistant-message', inbox.id, messageId]), from: seat.id, to: seat.id, status: 'queued' as const, createdAt: now,

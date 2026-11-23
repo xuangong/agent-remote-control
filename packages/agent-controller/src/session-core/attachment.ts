@@ -7,6 +7,7 @@ import { directoryNativeEffect } from '../directory-mutation.js';
 import { NativeSessionOwnerError } from '../native-session-owner.js';
 import { pendingReferenceNote } from '../session-refs.js';
 import { workerToolsIn } from '../call-for-support-worker.js';
+import { watchChainTurns } from './chain-turns.js';
 import { hasHeldChild, mayReconcileIdle, mayReleaseIdle } from './idle-release.js';
 import { releaseGraceMs } from './residency.js';
 import { withinResumeDeadline } from './resume-deadline.js';
@@ -175,8 +176,11 @@ export function createAttachment(ctx: SessionCoreContext) {
         // A CLI that exits under the session leaves its runtime unusable: it is released, and the next send or open attaches it again.
         const exiting = watchExit(nativeSession, { exited: () => { void releaseRuntime(binding).catch(() => undefined); } });
         // A turn of a CLI that declares no heartbeat is watched: a silent one ends native_unresponsive and the runtime is released (gap 4).
-        const watched = behaviour.turn?.heartbeatMs === undefined
+        const timed = behaviour.turn?.heartbeatMs === undefined
           ? watchTurns(exiting, { silenceMs: TURN_SILENCE_MS, unresponsive: () => { void releaseRuntime(binding).catch(() => undefined); } }) : exiting;
+        // A bot's turns, and what started each, count in their chains (bots design 7).
+        const support = ctx.workerSupport;
+        const watched = support ? watchChainTurns(timed, attached, support.causes, turn => support.turnEnded(attached, turn)) : timed;
         const noted = sessionRefs && parentNativeSessionId === undefined ? withReferenceNotes(watched, {
           pending: () => pendingReferenceNote({ providerId, nativeSessionId }, sessionRefs),
           delivered: revision => sessionRefs.store.markDelivered({ providerId, nativeSessionId }, revision),

@@ -3,9 +3,10 @@ import { NativeSessionRef } from './session-succession.js';
 import { Value } from '@sinclair/typebox/value';
 import { TeamResource } from './team-resource.js';
 import { BotId, BotMission, BotName, BotTimer, WorkItem, WORK_ITEM_LIMIT } from './bots.js';
+import { ChainId, TurnCause } from './chains.js';
 import { CallForSupportCallInput, CallForSupportFinding, CallForSupportGroup, CallForSupportMandate, CallForSupportReportStatus, CallForSupportRosterProposal,
   isCallForSupportGroup } from './call-for-support.js';
-import { TaskBrief, TaskDoneWhen, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_HOP_LIMIT, ASSISTANT_MESSAGE_LIMIT, ROOM_MINUTES_LIMIT, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, TaskReportStatus, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_QUESTION_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, isTeamTask } from './task.js';
+import { TaskBrief, TaskDoneWhen, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_LIMIT, ROOM_MINUTES_LIMIT, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, TaskReportStatus, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_QUESTION_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, isTeamTask } from './task.js';
 const object = { additionalProperties: false } as const;
 const id = Type.String({ minLength: 1, maxLength: 256 });
 const short = Type.String({ maxLength: 2048 });
@@ -34,6 +35,8 @@ export const TeamMember = Type.Object({
   /** The session must not write its working directory. */
   access: Type.Optional(Type.Literal('read_only')), workspace: Type.Optional(TeamMemberWorkspace),
   usage: Type.Optional(Type.Object({ tokens: Type.Integer({ minimum: 0 }), costUsd: Type.Optional(Type.Number({ minimum: 0 })), updatedAt: Type.Number() }, object)),
+  /** The chain of the latest input the Relay delivered to this member's session, and when (bots design 7). */
+  chain: Type.Optional(Type.Object({ id: ChainId, at: Type.Number() }, object)),
 }, object);
 export type TeamMember = Static<typeof TeamMember>;
 export { TeamResource };
@@ -44,6 +47,8 @@ export const TeamMessage = Type.Object({ id, from: id, to: id, text, resources: 
   resolvedTarget: Type.Optional(NativeSessionRef), acceptance: Type.Optional(enumOf('started', 'queued', 'handled')), createdAt: Type.Number(), error: Type.Optional(short),
   /** The Call For Support call this message carries or reports. */
   callForSupportCallId: Type.Optional(id),
+  /** The chain this message belongs to (bots design 7). */
+  chain: Type.Optional(ChainId),
 }, object);
 export type TeamMessage = Static<typeof TeamMessage>;
 export const TEAM_DELIVERY_RECEIPT_LIMIT = 200;
@@ -52,10 +57,10 @@ export const TeamUnresolvedReceipt = Type.Object({ ...Type.Omit(TeamMessage, ['t
 export type TeamUnresolvedReceipt = Static<typeof TeamUnresolvedReceipt>;
 /**
  * Two assistants' link: their keys in member order, and the latest messages between them with their hop along a reply chain,
- * so a reply names a message it answers and a chain stops at the hop limit.
+ * so a reply names a message it answers; the chain records the depth.
  */
 export const TeamLink = Type.Object({ assistants: Type.Tuple([id, id]),
-  recent: Type.Array(Type.Object({ id: AssistantMessageId, from: id, hop: Type.Integer({ minimum: 1, maximum: ASSISTANT_MESSAGE_HOP_LIMIT }), operationId: id }, object), { maxItems: 64 }) }, object);
+  recent: Type.Array(Type.Object({ id: AssistantMessageId, from: id, hop: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }), operationId: id }, object), { maxItems: 64 }) }, object);
 export type TeamLink = Static<typeof TeamLink>;
 /**
  * One bot's inbox (bots design 3): its main session as the only seat, bound where it is. Whatever reaches the bot arrives here as a
@@ -63,7 +68,7 @@ export type TeamLink = Static<typeof TeamLink>;
  */
 export const TeamInbox = Type.Object({ botId: BotId, instructions: Type.Optional(Type.String({ pattern: '^[0-9a-f]{64}$' })),
   /** The latest messages other bots sent here, with their hop along a reply chain, so a reply names a message it answers. */
-  recent: Type.Optional(Type.Array(Type.Object({ id: AssistantMessageId, from: BotId, hop: Type.Integer({ minimum: 1, maximum: ASSISTANT_MESSAGE_HOP_LIMIT }), operationId: id }, object), { maxItems: 64 })),
+  recent: Type.Optional(Type.Array(Type.Object({ id: AssistantMessageId, from: BotId, hop: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }), operationId: id }, object), { maxItems: 64 })),
   /** The bot's work items and timers (bots design 6). */
   work: Type.Optional(Type.Array(WorkItem, { maxItems: WORK_ITEM_LIMIT })),
   timers: Type.Optional(Type.Array(BotTimer, { maxItems: 8 })),
@@ -179,14 +184,17 @@ export const TeamHostCall = Type.Union([
     summary: Type.Optional(Type.String({ minLength: 1, maxLength: TASK_SUMMARY_LIMIT })) }, object),
   // Every bot's own calls, made as its main session (bots design 5.1). A temporary bot is a task: its organizer is the task's owner.
   Type.Object({ action: Type.Literal('create_bot'), owner: TaskOwner, operationId: id, name: TaskTitle, mission: TaskBrief, lifetime: Type.Union([Type.Literal('temporary'), Type.Literal('standing')]),
-    message: Type.Optional(BotText), workspace: Type.Optional(TaskWorkspace), commit: Type.Optional(gitObject), provider: Type.Optional(id), model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })) }, object),
-  Type.Object({ action: Type.Literal('bot_message'), owner: BotCaller, operationId: id, to: Type.String({ minLength: 1, maxLength: 300 }), text: BotText,
+    message: Type.Optional(BotText), workspace: Type.Optional(TaskWorkspace), commit: Type.Optional(gitObject), provider: Type.Optional(id), model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    cause: Type.Optional(TurnCause) }, object),
+  Type.Object({ action: Type.Literal('bot_message'), owner: BotCaller, operationId: id, to: Type.String({ minLength: 1, maxLength: 300 }), text: BotText, cause: Type.Optional(TurnCause),
     replyTo: Type.Optional(AssistantMessageId), status: Type.Optional(Type.Union([Type.Literal('progress'), Type.Literal('done'), Type.Literal('failed'), Type.Literal('needs_input')])),
     /** In a room: pass this turn instead of speaking. */
     pass: Type.Optional(Type.Boolean()),
     /** A worktree bot's result: where its patch was saved on its Host, added to the report by the Relay. */
     patch: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })) }, object),
   Type.Object({ action: Type.Literal('list_bots'), owner: BotCaller }, object),
+  // A bot's turn ended: its Host counts the turn and its usage in the turn's chain.
+  Type.Object({ action: Type.Literal('chain_turn'), owner: BotCaller, cause: TurnCause, tokens: Type.Integer({ minimum: 0 }), costUsd: Type.Optional(Type.Number({ minimum: 0 })) }, object),
   Type.Object({ action: Type.Literal('update_mission'), owner: BotCaller, mission: BotMission }, object),
   Type.Object({ action: Type.Literal('update_work'), owner: BotCaller, work: Type.Optional(WorkItem.properties.id), title: Type.Optional(WorkItem.properties.title), phase: Type.Optional(WorkItem.properties.phase),
     summary: Type.Optional(WorkItem.properties.summary), next: Type.Optional(WorkItem.properties.summary), acceptance: Type.Optional(Type.String({ minLength: 1, maxLength: 2000 })) }, object),
@@ -204,7 +212,7 @@ export const TeamHostCall = Type.Union([
   // An assistant opens a room with others, and speaks or passes when the room asks it.
   Type.Object({ action: Type.Literal('open_room'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), operationId: id,
     name: Type.String({ minLength: 1, maxLength: 120 }), topic: roomText, members: Type.Array(Type.String({ minLength: 1, maxLength: 300 }), { minItems: 1, maxItems: 7 }),
-    minutes: Type.Integer({ minimum: 1, maximum: ROOM_MINUTES_LIMIT }) }, object),
+    minutes: Type.Integer({ minimum: 1, maximum: ROOM_MINUTES_LIMIT }), cause: Type.Optional(TurnCause) }, object),
   Type.Object({ action: Type.Literal('room_say'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), roomId: id, text: roomText,
     done: Type.Optional(Type.Boolean()) }, object),
   Type.Object({ action: Type.Literal('room_pass'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), roomId: id }, object),

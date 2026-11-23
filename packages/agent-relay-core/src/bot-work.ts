@@ -10,6 +10,8 @@ import { assertTeamQueueCapacity, pendingTeamMessage, type SavedTeam } from './t
 import { plain } from './drafts.js';
 import type { Assistant, AssistantBrokerPorts } from './assistants.js';
 import type { BotInboxes } from './inboxes.js';
+import { timerChainId, type BotChains } from './chains.js';
+import { chainScope } from './chain-scope.js';
 
 type Call<A extends TeamHostCall['action']> = Extract<TeamHostCall, { action: A }>;
 const fail = (message: string): never => { throw new Error(message); };
@@ -34,7 +36,7 @@ const settled = (inbox: SavedTeam) => !inbox.messages.some(pendingTeamMessage);
 
 export class BotWork {
   private timer: unknown;
-  constructor(private readonly broker: AssistantBrokerPorts, private readonly inboxes: BotInboxes) {}
+  constructor(private readonly broker: AssistantBrokerPorts, private readonly inboxes: BotInboxes, private readonly chains?: BotChains) {}
   private async change<T>(bot: Assistant, update: (inbox: SavedTeam, now: number) => T): Promise<T> {
     const value = await this.broker.change(teams => {
       const now = this.broker.ports.now(), inbox = this.inboxes.prepare(teams, bot, now) ?? fail('Team capacity reached.');
@@ -98,8 +100,9 @@ export class BotWork {
     this.timer = scheduler.setTimeout(() => { this.timer = undefined; void this.due().catch(() => undefined).finally(() => this.arm()); }, wait);
   }
   private async due(): Promise<void> {
-    await this.broker.change(teams => {
-      const now = this.broker.ports.now();
+    // Each reminder starts a chain of its own (bots design 7).
+    const started = await this.broker.change(teams => {
+      const now = this.broker.ports.now(), chains: Array<{ id: string; bot: string }> = [];
       plain(teams).forEach((team, index) => {
         if (!team.inbox || team.status !== 'active' || !team.inbox.timers?.some(timer => timer.dueAt <= now)) return;
         const inbox = teams[index]!, seat = inbox.members[0]!;
@@ -107,13 +110,19 @@ export class BotWork {
           // Something already on its way wakes the bot anyway; the timer only waits again.
           if (settled(inbox)) {
             const open = (inbox.inbox!.work ?? []).filter(item => item.phase !== 'done').map(item => ({ title: item.title, phase: item.phase, ...(item.next ? { next: item.next } : {}) }));
-            const message = { id: digest(['timer', inbox.id, timer.name, now]), from: seat.id, to: seat.id, text: timerText({ name: timer.name, work: open }), status: 'queued' as const, createdAt: now };
-            assertTeamQueueCapacity(inbox, message); inbox.messages.push(message);
+            const chain = timerChainId(inbox.id, timer.name, now);
+            const message = { id: digest(['timer', inbox.id, timer.name, now]), from: seat.id, to: seat.id, text: timerText({ name: timer.name, work: open }), status: 'queued' as const, createdAt: now, chain };
+            assertTeamQueueCapacity(inbox, message); inbox.messages.push(message); chains.push({ id: chain, bot: inbox.inbox!.botId });
           }
           timer.dueAt = now + timer.intervalMs;
         }
         inbox.revision++; inbox.updatedAt = now;
       });
+      return chains;
     });
+    for (const chain of started) {
+      const scope = chainScope(chain.id); scope.messages = 1; scope.bots.add(chain.bot);
+      await this.chains?.record(scope, { cause: 'timer', bot: chain.bot }).catch(() => undefined);
+    }
   }
 }

@@ -1,0 +1,39 @@
+import { Type, type Static } from '@sinclair/typebox';
+import { Value } from '@sinclair/typebox/value';
+import { BotId } from './bots.js';
+
+/**
+ * A chain is the work one cause set off (bots design 7): an input the person sent to a bot, a bot's timer coming due, or a bot's own
+ * turn whose cause is not known. Every message between bots, bot created and turn that follows from it counts in the chain.
+ */
+const object = { additionalProperties: false } as const;
+const count = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
+const time = count;
+export const ChainId = Type.String({ pattern: '^c_[0-9a-f]{16}$' });
+export type ChainId = Static<typeof ChainId>;
+/** The bots one chain names, and the chains an account keeps. */
+export const CHAIN_BOT_LIMIT = 32;
+export const CHAIN_LIMIT = 100;
+export const CHAIN_RETENTION_MS = 7 * 24 * 60 * 60_000;
+
+/**
+ * What started the turn a bot calls from, as its Host sees it: the person's input (its message id), or input the Relay framed, whose
+ * chain the Relay knows from what it delivered.
+ */
+export const TurnCause = Type.Union([
+  Type.Object({ kind: Type.Literal('person'), messageId: Type.String({ minLength: 1, maxLength: 256 }) }, object),
+  Type.Object({ kind: Type.Literal('framed') }, object),
+]);
+export type TurnCause = Static<typeof TurnCause>;
+export const ChainUsage = Type.Object({ tokens: count, costUsd: Type.Optional(Type.Number({ minimum: 0 })) }, object);
+export type ChainUsage = Static<typeof ChainUsage>;
+
+/**
+ * One chain as the Relay keeps it. cause and bot: what started it and at which bot. bots: the bots it reached, in order. depth: the
+ * longest run of replies along it. stopped: when the person stopped it.
+ */
+export const BotChain = Type.Object({ id: ChainId, cause: Type.Union([Type.Literal('person'), Type.Literal('timer'), Type.Literal('bot')]), bot: BotId,
+  bots: Type.Array(BotId, { minItems: 1, maxItems: CHAIN_BOT_LIMIT }), messages: count, turns: count, created: count, depth: count, usage: ChainUsage,
+  startedAt: time, updatedAt: time, stopped: Type.Optional(time) }, object);
+export type BotChain = Static<typeof BotChain>;
+export const isBotChain = (value: unknown): value is BotChain => Value.Check(BotChain, value);

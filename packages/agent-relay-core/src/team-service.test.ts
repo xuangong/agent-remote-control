@@ -55,6 +55,19 @@ describe('callForSupportChange', () => {
   });
 });
 
+describe('the chains of an account', () => {
+  it('saves a chain with the broker state, and a broker loads it back', async () => {
+    const s = service();
+    const chain = { id: 'c_0123456789abcdef', cause: 'person' as const, bot: 'b_' + '1'.repeat(32), bots: ['b_' + '1'.repeat(32)], messages: 1, turns: 0, created: 0, depth: 1, usage: { tokens: 0 }, startedAt: NOW, updatedAt: NOW };
+    const scope = { id: chain.id, bots: new Set<string>(), messages: 1, created: 0, depth: 1 };
+    await s.teams.chains.record(scope, { cause: 'person', bot: chain.bot });
+    expect(s.saves.at(-1)?.chains).toEqual([chain]);
+    const loaded = createBrokerState({ initialState: s.saves.at(-1)!, now: () => NOW, onStateChange: async () => {}, keepsAssociations: false, keepsSharing: false });
+    expect(loaded.chains).toEqual([chain]);
+    expect(() => createBrokerState({ initialState: { ...saved(), chains: [{ ...chain, id: 'not a chain' }] }, now: () => NOW, onStateChange: async () => {}, keepsAssociations: false, keepsSharing: false })).toThrow('Invalid saved chains.');
+  });
+});
+
 describe('the Host guards of Teams', () => {
   it('refuses a Host that has not announced Team management', async () => {
     const s = service([host('h', { providers: [{ providerId: 'codex' } as never] })]);

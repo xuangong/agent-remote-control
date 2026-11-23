@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ASSISTANT_MESSAGE_HOP_LIMIT, isTeam, parseTaskInputs, type TeamSeat, type WindowGroup } from '@orchardworks/agent-remote-protocol';
+import { isTeam, parseTaskInputs, type TeamSeat, type WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { TeamBroker } from './teams.js';
 import type { SavedTeam } from './team-delivery.js';
 
@@ -72,20 +72,18 @@ describe('assistants messaging one another', () => {
     expect(isTeam(inbox)).toBe(true);
   });
 
-  it('answers a message it received and stops a chain of replies at its limit', async () => {
+  it('answers a message it received, and goes on however long the replies run: the chain records their depth', async () => {
     const f = fixture();
     let last = (await f.broker.hostCall('mac', { action: 'message_assistant', owner: f.chief, to: 'Tracker', text: 'Ping 1', operationId: 'p1' }) as { messageId: string }).messageId;
     await expect(f.broker.hostCall('mac', { action: 'message_assistant', owner: f.chief, to: 'Tracker', text: 'Self', operationId: 'self', replyTo: last })).rejects.toThrow('reply_to must name');
     const sides = [['pc', f.tracker, 'Chief'], ['mac', f.chief, 'Tracker']] as const;
-    for (let hop = 2; hop <= ASSISTANT_MESSAGE_HOP_LIMIT; hop++) {
+    for (let hop = 2; hop <= 10; hop++) {
       const [hostId, owner, to] = sides[hop % 2]!;
       last = (await f.broker.hostCall(hostId, { action: 'message_assistant', owner, to, text: `Ping ${hop}`, operationId: `p${hop}`, replyTo: last }) as { messageId: string }).messageId;
     }
-    const [hostId, owner, to] = sides[(ASSISTANT_MESSAGE_HOP_LIMIT + 1) % 2]!;
-    await expect(f.broker.hostCall(hostId, { action: 'message_assistant', owner, to, text: 'One more', operationId: 'more', replyTo: last })).rejects.toThrow('tell the person');
     expect(f.state().map(team => team.inbox?.botId).sort()).toEqual([ids.chief, ids.tracker].sort());
     const replies = f.state().flatMap(team => team.messages).map(message => parseTaskInputs(message.text)?.[0]).filter(input => input?.kind === 'assistant' && input.replyTo);
-    expect(replies).toHaveLength(ASSISTANT_MESSAGE_HOP_LIMIT - 1);
+    expect(replies).toHaveLength(9);
   });
 
   it('refuses unknown, hidden-by-name ambiguity and self the same way, and holds a message for an offline Host', async () => {

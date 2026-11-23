@@ -1,3 +1,4 @@
+import type { BotChain } from '@orchardworks/agent-remote-protocol';
 import type { WindowGroup, WindowSessionBinding, WindowBotDetails } from '@orchardworks/agent-remote-protocol';
 import type { CallForSupportState } from './call-for-support-profiles.js';
 import type { SavedTeam } from './team-delivery.js';
@@ -83,6 +84,8 @@ export interface RemoteHostBrokerState {
   teams?: SavedTeam[];
   /** Call For Support profiles and session enablement of this account. */
   callForSupport?: CallForSupportState;
+  /** The account's chains (bots design 7). */
+  chains?: BotChain[];
   revokedHosts?: RevokedHost[];
   /** Hosts that were revoked and whose journals are not yet confirmed deleted. */
   journalDeletions?: string[];

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { TurnCauses, type TurnReport } from './session-core/chain-turns.js';
 import { join } from 'node:path';
 import type { AgentSessionTool, AgentSessionToolNamespace } from '@orchardworks/agent-provider-sdk';
 import { ASSISTANT_MESSAGE_LIMIT, BOT_MESSAGE_LIMIT, nativeSessionRefKey, ROOM_MINUTES_LIMIT, TASK_BRIEF_LIMIT, TASK_TITLE_LIMIT, type CallForSupportCall, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
@@ -50,8 +51,16 @@ export class WorkerSupport {
   private loadedOnce = false;
   private polled?: Promise<void>;
   private tasksOffered = false;
+  /** What started each session's latest turn, which a bot's calls carry (bots design 7). */
+  readonly causes = new TurnCauses();
   constructor(private readonly ports: WorkerSupportPorts) {
     this.resources = new TeamResourceFiles(join(ports.stateDirectory, 'support-resources'), call => ports.request(call));
+  }
+  /** A bot's turn ended: its Relay counts the turn and its usage in the turn's chain. */
+  turnEnded(ref: NativeSessionRef, turn: TurnReport): void {
+    if (this.ports.tasks?.() !== true || this.tools(ref) !== 'tasks') return;
+    void this.ports.request({ action: 'chain_turn', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, cause: turn.cause, tokens: turn.tokens,
+      ...(turn.costUsd !== undefined ? { costUsd: turn.costUsd } : {}) }).catch(() => undefined);
   }
   /** Whether the session is offered the namespace: it is a bot's main session, or the user enabled it for support, explicitly or by a profile's default. */
   enabled(ref: NativeSessionRef): boolean { return this.tools(ref) !== 'none'; }
@@ -146,6 +155,8 @@ export class WorkerSupport {
         }),
     ];
     const caller = () => { const ref = worker(); return { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }; };
+    // What started the caller's turn, so the Relay finds its chain.
+    const cause = () => { const found = this.causes.of(worker()); return found ? { cause: found } : {}; };
     const coordination = [
       tool('create_bot', 'Start a bot. lifetime temporary (default) is for one piece of work: it runs in parallel on this Host in a session of its own, while you keep talking with the person, and reports back to you as input labelled [Task … · done] or [Task … · failed], or asks you [Task … · question]. Give it a short name and a mission that stands alone: it sees only the mission and its first message, and reads your conversation only if the mission says so. workspace: same (default) works in your working directory alongside you; read_only investigates it without changing it; worktree works in its own git worktree at your current commit and returns its changes as a patch. provider and model choose another agent or model. lifetime standing creates a bot that stays, with its own place in your group and in the person\'s chats, for a role your work keeps needing (a reviewer, a tester); it reads its mission and reports in, and you work with it by message. Then tell the person what you started. Reuse operationId to retry after a lost response.',
         object({ name: { type: 'string', minLength: 1, maxLength: TASK_TITLE_LIMIT }, mission: { type: 'string', minLength: 1, maxLength: TASK_BRIEF_LIMIT },
@@ -157,7 +168,7 @@ export class WorkerSupport {
           if (workspace === 'read_only' && !this.ports.readOnly?.(args.provider ?? ref.providerId)) fail('This agent cannot work read-only here; use workspace worktree or same.');
           const commit = workspace === 'worktree' ? await (this.ports.head ?? (() => fail('Worktree bots are not available on this Host.')))(ref) : undefined;
           return taskRequest({ action: 'create_bot', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId, ...(title ? { title: title.slice(0, 256) } : {}) },
-            operationId: args.operationId ?? randomUUID(), name: args.name, mission: args.mission, lifetime: args.lifetime ?? 'temporary', ...(args.message ? { message: args.message } : {}),
+            operationId: args.operationId ?? randomUUID(), name: args.name, mission: args.mission, lifetime: args.lifetime ?? 'temporary', ...cause(), ...(args.message ? { message: args.message } : {}),
             ...(workspace && workspace !== 'same' ? { workspace } : {}), ...(commit ? { commit } : {}), ...(args.provider ? { provider: args.provider } : {}), ...(args.model ? { model: args.model } : {}) });
         }),
       tool('message', 'Send a message to another bot, in your own words and at most 300 characters: a bot you organize, your organizer (to: "organizer"), any bot from list_bots by name or id, or a room you are in when it is your turn there (to: the room\'s name or id; pass: true when you have nothing to add; status done with the room\'s result when it has reached it). When you write to your organizer, status says what it is: progress, done or failed (your result, once), or needs_input (you wait for its answer; then end your turn). The details stay where they are: the receiver reads them with read_bot when it needs them. Answer a message another bot sent you with reply_to set to its id. It arrives between the receiver\'s turns. Reuse operationId to retry.',
@@ -166,7 +177,7 @@ export class WorkerSupport {
         async args => {
           // A worktree bot's result carries the path of its patch, saved on this Host where its organizer works.
           const patch = args.status === 'done' || args.status === 'failed' ? await this.ports.patch?.(worker()) : undefined;
-          return taskRequest({ action: 'bot_message', owner: caller(), operationId: args.operationId ?? randomUUID(), to: args.to, text: args.text, ...(patch ? { patch } : {}),
+          return taskRequest({ action: 'bot_message', owner: caller(), operationId: args.operationId ?? randomUUID(), to: args.to, text: args.text, ...(patch ? { patch } : {}), ...cause(),
             ...(args.status ? { status: args.status } : {}), ...(args.reply_to ? { replyTo: args.reply_to } : {}), ...(args.pass === true ? { pass: true } : {}) });
         }),
       tool('list_bots', 'List the bots you can message: the bots you organize with their status, your organizer if you have one, and the standing bots of this account with their missions.',
@@ -198,7 +209,7 @@ export class WorkerSupport {
           members: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 300 }, minItems: 1, maxItems: 7 }, minutes: { type: 'integer', minimum: 1, maximum: ROOM_MINUTES_LIMIT }, operationId: id }, ['name', 'topic', 'members', 'minutes']),
         args => { const ref = worker();
           return taskRequest({ action: 'open_room', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, operationId: args.operationId ?? randomUUID(), name: args.name, topic: args.topic,
-            members: args.members, minutes: args.minutes }); }),
+            members: args.members, minutes: args.minutes, ...cause() }); }),
     ];
     const supportDescription = 'call for support from other sessions, models and machines (reviews, consultations, tests), and read their reports.';
     return { name: WORKER_NAMESPACE, description: tasks ? `Agent Remote Control: start bots that work in parallel and report back, message the account's other bots, read and stop the bots you organize; ${supportDescription}` : `Agent Remote Control: ${supportDescription}`,

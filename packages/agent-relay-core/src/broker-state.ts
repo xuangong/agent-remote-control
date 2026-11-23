@@ -1,3 +1,4 @@
+import { isBotChain, CHAIN_LIMIT, type BotChain } from '@orchardworks/agent-remote-protocol';
 import { freeze } from 'immer';
 import { BrokerError, type Binding, type DeviceCredential, type Host, type RemoteHostBrokerState } from './broker-types.js';
 import { type CallForSupportState, validCallForSupportState } from './call-for-support-profiles.js';
@@ -38,6 +39,7 @@ export interface BrokerState {
   /** Teams are frozen committed objects; a change replaces the array. */
   teams: SavedTeam[];
   callForSupport: CallForSupportState | undefined;
+  chains: BotChain[] | undefined;
   sharing: HostSharing;
   /** The registry whose snapshot is part of the saved state; set once by the composition. */
   previews: { snapshot(): HostPreviewState[] } | undefined;
@@ -88,6 +90,8 @@ export function createBrokerState(options: BrokerStateOptions): BrokerState {
   for (const [key, value] of initialState?.creations ?? []) if (bindings.has(value.agentId)) completedCreations.set(key, value);
   const callForSupport = initialState?.callForSupport && structuredClone(initialState.callForSupport);
   if (callForSupport && !validCallForSupportState(callForSupport)) throw new Error('Invalid saved Call For Support state.');
+  const chains = initialState?.chains && structuredClone(initialState.chains);
+  if (chains && !validChains(chains)) throw new Error('Invalid saved chains.');
   const savedTeams: SavedTeam[] = structuredClone(initialState?.teams ?? []);
   if (!savedTeams.every(validSavedTeam)) throw new Error('Invalid saved Teams.');
   for (const team of savedTeams) { compactTeamDeliveries(team, now()); trimTeamDeliveryReceipts(team, TEAM_RECORD_BYTES); }
@@ -105,6 +109,7 @@ export function createBrokerState(options: BrokerStateOptions): BrokerState {
     associations: migrateBrokerAssociations(initialState?.associations ?? { version: 6, revision: 0, admissions: [], freezes: [], relationChanges: [], relationResets: [] }),
     teams: freeze(savedTeams, true),
     callForSupport,
+    chains,
     sharing: new HostSharing(initialState?.sharing, () => {}),
     previews: undefined,
     validTeams: new WeakSet<SavedTeam>(),
@@ -120,7 +125,7 @@ export function createBrokerState(options: BrokerStateOptions): BrokerState {
       catch (error) { throw new BrokerError(409, 'host_recovery_capacity', error instanceof Error ? error.message : 'Retained Host identities are unavailable.'); }
     },
     snapshot() {
-      return { teams: state.teams, ...(state.callForSupport ? { callForSupport: state.callForSupport } : {}), ...(state.revokedHosts ? { revokedHosts: structuredClone(state.revokedHosts) } : {}),
+      return { teams: state.teams, ...(state.callForSupport ? { callForSupport: state.callForSupport } : {}), ...(state.chains?.length ? { chains: state.chains } : {}), ...(state.revokedHosts ? { revokedHosts: structuredClone(state.revokedHosts) } : {}),
         ...(state.journalDeletions.length > 0 ? { journalDeletions: [...state.journalDeletions] } : {}), ...(options.keepsAssociations ? { associations: state.associations } : {}),
         pairings: structuredClone(state.pairings), previews: structuredClone(state.previews?.snapshot() ?? []), ...(options.keepsSharing ? { sharing: state.sharing.snapshot() } : {}),
         keys: [...keys].map(([key, value]) => [key, structuredClone(value)]),
@@ -199,4 +204,9 @@ function retain<T>(values: T[] | undefined, previous: T[] | undefined, key: (val
     return kept;
   });
   return same ? previous : result;
+}
+
+/** Saved chains: at most `CHAIN_LIMIT`, each well formed, none twice. */
+export function validChains(value: unknown): value is BotChain[] {
+  return Array.isArray(value) && value.length <= CHAIN_LIMIT && value.every(isBotChain) && new Set(value.map(chain => chain.id)).size === value.length;
 }

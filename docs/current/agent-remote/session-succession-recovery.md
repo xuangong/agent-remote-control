@@ -29,7 +29,7 @@ Enter `/handoff` in a current writable ordinary Session View or Team member,
 or `/handoff <provider>` to request a target provider. Ordinary views include
 primary groups, docked and floating windows, and attached Side conversations;
 placement does not change eligibility. Native child sessions, concrete history,
-read-only access and shared-only Hosts do not offer the command. Ask and TPM's
+read-only access and shared-only Hosts do not offer the command. Ask's
 own conversations retain native-prefix routing and do not offer generic handoff.
 The compact chooser defaults to the current provider
 and shows the working directory. `claude` also matches an available Claude Code
@@ -85,7 +85,7 @@ not require this additional observation. The chooser also checks this browser's
 pending messages before preparation, since the Host cannot observe unsent local
 inputs.
 
-Source references and TPM follow the stable role; concrete history and already
+Source references follow the stable role; concrete history and already
 admitted deliveries retain their
 original native targets. Favorites, Track and the primary pane follow the new
 current session while existing Side/Ask sessions retain their own histories.
@@ -157,7 +157,7 @@ The configured succession state directory contains:
 | `source-cursor.key` | Signing key for existing source-history and context cursors |
 
 The complete recovery set also includes Controller installation identity, native
-source grants, TPM state and the Relay tenant's durable bindings, association
+source grants and the Relay tenant's durable bindings, association
 receipts and projections. Native provider transcripts remain separate. Copying
 succession state does not copy a workspace, process, credentials or native session.
 
@@ -348,8 +348,6 @@ Cleanup cannot hide the original initialization cause.
 | Certified zero-input/zero-task creation has no result witness | Explicit cancellation may settle the handoff intent after its terminal fence is saved; candidate existence can remain unknown |
 | Other native effect has no durable result witness | Retain unknown; a matching grant alone is not proof of that operation |
 | First-input dispatch accepted or uncertain | Keep its actual recipient and operation identity; do not replay or retarget it automatically |
-| TPM recovery rejected before native access | Settle only the rejected recovery admission; retain the original unresolved creation |
-| TPM recovery failed after native access or during outcome persistence | Keep the unresolved admission until matching evidence settles it |
 
 Association release follows a durable Relay decision and exact Host acknowledgement.
 A terminal Host decision alone does not authorize releasing the other side's
@@ -374,24 +372,8 @@ entry. Capacity refusal preserves existing evidence. This cache does not survive
 process restart; native recovery must independently cover that boundary.
 
 Input acceptance settles only when its disposition is started or handled;
-queued or absent disposition is still unresolved. TPM catalog and admission use
-the same predicate. Prepared TPM intents remain visible but are not yet native
-work. Read-only inspection, handoff cancel/reconcile, unrelated sessions and
+queued or absent disposition is still unresolved. Read-only inspection, handoff cancel/reconcile, unrelated sessions and
 security revocation remain available during a reservation.
-
-The original live TPM invocation subscribes to native acceptance through both
-ordinary sends and prepared first-input delivery. Late exact execution evidence
-updates its existing outbox intent without changing recipient, role revision or
-operation identity. Duplicate evidence and a later transport failure cannot undo
-confirmed execution. The callback is dispatch-local and is not serialized into
-public operation parameters, fingerprints or durable records.
-
-This notification is not a cross-restart receipt guarantee. If the Controller
-restarts with an accepted intent but no retained started/handled evidence, that
-intent remains unsettled and can prevent another handoff. Closed coordinators
-ignore old callbacks. There is no automatic replay, inference from later idle
-state, or new manual override for accepted-without-execution evidence. Preserve
-the record; do not delete it to force eligibility.
 
 Accepted settings reserve asynchronous work and a reusable future native-effect
 slot before acceptance. Every queued/deferred apply restores its original Host
@@ -440,7 +422,7 @@ Two routings resolve where work addressed to a session goes after its committed
 successions. Native-prefix routing (`resolveNativePrefix`) follows prompt-edit
 branches only and fails across a generic succession, whose successor starts from
 captured context instead of the native history; source-reader ancestry, prompt-edit
-metadata, TPM and Ask use it. Role routing (`resolveRoleSuccession`) follows every
+metadata and Ask use it. Role routing (`resolveRoleSuccession`) follows every
 committed succession of the role, including a handoff to another provider; Team
 seats use it on the Controller and the Relay, so a Team member's seat, messages and
 roster entry follow a handoff. Both validate the complete committed lineage first.
@@ -451,8 +433,7 @@ Controller each such role implements `SessionRole`
 the role a session holds, bound to the session that runs them, and decides whether
 a generic succession may keep the role. A Team seat may move when the Relay
 acknowledged Team succession and the target provider runs session instructions and
-tools; a TPM session may not, and its handoff is refused before preparation with the
-role's reason. Sessions without a role move freely; a Side or Ask keeps reading its
+tools. Sessions without a role move freely; a Side or Ask keeps reading its
 source through the source relation.
 
 A generic successor takes its source's role from creation. The Controller passes the
@@ -790,8 +771,8 @@ A postcommit Side link edit has its own bounded durable operation identity. The
 Broker reserves the request, the Host validates the complete native grant catalog
 and gates the affected reader, then the Broker commits relationship metadata.
 Only the exact acknowledged Host overlay update releases the reader gate. Pending
-edits block conflicting succession and source-bound creation/import. Native sends,
-TPM participants and already admitted recipient identities do not move.
+edits block conflicting succession and source-bound creation/import. Native sends
+and already admitted recipient identities do not move.
 
 Before reservation, a changed catalog invalidates an earlier Host description;
 retry requires current facts. Duplicate operation identities retain their original
@@ -835,7 +816,7 @@ JavaScript callbacks or a native readiness certificate.
 New private grants distinguish an omitted base system prompt from an explicitly
 empty prompt with `systemPromptProvided`. Legacy grants without that marker keep
 their previous truthy-string interpretation. Invalid marker types/combinations
-reject; do not edit fields to force recovery. Caller/TPM callbacks must be supplied
+reject; do not edit fields to force recovery. Caller callbacks must be supplied
 again after restart, while source callbacks are rebuilt from the grant. Native
 saved model/permission settings are not overwritten from the grant handle.
 
@@ -894,7 +875,7 @@ uncertainty after that attempt; the latter fences reads and writes until validat
 fresh reopening. Cursor readiness also waits for its containing-directory
 barrier. Sync/close and cleanup errors retain the first cause. Windows keeps the
 existing unsupported-directory-sync exception and
-does not gain a stronger power-loss guarantee. These separate files, TPM state
+does not gain a stronger power-loss guarantee. These separate files
 and Relay storage are not a cross-store durable transaction. New ancestor
 directory entries are not individually synced; application restart and controlled
 fault/reopen evidence does not certify OS-crash or power-loss behavior.

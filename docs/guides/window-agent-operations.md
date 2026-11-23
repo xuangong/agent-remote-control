@@ -149,10 +149,10 @@ Click a conversation to focus its view, then use Favorites, Discover sessions,
 Track, or New session. These actions bind that exact ordinary view, including an empty
 one. A pending creation keeps its original destination when focus changes; a
 closed or rebound destination cannot silently receive the result elsewhere.
-Ask, Team, and TPM views have managed bindings and cannot be replaced this way.
+Ask and Team views have managed bindings and cannot be replaced this way.
 
 The selected view is the target for pane operations and its current session is
-the source for session operations, including creation of Team or TPM work.
+the source for session operations, including creation of Team work.
 An empty view has no session source. Creation captures the source view and session;
 later selection changes do not change that relationship. Track restores its remembered family
 layout when the selected destination is a primary view; an independent or attached

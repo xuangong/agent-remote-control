@@ -10,11 +10,11 @@ The Workbench is twelve modules of `architecture/modules.json`. Each lists in `u
 
 | Module | Path | Uses | Owns |
 |---|---|---|---|
-| `workbench-kernel` | `src/kernel/`, `src/ui/` | none | What every feature reads: the session tree, the directory and Host clients and their types, storage and recovery writes, the composition document, the Window workspace model (`window-workspace`, `window-composition`, `window-feature-views`), forks, tracking, the view contexts and console commands (Track, Ask, TPM, Team, Window), the dock (`SessionDock`), toasts, and the design system |
+| `workbench-kernel` | `src/kernel/`, `src/ui/` | none | What every feature reads: the session tree, the directory and Host clients and their types, storage and recovery writes, the composition document, the Window workspace model (`window-workspace`, `window-composition`, `window-feature-views`), forks, tracking, the view contexts and console commands (Track, Ask, Team, Window), the dock (`SessionDock`), toasts, and the design system |
 | `workbench-conversation` | `src/conversation/` | kernel | The session renderer both modes draw (`SessionWorkbench` in parts, `LabWorkbench`, `SessionConversation`, the surfaces) and its operations: prompt edit, the Handoff dialog, fork actions, connections |
 | `workbench-chats` | `src/features/chats/` | kernel, conversation, windows | Bot mode, its roster and the Assistants directory |
 | `workbench-windows` | `src/features/windows/` | kernel, conversation | Window mode: the Window list and overview, panes, docks' rail, folding, panels and the window workspace hooks |
-| `workbench-team` | `src/features/team/` | kernel, conversation | Team, TPM, Ask and Call for Support |
+| `workbench-team` | `src/features/team/` | kernel, conversation | Team and Ask |
 | `workbench-sessions` | `src/features/sessions/` | kernel, conversation | The directory, favorites and stars, tracking, creation choices, the outbox |
 | `workbench-session-links` | `src/features/session-links/` | kernel, conversation | Fork references, Sides, quotes, references, letters, relations |
 | `workbench-computers` | `src/features/computers/` | kernel, conversation | Hosts, pairing, Controller updates, previews, the VS Code tunnel, security |
@@ -272,6 +272,6 @@ Kept: the start, landing and target rules are unit-owned (9 of 11 mutations caug
 | `App.window-actions.test.tsx`, `App.window-toolbar.test.tsx`, `App.window-fold.test.tsx`, `App.window-retention.test.tsx` | 12, 19, 3, 5 | Window layout: `pane-folding`, `window-composition`, `useOpenWindows.test` | kept: layout and focus in the DOM |
 | `App.command-palette.test.tsx` | 6 | `palette-actions`, `mode-steps` | kept: keyboard and focus |
 | `App.host-providers.test.tsx`, `App.hosts-page.test.tsx` | 13, 2 | `creation-choice` | kept: Host pages with providers |
-| `App.attributions.test.tsx`, `App.tpm.test.tsx` | 5, 7 | attribution targets, TPM: `useTpmMainOpening.test`, `session-binding` | kept: navigation with documents |
+| `App.attributions.test.tsx` | 5, 7 | attribution targets: `session-binding` | kept: navigation with documents |
 | `App.outbox.test.tsx`, `App.shared-drafts.test.tsx`, `App.transport-ownership.test.tsx`, `App.compact-sleep.test.tsx` | 4, 2, 2, 2 | outbox, drafts, transport ownership, sleeping panes: `draft-ownership`, `pane-folding` | kept: persistence across mounts |
 | `App.performance.test.tsx`, `App.render-budget.test.tsx`, `App.attach-budget.test.tsx` | 1, 3, 1 | render and attach budgets of the whole App | kept: they measure the composition itself |

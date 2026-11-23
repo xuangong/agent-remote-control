@@ -14,7 +14,7 @@ Use a wide screen to work across several conversations, or open the same workspa
 
 Keep an implementation conversation, a review, and another project's work open together. Each **Session View** has its own conversation, composer, runtime status, and display mode. On wide screens, resize panes and scroll the workspace horizontally; attached Sides and subagents stay beside their source view as a group, and opening another Side from the same source adds it beside the ones already open.
 
-Click a pane's title, conversation, or composer to select it. Choosing a session from the sidebar, Favorites, or Track, or creating a new session, opens it beside the selected pane, so the conversation there stays open; an empty pane, a history view, or a pane of a group hidden in Bot mode takes it in place. Ask, Team, and TPM panes stay attached to their own conversations.
+Click a pane's title, conversation, or composer to select it. Choosing a session from the sidebar, Favorites, or Track, or creating a new session, opens it beside the selected pane, so the conversation there stays open; an empty pane, a history view, or a pane of a group hidden in Bot mode takes it in place. Ask and Team panes stay attached to their own conversations.
 
 Use **Ask** for a separate contextual discussion and **/side** for a related working conversation. A session's references sit above its composer: remove a Side's source to make it an independent session, or add other sessions of the Host with **+** or **/ref**; the agent reads them with `agent-remote-controller session read`. Show the Ask entry with **View → Ask view** or **/ask**. Both use the same Session View as other sessions. Ask can float above the workspace or **Dock** alongside it when there is enough room. On narrow screens, the foreground conversation is already selected; switch views through the Window list instead of navigating a horizontal canvas.
 
@@ -42,16 +42,6 @@ Everything the website does, `agent-remote-controller` does from a shell, for yo
 
 A bot can start other bots: a temporary bot for one job, or a standing bot that joins its group. The bot that starts them is their **chief**, and the bots it runs are its **staff**. Staff work in their own environments and permissions, on this Host or another; the chief messages them, and they report back between their turns. An organizer from an earlier version, a Leader with members, became a chief with its staff when the Relay loaded its state. Design: [bots](docs/superpowers/specs/2026-11-23-bots-design.md).
 
-### Give one deliverable a dedicated TPM
-
-<a href="docs/images/tpm-manager.png"><img src="docs/images/tpm-manager.png" alt="TPM work list grouped by source session, with Needs you and New indicators, archived work, and New TPM session." width="360"></a>
-
-A **TPM** is a conversation dedicated to clarifying a requirement and following it through delivery. Select the session doing the implementation, open **TPM**, and choose **New TPM session**. Start talking without filling in a title or a specification first; the work can be named as the goal becomes clear.
-
-The TPM helps develop the plan and acceptance criteria, sends requests to its source session, checks progress and evidence, and reports back. Unlike a Team Leader, it coordinates implementation with that session rather than implementing product code itself. The TPM list groups work by source session and highlights items that need your attention. On a phone, open one TPM conversation at a time and use this list to switch between work items.
-
-New work starts in manual mode. Choose **Delegate** in the TPM workspace to enable Controller-owned background follow-up, including heartbeats. This continues while the browser is closed, provided the Host and model service remain available. Click **Delegated** to return to manual discussion; archive the work when it is finished. Use **View → TPM view** or **/tpm** to show the entry. See [TPM delivery](docs/tpm-delivery.md) for plans, acceptance, and recovery behavior.
-
 ### Attach files and share results
 
 Use **… → Resource** in the composer to attach ordinary files as `[resource #N]` references. Agents receive verified Host-local files, and sent messages provide downloads. Team members can exchange archives and reports through `upload_team_resource`, `send_team_message`, and `download_team_resource` without encoding file contents in message text. See [Resource attachments](docs/resource-attachments.md) for usage, storage, and limits.
@@ -63,7 +53,7 @@ To try the full product on one machine, start with the [Local Devbox](#local-dev
 Run the complete product in one Docker container for a local trial or to validate
 feature changes before deployment. It includes the full website, persistent Node
 Relay, automatically configured Controller, Codex, Claude Code, Copilot and
-OpenCode. Window, Ask, Side, TPM, Team, Track and Favourites use the ordinary
+OpenCode. Window, Ask, Side, Team, Track and Favourites use the ordinary
 product implementation; this is not the diagnostic Lab.
 
 From the source checkout you want to try:
@@ -563,14 +553,14 @@ A Window can contain multiple top-level sessions, attached subagents, and docked
 or floating views. Click a view's title, conversation, or composer to select it;
 sidebar, Favorites, Track, and new-session actions target that selected ordinary
 view. **New session view** creates an empty dock that can be bound afterward.
-Ask, Team, and TPM views keep their managed bindings. The selected session is
-also the source for creating related Ask, Side, Team, or TPM work.
+Ask and Team views keep their managed bindings. The selected session is
+also the source for creating related Ask, Side, or Team work.
 
 Open a Window's shared link in multiple pages to share layout, selection, docking,
 widths, and per-view display preferences. Narrow screens show the selected view
 without replacing the saved wide-screen layout. Every pane can be closed;
 closing the last leaves the same empty Window. Closing a view does not stop its
-native session or archive a Team or TPM task.
+native session or archive a Team task.
 
 Use the floating **Window** button to switch Windows and select their session
 views. Drag the button to reposition it; **View → Window view** shows or hides
@@ -715,7 +705,7 @@ key or unconditional success is not a valid substitute.
 
 These are data semantics, not mandatory SQL table names or a database product.
 The main site does not need a copy of Relay's Host bindings, browser cookies,
-pairing keys, Team/TPM state, shares or usage ledger. Relay owns that application
+pairing keys, Team state, shares or usage ledger. Relay owns that application
 state in its volume/Durable Object. Native session history and workspaces remain
 on the Hosts; transcript traffic does not pass through the main site.
 

@@ -13,7 +13,7 @@ Smallest and least shared first, so each fold leaves less for the next:
    the support enablement today, move to a bot enablement of their own first.
 3. **7c Team.** A Team becomes a chief and its bots. The page's Team roster loading, which the task directory, rooms and work
    items read, moves out of the Teams panel before the panel goes.
-4. **7d TPM.** A TPM becomes a bot whose mission is its work, with work items, todo and confirmations; the companions' heartbeat goes.
+4. **7d TPM.** TPMs are removed entirely; a TPM's native session stays a plain session, its history readable.
 
 ## 7a. Side
 
@@ -75,17 +75,40 @@ the ordinary uplink validation; nothing special is built for it.
 - The App-level attribution navigation tests (`App.attributions.test.tsx`) used a Team as the relation; `session-attribution-navigation.test.ts`
   keeps the window operations.
 - E7's Team case became "a temporary bot a bot started survives a Controller restart and still reports to its chief"; E15 did not cover a restart.
-- The recipient-unaware paths of the Team broker (`recipientAware` false) are reachable only by a Controller that runs tasks without exact
-  recipients, which the uplink negotiation does not allow; the tests that drove them through ordinary Teams were removed.
-- A Cloudflare Relay keeps the empty `relay_team_resource_chunks` table, and a Node Relay's `<state file>.resources` directory stays on disk.
-- `docs/current/agent-remote/call-for-support.md` still describes the folded support groups.
 
-## 7d. TPM
+### Leftovers, done (2026-11-24)
 
-- Decided with the owner (2026-11-23): history only. A TPM becomes a standing bot whose mission is its work; its intents stay
-  readable in its conversation and are not carried into work items. Tracking work need not be the work items: a goal tool or other
-  tools may serve later.
-- Deleted: `tpm_intent`, TPM delivery, workspace, launcher, the companions' heartbeat; TPM tests rewritten on bots.
+- The recipient-unaware paths of the Team broker are gone: every delivery names its exact recipient, and the `teamRecipients` negotiation
+  (uplink offer, `registered` field, `x-arc-team-recipients` header, `team_recipients_upgrade_required`) went with them. `teamSuccession` stays
+  its own negotiation. An older Controller or page is updated; nothing special refuses it.
+- The Cloudflare Relay drops `relay_team_resource_chunks` when its storage opens. A Node Relay no longer references its
+  `<state file>.resources` directory; it is not read or deleted, so a stale one stays on disk until the person removes it.
+- `docs/current/agent-remote/call-for-support.md` is deleted; the README intro and the command line help name bots, not Team, support or TPM roles.
+
+## 7d. TPM (as built)
+
+- Decided with the owner (2026-11-23, revised 2026-11-24): TPMs are removed entirely, not folded into bots. A TPM's native session stays a plain
+  session and its conversation stays readable; it is not converted into a bot, and its work record, todo and intents are not carried anywhere.
+  Tracking work may be served later by a goal tool or other tools.
+- Deleted, protocol: `tpm.ts` (`TpmWork`, `TpmIntent`, `TpmCreate`, `TpmAction`, `TpmList`), the `tpm` Host paths and the `tpmManagement`
+  registration field of the uplink, the `tpm` kind of a succession participant, and `session-todo.ts` (the todo list was TPM's only consumer).
+  The frozen legacy Team codecs of `agent-remote-protocol/testing` went too: they only checked a current peer against an older one.
+- Deleted, Relay: the `/v1/remote/hosts/<id>/tpm` routes and `tpmManagement` on a Host.
+- Deleted, Controller: `TpmCoordinator`, the TPM store and role, TPM routing of a succession (`session-succession-tpm.ts`), the todo and
+  heartbeat toolkits and background reviews (`session-todo.ts`, `session-heartbeat.ts`, `session-background.ts`), the `/remote/tpm` routes, the
+  `tpm` Host option and its `tpm-v1` state directory, the TPM role of a handoff, the recovery admissions of a TPM creation in the succession store
+  (`settleRecoveredAssociation`, `AssociationRecovery`), and the TPM tests.
+- Deleted, client and lab: the TPM workspace, menu, launcher, visibility command and storage keys, the TPM work and main-session hooks, the TPM
+  role label, the todo panel (`SessionTodoPanel`), the client's `RemoteHostControlClient` (only TPM used it), the debugger's `tpm` command, and
+  the TPM component fixtures and specs.
+- Old state is dropped when it loads, nothing is converted. The Relay drops the `tpm` tag and managed binding of a Window view (the view stays a
+  plain session) with the `team` ones (`legacy-teams.ts`), and the TPM participants of the receipts of earlier handoffs
+  (`migrateBrokerAssociations`). The Controller's succession store drops TPM participants from its roles and prepared handoffs, and the admissions of
+  a TPM creation. The TPM state directory of a Controller stays on disk, unread. The lab reads a saved view with a `tpm` feature as an ordinary view.
+- Tests: the TPM suites went with their code. Where a test only used TPM as an example (succession fixtures, participants, role extensions) it
+  uses a Side, an Ask or a role extension. The prefix-handoff test of a TPM's tools (`native-prefix-role-runtime.test.ts`) went with TPM; the
+  bot seat is covered by `bot-seat-succession.test.ts`. No e2e flow of `packages/agent-e2e/flows` covered TPM, so none changed. Component specs
+  that only ran on the TPM fixture went (`tpm-dock`, `session-attributions-layout`, the Ask-and-TPM title test of `dock-title-interactions`).
 
 ## Checks
 

@@ -7,7 +7,7 @@
 | Group | What it covers |
 |---|---|
 | `session` | List, read, inspect, link, create, send, steer, cancel, answer, set, release, hand off and attach sessions; their references. |
-| `role` | In a session's shell: the commands of the role it holds (Team member, support coordinator or supporter, TPM, a worker calling for support). |
+| `role` | In a session's shell: the commands of the role it holds (a bot's tools). |
 | `host` | List and read Hosts; providers, workspaces, VS Code tunnel, previews, Controller updates, stopping sessions. |
 | `window` | Windows: create, arrange views, name the session that arranges one. |
 | `login`, `logout` | The command line's own website sign-in. |

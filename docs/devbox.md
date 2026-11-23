@@ -141,7 +141,7 @@ Three named volumes are retained across rebuilds and ordinary shutdowns:
 
 | Volume | Container path | Contents |
 | --- | --- | --- |
-| `devbox-data` | `/data` | Relay account, Window layouts, Host identity, pairing credential, TPM and Team state |
+| `devbox-data` | `/data` | Relay account, Window layouts, Host identity, pairing credential and Team state |
 | `devbox-home` | `/home/node` | Native provider profiles, login state, histories and session references |
 | `devbox-workspace` | `/workspace` | Projects and files created by agents |
 
@@ -210,7 +210,7 @@ temporary state and does not require provider credentials.
 
 This environment exercises the real web → Relay → Controller → native CLI
 chain, including session creation, input, tools, history, reconnect behavior and
-supported Ask, Side, TPM or Team features. Authenticate each provider whose
+supported Ask, Side or Team features. Authenticate each provider whose
 features you need to validate, then perform that provider's test scenario.
 
 It is a Linux environment, including on Docker Desktop for macOS or Windows.

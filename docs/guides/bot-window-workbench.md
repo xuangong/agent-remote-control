@@ -8,7 +8,7 @@ Switch with **View → Bot mode** or **Window mode**, ⌥⌘2 and ⌥⌘1 (Ctrl+
 
 ## Groups and bots
 
-Every Window is a **group**, and every current session in it is a **bot**: an ordinary session, a Side, a Team Leader or member, a Support session, or a TPM. Roles show as tags beside the name, and a label you give a bot shows beside its role. Asks are not bots: they nest under the bot they ask about.
+Every Window is a **group**, and every current session in it is a **bot**: an ordinary session, a Side, or a Team Leader or member. Roles show as tags beside the name, and a label you give a bot shows beside its role. Asks are not bots: they nest under the bot they ask about.
 
 - **Each session appears once in Bot mode**, in the first group that holds it, even if several Windows show it.
 - **A group appears in both modes until you hide it** from one of them. Use **Hide in Bot mode** in the Window list, or the group's ⋯ menu in Bot mode. A group stays visible in at least one mode.
@@ -35,7 +35,7 @@ Each bot has a ⋯ menu above its conversation. On a desktop, right-click its ro
 In a bot's conversation:
 - **/side** (or **/btw**) opens a Side beside the bot in the same group.
 - **/handoff** continues the bot on another provider of its Host. The bot keeps its place and its earlier conversation, which stays readable above a quiet divider. In Window mode, **Continued from** above the conversation leads there. In a Window none of whose bots you have labeled, put to sleep or hidden, it opens the earlier session in the pane instead, with **Return to current**.
-- To start a Team, TPM work or a call for support from a bot, open its group in Window mode.
+- To start a Team from a bot, open its group in Window mode.
 
 In Window mode, opening another session from a bot's pane opens it **beside** the bot, through the sidebar, Favorites, Track or a new session, and in a Window with labeled, sleeping or hidden bots also through the pane's session list or a link in the conversation. Navigating within the bot's own handoff history stays in place, as do empty and history views.
 

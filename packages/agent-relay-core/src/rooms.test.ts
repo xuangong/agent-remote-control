@@ -86,4 +86,15 @@ describe('rooms', () => {
     expect(speaker).toBeDefined();
     expect(f.room().room).toMatchObject({ state: 'closed', turns: ROOM_TURN_LIMIT });
   });
+
+  it('lets a member speak from the session the room bound, even after its bot shows another session', async () => {
+    const f = fixture();
+    const { roomId } = await f.broker.hostCall('mac', { action: 'open_room', owner: f.owner('chief'), operationId: 'op', name: 'R', topic: 'T', members: ['Tracker'], minutes: 30 }) as { roomId: string };
+    // The person opened another session in Tracker's tile: the directory no longer names tracker's session.
+    (group.window.views[1] as { binding: { nativeSessionId: string } }).binding.nativeSessionId = 'elsewhere';
+    try {
+      expect(await f.broker.hostCall('mac', { action: 'room_say', owner: f.owner('tracker'), roomId, text: 'Here.', done: true })).toEqual({ roomId, state: 'done' });
+      await expect(f.broker.hostCall('mac', { action: 'room_say', owner: f.owner('elsewhere'), roomId, text: 'Me?' })).rejects.toThrow('Room not found');
+    } finally { (group.window.views[1] as { binding: { nativeSessionId: string } }).binding.nativeSessionId = 'tracker'; }
+  });
 });

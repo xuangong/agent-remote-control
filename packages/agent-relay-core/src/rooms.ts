@@ -5,7 +5,7 @@
  * from the page. A room ends when a member says it is done, the person ends it, or its turns or time run out.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { roomTurnText, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, type Team, type TeamHostCall, type TeamMember, type TeamRoom } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, roomTurnText, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, type Team, type TeamHostCall, type TeamMember, type TeamRoom } from '@orchardworks/agent-remote-protocol';
 import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
 import type { TeamBrokerPorts } from './teams.js';
@@ -101,10 +101,13 @@ export class Rooms {
   /** The member asked to speak answers, or passes. */
   speak(hostId: string, call: SayCall): Promise<{ roomId: string; state: TeamRoom['state'] }> {
     if (!this.ports.capable(hostId)) fail('Update the Controller to use rooms.');
-    const directory = accountDirectory(this.ports.groups()), self = callerAssistant(this.broker.ports.resolveSession, hostId, call.owner, directory);
+    const resolve = this.broker.ports.resolveSession;
+    const key = (host: string, providerId: string, nativeSessionId: string) => { try { return nativeSessionRefKey(resolve(host, providerId, nativeSessionId)); } catch { return undefined; } };
+    const caller = key(hostId, call.owner.providerId, call.owner.nativeSessionId);
     return this.broker.change(teams => {
       const team = teams.find(item => item.id === call.roomId && item.room) ?? fail('Room not found.'), item = room(team), now = this.broker.ports.now();
-      const member = team.members.find(candidate => candidate.hostId === self.hostId && candidate.providerId === self.providerId && candidate.nativeSessionId === self.nativeSessionId)
+      // A member is the session the room bound, or the one that holds its role now; what its bot shows later does not matter.
+      const member = team.members.find(candidate => candidate.hostId === hostId && !!caller && !!candidate.nativeSessionId && key(candidate.hostId, candidate.providerId, candidate.nativeSessionId) === caller)
         ?? fail('Room not found.');
       if (item.state !== 'open') fail('This room has ended.');
       if (item.speaker !== member.id) fail('It is not your turn in this room; wait to be asked.');

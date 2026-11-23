@@ -44,8 +44,10 @@ const fold = (text: string) => text.trim().toLocaleLowerCase('en');
 export function accountDirectory(groups: readonly WindowGroup[], coordinatorProvider: AssistantPorts['coordinatorProvider'] = () => true): Assistant[] {
   const names = assistantNamesIn(accountAssistants(groups), 'en');
   return groups.flatMap(group => botViews(group).map(view => {
-    const key = viewAssistantKey(group.window.id, view.id), details = group.bots?.members[view.id];
-    return { key, name: names.get(key) ?? view.binding.title, ...(details?.label ? { label: details.label } : {}), hidden: details?.hidden === true, coordinator: details?.mode === 'coordinator' && coordinatorProvider(view.binding.hostId, view.binding.providerId),
+    // The id is the bot's record, which a move between groups keeps; names follow the account's naming rule, keyed by place.
+    const viewKey = viewAssistantKey(group.window.id, view.id), details = group.bots?.members[view.id];
+    const key = details?.botId ?? viewKey;
+    return { key, name: names.get(viewKey) ?? view.binding.title, ...(details?.label ? { label: details.label } : {}), hidden: details?.hidden === true, coordinator: details?.mode === 'coordinator' && coordinatorProvider(view.binding.hostId, view.binding.providerId),
       hostId: view.binding.hostId, providerId: view.binding.providerId, nativeSessionId: view.binding.nativeSessionId };
   }));
 }

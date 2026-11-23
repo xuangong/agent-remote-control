@@ -129,9 +129,16 @@ temporary bot, and counting tool calls per organizer turn.
 
 ## Step 6: the Workbench
 
-- [ ] Design 10: Chats grouped by organizer with status and work item lines; grouped reminders; folded lines between bots; the
-  temporary bot beside its organizer with Send, Interrupt, Queue, Stop and Keep; details with bots, work items and the mission;
-  rooms in Bot mode.
+- [x] Design 10: Chats grouped by organizer with status and work item lines; folded lines between bots; details with bots, work
+  items and the mission; rooms in Bot mode; Keep.
+- [ ] Grouped reminders by organizer: reminders stay per bot; a bot's row names its organizer.
+
+Built (d6ff44e4): a standing bot another bot created joins its organizer's group, so Chats groups bots by organizer already; its
+row says "by Chief", and a quiet bot shows its latest open work item and phase instead of its sentence. Rooms are listed above the
+bots from the Teams the page keeps and open as a group chat in a sheet. The details list the standing bots a bot organizes beside
+its temporary bots, work items and mission. A temporary bot's progress folds to one line per bot; results and questions stay cards.
+A temporary bot opens beside its organizer as any session does (Send, Interrupt and Queue are its conversation's own); its row
+offers Stop, Mark done and Keep, which makes it a standing bot of its organizer's group with its brief as its mission.
 
 ## Step 7: fold the older features
 

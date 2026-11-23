@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { createTeamRoutes } from './team-routes.js';
 import { routeFixture } from './test-utils/route-fixture.js';
 
-const resolve = { teamId: 't1', action: 'resolve_message', messageId: 'm1', outcome: 'accepted' };
+const resolve = { teamId: 't1', action: 'close_room' };
 const setup = (teamHost = 'h1') => {
   const run = routeFixture();
   const done: string[] = []; let who = "owner"; let during = () => {};
@@ -42,22 +42,10 @@ describe('Team routes', () => {
     expect(run.done).toEqual(["action"]);
   });
 
-  it('refuses to add a member on a Host the caller may not reach, and does not answer a change whose Host went away while it ran', async () => {
+  it('does not answer a change whose Host went away while it ran', async () => {
     const run = setup();
-    const add = { teamId: 't1', action: 'add_member', operationId: 'op1', hostId: 'ghost', providerId: 'codex', cwd: '/w', name: 'Member', responsibility: 'Review' };
-    await expect(run.call(run.route, 'POST', '/v1/remote/teams/action', add)).resolves.toMatchObject({ status: 409, body: { error: 'Host is unavailable.' } });
-    expect(run.done).toEqual([]);
     run.during(() => run.state.hosts.delete('h1'));
-    await expect(run.call(run.route, 'POST', '/v1/remote/teams/action', { ...resolve, }, 'owner', 'owner')).resolves.toMatchObject({ status: 409, body: { error: 'Host is unavailable.' } });
-    expect(run.done).toEqual(['action']);
-  });
-
-  it('does not answer a member addition whose member Host went away while it ran', async () => {
-    const run = setup();
-    run.state.hosts.set('h2', { ...run.host, id: 'h2', installationId: 'second' });
-    const add = { teamId: 't1', action: 'add_member', operationId: 'op1', hostId: 'h2', providerId: 'codex', cwd: '/w', name: 'Member', responsibility: 'Review' };
-    run.during(() => run.state.hosts.delete('h2'));
-    await expect(run.call(run.route, 'POST', '/v1/remote/teams/action', add)).resolves.toMatchObject({ status: 409, body: { error: 'Host is unavailable.' } });
+    await expect(run.call(run.route, 'POST', '/v1/remote/teams/action', resolve, 'owner', 'owner')).resolves.toMatchObject({ status: 409, body: { error: 'Host is unavailable.' } });
     expect(run.done).toEqual(['action']);
   });
 });

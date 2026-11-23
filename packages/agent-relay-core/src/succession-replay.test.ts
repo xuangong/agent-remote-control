@@ -87,7 +87,7 @@ async function fixture(configure?: (state: HostedRelayState) => void, recentAuth
     if (!directBroker) return createHostedRelay({ ...auth, successionEncodingCosts: encodingCosts, successionEnrollment: true, successionProjectionAllowance: context => select?.(context) ?? 2 * 1024 * 1024, scheduler: { schedule() {}, cancel() {} }, storage });
     // Isolated Broker consumer: explicit fixture principals, without Gateway proof-queue ordering.
     const state = createRelayState(auth, storage, () => {}, () => {}, encodingCosts);
-    const broker = createHostBroker({ origin, ownerSubject: 'owner', durable: true, initialState: state.read().tenants[0]!.broker,
+    const broker = createHostBroker({ origin, ownerSubject: 'owner', durable: true, assistantGroups: () => [], initialState: state.read().tenants[0]!.broker,
       successionEnrollment: { version: 1, origin, issuer: auth.issuer, namespace: namespace('owner'), ownerSubject: 'owner' },
       successionProjectionAllowance: context => select?.(context) ?? 2 * 1024 * 1024,
       onStateChange: value => state.mutate(draft => { draft.tenants[0]!.broker = value; }) });
@@ -235,7 +235,7 @@ async function controller(f: Awaited<ReturnType<typeof fixture>>, failAtCommit =
   let decline = false, loseRelease = false;
   let describeHold: { entered(): void; waiting: Promise<void> } | undefined;
   async function connect(recipientAware = teamRecipients, teamSuccession = false) {
-    const socket = new WebSocket(f.origin.replace('http', 'ws') + `/ws/remote-host?control=1&successionEnrollment=${enrollmentVersion}&team=1${recipientAware ? '&teamRecipients=1' : ''}${teamSuccession ? '&teamSuccession=1' : ''}`, { headers: { authorization: 'Bearer ' + f.credential } }); sockets.push(socket);
+    const socket = new WebSocket(f.origin.replace('http', 'ws') + `/ws/remote-host?control=1&successionEnrollment=${enrollmentVersion}&team=1${recipientAware ? '&teamRecipients=1' : ''}${teamSuccession ? '&teamSuccession=1&tasks=1&coordinatorProvider=fixture' : ''}`, { headers: { authorization: 'Bearer ' + f.credential } }); sockets.push(socket);
     socket.on('message', async (data: { toString(): string }) => {
       const message = JSON.parse(data.toString());
       if (message.type === 'heartbeat') { socket.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat_ack', nonce: message.nonce })); return; }
@@ -1432,14 +1432,15 @@ function seedPrefixTeam(state: HostedRelayState) {
   const broker = state.tenants[0]!.broker;
   broker.associations!.freezes = [];
   broker.teams = [{ id: 'team', operationId: 'create-team', revision: 1, title: 'Team', status: 'active', source: { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'source', title: 'Source' }, createdAt: 1, updatedAt: 1,
-    members: [{ id: 'leader', hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'leader', role: 'leader', name: 'Leader', responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 },
-      { id: 'worker', hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'A', role: 'member', name: 'Worker', responsibility: 'Verify', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 }],
+    members: [{ id: 'leader', hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'leader', role: 'requester', name: 'Leader', responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 },
+      { id: 'worker', hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'A', role: 'requester', name: 'Worker', responsibility: 'Verify', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 }],
+    link: { assistants: ['leader', 'worker'], recent: [] },
     messages: [{ id: 'message', from: 'leader', to: 'worker', text: 'Once', status: 'queued', createdAt: 1 }] }];
 }
 const prefixTeamRequest = { operationId: 'prefix-team', providerId: 'fixture', nativeSessionId: 'A', expectedRevision: 1, preparation: { kind: 'native_prefix', turnId: 'turn', messageId: 'message' } };
 const prefixTeamClaim = { action: 'claim', teamId: 'team', memberId: 'worker', messageId: 'message', expectedNativeSessionId: 'A' };
 test.each(['claim-first', 'freeze-first'] as const)('serializes Team %s at the durable claim versus freeze boundary over HTTP and WebSocket', async order => {
-  const f = await fixture(seedPrefixTeam, false, true, true), host = await controller(f, false, false, 3);
+  const f = await fixture(seedPrefixTeam, false, true, true), host = await controller(f, false, false, 3); await host.connect(true, true);
   const held = f.hold(state => order === 'claim-first' ? state.tenants[0]!.broker.teams![0]!.messages[0]!.status === 'dispatching' : state.tenants[0]!.broker.associations!.freezes.length === 1);
   const prepare = () => f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', prefixTeamRequest);
   if (order === 'claim-first') {
@@ -1457,7 +1458,7 @@ test.each(['claim-first', 'freeze-first'] as const)('serializes Team %s at the d
     expect((await host.teamCall({...prefixTeamClaim,expectedNativeSessionId:undefined})).status).toBe(409);
     expect(await host.teamCall({...prefixTeamClaim,expectedNativeSessionId:'B'})).toMatchObject({status:200,body:{status:'dispatching',resolvedTarget:ref('B')}});
     expect((await f.saved()).tenants[0]!.broker.teams![0]!.members[1]!.nativeSessionId).toBe('A');
-    await f.restart(); await host.connect();
+    await f.restart(); await host.connect(true, true);
     const poll = await host.teamCall({action:'poll'});
     expect(poll.body[0].members[1].nativeSessionId).toBe('B');
     expect(poll.body[0].messages[0]).toMatchObject({status:'dispatching',resolvedTarget:ref('B')});
@@ -1465,74 +1466,11 @@ test.each(['claim-first', 'freeze-first'] as const)('serializes Team %s at the d
   }
 }, 10000);
 test.each(['unknown', 'accepted', 'queued'] as const)('blocks Team %s receipts at their actual recipient before Relay freezing', async state => {
-  const f = await fixture(seedPrefixTeam, false, true, true), host = await controller(f, false, false, 3);
+  const f = await fixture(seedPrefixTeam, false, true, true), host = await controller(f, false, false, 3); await host.connect(true, true);
   expect((await host.teamCall(prefixTeamClaim)).status).toBe(200);
   expect((await host.teamCall({ action:'settle',teamId:'team',memberId:'worker',messageId:'message',resolvedTarget:ref('A'),outcome:state==='unknown'?'unknown':'accepted',...(state==='queued'?{acceptance:'queued'}:{}) })).status).toBe(200);
   expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare','owner',prefixTeamRequest)).status).toBe(409);
   expect(host.effects.prepare).toBe(0); expect((await f.saved()).tenants[0]!.broker.associations!.freezes).toEqual([]);
-}, 10000);
-
-
-test.each(['inline', 'compact-legacy', 'compact-target'] as const)('recovers %s accepted receipts only after explicit settlement over persisted HTTP and WebSocket', async representation => {
-  for (const outcome of ['accepted', 'rejected'] as const) {
-    const f = await fixture(seedPrefixTeam, false, true, true);
-    const input = { action: 'send', teamId: 'team', memberId: 'leader', to: 'worker', operationId: 'uncertain', text: 'Original private body' };
-    const id = createHash('sha256').update(JSON.stringify(['leader', input.operationId])).digest('hex');
-    const fingerprint = deliveryFingerprint(input);
-    await f.replaceSaved(state => {
-      const team = state.tenants[0]!.broker.teams![0]!;
-      const message = { id, from: 'leader', to: 'worker', status: 'accepted' as const, createdAt: 1, ...(representation === 'compact-legacy' ? {} : { resolvedTarget: ref('A') }) };
-      team.messages = representation === 'inline' ? [{ ...message, text: input.text }] : [];
-      if (representation !== 'inline') team.deliveryReceipts = [{ ...message, fingerprint, settledAt: 1 }];
-    });
-    await f.restart();
-    const host = await controller(f, false, false, 3);
-    expect((await f.request('v1/remote/teams/action', 'owner', { action: 'rename', teamId: 'team', title: 'Retained' })).status).toBe(200);
-    const saved = (await f.saved()).tenants[0]!.broker.teams![0]!;
-    expect(validSavedTeam(saved)).toBe(true);
-    if (representation !== 'inline') {
-      const catalog = (await (await f.request('v1/remote/teams')).json()).teams[0];
-      expect(catalog.unresolvedReceipts).toHaveLength(1);
-      expect(catalog.unresolvedReceipts[0]).toMatchObject({ id, from: 'leader', to: 'worker', status: 'accepted' });
-      expect(catalog.unresolvedReceipts[0]).not.toHaveProperty('text');
-      expect(catalog.unresolvedReceipts[0]).not.toHaveProperty('fingerprint');
-      expect(catalog.unresolvedReceipts[0]).not.toHaveProperty('acceptance');
-      if (representation === 'compact-legacy') expect(catalog.unresolvedReceipts[0]).not.toHaveProperty('resolvedTarget');
-      else expect(catalog.unresolvedReceipts[0].resolvedTarget).toEqual(ref('A'));
-      expect(JSON.stringify(saved)).not.toContain(input.text);
-      expect(saved.deliveryReceipts![0]).toMatchObject({ id, fingerprint, settledAt: 1 });
-      expect(saved.deliveryReceipts![0]).not.toHaveProperty('acceptance');
-      if (representation === 'compact-legacy') expect(saved.deliveryReceipts![0]).not.toHaveProperty('resolvedTarget');
-    }
-    expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', prefixTeamRequest)).status).toBe(409);
-    expect(host.effects.prepare).toBe(0);
-    expect(await host.teamCall(input)).toMatchObject({ status: 200, body: { id, status: 'accepted' } });
-    expect((await host.teamCall({ ...prefixTeamClaim, messageId: id })).status).toBe(409);
-    expect((await f.request('v1/remote/teams/action', 'owner', { action: 'archive', teamId: 'team' })).status).toBe(200);
-    for (const memberId of ['leader', 'worker']) expect((await host.teamCall({ action: 'presence', teamId: 'team', memberId, activity: 'idle' })).status).toBe(200);
-    expect((await (await f.request('v1/remote/teams')).json()).teams[0].status).toBe('archiving');
-    const resolved = await f.request('v1/remote/teams/action', 'owner', { action: 'resolve_message', teamId: 'team', messageId: id, outcome });
-    expect(resolved.status).toBe(200);
-    const resolvedTeam = await resolved.json();
-    expect(resolvedTeam.status).toBe('archived');
-    expect(resolvedTeam).not.toHaveProperty('unresolvedReceipts');
-    const receipt = (await f.saved()).tenants[0]!.broker.teams![0]!.deliveryReceipts!.find(item => item.id === id)!;
-    expect(receipt).toMatchObject({ id, status: outcome, fingerprint });
-    expect(receipt.acceptance).toBe(outcome === 'accepted' ? 'handled' : undefined);
-    if (representation === 'compact-legacy') expect(receipt).not.toHaveProperty('resolvedTarget');
-    else expect(receipt.resolvedTarget).toEqual(ref('A'));
-    await f.restart(); await host.connect();
-    expect((await f.request('v1/remote/teams/action', 'owner', { action: 'restore', teamId: 'team' })).status).toBe(200);
-    expect(await host.teamCall(input)).toMatchObject({ status: 200, body: { id, status: outcome } });
-    expect((await host.teamCall({ ...input, text: 'Different input' })).status).toBe(409);
-    const poll = await host.teamCall({ action: 'poll' });
-    expect(poll.body[0].messages).toEqual([]);
-    expect((await host.teamCall({ ...prefixTeamClaim, messageId: id })).status).toBe(409);
-    expect(host.effects.input).toBe(0);
-    expect(host.effects.rpc.every(path => path === '/remote/succession/enrollment')).toBe(true);
-    expect((await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', prefixTeamRequest)).status).toBe(200);
-    expect(host.effects.prepare).toBe(1);
-  }
 }, 10000);
 
 

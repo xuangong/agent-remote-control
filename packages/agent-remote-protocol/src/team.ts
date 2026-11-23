@@ -100,18 +100,10 @@ export const Team = Type.Object({ id, operationId: id, revision: Type.Integer({ 
   room: Type.Optional(TeamRoom),
 }, object);
 export type Team = Static<typeof Team>;
-export const TeamCreate = Type.Object({ operationId: id, source: TeamSource,
-  /** The person starts a temporary bot whose chief is the source session (`/side`, bots design 9): its name and its mission. */
-  bot: Type.Optional(Type.Object({ name: TaskTitle, mission: TaskBrief }, object)) }, object);
+/** The person starts a temporary bot whose chief is the source session (`/side`, bots design 9): its name and its mission. */
+export const TeamCreate = Type.Object({ operationId: id, source: TeamSource, bot: Type.Object({ name: TaskTitle, mission: TaskBrief }, object) }, object);
 export type TeamCreate = Static<typeof TeamCreate>;
 export const TeamAction = Type.Union([
-  Type.Object({ teamId: id, action: Type.Literal('add_member'), operationId: id, hostId: id, providerId: id,
-    cwd: short, name: Type.String({ minLength: 1, maxLength: 256 }), responsibility: short }, object),
-  Type.Object({ teamId: id, action: enumOf('archive', 'restore') }, object),
-  Type.Object({ teamId: id, action: Type.Literal('rename'), title: Type.String({ minLength: 1, maxLength: 256, pattern: '\\S' }) }, object),
-  Type.Object({ teamId: id, action: Type.Literal('retry_creation'), memberId: id }, object),
-  Type.Object({ teamId: id, action: Type.Literal('abandon_creation'), memberId: id }, object),
-  Type.Object({ teamId: id, action: Type.Literal('resolve_message'), messageId: id, outcome: enumOf('accepted', 'rejected') }, object),
   // The person stops a task, or takes it as done.
   Type.Object({ teamId: id, action: Type.Literal('cancel_task') }, object),
   Type.Object({ teamId: id, action: Type.Literal('mark_task_done') }, object),
@@ -136,11 +128,6 @@ export const TeamHostCall = Type.Union([
   Type.Object({ action: Type.Literal('resource_metadata'), teamId: id, memberId: id, resourceId: id }, object),
   Type.Object({ action: Type.Literal('resource_read'), teamId: id, memberId: id, resourceId: id, offset: Type.Integer({ minimum: 0 }) }, object),
   Type.Object({ action: Type.Literal('read'), teamId: id, memberId: id }, object),
-  Type.Object({ action: Type.Literal('acknowledge'), teamId: id, memberId: id,
-    messageIds: Type.Array(id, { minItems: 1, maxItems: 32, uniqueItems: true }), expectedNativeSessionId: NativeSessionRef.properties.nativeSessionId }, object),
-  Type.Object({ action: Type.Literal('send'), teamId: id, memberId: id, to: id, operationId: id, text, resources: Type.Optional(Type.Array(id, { minItems: 1, maxItems: 8, uniqueItems: true })) }, object),
-  Type.Object({ action: Type.Literal('describe_member'), teamId: id, memberId: id, target: id, responsibility: short }, object),
-  Type.Object({ action: Type.Literal('report'), teamId: id, memberId: id, summary: short }, object),
   Type.Object({ action: Type.Literal('presence'), teamId: id, memberId: id, activity: enumOf('idle', 'busy', 'unknown'),
     // A task worker's pending native interaction, which only the person answers.
     interaction: Type.Optional(Type.String({ minLength: 1, maxLength: TASK_TOLD_LIMIT })) }, object),

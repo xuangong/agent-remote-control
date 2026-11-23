@@ -1,5 +1,6 @@
 import { validWindowState, type SavedWorkspaceWindow } from './window-workspaces.js';
 import { migrateBots, needsBotMigration, validBots, type SavedBot } from './bot-store.js';
+import { dropLegacyTeams, hasLegacyTeams } from './legacy-teams.js';
 import { ACCOUNT_TEAM_LIMIT, validSavedTeam } from './team-delivery.js';
 import { validFavoritesSuccession, type FavoritesSuccessionProgress } from './favorites-succession.js';
 import { validBrokerAssociations, migrateBrokerAssociations } from './succession-associations.js';
@@ -300,6 +301,7 @@ function migrateRelayState(value: HostedRelayState): HostedRelayState {
   }
   if (migrated.workspaceWindows) for (const row of migrated.workspaceWindows) if (row.window) row.window = decodeWorkspaceWindow(row.window)!;
   if (migrated.workspaceWindows && needsBotMigration(migrated.workspaceWindows)) migrateBots(migrated.workspaceWindows, migrated.bots ??= [], Date.now());
+  if (hasLegacyTeams(migrated.tenants)) dropLegacyTeams(migrated.tenants, migrated.workspaceWindows ??= [], migrated.bots ??= [], Date.now());
   delete migrated.sessionSuccessions;
   return migrated;
 }
@@ -323,7 +325,7 @@ export function checkedRelayState(value: unknown, auth: HostedAuthOptions): Host
     }
     return result;
   };
-  if (Object.hasOwn(value, 'sessionSuccessions') || hasLegacySupport(value) || value.workspaceWindows?.some(row => !normalized(row)) || (value.workspaceWindows !== undefined && needsBotMigration(value.workspaceWindows))) return migrateRelayState(value);
+  if (Object.hasOwn(value, 'sessionSuccessions') || hasLegacySupport(value) || hasLegacyTeams(value.tenants) || value.workspaceWindows?.some(row => !normalized(row)) || (value.workspaceWindows !== undefined && needsBotMigration(value.workspaceWindows))) return migrateRelayState(value);
   return value;
 }
 /** Only the authenticated Node file adapter calls this explicit v1 migration. */

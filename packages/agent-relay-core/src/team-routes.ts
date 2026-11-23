@@ -39,7 +39,7 @@ export function createTeamRoutes(ports: TeamRoutesPorts): RouteGroup {
       try {
         if (url.pathname.endsWith('/create') && isTeamCreate(input)) {
           requireAccess(input.source.hostId, principal(context));
-          const result = input.bot ? await teams.startBot(input) : await teams.create(input);
+          const result = await teams.startBot(input);
           requireOwner(principal(context)); requireAccess(input.source.hostId, principal(context));
           return json(200, teams.readForClient(result.id, recipientAware));
         }
@@ -47,10 +47,8 @@ export function createTeamRoutes(ports: TeamRoutesPorts): RouteGroup {
           const team = brokerState.teams.find(team => team.id === input.teamId);
           if (!team) return json(404, { error: 'Team not found.' });
           requireAccess(team.source.hostId, principal(context));
-          if (input.action === 'add_member') requireAccess(input.hostId, principal(context));
           const result = await teams.action(input);
           requireOwner(principal(context)); requireAccess(team.source.hostId, principal(context));
-          if (input.action === 'add_member') requireAccess(input.hostId, principal(context));
           return json(200, teams.readForClient(result.id, recipientAware));
         }
         return json(400, { error: 'Invalid Team request.' });

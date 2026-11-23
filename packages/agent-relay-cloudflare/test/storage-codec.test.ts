@@ -44,10 +44,10 @@ test('real Worker SQLite stores bounded BLOB records and ordered headers, surviv
   (broker.associations!.freezes[0] as any).extraEvidence = '😀\ud800'.repeat(80000);
   broker.bindings = Array.from({ length: 80 }, (_, index) => ({ agentId: 'a'.repeat(4090) + index, hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'native-' + index }));
   broker.creations = [];
-  const member = (team: string, id: string, role: 'leader' | 'member') => ({ id, hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: `${team}-${id}`,
+  const member = (team: string, id: string, role: 'requester') => ({ id, hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: `${team}-${id}`,
     role, name: id, responsibility: '', creation: 'ready' as const, activity: 'idle' as const, summary: '', updatedAt: 1 });
   broker.teams = ['first', 'second'].map(id => ({ id, operationId: id, revision: 1, title: id, status: 'active' as const, createdAt: 1, updatedAt: 1,
-    source: { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: `${id}-source`, title: 'Source' }, members: [member(id, 'leader', 'leader'), member(id, 'helper', 'member')],
+    source: { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: `${id}-source`, title: 'Source' }, link: { assistants: ['leader', 'helper'] as [string, string], recent: [] }, members: [member(id, 'leader', 'requester'), member(id, 'helper', 'requester')],
     messages: [{ id: `${id}-message`, from: 'leader', to: 'helper', text: 'Review the change.', status: 'queued' as const, createdAt: 1 }] }));
   expect((await f.inspect('codec/seed', { method: 'POST', body: JSON.stringify(state) })).status).toBe(200);
   const physical = await (await f.inspect('codec/physical')).json() as any;

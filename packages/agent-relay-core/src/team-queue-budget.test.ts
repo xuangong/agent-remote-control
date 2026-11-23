@@ -4,7 +4,7 @@ import { afterEach, expect, test } from 'vitest';
 import type { TeamHostCall, TeamMessage } from '@orchardworks/agent-remote-protocol';
 import { memoryHostClient } from './test-utils/ws-relay-socket.js';
 import { createHostBroker, type RemoteHostBrokerState } from './broker.js';
-import { validSavedTeam, type SavedTeam } from './team-delivery.js';
+import { assertTeamQueueCapacity, validSavedTeam, type SavedTeam } from './team-delivery.js';
 
 const close: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of close.splice(0).reverse()) await dispose(); }, 5000);
@@ -55,27 +55,22 @@ async function connectedBroker(teams: SavedTeam[] = [savedTeam()], stateRoom?: (
   };
 }
 
-const send = (operationId: string, text: string): TeamHostCall => ({ action: 'send', teamId: 'team', memberId: 'leader', to: 'worker', operationId, text });
+const overflow = (text: string): TeamMessage => ({ id: 'overflow', from: 'leader', to: 'worker', text, status: 'queued', createdAt: 1 });
 
 test('admits 200 small pending messages and reopens a slot after settlement', async () => {
-  const f = await connectedBroker();
-  for (let index = 0; index < 200; index++) expect((await f.call(send(`small-${index}`, 'Inspect'))).status).toBe(200);
-  expect(f.snapshot()[0]!.messages).toHaveLength(200);
-  expect((await f.call(send('overflow', 'Inspect'))).status).toBe(409);
-  const target = { teamId: 'team', memberId: 'worker', messageId: f.snapshot()[0]!.messages[0]!.id };
+  const team = savedTeam(); team.messages = Array.from({ length: 200 }, (_, index) => pendingMessage(index, 'Inspect'));
+  const f = await connectedBroker([team]);
+  expect(() => assertTeamQueueCapacity(f.snapshot()[0]!, overflow('Inspect'))).toThrow();
+  const target = { teamId: 'team', memberId: 'worker', messageId: 'pending-0' };
   expect((await f.call({ action: 'claim', ...target, expectedNativeSessionId: nativeSessionId })).status).toBe(200);
   expect((await f.call({ action: 'settle', ...target, outcome: 'rejected', resolvedTarget: recipient })).status).toBe(200);
-  expect((await f.call(send('overflow', 'Inspect'))).status).toBe(200);
-  expect(f.snapshot()[0]!.messages).toHaveLength(200);
+  expect(() => assertTeamQueueCapacity(f.snapshot()[0]!, overflow('Inspect'))).not.toThrow();
 }, 10000);
 
 test('uses actual pending input bytes instead of reserving recipient metadata per message', async () => {
-  const f = await connectedBroker();
-  for (let index = 0; index < 8; index++) expect((await f.call(send(`large-${index}`, 'x'.repeat(16000)))).status).toBe(200);
-  expect(f.snapshot()[0]!.messages).toHaveLength(8);
-  const rejected = await f.call(send('overflow', 'x'.repeat(16000)));
-  expect(rejected.status).toBe(409);
-  expect(rejected.value.error).toContain('capacity');
+  const team = savedTeam(); team.messages = Array.from({ length: 8 }, (_, index) => pendingMessage(index));
+  const f = await connectedBroker([team]);
+  expect(() => assertTeamQueueCapacity(f.snapshot()[0]!, overflow('x'.repeat(16000)))).toThrow('capacity');
   for (const message of f.snapshot()[0]!.messages) {
     const target = { teamId: 'team', memberId: 'worker', messageId: message.id };
     expect((await f.call({ action: 'claim', ...target, expectedNativeSessionId: nativeSessionId })).status).toBe(200);

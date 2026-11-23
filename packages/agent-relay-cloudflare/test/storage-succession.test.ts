@@ -517,10 +517,10 @@ test('full recovery registration construction fits the saved claim and ends only
 
 /** A Team of the size format 3 kept inline: its queued messages are most of its bytes. */
 function savedTeam(id: string, textBytes: number) {
-  const member = (memberId: string, role: 'leader' | 'member') => ({ id: memberId, hostId: 'host', providerId: 'codex', nativeSessionId: `${id}-${memberId}`,
+  const member = (memberId: string, role: 'requester') => ({ id: memberId, hostId: 'host', providerId: 'codex', nativeSessionId: `${id}-${memberId}`,
     role, name: memberId, responsibility: '', creation: 'ready' as const, activity: 'idle' as const, summary: '', updatedAt: 1 });
   return { id, operationId: id, revision: 1, source: { hostId: 'host', providerId: 'codex', nativeSessionId: `${id}-source`, title: 'Source' }, title: 'Team',
-    status: 'active' as const, createdAt: 1, updatedAt: 1, members: [member('leader', 'leader'), member('helper', 'member')],
+    status: 'active' as const, createdAt: 1, updatedAt: 1, link: { assistants: ['leader', 'helper'] as [string, string], recent: [] }, members: [member('leader', 'requester'), member('helper', 'requester')],
     messages: Array.from({ length: 8 }, (_, index) => ({ id: `${id}-m${index}`, from: 'leader', to: 'helper', text: 'x'.repeat(Math.floor(textBytes / 8)), status: 'queued' as const, createdAt: 1 })) };
 }
 /** Writes state as a released Relay would have, in format, replacing every snapshot row. */

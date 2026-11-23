@@ -151,7 +151,6 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
   const ready = new Promise<{ hostId: string; pairingPurpose?: PairingPurpose }>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
   void ready.catch(() => undefined);
   const teamPending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
-  let teamInbox = false;
   let teamResources = false;
   let teamRecipients = false;
   let teamSuccession = false;
@@ -165,7 +164,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     outboxPending.clear();
     if (available) options.outbox?.onAvailable(false);
   };
-  const rejectTeam = () => { teamInbox = false; teamRecipients = false; teamSuccession = false; tasks = false; teamResources = false; sendTeam = undefined; for (const pending of teamPending.values()) { clearTimeout(pending.timer); pending.reject(new Error('Team transport disconnected; query the original operation before retrying.')); } teamPending.clear(); };
+  const rejectTeam = () => { teamRecipients = false; teamSuccession = false; tasks = false; teamResources = false; sendTeam = undefined; for (const pending of teamPending.values()) { clearTimeout(pending.timer); pending.reject(new Error('Team transport disconnected; query the original operation before retrying.')); } teamPending.clear(); };
   let remoteKey = options.remoteKey;
   let credentialWrite: Promise<void> | undefined;
   let closed = false;
@@ -205,7 +204,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     endpoint.searchParams.set('control', '1');
     if (options.journal) endpoint.searchParams.set('journal', String(JOURNAL_VERSION));
     if (options.journal?.shown) endpoint.searchParams.set('journalShown', '1');
-    if (options.teamManagement) { endpoint.searchParams.set('team', '1'); endpoint.searchParams.set('teamInbox', '1'); endpoint.searchParams.set('teamRecipients', '1'); endpoint.searchParams.set('teamSuccession', '1'); endpoint.searchParams.set('teamResources', '1'); if (options.tasks) { endpoint.searchParams.set('tasks', '1'); for (const providerId of options.coordinatorProviders ?? []) endpoint.searchParams.append('coordinatorProvider', providerId); } }
+    if (options.teamManagement) { endpoint.searchParams.set('team', '1'); endpoint.searchParams.set('teamRecipients', '1'); endpoint.searchParams.set('teamSuccession', '1'); endpoint.searchParams.set('teamResources', '1'); if (options.tasks) { endpoint.searchParams.set('tasks', '1'); for (const providerId of options.coordinatorProviders ?? []) endpoint.searchParams.append('coordinatorProvider', providerId); } }
     const socket: UplinkSocket = (options.connect ?? connectWebSocket)(endpoint, { authorization: `Bearer ${remoteKey}`, maxPayload: UPLINK_MAX_FRAME_BYTES, handshakeTimeout: registrationTimeout });
     let registered = false;
     let registeredHostId: string | undefined;
@@ -331,7 +330,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       }
       if (registered && decoded.value.type === 'registered') {
         if ((decoded.value.successionEnrollment && JSON.stringify([successionAuthorityKey(decoded.value.successionEnrollment), decoded.value.successionEnrollmentVersion])) !== registeredEnrollmentIdentity || decoded.value.hostId !== registeredHostId
-          || (!!options.outbox && decoded.value.outbox === 1) !== !!sendOutbox || (decoded.value.control === 1) !== sessionControl || (!!options.journal && decoded.value.journal === JOURNAL_VERSION) !== !!journalWriter || (decoded.value.teamInbox === 1) !== teamInbox || !!decoded.value.teamManagement !== !!sendTeam || !!decoded.value.teamResources !== teamResources || (decoded.value.teamRecipients === 1) !== teamRecipients || (decoded.value.teamSuccession === 1) !== teamSuccession
+          || (!!options.outbox && decoded.value.outbox === 1) !== !!sendOutbox || (decoded.value.control === 1) !== sessionControl || (!!options.journal && decoded.value.journal === JOURNAL_VERSION) !== !!journalWriter || !!decoded.value.teamManagement !== !!sendTeam || !!decoded.value.teamResources !== teamResources || (decoded.value.teamRecipients === 1) !== teamRecipients || (decoded.value.teamSuccession === 1) !== teamSuccession
           || decoded.value.heartbeat?.intervalMs !== cloudHeartbeat?.intervalMs
           || decoded.value.heartbeat?.timeoutMs !== cloudHeartbeat?.timeoutMs) retire({ reason: 'protocol_error' });
         return;
@@ -341,7 +340,6 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         if (decoded.value.type !== 'registered') { retire({ reason: 'protocol_error' }); return; }
         clearTimeout(registrationDeadline);
         registered = true;
-        teamInbox = options.teamManagement === true && decoded.value.teamManagement === true && decoded.value.teamInbox === 1;
         teamResources = decoded.value.teamResources === true;
         teamRecipients = options.teamManagement === true && decoded.value.teamManagement === true && decoded.value.teamRecipients === 1;
         teamSuccession = teamRecipients && decoded.value.teamSuccession === 1;
@@ -452,9 +450,8 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       });
     },
     teamRequest(call) {
-      if (call.action === 'acknowledge' && (!teamInbox || !teamRecipients)) return Promise.reject(new Error('Update the Relay to support Team inbox acknowledgement before confirming these messages.'));
       if (!teamRecipients && (call.action === 'claim' || call.action === 'settle' && call.resolvedTarget)) return Promise.reject(new Error('Update the Relay to support exact Team recipients before dispatching or settling this delivery.'));
-      if ((call.action.startsWith('resource_') || call.action === 'send' && call.resources?.length) && !teamResources) return Promise.reject(new Error('Team resources are unavailable on this Relay. Update the Relay or configure resource storage.'));
+      if (call.action.startsWith('resource_') && !teamResources) return Promise.reject(new Error('Team resources are unavailable on this Relay. Update the Relay or configure resource storage.'));
       if (!tasks && taskActions.has(call.action)) return Promise.reject(new Error('Update the Relay to use tasks.'));
       if (!sendTeam || closed || teamPending.size >= 32) return Promise.reject(new Error('Team transport is unavailable.'));
       const requestId = randomUUID();

@@ -1,32 +1,27 @@
 import { expect, it } from 'vitest';
 import { decodeRemoteHostUplinkMessage, encodeRemoteHostUplinkMessage } from './remote-host-uplink.js';
 import { isTeam, isTeamAction, isTeamCreate, isTeamDelete, isTeamHostCall } from './team.js';
-it('bounds explicit inbox acknowledgement and requires its exact recipient', () => {
-  const call = { action: 'acknowledge', teamId: 'team', memberId: 'leader', messageIds: ['message'], expectedNativeSessionId: 'native' };
-  expect(isTeamHostCall(call)).toBe(true);
-  const envelope = { uplinkVersion: 2, type: 'team_request', requestId: 'ack', call };
-  expect(decodeRemoteHostUplinkMessage(JSON.stringify(envelope)).status).toBe('ok');
-  for (const invalid of [{ ...call, messageIds: [] }, { ...call, messageIds: ['message', 'message'] },
-    { ...call, messageIds: Array.from({ length: 33 }, (_, index) => String(index)) },
-    { ...call, expectedNativeSessionId: undefined }, { ...call, expectedNativeSessionId: '' }, { ...call, force: true }]) {
-    expect(isTeamHostCall(invalid)).toBe(false);
-  }
-});
 it('admits only the bounded Team contract over the Host uplink',()=>{
-  const call={action:'send',teamId:'team',memberId:'leader',to:'worker',operationId:'op',text:'Inspect logs'};
+  const call={action:'claim',teamId:'team',memberId:'worker',messageId:'message'};
   expect(isTeamHostCall(call)).toBe(true);
   expect(isTeamHostCall({...call,command:'rm'})).toBe(false);
-  expect(isTeamHostCall({...call,text:'a'.repeat(16001)})).toBe(false);
+  expect(isTeamHostCall({...call,messageId:''})).toBe(false);
   const envelope={uplinkVersion:2 as const,type:'team_request' as const,requestId:'request',call:call as any};
   expect(encodeRemoteHostUplinkMessage(envelope).status).toBe('ok');
   expect(decodeRemoteHostUplinkMessage(JSON.stringify(envelope)).status).toBe('ok');
   expect(decodeRemoteHostUplinkMessage(JSON.stringify({uplinkVersion:2,type:'rpc_request',requestId:'create',method:'POST',path:'/remote/team/create-seat',body:'{}'})).status).toBe('ok');
   expect(decodeRemoteHostUplinkMessage(JSON.stringify({uplinkVersion:2,type:'rpc_request',requestId:'create',method:'POST',path:'/remote/team/arbitrary-shell',body:'{}'})).status).toBe('rejected');
 });
-it('keeps membership creation in owner APIs rather than agent tools',()=>{
-  expect(isTeamHostCall({action:'add_member',teamId:'team',memberId:'leader',hostId:'other'})).toBe(false);
-  expect(isTeamCreate({operationId:'new',source:{hostId:'host',providerId:'codex',nativeSessionId:'source',title:'Main'}})).toBe(true);
-  expect(isTeamAction({teamId:'team',action:'resolve_message',messageId:'message',outcome:'accepted'})).toBe(true);
+it('has no ordinary Team to make, change or message: a Team is made only to start a bot',()=>{
+  for (const call of [{action:'add_member',teamId:'team',memberId:'leader',hostId:'other'},{action:'send',teamId:'team',memberId:'leader',to:'worker',operationId:'op',text:'Hi'},
+    {action:'acknowledge',teamId:'team',memberId:'leader',messageIds:['m'],expectedNativeSessionId:'n'},{action:'describe_member',teamId:'team',memberId:'leader',target:'w',responsibility:'x'},
+    {action:'report',teamId:'team',memberId:'leader',summary:'x'}]) expect(isTeamHostCall(call)).toBe(false);
+  const source={hostId:'host',providerId:'codex',nativeSessionId:'source',title:'Main'};
+  expect(isTeamCreate({operationId:'new',source})).toBe(false);
+  expect(isTeamCreate({operationId:'new',source,bot:{name:'Review',mission:'Review the change.'}})).toBe(true);
+  for (const action of [{action:'resolve_message',messageId:'message',outcome:'accepted'},{action:'archive'},{action:'restore'},{action:'rename',title:'x'},{action:'abandon_creation',memberId:'m'},
+    {action:'retry_creation',memberId:'m'},{action:'add_member',operationId:'o',hostId:'h',providerId:'p',cwd:'',name:'n',responsibility:''}]) expect(isTeamAction({teamId:'team',...action})).toBe(false);
+  expect(isTeamAction({teamId:'team',action:'keep_task'})).toBe(true);
 });
 
 

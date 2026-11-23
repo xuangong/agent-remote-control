@@ -149,18 +149,6 @@ export function validSavedTeam(value: unknown): value is SavedTeam {
   return true;
 }
 
-export function replayTeamDelivery(team: SavedTeam, id: string, input: { to: string; text: string; resources?: string[] }): TeamMessage | undefined {
-  const receipt = team.deliveryReceipts?.find(receipt => receipt.id === id);
-  if (!receipt) return;
-  if (receipt.fingerprint !== deliveryFingerprint(input)) throw new Error('Message identity has different input.');
-  const { fingerprint: _hash, settledAt: _time, ...result } = receipt;
-  return { ...result, text: input.text, ...(input.resources?.length ? { resources: input.resources.map(id => {
-    const upload = team.resourceUploads?.find(upload => upload.resource.resourceId === id);
-    if (!upload) throw new Error('Message resource is unavailable.');
-    return upload.resource;
-  }) } : {}) };
-}
-
 export function assertTeamQueueCapacity(team: Team, message: TeamMessage): void {
   if (team.messages.length >= 200 || teamMessageBudgetBytes({ ...team, messages: [...team.messages, message] }) > 128 * 1024) {
     throw new Error('Team communication capacity reached. Wait for pending deliveries to settle.');

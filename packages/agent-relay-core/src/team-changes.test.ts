@@ -45,10 +45,10 @@ it('a Team change copies, compacts and measures only the Teams it touches', asyn
     // As the Relay broker changes Teams: copy-on-write, so unchanged Teams stay the committed objects.
     change: async update => { let value: unknown; state = committed.produce(state, teams => { value = structuredClone(detached(update(teams))); }); return value as never; } });
   const before = state;
-  await broker.hostCall('host', { action: 'send', teamId: 'team-7', memberId: 'leader', to: 'helper', operationId: 'send-7', text: 'Inspect the logs.' });
+  await broker.hostCall('host', { action: 'claim', teamId: 'team-7', memberId: 'helper', messageId: 'm-7' });
   expect(state).not.toBe(before);
   expect(state.filter((saved, index) => saved !== before[index]).map(saved => saved.id)).toEqual(['team-7']);
-  expect(state[7]!.messages.map(item => item.text)).toEqual(['text m-7', 'Inspect the logs.']);
+  expect(state[7]!.messages.map(item => item.status)).toEqual(['dispatching']);
   expect(teamStateBytes(state)).toBe(Buffer.byteLength(JSON.stringify(state)));
   // A settled message moves to a receipt in the same change, in that Team only.
   await broker.hostCall('host', { action: 'claim', teamId: 'team-9', memberId: 'helper', messageId: 'm-9' });

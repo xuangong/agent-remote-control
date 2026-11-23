@@ -13,7 +13,7 @@ async function harness(toolNamespaces = false) { const h = await botsHarness({ t
 const owner = { providerId: 'codex', nativeSessionId: 'worker', title: 'Chief' };
 const createTask = { action: 'create_task' as const, owner, operationId: 'op', title: 'Collect logs', brief: 'Collect the build logs of the last run.' };
 /** Every bot's tools, as the Host gives them while the Relay runs tasks. */
-const BOT_TOOLS = ['create_bot', 'message', 'list_bots', 'read_bot', 'update_mission', 'update_work', 'complete_work', 'set_timer', 'stop_bot', 'retire_bot', 'open_room'];
+const BOT_TOOLS = ['create_bot', 'message', 'download_attachment', 'list_bots', 'read_bot', 'update_mission', 'update_work', 'complete_work', 'set_timer', 'stop_bot', 'retire_bot', 'open_room'];
 const tool = (tools: readonly AgentSessionTool[] | undefined, name: string) => tools?.find(item => item.name === name) ?? (() => { throw new Error(`No ${name} tool.`); })();
 /** A temporary bot writes to its chief: its result (done, failed), its question (needs_input) or progress. */
 const report = (tools: readonly AgentSessionTool[] | undefined, status: 'done' | 'failed' | 'needs_input' | 'progress', text: string) => tool(tools, 'message').execute({ to: 'chief', text, status });

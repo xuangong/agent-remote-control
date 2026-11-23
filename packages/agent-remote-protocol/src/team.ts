@@ -1,7 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { NativeSessionRef } from './session-succession.js';
 import { Value } from '@sinclair/typebox/value';
-import { BotId, BotMission, BotName, BotTimer, WorkItem, WORK_ITEM_LIMIT } from './bots.js';
+import { ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, AttachmentId, BotAttachment, BotId, BotMission, BotName, BotTimer, WorkItem, WORK_ITEM_LIMIT } from './bots.js';
 import { ChainId, TurnCause } from './chains.js';
 import { TaskBrief, TaskDoneWhen, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_LIMIT, ROOM_MINUTES_LIMIT, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, TaskReportStatus, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_QUESTION_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, isTeamTask } from './task.js';
 const object = { additionalProperties: false } as const;
@@ -144,6 +144,8 @@ export const TeamHostCall = Type.Union([
     replyTo: Type.Optional(AssistantMessageId), status: Type.Optional(Type.Union([Type.Literal('progress'), Type.Literal('done'), Type.Literal('failed'), Type.Literal('needs_input')])),
     /** In a room: pass this turn instead of speaking. */
     pass: Type.Optional(Type.Boolean()),
+    /** Files already uploaded with attachment_finish, which the message carries (bots design 3.4). */
+    attachments: Type.Optional(Type.Array(AttachmentId, { minItems: 1, maxItems: ATTACHMENTS_PER_MESSAGE, uniqueItems: true })),
     /** A worktree bot's result: where its patch was saved on its Host, added to the report by the Relay. */
     patch: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })) }, object),
   // A standing bot's turn ended: its final text answers the one message that started it (bots design 3.3). The Host sends it, never the model.
@@ -152,6 +154,13 @@ export const TeamHostCall = Type.Union([
   // The person wrote into a standing bot's session: its chief, if a bot, hears it (bots design 3.5). The Host sends it from its record of the input.
   Type.Object({ action: Type.Literal('bot_told'), owner: BotCaller, text: Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT }),
     cause: Type.Object({ kind: Type.Literal('person'), messageId: Type.String({ minLength: 1, maxLength: 256 }) }, object) }, object),
+  // A bot's files: uploaded in order in chunks and finished, then named by a message; downloaded by the receiver chunk by chunk (bots design 3.4).
+  Type.Object({ action: Type.Literal('attachment_begin'), owner: BotCaller, name: BotAttachment.properties.name, mediaType: BotAttachment.properties.mediaType,
+    byteLength: BotAttachment.properties.byteLength, sha256: BotAttachment.properties.sha256 }, object),
+  Type.Object({ action: Type.Literal('attachment_chunk'), owner: BotCaller, attachment: AttachmentId, offset: Type.Integer({ minimum: 0 }),
+    contentBase64: Type.String({ minLength: 4, maxLength: Math.ceil(ATTACHMENT_CHUNK_BYTES / 3) * 4 }) }, object),
+  Type.Object({ action: Type.Literal('attachment_finish'), owner: BotCaller, attachment: AttachmentId }, object),
+  Type.Object({ action: Type.Literal('attachment_read'), owner: BotCaller, attachment: AttachmentId, offset: Type.Integer({ minimum: 0 }) }, object),
   Type.Object({ action: Type.Literal('list_bots'), owner: BotCaller }, object),
   // A bot's turn ended: its Host counts the turn and its usage in the turn's chain.
   Type.Object({ action: Type.Literal('chain_turn'), owner: BotCaller, cause: TurnCause, tokens: Type.Integer({ minimum: 0 }), costUsd: Type.Optional(Type.Number({ minimum: 0 })) }, object),

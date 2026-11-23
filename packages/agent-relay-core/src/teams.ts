@@ -1,6 +1,7 @@
 import { compactTeamDeliveries, teamNeedsCompaction, unresolvedTeamDelivery, stripPrivateTeamEvidence, validSavedTeam, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
 export { teamMessageBudgetBytes } from './team-delivery.js';
+import type { AttachmentStore } from './attachments.js';
 import { accountDirectory, AssistantMessages, type AssistantPorts } from './assistants.js';
 import { roomAction, Rooms } from './rooms.js';
 import { BotInboxes } from './inboxes.js';
@@ -30,6 +31,8 @@ export interface TeamBrokerPorts {
   assistants?: AssistantPorts;
   /** Where the account's chains are kept; in memory when absent. */
   chains?: ChainStore;
+  /** Where the files bots attach to messages are kept (bots design 3.4); absent, this Relay takes no attachments. */
+  attachments?: AttachmentStore;
   /** A chain passed one of the person's thresholds: remind the person that this session, the chain's first bot, needs them, once per identity. */
   alertChain?(session: { hostId: string; providerId: string; nativeSessionId: string }, identity: string): void;
 }
@@ -207,6 +210,7 @@ export class TeamBroker {
     }
     if (call.action === 'create_bot') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained(hostId, call.owner, call.cause, () => bots.create(hostId, call)); }
     if (call.action === 'bot_message') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained<BotMessageResult>(hostId, call.owner, call.cause, () => bots.message(hostId, call), reason => ({ outcome: 'forbidden', reason })); }
+    if (call.action === 'attachment_begin' || call.action === 'attachment_chunk' || call.action === 'attachment_finish' || call.action === 'attachment_read') return (this.bots ?? fail(unavailableAssistants)).attachment(hostId, call);
     if (call.action === 'bot_reply') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained<BotMessageResult>(hostId, call.owner, call.cause, () => bots.reply(hostId, call), reason => ({ outcome: 'forbidden', reason })); }
     if (call.action === 'bot_told') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained<BotMessageResult>(hostId, call.owner, call.cause, () => bots.told(hostId, call), reason => ({ outcome: 'forbidden', reason })); }
     if (call.action === 'chain_turn') { const bots = this.bots ?? fail(unavailableAssistants), found = this.chains.find(this.ports.read(), { hostId, ...call.owner }, call.cause);

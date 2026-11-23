@@ -22,7 +22,7 @@ import type { Succession } from './succession-service.js';
 
 export interface TeamServicePorts {
   brokerState: BrokerState;
-  options: Pick<HostBrokerOptions, 'stateRoom' | 'assistantGroups' | 'placeBot' | 'setMission' | 'scheduler' | 'alertChain'>;
+  options: Pick<HostBrokerOptions, 'attachments' | 'stateRoom' | 'assistantGroups' | 'placeBot' | 'setMission' | 'scheduler' | 'alertChain'>;
   now: () => number;
   requireHost(hostId: string): Host;
   /** A Host call; read when used, because the Host session is built after the Teams. */
@@ -61,6 +61,7 @@ export function createTeamService(ports: TeamServicePorts) {
       const host = ports.requireHost(hostId);
       if (generic && host.teamSuccession !== 1) throw new BrokerError(409, 'team_succession_upgrade_required', 'Update the Controller to hand off Team members.');
     },
+    ...(options.attachments ? { attachments: options.attachments } : {}),
     now, read: () => brokerState.teams,
     change: update => brokerState.commit(draft => {
       // Only the Teams a change touches are copied, measured and validated; the others stay the committed objects.

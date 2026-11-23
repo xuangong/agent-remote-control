@@ -199,4 +199,5 @@ export const relayStateStoreCases: ReadonlyArray<StoreConformanceCase<RelayState
 
 /** The Team and Call For Support rules, for Controller tests that run them against their own sessions. */
 export { TeamBroker } from './teams.js';
+export { PortableAttachmentStore, memoryAttachmentStorage } from './attachments.js';
 export type { SavedTeam } from './team-delivery.js';

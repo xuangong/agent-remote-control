@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
-import { BOT_MISSION_LIMIT, BotMessageResult, BotRecord, isTeamHostCall, botIdentity, botPlacement, WindowBotDetails } from './index.js';
+import { assistantMessageText, attachmentLines, BOT_MISSION_LIMIT, BotAttachment, BotMessageResult, BotRecord, isTeamHostCall, botIdentity, botPlacement, WindowBotDetails } from './index.js';
 
 const id = 'b_' + 'a'.repeat(32);
 
@@ -35,5 +35,17 @@ describe('the outcome of a message', () => {
   it('has the calls the Host makes by itself: the reply of a turn naming the one message it answers, and the words the person wrote to a bot', () => {
     for (const call of botMessages.calls.valid) expect(isTeamHostCall(call)).toBe(true);
     for (const call of botMessages.calls.invalid) expect(isTeamHostCall(call)).toBe(false);
+  });
+
+  it('describes an attachment by its id, a name without a path, its size and its hash', () => {
+    for (const file of botMessages.attachments.valid) expect(Value.Check(BotAttachment, file)).toBe(true);
+    for (const file of botMessages.attachments.invalid) expect(Value.Check(BotAttachment, file)).toBe(false);
+  });
+
+  it('lists a message\'s files in lines the Relay writes, one for each, after the sender\'s own words', () => {
+    const lines = attachmentLines(botMessages.attachments.valid);
+    expect(lines.split('\n')).toHaveLength(1 + botMessages.attachments.valid.length);
+    expect(lines).toContain(`- ${botMessages.attachments.valid[2].id} · my log (2).txt · text/x-diff · 2048 bytes · sha256 ${'a'.repeat(64)}`);
+    expect(assistantMessageText({ messageId: 'm0123456789ab', from: 'Dev', body: `Fixed.\n${lines}` })).toContain('\n- a_');
   });
 });

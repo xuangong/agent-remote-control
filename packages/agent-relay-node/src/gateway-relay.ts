@@ -3,7 +3,10 @@ import type { AddressInfo } from 'node:net';
 import { WebSocketServer } from 'ws';
 import { SqlJournalStore } from '@orchardworks/agent-remote-journal-sqlite';
 import { openNodeJournalDatabase, type NodeJournalDatabase } from '@orchardworks/agent-remote-journal-sqlite/node';
-import { BROKER_MAX_FRAME_BYTES, createHostedRelay, createHostJournals, type HostJournals, hostedAuthStorageIdentity, hostedRecordEncodingCosts, isPreviewDomain, migrateLegacyNodeState, resolveHostedAuth, type HostedAuthOptions, type HostJournalsOptions, type HostedRelayOptions } from '@orchardworks/agent-relay-core';
+import { createHmac } from 'node:crypto';
+import { join } from 'node:path';
+import { FileAttachmentStorage } from './attachment-storage.js';
+import { BROKER_MAX_FRAME_BYTES, PortableAttachmentStore, createHostedRelay, createHostJournals, type HostJournals, hostedAuthStorageIdentity, hostedRecordEncodingCosts, isPreviewDomain, migrateLegacyNodeState, resolveHostedAuth, type HostedAuthOptions, type HostJournalsOptions, type HostedRelayOptions } from '@orchardworks/agent-relay-core';
 import { openGatewayState } from './gateway-state.js';
 import { openGatewayDiagnostics } from './gateway-diagnostics.js';
 import { InvalidHttpRequest, relaySocket, rejectUpgrade, webRequest, writeResponse } from './remote-host-broker.js';
@@ -135,6 +138,8 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
           ...(options.push ? { push: options.push } : {}), ...(options.onPushProblem ? { onPushProblem: options.onPushProblem } : {}),
           ...(storage ? { successionEnrollment: true, successionEncodingCosts: { ...hostedRecordEncodingCosts(auth), acceptsSnapshot: storage.acceptsSnapshot } } : {}),
           ...(options.stateFile ? { diagnosticStorage: openGatewayDiagnostics(options.stateFile, auth) } : {}),
+          // The files bots attach to messages: a directory beside the state file for each account; in memory without one.
+          ...(options.stateFile ? { attachments: (namespace: string) => new PortableAttachmentStore(new FileAttachmentStorage(join(options.stateFile + '.attachments', createHmac('sha256', auth.secret).update(JSON.stringify([auth.origin, auth.issuer, namespace])).digest('hex')))) } : {}),
           ...(journalService ? { journalService } : {}),
           ...(storage ? { storage: { initial, commit: value => storage!.commit(value), close: () => storage!.close() } } : {}) });
         return { port: address.port, url: auth.origin };

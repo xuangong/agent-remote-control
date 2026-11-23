@@ -31,3 +31,4 @@ export { encryptPush, fromBase64url, generateVapidKeys, importVapidKeys, isUncom
 export { defaultPushSubject, pushFromEnvironment, type PushConfiguration, type PushEnvironment } from './push/push-config.js';
 export { createRelayPush, type RelayPush, type RelayPushOptions } from './push/relay-push.js';
 export type { ReminderState } from './push/push-reminders.js';
+export { PortableAttachmentStore, memoryAttachmentStorage, ATTACHMENT_QUOTA_BYTES, type AttachmentStorage, type AttachmentStore, type AttachmentLimits } from './attachments.js';

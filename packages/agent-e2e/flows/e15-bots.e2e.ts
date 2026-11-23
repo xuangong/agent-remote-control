@@ -1,7 +1,9 @@
 // E15, bots that call bots (bots design 11): the real page, Relay and Controller, with scripted sessions that take tools. A flow calls a
 // bot's tool in its model's place (`useTool`); everything the call causes runs for real: tasks and their workers, inboxes, framed inputs,
 // delivery between turns, and a standing bot joining its chief's group.
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Browser, BrowserContext } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { createWindowView, parseTaskInputs } from '@orchardworks/agent-remote-protocol';
@@ -11,7 +13,10 @@ import { showsText } from './page.js';
 
 let stack: Stack; let browser: Browser;
 beforeAll(async () => {
-  stack = await startStack({ teams: true, tools: true, sessions: {
+  stack = await startStack({ teams: true, tools: true,
+    // A message that asks for a report in is answered by one turn whose final text is the report; any other input is echoed.
+    turns: text => text.includes('Report in with your status.') ? [{ reply: 'Scribe here: ready to keep the notes.' }] : undefined,
+    sessions: {
     chief: { title: 'Chief', history: [{ role: 'user', text: 'Plan the release.' }, { role: 'assistant', text: 'Chief is ready.' }] },
     tracker: { title: 'Tracker', history: [{ role: 'user', text: 'Track the build.' }, { role: 'assistant', text: 'Tracker is ready.' }] },
   } });
@@ -89,6 +94,41 @@ it('E15: a bot creates a standing bot, which joins its group in the page and rea
   await context.close();
 });
 
+it('E15: a bot answers a message from the final text of its turn, and its chief hears what the person wrote to it', async () => {
+  const { context, page } = await openPage(browser, stack.origin + '/?mode=bot');
+  await team(context);
+  await hasTools('chief');
+  expect(await stack.provider.useTool('chief', 'create_bot', { name: 'Archivist', mission: 'Keep the changelog.', lifetime: 'standing', message: 'Report in with your status.' })).toMatchObject({ status: 'ready' });
+  await showsText(page, 'Archivist');
+  const archivist = () => stack.provider.known().filter(id => id.includes('-new-')).find(id => stack.provider.given(id)?.instructions?.includes('Keep the changelog.'));
+  await expect.poll(archivist, { timeout: 20_000 }).toBeDefined();
+  // The turn its first message started ended with a text; no tool was called, and the chief reads it as the reply.
+  await expect.poll(() => inputs('chief').filter(input => input.kind === 'assistant' && input.from === 'Archivist'), { timeout: 20_000 })
+    .toEqual([expect.objectContaining({ from: 'Archivist', body: 'Scribe here: ready to keep the notes.', replyTo: expect.stringMatching(/^m[0-9a-f]{12}$/) })]);
+  // The person types into the bot's own session: the chief hears the first words, framed as theirs.
+  stack.provider.session(archivist()!)!.write('user', 'Use the short changelog format from now on.');
+  await expect.poll(() => inputs('chief').filter(input => input.kind === 'person_wrote'), { timeout: 20_000 })
+    .toEqual([{ kind: 'person_wrote', bot: 'Archivist', body: 'Use the short changelog format from now on.' }]);
+  await context.close();
+});
+
+it('E15: a bot attaches a file to a message and the receiver downloads it, checked against its hash', async () => {
+  const { context, page } = await openPage(browser, stack.origin + '/?mode=bot');
+  await team(context);
+  await hasTools('chief'); await hasTools('tracker');
+  const bytes = Buffer.from('--- a/notes.md\n+++ b/notes.md\n@@ -1 +1 @@\n-draft\n+final\n');
+  const path = join(stack.workspace, 'notes.patch');
+  await writeFile(path, bytes);
+  expect(await stack.provider.useTool('chief', 'message', { to: 'Tracker', text: 'The notes patch.', attachments: [{ path: 'notes.patch' }] })).toMatchObject({ outcome: 'delivered' });
+  await expect.poll(() => inputs('tracker').filter(input => input.kind === 'assistant' && input.body.includes('notes.patch')), { timeout: 20_000 }).toHaveLength(1);
+  const body = (inputs('tracker').filter(input => input.kind === 'assistant').at(-1) as { body: string }).body;
+  const id = /(a_[0-9a-f]{32}) · notes\.patch/.exec(body)![1]!;
+  const got = await stack.provider.useTool('tracker', 'download_attachment', { attachment: id }) as { path: string; sha256: string; verified: boolean };
+  expect(got).toMatchObject({ sha256: createHash('sha256').update(bytes).digest('hex'), verified: true });
+  expect(await readFile(got.path)).toEqual(bytes);
+  await context.close();
+});
+
 it('E15: the person stops a chain from the audit in Settings, and a bot\'s next call in it is refused', async () => {
   const { context, page } = await openPage(browser, stack.origin + '/?page=settings&group=assistants');
   await team(context);
@@ -103,6 +143,7 @@ it('E15: the person stops a chain from the audit in Settings, and a bot\'s next 
   await expect.poll(() => row.innerText(), { timeout: 20_000 }).toContain('Tracker');
   await row.getByRole('button', { name: 'Stop', exact: true }).click();
   await expect.poll(() => row.locator('small').innerText(), { timeout: 20_000 }).toContain('Stopped');
-  await expect(stack.provider.useTool('tracker', 'message', { to: 'Chief', text: 'Notes drafted.', reply_to: sent.messageId })).rejects.toThrow('The person stopped this work');
+  // The refusal is an outcome the bot reads, with the reason.
+  await expect(stack.provider.useTool('tracker', 'message', { to: 'Chief', text: 'Notes drafted.', reply_to: sent.messageId })).resolves.toMatchObject({ outcome: 'forbidden', reason: expect.stringContaining('The person stopped this work') });
   await context.close();
 });

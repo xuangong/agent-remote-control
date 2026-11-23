@@ -5,7 +5,7 @@
  * an chief's to its temporary bot, and any other bot's, is input to that task; anything to a standing bot goes to its inbox.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { assistantMessageText, nativeSessionRefKey, taskView, type BotMessageResult, type TeamHostCall, type TaskView, type TeamMember, type WorkItem } from '@orchardworks/agent-remote-protocol';
+import { assistantMessageText, attachmentLines, nativeSessionRefKey, taskView, type BotAttachment, type BotMessageResult, type TeamHostCall, type TaskView, type TeamMember, type WorkItem } from '@orchardworks/agent-remote-protocol';
 import { accountDirectory, callerAssistant, type Assistant, type AssistantBrokerPorts, type AssistantMessages, type AssistantPorts } from './assistants.js';
 import { ownerTasks, taskAction, type TaskGroups } from './tasks.js';
 import { ACCOUNT_TEAM_LIMIT, type SavedTeam } from './team-delivery.js';
@@ -17,6 +17,7 @@ import type { BotWork } from './bot-work.js';
 import { newBotId } from './bot-store.js';
 import { temporaryBotId } from './chain-scope.js';
 import { cutReply } from './reply-text.js';
+import type { AttachmentStore } from './attachments.js';
 
 type Call<A extends TeamHostCall['action']> = Extract<TeamHostCall, { action: A }>;
 type Owner = { providerId: string; nativeSessionId: string };
@@ -149,12 +150,28 @@ export class BotCalls {
     if (call.action === 'complete_work') return this.work.complete(self, call);
     return this.work.setTimer(self, call);
   }
+  private files(): AttachmentStore { return this.broker.ports.attachments ?? fail('This Relay does not take attachments.'); }
+  /** A bot's files: uploaded in chunks and finished, then read back by the bots a message names them to (bots design 3.4). */
+  async attachment(hostId: string, call: Call<'attachment_begin' | 'attachment_chunk' | 'attachment_finish' | 'attachment_read'>) {
+    this.caller(hostId, call.owner);
+    const files = this.files();
+    if (call.action === 'attachment_begin') return files.begin({ name: call.name, mediaType: call.mediaType, byteLength: call.byteLength, sha256: call.sha256 });
+    if (call.action === 'attachment_finish') return files.finish(call.attachment);
+    if (call.action === 'attachment_chunk') {
+      const bytes = Buffer.from(call.contentBase64, 'base64');
+      if (bytes.toString('base64') !== call.contentBase64) fail('Invalid file chunk.');
+      return files.chunk(call.attachment, call.offset, bytes);
+    }
+    const chunk = await files.read(call.attachment, call.offset);
+    return { attachment: chunk.attachment, offset: chunk.offset, contentBase64: Buffer.from(chunk.bytes).toString('base64') };
+  }
   /** Sends one message and says what became of it (bots design 3.2). A refusal is an outcome the sender reads, not an error. */
   async message(hostId: string, call: Call<'bot_message'>): Promise<BotMessageResult> {
     const from = this.caller(hostId, call.owner), chief = this.chiefOf(from);
     // A room the sender is a member of: its turn's answer, a pass, or the room's result.
     const room = this.rooms.memberRoom(hostId, call.owner, call.to);
     if (room) {
+      if (call.attachments) fail('A room message cannot carry files.');
       await this.rooms.speak(hostId, call.pass ? { action: 'room_pass', owner: call.owner, roomId: room.id }
         : { action: 'room_say', owner: call.owner, roomId: room.id, text: call.text, ...(call.status === 'done' ? { done: true } : {}) });
       return { outcome: 'delivered' };
@@ -162,7 +179,9 @@ export class BotCalls {
     const to = fold(call.to) === 'chief' && chief ? chief : this.named(call.to, from);
     if (to === 'self') return { outcome: 'forbidden', reason: 'You cannot message yourself.' };
     if (!to) return { outcome: 'unreachable', reason: NOT_FOUND };
-    return this.route(hostId, from, chief, to, call);
+    // The files the message carries are listed after the sender's words, written from their records.
+    const files: BotAttachment[] = call.attachments ? await Promise.all(call.attachments.map(id => this.files().metadata(id))) : [];
+    return this.route(hostId, from, chief, to, files.length ? { ...call, text: `${call.text}\n${attachmentLines(files)}` } : call);
   }
   /** Sends where the sender and receiver say, and marks the messages a standing sender answered by it (bots design 3.3). */
   private async route(hostId: string, from: Bot, chief: Bot | undefined, to: Bot, call: SendCall): Promise<BotMessageResult> {

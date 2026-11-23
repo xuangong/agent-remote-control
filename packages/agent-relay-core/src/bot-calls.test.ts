@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { isBotMessageResult, parseTaskInputs, type WindowGroup } from '@orchardworks/agent-remote-protocol';
+import { attachmentLines, isBotMessageResult, parseTaskInputs, type WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { TeamBroker } from './teams.js';
 import { committed, detached } from './drafts.js';
 import type { SavedTeam } from './team-delivery.js';
 import { temporaryBotId } from './bot-calls.js';
+import { memoryAttachmentStorage, PortableAttachmentStore } from './attachments.js';
 import { instructionsHash } from './inboxes.js';
 
 // Bots call as their own sessions. The groups and the Hosts are stubs; the broker, tasks, inboxes and their validation are real.
@@ -22,6 +24,7 @@ function fixture() {
     // Drafts as the Relay's state makes them.
     change: async update => { let result: unknown; state = committed.produce(state, draft => { result = structuredClone(detached(update(draft))); }); return result as never; },
     createSeat: async (_hostId, seat) => offline ? Promise.reject(new Error('Host offline.')) : ({ ...seat.member, creation: 'ready', activity: 'idle', cwd: '/repo', ...(seat.member.nativeSessionId ? {} : { nativeSessionId: `worker-${++workers}` }) }),
+    attachments: new PortableAttachmentStore(memoryAttachmentStorage()),
     tasks: { capable: () => true, assertHost: () => {} },
     assistants: { groups: () => groups, capable: () => true,
       placeBot: async (groupId, view, details) => {
@@ -164,6 +167,36 @@ describe('bots calling as their own sessions', () => {
     expect(await f.broker.hostCall('mac', { ...wrote, owner: f.as('tracker') })).toMatchObject({ outcome: 'unreachable' });
     await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op2', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
     expect(await f.broker.hostCall('mac', { ...wrote, owner: f.as(f.task().members[0]!.nativeSessionId!) })).toMatchObject({ outcome: 'forbidden' });
+  });
+
+  describe('attachments', () => {
+    const bytes = Buffer.from('--- a/notes.md\n+++ b/notes.md\n@@ -1 +1 @@\n-draft\n+final\n');
+    const upload = async (f: ReturnType<typeof fixture>, owner: ReturnType<typeof f.as>, name = 'notes.patch') => {
+      const begun = await f.broker.hostCall('mac', { action: 'attachment_begin', owner, name, mediaType: 'text/x-diff', byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }) as { id: string };
+      await f.broker.hostCall('mac', { action: 'attachment_chunk', owner, attachment: begun.id, offset: 0, contentBase64: bytes.toString('base64') });
+      return await f.broker.hostCall('mac', { action: 'attachment_finish', owner, attachment: begun.id }) as { id: string; sha256: string };
+    };
+
+    it('lists the files a message carries after its words, and lets the receiver read them back whole', async () => {
+      const f = fixture(), file = await upload(f, f.as('chief'));
+      expect(await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'a1', to: 'Tracker', text: 'The notes patch.', attachments: [file.id] })).toMatchObject({ outcome: 'delivered' });
+      const tracker = f.state().find(team => team.inbox?.botId === ids.tracker)!, [input] = parseTaskInputs(tracker.messages.at(-1)!.text)!;
+      expect((input as { body: string }).body).toBe(`The notes patch.\n${attachmentLines([{ id: file.id, name: 'notes.patch', mediaType: 'text/x-diff', byteLength: bytes.length, sha256: file.sha256 }])}`);
+      const read = await f.broker.hostCall('mac', { action: 'attachment_read', owner: f.as('tracker'), attachment: file.id, offset: 0 }) as { attachment: { byteLength: number }; contentBase64: string };
+      expect(Buffer.from(read.contentBase64, 'base64')).toEqual(bytes);
+      expect(read.attachment.byteLength).toBe(bytes.length);
+    });
+
+    it('carries a temporary bot\'s report with a file, and refuses files that are not stored, in a room, or from a session that is no bot', async () => {
+      const f = fixture();
+      await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
+      const worker = f.as(f.task().members[0]!.nativeSessionId!), file = await upload(f, worker, 'review.log');
+      await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'd1', to: 'chief', text: 'Two issues.', status: 'done', attachments: [file.id] });
+      expect(f.inputs(f.task(), 1).at(-1)).toMatchObject({ kind: 'done', body: expect.stringContaining(`- ${file.id} · review.log`) });
+      await expect(f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'a2', to: 'Tracker', text: 'Look.', attachments: ['a_' + '1'.repeat(32)] })).rejects.toThrow('no longer stored');
+      await expect(f.broker.hostCall('mac', { action: 'attachment_begin', owner: f.as('stranger'), name: 'x.log', mediaType: 'text/plain', byteLength: 1, sha256: 'a'.repeat(64) })).rejects.toThrow('Only an assistant');
+      await expect(f.broker.hostCall('mac', { action: 'attachment_chunk', owner: worker, attachment: file.id, offset: 0, contentBase64: 'aGVsbG8' })).rejects.toThrow('Invalid file chunk');
+    });
   });
 
   describe('replies from the final text of a turn', () => {

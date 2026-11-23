@@ -25,6 +25,7 @@ import { SessionRoles } from './session-role-succession.js';
 import { roleSessionConfig } from './role-session-creation.js';
 import { headCommit } from './worktrees.js';
 import { BotTools } from './bot-tools.js';
+import { botFiles } from './bot-files.js';
 import { createControllerPreviews } from './previews.js';
 import { createVscodeTunnelManager, type VscodeTunnelOptions } from './vscode-tunnel.js';
 import { createOperationCache, OperationCacheError } from '@orchardworks/agent-session-runtime';
@@ -480,15 +481,18 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     },
     acquire: automationAccess.acquire,
   } }) : undefined;
+  const sessionDirectory = async (ref: NativeSessionRef): Promise<string | undefined> => {
+    const lease = await automationAccess.acquire(ref.providerId, ref.nativeSessionId);
+    try { return lease.agent.snapshot().payload.runtimeInfo.cwd; } finally { lease.release(); }
+  };
   const workerSupport: BotTools | undefined = options.team?.request ? new BotTools({ request: options.team.request, tasks: () => options.team?.tasks?.() === true,
     title: async ref => await providers.require(ref.providerId).directory.sessionTitle?.(ref.nativeSessionId),
     head: async ref => {
-      const lease = await automationAccess.acquire(ref.providerId, ref.nativeSessionId);
-      let cwd: string | undefined;
-      try { cwd = lease.agent.snapshot().payload.runtimeInfo.cwd; } finally { lease.release(); }
+      const cwd = await sessionDirectory(ref);
       if (!cwd) throw new Error('This session\'s working directory is unknown.');
       return headCommit(cwd);
     },
+    files: botFiles(sessionDirectory),
     readOnly: providerId => !!providers.get(providerId)?.adapter.descriptor.sessionAccess?.readOnly,
     patch: async (ref): Promise<string | undefined> => team?.patchFor(ref),
     read: async (ref, before) => {

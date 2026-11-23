@@ -70,8 +70,8 @@ export interface ScriptedProviderOptions {
   providerId?: string;
   displayName?: string;
   answer?(text: string): string;
-  /** Steps of the turn a sent text starts; when it returns steps, they replace `answer` for that text. */
-  turns?(text: string): ScriptedStep[];
+  /** Steps of the turn a sent text starts; when it returns steps, they replace `answer` for that text, and undefined leaves the text to `answer`. */
+  turns?(text: string): ScriptedStep[] | undefined;
   replyDelayMs?: number;
   /** Answer in two pieces, as a model streams: the page shows the first before the second arrives. */
   stream?: boolean;

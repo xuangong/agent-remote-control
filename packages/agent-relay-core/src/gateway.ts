@@ -1,4 +1,5 @@
 import { createWindowWorkspaces } from './window-workspaces.js';
+import { memoryAttachmentStorage, PortableAttachmentStore, type AttachmentStore } from './attachments.js';
 import { HostedRecordCache, measureHostedSnapshot } from './record-codec.js';
 import { committed } from './drafts.js';
 import { handleWindowRequest } from './window-routes.js';
@@ -68,6 +69,8 @@ export type HostedRelayOptions = HostedAuthOptions & {
   journals?: JournalStore;
   /** A journal service built elsewhere, such as one that reaches journal partitions; used instead of `journals`. */
   journalService?: HostJournals;
+  /** Where each account keeps the files its bots attach to messages, by account namespace; in memory when absent. */
+  attachments?: (namespace: string) => AttachmentStore;
   diagnosticContext?: RelayDiagnosticContext;
   scheduler?: RelayScheduler;
   /** The timers of each account's Broker: credential expiry, heartbeats and deadlines. Defaults to real timers. */
@@ -106,6 +109,8 @@ type Tenant = { subject: string; namespace: string; authorityUntil: number; auth
   checking?: Promise<'active' | 'denied' | 'unavailable'>; broker: ReturnType<typeof createHostBroker>; expiresAt: number };
 export function createHostedRelay(options: HostedRelayOptions) {
   const auth = resolveHostedAuth(options);
+  // One store of files for each account, kept as long as the Relay runs.
+  const attachmentStores = new Map<string, AttachmentStore>();
   const windowChangesWaitMs = options.windowChangesWaitMs === undefined ? 25000 : options.windowChangesWaitMs;
   if (!Number.isSafeInteger(windowChangesWaitMs) || windowChangesWaitMs < 1 || windowChangesWaitMs > 25000) throw new Error('Window changes wait must be an integer between 1 and 25000 milliseconds.');
   const tenants = new Map<string, Tenant>();
@@ -456,6 +461,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       } : undefined;
       const broker = createHostBroker({ origin: auth.origin, publicUrl: auth.origin, keyLifetimeMs: options.keyLifetimeMs, ...options.hostLiveness, ...(options.brokerScheduler ? { scheduler: options.brokerScheduler } : {}), ...(options.controllerReleases ? { controllerReleases: options.controllerReleases } : {}),
         ownerSubject: grant.subject, durable, accountBacked, initialState, diagnostics, gatewaySetup: auth.provider === 'mainsite',
+        attachments: attachmentStores.get(grant.namespace) ?? (() => { const store = options.attachments?.(grant.namespace) ?? new PortableAttachmentStore(memoryAttachmentStorage()); attachmentStores.set(grant.namespace, store); return store; })(),
         assistantGroups: () => windows.list({ subject: grant.subject }).groups,
         // A bot another bot created joins its chief's group: a view of its session, and its details.
         placeBot: async (groupId, view, details) => {

@@ -5,9 +5,10 @@ import { join } from 'node:path';
 import type { AgentMessageOptions, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import type { AgentSnapshotPayload, NativeSessionRef, Team, TeamHostCall, WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { createOperationCache, createOperationExecutor, type AgentManagerEvent, type SessionWireAgent } from '@orchardworks/agent-session-runtime';
-import { TeamBroker } from '@orchardworks/agent-relay-core/testing';
+import { memoryAttachmentStorage, PortableAttachmentStore, TeamBroker } from '@orchardworks/agent-relay-core/testing';
 import type { SavedTeam } from '@orchardworks/agent-relay-core/testing';
 import { BotTools } from '../bot-tools.js';
+import { botFiles } from '../bot-files.js';
 import { TeamRuntime, type TeamRuntimeAccess } from '../team.js';
 import type { SessionCreation } from '../role-session-creation.js';
 
@@ -44,7 +45,7 @@ export async function botsHarness(options: { groups?: WindowGroup[]; sessions?: 
     binding: { hostId: 'host', providerId: 'codex', nativeSessionId: 'worker', title: 'worker' } }] }, bots: { rank: 'm', members: { chief: { botId: 'b_' + 'c'.repeat(32), name: 'Chief' } } } }] as unknown as WindowGroup[];
   const resolve = (_host: string, providerId: string, nativeSessionId: string) => ref(providerId, nativeSessionId);
   let runtime: TeamRuntime;
-  const broker = new TeamBroker({ read: () => teams, now: Date.now, assertHost() {}, resolveSession: resolve,
+  const broker = new TeamBroker({ attachments: new PortableAttachmentStore(memoryAttachmentStorage()), read: () => teams, now: Date.now, assertHost() {}, resolveSession: resolve,
     async change(update) { const draft = structuredClone(teams), result = structuredClone(update(draft)); teams = draft; return result; },
     async createSeat(_host, seat) { return runtime.create(seat); },
     tasks: { capable: () => options.tasks === true, assertHost() { if (options.tasks !== true) throw new Error('Update the Controller to use tasks.'); } },
@@ -58,7 +59,7 @@ export async function botsHarness(options: { groups?: WindowGroup[]; sessions?: 
   const created: Array<{ id: string; provider: string; creation: SessionCreation; extensions: AgentSessionExtensions }> = [];
   // Every bot's tools, as a Host gives them to a temporary bot (a task's worker).
   const bots = new BotTools({ request: call => broker.hostCall('host', call), tasks: () => options.tasks === true,
-    title: async () => 'Chief', readOnly: providerId => ['codex', 'claude'].includes(providerId), patch: ref => runtime.patchFor(ref) });
+    title: async () => 'Chief', files: botFiles(async () => directory, join(directory, '.downloads')), readOnly: providerId => ['codex', 'claude'].includes(providerId), patch: ref => runtime.patchFor(ref) });
   const access: TeamRuntimeAccess = {
     botTools: actual => bots.namespace(actual, false),
     controllerId: 'controller', available: () => true, supportedProviders: () => ['codex', 'claude', 'copilot'], readOnlyProviders: () => ['codex', 'claude'],

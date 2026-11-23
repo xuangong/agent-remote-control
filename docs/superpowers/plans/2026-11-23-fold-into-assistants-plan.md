@@ -5,7 +5,8 @@ Decided 2026-11-23 with the owner; the design is section 10 of
 
 ## Goal
 
-The person keeps four ideas: an assistant, its tasks, messages between assistants, and rooms. Ask stays as the way to look at any
+One kind of bot: a name, a mission, and the abilities every bot has (tasks, messages both ways, rooms, work items, a timer). A bot
+can serve other bots and be served by them, so no bot is a special kind. Ask stays as the way to look at any
 session without touching it. Every older way of making sessions work together is rebuilt on these and then deleted, with its
 records migrated, its panels and launchers removed, and its tools gone from every CLI.
 
@@ -23,8 +24,9 @@ messages run in production.
   a worker's tool approval answered by the person; assistant A messages B and B replies; a worker's Host offline until it returns.
   Chromium and WebKit. These are the gates of every step below, since Side, Call For Support and TPM have no flow of their own and
   Team has one case in E7.
-- [ ] **The assistant record (T1, O70)** first: ids that survive moving groups, the session a bot shows now, name and label as its
-  responsibility, peers. Links, rooms, timers and reading a peer's conversation all rest on it.
+- [ ] **The assistant record (T1, O70)** first: ids that survive moving groups, the session a bot shows now, name, label,
+  **mission**, peers. The mission is set by the person (a bot may propose a change), reaches the main session as its standing
+  instructions, and is shown to other bots by `list_assistants`. Links, rooms, timers and reading a peer's conversation all rest on it.
 - [ ] **A reply is the receiver's answer** (design 10.1): the final text of the turn a message started returns to the sender, so a
   bot on any provider can be asked; plain bots can receive messages.
 - [ ] **Attachments on messages and task results.** A message or a report carries files (a patch, a log) as resources, as Team
@@ -42,12 +44,12 @@ messages run in production.
 - [ ] Delete Side creation and relation kinds, `/btw` follows `/side`.
 - Gate: flows 1 and 2 with a task the person started; the Side cases of the component tier rewritten against task threads.
 
-## Step 2: Call For Support becomes bots with responsibilities
+## Step 2: Call For Support becomes bots asking bots
 
-- [ ] Coordinator instructions say that other bots have responsibilities (name and label from `list_assistants`), that a bot asks
-  the one whose responsibility fits for a review, another model or another machine, and that the answer is advice.
+- [ ] Coordinator instructions say that other bots have missions (from `list_assistants`), that a bot asks the one whose mission
+  fits for a review, another model or another machine, and that the answer is advice.
 - [ ] Verify in `pnpm local` that bots do this unprompted: a coordinator facing a change that needs an independent review messages
-  the bot labelled for reviews.
+  the bot whose mission is reviewing.
 - [ ] Profiles are not migrated: the person sets up the bots they want. The support settings say so once, then go.
 - [ ] Delete profiles, enablement, support groups, calls, rosters and approval, ledgers, report framing, the four support tools,
   the support settings and panel views, the `callForSupport` and `readOnlyProvider` negotiation, and the `support_enablement` host
@@ -65,16 +67,16 @@ messages run in production.
   its launcher. E7's Team case is rewritten for a coordinator with tasks.
 - Gate: flows 1 to 5; E7 rewritten; a room in Bot mode reaches a result.
 
-## Step 4: progress, then TPM
+## Step 4: work items and timers, then TPM
 
-- [ ] **Progress as a bot capability** (design 10.4): work items with plan, acceptance, todo, phase, summary and next action;
-  `update_work`, `complete_work` and the todo and confirmation companions offered to any bot that has it, not only to a TPM.
+- [ ] **Work items for every bot** (design 10.4): plan, acceptance, todo, phase, summary and next action; `update_work`,
+  `complete_work` and the todo and confirmation companions offered to every bot, not only to a TPM.
 - [ ] Progress moves with inputs: replies from the bots it asked, its task results, the person's words and decisions. Turns that
   change nothing visible fold as background checks.
 - [ ] The person sees work items in the bot's details and its chat row's business line; plan, acceptance and todo one step away.
 - [ ] **A fallback timer** (design 10.5): `set_timer`, `clear_timer`; due only after a quiet interval, pushed back by any input,
-  missed ticks coalesced; five minutes by default for a bot managing progress. It replaces the heartbeat of session companions.
-- [ ] A TPM becomes a bot managing progress: its work items, todo and confirmations carry over; the main session it coordinated is
+  missed ticks coalesced; five minutes by default for a bot with an open work item. It replaces the heartbeat of session companions.
+- [ ] A TPM becomes a bot whose mission is its work: its work items, todo and confirmations carry over; the main session it coordinated is
   the bot it messages.
 - [ ] Delete `tpm_intent`, TPM's own delivery path, workspace and launcher.
 - Gate: e2e flows written first: a progress bot asks a working bot, its reply updates the work item the person sees; a

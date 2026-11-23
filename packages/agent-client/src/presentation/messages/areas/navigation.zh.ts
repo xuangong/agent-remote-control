@@ -157,7 +157,6 @@ export const navigation: AreaMessages<typeof english> = {
   'navigation.browse.scan': '扫码',
   'navigation.view.bindingChanged': '会话视图的绑定变了，请重新打开它当前的对话。',
   'navigation.view.bindingSynchronizing': '会话视图的绑定还在同步。',
-  'navigation.view.teamUnconfirmed': 'Team 的执行还没确认，重试一下再找找看。',
   'navigation.status.failed': '失败',
   'navigation.status.working': '进行中',
   'navigation.status.unread': '有新结果',

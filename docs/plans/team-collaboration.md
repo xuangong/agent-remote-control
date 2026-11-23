@@ -1,5 +1,7 @@
 # Team collaboration
 
+> Superseded: ordinary Teams were folded into bots (bots design 9, plan step 7c). A Leader became a chief and its members its staff; the Team queue, member tools and panel are gone. Kept as history.
+
 ## Requirements and boundaries
 
 A Team isolates finite collaboration from its long-lived source session. Creating a Team creates one Leader on the source Host, with the same working directory. The Leader is an executing worker: it discusses requirements, reads and changes code, delegates, validates, and reports to the user. It does not rely on the source agent to implement work. The source session receives neither membership tools nor automatic messages.

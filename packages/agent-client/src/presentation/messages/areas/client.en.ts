@@ -292,10 +292,6 @@ export const client = {
   'client.describe.supportCoordinator': 'Support coordinator',
   'client.describe.callsForSupport': 'Calls for support',
   'client.describe.supporter': 'Supporter',
-  'client.describe.teamLeader': 'Team leader',
-  'client.describe.teamMember': 'Team member',
-  'client.describe.leader': 'Leader',
-  'client.describe.member': 'Member',
   'client.describe.parent': 'Parent',
   'client.describe.child': 'Child',
 } as const satisfies Readonly<Record<string, Message>>;

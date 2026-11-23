@@ -8,7 +8,6 @@ import { WindowSessionBridgeContext, type WindowSessionBridge } from '../kernel/
 import { TrackViewScope } from '../kernel/useSessionAttention.js';
 import { AskViewScope } from '../kernel/useAskVisibility.js';
 import { TpmViewScope } from '../kernel/useTpmVisibility.js';
-import { TeamViewScope } from '../kernel/useTeamVisibility.js';
 import { sessionKey } from '../kernel/session-tree.js';
 import { SessionTitleInteractionContext } from '../kernel/SessionTitleInteraction.js';
 import { moveSessionHost } from '../kernel/SessionDock.js';
@@ -38,7 +37,7 @@ export interface SessionConversationSurfacesProps {
 }
 interface CapturedDescriptor extends SessionSurfaceDescriptor {
   track: ContextType<typeof TrackViewScope>; ask: ContextType<typeof AskViewScope>;
-  tpm: ContextType<typeof TpmViewScope>; team: ContextType<typeof TeamViewScope>;
+  tpm: ContextType<typeof TpmViewScope>;
   /** Where the assistant's details open, in either mode. */
   details: ContextType<typeof AssistantDetailsHostContext>;
 }
@@ -183,9 +182,9 @@ const ConversationSurface = memo(function ConversationSurface({ registry, entry,
     <WindowSessionBridgeContext.Provider value={descriptor.bridge}><WindowPresentationContext.Provider value={descriptor.presentedViewId}>
       <SessionTitleInteractionContext.Provider value={descriptor.titleInteraction}>
         <TrackViewScope.Provider value={descriptor.track}><AskViewScope.Provider value={descriptor.ask}>
-          <TpmViewScope.Provider value={descriptor.tpm}><TeamViewScope.Provider value={descriptor.team}>
+          <TpmViewScope.Provider value={descriptor.tpm}>
             <AssistantDetailsHostContext.Provider value={descriptor.details}><ConversationGate {...props} /></AssistantDetailsHostContext.Provider>
-          </TeamViewScope.Provider></TpmViewScope.Provider>
+          </TpmViewScope.Provider>
         </AskViewScope.Provider></TrackViewScope.Provider>
       </SessionTitleInteractionContext.Provider>
     </WindowPresentationContext.Provider></WindowSessionBridgeContext.Provider>
@@ -196,15 +195,15 @@ export function SessionConversationMount({ mode, descriptor, active }: { mode: W
   const scope = useContext(SurfaceScope);
   const layout = useContext(WindowLayoutContext), bridge = useContext(WindowSessionBridgeContext);
   const presentedViewId = useContext(WindowPresentationContext), titleInteraction = useContext(SessionTitleInteractionContext);
-  const track = useContext(TrackViewScope), ask = useContext(AskViewScope), tpm = useContext(TpmViewScope), team = useContext(TeamViewScope);
+  const track = useContext(TrackViewScope), ask = useContext(AskViewScope), tpm = useContext(TpmViewScope);
   const details = useContext(AssistantDetailsHostContext);
   const destination = useRef<HTMLDivElement>(null), token = useRef(Symbol('conversation destination'));
   const captured: CapturedDescriptor = mode === 'window' ? { ...descriptor,
     layout: descriptor.layout ?? layout, bridge: descriptor.bridge ?? bridge,
     presentedViewId: descriptor.presentedViewId ?? presentedViewId, titleInteraction: descriptor.titleInteraction ?? titleInteraction,
-    track, ask, tpm, team, details,
+    track, ask, tpm, details,
   } : { ...descriptor, layout: undefined, bridge: undefined, presentedViewId: undefined, titleInteraction: undefined,
-    track: undefined, ask: undefined, tpm: undefined, team: undefined, details,
+    track: undefined, ask: undefined, tpm: undefined, details,
     props: { ...descriptor.props, familyRoot: false },
   };
   useLayoutEffect(() => {

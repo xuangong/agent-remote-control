@@ -157,7 +157,6 @@ export const navigation = {
   'navigation.browse.scan': 'Scan',
   'navigation.view.bindingChanged': 'The session view binding changed. Reopen its current conversation.',
   'navigation.view.bindingSynchronizing': 'The session view binding is still synchronizing.',
-  'navigation.view.teamUnconfirmed': 'The Team execution is not confirmed yet. Retry to look for it again.',
   'navigation.status.failed': 'Failed',
   'navigation.status.working': 'Working',
   'navigation.status.unread': 'New result',

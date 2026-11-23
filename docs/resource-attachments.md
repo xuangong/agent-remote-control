@@ -46,4 +46,3 @@ The standalone Lab and debugger have separate resource directories under `~/.age
 
 Resource inputs extend strict public schemas in Remote protocol **1.8.0**. Upgrade Web, Relay, and Controller together for the session attachment flow. Version negotiation reports incompatible public participants explicitly. The Host uplink envelope version is independent; Team resource support is separately negotiated so an older Team Relay can continue handling text without receiving unsupported resource calls.
 
-See [Transfer files between Team Hosts](guides/team-resources.md) for delivery receipts, retry behavior, and the distinction between resource storage and Team journal capacity.

@@ -2,7 +2,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { coveringControls } from './covering.js';
 
-// The Track, Team, TPM and Window launchers never cover the conversation's text or the composer. On a compact screen they sit in a
+// The Track, TPM and Window launchers never cover the conversation's text or the composer. On a compact screen they sit in a
 // row of the navigation that the layout reserves, so the rule holds for any number of launchers; on a wide screen without the
 // sidebar they float in the margin beside the reading column.
 /** A launcher's button, never the rail's or the tab bar's destinations. */
@@ -45,14 +45,14 @@ async function coverage(page: Page) {
 async function openLongConversation(page: Page, width: number, height: number) {
   await page.setViewportSize({ width, height });
   // Track and TPM show by default only on a touch screen and Ask only when chosen; the person can show each anywhere.
-  await page.addInitScript(() => { for (const view of ['track', 'team', 'tpm', 'window', 'ask']) localStorage.setItem(`agent-remote:${view}-view`, 'true'); });
+  await page.addInitScript(() => { for (const view of ['track', 'tpm', 'window', 'ask']) localStorage.setItem(`agent-remote:${view}-view`, 'true'); });
   await page.goto('/e2e/fixtures/session-stars.html?long');
   await expect(page.getByText('Item 30.', { exact: false })).toBeVisible();
 }
 
 test('at 390x844 the launchers take their own row and cover no conversation text or composer, however many there are', async ({ page }, testInfo) => {
   await openLongConversation(page, 390, 844);
-  for (const name of ['Tracked sessions', 'Teams', 'TPM works', 'Groups']) await expect(launcherButton(page, name)).toBeVisible();
+  for (const name of ['Tracked sessions', 'TPM works', 'Groups']) await expect(launcherButton(page, name)).toBeVisible();
   const four = await coverage(page);
   expect(four.launchers.length).toBeGreaterThanOrEqual(4);
   expect(four.lines).toBeGreaterThan(0);
@@ -116,7 +116,7 @@ for (const width of [1024, 1280, 1440]) {
     test(`at ${width}px with ${tiles} tile${tiles > 1 ? 's' : ''}, no control covers a tile's conversation text`, async ({ page, isMobile }, testInfo) => {
       test.skip(isMobile, 'A desktop viewport on a desktop profile');
       await page.setViewportSize({ width, height: 860 });
-      await page.addInitScript(() => { for (const view of ['track', 'team', 'tpm', 'window', 'ask']) localStorage.setItem(`agent-remote:${view}-view`, 'true'); });
+      await page.addInitScript(() => { for (const view of ['track', 'tpm', 'window', 'ask']) localStorage.setItem(`agent-remote:${view}-view`, 'true'); });
       await page.goto(`/e2e/fixtures/window-tiles.html?tiles=${tiles}`);
       // A compact screen opens on its sessions drawer when the address names no session.
       if (width <= 1180) await page.locator('#lab-context').getByRole('button', { name: 'Close', exact: false }).first().click();

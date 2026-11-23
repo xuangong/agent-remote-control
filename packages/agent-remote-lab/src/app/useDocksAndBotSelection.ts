@@ -26,11 +26,6 @@ export function useDocksAndBotSelection(scope: Pick<AppInputs & SessionSuccessio
 
   const selectedBot = useBotWorkspace(windowWorkspace, succession, navigation.place, activated && accessReady && !windowMode);
 
-  // A Team member's conversation in this workspace (the main conversation in a member's seat, a managed Team window, a Team
-  // view of the current Window, or the selected bot): Team routing moves its seat to the member's successor, so the Team roster refreshes closely meanwhile.
-  const teamConversationsOpen = !!succession.desired?.slot.metadata?.teamId || !!succession.document.windows?.some(window => window.managed)
-    || !!sharedWindow?.views.some(view => view.feature?.kind === 'team') || selectedBot.view?.feature?.kind === 'team';
-
   const botPresentation = useMemo(() => ({ recovering: false, confirmed: undefined as { groupId: string; viewId: string; slotId: string; bindingKey: string } | undefined }), [baseUrl, transport]);
 
   if (!accessReady) botPresentation.recovering = true;
@@ -50,7 +45,7 @@ export function useDocksAndBotSelection(scope: Pick<AppInputs & SessionSuccessio
   }
 
   const primaryGroups = sharedWindow ? primaryWindowViews(sharedWindow) : [];
-  return { agentControlOpen, setAgentControlOpen, deleteConfirmOpen, setDeleteConfirmOpen, selectedBot, teamConversationsOpen, botPresentation, primaryGroups };
+  return { agentControlOpen, setAgentControlOpen, deleteConfirmOpen, setDeleteConfirmOpen, selectedBot, botPresentation, primaryGroups };
 }
 
 export type DocksAndBotSelectionSlice = ReturnType<typeof useDocksAndBotSelection>;

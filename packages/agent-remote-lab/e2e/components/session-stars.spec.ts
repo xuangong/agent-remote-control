@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openSessionsPage } from '../all-sessions';
 
-/** The Track capsule, floating or (while the desktop sidebar shows) in the sidebar's Shortcuts. `.lab-tracking-floating` is also the class of the floating Window, Team and TPM capsules. */
+/** The Track capsule, floating or (while the desktop sidebar shows) in the sidebar's Shortcuts. `.lab-tracking-floating` is also the class of the floating Window and TPM capsules. */
 const track = (page: Page) => page.locator('.lab-tracking-floating, .lab-sidebar-shortcut-track').filter({ has: page.getByRole('button', { name: 'Tracked sessions', exact: true }) });
 
 test.beforeEach(async ({ page }, testInfo) => {

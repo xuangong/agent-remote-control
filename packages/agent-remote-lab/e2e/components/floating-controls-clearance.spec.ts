@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { toggleViewPanel } from '../view-options';
 
-// The Window, Team, TPM and Track launchers never cover the header or session controls. At phone and tablet widths the app bar has
+// The Window, TPM and Track launchers never cover the header or session controls. At phone and tablet widths the app bar has
 // several rows and the timeline toolbar sits under it; the launchers sit in the navigation's launcher bar, clear of both, in light and dark.
 const widths = [320, 390, 412, 600, 800];
 

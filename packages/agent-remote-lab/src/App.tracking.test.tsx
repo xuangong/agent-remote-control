@@ -1,5 +1,4 @@
 import { act, useState, type ComponentProps } from 'react';
-import * as teamComponents from './features/team/TeamMenu.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { WindowRequestError, WindowWorkspaceClient, type RemoteTransportListener } from '@orchardworks/agent-client';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
@@ -505,10 +504,7 @@ it('keeps desktop tracking alive while its panel is hidden and delivers pending 
   expect(f.contentConnections).toHaveLength(0);
   expect(readTrackedSessions(baseUrl)).toEqual([star]);
 });
-it.each([false, true])('returns to the requested tracked session after Team navigation (compact: %s)', async compact => {
-  const realTeamMenu = teamComponents.TeamMenu;
-  let team!: ComponentProps<typeof realTeamMenu>;
-  vi.spyOn(teamComponents, 'TeamMenu').mockImplementation(props => { team = props; return realTeamMenu(props); });
+it.each([false, true])('returns to the requested tracked session after another tracked session was opened (compact: %s)', async compact => {
   const leader = { ...star, nativeSessionId: 'leader', title: 'Leader' };
   const f = await fixture(star, true, leader, undefined, { compact });
   await f.open();
@@ -518,7 +514,7 @@ it.each([false, true])('returns to the requested tracked session after Team navi
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   expect(new URL(window.location.href).searchParams.get('session')).toBe(star.nativeSessionId);
-  await act(async () => { await team.onOpenSession(leader); });
+  await f.open(leader.title);
   expect(new URL(window.location.href).searchParams.get('session')).toBe(leader.nativeSessionId);
   await f.open();
   expect(new URL(window.location.href).searchParams.get('session')).toBe(star.nativeSessionId);

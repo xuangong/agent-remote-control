@@ -3,7 +3,6 @@ import { errorWords } from '@orchardworks/agent-client';
 import { useWindowWorkspace } from '../features/windows/useWindowWorkspace.js';
 import { useWindowSessionRetention } from '../features/windows/useWindowSessionRetention.js';
 import { useWindowActions } from '../features/windows/useWindowActions.js';
-import { teamViewTarget } from '../features/team/team-view-binding.js';
 import type { Team, WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
 import { DraftStore } from '../kernel/draft-store.js';
 import { useSessionSuccession } from '../hooks/useSessionSuccession.js';
@@ -31,12 +30,6 @@ export function useSessionSuccessionBinding(scope: Pick<AppInputs & ProviderStat
     // A slot the live budget has not met yet counts as live, so a sleeping bot is checked here too: attaching it would
     // resume its native session before its conversation says it is folded.
     attachmentAllowed: (slotId, document) => liveConnections.live(slotId) && !asleepSlot.current(slotId, document),
-    targetRevision: JSON.stringify(teamRoster),
-    validateTarget(selection, viewId, document) {
-      const roster = teamRosterRef.current;
-      const target = teamViewTarget(document, roster?.baseUrl === baseUrl ? roster.teams : undefined, selection, viewId);
-      if (target && sessionKey(target) !== sessionKey(selection)) throw new Error(t('sessions.succession.teamUnconfirmed'));
-    },
     scope: baseUrl, transport, enabled: activated && accessReady,
     initial: initialSession, initialDisplayState: cachedState, initialLayout: initialSession ? initialLayout : undefined,
     connections, replicaFor, directory: hostId => hostId === selectedHost.id && directory ? directory : new SessionDirectoryClient(baseUrl, undefined, hostId),

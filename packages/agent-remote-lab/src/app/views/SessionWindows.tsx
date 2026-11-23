@@ -1,5 +1,4 @@
 // The floating session windows.
-import { TeamGatherButton } from '../../features/team/TeamGatherButton.js';
 import { SessionWindow } from '../../features/windows/SessionWindow.js';
 import { SessionFamily } from '../../conversation/SessionFamily.js';
 import { sessionKey } from '../../kernel/session-tree.js';
@@ -17,7 +16,6 @@ export function SessionWindows({ scope }: { readonly scope: Pick<AppScope, 'acti
           onChangeSession={entry.managed ? undefined : () => chooseWindowSession(entry.id)}
           hostLabel={entry.target ? remoteHosts.find(host => host.id === entry.target!.hostId)?.name ?? entry.target.hostId : ''}
           offline={entry.target ? remoteHosts.find(host => host.id === entry.target!.hostId)?.online === false : false}
-          actions={entry.groupId ? <TeamGatherButton baseUrl={baseUrl} entry={entry} onGather={targets => sessionWindows.gather(entry, targets)} /> : undefined}
           onSessionBound={entry.managed ? undefined : receiveViewSession}
           missing={!!entry.target && missingSessions.has(sessionKey(entry.target))} onSessionUnavailable={markSessionMissing}
           sessionPresentation={context => presentSessionView(context, { team: !!entry.groupId || !!entry.teamMemberId })}

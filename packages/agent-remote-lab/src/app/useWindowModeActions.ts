@@ -29,8 +29,8 @@ import type { SharedFeedsAndTpmSlice } from './useSharedFeedsAndTpm.js';
 import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';
 import type { AppInputs } from './types.js';
 
-export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBindingSlice & SessionOpeningSlice & ViewSessionStateSlice & PanelsAndShortcutsSlice & ActiveSessionSlice & DocksAndBotSelectionSlice & WindowViewActionsSlice & WorkbenchShellSlice & ProviderStateSlice & SharedFeedsAndTpmSlice & WorkbenchRecordsSlice, 'addSessionView' | 'askView' | 'baseUrl' | 'closeContext' | 'closeInspector' | 'closePage' | 'compactLayout' | 'createWindowFromMenu' | 'expandedKeys' | 'modeSteps' | 'navigation' | 'openDirectorySession' | 'openSession' | 'presentedViewId' | 'setQueuedModeSteps' | 'setTeamReveal' | 'sharedViewForSlot' | 'sharedWindow' | 'showView' | 'sideRequests' | 'succession' | 'teamRoster' | 'teamView' | 'tpmView' | 'windowActions' | 'windowWorkspace'>) {
-  const { addSessionView, askView, baseUrl, closeContext, closeInspector, closePage, compactLayout, createWindowFromMenu, expandedKeys, modeSteps, navigation, openDirectorySession, openSession, presentedViewId, setQueuedModeSteps, setTeamReveal, sharedViewForSlot, sharedWindow, showView, sideRequests, succession, teamRoster, teamView, tpmView, windowActions, windowWorkspace } = scope;
+export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBindingSlice & SessionOpeningSlice & ViewSessionStateSlice & PanelsAndShortcutsSlice & ActiveSessionSlice & DocksAndBotSelectionSlice & WindowViewActionsSlice & WorkbenchShellSlice & ProviderStateSlice & SharedFeedsAndTpmSlice & WorkbenchRecordsSlice, 'addSessionView' | 'askView' | 'baseUrl' | 'closeContext' | 'closeInspector' | 'closePage' | 'compactLayout' | 'createWindowFromMenu' | 'expandedKeys' | 'modeSteps' | 'navigation' | 'openDirectorySession' | 'openSession' | 'presentedViewId' | 'setQueuedModeSteps' | 'sharedViewForSlot' | 'sharedWindow' | 'showView' | 'sideRequests' | 'succession' | 'teamRoster' | 'tpmView' | 'windowActions' | 'windowWorkspace'>) {
+  const { addSessionView, askView, baseUrl, closeContext, closeInspector, closePage, compactLayout, createWindowFromMenu, expandedKeys, modeSteps, navigation, openDirectorySession, openSession, presentedViewId, setQueuedModeSteps, sharedViewForSlot, sharedWindow, showView, sideRequests, succession, teamRoster, tpmView, windowActions, windowWorkspace } = scope;
   const t = useTranslate();
 
   function isViewVisible(slotId: string) {
@@ -172,14 +172,8 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
   async function navigateAttribution(attribution: SessionAttribution): Promise<void> {
     const target = attribution.target;
     if (!target) return;
-    if (target.kind === 'group') {
-      if (target.groupType !== 'team' || teamRoster?.baseUrl !== baseUrl || !teamRoster.teams.some(team => team.id === target.groupId)) {
-        throw keyedError('windows.error.groupGone');
-      }
-      teamView.setVisible(true);
-      setTeamReveal({ baseUrl, teamId: target.groupId, requestId: crypto.randomUUID() });
-      return;
-    }
+    // A group is a Team of an earlier build; there is none to show now.
+    if (target.kind === 'group') throw keyedError('windows.error.groupGone');
     const current = windowWorkspace.readWindow();
     showView('workbench'); closeContext();
     if (compactLayout) closeInspector();

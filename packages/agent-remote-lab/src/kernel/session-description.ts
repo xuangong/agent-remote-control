@@ -1,4 +1,4 @@
-import type { NativeSessionRef, Team } from '@orchardworks/agent-remote-protocol';
+import type { NativeSessionRef } from '@orchardworks/agent-remote-protocol';
 import { translator, type SessionAttribution, type SessionDescription, type SessionDescriptionIdentity, type Translate } from '@orchardworks/agent-client';
 import type { TpmItem } from './tpm-main-sessions.js';
 import { currentForkSource, sideLinkVisible, sideNavigationSource, sideNavigationTarget, type SessionFork } from './session-forks.js';
@@ -13,7 +13,6 @@ export interface DescribeSessionInput {
   forks?: readonly SessionFork[];
   asks?: readonly SessionFork[];
   tpmWorks?: readonly TpmItem[];
-  teams?: readonly Team[];
   hostNames?: ReadonlyMap<string, string>;
   /** The words of the reader's language; English when absent. */
   t?: Translate;
@@ -26,7 +25,7 @@ interface SourceEvidence {
 }
 
 /** Project existing owners' records; this description never owns a relationship graph. */
-export function describeSession({ session, sessions = [], forks = [], asks = [], tpmWorks = [], teams = [], hostNames, t = translator('en') }: DescribeSessionInput): SessionDescription {
+export function describeSession({ session, sessions = [], forks = [], asks = [], tpmWorks = [], hostNames, t = translator('en') }: DescribeSessionInput): SessionDescription {
   const known = new Map(sessions.map(entry => [sessionKey(entry), entry]));
   const currentKey = sessionKey(session);
   const current = { ...session, parentNativeSessionId: session.parentNativeSessionId ?? known.get(currentKey)?.parentNativeSessionId };
@@ -118,41 +117,6 @@ export function describeSession({ session, sessions = [], forks = [], asks = [],
       }
     }
     if (matches(main) && !matches(target)) addSession(`${prefix}:related`, 'tpm', 'TPM', target, work.archived ? t('client.describe.archived') : undefined);
-  }
-
-  for (const team of teams) {
-    const leader = team.members.find(member => member.role === 'leader');
-    const leaderSession = leader?.nativeSessionId ? { ...leader, nativeSessionId: leader.nativeSessionId, title: leader.name } : undefined;
-    const prefix = `team:${team.id}`;
-    const addTeam = () => add({ id: `${prefix}:group`, kind: 'team', label: 'Team', value: team.title,
-      ...(team.status === 'archived' ? { detail: t('client.describe.archived') } : {}),
-      target: { kind: 'group', groupType: 'team', groupId: team.id } });
-    const addMember = (member: Team['members'][number], kind: string, name: string) => {
-      const id = `${prefix}:${kind}:${member.id}`;
-      if (member.nativeSessionId) addSession(id, kind, name, { ...member, nativeSessionId: member.nativeSessionId, title: member.name });
-      else add({ id, kind, label: name, value: member.name, detail: [scopeDetail(member), t('client.describe.sessionUnavailable')].filter(Boolean).join(' · ') });
-    };
-    for (const member of team.members) {
-      const matchesMember = member.nativeSessionId
-        ? matches({ ...member, nativeSessionId: member.nativeSessionId })
-        : session.teamId === team.id && session.teamMemberId === member.id
-          && (current.hostId ?? 'local') === member.hostId && current.providerId === member.providerId;
-      if (!matchesMember) continue;
-      addRole(t(member.role === 'leader' ? 'client.describe.teamLeader' : 'client.describe.teamMember'));
-      addTeam();
-      if (member.role === 'requester') continue;
-      if (member.role !== 'leader' && leader) addMember(leader, 'leader', t('client.describe.leader'));
-      addSession(`${prefix}:main`, 'main', t('client.describe.main'), team.source);
-      if (member.role === 'leader') {
-        for (const peer of team.members) {
-          if (peer.role !== 'leader') addMember(peer, 'member', t('client.describe.member'));
-        }
-      }
-    }
-    if (matches(team.source)) {
-      addTeam();
-      if (leader && !matches(leaderSession)) addMember(leader, 'team-leader', t('client.describe.teamLeader'));
-    }
   }
 
   if (current.parentNativeSessionId && current.parentNativeSessionId !== current.nativeSessionId) {

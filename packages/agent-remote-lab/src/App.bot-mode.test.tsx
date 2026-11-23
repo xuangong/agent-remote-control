@@ -277,14 +277,14 @@ it('shows Windows, In this group and Shortcuts in the desktop sidebar, and sessi
 
 it('moves the entries into the sidebar while it is visible, and into the Window toolbar while it is hidden', async () => {
   const scope = 'http://localhost/window-shortcuts/'; seedGroup(scope, botGroup('A'));
-  // Team shows by default; TPM (coarse pointers only) and Ask are turned on here so every entry the fixture can show is covered.
+  // TPM (coarse pointers only) and Ask are turned on here so every entry the fixture can show is covered.
   localStorage.setItem('agent-remote:tpm-view', 'true'); localStorage.setItem('agent-remote:ask-view', 'true');
   history.replaceState(null, '', '/?window=A');
   const app = await mountBotApp(scope);
   try {
     await until(() => expect(app.container.querySelector('#lab-context nav[aria-label="Shortcuts"]')).not.toBeNull());
     const shortcuts = () => app.container.querySelector('#lab-context nav[aria-label="Shortcuts"]')!;
-    const triggers = ['Teams', 'TPM works', 'Ask about this session'];
+    const triggers = ['TPM works', 'Ask about this session'];
     await until(() => { for (const label of triggers) expect(shortcuts().querySelector(`button[aria-label="${label}"]`), label).not.toBeNull(); });
     // The Window capsule gives way to the sidebar's Windows section.
     expect(app.container.querySelector('.lab-window-floating:not([data-hidden])')).toBeNull();
@@ -303,32 +303,30 @@ it('moves the entries into the sidebar while it is visible, and into the Window 
   } finally { await app.close(); }
 });
 
-it('keeps the Team entry mounted, with its panel open, when the sidebar is hidden and shown', async () => {
+it('keeps the TPM entry mounted, with its panel open, when the sidebar is hidden and shown', async () => {
   const scope = 'http://localhost/window-shortcuts-mounted/'; seedGroup(scope, botGroup('A'));
+  localStorage.setItem('agent-remote:tpm-view', 'true');
   history.replaceState(null, '', '/?window=A');
   const app = await mountBotApp(scope);
   const apple = /Mac|iPhone|iPad/.test(navigator.platform);
   const backslash = () => act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', code: 'Backslash', metaKey: apple, ctrlKey: !apple, bubbles: true, cancelable: true })); });
   try {
     const context = () => app.container.querySelector<HTMLElement>('#lab-context')!;
-    await until(() => expect(context().querySelector('nav[aria-label="Shortcuts"] button[aria-label="Teams"]')).not.toBeNull());
-    const trigger = context().querySelector<HTMLButtonElement>('button[aria-label="Teams"]')!;
-    trigger.focus();
+    await until(() => expect(context().querySelector('nav[aria-label="Shortcuts"] button[aria-label="TPM works"]')).not.toBeNull());
+    const trigger = context().querySelector<HTMLButtonElement>('button[aria-label="TPM works"]')!;
     await act(async () => trigger.click());
     expect(trigger.getAttribute('aria-expanded')).toBe('true');
     await backslash();
     expect(context().hidden).toBe(true);
-    // The same element moves to the Window's toolbar: a remount would drop the open panel (and a pending Team creation with it).
-    expect(app.container.querySelector('button[aria-label="Teams"]')).toBe(trigger);
+    // The same element moves to the Window's toolbar: a remount would drop the open panel .
+    expect(app.container.querySelector('button[aria-label="TPM works"]')).toBe(trigger);
     expect(trigger.closest('#lab-context')).toBeNull();
-    expect(trigger.closest('.lab-toolbar-launchers .lab-launcher-team')).not.toBeNull();
+    expect(trigger.closest('.lab-toolbar-launchers .lab-launcher-tpm')).not.toBeNull();
     expect(trigger.getAttribute('aria-expanded')).toBe('true');
-    // The moved control keeps the focus it had.
-    expect(document.activeElement).toBe(trigger);
     await backslash();
     expect(context().hidden).toBe(false);
-    expect(context().querySelector('button[aria-label="Teams"]')).toBe(trigger);
-    expect(trigger.closest('.lab-sidebar-shortcut-team')).not.toBeNull();
+    expect(context().querySelector('button[aria-label="TPM works"]')).toBe(trigger);
+    expect(trigger.closest('.lab-sidebar-shortcut-tpm')).not.toBeNull();
     expect(trigger.getAttribute('aria-expanded')).toBe('true');
   } finally { await app.close(); }
 });

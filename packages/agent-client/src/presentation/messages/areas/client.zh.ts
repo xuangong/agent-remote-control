@@ -292,10 +292,6 @@ export const client: AreaMessages<typeof english> = {
   'client.describe.supportCoordinator': '支援协调人',
   'client.describe.callsForSupport': '发起求助',
   'client.describe.supporter': '支援者',
-  'client.describe.teamLeader': 'Team 组长',
-  'client.describe.teamMember': 'Team 成员',
-  'client.describe.leader': '组长',
-  'client.describe.member': '成员',
   'client.describe.parent': '上级',
   'client.describe.child': '子级',
 };

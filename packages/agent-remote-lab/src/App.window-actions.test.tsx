@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, applyWindowOperation, createWindowView, type Team, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { configureImageDraftPersistence } from '@orchardworks/agent-client-web/browser';
 import { App, type LabTransport } from './App.js';
-import * as teamMenu from './features/team/TeamMenu.js';
+import * as tpmMenu from './features/team/TpmMenu.js';
 import * as workspaceHooks from './features/windows/useWindowWorkspace.js';
 import * as successionHooks from './hooks/useSessionSuccession.js';
 import * as trackingMenu from './features/sessions/SessionTrackingMenu.js';
@@ -20,15 +20,6 @@ import { replicaState } from './test/fixtures.js';
 const useWindowWorkspace = workspaceHooks.useWindowWorkspace;
 const useSessionSuccession = successionHooks.useSessionSuccession;
 const scope = 'http://localhost/window-actions/';
-const team: Team = {
-  id: 'team', operationId: 'create-team', revision: 1, title: 'Review', status: 'active',
-  source: { hostId: 'local', providerId: 'recorded', nativeSessionId: 'source', title: 'Source' },
-  members: [
-    { id: 'leader', hostId: 'local', providerId: 'recorded', nativeSessionId: 'leader-session', role: 'leader', name: 'Leader', responsibility: 'Coordinate', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 },
-    { id: 'worker', hostId: 'local', providerId: 'recorded', nativeSessionId: 'worker-session', role: 'member', name: 'Worker', responsibility: 'Review', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 },
-  ],
-  messages: [], createdAt: 1, updatedAt: 1,
-};
 
 afterEach(() => {
   vi.restoreAllMocks(); vi.unstubAllGlobals();
@@ -41,10 +32,7 @@ async function fixture(historyPlacement?: 'dock' | 'float', hiddenAskSource?: 'm
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const first: WorkspaceWindow = {
     schemaVersion: 3, id: 'first', revision: 0, title: 'First', selectedPrimaryViewId: 'main', selectedViewId: 'main',
-    views: [createWindowView('main', undefined, 'primary'), {
-      ...createWindowView('leader-view', { hostId: 'local', providerId: 'recorded', nativeSessionId: 'leader-session', title: 'Leader' }),
-      feature: createWindowFeature({ kind: 'team', id: team.id, role: 'leader', memberId: 'leader' }), bindingPolicy: 'managed',
-    }],
+    views: [createWindowView('main', undefined, 'primary'), createWindowView('leader-view', { hostId: 'local', providerId: 'recorded', nativeSessionId: 'leader-session', title: 'Leader' })],
   };
   if (historyPlacement) {
     first.views[0]!.binding = { hostId: 'local', providerId: 'recorded', nativeSessionId: 'primary-session', title: 'Primary' };
@@ -80,9 +68,9 @@ async function fixture(historyPlacement?: 'dock' | 'float', hiddenAskSource?: 'm
   vi.spyOn(SessionDirectoryClient.prototype, 'list').mockResolvedValue({ items: [], hasMore: false, revision: '1' });
   vi.spyOn(SessionDirectoryClient.prototype, 'workspaces').mockResolvedValue({ workspaces: [] });
   let workspace!: ReturnType<typeof useWindowWorkspace>;
-  let menu!: ComponentProps<typeof teamMenu.TeamMenu>;
+  let menu!: ComponentProps<typeof tpmMenu.TpmMenu>;
   vi.spyOn(workspaceHooks, 'useWindowWorkspace').mockImplementation((...args) => { workspace = useWindowWorkspace(...args); return workspace; });
-  vi.spyOn(teamMenu, 'TeamMenu').mockImplementation(props => { menu = props; return null; });
+  vi.spyOn(tpmMenu, 'TpmMenu').mockImplementation(props => { menu = props; return null as never; });
   const transport: LabTransport = {
     listProviders: async () => [{ providerId: 'recorded', displayName: 'Recorded' }],
     createAgent: async () => { throw new Error('Team gathering must reuse its existing sessions.'); },
@@ -99,30 +87,6 @@ async function fixture(historyPlacement?: 'dock' | 'float', hiddenAskSource?: 'm
   await vi.waitFor(() => expect(workspace.window?.id).toBe(first.id));
   return { read: () => workspace, menu: () => menu, first, second, container };
 }
-
-it('gathers Team members locally before saving and keeps them out of a subsequently selected Window', async () => {
-  const test = await fixture();
-  let release!: () => Promise<void>;
-  let held = false;
-  vi.stubGlobal('navigator', { locks: { request: (_name: string, commit: () => Promise<unknown>) => {
-    if (held) return commit();
-    held = true;
-    return new Promise(resolve => { release = async () => { resolve(await commit()); }; });
-  } } });
-  let pending!: Promise<boolean>;
-  await act(async () => { pending = test.menu().onOpen(team, 'first/main'); void pending.catch(() => {}); });
-  expect(test.read().window!.views.filter(view => parseWindowFeature(view.feature)?.kind === 'team')).toHaveLength(2);
-  expect(await pending).toBe(true);
-  await vi.waitFor(() => expect(release).toBeTypeOf('function'));
-  await act(async () => { await test.read().open('second'); });
-  expect(test.read().window?.id).toBe('second');
-  await act(async () => { await release(); await pending; });
-  expect(test.read().window!.views.filter(view => parseWindowFeature(view.feature)?.kind === 'team')).toHaveLength(0);
-  expect(test.read().window).toEqual(test.second);
-  const storedFirst = JSON.parse(localStorage.getItem(`agent-remote:recovery:${scope}:shared-window:first`)!).window;
-  expect(storedFirst.selectedViewId).toBe('leader-view');
-  expect(storedFirst.views).toHaveLength(3);
-}, 10000);
 
 it('restores source families behind the visible selected Ask', async () => {
   const test = await fixture('dock', 'side-view', true);
@@ -145,9 +109,7 @@ it.each(['main', 'ordinary-view', 'side-view'] as const)('shows the hidden Ask s
     expect(source?.querySelector('.lab-session-view')).not.toBeNull();
   });
   expect(test.container.querySelector('[role="dialog"][aria-label="Ask"]')).toBeNull();
-  expect(test.menu().sourceViewId).toBe(`first/${sourceViewId}`);
-  expect(test.menu().source?.nativeSessionId).toBe(test.first.views.find(view => view.id === sourceViewId)?.binding?.nativeSessionId);
-  expect(test.menu().currentSession?.nativeSessionId).toBe(test.menu().source?.nativeSessionId);
+  expect(test.menu().main?.nativeSessionId).toBe(test.first.views.find(view => view.id === sourceViewId)?.binding?.nativeSessionId);
   expect(test.read().window?.selectedViewId).toBe('selected-ask');
   expect(test.read().window?.views.find(view => view.id === 'selected-ask')?.collapsed).toBe(false);
 }, 10000);
@@ -180,41 +142,6 @@ it.each(['dock', 'float'] as const)('opens handoff history and returns to curren
   expect(test.read().window?.views).toHaveLength(2);
   expect(pane().querySelector('.lab-assistant-sessions [role="alert"]')).toBeNull();
 }, 10000);
-
-it('gathers missing Team members after same-Window leader selection clones its feature', async () => {
-  const test = await fixture();
-  const before = test.read().window!.views.find(view => view.id === 'leader-view')!.feature;
-  await act(async () => { expect(await test.menu().onOpen(team, 'first/main')).toBe(true); });
-  await vi.waitFor(() => expect(test.read().window?.views).toHaveLength(3));
-  const current = test.read().window!;
-  expect(current.id).toBe('first');
-  expect(current.selectedViewId).toBe('leader-view');
-  const leader = current.views.find(view => view.id === 'leader-view')!;
-  expect(leader.feature).not.toBe(before);
-  expect(leader.feature).toEqual(before);
-  const members = current.views.filter(view => parseWindowFeature(view.feature)?.kind === 'team');
-  expect(members).toHaveLength(2);
-  expect(members.find(view => parseWindowFeature(view.feature)?.kind === 'team' && view.id !== leader.id))
-    .toMatchObject({ binding: { nativeSessionId: 'worker-session' }, bindingPolicy: 'managed', closeWith: leader.id,
-      feature: createWindowFeature({ kind: 'team', id: team.id, role: 'member', memberId: 'worker' }) });
-}, 10000);
-
-it('opens an existing Team in the same empty Window without reviving a closed source view', async () => {
-  const test = await fixture();
-  await act(async () => { await test.read().operate({ type: 'layout.apply', layout: {
-    title: 'First', selectedViewId: null, selectedPrimaryViewId: null, views: [],
-  } }); });
-  expect(test.container.querySelector('[data-testid="empty-window"]')).not.toBeNull();
-  expect(test.menu().source).toBeUndefined();
-  let opened = false;
-  await act(async () => { opened = await test.menu().onOpen(team); });
-  expect(opened).toBe(true);
-  expect(test.read().window?.id).toBe('first');
-  expect(test.read().window?.views).toHaveLength(3);
-  expect(test.read().window?.views.some(view => view.id === 'main')).toBe(false);
-  expect(test.read().window?.views.find(view => view.id === test.read().window?.selectedViewId)?.binding?.nativeSessionId).toBe('source');
-  expect(test.read().window?.views.filter(view => parseWindowFeature(view.feature)?.kind === 'team')).toHaveLength(2);
-});
 
 async function settleTrackedPrimary(check: () => void) {
   await vi.waitFor(async () => {

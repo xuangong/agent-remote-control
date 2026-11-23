@@ -38,19 +38,9 @@ An agent can also inspect and arrange a Window through `agent-remote-controller 
 
 Everything the website does, `agent-remote-controller` does from a shell, for you and for your agents: list, read, create and drive sessions on any of your Hosts, answer their requests, hand them off, manage references, Windows and Hosts, and run a session's Team, support or TPM role. Agents learn the commands from the `agent-remote` skill the Controller gives them. On a computer without a running Controller, or for other Hosts and Windows, run `agent-remote-controller login` once and approve it in your browser. See [command line](docs/current/agent-remote/cli.md).
 
-### Put a Team on work that spans machines
+### Put a chief and its staff on work that spans machines
 
-[![A Team Leader and a Windows member working in neighboring Session Views within the horizontally scrolled workspace.](docs/images/team-workspace.png)](docs/images/team-workspace.png)
-
-Use a **Team** when a task needs agents in different environments: investigate on a Mac, reproduce on Windows, and validate on Linux. Select the source project session, open **Team**, and choose **New team**. A separate Leader starts in the source working directory. Discuss the goal with the Leader, then use **Manage team → Add member** to select an online paired Host, a provider, and a working directory from that Host's folder browser.
-
-The Leader can implement work itself and send tasks to members, collect their findings, and coordinate validation. Members run in their own native environments and permissions. The source session stays separate from this collaboration; it does not need to manage the Team.
-
-<a href="docs/images/team-manager.png"><img src="docs/images/team-manager.png" alt="Team manager grouping Teams by source session, with worker counts, Rename, Manage team, Archived, and New team controls." width="360"></a>
-
-The Team list groups work by source session so you can see which project each group belongs to. **Manage team** holds membership and archive actions. Opening a Team arranges its source, Leader, and members using ordinary Session Views on wide screens. **Gather** brings missing member views back; closing a member pane does not remove the member. On a phone, opening the Team shows its Leader; use the session selector in the Team list to switch to members.
-
-Use **View → Team view** or **/team** to show or hide the management entry. For files such as logs, reports, or build archives, members can use explicit [Team resource transfers](docs/guides/team-resources.md); working directories are not automatically shared between Hosts.
+A bot can start other bots: a temporary bot for one job, or a standing bot that joins its group. The bot that starts them is their **chief**, and the bots it runs are its **staff**. Staff work in their own environments and permissions, on this Host or another; the chief messages them, and they report back between their turns. An organizer from an earlier version, a Leader with members, became a chief with its staff when the Relay loaded its state. Design: [bots](docs/superpowers/specs/2026-11-23-bots-design.md).
 
 ### Call for support from another model or machine
 

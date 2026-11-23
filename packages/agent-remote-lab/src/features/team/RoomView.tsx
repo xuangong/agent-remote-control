@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import './team.css';
 import type { Team, TeamAction } from '@orchardworks/agent-remote-protocol';
 import { MarkdownContent, useTranslate } from '@orchardworks/agent-client-web/react';
 

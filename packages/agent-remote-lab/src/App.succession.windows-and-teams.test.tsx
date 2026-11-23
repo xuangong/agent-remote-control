@@ -332,17 +332,9 @@ it('opens Track beside a dock bot whose replacement is still saving, leaving tha
   expect(setup.windowDocument.selectedViewId).toBe(opened()!.id);
 });
 
-it.each((['dock', 'attached', 'empty-dock'] as const).flatMap(destination => (['Team', 'TPM'] as const).map(feature => ({ destination, feature }))))
-('creates $feature from the selected $destination binding without falling back to primary', async ({ destination, feature }) => {
+it.each(['dock', 'attached', 'empty-dock'] as const)('creates a TPM work from the selected %s binding without falling back to primary', async destination => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
   localStorage.setItem('agent-remote:tpm-view', 'true');
-  const teamCreate = vi.spyOn(RemoteTeamClient.prototype, 'create').mockImplementation(async input => ({
-    id: 'created-selected-team', operationId: input.operationId, revision: 1, title: 'Selected source Team', status: 'active', source: input.source,
-    members: [
-      { id: 'leader', hostId: 'host', providerId: 'recorded', nativeSessionId: 'S', role: 'leader', name: 'Selected Leader', responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 },
-      { id: 'member', hostId: 'host', providerId: 'recorded', nativeSessionId: 'T', role: 'member', name: 'Selected Member', responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 },
-    ], messages: [], createdAt: 1, updatedAt: 1,
-  }));
   const tpmCreate = vi.fn().mockRejectedValue(new Error('TPM creation observed'));
   const hostService = {
     hosts: async () => ({ hosts: [{ id: 'host', name: 'Fixture Host', online: true, teamManagement: true as const, providers: [] }] }),
@@ -354,7 +346,7 @@ it.each((['dock', 'attached', 'empty-dock'] as const).flatMap(destination => (['
   const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Source ${id}` });
   const selected = createWindowView('feature-source', destination === 'empty-dock' ? undefined : binding('X'), destination === 'attached' ? 'attached' : 'dock');
   if (destination === 'attached') selected.attachedTo = 'primary-A';
-  const document: WorkspaceWindow = { schemaVersion: 3, id: `feature-selected-${destination}-${feature}`, title: 'Selected feature source', revision: 0,
+  const document: WorkspaceWindow = { schemaVersion: 3, id: `feature-selected-${destination}`, title: 'Selected feature source', revision: 0,
     selectedPrimaryViewId: 'primary-A', selectedViewId: 'primary-A', views: [createWindowView('primary-A', binding('A'), 'primary'), selected] };
   const setup = { chain: [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document, hostService };
   const f = await failureFixture(false, 'A', false, `&window=${document.id}`, setup);
@@ -369,34 +361,18 @@ it.each((['dock', 'attached', 'empty-dock'] as const).flatMap(destination => (['
   if (destination !== 'attached') {
     await settleApp(() => expect(f.view.querySelector('[data-primary-group-id="primary-A"]')?.hasAttribute('data-selected')).toBe(false));
   }
-  const trigger = feature === 'Team' ? '[aria-label="Teams"]' : '[aria-label="TPM works"]';
-  await act(async () => f.view.querySelector<HTMLButtonElement>(trigger)!.click());
-  const create = () => feature === 'Team'
-    ? [...f.view.querySelectorAll<HTMLButtonElement>('[aria-label="Teams"] button')].find(button => button.textContent === 'New team')
-    : f.view.querySelector<HTMLButtonElement>('[aria-label="Create TPM work"]');
+  await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="TPM works"]')!.click());
+  const create = () => f.view.querySelector<HTMLButtonElement>('[aria-label="Create TPM work"]');
   if (destination === 'empty-dock') {
-    await settleApp(() => { expect(feature === 'Team' ? create()?.disabled === true : !create() || create()!.disabled).toBe(true); });
-    expect(teamCreate).not.toHaveBeenCalled(); expect(tpmCreate).not.toHaveBeenCalled();
+    await settleApp(() => { expect(!create() || create()!.disabled).toBe(true); });
+    expect(tpmCreate).not.toHaveBeenCalled();
     expect(f.view.querySelector('.lab-tpm-panel [data-creation-source]')).toBeNull();
     return;
   }
   await settleApp(() => { expect(create()).toBeTruthy(); expect(create()!.disabled).toBe(false); });
   await act(async () => create()!.click());
-  if (feature === 'Team') {
-    await settleApp(() => expect(teamCreate).toHaveBeenCalledOnce());
-    expect(teamCreate.mock.calls[0]![0]).toMatchObject({ source: binding('X'), operationId: expect.any(String) });
-    expect(tpmCreate).not.toHaveBeenCalled();
-    await settleApp(() => {
-      const teamViews = setup.windowDocument.views.filter(view => view.feature?.kind === 'team' && view.feature.id === 'created-selected-team');
-      expect(teamViews.map(view => view.binding?.nativeSessionId).sort()).toEqual(['S', 'T']);
-      expect(teamViews.every(view => view.placement === 'dock' && view.bindingPolicy === 'managed')).toBe(true);
-    });
-    expect(setup.windowDocument.views.find(view => view.id === selected.id)?.binding?.nativeSessionId).toBe('X');
-  } else {
-    await settleApp(() => expect(tpmCreate).toHaveBeenCalledOnce());
-    expect(tpmCreate).toHaveBeenCalledWith('host', expect.objectContaining({ providerId: 'recorded', mainNativeSessionId: 'X', operationId: expect.any(String) }));
-    expect(teamCreate).not.toHaveBeenCalled();
-  }
+  await settleApp(() => expect(tpmCreate).toHaveBeenCalledOnce());
+  expect(tpmCreate).toHaveBeenCalledWith('host', expect.objectContaining({ providerId: 'recorded', mainNativeSessionId: 'X', operationId: expect.any(String) }));
   expect(setup.windowDocument.views.find(view => view.id === 'primary-A')?.binding?.nativeSessionId).toBe('A');
 });
 
@@ -569,37 +545,3 @@ it('keeps the selected shared attached child on repeated pointer and focus witho
   }
 });
 
-it('opens an existing Team from a managed view by selecting its new ordinary source on mobile', async () => {
-  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
-  vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query.includes('max-width: 1180px'), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })));
-  const binding = (id: string) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: id, title: `Session ${id}` });
-  const originalTeam: Team = { id: 'original-team', operationId: 'original-create', revision: 1, title: 'Original Team', status: 'active', source: binding('A'),
-    members: [{ id: 'original-leader', hostId: 'host', providerId: 'recorded', nativeSessionId: 'X', role: 'leader', name: 'Original Leader', responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 }],
-    messages: [], createdAt: 1, updatedAt: 1 };
-  const unopenedTeam: Team = { ...originalTeam, id: 'unopened-team', operationId: 'unopened-create', title: 'Unopened Team', source: binding('S'),
-    members: [{ ...originalTeam.members[0]!, id: 'unopened-leader', nativeSessionId: 'T', name: 'Unopened Leader' }] };
-  const managed = { ...createWindowView('original-leader-view', binding('X'), 'dock'), bindingPolicy: 'managed' as const,
-    feature: createWindowFeature({ kind: 'team', id: originalTeam.id, role: 'leader', memberId: 'original-leader' }) };
-  const document: WorkspaceWindow = { schemaVersion: 3, id: 'team-managed-fallback', title: 'Team navigation', revision: 0,
-    selectedPrimaryViewId: 'primary-A', selectedViewId: managed.id, views: [createWindowView('primary-A', binding('A'), 'primary'), managed] };
-  const setup = { chain: [] as SessionSuccessionReplay[], userScoped: true, windowDocument: document, teams: () => [originalTeam, unopenedTeam] };
-  const f = await failureFixture(false, 'A', false, `&window=${document.id}`, setup);
-  await settleApp(() => {
-    expect(setup.windowDocument.selectedViewId).toBe(managed.id);
-    expect(f.view.querySelector(`[data-view-id="${managed.id}"]`)?.closest('[hidden]')).toBeNull();
-  });
-  await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Teams"]')!.click());
-  const openTeam = () => [...f.view.querySelectorAll<HTMLButtonElement>(':is(.lab-team-floating, .lab-launcher-team) .lab-session-row')]
-    .find(button => button.textContent?.includes('Unopened Team'));
-  await settleApp(() => expect(openTeam()).toBeDefined());
-  await act(async () => openTeam()!.click());
-  await settleApp(() => expect(setup.windowDocument.views.some(view => view.feature?.id === unopenedTeam.id)).toBe(true));
-  const source = setup.windowDocument.views.find(view => view.binding?.nativeSessionId === 'S');
-  expect(source).toBeDefined();
-  expect(source?.bindingPolicy).not.toBe('managed');
-  expect(source?.feature).toBeUndefined();
-  expect(setup.windowDocument.views.find(view => view.id === managed.id)).toEqual(managed);
-  expect(setup.windowDocument.views.find(view => view.id === 'primary-A')?.binding).toEqual(binding('A'));
-  expect(setup.windowDocument.selectedViewId).toBe(source!.id);
-  await settleApp(() => expect(f.view.querySelector(`[data-view-id="${source!.id}"]`)?.closest('[hidden]')).toBeNull());
-});

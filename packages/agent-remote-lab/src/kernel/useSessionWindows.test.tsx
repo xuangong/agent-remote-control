@@ -1,6 +1,5 @@
 import { applyWindowOperation, createWindowView, type Team, type WindowOperation, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { ensureWindowCompositionSlot } from './window-composition.js';
-import { teamViewTarget } from '../features/team/team-view-binding.js';
 import { act, useReducer } from 'react';
 import { render } from '../test/setup.js';
 import { afterEach, expect, it } from 'vitest';
@@ -176,36 +175,6 @@ it('opens the same local session once before the first render commits', async ()
   expect(window.views.filter(view => view.binding?.nativeSessionId === 'same')).toHaveLength(1);
   expect(window.revision).toBe(1);
   expect(element.querySelector('output')?.textContent).toBe('1');
-});
-
-it('retains shared Team member identity and validates its current roster locator after gather', async () => {
-  const document = createCompositionDocument('shared-team');
-  let window: WorkspaceWindow = { schemaVersion: 3, id: 'shared-team', title: 'Team', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
-  let current!: ReturnType<typeof useSessionWindows>;
-  function Harness() {
-    const [, save] = useReducer(n => n + 1, 0);
-    current = useSessionWindows(document.scope, { document, save,
-      ensureView: selection => ensureWindowCompositionSlot(document, window.id, 'fallback', selection),
-      ensureWindowView: (windowId, viewId, selection) => ensureWindowCompositionSlot(document, windowId, viewId, selection),
-      shared: { window, operate(operation) { window = applyWindowOperation(window, operation); save(); } },
-    });
-    return null;
-  }
-  await render(<Harness />);
-  const leader = { ...target('old-leader'), teamId: 'team', teamMemberId: 'leader' };
-  const member = { ...target('old-member'), teamId: 'team', teamMemberId: 'member' };
-  await act(async () => current.open([leader, member], leader, 'team'));
-  const root = current.entries.find(entry => entry.teamMemberId === 'leader')!;
-  const entry = current.entries.find(entry => entry.teamMemberId === 'member')!;
-  expect(entry.target).toMatchObject({ teamId: 'team', teamMemberId: 'member' });
-  expect(document.slots.find(slot => slot.id === entry.slotId)?.metadata).toMatchObject({ teamId: 'team', teamMemberId: 'member' });
-  await act(async () => current.gather(root, [{ ...member, nativeSessionId: 'new-member' }]));
-  expect(current.entries).toHaveLength(2);
-  expect(current.entries.find(view => view.teamMemberId === 'member')?.id).toBe(entry.id);
-  const team: Team = { id: 'team', operationId: 'create-team', revision: 2, title: 'Team', status: 'active', source: leader,
-    members: [{ id: 'member', hostId: 'host', providerId: 'recorded', nativeSessionId: 'new-member', role: 'member', name: 'Member', responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 }], messages: [], createdAt: 1, updatedAt: 1 };
-  expect(teamViewTarget(document, [team], entry.target!, entry.slotId)?.nativeSessionId).toBe('new-member');
-  expect(() => teamViewTarget(document, [{ ...team, members: [{ ...team.members[0]!, nativeSessionId: undefined }] }], entry.target!, entry.slotId)).toThrow(/no current execution locator/);
 });
 
 it('renders unknown and malformed feature associations as replaceable ordinary session views', async () => {

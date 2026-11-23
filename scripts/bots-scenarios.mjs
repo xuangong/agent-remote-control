@@ -84,6 +84,8 @@ function group(title, bots) {
     selectedPrimaryViewId: 'v0', selectedViewId: 'v0', views }, bots: { rank: 'm', members: Object.fromEntries(bots.map((item, index) => [`v${index}`, { name: item.name, ...(item.mission ? { mission: item.mission } : {}) }])) } });
 }
 const teams = () => api('GET', '/v1/remote/teams').teams;
+/** Whether a session's history holds an input with this text; the Relay forgets messages once delivered, the session does not. */
+const received = (address, text) => (controller('session', 'read', address, '--search', text, '--limit', '1').entries ?? []).some(entry => entry.role === 'user');
 const chains = () => api('GET', '/v1/remote/chains');
 const tasksOf = owner => teams().filter(team => team.task && team.members[1]?.nativeSessionId === owner.nativeSessionId);
 const inboxNamed = name => teams().find(team => team.inbox && team.members[0]?.name === name);
@@ -127,9 +129,8 @@ if (run('standing') || run('shared')) {
   check('standing: the organizer created a standing reviewer', !!inbox.inbox.botId && !inbox.inbox.pending, inbox.inbox.botId);
   reviewer = { name: `Reviewer ${tag}`, nativeSessionId: inbox.members[0].nativeSessionId, address: `${hostId}/${inbox.members[0].providerId}/${inbox.members[0].nativeSessionId}` };
   await settled(reviewer.address, undefined);
-  const organizerInbox = await until('the reviewer\'s answer in the organizer\'s inbox', () => teams().find(team => team.inbox && team.members[0]?.nativeSessionId === organizer.nativeSessionId
-    && team.messages.some(message => message.text.startsWith(`[Message from Reviewer ${tag}`))));
-  check('standing: the reviewer answered its organizer by message', !!organizerInbox);
+  const answered = await until('the reviewer\'s answer to its organizer', () => received(organizer.address, `[Message from Reviewer ${tag}`)).catch(() => false);
+  check('standing: the reviewer answered its organizer by message', answered);
   if (run('standing')) {
     await say(reviewer.address, 'From now on, also give the number of words of every file you review.');
     const mission = await until('the reviewer to record its mission', () => {
@@ -148,9 +149,8 @@ if (run('shared') && reviewer) {
   // A second organizer asks the same reviewer: it serves both teams, and each answer reaches the one who asked.
   const second = await organizerBot(`Planner ${tag}`);
   await say(second.address, `Ask the bot ${reviewer.name} to review review-${tag}.txt and tell me its answer.`);
-  const answered = await until('the reviewer\'s answer to the second organizer', () => teams().find(team => team.inbox && team.members[0]?.nativeSessionId === second.nativeSessionId
-    && team.messages.some(message => message.text.startsWith(`[Message from ${reviewer.name}`))));
-  check('shared: the reviewer answered a second organizer', !!answered);
+  const answered = await until('the reviewer\'s answer to the second organizer', () => received(second.address, `[Message from ${reviewer.name}`)).catch(() => false);
+  check('shared: the reviewer answered a second organizer', answered);
 }
 
 const failed = results.filter(item => !item.ok);

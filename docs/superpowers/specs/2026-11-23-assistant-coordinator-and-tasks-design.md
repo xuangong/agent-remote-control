@@ -470,21 +470,44 @@ L2 and L3 detail (tool calls, frames, operation states) stay one step away, as O
 
 ## 10. What happens to Side, Team, Call For Support and TPM
 
-| Today | As tasks | Removed when done |
+The person keeps four ideas: an **assistant**, its **tasks**, **messages** between assistants, and **rooms** (group chats). Every
+older way of making sessions work together becomes one of these, so there are no separate modes to learn and no separate panels.
+Ask stays beside them as the person's way to look without touching (10.2). Decided by the owner on 2026-11-23.
+
+### 10.1 Each feature in the model
+
+| Today | In the model | Removed when done |
 |---|---|---|
-| **Side** | A task the person opens from the conversation (`/side`). Its brief is the person's first message, no done-when, workspace `same`. Existing Side relations are listed as tasks. | Side-specific creation and relation kinds, after migration of the relations |
-| **Team** | The Leader is the main session in coordinator mode. Members are workers placed on chosen Hosts and directories, reused across tasks with `continue_task`. `send_team_message` becomes `message_task`; member reports become `report_task`; `read_team` becomes `task_status`; Team resources become task resources. | `teams.ts` queue and inbox, `team.ts` delivery, `team_message`, the Team panel (folded into tasks) |
-| **Call For Support** | `call_for_support` creates a task whose requester is the calling session and whose worker is the coordinator. The coordinator creates subtasks for supporters. Profiles become worker placement policies (providers, models, workspaces, approval of placements, budgets). `report_support` becomes `report_task`, framed as advice. | Support groups' own call queue, rosters state and report framing, after profiles are migrated |
-| **TPM** | A task owned by the source assistant, whose worker is the TPM session with the todo, confirmation and heartbeat companions (`session-companions.md`). Its requests to the source become `ask_owner` and task events. | `tpm_intent`, TPM's own delivery path |
-| **Ask** | Unchanged: a read-only side discussion, not work. | — |
+| **Call For Support** | An **expert assistant**: a profile becomes an assistant with its own provider, model, Host and working directory, for example "Reviewer · Opus · Mac mini". A session that needs support messages it (`message_assistant`); the expert splits the work into its own tasks and answers with a message, attaching a patch or a log where needed. Follow-ups reach the same assistant, which keeps its context. Read-only and worktree work are task workspaces. A profile's budget becomes the assistant's `limits`. | Profiles, enablement, support groups, calls, rosters and their approval, ledgers, report framing, `call_for_support`, `support_status`, `read_support_report`, `download_support_resource`, the support settings and Team panel views |
+| **Team** | The Leader is a coordinator; members are its tasks' workers, reused across tasks with `continue_task`. A member the person wants to keep and talk to becomes an assistant of its own. `send_team_message` becomes `message_task`; member reports become `report_task`; `read_team` becomes `task_status`; Team resources become task attachments. | `teams.ts` queue and inbox, `team.ts` delivery, `team_message`, the Team panel and launcher |
+| **Side** | A task the person starts from the conversation (`/side`): its brief is the person's first message, no done-when, workspace `same`. Existing Side relations are listed as tasks. | Side-specific creation and relation kinds, after the relations are migrated |
+| **TPM** | A **project manager assistant**: it and the assistant it watches talk by messages; its heartbeat is a scheduled reminder to itself, its todo and confirmations are its own state. Comes last, after its companions ([session companions](../../session-companions.md)) are mapped. | `tpm_intent`, TPM's own delivery path and launcher |
+| **Rooms** (this design, 6) | A group chat in Bot mode's list, instead of a row of the Teams panel (O71). | The Teams panel |
 
-Each migration keeps the product behaviour the user sees and is verified by that feature's existing e2e flows before
-the old path is deleted.
+What is dropped rather than carried over: the person's approval of a support roster (the person sees the expert's tasks in its
+details and can stop them), and the structured findings of a support report (a message carries the answer as text and attachments).
 
-**Compatibility.** Controllers advertise a `tasks` capability on the uplink. The Relay keeps the old Team, Support and
-TPM paths for Controllers without it until every Host of the account is updated, as `teamInbox` and `control` were
-negotiated. Deploy the Relay first. Protocol fixtures, replay vectors and compatibility metadata change with each step,
-per the repository rules.
+### 10.2 What stays outside: Ask and quotes
+
+**Ask** stays. It opens a separate read-only session that reads any session's record (`read_source_session`) and answers the
+person: the main session, a task's worker, a native subagent or another assistant. Neither path of the model replaces it:
+
+- Asking the main session to look at a worker puts the questions and answers into the main session's context, against the rule
+  that only summaries cross into it, and gives a second-hand answer.
+- Writing in a task's thread makes the question an input of the worker: it waits for the worker's turn to end, stays in its
+  context and may change what it does.
+
+A task thread is for directing work; Ask is for understanding it without disturbing anyone. Ask may reuse task creation, placement
+and cleanup underneath (a read-only task the person starts, whose brief is the question), while its view stays its own. The main
+session's own way to look is `read_task` (7.1).
+
+**Quoting messages** stays a person's action between conversations, not coordination between assistants.
+
+### 10.3 Order
+
+Side, then Call For Support, then Team, then TPM. Each migration keeps what the person sees working, passes that feature's existing
+e2e flows on the new path, migrates its records (profiles to expert assistants, Side relations to tasks), and then deletes the old
+path in the same step. The plan: [fold features into assistants](../plans/2026-11-23-fold-into-assistants-plan.md).
 
 ## 11. Tests
 
@@ -543,7 +566,7 @@ result) or `room_pass`; the person reads, writes and ends a room in the Teams pa
 | T2 | Tasks on one Host: `create_task`, `task_brief`, `report_task`, `task_event` with coalescing, task cards, task threads, the details list; Claude Code first | E2E flow (1) |
 | T3 | Coordinator mode for Codex and Copilot; `task_input` modes; `needs_input` (both kinds); `cancel_task`; stalls; workspaces `read_only`, `worktree`, `remote` | E2E flows (2), (3), (5); local/native checks |
 | T4 | `assistant_message`, `list_assistants`, peers, hop limits, folded lines | E2E flow (4) |
-| T5 | Side, Team, Call For Support and TPM on tasks; their old queues, tools and panels deleted | Each feature's existing e2e flows pass on the task path; old paths removed |
+| T5 | Side, Team, Call For Support and TPM folded into assistants, tasks and messages (10); their old queues, tools and panels deleted | Each feature's existing e2e flows pass on the task path; old paths removed |
 | T6 | Rooms: a turn scheduler in relay-core asking members with `room_turn`, the room conversation as the members' attributed messages | A room of two assistants and a person reaches a result within its deadline |
 
 T2 to T4 change the website, the Relay and the Controller; each is verified in a local instance (`pnpm local up`) and
@@ -555,9 +578,9 @@ ends with `pnpm verify`, as the repository requires.
 |---|---|---|
 | Q1 | Is a coordinator's main session read-only? Read-only keeps it light and makes delegation necessary; full lets the person say "just fix this line". | Full by default, read-only as a per-assistant setting where the provider supports it |
 | Q2 | May an assistant message steer another assistant's running turn? | No (5.4 rule 1) |
-| Q3 | May an assistant create a task whose worker is another assistant, instead of messaging it? | Not in this design; revisit after T4 |
+| Q3 | May an assistant create a task whose worker is another assistant, instead of messaging it? | No: it messages the other assistant, which starts its own tasks (10.1, Call For Support) |
 | Q4 | Do new assistants start in coordinator mode? | Yes where the provider takes tools; existing bots stay plain until switched |
-| Q5 | When are the Team, Support and TPM panels removed? | At the end of T5, after one release with both views reading the same task records |
+| Q5 | When are the Team, Support and TPM panels removed? | In each feature's migration step, once its e2e flows pass on the new path; no release with both views, since the owner updates every Controller (10.3) |
 
 ## 13. Out of scope
 

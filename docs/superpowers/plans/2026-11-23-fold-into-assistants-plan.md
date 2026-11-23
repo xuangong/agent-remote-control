@@ -5,8 +5,9 @@ mission, messages between bots, chains for the audit, work items for progress; S
 
 ## Before
 
-`feat/assistant-tasks` with `feat/assistant-tasks-deployable` is merged and deployed (Relay first), so tasks, messages between
-assistants and rooms run in production. Each step below is one branch that ends with `pnpm verify`, the e2e flows on Chromium and
+No intermediate release (owner, 2026-11-23): `feat/assistant-tasks` and `feat/assistant-tasks-deployable` are not deployed on
+their own, since step 2 replaces their mode switch and tools. Steps 1 and 2 build on them as stacked branches, each its own PR, and
+the first deployment (Relay first, then Controllers) follows step 2. Each step below is one branch that ends with `pnpm verify`, the e2e flows on Chromium and
 WebKit, and a check in `pnpm local`; protocol fixtures, schemas and compatibility metadata change with the step that changes them.
 No release keeps an old path beside its replacement: the owner updates every Controller, so the Relay requires the new capability
 once a step ships (Relay first, then Controllers).

@@ -481,7 +481,7 @@ Ask stays beside them as the person's way to look without touching (10.2). Decid
 | **Call For Support** | **Bots with responsibilities.** The person decides which bots exist and what each is for, by its name and label ("Reviewer", "Tester on the Linux box"); `list_assistants` shows both. A bot that needs a review, another model or another machine messages the bot whose responsibility fits, and that bot does the work its own way, with its own tasks. There is no profile, mandate or roster: the coordination is the bots' responsibilities and the messages between them, as in the reference model (2). | Profiles, enablement, support groups, calls, rosters and their approval, ledgers, report framing, `call_for_support`, `support_status`, `read_support_report`, `download_support_resource`, the support settings and Team panel views |
 | **Team** | The Leader is a coordinator; members are its tasks' workers, reused across tasks with `continue_task`. A member the person wants to keep and talk to becomes an assistant of its own. `send_team_message` becomes `message_task`; member reports become `report_task`; `read_team` becomes `task_status`; Team resources become task attachments. | `teams.ts` queue and inbox, `team.ts` delivery, `team_message`, the Team panel and launcher |
 | **Side** | A task the person starts from the conversation (`/side`): its brief is the person's first message, no done-when, workspace `same`. Existing Side relations are listed as tasks. | Side-specific creation and relation kinds, after the relations are migrated |
-| **TPM** | A **project manager assistant** with a **timer** (10.4): it and the assistant it watches talk by messages; at each tick it reads that assistant's conversation and decides whether to act; its todo and confirmations are the generic companions ([session companions](../../session-companions.md)) any assistant may use. | `tpm_intent`, TPM's own delivery path and launcher |
+| **TPM** | **A bot that manages progress** (10.4): it owns a piece of work, keeps its plan, todo and acceptance, gets the work done by messaging the bots responsible and by its own tasks, and updates the progress as their replies, task results and the person's words arrive. A timer is only its fallback heartbeat (10.5). |
 | **Rooms** (this design, 6) | A group chat in Bot mode's list, instead of a row of the Teams panel (O71). | The Teams panel |
 
 What is dropped rather than carried over: profiles and their migration (the person sets up the bots they want), the person's
@@ -514,22 +514,33 @@ session's own way to look is `read_task` (7.1).
 
 ### 10.3 Order
 
-All four fold, decided by the owner. Side, then Call For Support, then Team, then timers on assistants (10.4) with TPM. Each migration keeps what the person sees working, passes that feature's existing
+All four fold, decided by the owner. Side, then Call For Support, then Team, then progress (10.4) with its timer (10.5) and TPM. Each migration keeps what the person sees working, passes that feature's existing
 e2e flows on the new path, migrates its records (Side relations to tasks, Teams to tasks, TPMs to project manager bots; support profiles are not migrated), and then deletes the old
 path in the same step. The plan: [fold features into assistants](../plans/2026-11-23-fold-into-assistants-plan.md).
 
-### 10.4 Timers
+### 10.4 Progress
 
-Any assistant may carry timers, which the person or the assistant sets: a name, an interval (or a time), an optional end, and
-what it is for. When one is due, the Relay delivers `[Timer "<name>" · due]` with that purpose to the assistant's main session
-the next time it is idle, like any other framed input; ticks missed while it was busy or offline coalesce into one. An assistant
-that may read another assistant's conversation (its peers allow it) does so at the tick, as Ask reads a session. A tick whose turn
-changes nothing is folded as a background check, as TPM's quiet reviews are today, and sends no reminder. A timer that watches
-another bot is skipped without waking the model when that bot's conversation has nothing new, and may fire early when it has, so
-watching costs a turn only when there is something to look at and reacts as quickly as TPM's event-driven reviews.
+Managing progress is a capability any bot may have, as tasks are; a TPM is a bot whose responsibility is that. A bot with it keeps
+**work items**: what was agreed, a plan with acceptance, a todo, a phase (clarifying, agreed, in progress, verifying, waiting for
+the person, done), a one-line summary and the next action. Its tools are today's TPM tools without the TPM around them
+(`update_work`, `complete_work`, the todo and confirmation companions of [session companions](../../session-companions.md)).
 
-This replaces TPM's heartbeat and its event-driven reviews: watching becomes "every N minutes, read and decide". Timers come
-right after the folding steps and before TPM moves (plan, step 4).
+Progress moves with what happens, never on a schedule:
+
+- a reply from a bot it asked, or a result of one of its tasks, arrives as input and its turn updates the work item;
+- the person's words, and their Agree or Needs changes on a confirmation, do the same;
+- the bot doing the work may report progress to it by message without being asked.
+
+The person sees each work item where the bot's tasks are: in its details and as its chat row's business line, with the plan,
+acceptance and todo one step away. A turn that changes nothing visible is folded as a background check and sends no reminder.
+
+### 10.5 Timers
+
+A timer is a fallback, not the driver: it wakes a bot when nothing has happened for a while, so work that went quiet is looked at.
+The person or the bot sets one (a name, an interval, an optional end); when due and the bot is idle, the Relay delivers
+`[Timer "<name>" · due]`, and missed ticks coalesce into one. Any input to the bot pushes its next tick back, so a timer never fires
+while progress is flowing. A bot managing progress has one by default (five minutes, as TPM's heartbeat). Reading another bot's
+conversation, where its peers allow it, is how a woken bot looks at quiet work.
 
 ## 11. Tests
 

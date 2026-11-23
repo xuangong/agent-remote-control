@@ -65,20 +65,21 @@ messages run in production.
   its launcher. E7's Team case is rewritten for a coordinator with tasks.
 - Gate: flows 1 to 5; E7 rewritten; a room in Bot mode reaches a result.
 
-## Step 4: timers, then TPM
+## Step 4: progress, then TPM
 
-- [ ] **Timers on assistants** (design 10.4): set by the person or the assistant (`set_timer`, `clear_timer`), stored with the
-  assistant in the Relay, delivered as `[Timer "<name>" · due]` when the main session is idle, missed ticks coalesced. A timer that
-  watches another bot is skipped, without waking the model, when that bot's conversation has nothing new, and may fire early when it
-  has; ticks that change nothing are folded as background checks. The heartbeat of [session companions](../../session-companions.md) is removed in favour of it.
-- [ ] Reading a peer's conversation at a tick, allowed by the watched assistant's peers.
-- [ ] Todo and confirmation become companions any assistant may switch on, not TPM's own.
-- [ ] A TPM becomes a project manager assistant: a timer (five minutes by default, as the heartbeat), messages with the assistant
-  it watches, its todo and confirmations; `complete_work` becomes ending its work and clearing the timer.
-- [ ] Migrate existing TPM sessions to project manager assistants.
-- [ ] Delete `tpm_intent`, TPM's delivery path and its launcher.
-- Gate: e2e flows written first on the new path: a timer tick reads the watched assistant and messages it; a quiet tick folds and
-  sends no reminder; a confirmation waits for the person's Agree; ending the work clears the timer.
+- [ ] **Progress as a bot capability** (design 10.4): work items with plan, acceptance, todo, phase, summary and next action;
+  `update_work`, `complete_work` and the todo and confirmation companions offered to any bot that has it, not only to a TPM.
+- [ ] Progress moves with inputs: replies from the bots it asked, its task results, the person's words and decisions. Turns that
+  change nothing visible fold as background checks.
+- [ ] The person sees work items in the bot's details and its chat row's business line; plan, acceptance and todo one step away.
+- [ ] **A fallback timer** (design 10.5): `set_timer`, `clear_timer`; due only after a quiet interval, pushed back by any input,
+  missed ticks coalesced; five minutes by default for a bot managing progress. It replaces the heartbeat of session companions.
+- [ ] A TPM becomes a bot managing progress: its work items, todo and confirmations carry over; the main session it coordinated is
+  the bot it messages.
+- [ ] Delete `tpm_intent`, TPM's own delivery path, workspace and launcher.
+- Gate: e2e flows written first: a progress bot asks a working bot, its reply updates the work item the person sees; a
+  confirmation waits for Agree; with no input for the interval the timer wakes the bot once, and an input before then pushes it
+  back; `complete_work` ends the item.
 
 ## Rules for every step
 

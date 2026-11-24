@@ -54,6 +54,16 @@ The [second record](../reviews/2026-11-25-old-ways-with-bots-after-fixes.md) lef
 - **N-1: a side's cost.** The code between the records adds under 1k tokens to a side's start (about 550 characters of base instructions and 2k of tool text; the tool count is unchanged), so the start is not the cause. The totals step by about one cached-context round (56k, 81k, 108k-112k), so the side made more model calls in its turn. The one change on a side's path is that its message to its chief now returns `held`, which the tool text describes as waiting for the receiver; the reason now says nothing answers it and not to resend or wait. This is inferred from the code and the token steps, not measured; the next record counts model calls per side.
 - **9d widened** to every kind of tool action (see 9d).
 
+## After the third record (2026-11-25)
+
+The [third record](../reviews/2026-11-25-old-ways-with-bots-third.md) ranked what could still improve; three items are done here, one commit each:
+
+- **N-1, N-4: a side answers by its final text.** The Host sends the final text of a temporary bot's turn as `side_final`; the Relay records it as the result of a `/side` bot (once, kept to the result limit of 4000 characters; any other bot's call is ignored) and the card shows it, so the card equals the side's page and no file is needed to hold a long answer. The side's brief and worker instructions say to answer in the reply, message no one and write no file it was not asked for (the seat carries `side`). A side's `message` still returns `held`, but nothing tells it to send one. Bring back is unchanged (it quotes the card). Expected: two fewer model calls per side.
+- **T-2: an assignment notice carries the item.** When the board assigns an item to another bot, the notice reads `[Item 4 "title" changed · assigned to you · brief: ...]` with the item number and the first 500 characters of its brief on one line. `create_bot` with an item already names the item and the brief in its first message.
+- **C-1, N-3: base instructions v9.** One generic line: "Copying a neighbour's style is a guess too: if a bot's mission covers it, ask that bot first." and "Do not start work no one asked for."; the redundant "Say how you now understand your work." is dropped. No special case for help.
+
+Not done here: N-2/T-1 (routing narration as an answer), N-6 (reading persisted approvals that carry `kind`), S-4 and the roster preview of a finished team.
+
 ## Checks
 
 Affected tests per sub-step; then Side and Call For Support simulated again with real bots and recorded beside the first record; then

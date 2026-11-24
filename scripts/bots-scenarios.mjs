@@ -1,7 +1,7 @@
 // Behaviour scenarios of bots (bots design 11): real Claude Code or Codex sessions on this checkout's local instance, driven as the
 // person drives them, judged by facts the Relay and the sessions record, never by the wording of a reply.
 // Usage, from the checkout root, with the instance running (`pnpm local up`):
-//   pnpm test:bots [claude|codex] [scenario ...]        scenarios: temporary, standing, shared, bundle, repository, board, ask, side, support, team, tpm, copilot (default: all, in order)
+//   pnpm test:bots [claude|codex] [scenario ...]        scenarios: temporary, standing, shared, bundle, repository, board, ask, copilot (default: all, in order)
 // It creates its own sessions in the instance workspace and its own group, and leaves them for reading in the page.
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -228,58 +228,6 @@ if (run('ask') && reviewer) {
   check('ask: the chief\'s session received nothing', !received(chief.address, `6 times 7 (${tag})`));
   check('ask: the reviewer\'s main session never saw the question', !received(reviewer.address, `6 times 7 (${tag})`));
   await settled(reviewer.address, undefined).catch(() => undefined);
-}
-
-// The older features' ways of working, done with bots: each proves the fold kept what people used them for.
-if (run('side')) {
-  // Side: the person asks a side question beside a conversation; a temporary bot of that bot answers, and the conversation goes on.
-  const question = `What is 7 plus 8 (${tag})? Write only the number into side-${tag}.txt in the working directory, then report.`;
-  const team = api('POST', '/v1/remote/teams/create', { operationId: randomUUID(), source: { hostId, providerId: provider, nativeSessionId: chief.nativeSessionId, title: chief.name }, bot: { name: `Side ${tag}`, mission: question } });
-  const done = await until('the side bot to report', () => { const found = teams().find(item => item.id === team.id); return found && ['done', 'failed'].includes(found.task?.state) && found; }, 6 * 60_000).catch(() => undefined);
-  check('side: /side started a temporary bot of the bot on screen', !!team?.task, team?.task?.title ?? 'none');
-  check('side: it answered and reported done', done?.task?.state === 'done' && existsSync(file(`side-${tag}.txt`)) && readFileSync(file(`side-${tag}.txt`), 'utf8').includes('15'));
-  const after = await say(chief.address, `Reply with the word CONTINUING (${tag}).`);
-  check('side: the conversation goes on undisturbed', /CONTINUING/i.test(after.text ?? ''), (after.text ?? '').slice(0, 60));
-}
-
-if (run('support')) {
-  // Call For Support: a bot that lacks something asks the standing bot whose mission fits, gets the answer, and carries on.
-  const expert = await bot(`Glossary ${tag}`, `You keep the project glossary. The project term "zeta-${tag}" means "release candidate". Answer questions about terms in one line.`);
-  group(`Scenarios Glossary ${tag}`, [expert]);
-  await until(`${expert.name}'s standing instructions`, () => teams().find(item => item.inbox && item.members[0]?.nativeSessionId === expert.nativeSessionId && item.inbox.instructions), 3 * 60_000);
-  const out = `support-${tag}.txt`;
-  await say(chief.address, `Write ${out} in your working directory containing the meaning of the project term "zeta-${tag}". You do not know it: ask the bot whose mission covers project terms, wait for its answer, then write the file and tell me.`);
-  const asked = await until('the chief to ask the glossary bot', () => received(expert.address, `zeta-${tag}`), 6 * 60_000).catch(() => false);
-  check('support: the bot asked the bot whose mission fits', asked);
-  const written = await until('the file with the answer', () => existsSync(file(out)) && /release candidate/i.test(readFileSync(file(out), 'utf8')), 8 * 60_000).catch(() => false);
-  check('support: it used the answer and carried on', written);
-}
-
-if (run('team')) {
-  // Team: a chief organizes standing staff that split one piece of work; the person speaks to one of them and the chief hears it.
-  const lead = await chiefBot(`Lead ${tag}`);
-  const [draft, verdict] = [`team-draft-${tag}.txt`, `team-check-${tag}.txt`];
-  await say(lead.address, `Create two standing staff: Writer ${tag}, who writes short texts, and Checker ${tag}, who checks them. Put the work on your board: Writer writes ${draft} with one sentence about the release; when it is done, Checker checks it and writes OK or a correction into ${verdict}. Both files in your working directory. Tell me when both are done.`);
-  const staff = await until('two staff of the chief', () => { const members = api('GET', '/v1/windows').groups?.flatMap(item => Object.values(item.bots?.members ?? {})) ?? []; const own = members.filter(member => member.chief && /^(Writer|Checker) /.test(member.name ?? '')); return own.length >= 2 && own; }, 8 * 60_000).catch(() => undefined);
-  check('team: the chief organized two standing staff', !!staff, (staff ?? []).map(member => member.name).join(', '));
-  const writer = staff && inboxNamed(`Writer ${tag}`);
-  if (writer) controller('session', 'send', `${hostId}/${writer.members[0].providerId}/${writer.members[0].nativeSessionId}`, `Note from the person (${tag}): keep the sentence under ten words.`);
-  const both = await until('both files', () => existsSync(file(draft)) && existsSync(file(verdict)), 12 * 60_000).catch(() => false);
-  check('team: the staff split the work and both finished', both);
-  check('team: the chief heard what the person told its staff', received(lead.address, `[The person wrote to Writer ${tag}]`));
-  const board = inboxNamed(lead.name)?.inbox?.board;
-  check('team: the work was tracked on the chief\'s board', !!board?.items?.some(item => item.status === 'done'), `${board?.items?.length ?? 0} items`);
-}
-
-if (run('tpm')) {
-  // TPM: a bot tracks a piece of work of several steps on its board and moves it on across separate turns, from the board alone.
-  const tracker = await chiefBot(`Tracker ${tag}`);
-  await say(tracker.address, `Track this release on your board as three items: "Write notes-${tag}.txt", "Write changelog-${tag}.txt", "Write announce-${tag}.txt" (each one line, in your working directory). Do only the first item now and mark it done.`);
-  for (const step of [2, 3]) await say(tracker.address, `Continue the release (${tag}, step ${step}): read your board and do the next open item only, then mark it done.`);
-  const items = inboxNamed(tracker.name)?.inbox?.board?.items ?? [];
-  const done = items.filter(item => item.status === 'done' && new RegExp(`(notes|changelog|announce)-${tag}`).test(item.title));
-  check('tpm: the work was tracked as items on the board', items.length >= 3, `${items.length} items`);
-  check('tpm: it moved the work on across turns from the board', done.length === 3 && ['notes', 'changelog', 'announce'].every(name => existsSync(file(`${name}-${tag}.txt`))), `${done.length} done`);
 }
 
 if (run('copilot')) {

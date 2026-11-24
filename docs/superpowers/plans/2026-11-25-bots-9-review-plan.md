@@ -64,6 +64,12 @@ The [third record](../reviews/2026-11-25-old-ways-with-bots-third.md) ranked wha
 
 - **T-1: final-text replies only for toolless providers (2026-11-25, the owner may revisit).** A bot that has the bot tools answers with `message`; its final text is never routed to a sender (the Controller asks `takesTools` of its provider before it sends `bot_reply`), which removes the loop where a turn's closing monologue was routed as `final answer to <message>`. The answer session of a mention and a side's result keep using the final text. Base instructions v10: "Answer a message with message and reply_to set to its id; your final text goes to no one."
 
+## After the fourth record (2026-11-25)
+
+- **N-7: an acknowledgement never holds a seat.** Cause: a delivery that carried an acknowledgement (9c) settled into a receipt that still had the `ack` field; the stored-team validation (`validSavedTeam`) does not allow it, so the Relay refused the settle with 409 and every later change to that team. The claimed acknowledgement stayed `dispatching` or `accepted` without `started`, the seat stayed `busy`, queued input behind it never moved, and `session release` answered `false`, across a Controller restart, because the state is the Relay's. The unit tests of 9c never saw it because their store did not validate on commit. Fix: a receipt drops `ack` (as it drops `chain`); a queued acknowledgement is no input on its way to a task worker, so it no longer hides that worker's ended turn. Tests: the real host broker settles a claimed acknowledgement and still validates the team; a held acknowledgement leaves a worker's ended turn counted.
+- **N-9: `create_bot` with an item gives the bot the item's brief in its first input** (standing and temporary alike).
+- **N-8: an assignee may name the item it was assigned on its chief's board in a `message`**; it only tags the exchange and never writes that board. The `message` text declares its 300-character limit in its schema as well as in the tool description.
+
 Not done here: N-6 (reading persisted approvals that carry `kind`), S-4 and the roster preview of a finished team.
 
 ## Checks

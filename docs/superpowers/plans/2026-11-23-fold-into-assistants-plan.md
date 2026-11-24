@@ -151,6 +151,12 @@ models run with step 5's scenarios.
 
 - [x] The audit view (design 7): chains live, stop a chain or one bot's part of it, pause, retire; thresholds that notify.
   Plan and what was built: [step 4](2026-11-23-bots-4-audit-plan.md).
+- [x] A threshold passed is never lost to a page: when no push can go out (no device subscribed, or a page showing the session) the
+  page still learns it. It reads `GET v1/remote/chains` at the Team roster's idle refresh (30 s, and when the feed reopens), shows the
+  needs-you mark on the Chats row of each passed chain's first bot and a count on Settings' Assistants group, and both stay until the
+  audit has shown that chain with what it passed (`kernel/chain-alerts.ts`; seen chains are kept in `localStorage` per account
+  address and follow other pages of the browser through the `storage` event). Push is unchanged. E15b's second flow keeps a page on
+  Settings while a chain passes and follows the count, the mark and their clearing in Chromium and WebKit.
 - [x] The earlier refusals are removed: the reply hop limit is gone and depth is recorded. The running-task limit is the span of
   a chief (12), which stays; there was no creation limit beyond it.
 
@@ -180,7 +186,16 @@ temporary bot, and counting tool calls per chief turn.
 
 - [x] Design 10: Chats grouped by chief with status and work item lines; folded lines between bots; details with bots, work
   items and the mission; rooms in Bot mode; Keep.
-- [ ] Grouped reminders by chief: reminders stay per bot; a bot's row names its chief.
+- [x] Grouped reminders by chief: a staff bot's needs-you push uses its chief's tag, so one notification per chief replaces the
+  previous; a bot whose chief is the person reminds on its own.
+
+As built (grouped reminders): the Relay's push carries the chief's name in `name`, the staff bot's in the new optional `member`
+(`PushReminder` and its schema), the chief's tag and the staff bot's own address; the worker titles it "Chief: Reviewer needs
+you" / "主管：评审 需要你" (the chief's name, then the member's, each in the device's language) and a click opens the staff bot's
+chat. Only needs-you pushes group: a finished turn, a bot whose chief is the person, and a chief that is no assistant of the account
+remind on their own tag. In the page a chief's row in Chats shows the needs-you mark (`data-needs-you`) while any bot it is chief of
+needs the person (`staffNeedsYou` in the roster projection). The decision (`decidePush`) is unchanged: grouping is how a reminder
+that is sent is named and tagged.
 
 Built (d6ff44e4): a standing bot another bot created joins its chief's group, so Chats groups bots by chief already; its
 row says "by Chief", and a quiet bot shows its latest open work item and phase instead of its sentence. Rooms are listed above the

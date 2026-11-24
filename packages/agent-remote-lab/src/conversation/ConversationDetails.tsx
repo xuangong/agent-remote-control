@@ -11,6 +11,7 @@ import type { AssistantDetailsHost } from './assistant/details-host.js';
 import type { useProcessMode } from './useProcessMode.js';
 import type { MissionChoice } from './assistant/MissionEditor.js';
 import type { MemoryChoice } from './assistant/MemoryList.js';
+import type { BoardChoice } from './assistant/board-model.js';
 import type { LabWorkbenchActions, SessionWorkbenchProps } from './session-workbench-props.js';
 
 /** The details' code stays out of the App chunk; a conversation that can show them loads it once it is on screen, before a click. */
@@ -33,7 +34,11 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
   const [providerId, ...rest] = nativeSession?.split('/') ?? [];
   const detailsShown = !!host?.open && visible && (host.surface === 'sheet' || !!host.slot);
   const tasks = detailsShown && directory && providerId && rest.length ? directory.owned({ providerId, nativeSessionId: rest.join('/') }) : [];
-  const board = detailsShown && directory?.board && providerId && rest.length ? directory.board({ providerId, nativeSessionId: rest.join('/') }) : [];
+  const boardOf = detailsShown && botId ? directory?.boardOf?.(botId) : undefined;
+  const board: BoardChoice | undefined = boardOf && directory && (boardOf.items.length || boardOf.plan || directory.writeBoard) && botId ? {
+    board: boardOf, name: id => directory.botName?.(id) ?? id, choices: directory.assignees?.(botId) ?? [],
+    staffBoard: id => directory.boardOf?.(id), canOpen: id => directory.canOpenBot?.(id) ?? false, open: id => directory.openBot?.(id),
+    ...(directory.writeBoard ? { save: edit => directory.writeBoard!(botId, edit) } : {}) } : undefined;
   const answering = detailsShown && botId && directory?.answering ? directory.answering(botId) : [];
   const bots = detailsShown && botId && directory?.staff ? directory.staff(botId) : [];
   const chiefs = detailsShown && botId ? directory?.chief?.(botId) : undefined;
@@ -46,7 +51,7 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
     ...(host?.where ? { where: host.where } : {}), ...(host?.setPicture ? { setPicture: host.setPicture } : {}),
     ...(host?.rename ? { rename: host.rename } : {}),
     process, ...(mission ? { mission } : {}), ...(memory ? { memory } : {}),
-    ...(chiefs && botId && directory?.setChief ? { chief: { ...chiefs, move: (chief: string | null) => directory.setChief!(botId, chief) } } : {}), ...(tasks.length ? { tasks } : {}), ...(board.length ? { board } : {}), ...(answering.length ? { answering } : {}), ...(bots.length ? { bots } : {}),
+    ...(chiefs && botId && directory?.setChief ? { chief: { ...chiefs, move: (chief: string | null) => directory.setChief!(botId, chief) } } : {}), ...(tasks.length ? { tasks } : {}), ...(board ? { board } : {}), ...(answering.length ? { answering } : {}), ...(bots.length ? { bots } : {}),
     sessions: { ...details?.sessions, ...(lastTurn ? { time: lastTurn } : {}), ...(state?.agent?.cwd ? { directory: state.agent.cwd } : {}), ...(reportedSession ? { sessionId: reportedSession } : {}),
       subagents: reportedSession ? childrenFor?.(reportedSession) ?? [] : [], ...(onOpenChildSession ? { openSubagent: onOpenChildSession } : {}),
       tools: <>{details?.sessions?.tools}{workspaceLink}</> },

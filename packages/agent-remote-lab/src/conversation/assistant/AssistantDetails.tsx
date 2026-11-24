@@ -1,6 +1,6 @@
 import { useId, type ReactNode } from 'react';
 import { PROCESS_MODES, type ProcessMode, type SessionFile } from '@orchardworks/agent-client';
-import type { BoardItem, BotPicture, TaskView } from '@orchardworks/agent-remote-protocol';
+import type { BotPicture, TaskView } from '@orchardworks/agent-remote-protocol';
 import type { AvatarMood } from '@orchardworks/agent-client-web/theme';
 import { SegmentedControl, Sheet } from '@orchardworks/agent-client-web/primitives';
 import { useTranslate, type AnswerSession } from '@orchardworks/agent-client-web/react';
@@ -13,6 +13,7 @@ import { SessionsList, type AssistantSessions } from './SessionsList.js';
 import { FilesList } from './FilesList.js';
 import { TasksList } from './TasksList.js';
 import { BoardList } from './BoardList.js';
+import type { BoardChoice } from './board-model.js';
 import { AnsweringList } from './AnsweringList.js';
 import { MissionEditor, type MissionChoice } from './MissionEditor.js';
 import { MemoryList, type MemoryChoice } from './MemoryList.js';
@@ -32,8 +33,8 @@ export interface AssistantRef {
   readonly tasks?: readonly TaskView[];
   /** This bot's standing staff, the bots it created. */
   readonly bots?: readonly { botId: string; name: string }[];
-  /** The items of a standing bot's board, which it keeps itself. */
-  readonly board?: readonly BoardItem[];
+  /** A standing bot's board: its plan note and items, which the person may edit. */
+  readonly board?: BoardChoice;
   /** The sessions this standing bot has open to answer the person's mentions from other conversations. */
   readonly answering?: readonly AnswerSession[];
   /** This assistant's own process mode; the device's default, notifications and letters are in Settings > Assistants. */
@@ -64,6 +65,7 @@ export function AssistantDetails({ assistant, surface, onClose }: { assistant: A
     <AssistantCard id={assistant.id} {...(assistant.picture ? { picture: assistant.picture } : {})} name={assistant.name} {...(assistant.label ? { label: assistant.label } : {})}
       {...(assistant.role ? { role: assistant.role } : {})} {...(assistant.mood ? { mood: assistant.mood } : {})} {...(assistant.action ? { action: assistant.action } : {})}
       {...(assistant.actions ? { actions: assistant.actions } : {})} {...(assistant.setPicture ? { setPicture: assistant.setPicture } : {})} {...(assistant.rename ? { rename: assistant.rename } : {})} />
+    {assistant.board ? section('work', t('details.work'), <BoardList choice={assistant.board} />) : null}
     {assistant.process?.chooseForAssistant ? section('process', t('process.heading'), <div className="lab-assistant-process">
       <div className="lab-process-choice"><span>{t('process.assistant')}</span>
         <SegmentedControl<ProcessMode> label={t('process.assistant')} options={options} value={assistant.process.mode} onChange={assistant.process.chooseForAssistant} /></div>
@@ -71,7 +73,6 @@ export function AssistantDetails({ assistant, surface, onClose }: { assistant: A
     {assistant.mission ? section('mission', t('details.mission'), <MissionEditor mission={assistant.mission} />) : null}
     {assistant.memory ? section('memory', t('details.memory'), <MemoryList memory={assistant.memory} />) : null}
     {assistant.chief ? section('chief', t('details.chief'), <ChiefPicker chief={assistant.chief} />) : null}
-    {assistant.board?.length ? section('work', t('details.work'), <BoardList board={assistant.board} />) : null}
     {assistant.answering?.length ? section('answering', t('details.answering'), <AnsweringList sessions={assistant.answering} />) : null}
     {assistant.where ? section('where', t('details.where'), <WhereItWorks where={assistant.where} />) : null}
     {assistant.sessions ? section('sessions', t('details.sessions'), <SessionsList sessions={assistant.sessions} />) : null}

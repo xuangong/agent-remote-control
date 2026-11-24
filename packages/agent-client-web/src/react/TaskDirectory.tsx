@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { BoardItem, TaskView } from '@orchardworks/agent-remote-protocol';
+import type { Board, BoardItem, BoardItemEdit, BoardPlanEdit, BoardWriteResult, TaskView } from '@orchardworks/agent-remote-protocol';
 
 /** One thing the person asked a bot from a conversation (a mention) and what it answered, if it has. */
 export interface AskLine { readonly id: string; readonly botId: string; readonly bot: string; readonly text: string; readonly at: number; readonly answer?: { readonly text: string; readonly at: number } }
@@ -18,6 +18,17 @@ export interface TaskDirectory {
   staff?(botId: string): readonly { botId: string; name: string }[];
   /** The items of a standing bot's board, newest first (bots design 6). */
   board?(bot: { providerId: string; nativeSessionId: string }): readonly BoardItem[];
+  /** A standing bot's whole board, its plan note and items, by the bot's id; what the page shows of it is read only except on the bot's own details. */
+  boardOf?(botId: string): Board | undefined;
+  /** The name of a bot an item names as its assignee: a standing bot, or a temporary bot. */
+  botName?(botId: string): string | undefined;
+  /** The bots the person may assign an item of this bot's board to besides the bot itself: its standing staff and its temporary bots at work. */
+  assignees?(botId: string): readonly { botId: string; name: string }[];
+  /** Whether the session or bot doing an item can be opened from the page, and opening it: a standing bot's conversation, or a temporary bot beside its chief. */
+  canOpenBot?(botId: string): boolean;
+  openBot?(botId: string): void;
+  /** The person edits a standing bot's items and plan note; the Relay tells the bots the edit changes, and the answer says what a stale edit overwrote. */
+  writeBoard?(botId: string, edit: { items?: readonly BoardItemEdit[]; plan?: BoardPlanEdit }): Promise<BoardWriteResult>;
   /** Who manages a standing bot now (undefined: the person) and the standing bots it may be moved to. */
   chief?(botId: string): { current?: { botId: string; name: string }; choices: readonly { botId: string; name: string }[] };
   /** The person moves a standing bot to another chief, or to themselves (null); the Relay tells the bots. */

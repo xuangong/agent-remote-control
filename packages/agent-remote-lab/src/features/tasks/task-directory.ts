@@ -11,8 +11,17 @@ export function taskWorker(tasks: readonly Team[] | undefined, taskId: string): 
 }
 
 /** The tasks and the bots' inboxes, as the Relay lists them. Task cards open a task's worker session the way the page opens any session. */
-export function taskDirectory(tasks: readonly Team[] | undefined, open: (worker: TaskWorker) => void, act: TaskDirectory['act'] = async () => {}, groups: readonly WindowGroup[] = [], setChief?: TaskDirectory['setChief'], ask?: TaskDirectory['ask']): TaskDirectory {
+export function taskDirectory(tasks: readonly Team[] | undefined, open: (worker: TaskWorker) => void, act: TaskDirectory['act'] = async () => {}, groups: readonly WindowGroup[] = [], setChief?: TaskDirectory['setChief'], ask?: TaskDirectory['ask'], writeBoard?: TaskDirectory['writeBoard']): TaskDirectory {
   const standing = () => groups.flatMap(group => Object.values(group.bots?.members ?? {}).flatMap(item => item.botId ? [{ botId: item.botId, name: item.name ?? item.botId, ...(item.chief ? { chief: item.chief } : {}) }] : []));
+  const inbox = (botId: string) => (tasks ?? []).find(team => team.inbox?.botId === botId);
+  const temporary = (botId: string) => (tasks ?? []).find(team => team.task?.botId === botId);
+  /** The session a bot works in that the page can open: a standing bot's main session, or a temporary bot's worker. */
+  const sessionOf = (botId: string): TaskWorker | undefined => {
+    const team = inbox(botId), seat = team?.members[0];
+    if (team && seat?.nativeSessionId) return { hostId: seat.hostId, providerId: seat.providerId, nativeSessionId: seat.nativeSessionId, title: standing().find(bot => bot.botId === botId)?.name ?? seat.name };
+    const task = temporary(botId);
+    return task ? taskWorker(tasks, task.id) : undefined;
+  };
   return {
     canOpen: taskId => !!taskWorker(tasks, taskId),
     open: taskId => { const worker = taskWorker(tasks, taskId); if (worker) open(worker); },
@@ -39,6 +48,18 @@ export function taskDirectory(tasks: readonly Team[] | undefined, open: (worker:
     answering: botId => (tasks ?? []).filter(team => team.ask?.botId === botId && team.status === 'active')
       .map(team => ({ teamId: team.id, conversation: team.ask!.from.name, lastAt: team.ask!.lastAt, count: team.ask!.entries.length }))
       .sort((a, b) => b.lastAt - a.lastAt),
+    boardOf: botId => inbox(botId)?.inbox?.board,
+    botName: botId => standing().find(bot => bot.botId === botId)?.name ?? temporary(botId)?.task?.title,
+    // The bot's standing staff, and its temporary bots at work (the tasks its main session owns).
+    assignees: botId => {
+      const seat = inbox(botId)?.members[0];
+      const working = (tasks ?? []).filter(team => team.task?.botId && team.task.state !== 'done' && team.task.state !== 'failed' && team.task.state !== 'cancelled' && !!seat
+        && team.members[1]?.providerId === seat.providerId && team.members[1].nativeSessionId === seat.nativeSessionId).map(team => ({ botId: team.task!.botId!, name: team.task!.title }));
+      return [...standing().filter(bot => bot.chief === botId).map(({ botId: id, name }) => ({ botId: id, name })), ...working];
+    },
+    canOpenBot: botId => !!sessionOf(botId),
+    openBot: botId => { const worker = sessionOf(botId); if (worker) open(worker); },
+    ...(writeBoard ? { writeBoard } : {}),
     // A standing bot's inbox is bound to its session; its board travels on it.
     board: bot => [...(tasks ?? []).find(team => team.inbox && team.members[0]?.providerId === bot.providerId && team.members[0].nativeSessionId === bot.nativeSessionId)?.inbox?.board?.items ?? []]
       .sort((a: BoardItem, b: BoardItem) => b.updatedAt - a.updatedAt),

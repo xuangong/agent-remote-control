@@ -5,7 +5,6 @@ import type { BoardItem, Team, TeamTask, WindowGroup } from '@orchardworks/agent
 import { TaskDirectoryContext } from '@orchardworks/agent-client-web/react';
 import { render } from '../../test/setup.js';
 import { TasksList } from '../../conversation/assistant/TasksList.js';
-import { BoardList } from '../../conversation/assistant/BoardList.js';
 import { taskDirectory } from './task-directory.js';
 
 function taskTeam(id: string, task: Partial<TeamTask>, worker: { ready?: boolean; owner?: string } = {}): Team {
@@ -54,20 +53,36 @@ describe('the task directory', () => {
     expect(act).toHaveBeenCalledWith('d', 'keep_task');
   });
 
-  it('shows a standing bot\'s board items from its inbox: open ones with their status and latest report first, then the finished', async () => {
-    const item = (key: number, status: BoardItem['status'], updatedAt: number, report?: string, result?: string): BoardItem => ({ key, title: `Item ${key}`, status, assignee: 'self', links: [], version: 1, changedAt: {},
-      updatedBy: 'person', updatedAt, ...(report ? { report } : {}), ...(result ? { result } : {}) });
-    const inbox = { ...taskTeam('i', {}), task: undefined, members: [{ ...taskTeam('i', {}).members[1]!, nativeSessionId: 'scribe' }],
-      inbox: { botId: 'b_' + '3'.repeat(32), board: { next: 4, items: [item(1, 'done', 9, undefined, 'Shipped.'), item(2, 'waiting', 5, 'Needs the build.'), item(3, 'working', 7)] } } } as Team;
-    const directory = taskDirectory([inbox], () => {});
-    expect(directory.board!({ providerId: 'claude', nativeSessionId: 'other' })).toEqual([]);
-    const container = await render(<BoardList board={directory.board!({ providerId: 'claude', nativeSessionId: 'scribe' })} />);
-    const rows = [...container.querySelectorAll('li')];
-    expect(rows.map(row => row.querySelector('.lab-assistant-session-title')!.textContent)).toEqual(['Item 3', 'Item 2', 'Item 1']);
-    expect(rows[1]!.textContent).toContain('Waiting');
-    for (const row of rows) await act_(() => row.querySelector<HTMLButtonElement>('.lab-assistant-session-toggle')!.click());
-    expect(rows[1]!.textContent).toContain('Needs the build.');
-    expect(rows[2]!.textContent).toContain('Result: Shipped.');
+  describe('the boards of bots', () => {
+    const id = (n: number) => 'b_' + String(n).repeat(32);
+    const groups = [{ window: { id: 'g', title: 'g', revision: 1, views: [] }, bots: { rank: 'm', members: { v1: { botId: id(1), name: 'Chief' }, v2: { botId: id(2), name: 'Tracker', chief: id(1) } } } }] as unknown as WindowGroup[];
+    const item = (key: number, status: BoardItem['status'], updatedAt: number): BoardItem => ({ key, title: `Item ${key}`, status, assignee: 'self', links: [], version: 1, changedAt: {}, updatedBy: 'person', updatedAt });
+    const inbox = (bot: number, session: string, items: BoardItem[]): Team => ({ ...taskTeam(`i${bot}`, {}), task: undefined, members: [{ ...taskTeam(`i${bot}`, {}).members[1]!, name: `Bot ${bot}`, nativeSessionId: session }],
+      inbox: { botId: id(bot), board: { next: 9, items, plan: { text: 'Plan.', version: 1, changes: [] } } } } as Team);
+
+    it('gives a standing bot\'s whole board by its id, and its items newest first by its session', () => {
+      const teams = [inbox(1, 'chief', [item(1, 'done', 9), item(2, 'waiting', 5), item(3, 'working', 7)])];
+      const directory = taskDirectory(teams, () => {}, undefined, groups);
+      expect(directory.boardOf!(id(1))?.plan?.text).toBe('Plan.');
+      expect(directory.boardOf!(id(1))?.items.map(entry => entry.key)).toEqual([1, 2, 3]);
+      expect(directory.boardOf!(id(7))).toBeUndefined();
+      expect(directory.board!({ providerId: 'claude', nativeSessionId: 'chief' }).map(entry => entry.key)).toEqual([1, 3, 2]);
+    });
+
+    it('names assignees, standing or temporary, offers the standing staff and the temporary bots at work, and opens the session doing an item', () => {
+      const working = { ...taskTeam('t1', { botId: id(5), title: 'Regression' }, { owner: 'chief' }) }, finished = taskTeam('t2', { botId: id(6), title: 'Old run', state: 'done', result: { status: 'done', summary: 'Ok.', reportedAt: 3 } }, { owner: 'chief' });
+      const strangers = taskTeam('t3', { botId: id(7), title: 'Other chief' }, { owner: 'someone' });
+      const open = vi.fn();
+      const directory = taskDirectory([inbox(1, 'chief', []), inbox(2, 'tracker', []), working, finished, strangers], open, undefined, groups);
+      expect(directory.botName!(id(2))).toBe('Tracker');
+      expect(directory.botName!(id(6))).toBe('Old run');
+      expect(directory.assignees!(id(1))).toEqual([{ botId: id(2), name: 'Tracker' }, { botId: id(5), name: 'Regression' }]);
+      expect(directory.canOpenBot!(id(2))).toBe(true);
+      expect(directory.canOpenBot!(id(9))).toBe(false);
+      directory.openBot!(id(2));
+      directory.openBot!(id(5));
+      expect(open.mock.calls).toEqual([[{ hostId: 'mac', providerId: 'claude', nativeSessionId: 'tracker', title: 'Tracker' }], [{ hostId: 'mac', providerId: 'claude', nativeSessionId: 't1-session', title: 'Regression' }]]);
+    });
   });
 
   it('lists a bot\'s standing staff, from their records', () => {

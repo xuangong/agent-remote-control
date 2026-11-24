@@ -25,11 +25,11 @@ instructions and its mission. Live, a resumed Claude session did not see them: C
 `--resume`. So standing instructions also travel as a message when they change (design 5.1), built with step 2's delivery, which
 comes next. Chains (1c) move to step 4, where the audit needs them; nothing before the audit depends on them.
 
-- [ ] Bot record (design 2.1, closes O70): `botId` stable across handoffs and moves, name, label, picture, mission, chief (a bot
+- [x] Bot record (design 2.1, closes O70): `botId` stable across handoffs and moves, name, label, picture, mission, chief (a bot
   or the person), lifetime, main, status, work item, peers. Existing bots get ids from their group views; name, label and picture
-  move out of `WindowBotDetails`.
-- [ ] Mission as standing instructions; base instructions in the repository with a version (design 5.1).
-- [ ] Chains (design 7): every input the person sends and every timer tick opens one; messages and created bots carry its id and
+  move out of `WindowBotDetails`. Built in `feat/bots-1-record`; `peers` are not built (`read_bot` reads any standing bot).
+- [x] Mission as standing instructions; base instructions in the repository with a version (design 5.1).
+- [x] Chains (design 7, built in step 4): every input the person sends and every timer tick opens one; messages and created bots carry its id and
   the usage providers report.
 
 ## Step 2: one kind of bot
@@ -124,17 +124,20 @@ Built (2026-11-24, `feat/bots-4-chains`), the rest of step 2. Owner rules: the e
 - [ ] Gate: the person describes a team to one bot; it creates two bots with missions; each reports in; the chief gives one work
   by message and changes how the other works by message (recorded in its own mission); a Copilot bot answers a question; the
   person sees all of it in Chats and can change any bot. The e2e flows of design 11, written here, pass.
+  Status (2026-11-24): live in the scenarios with Claude Code and Codex except the Copilot bot, which was not run; E15 passes.
 
 ## Step 3: rooms, work items and timers
 
 - [x] Rooms as message targets with a Relay timer closing them on time (design 4, closes O71).
 - [x] Work items for standing bots (design 6.1): `update_work`, `complete_work`, read with `list_bots` and in the bot's details.
-- [ ] Work items' todo and confirmation, and `complete_work` retiring the bots created for the item: with the TPM fold (step 7),
-  whose todo and confirmations they replace.
+- Dropped (owner, 2026-11-24): TPM was removed rather than folded, so work items get no todo or confirmation from it; a goal
+  tool or another tool may track work later.
 - [x] Fallback timers pushed back by every message (design 6.2): `set_timer`, and the default timer of open work.
-- [ ] The companions' heartbeat removed: with the TPM fold (step 7).
+- [x] The companions' heartbeat removed, with TPM (step 7d).
 - [ ] Gate: a bot keeping a work item asks a working bot and the reply updates the item the person sees; a confirmation waits for
   Agree; a quiet interval wakes the bot once and a message pushes it back; a room of two bots and the person reaches a result.
+  Status (2026-11-24): work items, timers and rooms verified in Relay unit tests and the scenarios; the confirmation is dropped
+  with TPM.
 
 Built (2026-11-23, `feat/bots-3-rooms-work`): rooms are message targets (`message` to a room, `pass`, `status done` for its
 result) and move on time on the Relay's scheduler. A standing bot keeps up to 20 work items and 8 timers on its inbox; a temporary
@@ -153,7 +156,7 @@ models run with step 5's scenarios.
 
 ## Step 5: behaviour scenarios
 
-- [ ] `pnpm test:bots` with the release walkthrough (design 11). The base instructions are tuned here until it passes with Claude
+- [x] `pnpm test:bots` with the release walkthrough (design 11). The base instructions are tuned here until it passes with Claude
   Code and Codex; every later change to them reruns it.
 
 First rounds (2026-11-23, `scripts/bots-scenarios.mjs`, on this checkout's local instance): scenarios `temporary` (a chief
@@ -166,6 +169,8 @@ reviewer that answers by message; the person's lasting change goes into the revi
 - `update_work`, `complete_work` and `set_timer` cloned an immer draft and failed in the Relay; the unit tests now use drafts.
 - A settled message of a chain failed validation as a receipt and held its inbox; fixed, with a test that settles.
 - A reviewer kept a lasting change in Claude Code's memory files; the base instructions now name `update_mission`.
+
+Final run (2026-11-24, `d1854103`, fresh local instance): 10 of 10 checks with Claude Code and 10 of 10 with Codex.
 
 Not yet in the scenarios: the bundle and shared-repository loops (they need step 2's attachments), the person speaking to a
 temporary bot, and counting tool calls per chief turn.
@@ -187,14 +192,14 @@ offers Stop, Mark done and Keep, which makes it a standing bot of its chief's gr
 
 Each fold migrates its records, rewrites the feature's e2e cases on bots, and deletes the old path in the same branch (design 9).
 
-- [ ] Side: `/side` creates a temporary bot; existing Side relations listed as retired temporary bots.
-- [ ] Call For Support: profiles are not migrated; the support settings say so once, then go, with groups, calls, rosters, ledgers,
+- [x] Side: `/side` creates a temporary bot; existing Side views stay as ordinary bots of their group (7a).
+- [x] Call For Support (7b): profiles are not migrated; the support settings say so once, then go, with groups, calls, rosters, ledgers,
   report framing, the four tools, `callForSupport`, `readOnlyProvider` and `support_enablement`. Gate: a bot asks the bot whose
   mission is reviewing to review an uncommitted change, which it sees through a shared repository or a bundle.
-- [ ] Team: a Leader becomes a chief and its members the bots it is chief of (standing when they had their own conversation with
-  the person, temporary otherwise); the Team queue, inbox, `team_message`, panel and launcher go; E7's Team case is rewritten.
-- [ ] TPM: a TPM becomes a bot whose mission is its work, its work items, todo and confirmations carried over; `tpm_intent`, its
-  delivery, workspace and launcher go.
+- [x] Team (7c): ordinary Teams are dropped when state loads (owner, 2026-11-24: no conversion; the sessions stay); the Team
+  queue, inbox tools, `team_message`, file transfers, panel and launcher go; E7's Team case is rewritten on a temporary bot.
+- [x] TPM (7d): removed (owner, 2026-11-24: history only, then dropped); a TPM's session stays a plain session; `tpm_intent`,
+  its delivery, workspace, launcher, the session todo, heartbeat and background reviews go.
 
 ## Later
 

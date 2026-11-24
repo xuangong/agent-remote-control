@@ -102,7 +102,9 @@ it('E15: a bot hands an item of its board to another bot, which reads the item n
     .toMatchObject({ report: 'Main is green.', status: 'working' });
   // The chief retitles it; the one who holds it is told, written from the record.
   await stack.provider.useTool('chief', 'update_board', { items: [{ key: 1, version: 3, title: 'Watch main' }] });
-  await expect.poll(() => stack.provider.session('tracker')!.sent.filter(text => text.startsWith('[Item "')), { timeout: 20_000 }).toEqual(['[Item "Watch the build" changed · assigned to you]', '[Item "Watch main" changed · retitled to "Watch main"]']);
+  // The assignment reached it with the message, joined in one input; the retitle came alone.
+  await expect.poll(() => stack.provider.session('tracker')!.sent.join('\n'), { timeout: 20_000 }).toContain('[Item "Watch main" changed · retitled to "Watch main"]');
+  expect(stack.provider.session('tracker')!.sent.join('\n')).toContain('[Item "Watch the build" changed · assigned to you]');
   await context.close();
 });
 

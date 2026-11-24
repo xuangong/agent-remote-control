@@ -36,6 +36,9 @@ function fixture() {
 }
 const write = (f: ReturnType<typeof fixture>, items: Array<Record<string, unknown>>, extra: Record<string, unknown> = {}) => f.call('chief', { action: 'update_board', items, ...extra });
 
+/** The chief gives an item to its staff bot Tracker the way an item is assigned: by a board write, never by a message. */
+const hand = (f: ReturnType<typeof fixture>, key: number, brief: string) => write(f, [{ key, version: f.item(key).version, assignee: 'Tracker', status: 'working', brief }]);
+
 describe('a bot\'s board', () => {
   it('keeps items with a version that counts their writes, and refuses a change that names none', async () => {
     const f = fixture();
@@ -139,20 +142,24 @@ describe('the bots that hold an item', () => {
     await expect(f.call('worker-2', { action: 'update_board', items: [{ status: 'done' }] })).rejects.toThrow('not created for a board item');
   });
 
-  it('hands work to a standing staff bot with the item named in its message, and takes its reports as the latest report only', async () => {
+  it('names the item in a message to a staff bot without assigning it, and takes its reports as the latest report only', async () => {
     const f = fixture();
     await write(f, [{ title: 'Track the build' }, { title: 'Track the deploy' }]);
     expect(await f.say('chief', 'Tracker', 'Watch the build on main.', { item: 1 })).toMatchObject({ outcome: 'delivered' });
-    expect(f.item(1)).toMatchObject({ assignee: ids.tracker, status: 'working', brief: 'Watch the build on main.' });
+    expect(f.item(1)).toMatchObject({ assignee: 'self', status: 'open', version: 1 });
+    expect(f.item(1).brief).toBeUndefined();
     const frames = f.inputs(f.inbox(ids.tracker)).filter(input => input.kind === 'assistant');
     expect(frames).toEqual([expect.objectContaining({ from: 'Chief', body: '[Item 1 "Track the build" · from Chief]\nWatch the build on main.' })]);
+    // The item is assigned by the board write that gives it to the staff bot.
+    await hand(f, 1, 'Watch the build on main.');
+    expect(f.item(1)).toMatchObject({ assignee: ids.tracker, status: 'working', brief: 'Watch the build on main.' });
     // The staff bot reports the item as the only one it holds; the chief's item keeps its status and has no result.
     await f.say('tracker', 'Chief', 'Build is red on main.', { status: 'done' });
     expect(f.item(1)).toMatchObject({ report: 'Build is red on main.', status: 'working', updatedBy: ids.tracker });
     expect(f.item(1).result).toBeUndefined();
     expect(f.inputs(f.inbox(ids.chief)).filter(input => input.kind === 'assistant').at(-1)).toMatchObject({ body: expect.stringContaining('[Item 1 "Track the build" · from Tracker]') });
     // With two items it holds, the report names one; the other is untouched.
-    await f.say('chief', 'Tracker', 'Also the deploy.', { item: 2 });
+    await hand(f, 2, 'Also the deploy.');
     await f.say('tracker', 'Chief', 'Deploy is waiting.', { status: 'progress' });
     expect(f.item(1).report).toBe('Build is red on main.');
     expect(f.item(2).report).toBeUndefined();
@@ -167,13 +174,13 @@ describe('the bots that hold an item', () => {
   it('tells the assignee when its item is retitled, its brief changed, cancelled or reassigned, and the old assignee when it moves', async () => {
     const f = fixture();
     await write(f, [{ title: 'Track the build' }, { title: 'Own work' }]);
-    await f.say('chief', 'Tracker', 'Watch the build.', { item: 1 });
+    await hand(f, 1, 'Watch the build.');
     const told = () => f.inbox(ids.tracker).messages.map(message => message.text).filter(text => text.startsWith('[Item "'));
     const version = () => f.item(1).version;
     await write(f, [{ key: 1, version: version(), title: 'Track main' }]);
     await write(f, [{ key: 1, version: version(), brief: 'Watch main only.' }]);
     await write(f, [{ key: 2, version: 1, title: 'Own work 2' }]);
-    expect(told()).toEqual(['[Item "Track main" changed · retitled to "Track main"]', '[Item "Track main" changed · brief changed]']);
+    expect(told()).toEqual(['[Item "Track the build" changed · assigned to you]', '[Item "Track main" changed · retitled to "Track main"]', '[Item "Track main" changed · brief changed]']);
     // Moving it to a temporary bot tells the old assignee, and the new one.
     await f.call('chief', { action: 'create_bot', operationId: 'op', name: 'Regression', mission: 'Run it.', lifetime: 'temporary' });
     await write(f, [{ key: 1, version: version(), assignee: 'Regression' }]);
@@ -189,7 +196,7 @@ describe('the bots that hold an item', () => {
   it('lets a standing staff bot write only its own board, and the chief read it without writing', async () => {
     const f = fixture();
     await write(f, [{ title: 'Track the build' }]);
-    await f.say('chief', 'Tracker', 'Watch the build.', { item: 1 });
+    await hand(f, 1, 'Watch the build.');
     await f.call('tracker', { action: 'update_board', items: [{ title: 'Poll every minute' }] });
     expect(f.board(ids.tracker).items).toMatchObject([{ key: 1, title: 'Poll every minute', assignee: 'self' }]);
     expect(f.board().items).toMatchObject([{ key: 1, title: 'Track the build' }]);
@@ -206,23 +213,26 @@ describe('the bots that hold an item', () => {
     expect(await f.call('chief', { action: 'board', bot: 'Chief' })).toMatchObject({ bot: 'Chief' });
   });
 
-  it('keeps the assignee of an item whose bot asks a peer, which is not its staff, for a review, and still names the item to the peer', async () => {
+  it('never changes the assignee of an item by a message naming it, whoever receives it, and still names the item to the receiver', async () => {
     const f = fixture();
     await f.call('tracker', { action: 'update_board', items: [{ title: 'Add the changelog entry' }] });
     expect(await f.say('tracker', 'Chief', 'Please review the entry.', { item: 1 })).toMatchObject({ outcome: 'delivered' });
     expect(f.item(1, ids.tracker)).toMatchObject({ assignee: 'self', version: 1 });
     expect(f.item(1, ids.tracker).brief).toBeUndefined();
     expect(f.texts(f.inbox(ids.chief)).at(-1)).toContain('[Item 1 "Add the changelog entry" · from Tracker]');
-    // Work handed down to its own staff still names the item and assigns it.
+    // Not to its own staff or temporary bots either.
     await write(f, [{ title: 'Track the build' }]);
     await f.say('chief', 'Tracker', 'Watch the build.', { item: 1 });
-    expect(f.item(1)).toMatchObject({ assignee: ids.tracker, brief: 'Watch the build.' });
+    await f.call('chief', { action: 'create_bot', operationId: 'op', name: 'Regression', mission: 'Run it.', lifetime: 'temporary' });
+    await f.say('chief', 'Regression', 'Run it on main.', { item: 1 });
+    expect(f.item(1)).toMatchObject({ assignee: 'self', version: 1 });
+    expect(f.texts(f.task()).at(-1)).toContain('[Item 1 "Track the build" · from Chief]');
   });
 
   it('lists the open items of the caller\'s board, with the latest report, in list_bots', async () => {
     const f = fixture();
     await write(f, [{ title: 'Track the build' }, { title: 'Old', status: 'done' }]);
-    await f.say('chief', 'Tracker', 'Watch.', { item: 1 });
+    await hand(f, 1, 'Watch.');
     await f.say('tracker', 'Chief', 'Red.', { status: 'progress' });
     expect((await f.call('chief', { action: 'list_bots' })).board).toEqual({ open: 1, items: [{ key: 1, title: 'Track the build', status: 'working', assignee: ids.tracker, report: 'Red.' }] });
   });
@@ -235,15 +245,15 @@ describe('the person\'s edits of a board', () => {
   it('writes items and the plan note as the person, with the same versions, and tells the assignee of a changed item once', async () => {
     const f = fixture();
     await write(f, [{ title: 'Track the build' }]);
-    await f.say('chief', 'Tracker', 'Watch the build.', { item: 1 });
+    await hand(f, 1, 'Watch the build.');
     const result = await edit(f, { items: [{ key: 1, version: f.item(1).version, title: 'Track main', brief: 'Main only.' }] });
     expect(result.items).toEqual([{ key: 1, version: f.item(1).version }]);
     expect(f.item(1)).toMatchObject({ title: 'Track main', brief: 'Main only.', updatedBy: 'person' });
-    expect(told(f)).toEqual(['[Item "Track main" changed · retitled to "Track main"; brief changed]']);
+    expect(told(f)).toEqual(['[Item "Track the build" changed · assigned to you]', '[Item "Track main" changed · retitled to "Track main"; brief changed]']);
     // Cancelling is told too; writing what is there tells no one again.
     await edit(f, { items: [{ key: 1, version: f.item(1).version, status: 'cancelled' }] });
     await edit(f, { items: [{ key: 1, version: f.item(1).version, status: 'cancelled' }] });
-    expect(told(f)).toHaveLength(2);
+    expect(told(f)).toHaveLength(3);
     expect(told(f).at(-1)).toBe('[Item "Track main" changed · cancelled]');
     expect((await edit(f, { plan: { text: 'Notes first.', why: 'The person decided.' } })).plan).toEqual({ version: 1 });
     expect(f.board().plan).toMatchObject({ text: 'Notes first.', changes: [{ by: 'person', why: 'The person decided.' }] });

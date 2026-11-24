@@ -340,16 +340,12 @@ export class BotCalls {
     const files: BotAttachment[] = call.attachments ? await Promise.all(call.attachments.map(id => this.files().metadata(id))) : [];
     const text = files.length ? `${call.text}\n${attachmentLines(files)}` : call.text;
     // A message with a status to the bot whose board holds an item assigned to the sender is a report on that item; any other message
-    // naming an item hands work away on one of the sender's own, to its staff.
+    // naming an item only tags the exchange with it: an item is assigned by create_bot with the item or by a board write, never by a message.
     const held = call.status !== undefined && call.status !== 'ack' && to.standing ? heldItem(this.board.read(to.standing), from.key, call.item ?? from.task?.task?.item?.key) : undefined;
     if (call.item !== undefined && !held && from.standing) {
       const item = this.board.read(from.standing)?.items.find(entry => entry.key === call.item);
       if (!item) return { outcome: 'forbidden', reason: `No item ${call.item} on your board; read it with board.` };
-      const result = await this.route(hostId, from, chief, to, { ...call, text, tag: itemTagText({ key: item.key, title: item.title, from: from.name }) });
-      // Work goes down to the sender's own staff or temporary bots; a peer asked for help or a review only sees which item it is about.
-      const handsDown = to.standing ? to.standing.chief === from.key : this.chiefOf(to)?.key === from.key;
-      if (handsDown && (result.outcome === 'delivered' || result.outcome === 'held')) await this.notify(await this.board.assign(from.standing, item.key, to.key, call.text, from.key));
-      return result;
+      return this.route(hostId, from, chief, to, { ...call, text, tag: itemTagText({ key: item.key, title: item.title, from: from.name }) });
     }
     const result = await this.route(hostId, from, chief, to, { ...call, text, ...(held && !from.task ? { tag: itemTagText({ key: held.key, title: held.title, from: from.name }) } : {}) });
     // The report is the item's latest, whoever made it; its status follows only when the assignee is the bot created for the item.

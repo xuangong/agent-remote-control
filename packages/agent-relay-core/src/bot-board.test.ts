@@ -206,6 +206,19 @@ describe('the bots that hold an item', () => {
     expect(await f.call('chief', { action: 'board', bot: 'Chief' })).toMatchObject({ bot: 'Chief' });
   });
 
+  it('keeps the assignee of an item whose bot asks a peer, which is not its staff, for a review, and still names the item to the peer', async () => {
+    const f = fixture();
+    await f.call('tracker', { action: 'update_board', items: [{ title: 'Add the changelog entry' }] });
+    expect(await f.say('tracker', 'Chief', 'Please review the entry.', { item: 1 })).toMatchObject({ outcome: 'delivered' });
+    expect(f.item(1, ids.tracker)).toMatchObject({ assignee: 'self', version: 1 });
+    expect(f.item(1, ids.tracker).brief).toBeUndefined();
+    expect(f.texts(f.inbox(ids.chief)).at(-1)).toContain('[Item 1 "Add the changelog entry" · from Tracker]');
+    // Work handed down to its own staff still names the item and assigns it.
+    await write(f, [{ title: 'Track the build' }]);
+    await f.say('chief', 'Tracker', 'Watch the build.', { item: 1 });
+    expect(f.item(1)).toMatchObject({ assignee: ids.tracker, brief: 'Watch the build.' });
+  });
+
   it('lists the open items of the caller\'s board, with the latest report, in list_bots', async () => {
     const f = fixture();
     await write(f, [{ title: 'Track the build' }, { title: 'Old', status: 'done' }]);

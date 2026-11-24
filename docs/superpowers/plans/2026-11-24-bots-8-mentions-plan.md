@@ -197,6 +197,26 @@ As built (8f):
 - The details also show the memory and the answer sessions now open.
 - The audit lists answer sessions under their bot.
 
+As built (8g):
+
+- Route: the person's board write is the audit action `update_board { botId, items?, plan? }` on the chains route (owner scoped, like `set_chief`);
+  `BoardItemEdit` and `BoardPlanEdit` are shared with the bot's `update_board` call, and `BoardWriteResult` (items written, what a stale edit
+  overwrote) is the answer. The Relay writes as `person`, the same write as a bot's (versions, field by field stale writes), and tells every bot an
+  edited item is assigned to, once, from the record. The person assigns to the bot itself, its standing staff or its temporary bots, by id.
+  `TeamTask.botId` (written when the Relay lists a task) lets the page name a temporary bot an item names. Fixture `board.v1.json` gained
+  `personEdits` and `writeResults`.
+- Page: the details put the Board first (plan note with its changes and whys; open items as a tree by parent with status, assignee by name, links,
+  result, latest report; brief on expansion; Done folded). From an item "Open <name>" opens that bot's conversation or a temporary bot's worker.
+  An item assigned to a standing staff bot expands into its board read only, one level. In place edits: title, status, assignee, brief, cancel, and
+  the plan note with a why; a stale edit lists what it replaced. After a write the roster is refetched. `TaskDirectory` gained `boardOf`,
+  `botName`, `assignees`, `canOpenBot`, `openBot`, `writeBoard`.
+- Timeline: `[Item "..." changed ...]` and `[Chief changed ...]` notices are task inputs (`item_changed`, `chief_changed`) folded to one quiet line each;
+  the `[Item N "title" · from X]` tag shows as a quiet note and in the folded line's summary. (A temporary bot's notice is no longer read as the
+  person's own text.)
+- Tests: Relay (`bot-board.test.ts`: person's edits, stale notice, assignee told once, assignee rules; the notify call was mutation checked: dropping it
+  and doubling it both fail), protocol fixtures and parse tests, chain client test, jsdom `BoardList.test.tsx` and task directory tests, timeline fold
+  tests, component spec `board-details.spec.ts` (desktop panel and phone sheet).
+
 ## Tests
 
 - Unit (Relay, mock data): board writes, versions and stale writes, the notice to an assignee, the temporary bot's write,  answer

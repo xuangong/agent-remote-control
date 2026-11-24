@@ -82,6 +82,24 @@ As built (8a):
   what the bot is for; the memory is what it learned.
 - An answer session that learned something lasting records it in the memory; nothing else flows back to the main session.
 
+As built (8c):
+
+- A fact is `{ id, text }` (id `f` and 8 hexadecimal digits, text 1 to 300 characters); a memory is at most 50 facts. It is an identity field
+  of the bot's record and of its details, like the mission, so the person edits it through the same details write (`bot.update`).
+- Writers: the bot's own main session (`remember`, `forget`) and the person (the details). The invariant is structural: the two calls name
+  no bot, so the Relay always acts on the caller's own bot, and a temporary bot, which has no memory, is refused; another bot, its chief
+  included, cannot write it and no guard stands beside that. `remember(text, replace?)` adds a fact, or replaces the one `replace` names by
+  id or exact text; the same text twice is one fact; a 51st is refused with "forget one first". `forget(fact)` removes one by id or exact text.
+- Delivery: `botInstructions(mission, memory)` puts `Your memory (...)` after the mission, one line `- <id> · <text>` per fact (absent when
+  empty), so every session starts with it, and the existing hash resends the standing instructions to the main session when the person
+  changes the memory. A bot's own write counts as sent (`known`), as a mission write does. The base instructions are unchanged (8f).
+  The Controller keeps each bot's memory with its mission, so a session opened later starts with it too.
+- Page: the details list the facts beside the mission, each with edit and delete (no add: the person tells the bot, which keeps it). The
+  richer layout is 8g.
+- Tests: `bot-memory.test.ts` (adding, replacing and forgetting by id or text, the limits, the writer invariant, the instructions and their
+  resend), protocol fixture `fixtures/memory.v1.json`, window service, Controller mapping, a jsdom test of the details. The writer
+  invariant was mutation checked (a write that reaches the caller's staff fails the test).
+
 ## 8d. The person mentions a bot
 
 - The composer offers the account's bots after `@`. `@Name text` sent in conversation X sends nothing to X's session; it asks the
@@ -92,6 +110,23 @@ As built (8a):
 
 - `set_chief` (the person, or the bot's current chief) moves a standing bot to another chief, or to the person; the old chief, the
   new chief and the bot are each told. The span of 12 counts for the new chief.
+
+As built (8e):
+
+- Two entrances to one move: the bot's chief calls the Host call `set_chief(bot, chief)` (`chief` is a standing bot by name or id, or
+  `person`; the bot must be its own standing staff), and the person uses the audit action `set_chief { botId, chief | null }` on the chains
+  route, from the bot's details (a select of the person and the other standing bots, not itself or its own staff, and a button). The Relay
+  refuses a loop (a bot cannot report to its own staff) and the same chief is a no-op.
+- The record's chief changes in one commit that advances the bot's group revision, so pages refetch; an edit of the details still cannot set it.
+- Notices, queued after the move from the record: the bot `[Chief changed · your chief is now B (it was A)]`, the old chief `[Chief changed ·
+  "Bot" is no longer your staff; its chief is now B]`, the new chief `[Chief changed · "Bot" is now your staff (its chief was A)]`; the person
+  is named "the person" and is told nothing. The frame is written by the Relay (`chiefChangedText`) and a payload cannot forge it (`[Chief`
+  lines are quoted).
+- Span: a chief's span is its standing bots plus its temporary bots at work. No span limit existed before this step, so `set_chief` is where
+  the limit of 12 first applies; the 13th is refused with the advice to create a sub-chief. Creating a bot is not yet counted (open question).
+- Tests: `bot-memory.test.ts` (notices to all three, the person's path, who may move, loops, the span), protocol fixture, window service,
+  Controller mapping, the task directory and a jsdom test of the picker. The notices were mutation checked (dropping the old chief's notice
+  fails the tests).
 
 ## 8f. Base instructions (version 5)
 

@@ -245,7 +245,7 @@ describe both, shared repository first.
 Turns, their order, context and compaction stay the CLI's. ARC adds no concurrency inside a session and never rewrites native
 history; it keeps what it adds small: one frame per message, 300-character summaries, one input per idle. Each bot keeps its CLI's
 own permission settings. No bot answers another bot's native interactions (tool, plan or form approvals) or changes another bot's
-settings: those belong to the person. A native interaction pending in a bot makes its status `blocked`; its chief receives a
+settings: those belong to the person. The one thing applied for them is the person's own recorded decision on a tool approval: "for this chain in this folder" lets each bot's Controller answer allow, once, the same kind of action in the same folder from a bot of that chain until the chain ends or the person revokes it in the audit (plan 9d); nothing else is ever answered. A native interaction pending in a bot makes its status `blocked`; its chief receives a
 frame saying what waits, and the person is reminded directly.
 
 ## 6. The board and timers

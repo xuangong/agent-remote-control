@@ -28,6 +28,12 @@ what it learns through a memory; work is tracked on a board per bot; reports to 
 - Every write names the version it read; a stale write is applied field by field and the writer is told what it overwrote (no
   refusal). A change to an item assigned to another bot (retitled, reassigned, cancelled, its brief changed) queues
   `[Item "<title>" changed · <what changed>]` for that bot; it replans its own board.
+- Context stays with the item, so the main session can hand long work away and still find it (it reads its board first whenever it
+  starts, resumes or was compacted):
+  - The item keeps the brief as sent, and the latest report (one line, at most 300 characters) beside its status.
+  - Binding both ways: `create_bot` or `message` naming an item records the assignee on it; the assignee's first input names the item
+    (`[Item 7 "Run the regression" · from Chief]`), and its reports update that item without the chief matching them by hand.
+  - From an item the person and the chief open the session or bot doing it, and read its process with `read_bot`.
 - Tools: `board` (read one's own board, or the board of a bot one is chief of, read only), `update_board` (create, change, move,
   cancel items; the plan note). `create_bot` and `message` may name the item they serve; the item then links the bot.
 - Existing work items and timers: work items become board items; the timer of open work stays (design 6.2). Old data may be dropped.

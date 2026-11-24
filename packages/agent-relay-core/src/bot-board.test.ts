@@ -246,6 +246,10 @@ describe('the person\'s edits of a board', () => {
     expect(toldChief().at(-1)).toBe('[Item "Plan note" changed · changed: Ship it too.]');
     await edit(f, { items: [{ title: 'Ship', assignee: 'self' }] });
     expect(toldChief().at(-1)).toBe('[Item "Ship" changed · assigned to you]');
+    // A new item the person assigns to another bot tells that bot as an assignment, with its parent and brief kept.
+    await edit(f, { items: [{ title: 'Watch main', assignee: ids.tracker, brief: 'Main only.', parent: 1 }] });
+    expect(told(f)).toEqual(['[Item "Watch main" changed · assigned to you]']);
+    expect(f.item(3)).toMatchObject({ parent: 1, brief: 'Main only.', assignee: ids.tracker });
   });
 
   it('says what a stale edit overwrote, in an item and in the plan note, and still applies it', async () => {

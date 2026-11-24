@@ -1,6 +1,6 @@
 // A conversation's composer region: its status line, the context above the input (host notice, references, notices), the
 // collapse toggle and the composer itself, which the region keeps collapsed or open.
-import { useId, useRef, useState } from 'react';
+import { useId, useRef, useState, type ComponentProps } from 'react';
 import type { AgentReplicaState, RemoteSessionState, RemoteSessionStatus } from '@orchardworks/agent-client';
 import type { AgentCommand } from '@orchardworks/agent-remote-protocol';
 import { AgentComposer as DraftComposer, useTranslate } from '@orchardworks/agent-client-web/react';
@@ -16,7 +16,7 @@ type Passed = Pick<SessionWorkbenchProps, 'composerStatus' | 'composerContext' |
 export function ConversationComposer({ composerStatus, composerContext, composerNotice, authenticationNotice, reauthenticate, hostNotice, nativeTakeover, host, opening, openFailed,
   onPendingInputChange, pendingFirstInputContext, consoleCommands, onExecuteConsoleCommand, draftSessionKey, draftScope, imageDraftBinding, imageRecipient, messageDraft, onMessageDraftChange,
   sendLater, renderSessionSettingError, renderCommandError, handoff, state, session, sessionStatus, visible, draftOnly, hasTarget, readOnly, controlReadOnly, recordingReadOnly,
-  mutationBlocked, chromeless, recipient, actions, feedbackActions, takeControl, onInspectCommand, quote }: Passed & {
+  mutationBlocked, chromeless, recipient, actions, feedbackActions, takeControl, onInspectCommand, quote, mentions }: Passed & {
   state?: AgentReplicaState; session: RemoteSessionState; sessionStatus: RemoteSessionStatus; visible: boolean; draftOnly: boolean;
   /** The view has a session to show, resolved or not. */
   hasTarget: boolean;
@@ -32,6 +32,8 @@ export function ConversationComposer({ composerStatus, composerContext, composer
   onInspectCommand(command: AgentCommand): void;
   /** A message quoted from the timeline, which the composer puts at the end of its draft. */
   quote?: { id: number; text: string };
+  /** The bots `@` offers, and the ask. */
+  mentions?: ComponentProps<typeof DraftComposer>['mentions'];
 }) {
   const t = useTranslate();
   const [composerHidden, setComposerHidden] = useState(false);
@@ -99,6 +101,7 @@ export function ConversationComposer({ composerStatus, composerContext, composer
             onResolveResource={actions.resolveResource}
             onInspectCommand={onInspectCommand}
             quote={quote}
+            mentions={mentions}
           />
         </div>
       </div>

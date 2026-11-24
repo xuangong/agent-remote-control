@@ -51,6 +51,8 @@ export const composer = {
   'composer.cancellationRequested': 'Cancellation requested.',
   'composer.interruptFailed': 'Interrupt failed.',
   'composer.messageSent': 'Message sent.',
+  'composer.mentionAsked': '{bot} was asked; its answer shows here.',
+  'composer.mentionBots': 'Bots to ask',
   'composer.messageQueued': 'Message queued by Provider.',
   'composer.actionFailed': 'Agent command failed.',
   'composer.commandFailed': 'Native command failed.',

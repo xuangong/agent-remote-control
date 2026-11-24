@@ -3,7 +3,7 @@ import { PROCESS_MODES, type ProcessMode, type SessionFile } from '@orchardworks
 import type { BoardItem, BotPicture, TaskView } from '@orchardworks/agent-remote-protocol';
 import type { AvatarMood } from '@orchardworks/agent-client-web/theme';
 import { SegmentedControl, Sheet } from '@orchardworks/agent-client-web/primitives';
-import { useTranslate } from '@orchardworks/agent-client-web/react';
+import { useTranslate, type AnswerSession } from '@orchardworks/agent-client-web/react';
 import type { MenuEntry } from '../../ui/Menu.js';
 import type { ProcessModeChoice } from '../useProcessMode.js';
 import type { AssistantWhere } from './details-host.js';
@@ -13,6 +13,7 @@ import { SessionsList, type AssistantSessions } from './SessionsList.js';
 import { FilesList } from './FilesList.js';
 import { TasksList } from './TasksList.js';
 import { BoardList } from './BoardList.js';
+import { AnsweringList } from './AnsweringList.js';
 import { MissionEditor, type MissionChoice } from './MissionEditor.js';
 import { MemoryList, type MemoryChoice } from './MemoryList.js';
 import { ChiefPicker, type ChiefChoice } from './ChiefPicker.js';
@@ -33,6 +34,8 @@ export interface AssistantRef {
   readonly bots?: readonly { botId: string; name: string }[];
   /** The items of a standing bot's board, which it keeps itself. */
   readonly board?: readonly BoardItem[];
+  /** The sessions this standing bot has open to answer the person's mentions from other conversations. */
+  readonly answering?: readonly AnswerSession[];
   /** This assistant's own process mode; the device's default, notifications and letters are in Settings > Assistants. */
   readonly process?: ProcessModeChoice;
   /** The mission, for an assistant whose bot details the reader may change. */
@@ -69,6 +72,7 @@ export function AssistantDetails({ assistant, surface, onClose }: { assistant: A
     {assistant.memory ? section('memory', t('details.memory'), <MemoryList memory={assistant.memory} />) : null}
     {assistant.chief ? section('chief', t('details.chief'), <ChiefPicker chief={assistant.chief} />) : null}
     {assistant.board?.length ? section('work', t('details.work'), <BoardList board={assistant.board} />) : null}
+    {assistant.answering?.length ? section('answering', t('details.answering'), <AnsweringList sessions={assistant.answering} />) : null}
     {assistant.where ? section('where', t('details.where'), <WhereItWorks where={assistant.where} />) : null}
     {assistant.sessions ? section('sessions', t('details.sessions'), <SessionsList sessions={assistant.sessions} />) : null}
     {assistant.bots?.length ? section('bots', t('details.bots'), <ul className="lab-assistant-chain lab-assistant-bots">{assistant.bots.map(bot => <li key={bot.botId}><span className="lab-assistant-session-title">{bot.name}</span></li>)}</ul>) : null}

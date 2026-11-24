@@ -34,6 +34,7 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
   const detailsShown = !!host?.open && visible && (host.surface === 'sheet' || !!host.slot);
   const tasks = detailsShown && directory && providerId && rest.length ? directory.owned({ providerId, nativeSessionId: rest.join('/') }) : [];
   const board = detailsShown && directory?.board && providerId && rest.length ? directory.board({ providerId, nativeSessionId: rest.join('/') }) : [];
+  const answering = detailsShown && botId && directory?.answering ? directory.answering(botId) : [];
   const bots = detailsShown && botId && directory?.staff ? directory.staff(botId) : [];
   const chiefs = detailsShown && botId ? directory?.chief?.(botId) : undefined;
   const files = useMemo(() => detailsShown && state ? sessionFiles(state.timeline.entries) : [], [detailsShown, state?.timeline.entries]);
@@ -45,7 +46,7 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
     ...(host?.where ? { where: host.where } : {}), ...(host?.setPicture ? { setPicture: host.setPicture } : {}),
     ...(host?.rename ? { rename: host.rename } : {}),
     process, ...(mission ? { mission } : {}), ...(memory ? { memory } : {}),
-    ...(chiefs && botId && directory?.setChief ? { chief: { ...chiefs, move: (chief: string | null) => directory.setChief!(botId, chief) } } : {}), ...(tasks.length ? { tasks } : {}), ...(board.length ? { board } : {}), ...(bots.length ? { bots } : {}),
+    ...(chiefs && botId && directory?.setChief ? { chief: { ...chiefs, move: (chief: string | null) => directory.setChief!(botId, chief) } } : {}), ...(tasks.length ? { tasks } : {}), ...(board.length ? { board } : {}), ...(answering.length ? { answering } : {}), ...(bots.length ? { bots } : {}),
     sessions: { ...details?.sessions, ...(lastTurn ? { time: lastTurn } : {}), ...(state?.agent?.cwd ? { directory: state.agent.cwd } : {}), ...(reportedSession ? { sessionId: reportedSession } : {}),
       subagents: reportedSession ? childrenFor?.(reportedSession) ?? [] : [], ...(onOpenChildSession ? { openSubagent: onOpenChildSession } : {}),
       tools: <>{details?.sessions?.tools}{workspaceLink}</> },

@@ -48,6 +48,8 @@ export const composer: AreaMessages<typeof english> = {
   'composer.cancellationRequested': '已经请它停下了。',
   'composer.interruptFailed': '没能停下。',
   'composer.messageSent': '已发送。',
+  'composer.mentionAsked': '已向 {bot} 提问，回答会显示在这里。',
+  'composer.mentionBots': '可提问的 bot',
   'composer.messageQueued': 'Provider 已经把消息排上了。',
   'composer.actionFailed': '没能完成。',
   'composer.commandFailed': '命令没有执行成功。',

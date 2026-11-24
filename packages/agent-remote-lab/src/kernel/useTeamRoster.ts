@@ -11,7 +11,7 @@ export const TEAM_REFRESH_PERIODS: TeamRefreshPeriods = { watchingMs: 4_000, idl
 /** The periods the roster refreshes at; a page keeps `TEAM_REFRESH_PERIODS`, and a test passes shorter ones instead of waiting them out. */
 export const TeamRefresh = createContext<TeamRefreshPeriods>(TEAM_REFRESH_PERIODS);
 
-/** The Teams that are not tasks, links or inboxes: a room, or a Team of an earlier build. */
+/** The Teams that are not tasks, links, inboxes or answer sessions: a room, or a Team of an earlier build. Answer sessions travel with the tasks. */
 interface Inputs {
   baseUrl: string; enabled: boolean;
   /** The loaded Teams of this `baseUrl`, absent until the first read. */
@@ -29,9 +29,9 @@ export function useTeamRoster({ baseUrl, enabled, teams, publish }: Inputs): { l
   const refresh = async () => {
     const ticket = ++generation.current;
     const value = await client.list();
-    // Tasks, links, inboxes and rooms travel as Teams on the Relay; the page shows them in conversations and Chats.
+    // Tasks, links, inboxes, answer sessions and rooms travel as Teams on the Relay; the page shows them in conversations and Chats.
     if (currentClient.current === client && ticket === generation.current) {
-      publishing.current(baseUrl, value.filter(team => !team.task && !team.link && !team.inbox), value.filter(team => !!team.task || !!team.inbox));
+      publishing.current(baseUrl, value.filter(team => !team.task && !team.link && !team.inbox && !team.ask), value.filter(team => !!team.task || !!team.inbox || !!team.ask));
       setLoadError('');
     }
   };

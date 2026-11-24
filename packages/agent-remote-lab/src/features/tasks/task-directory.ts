@@ -11,7 +11,7 @@ export function taskWorker(tasks: readonly Team[] | undefined, taskId: string): 
 }
 
 /** The tasks and the bots' inboxes, as the Relay lists them. Task cards open a task's worker session the way the page opens any session. */
-export function taskDirectory(tasks: readonly Team[] | undefined, open: (worker: TaskWorker) => void, act: TaskDirectory['act'] = async () => {}, groups: readonly WindowGroup[] = [], setChief?: TaskDirectory['setChief']): TaskDirectory {
+export function taskDirectory(tasks: readonly Team[] | undefined, open: (worker: TaskWorker) => void, act: TaskDirectory['act'] = async () => {}, groups: readonly WindowGroup[] = [], setChief?: TaskDirectory['setChief'], ask?: TaskDirectory['ask']): TaskDirectory {
   const standing = () => groups.flatMap(group => Object.values(group.bots?.members ?? {}).flatMap(item => item.botId ? [{ botId: item.botId, name: item.name ?? item.botId, ...(item.chief ? { chief: item.chief } : {}) }] : []));
   return {
     canOpen: taskId => !!taskWorker(tasks, taskId),
@@ -28,6 +28,17 @@ export function taskDirectory(tasks: readonly Team[] | undefined, open: (worker:
       return { ...(chief ? { current: { botId: chief.botId, name: chief.name } } : {}), choices: bots.filter(bot => !up(bot.botId)).map(({ botId: id, name }) => ({ botId: id, name })) };
     },
     ...(setChief ? { setChief } : {}),
+    bots: () => standing().map(({ botId, name }) => ({ botId, name })),
+    ...(ask ? { ask } : {}),
+    // What the person asked from a conversation, from the answer sessions that conversation has; oldest first.
+    asks: from => (tasks ?? []).filter(team => team.ask && team.ask.from.providerId === from.providerId && team.ask.from.nativeSessionId === from.nativeSessionId)
+      .flatMap(team => team.ask!.entries.map(entry => ({ id: entry.id, botId: team.ask!.botId, bot: standing().find(bot => bot.botId === team.ask!.botId)?.name ?? team.members[0]?.name ?? team.title,
+        text: entry.text, at: entry.at, ...(entry.answer ? { answer: entry.answer } : {}) })))
+      .sort((a, b) => a.at - b.at),
+    // The sessions a bot has open to answer mentions now (an hour after the last question the Relay retires them).
+    answering: botId => (tasks ?? []).filter(team => team.ask?.botId === botId && team.status === 'active')
+      .map(team => ({ teamId: team.id, conversation: team.ask!.from.name, lastAt: team.ask!.lastAt, count: team.ask!.entries.length }))
+      .sort((a, b) => b.lastAt - a.lastAt),
     // A standing bot's inbox is bound to its session; its board travels on it.
     board: bot => [...(tasks ?? []).find(team => team.inbox && team.members[0]?.providerId === bot.providerId && team.members[0].nativeSessionId === bot.nativeSessionId)?.inbox?.board?.items ?? []]
       .sort((a: BoardItem, b: BoardItem) => b.updatedAt - a.updatedAt),

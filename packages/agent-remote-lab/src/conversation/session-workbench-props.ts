@@ -32,6 +32,8 @@ export interface SessionWorkbenchProps {
    * Window has loaded does not know the Host yet.
    */
   nativeSession?: string;
+  /** The account's bots a mention can ask from this conversation, and the ask; absent where the conversation has no Host to name. */
+  mentions?: ComponentProps<typeof AgentComposer>['mentions'];
   /** The bot this conversation is, when it is one: the view options choose its own process mode. */
   processAssistant?: ProcessAssistant;
   /** The session's Host as the Relay last said: an offline Host is said once, and the composer stays enabled. */

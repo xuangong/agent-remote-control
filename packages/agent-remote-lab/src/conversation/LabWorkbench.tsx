@@ -1,7 +1,7 @@
 import { TrackViewCommand, TrackViewScope } from '../kernel/useSessionAttention.js';
 import { AskViewCommand, AskViewScope } from '../kernel/useAskVisibility.js';
 import { useContext, useMemo, type ComponentProps } from 'react';
-import { useTranslate } from '@orchardworks/agent-client-web/react';
+import { useTaskDirectory, useTranslate } from '@orchardworks/agent-client-web/react';
 import { SessionWorkbench } from './ConversationSurface.js';
 import { RecoveryScope } from '../kernel/conversation-recovery.js';
 import { useBoundDraft, type DraftBinding } from '../kernel/draft-store.js';
@@ -37,6 +37,12 @@ export function LabWorkbench({ draftBinding, displayBinding, operationBinding, s
   const agent = props.state?.agent;
   const reportedSession = agent?.runtimeInfo.sessionId, cwd = agent?.cwd, providerId = agent?.providerId;
   const identity = source ?? relationships?.identity;
+  // `@Name text` asks that bot from this conversation; it needs the conversation's Host to name it to the Relay.
+  const directory = useTaskDirectory();
+  const mentions = useMemo(() => directory?.bots && directory.ask && identity?.hostId
+    ? { bots: directory.bots(), ask: (bot: { botId: string; name: string }, text: string) => directory.ask!({ hostId: identity.hostId!, providerId: identity.providerId, nativeSessionId: identity.nativeSessionId,
+      title: (props.conversationTitle || props.assistant?.name || identity.nativeSessionId).slice(0, 256) }, bot, text) } : undefined,
+    [directory, identity?.hostId, identity?.providerId, identity?.nativeSessionId, props.conversationTitle, props.assistant?.name]);
   const resolvedHostLabel = identity && descriptions?.hostName?.(identity.hostId ?? 'local') || hostLabel;
   const matchingAgent = identity && agent?.providerId === identity.providerId && reportedSession === identity.nativeSessionId ? agent : undefined;
   const sessionDescription = showAttributions && identity ? {
@@ -51,7 +57,7 @@ export function LabWorkbench({ draftBinding, displayBinding, operationBinding, s
     ],
   } : relationships;
   const workspace = useMemo(() => providerId && reportedSession && cwd ? { providerId, nativeSessionId: reportedSession, cwd } : undefined, [providerId, reportedSession, cwd]);
-  return <SessionWorkspaceContext.Provider value={workspace}><SessionWorkbench {...props}
+  return <SessionWorkspaceContext.Provider value={workspace}><SessionWorkbench {...props} mentions={mentions}
     nativeSession={identity ? `${identity.providerId}/${identity.nativeSessionId}` : undefined}
     sessionDescription={sessionDescription} onNavigateAttribution={props.onNavigateAttribution ?? descriptions?.navigate}
     readOnly={props.readOnly || promptEdit.recoveringDraft}

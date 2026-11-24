@@ -89,4 +89,47 @@ describe('the task directory', () => {
     expect(moved).toEqual([[id(3), null]]);
     expect(taskDirectory([], () => {}).setChief).toBeUndefined();
   });
+
+  describe('the answer sessions of mentions', () => {
+    const id = (n: number) => 'b_' + String(n).repeat(32);
+    const groups = [{ window: { id: 'g', title: 'g', revision: 1, views: [] }, bots: { rank: 'm', members: { v1: { botId: id(1), name: 'Reviewer' }, v2: { botId: id(2), name: 'Tracker' } } } }] as unknown as WindowGroup[];
+    const session = (teamId: string, bot: string, conversation: string, status: 'active' | 'archived', entries: Array<{ id: string; at: number; answer?: string }>): Team => {
+      const member = { id: `${teamId}-m`, hostId: 'mac', providerId: 'claude', role: 'leader' as const, name: 'Bot', responsibility: '', creation: 'ready' as const, activity: 'idle' as const, summary: '', updatedAt: 1, nativeSessionId: `${teamId}-s` };
+      return { id: teamId, operationId: teamId, revision: 1, title: 'Answers', status, createdAt: 1, updatedAt: 1, source: { hostId: 'mac', providerId: 'claude', nativeSessionId: 'main', title: 'Bot' }, messages: [], members: [member],
+        ask: { botId: bot, from: { hostId: 'mac', providerId: 'claude', nativeSessionId: conversation, name: `Conversation ${conversation}` }, lastAt: Math.max(...entries.map(entry => entry.at)),
+          entries: entries.map(entry => ({ id: entry.id, text: `Question ${entry.id}`, at: entry.at, ...(entry.answer ? { answer: { text: entry.answer, at: entry.at + 1 } } : {}) })) } } as Team;
+    };
+    const teams = [session('a', id(1), 'x', 'active', [{ id: 'q1', at: 10, answer: 'Fine.' }, { id: 'q3', at: 30 }]), session('b', id(2), 'x', 'active', [{ id: 'q2', at: 20, answer: 'Two open.' }]),
+      session('c', id(1), 'y', 'archived', [{ id: 'q4', at: 5 }]), session('d', id(1), 'z', 'active', [{ id: 'q5', at: 40 }])];
+
+    it('lists what a conversation asked, oldest first, with the bot\'s name and its answer when it has one', () => {
+      const directory = taskDirectory(teams, () => {}, async () => {}, groups);
+      expect(directory.asks!({ providerId: 'claude', nativeSessionId: 'x' }).map(line => [line.id, line.bot, line.text, line.answer?.text])).toEqual([
+        ['q1', 'Reviewer', 'Question q1', 'Fine.'], ['q2', 'Tracker', 'Question q2', 'Two open.'], ['q3', 'Reviewer', 'Question q3', undefined]]);
+      expect(directory.asks!({ providerId: 'claude', nativeSessionId: 'nowhere' })).toEqual([]);
+      expect(directory.asks!({ providerId: 'codex', nativeSessionId: 'x' })).toEqual([]);
+    });
+
+    it('lists a bot\'s open answer sessions, newest first, without the retired ones', () => {
+      const directory = taskDirectory(teams, () => {}, async () => {}, groups);
+      expect(directory.answering!(id(1))).toEqual([{ teamId: 'd', conversation: 'Conversation z', lastAt: 40, count: 1 }, { teamId: 'a', conversation: 'Conversation x', lastAt: 30, count: 2 }]);
+      expect(directory.answering!(id(2)).map(item => item.teamId)).toEqual(['b']);
+    });
+
+    it('offers the standing bots to mention, and asks through the call the page gave', async () => {
+      const asked: unknown[] = [];
+      const directory = taskDirectory([], () => {}, async () => {}, groups, undefined, async (source, bot, text) => { asked.push([source.nativeSessionId, bot.botId, text]); });
+      expect(directory.bots!()).toEqual([{ botId: id(1), name: 'Reviewer' }, { botId: id(2), name: 'Tracker' }]);
+      await directory.ask!({ hostId: 'mac', providerId: 'claude', nativeSessionId: 'x', title: 'X' }, { botId: id(1), name: 'Reviewer' }, 'Hello?');
+      expect(asked).toEqual([['x', id(1), 'Hello?']]);
+      expect(taskDirectory([], () => {}).ask).toBeUndefined();
+    });
+
+    it('shows a bot\'s open answer sessions in its details', async () => {
+      const directory = taskDirectory(teams, () => {}, async () => {}, groups);
+      const { AnsweringList } = await import('../../conversation/assistant/AnsweringList.js');
+      const container = await render(<AnsweringList sessions={directory.answering!(id(1))} />);
+      expect([...container.querySelectorAll('li')].map(item => item.textContent?.replace(/ · last .*/, ''))).toEqual(['Conversation z · 1 asked', 'Conversation x · 2 asked']);
+    });
+  });
 });

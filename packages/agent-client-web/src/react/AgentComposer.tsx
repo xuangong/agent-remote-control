@@ -10,6 +10,7 @@ import { AgentActivityStatus } from './AgentActivityStatus.js';
 import { InterruptButton } from './InterruptButton.js';
 import { ComposerMenu, type ComposerMenuEntry } from './ComposerMenu.js';
 import { composerMenu } from './composer-menu.js';
+import { chooseMention, mentionCandidates, parseMention, type MentionBot } from './composer-mention.js';
 import { planComposerDrop } from './composer-drop.js';
 import { quoteInsertion } from './composer-quote.js';
 import { useTranslate } from './locale.js';
@@ -99,6 +100,8 @@ export interface AgentComposerProps {
   /** Current-session waiting messages and unsettled message submissions. */
   onPendingInputChange?(count: number): void;
   onSendMessage?(text: string, options?: AgentMessageOptions): Promise<void>;
+  /** The account's bots, offered after `@`; `@Name text` asks the bot instead of writing to this session (bots plan 8d). */
+  mentions?: { readonly bots: readonly MentionBot[]; ask(bot: MentionBot, text: string): Promise<void> };
   onCancel?(): Promise<void>;
   onSetSessionSetting?(id: string, value: string): Promise<void>;
   onListCommands?(): Promise<AgentCommand[]>;
@@ -139,10 +142,12 @@ interface Draft {
   commandsOpen?: boolean;
   commandsDismissed?: boolean;
   commandIndex?: number;
+  mentionIndex?: number;
+  mentionDismissed?: boolean;
   feedback?: { kind: 'success' | 'error'; message: string; delivery?: boolean; commandError?: unknown };
 }
 
-export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly: draftOnlyRequested = false, opening = false, openFailed = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, recipient, readOnlyCollapsed = false, state, sessionControls, settings = 'inline', renderSessionSettingError, renderCommandError, sessionKey, host, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent, sendLater, quote }: AgentComposerProps) {
+export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly: draftOnlyRequested = false, opening = false, openFailed = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, recipient, readOnlyCollapsed = false, state, sessionControls, settings = 'inline', renderSessionSettingError, renderCommandError, sessionKey, host, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent, sendLater, quote, mentions }: AgentComposerProps) {
   const t = useTranslate();
   const draftOnly = draftOnlyRequested;
   const pendingFirstInputContext = firstInputContext !== undefined;
@@ -261,8 +266,14 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   const commandQuery = !readOnly && isCommand ? text.trimStart().slice(1) : '';
   const availableCommands = [...consoleCommands, ...(readOnly ? [] : directory.commands).filter((command) => !consoleCommands.some((local) => local.name === command.name || local.aliases?.includes(command.name)))];
   const commands = availableCommands.filter((command) => command.name.startsWith(commandQuery) || (commandQuery && consoleCommands.find((local) => local.id === command.id)?.aliases?.some((alias) => alias.startsWith(commandQuery))));
+  // A draft that starts with @ offers the account's bots; once a bot is named and a question follows, send asks it.
+  const mentionBots = mentions?.bots ?? [];
+  const mentionable = !!mentions && !readOnly && !draftOnly && !hasAttachments && !isCommand && !currentDraft.selectedSkill;
+  const mentioned = mentionable ? parseMention(text, mentionBots) : undefined;
   const showCommands = wantsCommands && (!readOnly || consoleCommands.length > 0) && !/\s/u.test(commandQuery);
   const commandIndex = Math.min(currentDraft.commandIndex ?? 0, Math.max(0, commands.length - 1));
+  const mentionOptions = mentionable && !showCommands && !currentDraft.mentionDismissed ? mentionCandidates(text, mentionBots) : [];
+  const mentionIndex = Math.min(currentDraft.mentionIndex ?? 0, Math.max(0, mentionOptions.length - 1));
   const activeTurnId = state?.agent?.activeTurn?.turnId;
   const nativeBusy = session.busy;
   const canQueue = !draftOnly && nativeBusy && capabilities?.queueMessage === true;
@@ -369,7 +380,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     refresh(value => value + 1);
   }
 
-  const sendButtonPress = useSendButtonPress(agentId, (canSubmit || laterMode && !laterBlocked && hasContent) && !readOnly && !busy, () => {
+  const sendButtonPress = useSendButtonPress(agentId, (canSubmit || !!mentioned || laterMode && !laterBlocked && hasContent) && !readOnly && !busy, () => {
     if (richEnabled) { editorRef.current?.insertText('\n'); return; }
     const input = inputRef.current;
     if (!input || input.disabled || composing.current) return;
@@ -419,6 +430,34 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     observer?.observe(input);
     return () => observer?.disconnect();
   }, [agentId, text, pending, readOnly, hideDraft, richEnabled]);
+
+  function pickMention(bot: MentionBot): void {
+    setText(chooseMention(bot));
+    currentDraft.mentionIndex = 0;
+    currentDraft.mentionDismissed = false;
+    currentDraft.feedback = undefined;
+    refresh(value => value + 1);
+    focusInput();
+  }
+  /** Asks the mentioned bot; the question never reaches this session, and the draft clears once the Relay took it. */
+  async function askMentioned(mention: { bot: MentionBot; text: string }): Promise<void> {
+    if (currentDraft.pending || latest.current.agentId !== agentId) return;
+    const submitted = currentDraft.text;
+    currentDraft.pending = 'send';
+    currentDraft.feedback = undefined;
+    refresh(value => value + 1);
+    try {
+      await mentions!.ask(mention.bot, mention.text);
+      if (currentDraft.text === submitted) { if (richEnabled) imageDraft.setText(''); else { currentDraft.text = ''; if (currentAgent.current === agentId) onDraftChange?.(''); } }
+      currentDraft.feedback = { kind: 'success', message: t('composer.mentionAsked', { bot: mention.bot.name }) };
+      if (currentAgent.current === agentId) focusRequested.current = agentId;
+    } catch (error) {
+      currentDraft.feedback = { kind: 'error', message: errorWords(error, t, 'composer.actionFailed') };
+    } finally {
+      currentDraft.pending = undefined;
+      if (mounted.current) refresh(value => value + 1);
+    }
+  }
 
   function chooseCommand(command: AgentCommand): void {
     if (latest.current.draftOnly || latest.current.mutationBlocked || latest.current.agentId !== agentId) return;
@@ -516,6 +555,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
       return;
     }
     if (readOnly) return;
+    if (kind === 'send' && mentioned) { await askMentioned(mentioned); return; }
     if (hasImages && blockFirstInputImages()) return;
     if (kind === 'queue' && latest.current.pendingFirstInputContext) return;
     if (hasAttachments && currentDraft.selectedSkill) { currentDraft.feedback = { kind: 'error', message: t('composer.removeSkillFirst') }; refresh(value => value + 1); return; }
@@ -585,6 +625,16 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     if (readOnly && !laterMode) return;
     const nativeEvent = 'nativeEvent' in event ? event.nativeEvent : event;
     if (nativeEvent.isComposing || nativeEvent.keyCode === 229 || composing.current) return;
+    if (mentionOptions.length > 0 && !busy) {
+      if (event.key === 'Escape') { event.preventDefault(); currentDraft.mentionDismissed = true; refresh(value => value + 1); return; }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        currentDraft.mentionIndex = (mentionIndex + (event.key === 'ArrowDown' ? 1 : -1) + mentionOptions.length) % mentionOptions.length;
+        refresh(value => value + 1);
+        return;
+      }
+      if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab') { event.preventDefault(); pickMention(mentionOptions[mentionIndex]!); return; }
+    }
     if (showCommands && event.key === 'Escape') {
       event.preventDefault();
       currentDraft.commandsDismissed = true;
@@ -642,7 +692,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   const setMenuView = (view: SessionControlView | undefined) => { currentDraft.view = view; refresh(value => value + 1); };
   // A draft-only stand-in reports no activity of its own (as the activity status reads it), so it never offers stop.
   const working = activitySession.activity === 'running', waitingForAnswer = activitySession.activity === 'waiting';
-  const sendDisabled = !canSubmit || readOnly || busy || hasImages && pendingFirstInputContext || (selectedSkill ? nativeBusy || !onExecuteCommand
+  const sendDisabled = mentioned ? readOnly || busy : !canSubmit || readOnly || busy || hasImages && pendingFirstInputContext || (selectedSkill ? nativeBusy || !onExecuteCommand
     : !hasContent || (!imageSendReady && !canWait) || (!isCommand && (capabilities?.sendMessage === false || (!onSendMessage && !onSendMessageContent && !canWait))));
   const sendIcon = pending === 'send' ? <span aria-hidden="true">…</span>
     : <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>;
@@ -725,6 +775,11 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
             : command.kind !== 'command' ? <small className="agent-command-kind">{command.kind === 'skill' ? t('composer.kindSkill') : t('composer.kindPrompt')}</small> : null}
         </button>)}</div>}
     </div> : null}
+    {mentionOptions.length > 0 ? <div className="agent-command-menu" data-mention-picker="">
+      <div role="listbox" id={`${controlId}-mentions`} aria-label={t('composer.mentionBots')}>{mentionOptions.map((bot, index) => <button
+        type="button" role="option" aria-selected={index === mentionIndex} id={`${controlId}-mention-${index}`} key={bot.botId}
+        onMouseDown={event => event.preventDefault()} onClick={() => pickMention(bot)}><strong>@{bot.name}</strong></button>)}</div>
+    </div> : null}
     <div className="agent-composer-draft" hidden={hideDraft}>
     {firstInputContext ? <p className="agent-composer-note" role="status">
       {firstInputContext.state === 'pending' ? t('composer.historyPending')
@@ -752,16 +807,16 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
       : <div className="agent-session-controls"><ComposerMenu entries={menuEntries} open={currentDraft.view === 'actions'} onOpen={open => setMenuView(open ? 'actions' : undefined)} /></div> : null}
     <label htmlFor={`${controlId}-input`} className="agent-visually-hidden">{t('composer.message')}</label>
     {richEnabled ? <ComposerEditor key={editorIdentity} ref={editorRef} id={`${controlId}-input`} parts={imageDraft.parts} images={imageDraft.images} placeholder={placeholder} label={t('composer.message')}
-      disabled={(blocked || agentId === '') && !draftOnly && !laterMode || readOnly && !laterMode || busy} onChange={parts => { imageDraft.setParts(parts); currentDraft.commandIndex = 0; currentDraft.commandsDismissed = false; currentDraft.feedback = undefined; }}
+      disabled={(blocked || agentId === '') && !draftOnly && !laterMode || readOnly && !laterMode || busy} onChange={parts => { imageDraft.setParts(parts); currentDraft.commandIndex = 0; currentDraft.commandsDismissed = false; currentDraft.mentionIndex = 0; currentDraft.mentionDismissed = false; currentDraft.feedback = undefined; }}
       onFiles={addImageFiles} onImport={importImageParts} onRetry={imageId => { if (!blockFirstInputImages()) imageDraft.retry(imageId); }} onKeyDown={handleKeyDown}
-      describedBy={`${controlId}-hint`} controls={showCommands && commands.length > 0 ? `${controlId}-commands` : undefined}
-      activeDescendant={showCommands && commands.length > 0 ? `${controlId}-command-${commandIndex}` : undefined} /> : <textarea
+      describedBy={`${controlId}-hint`} controls={showCommands && commands.length > 0 ? `${controlId}-commands` : mentionOptions.length > 0 ? `${controlId}-mentions` : undefined}
+      activeDescendant={showCommands && commands.length > 0 ? `${controlId}-command-${commandIndex}` : mentionOptions.length > 0 ? `${controlId}-mention-${mentionIndex}` : undefined} /> : <textarea
       ref={inputRef}
       id={`${controlId}-input`}
       data-testid="prompt-input"
       rows={1}
       value={text}
-      onChange={(event) => { setText(event.target.value); currentDraft.commandIndex = 0; currentDraft.commandsDismissed = false; currentDraft.feedback = undefined; refresh((value) => value + 1); }}
+      onChange={(event) => { setText(event.target.value); currentDraft.commandIndex = 0; currentDraft.commandsDismissed = false; currentDraft.mentionIndex = 0; currentDraft.mentionDismissed = false; currentDraft.feedback = undefined; refresh((value) => value + 1); }}
       onKeyDown={handleKeyDown}
       enterKeyHint={isCoarsePointer() ? 'enter' : 'send'}
       onCompositionStart={() => { composing.current = true; }}
@@ -770,8 +825,8 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
       readOnly={ownershipReadOnly}
       placeholder={placeholder}
       aria-describedby={`${controlId}-hint`}
-      aria-controls={showCommands && commands.length > 0 ? `${controlId}-commands` : undefined}
-      aria-activedescendant={showCommands && commands.length > 0 ? `${controlId}-command-${commandIndex}` : undefined}
+      aria-controls={showCommands && commands.length > 0 ? `${controlId}-commands` : mentionOptions.length > 0 ? `${controlId}-mentions` : undefined}
+      aria-activedescendant={showCommands && commands.length > 0 ? `${controlId}-command-${commandIndex}` : mentionOptions.length > 0 ? `${controlId}-mention-${mentionIndex}` : undefined}
     />}
     {!ownershipReadOnly ? <>
       <InterruptButton shown={working || waitingForAnswer || pending === 'command'}

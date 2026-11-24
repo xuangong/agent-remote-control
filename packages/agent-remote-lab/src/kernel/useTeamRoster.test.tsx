@@ -14,6 +14,9 @@ const room = (state: 'open' | 'done'): Team => ({ ...base, id: 'room', title: 'R
   room: { name: 'Launch', topic: 'Plan', state, deadline: 1, turns: 0, seen: {}, passed: [], transcript: [] } });
 const inbox: Team = { ...base, id: 'inbox', title: 'Bot', members: [{ ...member, id: 'bot', role: 'requester', name: 'Bot', nativeSessionId: 'bot' }], inbox: { botId: `b_${'0'.repeat(32)}` } };
 
+const answers: Team = { ...base, id: 'answers', title: 'Answers', members: [{ ...member, id: 'ans', role: 'leader', name: 'Bot', nativeSessionId: 'answer-1' }],
+  ask: { botId: `b_${'1'.repeat(32)}`, from: { hostId: 'mac', providerId: 'fixture', nativeSessionId: 'main', name: 'Main' }, lastAt: 1, entries: [{ id: 'e', text: 'Q?', at: 1 }] } };
+
 let published: { teams: Team[]; tasks: Team[] } | undefined;
 function Harness() {
   const [roster, setRoster] = useState<{ baseUrl: string; teams: Team[] }>();
@@ -29,6 +32,15 @@ it('reads the roster and splits what the page shows in Chats from the tasks and 
   await vi.waitFor(() => expect(published).toBeDefined());
   expect(published!.teams.map(team => team.id)).toEqual(['room']);
   expect(published!.tasks.map(team => team.id)).toEqual(['inbox']);
+  await unmount(view);
+});
+
+it('keeps answer sessions with the tasks, never among the rooms', async () => {
+  fixture.teams = [room('open'), answers];
+  const view = await render(<Harness />);
+  await vi.waitFor(() => expect(published).toBeDefined());
+  expect(published!.teams.map(team => team.id)).toEqual(['room']);
+  expect(published!.tasks.map(team => team.id)).toEqual(['answers']);
   await unmount(view);
 });
 

@@ -10,13 +10,16 @@ import { parseTaskInputs } from '@orchardworks/agent-remote-protocol';
 import { startStack, type Stack } from '@orchardworks/agent-e2e/stack';
 import { hasTools as hasToolsOf, inputs as inputsOf, team as teamOf } from './bot-team.js';
 import { launchBrowser, openPage } from './browser.js';
-import { showsText } from './page.js';
+import { holdsText, showsText } from './page.js';
 
 let stack: Stack; let browser: Browser;
 beforeAll(async () => {
   stack = await startStack({ teams: true, tools: true,
     // A message that asks for a report in is answered by one turn whose final text is the report; any other input is echoed.
-    turns: text => text.includes('Report in with your status.') ? [{ reply: 'Scribe here: ready to keep the notes.' }] : undefined,
+    turns: text => text.includes('Report in with your status.') ? [{ reply: 'Scribe here: ready to keep the notes.' }]
+      // A long check keeps the bot's main session busy, waiting for an approval no one gives; a question asked of it is answered by one turn.
+      : text.includes('Run the long check.') ? [{ approval: 'Run the check', command: 'npm run check' }]
+      : text.includes('What is the build status?') ? [{ reply: 'The build is green.' }] : undefined,
     sessions: {
     chief: { title: 'Chief', history: [{ role: 'user', text: 'Plan the release.' }, { role: 'assistant', text: 'Chief is ready.' }] },
     tracker: { title: 'Tracker', history: [{ role: 'user', text: 'Track the build.' }, { role: 'assistant', text: 'Tracker is ready.' }] },
@@ -151,5 +154,39 @@ it('E15: the person stops a chain from the audit in Settings, and a bot\'s next 
   await expect.poll(() => row.locator('small').innerText(), { timeout: 20_000 }).toContain('Stopped');
   // The refusal is an outcome the bot reads, with the reason.
   await expect(stack.provider.useTool('tracker', 'message', { to: 'Chief', text: 'Notes drafted.', reply_to: sent.messageId })).resolves.toMatchObject({ outcome: 'forbidden', reason: expect.stringContaining('The person stopped this work') });
+  await context.close();
+});
+
+it('E15: the person mentions a busy bot from another conversation, and the answer shows in place while the bot\'s main turn runs and nothing reaches either session', async () => {
+  const { context, page } = await openPage(browser, stack.sessionUrl('chief'));
+  await team(context);
+  await showsText(page, 'Chief is ready.');
+  await hasTools('chief'); await hasTools('tracker');
+  // Tracker's main session starts a turn that does not end.
+  await page.locator('[data-testid="prompt-input"][data-placeholder^="Message Tracker"]').click();
+  await page.keyboard.type('Run the long check.');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => stack.provider.session('tracker')!.sent.includes('Run the long check.'), { timeout: 20_000 }).toBe(true);
+  const trackerInputs = stack.provider.session('tracker')!.sent.length, chiefInputs = stack.provider.session('chief')!.sent.length;
+  // The person asks it from the Chief conversation, the page's composer being the way to mention a bot.
+  const composer = page.locator('[data-testid="prompt-input"][data-placeholder^="Message Chief"]');
+  await composer.click();
+  await page.keyboard.type('@Tracker What is the build status?');
+  await page.keyboard.press('Enter');
+  await showsText(page, 'Tracker answered');
+  await page.locator('summary', { hasText: 'Tracker answered' }).click();
+  await holdsText(page, 'The build is green.');
+  await holdsText(page, 'What is the build status?');
+  // The answer came from a session of its own, started with the bot's mission and the framed question.
+  const answering = () => stack.provider.known().filter(id => id.includes('-new-')).find(id => stack.provider.given(id)?.instructions?.includes('answer session'));
+  await expect.poll(answering, { timeout: 20_000 }).toBeDefined();
+  expect(inputs(answering()!)).toEqual([{ kind: 'ask', from: 'Chief', body: 'What is the build status?' }]);
+  // Neither the conversation it was asked from nor the bot's busy main session received anything.
+  expect(stack.provider.session('chief')!.sent).toHaveLength(chiefInputs);
+  expect(stack.provider.session('tracker')!.sent).toHaveLength(trackerInputs);
+  // The mention is a chain of the person's that names the bot and counts the answer's turn.
+  const status = await (await context.request.get(stack.origin + '/auth/status')).json() as { basePath: string };
+  const audit = await (await context.request.get(stack.origin + status.basePath + 'v1/remote/chains')).json() as { chains: Array<{ cause: string; bots: string[]; turns: number }>; names: Record<string, string> };
+  expect(audit.chains.filter(chain => chain.cause === 'person' && chain.bots.some(bot => audit.names[bot] === 'Tracker') && chain.turns === 1)).toHaveLength(1);
   await context.close();
 });

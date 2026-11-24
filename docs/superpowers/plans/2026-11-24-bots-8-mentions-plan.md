@@ -74,6 +74,37 @@ As built (8a):
 - Bots asking bots need no answer session: the receiver's main session answers between turns, combined with whatever else
   waits, and stays short because it coordinates (principle 2).
 
+As built (8b):
+
+- Owner decisions followed: bots talk to main sessions always (no routing of a bot's message to an answer session and no ask flag); an
+  answer session exists only for the person's mention; one per (bot, asking conversation), no count limit; a new native session of the
+  bot's provider in its working directory, read-only where the provider enforces it, no fork of the main session.
+- Protocol: a Team with `ask: { botId, from: { hostId, providerId, nativeSessionId, name }, lastAt, entries[] }` is the answer session; its
+  only seat is a `leader` (the Team `source` is the bot's main session, where the seat takes its directory), and each entry is one ask with
+  the answer its final text gave (at most 20 entries kept). The person asks through `POST v1/remote/teams/ask` (`TeamAskRequest`: the
+  conversation as `source`, `bot` by id or name, `text` up to 4000 characters); the Controller answers with the Host call `bot_answer`. The
+  seat carries `ask: { botId, mission?, memory? }`. Frame `[The person asks from <X>]` + the question + guidance is `askText`, read back as
+  `TaskInput` kind `ask`; a `TurnCause` of kind `framed` may say `asked`. Fixture `fixtures/ask.v1.json`.
+- Relay (`bot-asks.ts`): one change finds or creates the Team for (bot, X) (X compared by the session it resolves to), queues the framed
+  question as a Team message from and to the seat (stamped with the mention's chain), and records the entry; nothing is queued for X or for
+  the bot's main session, and the mention is a chain of the person's naming the bot (`personChainId`, as the Host names a person's chain).
+  A Relay timer retires a session an hour after its last mention (`status: archived`); a follow-up that arrives after the hour but before the
+  timer retires it first. Retired sessions stay as the page's record (up to 200). The final text answers every entry still open, cut at
+  300 characters with the pointer of `cutReply`.
+- Who the session is: `BotCalls.caller` resolves an answer session to its bot, so its board, memory and chain are the bot's own. The calls
+  that coordinate (create, message, stop and retire staff, mission, timers, chief, reply and told) go through `main()`, which refuses an
+  answer session; `message` returns `forbidden`. It reads other bots, and `read_bot` also takes `asking` (the conversation the question came
+  from) and `main` (the bot's main session).
+- Controller: the answer seat creates the session with the bot's mission and memory and the bots' tools; `read_only` is dropped when the
+  provider cannot enforce it. `inputCause` reads an input of only asks as `framed, asked`, whose final text `turnEnded` sends as `bot_answer`; the
+  session counts in the chain through `answering(ref)`, which the Team runtime answers from its own seat records. A retired session's seat is
+  forgotten once the Relay stops listing it.
+- Tests: `bot-asks.test.ts` (Relay: reuse per (bot, X), retirement on a fake clock and at the next ask, X never seated, bot messages still to
+  main, the answer, the board and memory as the bot, what it cannot do, `read_bot`, the chain), the route test, the protocol fixture test, and
+  `bot-answers.test.ts` (Controller over a real Relay broker: creation, the framed question, the final text becoming the answer, the chain).
+  Decision 1 (a bot's message routed away from the main session) and decision 2 (X seated in the Team) were each mutation checked and fail the
+  Relay tests.
+
 ## 8c. Memory
 
 - Beside its mission, a bot keeps a memory: short facts (at most 50, 300 characters each) that every session of it starts with.
@@ -105,6 +136,22 @@ As built (8c):
 - The composer offers the account's bots after `@`. `@Name text` sent in conversation X sends nothing to X's session; it asks the
   bot (8b) with X as the asking conversation. The answer shows in X's timeline as one expandable line ("Reviewer answered"), and
   in the bot's details.
+
+As built (8d):
+
+- Composer: `@` opens a picker of the account's standing bots (names from the Window groups, only when the conversation's Host is known);
+  arrows, Enter or Tab, Escape and the pointer work. A draft that starts with `@Name question` (case-insensitive, longest name first, names may
+  contain spaces) is asked through `RemoteTeamClient.ask` with the open conversation as `source`, and nothing is sent to that conversation; an
+  `@` with no bot after it is an ordinary message. The parser is the pure `composer-mention.ts`.
+- Timeline: each entry of an answer session whose `ask.from` is this conversation is one `<details>` line "<Bot> answered" (or "<Bot> is
+  answering"), opening to the question and the answer, placed after the turn it came during. The match is by provider and native session id.
+  The roster follows the Relay every 4 s while an entry has no answer yet (as it does while a room is open), otherwise twice a minute.
+- Details: a bot's open answer sessions are listed read only (conversation, number of asks, last asked). Answer sessions travel with the
+  tasks, never among the rooms. The audit lists the mention's chain under the bot, as every chain.
+- Tests: jsdom tests (mention parsing, the composer's picker by keyboard and pointer, the answer lines, the details list, the roster), the
+  component spec `mention-answer.spec.ts` (picker and answer line, desktop and phone), and the E15 flow: the person mentions a busy bot from
+  another conversation; the answer shows in place while the bot's main turn waits, and neither the asking conversation nor the main session
+  received anything.
 
 ## 8e. Changing a chief
 

@@ -212,6 +212,13 @@ short, and keep it short above all when bots report to you; when you serve sever
 keep your conversation to taking work in and handing results back; ask the bot whose mission fits; report outcomes to your
 chief; restate your understanding when it may have moved.
 
+As built (8b): the person's mention of a bot (`@Name text` typed in conversation X) is answered in an answer session, never in X and never in
+the bot's main session: one native session of the bot's provider per (bot, X), in the bot's directory and read-only where the provider enforces
+it, started with the bot's mission, its memory and the question framed `[The person asks from <X>]`, retired an hour after the last mention. It
+has the bots' tools but acts as the bot only for reading, the board and the memory: it does not message or create bots, manage staff, or change the
+mission, timers or chief. Its final text is the answer (3.3), kept on its Team for the page, and its turns and tokens count in the mention's chain
+(7). Messages between bots never use it; they reach the receiving bot's main session.
+
 ### 5.2 Getting the tools to each CLI
 
 The tools run in the Controller. Each provider receives them as it declares (`sessionExtensions.toolNamespaces`):

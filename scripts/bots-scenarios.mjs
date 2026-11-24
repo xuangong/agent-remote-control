@@ -1,7 +1,7 @@
 // Behaviour scenarios of bots (bots design 11): real Claude Code or Codex sessions on this checkout's local instance, driven as the
 // person drives them, judged by facts the Relay and the sessions record, never by the wording of a reply.
 // Usage, from the checkout root, with the instance running (`pnpm local up`):
-//   pnpm test:bots [claude|codex] [scenario ...]        scenarios: temporary, standing, shared, bundle, repository, copilot (default: all, in order)
+//   pnpm test:bots [claude|codex] [scenario ...]        scenarios: temporary, standing, shared, bundle, repository, board, ask, copilot (default: all, in order)
 // It creates its own sessions in the instance workspace and its own group, and leaves them for reading in the page.
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -127,7 +127,7 @@ if (run('temporary')) {
 }
 
 let reviewer;
-if (run('standing') || run('shared') || run('bundle') || run('repository')) {
+if (run('standing') || run('shared') || run('bundle') || run('repository') || run('ask')) {
   // An chief creates a standing bot with a mission; it reports in, works with the chief by message, takes the person's
   // lasting change into its own mission, and keeps a board item to its end.
   const target = `review-${tag}.txt`;
@@ -196,6 +196,38 @@ if (run('repository') && reviewer) {
   // An attached file is listed with its sha256 after the sender's words: the input that named the branch carries none.
   const named = controller('session', 'read', reviewer.address, '--search', branch, '--limit', '10').entries ?? [];
   check('repository: no file was attached, since the repository is shared', named.length > 0 && named.every(entry => !(entry.text ?? '').includes('sha256')));
+}
+
+if (run('board')) {
+  // The chief keeps its plan on its board: it gives an item to a temporary bot, which finishes it and fills it in; a lasting fact goes
+  // to its memory.
+  const out = `gamma-${tag}.txt`;
+  await say(chief.address, `Put an item "Write ${out}" on your board and give it to a temporary bot, naming the item when you create the bot: it creates ${out} containing the word gamma in your working directory. When it has finished, make sure the item is done with the file as its result.`);
+  const item = await until('the board item to be done', () => inboxNamed(chief.name)?.inbox?.board?.items?.find(entry => entry.title.includes(out) && entry.status === 'done'), 8 * 60_000).catch(() => undefined);
+  check('board: the chief\'s item is done', !!item, item ? `${item.status} · ${item.result ?? item.latestReport ?? ''}`.slice(0, 120) : 'none');
+  const worker = item ? tasksOf(chief).find(team => team.task.botId === item.assignee) : undefined;
+  check('board: the item was given to a temporary bot', !!worker, worker ? ` · ` : item?.assignee ?? 'none');
+  check('board: the file exists', existsSync(file(out)) && readFileSync(file(out), 'utf8').includes('gamma'));
+  await say(chief.address, 'Remember this for every session of yours: releases are approved by Dana.');
+  const fact = await until('the fact in the chief\'s memory', () => {
+    const member = api('GET', '/v1/windows').groups?.flatMap(group => Object.values(group.bots?.members ?? {})).find(entry => entry.name === chief.name);
+    return member?.memory?.find(entry => /Dana/.test(entry.text));
+  }, 4 * 60_000).catch(() => undefined);
+  check('board: the chief kept the lasting fact in its memory', !!fact, fact?.text ?? 'none');
+}
+
+if (run('ask') && reviewer) {
+  // The person mentions the reviewer from the chief's conversation while the reviewer is busy: an answer session answers at once, the
+  // chief's session receives nothing, and the reviewer's main session never sees the question.
+  controller('session', 'send', reviewer.address, `Count slowly from 1 to 40, one number per line, and then say "counted".`);
+  const question = `What is 6 times 7 (${tag})? Answer with the number only.`;
+  api('POST', '/v1/remote/teams/ask', { operationId: randomUUID(), source: { hostId, providerId: provider, nativeSessionId: chief.nativeSessionId, title: chief.name }, bot: reviewer.name, text: question });
+  const answer = await until('the answer to the mention', () => teams().find(team => team.ask && team.ask.from.nativeSessionId === chief.nativeSessionId && team.ask.entries.some(entry => entry.text === question && entry.answer))
+    ?.ask.entries.find(entry => entry.text === question).answer, 6 * 60_000).catch(() => undefined);
+  check('ask: the mention was answered', !!answer && /42/.test(answer.text), answer?.text?.slice(0, 80) ?? 'none');
+  check('ask: the chief\'s session received nothing', !received(chief.address, `6 times 7 (${tag})`));
+  check('ask: the reviewer\'s main session never saw the question', !received(reviewer.address, `6 times 7 (${tag})`));
+  await settled(reviewer.address, undefined).catch(() => undefined);
 }
 
 if (run('copilot')) {

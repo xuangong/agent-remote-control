@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentSessionTool } from '@orchardworks/agent-provider-sdk';
-import { BOT_INSTRUCTIONS_VERSION, parseTaskInputs, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import { BOT_INSTRUCTIONS_VERSION, assistantMessageText, chiefChangedText, itemChangedText, itemTagText, parseTaskInputs, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { botsHarness } from './test-utils/bots-harness.js';
 import { BotTools } from './bot-tools.js';
 
@@ -119,6 +119,21 @@ describe('a task between a main session and its worker', () => {
     await h.runtime.tick();
     const told = h.sessions.get('worker')!.deliveries.flatMap(delivery => parseTaskInputs(delivery.text) ?? []);
     expect(told).toEqual([expect.objectContaining({ kind: 'told', taskId, body: 'Skip the old logs.' })]);
+  });
+
+  it('does not tell the owner the board notices and item-tagged messages the Relay wrote to a temporary bot as if the person typed them', async () => {
+    const h = await harness();
+    await h.host(createTask);
+    const worker = h.created[0]!;
+    await h.runtime.tick();
+    h.userMessage(worker.id, itemChangedText({ title: 'Collect logs', what: 'brief changed' }), 'n1');
+    h.userMessage(worker.id, chiefChangedText({ to: 'bot', bot: 'Collect logs', from: 'Ann', chief: 'Bo' }), 'n2');
+    h.userMessage(worker.id, assistantMessageText({ messageId: 'm0123456789ab', from: 'Chief', body: 'Use main.', tag: itemTagText({ key: 7, title: 'Collect logs', from: 'Chief' }) }), 'n3');
+    h.userMessage(worker.id, 'Skip the old logs.', 'u1');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    await h.runtime.tick();
+    const told = h.sessions.get('worker')!.deliveries.flatMap(delivery => parseTaskInputs(delivery.text) ?? []);
+    expect(told).toEqual([expect.objectContaining({ kind: 'told', body: 'Skip the old logs.' })]);
   });
 
   it('stops a cancelled task\'s running worker turn and lets its runtime go', async () => {

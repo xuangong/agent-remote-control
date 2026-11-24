@@ -56,6 +56,9 @@ As built (8a):
   report changes neither status nor result.
 - Notices (retitled, brief changed, cancelled, assigned to you, reassigned) are queued after the write from the record, by the item's key
   and version, to a standing bot's inbox or a running temporary bot's task; a bot that is gone is simply not told.
+- The person's own edits tell the board's owner bot too: an item assigned to `self` (retitled, brief changed, status, assigned to you) and the plan
+  note (`[Item "Plan note" changed · changed: <why>]`) are noticed to the owner. A bot's edits to its own items stay silent. (Unit tests in
+  `bot-board.test.ts`; the person-only rule was mutation checked.)
 - Timer of open work: unchanged rules, driven by open board items; the due timer lists their title, status and latest report.
 - `list_bots` returns `board: { open, items }` for the caller's own open items where it returned `work`; `read_bot` is unchanged.
 - Page: `TaskDirectory.board` replaces `work`; the assistant details list items with status, latest report and result; a quiet bot's roster
@@ -210,9 +213,14 @@ As built (8g):
   An item assigned to a standing staff bot expands into its board read only, one level. In place edits: title, status, assignee, brief, cancel, and
   the plan note with a why; a stale edit lists what it replaced. After a write the roster is refetched. `TaskDirectory` gained `boardOf`,
   `botName`, `assignees`, `canOpenBot`, `openBot`, `writeBoard`.
+- Creating: a New item form under the tree (title; optional assignee, brief and parent) writes a keyless item through the same `update_board`; an
+  item assigned to another bot tells it as an assignment. While a bot's board is shown in its details the roster refreshes at the watching period
+  (`TEAM_REFRESH_PERIODS.watchingMs`, via `useWatchTeamRoster`) and goes back to idle when it closes.
 - Timeline: `[Item "..." changed ...]` and `[Chief changed ...]` notices are task inputs (`item_changed`, `chief_changed`) folded to one quiet line each;
   the `[Item N "title" · from X]` tag shows as a quiet note and in the folded line's summary. (A temporary bot's notice is no longer read as the
   person's own text.)
+- Controller: a temporary bot's `[Item ...]`, `[Chief changed ...]` and item-tagged message inputs are Relay frames, so the `tell_task` path does not
+  forward them to the chief as the person's typed words (`task-worker.test.ts`, mutation checked).
 - Tests: Relay (`bot-board.test.ts`: person's edits, stale notice, assignee told once, assignee rules; the notify call was mutation checked: dropping it
   and doubling it both fail), protocol fixtures and parse tests, chain client test, jsdom `BoardList.test.tsx` and task directory tests, timeline fold
   tests, component spec `board-details.spec.ts` (desktop panel and phone sheet).

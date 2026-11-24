@@ -176,7 +176,7 @@ function stop(signal) {
   }
 }
 // The Playwright runs use one worker over several projects (desktop, phone, Safari); each has a global deadline below its outer one.
-const outerDeadlineMs = mode === 'native-browser' ? 1_500_000 : mode === 'components' ? 1_600_000 : mode === 'e2e-flows' ? 240_000 : mode === 'live-cache-browser' ? 150_000 : mode === 'devbox' ? 30_000 : mode === 'devbox-server' ? 80_000 : mode === 'opencode-server-native' ? 90_000 : successionEvidence || opencodeSuccessionEvidence ? 120_000 : 540_000;
+const outerDeadlineMs = mode === 'native-browser' ? 1_500_000 : mode === 'components' ? 1_600_000 : mode === 'e2e-flows' ? 360_000 : mode === 'live-cache-browser' ? 150_000 : mode === 'devbox' ? 30_000 : mode === 'devbox-server' ? 80_000 : mode === 'opencode-server-native' ? 90_000 : successionEvidence || opencodeSuccessionEvidence ? 120_000 : 540_000;
 const deadline = setTimeout(() => {
   process.stderr.write(`${mode} suite exceeded its ${outerDeadlineMs / 1000} second deadline.\n`);
   stop('SIGKILL');

@@ -2,7 +2,7 @@ import { Type, type Static } from '@sinclair/typebox';
 import { NativeSessionRef } from './session-succession.js';
 import { Value } from '@sinclair/typebox/value';
 import { ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, AttachmentId, BotAttachment, BotId, BotFact, BotMission, BotName, Board, BOARD_ITEM_LIMIT, BOARD_PLAN_LIMIT, BoardItem, BoardItemEdit, BoardPlanEdit, BotTimer } from './bots.js';
-import { ChainId, TurnCause } from './chains.js';
+import { ChainId, StandingApproval, TurnCause } from './chains.js';
 import { TaskBrief, ASK_LIMIT, TaskDoneWhen, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_LIMIT, ROOM_MINUTES_LIMIT, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, TaskReportStatus, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_QUESTION_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, isTeamTask } from './task.js';
 const object = { additionalProperties: false } as const;
 const id = Type.String({ minLength: 1, maxLength: 256 });
@@ -194,6 +194,9 @@ export const TeamHostCall = Type.Union([
   Type.Object({ action: Type.Literal('list_bots'), owner: BotCaller }, object),
   // A bot's turn ended: its Host counts the turn and its usage in the turn's chain.
   Type.Object({ action: Type.Literal('chain_turn'), owner: BotCaller, cause: TurnCause, tokens: Type.Integer({ minimum: 0 }), costUsd: Type.Optional(Type.Number({ minimum: 0 })) }, object),
+  // A bot's native tool approval is pending, or the person chose "for this chain in this folder" for it: the Host asks whether a standing approval of the turn's chain covers the kind and folder
+  // (counting the use), or, with `grant`, records the person's choice. Only the person's recorded choice ever answers.
+  Type.Object({ action: Type.Literal('chain_approval'), owner: BotCaller, cause: Type.Optional(TurnCause), kind: StandingApproval.properties.kind, cwd: StandingApproval.properties.cwd, grant: Type.Optional(Type.Literal(true)) }, object),
   Type.Object({ action: Type.Literal('update_mission'), owner: BotCaller, mission: BotMission }, object),
   // A bot keeps its own memory, and no one else's: the caller is the only bot a call names. `replace` is the id or the exact text of the fact the new text takes the place of.
   Type.Object({ action: Type.Literal('remember'), owner: BotCaller, text: BotFact.properties.text, replace: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })) }, object),

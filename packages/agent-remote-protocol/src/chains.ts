@@ -15,6 +15,13 @@ export type ChainId = Static<typeof ChainId>;
 export const CHAIN_BOT_LIMIT = 32;
 export const CHAIN_LIMIT = 100;
 export const CHAIN_RETENTION_MS = 7 * 24 * 60 * 60_000;
+/** The most standing approvals one chain holds. */
+export const CHAIN_APPROVAL_LIMIT = 20;
+/**
+ * The choice a Controller adds to a bot's native tool approval, as a policy of the request: "for this chain in this folder". The person
+ * choosing it allows the request once and records a standing approval in the chain (bots plan 9d).
+ */
+export const CHAIN_APPROVAL_POLICY = 'chain-folder';
 
 /**
  * What started the turn a bot calls from, as its Host sees it: the person's input (its message id), or input the Relay framed, whose
@@ -32,6 +39,14 @@ export const ChainUsage = Type.Object({ tokens: count, costUsd: Type.Optional(Ty
 export type ChainUsage = Static<typeof ChainUsage>;
 
 /**
+ * What the person allowed for the rest of a chain: bots of the chain asking for this kind of action (the tool kind as the adapter
+ * reports it) in this working directory are answered allow by their Controllers. at: when the person chose it. applied: how many
+ * requests it answered.
+ */
+export const StandingApproval = Type.Object({ kind: Type.String({ minLength: 1, maxLength: 256 }), cwd: Type.String({ minLength: 1, maxLength: 4096 }), at: time, applied: count }, object);
+export type StandingApproval = Static<typeof StandingApproval>;
+
+/**
  * One chain as the Relay keeps it. cause and bot: what started it and at which bot. bots: the bots it reached, in order. depth: the
  * longest run of replies along it. stopped: when the person stopped it.
  */
@@ -40,6 +55,8 @@ export const BotChain = Type.Object({ id: ChainId, cause: Type.Union([Type.Liter
   startedAt: time, updatedAt: time, stopped: Type.Optional(time),
   /** Bots whose part of the chain the person stopped. */
   stoppedBots: Type.Optional(Type.Array(BotId, { maxItems: CHAIN_BOT_LIMIT })),
+  /** What the person allowed for this chain; it ends with the chain. */
+  approvals: Type.Optional(Type.Array(StandingApproval, { maxItems: CHAIN_APPROVAL_LIMIT })),
   /** The person's thresholds this chain passed, each told to the person once. */
   passed: Type.Optional(Type.Array(Type.Union([Type.Literal('tokens'), Type.Literal('depth'), Type.Literal('minutes')]), { maxItems: 3, uniqueItems: true })) }, object);
 export type BotChain = Static<typeof BotChain>;
@@ -69,6 +86,7 @@ export const ChainAction = Type.Union([
   // The person writes a standing bot's board as the person; the bots the write changes are told, as when a bot writes it.
   Type.Object({ action: Type.Literal('update_board'), botId: BotId, items: Type.Optional(Type.Array(BoardItemEdit, { minItems: 1, maxItems: 10 })), plan: Type.Optional(BoardPlanEdit) }, object),
   Type.Object({ action: Type.Literal('set_thresholds'), thresholds: ChainThresholds }, object),
+  Type.Object({ action: Type.Literal('revoke_approval'), chainId: ChainId, kind: StandingApproval.properties.kind, cwd: StandingApproval.properties.cwd }, object),
 ]);
 export type ChainAction = Static<typeof ChainAction>;
 export const isChainAction = (value: unknown): value is ChainAction => Value.Check(ChainAction, value);

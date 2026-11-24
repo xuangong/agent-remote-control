@@ -280,6 +280,11 @@ As built (4a): a turn's cause comes from its Host (the person's input by its mes
 and stamps every message a call queues with it. Chains are kept per account, at most 100 for seven days. Reply depth is recorded,
 no longer refused.
 
+As built (4b, 4c): `GET v1/remote/chains` and chain actions (stop a chain, stop one bot's part, pause, resume and retire a bot,
+set thresholds); Settings › Audit lists chains by cause and acts on them. Thresholds on tokens, reply depth and minutes mark a chain
+passed and send one needs-you reminder through its first bot still there; the page also polls chains with the roster and marks the
+bot's row and the Settings entry until the person has seen the chain. Nothing stops on a threshold.
+
 ## 8. Who may do what
 
 | Action | Person | Chief, for its bots | Any bot it may message |
@@ -294,6 +299,9 @@ no longer refused.
 
 The Relay checks the sender of every message at submission and again at delivery, using the identity the sender's Controller
 stamped; a Controller is trusted only for its own sessions. Share recipients see conversations as today and do not message bots.
+
+As built: `read_bot` reads any standing bot of the account (so a cut final-text reply's pointer works); `peers` are not built, and
+the audit stands in for them. A stopped chain answers a bot's call with the outcome `forbidden` and the reason.
 
 ## 9. What becomes of the older features
 
@@ -311,6 +319,10 @@ the person, without becoming an input of that session or of its chief. Messages 
 Ask is for understanding work without disturbing anyone. It may share creation and cleanup with temporary bots underneath. Quoting
 messages also stays: it is the person's action, not coordination.
 
+As built (step 7, owner decisions 2026-11-24: old data is dropped when state loads, never converted; no transition code): `/side`
+starts a temporary bot of the bot on screen; Call For Support, ordinary Teams (panel, inbox tools, queue, file transfers) and TPM
+(workspace, intents, todo, heartbeat, background reviews) are deleted; their sessions stay plain sessions with their history.
+
 ## 10. Workbench
 
 - **Chats** lists standing bots, each chief's bots in its group, marked with who created them. A bot's row shows its status and
@@ -325,6 +337,12 @@ messages also stays: it is the person's action, not coordination.
 - **Rooms** are group chats in Bot mode.
 - **The audit** lists chains (section 7).
 
+As built: Chats groups standing bots under their chief, a staff row marked "Staff of <chief>" (zh 成员), with status and work lines;
+needs-you reminders of staff bots collapse under the chief's notification ("Chief: Reviewer needs you") and light the chief's row.
+Reports between bots fold to one line; a temporary bot opens beside its chief with Stop, Mark done and Keep on its row (Send,
+Interrupt and Queue are its conversation's composer). Details show the mission, staff, temporary bots and work items (todo and
+acceptance went with TPM, owner 2026-11-24). Rooms show in Bot mode. The audit is in Settings.
+
 ## 11. Tests
 
 | Layer | What |
@@ -335,6 +353,10 @@ messages also stays: it is the person's action, not coordination.
 | Component | Chats grouped by chief, folded lines, the temporary bot beside its chief, details with bots and work items, the audit. |
 | E2E flows | Two temporary bots report and the chief sums up; one is interrupted from its thread; a tool approval answered by the person; bot A messages B and B's answer returns; a bot's Host offline until it returns. Chromium and WebKit. |
 | Behaviour scenarios | `pnpm test:bots`, with real Claude Code and Codex, by hand or nightly: the release walkthrough (an chief with three bots, temporary bots under one, a reviewer serving two teams with a temporary bot per request, a test and fix loop over a shared repository and over a bundle, the person speaking to a member, the work item completing). Checks read facts: bots, missions, report-ins, hops, turns, tool calls per chief turn, message lengths. |
+
+As built: unit and contract suites per package; E15 (chains, stop chain, final-text replies, the person's words to a chief,
+attachments) and E15b (thresholds: push, in-page mark) flows; component specs for the audit and a chief's temporary bots;
+`pnpm test:bots [claude|codex] [temporary standing shared bundle repository copilot]`, 10 of 10 and 6 of 6 with both providers.
 
 ## 12. Where it lives
 

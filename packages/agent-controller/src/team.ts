@@ -378,9 +378,10 @@ export class TeamRuntime implements SessionRole {
               await this.settle(team.id, member.id, message.id, { status: 'unknown', resolvedTarget: message.resolvedTarget, error: 'Delivery claim has no local receipt. Inspect this session before resolving.' }); continue;
             }
             if (message.status !== 'queued' || team.status !== 'active' || !availableDelivery(lease, false, false)) continue;
-            if (member.role === 'requester') {
+            // A queued acknowledgement reaches a seat with the input it waited for, so a worker takes them together as a main session does.
+            if (member.role === 'requester' || team.messages.some(item => item.to === member.id && item.ack && item.status === 'queued')) {
               const key = nativeSessionRefKey(target), batch = updates.get(key) ?? { lease, target, items: [] };
-              batch.items.push({ record, team, message }); updates.set(key, batch);
+              batch.items.push({ record, team, message }); updates.set(key, batch); dispatched = member.role !== 'requester' && !!record.seat.task;
             } else { await this.dispatch([{ record, team, message }], lease, target); dispatched = !!record.seat.task; }
           }
           this.access.sessionRouting.assertCurrent(this.anchor(record.seat), target);

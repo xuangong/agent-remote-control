@@ -24,6 +24,8 @@ The board in a bot's details already answers "where are we?"; asking the bot sti
 - A message whose only content is an acknowledgement ("received", "thanks", "noted") reaches the receiver folded and does not start a
   turn by itself: it waits for the next input. Measure turns and tokens of a Team run before and after.
 
+As built: base instructions are v7 ("after a delivery or a report, do not acknowledge or thank: answer one only when it changes what you do"; an acknowledgement that must be sent uses status `ack`). The `message` tool takes the explicit status `ack`; the Relay marks the queued message `ack: true` (`TeamMessage.ack`), whatever its receiver is (a standing bot's inbox, a temporary bot, a chief). The Host's poll leaves a queued acknowledgement out while no other input is queued for the same seat (`withoutHeldAcks`), so it starts no turn; once another input is queued, it goes in the same delivery (the Controller joins a worker's inputs when an acknowledgement is among them, as it does for a main session). An acknowledgement does not resume a bot that waits for an answer and is not a report on a board item. Turns and tokens of a Team run are not measured here; that waits for the simulated Side and Call For Support runs of the checks.
+
 ## 9d. One approval per chain and folder (decided: yes)
 
 - When the person answers a bot's native approval, they may choose "for this chain in this folder": the bots of the same chain asking

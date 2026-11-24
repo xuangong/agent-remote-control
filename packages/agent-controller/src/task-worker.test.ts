@@ -310,6 +310,26 @@ describe('messages between assistants', () => {
     expect(await h.runtime.extensions(h.ref('codex', 'tracker'))).toBeUndefined();
   });
 
+  it('does not start a turn for an acknowledgement; it reaches the bot with the next input, in the same delivery', async () => {
+    const h = await botsHarness({ tasks: true, groups, sessions: ['tracker'] });
+    cleanups.push(() => h.close());
+    const chief = new BotTools({ request: call => h.host(call), tasks: () => true, title: async () => 'Chief' });
+    const tools = chief.namespace(() => h.ref('codex', 'worker'), false).tools;
+    await h.host({ action: 'bot_enablement' });
+    await h.runtime.tick();
+    // The first message brings the receiver's standing instructions; after it the bot is ordinarily idle.
+    await tool(tools, 'message').execute({ to: 'Tracker', text: 'Hello.' });
+    await h.runtime.tick();
+    for (const id of ['worker', 'tracker']) h.sessions.get(id)!.deliveries.length = 0;
+    expect(JSON.parse(await tool(tools, 'message').execute({ to: 'Tracker', text: 'Thanks, noted.', status: 'ack' }) as string)).toMatchObject({ outcome: 'delivered' });
+    await h.runtime.tick(); await h.runtime.tick();
+    expect(h.sessions.get('tracker')!.deliveries).toEqual([]);
+    await tool(tools, 'message').execute({ to: 'Tracker', text: 'Is the branch cut?' });
+    await h.runtime.tick();
+    expect(h.sessions.get('tracker')!.deliveries).toHaveLength(1);
+    expect(parseTaskInputs(h.sessions.get('tracker')!.deliveries[0]!.text)?.map(input => input.kind === 'assistant' ? input.body : input.kind)).toEqual(expect.arrayContaining(['Thanks, noted.', 'Is the branch cut?']));
+  });
+
   it('stops the running turn of a bot whose chain the person stopped, once', async () => {
     const h = await botsHarness({ tasks: true, groups, sessions: ['tracker'] });
     cleanups.push(() => h.close());

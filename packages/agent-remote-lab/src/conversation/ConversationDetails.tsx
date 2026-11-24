@@ -32,7 +32,7 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
   const [providerId, ...rest] = nativeSession?.split('/') ?? [];
   const detailsShown = !!host?.open && visible && (host.surface === 'sheet' || !!host.slot);
   const tasks = detailsShown && directory && providerId && rest.length ? directory.owned({ providerId, nativeSessionId: rest.join('/') }) : [];
-  const work = detailsShown && directory?.work && providerId && rest.length ? directory.work({ providerId, nativeSessionId: rest.join('/') }) : [];
+  const board = detailsShown && directory?.board && providerId && rest.length ? directory.board({ providerId, nativeSessionId: rest.join('/') }) : [];
   const bots = detailsShown && botId && directory?.staff ? directory.staff(botId) : [];
   const files = useMemo(() => detailsShown && state ? sessionFiles(state.timeline.entries) : [], [detailsShown, state?.timeline.entries]);
   const reportedSession = state?.agent?.runtimeInfo.sessionId;
@@ -42,7 +42,7 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
     ...(host?.action ? { action: host.action } : {}), ...(host?.actions ? { actions: host.actions } : {}),
     ...(host?.where ? { where: host.where } : {}), ...(host?.setPicture ? { setPicture: host.setPicture } : {}),
     ...(host?.rename ? { rename: host.rename } : {}),
-    process, ...(mission ? { mission } : {}), ...(tasks.length ? { tasks } : {}), ...(work.length ? { work } : {}), ...(bots.length ? { bots } : {}),
+    process, ...(mission ? { mission } : {}), ...(tasks.length ? { tasks } : {}), ...(board.length ? { board } : {}), ...(bots.length ? { bots } : {}),
     sessions: { ...details?.sessions, ...(lastTurn ? { time: lastTurn } : {}), ...(state?.agent?.cwd ? { directory: state.agent.cwd } : {}), ...(reportedSession ? { sessionId: reportedSession } : {}),
       subagents: reportedSession ? childrenFor?.(reportedSession) ?? [] : [], ...(onOpenChildSession ? { openSubagent: onOpenChildSession } : {}),
       tools: <>{details?.sessions?.tools}{workspaceLink}</> },

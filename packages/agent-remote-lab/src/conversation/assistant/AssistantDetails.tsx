@@ -1,6 +1,6 @@
 import { useId, type ReactNode } from 'react';
 import { PROCESS_MODES, type ProcessMode, type SessionFile } from '@orchardworks/agent-client';
-import type { BotPicture, TaskView, WorkItem } from '@orchardworks/agent-remote-protocol';
+import type { BoardItem, BotPicture, TaskView } from '@orchardworks/agent-remote-protocol';
 import type { AvatarMood } from '@orchardworks/agent-client-web/theme';
 import { SegmentedControl, Sheet } from '@orchardworks/agent-client-web/primitives';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
@@ -12,7 +12,7 @@ import { WhereItWorks } from './WhereItWorks.js';
 import { SessionsList, type AssistantSessions } from './SessionsList.js';
 import { FilesList } from './FilesList.js';
 import { TasksList } from './TasksList.js';
-import { WorkList } from './WorkList.js';
+import { BoardList } from './BoardList.js';
 import { MissionEditor, type MissionChoice } from './MissionEditor.js';
 import './assistant.css';
 
@@ -29,8 +29,8 @@ export interface AssistantRef {
   readonly tasks?: readonly TaskView[];
   /** This bot's standing staff, the bots it created. */
   readonly bots?: readonly { botId: string; name: string }[];
-  /** A standing bot's work items, which it keeps itself. */
-  readonly work?: readonly WorkItem[];
+  /** The items of a standing bot's board, which it keeps itself. */
+  readonly board?: readonly BoardItem[];
   /** This assistant's own process mode; the device's default, notifications and letters are in Settings > Assistants. */
   readonly process?: ProcessModeChoice;
   /** The mission, for an assistant whose bot details the reader may change. */
@@ -60,7 +60,7 @@ export function AssistantDetails({ assistant, surface, onClose }: { assistant: A
         <SegmentedControl<ProcessMode> label={t('process.assistant')} options={options} value={assistant.process.mode} onChange={assistant.process.chooseForAssistant} /></div>
     </div>) : null}
     {assistant.mission ? section('mission', t('details.mission'), <MissionEditor mission={assistant.mission} />) : null}
-    {assistant.work?.length ? section('work', t('details.work'), <WorkList work={assistant.work} />) : null}
+    {assistant.board?.length ? section('work', t('details.work'), <BoardList board={assistant.board} />) : null}
     {assistant.where ? section('where', t('details.where'), <WhereItWorks where={assistant.where} />) : null}
     {assistant.sessions ? section('sessions', t('details.sessions'), <SessionsList sessions={assistant.sessions} />) : null}
     {assistant.bots?.length ? section('bots', t('details.bots'), <ul className="lab-assistant-chain lab-assistant-bots">{assistant.bots.map(bot => <li key={bot.botId}><span className="lab-assistant-session-title">{bot.name}</span></li>)}</ul>) : null}

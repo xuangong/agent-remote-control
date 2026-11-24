@@ -1,4 +1,4 @@
-// The Team roster the page reads: tasks, rooms and bots' inboxes are Teams on the Relay, and the task directory, rooms and work items show them.
+// The Team roster the page reads: tasks, rooms and bots' inboxes are Teams on the Relay, and the task directory, rooms and boards show them.
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { errorWords, RemoteTeamClient, watchList } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';

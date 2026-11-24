@@ -1,11 +1,11 @@
 import { act } from 'react';
 const act_ = (work: () => void) => act(async () => work());
 import { describe, expect, it, vi } from 'vitest';
-import type { Team, TeamTask, WorkItem } from '@orchardworks/agent-remote-protocol';
+import type { BoardItem, Team, TeamTask } from '@orchardworks/agent-remote-protocol';
 import { TaskDirectoryContext } from '@orchardworks/agent-client-web/react';
 import { render } from '../../test/setup.js';
 import { TasksList } from '../../conversation/assistant/TasksList.js';
-import { WorkList } from '../../conversation/assistant/WorkList.js';
+import { BoardList } from '../../conversation/assistant/BoardList.js';
 import { taskDirectory } from './task-directory.js';
 
 function taskTeam(id: string, task: Partial<TeamTask>, worker: { ready?: boolean; owner?: string } = {}): Team {
@@ -54,18 +54,20 @@ describe('the task directory', () => {
     expect(act).toHaveBeenCalledWith('d', 'keep_task');
   });
 
-  it('shows a standing bot\'s work items from its inbox: open ones with their phase and next step first', async () => {
-    const item = (id: string, phase: WorkItem['phase'], updatedAt: number, next?: string): WorkItem => ({ id, title: `Work ${id}`, phase, summary: `Summary ${id}`, updatedAt, ...(next ? { next } : {}) });
+  it('shows a standing bot\'s board items from its inbox: open ones with their status and latest report first, then the finished', async () => {
+    const item = (key: number, status: BoardItem['status'], updatedAt: number, report?: string, result?: string): BoardItem => ({ key, title: `Item ${key}`, status, assignee: 'self', links: [], version: 1, changedAt: {},
+      updatedBy: 'person', updatedAt, ...(report ? { report } : {}), ...(result ? { result } : {}) });
     const inbox = { ...taskTeam('i', {}), task: undefined, members: [{ ...taskTeam('i', {}).members[1]!, nativeSessionId: 'scribe' }],
-      inbox: { botId: 'b_' + '3'.repeat(32), work: [item('w_000000000001', 'done', 9), item('w_000000000002', 'waiting', 5, 'Ask the person.'), item('w_000000000003', 'in_progress', 7)] } } as Team;
+      inbox: { botId: 'b_' + '3'.repeat(32), board: { next: 4, items: [item(1, 'done', 9, undefined, 'Shipped.'), item(2, 'waiting', 5, 'Needs the build.'), item(3, 'working', 7)] } } } as Team;
     const directory = taskDirectory([inbox], () => {});
-    expect(directory.work!({ providerId: 'claude', nativeSessionId: 'other' })).toEqual([]);
-    const container = await render(<WorkList work={directory.work!({ providerId: 'claude', nativeSessionId: 'scribe' })} />);
+    expect(directory.board!({ providerId: 'claude', nativeSessionId: 'other' })).toEqual([]);
+    const container = await render(<BoardList board={directory.board!({ providerId: 'claude', nativeSessionId: 'scribe' })} />);
     const rows = [...container.querySelectorAll('li')];
-    expect(rows.map(row => row.querySelector('.lab-assistant-session-title')!.textContent)).toEqual(['Work w_000000000003', 'Work w_000000000002', 'Work w_000000000001']);
+    expect(rows.map(row => row.querySelector('.lab-assistant-session-title')!.textContent)).toEqual(['Item 3', 'Item 2', 'Item 1']);
     expect(rows[1]!.textContent).toContain('Waiting');
     for (const row of rows) await act_(() => row.querySelector<HTMLButtonElement>('.lab-assistant-session-toggle')!.click());
-    expect(rows[1]!.textContent).toContain('Next: Ask the person.');
+    expect(rows[1]!.textContent).toContain('Needs the build.');
+    expect(rows[2]!.textContent).toContain('Result: Shipped.');
   });
 
   it('lists a bot\'s standing staff, from their records', () => {

@@ -23,7 +23,7 @@ function Harness() {
 }
 afterEach(() => { fixture.lists = 0; fixture.teams = []; fixture.failure = ''; published = undefined; vi.useRealTimers(); });
 
-it('reads the roster and splits what the page shows in Chats from the tasks and bot inboxes work items come from', async () => {
+it('reads the roster and splits what the page shows in Chats from the tasks and bot inboxes boards come from', async () => {
   fixture.teams = [room('open'), inbox];
   const view = await render(<Harness />);
   await vi.waitFor(() => expect(published).toBeDefined());

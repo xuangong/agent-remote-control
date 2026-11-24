@@ -181,7 +181,7 @@ it('marks a bot with its chief, and a quiet bot shows where its open work stands
   group.bots!.members = { A1: { name: 'Chief', botId: 'b_' + '1'.repeat(32) }, A2: { name: 'Scribe', botId: 'b_' + '2'.repeat(32), chief: 'b_' + '1'.repeat(32) } };
   const model = projectBotRoster([group], [], { status: () => 'idle' });
   const directory = { canOpen: () => false, open: () => {}, owned: () => [], act: async () => {},
-    work: (bot: { nativeSessionId: string }) => bot.nativeSessionId === 'A2' ? [{ id: 'w_000000000001', title: 'Release notes', phase: 'waiting' as const, summary: 'Waiting.', updatedAt: 1 }] : [] };
+    board: (bot: { nativeSessionId: string }) => bot.nativeSessionId === 'A2' ? [{ key: 1, title: 'Release notes', status: 'waiting' as const, assignee: 'self' as const, links: [], version: 1, changedAt: {}, updatedBy: 'person' as const, updatedAt: 1 }] : [] };
   const container = await render(<TaskDirectoryContext.Provider value={directory}><BotRoster model={model} groups={[group]} onSelect={() => {}} directoryControls={null} /></TaskDirectoryContext.Provider>);
   const scribe = visibleButton(container, 'Scribe');
   expect(scribe.querySelector('[data-chief]')?.textContent).toBe('Staff of Chief');

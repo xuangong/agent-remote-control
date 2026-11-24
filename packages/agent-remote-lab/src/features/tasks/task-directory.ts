@@ -1,4 +1,4 @@
-import { taskView, type Team, type WindowGroup, type WorkItem } from '@orchardworks/agent-remote-protocol';
+import { taskView, type Team, type WindowGroup, type BoardItem } from '@orchardworks/agent-remote-protocol';
 import type { TaskDirectory } from '@orchardworks/agent-client-web/react';
 
 /** A worker session the page can open: a task's Leader once its session exists. */
@@ -20,8 +20,8 @@ export function taskDirectory(tasks: readonly Team[] | undefined, open: (worker:
       .map(taskView).sort((a, b) => b.updatedAt - a.updatedAt),
     // A bot's standing bots are the ones whose record names it as their chief.
     staff: botId => groups.flatMap(group => Object.values(group.bots?.members ?? {}).flatMap(item => item.chief === botId && item.botId ? [{ botId: item.botId, name: item.name ?? item.botId }] : [])),
-    // A standing bot's inbox is bound to its session; its work items travel on it.
-    work: bot => [...(tasks ?? []).find(team => team.inbox && team.members[0]?.providerId === bot.providerId && team.members[0].nativeSessionId === bot.nativeSessionId)?.inbox?.work ?? []]
-      .sort((a: WorkItem, b: WorkItem) => b.updatedAt - a.updatedAt),
+    // A standing bot's inbox is bound to its session; its board travels on it.
+    board: bot => [...(tasks ?? []).find(team => team.inbox && team.members[0]?.providerId === bot.providerId && team.members[0].nativeSessionId === bot.nativeSessionId)?.inbox?.board?.items ?? []]
+      .sort((a: BoardItem, b: BoardItem) => b.updatedAt - a.updatedAt),
   };
 }

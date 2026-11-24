@@ -32,9 +32,9 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
   const quiet = row.assistant.state === 'idle' || row.assistant.state === 'unknown';
   // Needs you is not unread: it asks for the owner, so its dot is distinct and mute never quiets it.
   const needsYou = row.assistant.state === 'needs_you' || !!row.staffNeedsYou || (!!row.details.botId && chainAlerts.some(alert => alert.bot === row.details.botId));
-  // A quiet bot that keeps work shows where its work stands (bots design 10): its latest open work item and phase.
-  const work = quiet ? directory?.work?.(row.session).find(item => item.phase !== 'done') : undefined;
-  const sentence = draft && quiet ? undefined : (work ? `${work.title} · ${t(`details.workPhase.${work.phase}`)}` : row.assistant.sentence) || undefined;
+  // A quiet bot that keeps a board shows where its work stands (bots design 10): its latest open item and status.
+  const work = quiet ? directory?.board?.(row.session).find(item => item.status !== 'done' && item.status !== 'cancelled') : undefined;
+  const sentence = draft && quiet ? undefined : (work ? `${work.title} · ${t(`details.boardStatus.${work.status}`)}` : row.assistant.sentence) || undefined;
   // The role and label are tags beside the name, like a job title; screen readers hear them after the name.
   const staffOf = row.chief ? t('assistants.staffOf', { name: row.chief }) : undefined;
   const description = [row.role, row.details.label, staffOf, sentence, draft ? `${t('assistants.draft')}: ${draft}` : undefined, row.unread ? t('assistants.unread') : undefined,

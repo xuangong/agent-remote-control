@@ -234,14 +234,21 @@ export class BotCalls {
   }
   /** The standing bot whose board this is. */
   private boardOwner(key: string): Assistant { return accountDirectory(this.ports.groups()).find(item => item.key === key) ?? fail('The board belongs to a bot that is gone.'); }
-  /** Reads a board (bots design 6.1): one's own, or that of a standing bot one is chief of, which is read only; a temporary bot reads its item. */
+  /** Reads a board (bots design 6.1): one's own, or that of a standing bot one is chief of, which is read only; an item handed to the caller on another board; a temporary bot reads its item. */
   readBoard(hostId: string, call: Call<'board'>) {
     const self = this.caller(hostId, call.owner);
     let target: Assistant, name = self.name;
     if (call.bot) {
       const named = this.named(call.bot, self);
       if (named === 'self') { target = self.standing ?? fail('A temporary bot has no board.'); }
-      else { const staff = typeof named === 'object' ? named.standing : undefined; if (!staff || staff.chief !== self.key) fail('You read the board of your own standing staff only.'); target = staff!; name = staff!.name; }
+      else {
+        const owner = typeof named === 'object' ? named.standing : undefined;
+        // An assignee also reads the one item that was handed to it, on whichever standing bot's board it sits.
+        const handed = owner && call.item !== undefined ? this.board.read(owner)?.items.find(entry => entry.key === call.item && entry.assignee === self.key) : undefined;
+        if (owner && handed) return { bot: owner.name, item: handed, readOnly: true };
+        if (!owner || owner.chief !== self.key) fail('You read the board of your own standing staff, and the items handed to you, only.');
+        target = owner; name = owner.name;
+      }
     } else if (self.standing) target = self.standing;
     else { const ref = self.task!.task!.item ?? fail('This bot was not created for a board item.'); target = this.boardOwner(ref.board); call = { ...call, item: ref.key }; name = target.name; }
     const board = this.board.read(target), items = board?.items ?? [];

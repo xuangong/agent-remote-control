@@ -199,6 +199,10 @@ describe('the bots that hold an item', () => {
     expect(await f.call('chief', { action: 'board', bot: 'Tracker', item: 1 })).toMatchObject({ item: { key: 1 } });
     // The staff bot is no chief, so it reads no board but its own.
     await expect(f.call('tracker', { action: 'board', bot: 'Chief' })).rejects.toThrow('own standing staff');
+    await expect(f.call('tracker', { action: 'board', bot: 'Chief', item: 2 })).rejects.toThrow('own standing staff');
+    // The item handed to it can be read, with its brief and links, on the chief's board; it stays read only.
+    expect(await f.call('tracker', { action: 'board', bot: 'Chief', item: 1 })).toMatchObject({ bot: 'Chief', readOnly: true, item: { key: 1, title: 'Track the build', brief: 'Watch the build.', assignee: ids.tracker } });
+    expect(f.board().items).toMatchObject([{ key: 1, title: 'Track the build', version: 2 }]);
     expect(await f.call('chief', { action: 'board', bot: 'Chief' })).toMatchObject({ bot: 'Chief' });
   });
 

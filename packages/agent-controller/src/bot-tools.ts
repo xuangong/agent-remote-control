@@ -22,7 +22,7 @@ export interface BotToolsPorts {
   title?(ref: NativeSessionRef): Promise<string | undefined>;
   /** The session is a bot's answer session on this Host: its turns count in the chain of the mention and its final text answers. */
   answering?(ref: NativeSessionRef): boolean;
-  /** The session's provider takes the bots' tools. A bot on one that does not answers a message by its final text (bots design 3.3). */
+  /** The session was given the bots' tools (`botToolsGiven`). A bot's session that was not answers a message by its final text (bots design 3.3). */
   takesTools?(ref: NativeSessionRef): boolean;
   /** The session is a temporary bot's worker on this Host. */
   working?(ref: NativeSessionRef): boolean;
@@ -44,6 +44,14 @@ export const WORKER_NAMESPACE = 'agent_remote';
 /** The tools a session was given: a listed (not deferred) bots' namespace. */
 export function workerToolsIn(namespaces: readonly AgentSessionToolNamespace[] | undefined): WorkerTools {
   return namespaces?.some(namespace => namespace.name === WORKER_NAMESPACE && !namespace.deferred) ? 'tasks' : 'none';
+}
+/**
+ * Whether a session was given the bots' tools in a form it can call, by what the Controller gave it, not by what its provider can take.
+ * A session fixed at creation holds a deferred namespace that it finds by tool search once it is a bot; for any other, the namespace
+ * applied at its last attachment or live update (`applied`) is the tools it has.
+ */
+export function botToolsGiven(session: { capability: 'creation' | 'live' | 'attachment' | undefined; applied: WorkerTools; isBot: boolean }): boolean {
+  return session.applied !== 'none' || (session.capability === 'creation' && session.isBot);
 }
 const id = { type: 'string', minLength: 1, maxLength: 256 };
 const object = (properties: Record<string, unknown>, required: string[]) => ({ type: 'object', properties, required, additionalProperties: false });

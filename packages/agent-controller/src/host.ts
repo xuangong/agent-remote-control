@@ -24,7 +24,7 @@ import { allowedWorkspace, protectHostDirectory } from './execution-policy.js';
 import { SessionRoles } from './session-role-succession.js';
 import { roleSessionConfig } from './role-session-creation.js';
 import { headCommit } from './worktrees.js';
-import { BotTools } from './bot-tools.js';
+import { BotTools, botToolsGiven } from './bot-tools.js';
 import { botFiles } from './bot-files.js';
 import { createControllerPreviews } from './previews.js';
 import { createVscodeTunnelManager, type VscodeTunnelOptions } from './vscode-tunnel.js';
@@ -486,7 +486,11 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     try { return lease.agent.snapshot().payload.runtimeInfo.cwd; } finally { lease.release(); }
   };
   const workerSupport: BotTools | undefined = options.team?.request ? new BotTools({ request: options.team.request, tasks: () => options.team?.tasks?.() === true, answering: ref => team?.answering(ref) === true, working: ref => team?.working(ref) === true,
-    takesTools: ref => providers.require(ref.providerId).adapter.descriptor.sessionExtensions?.toolNamespaces !== undefined,
+    takesTools: ref => {
+      const binding = sessions.byNative(ref.providerId, ref.nativeSessionId);
+      return botToolsGiven({ capability: providers.require(ref.providerId).adapter.descriptor.sessionExtensions?.toolNamespaces,
+        applied: binding ? ledger.workerToolsApplied(binding.agentId) : 'none', isBot: workerSupport?.tools(ref) === 'tasks' });
+    },
     answer: async (ref, requestId, response) => {
       const lease = await automationAccess.acquire(ref.providerId, ref.nativeSessionId);
       try { await lease.agent.respondToInteraction(requestId, response); } finally { lease.release(); }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { isBotMessageResult, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
-import { BotTools, workerToolsIn, WORKER_NAMESPACE } from './bot-tools.js';
+import { BotTools, botToolsGiven, workerToolsIn, WORKER_NAMESPACE } from './bot-tools.js';
 
 // The Relay names the bots' main sessions on this Host with their missions; the stub answers as it would.
 function fixture(bots: Array<{ nativeSessionId: string; mission?: string; memory?: Array<{ id: string; text: string }> }>, tasks = true, takesTools = true) {
@@ -163,4 +163,20 @@ it('states the 300-character limit of a message where its text is declared, and 
   const text = (message.inputSchema as { properties: { text: { maxLength: number; description?: string } } }).properties.text;
   expect(text).toMatchObject({ maxLength: 300, description: expect.stringContaining('at most 300 characters') });
   expect(message.description).toContain('at most 300 characters');
+});
+
+describe('whether a session was given the bots\' tools, which decides if its final text answers a message', () => {
+  it('is what the Controller gave the session, not what its provider can take', () => {
+    // A session of a tool-capable provider that was never given them answers by final text; one that was given them does not.
+    expect(botToolsGiven({ capability: 'attachment', applied: 'none', isBot: true })).toBe(false);
+    expect(botToolsGiven({ capability: 'attachment', applied: 'tasks', isBot: true })).toBe(true);
+    expect(botToolsGiven({ capability: 'live', applied: 'none', isBot: true })).toBe(false);
+    expect(botToolsGiven({ capability: 'live', applied: 'tasks', isBot: true })).toBe(true);
+    expect(botToolsGiven({ capability: undefined, applied: 'none', isBot: true })).toBe(false);
+  });
+
+  it('counts the deferred namespace of a session fixed at creation once it is a bot, since the bot finds it by tool search', () => {
+    expect(botToolsGiven({ capability: 'creation', applied: 'none', isBot: true })).toBe(true);
+    expect(botToolsGiven({ capability: 'creation', applied: 'none', isBot: false })).toBe(false);
+  });
 });

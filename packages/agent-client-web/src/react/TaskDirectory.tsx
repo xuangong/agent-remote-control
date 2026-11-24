@@ -3,6 +3,8 @@ import type { Board, BoardItem, BoardItemEdit, BoardPlanEdit, BoardWriteResult, 
 
 /** One thing the person asked a bot from a conversation (a mention) and what it answered, if it has. */
 export interface AskLine { readonly id: string; readonly botId: string; readonly bot: string; readonly text: string; readonly at: number; readonly answer?: { readonly text: string; readonly at: number } }
+/** What a `/side` bot answered the conversation it was asked from: a card beside it, which the person may bring back into it. */
+export interface SideCard { readonly taskId: string; readonly title: string; readonly status: 'done' | 'failed'; readonly summary: string; readonly at: number }
 /** An answer session a bot has open: the conversation it answers, when it was last asked and how many questions it holds. */
 export interface AnswerSession { readonly teamId: string; readonly conversation: string; readonly lastAt: number; readonly count: number }
 /**
@@ -39,6 +41,10 @@ export interface TaskDirectory {
   ask?(source: { hostId: string; providerId: string; nativeSessionId: string; title: string }, bot: { botId: string; name: string }, text: string): Promise<void>;
   /** What the person asked bots from this conversation and what they answered, oldest first (bots plan 8d). */
   asks?(from: { providerId: string; nativeSessionId: string }): readonly AskLine[];
+  /** The `/side` bots asked from this conversation that have reported, oldest first (bots plan 9a). They never reach the conversation's own session as input. */
+  sides?(from: { providerId: string; nativeSessionId: string }): readonly SideCard[];
+  /** The person brings a side's answer into the conversation `agentId` as their own input. */
+  bringBack?(card: SideCard, agentId: string): Promise<void>;
   /** The answer sessions a standing bot has open now, newest first. */
   answering?(botId: string): readonly AnswerSession[];
   /** The person stops a running task, takes it as done, or keeps its bot as a standing bot (bots design 10). */

@@ -12,13 +12,14 @@ import { ConversationConnectionScope } from '../conversation/conversation-connec
 import { TrackViewScope } from '../kernel/useSessionAttention.js';
 import { ToastActivity } from '../kernel/Toast.js';
 import { useCallback, useMemo, type ReactNode } from 'react';
-import { taskDirectory } from '../features/tasks/task-directory.js';
+import { bringBackText, taskDirectory } from '../features/tasks/task-directory.js';
+import { sendPersonInput } from '../conversation/fork-actions.js';
 import { RemoteChainClient, RemoteTeamClient } from '@orchardworks/agent-client';
 import { workspaceFetch } from '../kernel/workspace-access.js';
 import { HttpPreviewClient } from '@orchardworks/agent-client';
 import { RecoveryScope } from '../kernel/conversation-recovery.js';
 import type { RemoteHost } from '../kernel/remote-host.js';
-import { PreviewProvider, PreviewWorkspace, SessionExcerptNavigation, TaskDirectoryContext } from '@orchardworks/agent-client-web/react';
+import { PreviewProvider, PreviewWorkspace, SessionExcerptNavigation, TaskDirectoryContext, useTranslate } from '@orchardworks/agent-client-web/react';
 import { SessionDockProvider } from '../kernel/SessionDock.js';
 import { SidebarResize } from '../features/windows/SidebarResize.js';
 import { VscodeTunnelScope } from '../kernel/vscode-tunnel.js';
@@ -56,6 +57,7 @@ const WINDOW_INSPECTOR_WIDTH = 320;
 
 export function WorkbenchView({ scope }: { readonly scope: AppScope }) {
   const { assistantNames, activated, activeAgentId, activeOpened, activeView, askView, attention, backgroundInert, baseUrl, commandItems, compactLayout, connections, contextOpen, contextVisible, desktopContextVisible, focusManagedWindow, headerHidden, inspectorOpen, liveConnections, nativeTakeover, navigation, openExcerptSource, pageOpen, presentedPrimaryViewId, presentedViewId, previewClient, previewHost, promptMigrations, readingPositions, searchOpen, sessionDescriptions, sessionNotice, sessionViewOperations, setSearchOpen, setShortcutsOpen, sharedDrafts, sharedFeeds, sharedWindow, shellRef, shortcutsOpen, sidebar, state, supportingRailOpen, tracking, transport, userScoped, vscodeTunnelClient, windowMode, windowPageTitle, windowWorkspace, workbenchPanelRef , teamRoster , openSession , updateTaskRoster } = scope;
+  const t = useTranslate();
   const phone = usePhoneLayout();
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), [setShortcutsOpen]);
   const pageShown = !!navigation.page;
@@ -72,8 +74,9 @@ export function WorkbenchView({ scope }: { readonly scope: AppScope }) {
       // The page shows the board as the Relay now keeps it, so the edit and the bots' own changes since the last refresh are both in it.
       updateTaskRoster(baseUrl, (await taskClient.list()).filter(team => !!team.task || !!team.inbox || !!team.ask));
       return result;
-    }),
-    [tasks, openSession, compactLayout, taskClient, chainClient, updateTaskRoster, baseUrl, windowWorkspace.groups]);
+    },
+    (card, agentId) => sendPersonInput(transport, agentId, bringBackText(card, t))),
+    [tasks, openSession, compactLayout, taskClient, chainClient, updateTaskRoster, baseUrl, windowWorkspace.groups, transport, t]);
   return <TaskDirectoryContext.Provider value={tasksDirectory}><AssistantNamesContext.Provider value={assistantNames}><SharedFeedsContext.Provider value={sharedFeeds}><SharedDraftsContext.Provider value={sharedDrafts}><LiveConnectionsContext.Provider value={liveConnections.stable}><SessionDescriptionsContext.Provider value={sessionDescriptions}><SessionExcerptNavigation.Provider value={openExcerptSource}><SessionViewOperationsContext.Provider value={sessionViewOperations}><AskViewScope.Provider value={askView.execute}><WindowSessionBridgeContext.Provider value={windowWorkspace.sessionBridge}><WindowLayoutContext.Provider value={windowWorkspace.authority}><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={windowMode && !compactLayout && activeView === 'workbench'}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><PreviewScope client={previewClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><RecoveryScope.Provider value={readingPositions}><SessionConversationSurfaces scope={baseUrl} transport={transport} mode={navigation.mode}>{/* The frame sizes the rail and Bot mode's panels, leaving Window mode's own sidebar and inspector the room they take; the window's
      title names the assistant on screen, or Window mode's own title. */}
   <DesktopFrame surface={pageShown ? 'page' : windowMode ? 'window' : 'bot'} phone={phone}

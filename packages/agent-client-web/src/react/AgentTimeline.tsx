@@ -24,7 +24,8 @@ import { BubbleAvatarContext } from './bubble-foot.js';
 import { LocaleContext, useTranslate } from './locale.js';
 import { TurnStatus } from './TurnStatus.js';
 import { AnswerLines } from './items/AnswerLines.js';
-import { useTaskDirectory, type AskLine } from './TaskDirectory.js';
+import { SideCards } from './items/SideCards.js';
+import { useTaskDirectory, type SideCard } from './TaskDirectory.js';
 import { dayLineLabel, errorWords, foldTurns, startsDayLine, timelineEntryKey, workDisclosure, type AgentReplicaState, type ProcessMode, type Turn } from '@orchardworks/agent-client';
 
 export type AgentTimelineState = AgentReplicaState;
@@ -230,7 +231,10 @@ export function AgentTimeline({
   // What the person asked bots from this conversation shows where it was asked: after the turn it came during.
   const directory = useTaskDirectory();
   const asked = state.agent?.runtimeInfo.sessionId && state.agent.providerId ? directory?.asks?.({ providerId: state.agent.providerId, nativeSessionId: state.agent.runtimeInfo.sessionId }) ?? [] : [];
-  const askedIn = asked.length ? askedByTurn(turns, asked) : undefined;
+  const askedIn = asked.length ? byTurn(turns, asked) : undefined;
+  // The sides asked from this conversation and their answers sit the same way, as cards beside it.
+  const sides: readonly SideCard[] = state.agent?.runtimeInfo.sessionId && state.agent.providerId ? directory?.sides?.({ providerId: state.agent.providerId, nativeSessionId: state.agent.runtimeInfo.sessionId }) ?? [] : [];
+  const sidesIn = sides.length ? byTurn(turns, sides) : undefined;
   const assistantName = assistant?.name || t('conversation.assistant');
   // The live line shows while the assistant works on a turn and nothing waits for the person.
   const agent = state.agent;
@@ -283,14 +287,17 @@ export function AgentTimeline({
             const disclosure = disclosures[index]!;
             return <Fragment key={turn.key}>
               {index === 0 && askedIn?.before.length ? <AnswerLines lines={askedIn.before} /> : null}
+              {index === 0 && sidesIn?.before.length ? <SideCards cards={sidesIn.before} agentId={agentId} /> : null}
               <TimelineTurn turn={turn} disclosure={disclosure} separator={separators[index]}
                 onToggle={toggleTurn} renderEntry={renderEntry} groups={notices}
                 promptEditable={!!turn.prompt && editablePrompts.has(turn.prompt)} latest={index === turns.length - 1}
                 after={index === turns.length - 1 ? <>{pending}{liveInTurn ? live : null}</> : undefined} />
               {askedIn?.during[index]?.length ? <AnswerLines lines={askedIn.during[index]!} /> : null}
+              {sidesIn?.during[index]?.length ? <SideCards cards={sidesIn.during[index]!} agentId={agentId} /> : null}
             </Fragment>;
           })}
       {turns.length === 0 && asked.length ? <AnswerLines lines={asked} /> : null}
+      {turns.length === 0 && sides.length ? <SideCards cards={sides} agentId={agentId} /> : null}
       {outgoing.map(message => <OutgoingMessageItem key={message.id} message={message} resourceContext={onResourceResolve && onResourceRequest ? { scopeKey: JSON.stringify([state.agent?.id]), bindings: [], resources: state.resources, resolveResource: onResourceResolve, requestResource: onResourceRequest } : undefined} onRetry={onRetryMessage} onDelete={onDeleteMessage} />)}
       {turns.length === 0 ? pending : null}
       {live && !liveInTurn ? live : null}
@@ -337,12 +344,12 @@ function turnPlacement(turns: readonly Turn[]) {
 }
 
 /**
- * The asks of this conversation by the turn they came during: the turn that started before them and the next did not, so the
+ * What came beside this conversation (asks and sides) by the turn they came during: the turn that started before them and the next did not, so the
  * line follows the turn's rows. Those before the first turn come first.
  */
-function askedByTurn(turns: readonly Turn[], asks: readonly AskLine[]): { before: AskLine[]; during: AskLine[][] } {
+function byTurn<T extends { readonly at: number }>(turns: readonly Turn[], asks: readonly T[]): { before: T[]; during: T[][] } {
   const starts = turns.map(turn => Date.parse((turn.prompt ?? turn.work[0]?.entries[0] ?? turn.answer[0] ?? turn.letters[0])?.timestamp ?? ''));
-  const before: AskLine[] = [], during: AskLine[][] = turns.map(() => []);
+  const before: T[] = [], during: T[][] = turns.map(() => []);
   for (const ask of asks) {
     let at = -1;
     starts.forEach((start, index) => { if (Number.isFinite(start) && start <= ask.at) at = index; });

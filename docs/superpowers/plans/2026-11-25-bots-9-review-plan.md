@@ -12,6 +12,8 @@ the recommendations:
 - A "Bring back" action on the card sends the answer into the conversation as the person's input, when the person wants it there.
 - The side keeps its own conversation; its approvals show in the roster where the person sees them.
 
+As built: `TeamCreate.bot` starts the task with `task.side: true` (`TaskBroker.create(..., { side: true })`, not a field of the host call). For a side the Relay's task `enqueue` records nothing addressed to its owner (result, question, progress, no-report, told, cancelled), so no input and no turn reach the conversation's bot; the report still sets `task.result`, and the bot's `message` to its chief reads as delivered. Temporary bots another bot creates are unchanged. The conversation's timeline shows each reported side as a card (`SideCards`, placed by turn like the asks) with Open and Bring back; Bring back sends `From the side "<title>":` and the answer quoted with `> ` as the person's message into that conversation (`sendPersonInput`). The roster row of the owning bot takes the needs-you dot while any of its temporary bots waits on an approval (`waiting.reason === 'interaction'`); before this the approval showed only inside the side. No E15 flow covered `/side`.
+
 ## 9b. Status check-ins without a model turn (decided: not now)
 
 The board in a bot's details already answers "where are we?"; asking the bot still costs a turn. Revisit after use.

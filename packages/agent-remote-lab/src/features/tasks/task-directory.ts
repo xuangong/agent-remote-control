@@ -1,5 +1,6 @@
 import { taskView, type Team, type WindowGroup, type BoardItem } from '@orchardworks/agent-remote-protocol';
-import type { TaskDirectory } from '@orchardworks/agent-client-web/react';
+import type { SideCard, TaskDirectory } from '@orchardworks/agent-client-web/react';
+import type { Translate } from '@orchardworks/agent-client';
 
 /** A worker session the page can open: a task's Leader once its session exists. */
 export interface TaskWorker { hostId: string; providerId: string; nativeSessionId: string; title: string }
@@ -10,8 +11,11 @@ export function taskWorker(tasks: readonly Team[] | undefined, taskId: string): 
   return { hostId: worker.hostId, providerId: worker.providerId, nativeSessionId: worker.nativeSessionId, title: team.task?.title ?? team.title };
 }
 
+/** What a side's answer says when the person brings it back into the conversation: their own words, quoting the answer. */
+export const bringBackText = (card: SideCard, t: Translate): string => `${t('timeline.side.quote', { title: card.title })}\n\n${card.summary.split('\n').map(line => `> ${line}`).join('\n')}`;
+
 /** The tasks and the bots' inboxes, as the Relay lists them. Task cards open a task's worker session the way the page opens any session. */
-export function taskDirectory(tasks: readonly Team[] | undefined, open: (worker: TaskWorker) => void, act: TaskDirectory['act'] = async () => {}, groups: readonly WindowGroup[] = [], setChief?: TaskDirectory['setChief'], ask?: TaskDirectory['ask'], writeBoard?: TaskDirectory['writeBoard']): TaskDirectory {
+export function taskDirectory(tasks: readonly Team[] | undefined, open: (worker: TaskWorker) => void, act: TaskDirectory['act'] = async () => {}, groups: readonly WindowGroup[] = [], setChief?: TaskDirectory['setChief'], ask?: TaskDirectory['ask'], writeBoard?: TaskDirectory['writeBoard'], bringBack?: TaskDirectory['bringBack']): TaskDirectory {
   const standing = () => groups.flatMap(group => Object.values(group.bots?.members ?? {}).flatMap(item => item.botId ? [{ botId: item.botId, name: item.name ?? item.botId, ...(item.chief ? { chief: item.chief } : {}) }] : []));
   const inbox = (botId: string) => (tasks ?? []).find(team => team.inbox?.botId === botId);
   const temporary = (botId: string) => (tasks ?? []).find(team => team.task?.botId === botId);
@@ -39,6 +43,11 @@ export function taskDirectory(tasks: readonly Team[] | undefined, open: (worker:
     ...(setChief ? { setChief } : {}),
     bots: () => standing().map(({ botId, name }) => ({ botId, name })),
     ...(ask ? { ask } : {}),
+    ...(bringBack ? { bringBack } : {}),
+    // The sides asked from a conversation that have reported; their results never reach it as input.
+    sides: from => (tasks ?? []).filter(team => team.task?.side && team.task.result && team.members[1]?.providerId === from.providerId && team.members[1].nativeSessionId === from.nativeSessionId)
+      .map(team => ({ taskId: team.id, title: team.task!.title, status: team.task!.result!.status, summary: team.task!.result!.summary, at: team.task!.result!.reportedAt }))
+      .sort((a, b) => a.at - b.at),
     // What the person asked from a conversation, from the answer sessions that conversation has; oldest first.
     asks: from => (tasks ?? []).filter(team => team.ask && team.ask.from.providerId === from.providerId && team.ask.from.nativeSessionId === from.nativeSessionId)
       .flatMap(team => team.ask!.entries.map(entry => ({ id: entry.id, botId: team.ask!.botId, bot: standing().find(bot => bot.botId === team.ask!.botId)?.name ?? team.members[0]?.name ?? team.title,

@@ -5,7 +5,8 @@ import type { BoardItem, Team, TeamTask, WindowGroup } from '@orchardworks/agent
 import { TaskDirectoryContext } from '@orchardworks/agent-client-web/react';
 import { render } from '../../test/setup.js';
 import { TasksList } from '../../conversation/assistant/TasksList.js';
-import { taskDirectory } from './task-directory.js';
+import { bringBackText, taskDirectory } from './task-directory.js';
+import { translator } from '@orchardworks/agent-client';
 
 function taskTeam(id: string, task: Partial<TeamTask>, worker: { ready?: boolean; owner?: string } = {}): Team {
   const member = { hostId: 'mac', providerId: 'claude', responsibility: '', activity: 'idle' as const, summary: '', updatedAt: 1 };
@@ -146,5 +147,14 @@ describe('the task directory', () => {
       const container = await render(<AnsweringList sessions={directory.answering!(id(1))} />);
       expect([...container.querySelectorAll('li')].map(item => item.textContent?.replace(/ · last .*/, ''))).toEqual(['Conversation z · 1 asked', 'Conversation x · 2 asked']);
     });
+  });
+
+  it('lists the sides asked from a conversation once they have reported, oldest first, and quotes an answer to bring it back', () => {
+    const result = (summary: string, reportedAt: number) => ({ status: 'done' as const, summary, reportedAt });
+    const directory = taskDirectory([taskTeam('s2', { side: true, state: 'done', result: result('Second.\nMore.', 9) }), taskTeam('s1', { side: true, state: 'done', result: result('First.', 4) }),
+      taskTeam('working', { side: true }), taskTeam('bot', { state: 'done', result: result('Not a side.', 3) }), taskTeam('elsewhere', { side: true, state: 'done', result: result('Other chat.', 1) }, { owner: 'other' })], vi.fn());
+    const cards = directory.sides!({ providerId: 'claude', nativeSessionId: 'main' });
+    expect(cards.map(card => [card.taskId, card.at])).toEqual([['s1', 4], ['s2', 9]]);
+    expect(bringBackText(cards[1]!, translator('en'))).toBe('From the side "Task s2":\n\n> Second.\n> More.');
   });
 });

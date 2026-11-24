@@ -90,10 +90,17 @@ export async function sendForkInput(transport: RemoteAgentTransport, store: Fork
 function clientActions(client: RemoteSessionClient): LabWorkbenchActions {
   return { sendMessage: async (input) => { await client.sendMessage(input); }, setSessionSetting: async (id, value) => { await client.setSessionSetting(id, value); } };
 }
+/** The person writes into a conversation by its agent, outside the composer: a side's answer brought back. */
+export async function sendPersonInput(transport: RemoteAgentTransport, agentId: string, text: string): Promise<void> {
+  await withSessionClient(transport, agentId, async client => { await client.sendMessage(text); });
+}
 async function withForkClient(transport: RemoteAgentTransport, record: SessionFork, use: (client: RemoteSessionClient) => Promise<void>, signal?: AbortSignal): Promise<void> {
-  signal?.throwIfAborted();
   if (!record.target) throw withMessageKey(new Error('The fork has not been created.'), 'client.fork.notCreated');
-  const client = new RemoteSessionClient(record.target.agentId, transport, new AgentReplica());
+  await withSessionClient(transport, record.target.agentId, use, signal);
+}
+async function withSessionClient(transport: RemoteAgentTransport, agentId: string, use: (client: RemoteSessionClient) => Promise<void>, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  const client = new RemoteSessionClient(agentId, transport, new AgentReplica());
   let unsubscribe: (() => void) | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let onAbort: (() => void) | undefined;

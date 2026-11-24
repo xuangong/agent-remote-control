@@ -74,7 +74,7 @@ export const settings: AreaMessages<typeof english> = {
   'settings.audit.unseen': '{count} 条越过了阈值',
   'settings.audit.passed': '已超过：{what}',
   'settings.audit.approvals': '本次协作链内已允许',
-  'settings.audit.approval': '{kind}（{folder}）',
+  'settings.audit.approval': '{folder} 内的任何工具',
   'settings.audit.approvalApplied': { other: '已自动允许 {count} 次' },
   'settings.audit.revoke': '改回每次询问',
   'settings.letters.hint': '在对话里显示助手之间的信件',

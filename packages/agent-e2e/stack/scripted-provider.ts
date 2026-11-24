@@ -50,7 +50,7 @@ export type ScriptedStep =
   /** A tool call: a running `tool_call` row, then, after `ms`, the same item completed with `output`. */
   | { tool: string; input: ScriptedToolInput; output: string; ms?: number }
   /** A pending `tool_approval` of `command`; the turn waits until the page answers it. Allow goes on; deny or cancel ends the turn. */
-  | { approval: string; command: string }
+  | { approval: string; command: string; toolName?: string }
   /** An assistant message. */
   | { reply: string };
 
@@ -177,7 +177,7 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
         } else {
           const requestId = `${turnId}:approval-${index}`;
           const answered = new Promise<AgentInteractionResponse>(resolve => pendingApprovals.set(requestId, resolve));
-          emit({ type: 'interaction_requested', provider: providerId, turnId, request: { kind: 'tool_approval', requestId, toolCallId: callId, toolName: 'command', summary: step.approval,
+          emit({ type: 'interaction_requested', provider: providerId, turnId, request: { kind: 'tool_approval', requestId, toolCallId: callId, toolName: step.toolName ?? 'command', summary: step.approval,
             detail: { type: 'shell', command: step.command }, allowedDecisions: ['allow', 'deny'], allowScopes: ['once'] } }, `${requestId}:requested`);
           const response = await answered;
           emit({ type: 'interaction_resolved', provider: providerId, turnId, requestId, response }, `${requestId}:resolved`, { key: `interaction:${requestId}`, completes: true, liveOnly: true });

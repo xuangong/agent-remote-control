@@ -74,7 +74,7 @@ export const settings = {
   'settings.audit.unseen': '{count} chains passed a threshold',
   'settings.audit.passed': 'Passed: {what}',
   'settings.audit.approvals': 'Allowed for this chain',
-  'settings.audit.approval': '{kind} in {folder}',
+  'settings.audit.approval': 'Any tool in {folder}',
   'settings.audit.approvalApplied': { one: 'applied {count} time', other: 'applied {count} times' },
   'settings.audit.revoke': 'Ask me again',
   'settings.letters.hint': 'Show letters between agents in conversations',

@@ -125,14 +125,14 @@ describe('standing approvals of a chain (bots plan 9d)', () => {
   const runtime = (cwd: string) => event({ type: 'runtime_updated', provider: 'fake', runtimeInfo: { providerId: 'fake', sessionId: 'native', status: 'idle', cwd, persistence: { providerId: 'fake', sessionId: 'native', opaque: '{}' } } });
   const chainChoice = (value: { policies?: Array<{ policyId: string }> } | undefined) => value?.policies?.some(policy => policy.policyId === 'chain-folder') === true;
 
-  /** The Relay's side of it as the Host sees it: standing approvals by chain (the person's message), kind and folder, and the requests it was asked about. */
+  /** The Relay's side of it as the Host sees it: standing approvals by chain (the person's message) and folder, and the requests it was asked about. */
   function setup(options: { bot?: boolean } = {}) {
     const standing = new Set<string>(), asked: string[] = [], answered: Array<{ requestId: string; response: unknown }> = [];
     const causes = new TurnCauses();
     const tools = new BotTools({ tasks: () => true, answer: async (_ref, requestId, response) => { answered.push({ requestId, response }); },
       request: async call => {
         if (call.action !== 'chain_approval') return {};
-        const key = `${call.cause?.kind === 'person' ? call.cause.messageId : 'framed'}|${call.kind}|${call.cwd}`;
+        const key = `${call.cause?.kind === 'person' ? call.cause.messageId : 'framed'}|${call.cwd}`;
         asked.push(key);
         if (call.grant) { standing.add(key); return { chain: key }; }
         return { allowed: standing.has(key) };
@@ -156,31 +156,32 @@ describe('standing approvals of a chain (bots plan 9d)', () => {
     expect(chainChoice(shown)).toBe(true);
     expect(shown.allowScopes).toContain('policy');
     await f.watching.respondToInteraction('r1', { kind: 'tool_approval', decision: 'allow', scope: 'policy', policyId: 'chain-folder' });
-    expect([...f.standing]).toEqual(['u1|Edit|/repo']);
+    expect([...f.standing]).toEqual(['u1|/repo']);
     expect(f.responses).toEqual([{ kind: 'tool_approval', decision: 'allow', scope: 'once' }]);
     // The person's other answers pass through untouched.
     await f.watching.respondToInteraction('r1', { kind: 'tool_approval', decision: 'deny' });
     expect(f.responses.at(-1)).toEqual({ kind: 'tool_approval', decision: 'deny' });
   });
 
-  it('answers allow, like the person, the next approval of the same kind in the same folder of the same chain', async () => {
+  it('answers allow, like the person, the next tool approval of any kind in the same folder of the same chain', async () => {
     const f = setup();
-    f.standing.add('u1|Edit|/repo');
+    f.standing.add('u1|/repo');
     f.session.push(runtime('/repo')); f.session.push(input('Fix it.', 'u1')); f.session.push(requested(request('r1')));
     await f.settle();
-    expect(f.answered).toEqual([{ requestId: 'r1', response: { kind: 'tool_approval', decision: 'allow', scope: 'once' } }]);
+    f.session.push(requested(request('r2', 'Bash')));
+    await f.settle();
+    expect(f.answered).toEqual(['r1', 'r2'].map(requestId => ({ requestId, response: { kind: 'tool_approval', decision: 'allow', scope: 'once' } })));
   });
 
-  it('asks the person for another kind, another folder, another chain and a revoked approval', async () => {
+  it('asks the person for another folder, another chain and a revoked approval', async () => {
     const f = setup();
-    f.standing.add('u1|Edit|/repo');
-    f.session.push(runtime('/repo')); f.session.push(input('Fix it.', 'u1')); f.session.push(requested(request('kind', 'Bash')));
-    f.session.push(runtime('/other')); f.session.push(requested(request('folder')));
+    f.standing.add('u1|/repo');
+    f.session.push(runtime('/other')); f.session.push(input('Fix it.', 'u1')); f.session.push(requested(request('folder', 'Bash')));
     f.session.push(runtime('/repo')); f.session.push(input('Another thing.', 'u2')); f.session.push(requested(request('chain')));
-    f.session.push(input('Back.', 'u1')); f.standing.delete('u1|Edit|/repo'); f.session.push(requested(request('revoked')));
+    f.session.push(input('Back.', 'u1')); f.standing.delete('u1|/repo'); f.session.push(requested(request('revoked')));
     await f.settle();
     expect(f.answered).toEqual([]);
-    expect(f.asked).toEqual(['u1|Bash|/repo', 'u1|Edit|/other', 'u2|Edit|/repo', 'u1|Edit|/repo']);
+    expect(f.asked).toEqual(['u1|/other', 'u2|/repo', 'u1|/repo']);
   });
 
   it('offers nothing on a session that is no bot\'s, and on an approval that cannot be allowed once', async () => {

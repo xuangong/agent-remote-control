@@ -198,30 +198,29 @@ describe('the chains an account keeps', () => {
 });
 
 describe('standing approvals the person gave a chain (bots plan 9d)', () => {
-  const ask = (f: ReturnType<typeof fixture>, session: string, cause: ReturnType<typeof person> | typeof framed, kind = 'Edit', cwd = '/repo', grant?: true) =>
-    f.broker.hostCall('mac', { action: 'chain_approval', owner: f.as(session), cause, kind, cwd, ...(grant ? { grant } : {}) });
+  const ask = (f: ReturnType<typeof fixture>, session: string, cause: ReturnType<typeof person> | typeof framed, cwd = '/repo', grant?: true) =>
+    f.broker.hostCall('mac', { action: 'chain_approval', owner: f.as(session), cause, cwd, ...(grant ? { grant } : {}) });
 
-  it('records the person\'s choice in the chain, answers the same kind in the same folder for every bot of the chain, and counts each use', async () => {
+  it('records the person\'s choice in the chain, answers any tool use in the same folder for every bot of the chain, and counts each use', async () => {
     const f = fixture();
     await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'm1', to: 'Tracker', text: 'Fix the build.', cause: person('u1') });
     await f.deliver('tracker');
     expect(await ask(f, 'chief', person('u1'))).toEqual({ allowed: false });
-    await ask(f, 'chief', person('u1'), 'Edit', '/repo', true);
-    expect(f.chain().approvals).toEqual([{ kind: 'Edit', cwd: '/repo', at: expect.any(Number), applied: 0 }]);
+    await ask(f, 'chief', person('u1'), '/repo', true);
+    expect(f.chain().approvals).toEqual([{ cwd: '/repo', at: expect.any(Number), applied: 0 }]);
     // Tracker works in the chain on Chief's message, as framed input.
     expect(await ask(f, 'tracker', framed)).toEqual({ allowed: true });
     expect(await ask(f, 'chief', person('u1'))).toEqual({ allowed: true });
     expect(f.chain().approvals![0]!.applied).toBe(2);
     expect(f.broker.chainView().chains[0]!.approvals).toHaveLength(1);
-    await ask(f, 'chief', person('u1'), 'Edit', '/repo', true);
+    await ask(f, 'chief', person('u1'), '/repo', true);
     expect(f.chain().approvals).toHaveLength(1);
   });
 
-  it('asks again for another kind, another folder and another chain', async () => {
+  it('asks again for another folder and another chain', async () => {
     const f = fixture();
-    await ask(f, 'chief', person('u1'), 'Edit', '/repo', true);
-    expect(await ask(f, 'chief', person('u1'), 'Bash')).toEqual({ allowed: false });
-    expect(await ask(f, 'chief', person('u1'), 'Edit', '/other')).toEqual({ allowed: false });
+    await ask(f, 'chief', person('u1'), '/repo', true);
+    expect(await ask(f, 'chief', person('u1'), '/other')).toEqual({ allowed: false });
     expect(await ask(f, 'chief', person('u2'))).toEqual({ allowed: false });
     expect(await ask(f, 'tracker', framed)).toEqual({ allowed: false });
     expect(f.chain().approvals![0]!.applied).toBe(0);
@@ -229,32 +228,32 @@ describe('standing approvals the person gave a chain (bots plan 9d)', () => {
 
   it('ends when the person revokes it, stops the chain or stops the bot, and with the chain\'s retention', async () => {
     const f = fixture();
-    await ask(f, 'chief', person('u1'), 'Edit', '/repo', true);
-    await ask(f, 'chief', person('u1'), 'Write', '/repo', true);
+    await ask(f, 'chief', person('u1'), '/repo', true);
+    await ask(f, 'chief', person('u1'), '/other', true);
     const id = f.chain().id;
-    await f.broker.chainAction({ action: 'revoke_approval', chainId: id, kind: 'Edit', cwd: '/repo' });
+    await f.broker.chainAction({ action: 'revoke_approval', chainId: id, cwd: '/repo' });
     expect(await ask(f, 'chief', person('u1'))).toEqual({ allowed: false });
-    expect(await ask(f, 'chief', person('u1'), 'Write')).toEqual({ allowed: true });
-    await expect(f.broker.chainAction({ action: 'revoke_approval', chainId: id, kind: 'Edit', cwd: '/repo' })).rejects.toThrow('not standing');
+    expect(await ask(f, 'chief', person('u1'), '/other')).toEqual({ allowed: true });
+    await expect(f.broker.chainAction({ action: 'revoke_approval', chainId: id, cwd: '/repo' })).rejects.toThrow('not standing');
     await f.broker.chainAction({ action: 'stop_bot', chainId: id, botId: ids.chief });
-    expect(await ask(f, 'chief', person('u1'), 'Write')).toEqual({ allowed: false });
+    expect(await ask(f, 'chief', person('u1'), '/other')).toEqual({ allowed: false });
     const other = fixture();
-    await ask(other, 'chief', person('u1'), 'Write', '/repo', true);
+    await ask(other, 'chief', person('u1'), '/repo', true);
     await other.broker.chainAction({ action: 'stop', chainId: other.chain().id });
-    expect(await ask(other, 'chief', person('u1'), 'Write')).toEqual({ allowed: false });
+    expect(await ask(other, 'chief', person('u1'))).toEqual({ allowed: false });
 
     let now = 0;
     const chains = new BotChains(memoryChains(), () => now, () => false), start = { cause: 'person' as const, bot: ids.chief }, first = 'c_' + '1'.repeat(16);
-    await chains.approve(first, start, 'Edit', '/repo');
-    expect(await chains.covers(first, ids.chief, 'Edit', '/repo')).toBe(true);
+    await chains.approve(first, start, '/repo');
+    expect(await chains.covers(first, ids.chief, '/repo')).toBe(true);
     now = CHAIN_RETENTION_MS + 1;
     const scope = chainScope('c_' + '2'.repeat(16)); scope.messages = 1; await chains.record(scope, start);
-    expect(await chains.covers(first, ids.chief, 'Edit', '/repo')).toBe(false);
+    expect(await chains.covers(first, ids.chief, '/repo')).toBe(false);
   });
 
   it('holds a limited number of standing approvals in one chain', async () => {
     const f = fixture();
-    for (let n = 0; n < CHAIN_APPROVAL_LIMIT; n++) await ask(f, 'chief', person('u1'), `Tool${n}`, '/repo', true);
-    await expect(ask(f, 'chief', person('u1'), 'One more', '/repo', true)).rejects.toThrow('most standing approvals');
+    for (let n = 0; n < CHAIN_APPROVAL_LIMIT; n++) await ask(f, 'chief', person('u1'), `/repo${n}`, true);
+    await expect(ask(f, 'chief', person('u1'), '/one-more', true)).rejects.toThrow('most standing approvals');
   });
 });

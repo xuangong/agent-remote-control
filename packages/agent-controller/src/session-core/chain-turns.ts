@@ -20,16 +20,16 @@ export class TurnCauses {
 
 /**
  * The person's standing approvals of a chain, as this session's Controller applies them (bots plan 9d). The person decides: they chose
- * "for this chain in this folder" on one request, and `allow` applies that same decision to the next request of the same kind in the
+ * "for this chain in this folder" on one request, and `allow` applies that same decision to the next request of any kind in the
  * same folder from the same chain. Nothing else is ever answered here.
  */
 export interface ChainApprovals {
   /** The session is a bot's, so the choice is offered on its native tool approvals. */
   offered(): boolean;
-  /** Whether a standing approval of the turn's chain covers this kind of action in this folder; counts the use. */
-  covers(kind: string, cwd: string): Promise<boolean>;
+  /** Whether a standing approval of the turn's chain covers tool use in this folder; counts the use. */
+  covers(cwd: string): Promise<boolean>;
   /** Records the person's choice for the turn's chain. */
-  grant(kind: string, cwd: string): Promise<void>;
+  grant(cwd: string): Promise<void>;
   /** Answers the pending request with the person's recorded decision: allow once. */
   allow(requestId: string): Promise<void>;
 }
@@ -37,7 +37,7 @@ const fail = (message: string): never => { throw new Error(message); };
 type ToolApproval = Extract<AgentInteractionRequest, { kind: 'tool_approval' }>;
 const ALLOW_ONCE: AgentInteractionResponse = { kind: 'tool_approval', decision: 'allow', scope: 'once' };
 const chainChoice = (request: ToolApproval): ToolApproval => ({ ...request, allowScopes: request.allowScopes.includes('policy') ? request.allowScopes : [...request.allowScopes, 'policy'],
-  policies: [...request.policies ?? [], { policyId: CHAIN_APPROVAL_POLICY, description: 'Allow this kind of action in this folder for every bot of this chain, until the chain ends.' }] });
+  policies: [...request.policies ?? [], { policyId: CHAIN_APPROVAL_POLICY, description: 'Allow every tool use in this folder for every bot of this chain, until the chain ends.' }] });
 /** A request the chain choice can be made on: allow once is a decision it offers. */
 const chainable = (request: AgentInteractionRequest): request is ToolApproval => request.kind === 'tool_approval' && request.allowedDecisions.includes('allow')
   && request.allowScopes.includes('once') && !request.policies?.some(policy => policy.policyId === CHAIN_APPROVAL_POLICY);
@@ -87,7 +87,7 @@ export function watchChainTurns(session: AgentSession, ref: NativeSessionRef, ca
               offered.set(request.requestId, request);
               item = { ...item, event: { ...event, request: chainChoice(request) } };
               // After the request is delivered to the session's state, a standing approval of the chain answers it like the person would.
-              autoAnswer = () => { void approvals.covers(request.toolName, cwd).then(covered => covered ? approvals.allow(request.requestId) : undefined).catch(() => undefined); };
+              autoAnswer = () => { void approvals.covers(cwd).then(covered => covered ? approvals.allow(request.requestId) : undefined).catch(() => undefined); };
             }
           }
           if (event.type === 'timeline' && event.item.type === 'user_message' && !event.item.withdrawn && event.item.text.trim()) {
@@ -121,7 +121,7 @@ export function watchChainTurns(session: AgentSession, ref: NativeSessionRef, ca
       // The person's choice for the chain: recorded, and the adapter hears the ordinary allow once.
       if (original && response.kind === 'tool_approval' && response.decision === 'allow' && response.scope === 'policy' && response.policyId === CHAIN_APPROVAL_POLICY) {
         const cwd = await folder() ?? fail('This session\'s working directory is unknown.');
-        await approvals!.grant(original.toolName, cwd);
+        await approvals!.grant(cwd);
         response = ALLOW_ONCE;
       }
       return target.respondToInteraction(requestId, response);

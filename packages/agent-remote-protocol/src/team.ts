@@ -194,9 +194,9 @@ export const TeamHostCall = Type.Union([
   Type.Object({ action: Type.Literal('list_bots'), owner: BotCaller }, object),
   // A bot's turn ended: its Host counts the turn and its usage in the turn's chain.
   Type.Object({ action: Type.Literal('chain_turn'), owner: BotCaller, cause: TurnCause, tokens: Type.Integer({ minimum: 0 }), costUsd: Type.Optional(Type.Number({ minimum: 0 })) }, object),
-  // A bot's native tool approval is pending, or the person chose "for this chain in this folder" for it: the Host asks whether a standing approval of the turn's chain covers the kind and folder
+  // A bot's native tool approval is pending, or the person chose "for this chain in this folder" for it: the Host asks whether a standing approval of the turn's chain covers the folder
   // (counting the use), or, with `grant`, records the person's choice. Only the person's recorded choice ever answers.
-  Type.Object({ action: Type.Literal('chain_approval'), owner: BotCaller, cause: Type.Optional(TurnCause), kind: StandingApproval.properties.kind, cwd: StandingApproval.properties.cwd, grant: Type.Optional(Type.Literal(true)) }, object),
+  Type.Object({ action: Type.Literal('chain_approval'), owner: BotCaller, cause: Type.Optional(TurnCause), cwd: StandingApproval.properties.cwd, grant: Type.Optional(Type.Literal(true)) }, object),
   Type.Object({ action: Type.Literal('update_mission'), owner: BotCaller, mission: BotMission }, object),
   // A bot keeps its own memory, and no one else's: the caller is the only bot a call names. `replace` is the id or the exact text of the fact the new text takes the place of.
   Type.Object({ action: Type.Literal('remember'), owner: BotCaller, text: BotFact.properties.text, replace: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })) }, object),

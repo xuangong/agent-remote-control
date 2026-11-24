@@ -42,13 +42,13 @@ test('lists what the person allowed for a chain and takes it back from the keybo
   const audit = page.getByRole('main', { name: 'Audit' });
   await audit.locator('.lab-assistant-session-toggle').first().click();
   const approvals = audit.locator('.lab-bot-audit-approvals').filter({ visible: true });
-  await expect(approvals).toContainText('Edit in /Users/someone/projects/agent-remote-control/packages/agent-remote-lab');
+  await expect(approvals).toContainText('Any tool in /Users/someone/projects/agent-remote-control/packages/agent-remote-lab');
   await expect(approvals).toContainText('applied 3 times');
   expect(await fitsWidth(page)).toBe(true);
   await approvals.getByRole('button', { name: 'Ask me again', exact: true }).focus();
   await page.keyboard.press('Enter');
   await expect(approvals).toHaveCount(0);
-  expect(await actions(page)).toEqual([{ action: 'revoke_approval', chainId: 'c_0000000000000001', kind: 'Edit', cwd: '/Users/someone/projects/agent-remote-control/packages/agent-remote-lab' }]);
+  expect(await actions(page)).toEqual([{ action: 'revoke_approval', chainId: 'c_0000000000000001', cwd: '/Users/someone/projects/agent-remote-control/packages/agent-remote-lab' }]);
 });
 
 test('sets thresholds from the keyboard, and says when the bots have not worked together yet', async ({ page }) => {

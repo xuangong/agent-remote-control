@@ -78,22 +78,22 @@ describe('the audit and the passed-chain sign', () => {
   });
 
   it('lists the approvals the person gave a chain, with when and how often they applied, and revokes one so it asks again', async () => {
-    let current = view([chain('c_0000000000000001', { approvals: [{ kind: 'Edit', cwd: '/repo', at: 2, applied: 3 }, { kind: 'Bash', cwd: '/repo', at: 2, applied: 1 }] }), chain('c_0000000000000002')]);
+    let current = view([chain('c_0000000000000001', { approvals: [{ cwd: '/repo', at: 2, applied: 3 }, { cwd: '/other', at: 2, applied: 1 }] }), chain('c_0000000000000002')]);
     const acted: ChainAction[] = [];
     const client = { list: vi.fn(async () => current), act: vi.fn(async (action: ChainAction) => { acted.push(action);
-      if (action.action === 'revoke_approval') current = view([chain('c_0000000000000001', { approvals: [{ kind: 'Bash', cwd: '/repo', at: 2, applied: 1 }] }), chain('c_0000000000000002')]); }) };
+      if (action.action === 'revoke_approval') current = view([chain('c_0000000000000001', { approvals: [{ cwd: '/other', at: 2, applied: 1 }] }), chain('c_0000000000000002')]); }) };
     const container = await render(<BotAudit baseUrl="/" client={client} />);
     await flush();
     const rows = [...container.querySelectorAll('.lab-bot-audit > ul > li')];
     for (const row of rows) await act(async () => row.querySelector<HTMLButtonElement>('.lab-assistant-session-toggle')!.click());
     expect(rows[1]!.querySelector('.lab-bot-audit-approvals')).toBeNull();
     const approvals = () => [...rows[0]!.querySelectorAll('.lab-bot-audit-approvals li')];
-    expect(approvals().map(row => row.querySelector('span')!.textContent)).toEqual(['Edit in /repo', 'Bash in /repo']);
+    expect(approvals().map(row => row.querySelector('span')!.textContent)).toEqual(['Any tool in /repo', 'Any tool in /other']);
     expect(approvals()[0]!.querySelector('small')!.textContent).toContain('applied 3 times');
     expect(approvals()[1]!.querySelector('small')!.textContent).toContain('applied 1 time');
     await act(async () => approvals()[0]!.querySelector<HTMLButtonElement>('button')!.click());
     await flush();
-    expect(acted).toEqual([{ action: 'revoke_approval', chainId: 'c_0000000000000001', kind: 'Edit', cwd: '/repo' }]);
-    expect(approvals().map(row => row.querySelector('span')!.textContent)).toEqual(['Bash in /repo']);
+    expect(acted).toEqual([{ action: 'revoke_approval', chainId: 'c_0000000000000001', cwd: '/repo' }]);
+    expect(approvals().map(row => row.querySelector('span')!.textContent)).toEqual(['Any tool in /other']);
   });
 });

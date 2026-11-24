@@ -47,10 +47,10 @@ export function BotAudit({ baseUrl, client: given }: { baseUrl: string; client?:
       {chain.stopped === undefined ? <div className="lab-assistant-task-actions">{button(t('settings.audit.stop'), { action: 'stop', chainId: chain.id })}</div> : null}
       {chain.approvals?.length ? <section className="lab-bot-audit-approvals" aria-label={t('settings.audit.approvals')}>
         <h4>{t('settings.audit.approvals')}</h4>
-        <ul>{chain.approvals.map(approval => <li key={`${approval.kind}:${approval.cwd}`}>
-          <span>{t('settings.audit.approval', { kind: approval.kind, folder: approval.cwd })}</span>
+        <ul>{chain.approvals.map(approval => <li key={approval.cwd}>
+          <span>{t('settings.audit.approval', { folder: approval.cwd })}</span>
           <small>{[replyTime(approval.at, undefined, dateLocale(locale), t), t('settings.audit.approvalApplied', { count: approval.applied })].join(' · ')}</small>
-          <div className="lab-assistant-task-actions">{button(t('settings.audit.revoke'), { action: 'revoke_approval', chainId: chain.id, kind: approval.kind, cwd: approval.cwd })}</div>
+          <div className="lab-assistant-task-actions">{button(t('settings.audit.revoke'), { action: 'revoke_approval', chainId: chain.id, cwd: approval.cwd })}</div>
         </li>)}</ul>
       </section> : null}
       <ul className="lab-bot-audit-bots">{chain.bots.map(bot => {

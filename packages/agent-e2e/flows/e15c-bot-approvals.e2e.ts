@@ -1,5 +1,5 @@
-// E15c, one approval per chain and folder (bots plan 9d): the real page, Relay and Controller, with scripted sessions that ask for an
-// approval. The person allows a command for a chain in a folder once; a bot of the same chain asking the same is answered at once, another
+// E15c, one approval per chain and folder, for every kind of tool (bots plan 9d): the real page, Relay and Controller, with scripted sessions that ask for an
+// approval. The person allows a tool for a chain in a folder once; a bot of the same chain asking for any tool in that folder is answered at once, another
 // chain is asked about, and the audit lists what was allowed and takes it back.
 import type { Browser, Page } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
@@ -13,7 +13,7 @@ beforeAll(async () => {
   stack = await startStack({ teams: true, tools: true,
     turns: text => text.includes('Run the chief check.') ? [{ approval: 'Run the check', command: 'npm run check' }, { reply: 'Chief check passed.' }]
       : text.includes('Run the second tracker check.') ? [{ approval: 'Run the check', command: 'npm run check' }, { reply: 'Second tracker check passed.' }]
-      : text.includes('Run the tracker check.') ? [{ approval: 'Run the check', command: 'npm run check' }, { reply: 'Tracker check passed.' }] : undefined,
+      : text.includes('Run the tracker check.') ? [{ approval: 'Edit the changelog', command: 'npm run check', toolName: 'Edit' }, { reply: 'Tracker check passed.' }] : undefined,
     sessions: {
       chief: { title: 'Chief', history: [{ role: 'user', text: 'Plan the release.' }, { role: 'assistant', text: 'Chief is ready.' }] },
       tracker: { title: 'Tracker', history: [{ role: 'user', text: 'Track the build.' }, { role: 'assistant', text: 'Tracker is ready.' }] },
@@ -34,7 +34,7 @@ async function typeInto(page: Page, bot: string, text: string): Promise<void> {
   await page.keyboard.press('Enter');
 }
 
-it('E15c: allowing a command for the chain in this folder answers the same command of another bot of the chain, not another chain\'s, and the audit takes it back', async () => {
+it('E15c: allowing a tool for the chain in this folder answers any tool of another bot of the chain in that folder, not another chain\'s, and the audit takes it back', async () => {
   const { context, page } = await openPage(browser, stack.sessionUrl('chief'));
   await teamOf(stack, context);
   await page.locator('[data-testid="prompt-input"][data-placeholder^="Message Tracker"]').waitFor();
@@ -47,7 +47,7 @@ it('E15c: allowing a command for the chain in this folder answers the same comma
   await cards.first().getByRole('button', { name: 'Allow for this chain in this folder', exact: true }).click();
   await showsText(page, 'Chief check passed.');
 
-  // Chief hands Tracker work in the same chain; Tracker asks for the same command in the same folder and is answered without the person.
+  // Chief hands Tracker work in the same chain; Tracker asks for another kind of tool in the same folder and is answered without the person.
   await stack.provider.useTool('chief', 'message', { to: 'Tracker', text: 'Run the tracker check.' });
   await holdsText(page, 'Tracker check passed.');
   expect(await cards.count()).toBe(0);
@@ -67,7 +67,7 @@ it('E15c: allowing a command for the chain in this folder answers the same comma
   for (const toggle of await page.locator('.lab-bot-audit .lab-assistant-session-toggle').all()) await toggle.click();
   const approvals = page.locator('.lab-bot-audit-approvals');
   await expect.poll(() => approvals.count(), { timeout: 20_000 }).toBe(1);
-  expect(await approvals.innerText()).toContain('command in');
+  expect(await approvals.innerText()).toContain('Any tool in');
   expect(await approvals.innerText()).toContain('applied 1 time');
   await approvals.getByRole('button', { name: 'Ask me again', exact: true }).click();
   await expect.poll(() => approvals.count(), { timeout: 20_000 }).toBe(0);

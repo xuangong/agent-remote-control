@@ -71,30 +71,30 @@ export class BotChains {
     });
     if (crossed) this.passed(crossed.chain, crossed.passed);
   }
-  /** The person allowed a kind of action in a folder for the rest of a chain, which starts at this bot if it is new; the same choice twice is one. */
-  async approve(id: string, start: { cause: BotChain['cause']; bot: string }, kind: string, cwd: string): Promise<void> {
+  /** The person allowed tool use in a folder for the rest of a chain, which starts at this bot if it is new; the same choice twice is one. */
+  async approve(id: string, start: { cause: BotChain['cause']; bot: string }, cwd: string): Promise<void> {
     await this.store.change(chains => {
       const now = this.now(), chain = chains.find(item => item.id === id) ?? began(chains, id, start, now);
-      if (chain.approvals?.some(item => item.kind === kind && item.cwd === cwd)) return;
+      if (chain.approvals?.some(item => item.cwd === cwd)) return;
       if ((chain.approvals?.length ?? 0) >= CHAIN_APPROVAL_LIMIT) fail('This chain already holds the most standing approvals; revoke one first.');
-      (chain.approvals ??= []).push({ kind, cwd, at: now, applied: 0 });
+      (chain.approvals ??= []).push({ cwd, at: now, applied: 0 });
       chain.updatedAt = now;
     });
   }
   /**
-   * Whether a standing approval of this chain covers the kind of action in this folder, counting the use. A chain the person stopped, or
+   * Whether a standing approval of this chain covers tool use in this folder, counting the use. A chain the person stopped, or
    * stopped for this bot, answers nothing; a chain past its retention is gone, and so are its approvals.
    */
-  async covers(id: string, bot: string, kind: string, cwd: string): Promise<boolean> {
-    if (this.stopped(id, bot) || !this.store.read().some(chain => chain.id === id && chain.approvals?.some(item => item.kind === kind && item.cwd === cwd))) return false;
-    await this.store.change(chains => { chains.find(item => item.id === id)!.approvals!.find(item => item.kind === kind && item.cwd === cwd)!.applied++; });
+  async covers(id: string, bot: string, cwd: string): Promise<boolean> {
+    if (this.stopped(id, bot) || !this.store.read().some(chain => chain.id === id && chain.approvals?.some(item => item.cwd === cwd))) return false;
+    await this.store.change(chains => { chains.find(item => item.id === id)!.approvals!.find(item => item.cwd === cwd)!.applied++; });
     return true;
   }
-  /** The person ends a standing approval: the kind in that folder asks again. */
-  async revoke(id: string, kind: string, cwd: string): Promise<void> {
+  /** The person ends a standing approval: tool use in that folder asks again. */
+  async revoke(id: string, cwd: string): Promise<void> {
     await this.store.change(chains => {
       const chain = chains.find(item => item.id === id) ?? fail('No chain of this account has that id.');
-      const kept = (chain.approvals ?? []).filter(item => item.kind !== kind || item.cwd !== cwd);
+      const kept = (chain.approvals ?? []).filter(item => item.cwd !== cwd);
       if (kept.length === (chain.approvals?.length ?? 0)) fail('That approval is not standing in this chain.');
       if (kept.length) chain.approvals = kept; else delete chain.approvals;
     });

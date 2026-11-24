@@ -91,12 +91,12 @@ export class BotTools {
    */
   approvalsFor(ref: NativeSessionRef): ChainApprovals {
     const owner = { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId };
-    const call = (kind: string, cwd: string, grant?: true) => { const cause = this.causes.of(ref);
-      return this.ports.request({ action: 'chain_approval', owner, ...(cause ? { cause } : {}), kind, cwd, ...(grant ? { grant } : {}) }); };
+    const call = (cwd: string, grant?: true) => { const cause = this.causes.of(ref);
+      return this.ports.request({ action: 'chain_approval', owner, ...(cause ? { cause } : {}), cwd, ...(grant ? { grant } : {}) }); };
     return {
       offered: () => this.ports.tasks() && !!this.ports.answer && (this.tools(ref) === 'tasks' || this.ports.answering?.(ref) === true || this.ports.working?.(ref) === true),
-      covers: async (kind, cwd) => ((await call(kind, cwd)) as { allowed?: unknown })?.allowed === true,
-      grant: async (kind, cwd) => { await call(kind, cwd, true); },
+      covers: async cwd => ((await call(cwd)) as { allowed?: unknown })?.allowed === true,
+      grant: async cwd => { await call(cwd, true); },
       allow: requestId => this.ports.answer!(ref, requestId, { kind: 'tool_approval', decision: 'allow', scope: 'once' }),
     };
   }

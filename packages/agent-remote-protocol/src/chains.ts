@@ -39,11 +39,10 @@ export const ChainUsage = Type.Object({ tokens: count, costUsd: Type.Optional(Ty
 export type ChainUsage = Static<typeof ChainUsage>;
 
 /**
- * What the person allowed for the rest of a chain: bots of the chain asking for this kind of action (the tool kind as the adapter
- * reports it) in this working directory are answered allow by their Controllers. at: when the person chose it. applied: how many
- * requests it answered.
+ * What the person allowed for the rest of a chain: native tool approvals of any kind, from bots of the chain working in this directory,
+ * are answered allow by their Controllers. at: when the person chose it. applied: how many requests it answered.
  */
-export const StandingApproval = Type.Object({ kind: Type.String({ minLength: 1, maxLength: 256 }), cwd: Type.String({ minLength: 1, maxLength: 4096 }), at: time, applied: count }, object);
+export const StandingApproval = Type.Object({ cwd: Type.String({ minLength: 1, maxLength: 4096 }), at: time, applied: count }, object);
 export type StandingApproval = Static<typeof StandingApproval>;
 
 /**
@@ -86,7 +85,7 @@ export const ChainAction = Type.Union([
   // The person writes a standing bot's board as the person; the bots the write changes are told, as when a bot writes it.
   Type.Object({ action: Type.Literal('update_board'), botId: BotId, items: Type.Optional(Type.Array(BoardItemEdit, { minItems: 1, maxItems: 10 })), plan: Type.Optional(BoardPlanEdit) }, object),
   Type.Object({ action: Type.Literal('set_thresholds'), thresholds: ChainThresholds }, object),
-  Type.Object({ action: Type.Literal('revoke_approval'), chainId: ChainId, kind: StandingApproval.properties.kind, cwd: StandingApproval.properties.cwd }, object),
+  Type.Object({ action: Type.Literal('revoke_approval'), chainId: ChainId, cwd: StandingApproval.properties.cwd }, object),
 ]);
 export type ChainAction = Static<typeof ChainAction>;
 export const isChainAction = (value: unknown): value is ChainAction => Value.Check(ChainAction, value);

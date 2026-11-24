@@ -4,10 +4,10 @@ import { isBotMessageResult, type TeamHostCall } from '@orchardworks/agent-remot
 import { BotTools, workerToolsIn, WORKER_NAMESPACE } from './bot-tools.js';
 
 // The Relay names the bots' main sessions on this Host with their missions; the stub answers as it would.
-function fixture(bots: Array<{ nativeSessionId: string; mission?: string; memory?: Array<{ id: string; text: string }> }>, tasks = true) {
+function fixture(bots: Array<{ nativeSessionId: string; mission?: string; memory?: Array<{ id: string; text: string }> }>, tasks = true, takesTools = true) {
   const calls: TeamHostCall[] = [];
   let listed = bots;
-  const tools = new BotTools({ request: async call => { calls.push(call); return { bots: listed.map(bot => ({ providerId: 'codex', ...bot })) }; }, tasks: () => tasks });
+  const tools = new BotTools({ request: async call => { calls.push(call); return { bots: listed.map(bot => ({ providerId: 'codex', ...bot })) }; }, tasks: () => tasks, takesTools: () => takesTools });
   return { tools, calls, set: (next: typeof bots) => { listed = next; } };
 }
 const ref = (nativeSessionId: string) => ({ controllerId: 'controller', providerId: 'codex', nativeSessionId });
@@ -61,18 +61,22 @@ it('returns the outcome of a message to the bot as the tool result, whichever of
 
 describe('the reply a bot\'s ended turn sends', () => {
   const asked = { kind: 'framed' as const, answers: 'm0123456789ab' };
-  const ended = async (turn: Parameters<BotTools['turnEnded']>[1]) => {
-    const f = fixture([{ nativeSessionId: 'chief' }]);
+  const ended = async (turn: Parameters<BotTools['turnEnded']>[1], takesTools = false) => {
+    const f = fixture([{ nativeSessionId: 'chief' }], true, takesTools);
     await f.tools.refresh('controller');
     f.calls.length = 0;
     f.tools.turnEnded(ref('chief'), turn);
     return f.calls;
   };
 
-  it('is the final text, as a call the Host makes with no tool, when one message started the turn', async () => {
+  it('is the final text of a bot whose provider takes no tools, as a call the Host makes, when one message started the turn', async () => {
     expect(await ended({ cause: asked, tokens: 5, finalText: 'Yes, cut at noon.' })).toEqual([
       { action: 'chain_turn', owner: { providerId: 'codex', nativeSessionId: 'chief' }, cause: asked, tokens: 5 },
       { action: 'bot_reply', owner: { providerId: 'codex', nativeSessionId: 'chief' }, text: 'Yes, cut at noon.', cause: asked }]);
+  });
+
+  it('is never the final text of a bot that has the tools: it answers with message, so its closing words go to no sender', async () => {
+    expect((await ended({ cause: asked, tokens: 5, finalText: 'Noted, nothing more to do.' }, true)).map(call => call.action)).toEqual(['chain_turn']);
   });
 
   it('is sent for no turn that answers no message, that said nothing, or that a session without bots ran', async () => {

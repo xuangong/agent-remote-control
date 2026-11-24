@@ -22,6 +22,8 @@ export interface BotToolsPorts {
   title?(ref: NativeSessionRef): Promise<string | undefined>;
   /** The session is a bot's answer session on this Host: its turns count in the chain of the mention and its final text answers. */
   answering?(ref: NativeSessionRef): boolean;
+  /** The session's provider takes the bots' tools. A bot on one that does not answers a message by its final text (bots design 3.3). */
+  takesTools?(ref: NativeSessionRef): boolean;
   /** The session is a temporary bot's worker on this Host. */
   working?(ref: NativeSessionRef): boolean;
   /** Answers a pending interaction of a session on this Host, as the person's decision applied. */
@@ -68,8 +70,8 @@ export class BotTools {
   constructor(private readonly ports: BotToolsPorts) {}
   /**
    * A bot's turn ended: its Relay counts the turn and its usage in the turn's chain. When one message from another bot started the
-   * turn, the turn's final text goes back to that message's sender as the reply (bots design 3.3): the Host sends it, with no tool call.
-   * An answer session's turn started by what the person asked answers them the same way.
+   * turn and the bot's provider takes no tools, the turn's final text goes back to that message's sender as the reply (bots design 3.3):
+   * the Host sends it. A bot with the tools answers with `message`, so its final text goes to no sender. An answer session's turn started by what the person asked answers them the same way.
    */
   turnEnded(ref: NativeSessionRef, turn: TurnReport): void {
     const owner = { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId };
@@ -79,7 +81,7 @@ export class BotTools {
     void this.ports.request({ action: 'chain_turn', owner, cause: turn.cause, tokens: turn.tokens, ...(turn.costUsd !== undefined ? { costUsd: turn.costUsd } : {}) }).catch(() => undefined);
     if (turn.cause.kind === 'framed' && turn.cause.asked && turn.finalText)
       void this.ports.request({ action: 'bot_answer', owner, text: turn.finalText.slice(0, ASSISTANT_MESSAGE_LIMIT), cause: { kind: 'framed', asked: true } }).catch(() => undefined);
-    else if (turn.cause.kind === 'framed' && turn.cause.answers && turn.finalText)
+    else if (turn.cause.kind === 'framed' && turn.cause.answers && turn.finalText && this.ports.takesTools?.(ref) === false)
       void this.ports.request({ action: 'bot_reply', owner, text: turn.finalText.slice(0, ASSISTANT_MESSAGE_LIMIT), cause: { kind: 'framed', answers: turn.cause.answers } }).catch(() => undefined);
   }
   /**

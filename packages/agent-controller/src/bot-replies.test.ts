@@ -19,11 +19,11 @@ const input = (text: string, messageId?: string) => event({ type: 'timeline', pr
 const said = (text: string) => event({ type: 'timeline', provider: 'codex', item: { type: 'assistant_message', text } });
 const done = () => event({ type: 'turn_completed', provider: 'codex', turnId: 't' });
 
-async function setup() {
+async function setup(takesTools = false) {
   const h = await botsHarness({ tasks: true, groups, sessions: ['tracker'] });
   cleanups.push(() => h.close());
   const chief = new BotTools({ request: call => h.host(call), tasks: () => true, title: async () => 'Chief' });
-  const tracker = new BotTools({ request: call => h.host(call), tasks: () => true, title: async () => 'Tracker' });
+  const tracker = new BotTools({ request: call => h.host(call), tasks: () => true, title: async () => 'Tracker', takesTools: () => takesTools });
   await tracker.refresh('controller');
   const session = new ScriptedSession('codex', 'tracker', [boundary()]);
   const ref = h.ref('codex', 'tracker');
@@ -38,7 +38,19 @@ async function setup() {
   return { h, session, settle, chiefInputs, ask, chief };
 }
 
-describe('a bot answers from its final text', () => {
+describe('a bot with the tools answers with message, not from its final text', () => {
+  it('sends its chief nothing when the turn one message started ends with a text', async () => {
+    const f = await setup(true);
+    const asked = await f.ask('Is the branch cut?');
+    f.session.push(input(assistantMessageText({ messageId: asked, from: 'Chief', body: 'Is the branch cut?' })));
+    f.session.push(said('Nothing more to do.'));
+    f.session.push(done());
+    await f.settle();
+    expect(await f.chiefInputs()).toEqual([]);
+  });
+});
+
+describe('a bot whose provider takes no tools answers from its final text', () => {
   it('sends the final text of the turn one message started back to its sender, cut at 300 characters', async () => {
     const f = await setup();
     const asked = await f.ask('Is the branch cut?');

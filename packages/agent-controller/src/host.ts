@@ -486,6 +486,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     try { return lease.agent.snapshot().payload.runtimeInfo.cwd; } finally { lease.release(); }
   };
   const workerSupport: BotTools | undefined = options.team?.request ? new BotTools({ request: options.team.request, tasks: () => options.team?.tasks?.() === true, answering: ref => team?.answering(ref) === true, working: ref => team?.working(ref) === true,
+    takesTools: ref => providers.require(ref.providerId).adapter.descriptor.sessionExtensions?.toolNamespaces !== undefined,
     answer: async (ref, requestId, response) => {
       const lease = await automationAccess.acquire(ref.providerId, ref.nativeSessionId);
       try { await lease.agent.respondToInteraction(requestId, response); } finally { lease.release(); }

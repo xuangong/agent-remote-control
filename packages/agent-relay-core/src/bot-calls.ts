@@ -247,7 +247,7 @@ export class BotCalls {
         const handed = owner && call.item !== undefined ? this.board.read(owner)?.items.find(entry => entry.key === call.item && entry.assignee === self.key) : undefined;
         if (owner && handed) return { bot: owner.name, item: handed, readOnly: true };
         if (!owner || owner.chief !== self.key) fail('You read the board of your own standing staff, and the items handed to you, only.');
-        target = owner; name = owner.name;
+        target = owner!; name = owner!.name;
       }
     } else if (self.standing) target = self.standing;
     else { const ref = self.task!.task!.item ?? fail('This bot was not created for a board item.'); target = this.boardOwner(ref.board); call = { ...call, item: ref.key }; name = target.name; }

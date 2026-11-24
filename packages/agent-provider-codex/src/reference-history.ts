@@ -3,8 +3,22 @@ import type { CodexAppServerTransport } from './app-server-transport.js';
 import { isRecord, readString } from './native.js';
 import { CodexEventProjector } from './projector.js';
 
-/** Native pagination stays inside the adapter; source threads are never resumed. */
+/** The native pages one read looks through for a readable entry before it hands the cursor back. */
+const UNREADABLE_PAGES_LIMIT = 20;
+
+/**
+ * Native pagination stays inside the adapter; source threads are never resumed. A native page counts items a reader never sees
+ * (reasoning, status), so a page the size of one entry can hold none; the read goes on to the next native page, a bounded number of times,
+ * so that an empty page means the history has no readable entry in the range read.
+ */
 export async function readSessionHistoryPage(transport: Pick<CodexAppServerTransport, 'request'>, threadId: string, query: AgentHistoryQuery): Promise<AgentHistoryPage> {
+  let page = await readNativePage(transport, threadId, query);
+  for (let pages = 1; query.query === undefined && page.entries.length === 0 && page.nextCursor && pages < UNREADABLE_PAGES_LIMIT; pages++)
+    page = await readNativePage(transport, threadId, { ...query, cursor: page.nextCursor });
+  return page;
+}
+
+async function readNativePage(transport: Pick<CodexAppServerTransport, 'request'>, threadId: string, query: AgentHistoryQuery): Promise<AgentHistoryPage> {
   const limit = query.limit ?? 5;
   const textOffset = query.textOffset ?? 0;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10 || !Number.isSafeInteger(textOffset) || textOffset < 0) throw new Error('Invalid source history page bounds.');

@@ -120,7 +120,7 @@ const sameKey = (resolve: TeamBrokerPorts['resolveSession'], hostId: string, pro
 
 export { quoteFrames } from '@orchardworks/agent-remote-protocol';
 /** The worker's first input. */
-export const briefText = (team: Team): string => { const item = task(team); return taskBriefText({ taskId: team.id, from: team.source.title, title: item.title, brief: item.brief, ...(item.doneWhen ? { doneWhen: item.doneWhen } : {}), ...tagOf(team, team.source.title) }); };
+export const briefText = (team: Team): string => { const item = task(team); return taskBriefText({ taskId: team.id, from: team.source.title, title: item.title, brief: item.brief, ...(item.doneWhen ? { doneWhen: item.doneWhen } : {}), ...(item.side ? { side: true as const } : {}), ...tagOf(team, team.source.title) }); };
 /** The owner's view of a report. */
 export const resultText = (team: Team): string => { const item = task(team), result = item.result ?? fail('The task has no result.'); return taskResultText({ taskId: team.id, status: result.status, title: item.title, summary: result.summary, ...tagOf(team, item.title) }); };
 

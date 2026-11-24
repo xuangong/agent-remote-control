@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { TurnCauses, type ChainApprovals, type PersonInput, type TurnReport } from './session-core/chain-turns.js';
 import type { AgentSessionTool, AgentSessionToolNamespace } from '@orchardworks/agent-provider-sdk';
 import type { AgentInteractionResponse } from '@orchardworks/agent-remote-protocol';
-import { ASSISTANT_MESSAGE_LIMIT, ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, BOT_FACT_LIMIT, BOT_MESSAGE_LIMIT, nativeSessionRefKey, PERSON_WROTE_LIMIT, ROOM_MINUTES_LIMIT, TASK_BRIEF_LIMIT, TASK_TITLE_LIMIT, type BotFact, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import { ASSISTANT_MESSAGE_LIMIT, ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, BOT_FACT_LIMIT, BOT_MESSAGE_LIMIT, nativeSessionRefKey, PERSON_WROTE_LIMIT, ROOM_MINUTES_LIMIT, TASK_BRIEF_LIMIT, TASK_SUMMARY_LIMIT, TASK_TITLE_LIMIT, type BotFact, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { botInstructions } from './bot-instructions.js';
 
 /** The local files of attachments: one a bot sends, and one it downloads. */
@@ -52,6 +52,9 @@ const tool = (name: string, description: string, inputSchema: Record<string, unk
 const mediaTypes: Record<string, string> = { patch: 'text/x-diff', diff: 'text/x-diff', log: 'text/plain', txt: 'text/plain', md: 'text/markdown', json: 'application/json', bundle: 'application/x-git-bundle' };
 const mediaTypeOf = (name: string) => mediaTypes[name.split('.').pop()?.toLowerCase() ?? ''] ?? 'application/octet-stream';
 
+/** A side's answer as its result keeps: the start of the text, marked when it was cut. */
+const cutFinal = (text: string) => text.length > TASK_SUMMARY_LIMIT ? `${text.slice(0, TASK_SUMMARY_LIMIT - 1)}…` : text;
+
 /** Every bot's tools, and which of this Host's sessions are bots, with their missions (bots design 5.1). */
 export class BotTools {
   /** The bots' main sessions on this Host, with their missions and memories. */
@@ -69,8 +72,10 @@ export class BotTools {
    * An answer session's turn started by what the person asked answers them the same way.
    */
   turnEnded(ref: NativeSessionRef, turn: TurnReport): void {
-    if (this.tools(ref) !== 'tasks' && this.ports.answering?.(ref) !== true) return;
     const owner = { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId };
+    // A temporary bot's worker: the Relay takes the final text as the answer of a `/side` bot and ignores it for any other.
+    if (this.ports.working?.(ref) === true && turn.finalText) void this.ports.request({ action: 'side_final', owner, text: cutFinal(turn.finalText) }).catch(() => undefined);
+    if (this.tools(ref) !== 'tasks' && this.ports.answering?.(ref) !== true) return;
     void this.ports.request({ action: 'chain_turn', owner, cause: turn.cause, tokens: turn.tokens, ...(turn.costUsd !== undefined ? { costUsd: turn.costUsd } : {}) }).catch(() => undefined);
     if (turn.cause.kind === 'framed' && turn.cause.asked && turn.finalText)
       void this.ports.request({ action: 'bot_answer', owner, text: turn.finalText.slice(0, ASSISTANT_MESSAGE_LIMIT), cause: { kind: 'framed', asked: true } }).catch(() => undefined);

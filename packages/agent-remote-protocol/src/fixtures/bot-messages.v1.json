@@ -56,6 +56,14 @@
         }
       },
       {
+        "action": "side_final",
+        "owner": {
+          "providerId": "codex",
+          "nativeSessionId": "notes"
+        },
+        "text": "The notes are written."
+      },
+      {
         "action": "bot_told",
         "owner": {
           "providerId": "codex",
@@ -120,6 +128,14 @@
       }
     ],
     "invalid": [
+      {
+        "action": "side_final",
+        "owner": {
+          "providerId": "codex",
+          "nativeSessionId": "notes"
+        },
+        "text": ""
+      },
       {
         "action": "bot_reply",
         "owner": {

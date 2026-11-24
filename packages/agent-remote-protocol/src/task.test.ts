@@ -134,3 +134,11 @@ it('reads the notices of a changed item and a changed chief as inputs of their o
   expect(splitItemTag(`${tag}\nGo.`)).toEqual({ item: { key: 7, title: 'Run it', from: 'Chief' }, body: 'Go.' });
   expect(splitItemTag('Go.')).toEqual({ body: 'Go.' });
 });
+
+it('words a side\'s brief to answer in its reply, and reads it back as a brief', () => {
+  const side = taskBriefText({ taskId: 't1', from: 'Chief', title: 'Notes', brief: 'Write notes.', side: true });
+  expect(side).toMatch(/Answer in your reply[\s\S]*Do not message anyone, and write no file you were not asked for\.$/);
+  expect(side).not.toContain('message your chief');
+  expect(parseTaskInput(side)).toMatchObject({ kind: 'brief', taskId: 't1', title: 'Notes', brief: 'Write notes.' });
+  expect(taskBriefText({ taskId: 't1', from: 'Chief', title: 'Notes', brief: 'Write notes.' })).toContain('message your chief once');
+});

@@ -100,6 +100,35 @@ describe('bots calling as their own sessions', () => {
     expect(f.task().messages.filter(message => message.to === f.task().members[1]!.id && message.status !== 'canceled')).toEqual([]);
   });
 
+  it('takes a /side bot\'s final text as its answer: the result on its card, once, with nothing queued for the chief', async () => {
+    const f = fixture();
+    await f.broker.startBot({ operationId: 's1', source: { hostId: 'mac', providerId: 'codex', nativeSessionId: 'chief', title: 'Chief' }, bot: { name: 'Notes', mission: 'Write the release notes.' } });
+    const worker = f.as(f.task().members[0]!.nativeSessionId!), answer = 'The notes are:\n\n'.concat('line\n'.repeat(200));
+    expect(await f.broker.hostCall('mac', { action: 'side_final', owner: worker, text: answer })).toEqual({ outcome: 'recorded' });
+    expect(f.task().task).toMatchObject({ state: 'done', result: { status: 'done', summary: answer } });
+    expect(await f.broker.hostCall('mac', { action: 'side_final', owner: worker, text: 'Another turn.' })).toEqual({ outcome: 'ignored' });
+    expect(f.task().task!.result!.summary).toBe(answer);
+    expect(f.task().messages.filter(message => message.to === f.task().members[1]!.id && message.status !== 'canceled')).toEqual([]);
+  });
+
+  it('tells a /side bot in its brief to answer in its reply and tell no one, and any other temporary bot to message its chief', async () => {
+    const side = fixture();
+    await side.broker.startBot({ operationId: 's1', source: { hostId: 'mac', providerId: 'codex', nativeSessionId: 'chief', title: 'Chief' }, bot: { name: 'Notes', mission: 'Write the release notes.' } });
+    const other = fixture();
+    await other.broker.hostCall('mac', { action: 'create_bot', owner: other.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
+    expect(side.task().messages[0]!.text).toMatch(/Answer in your reply[\s\S]*Do not message anyone, and write no file you were not asked for/);
+    expect(side.task().messages[0]!.text).not.toMatch(/message your chief/);
+    expect(side.inputs(side.task(), 0)).toEqual([expect.objectContaining({ kind: 'brief', title: 'Notes' })]);
+    expect(other.task().messages[0]!.text).toMatch(/message your chief once with status done or failed/);
+  });
+
+  it('records nothing from the final text of a temporary bot another bot created', async () => {
+    const f = fixture();
+    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
+    expect(await f.broker.hostCall('mac', { action: 'side_final', owner: f.as(f.task().members[0]!.nativeSessionId!), text: 'Fine.' })).toEqual({ outcome: 'ignored' });
+    expect(f.task().task).toMatchObject({ state: 'working' });
+  });
+
   it('still reports a temporary bot another bot created to its chief as input', async () => {
     const f = fixture();
     await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });

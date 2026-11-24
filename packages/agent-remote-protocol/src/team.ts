@@ -181,6 +181,8 @@ export const TeamHostCall = Type.Union([
   // An answer session's turn ended: its final text answers what the person asked (bots plan 8b). The Host sends it, never the model.
   Type.Object({ action: Type.Literal('bot_answer'), owner: BotCaller, text: Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT }),
     cause: Type.Object({ kind: Type.Literal('framed'), asked: Type.Literal(true) }, object) }, object),
+  // A `/side` bot's turn ended with a final text: that text is the side's answer and its result. The Host sends it, never the model.
+  Type.Object({ action: Type.Literal('side_final'), owner: BotCaller, text: Type.String({ minLength: 1, maxLength: TASK_SUMMARY_LIMIT }) }, object),
   // The person wrote into a standing bot's session: its chief, if a bot, hears it (bots design 3.5). The Host sends it from its record of the input.
   Type.Object({ action: Type.Literal('bot_told'), owner: BotCaller, text: Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT }),
     cause: Type.Object({ kind: Type.Literal('person'), messageId: Type.String({ minLength: 1, maxLength: 256 }) }, object) }, object),
@@ -232,7 +234,7 @@ export const TeamHostCall = Type.Union([
 export type TeamHostCall = Static<typeof TeamHostCall>;
 export const TeamSeat = Type.Object({ teamId: id, source: TeamSource, member: TeamMember,
   /** The seat belongs to a task: its worker as Leader, or the main session that owns it as requester. */
-  task: Type.Optional(Type.Object({ title: TaskTitle }, object)),
+  task: Type.Optional(Type.Object({ title: TaskTitle, side: Type.Optional(Type.Literal(true)) }, object)),
   /** The seat is one assistant's main session in a link: bound where it is, it only receives messages. */
   link: Type.Optional(Type.Object({ peer: Type.String({ minLength: 1, maxLength: 256 }) }, object)),
   /** The seat is one bot's main session, receiving its inbox; mission: a bot this seat creates, which starts with it. */

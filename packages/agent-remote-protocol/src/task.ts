@@ -120,16 +120,20 @@ export const TASK_GUIDANCE: Record<TaskInputKind, string> = {
   needs_you: 'The worker waits on the person, who sees the request in the task. Tell the person if they may not have noticed; do not answer it yourself.',
   told: 'The person wrote this to the worker directly. Take it into account; the worker already has it.',
 };
+/** What a `/side` bot's brief ends with: it answers in its reply, and tells no one. */
+export const TASK_SIDE_BRIEF_GUIDANCE = 'Do the work with your own tools, where your instructions say. '
+  + 'Read your chief\'s conversation with read_source_session only when the brief is not enough. '
+  + 'Answer in your reply: your final text is the answer the person reads. Do not message anyone, and write no file you were not asked for.';
 /** Kept for the brief and result callers. */
 export const TASK_BRIEF_GUIDANCE = TASK_GUIDANCE.brief;
 export const TASK_RESULT_GUIDANCE = TASK_GUIDANCE.done;
 
 /** The worker's first input: what to do, how to tell it is done, and how to report. */
-export function taskBriefText(input: { taskId: string; from: string; title: string; brief: string; doneWhen?: string; tag?: string }): string {
+export function taskBriefText(input: { taskId: string; from: string; title: string; brief: string; doneWhen?: string; tag?: string; side?: true }): string {
   // A brief line that would read as the done-when line is reworded, so the done-when line is only ever the task's own.
   const lines = [`[Task ${input.taskId} · brief · from ${heading(input.from)}]`, `Task: ${heading(input.title)}`, ...(input.tag ? [input.tag] : []), quoteFrames(input.brief).replace(/^Done when: /gm, 'Done when — ')];
   if (input.doneWhen) lines.push(`Done when: ${heading(input.doneWhen)}`);
-  lines.push(TASK_GUIDANCE.brief);
+  lines.push(input.side ? TASK_SIDE_BRIEF_GUIDANCE : TASK_GUIDANCE.brief);
   return lines.join('\n');
 }
 /** The owner's view of a report: the worker's summary, labelled with the task. */
@@ -256,7 +260,7 @@ function parseOne(lines: string[]): TaskInput | undefined {
     ? { kind: 'assistant', messageId: message[2]!, from: message[1]!, ...(message[4] ? { replyTo: message[4] } : {}), ...(message[3] === 'final answer' ? { final: true as const } : {}), body: lines.slice(1, -1).join('\n') } : undefined;
   const frame = framePattern.exec(lines[0] ?? '');
   const kind = frame && wordKinds.get(frame[2]!);
-  if (!frame || !kind || lines.length < 3 || lines.at(-1) !== TASK_GUIDANCE[kind]) return undefined;
+  if (!frame || !kind || lines.length < 3 || lines.at(-1) !== TASK_GUIDANCE[kind] && !(kind === 'brief' && lines.at(-1) === TASK_SIDE_BRIEF_GUIDANCE)) return undefined;
   const taskId = frame[1]!, label = frame[3]!;
   if (kind === 'brief') {
     const from = /^from (.+)$/.exec(label), title = /^Task: (.+)$/.exec(lines[1] ?? '');

@@ -407,6 +407,16 @@ export class BotCalls {
     return this.route(hostId, from, undefined, to, { owner: call.owner, operationId: `reply-${entry.id}`, text: cutReply(call.text, from.name), replyTo: entry.id, final: true, cause: call.cause });
   }
   /**
+   * A `/side` bot's turn ended with a final text: it is the side's answer, recorded as its result and shown on its card (nothing
+   * reaches the chief). A bot that is no side, or a side that already has its result, records nothing.
+   */
+  async sideFinal(hostId: string, call: Call<'side_final'>): Promise<{ outcome: 'recorded' | 'ignored' }> {
+    const self = this.caller(hostId, call.owner), team = self.task;
+    if (!team?.task?.side || team.task.result || !running(team)) return { outcome: 'ignored' };
+    await this.tasks.report(hostId, { action: 'report_task', teamId: team.id, memberId: team.members[0]!.id, status: 'done', summary: call.text });
+    return { outcome: 'recorded' };
+  }
+  /**
    * The person wrote into a standing bot's session (bots design 3.5): its chief, when a bot, reads the first 300 characters framed
    * as what they are. Nothing is queued for a bot whose chief is the person, who already sees it.
    */

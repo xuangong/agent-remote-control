@@ -87,6 +87,27 @@ describe('the reply a bot\'s ended turn sends', () => {
   });
 });
 
+describe('the answer of a side', () => {
+  const turn = (finalText?: string) => ({ cause: { kind: 'framed' as const }, tokens: 5, ...(finalText ? { finalText } : {}) });
+  const workerTools = (calls: TeamHostCall[]) => new BotTools({ request: async call => { calls.push(call); return {}; }, tasks: () => true, working: candidate => candidate.nativeSessionId === 'worker' });
+
+  it('is the final text of a temporary bot\'s turn, sent as a call the Host makes with no tool, kept to the size a result keeps', () => {
+    const calls: TeamHostCall[] = [], tools = workerTools(calls);
+    tools.turnEnded(ref('worker'), turn('Two notes written.'));
+    tools.turnEnded(ref('worker'), turn('x'.repeat(5000)));
+    expect(calls).toEqual([
+      { action: 'side_final', owner: { providerId: 'codex', nativeSessionId: 'worker' }, text: 'Two notes written.' },
+      { action: 'side_final', owner: { providerId: 'codex', nativeSessionId: 'worker' }, text: `${'x'.repeat(3999)}…` }]);
+  });
+
+  it('is sent for no turn that said nothing, and for no session that is not a temporary bot\'s worker', () => {
+    const calls: TeamHostCall[] = [], tools = workerTools(calls);
+    tools.turnEnded(ref('worker'), turn());
+    tools.turnEnded(ref('plain'), turn('Done.'));
+    expect(calls).toEqual([]);
+  });
+});
+
 describe('what the person wrote to a bot', () => {
   it('goes to the Relay as the person\'s own words, at most 300 characters, only for a bot\'s session', async () => {
     const f = fixture([{ nativeSessionId: 'tracker' }]);

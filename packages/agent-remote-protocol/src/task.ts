@@ -194,9 +194,13 @@ export function itemTagText(input: { key: number; title: string; from: string })
   return `[Item ${input.key} "${heading(input.title).replace(/"/g, "'")}" · from ${heading(input.from)}]`;
 }
 /** What the assignee of an item reads when the item it holds changed, written from the record. */
-export function itemChangedText(input: { title: string; what: string }): string {
-  return `[Item "${heading(input.title).replace(/"/g, "'")}" changed · ${heading(input.what)}]`;
+export function itemChangedText(input: { title: string; what: string; key?: number; brief?: string }): string {
+  const brief = input.brief?.replace(/\s+/g, ' ').trim();
+  const what = brief ? `${input.what} · brief: ${brief.length > ITEM_NOTICE_BRIEF_LIMIT ? `${brief.slice(0, ITEM_NOTICE_BRIEF_LIMIT - 1)}…` : brief}` : input.what;
+  return `[Item ${input.key === undefined ? '' : `${input.key} `}"${heading(input.title).replace(/"/g, "'")}" changed · ${heading(what)}]`;
 }
+/** How much of an item's brief a notice of its assignment carries, so the assignee need not read the board first. */
+export const ITEM_NOTICE_BRIEF_LIMIT = 500;
 /** What the three bots of a change of chief read, each written from the record: `bot` is told its new chief, `old` that it lost a staff bot, `new` that it gained one. */
 export function chiefChangedText(input: { to: 'bot' | 'old' | 'new'; bot: string; from: string; chief: string }): string {
   const bot = `"${heading(input.bot).replace(/"/g, "'")}"`, from = heading(input.from), chief = heading(input.chief);
@@ -212,7 +216,7 @@ export function splitItemTag(body: string): { item?: { key: number; title: strin
 const standingFrame = /^\[Your standing instructions · v(\d+)\]$/;
 const timerFrame = /^\[Timer "(.+)" · due\]$/;
 const askFrame = /^\[The person asks from ([^\]]+)\]$/;
-const itemChangedFrame = /^\[Item "([^"]+)" changed · (.+)\]$/;
+const itemChangedFrame = /^\[Item (?:(\d+) )?"([^"]+)" changed · (.+)\]$/;
 const chiefChangedFrame = /^\[Chief changed · (.+)\]$/;
 const itemTagFrame = /^\[Item (\d+) "([^"]+)" · from (.+)\]$/;
 const personWroteFrame = /^\[The person wrote to ([^\]]+)\] (.+)$/;
@@ -234,7 +238,7 @@ export type TaskInput =
   /** What the person asks the receiver from another conversation: an answer session's input. */
   | { kind: 'ask'; from: string; body: string }
   /** What the assignee of a board item reads when the item changed: one line, written from the record. */
-  | { kind: 'item_changed'; title: string; what: string }
+  | { kind: 'item_changed'; title: string; what: string; key?: number }
   /** What a bot reads when its chief, or the chief of a bot it manages, changed: one line, written from the record. */
   | { kind: 'chief_changed'; body: string };
 const wordKinds = new Map(Object.entries(kindWords).map(([kind, word]) => [word, kind as TaskInputKind]));
@@ -246,7 +250,7 @@ function parseOne(lines: string[]): TaskInput | undefined {
   const wrote = personWroteFrame.exec(lines[0] ?? '');
   if (wrote) return lines.length === 2 && lines[1] === PERSON_WROTE_GUIDANCE ? { kind: 'person_wrote', bot: wrote[1]!, body: wrote[2]! } : undefined;
   const changed = itemChangedFrame.exec(lines[0] ?? '');
-  if (changed) return lines.length === 1 ? { kind: 'item_changed', title: changed[1]!, what: changed[2]! } : undefined;
+  if (changed) return lines.length === 1 ? { kind: 'item_changed', title: changed[2]!, what: changed[3]!, ...(changed[1] ? { key: Number(changed[1]) } : {}) } : undefined;
   const chief = chiefChangedFrame.exec(lines[0] ?? '');
   if (chief) return lines.length === 1 ? { kind: 'chief_changed', body: chief[1]! } : undefined;
   const ask = askFrame.exec(lines[0] ?? '');

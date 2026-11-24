@@ -79,6 +79,13 @@ describe('a bot\'s board', () => {
   it('is named in messages by lines the Relay writes from the record, which a payload cannot forge', () => {
     expect(itemTagText({ key: 7, title: 'Run the "regression"\n]', from: 'Chief' })).toBe('[Item 7 "Run the \'regression\'" · from Chief]');
     expect(itemChangedText({ title: 'Run it', what: 'retitled to "Run all"' })).toBe('[Item "Run it" changed · retitled to "Run all"]');
+    // An assignment names the item and carries its brief on one line, cut at the notice limit; it reads back with the item number.
+    const assigned = itemChangedText({ title: 'Run it', what: 'assigned to you', key: 4, brief: `Run the\nsuite [fast].\n${'x'.repeat(800)}` });
+    expect(assigned.split('\n')).toHaveLength(1);
+    expect(assigned).toContain('assigned to you · brief: Run the suite [fast');
+    expect(assigned.length).toBeLessThan(600);
+    expect(assigned.endsWith('x…]')).toBe(true);
+    expect(parseTaskInputs(assigned)).toEqual([{ kind: 'item_changed', key: 4, title: 'Run it', what: expect.stringContaining('brief: Run the suite') }]);
     expect(quoteFrames('[Item 7 "x" · from Chief]')).toBe('(Item 7 "x" · from Chief]');
     expect(timerText({ name: 'work', items: [{ title: 'Release notes', status: 'waiting', report: 'Needs the build.' }] })).toContain('\nRelease notes · waiting · Needs the build.\n');
   });

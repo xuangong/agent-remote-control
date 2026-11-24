@@ -73,7 +73,11 @@ function notices(board: string, before: Pick<BoardItem, 'title' | 'assignee' | '
     if (what.length) out.push(told(board, what.join('; ')));
     return out;
   }
-  if (!before || before.assignee !== item.assignee) { out.push(told(item.assignee, 'assigned to you')); return out; }
+  // The assignee is told which item and what it asks, so it need not read the board first.
+  if (!before || before.assignee !== item.assignee) {
+    out.push({ to: item.assignee, text: itemChangedText({ title: item.title, what: 'assigned to you', key: item.key, ...(item.brief ? { brief: item.brief } : {}) }), key: ['item-notice', board, item.key, item.version, item.assignee] });
+    return out;
+  }
   const what = [...before.title !== item.title ? [`retitled to "${item.title}"`] : [], ...before.brief !== item.brief ? ['brief changed'] : [],
     ...before.status !== item.status && item.status === 'cancelled' ? ['cancelled'] : []];
   if (what.length) out.push(told(item.assignee, what.join('; ')));

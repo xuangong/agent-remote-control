@@ -175,17 +175,17 @@ describe('the bots that hold an item', () => {
     const f = fixture();
     await write(f, [{ title: 'Track the build' }, { title: 'Own work' }]);
     await hand(f, 1, 'Watch the build.');
-    const told = () => f.inbox(ids.tracker).messages.map(message => message.text).filter(text => text.startsWith('[Item "'));
+    const told = () => f.inbox(ids.tracker).messages.map(message => message.text).filter(text => /^\[Item (\d+ )?"/.test(text));
     const version = () => f.item(1).version;
     await write(f, [{ key: 1, version: version(), title: 'Track main' }]);
     await write(f, [{ key: 1, version: version(), brief: 'Watch main only.' }]);
     await write(f, [{ key: 2, version: 1, title: 'Own work 2' }]);
-    expect(told()).toEqual(['[Item "Track the build" changed · assigned to you]', '[Item "Track main" changed · retitled to "Track main"]', '[Item "Track main" changed · brief changed]']);
+    expect(told()).toEqual(['[Item 1 "Track the build" changed · assigned to you · brief: Watch the build.]', '[Item "Track main" changed · retitled to "Track main"]', '[Item "Track main" changed · brief changed]']);
     // Moving it to a temporary bot tells the old assignee, and the new one.
     await f.call('chief', { action: 'create_bot', operationId: 'op', name: 'Regression', mission: 'Run it.', lifetime: 'temporary' });
     await write(f, [{ key: 1, version: version(), assignee: 'Regression' }]);
     expect(told().at(-1)).toBe('[Item "Track main" changed · reassigned]');
-    expect(f.texts(f.task()).at(-1)).toBe('[Item "Track main" changed · assigned to you]');
+    expect(f.texts(f.task()).at(-1)).toBe('[Item 1 "Track main" changed · assigned to you · brief: Watch main only.]');
     await write(f, [{ key: 1, version: version(), status: 'cancelled' }]);
     expect(f.texts(f.task()).at(-1)).toBe('[Item "Track main" changed · cancelled]');
     expect(f.item(1)).toMatchObject({ assignee: temporaryBotId(f.task().id), status: 'cancelled', closedAt: expect.any(Number) });
@@ -240,7 +240,7 @@ describe('the bots that hold an item', () => {
 
 describe('the person\'s edits of a board', () => {
   const edit = (f: ReturnType<typeof fixture>, action: Record<string, unknown>) => f.broker.chainAction({ action: 'update_board', botId: ids.chief, ...action } as never) as Promise<any>;
-  const told = (f: ReturnType<typeof fixture>) => f.inbox(ids.tracker).messages.map(message => message.text).filter(text => text.startsWith('[Item "'));
+  const told = (f: ReturnType<typeof fixture>) => f.inbox(ids.tracker).messages.map(message => message.text).filter(text => /^\[Item (\d+ )?"/.test(text));
 
   it('writes items and the plan note as the person, with the same versions, and tells the assignee of a changed item once', async () => {
     const f = fixture();
@@ -249,7 +249,7 @@ describe('the person\'s edits of a board', () => {
     const result = await edit(f, { items: [{ key: 1, version: f.item(1).version, title: 'Track main', brief: 'Main only.' }] });
     expect(result.items).toEqual([{ key: 1, version: f.item(1).version }]);
     expect(f.item(1)).toMatchObject({ title: 'Track main', brief: 'Main only.', updatedBy: 'person' });
-    expect(told(f)).toEqual(['[Item "Track the build" changed · assigned to you]', '[Item "Track main" changed · retitled to "Track main"; brief changed]']);
+    expect(told(f)).toEqual(['[Item 1 "Track the build" changed · assigned to you · brief: Watch the build.]', '[Item "Track main" changed · retitled to "Track main"; brief changed]']);
     // Cancelling is told too; writing what is there tells no one again.
     await edit(f, { items: [{ key: 1, version: f.item(1).version, status: 'cancelled' }] });
     await edit(f, { items: [{ key: 1, version: f.item(1).version, status: 'cancelled' }] });
@@ -261,7 +261,7 @@ describe('the person\'s edits of a board', () => {
 
   it('tells the board\'s own bot what the person changed on its items and plan note, and stays silent for the bot\'s own edits', async () => {
     const f = fixture();
-    const toldChief = () => f.inbox(ids.chief).messages.map(message => message.text).filter(text => text.startsWith('[Item "'));
+    const toldChief = () => f.inbox(ids.chief).messages.map(message => message.text).filter(text => /^\[Item (\d+ )?"/.test(text));
     await write(f, [{ title: 'Write notes' }], { plan: { text: 'Notes.', why: 'Start.' } });
     await write(f, [{ key: 1, version: 1, title: 'Write the notes', status: 'working', brief: 'Short.' }], { plan: { text: 'Notes, short.', why: 'Tighter.', version: 1 } });
     expect(toldChief()).toEqual([]);
@@ -275,7 +275,7 @@ describe('the person\'s edits of a board', () => {
     expect(toldChief().at(-1)).toBe('[Item "Ship" changed · assigned to you]');
     // A new item the person assigns to another bot tells that bot as an assignment, with its parent and brief kept.
     await edit(f, { items: [{ title: 'Watch main', assignee: ids.tracker, brief: 'Main only.', parent: 1 }] });
-    expect(told(f)).toEqual(['[Item "Watch main" changed · assigned to you]']);
+    expect(told(f)).toEqual(['[Item 3 "Watch main" changed · assigned to you · brief: Main only.]']);
     expect(f.item(3)).toMatchObject({ parent: 1, brief: 'Main only.', assignee: ids.tracker });
   });
 
@@ -309,10 +309,10 @@ describe('the person\'s edits of a board', () => {
     // The page names a temporary bot by the id its items carry.
     expect(f.broker.readForClient(f.task().id).task!.botId).toBe(temporaryBotId(f.task().id));
     await edit(f, { items: [{ key: 1, version: 1, assignee: ids.tracker }] });
-    expect(told(f)).toEqual(['[Item "Track the build" changed · assigned to you]']);
+    expect(told(f)).toEqual(['[Item 1 "Track the build" changed · assigned to you]']);
     await edit(f, { items: [{ key: 1, version: f.item(1).version, assignee: temporaryBotId(f.task().id) }] });
     expect(told(f).at(-1)).toBe('[Item "Track the build" changed · reassigned]');
-    expect(f.texts(f.task()).at(-1)).toBe('[Item "Track the build" changed · assigned to you]');
+    expect(f.texts(f.task()).at(-1)).toBe('[Item 1 "Track the build" changed · assigned to you]');
     await edit(f, { items: [{ key: 1, version: f.item(1).version, assignee: 'self' }] });
     expect(f.texts(f.task()).at(-1)).toBe('[Item "Track the build" changed · reassigned]');
     expect(f.item(1).assignee).toBe('self');

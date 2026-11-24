@@ -509,5 +509,153 @@
         "title": "x"
       }
     ]
+  },
+  "personEdits": {
+    "valid": [
+      {
+        "action": "update_board",
+        "botId": "b_11111111111111111111111111111111",
+        "items": [
+          {
+            "key": 7,
+            "version": 3,
+            "title": "Run the regression",
+            "status": "working",
+            "assignee": "b_22222222222222222222222222222222",
+            "brief": "Main only."
+          }
+        ]
+      },
+      {
+        "action": "update_board",
+        "botId": "b_11111111111111111111111111111111",
+        "plan": {
+          "text": "Review first.",
+          "why": "The person decided.",
+          "version": 2
+        }
+      },
+      {
+        "action": "update_board",
+        "botId": "b_11111111111111111111111111111111",
+        "items": [
+          {
+            "title": "A new item",
+            "parent": 7
+          }
+        ]
+      }
+    ],
+    "invalid": [
+      {
+        "action": "update_board",
+        "botId": "Chief",
+        "plan": {
+          "text": "x",
+          "why": "y"
+        }
+      },
+      {
+        "action": "update_board",
+        "botId": "b_11111111111111111111111111111111",
+        "items": []
+      },
+      {
+        "action": "update_board",
+        "botId": "b_11111111111111111111111111111111",
+        "plan": {
+          "text": "Review first."
+        }
+      },
+      {
+        "action": "update_board",
+        "botId": "b_11111111111111111111111111111111",
+        "items": [
+          {
+            "key": 7,
+            "status": "failed"
+          }
+        ]
+      },
+      {
+        "action": "update_board",
+        "botId": "b_11111111111111111111111111111111",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "plan": {
+          "text": "x",
+          "why": "y"
+        }
+      }
+    ]
+  },
+  "writeResults": {
+    "valid": [
+      {
+        "items": [
+          {
+            "key": 1,
+            "version": 2
+          }
+        ]
+      },
+      {
+        "items": [
+          {
+            "key": 1,
+            "version": 3,
+            "overwrote": [
+              {
+                "field": "status",
+                "was": "waiting",
+                "by": "b_11111111111111111111111111111111"
+              }
+            ]
+          }
+        ],
+        "plan": {
+          "version": 3,
+          "overwrote": [
+            {
+              "field": "plan",
+              "was": "Notes.",
+              "by": "person"
+            }
+          ]
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "items": [
+          {
+            "key": 1,
+            "version": 0
+          }
+        ]
+      },
+      {
+        "items": [
+          {
+            "key": 1,
+            "version": 2,
+            "overwrote": [
+              {
+                "field": "speed",
+                "was": 1,
+                "by": "person"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "plan": {
+          "version": 1
+        }
+      }
+    ]
   }
 }

@@ -1,7 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { NativeSessionRef } from './session-succession.js';
 import { Value } from '@sinclair/typebox/value';
-import { ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, AttachmentId, BotAttachment, BotId, BotFact, BotMission, BotName, Board, BOARD_ITEM_LIMIT, BOARD_PLAN_LIMIT, BoardItem, BoardLink, BOARD_LINK_LIMIT, BoardStatus, BotTimer } from './bots.js';
+import { ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, AttachmentId, BotAttachment, BotId, BotFact, BotMission, BotName, Board, BOARD_ITEM_LIMIT, BOARD_PLAN_LIMIT, BoardItem, BoardItemEdit, BoardPlanEdit, BotTimer } from './bots.js';
 import { ChainId, TurnCause } from './chains.js';
 import { TaskBrief, ASK_LIMIT, TaskDoneWhen, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_LIMIT, ROOM_MINUTES_LIMIT, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, TaskReportStatus, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_QUESTION_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, isTeamTask } from './task.js';
 const object = { additionalProperties: false } as const;
@@ -202,10 +202,7 @@ export const TeamHostCall = Type.Union([
   Type.Object({ action: Type.Literal('board'), owner: BotCaller, bot: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })), item: Type.Optional(BoardItem.properties.key) }, object),
   // Every write names the version it read (bots design 6.1). A new item names none; `assignee` is a bot by name or id, or self. parent null clears it.
   Type.Object({ action: Type.Literal('update_board'), owner: BotCaller,
-    items: Type.Optional(Type.Array(Type.Object({ key: Type.Optional(BoardItem.properties.key), version: Type.Optional(BoardItem.properties.version), title: Type.Optional(BoardItem.properties.title),
-      status: Type.Optional(BoardStatus), assignee: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })), parent: Type.Optional(Type.Union([BoardItem.properties.key, Type.Null()])),
-      links: Type.Optional(Type.Array(BoardLink, { maxItems: BOARD_LINK_LIMIT })), brief: BoardItem.properties.brief, result: BoardItem.properties.result }, object), { minItems: 1, maxItems: 10 })),
-    plan: Type.Optional(Type.Object({ text: Type.String({ minLength: 1, maxLength: BOARD_PLAN_LIMIT }), why: Type.String({ minLength: 1, maxLength: 200 }), version: Type.Optional(Type.Integer({ minimum: 0 })) }, object)) }, object),
+    items: Type.Optional(Type.Array(BoardItemEdit, { minItems: 1, maxItems: 10 })), plan: Type.Optional(BoardPlanEdit) }, object),
   Type.Object({ action: Type.Literal('set_timer'), owner: BotCaller, name: BotTimer.properties.name, minutes: Type.Integer({ minimum: 0, maximum: 7 * 24 * 60 }) }, object),
   Type.Object({ action: Type.Literal('stop_bot'), owner: BotCaller, bot: Type.String({ minLength: 1, maxLength: 300 }) }, object),
   Type.Object({ action: Type.Literal('retire_bot'), owner: BotCaller, bot: Type.String({ minLength: 1, maxLength: 300 }) }, object),

@@ -104,6 +104,27 @@ export const BoardPlan = Type.Object({
   changes: Type.Array(Type.Object({ at: time, by: Type.Union([Type.Literal('person'), BotId]), why: Type.String({ minLength: 1, maxLength: 200 }) }, strict), { maxItems: BOARD_PLAN_CHANGES }),
 }, strict);
 export type BoardPlan = Static<typeof BoardPlan>;
+/**
+ * What a writer sets of one item in a board write (the bot's `update_board` call and the person's edit alike). Every write names the
+ * version it read; a new item names none. `assignee` is a bot by name or id, or self. `parent` null clears it.
+ */
+export const BoardItemEdit = Type.Object({ key: Type.Optional(BoardItem.properties.key), version: Type.Optional(BoardItem.properties.version), title: Type.Optional(BoardItem.properties.title),
+  status: Type.Optional(BoardStatus), assignee: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })), parent: Type.Optional(Type.Union([BoardItem.properties.key, Type.Null()])),
+  links: Type.Optional(Type.Array(BoardLink, { maxItems: BOARD_LINK_LIMIT })), brief: BoardItem.properties.brief, result: BoardItem.properties.result }, strict);
+export type BoardItemEdit = Static<typeof BoardItemEdit>;
+/** A new text of the plan note with the line saying why, and the version of the note the writer read (none: the first write). */
+export const BoardPlanEdit = Type.Object({ text: Type.String({ minLength: 1, maxLength: BOARD_PLAN_LIMIT }), why: Type.String({ minLength: 1, maxLength: 200 }), version: Type.Optional(Type.Integer({ minimum: 0 })) }, strict);
+export type BoardPlanEdit = Static<typeof BoardPlanEdit>;
+/** What a write overwrote because it was based on an older version: the field, what it held, and who wrote that. */
+export const BoardOverwrite = Type.Object({ field: Type.Union([...BOARD_FIELDS.map(field => Type.Literal(field)), Type.Literal('plan')]), was: Type.Unknown(),
+  by: Type.Union([Type.Literal('person'), BotId]) }, strict);
+export type BoardOverwrite = Static<typeof BoardOverwrite>;
+/** The answer to a board write: each item written with its new version, the plan note's version, and what the write overwrote. */
+export const BoardWriteResult = Type.Object({
+  items: Type.Array(Type.Object({ key: BoardItem.properties.key, version: BoardItem.properties.version, overwrote: Type.Optional(Type.Array(BoardOverwrite)) }, strict)),
+  plan: Type.Optional(Type.Object({ version: BoardPlan.properties.version, overwrote: Type.Optional(Type.Array(BoardOverwrite)) }, strict)) }, strict);
+export type BoardWriteResult = Static<typeof BoardWriteResult>;
+export const isBoardWriteResult = (value: unknown): value is BoardWriteResult => Value.Check(BoardWriteResult, value);
 /** A standing bot's board, kept on its inbox. `next` is the key its next item takes. */
 export const Board = Type.Object({ next: Type.Integer({ minimum: 1 }), items: Type.Array(BoardItem, { maxItems: BOARD_ITEM_LIMIT }), plan: Type.Optional(BoardPlan) }, strict);
 export type Board = Static<typeof Board>;

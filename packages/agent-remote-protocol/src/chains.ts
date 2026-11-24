@@ -1,6 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
-import { BotId } from './bots.js';
+import { BoardItemEdit, BoardPlanEdit, BotId } from './bots.js';
 
 /**
  * A chain is the work one cause set off (bots design 7): an input the person sent to a bot, a bot's timer coming due, or a bot's own
@@ -57,7 +57,7 @@ export const isChainThresholds = (value: unknown): value is ChainThresholds => V
 /**
  * What the person does from the audit (bots design 7). stop: the chain's waiting messages are withdrawn, its running turns stopped and
  * its temporary bots stopped; a bot's later call in it is refused. stop_bot: the same for one bot's part. pause_bot and resume_bot: a
- * standing bot's inbox holds its messages until resumed. retire_bot: a temporary bot ends, what it did standing as its result. set_chief: a standing bot moves to another standing bot as its chief, or to the person (null).
+ * standing bot's inbox holds its messages until resumed. retire_bot: a temporary bot ends, what it did standing as its result. update_board: the person edits a standing bot's items and plan note. set_chief: a standing bot moves to another standing bot as its chief, or to the person (null).
  */
 export const ChainAction = Type.Union([
   Type.Object({ action: Type.Literal('stop'), chainId: ChainId }, object),
@@ -66,6 +66,8 @@ export const ChainAction = Type.Union([
   Type.Object({ action: Type.Literal('resume_bot'), botId: BotId }, object),
   Type.Object({ action: Type.Literal('retire_bot'), botId: BotId }, object),
   Type.Object({ action: Type.Literal('set_chief'), botId: BotId, chief: Type.Union([BotId, Type.Null()]) }, object),
+  // The person writes a standing bot's board as the person; the bots the write changes are told, as when a bot writes it.
+  Type.Object({ action: Type.Literal('update_board'), botId: BotId, items: Type.Optional(Type.Array(BoardItemEdit, { minItems: 1, maxItems: 10 })), plan: Type.Optional(BoardPlanEdit) }, object),
   Type.Object({ action: Type.Literal('set_thresholds'), thresholds: ChainThresholds }, object),
 ]);
 export type ChainAction = Static<typeof ChainAction>;

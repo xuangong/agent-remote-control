@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
-import { assistantMessageText, attachmentLines, Board, BoardItem, BOT_MISSION_LIMIT, BOT_INSTRUCTIONS_VERSION, itemChangedText, itemTagText, quoteFrames, timerText, BotAttachment, BotMessageResult, BotRecord, BotFact, BotMemory, BOT_MEMORY_FACTS, botInstructions, chiefChangedText, isChainAction, standingInstructionsText, isTeamHostCall, isTeam, isTeamSeat, isTeamAskRequest, askText, parseTaskInputs, botIdentity, botPlacement, WindowBotDetails } from './index.js';
+import { assistantMessageText, attachmentLines, Board, BoardItem, BOT_MISSION_LIMIT, BOT_INSTRUCTIONS_VERSION, itemChangedText, itemTagText, quoteFrames, timerText, BotAttachment, BotMessageResult, BotRecord, BotFact, BotMemory, BOT_MEMORY_FACTS, botInstructions, chiefChangedText, isChainAction, isBoardWriteResult, standingInstructionsText, isTeamHostCall, isTeam, isTeamSeat, isTeamAskRequest, askText, parseTaskInputs, botIdentity, botPlacement, WindowBotDetails } from './index.js';
 
 const id = 'b_' + 'a'.repeat(32);
 
@@ -67,6 +67,13 @@ describe('a bot\'s board', () => {
   it('is read and written by two calls: a write names versions, and the old work item calls are gone', () => {
     for (const call of board.calls.valid) expect(isTeamHostCall(call)).toBe(true);
     for (const call of board.calls.invalid) expect(isTeamHostCall(call)).toBe(false);
+  });
+
+  it('is edited by the person through an audit action that names the bot, and answers with what a stale edit overwrote', () => {
+    for (const action of board.personEdits.valid) expect(isChainAction(action)).toBe(true);
+    for (const action of board.personEdits.invalid) expect(isChainAction(action)).toBe(false);
+    for (const result of board.writeResults.valid) expect(isBoardWriteResult(result)).toBe(true);
+    for (const result of board.writeResults.invalid) expect(isBoardWriteResult(result)).toBe(false);
   });
 
   it('is named in messages by lines the Relay writes from the record, which a payload cannot forge', () => {

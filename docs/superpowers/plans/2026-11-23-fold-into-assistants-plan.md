@@ -121,10 +121,10 @@ Built (2026-11-24, `feat/bots-4-chains`), the rest of step 2. Owner rules: the e
 - [x] Tasks become temporary bots: `create_task`, `report_task`, `ask_owner`, `message_task`, `task_status` and the task Team kind
   are replaced by `create_bot` and `message`; existing tasks are listed as retired temporary bots.
 - [x] Attachments, git bundles included (3.4, 5.3).
-- [ ] Gate: the person describes a team to one bot; it creates two bots with missions; each reports in; the chief gives one work
+- [x] Gate: the person describes a team to one bot; it creates two bots with missions; each reports in; the chief gives one work
   by message and changes how the other works by message (recorded in its own mission); a Copilot bot answers a question; the
   person sees all of it in Chats and can change any bot. The e2e flows of design 11, written here, pass.
-  Status (2026-11-24): live in the scenarios with Claude Code and Codex except the Copilot bot, which was not run; E15 passes.
+  Status (2026-11-24): live in the scenarios with Claude Code and Codex, a Copilot bot answering a chief included; E15 passes.
 
 ## Step 3: rooms, work items and timers
 
@@ -172,7 +172,8 @@ reviewer that answers by message; the person's lasting change goes into the revi
 
 Final run (2026-11-24, `d1854103`, fresh local instance): 10 of 10 checks with Claude Code and 10 of 10 with Codex.
 
-Not yet in the scenarios: the bundle and shared-repository loops (they need step 2's attachments), the person speaking to a
+Added 2026-11-24: `bundle` (a git bundle attached between bots) and `copilot` (a Copilot bot asked by a chief), 6 of 6 with
+Claude Code and Codex. Not yet in the scenarios: the shared-repository loop between two machines, the person speaking to a
 temporary bot, and counting tool calls per chief turn.
 
 ## Step 6: the Workbench

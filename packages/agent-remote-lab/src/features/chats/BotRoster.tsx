@@ -31,7 +31,9 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
   // The sentence says what the assistant is doing; a draft takes the place of a quiet one (its latest reply, or ready).
   const quiet = row.assistant.state === 'idle' || row.assistant.state === 'unknown';
   // Needs you is not unread: it asks for the owner, so its dot is distinct and mute never quiets it.
-  const needsYou = row.assistant.state === 'needs_you' || !!row.staffNeedsYou || (!!row.details.botId && chainAlerts.some(alert => alert.bot === row.details.botId));
+  // A temporary bot of this row (a /side beside its conversation, or a bot it started) waiting on an approval only the person can answer asks for the owner here.
+  const sideNeedsYou = !!directory?.owned?.(row.session).some(task => task.waiting?.reason === 'interaction');
+  const needsYou = row.assistant.state === 'needs_you' || !!row.staffNeedsYou || sideNeedsYou || (!!row.details.botId && chainAlerts.some(alert => alert.bot === row.details.botId));
   // A quiet bot that keeps a board shows where its work stands (bots design 10): its latest open item and status.
   const work = quiet ? directory?.board?.(row.session).find(item => item.status !== 'done' && item.status !== 'cancelled') : undefined;
   const sentence = draft && quiet ? undefined : (work ? `${work.title} · ${t(`details.boardStatus.${work.status}`)}` : row.assistant.sentence) || undefined;

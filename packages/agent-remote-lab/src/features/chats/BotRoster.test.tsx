@@ -213,3 +213,13 @@ it('marks the row of a bot whose chain passed a threshold the owner has not seen
   expect(visibleButton(container, 'Chief').dataset.needsYou).toBeUndefined();
   resetChainAlerts();
 });
+
+it('marks the row of a bot whose /side waits on an approval only the person can answer, and not one that waits on its owner', async () => {
+  const group = botGroup('A');
+  const model = projectBotRoster([group], [], { status: () => 'idle' });
+  const owned = (reason: 'interaction' | 'question') => [{ taskId: 't', title: 'Side', state: 'needs_input' as const, waiting: { reason, text: 'x', since: 1 } }];
+  const rowWith = async (reason: 'interaction' | 'question') => visibleButton(await render(<TaskDirectoryContext.Provider value={{ canOpen: () => false, open: () => {}, act: async () => {}, owned: () => owned(reason) as never }}>
+    <BotRoster model={model} groups={[group]} onSelect={() => {}} directoryControls={null} /></TaskDirectoryContext.Provider>), 'A1');
+  expect((await rowWith('interaction')).getAttribute('data-needs-you')).toBe('true');
+  expect((await rowWith('question')).getAttribute('data-needs-you')).toBeNull();
+});

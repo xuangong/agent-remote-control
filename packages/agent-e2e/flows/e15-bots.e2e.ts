@@ -1,14 +1,15 @@
 // E15, bots that call bots (bots design 11): the real page, Relay and Controller, with scripted sessions that take tools. A flow calls a
 // bot's tool in its model's place (`useTool`); everything the call causes runs for real: tasks and their workers, inboxes, framed inputs,
 // delivery between turns, and a standing bot joining its chief's group.
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Browser, BrowserContext } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import { createWindowView, parseTaskInputs } from '@orchardworks/agent-remote-protocol';
+import { parseTaskInputs } from '@orchardworks/agent-remote-protocol';
 import { startStack, type Stack } from '@orchardworks/agent-e2e/stack';
-import { launchBrowser, openPage, resetWindows } from './browser.js';
+import { hasTools as hasToolsOf, inputs as inputsOf, team as teamOf } from './bot-team.js';
+import { launchBrowser, openPage } from './browser.js';
 import { showsText } from './page.js';
 
 let stack: Stack; let browser: Browser;
@@ -24,22 +25,9 @@ beforeAll(async () => {
 });
 afterAll(async () => { await browser?.close(); await stack?.close(); });
 
-/** One group of the account with Chief and Tracker as its bots. */
-async function team(context: BrowserContext): Promise<string> {
-  await resetWindows(context, stack.origin);
-  const status = await (await context.request.get(stack.origin + '/auth/status')).json() as { basePath: string };
-  const binding = (nativeSessionId: string, title: string) => ({ hostId: stack.hostId, providerId: stack.provider.providerId, nativeSessionId, title });
-  const id = randomUUID();
-  const response = await context.request.post(stack.origin + status.basePath + 'v1/windows', { headers: { origin: stack.origin }, data: { operationId: randomUUID(), issuedAt: Date.now(),
-    window: { schemaVersion: 3, id, title: 'Release', revision: 0, selectedPrimaryViewId: 'chief', selectedViewId: 'chief',
-      views: [createWindowView('chief', binding('chief', 'Chief'), 'primary'), createWindowView('tracker', binding('tracker', 'Tracker'), 'primary')] },
-    bots: { rank: 'm', members: { chief: { name: 'Chief' }, tracker: { name: 'Tracker' } } } } });
-  if (!response.ok()) throw new Error(`The team group could not be created (${response.status()}).`);
-  return id;
-}
-/** A bot's tools arrive once the Controller has read which sessions are bots. */
-const hasTools = (nativeSessionId: string) => expect.poll(() => stack.provider.given(nativeSessionId)?.tools.map(tool => tool.name) ?? [], { timeout: 20_000 }).toContain('create_bot');
-const inputs = (nativeSessionId: string) => stack.provider.session(nativeSessionId)?.sent.flatMap(text => parseTaskInputs(text) ?? []) ?? [];
+const team = (context: BrowserContext) => teamOf(stack, context);
+const hasTools = (nativeSessionId: string) => hasToolsOf(stack, nativeSessionId);
+const inputs = (nativeSessionId: string) => inputsOf(stack, nativeSessionId);
 
 it('E15: a bot starts two temporary bots; both report while it is idle, as one input, and the page folds them', async () => {
   const { context, page } = await openPage(browser, stack.sessionUrl('chief'));

@@ -5,11 +5,12 @@
 // decrypt to the assistant's name and "needs you", and nothing of the conversation. A headless browser has no push service, so the
 // browser's push manager hands out the simulator's subscription and its permission prompt is answered "allow".
 // `E2E_BROWSER=webkit` runs it in WebKit.
-import type { Browser, Page } from '@playwright/test';
+import type { Browser } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { startStack, type ScriptedStep, type Stack } from '@orchardworks/agent-e2e/stack';
-import { startPushService, type PushService, type SimulatedSubscription } from '@orchardworks/agent-remote-fixtures/push-service';
+import { startPushService, type PushService } from '@orchardworks/agent-remote-fixtures/push-service';
 import { launchBrowser, openPage } from './browser.js';
+import { modelBrowserPush } from './push-device.js';
 import { goTo, openSettings, send, waitForEntries } from './page.js';
 
 let stack: Stack; let browser: Browser; let push: PushService;
@@ -27,25 +28,6 @@ beforeAll(async () => {
   browser = await launchBrowser();
 });
 afterAll(async () => { await browser?.close(); await stack?.close(); await push?.close(); });
-
-/** The browser's push as a headless browser cannot give it: the prompt answers "allow" and the push manager subscribes at the simulator. */
-async function modelBrowserPush(page: Page, subscription: SimulatedSubscription): Promise<void> {
-  await page.addInitScript(({ endpoint, keys }) => {
-    const allowed = 'arc-e2e:notification-permission';
-    Object.defineProperty(Notification, 'permission', { configurable: true, get: () => localStorage.getItem(allowed) ?? 'default' });
-    Notification.requestPermission = async () => { localStorage.setItem(allowed, 'granted'); return 'granted'; };
-    // The browser keeps its subscription across the page's loads, as a real one does.
-    const kept = 'arc-e2e:push-subscription';
-    const made = (key: number[]) => ({ endpoint, options: { applicationServerKey: new Uint8Array(key).buffer }, toJSON: () => ({ endpoint, keys }),
-      unsubscribe: async () => { localStorage.removeItem(kept); return true; } });
-    PushManager.prototype.getSubscription = async () => { const key = localStorage.getItem(kept); return (key ? made(JSON.parse(key)) : null) as PushSubscription | null; };
-    PushManager.prototype.subscribe = async (options?: PushSubscriptionOptionsInit) => {
-      const key = [...options!.applicationServerKey as Uint8Array];
-      localStorage.setItem(kept, JSON.stringify(key));
-      return made(key) as unknown as PushSubscription;
-    };
-  }, subscription);
-}
 
 it('E14b: a need with no page running sends exactly one push, named for the assistant; a page that shows the session sends none', async () => {
   // The Relay's key, which the browser's subscription is made with.

@@ -41,6 +41,8 @@ export const TeamMessage = Type.Object({ id, from: id, to: id, text,
   resolvedTarget: Type.Optional(NativeSessionRef), acceptance: Type.Optional(enumOf('started', 'queued', 'handled')), createdAt: Type.Number(), error: Type.Optional(short),
   /** The chain this message belongs to (bots design 7). */
   chain: Type.Optional(ChainId),
+  /** A bot's acknowledgement (message status `ack`): the Host is not given it until another input is queued for the same seat, and then it arrives with that input. */
+  ack: Type.Optional(Type.Literal(true)),
 }, object);
 export type TeamMessage = Static<typeof TeamMessage>;
 export const TEAM_DELIVERY_RECEIPT_LIMIT = 200;
@@ -164,7 +166,7 @@ export const TeamHostCall = Type.Union([
     /** The item of the caller's board this bot is created for: it records the assignee and the brief, and the bot's input names it. */
     item: Type.Optional(BoardItem.properties.key), cause: Type.Optional(TurnCause) }, object),
   Type.Object({ action: Type.Literal('bot_message'), owner: BotCaller, operationId: id, to: Type.String({ minLength: 1, maxLength: 300 }), text: BotText, cause: Type.Optional(TurnCause),
-    replyTo: Type.Optional(AssistantMessageId), status: Type.Optional(Type.Union([Type.Literal('progress'), Type.Literal('done'), Type.Literal('failed'), Type.Literal('needs_input')])),
+    replyTo: Type.Optional(AssistantMessageId), status: Type.Optional(Type.Union([Type.Literal('progress'), Type.Literal('done'), Type.Literal('failed'), Type.Literal('needs_input'), Type.Literal('ack')])),
     /** In a room: pass this turn instead of speaking. */
     pass: Type.Optional(Type.Boolean()),
     /** Files already uploaded with attachment_finish, which the message carries (bots design 3.4). */

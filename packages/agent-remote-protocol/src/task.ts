@@ -195,10 +195,18 @@ export function chiefChangedText(input: { to: 'bot' | 'old' | 'new'; bot: string
   const what = input.to === 'bot' ? `your chief is now ${chief} (it was ${from})` : input.to === 'old' ? `${bot} is no longer your staff; its chief is now ${chief}` : `${bot} is now your staff (its chief was ${from})`;
   return `[Chief changed · ${what}]`;
 }
+/** Takes the line that names a board item off the start of a message body, as `itemTagText` wrote it, and says which item it was. */
+export function splitItemTag(body: string): { item?: { key: number; title: string; from: string }; body: string } {
+  const [first, ...rest] = body.split('\n'), tag = itemTagFrame.exec(first ?? '');
+  return tag ? { item: { key: Number(tag[1]), title: tag[2]!, from: tag[3]! }, body: rest.join('\n') } : { body };
+}
 /** The frame of a bot's standing instructions, written by `standingInstructionsText`. */
 const standingFrame = /^\[Your standing instructions · v(\d+)\]$/;
 const timerFrame = /^\[Timer "(.+)" · due\]$/;
 const askFrame = /^\[The person asks from ([^\]]+)\]$/;
+const itemChangedFrame = /^\[Item "([^"]+)" changed · (.+)\]$/;
+const chiefChangedFrame = /^\[Chief changed · (.+)\]$/;
+const itemTagFrame = /^\[Item (\d+) "([^"]+)" · from (.+)\]$/;
 const personWroteFrame = /^\[The person wrote to ([^\]]+)\] (.+)$/;
 const roomFrame = /^\[Room "(.+)" · (\S+) · your turn · (\d+) new messages? · ends in (\d+) min\]$/;
 export type TaskInput =
@@ -216,7 +224,11 @@ export type TaskInput =
   /** What the person wrote to one of the receiver's bots. */
   | { kind: 'person_wrote'; bot: string; body: string }
   /** What the person asks the receiver from another conversation: an answer session's input. */
-  | { kind: 'ask'; from: string; body: string };
+  | { kind: 'ask'; from: string; body: string }
+  /** What the assignee of a board item reads when the item changed: one line, written from the record. */
+  | { kind: 'item_changed'; title: string; what: string }
+  /** What a bot reads when its chief, or the chief of a bot it manages, changed: one line, written from the record. */
+  | { kind: 'chief_changed'; body: string };
 const wordKinds = new Map(Object.entries(kindWords).map(([kind, word]) => [word, kind as TaskInputKind]));
 const framePattern = new RegExp(`^\\[Task (\\S+) · (${Object.values(kindWords).join('|')}) · (.+)\\]$`);
 /** Reads one brief or update the Relay framed; any other text, or a frame without its closing guidance, is not a task input. */
@@ -225,6 +237,10 @@ function parseOne(lines: string[]): TaskInput | undefined {
   if (standing) return lines.length >= 2 ? { kind: 'standing', version: Number(standing[1]), body: lines.slice(1).join('\n').trimEnd() } : undefined;
   const wrote = personWroteFrame.exec(lines[0] ?? '');
   if (wrote) return lines.length === 2 && lines[1] === PERSON_WROTE_GUIDANCE ? { kind: 'person_wrote', bot: wrote[1]!, body: wrote[2]! } : undefined;
+  const changed = itemChangedFrame.exec(lines[0] ?? '');
+  if (changed) return lines.length === 1 ? { kind: 'item_changed', title: changed[1]!, what: changed[2]! } : undefined;
+  const chief = chiefChangedFrame.exec(lines[0] ?? '');
+  if (chief) return lines.length === 1 ? { kind: 'chief_changed', body: chief[1]! } : undefined;
   const ask = askFrame.exec(lines[0] ?? '');
   if (ask) return lines.length >= 3 && lines.at(-1) === ASK_GUIDANCE ? { kind: 'ask', from: ask[1]!, body: lines.slice(1, -1).join('\n') } : undefined;
   const timer = timerFrame.exec(lines[0] ?? '');
@@ -252,7 +268,7 @@ function parseOne(lines: string[]): TaskInput | undefined {
 export const joinTaskInputs = (texts: readonly string[]): string => texts.join('\n\n');
 /** Reads one or several task inputs the Relay framed and the Controller joined; anything else is not task input. */
 export function parseTaskInputs(text: string): TaskInput[] | undefined {
-  const lines = text.split('\n'), starts = lines.flatMap((line, index) => (framePattern.test(line) || assistantFrame.test(line) || roomFrame.test(line) || standingFrame.test(line) || timerFrame.test(line) || personWroteFrame.test(line) || askFrame.test(line)) && (index === 0 || lines[index - 1] === '') ? [index] : []);
+  const lines = text.split('\n'), starts = lines.flatMap((line, index) => (framePattern.test(line) || assistantFrame.test(line) || roomFrame.test(line) || standingFrame.test(line) || timerFrame.test(line) || personWroteFrame.test(line) || askFrame.test(line) || itemChangedFrame.test(line) || chiefChangedFrame.test(line)) && (index === 0 || lines[index - 1] === '') ? [index] : []);
   if (starts[0] !== 0) return undefined;
   const inputs: TaskInput[] = [];
   for (const [position, start] of starts.entries()) {

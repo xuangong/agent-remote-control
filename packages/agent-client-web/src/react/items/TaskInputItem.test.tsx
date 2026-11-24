@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { expect, it } from 'vitest';
-import { BOT_INSTRUCTIONS_VERSION, appendSessionReferences, assistantMessageText, joinTaskInputs, personWroteText, standingInstructionsText, roomTurnText, taskBriefText, timerText, taskResultText, taskUpdateText } from '@orchardworks/agent-remote-protocol';
+import { BOT_INSTRUCTIONS_VERSION, appendSessionReferences, assistantMessageText, chiefChangedText, itemChangedText, itemTagText, joinTaskInputs, personWroteText, standingInstructionsText, roomTurnText, taskBriefText, timerText, taskResultText, taskUpdateText } from '@orchardworks/agent-remote-protocol';
 import { TaskDirectoryContext } from '../TaskDirectory.js';
 import { render } from '../../test/setup.js';
 import { UserMessageItem } from './MessageItem.js';
@@ -104,4 +104,27 @@ it('folds messages from another assistant into one line per sender beside task c
 it('folds a room\'s turn into one line naming the room', async () => {
   const container = await render(<UserMessageItem item={message(roomTurnText({ roomId: 'r1', name: 'Release', messages: [{ name: 'Chief', text: 'Ready?' }], minutesLeft: 5 }))} />);
   expect(container.querySelector('details[data-room-id="r1"] summary')?.textContent).toBe('Your turn in Release · 1 new message');
+});
+
+it('folds the notices of a changed item and a changed chief into one quiet line each, never the person\'s bubble', async () => {
+  const text = joinTaskInputs([itemChangedText({ title: 'Track main', what: 'retitled to "Track trunk"; brief changed' }), chiefChangedText({ to: 'bot', bot: 'Tracker', from: 'Chief', chief: 'Reviewer' })]);
+  const container = await render(<UserMessageItem item={message(text)} />);
+  const lines = [...container.querySelectorAll('details[data-item-change]')];
+  expect(lines.map(line => line.getAttribute('data-item-change'))).toEqual(['item_changed', 'chief_changed']);
+  expect(lines.map(line => line.querySelector('summary')?.textContent)).toEqual(['Item "Track main" changed', 'Chief changed']);
+  expect(lines[0]!.textContent).toContain('retitled to "Track trunk"; brief changed');
+  expect(lines[1]!.textContent).toContain('your chief is now Reviewer');
+  expect(container.querySelector('.agent-message-user')).toBeNull();
+});
+
+it('names the item an assignment serves in the folded line, and off the text, for a message and a brief', async () => {
+  const tag = itemTagText({ key: 7, title: 'Run the regression', from: 'Chief' });
+  const container = await render(<UserMessageItem item={message(assistantMessageText({ messageId: 'm123456789abc', from: 'Chief', tag, body: 'Watch the build.' }))} />);
+  const folded = container.querySelector('details[data-message-ids]')!;
+  expect(folded.querySelector('summary')?.textContent).toBe('Message from Chief · Item 7');
+  expect(folded.querySelector('.agent-task-item')?.textContent).toBe('Item 7 · Run the regression');
+  expect(folded.textContent).not.toContain('[Item');
+  const brief = await render(<UserMessageItem item={message(taskBriefText({ taskId: 't1', from: 'Chief', title: 'Regression', brief: 'Run it.', tag }))} />);
+  expect(brief.querySelector('.agent-task-input .agent-task-item')?.textContent).toBe('Item 7 · Run the regression');
+  expect(brief.querySelector('.agent-task-input')?.textContent).not.toContain('[Item');
 });

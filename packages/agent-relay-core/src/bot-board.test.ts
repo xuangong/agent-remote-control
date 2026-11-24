@@ -32,7 +32,7 @@ function fixture() {
   let sent = 0;
   const say = (who: string, to: string, text: string, extra: Record<string, unknown> = {}) => call(who, { action: 'bot_message', operationId: `op-${++sent}`, to, text, ...extra });
   const texts = (team: SavedTeam, member = 0) => team.messages.filter(message => message.to === team.members[member]!.id).map(message => message.text);
-  return { call, as, inbox, board, item, inputs, texts, task, say, state: () => state, advance: (ms: number) => { now += ms; } };
+  return { broker, call, as, inbox, board, item, inputs, texts, task, say, state: () => state, advance: (ms: number) => { now += ms; } };
 }
 const write = (f: ReturnType<typeof fixture>, items: Array<Record<string, unknown>>, extra: Record<string, unknown> = {}) => f.call('chief', { action: 'update_board', items, ...extra });
 
@@ -208,5 +208,56 @@ describe('the bots that hold an item', () => {
     await f.say('chief', 'Tracker', 'Watch.', { item: 1 });
     await f.say('tracker', 'Chief', 'Red.', { status: 'progress' });
     expect((await f.call('chief', { action: 'list_bots' })).board).toEqual({ open: 1, items: [{ key: 1, title: 'Track the build', status: 'working', assignee: ids.tracker, report: 'Red.' }] });
+  });
+});
+
+describe('the person\'s edits of a board', () => {
+  const edit = (f: ReturnType<typeof fixture>, action: Record<string, unknown>) => f.broker.chainAction({ action: 'update_board', botId: ids.chief, ...action } as never) as Promise<any>;
+  const told = (f: ReturnType<typeof fixture>) => f.inbox(ids.tracker).messages.map(message => message.text).filter(text => text.startsWith('[Item "'));
+
+  it('writes items and the plan note as the person, with the same versions, and tells the assignee of a changed item once', async () => {
+    const f = fixture();
+    await write(f, [{ title: 'Track the build' }]);
+    await f.say('chief', 'Tracker', 'Watch the build.', { item: 1 });
+    const result = await edit(f, { items: [{ key: 1, version: f.item(1).version, title: 'Track main', brief: 'Main only.' }] });
+    expect(result.items).toEqual([{ key: 1, version: f.item(1).version }]);
+    expect(f.item(1)).toMatchObject({ title: 'Track main', brief: 'Main only.', updatedBy: 'person' });
+    expect(told(f)).toEqual(['[Item "Track main" changed · retitled to "Track main"; brief changed]']);
+    // Cancelling is told too; writing what is there tells no one again.
+    await edit(f, { items: [{ key: 1, version: f.item(1).version, status: 'cancelled' }] });
+    await edit(f, { items: [{ key: 1, version: f.item(1).version, status: 'cancelled' }] });
+    expect(told(f)).toHaveLength(2);
+    expect(told(f).at(-1)).toBe('[Item "Track main" changed · cancelled]');
+    expect((await edit(f, { plan: { text: 'Notes first.', why: 'The person decided.' } })).plan).toEqual({ version: 1 });
+    expect(f.board().plan).toMatchObject({ text: 'Notes first.', changes: [{ by: 'person', why: 'The person decided.' }] });
+  });
+
+  it('says what a stale edit overwrote, in an item and in the plan note, and still applies it', async () => {
+    const f = fixture();
+    await write(f, [{ title: 'Release notes' }], { plan: { text: 'Notes.', why: 'Start.' } });
+    await write(f, [{ key: 1, version: 1, status: 'waiting' }]);
+    await f.call('chief', { action: 'update_board', plan: { text: 'Notes, then ship.', why: 'Green.', version: 1 } });
+    const result = await edit(f, { items: [{ key: 1, version: 1, status: 'working' }], plan: { text: 'Ship.', why: 'Person.', version: 1 } });
+    expect(result.items).toEqual([{ key: 1, version: 3, overwrote: [{ field: 'status', was: 'waiting', by: ids.chief }] }]);
+    expect(result.plan).toEqual({ version: 3, overwrote: [{ field: 'plan', was: 'Notes, then ship.', by: ids.chief }] });
+    expect(f.item(1)).toMatchObject({ status: 'working', updatedBy: 'person' });
+  });
+
+  it('assigns to the bot itself, its standing staff or its temporary bots, and tells the old and the new assignee', async () => {
+    const f = fixture();
+    await write(f, [{ title: 'Track the build' }]);
+    await f.call('chief', { action: 'create_bot', operationId: 'op', name: 'Regression', mission: 'Run it.', lifetime: 'temporary' });
+    await edit(f, { items: [{ key: 1, version: 1, assignee: ids.tracker }] });
+    expect(told(f)).toEqual(['[Item "Track the build" changed · assigned to you]']);
+    await edit(f, { items: [{ key: 1, version: f.item(1).version, assignee: temporaryBotId(f.task().id) }] });
+    expect(told(f).at(-1)).toBe('[Item "Track the build" changed · reassigned]');
+    expect(f.texts(f.task()).at(-1)).toBe('[Item "Track the build" changed · assigned to you]');
+    await edit(f, { items: [{ key: 1, version: f.item(1).version, assignee: 'self' }] });
+    expect(f.texts(f.task()).at(-1)).toBe('[Item "Track the build" changed · reassigned]');
+    expect(f.item(1).assignee).toBe('self');
+    // The bot's own chief is not its staff, so Tracker's board cannot hand an item to Chief.
+    await expect(f.broker.chainAction({ action: 'update_board', botId: ids.tracker, items: [{ title: 'Mine', assignee: ids.chief }] } as never)).rejects.toThrow('itself, its standing staff');
+    await expect(edit(f, { items: [{ key: 1, version: f.item(1).version, assignee: 'b_' + '9'.repeat(32) }] })).rejects.toThrow('itself, its standing staff');
+    await expect(f.broker.chainAction({ action: 'update_board', botId: 'b_' + '9'.repeat(32), plan: { text: 'x', why: 'y' } } as never)).rejects.toThrow('No standing bot');
   });
 });

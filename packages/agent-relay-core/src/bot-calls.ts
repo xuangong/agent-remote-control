@@ -5,7 +5,7 @@
  * an chief's to its temporary bot, and any other bot's, is input to that task; anything to a standing bot goes to its inbox.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { assistantMessageText, attachmentLines, boardItemOpen, BOARD_BRIEF_LIMIT, BOT_SPAN_LIMIT, chiefChangedText, itemTagText, nativeSessionRefKey, taskView, type BoardItem, type BotAttachment, type BotFact, type BotMessageResult, type TeamHostCall, type TaskView, type TeamMember } from '@orchardworks/agent-remote-protocol';
+import { assistantMessageText, attachmentLines, boardItemOpen, BOARD_BRIEF_LIMIT, BOT_SPAN_LIMIT, chiefChangedText, itemTagText, nativeSessionRefKey, taskView, type BoardItem, type BoardItemEdit, type BoardPlanEdit, type BotAttachment, type BotFact, type BotMessageResult, type TeamHostCall, type TaskView, type TeamMember } from '@orchardworks/agent-remote-protocol';
 import { accountDirectory, callerAssistant, type Assistant, type AssistantBrokerPorts, type AssistantMessages, type AssistantPorts } from './assistants.js';
 import { ownerTasks, taskAction, type TaskGroups } from './tasks.js';
 import { ACCOUNT_TEAM_LIMIT, type SavedTeam } from './team-delivery.js';
@@ -259,6 +259,24 @@ export class BotCalls {
       : await this.writeOwnItem(self, edits, call.plan);
     await this.notify(written.notices.filter(notice => notice.to !== self.key));
     return { items: written.items, ...(written.plan ? { plan: written.plan } : {}) };
+  }
+  /**
+   * The person writes a standing bot's board as the person: the same write as the bot's own, so a stale edit says what it overwrote and
+   * every bot an edited item is assigned to is told once, from the record. The person assigns items to the bot itself, its standing
+   * staff or its temporary bots.
+   */
+  async personUpdateBoard(botId: string, items: readonly BoardItemEdit[] | undefined, plan: BoardPlanEdit | undefined) {
+    const bot = accountDirectory(this.ports.groups()).find(item => item.key === botId && botId.startsWith('b_')) ?? fail('No standing bot of this account has that id.');
+    const edits = (items ?? []).map((edit): ItemEdit => ({ ...edit, ...(edit.assignee !== undefined ? { assignee: this.staffAssignee(bot, edit.assignee) } : {}) }));
+    const written = await this.board.write(bot, edits, plan, 'person');
+    await this.notify(written.notices);
+    return { items: written.items, ...(written.plan ? { plan: written.plan } : {}) };
+  }
+  /** An assignee the person names for an item of this bot's board: the bot (self), one of its standing staff or one of its temporary bots, by id. */
+  private staffAssignee(owner: Assistant, id: string): string {
+    if (id === 'self' || id === owner.key) return 'self';
+    const bot = this.byKey(id), chief = bot && this.chiefOf(bot);
+    return bot && (bot.standing ? bot.standing.chief === owner.key : chief?.key === owner.key) ? bot.key : fail('An item is assigned to the bot itself, its standing staff or its temporary bots.');
   }
   private writeOwnItem(self: Bot, edits: ItemEdit[], plan: unknown) {
     const ref = self.task!.task!.item ?? fail('This bot was not created for a board item; report to your chief with message.');

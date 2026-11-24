@@ -176,6 +176,7 @@ export class TeamBroker {
       return { chainId: action.chainId, ...(botId ? { botId } : {}), ...result };
     }
     if (action.action === 'set_thresholds') { await this.chains.setThresholds(action.thresholds); return { thresholds: action.thresholds }; }
+    if (action.action === 'update_board') return (this.bots ?? fail(unavailableAssistants)).personUpdateBoard(action.botId, action.items, action.plan);
     if (action.action === 'set_chief') return (this.bots ?? fail(unavailableAssistants)).personSetChief(action.botId, action.chief);
     return this.change(teams => actOnBot(teams, action, this.ports.now()));
   }

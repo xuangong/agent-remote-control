@@ -86,6 +86,26 @@ describe('bots calling as their own sessions', () => {
     expect(await f.broker.hostCall('mac', { action: 'list_bots', owner: f.as('chief') })).toMatchObject({ bots: expect.arrayContaining([expect.objectContaining({ name: 'Notes', kind: 'temporary', chief: 'you' })]) });
   });
 
+  it('keeps a /side bot beside its conversation: its result is recorded on the task and nothing reaches the chief as input', async () => {
+    const f = fixture();
+    await f.broker.startBot({ operationId: 's1', source: { hostId: 'mac', providerId: 'codex', nativeSessionId: 'chief', title: 'Chief' }, bot: { name: 'Notes', mission: 'Write the release notes.' } });
+    const worker = f.as(f.task().members[0]!.nativeSessionId!);
+    expect(f.task().task!.side).toBe(true);
+    expect(await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'p1', to: 'chief', text: 'Reading the log.', status: 'progress' })).toMatchObject({ outcome: 'delivered' });
+    expect(await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'd1', to: 'chief', text: 'Two notes written.', status: 'done' })).toMatchObject({ outcome: 'delivered' });
+    expect(f.task().task).toMatchObject({ state: 'done', result: { status: 'done', summary: 'Two notes written.' } });
+    expect(f.inputs(f.task(), 1)).toEqual([]);
+    expect(f.task().messages.filter(message => message.to === f.task().members[1]!.id && message.status !== 'canceled')).toEqual([]);
+  });
+
+  it('still reports a temporary bot another bot created to its chief as input', async () => {
+    const f = fixture();
+    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
+    expect(f.task().task!.side).toBeUndefined();
+    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as(f.task().members[0]!.nativeSessionId!), operationId: 'd1', to: 'chief', text: 'Fine.', status: 'done' });
+    expect(f.inputs(f.task(), 1).map(input => input.kind)).toEqual(['done']);
+  });
+
   it('keeps a temporary bot as a standing bot of its chief\'s group when the person asks, and ends its task as done', async () => {
     const f = fixture();
     await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review the release branch.', lifetime: 'temporary' });

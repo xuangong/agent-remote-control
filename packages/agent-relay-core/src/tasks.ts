@@ -39,7 +39,10 @@ const inbound = (team: Team, memberId: string) => team.messages.some(message => 
   && (message.status === 'queued' || message.status === 'dispatching' || message.status === 'unknown' || message.status === 'accepted' && message.acceptance !== 'started' && message.acceptance !== 'handled'));
 /** Queues a task input; its id makes a repeated call queue it once. */
 function enqueue(team: SavedTeam, from: TeamMember, to: TeamMember, key: unknown[], text: string, now: number): TeamMessage {
-  const id = digest(key), existing = team.messages.find(message => message.id === id);
+  const id = digest(key);
+  // A side stays beside the conversation it was asked from: what it tells its owner is on the page (its state, its result), never an input.
+  if (team.task?.side && to.id === owner(team).id) return { id, from: from.id, to: to.id, text, status: 'canceled' as const, createdAt: now };
+  const existing = team.messages.find(message => message.id === id);
   if (existing) return existing;
   const message = { id, from: from.id, to: to.id, text, status: 'queued' as const, createdAt: now };
   assertTeamQueueCapacity(team, message);
@@ -138,7 +141,7 @@ export function ownerTasks(teams: SavedTeam[], resolve: TeamBrokerPorts['resolve
 export class TaskGroups {
   constructor(private readonly broker: TaskBrokerPorts, private readonly ports: TaskPorts) {}
   capable(hostId: string): boolean { return this.ports.capable(hostId); }
-  async create(hostId: string, call: CreateCall): Promise<{ taskId: string; state: TaskView['state']; message: string }> {
+  async create(hostId: string, call: CreateCall, options: { side?: true } = {}): Promise<{ taskId: string; state: TaskView['state']; message: string }> {
     this.ports.assertHost(hostId);
     const providerId = call.provider ?? call.owner.providerId;
     this.broker.ports.assertHost(hostId, providerId);
@@ -167,7 +170,7 @@ export class TaskGroups {
       const team: SavedTeam = { id: randomUUID(), operationId: call.operationId, revision: 1, title: call.title, status: 'active', members: [worker, main], messages: [],
         source: { hostId, providerId: call.owner.providerId, nativeSessionId: call.owner.nativeSessionId, title: taskSenderName(call.owner.title) },
         task: { title: call.title, brief: call.brief, ...(call.doneWhen ? { doneWhen: call.doneWhen } : {}), ...(call.workspace && call.workspace !== 'same' ? { workspace: call.workspace } : {}),
-          ...(call.item ? { item: call.item } : {}), state: 'working', createdAt: now, updatedAt: now }, createdAt: now, updatedAt: now };
+          ...(call.item ? { item: call.item } : {}), ...(options.side ? { side: true as const } : {}), state: 'working', createdAt: now, updatedAt: now }, createdAt: now, updatedAt: now };
       const brief = { id: digest(['task-brief', team.id]), from: main.id, to: worker.id, text: briefText(team), status: 'queued' as const, createdAt: now };
       assertTeamQueueCapacity(team, brief);
       team.messages.push(brief);

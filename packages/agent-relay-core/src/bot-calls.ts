@@ -373,6 +373,8 @@ export class BotCalls {
         ? this.tasks.report(hostId, { action: 'report_task', teamId: from.task!.id, memberId, status: call.status, summary: call.patch ? `${call.text}\n\n${call.patch}` : call.text })
         : call.status === 'needs_input' ? this.tasks.ask(hostId, { action: 'ask_owner', teamId: from.task!.id, memberId, question: call.text })
           : this.tasks.progress(hostId, { teamId: from.task!.id, memberId, operationId: call.operationId, text: call.text });
+      // A side's words to its chief are recorded on the page, not queued as input, so there is no queue to count.
+      if (from.task.task?.side) { await send(); return { outcome: 'delivered' }; }
       return this.queued(from.task.id, from.task.members[1]!.id, send);
     }
     if (to.task) {

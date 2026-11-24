@@ -52,6 +52,8 @@ export const TeamTask = Type.Object({ title: TaskTitle, brief: TaskBrief, doneWh
   botId: Type.Optional(BotId),
   /** The item of its chief's board the temporary bot was created for, which it writes and whose assignee it is. */
   item: Type.Optional(Type.Object({ board: BotId, key: Type.Integer({ minimum: 1 }), title: Type.String({ minLength: 1, maxLength: 120 }) }, object)),
+  /** The person started it with `/side` from a conversation: it stays beside that conversation, and nothing it says reaches the conversation's bot as input. */
+  side: Type.Optional(Type.Literal(true)),
   waiting: Type.Optional(TaskWaiting), workspace: Type.Optional(TaskWorkspace), reminded: Type.Optional(Type.Number()),
   result: Type.Optional(TaskResult), createdAt: Type.Number(), updatedAt: Type.Number() }, object);
 export type TeamTask = Static<typeof TeamTask>;

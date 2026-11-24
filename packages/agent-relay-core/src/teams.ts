@@ -164,7 +164,7 @@ export class TeamBroker {
   async startBot(input: TeamCreate): Promise<SavedTeam> {
     const tasks = this.tasks ?? fail(unavailableTasks), bot = input.bot ?? fail('A bot needs a name and a mission.');
     const created = await tasks.create(input.source.hostId, { action: 'create_task', owner: { providerId: input.source.providerId, nativeSessionId: input.source.nativeSessionId,
-      ...(input.source.title ? { title: input.source.title } : {}) }, operationId: input.operationId, title: bot.name, brief: bot.mission });
+      ...(input.source.title ? { title: input.source.title } : {}) }, operationId: input.operationId, title: bot.name, brief: bot.mission }, { side: true });
     return this.ports.read().find(team => team.id === created.taskId) ?? fail('The bot could not be started.');
   }
   /** The person's decision from the audit: stop a chain or a bot's part of it, pause or resume a standing bot, retire a temporary one. */

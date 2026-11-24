@@ -96,12 +96,13 @@ export class BotCalls {
     if (self.standing && this.span(self.standing) >= BOT_SPAN_LIMIT) fail(`You already manage ${BOT_SPAN_LIMIT} bots; retire one, or give some to a sub-chief.`);
     const item = call.item === undefined ? undefined : this.ownItem(self, call.item);
     if (call.lifetime === 'standing') return this.createStanding(hostId, self, call, item);
-    const brief = call.message ? `${call.mission}\n\n${call.message}` : call.mission;
+    // What the item says to do reaches the bot in its first input, with its mission and the chief's words.
+    const brief = [call.mission, item?.brief, call.message].filter((part, index, parts): part is string => !!part && parts.indexOf(part) === index).join('\n\n');
     const created = await this.tasks.create(hostId, { action: 'create_task', owner: call.owner, operationId: call.operationId, title: call.name, brief,
       ...(item ? { item: { board: self.key, key: item.key, title: item.title } } : {}),
       ...(call.workspace ? { workspace: call.workspace } : {}), ...(call.commit ? { commit: call.commit } : {}), ...(call.provider ? { provider: call.provider } : {}), ...(call.model ? { model: call.model } : {}) });
     // The item records its assignee and the brief the bot was created with.
-    if (item) await this.notify(await this.board.assign(self.standing!, item.key, temporaryBotId(created.taskId), brief.slice(0, BOARD_BRIEF_LIMIT), self.key));
+    if (item) await this.notify(await this.board.assign(self.standing!, item.key, temporaryBotId(created.taskId), (item?.brief ?? brief).slice(0, BOARD_BRIEF_LIMIT), self.key));
     return { botId: temporaryBotId(created.taskId), status: created.state, message: created.message.replace(/^Task \S+/, `Bot "${call.name}"`) };
   }
   /**
@@ -127,7 +128,7 @@ export class BotCalls {
       if (call.message || item) {
         const messageId = `m${createHash('sha256').update(JSON.stringify([created.id, self.key, call.operationId])).digest('hex').slice(0, 12)}`;
         created.messages.push({ id: createHash('sha256').update(JSON.stringify(['first-message', created.id])).digest('hex'), from: seat.id, to: seat.id, status: 'queued', createdAt: now,
-          text: assistantMessageText({ messageId, from: self.name, body: call.message ?? 'This item is your work.', ...(item ? { tag: itemTagText({ key: item.key, title: item.title, from: self.name }) } : {}) }) });
+          text: assistantMessageText({ messageId, from: self.name, body: [call.message, item?.brief].filter((part, index, parts): part is string => !!part && parts.indexOf(part) === index).join('\n\n') || 'This item is your work.', ...(item ? { tag: itemTagText({ key: item.key, title: item.title, from: self.name }) } : {}) }) });
         // Recorded as received from the chief, so the new bot answers it with reply_to.
         created.inbox!.recent = [{ id: messageId, from: self.key, hop: 1, operationId: call.operationId }];
       }
@@ -136,7 +137,7 @@ export class BotCalls {
     });
     await this.broker.provision(team.id, team.members[0]!.id).catch(() => undefined);
     await this.inboxes.place(hostId);
-    if (item) await this.notify(await this.board.assign(self.standing!, item.key, team.inbox!.botId, (call.message ?? call.mission).slice(0, BOARD_BRIEF_LIMIT), self.key));
+    if (item) await this.notify(await this.board.assign(self.standing!, item.key, team.inbox!.botId, (item?.brief ?? call.message ?? call.mission).slice(0, BOARD_BRIEF_LIMIT), self.key));
     const placed = !this.broker.ports.read().find(entry => entry.id === team.id)?.inbox?.pending;
     return { botId: team.inbox!.botId, status: placed ? 'ready' : 'waiting',
       message: placed ? `Bot "${call.name}" is ready in your group; it reads its mission first and reports in.` : `Bot "${call.name}" is recorded; its session starts when this computer can create it.` };

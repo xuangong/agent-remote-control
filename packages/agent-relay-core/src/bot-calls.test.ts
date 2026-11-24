@@ -206,6 +206,16 @@ describe('bots calling as their own sessions', () => {
     expect(await f.broker.hostCall('mac', { action: 'bot_message', owner: scribe, operationId: 'r1', to: 'Chief', text: 'The file exists.', replyTo: first })).toMatchObject({ outcome: 'delivered' });
   });
 
+  it('gives a bot created for an item the item\'s brief in its first input, standing or temporary', async () => {
+    const f = fixture();
+    await f.broker.hostCall('mac', { action: 'update_board', owner: f.as('chief'), items: [{ title: 'Write the script', brief: 'Usage: wordstat FILE; exit 2 on a missing file.' }, { title: 'Write the README', brief: 'Document both scripts.' }] });
+    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op1', name: 'Scribe', mission: 'Keep the docs.', lifetime: 'standing', item: 2 });
+    const inbox = f.state().find(team => team.inbox?.botId && team.members[0]!.name === 'Scribe')!;
+    expect(inbox.messages.map(message => parseTaskInputs(message.text)?.[0])).toEqual([expect.objectContaining({ kind: 'assistant', body: expect.stringContaining('Document both scripts.') })]);
+    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op2', name: 'Coder', mission: 'Code it.', message: 'Start now.', lifetime: 'temporary', item: 1 });
+    expect(parseTaskInputs(f.task().messages[0]!.text)?.[0]).toMatchObject({ kind: 'brief', brief: expect.stringContaining('Usage: wordstat FILE; exit 2 on a missing file.') });
+  });
+
   it('lets a standing bot record a lasting change to its own mission, without sending it its instructions again', async () => {
     const f = fixture();
     await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('tracker'), operationId: 'hi', to: 'Chief', text: 'Hello.' });

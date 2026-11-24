@@ -34,9 +34,9 @@ const owner = (team: Team): TeamMember => team.members[1] ?? fail('Task has no o
 const finished = (state: TeamTask['state']) => state === 'done' || state === 'failed' || state === 'cancelled';
 const running = (state: TeamTask['state']) => state === 'working' || state === 'needs_input';
 const clip = (text: string) => text.length > TASK_TOLD_LIMIT ? `${text.slice(0, TASK_TOLD_LIMIT - 1)}…` : text;
-/** Whether more input is on its way to a member: queued, being delivered, or accepted but not yet started. */
+/** Whether more input is on its way to a member: queued, being delivered, or accepted but not yet started; a held acknowledgement is not input. */
 const inbound = (team: Team, memberId: string) => team.messages.some(message => message.to === memberId
-  && (message.status === 'queued' || message.status === 'dispatching' || message.status === 'unknown' || message.status === 'accepted' && message.acceptance !== 'started' && message.acceptance !== 'handled'));
+  && (message.status === 'queued' && !message.ack || message.status === 'dispatching' || message.status === 'unknown' || message.status === 'accepted' && message.acceptance !== 'started' && message.acceptance !== 'handled'));
 /** Queues a task input; its id makes a repeated call queue it once. */
 function enqueue(team: SavedTeam, from: TeamMember, to: TeamMember, key: unknown[], text: string, now: number, ack?: true): TeamMessage {
   const id = digest(key);

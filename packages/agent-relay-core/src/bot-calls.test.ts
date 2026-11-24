@@ -171,6 +171,17 @@ describe('bots calling as their own sessions', () => {
     expect([await given(1), f.task().task!.state]).toEqual([[], 'working']);
   });
 
+  it('counts a worker\'s turn as ended while an acknowledgement waits for it: a held acknowledgement is not input', async () => {
+    const f = fixture();
+    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
+    const worker = f.task().members[0]!;
+    f.settle();
+    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'k1', to: 'Reviewer', text: 'Noted.', status: 'ack' });
+    const presence = (activity: 'idle' | 'busy') => f.broker.hostCall('mac', { action: 'presence', teamId: f.task().id, memberId: worker.id, activity });
+    await presence('busy'); await presence('idle');
+    expect(f.task().task!.reminded).toEqual(expect.any(Number));
+  });
+
   it('keeps a temporary bot as a standing bot of its chief\'s group when the person asks, and ends its task as done', async () => {
     const f = fixture();
     await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review the release branch.', lifetime: 'temporary' });

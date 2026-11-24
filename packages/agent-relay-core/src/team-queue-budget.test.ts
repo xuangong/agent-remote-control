@@ -111,3 +111,20 @@ test('keeps the Relay within its bound when recipient evidence would exceed it',
   expect(f.snapshot()[0]!.messages[0]).toMatchObject({ status: 'queued' });
   expect(f.snapshot()[0]!.messages[0]!.resolvedTarget).toBeUndefined();
 }, 10000);
+
+test('settles an acknowledgement that a started turn took with its input, and keeps the Relay storing the team', async () => {
+  const team = savedTeam();
+  team.messages = [{ ...pendingMessage(0, 'Thanks, noted.'), ack: true }, pendingMessage(1, 'Is the branch cut?')];
+  const f = await connectedBroker([team]);
+  for (const message of team.messages) {
+    const target = { teamId: team.id, memberId: 'worker', messageId: message.id };
+    expect((await f.call({ action: 'claim', ...target, expectedNativeSessionId: nativeSessionId })).status).toBe(200);
+  }
+  for (const message of team.messages) {
+    const target = { teamId: team.id, memberId: 'worker', messageId: message.id };
+    expect((await f.call({ action: 'settle', ...target, outcome: 'accepted', acceptance: 'started', resolvedTarget: recipient })).status).toBe(200);
+  }
+  const stored = f.snapshot()[0]!;
+  expect(stored.messages).toEqual([]);
+  expect(validSavedTeam(stored)).toBe(true);
+}, 10000);

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { TurnCauses, type PersonInput, type TurnReport } from './session-core/chain-turns.js';
 import type { AgentSessionTool, AgentSessionToolNamespace } from '@orchardworks/agent-provider-sdk';
-import { ASSISTANT_MESSAGE_LIMIT, ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, BOT_MESSAGE_LIMIT, nativeSessionRefKey, PERSON_WROTE_LIMIT, ROOM_MINUTES_LIMIT, TASK_BRIEF_LIMIT, TASK_TITLE_LIMIT, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import { ASSISTANT_MESSAGE_LIMIT, ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, BOT_FACT_LIMIT, BOT_MESSAGE_LIMIT, nativeSessionRefKey, PERSON_WROTE_LIMIT, ROOM_MINUTES_LIMIT, TASK_BRIEF_LIMIT, TASK_TITLE_LIMIT, type BotFact, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { botInstructions } from './bot-instructions.js';
 
 /** The local files of attachments: one a bot sends, and one it downloads. */
@@ -47,8 +47,8 @@ const mediaTypeOf = (name: string) => mediaTypes[name.split('.').pop()?.toLowerC
 
 /** Every bot's tools, and which of this Host's sessions are bots, with their missions (bots design 5.1). */
 export class BotTools {
-  /** The bots' main sessions on this Host, with their missions. */
-  private bots = new Map<string, string>();
+  /** The bots' main sessions on this Host, with their missions and memories. */
+  private bots = new Map<string, { mission: string; memory: BotFact[] }>();
   private readonly listeners = new Set<() => void>();
   private polling = false;
   private loadedOnce = false;
@@ -81,10 +81,10 @@ export class BotTools {
   tools(ref: NativeSessionRef): WorkerTools {
     return this.ports.tasks() && this.bots.has(nativeSessionRefKey(ref)) ? 'tasks' : 'none';
   }
-  /** The standing instructions of a bot's main session (base instructions and its mission); undefined for a session that is no bot. */
+  /** The standing instructions of a bot's main session (base instructions, its mission and its memory); undefined for a session that is no bot. */
   standing(ref: NativeSessionRef): string | undefined {
-    const mission = this.bots.get(nativeSessionRefKey(ref));
-    return mission === undefined ? undefined : botInstructions(mission || undefined);
+    const bot = this.bots.get(nativeSessionRefKey(ref));
+    return bot === undefined ? undefined : botInstructions(bot.mission || undefined, bot.memory);
   }
   onChange(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   /**
@@ -107,12 +107,13 @@ export class BotTools {
   private async read(controllerId: string): Promise<void> {
     const value = await this.ports.request({ action: 'bot_enablement' }) as { bots?: unknown };
     if (!value || !Array.isArray(value.bots)) throw new Error('Invalid bot enablement.');
-    const bots = new Map<string, string>();
-    for (const entry of value.bots as Array<{ providerId?: unknown; nativeSessionId?: unknown; mission?: unknown }>) {
+    const bots = new Map<string, { mission: string; memory: BotFact[] }>();
+    for (const entry of value.bots as Array<{ providerId?: unknown; nativeSessionId?: unknown; mission?: unknown; memory?: unknown }>) {
       if (typeof entry?.providerId === 'string' && typeof entry.nativeSessionId === 'string')
-        bots.set(nativeSessionRefKey({ controllerId, providerId: entry.providerId, nativeSessionId: entry.nativeSessionId }), typeof entry.mission === 'string' ? entry.mission : '');
+        bots.set(nativeSessionRefKey({ controllerId, providerId: entry.providerId, nativeSessionId: entry.nativeSessionId }),
+          { mission: typeof entry.mission === 'string' ? entry.mission : '', memory: Array.isArray(entry.memory) ? entry.memory.filter((fact): fact is BotFact => typeof fact?.id === 'string' && typeof fact.text === 'string') : [] });
     }
-    const changed = bots.size !== this.bots.size || [...bots].some(([key, mission]) => this.bots.get(key) !== mission);
+    const changed = bots.size !== this.bots.size || [...bots].some(([key, bot]) => JSON.stringify(this.bots.get(key)) !== JSON.stringify(bot));
     this.bots = bots; this.loadedOnce = true;
     if (changed) for (const listener of this.listeners) { try { listener(); } catch { /* Listeners cannot stop enablement. */ } }
   }
@@ -190,6 +191,14 @@ export class BotTools {
         }),
       tool('update_mission', 'Record a lasting change to how you work in your own mission, when the person or your chief told you something meant to last. Write the whole mission as it now stands. A temporary bot\'s mission is its brief and does not change.',
         object({ mission: { type: 'string', minLength: 1, maxLength: 4000 } }, ['mission']), args => taskRequest({ action: 'update_mission', owner: caller(), mission: args.mission })),
+      tool('remember', 'Keep a lasting fact in your memory: something you learned that every session of yours should start with (a preference of the person, how a project does things, a decision). Your memory is separate from your mission: the mission is what you are for, the memory is what you learned. At most 50 facts of 300 characters each, one fact per call, short and standing alone. replace: the id or exact text of the fact the new one takes the place of, to correct or update it. The same text twice is one fact. Only you and the person write your memory; it is yours alone, and the person sees and edits it.',
+        object({ text: { type: 'string', minLength: 1, maxLength: BOT_FACT_LIMIT }, replace: { type: 'string', minLength: 1, maxLength: 300 } }, ['text']),
+        args => taskRequest({ action: 'remember', owner: caller(), text: args.text, ...(args.replace ? { replace: args.replace } : {}) })),
+      tool('forget', 'Remove a fact from your memory, by its id or its exact text, when it is no longer true or no longer matters.',
+        object({ fact: { type: 'string', minLength: 1, maxLength: 300 } }, ['fact']), args => taskRequest({ action: 'forget', owner: caller(), fact: args.fact })),
+      tool('set_chief', 'Move one of your standing staff to another chief: another standing bot of this account, or the person (chief: person). The bot, you and the new chief are each told. A chief manages at most 12 bots, so a thirteenth is refused: create a sub-chief for some of them. Only the person and a bot\'s own chief move it.',
+        object({ bot: { type: 'string', minLength: 1, maxLength: 300 }, chief: { type: 'string', minLength: 1, maxLength: 300 } }, ['bot', 'chief']),
+        args => taskRequest({ action: 'set_chief', owner: caller(), bot: args.bot, chief: args.chief })),
       tool('board', 'Read your board: the items of the work you keep (title, status, who does it, links, the latest report of the one who does it, its result and the version of each) and the plan note. Read it first whenever you start, resume or were compacted. bot: the board of one of your standing staff, which you only read; item: one item with its whole brief. A temporary bot reads the item it was created for.',
         object({ bot: { type: 'string', minLength: 1, maxLength: 300 }, item: { type: 'integer', minimum: 1 } }, []),
         args => taskRequest({ action: 'board', owner: caller(), ...(args.bot ? { bot: args.bot } : {}), ...(args.item !== undefined ? { item: args.item } : {}) })),

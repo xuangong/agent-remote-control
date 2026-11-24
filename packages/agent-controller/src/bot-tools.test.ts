@@ -4,7 +4,7 @@ import { isBotMessageResult, type TeamHostCall } from '@orchardworks/agent-remot
 import { BotTools, workerToolsIn, WORKER_NAMESPACE } from './bot-tools.js';
 
 // The Relay names the bots' main sessions on this Host with their missions; the stub answers as it would.
-function fixture(bots: Array<{ nativeSessionId: string; mission?: string }>, tasks = true) {
+function fixture(bots: Array<{ nativeSessionId: string; mission?: string; memory?: Array<{ id: string; text: string }> }>, tasks = true) {
   const calls: TeamHostCall[] = [];
   let listed = bots;
   const tools = new BotTools({ request: async call => { calls.push(call); return { bots: listed.map(bot => ({ providerId: 'codex', ...bot })) }; }, tasks: () => tasks });
@@ -96,4 +96,39 @@ describe('what the person wrote to a bot', () => {
     f.tools.personWrote(ref('plain'), { messageId: 'u2', text: 'Hello.' });
     expect(f.calls).toEqual([{ action: 'bot_told', owner: { providerId: 'codex', nativeSessionId: 'tracker' }, text: 'x'.repeat(300), cause: { kind: 'person', messageId: 'u1' } }]);
   });
+});
+
+it('starts every session of a bot with its memory after its mission, and tells listeners when the memory changes', async () => {
+  const fact = { id: 'f0a1b2c3d', text: 'Releases ship on Thursdays.' };
+  const f = fixture([{ nativeSessionId: 'chief', mission: 'Lead the release.', memory: [fact] }]);
+  let changes = 0; f.tools.onChange(() => { changes++; });
+  await f.tools.refresh('controller');
+  expect(f.tools.standing(ref('chief'))).toMatch(/Your mission:\nLead the release\.\n\nYour memory[^\n]*\n- f0a1b2c3d · Releases ship on Thursdays\.$/);
+  f.set([{ nativeSessionId: 'chief', mission: 'Lead the release.', memory: [{ ...fact, text: 'Releases ship on Fridays.' }] }]);
+  await f.tools.refresh('controller');
+  expect(changes).toBe(2);
+  expect(f.tools.standing(ref('chief'))).toContain('Releases ship on Fridays.');
+  f.set([{ nativeSessionId: 'chief', mission: 'Lead the release.' }]);
+  await f.tools.refresh('controller');
+  expect(f.tools.standing(ref('chief'))).not.toContain('Your memory');
+});
+
+it('maps remember, forget and set_chief to the Host calls of the calling session, naming no other bot\'s memory', async () => {
+  const f = fixture([{ nativeSessionId: 'chief' }]);
+  const tools = f.tools.namespace(() => ref('chief'), false).tools, owner = { providerId: 'codex', nativeSessionId: 'chief' };
+  const tool = (name: string) => tools.find(item => item.name === name)!;
+  await f.tools.refresh('controller');
+  f.calls.length = 0;
+  await tool('remember').execute({ text: 'Releases ship on Thursdays.' });
+  await tool('remember').execute({ text: 'Releases ship on Fridays.', replace: 'f0a1b2c3d' });
+  await tool('forget').execute({ fact: 'f0a1b2c3d' });
+  await tool('set_chief').execute({ bot: 'Reviewer', chief: 'person' });
+  expect(f.calls).toEqual([
+    { action: 'remember', owner, text: 'Releases ship on Thursdays.' },
+    { action: 'remember', owner, text: 'Releases ship on Fridays.', replace: 'f0a1b2c3d' },
+    { action: 'forget', owner, fact: 'f0a1b2c3d' },
+    { action: 'set_chief', owner, bot: 'Reviewer', chief: 'person' },
+  ]);
+  for (const name of ['remember', 'forget']) expect(Object.keys((tool(name).inputSchema as { properties: object }).properties)).not.toContain('bot');
+  expect((tool('remember').inputSchema as { properties: { text: { maxLength: number } } }).properties.text.maxLength).toBe(300);
 });

@@ -101,7 +101,7 @@ it('keeps a draft over the shared bound on this device only', async () => {
   expect(page.published).toEqual([]);
 });
 
-it('retries a failed publish and stops once disposed', async () => {
+it('retries a failed publish, saves the edit waiting when disposed, and publishes no more after', async () => {
   let fail = true;
   const published: string[] = [];
   const page = composer('', undefined, async value => { if (fail) throw new Error('offline'); published.push(value); return 9; });
@@ -114,6 +114,15 @@ it('retries a failed publish and stops once disposed', async () => {
   expect(published).toEqual(['Ship it']);
   page.type('More');
   page.sync.dispose();
+  page.type('Later');
   await vi.advanceTimersByTimeAsync(5_000);
-  expect(published).toEqual(['Ship it']);
+  expect(published).toEqual(['Ship it', 'More']);
+});
+
+it('saves a send that emptied the composer when the composer is replaced before the publish', async () => {
+  const page = composer('/side Is printf better?', { revision: 7, hash: draftHash('/side Is printf better?') });
+  page.type('');
+  page.sync.dispose();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(page.published).toEqual(['']);
 });

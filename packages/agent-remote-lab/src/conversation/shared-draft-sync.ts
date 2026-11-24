@@ -93,9 +93,13 @@ export function createSharedDraftSync(options: SharedDraftSyncOptions): SharedDr
       schedule();
     },
     dispose() {
-      disposed = true;
+      // An edit still waiting for its publish, such as a send that emptied the composer, is saved now: a composer that is
+      // replaced (a side opening) must not leave the Relay with the text that was sent.
+      const unpublished = timer !== undefined;
       if (timer) clearTimeout(timer);
       timer = undefined;
+      if (unpublished) void publish();
+      disposed = true;
     },
   };
 }

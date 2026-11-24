@@ -57,6 +57,8 @@ input.lab-assistant-card-name { width: 100%; background: var(--orchard-surface);
 .lab-assistant-process .lab-process-choice { display: grid; gap: var(--orchard-space-xs); color: var(--orchard-text-secondary); font-size: var(--orchard-type-caption-size); }
 .lab-assistant-memory { display: grid; gap: var(--orchard-space-s); margin: 0; padding: 0; list-style: none; }
 .lab-assistant-memory li { display: grid; gap: var(--orchard-space-xs); padding: var(--orchard-space-s) var(--orchard-space-l); border-radius: var(--orchard-radius-group); background: var(--orchard-fill); overflow-wrap: anywhere; }
+.lab-assistant-memory-add { display: flex; gap: var(--orchard-space-s); }
+.lab-assistant-memory-add input { flex: 1; min-width: 0; }
 .lab-assistant-hint { margin: 0; color: var(--orchard-text-secondary); font-size: var(--orchard-type-caption-size); }
 .lab-assistant-settings { gap: var(--orchard-space-s); padding-block: var(--orchard-space-m); }
 .lab-assistant-files { display: grid; gap: var(--orchard-space-2xs); margin: 0; padding: 0; list-style: none; }

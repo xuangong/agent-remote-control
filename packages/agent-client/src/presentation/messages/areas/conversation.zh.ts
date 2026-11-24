@@ -180,6 +180,8 @@ export const conversation: AreaMessages<typeof english> = {
   'details.memoryFact': '事实',
   'details.memorySave': '保存事实',
   'details.memoryCancel': '取消',
+  'details.memoryNew': '要它记住的事实',
+  'details.memoryAdd': '添加事实',
   'details.chief': '上级',
   'details.chiefHint': '谁来管理这个助手：你，或另一个助手（会收到通知）。一个上级最多管理 12 个。',
   'details.chiefPerson': '你',

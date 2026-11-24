@@ -190,6 +190,8 @@ export const conversation = {
   'details.memoryFact': 'Fact',
   'details.memorySave': 'Save fact',
   'details.memoryCancel': 'Cancel',
+  'details.memoryNew': 'A fact it should keep',
+  'details.memoryAdd': 'Add fact',
   'details.chief': 'Chief',
   'details.chiefHint': 'Who manages this assistant: you, or another assistant, which is then told. A chief manages at most 12.',
   'details.chiefPerson': 'You',

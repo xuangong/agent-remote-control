@@ -272,7 +272,7 @@ it("writes an assistant's mission in its details, keeping its other details, and
   } finally { await app.close(); }
 });
 
-it("lists an assistant's memory beside its mission, and edits or deletes a fact in its details, keeping its other details", async () => {
+it("lists an assistant's memory beside its mission, and adds, edits or deletes a fact in its details, keeping its other details", async () => {
   const group = botGroup('A');
   const facts = [{ id: 'f0000000a', text: 'Releases ship on Thursdays.' }, { id: 'f0000000b', text: 'The build takes 9 minutes.' }];
   group.bots!.members.A1 = { name: 'A1', label: 'Reviewer', mission: 'Review.', memory: facts };
@@ -296,6 +296,12 @@ it("lists an assistant's memory beside its mission, and edits or deletes a fact 
     await act(async () => visibleButton(row('Fridays'), 'Delete fact').click());
     await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ name: 'A1', label: 'Reviewer', mission: 'Review.' }));
     await until(() => expect(details().textContent).toContain('Nothing learned yet.'));
+    // The person adds a fact of their own; it gets an id the Relay accepts.
+    const added = () => details().querySelector<HTMLInputElement>('input[aria-label="A fact it should keep"]')!;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(added(), 'Ask Dana before a release.');
+      added().dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => visibleButton(details(), 'Add fact').click());
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1?.memory).toEqual([{ id: expect.stringMatching(/^f[0-9a-f]{8}$/), text: 'Ask Dana before a release.' }]));
   } finally { await app.close(); }
 });
 

@@ -1,13 +1,20 @@
 import { useState } from 'react';
-import { BOT_FACT_LIMIT, type BotFact } from '@orchardworks/agent-remote-protocol';
+import { BOT_FACT_LIMIT, BOT_MEMORY_FACTS, type BotFact } from '@orchardworks/agent-remote-protocol';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 
-/** A bot's memory as the person keeps it: the facts, each of which they may change or delete. The bot adds its own. */
+/** A bot's memory as the person keeps it: the facts, which they add, change or delete beside the bot's own. */
 export interface MemoryChoice { readonly facts: readonly BotFact[]; save(facts: readonly BotFact[]): void }
 
 export function MemoryList({ memory }: { memory: MemoryChoice }) {
   const t = useTranslate();
   const [editing, setEditing] = useState<{ id: string; text: string }>();
+  const [adding, setAdding] = useState('');
+  const add = () => {
+    const text = adding.trim();
+    if (!text || memory.facts.length >= BOT_MEMORY_FACTS) return;
+    memory.save([...memory.facts, { id: `f${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`, text }]);
+    setAdding('');
+  };
   const change = (id: string, text: string | undefined) => {
     memory.save(memory.facts.flatMap(fact => fact.id !== id ? [fact] : text === undefined ? [] : [{ id, text }]));
     setEditing(undefined);
@@ -28,6 +35,10 @@ export function MemoryList({ memory }: { memory: MemoryChoice }) {
         </span>
       </>}
     </li>)}</ul> : <p className="lab-assistant-empty">{t('details.memoryEmpty')}</p>}
+    {memory.facts.length < BOT_MEMORY_FACTS ? <form className="lab-assistant-memory-add" onSubmit={event => { event.preventDefault(); add(); }}>
+      <input aria-label={t('details.memoryNew')} placeholder={t('details.memoryNew')} value={adding} maxLength={BOT_FACT_LIMIT} onChange={event => setAdding(event.target.value)} />
+      <button type="submit" className="lab-assistant-action" disabled={!adding.trim()}>{t('details.memoryAdd')}</button>
+    </form> : null}
     <p className="lab-assistant-hint">{t('details.memoryHint')}</p>
   </div>;
 }

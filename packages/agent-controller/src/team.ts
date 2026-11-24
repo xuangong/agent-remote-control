@@ -162,6 +162,10 @@ export class TeamRuntime implements SessionRole {
   answering(ref: NativeSessionRef): boolean {
     return this.records.some(record => record.seat.ask && record.creation === 'ready' && record.seat.member.providerId === ref.providerId && record.seat.member.nativeSessionId === ref.nativeSessionId);
   }
+  /** Whether this session is a ready worker of a temporary bot of this Host. */
+  working(ref: NativeSessionRef): boolean {
+    return this.records.some(record => record.seat.task && record.seat.member.role === 'leader' && record.creation === 'ready' && record.seat.member.providerId === ref.providerId && record.seat.member.nativeSessionId === ref.nativeSessionId);
+  }
   async extensions(holder: NativeSessionRef, actual: () => NativeSessionRef | undefined = () => holder): Promise<AgentSessionExtensions | undefined> {
     await this.ready;
     // Before a successor's commit its source holds the seat; afterwards, or on restoration, the successor already does.

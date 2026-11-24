@@ -1,8 +1,9 @@
 import type { ProviderObservation, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
-import { assistantMessageText, joinTaskInputs, standingInstructionsText } from '@orchardworks/agent-remote-protocol';
+import { assistantMessageText, joinTaskInputs, nativeSessionRefKey, standingInstructionsText } from '@orchardworks/agent-remote-protocol';
 import { describe, expect, it } from 'vitest';
 
 import { boundary, ScriptedSession } from '../test-utils/journal-scripted-session.js';
+import { BotTools } from '../bot-tools.js';
 import { inputCause, TurnCauses, watchChainTurns, type PersonInput, type TurnReport } from './chain-turns.js';
 
 let sequence = 0;
@@ -114,5 +115,83 @@ describe('what the person types into the session', () => {
     session.push(input('An old request.', 'u0', 'history'));
     await settle();
     expect(written).toEqual([{ messageId: 'u1', text: 'Skip the flaky test.' }]);
+  });
+});
+
+describe('standing approvals of a chain (bots plan 9d)', () => {
+  const request = (requestId: string, toolName = 'Edit') => ({ kind: 'tool_approval' as const, requestId, toolCallId: `call-${requestId}`, toolName, summary: toolName, detail: { type: 'other' as const, description: toolName },
+    allowedDecisions: ['allow' as const, 'deny' as const], allowScopes: ['once' as const] });
+  const requested = (value: ReturnType<typeof request>) => event({ type: 'interaction_requested', provider: 'fake', request: value });
+  const runtime = (cwd: string) => event({ type: 'runtime_updated', provider: 'fake', runtimeInfo: { providerId: 'fake', sessionId: 'native', status: 'idle', cwd, persistence: { providerId: 'fake', sessionId: 'native', opaque: '{}' } } });
+  const chainChoice = (value: { policies?: Array<{ policyId: string }> } | undefined) => value?.policies?.some(policy => policy.policyId === 'chain-folder') === true;
+
+  /** The Relay's side of it as the Host sees it: standing approvals by chain (the person's message), kind and folder, and the requests it was asked about. */
+  function setup(options: { bot?: boolean } = {}) {
+    const standing = new Set<string>(), asked: string[] = [], answered: Array<{ requestId: string; response: unknown }> = [];
+    const causes = new TurnCauses();
+    const tools = new BotTools({ tasks: () => true, answer: async (_ref, requestId, response) => { answered.push({ requestId, response }); },
+      request: async call => {
+        if (call.action !== 'chain_approval') return {};
+        const key = `${call.cause?.kind === 'person' ? call.cause.messageId : 'framed'}|${call.kind}|${call.cwd}`;
+        asked.push(key);
+        if (call.grant) { standing.add(key); return { chain: key }; }
+        return { allowed: standing.has(key) };
+      } });
+    if (options.bot !== false) (tools as unknown as { bots: Map<string, unknown> }).bots.set(nativeSessionRefKey(ref), { mission: '', memory: [] });
+    const session = new ScriptedSession('fake', 'native', [boundary()]), responses: unknown[] = [], items: ProviderStreamItem[] = [];
+    session.respondToInteraction = async (_id, response) => { responses.push(response); };
+    const watching = watchChainTurns(session, ref, tools.causes, () => {}, () => {}, tools.approvalsFor(ref));
+    void (async () => { for await (const item of watching.observe()) items.push(item); })();
+    const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+    const pending = (requestId: string) => items.map(item => item.type === 'observation' && item.event.type === 'interaction_requested' ? item.event.request : undefined).find(value => value?.requestId === requestId);
+    void causes;
+    return { session, watching, standing, asked, answered, responses, items, settle, pending };
+  }
+
+  it('offers "for this chain in this folder" on a bot\'s tool approval, records the choice when the person makes it, and the adapter hears allow once', async () => {
+    const f = setup();
+    f.session.push(runtime('/repo')); f.session.push(input('Fix it.', 'u1')); f.session.push(requested(request('r1')));
+    await f.settle();
+    const shown = f.pending('r1') as { allowScopes: string[]; policies: Array<{ policyId: string }> };
+    expect(chainChoice(shown)).toBe(true);
+    expect(shown.allowScopes).toContain('policy');
+    await f.watching.respondToInteraction('r1', { kind: 'tool_approval', decision: 'allow', scope: 'policy', policyId: 'chain-folder' });
+    expect([...f.standing]).toEqual(['u1|Edit|/repo']);
+    expect(f.responses).toEqual([{ kind: 'tool_approval', decision: 'allow', scope: 'once' }]);
+    // The person's other answers pass through untouched.
+    await f.watching.respondToInteraction('r1', { kind: 'tool_approval', decision: 'deny' });
+    expect(f.responses.at(-1)).toEqual({ kind: 'tool_approval', decision: 'deny' });
+  });
+
+  it('answers allow, like the person, the next approval of the same kind in the same folder of the same chain', async () => {
+    const f = setup();
+    f.standing.add('u1|Edit|/repo');
+    f.session.push(runtime('/repo')); f.session.push(input('Fix it.', 'u1')); f.session.push(requested(request('r1')));
+    await f.settle();
+    expect(f.answered).toEqual([{ requestId: 'r1', response: { kind: 'tool_approval', decision: 'allow', scope: 'once' } }]);
+  });
+
+  it('asks the person for another kind, another folder, another chain and a revoked approval', async () => {
+    const f = setup();
+    f.standing.add('u1|Edit|/repo');
+    f.session.push(runtime('/repo')); f.session.push(input('Fix it.', 'u1')); f.session.push(requested(request('kind', 'Bash')));
+    f.session.push(runtime('/other')); f.session.push(requested(request('folder')));
+    f.session.push(runtime('/repo')); f.session.push(input('Another thing.', 'u2')); f.session.push(requested(request('chain')));
+    f.session.push(input('Back.', 'u1')); f.standing.delete('u1|Edit|/repo'); f.session.push(requested(request('revoked')));
+    await f.settle();
+    expect(f.answered).toEqual([]);
+    expect(f.asked).toEqual(['u1|Bash|/repo', 'u1|Edit|/other', 'u2|Edit|/repo', 'u1|Edit|/repo']);
+  });
+
+  it('offers nothing on a session that is no bot\'s, and on an approval that cannot be allowed once', async () => {
+    const plain = setup({ bot: false });
+    plain.session.push(runtime('/repo')); plain.session.push(input('Fix it.', 'u1')); plain.session.push(requested(request('r1')));
+    await plain.settle();
+    expect(chainChoice(plain.pending('r1'))).toBe(false);
+    expect(plain.asked).toEqual([]);
+    const sessionOnly = setup();
+    sessionOnly.session.push(runtime('/repo')); sessionOnly.session.push(input('Fix it.', 'u1')); sessionOnly.session.push(requested({ ...request('r2'), allowScopes: ['session'] as never }));
+    await sessionOnly.settle();
+    expect(chainChoice(sessionOnly.pending('r2'))).toBe(false);
   });
 });

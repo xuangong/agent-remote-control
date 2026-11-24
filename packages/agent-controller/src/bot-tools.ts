@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { TurnCauses, type PersonInput, type TurnReport } from './session-core/chain-turns.js';
+import { TurnCauses, type ChainApprovals, type PersonInput, type TurnReport } from './session-core/chain-turns.js';
 import type { AgentSessionTool, AgentSessionToolNamespace } from '@orchardworks/agent-provider-sdk';
+import type { AgentInteractionResponse } from '@orchardworks/agent-remote-protocol';
 import { ASSISTANT_MESSAGE_LIMIT, ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, BOT_FACT_LIMIT, BOT_MESSAGE_LIMIT, nativeSessionRefKey, PERSON_WROTE_LIMIT, ROOM_MINUTES_LIMIT, TASK_BRIEF_LIMIT, TASK_TITLE_LIMIT, type BotFact, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { botInstructions } from './bot-instructions.js';
 
@@ -21,6 +22,10 @@ export interface BotToolsPorts {
   title?(ref: NativeSessionRef): Promise<string | undefined>;
   /** The session is a bot's answer session on this Host: its turns count in the chain of the mention and its final text answers. */
   answering?(ref: NativeSessionRef): boolean;
+  /** The session is a temporary bot's worker on this Host. */
+  working?(ref: NativeSessionRef): boolean;
+  /** Answers a pending interaction of a session on this Host, as the person's decision applied. */
+  answer?(ref: NativeSessionRef, requestId: string, response: AgentInteractionResponse): Promise<void>;
   /** The commit checked out in a session's working directory, where a worktree task starts. */
   head?(ref: NativeSessionRef): Promise<string>;
   /** The provider keeps a session it starts from writing its working directory. */
@@ -79,6 +84,21 @@ export class BotTools {
   personWrote(ref: NativeSessionRef, input: PersonInput): void {
     if (this.tools(ref) !== 'tasks') return;
     void this.ports.request({ action: 'bot_told', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, text: input.text.slice(0, PERSON_WROTE_LIMIT), cause: { kind: 'person', messageId: input.messageId } }).catch(() => undefined);
+  }
+  /**
+   * The person's standing approvals for the chain of this session's turn (bots plan 9d). Offered on any bot's session: a standing bot's,
+   * its answer session or a temporary bot's worker. The Relay holds the approvals; this Host asks it for each pending approval.
+   */
+  approvalsFor(ref: NativeSessionRef): ChainApprovals {
+    const owner = { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId };
+    const call = (kind: string, cwd: string, grant?: true) => { const cause = this.causes.of(ref);
+      return this.ports.request({ action: 'chain_approval', owner, ...(cause ? { cause } : {}), kind, cwd, ...(grant ? { grant } : {}) }); };
+    return {
+      offered: () => this.ports.tasks() && !!this.ports.answer && (this.tools(ref) === 'tasks' || this.ports.answering?.(ref) === true || this.ports.working?.(ref) === true),
+      covers: async (kind, cwd) => ((await call(kind, cwd)) as { allowed?: unknown })?.allowed === true,
+      grant: async (kind, cwd) => { await call(kind, cwd, true); },
+      allow: requestId => this.ports.answer!(ref, requestId, { kind: 'tool_approval', decision: 'allow', scope: 'once' }),
+    };
   }
   /** Whether the session is offered the bots' namespace: it is a bot's main session. */
   enabled(ref: NativeSessionRef): boolean { return this.tools(ref) !== 'none'; }

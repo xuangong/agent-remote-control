@@ -33,10 +33,9 @@ As built: base instructions are v7 ("after a delivery or a report, do not acknow
   by the Controller of each bot; listed in the audit with the chain, revocable there.
 - Approvals of other chains, other folders or other kinds still ask the person.
 
-## 9e. Asking for help shows on the page (decided: yes)
+## 9e. Asking for help shows on the page (decided: no)
 
-- A bot's conversation shows a one-line "Asked <bot>" where it messaged another bot for help or a review, with the answer folded under it.
-- The asked bot's row in Chats shows who is asking it, while the request waits.
+Help is ordinary delegation by message and board item; the folded bot-message line and the board already show it.
 
 ## Checks
 

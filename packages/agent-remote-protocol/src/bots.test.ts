@@ -117,7 +117,7 @@ describe('a bot\'s memory', () => {
   it('teaches the coordinating habits of version 7 in a short text', () => {
     expect(BOT_INSTRUCTIONS_VERSION).toBe(7);
     const text = botInstructions(undefined);
-    for (const habit of ['read your board first', 'update_board', 'remember', 'update_mission', 'under 300 characters', 'git bundle', 'between turns', 'look at list_bots, pick the standing bot whose mission fits and message it before you guess', 'do not acknowledge or thank', 'status ack']) expect(text).toContain(habit);
+    for (const habit of ['read your board first', 'update_board', 'remember', 'update_mission', 'under 300 characters', 'git bundle', 'between turns', 'goes to the bot whose mission fits (list_bots)', 'update_board (assignee)', 'do not acknowledge or thank', 'status ack']) expect(text).toContain(habit);
     expect(text.length).toBeLessThan(3200);
   });
 

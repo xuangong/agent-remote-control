@@ -1,4 +1,4 @@
-import type { AgentInteractionRequest, AgentInteractionResponse } from '@orchardworks/agent-remote-protocol';
+import { CHAIN_APPROVAL_POLICY, type AgentInteractionRequest, type AgentInteractionResponse } from '@orchardworks/agent-remote-protocol';
 import { fileName, type Translate } from '@orchardworks/agent-client';
 import { useId } from 'react';
 
@@ -42,7 +42,10 @@ export function ToolApprovalCard({ request, onResponse, pending, failure, assist
   const scopes = allows ? request.allowScopes.filter(scope => scope !== 'policy') : [];
   const allowScope = scopes.includes('once') ? 'once' : scopes[0];
   const notNow = request.allowedDecisions.includes('deny') ? 'deny' : request.allowedDecisions.includes('cancel') ? 'cancel' : undefined;
-  const policies = allows && request.allowScopes.includes('policy') ? request.policies : undefined;
+  const offered = allows && request.allowScopes.includes('policy') ? request.policies : undefined;
+  // The Controller of a bot's session adds the chain choice: it is shown beside Allow, not among the rules for future requests.
+  const chainChoice = offered?.some(policy => policy.policyId === CHAIN_APPROVAL_POLICY) === true;
+  const policies = offered?.filter(policy => policy.policyId !== CHAIN_APPROVAL_POLICY);
   const name = assistantName || t('conversation.assistant');
   return <section className="agent-interaction agent-tool-approval orchard-approval" aria-labelledby={`${id}-title`} aria-busy={pending}>
     <p id={`${id}-title`} className="orchard-approval-prompt">{toolApprovalPrompt(request, name, t)}</p>
@@ -50,6 +53,8 @@ export function ToolApprovalCard({ request, onResponse, pending, failure, assist
     <div className="orchard-approval-choices">
       {allowScope ? <Pill variant="primary" data-decision="allow" data-scope={allowScope} disabled={pending}
         onClick={() => void onResponse({ kind: 'tool_approval', decision: 'allow', scope: allowScope })}>{t('approval.allow')}</Pill> : null}
+      {allowScope && chainChoice ? <Pill data-decision="allow" data-scope="policy" data-policy-id={CHAIN_APPROVAL_POLICY} disabled={pending}
+        onClick={() => void onResponse({ kind: 'tool_approval', decision: 'allow', scope: 'policy', policyId: CHAIN_APPROVAL_POLICY })}>{t('approval.allowChain')}</Pill> : null}
       {notNow ? <Pill data-decision={notNow} disabled={pending}
         onClick={() => void onResponse({ kind: 'tool_approval', decision: notNow })}>{t('approval.notNow')}</Pill> : null}
       <ApprovalChanges>

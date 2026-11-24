@@ -60,6 +60,7 @@ export const conversation = {
 
   // Inline approvals: plain choices, the rest one tap away.
   'approval.allow': 'Allow',
+  'approval.allowChain': 'Allow for this chain in this folder',
   'approval.notNow': 'Not now',
   'approval.showChanges': 'Show what changes',
   'approval.hideChanges': 'Hide what changes',

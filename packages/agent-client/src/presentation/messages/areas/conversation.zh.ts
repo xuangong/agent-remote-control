@@ -55,6 +55,7 @@ export const conversation: AreaMessages<typeof english> = {
   'time.dateAt': '{date} {time}',
 
   'approval.allow': '好的',
+  'approval.allowChain': '本次协作链、此文件夹内一律允许',
   'approval.notNow': '先别',
   'approval.showChanges': '看看要改什么',
   'approval.hideChanges': '收起',

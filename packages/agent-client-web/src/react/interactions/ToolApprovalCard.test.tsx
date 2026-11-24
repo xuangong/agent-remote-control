@@ -124,4 +124,17 @@ describe('tool approval', () => {
     await act(async () => toggle.click());
     expect(details.hidden).toBe(true);
   });
+
+  it('shows "for this chain in this folder" beside Allow only where the Controller offered it, and sends it as that choice, not among the rules', async () => {
+    const respond = vi.fn().mockResolvedValue(undefined);
+    const offered = { ...request, policies: [...request.policies!, { policyId: 'chain-folder', description: 'Every bot of this chain.' }] };
+    const container = await render(<InteractionPanel request={offered} onResponse={respond} assistantName="Chief" />);
+    const pills = [...container.querySelectorAll<HTMLElement>('.orchard-approval-choices > button, .orchard-approval-choices > details > summary')];
+    expect(pills.map(pill => pill.textContent)).toEqual(['Allow', 'Allow for this chain in this folder', 'Not now', 'Show what changes']);
+    await act(async () => pills[1]!.click());
+    expect(respond).toHaveBeenLastCalledWith('command', { kind: 'tool_approval', decision: 'allow', scope: 'policy', policyId: 'chain-folder' });
+    expect([...container.querySelectorAll('.agent-approval-rules li')].map(item => item.textContent)).toEqual([expect.stringContaining('Deny network host example.test')]);
+    const plain = await render(<InteractionPanel request={request} onResponse={respond} assistantName="Chief" />);
+    expect(plain.textContent).not.toContain('for this chain in this folder');
+  });
 });

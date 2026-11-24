@@ -93,8 +93,8 @@ describe('bots calling as their own sessions', () => {
     await f.broker.startBot({ operationId: 's1', source: { hostId: 'mac', providerId: 'codex', nativeSessionId: 'chief', title: 'Chief' }, bot: { name: 'Notes', mission: 'Write the release notes.' } });
     const worker = f.as(f.task().members[0]!.nativeSessionId!);
     expect(f.task().task!.side).toBe(true);
-    expect(await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'p1', to: 'chief', text: 'Reading the log.', status: 'progress' })).toMatchObject({ outcome: 'delivered' });
-    expect(await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'd1', to: 'chief', text: 'Two notes written.', status: 'done' })).toMatchObject({ outcome: 'delivered' });
+    expect(await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'p1', to: 'chief', text: 'Reading the log.', status: 'progress' })).toMatchObject({ outcome: 'held', reason: expect.stringContaining('beside the conversation') });
+    expect(await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'd1', to: 'chief', text: 'Two notes written.', status: 'done' })).toMatchObject({ outcome: 'held' });
     expect(f.task().task).toMatchObject({ state: 'done', result: { status: 'done', summary: 'Two notes written.' } });
     expect(f.inputs(f.task(), 1)).toEqual([]);
     expect(f.task().messages.filter(message => message.to === f.task().members[1]!.id && message.status !== 'canceled')).toEqual([]);

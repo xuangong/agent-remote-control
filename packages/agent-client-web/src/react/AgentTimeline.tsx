@@ -1,6 +1,6 @@
 import { ResourceDownloadContext, type DownloadResource } from './ResourceDownload.js';
 import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
-import { Fragment, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
   AgentInteractionResponse,
   ResourceBinding,
@@ -179,7 +179,9 @@ export function AgentTimeline({
   const disclosures = turns.map(turn => workDisclosure(processMode, turn.state, current.choices.get(turn.key), current.revealed.has(turn.key)));
   const selectionAnchor = useRef<string>();
   const selectedKeys = entrySelection?.selected;
-  if (!selectedKeys) selectionAnchor.current = undefined;
+  // The anchor lives while a selection does; a render that still shows the old, empty selection must not forget it.
+  const selecting = !!selectedKeys;
+  useEffect(() => { if (!selecting) selectionAnchor.current = undefined; }, [selecting]);
   const selectEntry = useTimelineAction(scopeKey, entrySelection ? (key: string, extend: boolean) => {
     // A range is taken over the entries shown, in the order they show: a closed work line's steps are never selected unseen.
     const shown = turns.flatMap((turn, index) => [...(turn.prompt ? [turn.prompt] : []),

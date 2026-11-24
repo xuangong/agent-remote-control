@@ -485,7 +485,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     const lease = await automationAccess.acquire(ref.providerId, ref.nativeSessionId);
     try { return lease.agent.snapshot().payload.runtimeInfo.cwd; } finally { lease.release(); }
   };
-  const workerSupport: BotTools | undefined = options.team?.request ? new BotTools({ request: options.team.request, tasks: () => options.team?.tasks?.() === true,
+  const workerSupport: BotTools | undefined = options.team?.request ? new BotTools({ request: options.team.request, tasks: () => options.team?.tasks?.() === true, answering: ref => team?.answering(ref) === true,
     title: async ref => await providers.require(ref.providerId).directory.sessionTitle?.(ref.nativeSessionId),
     head: async ref => {
       const cwd = await sessionDirectory(ref);

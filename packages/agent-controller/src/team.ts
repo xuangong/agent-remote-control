@@ -43,8 +43,8 @@ interface LocalSeat { seat: TeamSeat; creation: 'dispatching' | 'ready' | 'unkno
 function locationInstructions(seat: TeamSeat): string {
   return `You are on Host ${seat.member.hostId}${seat.member.cwd ? `, working in ${seat.member.cwd}` : ''}.`;
 }
-/** A seat of a bot: a task's worker or owner, a link, a room or an inbox. An ordinary Team's seat is none of these. */
-const bound = (seat: TeamSeat) => !!(seat.task || seat.link || seat.room || seat.inbox || seat.member.role === 'requester');
+/** A seat of a bot: a task's worker or owner, a link, a room, an inbox or an answer session. An ordinary Team's seat is none of these. */
+const bound = (seat: TeamSeat) => !!(seat.task || seat.link || seat.room || seat.inbox || seat.ask || seat.member.role === 'requester');
 /** One message to deliver, with the seat it reaches and its Team. */
 interface Delivery { record: LocalSeat; team: Team; message: TeamMessage }
 /** A main session reads what waits on it before the rest. */
@@ -158,6 +158,10 @@ export class TeamRuntime implements SessionRole {
       catch { return true; }
     }));
   }
+  /** Whether this session is a ready answer session of this Host. */
+  answering(ref: NativeSessionRef): boolean {
+    return this.records.some(record => record.seat.ask && record.creation === 'ready' && record.seat.member.providerId === ref.providerId && record.seat.member.nativeSessionId === ref.nativeSessionId);
+  }
   async extensions(holder: NativeSessionRef, actual: () => NativeSessionRef | undefined = () => holder): Promise<AgentSessionExtensions | undefined> {
     await this.ready;
     // Before a successor's commit its source holds the seat; afterwards, or on restoration, the successor already does.
@@ -191,7 +195,7 @@ export class TeamRuntime implements SessionRole {
     await this.ready;
     if (isTeamSeat(seat) && !bound(seat)) throw new Error('Teams of a person\'s own making no longer exist; start a bot instead.');
     if (!isTeamSeat(seat) || !this.access.available() || seat.member.role !== 'requester' && !this.access.supportedProviders().includes(seat.member.providerId)) throw new Error('Provider does not support Team tools on this Host.');
-    if ((seat.task || seat.link || seat.room || seat.inbox || seat.member.role === 'requester') && this.access.tasks?.() !== true) throw new Error('Update the Relay to use tasks.');
+    if ((seat.task || seat.link || seat.room || seat.inbox || seat.ask || seat.member.role === 'requester') && this.access.tasks?.() !== true) throw new Error('Update the Relay to use tasks.');
     const existing = this.records.find(item => item.seat.teamId === seat.teamId && item.seat.member.id === seat.member.id);
     if (existing) {
       const previous = existing.seat;
@@ -203,6 +207,8 @@ export class TeamRuntime implements SessionRole {
     if (this.records.length >= 384) throw new Error('Local Team session capacity reached.');
     seat = structuredClone(seat);
     this.boundAt.set(seat.teamId, ++this.bindings);
+    // An answer session is read-only where its provider enforces that, and otherwise works as the provider allows.
+    if (seat.ask && seat.member.access === 'read_only' && !(this.access.readOnlyProviders?.() ?? []).includes(seat.member.providerId)) delete seat.member.access;
     if (seat.member.role === 'requester') return this.bindWorker(seat);
     if (seat.member.role === 'leader') {
       const source = await this.access.acquire(seat.source.providerId, seat.source.nativeSessionId);
@@ -299,6 +305,13 @@ export class TeamRuntime implements SessionRole {
       const instructions = `${botInstructions(seat.inbox.mission)} ${locationInstructions(seat)}`;
       return this.access.toolNamespaces?.(member.providerId) ? { instructions, ...(bots ? { toolNamespaces: [bots] } : {}) } : { instructions, ...(bots ? { tools: bots.tools } : {}) };
     }
+    // A bot's answer session: its bot's mission and memory, and its tools, which the Relay narrows to reading, the board and the memory.
+    if (seat.ask) {
+      const bots = this.access.botTools?.(actual);
+      const instructions = `${botInstructions(seat.ask.mission, seat.ask.memory)}\n\nThis session is an answer session of this bot, not its main session: the person asks you questions from their other conversations, and you answer in your final text. Your main session keeps coordinating. ${locationInstructions(seat)}`;
+      const access = member.access ? { access: member.access } : {};
+      return this.access.toolNamespaces?.(member.providerId) ? { instructions, ...access, ...(bots ? { toolNamespaces: [bots] } : {}) } : { instructions, ...access, ...(bots ? { tools: bots.tools } : {}) };
+    }
     if (seat.task) {
       // A temporary bot has every bot's tools, called as its own session; it reports to its chief with message.
       const bots = this.access.botTools?.(actual);
@@ -392,12 +405,13 @@ export class TeamRuntime implements SessionRole {
       || message.status === 'accepted' && !['started', 'handled'].includes(message.acceptance ?? '')));
     const forgotten = new Set<LocalSeat>(), cancelled = new Set<LocalSeat>(), now = Date.now();
     for (const record of this.records) {
-      if (!record.seat.task || record.creation === 'dispatching' || Object.values(record.receipts).some(receipt => receipt.status === 'dispatching' || receipt.status === 'unknown')) continue;
+      if (!(record.seat.task || record.seat.ask) || record.creation === 'dispatching' || Object.values(record.receipts).some(receipt => receipt.status === 'dispatching' || receipt.status === 'unknown')) continue;
       const team = listed.find(item => item.id === record.seat.teamId);
       if (team) {
         this.missingTasks.delete(team.id);
         if (team.task?.state === 'cancelled' && record.seat.member.role === 'leader') cancelled.add(record);
-        if (team.task?.state !== 'working' && team.task?.state !== 'needs_input' && settled(team, record.seat.member.id)) forgotten.add(record);
+        // An answer session stays while the Relay lists it; a retired one is no longer listed.
+        if (record.seat.task && team.task?.state !== 'working' && team.task?.state !== 'needs_input' && settled(team, record.seat.member.id)) forgotten.add(record);
         continue;
       }
       // A Team just created can be missing from a poll answered before its seats were committed; only a long absence means the Relay removed it.

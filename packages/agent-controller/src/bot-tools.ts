@@ -19,6 +19,8 @@ export interface BotToolsPorts {
   tasks(): boolean;
   /** A session's title, which a bot's brief names it by. */
   title?(ref: NativeSessionRef): Promise<string | undefined>;
+  /** The session is a bot's answer session on this Host: its turns count in the chain of the mention and its final text answers. */
+  answering?(ref: NativeSessionRef): boolean;
   /** The commit checked out in a session's working directory, where a worktree task starts. */
   head?(ref: NativeSessionRef): Promise<string>;
   /** The provider keeps a session it starts from writing its working directory. */
@@ -59,12 +61,15 @@ export class BotTools {
   /**
    * A bot's turn ended: its Relay counts the turn and its usage in the turn's chain. When one message from another bot started the
    * turn, the turn's final text goes back to that message's sender as the reply (bots design 3.3): the Host sends it, with no tool call.
+   * An answer session's turn started by what the person asked answers them the same way.
    */
   turnEnded(ref: NativeSessionRef, turn: TurnReport): void {
-    if (this.tools(ref) !== 'tasks') return;
+    if (this.tools(ref) !== 'tasks' && this.ports.answering?.(ref) !== true) return;
     const owner = { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId };
     void this.ports.request({ action: 'chain_turn', owner, cause: turn.cause, tokens: turn.tokens, ...(turn.costUsd !== undefined ? { costUsd: turn.costUsd } : {}) }).catch(() => undefined);
-    if (turn.cause.kind === 'framed' && turn.cause.answers && turn.finalText)
+    if (turn.cause.kind === 'framed' && turn.cause.asked && turn.finalText)
+      void this.ports.request({ action: 'bot_answer', owner, text: turn.finalText.slice(0, ASSISTANT_MESSAGE_LIMIT), cause: { kind: 'framed', asked: true } }).catch(() => undefined);
+    else if (turn.cause.kind === 'framed' && turn.cause.answers && turn.finalText)
       void this.ports.request({ action: 'bot_reply', owner, text: turn.finalText.slice(0, ASSISTANT_MESSAGE_LIMIT), cause: { kind: 'framed', answers: turn.cause.answers } }).catch(() => undefined);
   }
   /**

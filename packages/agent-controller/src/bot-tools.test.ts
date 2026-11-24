@@ -157,3 +157,10 @@ it('maps remember, forget and set_chief to the Host calls of the calling session
   for (const name of ['remember', 'forget']) expect(Object.keys((tool(name).inputSchema as { properties: object }).properties)).not.toContain('bot');
   expect((tool('remember').inputSchema as { properties: { text: { maxLength: number } } }).properties.text.maxLength).toBe(300);
 });
+
+it('states the 300-character limit of a message where its text is declared, and in the tool description', () => {
+  const message = new BotTools({ request: async () => ({}), tasks: () => true }).namespace(() => ref('chief'), false).tools.find(tool => tool.name === 'message')!;
+  const text = (message.inputSchema as { properties: { text: { maxLength: number; description?: string } } }).properties.text;
+  expect(text).toMatchObject({ maxLength: 300, description: expect.stringContaining('at most 300 characters') });
+  expect(message.description).toContain('at most 300 characters');
+});

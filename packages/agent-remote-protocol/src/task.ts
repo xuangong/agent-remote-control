@@ -82,7 +82,7 @@ export function taskView(team: Team): TaskView {
 }
 
 /** A payload line that would read as a frame is quoted, so only the Relay opens one. */
-export const quoteFrames = (text: string) => text.replace(/^\[(?=(Task|Tasks|Team|Support|Message from|Room|The person wrote to|Item)\b)/gm, '(');
+export const quoteFrames = (text: string) => text.replace(/^\[(?=(Task|Tasks|Team|Support|Message from|Room|The person wrote to|Item|Chief)\b)/gm, '(');
 const heading = (text: string) => text.replace(/[\r\n\]]+/g, ' ').trim() || '…';
 /**
  * How a brief names the session that started the task: the first line of its title, at most 80 characters. A CLI may title a
@@ -180,6 +180,12 @@ export function itemTagText(input: { key: number; title: string; from: string })
 /** What the assignee of an item reads when the item it holds changed, written from the record. */
 export function itemChangedText(input: { title: string; what: string }): string {
   return `[Item "${heading(input.title).replace(/"/g, "'")}" changed · ${heading(input.what)}]`;
+}
+/** What the three bots of a change of chief read, each written from the record: `bot` is told its new chief, `old` that it lost a staff bot, `new` that it gained one. */
+export function chiefChangedText(input: { to: 'bot' | 'old' | 'new'; bot: string; from: string; chief: string }): string {
+  const bot = `"${heading(input.bot).replace(/"/g, "'")}"`, from = heading(input.from), chief = heading(input.chief);
+  const what = input.to === 'bot' ? `your chief is now ${chief} (it was ${from})` : input.to === 'old' ? `${bot} is no longer your staff; its chief is now ${chief}` : `${bot} is now your staff (its chief was ${from})`;
+  return `[Chief changed · ${what}]`;
 }
 /** The frame of a bot's standing instructions, written by `standingInstructionsText`. */
 const standingFrame = /^\[Your standing instructions · v(\d+)\]$/;

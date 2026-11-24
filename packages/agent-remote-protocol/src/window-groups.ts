@@ -2,7 +2,7 @@ import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import { WINDOW_VIEW_LIMIT, WindowEdit, WorkspaceWindow, decodeWorkspaceWindow, isWorkspaceWindow, type WindowSessionBinding, type WindowView } from './window-workspace.js';
 import { WindowLayoutError, applyWindowOperation } from './window-workspace-operations.js';
-import { BotId, BotLabel, BotMission, BotName, BotPicture } from './bots.js';
+import { BotId, BotLabel, BotMemory, BotMission, BotName, BotPicture } from './bots.js';
 export { BotPicture, readBotPicture } from './bots.js';
 
 const strict = { additionalProperties: false } as const;
@@ -37,6 +37,8 @@ export const WindowBotDetails = Type.Object({
   botId: Type.Optional(BotId),
   /** What the bot is for, in its record; its standing instructions after the base instructions. */
   mission: Type.Optional(BotMission),
+  /** What the bot learned, in its record: its facts, which its sessions start with. The bot's own sessions and the person write it. */
+  memory: Type.Optional(BotMemory),
   /** Its chief: the bot that created it, in its record; absent, the person. Responses carry it; a change cannot set it. */
   chief: Type.Optional(BotId),
 }, strict);

@@ -5,7 +5,7 @@
  * an chief's to its temporary bot, and any other bot's, is input to that task; anything to a standing bot goes to its inbox.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { assistantMessageText, attachmentLines, boardItemOpen, BOARD_BRIEF_LIMIT, itemTagText, nativeSessionRefKey, taskView, type BoardItem, type BotAttachment, type BotMessageResult, type TeamHostCall, type TaskView, type TeamMember } from '@orchardworks/agent-remote-protocol';
+import { assistantMessageText, attachmentLines, boardItemOpen, BOARD_BRIEF_LIMIT, BOT_SPAN_LIMIT, chiefChangedText, itemTagText, nativeSessionRefKey, taskView, type BoardItem, type BotAttachment, type BotFact, type BotMessageResult, type TeamHostCall, type TaskView, type TeamMember } from '@orchardworks/agent-remote-protocol';
 import { accountDirectory, callerAssistant, type Assistant, type AssistantBrokerPorts, type AssistantMessages, type AssistantPorts } from './assistants.js';
 import { ownerTasks, taskAction, type TaskGroups } from './tasks.js';
 import { ACCOUNT_TEAM_LIMIT, type SavedTeam } from './team-delivery.js';
@@ -16,6 +16,7 @@ import type { Rooms } from './rooms.js';
 import type { BotWork } from './bot-work.js';
 import { heldItem, type BotBoard, type ItemEdit, type ItemNotice } from './bot-board.js';
 import { newBotId } from './bot-store.js';
+import { forgotten, remembered } from './bot-memory.js';
 import { temporaryBotId } from './chain-scope.js';
 import { cutReply } from './reply-text.js';
 import type { AttachmentStore } from './attachments.js';
@@ -149,8 +150,62 @@ export class BotCalls {
     const self = this.caller(hostId, call.owner).standing ?? fail('A temporary bot\'s mission is its brief; tell your chief what changed instead.');
     const setMission = this.ports.setMission ?? fail('Missions cannot be changed on this Relay.');
     await setMission(self.groupId, self.viewId, call.mission);
-    await this.inboxes.known(self, call.mission);
+    await this.inboxes.known(self, { mission: call.mission });
     return { mission: call.mission };
+  }
+  /** A standing bot keeps its own memory: the caller's own, never another bot's. */
+  private async keepMemory(hostId: string, owner: Owner, change: (memory: readonly BotFact[]) => { memory: BotFact[]; fact: BotFact }) {
+    const self = this.caller(hostId, owner).standing ?? fail('A temporary bot has no memory; tell your chief what you learned instead.');
+    const setMemory = this.ports.setMemory ?? fail('Memory cannot be changed on this Relay.');
+    const { memory, fact } = change(self.memory ?? []);
+    await setMemory(self.groupId, self.viewId, memory);
+    await this.inboxes.known(self, { memory });
+    return { fact, count: memory.length };
+  }
+  remember(hostId: string, call: Call<'remember'>) { return this.keepMemory(hostId, call.owner, memory => remembered(memory, call.text, call.replace)); }
+  forget(hostId: string, call: Call<'forget'>) { return this.keepMemory(hostId, call.owner, memory => forgotten(memory, call.fact)); }
+  /** The bots one chief manages directly: its standing bots and its temporary bots at work. */
+  private span(chief: Assistant): number {
+    return accountDirectory(this.ports.groups()).filter(item => item.chief === chief.key).length + this.staff(chief.hostId, { providerId: chief.providerId, nativeSessionId: chief.nativeSessionId }).filter(running).length;
+  }
+  /**
+   * Moves a standing bot to another chief (a standing bot) or to the person (undefined). The old chief, the new chief and the bot are
+   * each told, from the record. The new chief's span counts the bot; a thirteenth is refused. The caller has checked who may ask.
+   */
+  private async moveChief(bot: Assistant, to: Assistant | undefined): Promise<{ bot: string; chief: string }> {
+    const setChief = this.ports.setChief ?? fail('Chiefs cannot be changed on this Relay.');
+    const directory = accountDirectory(this.ports.groups());
+    if (to?.key === bot.key) fail('A bot cannot be its own chief.');
+    for (let above = to; above; above = directory.find(item => item.key === above!.chief)) if (above.chief === bot.key) fail('A bot cannot report to its own staff.');
+    const old = bot.chief ? directory.find(item => item.key === bot.chief) : undefined;
+    if (bot.chief === to?.key) return { bot: bot.name, chief: to?.name ?? 'the person' };
+    if (to && this.span(to) >= BOT_SPAN_LIMIT) fail(`${to.name} already manages ${BOT_SPAN_LIMIT} bots; create a sub-chief for some of them, or choose another chief.`);
+    await setChief(bot.key, to?.key ?? null);
+    const names = { bot: bot.name, from: old?.name ?? 'the person', chief: to?.name ?? 'the person' }, at = this.broker.ports.now();
+    const told: Array<[Assistant | undefined, 'bot' | 'old' | 'new']> = [[bot, 'bot'], [old, 'old'], [to, 'new']];
+    for (const [receiver, role] of told) if (receiver) await this.messages.notice(receiver, ['chief', bot.key, role, at], chiefChangedText({ ...names, to: role })).catch(() => undefined);
+    return { bot: bot.name, chief: names.chief };
+  }
+  /** A standing bot's chief moves one of its staff to another chief, or to the person (chief: person). */
+  async setChief(hostId: string, call: Call<'set_chief'>) {
+    const caller = this.caller(hostId, call.owner), self = caller.standing ?? fail('Only a standing bot that is a chief moves its staff.');
+    const named = this.named(call.bot, caller);
+    const bot = typeof named === 'object' ? named.standing : undefined;
+    if (!bot || bot.chief !== self.key) fail('You move your own standing staff only; list them with list_bots.');
+    let to: Assistant | undefined;
+    if (fold(call.chief) !== 'person') {
+      const target = this.named(call.chief, caller);
+      to = target === 'self' ? self : typeof target === 'object' ? target.standing : undefined;
+      if (!to) fail('A standing bot\'s chief is another standing bot or the person.');
+    }
+    return this.moveChief(bot!, to);
+  }
+  /** The person moves a standing bot to a chief, or to themselves (null). */
+  async personSetChief(botId: string, chief: string | null) {
+    const directory = accountDirectory(this.ports.groups());
+    const bot = directory.find(item => item.key === botId && item.key.startsWith('b_')) ?? fail('No standing bot of this account has that id.');
+    const to = chief === null ? undefined : directory.find(item => item.key === chief && item.key.startsWith('b_')) ?? fail('No standing bot of this account has that id.');
+    return this.moveChief(bot, to);
   }
   /** A standing bot keeps its named timers (bots design 6.2); a temporary bot reports to its chief instead. */
   async setTimer(hostId: string, call: Call<'set_timer'>) {

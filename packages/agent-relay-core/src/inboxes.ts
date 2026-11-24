@@ -5,7 +5,7 @@
  * appended when it opens (design 5.1).
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { botInstructions, nativeSessionRefKey, standingInstructionsText, type TeamMember } from '@orchardworks/agent-remote-protocol';
+import { botInstructions, type BotFact, nativeSessionRefKey, standingInstructionsText, type TeamMember } from '@orchardworks/agent-remote-protocol';
 import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
 import { assistantSeat, type Assistant, type AssistantBrokerPorts, type AssistantPorts } from './assistants.js';
@@ -14,7 +14,7 @@ import { pushBackTimers } from './bot-work.js';
 
 const digest = (value: unknown) => createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex');
 /** Which standing instructions a bot was sent: the hash of their text. */
-export const instructionsHash = (mission: string | undefined) => digest(botInstructions(mission));
+export const instructionsHash = (mission: string | undefined, memory?: readonly BotFact[]) => digest(botInstructions(mission, memory));
 
 export class BotInboxes {
   constructor(private readonly broker: AssistantBrokerPorts, private readonly ports?: Pick<AssistantPorts, 'placeBot'>) {}
@@ -42,10 +42,10 @@ export class BotInboxes {
         members: [assistantSeat(bot, now)], messages: [], inbox: { botId: bot.key }, createdAt: now, updatedAt: now };
       teams.push(inbox);
     }
-    const hash = instructionsHash(bot.mission);
+    const hash = instructionsHash(bot.mission, bot.memory);
     if (inbox.inbox!.instructions !== hash) {
       const seat = inbox.members[0]!;
-      const message = { id: digest(['standing', inbox.id, hash]), from: seat.id, to: seat.id, text: standingInstructionsText(bot.mission), status: 'queued' as const, createdAt: now };
+      const message = { id: digest(['standing', inbox.id, hash]), from: seat.id, to: seat.id, text: standingInstructionsText(bot.mission, bot.memory), status: 'queued' as const, createdAt: now };
       if (!inbox.messages.some(item => item.id === message.id)) { assertTeamQueueCapacity(inbox, message); inbox.messages.push(message); pushBackTimers(inbox, now); }
       inbox.inbox!.instructions = hash;
       inbox.revision++; inbox.updatedAt = now;
@@ -74,11 +74,11 @@ export class BotInboxes {
       });
     }
   }
-  /** The bot wrote this mission itself, so it has these standing instructions already: they count as sent. */
-  async known(bot: Assistant, mission: string): Promise<void> {
+  /** The bot wrote this mission and memory itself, so it has these standing instructions already: they count as sent. */
+  async known(bot: Assistant, written: { mission?: string; memory?: readonly BotFact[] }): Promise<void> {
     await this.broker.change(teams => {
       const inbox = this.current(teams, bot);
-      if (inbox?.inbox) { inbox.inbox.instructions = instructionsHash(mission); inbox.revision++; inbox.updatedAt = this.broker.ports.now(); }
+      if (inbox?.inbox) { inbox.inbox.instructions = instructionsHash(written.mission ?? bot.mission, written.memory ?? bot.memory); inbox.revision++; inbox.updatedAt = this.broker.ports.now(); }
     });
   }
   /** The bot answered these messages of its inbox, from the senders named: a reply from its final text then has nothing left to answer. */
@@ -105,7 +105,7 @@ export class BotInboxes {
   async ensure(bots: readonly Assistant[]): Promise<void> {
     const pending = (teams: readonly SavedTeam[]) => bots.filter(bot => {
       const sent = this.current(teams, bot)?.inbox?.instructions;
-      return sent ? sent !== instructionsHash(bot.mission) : !!bot.mission;
+      return sent ? sent !== instructionsHash(bot.mission, bot.memory) : !!bot.mission || !!bot.memory?.length;
     });
     if (pending(this.broker.ports.read()).length) await this.broker.change(teams => { const now = this.broker.ports.now(); for (const bot of pending(plain(teams))) this.prepare(teams, bot, now); });
     // Binding a main session where it is never creates anything, so a Host that was offline is asked again at its next poll.

@@ -1,4 +1,4 @@
-import type { BotChain, ChainThresholds } from '@orchardworks/agent-remote-protocol';
+import type { BotChain, BotFact, ChainThresholds } from '@orchardworks/agent-remote-protocol';
 import type { WindowGroup, WindowSessionBinding, WindowBotDetails } from '@orchardworks/agent-remote-protocol';
 import type { SavedTeam } from './team-delivery.js';
 import type { AttachmentStore } from './attachments.js';
@@ -104,6 +104,10 @@ export interface HostBrokerOptions {
   alertChain?: (session: { hostId: string; providerId: string; nativeSessionId: string }, identity: string) => void;
   /** Records a standing bot's own lasting change to its mission (bots design 2.3). */
   setMission?: (groupId: string, viewId: string, mission: string) => Promise<void>;
+  /** Records a standing bot's memory as it stands (bots step 8c). */
+  setMemory?: (groupId: string, viewId: string, memory: BotFact[]) => Promise<void>;
+  /** Moves a standing bot to another chief, a bot's id, or to the person (null). */
+  setChief?: (botId: string, chief: string | null) => Promise<void>;
   /** Messages waiting for this account's Hosts; Controllers that ask for it poll, claim and settle them over the uplink. */
   outbox?: { hostCall(hostId: string, call: unknown): Promise<unknown> };
   /** Where Host session journals are kept. Without it no Controller is granted journals. */

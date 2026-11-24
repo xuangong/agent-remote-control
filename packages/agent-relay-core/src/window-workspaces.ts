@@ -262,6 +262,20 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
         });
       }); notify(principal.subject, id); notify(principal.subject, input.target); return outcome;
     },
+    /** Moves a standing bot to another chief (a bot's id) or to the person (null), and tells the pages by advancing its group's revision. */
+    async setBotChief(principal: WindowPrincipal, botId: string, chief: string | null) {
+      const id = await state.mutate(draft => {
+        if (principal.authorize?.() === false) fail(401, 'unauthorized', 'Authorization is unavailable.');
+        const mine = (draft.bots ?? []).filter(bot => bot.subject === principal.subject && bot.lifetime === 'standing' && bot.retiredAt === undefined);
+        const record = mine.find(bot => bot.botId === botId) ?? fail(404, 'bot_not_found', 'This bot no longer exists.');
+        if (chief !== null && !mine.some(bot => bot.botId === chief)) fail(404, 'bot_not_found', 'The new chief no longer exists.');
+        record.chief = chief === null ? { kind: 'person' } : { kind: 'bot', botId: chief }; record.updatedAt = now();
+        const row = (draft.workspaceWindows ?? []).find(item => item.subject === principal.subject && !item.deleted && Object.values(item.bots?.members ?? {}).some(details => details.botId === botId));
+        if (row?.window) row.window.revision++;
+        return row?.id;
+      });
+      if (id) notify(principal.subject, id);
+    },
     async assign(principal: WindowPrincipal, id: string, session: WindowSessionBinding | null) {
       assertInputSize(session);
       if (session !== null && !isWindowSessionBinding(session)) fail(400, 'invalid_manager', 'A valid manager session is required.');

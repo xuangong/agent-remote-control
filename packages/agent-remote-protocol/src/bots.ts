@@ -24,6 +24,14 @@ export const BotId = Type.String({ pattern: '^b_[0-9a-f]{32}$' });
 export const BOT_MISSION_LIMIT = 4000;
 /** What a bot is for and how it sees its place; its standing instructions after the base instructions. */
 export const BotMission = Type.String({ minLength: 1, maxLength: BOT_MISSION_LIMIT });
+/** What a bot learned, apart from what it is for: at most this many facts of at most this many characters (bots step 8c). */
+export const BOT_MEMORY_FACTS = 50;
+export const BOT_FACT_LIMIT = 300;
+/** At most this many bots, standing and temporary, have one chief (bots design 2.5). */
+export const BOT_SPAN_LIMIT = 12;
+export const BotFact = Type.Object({ id: Type.String({ pattern: '^f[0-9a-f]{8}$' }), text: Type.String({ minLength: 1, maxLength: BOT_FACT_LIMIT }) }, strict);
+export type BotFact = Static<typeof BotFact>;
+export const BotMemory = Type.Array(BotFact, { maxItems: BOT_MEMORY_FACTS });
 export const BotName = Type.String({ minLength: 1, maxLength: 60 });
 export const BotLabel = Type.String({ minLength: 1, maxLength: 120 });
 
@@ -37,6 +45,7 @@ export const BotRecord = Type.Object({
   label: Type.Optional(BotLabel),
   picture: Type.Optional(BotPicture),
   mission: Type.Optional(BotMission),
+  memory: Type.Optional(BotMemory),
   chief: Type.Union([Type.Object({ kind: Type.Literal('person') }, strict), Type.Object({ kind: Type.Literal('bot'), botId: BotId }, strict)]),
   lifetime: Type.Union([Type.Literal('standing'), Type.Literal('temporary')]),
   createdAt: time,
@@ -145,7 +154,7 @@ export function attachmentLines(files: readonly BotAttachment[]): string {
 }
 
 /** The bot details fields that belong to the bot rather than to its place in a group. */
-export const BOT_IDENTITY_FIELDS = ['name', 'label', 'picture', 'mission'] as const;
+export const BOT_IDENTITY_FIELDS = ['name', 'label', 'picture', 'mission', 'memory'] as const;
 type IdentityField = typeof BOT_IDENTITY_FIELDS[number];
 export type BotIdentity = Partial<Pick<BotRecord, IdentityField>>;
 
@@ -176,12 +185,15 @@ const BASE = `You are an assistant of Agent Remote Control. The person, and othe
 - Keep your open work on your board (board, update_board): an item for each piece of work, who does it, and how it stands, and a short plan note saying why you changed course. Name the item when you hand work to a bot (create_bot or message with item), and update it when work changes hands; a bot reports on its item and you decide.
 - When the person, or your chief, tells you something that should change how you work from now on, record it in your mission with update_mission, writing the whole mission as it now stands (not in a memory file of your own), follow it, and say how you now understand your mission.`;
 
-/** The instructions of a bot with this mission, or of a bot without one. */
-export function botInstructions(mission: string | undefined): string {
-  return mission ? `${BASE}\n\nYour mission:\n${mission}` : BASE;
+/** The memory section of a bot's instructions: its facts, each with the id remember and forget name it by. */
+const memoryText = (memory: readonly BotFact[]) =>
+  `Your memory (what you learned; every session of yours starts with it; keep it with remember and forget):\n${memory.map(fact => `- ${fact.id} · ${fact.text.replace(/\s+/g, ' ')}`).join('\n')}`;
+/** The instructions of a bot with this mission and memory, or of a bot with neither. */
+export function botInstructions(mission: string | undefined, memory?: readonly BotFact[]): string {
+  return [BASE, ...(mission ? [`Your mission:\n${mission}`] : []), ...(memory?.length ? [memoryText(memory)] : [])].join('\n\n');
 }
 
 /** The message that gives a bot its standing instructions when they change. */
-export function standingInstructionsText(mission: string | undefined): string {
-  return `[Your standing instructions · v${BOT_INSTRUCTIONS_VERSION}]\n${botInstructions(mission)}`;
+export function standingInstructionsText(mission: string | undefined, memory?: readonly BotFact[]): string {
+  return `[Your standing instructions · v${BOT_INSTRUCTIONS_VERSION}]\n${botInstructions(mission, memory)}`;
 }

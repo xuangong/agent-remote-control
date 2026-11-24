@@ -49,3 +49,25 @@ it('keeps a bot\'s id when it moves to another group, and retires it when it lea
   await f.change('b', { type: 'bots.remove' });
   expect(f.state.read().bots!.find(bot => bot.botId === botId)!.retiredAt).toBe(2_000);
 });
+
+it('keeps a bot\'s memory in its record beside the mission, and moves its chief when asked, which an edit of the details cannot do', async () => {
+  const f = await fixture();
+  const memory = [{ id: 'f0a1b2c3d', text: 'Releases ship on Thursdays.' }];
+  await f.create('a', { v1: { name: 'Chief' }, v2: { name: 'Tracker', mission: 'Track it.', memory } });
+  const [chief, tracker] = [f.member('a', 'v1').botId!, f.member('a', 'v2').botId!];
+  expect(f.state.read().workspaceWindows![0]!.bots!.members.v2).toEqual({ botId: tracker });
+  expect(f.state.read().bots!.find(bot => bot.botId === tracker)).toMatchObject({ mission: 'Track it.', memory });
+  expect(f.member('a', 'v2')).toMatchObject({ mission: 'Track it.', memory });
+  const before = f.service.inspect(f.me, 'a').window.revision;
+  await f.service.setBotChief(f.me, tracker, chief);
+  expect(f.member('a', 'v2')).toMatchObject({ chief, memory });
+  expect(f.service.inspect(f.me, 'a').window.revision).toBe(before + 1);
+  // An edit that names another chief, or none, leaves the chief where it is.
+  await f.change('a', { type: 'bot.update', viewId: 'v2', details: { name: 'Tracker', mission: 'Track it.', chief: tracker } });
+  expect(f.member('a', 'v2').chief).toBe(chief);
+  await f.service.setBotChief(f.me, tracker, null);
+  expect(f.member('a', 'v2').chief).toBeUndefined();
+  await expect(f.service.setBotChief(f.me, tracker, 'b_' + '9'.repeat(32))).rejects.toThrow('no longer exists');
+  await f.change('a', { type: 'bot.update', viewId: 'v2', details: { name: 'Tracker', mission: 'Track it.' } });
+  expect(f.member('a', 'v2').memory).toBeUndefined();
+});

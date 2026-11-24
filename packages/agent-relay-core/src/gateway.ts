@@ -478,6 +478,14 @@ export function createHostedRelay(options: HostedRelayOptions) {
             operation: { type: 'bot.update', viewId, details: { ...details, mission } } });
           if (outcome.result.status !== 'committed') throw new Error(outcome.result.message ?? 'The mission could not be recorded.');
         },
+        setMemory: async (groupId, viewId, memory) => {
+          const principal = { subject: grant.subject }, current = windows.inspect(principal, groupId);
+          const { memory: _was, ...details } = current.bots?.members[viewId] ?? {};
+          const outcome = await windows.mutate(principal, groupId, { operationId: randomUUID(), issuedAt: Date.now(), baseRevision: current.window.revision,
+            operation: { type: 'bot.update', viewId, details: { ...details, ...(memory.length ? { memory } : {}) } } });
+          if (outcome.result.status !== 'committed') throw new Error(outcome.result.message ?? 'The memory could not be recorded.');
+        },
+        setChief: (botId, chief) => windows.setBotChief({ subject: grant.subject }, botId, chief),
         outbox: { hostCall: (hostId, call) => sessionOutbox.hostCall(hostId, call) },
         ...(journalService ? { journalService } : {}),
         ...(options.successionEnrollment ? { successionEnrollment: { version: 1, origin: auth.origin, issuer: auth.issuer, namespace: grant.namespace, ownerSubject: grant.subject } as const, successionProjectionAllowance: allowance } : {}),

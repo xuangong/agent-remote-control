@@ -171,6 +171,7 @@ export class TeamBroker {
       return { chainId: action.chainId, ...(botId ? { botId } : {}), ...result };
     }
     if (action.action === 'set_thresholds') { await this.chains.setThresholds(action.thresholds); return { thresholds: action.thresholds }; }
+    if (action.action === 'set_chief') return (this.bots ?? fail(unavailableAssistants)).personSetChief(action.botId, action.chief);
     return this.change(teams => actOnBot(teams, action, this.ports.now()));
   }
   /** Where a bot's main session is: a standing bot's view, or a temporary bot's worker. */
@@ -222,6 +223,9 @@ export class TeamBroker {
     if (call.action === 'set_timer') return (this.bots ?? fail(unavailableAssistants)).setTimer(hostId, call);
     if (call.action === 'board') return (this.bots ?? fail(unavailableAssistants)).readBoard(hostId, call);
     if (call.action === 'update_board') return (this.bots ?? fail(unavailableAssistants)).updateBoard(hostId, call);
+    if (call.action === 'remember') return (this.bots ?? fail(unavailableAssistants)).remember(hostId, call);
+    if (call.action === 'forget') return (this.bots ?? fail(unavailableAssistants)).forget(hostId, call);
+    if (call.action === 'set_chief') return (this.bots ?? fail(unavailableAssistants)).setChief(hostId, call);
     if (call.action === 'update_mission') return (this.bots ?? fail(unavailableAssistants)).updateMission(hostId, call);
     if (call.action === 'list_bots') return (this.bots ?? fail(unavailableAssistants)).list(hostId, call);
     if (call.action === 'stop_bot' || call.action === 'retire_bot') return (this.bots ?? fail(unavailableAssistants)).manageStaff(hostId, call);

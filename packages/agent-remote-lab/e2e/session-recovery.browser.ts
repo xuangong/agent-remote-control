@@ -32,7 +32,8 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
       const socket = new WebSocket(url); const send = socket.send.bind(socket);
       socket.send = text => {
         const value = JSON.parse(text);
-        if (value.type === 'send_message') {
+        // Sends only: a settle ask after a reconnect asks the Host whether the message arrived and never sends it again.
+        if (value.type === 'send_message' && !value.payload.settle) {
           window.attempts.push(value.payload);
           if (window.dropNext) { window.dropNext = false; window.disconnectDropped = () => socket.close(); return; }
         }
@@ -53,7 +54,9 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
   const separator = fixture.alice.cookie.indexOf('=');
   await page.context().addCookies([{ name: fixture.alice.cookie.slice(0, separator), value: fixture.alice.cookie.slice(separator + 1), url: fixture.url, httpOnly: true, sameSite: 'Strict' }]);
   const errors: string[] = []; let sockets = 0;
-  page.on('pageerror', error => errors.push(error.message)); page.on('websocket', () => sockets++);
+  // A navigation cuts short the Host list the page refreshes every 30 s; the page handles that rejection, but WebKit also reports
+  // it as a page error ("Fetch API cannot load … due to access control checks"). Every other page error fails the test.
+  page.on('pageerror', error => { if (!/\/v1\/remote\/hosts due to access control checks\.$/.test(error.message)) errors.push(error.message); }); page.on('websocket', () => sockets++);
   await page.goto(windowUrl);
   const input = page.getByTestId('prompt-input');
   // The movable Window and Team entries float over the short conversation, so a message action is pressed without a pointer hit test.

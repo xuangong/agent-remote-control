@@ -1,7 +1,7 @@
 import { act } from 'react';
 const act_ = (work: () => void) => act(async () => work());
 import { describe, expect, it, vi } from 'vitest';
-import type { BoardItem, Team, TeamTask } from '@orchardworks/agent-remote-protocol';
+import type { BoardItem, Team, TeamTask, WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { TaskDirectoryContext } from '@orchardworks/agent-client-web/react';
 import { render } from '../../test/setup.js';
 import { TasksList } from '../../conversation/assistant/TasksList.js';
@@ -75,5 +75,18 @@ describe('the task directory', () => {
     const directory = taskDirectory([], () => {}, undefined, groups);
     expect(directory.staff!('b_' + '1'.repeat(32))).toEqual([{ botId: 'b_' + '2'.repeat(32), name: 'Scribe' }]);
     expect(directory.staff!('b_' + '2'.repeat(32))).toEqual([]);
+  });
+
+  it('names a bot\'s chief and the standing bots it may move to: not itself and not its own staff', async () => {
+    const id = (n: number) => 'b_' + String(n).repeat(32);
+    const groups = [{ window: { id: 'g', title: 'g', revision: 1, views: [] }, bots: { rank: 'm', members: {
+      v1: { botId: id(1), name: 'Chief' }, v2: { botId: id(2), name: 'Tracker', chief: id(1) }, v3: { botId: id(3), name: 'Reviewer', chief: id(2) }, v4: { botId: id(4), name: 'Scribe' } } } }] as unknown as WindowGroup[];
+    const moved: Array<[string, string | null]> = [];
+    const directory = taskDirectory([], () => {}, async () => {}, groups, async (botId, chief) => { moved.push([botId, chief]); });
+    expect(directory.chief!(id(2))).toEqual({ current: { botId: id(1), name: 'Chief' }, choices: [{ botId: id(1), name: 'Chief' }, { botId: id(4), name: 'Scribe' }] });
+    expect(directory.chief!(id(4))).toEqual({ choices: [{ botId: id(1), name: 'Chief' }, { botId: id(2), name: 'Tracker' }, { botId: id(3), name: 'Reviewer' }] });
+    await directory.setChief!(id(3), null);
+    expect(moved).toEqual([[id(3), null]]);
+    expect(taskDirectory([], () => {}).setChief).toBeUndefined();
   });
 });

@@ -14,6 +14,10 @@ export interface TaskDirectory {
   staff?(botId: string): readonly { botId: string; name: string }[];
   /** The items of a standing bot's board, newest first (bots design 6). */
   board?(bot: { providerId: string; nativeSessionId: string }): readonly BoardItem[];
+  /** Who manages a standing bot now (undefined: the person) and the standing bots it may be moved to. */
+  chief?(botId: string): { current?: { botId: string; name: string }; choices: readonly { botId: string; name: string }[] };
+  /** The person moves a standing bot to another chief, or to themselves (null); the Relay tells the bots. */
+  setChief?(botId: string, chief: string | null): Promise<void>;
   /** The person stops a running task, takes it as done, or keeps its bot as a standing bot (bots design 10). */
   act(taskId: string, action: 'cancel_task' | 'mark_task_done' | 'keep_task'): Promise<void>;
 }

@@ -272,6 +272,51 @@ it("writes an assistant's mission in its details, keeping its other details, and
   } finally { await app.close(); }
 });
 
+it("lists an assistant's memory beside its mission, and edits or deletes a fact in its details, keeping its other details", async () => {
+  const group = botGroup('A');
+  const facts = [{ id: 'f0000000a', text: 'Releases ship on Thursdays.' }, { id: 'f0000000b', text: 'The build takes 9 minutes.' }];
+  group.bots!.members.A1 = { name: 'A1', label: 'Reviewer', mission: 'Review.', memory: facts };
+  const app = await open('bot-details-memory', [group], '/?mode=bot&section=A&bot=A1');
+  try {
+    const details = () => app.container.querySelector<HTMLElement>('.lab-assistant-details')!;
+    const items = () => [...details().querySelectorAll('.lab-assistant-memory li')].map(item => item.querySelector('span')!.textContent);
+    await until(() => expect(items()).toEqual(['Releases ship on Thursdays.', 'The build takes 9 minutes.']));
+    const sections = [...details().querySelectorAll('.lab-assistant-section h3')].map(heading => heading.textContent);
+    expect(sections.indexOf('Memory')).toBe(sections.indexOf('Mission') + 1);
+    const row = (text: string) => [...details().querySelectorAll<HTMLElement>('.lab-assistant-memory li')].find(item => item.textContent!.includes(text))!;
+    await act(async () => visibleButton(row('Thursdays'), 'Edit fact').click());
+    const field = () => details().querySelector<HTMLInputElement>('input[aria-label="Fact"]')!;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field(), 'Releases ship on Fridays.');
+      field().dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => visibleButton(details(), 'Save fact').click());
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ name: 'A1', label: 'Reviewer', mission: 'Review.',
+      memory: [{ id: 'f0000000a', text: 'Releases ship on Fridays.' }, facts[1]] }));
+    await act(async () => visibleButton(row('9 minutes'), 'Delete fact').click());
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1?.memory).toEqual([{ id: 'f0000000a', text: 'Releases ship on Fridays.' }]));
+    await act(async () => visibleButton(row('Fridays'), 'Delete fact').click());
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ name: 'A1', label: 'Reviewer', mission: 'Review.' }));
+    await until(() => expect(details().textContent).toContain('Nothing learned yet.'));
+  } finally { await app.close(); }
+});
+
+it('offers a standing bot\'s chief as the person or another standing bot, and moves it only when a different one is chosen', async () => {
+  const moves: Array<string | null> = [];
+  const chief = { current: { botId: 'b_' + '1'.repeat(32), name: 'Chief' }, choices: [{ botId: 'b_' + '1'.repeat(32), name: 'Chief' }, { botId: 'b_' + '2'.repeat(32), name: 'Scribe' }], move: (next: string | null) => { moves.push(next); } };
+  const container = await render(<AssistantDetails assistant={{ id: 'a', name: 'Tracker', chief }} surface="panel" onClose={() => {}} />);
+  const select = () => container.querySelector<HTMLSelectElement>('select[aria-label="Chief"]')!;
+  const save = () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Change chief')!;
+  expect([...select().options].map(option => option.textContent)).toEqual(['You', 'Chief', 'Scribe']);
+  expect(select().value).toBe('b_' + '1'.repeat(32));
+  expect(save().disabled).toBe(true);
+  const choose = async (value: string) => act(async () => { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select(), value); select().dispatchEvent(new Event('change', { bubbles: true })); });
+  await choose('b_' + '2'.repeat(32));
+  expect(save().disabled).toBe(false);
+  await act(async () => save().click());
+  await choose('');
+  await act(async () => save().click());
+  expect(moves).toEqual(['b_' + '2'.repeat(32), null]);
+});
+
 it("changes an assistant's avatar from its card, for every device", async () => {
   const app = await open('bot-details-avatar', [botGroup('A')], '/?mode=bot&section=A&bot=A1');
   try {

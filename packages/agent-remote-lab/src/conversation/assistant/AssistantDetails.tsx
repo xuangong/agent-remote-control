@@ -14,6 +14,8 @@ import { FilesList } from './FilesList.js';
 import { TasksList } from './TasksList.js';
 import { BoardList } from './BoardList.js';
 import { MissionEditor, type MissionChoice } from './MissionEditor.js';
+import { MemoryList, type MemoryChoice } from './MemoryList.js';
+import { ChiefPicker, type ChiefChoice } from './ChiefPicker.js';
 import './assistant.css';
 
 /** Everything the details show of one assistant; each section shows only when its part is known. */
@@ -35,6 +37,10 @@ export interface AssistantRef {
   readonly process?: ProcessModeChoice;
   /** The mission, for an assistant whose bot details the reader may change. */
   readonly mission?: MissionChoice;
+  /** The memory, for an assistant whose bot details the reader may change. */
+  readonly memory?: MemoryChoice;
+  /** Its chief, for a standing bot that the reader may move. */
+  readonly chief?: ChiefChoice;
   readonly settings?: ReactNode;
   readonly files?: readonly SessionFile[];
   readonly openFile?: (file: SessionFile, trigger: HTMLElement) => void;
@@ -60,6 +66,8 @@ export function AssistantDetails({ assistant, surface, onClose }: { assistant: A
         <SegmentedControl<ProcessMode> label={t('process.assistant')} options={options} value={assistant.process.mode} onChange={assistant.process.chooseForAssistant} /></div>
     </div>) : null}
     {assistant.mission ? section('mission', t('details.mission'), <MissionEditor mission={assistant.mission} />) : null}
+    {assistant.memory ? section('memory', t('details.memory'), <MemoryList memory={assistant.memory} />) : null}
+    {assistant.chief ? section('chief', t('details.chief'), <ChiefPicker chief={assistant.chief} />) : null}
     {assistant.board?.length ? section('work', t('details.work'), <BoardList board={assistant.board} />) : null}
     {assistant.where ? section('where', t('details.where'), <WhereItWorks where={assistant.where} />) : null}
     {assistant.sessions ? section('sessions', t('details.sessions'), <SessionsList sessions={assistant.sessions} />) : null}

@@ -3,7 +3,7 @@
 import { useCallback, useContext, useId, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { remoteSessionState, sessionActivityLabel, sessionNotice, sessionNoticeWords, type SessionFacts } from '@orchardworks/agent-client';
-import type { AgentCommand } from '@orchardworks/agent-remote-protocol';
+import type { AgentCommand, BotFact } from '@orchardworks/agent-remote-protocol';
 import { AgentCommandDetails, LocaleContext, PreviewDock, ProcessModeContext, SessionAttributions, TimelineLettersVisible, useTranslate } from '@orchardworks/agent-client-web/react';
 import { SessionViewFrame } from './SessionViewFrame.js';
 import { SessionViewOptions } from './SessionViewOptions.js';
@@ -39,6 +39,10 @@ export function SessionWorkbench({ assistant, details, conversationTitle: _conve
   const mission = processAssistant ? { text: processAssistant.details?.mission ?? '', save: (text: string) => {
     const { mission: _previous, ...rest } = processAssistant.details ?? {};
     processAssistant.update(text ? { ...rest, mission: text } : rest);
+  } } : undefined;
+  const memory = processAssistant ? { facts: processAssistant.details?.memory ?? [], save: (facts: readonly BotFact[]) => {
+    const { memory: _previous, ...rest } = processAssistant.details ?? {};
+    processAssistant.update(facts.length ? { ...rest, memory: [...facts] } : rest);
   } } : undefined;
   const [lettersVisible] = useLettersVisible();
   const session = suppliedSessionState ?? remoteSessionState(state, connectionStatus);
@@ -104,7 +108,7 @@ export function SessionWorkbench({ assistant, details, conversationTitle: _conve
       resourceScopeKey={JSON.stringify([state.agent?.id, selectedCommand.id])}
       onClose={() => setInspected(undefined)} /> : null}
     {tileChrome && !phone ? <TileDetailsPanel tileDetails={tileDetails} slotRef={setTileDetailsSlot} /> : null}
-    <ConversationDetails host={detailsHost} visible={visible} state={state} details={details} assistant={assistant} displayScope={displayScope} process={process} {...(mission ? { mission } : {})} {...(processAssistant?.details?.botId ? { botId: processAssistant.details.botId } : {})} session={session}
+    <ConversationDetails host={detailsHost} visible={visible} state={state} details={details} assistant={assistant} displayScope={displayScope} process={process} {...(mission ? { mission } : {})} {...(memory ? { memory } : {})} {...(processAssistant?.details?.botId ? { botId: processAssistant.details.botId } : {})} session={session}
       sessionStatus={sessionStatus} readOnly={readOnly} mutationBlocked={mutationBlocked} draftOnly={draftOnly} actions={actions} renderSessionSettingError={renderSessionSettingError}
       childrenFor={childrenFor} onOpenChildSession={onOpenChildSession} workspaceLink={workspaceLink} {...(nativeSession ? { nativeSession } : {})} />
   </SessionViewFrame>}</SessionAttributions></TimelineLettersVisible.Provider></ProcessModeContext.Provider>;

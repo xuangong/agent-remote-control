@@ -13,7 +13,7 @@ import { TrackViewScope } from '../kernel/useSessionAttention.js';
 import { ToastActivity } from '../kernel/Toast.js';
 import { useCallback, useMemo, type ReactNode } from 'react';
 import { taskDirectory } from '../features/tasks/task-directory.js';
-import { RemoteTeamClient } from '@orchardworks/agent-client';
+import { RemoteChainClient, RemoteTeamClient } from '@orchardworks/agent-client';
 import { workspaceFetch } from '../kernel/workspace-access.js';
 import { HttpPreviewClient } from '@orchardworks/agent-client';
 import { RecoveryScope } from '../kernel/conversation-recovery.js';
@@ -62,9 +62,11 @@ export function WorkbenchView({ scope }: { readonly scope: AppScope }) {
   const detailsBeside = useDetailsBeside(phone);
   const tasks = teamRoster?.baseUrl === baseUrl ? teamRoster.tasks : undefined;
   const taskClient = useMemo(() => new RemoteTeamClient(baseUrl, workspaceFetch), [baseUrl]);
+  const chainClient = useMemo(() => new RemoteChainClient(baseUrl, workspaceFetch), [baseUrl]);
   const tasksDirectory = useMemo(() => taskDirectory(tasks, worker => void openSession(worker, undefined, undefined, false, undefined, undefined, undefined, undefined, compactLayout ? 'primary' : undefined),
-    async (taskId, action) => { const team = await taskClient.action({ teamId: taskId, action }); updateTaskRoster(baseUrl, [...(tasks ?? []).filter(item => item.id !== team.id), team]); }, windowWorkspace.groups),
-    [tasks, openSession, compactLayout, taskClient, updateTaskRoster, baseUrl, windowWorkspace.groups]);
+    async (taskId, action) => { const team = await taskClient.action({ teamId: taskId, action }); updateTaskRoster(baseUrl, [...(tasks ?? []).filter(item => item.id !== team.id), team]); }, windowWorkspace.groups,
+    (botId, chief) => chainClient.act({ action: 'set_chief', botId, chief })),
+    [tasks, openSession, compactLayout, taskClient, chainClient, updateTaskRoster, baseUrl, windowWorkspace.groups]);
   return <TaskDirectoryContext.Provider value={tasksDirectory}><AssistantNamesContext.Provider value={assistantNames}><SharedFeedsContext.Provider value={sharedFeeds}><SharedDraftsContext.Provider value={sharedDrafts}><LiveConnectionsContext.Provider value={liveConnections.stable}><SessionDescriptionsContext.Provider value={sessionDescriptions}><SessionExcerptNavigation.Provider value={openExcerptSource}><SessionViewOperationsContext.Provider value={sessionViewOperations}><AskViewScope.Provider value={askView.execute}><WindowSessionBridgeContext.Provider value={windowWorkspace.sessionBridge}><WindowLayoutContext.Provider value={windowWorkspace.authority}><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={windowMode && !compactLayout && activeView === 'workbench'}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><PreviewScope client={previewClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><RecoveryScope.Provider value={readingPositions}><SessionConversationSurfaces scope={baseUrl} transport={transport} mode={navigation.mode}>{/* The frame sizes the rail and Bot mode's panels, leaving Window mode's own sidebar and inspector the room they take; the window's
      title names the assistant on screen, or Window mode's own title. */}
   <DesktopFrame surface={pageShown ? 'page' : windowMode ? 'window' : 'bot'} phone={phone}

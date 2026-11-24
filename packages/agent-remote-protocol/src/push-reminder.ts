@@ -16,10 +16,12 @@ export interface PushReminder {
   readonly kind: PushReminderKind;
   /** The assistant's name: its own, or the one every device calls it by; 1 to 80 characters. */
   readonly name: string;
+  /** For a staff bot's need, which the reminder groups under its chief: the staff bot's name, and `name` is the chief's. */
+  readonly member?: string;
   readonly locale: PushLocale;
   /** The conversation's address on the site, such as `/?mode=bot&section=…&bot=…`; at most 1024 characters. */
   readonly url: string;
-  /** One per session, up to 32 base64url characters: a newer reminder of the session replaces the older, at the push service and on screen. */
+  /** One per session, or one per chief for its staff bots' needs, up to 32 base64url characters: a newer reminder of the session replaces the older, at the push service and on screen. */
   readonly tag: string;
   /** When the Relay decided it, in milliseconds: of two reminders of one session that arrive out of order, the later stays. */
   readonly at: number;
@@ -32,7 +34,7 @@ export const PUSH_REMINDER_TTL_SECONDS: Readonly<Record<PushReminderKind, number
 /** How soon a push service delivers it (RFC 8030 `Urgency`): a need at once, a finished turn as the device's battery allows. */
 export const PUSH_REMINDER_URGENCY: Readonly<Record<PushReminderKind, 'high' | 'normal'>> = { needs_you: 'high', finished: 'normal' };
 
-const REMINDER_FIELDS = ['v', 'kind', 'name', 'locale', 'url', 'tag', 'at'];
+const REMINDER_FIELDS = ['v', 'kind', 'name', 'member', 'locale', 'url', 'tag', 'at'];
 export const encodePushReminder = (reminder: PushReminder): string => JSON.stringify(reminder);
 /** A reminder from a push's text, or undefined for anything else. */
 export function decodePushReminder(text: string | undefined | null): PushReminder | undefined {
@@ -40,8 +42,9 @@ export function decodePushReminder(text: string | undefined | null): PushReminde
   let value: Record<string, unknown>;
   try { value = JSON.parse(text); } catch { return undefined; }
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !REMINDER_FIELDS.includes(key))) return undefined;
-  const { v, kind, name, locale, url, tag, at } = value;
+  const { v, kind, name, member, locale, url, tag, at } = value;
   const valid = v === 1 && (kind === 'needs_you' || kind === 'finished') && typeof name === 'string' && name.length >= 1 && name.length <= 80
+    && (member === undefined || (typeof member === 'string' && member.length >= 1 && member.length <= 80))
     && (locale === 'en' || locale === 'zh') && typeof url === 'string' && url.length >= 2 && url.length <= 1024 && /^\/\?[^\s]*$/.test(url)
     && typeof tag === 'string' && /^[A-Za-z0-9_-]{1,32}$/.test(tag) && typeof at === 'number' && Number.isSafeInteger(at) && at >= 0;
   return valid ? value as unknown as PushReminder : undefined;

@@ -38,6 +38,7 @@ export const PushReminderSchema = Type.Object({
   v: Type.Literal(1),
   kind: Type.Union([Type.Literal('needs_you'), Type.Literal('finished')]),
   name: Type.String({ minLength: 1, maxLength: 80 }),
+  member: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
   locale: PushLocaleSchema,
   url: Type.String({ minLength: 2, maxLength: 1024, pattern: '^/\\?[^\\s]*$' }),
   tag: Type.String({ pattern: '^[A-Za-z0-9_-]{1,32}$' }),

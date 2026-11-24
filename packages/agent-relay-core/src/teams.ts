@@ -96,6 +96,7 @@ export class TeamBroker {
   private project(source: SavedTeam): Team {
     const saved = plain(source);
     const team: Team = structuredClone(stripPrivateTeamEvidence(saved));
+    if (team.task) team.task.botId = temporaryBotId(team.id);
     const unresolved = (saved.deliveryReceipts ?? []).flatMap(receipt => {
       if (receipt.status !== 'accepted' || receipt.acceptance !== undefined) return [];
       const { fingerprint: _hash, settledAt: _time, acceptance: _disposition, ...evidence } = receipt;

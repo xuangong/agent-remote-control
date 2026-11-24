@@ -48,6 +48,8 @@ export const TaskWorkspace = Type.Union([Type.Literal('same'), Type.Literal('rea
 export type TaskWorkspace = Static<typeof TaskWorkspace>;
 /** The task a Team carries. reminded: when the worker was last reminded to report. */
 export const TeamTask = Type.Object({ title: TaskTitle, brief: TaskBrief, doneWhen: Type.Optional(TaskDoneWhen), state: TaskState,
+  /** The temporary bot's id, which a board's items name it by; the Relay writes it when it lists the Team, so the page can name an item's assignee. */
+  botId: Type.Optional(BotId),
   /** The item of its chief's board the temporary bot was created for, which it writes and whose assignee it is. */
   item: Type.Optional(Type.Object({ board: BotId, key: Type.Integer({ minimum: 1 }), title: Type.String({ minLength: 1, maxLength: 120 }) }, object)),
   waiting: Type.Optional(TaskWaiting), workspace: Type.Optional(TaskWorkspace), reminded: Type.Optional(Type.Number()),

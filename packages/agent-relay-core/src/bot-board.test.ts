@@ -247,6 +247,8 @@ describe('the person\'s edits of a board', () => {
     const f = fixture();
     await write(f, [{ title: 'Track the build' }]);
     await f.call('chief', { action: 'create_bot', operationId: 'op', name: 'Regression', mission: 'Run it.', lifetime: 'temporary' });
+    // The page names a temporary bot by the id its items carry.
+    expect(f.broker.readForClient(f.task().id).task!.botId).toBe(temporaryBotId(f.task().id));
     await edit(f, { items: [{ key: 1, version: 1, assignee: ids.tracker }] });
     expect(told(f)).toEqual(['[Item "Track the build" changed · assigned to you]']);
     await edit(f, { items: [{ key: 1, version: f.item(1).version, assignee: temporaryBotId(f.task().id) }] });

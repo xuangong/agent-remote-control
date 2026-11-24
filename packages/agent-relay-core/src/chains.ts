@@ -5,7 +5,7 @@
  * go first.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { CHAIN_BOT_LIMIT, CHAIN_LIMIT, CHAIN_RETENTION_MS, type BotChain, type ChainThresholds, type TurnCause } from '@orchardworks/agent-remote-protocol';
+import { CHAIN_APPROVAL_LIMIT, CHAIN_BOT_LIMIT, CHAIN_LIMIT, CHAIN_RETENTION_MS, type BotChain, type ChainThresholds, type TurnCause } from '@orchardworks/agent-remote-protocol';
 import type { SavedTeam } from './team-delivery.js';
 import type { ChainScope } from './chain-scope.js';
 
@@ -52,11 +52,7 @@ export class BotChains {
     const limits = this.store.thresholds();
     const crossed = await this.store.change(chains => {
       const now = this.now();
-      let chain = chains.find(item => item.id === scope.id);
-      if (!chain) {
-        chain = { id: scope.id, cause: start.cause, bot: start.bot, bots: [start.bot], messages: 0, turns: 0, created: 0, depth: 0, usage: { tokens: 0 }, startedAt: now, updatedAt: now };
-        chains.push(chain);
-      }
+      const chain = chains.find(item => item.id === scope.id) ?? began(chains, scope.id, start, now);
       for (const bot of scope.bots) if (!chain.bots.includes(bot) && chain.bots.length < CHAIN_BOT_LIMIT) chain.bots.push(bot);
       chain.messages += scope.messages; chain.created += scope.created; chain.depth = Math.max(chain.depth, scope.depth);
       if (turn) {
@@ -75,6 +71,34 @@ export class BotChains {
     });
     if (crossed) this.passed(crossed.chain, crossed.passed);
   }
+  /** The person allowed a kind of action in a folder for the rest of a chain, which starts at this bot if it is new; the same choice twice is one. */
+  async approve(id: string, start: { cause: BotChain['cause']; bot: string }, kind: string, cwd: string): Promise<void> {
+    await this.store.change(chains => {
+      const now = this.now(), chain = chains.find(item => item.id === id) ?? began(chains, id, start, now);
+      if (chain.approvals?.some(item => item.kind === kind && item.cwd === cwd)) return;
+      if ((chain.approvals?.length ?? 0) >= CHAIN_APPROVAL_LIMIT) fail('This chain already holds the most standing approvals; revoke one first.');
+      (chain.approvals ??= []).push({ kind, cwd, at: now, applied: 0 });
+      chain.updatedAt = now;
+    });
+  }
+  /**
+   * Whether a standing approval of this chain covers the kind of action in this folder, counting the use. A chain the person stopped, or
+   * stopped for this bot, answers nothing; a chain past its retention is gone, and so are its approvals.
+   */
+  async covers(id: string, bot: string, kind: string, cwd: string): Promise<boolean> {
+    if (this.stopped(id, bot) || !this.store.read().some(chain => chain.id === id && chain.approvals?.some(item => item.kind === kind && item.cwd === cwd))) return false;
+    await this.store.change(chains => { chains.find(item => item.id === id)!.approvals!.find(item => item.kind === kind && item.cwd === cwd)!.applied++; });
+    return true;
+  }
+  /** The person ends a standing approval: the kind in that folder asks again. */
+  async revoke(id: string, kind: string, cwd: string): Promise<void> {
+    await this.store.change(chains => {
+      const chain = chains.find(item => item.id === id) ?? fail('No chain of this account has that id.');
+      const kept = (chain.approvals ?? []).filter(item => item.kind !== kind || item.cwd !== cwd);
+      if (kept.length === (chain.approvals?.length ?? 0)) fail('That approval is not standing in this chain.');
+      if (kept.length) chain.approvals = kept; else delete chain.approvals;
+    });
+  }
   thresholds(): ChainThresholds { return this.store.thresholds(); }
   setThresholds(thresholds: ChainThresholds): Promise<void> { return this.store.setThresholds(thresholds); }
   /** Marks a chain, or one bot's part of it, as stopped by the person. */
@@ -91,6 +115,11 @@ export class BotChains {
     return !!chain && (chain.stopped !== undefined || !!chain.stoppedBots?.includes(botId));
   }
   list(): BotChain[] { return [...this.store.read()].sort((a, b) => b.updatedAt - a.updatedAt); }
+}
+function began(chains: BotChain[], id: string, start: { cause: BotChain['cause']; bot: string }, now: number): BotChain {
+  const chain: BotChain = { id, cause: start.cause, bot: start.bot, bots: [start.bot], messages: 0, turns: 0, created: 0, depth: 0, usage: { tokens: 0 }, startedAt: now, updatedAt: now };
+  chains.push(chain);
+  return chain;
 }
 function prune(chains: BotChain[], now: number): void {
   const kept = chains.filter(chain => now - chain.updatedAt <= CHAIN_RETENTION_MS).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, CHAIN_LIMIT);

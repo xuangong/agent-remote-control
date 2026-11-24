@@ -176,6 +176,7 @@ export class TeamBroker {
       const result = await this.change(teams => stopInTeams(teams, action.chainId, botId, this.ports.now()));
       return { chainId: action.chainId, ...(botId ? { botId } : {}), ...result };
     }
+    if (action.action === 'revoke_approval') { await this.chains.revoke(action.chainId, action.kind, action.cwd); return { chainId: action.chainId, kind: action.kind, cwd: action.cwd }; }
     if (action.action === 'set_thresholds') { await this.chains.setThresholds(action.thresholds); return { thresholds: action.thresholds }; }
     if (action.action === 'update_board') {
       // What the bots are told of the person's edit is one chain of its own, caused by the person: not the timer chain the bot ran in last.
@@ -233,6 +234,9 @@ export class TeamBroker {
     if (call.action === 'bot_told') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained<BotMessageResult>(hostId, call.owner, call.cause, () => bots.told(hostId, call), reason => ({ outcome: 'forbidden', reason })); }
     if (call.action === 'chain_turn') { const bots = this.bots ?? fail(unavailableAssistants), found = this.chains.find(this.ports.read(), { hostId, ...call.owner }, call.cause);
       await this.chains.record(chainScope(found.id), { cause: found.cause, bot: bots.callerKey(hostId, call.owner) }, { tokens: call.tokens, ...(call.costUsd !== undefined ? { costUsd: call.costUsd } : {}) }); return { chain: found.id }; }
+    if (call.action === 'chain_approval') { const bots = this.bots ?? fail(unavailableAssistants), found = this.chains.find(this.ports.read(), { hostId, ...call.owner }, call.cause), bot = bots.callerKey(hostId, call.owner);
+      if (!call.grant) return { allowed: await this.chains.covers(found.id, bot, call.kind, call.cwd) };
+      await this.chains.approve(found.id, { cause: found.cause, bot }, call.kind, call.cwd); return { chain: found.id }; }
     if (call.action === 'set_timer') return (this.bots ?? fail(unavailableAssistants)).setTimer(hostId, call);
     if (call.action === 'board') return (this.bots ?? fail(unavailableAssistants)).readBoard(hostId, call);
     if (call.action === 'update_board') return (this.bots ?? fail(unavailableAssistants)).updateBoard(hostId, call);

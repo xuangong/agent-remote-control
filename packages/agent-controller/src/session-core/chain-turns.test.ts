@@ -62,15 +62,17 @@ describe('the causes and usage of a bot\'s turns', () => {
 
 const said = (text: string, messageId?: string) => event({ type: 'timeline', provider: 'fake', item: { type: 'assistant_message', text, ...(messageId ? { messageId } : {}) } });
 const tool = () => event({ type: 'timeline', provider: 'fake', item: { type: 'tool_call', callId: 'c', name: 'shell', detail: { type: 'unknown', input: null, output: null }, status: 'completed', error: null } as never });
-const message = (messageId: string, replyTo?: string) => assistantMessageText({ messageId, from: 'Tracker', ...(replyTo ? { replyTo } : {}), body: 'Is it cut?' });
+const message = (messageId: string, replyTo?: string, final?: boolean) => assistantMessageText({ messageId, from: 'Tracker', ...(replyTo ? { replyTo } : {}), ...(final ? { final } : {}), body: 'Is it cut?' });
 
 describe('which message a turn answers', () => {
   it('names the one message from another bot that started the turn, unless it is a reply or shares the turn with another input', () => {
     expect(inputCause({ text: message('m0123456789ab') })).toEqual({ kind: 'framed', answers: 'm0123456789ab' });
     // Standing instructions are not messages.
     expect(inputCause({ text: joinTaskInputs([standingInstructionsText('Review.'), message('m0123456789ab')]) })).toEqual({ kind: 'framed', answers: 'm0123456789ab' });
-    // A reply never earns a reply, and several messages are answered one by one with reply_to.
-    expect(inputCause({ text: message('m0123456789ab', 'm0000000000aa') })).toEqual({ kind: 'framed' });
+    // A message sent as a reply (a review request after the receiver's question) is a request like any other and earns its answer.
+    expect(inputCause({ text: message('m0123456789ab', 'm0000000000aa') })).toEqual({ kind: 'framed', answers: 'm0123456789ab' });
+    // The final answer of a turn ends the exchange, and several messages are answered one by one with reply_to.
+    expect(inputCause({ text: message('m0123456789ab', 'm0000000000aa', true) })).toEqual({ kind: 'framed' });
     expect(inputCause({ text: joinTaskInputs([message('m0123456789ab'), message('m0123456789ac')]) })).toEqual({ kind: 'framed' });
     expect(inputCause({ text: standingInstructionsText('Review.') })).toEqual({ kind: 'framed' });
     expect(inputCause({ text: 'Please look.', messageId: 'u1' })).toEqual({ kind: 'person', messageId: 'u1' });

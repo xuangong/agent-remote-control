@@ -113,7 +113,7 @@ export class AssistantMessages {
     return this.deliver(from, to, call);
   }
   /** Queues a message from a bot (standing or temporary) in a standing bot's inbox. */
-  async deliver(from: { key: string; name: string }, to: Assistant, call: { operationId: string; text: string; replyTo?: string; frame?: 'person'; tag?: string }): Promise<BotMessageResult> {
+  async deliver(from: { key: string; name: string }, to: Assistant, call: { operationId: string; text: string; replyTo?: string; final?: boolean; frame?: 'person'; tag?: string }): Promise<BotMessageResult> {
     const sent = await this.broker.change(teams => {
       const now = this.broker.ports.now();
       const inbox = this.inboxes.prepare(teams, to, now) ?? fail('Team capacity reached.');
@@ -131,7 +131,7 @@ export class AssistantMessages {
       const seat = inbox.members[0]!, messageId = `m${digest([inbox.id, from.key, call.operationId]).slice(0, 12)}`;
       const message = { id: digest(['assistant-message', inbox.id, messageId]), from: seat.id, to: seat.id, status: 'queued' as const, createdAt: now,
         // The person's words to a bot are framed as what they are, from the record; any other text is a bot's message.
-        text: call.frame === 'person' ? personWroteText({ bot: from.name, text: call.text }) : assistantMessageText({ messageId, from: from.name, ...(call.replyTo ? { replyTo: call.replyTo } : {}), ...(call.tag ? { tag: call.tag } : {}), body: call.text }) };
+        text: call.frame === 'person' ? personWroteText({ bot: from.name, text: call.text }) : assistantMessageText({ messageId, from: from.name, ...(call.replyTo ? { replyTo: call.replyTo, ...(call.final ? { final: true } : {}) } : {}), ...(call.tag ? { tag: call.tag } : {}), body: call.text }) };
       assertTeamQueueCapacity(inbox, message);
       inbox.messages.push(message); pushBackTimers(inbox, now);
       recent.push({ id: messageId, from: from.key, hop, operationId: call.operationId });

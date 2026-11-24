@@ -52,7 +52,7 @@ describe('a bot answers from its final text', () => {
     expect(reply!.body).toContain('read_bot');
   });
 
-  it('answers nothing when it already messaged its sender, when a reply started the turn, or when two messages arrived together', async () => {
+  it('answers nothing when it already messaged its sender, when a final answer started the turn, or when two messages arrived together', async () => {
     const f = await setup();
     const first = await f.ask('One?', 'q1');
     const trackerTools = new BotTools({ request: call => f.h.host(call), tasks: () => true, title: async () => 'Tracker' });
@@ -62,8 +62,8 @@ describe('a bot answers from its final text', () => {
     f.session.push(input(assistantMessageText({ messageId: first, from: 'Chief', body: 'One?' })));
     f.session.push(said('Yes, cut.'));
     f.session.push(done());
-    // A reply, and two messages together, are answered by no final text.
-    f.session.push(input(assistantMessageText({ messageId: 'm0123456789ab', from: 'Chief', replyTo: first, body: 'Thanks.' })));
+    // A final answer, and two messages together, are answered by no final text.
+    f.session.push(input(assistantMessageText({ messageId: 'm0123456789ab', from: 'Chief', replyTo: first, final: true, body: 'Thanks.' })));
     f.session.push(said('You are welcome.'));
     f.session.push(done());
     const [second, third] = [await f.ask('Two?', 'q2'), await f.ask('Three?', 'q3')];
@@ -73,6 +73,20 @@ describe('a bot answers from its final text', () => {
     await f.settle();
     const heard = (await f.chiefInputs()).filter((item): item is typeof item & { kind: 'assistant'; body: string } => item.kind === 'assistant').map(item => item.body);
     expect(heard).toEqual(['Yes, cut.']);
+  });
+});
+
+describe('a request sent as a reply', () => {
+  it('earns its answer between turns, as the review verdict of a builder that answered a question and then asked for the review', async () => {
+    const f = await setup();
+    const request = await f.ask('Now review my change?', 'q1');
+    f.session.push(input(assistantMessageText({ messageId: request, from: 'Chief', replyTo: 'm0000000000aa', body: 'Now review my change?' })));
+    f.session.push(said('Approved.'));
+    f.session.push(done());
+    await f.settle();
+    const heard = (await f.chiefInputs()).filter((item): item is typeof item & { kind: 'assistant'; body: string; final?: true } => item.kind === 'assistant');
+    expect(heard.map(item => item.body)).toEqual(['Approved.']);
+    expect(heard[0]!.final).toBe(true);
   });
 });
 

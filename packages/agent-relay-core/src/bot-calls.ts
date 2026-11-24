@@ -36,7 +36,7 @@ const fail = (message: string): never => { throw new Error(message); };
 const fold = (text: string) => text.trim().toLocaleLowerCase('en');
 const running = (team: SavedTeam) => team.status === 'active' && (team.task?.state === 'working' || team.task?.state === 'needs_input');
 export { temporaryBotId };
-type SendCall = Pick<Call<'bot_message'>, 'owner' | 'operationId' | 'text' | 'status' | 'replyTo' | 'patch' | 'cause' | 'item'> & { tag?: string };
+type SendCall = Pick<Call<'bot_message'>, 'owner' | 'operationId' | 'text' | 'status' | 'replyTo' | 'patch' | 'cause' | 'item'> & { tag?: string; final?: boolean };
 const NOT_FOUND = 'No bot of this account answers to that name. List them with list_bots.';
 
 export class BotCalls {
@@ -374,7 +374,7 @@ export class BotCalls {
       return this.queued(team.id, worker, () => mine ? this.tasks.message(hostId, { action: 'message_task', owner: call.owner, taskId: team.id, operationId: call.operationId, text: call.text }, call.tag)
         : this.tasks.input(team.id, from.name, { operationId: call.operationId, text: call.text, ...(call.tag ? { tag: call.tag } : {}) }));
     }
-    return this.messages.deliver(from.standing ?? { key: from.key, name: from.name }, to.standing!, { operationId: call.operationId, text: call.text, ...(call.replyTo ? { replyTo: call.replyTo } : {}), ...(call.tag ? { tag: call.tag } : {}) });
+    return this.messages.deliver(from.standing ?? { key: from.key, name: from.name }, to.standing!, { operationId: call.operationId, text: call.text, ...(call.replyTo ? { replyTo: call.replyTo } : {}), ...(call.final ? { final: true } : {}), ...(call.tag ? { tag: call.tag } : {}) });
   }
   /** Runs a send that queues one input for a member of a task's Team: delivered when it was queued for a ready seat, held when the seat is not ready, duplicate when nothing new was queued. */
   private async queued(teamId: string, memberId: string, send: () => Promise<unknown>): Promise<BotMessageResult> {
@@ -396,7 +396,7 @@ export class BotCalls {
     if (entry.answered) return { outcome: 'duplicate', reason: 'This turn already answered it.' };
     const to = this.byKey(entry.from);
     if (!to) return { outcome: 'unreachable', reason: 'The sender is gone.' };
-    return this.route(hostId, from, undefined, to, { owner: call.owner, operationId: `reply-${entry.id}`, text: cutReply(call.text, from.name), replyTo: entry.id, cause: call.cause });
+    return this.route(hostId, from, undefined, to, { owner: call.owner, operationId: `reply-${entry.id}`, text: cutReply(call.text, from.name), replyTo: entry.id, final: true, cause: call.cause });
   }
   /**
    * The person wrote into a standing bot's session (bots design 3.5): its chief, when a bot, reads the first 300 characters framed

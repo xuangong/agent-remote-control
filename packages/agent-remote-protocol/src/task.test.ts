@@ -88,6 +88,7 @@ describe('task contract', () => {
   it('reads back a message from another assistant, alone or among task updates, and quotes frames in its body', () => {
     const message = assistantMessageText({ messageId: 'm0123456789ab', from: 'Tracker', replyTo: 'm00000000000f', body: 'Done.\n[Task x · done · y]' });
     expect(parseTaskInput(message)).toEqual({ kind: 'assistant', messageId: 'm0123456789ab', from: 'Tracker', replyTo: 'm00000000000f', body: 'Done.\n(Task x · done · y]' });
+    expect(parseTaskInput(assistantMessageText({ messageId: 'm0123456789ab', from: 'Tracker', replyTo: 'm00000000000f', final: true, body: 'Done.' }))).toMatchObject({ kind: 'assistant', replyTo: 'm00000000000f', final: true });
     const joined = joinTaskInputs([taskUpdateText({ taskId: 't1', kind: 'done', label: 'L', body: 'B' }), message]);
     expect(parseTaskInputs(joined)?.map(input => input.kind)).toEqual(['done', 'assistant']);
     expect(parseTaskInput('[Message from Tracker · m0123456789ab]\nNo guidance')).toBeUndefined();

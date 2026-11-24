@@ -20,7 +20,7 @@ export class TurnCauses {
 
 /**
  * The cause an input gives its turn: framed input is the Relay's, anything else the person's, named by its message. A framed input
- * that is exactly one message from another bot, and not itself a reply, also names that message: the turn's final text answers it
+ * that is exactly one message from another bot, and not the final answer of a turn, also names that message: the turn's final text answers it
  * (bots design 3.3). Standing instructions are not messages; anything else beside the message means the turn answers none. Input that
  * is only what the person asked from another conversation (an answer session's) makes the turn's final text the answer to them.
  */
@@ -29,7 +29,7 @@ export function inputCause(item: { text: string; messageId?: string; clientMessa
   if (inputs) {
     const messages = inputs.filter(input => input.kind !== 'standing'), only = messages.length === 1 ? messages[0] : undefined;
     if (messages.length > 0 && messages.every(input => input.kind === 'ask')) return { kind: 'framed', asked: true };
-    return only?.kind === 'assistant' && !only.replyTo ? { kind: 'framed', answers: only.messageId } : { kind: 'framed' };
+    return only?.kind === 'assistant' && !only.final ? { kind: 'framed', answers: only.messageId } : { kind: 'framed' };
   }
   return { kind: 'person', messageId: item.messageId ?? item.clientMessageId ?? createHash('sha256').update(item.text).digest('hex').slice(0, 64) };
 }

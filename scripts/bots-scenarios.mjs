@@ -193,8 +193,9 @@ if (run('repository') && reviewer) {
   check('repository: the chief told the reviewer the remote and branch by message', told);
   const answered = await until('the reviewer to answer about the branch', () => received(chief.address, 'shared.txt') && received(chief.address, `[Message from ${reviewer.name}`), 8 * 60_000).catch(() => false);
   check('repository: the reviewer fetched the branch and answered the chief', answered);
-  // An attached file is listed with its sha256 after the sender's words; this reviewer is new, so it has received none.
-  check('repository: no file was attached, since the repository is shared', !received(reviewer.address, 'sha256'));
+  // An attached file is listed with its sha256 after the sender's words: the input that named the branch carries none.
+  const named = controller('session', 'read', reviewer.address, '--search', branch, '--limit', '10').entries ?? [];
+  check('repository: no file was attached, since the repository is shared', named.length > 0 && named.every(entry => !(entry.text ?? '').includes('sha256')));
 }
 
 if (run('copilot')) {

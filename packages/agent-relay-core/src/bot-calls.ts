@@ -79,6 +79,8 @@ export class BotCalls {
 
   async create(hostId: string, call: Call<'create_bot'>) {
     const self = this.caller(hostId, call.owner);
+    // A chief manages at most twelve bots directly, standing and temporary alike (bots design 2.5).
+    if (self.standing && this.span(self.standing) >= BOT_SPAN_LIMIT) fail(`You already manage ${BOT_SPAN_LIMIT} bots; retire one, or give some to a sub-chief.`);
     const item = call.item === undefined ? undefined : this.ownItem(self, call.item);
     if (call.lifetime === 'standing') return this.createStanding(hostId, self, call, item);
     const brief = call.message ? `${call.mission}\n\n${call.message}` : call.mission;

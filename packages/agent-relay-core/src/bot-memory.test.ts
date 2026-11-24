@@ -174,4 +174,12 @@ describe('changing a chief', () => {
     await f.broker.chainAction({ action: 'set_chief', botId: f.id('Scribe'), chief: null });
     expect(f.chiefOf('Scribe')).toBeUndefined();
   });
+
+  it('refuses a thirteenth bot a chief creates, counting its standing staff and its temporary bots at work', async () => {
+    const f = fixture(12);
+    for (let index = 0; index < 11; index++) f.members[`v${4 + index}`]!.chief = f.id('Reviewer');
+    await f.call({ action: 'create_bot', owner: f.as('Reviewer'), operationId: 'twelfth', name: 'Helper', mission: 'Help.', lifetime: 'temporary' });
+    await expect(f.call({ action: 'create_bot', owner: f.as('Reviewer'), operationId: 'thirteenth', name: 'Helper 2', mission: 'Help.', lifetime: 'temporary' })).rejects.toThrow('already manage 12 bots');
+    await expect(f.call({ action: 'create_bot', owner: f.as('Reviewer'), operationId: 'standing', name: 'Scribe 2', mission: 'Write.', lifetime: 'standing' })).rejects.toThrow('already manage 12 bots');
+  });
 });

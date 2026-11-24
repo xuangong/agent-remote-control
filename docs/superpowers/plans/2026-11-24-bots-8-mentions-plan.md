@@ -181,6 +181,15 @@ As built (8e):
   staff, answer staff questions first. Asks arrive in answer sessions. Lasting facts go to memory, purpose to the mission.
 - Rerun `pnpm test:bots` with Claude Code and Codex.
 
+As built (8f):
+
+- `BOT_INSTRUCTIONS_VERSION` is 5 and the base text is shorter and more abstract: it coordinates (short turns, plan on the board with a why, work
+  of any size to temporary bots or staff naming the item, staff questions first), reads the board whenever it starts, resumes or was compacted,
+  knows that bots' messages arrive between turns and the person's mentions are answered in sessions of their own, keeps lasting facts in memory
+  and purpose in the mission, reports by message (300 characters) with links on the item, and moves code through a shared repository before a
+  git bundle. A bot's standing instructions are resent when the version or hash changes, as before.
+- Test: `bots.test.ts` checks the version and that the habits are in the text and the text stays short. Real-CLI scenarios were not rerun.
+
 ## 8g. The Workbench
 
 - A bot's details show its board first: the plan note, then open items as a tree (assignee, status, links, result); an item

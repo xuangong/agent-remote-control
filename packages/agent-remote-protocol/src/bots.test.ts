@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
-import { assistantMessageText, attachmentLines, Board, BoardItem, BOT_MISSION_LIMIT, itemChangedText, itemTagText, quoteFrames, timerText, BotAttachment, BotMessageResult, BotRecord, BotFact, BotMemory, BOT_MEMORY_FACTS, botInstructions, chiefChangedText, isChainAction, standingInstructionsText, isTeamHostCall, isTeam, isTeamSeat, isTeamAskRequest, askText, parseTaskInputs, botIdentity, botPlacement, WindowBotDetails } from './index.js';
+import { assistantMessageText, attachmentLines, Board, BoardItem, BOT_MISSION_LIMIT, BOT_INSTRUCTIONS_VERSION, itemChangedText, itemTagText, quoteFrames, timerText, BotAttachment, BotMessageResult, BotRecord, BotFact, BotMemory, BOT_MEMORY_FACTS, botInstructions, chiefChangedText, isChainAction, standingInstructionsText, isTeamHostCall, isTeam, isTeamSeat, isTeamAskRequest, askText, parseTaskInputs, botIdentity, botPlacement, WindowBotDetails } from './index.js';
 
 const id = 'b_' + 'a'.repeat(32);
 
@@ -105,6 +105,13 @@ describe('a bot\'s memory', () => {
     expect(botInstructions(undefined, facts)).not.toContain('Your mission');
     expect(botInstructions('Coordinate.', [])).toBe(botInstructions('Coordinate.'));
     expect(standingInstructionsText('Coordinate.', facts)).toContain(botInstructions('Coordinate.', facts));
+  });
+
+  it('teaches the coordinating habits of version 5 in a short text', () => {
+    expect(BOT_INSTRUCTIONS_VERSION).toBe(5);
+    const text = botInstructions(undefined);
+    for (const habit of ['read your board first', 'update_board', 'remember', 'update_mission', 'under 300 characters', 'git bundle', 'between turns']) expect(text).toContain(habit);
+    expect(text.length).toBeLessThan(3200);
   });
 
   it('is told to the three bots of a change of chief in lines written from the record, which a name cannot forge', () => {

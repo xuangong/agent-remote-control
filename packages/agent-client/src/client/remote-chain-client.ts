@@ -1,4 +1,4 @@
-import { isBotChain, type ChainAction, type ChainView } from '@orchardworks/agent-remote-protocol';
+import { isBoardWriteResult, isBotChain, type BoardItemEdit, type BoardPlanEdit, type BoardWriteResult, type ChainAction, type ChainView } from '@orchardworks/agent-remote-protocol';
 import { withMessageKey } from '../presentation/locale-choice.js';
 
 /** The account's chains and the person's decisions on them (bots design 7). Decisions are never retried automatically. */
@@ -19,4 +19,10 @@ export class RemoteChainClient {
     return { chains: value.chains, names: value.names, paused: value.paused, kinds: value.kinds ?? {}, thresholds: value.thresholds ?? {} };
   }
   async act(action: ChainAction): Promise<void> { await this.request('/action', action); }
+  /** The person edits a standing bot's items and plan note; the answer says what a stale edit overwrote. */
+  async writeBoard(botId: string, edit: { items?: readonly BoardItemEdit[]; plan?: BoardPlanEdit }): Promise<BoardWriteResult> {
+    const value = await this.request('/action', { action: 'update_board', botId, ...edit });
+    if (!isBoardWriteResult(value)) throw withMessageKey(new Error('The audit is unavailable.'), 'client.error.auditUnavailable');
+    return value;
+  }
 }

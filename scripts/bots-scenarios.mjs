@@ -1,7 +1,7 @@
 // Behaviour scenarios of bots (bots design 11): real Claude Code or Codex sessions on this checkout's local instance, driven as the
 // person drives them, judged by facts the Relay and the sessions record, never by the wording of a reply.
 // Usage, from the checkout root, with the instance running (`pnpm local up`):
-//   pnpm test:bots [claude|codex] [scenario ...]        scenarios: temporary, standing, shared, bundle, copilot (default: all, in order)
+//   pnpm test:bots [claude|codex] [scenario ...]        scenarios: temporary, standing, shared, bundle, repository, copilot (default: all, in order)
 // It creates its own sessions in the instance workspace and its own group, and leaves them for reading in the page.
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -127,7 +127,7 @@ if (run('temporary')) {
 }
 
 let reviewer;
-if (run('standing') || run('shared') || run('bundle')) {
+if (run('standing') || run('shared') || run('bundle') || run('repository')) {
   // An chief creates a standing bot with a mission; it reports in, works with the chief by message, takes the person's
   // lasting change into its own mission, and keeps a work item to its end.
   const target = `review-${tag}.txt`;
@@ -179,6 +179,22 @@ if (run('bundle') && reviewer) {
   check('bundle: the reviewer downloaded the verified file', !!downloaded, downloaded ?? 'none');
   const answered = await until('the reviewer to answer about the bundle', () => received(chief.address, 'change.txt') && received(chief.address, `[Message from ${reviewer.name}`), 6 * 60_000).catch(() => false);
   check('bundle: the reviewer answered the chief about the change', answered);
+}
+
+if (run('repository') && reviewer) {
+  // Code moves through a repository both bots reach, the first way the base instructions name: the chief pushes a branch and
+  // says where it is in a message without a file; the reviewer fetches it and answers. A bare repository stands for the remote.
+  const remote = file(`remote-${tag}.git`), repo = file(`shared-${tag}`), branch = `shared-${tag}`;
+  execFileSync('/bin/sh', ['-c', `git init -q --bare '${remote}' && git init -q '${repo}' && cd '${repo}' && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m base && git remote add origin '${remote}' && git push -q origin HEAD:main`]);
+  await say(chief.address, `In shared-${tag} (a git repository in your working directory whose remote "origin" is shared with other bots), create a branch named ${branch} with one commit adding shared.txt containing the word shared, push it to origin, then message ${reviewer.name}: give it the remote ${remote} and the branch, and ask it to fetch the branch, check that it adds shared.txt, and answer you. Attach no file.`);
+  const pushed = await until('the branch on the shared remote', () => { try { return execFileSync('git', ['--git-dir', remote, 'rev-parse', '--verify', `refs/heads/${branch}`], { encoding: 'utf8' }).trim(); } catch { return undefined; } }, 6 * 60_000).catch(() => undefined);
+  check('repository: the chief pushed its branch to the shared remote', !!pushed, pushed ?? 'none');
+  const told = await until('the reviewer to hear where the branch is', () => received(reviewer.address, branch), 6 * 60_000).catch(() => false);
+  check('repository: the chief told the reviewer the remote and branch by message', told);
+  const answered = await until('the reviewer to answer about the branch', () => received(chief.address, 'shared.txt') && received(chief.address, `[Message from ${reviewer.name}`), 8 * 60_000).catch(() => false);
+  check('repository: the reviewer fetched the branch and answered the chief', answered);
+  // An attached file is listed with its sha256 after the sender's words; this reviewer is new, so it has received none.
+  check('repository: no file was attached, since the repository is shared', !received(reviewer.address, 'sha256'));
 }
 
 if (run('copilot')) {

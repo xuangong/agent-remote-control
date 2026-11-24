@@ -386,10 +386,7 @@ export class BotCalls {
       return this.queued(team.id, worker, () => mine ? this.tasks.message(hostId, { action: 'message_task', owner: call.owner, taskId: team.id, operationId: call.operationId, text: call.text }, call.tag, ack.ack)
         : this.tasks.input(team.id, from.name, { operationId: call.operationId, text: call.text, ...(call.tag ? { tag: call.tag } : {}), ...ack }));
     }
-    // What answers an earlier request, and a request to a peer (neither its chief nor its staff) the page shows as "Asked": by who sends it to whom, not by its words.
-    const answerOf = call.replyTo ?? (call.cause?.kind === 'framed' ? call.cause.answers : undefined);
-    const request = !!from.standing && !answerOf && !call.final && call.status === undefined && to.key !== chief?.key && from.standing?.chief !== to.key && to.standing!.chief !== from.key;
-    return this.messages.deliver(from.standing ?? { key: from.key, name: from.name }, to.standing!, { ...(request ? { request: true as const } : {}), ...(answerOf ? { answerOf } : {}), operationId: call.operationId, text: call.text, ...(call.replyTo ? { replyTo: call.replyTo } : {}), ...(call.final ? { final: true } : {}), ...(call.tag ? { tag: call.tag } : {}), ...(call.status === 'ack' ? { ack: true as const } : {}) });
+    return this.messages.deliver(from.standing ?? { key: from.key, name: from.name }, to.standing!, { operationId: call.operationId, text: call.text, ...(call.replyTo ? { replyTo: call.replyTo } : {}), ...(call.final ? { final: true } : {}), ...(call.tag ? { tag: call.tag } : {}), ...(call.status === 'ack' ? { ack: true as const } : {}) });
   }
   /** Runs a send that queues one input for a member of a task's Team: delivered when it was queued for a ready seat, held when the seat is not ready, duplicate when nothing new was queued. */
   private async queued(teamId: string, memberId: string, send: () => Promise<unknown>): Promise<BotMessageResult> {

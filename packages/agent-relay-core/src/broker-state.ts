@@ -92,6 +92,8 @@ export function createBrokerState(options: BrokerStateOptions): BrokerState {
   const chainThresholds = initialState?.chainThresholds && structuredClone(initialState.chainThresholds);
   if (chainThresholds && !isChainThresholds(chainThresholds)) throw new Error('Invalid saved chain thresholds.');
   const savedTeams: SavedTeam[] = structuredClone(initialState?.teams ?? []);
+  // The work items of an earlier Relay are not carried over to boards.
+  for (const team of savedTeams) if (team.inbox) delete (team.inbox as { work?: unknown }).work;
   if (!savedTeams.every(validSavedTeam)) throw new Error('Invalid saved Teams.');
   for (const team of savedTeams) { compactTeamDeliveries(team, now()); trimTeamDeliveryReceipts(team, TEAM_RECORD_BYTES); }
 

@@ -39,10 +39,10 @@ it('folds a bot\'s standing instructions into one quiet line, never the person\'
 });
 
 it('folds a due timer into one quiet line that opens to the bot\'s open work', async () => {
-  const container = await render(<UserMessageItem item={message(timerText({ name: 'work', work: [{ title: 'Release notes', phase: 'waiting', next: 'Publish' }] }))} />);
+  const container = await render(<UserMessageItem item={message(timerText({ name: 'work', items: [{ title: 'Release notes', status: 'waiting', report: 'Publish' }] }))} />);
   const folded = container.querySelector('details[data-timer="work"]')!;
   expect(folded.querySelector('summary')?.textContent).toBe('Timer "work" is due');
-  expect(folded.textContent).toContain('Release notes · waiting · next: Publish');
+  expect(folded.textContent).toContain('Release notes · waiting · Publish');
   expect(container.querySelector('.agent-message-user')).toBeNull();
 });
 

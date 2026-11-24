@@ -7,6 +7,7 @@ import { roomAction, Rooms } from './rooms.js';
 import { BotInboxes } from './inboxes.js';
 import { BotCalls } from './bot-calls.js';
 import { BotWork } from './bot-work.js';
+import { BotBoard } from './bot-board.js';
 import { BotChains, memoryChains, type ChainStore } from './chains.js';
 import { chainScope, inChain, seenBefore, stampChain, temporaryBotId } from './chain-scope.js';
 import { actOnBot, stopInTeams } from './audit.js';
@@ -70,7 +71,7 @@ export class TeamBroker {
       const lent = { ports, change: <T>(update: (teams: SavedTeam[]) => T) => this.change(update), provision: (teamId: string, memberId: string) => this.provision(teamId, memberId) };
       this.inboxes = new BotInboxes(lent, ports.assistants); this.assistants = new AssistantMessages(lent, ports.assistants, this.inboxes); this.rooms = new Rooms(lent, ports.assistants);
       this.work = new BotWork(lent, this.inboxes, this.chains);
-      if (this.tasks) this.bots = new BotCalls(lent, ports.assistants, this.tasks, this.assistants, this.inboxes, this.rooms, this.work);
+      if (this.tasks) this.bots = new BotCalls(lent, ports.assistants, this.tasks, this.assistants, this.inboxes, this.rooms, this.work, new BotBoard(lent, this.inboxes, this.work));
       this.rooms.arm(); this.work.arm();
     }
   }
@@ -218,7 +219,9 @@ export class TeamBroker {
     if (call.action === 'bot_told') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained<BotMessageResult>(hostId, call.owner, call.cause, () => bots.told(hostId, call), reason => ({ outcome: 'forbidden', reason })); }
     if (call.action === 'chain_turn') { const bots = this.bots ?? fail(unavailableAssistants), found = this.chains.find(this.ports.read(), { hostId, ...call.owner }, call.cause);
       await this.chains.record(chainScope(found.id), { cause: found.cause, bot: bots.callerKey(hostId, call.owner) }, { tokens: call.tokens, ...(call.costUsd !== undefined ? { costUsd: call.costUsd } : {}) }); return { chain: found.id }; }
-    if (call.action === 'update_work' || call.action === 'complete_work' || call.action === 'set_timer') return (this.bots ?? fail(unavailableAssistants)).keepWork(hostId, call);
+    if (call.action === 'set_timer') return (this.bots ?? fail(unavailableAssistants)).setTimer(hostId, call);
+    if (call.action === 'board') return (this.bots ?? fail(unavailableAssistants)).readBoard(hostId, call);
+    if (call.action === 'update_board') return (this.bots ?? fail(unavailableAssistants)).updateBoard(hostId, call);
     if (call.action === 'update_mission') return (this.bots ?? fail(unavailableAssistants)).updateMission(hostId, call);
     if (call.action === 'list_bots') return (this.bots ?? fail(unavailableAssistants)).list(hostId, call);
     if (call.action === 'stop_bot' || call.action === 'retire_bot') return (this.bots ?? fail(unavailableAssistants)).manageStaff(hostId, call);

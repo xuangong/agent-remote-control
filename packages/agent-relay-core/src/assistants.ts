@@ -109,7 +109,7 @@ export class AssistantMessages {
     return this.deliver(from, to, call);
   }
   /** Queues a message from a bot (standing or temporary) in a standing bot's inbox. */
-  async deliver(from: { key: string; name: string }, to: Assistant, call: { operationId: string; text: string; replyTo?: string; frame?: 'person' }): Promise<BotMessageResult> {
+  async deliver(from: { key: string; name: string }, to: Assistant, call: { operationId: string; text: string; replyTo?: string; frame?: 'person'; tag?: string }): Promise<BotMessageResult> {
     const sent = await this.broker.change(teams => {
       const now = this.broker.ports.now();
       const inbox = this.inboxes.prepare(teams, to, now) ?? fail('Team capacity reached.');
@@ -127,7 +127,7 @@ export class AssistantMessages {
       const seat = inbox.members[0]!, messageId = `m${digest([inbox.id, from.key, call.operationId]).slice(0, 12)}`;
       const message = { id: digest(['assistant-message', inbox.id, messageId]), from: seat.id, to: seat.id, status: 'queued' as const, createdAt: now,
         // The person's words to a bot are framed as what they are, from the record; any other text is a bot's message.
-        text: call.frame === 'person' ? personWroteText({ bot: from.name, text: call.text }) : assistantMessageText({ messageId, from: from.name, ...(call.replyTo ? { replyTo: call.replyTo } : {}), body: call.text }) };
+        text: call.frame === 'person' ? personWroteText({ bot: from.name, text: call.text }) : assistantMessageText({ messageId, from: from.name, ...(call.replyTo ? { replyTo: call.replyTo } : {}), ...(call.tag ? { tag: call.tag } : {}), body: call.text }) };
       assertTeamQueueCapacity(inbox, message);
       inbox.messages.push(message); pushBackTimers(inbox, now);
       recent.push({ id: messageId, from: from.key, hop, operationId: call.operationId });
@@ -139,6 +139,18 @@ export class AssistantMessages {
     // Binding a main session where it is never creates anything, so a Host that was offline is asked again with the next message.
     const receiver = await this.inboxes.bind(to);
     return { messageId: sent.messageId, outcome: receiver?.creation === 'ready' ? 'delivered' : 'held' };
+  }
+  /** Tells a bot something the Relay wrote from the record, between its turns; `key` makes a repeated notice queue once. */
+  async notice(to: Assistant, key: unknown[], text: string): Promise<void> {
+    await this.broker.change(teams => {
+      const now = this.broker.ports.now(), inbox = this.inboxes.prepare(teams, to, now) ?? fail('Team capacity reached.'), seat = inbox.members[0]!;
+      const message = { id: digest(['notice', inbox.id, ...key]), from: seat.id, to: seat.id, status: 'queued' as const, createdAt: now, text };
+      if (inbox.messages.some(item => item.id === message.id)) return;
+      assertTeamQueueCapacity(inbox, message);
+      inbox.messages.push(message); pushBackTimers(inbox, now);
+      inbox.revision++; inbox.updatedAt = now;
+    });
+    await this.inboxes.bind(to);
   }
 
 }

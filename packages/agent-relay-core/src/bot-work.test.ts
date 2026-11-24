@@ -5,7 +5,7 @@ import type { SavedTeam } from './team-delivery.js';
 import { WAITING_TIMER_MS, WORK_TIMER_MS } from './bot-work.js';
 import { committed, detached } from './drafts.js';
 
-// A standing bot keeps work items and quiet timers on its inbox. Groups and Hosts are stubs; the broker and its timers are real.
+// A standing bot keeps quiet timers on its inbox; open board items give it a default one. Groups and Hosts are stubs; the broker and its timers are real.
 const ids = { chief: 'b_' + '1'.repeat(32), tracker: 'b_' + '2'.repeat(32) };
 const group = () => ({ window: { id: 'g', title: 'g', revision: 1, views: [['v1', 'chief'], ['v2', 'tracker']].map(([id, nativeSessionId]) => ({ id, placement: 'primary',
   binding: { hostId: 'mac', providerId: 'claude', nativeSessionId, title: nativeSessionId } })) },
@@ -33,21 +33,20 @@ function fixture() {
   const read = () => { state = committed.produce(state, draft => { for (const team of draft) if (team.inbox?.botId === ids.chief) for (const message of team.messages) { message.status = 'accepted'; message.acceptance = 'handled'; } }); };
   return { broker, as, inbox, timerInputs, read, fire, advance: (ms: number) => { now += ms; } };
 }
-type Item = { id: string; phase: string };
-
-describe('a standing bot\'s work items and timers', () => {
-  it('keeps work items that list_bots shows, and a quiet timer that reminds the bot of its open work', async () => {
+describe('a standing bot\'s timers', () => {
+  it('keeps a quiet timer that reminds the bot of its open board items, which list_bots shows', async () => {
     const f = fixture();
-    const item = await f.broker.hostCall('mac', { action: 'update_work', owner: f.as('chief'), title: 'Release notes', summary: 'Collecting the changes.', phase: 'in_progress', next: 'Ask Tracker for the build.' }) as Item;
-    expect(item).toMatchObject({ id: expect.stringMatching(/^w_[0-9a-f]{12}$/), phase: 'in_progress' });
-    expect(await f.broker.hostCall('mac', { action: 'list_bots', owner: f.as('chief') })).toMatchObject({ work: [expect.objectContaining({ title: 'Release notes', next: 'Ask Tracker for the build.' })] });
+    await f.broker.hostCall('mac', { action: 'update_board', owner: f.as('chief'), items: [{ title: 'Release notes', status: 'working' }] });
+    await f.broker.hostCall('mac', { action: 'update_board', owner: f.as('chief'), items: [{ key: 1, version: 1, status: 'waiting' }] });
+    await f.broker.hostCall('mac', { action: 'update_board', owner: f.as('chief'), items: [{ key: 1, version: 2, status: 'working' }] });
+    expect(await f.broker.hostCall('mac', { action: 'list_bots', owner: f.as('chief') })).toMatchObject({ board: { open: 1, items: [expect.objectContaining({ key: 1, title: 'Release notes', status: 'working' })] } });
     expect(isTeam(f.inbox())).toBe(true);
     // The bot read its standing instructions, so nothing is on its way to it.
     f.read();
     f.advance(WORK_TIMER_MS - 1); await f.fire();
     expect(f.timerInputs()).toEqual([]);
     f.advance(1); await f.fire();
-    expect(f.timerInputs()).toEqual([expect.objectContaining({ name: 'work', body: 'Release notes · in_progress · next: Ask Tracker for the build.' })]);
+    expect(f.timerInputs()).toEqual([expect.objectContaining({ name: 'work', body: 'Release notes · working' })]);
     // The reminder starts a chain of its own at the bot.
     expect(f.broker.chains.list()).toEqual([expect.objectContaining({ cause: 'timer', bot: ids.chief, messages: 1 })]);
     expect(f.inbox().messages.at(-1)!.chain).toBe(f.broker.chains.list()[0]!.id);
@@ -61,20 +60,20 @@ describe('a standing bot\'s work items and timers', () => {
 
   it('pushes the timer back with every message, waits longer while the work waits, and drops it once the work is done', async () => {
     const f = fixture();
-    const item = await f.broker.hostCall('mac', { action: 'update_work', owner: f.as('chief'), title: 'Release notes', summary: 'Collecting.' }) as Item;
+    await f.broker.hostCall('mac', { action: 'update_board', owner: f.as('chief'), items: [{ title: 'Release notes' }] });
     f.advance(WORK_TIMER_MS - 1);
     await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('tracker'), operationId: 'm1', to: 'Chief', text: 'Build is green.' });
     f.read(); f.advance(2); await f.fire();
     expect(f.timerInputs()).toEqual([]);
-    await f.broker.hostCall('mac', { action: 'update_work', owner: f.as('chief'), work: item.id, phase: 'waiting', summary: 'Waiting for the person to approve.' });
+    await f.broker.hostCall('mac', { action: 'update_board', owner: f.as('chief'), items: [{ key: 1, version: 1, status: 'waiting' }] });
     expect(f.inbox().inbox!.timers).toEqual([expect.objectContaining({ name: 'work', intervalMs: WAITING_TIMER_MS })]);
-    expect(await f.broker.hostCall('mac', { action: 'complete_work', owner: f.as('chief'), work: item.id, summary: 'Published.' })).toMatchObject({ phase: 'done', summary: 'Published.' });
+    expect(await f.broker.hostCall('mac', { action: 'update_board', owner: f.as('chief'), items: [{ key: 1, version: 2, status: 'done', result: 'Published.' }] })).toMatchObject({ items: [{ key: 1, version: 3 }] });
     expect(f.inbox().inbox!.timers).toEqual([]);
     f.advance(WAITING_TIMER_MS); await f.fire();
     expect(f.timerInputs()).toEqual([]);
   });
 
-  it('sets and clears named timers, and refuses work items to a temporary bot', async () => {
+  it('sets and clears named timers, and refuses them to a temporary bot', async () => {
     const f = fixture();
     expect(await f.broker.hostCall('mac', { action: 'set_timer', owner: f.as('chief'), name: 'Check CI', minutes: 10 })).toEqual({ timers: [expect.objectContaining({ name: 'Check CI', intervalMs: 600_000 })] });
     f.read();
@@ -83,6 +82,6 @@ describe('a standing bot\'s work items and timers', () => {
     expect(await f.broker.hostCall('mac', { action: 'set_timer', owner: f.as('chief'), name: 'Check CI', minutes: 0 })).toEqual({ timers: [] });
     await expect(f.broker.hostCall('mac', { action: 'set_timer', owner: f.as('chief'), name: 'work', minutes: 10 })).rejects.toThrow('work timer');
     await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
-    await expect(f.broker.hostCall('mac', { action: 'update_work', owner: f.as('worker-1'), title: 'Review', summary: 'Reading.' })).rejects.toThrow('temporary bot');
+    await expect(f.broker.hostCall('mac', { action: 'set_timer', owner: f.as('worker-1'), name: 'Check CI', minutes: 5 })).rejects.toThrow('temporary bot');
   });
 });

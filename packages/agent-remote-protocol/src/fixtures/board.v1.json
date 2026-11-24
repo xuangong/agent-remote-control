@@ -1,0 +1,513 @@
+{
+  "items": {
+    "valid": [
+      {
+        "key": 7,
+        "title": "Run the regression",
+        "status": "working",
+        "assignee": "b_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "links": [
+          {
+            "kind": "branch",
+            "value": "fix/login"
+          }
+        ],
+        "brief": "Run the suite on the branch and report failures.",
+        "report": "Half done.",
+        "version": 3,
+        "changedAt": {
+          "title": 1,
+          "status": 3
+        },
+        "updatedBy": "b_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "updatedAt": 1000
+      },
+      {
+        "key": 7,
+        "title": "Run the regression",
+        "status": "done",
+        "assignee": "self",
+        "links": [],
+        "brief": "Run the suite on the branch and report failures.",
+        "report": "Half done.",
+        "version": 3,
+        "changedAt": {
+          "title": 1,
+          "status": 3
+        },
+        "updatedBy": "b_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "updatedAt": 1000,
+        "parent": 2,
+        "result": "All green.",
+        "closedAt": 2000
+      },
+      {
+        "key": 1,
+        "title": "Plan",
+        "status": "open",
+        "assignee": "self",
+        "links": [],
+        "version": 1,
+        "changedAt": {},
+        "updatedBy": "person",
+        "updatedAt": 0
+      }
+    ],
+    "invalid": [
+      {
+        "key": 7,
+        "title": "Run the regression",
+        "status": "failed",
+        "assignee": "b_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "links": [
+          {
+            "kind": "branch",
+            "value": "fix/login"
+          }
+        ],
+        "brief": "Run the suite on the branch and report failures.",
+        "report": "Half done.",
+        "version": 3,
+        "changedAt": {
+          "title": 1,
+          "status": 3
+        },
+        "updatedBy": "b_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "updatedAt": 1000
+      },
+      {
+        "key": 7,
+        "title": "Run the regression",
+        "status": "working",
+        "assignee": "Reviewer",
+        "links": [
+          {
+            "kind": "branch",
+            "value": "fix/login"
+          }
+        ],
+        "brief": "Run the suite on the branch and report failures.",
+        "report": "Half done.",
+        "version": 3,
+        "changedAt": {
+          "title": 1,
+          "status": 3
+        },
+        "updatedBy": "b_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "updatedAt": 1000
+      },
+      {
+        "key": 0,
+        "title": "Run the regression",
+        "status": "working",
+        "assignee": "b_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "links": [
+          {
+            "kind": "branch",
+            "value": "fix/login"
+          }
+        ],
+        "brief": "Run the suite on the branch and report failures.",
+        "report": "Half done.",
+        "version": 3,
+        "changedAt": {
+          "title": 1,
+          "status": 3
+        },
+        "updatedBy": "b_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "updatedAt": 1000
+      },
+      {
+        "key": 7,
+        "title": "Run the regression",
+        "status": "working",
+        "assignee": "b_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "links": [
+          {
+            "kind": "branch",
+            "value": "fix/login"
+          }
+        ],
+        "brief": "Run the suite on the branch and report failures.",
+        "report": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "version": 3,
+        "changedAt": {
+          "title": 1,
+          "status": 3
+        },
+        "updatedBy": "b_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "updatedAt": 1000
+      },
+      {
+        "key": 7,
+        "title": "Run the regression",
+        "status": "working",
+        "assignee": "b_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "links": [
+          {
+            "kind": "url",
+            "value": "x"
+          }
+        ],
+        "brief": "Run the suite on the branch and report failures.",
+        "report": "Half done.",
+        "version": 3,
+        "changedAt": {
+          "title": 1,
+          "status": 3
+        },
+        "updatedBy": "b_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "updatedAt": 1000
+      },
+      {
+        "key": 7,
+        "title": "Run the regression",
+        "status": "working",
+        "assignee": "b_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "links": [
+          {
+            "kind": "pr",
+            "value": "1"
+          },
+          {
+            "kind": "pr",
+            "value": "1"
+          },
+          {
+            "kind": "pr",
+            "value": "1"
+          },
+          {
+            "kind": "pr",
+            "value": "1"
+          },
+          {
+            "kind": "pr",
+            "value": "1"
+          },
+          {
+            "kind": "pr",
+            "value": "1"
+          },
+          {
+            "kind": "pr",
+            "value": "1"
+          },
+          {
+            "kind": "pr",
+            "value": "1"
+          },
+          {
+            "kind": "pr",
+            "value": "1"
+          },
+          {
+            "kind": "pr",
+            "value": "1"
+          },
+          {
+            "kind": "pr",
+            "value": "1"
+          }
+        ],
+        "brief": "Run the suite on the branch and report failures.",
+        "report": "Half done.",
+        "version": 3,
+        "changedAt": {
+          "title": 1,
+          "status": 3
+        },
+        "updatedBy": "b_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "updatedAt": 1000
+      },
+      {
+        "key": 7,
+        "title": "Run the regression",
+        "status": "working",
+        "assignee": "b_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "links": [
+          {
+            "kind": "branch",
+            "value": "fix/login"
+          }
+        ],
+        "brief": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "report": "Half done.",
+        "version": 3,
+        "changedAt": {
+          "title": 1,
+          "status": 3
+        },
+        "updatedBy": "b_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "updatedAt": 1000
+      },
+      {
+        "key": 7,
+        "title": "Run the regression",
+        "status": "working",
+        "assignee": "b_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "links": [
+          {
+            "kind": "branch",
+            "value": "fix/login"
+          }
+        ],
+        "brief": "Run the suite on the branch and report failures.",
+        "report": "Half done.",
+        "version": 3,
+        "changedAt": {
+          "title": 1,
+          "status": 3
+        },
+        "updatedBy": "b_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "updatedAt": 1000,
+        "extra": 1
+      },
+      {
+        "key": 7,
+        "title": "Run the regression",
+        "status": "working",
+        "assignee": "b_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "links": [
+          {
+            "kind": "branch",
+            "value": "fix/login"
+          }
+        ],
+        "brief": "Run the suite on the branch and report failures.",
+        "report": "Half done.",
+        "changedAt": {
+          "title": 1,
+          "status": 3
+        },
+        "updatedBy": "b_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "updatedAt": 1000
+      }
+    ]
+  },
+  "boards": {
+    "valid": [
+      {
+        "next": 8,
+        "items": [
+          {
+            "key": 7,
+            "title": "Run the regression",
+            "status": "working",
+            "assignee": "b_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "links": [
+              {
+                "kind": "branch",
+                "value": "fix/login"
+              }
+            ],
+            "brief": "Run the suite on the branch and report failures.",
+            "report": "Half done.",
+            "version": 3,
+            "changedAt": {
+              "title": 1,
+              "status": 3
+            },
+            "updatedBy": "b_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "updatedAt": 1000
+          }
+        ]
+      },
+      {
+        "next": 1,
+        "items": [],
+        "plan": {
+          "text": "Test first, then ship.",
+          "version": 2,
+          "changes": [
+            {
+              "at": 5,
+              "by": "b_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "why": "The build is red."
+            }
+          ]
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "items": [
+          {
+            "key": 7,
+            "title": "Run the regression",
+            "status": "working",
+            "assignee": "b_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "links": [
+              {
+                "kind": "branch",
+                "value": "fix/login"
+              }
+            ],
+            "brief": "Run the suite on the branch and report failures.",
+            "report": "Half done.",
+            "version": 3,
+            "changedAt": {
+              "title": 1,
+              "status": 3
+            },
+            "updatedBy": "b_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "updatedAt": 1000
+          }
+        ]
+      },
+      {
+        "next": 8,
+        "items": [
+          {
+            "key": 7,
+            "title": "Run the regression",
+            "status": "working",
+            "assignee": "b_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "links": [
+              {
+                "kind": "branch",
+                "value": "fix/login"
+              }
+            ],
+            "brief": "Run the suite on the branch and report failures.",
+            "report": "Half done.",
+            "version": 3,
+            "changedAt": {
+              "title": 1,
+              "status": 3
+            },
+            "updatedBy": "b_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "updatedAt": 1000
+          }
+        ],
+        "plan": {
+          "text": "",
+          "version": 1,
+          "changes": []
+        }
+      },
+      {
+        "next": 8,
+        "items": [
+          {
+            "key": 7,
+            "title": "Run the regression",
+            "status": "working",
+            "assignee": "b_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "links": [
+              {
+                "kind": "branch",
+                "value": "fix/login"
+              }
+            ],
+            "brief": "Run the suite on the branch and report failures.",
+            "report": "Half done.",
+            "version": 3,
+            "changedAt": {
+              "title": 1,
+              "status": 3
+            },
+            "updatedBy": "b_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "updatedAt": 1000
+          }
+        ],
+        "notes": "x"
+      }
+    ]
+  },
+  "calls": {
+    "valid": [
+      {
+        "action": "board",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        }
+      },
+      {
+        "action": "board",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "bot": "Reviewer",
+        "item": 7
+      },
+      {
+        "action": "update_board",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "items": [
+          {
+            "title": "Run the regression",
+            "assignee": "Reviewer"
+          },
+          {
+            "key": 7,
+            "version": 3,
+            "status": "done",
+            "result": "All green.",
+            "parent": null
+          }
+        ],
+        "plan": {
+          "text": "Review first.",
+          "why": "The build changed.",
+          "version": 2
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "action": "board",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "item": 0
+      },
+      {
+        "action": "update_board",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "items": []
+      },
+      {
+        "action": "update_board",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "items": [
+          {
+            "key": 7,
+            "version": 3,
+            "status": "failed"
+          }
+        ]
+      },
+      {
+        "action": "update_board",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "plan": {
+          "text": "Review first."
+        }
+      },
+      {
+        "action": "update_work",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "title": "x"
+      }
+    ]
+  }
+}

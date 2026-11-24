@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { nativeSessionRefKey, TASK_RUNNING_LIMIT, taskBriefText, taskResultText, taskSenderName, taskUpdateText, taskView, TASK_TOLD_LIMIT, type Team, type TeamMessage, type TeamHostCall, type TeamMember, type TeamTask, type TaskView } from '@orchardworks/agent-remote-protocol';
+import { itemTagText, nativeSessionRefKey, TASK_RUNNING_LIMIT, taskBriefText, taskResultText, taskSenderName, taskUpdateText, taskView, TASK_TOLD_LIMIT, type Team, type TeamMessage, type TeamHostCall, type TeamMember, type TeamTask, type TaskView } from '@orchardworks/agent-remote-protocol';
 import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
 import { pruneCoordination } from './coordination-retention.js';
@@ -109,15 +109,17 @@ export function taskAction(team: SavedTeam, action: 'cancel_task' | 'mark_task_d
     enqueue(team, worker, main, ['task-result', team.id], resultText(team), now);
   }
 }
+/** The line naming the board item a task serves, in the frames of its worker and its chief; none for a task without one. */
+const tagOf = (team: Team, from: string): { tag: string } | Record<string, never> => team.task?.item ? { tag: itemTagText({ key: team.task.item.key, title: team.task.item.title, from }) } : {};
 const sameKey = (resolve: TeamBrokerPorts['resolveSession'], hostId: string, providerId: string, nativeSessionId: string) => {
   try { return nativeSessionRefKey(resolve(hostId, providerId, nativeSessionId)); } catch { return undefined; }
 };
 
 export { quoteFrames } from '@orchardworks/agent-remote-protocol';
 /** The worker's first input. */
-export const briefText = (team: Team): string => { const item = task(team); return taskBriefText({ taskId: team.id, from: team.source.title, title: item.title, brief: item.brief, ...(item.doneWhen ? { doneWhen: item.doneWhen } : {}) }); };
+export const briefText = (team: Team): string => { const item = task(team); return taskBriefText({ taskId: team.id, from: team.source.title, title: item.title, brief: item.brief, ...(item.doneWhen ? { doneWhen: item.doneWhen } : {}), ...tagOf(team, team.source.title) }); };
 /** The owner's view of a report. */
-export const resultText = (team: Team): string => { const item = task(team), result = item.result ?? fail('The task has no result.'); return taskResultText({ taskId: team.id, status: result.status, title: item.title, summary: result.summary }); };
+export const resultText = (team: Team): string => { const item = task(team), result = item.result ?? fail('The task has no result.'); return taskResultText({ taskId: team.id, status: result.status, title: item.title, summary: result.summary, ...tagOf(team, item.title) }); };
 
 export { taskView };
 
@@ -165,7 +167,7 @@ export class TaskGroups {
       const team: SavedTeam = { id: randomUUID(), operationId: call.operationId, revision: 1, title: call.title, status: 'active', members: [worker, main], messages: [],
         source: { hostId, providerId: call.owner.providerId, nativeSessionId: call.owner.nativeSessionId, title: taskSenderName(call.owner.title) },
         task: { title: call.title, brief: call.brief, ...(call.doneWhen ? { doneWhen: call.doneWhen } : {}), ...(call.workspace && call.workspace !== 'same' ? { workspace: call.workspace } : {}),
-          state: 'working', createdAt: now, updatedAt: now }, createdAt: now, updatedAt: now };
+          ...(call.item ? { item: call.item } : {}), state: 'working', createdAt: now, updatedAt: now }, createdAt: now, updatedAt: now };
       const brief = { id: digest(['task-brief', team.id]), from: main.id, to: worker.id, text: briefText(team), status: 'queued' as const, createdAt: now };
       assertTeamQueueCapacity(team, brief);
       team.messages.push(brief);
@@ -216,11 +218,11 @@ export class TaskGroups {
     });
   }
   /** The owner sends its worker input; it answers a question the worker asked. */
-  message(hostId: string, call: MessageCall): Promise<{ taskId: string; state: TeamTask['state'] }> {
+  message(hostId: string, call: MessageCall, tag?: string): Promise<{ taskId: string; state: TeamTask['state'] }> {
     return this.ownerChange(hostId, call, (team, item, now) => {
       if (!running(item.state)) fail('This task is finished. Start a new task for more work.');
       const main = owner(team);
-      enqueue(team, main, team.members[0]!, ['task-message', team.id, call.operationId], taskUpdateText({ taskId: team.id, kind: 'message', label: main.name, body: call.text }), now);
+      enqueue(team, main, team.members[0]!, ['task-message', team.id, call.operationId], taskUpdateText({ taskId: team.id, kind: 'message', label: main.name, body: call.text, ...(tag ? { tag } : tagOf(team, main.name)) }), now);
       resume(team, item, now);
       return { taskId: team.id, state: item.state };
     });
@@ -240,7 +242,7 @@ export class TaskGroups {
       if (item.state === 'needs_input' && item.waiting?.reason === 'question' && item.waiting.text === call.question) return { taskId: team.id, state: item.state };
       if (item.state !== 'working') fail('This task is not running.');
       wait(team, item, 'question', call.question, now);
-      enqueue(team, self, owner(team), ['task-question', team.id, now], taskUpdateText({ taskId: team.id, kind: 'question', label: item.title, body: call.question }), now);
+      enqueue(team, self, owner(team), ['task-question', team.id, now], taskUpdateText({ taskId: team.id, kind: 'question', label: item.title, body: call.question, ...tagOf(team, item.title) }), now);
       return { taskId: team.id, state: item.state };
     });
   }
@@ -248,18 +250,26 @@ export class TaskGroups {
   progress(hostId: string, call: { teamId: string; memberId: string; operationId: string; text: string }): Promise<{ taskId: string; state: TeamTask['state'] }> {
     return this.workerChange(hostId, call, (team, self, item, now) => {
       if (!running(item.state)) fail('This task is no longer running.');
-      enqueue(team, self, owner(team), ['task-progress', team.id, call.operationId], taskUpdateText({ taskId: team.id, kind: 'progress', label: item.title, body: call.text }), now);
+      enqueue(team, self, owner(team), ['task-progress', team.id, call.operationId], taskUpdateText({ taskId: team.id, kind: 'progress', label: item.title, body: call.text, ...tagOf(team, item.title) }), now);
       return { taskId: team.id, state: item.state };
     });
   }
   /** A bot that is not the temporary bot's chief writes to it: the worker reads it as input from that bot. */
-  input(teamId: string, from: string, call: { operationId: string; text: string }): Promise<{ taskId: string; state: TeamTask['state'] }> {
+  input(teamId: string, from: string, call: { operationId: string; text: string; tag?: string }): Promise<{ taskId: string; state: TeamTask['state'] }> {
     return this.broker.change(teams => {
       const team = teams.find(item => item.id === teamId) ?? fail('Task not found.'), item = task(team), now = this.broker.ports.now();
       if (team.status !== 'active' || !running(item.state)) fail('This bot has finished its work.');
-      enqueue(team, owner(team), team.members[0]!, ['task-input', team.id, from, call.operationId], taskUpdateText({ taskId: team.id, kind: 'message', label: from, body: call.text }), now);
+      enqueue(team, owner(team), team.members[0]!, ['task-input', team.id, from, call.operationId], taskUpdateText({ taskId: team.id, kind: 'message', label: from, body: call.text, ...(call.tag ? { tag: call.tag } : tagOf(team, from)) }), now);
       resume(team, item, now);
       return { taskId: team.id, state: item.state };
+    });
+  }
+  /** Tells a temporary bot something the Relay wrote from the record; a bot that finished is not told. */
+  notice(teamId: string, key: unknown[], text: string): Promise<void> {
+    return this.broker.change(teams => {
+      const team = teams.find(item => item.id === teamId), now = this.broker.ports.now();
+      if (!team?.task || team.status !== 'active' || !running(team.task.state)) return;
+      enqueue(team, owner(team), team.members[0]!, ['task-notice', team.id, ...key], text, now);
     });
   }
   /** The person wrote to the worker directly: the owner is told, and what the worker waited for may have arrived. */

@@ -1,7 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { NativeSessionRef } from './session-succession.js';
 import { Value } from '@sinclair/typebox/value';
-import { ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, AttachmentId, BotAttachment, BotId, BotMission, BotName, BotTimer, WorkItem, WORK_ITEM_LIMIT } from './bots.js';
+import { ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, AttachmentId, BotAttachment, BotId, BotMission, BotName, Board, BOARD_ITEM_LIMIT, BOARD_PLAN_LIMIT, BoardItem, BoardLink, BOARD_LINK_LIMIT, BoardStatus, BotTimer } from './bots.js';
 import { ChainId, TurnCause } from './chains.js';
 import { TaskBrief, TaskDoneWhen, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_LIMIT, ROOM_MINUTES_LIMIT, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, TaskReportStatus, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_QUESTION_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, isTeamTask } from './task.js';
 const object = { additionalProperties: false } as const;
@@ -65,8 +65,8 @@ export const TeamInbox = Type.Object({ botId: BotId, instructions: Type.Optional
     answered: Type.Optional(Type.Literal(true)) }, object), { maxItems: 64 })),
   /** The person paused the bot: its messages wait until resumed (bots design 7). */
   paused: Type.Optional(Type.Literal(true)),
-  /** The bot's work items and timers (bots design 6). */
-  work: Type.Optional(Type.Array(WorkItem, { maxItems: WORK_ITEM_LIMIT })),
+  /** The bot's board and timers (bots design 6). */
+  board: Type.Optional(Board),
   timers: Type.Optional(Type.Array(BotTimer, { maxItems: 8 })),
   /** A standing bot another bot created: its seat creates its session, then the Relay places it in its chief's group (bots design 2.2). */
   pending: Type.Optional(Type.Object({ name: BotName, mission: BotMission, chief: BotId, groupId: id, message: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })) }, object)) }, object);
@@ -129,7 +129,8 @@ export const TeamHostCall = Type.Union([
   // A main session's task tools, by the main session on the calling Host.
   // workspace: where the worker works (default same); worktree needs the commit it starts from. provider and model choose the worker's agent.
   Type.Object({ action: Type.Literal('create_task'), owner: TaskOwner, operationId: id, title: TaskTitle, brief: TaskBrief, doneWhen: Type.Optional(TaskDoneWhen),
-    workspace: Type.Optional(TaskWorkspace), commit: Type.Optional(gitObject), provider: Type.Optional(id), model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })) }, object),
+    workspace: Type.Optional(TaskWorkspace), commit: Type.Optional(gitObject), provider: Type.Optional(id), model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    item: TeamTask.properties.item }, object),
   Type.Object({ action: Type.Literal('task_status'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), taskId: Type.Optional(id) }, object),
   Type.Object({ action: Type.Literal('message_task'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), taskId: id, operationId: id,
     text: Type.String({ minLength: 1, maxLength: TASK_BRIEF_LIMIT }) }, object),
@@ -139,13 +140,16 @@ export const TeamHostCall = Type.Union([
   // Every bot's own calls, made as its main session (bots design 5.1). A temporary bot is a task: its chief is the task's owner.
   Type.Object({ action: Type.Literal('create_bot'), owner: TaskOwner, operationId: id, name: TaskTitle, mission: TaskBrief, lifetime: Type.Union([Type.Literal('temporary'), Type.Literal('standing')]),
     message: Type.Optional(BotText), workspace: Type.Optional(TaskWorkspace), commit: Type.Optional(gitObject), provider: Type.Optional(id), model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
-    cause: Type.Optional(TurnCause) }, object),
+    /** The item of the caller's board this bot is created for: it records the assignee and the brief, and the bot's input names it. */
+    item: Type.Optional(BoardItem.properties.key), cause: Type.Optional(TurnCause) }, object),
   Type.Object({ action: Type.Literal('bot_message'), owner: BotCaller, operationId: id, to: Type.String({ minLength: 1, maxLength: 300 }), text: BotText, cause: Type.Optional(TurnCause),
     replyTo: Type.Optional(AssistantMessageId), status: Type.Optional(Type.Union([Type.Literal('progress'), Type.Literal('done'), Type.Literal('failed'), Type.Literal('needs_input')])),
     /** In a room: pass this turn instead of speaking. */
     pass: Type.Optional(Type.Boolean()),
     /** Files already uploaded with attachment_finish, which the message carries (bots design 3.4). */
     attachments: Type.Optional(Type.Array(AttachmentId, { minItems: 1, maxItems: ATTACHMENTS_PER_MESSAGE, uniqueItems: true })),
+    /** Sent to a bot: the item of the sender's board it serves. Sent to the sender's chief with a status: the item of the chief's board it reports on. */
+    item: Type.Optional(BoardItem.properties.key),
     /** A worktree bot's result: where its patch was saved on its Host, added to the report by the Relay. */
     patch: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })) }, object),
   // A standing bot's turn ended: its final text answers the one message that started it (bots design 3.3). The Host sends it, never the model.
@@ -165,9 +169,14 @@ export const TeamHostCall = Type.Union([
   // A bot's turn ended: its Host counts the turn and its usage in the turn's chain.
   Type.Object({ action: Type.Literal('chain_turn'), owner: BotCaller, cause: TurnCause, tokens: Type.Integer({ minimum: 0 }), costUsd: Type.Optional(Type.Number({ minimum: 0 })) }, object),
   Type.Object({ action: Type.Literal('update_mission'), owner: BotCaller, mission: BotMission }, object),
-  Type.Object({ action: Type.Literal('update_work'), owner: BotCaller, work: Type.Optional(WorkItem.properties.id), title: Type.Optional(WorkItem.properties.title), phase: Type.Optional(WorkItem.properties.phase),
-    summary: Type.Optional(WorkItem.properties.summary), next: Type.Optional(WorkItem.properties.summary), acceptance: Type.Optional(Type.String({ minLength: 1, maxLength: 2000 })) }, object),
-  Type.Object({ action: Type.Literal('complete_work'), owner: BotCaller, work: WorkItem.properties.id, summary: WorkItem.properties.summary }, object),
+  // A bot reads its own board, or the board of a standing bot it is chief of (read only); item names one item with its whole brief.
+  Type.Object({ action: Type.Literal('board'), owner: BotCaller, bot: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })), item: Type.Optional(BoardItem.properties.key) }, object),
+  // Every write names the version it read (bots design 6.1). A new item names none; `assignee` is a bot by name or id, or self. parent null clears it.
+  Type.Object({ action: Type.Literal('update_board'), owner: BotCaller,
+    items: Type.Optional(Type.Array(Type.Object({ key: Type.Optional(BoardItem.properties.key), version: Type.Optional(BoardItem.properties.version), title: Type.Optional(BoardItem.properties.title),
+      status: Type.Optional(BoardStatus), assignee: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })), parent: Type.Optional(Type.Union([BoardItem.properties.key, Type.Null()])),
+      links: Type.Optional(Type.Array(BoardLink, { maxItems: BOARD_LINK_LIMIT })), brief: BoardItem.properties.brief, result: BoardItem.properties.result }, object), { minItems: 1, maxItems: 10 })),
+    plan: Type.Optional(Type.Object({ text: Type.String({ minLength: 1, maxLength: BOARD_PLAN_LIMIT }), why: Type.String({ minLength: 1, maxLength: 200 }), version: Type.Optional(Type.Integer({ minimum: 0 })) }, object)) }, object),
   Type.Object({ action: Type.Literal('set_timer'), owner: BotCaller, name: BotTimer.properties.name, minutes: Type.Integer({ minimum: 0, maximum: 7 * 24 * 60 }) }, object),
   Type.Object({ action: Type.Literal('stop_bot'), owner: BotCaller, bot: Type.String({ minLength: 1, maxLength: 300 }) }, object),
   Type.Object({ action: Type.Literal('retire_bot'), owner: BotCaller, bot: Type.String({ minLength: 1, maxLength: 300 }) }, object),

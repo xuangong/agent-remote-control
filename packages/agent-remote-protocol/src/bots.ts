@@ -46,26 +46,61 @@ export const BotRecord = Type.Object({
 export type BotRecord = Static<typeof BotRecord>;
 export const isBotRecord = (value: unknown): value is BotRecord => Value.Check(BotRecord, value);
 
-const workText = Type.String({ minLength: 1, maxLength: 300 });
+const reportText = Type.String({ minLength: 1, maxLength: 300 });
+/** What a board holds (bots design 6.1): at most this many open items; finished ones are kept for a week, and at most this many items in all. */
+export const BOARD_OPEN_LIMIT = 50;
+export const BOARD_ITEM_LIMIT = 100;
+export const BOARD_KEEP_MS = 7 * 24 * 60 * 60_000;
+export const BOARD_BRIEF_LIMIT = 1000;
+export const BOARD_LINK_LIMIT = 10;
+export const BOARD_PLAN_LIMIT = 1000;
+export const BOARD_PLAN_CHANGES = 20;
+export const BoardStatus = Type.Union([Type.Literal('open'), Type.Literal('working'), Type.Literal('waiting'), Type.Literal('done'), Type.Literal('cancelled')]);
+export type BoardStatus = Static<typeof BoardStatus>;
+export const boardItemOpen = (status: BoardStatus) => status !== 'done' && status !== 'cancelled';
+/** What an item points at: a commit, branch, pull request or file by its text, an attachment by its id, another bot by its id. */
+export const BoardLink = Type.Object({ kind: Type.Union([Type.Literal('commit'), Type.Literal('branch'), Type.Literal('pr'), Type.Literal('file'), Type.Literal('attachment'), Type.Literal('bot')]),
+  value: Type.String({ minLength: 1, maxLength: 300 }) }, strict);
+export type BoardLink = Static<typeof BoardLink>;
+/** The fields of an item a writer sets; `changedAt` keeps the version at which each last changed, so a stale write can say what it overwrote. */
+export const BOARD_FIELDS = ['title', 'status', 'assignee', 'parent', 'links', 'brief', 'result'] as const;
+export type BoardField = (typeof BOARD_FIELDS)[number];
 /**
- * A bot's record of a piece of work (bots design 6.1): what it is, where it stands in the bot's own words, and what comes next. The
- * bot keeps it with update_work and complete_work; the person reads it in the bot's details.
+ * One item of a bot's board (bots design 6.1): a piece of work, who does it (`self`, one of the bot's temporary bots or a standing bot
+ * by id), what it points at, the brief it was handed away with, and where it stands: the latest report of its assignee, and its result.
+ * `version` counts its writes; `updatedBy` is the bot (or the person) that wrote last.
  */
-export const WorkItem = Type.Object({
-  id: Type.String({ pattern: '^w_[0-9a-f]{12}$' }),
+export const BoardItem = Type.Object({
+  key: Type.Integer({ minimum: 1 }),
   title: Type.String({ minLength: 1, maxLength: 120 }),
-  phase: Type.Union([Type.Literal('clarifying'), Type.Literal('agreed'), Type.Literal('in_progress'), Type.Literal('verifying'), Type.Literal('waiting'), Type.Literal('done')]),
-  summary: workText,
-  next: Type.Optional(workText),
-  acceptance: Type.Optional(Type.String({ minLength: 1, maxLength: 2000 })),
+  status: BoardStatus,
+  assignee: Type.Union([Type.Literal('self'), BotId]),
+  parent: Type.Optional(Type.Integer({ minimum: 1 })),
+  links: Type.Array(BoardLink, { maxItems: BOARD_LINK_LIMIT }),
+  brief: Type.Optional(Type.String({ minLength: 1, maxLength: BOARD_BRIEF_LIMIT })),
+  report: Type.Optional(reportText),
+  result: Type.Optional(reportText),
+  version: Type.Integer({ minimum: 1 }),
+  changedAt: Type.Record(Type.String({ maxLength: 16 }), Type.Integer({ minimum: 1 }), { maxProperties: BOARD_FIELDS.length }),
+  updatedBy: Type.Union([Type.Literal('person'), BotId]),
   updatedAt: time,
+  /** When the item finished, which starts the week it is kept. */
+  closedAt: Type.Optional(time),
 }, strict);
-export type WorkItem = Static<typeof WorkItem>;
-/** Open work items a bot keeps at once; done ones beyond the newest few are dropped. */
-export const WORK_ITEM_LIMIT = 20;
+export type BoardItem = Static<typeof BoardItem>;
+/** The plan note that heads a board: how the bot means to do the work, and each change to it with the line saying why. */
+export const BoardPlan = Type.Object({
+  text: Type.String({ minLength: 1, maxLength: BOARD_PLAN_LIMIT }),
+  version: Type.Integer({ minimum: 1 }),
+  changes: Type.Array(Type.Object({ at: time, by: Type.Union([Type.Literal('person'), BotId]), why: Type.String({ minLength: 1, maxLength: 200 }) }, strict), { maxItems: BOARD_PLAN_CHANGES }),
+}, strict);
+export type BoardPlan = Static<typeof BoardPlan>;
+/** A standing bot's board, kept on its inbox. `next` is the key its next item takes. */
+export const Board = Type.Object({ next: Type.Integer({ minimum: 1 }), items: Type.Array(BoardItem, { maxItems: BOARD_ITEM_LIMIT }), plan: Type.Optional(BoardPlan) }, strict);
+export type Board = Static<typeof Board>;
 /**
  * A bot's fallback timer (bots design 6.2): due after `intervalMs` of quiet, pushed back by every message to the bot. `work` marks the
- * one the Relay keeps for a bot with open work.
+ * one the Relay keeps for a bot with open board items.
  */
 export const BotTimer = Type.Object({ name: Type.String({ minLength: 1, maxLength: 60 }), intervalMs: Type.Integer({ minimum: 60_000, maximum: 7 * 24 * 60 * 60_000 }), dueAt: time,
   work: Type.Optional(Type.Literal(true)) }, strict);
@@ -138,6 +173,7 @@ const BASE = `You are an assistant of Agent Remote Control. The person, and othe
 - When one message from another bot starts your turn, your final text goes back to its sender as the reply, with no tool call: keep it under 300 characters (a longer one is cut), say when the result will follow, and do not message the sender the same answer as well. A reply is never answered by another reply, so do not thank it. When several messages arrive together, answer each with message and reply_to.
 - Between computers, move code the way people do: push a branch to a git repository both computers reach, then message the receiver its remote, branch and commit, and it fetches. Only without such a repository, attach a git bundle of the commits since a base both have (git bundle create out.bundle base..branch) to your message; the receiver downloads it with download_attachment and fetches it into a branch it only reads. Patches and logs are attached the same way, at most 3 files of 8 MiB. A received patch or bundle is never applied, merged or run on its own: read it, and change a working tree only when the person or your chief asked for that.
 - A message that begins [The person wrote to …] tells you what the person said to one of your bots, so you do not act on an outdated picture. It is not addressed to you: take it into account and do not answer it.
+- Keep your open work on your board (board, update_board): an item for each piece of work, who does it, and how it stands, and a short plan note saying why you changed course. Name the item when you hand work to a bot (create_bot or message with item), and update it when work changes hands; a bot reports on its item and you decide.
 - When the person, or your chief, tells you something that should change how you work from now on, record it in your mission with update_mission, writing the whole mission as it now stands (not in a memory file of your own), follow it, and say how you now understand your mission.`;
 
 /** The instructions of a bot with this mission, or of a bot without one. */

@@ -12,6 +12,7 @@ import type { useProcessMode } from './useProcessMode.js';
 import type { MissionChoice } from './assistant/MissionEditor.js';
 import type { MemoryChoice } from './assistant/MemoryList.js';
 import type { BoardChoice } from './assistant/board-model.js';
+import { useWatchTeamRoster } from '../kernel/useTeamRoster.js';
 import type { LabWorkbenchActions, SessionWorkbenchProps } from './session-workbench-props.js';
 
 /** The details' code stays out of the App chunk; a conversation that can show them loads it once it is on screen, before a click. */
@@ -39,6 +40,7 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
     board: boardOf, name: id => directory.botName?.(id) ?? id, choices: directory.assignees?.(botId) ?? [],
     staffBoard: id => directory.boardOf?.(id), canOpen: id => directory.canOpenBot?.(id) ?? false, open: id => directory.openBot?.(id),
     ...(directory.writeBoard ? { save: edit => directory.writeBoard!(botId, edit) } : {}) } : undefined;
+  useWatchTeamRoster(!!board);
   const answering = detailsShown && botId && directory?.answering ? directory.answering(botId) : [];
   const bots = detailsShown && botId && directory?.staff ? directory.staff(botId) : [];
   const chiefs = detailsShown && botId ? directory?.chief?.(botId) : undefined;

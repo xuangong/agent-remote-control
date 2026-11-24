@@ -1,5 +1,5 @@
 // The Team roster the page reads: tasks, rooms and bots' inboxes are Teams on the Relay, and the task directory, rooms and boards show them.
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { errorWords, RemoteTeamClient, watchList } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { Team } from '@orchardworks/agent-remote-protocol';
@@ -10,6 +10,15 @@ export interface TeamRefreshPeriods { watchingMs: number; idleMs: number }
 export const TEAM_REFRESH_PERIODS: TeamRefreshPeriods = { watchingMs: 4_000, idleMs: 30_000 };
 /** The periods the roster refreshes at; a page keeps `TEAM_REFRESH_PERIODS`, and a test passes shorter ones instead of waiting them out. */
 export const TeamRefresh = createContext<TeamRefreshPeriods>(TEAM_REFRESH_PERIODS);
+
+/** The views that show a bot's board and want the roster followed closely, as an open room does; the count falls back to nothing when they close. */
+let boardViews = 0;
+const boardViewListeners = new Set<() => void>();
+const changeBoardViews = (by: number) => { boardViews += by; for (const listener of boardViewListeners) listener(); };
+/** While `shown`, the roster refreshes at the watching period (a bot's board in its details changes as the bots work). */
+export function useWatchTeamRoster(shown: boolean): void {
+  useEffect(() => { if (!shown) return; changeBoardViews(1); return () => changeBoardViews(-1); }, [shown]);
+}
 
 /** The Teams that are not tasks, links, inboxes or answer sessions: a room, or a Team of an earlier build. Answer sessions travel with the tasks. */
 interface Inputs {
@@ -53,7 +62,8 @@ export function useTeamRoster({ baseUrl, enabled, teams, tasks, publish }: Input
   }, [client, enabled, baseUrl]);
   // An open room changes as its members speak, and a question asked of a bot is waiting for its answer, so both are followed closely; otherwise the roster stays current twice a minute
   // instead of polling every few seconds on every open page.
-  const watching = !!teams?.some(team => team.room?.state === 'open') || !!tasks?.some(team => team.status === 'active' && team.ask?.entries.some(entry => !entry.answer));
+  const boardShown = useSyncExternalStore(listener => { boardViewListeners.add(listener); return () => { boardViewListeners.delete(listener); }; }, () => boardViews > 0);
+  const watching = boardShown || !!teams?.some(team => team.room?.state === 'open') || !!tasks?.some(team => team.status === 'active' && team.ask?.entries.some(entry => !entry.answer));
   const periods = useContext(TeamRefresh);
   useEffect(() => {
     if (!enabled) return;

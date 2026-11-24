@@ -370,7 +370,7 @@ export class BotCalls {
         : call.status === 'needs_input' ? this.tasks.ask(hostId, { action: 'ask_owner', teamId: from.task!.id, memberId, question: call.text })
           : this.tasks.progress(hostId, { teamId: from.task!.id, memberId, operationId: call.operationId, text: call.text, ...(call.status === 'ack' ? { ack: true as const } : {}) });
       // A side's words to its chief are recorded on the page, not queued as input: nothing reaches the chief, so it is held, not delivered.
-      if (from.task.task?.side) { await send(); return { outcome: 'held', reason: 'Recorded beside the conversation you were asked from; the person sees it there, and it reaches your chief only if the person brings it back.' }; }
+      if (from.task.task?.side) { await send(); return { outcome: 'held', reason: 'Recorded beside the conversation you were asked from; the person sees it there, and it reaches your chief only if the person brings it back. Nothing answers it: do not send it again or wait.' }; }
       return this.queued(from.task.id, from.task.members[1]!.id, send);
     }
     if (to.task) {

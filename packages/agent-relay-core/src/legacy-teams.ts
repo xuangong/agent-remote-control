@@ -10,7 +10,7 @@ import type { SavedWorkspaceWindow } from './window-workspaces.js';
 /** A Team of one person's own making: none of a task, a link, a bot's inbox or a room. */
 export const isOrdinaryTeam = (team: unknown): boolean => {
   const value = team as Partial<Team> | null;
-  return !!value && typeof value === 'object' && typeof value.id === 'string' && !value.task && !value.link && !value.inbox && !value.room;
+  return !!value && typeof value === 'object' && typeof value.id === 'string' && !value.task && !value.link && !value.inbox && !value.room && !value.ask;
 };
 interface Broker { teams?: Team[] }
 type Tenant = { subject: string; broker: Broker };

@@ -3,7 +3,7 @@ import { NativeSessionRef } from './session-succession.js';
 import { Value } from '@sinclair/typebox/value';
 import { ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, AttachmentId, BotAttachment, BotId, BotFact, BotMission, BotName, Board, BOARD_ITEM_LIMIT, BOARD_PLAN_LIMIT, BoardItem, BoardLink, BOARD_LINK_LIMIT, BoardStatus, BotTimer } from './bots.js';
 import { ChainId, TurnCause } from './chains.js';
-import { TaskBrief, TaskDoneWhen, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_LIMIT, ROOM_MINUTES_LIMIT, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, TaskReportStatus, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_QUESTION_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, isTeamTask } from './task.js';
+import { TaskBrief, ASK_LIMIT, TaskDoneWhen, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_LIMIT, ROOM_MINUTES_LIMIT, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, TaskReportStatus, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_QUESTION_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, isTeamTask } from './task.js';
 const object = { additionalProperties: false } as const;
 const id = Type.String({ minLength: 1, maxLength: 256 });
 const short = Type.String({ maxLength: 2048 });
@@ -71,6 +71,22 @@ export const TeamInbox = Type.Object({ botId: BotId, instructions: Type.Optional
   /** A standing bot another bot created: its seat creates its session, then the Relay places it in its chief's group (bots design 2.2). */
   pending: Type.Optional(Type.Object({ name: BotName, mission: BotMission, chief: BotId, groupId: id, message: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })) }, object)) }, object);
 export type TeamInbox = Static<typeof TeamInbox>;
+/** An answer session stays this long without a follow-up from the conversation it answers; then it is retired. */
+export const ASK_IDLE_MS = 60 * 60_000;
+/** Asks and answers one answer session keeps for the page. */
+export const ASK_ENTRY_LIMIT = 20;
+/**
+ * A bot's answer session for one conversation of the person (bots plan 8b): the Team's only seat is a session of the bot's provider,
+ * created for the mention. from: the conversation the person asks from, where the page shows the entries. Each entry is one ask and
+ * the answer the session's final text gave, cut at 300 characters.
+ */
+export const TeamAsk = Type.Object({ botId: BotId,
+  from: Type.Object({ hostId: id, providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId, name: Type.String({ minLength: 1, maxLength: 256 }) }, object),
+  /** The latest ask: the session is retired an hour after it. */
+  lastAt: Type.Number(),
+  entries: Type.Array(Type.Object({ id, text: Type.String({ minLength: 1, maxLength: ASK_LIMIT }), at: Type.Number(),
+    answer: Type.Optional(Type.Object({ text: Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT }), at: Type.Number() }, object)) }, object), { maxItems: ASK_ENTRY_LIMIT }) }, object);
+export type TeamAsk = Static<typeof TeamAsk>;
 const roomText = Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT });
 /**
  * A room: assistants' main sessions, bound where they are, and the people of the account, talking one member at a time. speaker: the
@@ -95,11 +111,16 @@ export const Team = Type.Object({ id, operationId: id, revision: Type.Integer({ 
   inbox: Type.Optional(TeamInbox),
   /** Set for a room of assistants and people; every member is an assistant's main session. */
   room: Type.Optional(TeamRoom),
+  /** Set for a bot's answer session for one conversation of the person. */
+  ask: Type.Optional(TeamAsk),
 }, object);
 export type Team = Static<typeof Team>;
 /** The person starts a temporary bot whose chief is the source session (`/side`, bots design 9): its name and its mission. */
 export const TeamCreate = Type.Object({ operationId: id, source: TeamSource, bot: Type.Object({ name: TaskTitle, mission: TaskBrief }, object) }, object);
 export type TeamCreate = Static<typeof TeamCreate>;
+/** The person mentions a bot (`@Name text`) in the conversation `source`: the bot answers in a session of its own for it. `bot`: the bot's id or name. */
+export const TeamAskRequest = Type.Object({ operationId: id, source: TeamSource, bot: Type.String({ minLength: 1, maxLength: 300 }), text: Type.String({ minLength: 1, maxLength: ASK_LIMIT }) }, object);
+export type TeamAskRequest = Static<typeof TeamAskRequest>;
 export const TeamAction = Type.Union([
   // The person stops a task, or takes it as done.
   Type.Object({ teamId: id, action: Type.Literal('cancel_task') }, object),
@@ -155,6 +176,9 @@ export const TeamHostCall = Type.Union([
   // A standing bot's turn ended: its final text answers the one message that started it (bots design 3.3). The Host sends it, never the model.
   Type.Object({ action: Type.Literal('bot_reply'), owner: BotCaller, text: Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT }),
     cause: Type.Object({ kind: Type.Literal('framed'), answers: AssistantMessageId }, object) }, object),
+  // An answer session's turn ended: its final text answers what the person asked (bots plan 8b). The Host sends it, never the model.
+  Type.Object({ action: Type.Literal('bot_answer'), owner: BotCaller, text: Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT }),
+    cause: Type.Object({ kind: Type.Literal('framed'), asked: Type.Literal(true) }, object) }, object),
   // The person wrote into a standing bot's session: its chief, if a bot, hears it (bots design 3.5). The Host sends it from its record of the input.
   Type.Object({ action: Type.Literal('bot_told'), owner: BotCaller, text: Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT }),
     cause: Type.Object({ kind: Type.Literal('person'), messageId: Type.String({ minLength: 1, maxLength: 256 }) }, object) }, object),
@@ -212,13 +236,17 @@ export const TeamSeat = Type.Object({ teamId: id, source: TeamSource, member: Te
   /** The seat is one bot's main session, receiving its inbox; mission: a bot this seat creates, which starts with it. */
   inbox: Type.Optional(Type.Object({ botId: BotId, mission: Type.Optional(BotMission) }, object)),
   /** The seat is one assistant's main session in a room. */
-  room: Type.Optional(Type.Object({ name: Type.String({ minLength: 1, maxLength: 120 }) }, object)) }, object);
+  room: Type.Optional(Type.Object({ name: Type.String({ minLength: 1, maxLength: 120 }) }, object)),
+  /** The seat is a bot's answer session: it starts with the bot's mission and memory, and works where its main session works. */
+  ask: Type.Optional(Type.Object({ botId: BotId, mission: Type.Optional(BotMission), memory: Type.Optional(Type.Array(BotFact, { maxItems: 50 })) }, object)) }, object);
 export type TeamSeat = Static<typeof TeamSeat>;
 /** What a member of a temporary bot's Team may carry about how its session works; any other member carries none. */
 const workerFields = ['model', 'reasoningEffort', 'access', 'workspace'] as const;
 const plainMember = (member: TeamMember) => workerFields.every(field => member[field] === undefined);
-/** A task has its worker and then its owner; an inbox, a link and a room bind main sessions. A Team is one of these four. */
+/** A task has its worker and then its owner; an inbox, a link and a room bind main sessions; an answer session is one seat. A Team is one of these five. */
 const validShape = (value: Team) => {
+  if (value.ask) return !value.task && !value.link && !value.room && !value.inbox && value.members.length === 1 && value.members[0]!.role === 'leader'
+    && value.members[0]!.workspace === undefined;
   if (value.inbox) return !value.task && !value.link && !value.room && value.members.length === 1
     // Bound where the bot already is (requester), or created for a bot another bot made (leader).
     && (value.members[0]!.role === 'requester' || value.members[0]!.role === 'leader') && plainMember(value.members[0]!);
@@ -237,6 +265,7 @@ export const isTeam = (value: unknown): value is Team => Value.Check(Team, value
   && (value.unresolvedReceipts ?? []).every(receipt => value.members.some(member => member.id === receipt.from) && value.members.some(member => member.id === receipt.to && (!receipt.resolvedTarget || member.providerId === receipt.resolvedTarget.providerId)))
   && value.messages.every(message => !message.resolvedTarget || value.members.some(member => member.id === message.to && member.providerId === message.resolvedTarget!.providerId))
   && value.messages.every(message => value.members.some(member => member.id === message.from) && value.members.some(member => member.id === message.to));
+export const isTeamAskRequest = (value: unknown): value is TeamAskRequest => Value.Check(TeamAskRequest, value);
 export const isTeamCreate = (value: unknown): value is TeamCreate => Value.Check(TeamCreate, value);
 export const isTeamAction = (value: unknown): value is TeamAction => Value.Check(TeamAction, value);
 export const isTeamHostCall = (value: unknown): value is TeamHostCall => Value.Check(TeamHostCall, value);

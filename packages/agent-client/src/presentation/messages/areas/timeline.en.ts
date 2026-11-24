@@ -60,6 +60,7 @@ export const timeline = {
   'timeline.standingInstructions': 'Standing instructions updated',
   'timeline.timerDue': 'Timer "{name}" is due',
   'timeline.personWrote': 'The person wrote to {bot}',
+  'timeline.personAsks': 'The person asks from {from}',
   'timeline.task.progressFrom': { one: 'An update from {from}', other: '{count} updates from {from}' },
   'timeline.assistantMessages': { one: 'Message from {from}', other: '{count} messages from {from}' },
   'timeline.reasoning': 'Reasoning trace',

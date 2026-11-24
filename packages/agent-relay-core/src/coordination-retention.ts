@@ -13,14 +13,18 @@ export const ROOM_ENDED_KEEP = 50;
 /** Links kept per account: a removed link forgets which messages may be answered with reply_to. */
 export const LINK_KEEP = 100;
 
-type Kind = 'task' | 'room' | 'link';
-const KEEP: Record<Kind, number> = { task: TASK_FINISHED_KEEP, room: ROOM_ENDED_KEEP, link: LINK_KEEP };
+/** Retired answer sessions kept per account: the page shows what they answered. */
+export const ASK_RETIRED_KEEP = 200;
 
-const kind = (team: SavedTeam): Kind | undefined => team.task ? 'task' : team.room ? 'room' : team.link ? 'link' : undefined;
+type Kind = 'task' | 'room' | 'link' | 'ask';
+const KEEP: Record<Kind, number> = { task: TASK_FINISHED_KEEP, room: ROOM_ENDED_KEEP, link: LINK_KEEP, ask: ASK_RETIRED_KEEP };
+
+const kind = (team: SavedTeam): Kind | undefined => team.task ? 'task' : team.room ? 'room' : team.link ? 'link' : team.ask ? 'ask' : undefined;
 /** Nothing more will happen to it: a finished task, an ended room, or any link (it opens again with the next message). */
 const ended = (team: SavedTeam): boolean => {
   if (team.task) return team.task.state === 'done' || team.task.state === 'failed' || team.task.state === 'cancelled';
   if (team.room) return team.room.state !== 'open';
+  if (team.ask) return team.status === 'archived';
   return !!team.link;
 };
 const settled = (team: SavedTeam) => ![...team.messages, ...(team.deliveryReceipts ?? [])].some(message => message.status === 'queued' || unresolvedTeamDelivery(message));
@@ -30,7 +34,7 @@ const age = (team: SavedTeam) => team.task?.updatedAt ?? team.updatedAt;
 export function pruneCoordination(teams: SavedTeam[], reserve = 0): void {
   const view = plain(teams);
   const removable = view.filter(team => kind(team) && ended(team) && settled(team)).sort((a, b) => age(a) - age(b));
-  const excess: Record<Kind, number> = { task: 0, room: 0, link: 0 };
+  const excess: Record<Kind, number> = { task: 0, room: 0, link: 0, ask: 0 };
   for (const key of Object.keys(KEEP) as Kind[]) excess[key] = Math.max(0, view.filter(team => kind(team) === key && ended(team)).length - KEEP[key]);
   let capacity = Math.max(0, view.length + reserve - ACCOUNT_TEAM_LIMIT);
   const removed = new Set<string>();

@@ -23,7 +23,9 @@ export const CHAIN_RETENTION_MS = 7 * 24 * 60 * 60_000;
 export const TurnCause = Type.Union([
   Type.Object({ kind: Type.Literal('person'), messageId: Type.String({ minLength: 1, maxLength: 256 }) }, object),
   // answers: the one message from another bot that started the turn, which is not itself a reply, so the turn's final text answers it (bots design 3.3).
-  Type.Object({ kind: Type.Literal('framed'), answers: Type.Optional(Type.String({ pattern: '^m[0-9a-f]{12}$' })) }, object),
+  Type.Object({ kind: Type.Literal('framed'), answers: Type.Optional(Type.String({ pattern: '^m[0-9a-f]{12}$' })),
+    // asked: the turn answers what the person asked from another conversation; its final text is the answer (bots design 3.3, plan 8b).
+    asked: Type.Optional(Type.Literal(true)) }, object),
 ]);
 export type TurnCause = Static<typeof TurnCause>;
 export const ChainUsage = Type.Object({ tokens: count, costUsd: Type.Optional(Type.Number({ minimum: 0 })) }, object);

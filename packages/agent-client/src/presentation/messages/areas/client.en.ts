@@ -112,6 +112,7 @@ export const client = {
   'client.error.invalidTeamCatalog': 'Invalid Team catalog.',
   'client.error.invalidTeamCreation': 'Invalid Team creation response.',
   'client.error.invalidTeamAction': 'Invalid Team action response.',
+  'client.error.invalidTeamAsk': 'Invalid ask response.',
   'client.error.invalidTeamDeletion': 'Invalid Team deletion response.',
   'client.error.windowRequestFailed': 'Window request failed.',
   'client.error.invalidWindowList': 'Invalid Window list.',

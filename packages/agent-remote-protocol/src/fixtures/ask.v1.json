@@ -1,0 +1,854 @@
+{
+  "teams": {
+    "valid": [
+      {
+        "id": "t1",
+        "operationId": "op",
+        "revision": 1,
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "main",
+          "title": "Reviewer"
+        },
+        "title": "Reviewer answers Notes",
+        "status": "active",
+        "members": [
+          {
+            "id": "m1",
+            "hostId": "mac",
+            "providerId": "codex",
+            "role": "leader",
+            "name": "Reviewer",
+            "responsibility": "Answers the person's questions from Notes.",
+            "creation": "ready",
+            "activity": "idle",
+            "summary": "",
+            "updatedAt": 1,
+            "access": "read_only",
+            "nativeSessionId": "answer-1",
+            "cwd": "/repo"
+          }
+        ],
+        "messages": [],
+        "createdAt": 1,
+        "updatedAt": 5,
+        "ask": {
+          "botId": "b_11111111111111111111111111111111",
+          "from": {
+            "hostId": "mac",
+            "providerId": "codex",
+            "nativeSessionId": "conversation-1",
+            "name": "Notes"
+          },
+          "lastAt": 5,
+          "entries": [
+            {
+              "id": "e1",
+              "text": "Anything new?",
+              "at": 2,
+              "answer": {
+                "text": "Two reviews are open.",
+                "at": 4
+              }
+            },
+            {
+              "id": "e2",
+              "text": "And the third?",
+              "at": 5
+            }
+          ]
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "id": "t1",
+        "operationId": "op",
+        "revision": 1,
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "main",
+          "title": "Reviewer"
+        },
+        "title": "Reviewer answers Notes",
+        "status": "active",
+        "members": [
+          {
+            "id": "m1",
+            "hostId": "mac",
+            "providerId": "codex",
+            "role": "leader",
+            "name": "Reviewer",
+            "responsibility": "Answers the person's questions from Notes.",
+            "creation": "ready",
+            "activity": "idle",
+            "summary": "",
+            "updatedAt": 1,
+            "access": "read_only",
+            "nativeSessionId": "answer-1",
+            "cwd": "/repo"
+          }
+        ],
+        "messages": [],
+        "createdAt": 1,
+        "updatedAt": 5,
+        "ask": {
+          "botId": "b_11111111111111111111111111111111",
+          "from": {
+            "hostId": "mac",
+            "providerId": "codex",
+            "nativeSessionId": "conversation-1",
+            "name": "Notes"
+          },
+          "lastAt": 5,
+          "entries": [
+            {
+              "id": "e1",
+              "text": "Anything new?",
+              "at": 2,
+              "answer": {
+                "text": "Two reviews are open.",
+                "at": 4
+              }
+            },
+            {
+              "id": "e2",
+              "text": "And the third?",
+              "at": 5
+            }
+          ]
+        },
+        "task": {
+          "title": "x"
+        }
+      },
+      {
+        "id": "t1",
+        "operationId": "op",
+        "revision": 1,
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "main",
+          "title": "Reviewer"
+        },
+        "title": "Reviewer answers Notes",
+        "status": "active",
+        "members": [
+          {
+            "id": "m1",
+            "hostId": "mac",
+            "providerId": "codex",
+            "role": "requester",
+            "name": "Reviewer",
+            "responsibility": "Answers the person's questions from Notes.",
+            "creation": "ready",
+            "activity": "idle",
+            "summary": "",
+            "updatedAt": 1,
+            "access": "read_only",
+            "nativeSessionId": "answer-1",
+            "cwd": "/repo"
+          }
+        ],
+        "messages": [],
+        "createdAt": 1,
+        "updatedAt": 5,
+        "ask": {
+          "botId": "b_11111111111111111111111111111111",
+          "from": {
+            "hostId": "mac",
+            "providerId": "codex",
+            "nativeSessionId": "conversation-1",
+            "name": "Notes"
+          },
+          "lastAt": 5,
+          "entries": [
+            {
+              "id": "e1",
+              "text": "Anything new?",
+              "at": 2,
+              "answer": {
+                "text": "Two reviews are open.",
+                "at": 4
+              }
+            },
+            {
+              "id": "e2",
+              "text": "And the third?",
+              "at": 5
+            }
+          ]
+        }
+      },
+      {
+        "id": "t1",
+        "operationId": "op",
+        "revision": 1,
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "main",
+          "title": "Reviewer"
+        },
+        "title": "Reviewer answers Notes",
+        "status": "active",
+        "members": [
+          {
+            "id": "m1",
+            "hostId": "mac",
+            "providerId": "codex",
+            "role": "leader",
+            "name": "Reviewer",
+            "responsibility": "Answers the person's questions from Notes.",
+            "creation": "ready",
+            "activity": "idle",
+            "summary": "",
+            "updatedAt": 1,
+            "access": "read_only",
+            "nativeSessionId": "answer-1",
+            "cwd": "/repo"
+          },
+          {
+            "id": "m2",
+            "hostId": "mac",
+            "providerId": "codex",
+            "role": "leader",
+            "name": "Reviewer",
+            "responsibility": "Answers the person's questions from Notes.",
+            "creation": "ready",
+            "activity": "idle",
+            "summary": "",
+            "updatedAt": 1,
+            "access": "read_only",
+            "nativeSessionId": "answer-1",
+            "cwd": "/repo"
+          }
+        ],
+        "messages": [],
+        "createdAt": 1,
+        "updatedAt": 5,
+        "ask": {
+          "botId": "b_11111111111111111111111111111111",
+          "from": {
+            "hostId": "mac",
+            "providerId": "codex",
+            "nativeSessionId": "conversation-1",
+            "name": "Notes"
+          },
+          "lastAt": 5,
+          "entries": [
+            {
+              "id": "e1",
+              "text": "Anything new?",
+              "at": 2,
+              "answer": {
+                "text": "Two reviews are open.",
+                "at": 4
+              }
+            },
+            {
+              "id": "e2",
+              "text": "And the third?",
+              "at": 5
+            }
+          ]
+        }
+      },
+      {
+        "id": "t1",
+        "operationId": "op",
+        "revision": 1,
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "main",
+          "title": "Reviewer"
+        },
+        "title": "Reviewer answers Notes",
+        "status": "active",
+        "members": [
+          {
+            "id": "m1",
+            "hostId": "mac",
+            "providerId": "codex",
+            "role": "leader",
+            "name": "Reviewer",
+            "responsibility": "Answers the person's questions from Notes.",
+            "creation": "ready",
+            "activity": "idle",
+            "summary": "",
+            "updatedAt": 1,
+            "access": "read_only",
+            "nativeSessionId": "answer-1",
+            "cwd": "/repo",
+            "workspace": {
+              "kind": "shared"
+            }
+          }
+        ],
+        "messages": [],
+        "createdAt": 1,
+        "updatedAt": 5,
+        "ask": {
+          "botId": "b_11111111111111111111111111111111",
+          "from": {
+            "hostId": "mac",
+            "providerId": "codex",
+            "nativeSessionId": "conversation-1",
+            "name": "Notes"
+          },
+          "lastAt": 5,
+          "entries": [
+            {
+              "id": "e1",
+              "text": "Anything new?",
+              "at": 2,
+              "answer": {
+                "text": "Two reviews are open.",
+                "at": 4
+              }
+            },
+            {
+              "id": "e2",
+              "text": "And the third?",
+              "at": 5
+            }
+          ]
+        }
+      },
+      {
+        "id": "t1",
+        "operationId": "op",
+        "revision": 1,
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "main",
+          "title": "Reviewer"
+        },
+        "title": "Reviewer answers Notes",
+        "status": "active",
+        "members": [
+          {
+            "id": "m1",
+            "hostId": "mac",
+            "providerId": "codex",
+            "role": "leader",
+            "name": "Reviewer",
+            "responsibility": "Answers the person's questions from Notes.",
+            "creation": "ready",
+            "activity": "idle",
+            "summary": "",
+            "updatedAt": 1,
+            "access": "read_only",
+            "nativeSessionId": "answer-1",
+            "cwd": "/repo"
+          }
+        ],
+        "messages": [],
+        "createdAt": 1,
+        "updatedAt": 5,
+        "ask": {
+          "botId": "b_11111111111111111111111111111111",
+          "from": {
+            "hostId": "mac",
+            "providerId": "codex",
+            "nativeSessionId": "conversation-1",
+            "name": "Notes"
+          },
+          "lastAt": 5,
+          "entries": [
+            {
+              "id": "e",
+              "text": "",
+              "at": 1
+            }
+          ]
+        }
+      },
+      {
+        "id": "t1",
+        "operationId": "op",
+        "revision": 1,
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "main",
+          "title": "Reviewer"
+        },
+        "title": "Reviewer answers Notes",
+        "status": "active",
+        "members": [
+          {
+            "id": "m1",
+            "hostId": "mac",
+            "providerId": "codex",
+            "role": "leader",
+            "name": "Reviewer",
+            "responsibility": "Answers the person's questions from Notes.",
+            "creation": "ready",
+            "activity": "idle",
+            "summary": "",
+            "updatedAt": 1,
+            "access": "read_only",
+            "nativeSessionId": "answer-1",
+            "cwd": "/repo"
+          }
+        ],
+        "messages": [],
+        "createdAt": 1,
+        "updatedAt": 5,
+        "ask": {
+          "botId": "reviewer",
+          "from": {
+            "hostId": "mac",
+            "providerId": "codex",
+            "nativeSessionId": "conversation-1",
+            "name": "Notes"
+          },
+          "lastAt": 5,
+          "entries": [
+            {
+              "id": "e1",
+              "text": "Anything new?",
+              "at": 2,
+              "answer": {
+                "text": "Two reviews are open.",
+                "at": 4
+              }
+            },
+            {
+              "id": "e2",
+              "text": "And the third?",
+              "at": 5
+            }
+          ]
+        }
+      },
+      {
+        "id": "t1",
+        "operationId": "op",
+        "revision": 1,
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "main",
+          "title": "Reviewer"
+        },
+        "title": "Reviewer answers Notes",
+        "status": "active",
+        "members": [
+          {
+            "id": "m1",
+            "hostId": "mac",
+            "providerId": "codex",
+            "role": "leader",
+            "name": "Reviewer",
+            "responsibility": "Answers the person's questions from Notes.",
+            "creation": "ready",
+            "activity": "idle",
+            "summary": "",
+            "updatedAt": 1,
+            "access": "read_only",
+            "nativeSessionId": "answer-1",
+            "cwd": "/repo"
+          }
+        ],
+        "messages": [],
+        "createdAt": 1,
+        "updatedAt": 5,
+        "ask": {
+          "botId": "b_11111111111111111111111111111111",
+          "from": {
+            "hostId": "mac",
+            "providerId": "codex",
+            "nativeSessionId": "conversation-1",
+            "name": "Notes"
+          },
+          "lastAt": 5,
+          "entries": [
+            {
+              "id": "e1",
+              "text": "Anything new?",
+              "at": 2,
+              "answer": {
+                "text": "Two reviews are open.",
+                "at": 4
+              }
+            },
+            {
+              "id": "e2",
+              "text": "And the third?",
+              "at": 5
+            }
+          ],
+          "extra": true
+        }
+      },
+      {
+        "id": "t1",
+        "operationId": "op",
+        "revision": 1,
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "main",
+          "title": "Reviewer"
+        },
+        "title": "Reviewer answers Notes",
+        "status": "active",
+        "members": [
+          {
+            "id": "m1",
+            "hostId": "mac",
+            "providerId": "codex",
+            "role": "leader",
+            "name": "Reviewer",
+            "responsibility": "Answers the person's questions from Notes.",
+            "creation": "ready",
+            "activity": "idle",
+            "summary": "",
+            "updatedAt": 1,
+            "access": "read_only",
+            "nativeSessionId": "answer-1",
+            "cwd": "/repo"
+          }
+        ],
+        "messages": [],
+        "createdAt": 1,
+        "updatedAt": 5,
+        "ask": {
+          "botId": "b_11111111111111111111111111111111",
+          "from": {
+            "hostId": "mac",
+            "providerId": "codex",
+            "nativeSessionId": "conversation-1",
+            "name": "Notes"
+          },
+          "lastAt": 5,
+          "entries": [
+            {
+              "id": "e0",
+              "text": "q",
+              "at": 0
+            },
+            {
+              "id": "e1",
+              "text": "q",
+              "at": 1
+            },
+            {
+              "id": "e2",
+              "text": "q",
+              "at": 2
+            },
+            {
+              "id": "e3",
+              "text": "q",
+              "at": 3
+            },
+            {
+              "id": "e4",
+              "text": "q",
+              "at": 4
+            },
+            {
+              "id": "e5",
+              "text": "q",
+              "at": 5
+            },
+            {
+              "id": "e6",
+              "text": "q",
+              "at": 6
+            },
+            {
+              "id": "e7",
+              "text": "q",
+              "at": 7
+            },
+            {
+              "id": "e8",
+              "text": "q",
+              "at": 8
+            },
+            {
+              "id": "e9",
+              "text": "q",
+              "at": 9
+            },
+            {
+              "id": "e10",
+              "text": "q",
+              "at": 10
+            },
+            {
+              "id": "e11",
+              "text": "q",
+              "at": 11
+            },
+            {
+              "id": "e12",
+              "text": "q",
+              "at": 12
+            },
+            {
+              "id": "e13",
+              "text": "q",
+              "at": 13
+            },
+            {
+              "id": "e14",
+              "text": "q",
+              "at": 14
+            },
+            {
+              "id": "e15",
+              "text": "q",
+              "at": 15
+            },
+            {
+              "id": "e16",
+              "text": "q",
+              "at": 16
+            },
+            {
+              "id": "e17",
+              "text": "q",
+              "at": 17
+            },
+            {
+              "id": "e18",
+              "text": "q",
+              "at": 18
+            },
+            {
+              "id": "e19",
+              "text": "q",
+              "at": 19
+            },
+            {
+              "id": "e20",
+              "text": "q",
+              "at": 20
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "requests": {
+    "valid": [
+      {
+        "operationId": "op1",
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "conversation-1",
+          "title": "Notes"
+        },
+        "bot": "Reviewer",
+        "text": "Anything new?"
+      },
+      {
+        "operationId": "op1",
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "conversation-1",
+          "title": "Notes"
+        },
+        "bot": "b_11111111111111111111111111111111",
+        "text": "Anything new?"
+      }
+    ],
+    "invalid": [
+      {
+        "operationId": "op1",
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "conversation-1",
+          "title": "Notes"
+        },
+        "bot": "Reviewer",
+        "text": ""
+      },
+      {
+        "operationId": "op1",
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "conversation-1",
+          "title": "Notes"
+        },
+        "bot": "",
+        "text": "Anything new?"
+      },
+      {
+        "operationId": "op1",
+        "bot": "Reviewer",
+        "text": "Anything new?"
+      },
+      {
+        "operationId": "op1",
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "conversation-1",
+          "title": "Notes"
+        },
+        "bot": "Reviewer",
+        "text": "Anything new?",
+        "extra": 1
+      },
+      {
+        "operationId": "op1",
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "conversation-1",
+          "title": "Notes"
+        },
+        "bot": "Reviewer",
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    ]
+  },
+  "calls": {
+    "valid": [
+      {
+        "action": "bot_answer",
+        "owner": {
+          "providerId": "codex",
+          "nativeSessionId": "answer-1"
+        },
+        "text": "Two reviews are open.",
+        "cause": {
+          "kind": "framed",
+          "asked": true
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "action": "bot_answer",
+        "owner": {
+          "providerId": "codex",
+          "nativeSessionId": "answer-1"
+        },
+        "text": "",
+        "cause": {
+          "kind": "framed",
+          "asked": true
+        }
+      },
+      {
+        "action": "bot_answer",
+        "owner": {
+          "providerId": "codex",
+          "nativeSessionId": "answer-1"
+        },
+        "text": "x",
+        "cause": {
+          "kind": "framed"
+        }
+      },
+      {
+        "action": "bot_answer",
+        "owner": {
+          "providerId": "codex",
+          "nativeSessionId": "answer-1"
+        },
+        "text": "x",
+        "cause": {
+          "kind": "person",
+          "messageId": "a"
+        }
+      },
+      {
+        "action": "bot_answer",
+        "text": "x",
+        "cause": {
+          "kind": "framed",
+          "asked": true
+        }
+      }
+    ]
+  },
+  "seats": {
+    "valid": [
+      {
+        "teamId": "t1",
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "main",
+          "title": "Reviewer"
+        },
+        "member": {
+          "id": "m1",
+          "hostId": "mac",
+          "providerId": "codex",
+          "role": "leader",
+          "name": "Reviewer",
+          "responsibility": "Answers the person's questions from Notes.",
+          "creation": "ready",
+          "activity": "idle",
+          "summary": "",
+          "updatedAt": 1,
+          "access": "read_only",
+          "nativeSessionId": "answer-1",
+          "cwd": "/repo"
+        },
+        "ask": {
+          "botId": "b_11111111111111111111111111111111",
+          "mission": "Review code.",
+          "memory": [
+            {
+              "id": "f00000001",
+              "text": "Reviews wait for CI."
+            }
+          ]
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "teamId": "t1",
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "main",
+          "title": "Reviewer"
+        },
+        "member": {
+          "id": "m1",
+          "hostId": "mac",
+          "providerId": "codex",
+          "role": "leader",
+          "name": "Reviewer",
+          "responsibility": "Answers the person's questions from Notes.",
+          "creation": "ready",
+          "activity": "idle",
+          "summary": "",
+          "updatedAt": 1,
+          "access": "read_only",
+          "nativeSessionId": "answer-1",
+          "cwd": "/repo"
+        },
+        "ask": {
+          "botId": "reviewer"
+        }
+      }
+    ]
+  },
+  "frames": {
+    "text": "[The person asks from Notes]\nAnything new?",
+    "from": "Notes",
+    "body": "Anything new?"
+  }
+}

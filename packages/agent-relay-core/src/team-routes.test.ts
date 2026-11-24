@@ -9,7 +9,7 @@ const setup = (teamHost = 'h1') => {
   const done: string[] = []; let who = "owner"; let during = () => {};
   const brokerState = { teams: [{ id: 't1', source: { hostId: teamHost, providerId: 'codex', nativeSessionId: 'n1' } } as never] } as never;
   const teams = { action: async (input: { teamId: string }) => { done.push("action"); who = "guest"; during(); return { id: input.teamId }; }, delete: async () => { done.push('delete'); },
-    readForClient: (id: string) => ({ id }) };
+    readForClient: (id: string) => ({ id }), ask: async (input: { bot: string }) => { done.push(`ask ${input.bot}`); return { id: 'answer' }; } };
   const route = createTeamRoutes({ access: run.access, brokerState, teams: teams as never });
   return { ...run, route, done, who: () => who, during(action: () => void) { during = action; } };
 };
@@ -47,5 +47,16 @@ describe('Team routes', () => {
     run.during(() => run.state.hosts.delete('h1'));
     await expect(run.call(run.route, 'POST', '/v1/remote/teams/action', resolve, 'owner', 'owner')).resolves.toMatchObject({ status: 409, body: { error: 'Host is unavailable.' } });
     expect(run.done).toEqual(['action']);
+  });
+
+  it('takes the person\'s mention as the owner\'s call, from a Host the caller reaches, and refuses a body that is not one', async () => {
+    const run = setup();
+    const mention = { operationId: 'op1', source: { hostId: 'h1', providerId: 'codex', nativeSessionId: 'n1', title: 'Notes' }, bot: 'Reviewer', text: 'Anything new?' };
+    await expect(run.call(run.route, 'POST', '/v1/remote/teams/ask', mention, 'guest')).rejects.toMatchObject({ status: 403, code: 'owner_required' });
+    await expect(run.call(run.route, 'POST', '/v1/remote/teams/ask', { ...mention, text: '' })).resolves.toMatchObject({ status: 400 });
+    await expect(run.call(run.route, 'POST', '/v1/remote/teams/ask', { ...mention, source: { ...mention.source, hostId: 'gone' } })).resolves.toMatchObject({ status: 409, body: { error: 'Host is unavailable.' } });
+    expect(run.done).toEqual([]);
+    await expect(run.call(run.route, 'POST', '/v1/remote/teams/ask', mention)).resolves.toMatchObject({ status: 200, body: { id: 'answer' } });
+    expect(run.done).toEqual(['ask Reviewer']);
   });
 });

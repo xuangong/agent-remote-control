@@ -1,5 +1,5 @@
 import { TeamBroker } from './teams.js';
-import { isChainAction, isTeamCreate, isTeamAction } from '@orchardworks/agent-remote-protocol';
+import { isChainAction, isTeamAskRequest, isTeamCreate, isTeamAction } from '@orchardworks/agent-remote-protocol';
 import { SharingError } from './host-sharing.js';
 import { readBody, principal, type RouteGroup } from './request-input.js';
 import { json } from './http-replies.js';
@@ -27,7 +27,7 @@ export function createTeamRoutes(ports: TeamRoutesPorts): RouteGroup {
   const { access, brokerState, teams } = ports;
   const { hostAllowed, requireOwner, requireAccess } = access;
   return async (request, context, url, subject) => {
-    if (url.pathname === '/v1/remote/teams' || url.pathname === '/v1/remote/teams/create' || url.pathname === '/v1/remote/teams/action') {
+    if (url.pathname === '/v1/remote/teams' || url.pathname === '/v1/remote/teams/create' || url.pathname === '/v1/remote/teams/ask' || url.pathname === '/v1/remote/teams/action') {
       requireOwner(subject);
       if (url.pathname === '/v1/remote/teams' && request.method === 'GET') {
         try { return json(200, { teams: brokerState.teams.filter(team => hostAllowed(team.source.hostId, subject)).map(team => teams.readForClient(team.id)) }); }
@@ -41,6 +41,12 @@ export function createTeamRoutes(ports: TeamRoutesPorts): RouteGroup {
           const result = await teams.startBot(input);
           requireOwner(principal(context)); requireAccess(input.source.hostId, principal(context));
           return json(200, teams.readForClient(result.id));
+        }
+        if (url.pathname.endsWith('/ask') && isTeamAskRequest(input)) {
+          requireAccess(input.source.hostId, principal(context));
+          const result = await teams.ask(input);
+          requireOwner(principal(context)); requireAccess(input.source.hostId, principal(context));
+          return json(200, result);
         }
         if (url.pathname.endsWith('/action') && isTeamAction(input)) {
           const team = brokerState.teams.find(team => team.id === input.teamId);

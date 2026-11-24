@@ -112,6 +112,7 @@ export const client: AreaMessages<typeof english> = {
   'client.error.invalidTeamCatalog': 'Team 列表不对。',
   'client.error.invalidTeamCreation': '创建 Team 的回应不对。',
   'client.error.invalidTeamAction': 'Team 操作的回应不对。',
+  'client.error.invalidTeamAsk': '提问的回应不对。',
   'client.error.invalidTeamDeletion': '删除 Team 的回应不对。',
   'client.error.windowRequestFailed': '窗口请求失败了。',
   'client.error.invalidWindowList': '窗口列表不对。',

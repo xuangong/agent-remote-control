@@ -6,13 +6,14 @@ import { accountDirectory, AssistantMessages, type AssistantPorts } from './assi
 import { roomAction, Rooms } from './rooms.js';
 import { BotInboxes } from './inboxes.js';
 import { BotCalls } from './bot-calls.js';
+import { BotAsks } from './bot-asks.js';
 import { BotWork } from './bot-work.js';
 import { BotBoard } from './bot-board.js';
 import { BotChains, memoryChains, type ChainStore } from './chains.js';
 import { chainScope, inChain, seenBefore, stampChain, temporaryBotId } from './chain-scope.js';
 import { actOnBot, stopInTeams } from './audit.js';
 import { TaskGroups, taskAction, taskPresence, taskSettled, type TaskPorts } from './tasks.js';
-import { nativeSessionRefKey, type BotMessageResult, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TurnCause, type BotChain, type ChainAction, type ChainView } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, type TeamAskRequest, type BotMessageResult, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TurnCause, type BotChain, type ChainAction, type ChainView } from '@orchardworks/agent-remote-protocol';
 
 export interface TeamBrokerPorts {
   /** Timers of the Relay, for what must happen on time: a room's deadline and a member's turn. */
@@ -58,6 +59,7 @@ export class TeamBroker {
   private readonly inboxes?: BotInboxes;
   private readonly bots?: BotCalls;
   private readonly work?: BotWork;
+  private readonly asks?: BotAsks;
   readonly chains: BotChains;
   constructor(private readonly ports: TeamBrokerPorts) {
     const key = (session: { hostId: string; providerId: string; nativeSessionId: string }) => { try { return nativeSessionRefKey(ports.resolveSession(session.hostId, session.providerId, session.nativeSessionId)); } catch { return undefined; } };
@@ -71,8 +73,9 @@ export class TeamBroker {
       const lent = { ports, change: <T>(update: (teams: SavedTeam[]) => T) => this.change(update), provision: (teamId: string, memberId: string) => this.provision(teamId, memberId) };
       this.inboxes = new BotInboxes(lent, ports.assistants); this.assistants = new AssistantMessages(lent, ports.assistants, this.inboxes); this.rooms = new Rooms(lent, ports.assistants);
       this.work = new BotWork(lent, this.inboxes, this.chains);
-      if (this.tasks) this.bots = new BotCalls(lent, ports.assistants, this.tasks, this.assistants, this.inboxes, this.rooms, this.work, new BotBoard(lent, this.inboxes, this.work));
-      this.rooms.arm(); this.work.arm();
+      this.asks = new BotAsks(lent, ports.assistants, this.chains);
+      if (this.tasks) this.bots = new BotCalls(lent, ports.assistants, this.tasks, this.assistants, this.inboxes, this.rooms, this.work, new BotBoard(lent, this.inboxes, this.work), this.asks);
+      this.rooms.arm(); this.work.arm(); this.asks.arm();
     }
   }
   private async change<T>(update: (teams: SavedTeam[]) => T): Promise<T> {
@@ -154,6 +157,8 @@ export class TeamBroker {
     for (const team of this.ports.read()) if (team.task && wanted.has(temporaryBotId(team.id))) { names[temporaryBotId(team.id)] = team.task.title; kinds[temporaryBotId(team.id)] = 'temporary'; }
     return { chains, names, kinds, thresholds: this.chains.thresholds(), paused: this.ports.read().filter(team => team.inbox?.paused).map(team => team.inbox!.botId) };
   }
+  /** The person mentions a bot from a conversation: the bot answers in its answer session for that conversation (bots plan 8b). */
+  async ask(input: TeamAskRequest): Promise<Team> { return this.project(await (this.asks ?? fail(unavailableAssistants)).ask(input)); }
   /** The person starts a temporary bot whose chief is a session (`/side`, bots design 9): a task of that session, its mission the brief. */
   async startBot(input: TeamCreate): Promise<SavedTeam> {
     const tasks = this.tasks ?? fail(unavailableTasks), bot = input.bot ?? fail('A bot needs a name and a mission.');
@@ -197,7 +202,7 @@ export class TeamBroker {
     assertCurrent();
     // A Controller that does not run tasks never sees them.
     const visible = (team: SavedTeam) => (!team.task || this.ports.tasks?.capable(hostId) === true)
-      && (!team.link && !team.room && !team.inbox || this.ports.assistants?.capable(hostId) === true);
+      && (!team.link && !team.room && !team.inbox && !team.ask || this.ports.assistants?.capable(hostId) === true);
     if (call.action === 'poll') return this.ports.read().filter(team => team.status !== 'archived' && visible(team) && team.members.some(item => item.hostId === hostId && item.creation === 'ready'))
       // A paused bot's messages wait on the Relay until the person resumes it.
       .map(team => this.project(team.inbox?.paused ? { ...team, messages: team.messages.filter(message => message.status !== 'queued') } : team));
@@ -217,6 +222,7 @@ export class TeamBroker {
     if (call.action === 'bot_message') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained<BotMessageResult>(hostId, call.owner, call.cause, () => bots.message(hostId, call), reason => ({ outcome: 'forbidden', reason })); }
     if (call.action === 'attachment_begin' || call.action === 'attachment_chunk' || call.action === 'attachment_finish' || call.action === 'attachment_read') return (this.bots ?? fail(unavailableAssistants)).attachment(hostId, call);
     if (call.action === 'bot_reply') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained<BotMessageResult>(hostId, call.owner, call.cause, () => bots.reply(hostId, call), reason => ({ outcome: 'forbidden', reason })); }
+    if (call.action === 'bot_answer') return (this.asks ?? fail(unavailableAssistants)).answer(hostId, call);
     if (call.action === 'bot_told') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained<BotMessageResult>(hostId, call.owner, call.cause, () => bots.told(hostId, call), reason => ({ outcome: 'forbidden', reason })); }
     if (call.action === 'chain_turn') { const bots = this.bots ?? fail(unavailableAssistants), found = this.chains.find(this.ports.read(), { hostId, ...call.owner }, call.cause);
       await this.chains.record(chainScope(found.id), { cause: found.cause, bot: bots.callerKey(hostId, call.owner) }, { tokens: call.tokens, ...(call.costUsd !== undefined ? { costUsd: call.costUsd } : {}) }); return { chain: found.id }; }
@@ -290,7 +296,7 @@ export class TeamBroker {
     let result: TeamMember;
     try {
       result = await this.ports.createSeat(item.hostId, { teamId, source: team.source, member: item,
-        ...(team.task ? { task: { title: team.task.title } } : {}), ...(team.link ? { link: { peer: team.members.find(other => other.id !== item.id)!.name } } : {}), ...(team.room ? { room: { name: team.room.name } } : {}), ...(team.inbox ? { inbox: { botId: team.inbox.botId, ...(team.inbox.pending ? { mission: team.inbox.pending.mission } : {}) } } : {}) });
+        ...(team.task ? { task: { title: team.task.title } } : {}), ...(team.link ? { link: { peer: team.members.find(other => other.id !== item.id)!.name } } : {}), ...(team.room ? { room: { name: team.room.name } } : {}), ...(team.ask ? { ask: this.asks!.seat(team) } : {}), ...(team.inbox ? { inbox: { botId: team.inbox.botId, ...(team.inbox.pending ? { mission: team.inbox.pending.mission } : {}) } } : {}) });
       if (!isTeamMember(result) || result.id !== item.id || result.hostId !== item.hostId || result.providerId !== item.providerId || result.role !== item.role || result.creation !== 'ready' || !result.nativeSessionId) fail('Invalid Host member registration.');
     } catch (error) { result = { ...item, creation: 'unknown', error: error instanceof Error ? error.message.slice(0, 2048) : 'Member creation is uncertain.' }; }
     return this.change(teams => {

@@ -15,6 +15,8 @@ export type Passed = NonNullable<BotChain['passed']>[number];
 type Session = { providerId: string; nativeSessionId: string };
 const fail = (message: string): never => { throw new Error(message); };
 const chainId = (parts: unknown[]) => 'c_' + createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 16);
+/** The chain of the person's input to a session, named by its message. */
+export const personChainId = (session: Session, messageId: string) => chainId(['person', session.providerId, session.nativeSessionId, messageId]);
 /** A chain a timer starts when it comes due. */
 export const timerChainId = (inboxId: string, timer: string, at: number) => chainId(['timer', inboxId, timer, at]);
 
@@ -34,7 +36,7 @@ export class BotChains {
    * message the Relay handed to that session; a turn with neither starts a chain of its own.
    */
   find(teams: readonly SavedTeam[], session: Session & { hostId: string }, cause: TurnCause | undefined): { id: string; cause: BotChain['cause'] } {
-    if (cause?.kind === 'person') return { id: chainId(['person', session.providerId, session.nativeSessionId, cause.messageId]), cause: 'person' };
+    if (cause?.kind === 'person') return { id: personChainId(session, cause.messageId), cause: 'person' };
     let latest: { id: string; at: number } | undefined;
     for (const team of teams) for (const member of team.members) {
       if (!member.chain || !member.nativeSessionId || latest && member.chain.at <= latest.at) continue;

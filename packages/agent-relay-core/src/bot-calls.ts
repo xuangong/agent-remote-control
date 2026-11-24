@@ -16,6 +16,7 @@ import type { Rooms } from './rooms.js';
 import type { BotWork } from './bot-work.js';
 import { heldItem, type BotBoard, type ItemEdit, type ItemNotice } from './bot-board.js';
 import { newBotId } from './bot-store.js';
+import type { BotAsks } from './bot-asks.js';
 import { forgotten, remembered } from './bot-memory.js';
 import { temporaryBotId } from './chain-scope.js';
 import { cutReply } from './reply-text.js';
@@ -24,7 +25,8 @@ import type { AttachmentStore } from './attachments.js';
 type Call<A extends TeamHostCall['action']> = Extract<TeamHostCall, { action: A }>;
 type Owner = { providerId: string; nativeSessionId: string };
 /** A bot as the calls see it. A temporary bot carries its task. */
-export type Bot = { key: string; name: string; standing?: Assistant; task?: SavedTeam };
+/** answer: the bot's answer session this caller is, which may read, keep the board and the memory, and answer, nothing more. */
+export type Bot = { key: string; name: string; standing?: Assistant; task?: SavedTeam; answer?: SavedTeam };
 export interface BotListing { id: string; name: string; label?: string; mission?: string; kind: 'standing' | 'temporary'; chief?: 'you'; status?: TaskView['state'] }
 /** An item as a list shows it: where it stands, without its brief. */
 const summary = (item: BoardItem) => ({ key: item.key, title: item.title, status: item.status, assignee: item.assignee, ...(item.report ? { report: item.report } : {}) });
@@ -38,7 +40,7 @@ type SendCall = Pick<Call<'bot_message'>, 'owner' | 'operationId' | 'text' | 'st
 const NOT_FOUND = 'No bot of this account answers to that name. List them with list_bots.';
 
 export class BotCalls {
-  constructor(private readonly broker: AssistantBrokerPorts, private readonly ports: AssistantPorts, private readonly tasks: TaskGroups, private readonly messages: AssistantMessages, private readonly inboxes: BotInboxes, private readonly rooms: Rooms, private readonly work: BotWork, private readonly board: BotBoard) {}
+  constructor(private readonly broker: AssistantBrokerPorts, private readonly ports: AssistantPorts, private readonly tasks: TaskGroups, private readonly messages: AssistantMessages, private readonly inboxes: BotInboxes, private readonly rooms: Rooms, private readonly work: BotWork, private readonly board: BotBoard, private readonly asks: BotAsks) {}
   private key(hostId: string, providerId: string, nativeSessionId: string): string | undefined {
     try { return nativeSessionRefKey(this.broker.ports.resolveSession(hostId, providerId, nativeSessionId)); } catch { return undefined; }
   }
@@ -48,12 +50,23 @@ export class BotCalls {
   /** The calling bot: a standing bot whose view shows this session, or a temporary bot whose worker it is. */
   private caller(hostId: string, owner: Owner): Bot {
     if (!this.ports.capable(hostId)) fail('Update the Controller to use bots.');
+    // An answer session is its bot's own session: it reads and writes the bot's board and memory as that bot.
+    const answer = this.asks.forSession(hostId, owner);
+    if (answer) {
+      const standing = accountDirectory(this.ports.groups()).find(item => item.key === answer.ask!.botId) ?? fail('This answer session\'s bot is gone.');
+      return { key: standing.key, name: standing.name, standing, answer };
+    }
     const own = this.key(hostId, owner.providerId, owner.nativeSessionId);
     const worker = own ? this.broker.ports.read().find(team => team.task && team.members[0]!.hostId === hostId && team.members[0]!.nativeSessionId
       && this.key(hostId, team.members[0]!.providerId, team.members[0]!.nativeSessionId) === own) : undefined;
     if (worker) return this.temporary(worker);
     const standing = callerAssistant(this.broker.ports.resolveSession, hostId, owner, accountDirectory(this.ports.groups()));
     return { key: standing.key, name: standing.name, standing };
+  }
+  /** The calling bot's main session: the calls that coordinate (create, message, staff, mission, timers, chief) are made there, never in an answer session. */
+  private main(hostId: string, owner: Owner): Bot {
+    const self = this.caller(hostId, owner);
+    return self.answer ? fail('An answer session answers with its final text; it does not message or manage bots. Your main session does that.') : self;
   }
   /** The temporary bot's chief, if the bot is one: its task's owner session, as a standing or a temporary bot. */
   private chiefOf(bot: Bot): Bot | undefined {
@@ -78,7 +91,7 @@ export class BotCalls {
   }
 
   async create(hostId: string, call: Call<'create_bot'>) {
-    const self = this.caller(hostId, call.owner);
+    const self = this.main(hostId, call.owner);
     // A chief manages at most twelve bots directly, standing and temporary alike (bots design 2.5).
     if (self.standing && this.span(self.standing) >= BOT_SPAN_LIMIT) fail(`You already manage ${BOT_SPAN_LIMIT} bots; retire one, or give some to a sub-chief.`);
     const item = call.item === undefined ? undefined : this.ownItem(self, call.item);
@@ -149,7 +162,7 @@ export class BotCalls {
   }
   /** A standing bot records a lasting change to how it works in its own mission (bots design 2.3). */
   async updateMission(hostId: string, call: Call<'update_mission'>) {
-    const self = this.caller(hostId, call.owner).standing ?? fail('A temporary bot\'s mission is its brief; tell your chief what changed instead.');
+    const self = this.main(hostId, call.owner).standing ?? fail('A temporary bot\'s mission is its brief; tell your chief what changed instead.');
     const setMission = this.ports.setMission ?? fail('Missions cannot be changed on this Relay.');
     await setMission(self.groupId, self.viewId, call.mission);
     await this.inboxes.known(self, { mission: call.mission });
@@ -190,7 +203,7 @@ export class BotCalls {
   }
   /** A standing bot's chief moves one of its staff to another chief, or to the person (chief: person). */
   async setChief(hostId: string, call: Call<'set_chief'>) {
-    const caller = this.caller(hostId, call.owner), self = caller.standing ?? fail('Only a standing bot that is a chief moves its staff.');
+    const caller = this.main(hostId, call.owner), self = caller.standing ?? fail('Only a standing bot that is a chief moves its staff.');
     const named = this.named(call.bot, caller);
     const bot = typeof named === 'object' ? named.standing : undefined;
     if (!bot || bot.chief !== self.key) fail('You move your own standing staff only; list them with list_bots.');
@@ -211,7 +224,7 @@ export class BotCalls {
   }
   /** A standing bot keeps its named timers (bots design 6.2); a temporary bot reports to its chief instead. */
   async setTimer(hostId: string, call: Call<'set_timer'>) {
-    const self = this.caller(hostId, call.owner).standing ?? fail('A temporary bot\'s work is its brief; report progress to your chief with message.');
+    const self = this.main(hostId, call.owner).standing ?? fail('A temporary bot\'s work is its brief; report progress to your chief with message.');
     return this.work.setTimer(self, call);
   }
   /** The item of the caller's own board a bot is handed work with. */
@@ -286,6 +299,7 @@ export class BotCalls {
   /** Sends one message and says what became of it (bots design 3.2). A refusal is an outcome the sender reads, not an error. */
   async message(hostId: string, call: Call<'bot_message'>): Promise<BotMessageResult> {
     const from = this.caller(hostId, call.owner), chief = this.chiefOf(from);
+    if (from.answer) return { outcome: 'forbidden', reason: 'An answer session answers with its final text; it does not message bots.' };
     // A room the sender is a member of: its turn's answer, a pass, or the room's result.
     const room = this.rooms.memberRoom(hostId, call.owner, call.to);
     if (room) {
@@ -358,7 +372,7 @@ export class BotCalls {
    * back to that message's sender as the reply, cut where a bot's message is cut. Nothing is sent when the turn already answered.
    */
   async reply(hostId: string, call: Call<'bot_reply'>): Promise<BotMessageResult> {
-    const from = this.caller(hostId, call.owner), standing = from.standing;
+    const from = this.main(hostId, call.owner), standing = from.standing;
     const entry = standing && this.inboxes.current(this.broker.ports.read(), standing)?.inbox?.recent?.find(item => item.id === call.cause.answers);
     if (!entry) return { outcome: 'forbidden', reason: 'No message of yours has that id.' };
     if (entry.answered) return { outcome: 'duplicate', reason: 'This turn already answered it.' };
@@ -372,6 +386,7 @@ export class BotCalls {
    */
   async told(hostId: string, call: Call<'bot_told'>): Promise<BotMessageResult> {
     const self = this.caller(hostId, call.owner), bot = self.standing;
+    if (self.answer) return { outcome: 'forbidden', reason: 'The person asks an answer session; nobody else needs to hear it.' };
     if (!bot) return { outcome: 'forbidden', reason: 'A temporary bot\'s chief hears the person through its task.' };
     const chief = bot.chief ? this.byKey(bot.chief) : undefined;
     if (!chief?.standing) return { outcome: 'unreachable', reason: 'The person is its chief, or its chief is gone.' };
@@ -397,15 +412,17 @@ export class BotCalls {
   /** Where a bot's conversation is, for `read_bot`: one of the caller's staff, or any standing bot of the account (the person's bots are not secret from each other). */
   readSession(hostId: string, call: Call<'bot_session'>): { providerId: string; nativeSessionId: string } {
     const self = this.caller(hostId, call.owner);
+    // An answer session reads the conversation it was asked from ("asking") and its bot's main session ("main").
+    const own = self.answer && fold(call.bot) === 'asking' ? self.answer.ask!.from : self.answer && fold(call.bot) === 'main' ? self.standing : undefined;
     const team = this.staff(hostId, call.owner).find(item => temporaryBotId(item.id) === call.bot || fold(item.task!.title) === fold(call.bot));
-    const found = team?.members[0] ?? (() => { const bot = this.named(call.bot, self); return typeof bot === 'object' ? bot.standing : undefined; })();
+    const found = own ?? team?.members[0] ?? (() => { const bot = this.named(call.bot, self); return typeof bot === 'object' ? bot.standing : undefined; })();
     if (!found?.nativeSessionId || found.hostId !== hostId) fail(found ? 'That bot runs on another computer; ask it with message instead.' : NOT_FOUND);
     const current = this.broker.ports.resolveSession(found!.hostId, found!.providerId, found!.nativeSessionId!);
     return { providerId: current.providerId, nativeSessionId: current.nativeSessionId };
   }
   /** The chief's hold on one of its temporary bots: stop its work, retire it. */
   async manageStaff(hostId: string, call: Call<'stop_bot' | 'retire_bot'>) {
-    this.caller(hostId, call.owner);
+    this.main(hostId, call.owner);
     const team = this.staff(hostId, call.owner).find(item => temporaryBotId(item.id) === call.bot || fold(item.task!.title) === fold(call.bot))
       ?? fail('None of your staff has that name; list them with list_bots.');
     if (!running(team)) return { botId: temporaryBotId(team.id), status: team.task!.state };

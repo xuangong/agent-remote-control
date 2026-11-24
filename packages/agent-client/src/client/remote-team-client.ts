@@ -1,4 +1,4 @@
-import { isTeam, type Team, type TeamAction, type TeamCreate } from '@orchardworks/agent-remote-protocol';
+import { isTeam, type Team, type TeamAction, type TeamAskRequest, type TeamCreate } from '@orchardworks/agent-remote-protocol';
 import { withMessageKey } from '../presentation/locale-choice.js';
 
 /** Mutations retain caller-owned identities and are never automatically retried. */
@@ -16,5 +16,7 @@ export class RemoteTeamClient {
     if (!Array.isArray(value.teams) || !value.teams.every(isTeam)) throw withMessageKey(new Error('Invalid Team catalog.'), 'client.error.invalidTeamCatalog'); return value.teams;
   }
   async create(input: TeamCreate): Promise<Team> { const value = await this.request('/create', input); if (!isTeam(value)) throw withMessageKey(new Error('Invalid Team creation response.'), 'client.error.invalidTeamCreation'); return value; }
+  /** The person mentions a bot from a conversation; the bot answers in its answer session for it, which this returns. */
+  async ask(input: TeamAskRequest): Promise<Team> { const value = await this.request('/ask', input); if (!isTeam(value) || !value.ask) throw withMessageKey(new Error('Invalid ask response.'), 'client.error.invalidTeamAsk'); return value; }
   async action(input: TeamAction): Promise<Team> { const value = await this.request('/action', input); if (!isTeam(value) || value.id !== input.teamId) throw withMessageKey(new Error('Invalid Team action response.'), 'client.error.invalidTeamAction'); return value; }
 }

@@ -60,6 +60,7 @@ export const timeline: AreaMessages<typeof english> = {
   'timeline.standingInstructions': '常驻指令已更新',
   'timeline.timerDue': '计时器“{name}”到期',
   'timeline.personWrote': '用户给 {bot} 发了消息',
+  'timeline.personAsks': '用户从 {from} 提问',
   'timeline.task.progressFrom': { other: '{from} 的 {count} 条进展' },
   'timeline.assistantMessages': { other: '{from} 发来 {count} 条消息' },
   'timeline.reasoning': '思考过程',

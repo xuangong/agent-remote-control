@@ -97,16 +97,27 @@ export function readStoredBots(bots: unknown): unknown {
   })) };
 }
 const bound = (row: SavedWorkspaceWindow) => row.window && row.bots ? groupBotViews({ window: row.window, bots: row.bots }).map(view => view.id) : [];
-/** Whether some live row holds a bot view without a record. */
+/** The bot views of a row whose details have no `botId`, which only state of an earlier build holds: a bot view without details has no record to give. */
+const unbound = (row: SavedWorkspaceWindow) => bound(row).filter(viewId => row.bots!.members[viewId] && !row.bots!.members[viewId]!.botId);
+/** Whether some live row holds bot details without a record. */
 export function needsBotMigration(rows: readonly SavedWorkspaceWindow[]): boolean {
-  return rows.some(row => !row.deleted && bound(row).some(viewId => !row.bots!.members[viewId]?.botId));
+  return rows.some(row => !row.deleted && unbound(row).length > 0);
 }
-/** Gives every bot view of every account a record, with `migrationBotId` for those without one. Pictures are read in the current form first. */
+/**
+ * Gives every bot with details and no record one, with `migrationBotId`. Pictures are read in the current form first. Only a row that holds
+ * such a bot is reconciled, and the identity the row's other bots already have in their records is read into it first, so the
+ * reconciliation keeps it.
+ */
 export function migrateBots(rows: SavedWorkspaceWindow[], bots: SavedBot[], now: number): void {
   for (const row of rows) if (!row.deleted && row.bots) row.bots = readStoredBots(row.bots) as typeof row.bots;
   for (const subject of new Set(rows.map(row => row.subject))) {
-    const before = new Map<string, string>();
-    for (const row of rows) if (row.subject === subject && !row.deleted) for (const viewId of bound(row)) before.set(key(row.id, viewId), migrationBotId(subject, row.id, viewId));
-    reconcileBots(subject, rows, bots, new Set(rows.filter(row => row.subject === subject).map(row => row.id)), before, now);
+    const before = new Map<string, string>(), changed = new Set<string>();
+    for (const row of rows) {
+      if (row.subject !== subject || row.deleted || !row.window || !row.bots || !unbound(row).length) continue;
+      row.bots = mergeBots(subject, { window: row.window, bots: row.bots }, bots).bots!;
+      for (const viewId of bound(row)) before.set(key(row.id, viewId), migrationBotId(subject, row.id, viewId));
+      changed.add(row.id);
+    }
+    reconcileBots(subject, rows, bots, changed, before, now);
   }
 }

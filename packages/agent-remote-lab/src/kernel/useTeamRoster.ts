@@ -16,10 +16,12 @@ interface Inputs {
   baseUrl: string; enabled: boolean;
   /** The loaded Teams of this `baseUrl`, absent until the first read. */
   teams: readonly Team[] | undefined;
+  /** The loaded tasks, inboxes and answer sessions of this `baseUrl`: a question still unanswered is followed closely too. */
+  tasks?: readonly Team[] | undefined;
   publish(baseUrl: string, teams: Team[], tasks: Team[]): void;
 }
 /** Loads the Team roster from the Relay and keeps it current: closely while a room is open, otherwise twice a minute. */
-export function useTeamRoster({ baseUrl, enabled, teams, publish }: Inputs): { loadError: string } {
+export function useTeamRoster({ baseUrl, enabled, teams, tasks, publish }: Inputs): { loadError: string } {
   const t = useTranslate();
   const client = useMemo(() => new RemoteTeamClient(baseUrl, workspaceFetch), [baseUrl]);
   const [loadError, setLoadError] = useState('');
@@ -49,9 +51,9 @@ export function useTeamRoster({ baseUrl, enabled, teams, publish }: Inputs): { l
     const unwatch = watchList(load);
     return () => { stopped = true; ++generation.current; if (loader.current === load) loader.current = undefined; unwatch(); };
   }, [client, enabled, baseUrl]);
-  // An open room changes as its members speak, so it is followed closely; otherwise the roster stays current twice a minute
+  // An open room changes as its members speak, and a question asked of a bot is waiting for its answer, so both are followed closely; otherwise the roster stays current twice a minute
   // instead of polling every few seconds on every open page.
-  const watching = !!teams?.some(team => team.room?.state === 'open');
+  const watching = !!teams?.some(team => team.room?.state === 'open') || !!tasks?.some(team => team.status === 'active' && team.ask?.entries.some(entry => !entry.answer));
   const periods = useContext(TeamRefresh);
   useEffect(() => {
     if (!enabled) return;

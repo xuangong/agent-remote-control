@@ -60,7 +60,7 @@ export function useSharedFeeds(scope: Pick<AppInputs & WorkbenchShellSlice & Act
   const updateTaskRoster = useCallback((baseUrl: string, tasks: Team[]) => setTeamRoster(current => ({ baseUrl, teams: current?.baseUrl === baseUrl ? current.teams : [], tasks })), []);
 
   const rosterTeams = teamRoster?.baseUrl === baseUrl ? teamRoster.teams : undefined;
-  useTeamRoster({ baseUrl, enabled: accessReady && !!directory, teams: rosterTeams,
+  useTeamRoster({ baseUrl, enabled: accessReady && !!directory, teams: rosterTeams, tasks: teamRoster?.baseUrl === baseUrl ? teamRoster.tasks : undefined,
     publish: (baseUrl, teams, tasks) => { updateTeamRoster(baseUrl, teams); updateTaskRoster(baseUrl, tasks); } });
 
   // The audit's passed chains reach the page without a push: the roster's marks and Settings' count follow them.

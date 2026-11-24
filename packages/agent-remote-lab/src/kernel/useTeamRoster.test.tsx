@@ -19,9 +19,9 @@ const answers: Team = { ...base, id: 'answers', title: 'Answers', members: [{ ..
 
 let published: { teams: Team[]; tasks: Team[] } | undefined;
 function Harness() {
-  const [roster, setRoster] = useState<{ baseUrl: string; teams: Team[] }>();
-  const { loadError } = useTeamRoster({ baseUrl: 'https://relay.test', enabled: true, teams: roster?.teams,
-    publish: (baseUrl, teams, tasks) => { setRoster({ baseUrl, teams }); published = { teams, tasks }; } });
+  const [roster, setRoster] = useState<{ baseUrl: string; teams: Team[]; tasks: Team[] }>();
+  const { loadError } = useTeamRoster({ baseUrl: 'https://relay.test', enabled: true, teams: roster?.teams, tasks: roster?.tasks,
+    publish: (baseUrl, teams, tasks) => { setRoster({ baseUrl, teams, tasks }); published = { teams, tasks }; } });
   return <p role="status">{loadError}</p>;
 }
 afterEach(() => { fixture.lists = 0; fixture.teams = []; fixture.failure = ''; published = undefined; vi.useRealTimers(); });
@@ -54,6 +54,19 @@ it('refreshes every 4 s while a room is open, and twice a minute otherwise', asy
   await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
   expect(await minute()).toBe(15);
   fixture.teams = [room('done')];
+  await act(async () => { await vi.advanceTimersByTimeAsync(4_000); });
+  expect(await minute()).toBe(2);
+  await unmount(view);
+});
+
+it('refreshes every 4 s while a question asked of a bot has no answer, and twice a minute once it has one', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  fixture.teams = [answers];
+  const view = await render(<Harness />);
+  const minute = async () => { fixture.lists = 0; await act(async () => { await vi.advanceTimersByTimeAsync(60_000); }); return fixture.lists; };
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  expect(await minute()).toBe(15);
+  fixture.teams = [{ ...answers, ask: { ...answers.ask!, entries: [{ ...answers.ask!.entries[0]!, answer: { text: 'A.', at: 2 } }] } }];
   await act(async () => { await vi.advanceTimersByTimeAsync(4_000); });
   expect(await minute()).toBe(2);
   await unmount(view);

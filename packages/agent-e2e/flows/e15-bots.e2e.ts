@@ -28,7 +28,7 @@ async function holdsComposerText(page: Page, bot: string, text: string): Promise
 let stack: Stack; let browser: Browser;
 beforeAll(async () => {
   stack = await startStack({ teams: true, tools: true,
-    // A message that asks for a report in is answered by one turn whose final text is the report; any other input is echoed.
+    // A message that asks for a report in starts one turn that ends with a text; any other input is echoed.
     turns: text => text.includes('Report in with your status.') ? [{ reply: 'Scribe here: ready to keep the notes.' }]
       // A long check keeps the bot's main session busy, waiting for an approval no one gives; a question asked of it is answered by one turn.
       : text.includes('Run the long check.') ? [{ approval: 'Run the check', command: 'npm run check' }]
@@ -120,7 +120,7 @@ it('E15: a bot creates a standing bot, which joins its group in the page and rea
   await context.close();
 });
 
-it('E15: a bot answers a message from the final text of its turn, and its chief hears what the person wrote to it', async () => {
+it('E15: a bot with the tools answers a message with message, not its final text, and its chief hears what the person wrote to it', async () => {
   const { context, page } = await openPage(browser, stack.origin + '/?mode=bot');
   await team(context);
   await hasTools('chief');
@@ -128,9 +128,13 @@ it('E15: a bot answers a message from the final text of its turn, and its chief 
   await showsText(page, 'Archivist');
   const archivist = () => stack.provider.known().filter(id => id.includes('-new-')).find(id => stack.provider.given(id)?.instructions?.includes('Keep the changelog.'));
   await expect.poll(archivist, { timeout: 20_000 }).toBeDefined();
-  // The turn its first message started ended with a text; no tool was called, and the chief reads it as the reply.
+  // The turn its first message started ended with a text, which goes to no one: a bot with the tools answers with message.
+  await expect.poll(() => inputs(archivist()!).filter(input => input.kind === 'assistant'), { timeout: 20_000 }).toHaveLength(1);
+  const asked = (inputs(archivist()!).find(input => input.kind === 'assistant') as { messageId?: string }).messageId;
+  expect(inputs('chief').filter(input => input.kind === 'assistant' && input.from === 'Archivist')).toEqual([]);
+  expect(await stack.provider.useTool(archivist()!, 'message', { to: 'chief', text: 'Scribe here: ready to keep the notes.', reply_to: asked })).toMatchObject({ outcome: 'delivered' });
   await expect.poll(() => inputs('chief').filter(input => input.kind === 'assistant' && input.from === 'Archivist'), { timeout: 20_000 })
-    .toEqual([expect.objectContaining({ from: 'Archivist', body: 'Scribe here: ready to keep the notes.', replyTo: expect.stringMatching(/^m[0-9a-f]{12}$/) })]);
+    .toEqual([expect.objectContaining({ from: 'Archivist', body: 'Scribe here: ready to keep the notes.', replyTo: asked })]);
   // The person types into the bot's own session: the chief hears the first words, framed as theirs.
   stack.provider.session(archivist()!)!.write('user', 'Use the short changelog format from now on.');
   await expect.poll(() => inputs('chief').filter(input => input.kind === 'person_wrote'), { timeout: 20_000 })

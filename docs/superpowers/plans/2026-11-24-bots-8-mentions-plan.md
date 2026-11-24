@@ -31,7 +31,7 @@ what it learns through a memory; work is tracked on a board per bot; reports to 
 - Context stays with the item, so the main session can hand long work away and still find it (it reads its board first whenever it
   starts, resumes or was compacted):
   - The item keeps the brief as sent, and the latest report (one line, at most 300 characters) beside its status.
-  - Binding both ways: `create_bot` or `message` naming an item records the assignee on it; the assignee's first input names the item
+  - Binding both ways: `create_bot` naming an item, or an `update_board` assignee, records the assignee on it (a `message` naming an item only tags the exchange, bots plan 9); the assignee's first input names the item
     (`[Item 7 "Run the regression" · from Chief]`), and its reports update that item without the chief matching them by hand.
   - From an item the person and the chief open the session or bot doing it, and read its process with `read_bot`.
 - Tools: `board` (read one's own board, or the board of a bot one is chief of, read only), `update_board` (create, change, move,
@@ -47,8 +47,7 @@ As built (8a):
 - Items keep `changedAt` (the version at which each field last changed), which is how a stale write knows what it overwrote: only fields it
   writes, with another value, that changed after the version it read. A new item names no version; a temporary bot may leave out the version
   and the key of the one item it writes. The plan note has its own version and the same notice; each change keeps a `why` line (last 20).
-- Assigning: `create_bot` or `message` naming an item sets the assignee, the brief (the first one the assignee got; a follow-up leaves it) and
-  status working. The tag line `[Item 7 "title" · from Chief]` is written by the Relay after the frame's header, never in a payload
+- Assigning: `create_bot` naming an item sets the assignee, the brief and status working (an `update_board` write sets them as written; a `message` naming an item never assigns, whoever receives it). The tag line `[Item 7 "title" · from Chief]` is written by the Relay after the frame's header, never in a payload
   (`[Item` lines in a payload are quoted). For a temporary bot the tag also goes on its later inputs and its reports, from the stored item.
 - Reports: a `message` with a status, from a bot to the bot whose board holds an open item assigned to the sender (the named `item`, or the
   only one), sets the item's latest report (a failed report reads "Failed: ..."). Status and result follow (progress working, needs_input

@@ -456,7 +456,7 @@ Ranked by impact; each is tied to the evidence above. Not implemented.
 - S-3, draft (ef11bfc6): the composer cleared the saved draft only while its session was still shown; opening the side first left it behind.
 - T-2, item read (847cb599): the assignee reads the item handed to it on the other bot's board with `board` (bot and item), read only. Chosen over copying the brief into the input: one read rule, no second copy.
 - P-1, cause (d1698c48): the person's edit runs in a chain of its own with cause `person` (shown as "You asked ..."), instead of joining the bot's latest timer chain.
-- Item moved by a help request (af97cf2d): a message naming the sender's item assigns it only to the sender's own staff or temporary bots; to a peer it names the item and changes nothing.
+- Item moved by a help request (af97cf2d): a message naming the sender's item assigns it only to the sender's own staff or temporary bots; to a peer it names the item and changes nothing. Later (bots plan 9): a message never assigns, to anyone.
 
 ### Larger changes
 

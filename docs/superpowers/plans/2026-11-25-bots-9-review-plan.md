@@ -37,6 +37,10 @@ As built: base instructions are v7 ("after a delivery or a report, do not acknow
 
 Help is ordinary delegation by message and board item; the folded bot-message line and the board already show it.
 
+## Delegation is one path (decided: 2026-11-25)
+
+Asking another bot for help is handing it work: the base instructions say "work outside your mission goes to the bot whose mission fits (`list_bots`): hand it over by message and wait for its answer" (still v7). An item is assigned only by `create_bot` with the item or an explicit `update_board` assignee; a `message` naming an item tags the exchange and never changes the assignee, for staff, temporary bots and peers alike (the relation-based branch of af97cf2d is gone). The instructions tell a bot to assign with `update_board` (or `create_bot` with the item) when handing an item over.
+
 ## Checks
 
 Affected tests per sub-step; then Side and Call For Support simulated again with real bots and recorded beside the first record; then

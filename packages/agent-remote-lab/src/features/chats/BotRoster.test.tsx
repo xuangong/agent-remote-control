@@ -5,6 +5,7 @@ import { projectBotRoster } from '../../kernel/bot-roster.js';
 import { botGroup, botTarget, visibleButton } from '../../test/bot-mode-fixtures.js';
 import { createWindowView, type WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { render } from '../../test/setup.js';
+import { markChainsSeen, observeChains, resetChainAlerts } from '../../kernel/chain-alerts.js';
 import { TaskDirectoryContext } from '@orchardworks/agent-client-web/react';
 import type { BotPlace } from '../../kernel/workbench-mode.js';
 
@@ -197,4 +198,18 @@ it('marks a chief\'s row with the needs-you dot while one of its staff needs the
   const chief = visibleButton(container, 'Chief');
   expect([chief.dataset.needsYou, chief.querySelector('.lab-bot-needs-you') !== null]).toEqual(['true', true]);
   expect(visibleButton(container, 'Scribe').dataset.needsYou).toBe('true');
+});
+
+it('marks the row of a bot whose chain passed a threshold the owner has not seen, until the audit shows it', async () => {
+  const bot = 'b_' + '1'.repeat(32);
+  const group = botGroup('A'); group.bots!.members = { A1: { name: 'Chief', botId: bot } };
+  const model = projectBotRoster([group], [], { status: () => 'idle' });
+  const container = await render(<BotRoster model={model} groups={[group]} onSelect={() => {}} directoryControls={null} />);
+  expect(visibleButton(container, 'Chief').dataset.needsYou).toBeUndefined();
+  const passed = [{ id: 'c_0000000000000001', cause: 'person' as const, bot, bots: [bot], messages: 1, turns: 1, created: 0, depth: 3, usage: { tokens: 1 }, startedAt: 1, updatedAt: 2, passed: ['depth' as const] }];
+  act(() => observeChains('/', passed));
+  expect([visibleButton(container, 'Chief').dataset.needsYou, visibleButton(container, 'Chief').querySelector('.lab-bot-needs-you') !== null]).toEqual(['true', true]);
+  act(() => markChainsSeen('/'));
+  expect(visibleButton(container, 'Chief').dataset.needsYou).toBeUndefined();
+  resetChainAlerts();
 });

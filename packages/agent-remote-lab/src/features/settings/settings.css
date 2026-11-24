@@ -19,6 +19,7 @@
 .lab-settings-group.lab-settings-group:hover:not(:disabled) { color: var(--orchard-text-strong); background: var(--orchard-fill); }
 .lab-settings-group.lab-settings-group[aria-current="page"] { color: var(--orchard-text-strong); background: var(--orchard-tint); }
 .lab-settings-group[aria-current="page"] > svg:first-child { color: var(--orchard-brand); }
+.lab-settings-count { flex: none; min-width: 20px; padding: 0 6px; border-radius: 10px; color: var(--orchard-surface); background: var(--orchard-brand); font-size: var(--orchard-type-footnote-size); line-height: 20px; text-align: center; }
 .lab-settings-group-text { display: flex; flex: 1; flex-direction: column; min-width: 0; }
 .lab-settings-group-text small { overflow: hidden; color: var(--orchard-text-secondary); font-size: var(--orchard-type-footnote-size); text-overflow: ellipsis; white-space: nowrap; }
 .lab-settings-me .lab-settings-group.lab-settings-group { min-height: 56px; background: var(--orchard-fill); }

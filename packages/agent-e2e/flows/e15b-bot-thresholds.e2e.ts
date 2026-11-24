@@ -1,22 +1,26 @@
 // E15b, the person's thresholds on bot chains (bots design 7), on the real stack with the push service simulator. The person turns on
 // "Notify me on this device" and sets a reply-depth threshold in Settings > Assistants. With no page running, two bots exchange messages
 // so a chain passes it: the audit shows the chain as passed, exactly one "needs you" push for the chain's first bot reaches the push
-// service, and nothing stops: the next message in the chain is delivered. `E2E_BROWSER=webkit` runs it in WebKit.
+// service, and nothing stops: the next message in the chain is delivered. A second flow keeps a page open on Settings while a chain
+// passes a threshold, where no push is sent: the page learns it at the Team roster's refresh pace, shows the count on Assistants and the
+// needs-you mark on the chain's bot in Chats, and clears both once the audit has shown the chain. `E2E_BROWSER=webkit` runs it in WebKit.
 import type { Browser } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { startStack, type Stack } from '@orchardworks/agent-e2e/stack';
 import { startPushService, type PushService } from '@orchardworks/agent-remote-fixtures/push-service';
 import { hasTools, inputs, team } from './bot-team.js';
 import { launchBrowser, openPage } from './browser.js';
+import { chooseSetting, goTo } from './page.js';
 import { modelBrowserPush } from './push-device.js';
 
+const SESSIONS = {
+  chief: { title: 'Chief', history: [{ role: 'user' as const, text: 'Plan the release.' }, { role: 'assistant' as const, text: 'Chief is ready.' }] },
+  tracker: { title: 'Tracker', history: [{ role: 'user' as const, text: 'Track the build.' }, { role: 'assistant' as const, text: 'Tracker is ready.' }] },
+};
 let stack: Stack; let browser: Browser; let push: PushService;
 beforeAll(async () => {
   push = await startPushService();
-  stack = await startStack({ teams: true, tools: true, pushServices: [push.origin], sessions: {
-    chief: { title: 'Chief', history: [{ role: 'user', text: 'Plan the release.' }, { role: 'assistant', text: 'Chief is ready.' }] },
-    tracker: { title: 'Tracker', history: [{ role: 'user', text: 'Track the build.' }, { role: 'assistant', text: 'Tracker is ready.' }] },
-  } });
+  stack = await startStack({ teams: true, tools: true, pushServices: [push.origin], sessions: SESSIONS });
   browser = await launchBrowser();
 });
 afterAll(async () => { await browser?.close(); await stack?.close(); await push?.close(); });
@@ -63,3 +67,36 @@ it('E15b: a chain that passes the reply-depth threshold is shown as passed and s
   expect(delivered!.payload).not.toMatch(/release branch|tagged/);
   await context.close();
 });
+
+it('E15b: a page left open on Settings learns that a chain passed a threshold, marks its bot in Chats, and clears the sign once the audit has shown it', async () => {
+  const own = await startStack({ teams: true, tools: true, sessions: SESSIONS });
+  try {
+    const { context, page } = await openPage(browser, own.origin + '/?page=settings&group=general');
+    const status = await (await context.request.get(own.origin + '/auth/status')).json() as { basePath: string };
+    await team(own, context);
+    await hasTools(own, 'chief'); await hasTools(own, 'tracker');
+    await page.goto(own.origin + '/?page=settings&group=general');
+    const set = await context.request.post(`${own.origin}${status.basePath}v1/remote/chains/action`, { headers: { origin: own.origin }, data: { action: 'set_thresholds', thresholds: { depth: 1 } } });
+    expect(set.ok()).toBe(true);
+    await page.locator('.lab-settings-group').filter({ hasText: 'Assistants' }).waitFor();
+    expect(await page.locator('.lab-settings-count').count()).toBe(0);
+
+    // A chain passes the threshold while the page stays open: it learns it at the roster's pace, without a push.
+    expect(await own.provider.useTool('chief', 'message', { to: 'Tracker', text: 'Is the release branch cut?' })).toMatchObject({ outcome: 'delivered' });
+    await page.locator('.lab-settings-count').waitFor({ timeout: 45_000 });
+    expect(await page.locator('.lab-settings-count').textContent()).toBe('1');
+    await goTo(page, 'Chats');
+    const chief = (marked: boolean) => page.locator(marked ? '.lab-bot-row[data-needs-you]' : '.lab-bot-row').filter({ hasText: 'Chief' });
+    await chief(true).first().waitFor({ timeout: 20_000 });
+
+    // The audit shows the chain, which is seeing it: the count and the mark are gone afterwards.
+    await goTo(page, 'Settings');
+    await chooseSetting(page, 'Assistants');
+    await expect.poll(() => page.locator('.lab-bot-audit > ul > li').filter({ hasText: 'Passed: Reply depth' }).count(), { timeout: 20_000 }).toBeGreaterThan(0);
+    expect(await page.locator('.lab-settings-count').count()).toBe(0);
+    await goTo(page, 'Chats');
+    await chief(false).first().waitFor({ timeout: 20_000 });
+    expect(await chief(true).count()).toBe(0);
+    await context.close();
+  } finally { await own.close(); }
+}, 120_000);

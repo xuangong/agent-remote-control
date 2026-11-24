@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { BotChain, ChainAction, ChainView } from '@orchardworks/agent-remote-protocol';
 import { render } from '../../test/setup.js';
 import { BotAudit } from './BotAudit.js';
+import { observeChains, resetChainAlerts, useChainAlerts } from '../../kernel/chain-alerts.js';
 
 const ids = { chief: 'b_' + '1'.repeat(32), tracker: 'b_' + '2'.repeat(32), worker: 'b_' + '3'.repeat(32) };
 const chain = (id: string, extra: Partial<BotChain> = {}): BotChain => ({ id, cause: 'person', bot: ids.chief, bots: [ids.chief, ids.tracker, ids.worker], messages: 4, turns: 3, created: 1, depth: 2,
@@ -55,5 +56,24 @@ describe('the audit of the bots\' work', () => {
     await act(async () => form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
     await flush();
     expect(acted).toEqual([{ action: 'set_thresholds', thresholds: { tokens: 200000, minutes: 30 } }]);
+  });
+});
+
+describe('the audit and the passed-chain sign', () => {
+  it('seeing a passed chain in the audit clears its sign, and a chain that passes more later brings it back', async () => {
+    resetChainAlerts();
+    let current = view([chain('c_0000000000000001', { passed: ['depth'] })]);
+    function Sign() { return <output>{useChainAlerts().length}</output>; }
+    const client = { list: vi.fn(async () => current), act: vi.fn(async () => {}) };
+    act(() => observeChains('/', current.chains));
+    const sign = await render(<Sign />);
+    expect(sign.textContent).toBe('1');
+    await render(<BotAudit baseUrl="/" client={client} />);
+    await flush();
+    expect(sign.textContent).toBe('0');
+    current = view([chain('c_0000000000000001', { passed: ['depth', 'tokens'] })]);
+    act(() => observeChains('/', current.chains));
+    expect(sign.textContent).toBe('1');
+    resetChainAlerts();
   });
 });

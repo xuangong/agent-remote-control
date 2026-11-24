@@ -71,6 +71,7 @@ export const settings = {
   'settings.audit.threshold.tokens': 'Tokens',
   'settings.audit.threshold.depth': 'Reply depth',
   'settings.audit.threshold.minutes': 'Minutes',
+  'settings.audit.unseen': '{count} chains passed a threshold',
   'settings.audit.passed': 'Passed: {what}',
   'settings.letters.hint': 'Show letters between agents in conversations',
   'settings.computers.hint': 'Every computer that runs your agents.',

@@ -71,6 +71,7 @@ export const settings: AreaMessages<typeof english> = {
   'settings.audit.threshold.tokens': 'Tokens',
   'settings.audit.threshold.depth': '回复深度',
   'settings.audit.threshold.minutes': '分钟',
+  'settings.audit.unseen': '{count} 条越过了阈值',
   'settings.audit.passed': '已超过：{what}',
   'settings.letters.hint': '在对话里显示助手之间的信件',
   'settings.computers.hint': '运行你的 Agent 的每一台电脑。',

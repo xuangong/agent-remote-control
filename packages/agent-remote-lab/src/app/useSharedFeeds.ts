@@ -6,6 +6,7 @@ import { useSharedFeedsSource } from '../kernel/shared-feeds.js';
 import { useWindowVisibility } from '../kernel/useWindowVisibility.js';
 import type { Team } from '@orchardworks/agent-remote-protocol';
 import { useTeamRoster } from '../kernel/useTeamRoster.js';
+import { useChainAlertPoll } from '../kernel/chain-alerts.js';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { RemoteHost } from '../kernel/remote-host.js';
@@ -61,6 +62,9 @@ export function useSharedFeeds(scope: Pick<AppInputs & WorkbenchShellSlice & Act
   const rosterTeams = teamRoster?.baseUrl === baseUrl ? teamRoster.teams : undefined;
   useTeamRoster({ baseUrl, enabled: accessReady && !!directory, teams: rosterTeams,
     publish: (baseUrl, teams, tasks) => { updateTeamRoster(baseUrl, teams); updateTaskRoster(baseUrl, tasks); } });
+
+  // The audit's passed chains reach the page without a push: the roster's marks and Settings' count follow them.
+  useChainAlertPoll({ baseUrl, enabled: accessReady && !!directory });
 
   // Most recent use orders the Window overview; a page in front counts as using its Window.
   useEffect(() => {

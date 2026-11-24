@@ -2,6 +2,7 @@ import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { RemoteChainClient } from '@orchardworks/agent-client';
 import type { BotChain, ChainAction, ChainThresholds, ChainView } from '@orchardworks/agent-remote-protocol';
 import { LocaleContext, useTranslate } from '@orchardworks/agent-client-web/react';
+import { markChainsSeen, observeChains } from '../../kernel/chain-alerts.js';
 import { workspaceFetch } from '../../kernel/workspace-access.js';
 import { dateLocale, replyTime } from '../../kernel/reply-time.js';
 import { SessionRow } from '../../conversation/assistant/SessionsList.js';
@@ -20,7 +21,8 @@ export function BotAudit({ baseUrl, client: given }: { baseUrl: string; client?:
   const client = useMemo(() => given ?? new RemoteChainClient(baseUrl, workspaceFetch), [baseUrl, given]);
   const [view, setView] = useState<ChainView>();
   const [failed, setFailed] = useState(false), [busy, setBusy] = useState(false);
-  const load = useCallback(async () => { try { setView(await client.list()); } catch { setFailed(true); } }, [client]);
+  // What the audit shows is seen: the chains that passed a threshold stop marking their bots and counting on Settings.
+  const load = useCallback(async () => { try { const next = await client.list(); setView(next); observeChains(baseUrl, next.chains); markChainsSeen(baseUrl); } catch { setFailed(true); } }, [client, baseUrl]);
   useEffect(() => {
     void load();
     const timer = setInterval(() => { if (document.visibilityState === 'visible') void load(); }, REFRESH_MS);

@@ -13,6 +13,7 @@ import { AssistantSettings, type DeviceNotifications } from './AssistantSettings
 import { ComputerSettings, type ComputerServices } from './ComputerSettings.js';
 import { GeneralSettings } from './GeneralSettings.js';
 import { PrivacySettings } from './PrivacySettings.js';
+import { useChainAlerts } from '../../kernel/chain-alerts.js';
 import { settingsGroups, type SettingsFacts } from './settings-groups.js';
 import { hostSummary } from './host-summary.js';
 import './settings.css';
@@ -42,6 +43,8 @@ export function SettingsPage({ context, group, phone, onGroup, linkNotice }: {
 }) {
   const t = useTranslate();
   const groups = settingsGroups(context.facts);
+  // Chains that passed a threshold and are not yet seen in the audit count on the group that holds it.
+  const unseenChains = useChainAlerts().length;
   const current = phone ? group : group ?? 'general';
   const title = (id: SettingsGroupId) => t(`settings.group.${id}` as const);
   const hint = (id: SettingsGroupId) => id === 'computers' ? hostSummary(context.computers.hosts, context.computers.loaded, t) : t(`settings.hint.${id}` as const);
@@ -49,6 +52,7 @@ export function SettingsPage({ context, group, phone, onGroup, linkNotice }: {
     {groups.map(item => <button key={item.id} type="button" className="lab-settings-group" aria-current={current === item.id ? 'page' : undefined} onClick={() => onGroup(item.id)}>
       <Icon name={ICONS[item.id]} size={20} />
       <span className="lab-settings-group-text"><strong>{title(item.id)}</strong>{phone ? <small>{hint(item.id)}</small> : null}</span>
+      {item.id === 'assistants' && unseenChains ? <span className="lab-settings-count" role="status" aria-label={t('settings.audit.unseen', { count: unseenChains })}>{unseenChains}</span> : null}
       {phone ? <Icon name="chevron-right" size={16} /> : null}
     </button>)}
   </nav>;

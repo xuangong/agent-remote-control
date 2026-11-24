@@ -8,6 +8,7 @@ import { sessionKey } from '../../kernel/session-tree.js';
 import { Icon } from '../../ui/Icon.js';
 import { dateLocale, replyTime } from '../../kernel/reply-time.js';
 import { LocaleContext, useTaskDirectory, useTranslate } from '@orchardworks/agent-client-web/react';
+import { useChainAlerts } from '../../kernel/chain-alerts.js';
 import { contextMenuEvents } from '../../ui/ContextMenu.js';
 
 export function botPlaceKey(place: BotPlace): string {
@@ -23,13 +24,14 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
   const directory = useTaskDirectory();
   const name = row.name, destination: BotPlace = { kind: 'bot', groupId: row.groupId, viewId: row.viewId };
   const locale = useContext(LocaleContext);
+  const chainAlerts = useChainAlerts();
   const time = row.reply ? replyTime(row.reply.replyAt, undefined, dateLocale(locale), t) : undefined;
   // Like a chat list, an unsent draft shows where the latest reply would; the bot on screen has it in its composer.
   const draft = !current && row.draft ? row.draft.replace(/\s+/g, ' ').trim() : undefined;
   // The sentence says what the assistant is doing; a draft takes the place of a quiet one (its latest reply, or ready).
   const quiet = row.assistant.state === 'idle' || row.assistant.state === 'unknown';
   // Needs you is not unread: it asks for the owner, so its dot is distinct and mute never quiets it.
-  const needsYou = row.assistant.state === 'needs_you' || !!row.staffNeedsYou;
+  const needsYou = row.assistant.state === 'needs_you' || !!row.staffNeedsYou || (!!row.details.botId && chainAlerts.some(alert => alert.bot === row.details.botId));
   // A quiet bot that keeps work shows where its work stands (bots design 10): its latest open work item and phase.
   const work = quiet ? directory?.work?.(row.session).find(item => item.phase !== 'done') : undefined;
   const sentence = draft && quiet ? undefined : (work ? `${work.title} · ${t(`details.workPhase.${work.phase}`)}` : row.assistant.sentence) || undefined;

@@ -4,6 +4,7 @@ import { HttpPreviewClient } from '@orchardworks/agent-client';
 import { LocaleProvider } from '@orchardworks/agent-client-web/react';
 import { bindAppearance, bindLanguage, bindMotion } from '@orchardworks/agent-client-web/browser';
 import { render } from '../../test/setup.js';
+import { markChainsSeen, observeChains, resetChainAlerts } from '../../kernel/chain-alerts.js';
 import type { SettingsGroupId } from '../../kernel/destinations.js';
 import { SettingsPage, type SettingsContext } from './SettingsPage.js';
 
@@ -108,4 +109,18 @@ it('opens Trace and the Replica Inspector from Advanced, and signs out from Acco
   await press(container, 'Sign out'); expect(ctx.account!.signOut).toHaveBeenCalledOnce();
   expect(container.textContent).toContain('Signed in as Xian');
   expect(container.textContent).toContain('Controller on Studio');
+});
+
+it('counts on Assistants the chains that passed a threshold and are not yet seen in the audit', async () => {
+  const container = await mount(<Harness />);
+  const count = () => container.querySelector('.lab-settings-count')?.textContent;
+  expect(count()).toBeUndefined();
+  const bot = 'b_' + '1'.repeat(32);
+  act(() => observeChains('http://localhost/', [{ id: 'c_0000000000000001', cause: 'person', bot, bots: [bot], messages: 1, turns: 1, created: 0, depth: 3, usage: { tokens: 1 }, startedAt: 1, updatedAt: 2, passed: ['depth'] }]));
+  expect(count()).toBe('1');
+  expect(container.querySelector('.lab-settings-count')?.getAttribute('aria-label')).toBe('1 chains passed a threshold');
+  expect(container.querySelector('.lab-settings-count')?.closest('button')?.textContent).toContain('Assistants');
+  act(() => markChainsSeen('http://localhost/'));
+  expect(count()).toBeUndefined();
+  resetChainAlerts();
 });

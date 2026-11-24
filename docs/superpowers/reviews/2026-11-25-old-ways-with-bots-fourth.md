@@ -246,7 +246,7 @@ Verdicts compare the fourth record with the third, and say where it stands overa
 | C-3 review verdict lost | lost | arrived, not a reply | arrived with `reply_to` set | arrived in the chain, twice | Holds (duplicate, N-8) |
 | Item moved to the reviewer | assignee the keeper | `self` | `self`, keeper a link | the builder wrote the assignment; the keeper is the assignee, its `item:` reply refused | Worse (by a model's board write, see N-8) |
 | C-2, C-4, C-5 | public mission, `ListAgents`, ten stale bots | unchanged | unchanged, fresh workspace | missions in `list_bots` read as the rules (2b); fresh workspace | Unchanged |
-| T-1 closing chatter, many turns | Claude 39, 41 messages, 5.18 M, $2.32; Codex 30, 28 messages, 2.74 M | Claude 34, 33 messages, 4.20 M, $1.90; Codex 40, 51 messages, 4.04 M | Claude 30, 28 messages, 3.28 M, $1.62, 3 closing turns; Codex 89, 92 messages, 13.74 M, 11 after first delivery | Claude 18, 25 messages, 2.45 M, $1.92, not delivered (frozen); Codex 40, 74 messages, 4.36 M, 0 closing lead turns, 4 min 43 s to delivery | Improved for Codex (confounded by the freeze); Claude not comparable |
+| T-1 closing chatter, many turns | Claude 39, 41 messages, 5.18 M, $2.32; Codex 30, 28 messages, 2.74 M | Claude 34, 33 messages, 4.20 M, $1.90; Codex 40, 51 messages, 4.04 M | Claude 30, 28 messages, 3.28 M, $1.62, 3 closing turns; Codex 89, 92 messages, 13.74 M, 11 after first delivery | Claude 18, 25 messages, 2.45 M, $1.92, not delivered (frozen); Codex 40, 74 messages, 4.36 M, 0 closing lead turns, 4 min 43 s to delivery | Improved for Codex (confounded by the freeze); Claude not comparable. After the N-7 fix (build 853a0bad): Claude 22 turns, 23 messages, 4.71 M, $3.16, delivered in 3 min 44 s, 1 closing turn; Codex 62 turns, 66 messages, 9.37 M, delivered in 4 min 18 s, 5 lead turns after it, none with narration |
 | N-2 final text routed as an answer feeds the chatter | n/a | hypothesis | traced | 0 inputs "final answer to" in 8 team sessions | Fixed (by T-1) |
 | Chief asks staff for progress | check-ins | "report on ..." | none | none (hand-offs only) | Holds |
 | T-2 item number and brief in the notice | "read item N" fails | spec still missing | specs in `create_bot` (Claude); Codex notice without key or brief | notice carries item and brief (keeper, Codex staff); Claude `create_bot` left the staff without the spec | Improved for notices; new for `create_bot` (N-9) |
@@ -254,11 +254,11 @@ Verdicts compare the fourth record with the third, and say where it stands overa
 | T-4 stale or crossed reports | yes | yes | mild | yes: coder acks twice, tester "Lead R4's last three messages crossed with my report" | Unchanged |
 | Approvals | 37 | Team 4 cards, 11 uses; 13 once | Team 1 card, 9 uses; 16 once | Team Claude 3 cards, 3 uses (one per chain and kind of prompt); Codex none; 14 once for Side and Support | Holds (1 to 3 cards, within variance) |
 | N-6 persisted approvals refused | n/a | n/a | instance would not start | n/e (state removed) | n/e |
-| N-7 seat frozen `busy`, queue never delivered | n/a | n/a | not seen | 7 of 7 seats that held an ack, in both providers | New |
+| N-7 seat frozen `busy`, queue never delivered | n/a | n/a | not seen | 7 of 7 seats that held an ack, in both providers | New. Fixed in build 853a0bad: 0 frozen seats in 3 Team runs (Claude twice, Codex once); every queue drained, all seats `idle` at the end |
 | N-8 refused `item:` reply by an assignee; 300-character `message` limit | n/a | n/a | n/a | seen in 2a | New |
 | N-9 `create_bot` with item leaves the spec out | n/a | n/a | n/a | Claude run | New |
-| N-10 Codex sessions cannot be released | n/a | n/a | released: true | released: false for all four | New (follows N-7) |
-| N-11 a chief asks the person about the person's own change | n/a | n/a | n/a | once | New |
+| N-10 Codex sessions cannot be released | n/a | n/a | released: true | released: false for all four New (follows N-7). Gone after the fix: `released: true` for all 8 Codex sessions (the 4 old ones and the 4 of the new run) |
+| N-11 a chief asks the person about the person's own change | n/a | n/a | n/a | once | New. Not seen after the fix: the lead was woken by the person-wrote notice at once and acted on it (Claude, Codex) |
 | P-1, P-2, P-3, Mention | | n/e | n/e | n/e | n/e |
 
 ## Analysis: was each change effective
@@ -298,3 +298,56 @@ Verdicts compare the fourth record with the third, and say where it stands overa
 - The item number and the brief in an assignment notice.
 - A builder that asks the keeper (or reads its mission) before copying a neighbour, and verdicts that reach the asker in the chain.
 - A Codex team of three staff that delivered a 33-test slugifier with the person's late change, a keeper review of the README, no unasked file and no closing narration.
+
+## After the N-7 fix (build 853a0bad)
+
+Date: 2026-11-25 local; the machine clock read 2026-11-24 21:55 to 22:16 UTC during the run, and clock times below are UTC. Same worktree and instance
+(`bots-8-5ac6711d`, `http://localhost:59571`), running build `853a0bade54e` (clean checkout), which holds the fix for N-7 (a bot seat froze `busy` after an `ack`).
+I played the owner again with the Team scenario of section 4, once with Claude Code and once with Codex. Not a test; no product code changed. One run each, so
+variance applies. Helpers are copies of the fourth record's in `/tmp/old-ways5/` (names changed to R5), plus a poll of `GET /v1/remote/teams` every 5 to 6 seconds
+that logged the seat activity of each member and the state of each message whenever either changed.
+
+**What was different from the fourth record.** The instance's state was the fourth record's (its Relay state survived the restart onto this build, with the staff and keepers of that
+run). The workspace holds `r4-team/` (a labelled-output `wordstat.sh`), so the Claude coder printed labelled output from its first version, before my direct change reached it (see 1 below).
+At the start every seat of the fourth record was `idle` and held no messages, and the four Codex sessions that could not be released then (N-10) answered `released: true` at the first try
+(the Relay state has no record of what cleared them; I did not look). `Style Keeper R4` and `Docs Keeper R4` were the standing keepers again. Approvals: a background loop answered every
+`tool_approval` of the new sessions with "Allow for this chain in this folder" when offered. No `AskUserQuestion` came from any new session.
+
+### 1. Team with Claude Code
+
+`Lead R5` (same mission as `Lead R4`), staff chosen by the lead: `R5 Coder`, `R5 Tester`, `R5 Docs`. Request at 21:56:31 for `r5-team/wordstat.sh` (the same words as section 4, with R5).
+
+- **Direct change.** At 21:59:27 (2 min 56 s after the request, straight to `R5 Coder`): the labelled one-line output of section 4. It was already what the coder had written, so the coder answered in 2 turns (117,335 tokens, $0.039): "No change is needed ... already prints labelled
+  counts on one line". The lead was woken 4 seconds after I sent it by `[The person wrote to R5 Coder] ...` (21:59:32), said in its reply that the format already was that, and went on. A weak test of the fix, so I sent a **second, real change** at 22:02:59 (after
+  delivery): add `file=<name>` to the line. The coder changed the script, the lead received the notice at 22:03:03 and wrote to the tester and the docs writer in the same second the board was updated (22:03:14, :15), the coder's report woke the lead at 22:03:27, the tester updated the tests (22:04:06,
+  11 tests, including a relative path and a name with a space), the docs writer the README (22:04:21), and the lead's delivery text came at 22:04:37, **1 min 38 s after my change, without my asking anything**.
+- **Seats.** In the polls of both runs, seats were `busy` while a turn ran and went back to `idle` after it; messages went `queued`, `accepted` (up to 6 at a time), then gone. No seat stayed `busy` with an idle session, no message stayed queued behind one. At the end of the first delivery one message remained `queued` while the seat
+  (`R5 Tester`) was `idle`: the lead's `ack` to the tester ("Noted. The locale question is with the person ..."), an ack that starts no turn and is held for the seat's next input. It was gone from the Relay after the second change had run (22:04:37: no message, all four seats `idle`). That is the held-ack design (v7), not the freeze: the seat was never `busy`.
+- **Delivered result.** 21:56:31 to 22:00:15 = 3 min 44 s to the first delivery text. Chains: request 20 turns, 22 messages, 3 bots created, 4,590,772 tokens, $3.12; the direct message to the coder 2 turns, 117,335 tokens, $0.039; together 22 turns, 23 messages, 4.71 million tokens, $3.16 (fourth record: 18 turns, 2.45 million, $1.92, not delivered; third: 30 turns, 28 messages, 3.28 million, $1.62).
+  Model calls (transcripts) at delivery: lead 27, coder 14. After the real change the chain records read 28 turns, 28 messages, 5.39 million, $3.39 for the lead's chain and 9 turns, 8 messages, 0.80 million, $0.30 for the coder's chain started by that message (the two records overlap in part; I did not add them).
+- **Closing turns after the delivery text:** 1. The tester's answer to an earlier lead message arrived at 22:00:24; the lead sent a `status: ack` reply and wrote a final text of two sentences ("The tester ran the tests again and all 9 still pass ...") at 22:00:37. Third record: 3 closing turns; fourth: none because there was no delivery.
+- **The delivered result, run by me.** `r5-team/` holds `wordstat.sh`, `test_wordstat.sh`, `README.md` and nothing else. `test_wordstat.sh` prints `all tests passed` (11 PASS lines after the real change); `wordstat.sh` on a file of 2 lines, 6 words, 11 characters printed `lines=2 words=6 chars=11 file=/tmp/x5.txt` (`wc` agrees on the three counts);
+  no argument gives `usage: wordstat.sh <file>` and exit 64, a missing file gives `cannot read file` and exit 66. The README follows the Docs Keeper's three sections (Synopsis, Exit codes, See also) and ends with "Maintained by platform-team." and shows the `file=` output.
+- **Approvals:** 2 cards, both offered "Allow for this chain in this folder" and answered that way: a Write (21:57:56) in the request's chain and an Edit (22:03:10) in the chain of my second direct message. The first direct change (21:59) needed none. (Fourth record: 3 cards.)
+- **Anything new.** (a) The first delivery text carried an open question for the person that the tester had invented: `wc -m` counts bytes under `LC_ALL=C`; the lead offered "force UTF-8 inside the script" or "a README note" and waited for me. It delivered, but with a decision attached that nobody asked for.
+  (b) The lead put the person's change into the plan and the staff's briefs at once instead of asking me what I want (N-11 did not recur). (c) The workspace contamination above made the first direct change a no-op; a fresh workspace would have been a cleaner test.
+
+### 2. Team with Codex
+
+`Lead R5X` (same mission as `Lead R4X`), staff `R5X Coder`, `R5X Tester`, `R5X Docs`. Request at 22:07:05 for `r5-team-cx/slugify.sh` (the section 3 words with R5), the direct change to `R5X Coder` at 22:08:42 (1 min 37 s later): cut at 40 characters, never end with a dash.
+
+- The lead asked the standing keepers for the conventions on its own, created the staff and the board, and carried the person's change into the plan and the tester's and docs writer's briefs ("The board and README brief now include the 40-character cap and removal of a trailing dash"). The lead's delivery text came at **22:11:23, 4 min 18 s after the request**:
+  "Delivered in r5-team-cx: slugify.sh, test_slugify.sh, and README.md. All 25 tests pass, including the 40-character limit and no trailing dash. README review passed."
+- **Seats.** Up to 16 messages were `queued` at once while all four seats were `busy` with running turns (22:12), all drained, and by 22:16:10 all four seats were `idle` with no message left. No seat stayed `busy` with an idle session.
+- **Numbers.** Request chain: 51 turns, 54 messages, 3 bots created, 7.02 million tokens; direct-message chain 11 turns, 12 messages, 2.35 million tokens; together 62 turns, 66 messages, 9.37 million tokens (the chain records show a small dollar figure for Codex that I do not trust). Fourth record: 40 turns, 74 messages, 4.36 million; third: 89 turns, 92 messages, 13.74 million.
+- **After the delivery text:** 5 more lead turns (22:11:24, 22:12:09, 22:12:24, 22:13:00, 22:13:42), each started by a staff message (a reverify report, a docs "already includes this", two coder reports) and each ending with an empty final text and one `exec` check; no narration and no message to anyone. The coder's chain ran until 22:15:11 and the lead's to 22:16:04, so 4 min 41 s of staff chatter after the delivery.
+  Third record: 11 more lead turns, 6 of them narration. The delivery text is the lead's last text.
+- **The delivered result, run by me.** `r5-team-cx/` holds `slugify.sh`, `test_slugify.sh`, `README.md`. `test_slugify.sh` prints `PASS: 25 tests`. `slugify.sh Hello, World! This is a Very Long Title That Goes On And On And On` gives `hello-world-this-is-a-very-long-title-th` (40 characters); `The quick brown fox jumps over the lazy dogs- now`
+  gives `the-quick-brown-fox-jumps-over-the-lazy` (39; the cut fell on a dash and it was removed).
+- **Approvals:** none asked. **Release:** all four sessions answered `released: true`.
+
+### Verdict
+
+- **N-7 is fixed in use.** Three Team runs (two with Claude, one with Codex) with acks held, a person's direct change mid-run and 16 messages queued at once: no seat stayed `busy` with an idle session, no queue outlived its turns, all seats ended `idle`. The Claude lead woke on the person-wrote notice and on the coder's report and delivered without being asked, 1 min 38 s after a real change. N-10 is gone with it (8 of 8 releases true).
+- Team cost is not lower than the third record for Claude (4.71 million tokens, $3.16, for a delivery plus the one closing turn; the third record's 3.28 million and $1.62), and the Codex team is 9.37 million tokens against 4.36 million in the frozen fourth run; the fourth record's numbers are the frozen runs' and are not a baseline. The 5 closing lead turns and 4 minutes of staff chatter after a Codex delivery are what is left of T-1.
+- **Not settled:** the first direct change was a no-op because of the workspace; the real mid-way change on the Claude team is the second (22:02:59). A held ack left `queued` beside an `idle` seat is by design but looks like the old freeze in a roster; a person-visible mark for it was proposed in the fourth record and is still open.

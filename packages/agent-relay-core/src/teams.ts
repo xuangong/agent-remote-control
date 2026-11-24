@@ -1,4 +1,4 @@
-import { compactTeamDeliveries, teamNeedsCompaction, unresolvedTeamDelivery, stripPrivateTeamEvidence, validSavedTeam, type SavedTeam } from './team-delivery.js';
+import { compactTeamDeliveries, teamNeedsCompaction, unresolvedTeamDelivery, stripPrivateTeamEvidence, validSavedTeam, withoutHeldAcks, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
 export { teamMessageBudgetBytes } from './team-delivery.js';
 import type { AttachmentStore } from './attachments.js';
@@ -212,7 +212,7 @@ export class TeamBroker {
       && (!team.link && !team.room && !team.inbox && !team.ask || this.ports.assistants?.capable(hostId) === true);
     if (call.action === 'poll') return this.ports.read().filter(team => team.status !== 'archived' && visible(team) && team.members.some(item => item.hostId === hostId && item.creation === 'ready'))
       // A paused bot's messages wait on the Relay until the person resumes it.
-      .map(team => this.project(team.inbox?.paused ? { ...team, messages: team.messages.filter(message => message.status !== 'queued') } : team));
+      .map(team => this.project(team.inbox?.paused ? { ...team, messages: team.messages.filter(message => message.status !== 'queued') } : withoutHeldAcks(team)));
     // The Host's sessions that are bots: they get the bots' tools and standing instructions. Bots another bot created join their group here.
     if (call.action === 'bot_enablement') {
       if (!this.assistants) return { bots: [] };

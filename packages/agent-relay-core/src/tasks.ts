@@ -38,13 +38,13 @@ const clip = (text: string) => text.length > TASK_TOLD_LIMIT ? `${text.slice(0, 
 const inbound = (team: Team, memberId: string) => team.messages.some(message => message.to === memberId
   && (message.status === 'queued' || message.status === 'dispatching' || message.status === 'unknown' || message.status === 'accepted' && message.acceptance !== 'started' && message.acceptance !== 'handled'));
 /** Queues a task input; its id makes a repeated call queue it once. */
-function enqueue(team: SavedTeam, from: TeamMember, to: TeamMember, key: unknown[], text: string, now: number): TeamMessage {
+function enqueue(team: SavedTeam, from: TeamMember, to: TeamMember, key: unknown[], text: string, now: number, ack?: true): TeamMessage {
   const id = digest(key);
   // A side stays beside the conversation it was asked from: what it tells its owner is on the page (its state, its result), never an input.
   if (team.task?.side && to.id === owner(team).id) return { id, from: from.id, to: to.id, text, status: 'canceled' as const, createdAt: now };
   const existing = team.messages.find(message => message.id === id);
   if (existing) return existing;
-  const message = { id, from: from.id, to: to.id, text, status: 'queued' as const, createdAt: now };
+  const message = { id, from: from.id, to: to.id, text, status: 'queued' as const, createdAt: now, ...(ack ? { ack } : {}) };
   assertTeamQueueCapacity(team, message);
   team.messages.push(message);
   return message;
@@ -221,12 +221,12 @@ export class TaskGroups {
     });
   }
   /** The owner sends its worker input; it answers a question the worker asked. */
-  message(hostId: string, call: MessageCall, tag?: string): Promise<{ taskId: string; state: TeamTask['state'] }> {
+  message(hostId: string, call: MessageCall, tag?: string, ack?: true): Promise<{ taskId: string; state: TeamTask['state'] }> {
     return this.ownerChange(hostId, call, (team, item, now) => {
       if (!running(item.state)) fail('This task is finished. Start a new task for more work.');
       const main = owner(team);
-      enqueue(team, main, team.members[0]!, ['task-message', team.id, call.operationId], taskUpdateText({ taskId: team.id, kind: 'message', label: main.name, body: call.text, ...(tag ? { tag } : tagOf(team, main.name)) }), now);
-      resume(team, item, now);
+      enqueue(team, main, team.members[0]!, ['task-message', team.id, call.operationId], taskUpdateText({ taskId: team.id, kind: 'message', label: main.name, body: call.text, ...(tag ? { tag } : tagOf(team, main.name)) }), now, ack);
+      if (!ack) resume(team, item, now);
       return { taskId: team.id, state: item.state };
     });
   }
@@ -250,20 +250,21 @@ export class TaskGroups {
     });
   }
   /** The temporary bot the task is tells its chief where its work stands. */
-  progress(hostId: string, call: { teamId: string; memberId: string; operationId: string; text: string }): Promise<{ taskId: string; state: TeamTask['state'] }> {
+  progress(hostId: string, call: { teamId: string; memberId: string; operationId: string; text: string; ack?: true }): Promise<{ taskId: string; state: TeamTask['state'] }> {
     return this.workerChange(hostId, call, (team, self, item, now) => {
       if (!running(item.state)) fail('This task is no longer running.');
-      enqueue(team, self, owner(team), ['task-progress', team.id, call.operationId], taskUpdateText({ taskId: team.id, kind: 'progress', label: item.title, body: call.text, ...tagOf(team, item.title) }), now);
+      enqueue(team, self, owner(team), ['task-progress', team.id, call.operationId], taskUpdateText({ taskId: team.id, kind: 'progress', label: item.title, body: call.text, ...tagOf(team, item.title) }), now, call.ack);
       return { taskId: team.id, state: item.state };
     });
   }
   /** A bot that is not the temporary bot's chief writes to it: the worker reads it as input from that bot. */
-  input(teamId: string, from: string, call: { operationId: string; text: string; tag?: string }): Promise<{ taskId: string; state: TeamTask['state'] }> {
+  input(teamId: string, from: string, call: { operationId: string; text: string; tag?: string; ack?: true }): Promise<{ taskId: string; state: TeamTask['state'] }> {
     return this.broker.change(teams => {
       const team = teams.find(item => item.id === teamId) ?? fail('Task not found.'), item = task(team), now = this.broker.ports.now();
       if (team.status !== 'active' || !running(item.state)) fail('This bot has finished its work.');
-      enqueue(team, owner(team), team.members[0]!, ['task-input', team.id, from, call.operationId], taskUpdateText({ taskId: team.id, kind: 'message', label: from, body: call.text, ...(call.tag ? { tag: call.tag } : tagOf(team, from)) }), now);
-      resume(team, item, now);
+      enqueue(team, owner(team), team.members[0]!, ['task-input', team.id, from, call.operationId], taskUpdateText({ taskId: team.id, kind: 'message', label: from, body: call.text, ...(call.tag ? { tag: call.tag } : tagOf(team, from)) }), now, call.ack);
+      // An acknowledgement answers nothing the bot waited for.
+      if (!call.ack) resume(team, item, now);
       return { taskId: team.id, state: item.state };
     });
   }

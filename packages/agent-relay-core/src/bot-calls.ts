@@ -341,7 +341,7 @@ export class BotCalls {
     const text = files.length ? `${call.text}\n${attachmentLines(files)}` : call.text;
     // A message with a status to the bot whose board holds an item assigned to the sender is a report on that item; any other message
     // naming an item hands work away on one of the sender's own, to its staff.
-    const held = call.status !== undefined && to.standing ? heldItem(this.board.read(to.standing), from.key, call.item ?? from.task?.task?.item?.key) : undefined;
+    const held = call.status !== undefined && call.status !== 'ack' && to.standing ? heldItem(this.board.read(to.standing), from.key, call.item ?? from.task?.task?.item?.key) : undefined;
     if (call.item !== undefined && !held && from.standing) {
       const item = this.board.read(from.standing)?.items.find(entry => entry.key === call.item);
       if (!item) return { outcome: 'forbidden', reason: `No item ${call.item} on your board; read it with board.` };
@@ -372,7 +372,7 @@ export class BotCalls {
       const send = () => call.status === 'done' || call.status === 'failed'
         ? this.tasks.report(hostId, { action: 'report_task', teamId: from.task!.id, memberId, status: call.status, summary: call.patch ? `${call.text}\n\n${call.patch}` : call.text })
         : call.status === 'needs_input' ? this.tasks.ask(hostId, { action: 'ask_owner', teamId: from.task!.id, memberId, question: call.text })
-          : this.tasks.progress(hostId, { teamId: from.task!.id, memberId, operationId: call.operationId, text: call.text });
+          : this.tasks.progress(hostId, { teamId: from.task!.id, memberId, operationId: call.operationId, text: call.text, ...(call.status === 'ack' ? { ack: true as const } : {}) });
       // A side's words to its chief are recorded on the page, not queued as input, so there is no queue to count.
       if (from.task.task?.side) { await send(); return { outcome: 'delivered' }; }
       return this.queued(from.task.id, from.task.members[1]!.id, send);
@@ -382,10 +382,11 @@ export class BotCalls {
       if (!team || !running(team)) return { outcome: 'unreachable', reason: 'That bot has finished its work.' };
       const mine = this.staff(hostId, call.owner).some(item => item.id === team.id);
       const worker = team.members[0]!.id;
-      return this.queued(team.id, worker, () => mine ? this.tasks.message(hostId, { action: 'message_task', owner: call.owner, taskId: team.id, operationId: call.operationId, text: call.text }, call.tag)
-        : this.tasks.input(team.id, from.name, { operationId: call.operationId, text: call.text, ...(call.tag ? { tag: call.tag } : {}) }));
+      const ack = call.status === 'ack' ? { ack: true as const } : {};
+      return this.queued(team.id, worker, () => mine ? this.tasks.message(hostId, { action: 'message_task', owner: call.owner, taskId: team.id, operationId: call.operationId, text: call.text }, call.tag, ack.ack)
+        : this.tasks.input(team.id, from.name, { operationId: call.operationId, text: call.text, ...(call.tag ? { tag: call.tag } : {}), ...ack }));
     }
-    return this.messages.deliver(from.standing ?? { key: from.key, name: from.name }, to.standing!, { operationId: call.operationId, text: call.text, ...(call.replyTo ? { replyTo: call.replyTo } : {}), ...(call.final ? { final: true } : {}), ...(call.tag ? { tag: call.tag } : {}) });
+    return this.messages.deliver(from.standing ?? { key: from.key, name: from.name }, to.standing!, { operationId: call.operationId, text: call.text, ...(call.replyTo ? { replyTo: call.replyTo } : {}), ...(call.final ? { final: true } : {}), ...(call.tag ? { tag: call.tag } : {}), ...(call.status === 'ack' ? { ack: true as const } : {}) });
   }
   /** Runs a send that queues one input for a member of a task's Team: delivered when it was queued for a ready seat, held when the seat is not ready, duplicate when nothing new was queued. */
   private async queued(teamId: string, memberId: string, send: () => Promise<unknown>): Promise<BotMessageResult> {

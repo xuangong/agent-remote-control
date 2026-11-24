@@ -139,3 +139,13 @@ export function assertTeamQueueCapacity(team: Team, message: TeamMessage): void 
     throw new Error('Team communication capacity reached. Wait for pending deliveries to settle.');
   }
 }
+
+/**
+ * What a Host is given of a team: a queued acknowledgement is kept back while no other input waits for the same seat, so it never starts
+ * a turn by itself; once another input is queued for that seat, it goes with it.
+ */
+export function withoutHeldAcks(team: SavedTeam): SavedTeam {
+  const awake = new Set(team.messages.filter(message => message.status === 'queued' && !message.ack).map(message => message.to));
+  return team.messages.some(message => message.ack && message.status === 'queued' && !awake.has(message.to))
+    ? { ...team, messages: team.messages.filter(message => !(message.ack && message.status === 'queued' && !awake.has(message.to))) } : team;
+}

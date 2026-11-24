@@ -37,7 +37,9 @@ function fixture() {
   const as = (nativeSessionId: string) => ({ providerId: 'codex', nativeSessionId });
   const task = () => state.find(team => team.task)!;
   const inputs = (team: SavedTeam, to: number) => team.messages.filter(message => message.to === team.members[to]!.id).flatMap(message => parseTaskInputs(message.text) ?? []);
-  return { broker, as, task, inputs, placed, state: () => state, goOffline: () => { offline = true; } };
+  /** Everything queued so far reached its seat and started its turn. */
+  const settle = () => { state = state.map(team => ({ ...team, messages: team.messages.map(message => message.status === 'queued' ? { ...message, status: 'accepted' as const, acceptance: 'started' as const } : message) })); };
+  return { broker, as, task, inputs, placed, settle, state: () => state, goOffline: () => { offline = true; } };
 }
 
 describe('bots calling as their own sessions', () => {
@@ -104,6 +106,40 @@ describe('bots calling as their own sessions', () => {
     expect(f.task().task!.side).toBeUndefined();
     await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as(f.task().members[0]!.nativeSessionId!), operationId: 'd1', to: 'chief', text: 'Fine.', status: 'done' });
     expect(f.inputs(f.task(), 1).map(input => input.kind)).toEqual(['done']);
+  });
+
+  it('holds a bot\'s acknowledgement back from the Host until another input is queued for the same seat, then sends them together', async () => {
+    const f = fixture();
+    const polled = async (nativeSessionId: string) => ((await f.broker.hostCall('mac', { action: 'poll' }) as SavedTeam[]).find(team => team.inbox && team.members[0]!.nativeSessionId === nativeSessionId)?.messages ?? [])
+      .filter(message => message.status === 'queued').flatMap(message => parseTaskInputs(message.text) ?? []).filter(input => input.kind === 'assistant');
+    // The standing instructions went in with the first input and settled.
+    await f.broker.hostCall('mac', { action: 'bot_enablement' }); await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('tracker'), operationId: 'first', to: 'Chief', text: 'Hello.' }); f.settle();
+    const send = (operationId: string, text: string, status?: 'ack') => f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('tracker'), operationId, to: 'Chief', text, ...(status ? { status } : {}) });
+    expect(await send('a1', 'Received.', 'ack')).toMatchObject({ outcome: 'delivered' });
+    expect(await send('a2', 'Thanks.', 'ack')).toMatchObject({ outcome: 'delivered' });
+    // Nothing the Host is given starts a turn: the acknowledgements wait on the Relay.
+    expect((await polled('chief')).map(input => 'body' in input ? input.body : '')).toEqual([]);
+    const chiefInbox = f.state().find(team => team.inbox?.botId === ids.chief)!;
+    expect(chiefInbox.messages.filter(message => message.ack && message.status === 'queued')).toHaveLength(2);
+    await send('r1', 'The branch is cut.');
+    expect((await polled('chief')).map(input => 'body' in input ? input.body : '')).toEqual(['Received.', 'Thanks.', 'The branch is cut.']);
+  });
+
+  it('holds an acknowledgement to a temporary bot and to its chief the same way, and an acknowledgement does not answer what a bot waits for', async () => {
+    const f = fixture();
+    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
+    const worker = f.as(f.task().members[0]!.nativeSessionId!);
+    await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'q1', to: 'chief', text: 'Include the hotfix?', status: 'needs_input' });
+    f.settle();
+    const given = async (to: number) => { const team = (await f.broker.hostCall('mac', { action: 'poll' }) as SavedTeam[]).find(item => item.task)!; return team.messages.filter(message => message.to === team.members[to]!.id && message.status === 'queued').map(message => parseTaskInputs(message.text)![0]); };
+    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'k1', to: 'Reviewer', text: 'Noted.', status: 'ack' });
+    await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'p1', to: 'chief', text: 'Got it.', status: 'ack' });
+    // Both wait on the Relay; the worker still waits for its answer.
+    expect([await given(0), await given(1), f.task().task!.state]).toEqual([[], [], 'needs_input']);
+    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'a1', to: 'Reviewer', text: 'Yes.' });
+    expect((await given(0)).map(input => 'body' in input ? input.body : '')).toEqual(['Noted.', 'Yes.']);
+    // Nothing else was queued for the chief, so its acknowledgement still waits.
+    expect([await given(1), f.task().task!.state]).toEqual([[], 'working']);
   });
 
   it('keeps a temporary bot as a standing bot of its chief\'s group when the person asks, and ends its task as done', async () => {

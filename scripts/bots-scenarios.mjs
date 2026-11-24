@@ -1,11 +1,12 @@
 // Behaviour scenarios of bots (bots design 11): real Claude Code or Codex sessions on this checkout's local instance, driven as the
 // person drives them, judged by facts the Relay and the sessions record, never by the wording of a reply.
 // Usage, from the checkout root, with the instance running (`pnpm local up`):
-//   pnpm test:bots [claude|codex] [scenario ...]        scenarios: temporary, standing, shared (default: all, in order)
+//   pnpm test:bots [claude|codex] [scenario ...]        scenarios: temporary, standing, shared, bundle, copilot (default: all, in order)
 // It creates its own sessions in the instance workspace and its own group, and leaves them for reading in the page.
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -75,15 +76,15 @@ async function until(what, read, timeoutMs = TURN_MS) {
 }
 const newest = address => controller('session', 'read', address, '--limit', '1').entries?.[0]?.id;
 async function say(address, text) { const before = newest(address); controller('session', 'send', address, text); return settled(address, before); }
-async function bot(name, mission) {
-  const address = controller('session', 'create', '--provider', provider, '--message', `Your name is ${name}. Reply with the word READY and nothing else.`).session.address;
+async function bot(name, mission, providerId = provider) {
+  const address = controller('session', 'create', '--provider', providerId, '--message', `Your name is ${name}. Reply with the word READY and nothing else.`).session.address;
   await settled(address, undefined, 4 * 60_000);
   const [, , nativeSessionId] = address.split('/');
-  return { name, address, nativeSessionId, ...(mission ? { mission } : {}) };
+  return { name, address, nativeSessionId, providerId, ...(mission ? { mission } : {}) };
 }
 /** One group of the account with these sessions as its bots, as the page makes it. */
 function group(title, bots) {
-  const binding = item => ({ hostId, providerId: provider, nativeSessionId: item.nativeSessionId, title: item.name });
+  const binding = item => ({ hostId, providerId: item.providerId ?? provider, nativeSessionId: item.nativeSessionId, title: item.name });
   // As `createWindowView` makes a primary view.
   const views = bots.map((item, index) => ({ id: `v${index}`, binding: binding(item), placement: 'primary', width: 440, collapsed: false, display: { mode: 'preview', lettersVisible: true } }));
   return api('POST', '/v1/windows', { operationId: randomUUID(), issuedAt: Date.now(), window: { schemaVersion: 3, id: randomUUID(), title, revision: 0,
@@ -126,7 +127,7 @@ if (run('temporary')) {
 }
 
 let reviewer;
-if (run('standing') || run('shared')) {
+if (run('standing') || run('shared') || run('bundle')) {
   // An chief creates a standing bot with a mission; it reports in, works with the chief by message, takes the person's
   // lasting change into its own mission, and keeps a work item to its end.
   const target = `review-${tag}.txt`;
@@ -158,6 +159,38 @@ if (run('shared') && reviewer) {
   await say(second.address, `Ask the bot ${reviewer.name} to review review-${tag}.txt and tell me its answer.`);
   const answered = await until('the reviewer\'s answer to the second chief', () => received(second.address, `[Message from ${reviewer.name}`)).catch(() => false);
   check('shared: the reviewer answered a second chief', answered);
+}
+
+if (run('bundle') && reviewer) {
+  // Code moves as a git bundle attached to a message when no repository is shared: the chief bundles a branch, the reviewer
+  // downloads the verified file and reads the branch, and answers. On one machine the chief is told to use the bundle.
+  const repo = file(`repo-${tag}`), started = Date.now();
+  execFileSync('/bin/sh', ['-c', `git init -q '${repo}' && cd '${repo}' && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m base`]);
+  await say(chief.address, `In repo-${tag} (a git repository in your working directory), create a branch named change-${tag} with one commit adding change.txt containing the word bundled. Make a git bundle of that branch and send it to ${reviewer.name} as an attachment of a message, asking it to check that the branch adds change.txt and to answer you. Do not share the repository path; the bundle is how it gets the change.`);
+  const attached = await until('the bundle to reach the reviewer', () => received(reviewer.address, 'sha256'), 6 * 60_000).catch(() => false);
+  check('bundle: the chief attached a file to its message', attached);
+  const downloaded = await until('the reviewer to download the bundle', () => {
+    // The Controller saves under its temporary directory: on macOS the per-user one, whatever this shell's TMPDIR says.
+    const userTemp = (() => { try { return execFileSync('getconf', ['DARWIN_USER_TEMP_DIR'], { encoding: 'utf8' }).trim(); } catch { return undefined; } })();
+    const roots = [...new Set([tmpdir(), userTemp, '/tmp'].filter(Boolean))].map(root => join(root, 'agent-remote-attachments')).filter(existsSync);
+    return roots.flatMap(root => readdirSync(root, { recursive: true }).map(name => join(root, String(name))))
+      .find(path => statSync(path).isFile() && statSync(path).mtimeMs >= started);
+  }, 6 * 60_000).catch(() => undefined);
+  check('bundle: the reviewer downloaded the verified file', !!downloaded, downloaded ?? 'none');
+  const answered = await until('the reviewer to answer about the bundle', () => received(chief.address, 'change.txt') && received(chief.address, `[Message from ${reviewer.name}`), 6 * 60_000).catch(() => false);
+  check('bundle: the reviewer answered the chief about the change', answered);
+}
+
+if (run('copilot')) {
+  // A bot on another provider is asked a question and answers: by message, or with its final text when it sends none.
+  const helper = await bot(`Helper ${tag}`, 'You answer questions from bots or the person in one short line.', 'copilot');
+  const before = newest(helper.address);
+  group(`Scenarios Helper ${tag}`, [helper]);
+  await until(`${helper.name}'s standing instructions`, () => teams().find(team => team.inbox && team.members[0]?.nativeSessionId === helper.nativeSessionId && team.inbox.instructions), 3 * 60_000);
+  await settled(helper.address, before).catch(() => undefined);
+  await say(chief.address, `Ask the bot ${helper.name} what 17 times 3 is, and tell me its answer.`);
+  const answered = await until('the Copilot bot to answer', () => received(chief.address, `${helper.name}`) && received(chief.address, '51') && received(chief.address, `[Message from ${helper.name}`), 6 * 60_000).catch(() => false);
+  check('copilot: a Copilot bot answered a question from the chief', answered);
 }
 
 const failed = results.filter(item => !item.ok);

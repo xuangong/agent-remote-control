@@ -14,7 +14,7 @@ const answered: AskLine = { id: 'one', botId: 'b_1', bot: 'Reviewer', text: 'Is 
   answer: { text: 'Yes. The third fix only touches the retry timer and has a test. Ship it, and watch the first hour of retries.', at: Date.parse('2026-11-24T10:00:30Z') } };
 const answering: AskLine = { id: 'two', botId: 'b_2', bot: 'Release Manager', text: 'Who signs off the release?', at: Date.parse('2026-11-24T10:01:00Z') };
 const state = { ...replicaState, agent: { ...replicaState.agent!, capabilities: { ...replicaState.agent!.capabilities,
-  imageInput: { mediaTypes: ['image/png'], maxImages: 8, maxImageBytes: 10485760, maxMessageBytes: 20971520 } } },
+  imageInput: { mediaTypes: ['image/png' as const], maxImages: 8, maxImageBytes: 10485760, maxMessageBytes: 20971520 } } },
   timeline: { ...replicaState.timeline, hasOlder: false, entries: rows.entries, nextSeq: rows.entries.length + 1 } };
 const asked: Array<[string, string]> = [];
 (window as unknown as { asked: typeof asked }).asked = asked;

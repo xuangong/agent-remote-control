@@ -232,6 +232,22 @@ describe('the person\'s edits of a board', () => {
     expect(f.board().plan).toMatchObject({ text: 'Notes first.', changes: [{ by: 'person', why: 'The person decided.' }] });
   });
 
+  it('tells the board\'s own bot what the person changed on its items and plan note, and stays silent for the bot\'s own edits', async () => {
+    const f = fixture();
+    const toldChief = () => f.inbox(ids.chief).messages.map(message => message.text).filter(text => text.startsWith('[Item "'));
+    await write(f, [{ title: 'Write notes' }], { plan: { text: 'Notes.', why: 'Start.' } });
+    await write(f, [{ key: 1, version: 1, title: 'Write the notes', status: 'working', brief: 'Short.' }], { plan: { text: 'Notes, short.', why: 'Tighter.', version: 1 } });
+    expect(toldChief()).toEqual([]);
+    await edit(f, { items: [{ key: 1, version: f.item(1).version, title: 'Write the release notes', status: 'waiting' }] });
+    expect(toldChief()).toEqual(['[Item "Write the release notes" changed · retitled to "Write the release notes"; status is now waiting]']);
+    await edit(f, { items: [{ key: 1, version: f.item(1).version, status: 'waiting' }] });
+    expect(toldChief()).toHaveLength(1);
+    await edit(f, { plan: { text: 'Notes, then ship.', why: 'Ship it too.', version: 2 } });
+    expect(toldChief().at(-1)).toBe('[Item "Plan note" changed · changed: Ship it too.]');
+    await edit(f, { items: [{ title: 'Ship', assignee: 'self' }] });
+    expect(toldChief().at(-1)).toBe('[Item "Ship" changed · assigned to you]');
+  });
+
   it('says what a stale edit overwrote, in an item and in the plan note, and still applies it', async () => {
     const f = fixture();
     await write(f, [{ title: 'Release notes' }], { plan: { text: 'Notes.', why: 'Start.' } });

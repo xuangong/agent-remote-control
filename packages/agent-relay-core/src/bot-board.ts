@@ -60,11 +60,19 @@ function checkParent(board: Board, key: number, parent: number | null | undefine
   for (let at: number | undefined = parent; at !== undefined; at = itemOf(board, at).parent) if (at === key) fail('An item cannot be its own ancestor.');
 }
 /** What the item's assignee reads about a change, and what its old assignee does when the item moves on. */
-function notices(board: string, before: Pick<BoardItem, 'title' | 'assignee' | 'status' | 'brief'> | undefined, item: BoardItem): ItemNotice[] {
+function notices(board: string, before: Pick<BoardItem, 'title' | 'assignee' | 'status' | 'brief'> | undefined, item: BoardItem, by: Writer): ItemNotice[] {
   const told = (to: string, what: string): ItemNotice => ({ to, text: itemChangedText({ title: item.title, what }), key: ['item-notice', board, item.key, item.version, to] });
   const out: ItemNotice[] = [];
   if (before && before.assignee !== item.assignee && before.assignee !== 'self') out.push(told(before.assignee, 'reassigned'));
-  if (item.assignee === 'self') return out;
+  // An item the bot holds itself is silent for the bot's own edits (it knows what it wrote); the person's edits tell the owner.
+  if (item.assignee === 'self') {
+    if (by !== 'person') return out;
+    const own = before?.assignee === 'self' ? before : undefined;
+    const what = !own ? ['assigned to you'] : [...own.title !== item.title ? [`retitled to "${item.title}"`] : [], ...own.brief !== item.brief ? ['brief changed'] : [],
+      ...own.status !== item.status ? [`status is now ${item.status}`] : []];
+    if (what.length) out.push(told(board, what.join('; ')));
+    return out;
+  }
   if (!before || before.assignee !== item.assignee) { out.push(told(item.assignee, 'assigned to you')); return out; }
   const what = [...before.title !== item.title ? [`retitled to "${item.title}"`] : [], ...before.brief !== item.brief ? ['brief changed'] : [],
     ...before.status !== item.status && item.status === 'cancelled' ? ['cancelled'] : []];
@@ -95,7 +103,7 @@ export function writeBoard(box: TeamInbox, edits: readonly ItemEdit[] | undefine
       apply(item, { ...edit, version: undefined }, by, now);
       // The item is one write whatever fields it had.
       item.version = 1; item.changedAt = {};
-      written.push({ key, version: 1 }); told.push(...notices(owner, undefined, item));
+      written.push({ key, version: 1 }); told.push(...notices(owner, undefined, item, by));
       continue;
     }
     const item = itemOf(board, edit.key ?? own!);
@@ -109,7 +117,7 @@ export function writeBoard(box: TeamInbox, edits: readonly ItemEdit[] | undefine
       : [];
     apply(item, edit, by, now);
     written.push({ key: item.key, version: item.version, ...(overwrote.length ? { overwrote } : {}) });
-    told.push(...notices(owner, before, item));
+    told.push(...notices(owner, before, item, by));
   }
   let planned: BoardWrite['plan'];
   if (plan) {
@@ -118,6 +126,7 @@ export function writeBoard(box: TeamInbox, edits: readonly ItemEdit[] | undefine
     const changes = [...current?.changes ?? [], { at: now, by, why: plan.why }].slice(-BOARD_PLAN_CHANGES);
     board.plan = { text: plan.text, version: (current?.version ?? 0) + 1, changes };
     planned = { version: board.plan.version, ...(overwrote.length ? { overwrote } : {}) };
+    if (by === 'person') told.push({ to: owner, text: itemChangedText({ title: 'Plan note', what: `changed: ${plan.why}` }), key: ['item-notice', owner, 'plan', board.plan.version, owner] });
   }
   return { items: written, ...(planned ? { plan: planned } : {}), notices: told };
 }

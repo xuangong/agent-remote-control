@@ -4,13 +4,26 @@
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Browser, BrowserContext } from '@playwright/test';
+import type { Browser, BrowserContext, Page } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { parseTaskInputs } from '@orchardworks/agent-remote-protocol';
 import { startStack, type Stack } from '@orchardworks/agent-e2e/stack';
 import { hasTools as hasToolsOf, inputs as inputsOf, team as teamOf } from './bot-team.js';
 import { launchBrowser, openPage } from './browser.js';
-import { holdsText, showsText } from './page.js';
+import { holdsText, showsText, waitForEntries } from './page.js';
+
+/**
+ * Enter submits what the page has rendered of the draft: a key that comes in the same frame as the last typed character reaches a
+ * composer that has not rendered it yet, and sends nothing. A flow lets the composer show the draft, ready to send, before it presses Enter.
+ */
+async function holdsComposerText(page: Page, bot: string, text: string): Promise<void> {
+  await page.waitForFunction(({ bot, text }) => {
+    const input = document.querySelector(`[data-testid="prompt-input"][data-placeholder^="Message ${bot}"]`);
+    const send = input?.closest('.agent-composer')?.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]');
+    return input?.textContent?.includes(text) === true && send?.disabled === false && !document.querySelector('[data-mention-picker]');
+  }, { bot, text });
+  await page.evaluate(() => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+}
 
 let stack: Stack; let browser: Browser;
 beforeAll(async () => {
@@ -160,11 +173,15 @@ it('E15: the person stops a chain from the audit in Settings, and a bot\'s next 
 it('E15: the person mentions a busy bot from another conversation, and the answer shows in place while the bot\'s main turn runs and nothing reaches either session', async () => {
   const { context, page } = await openPage(browser, stack.sessionUrl('chief'));
   await team(context);
-  await showsText(page, 'Chief is ready.');
+  // Earlier cases filled Chief's conversation, so its first turns are folded away and a turn out of view is not in the page's text:
+  // the page is ready when both conversations hold turns.
+  await page.locator('[data-testid="prompt-input"][data-placeholder^="Message Tracker"]').waitFor();
+  await waitForEntries(page, 2);
   await hasTools('chief'); await hasTools('tracker');
   // Tracker's main session starts a turn that does not end.
   await page.locator('[data-testid="prompt-input"][data-placeholder^="Message Tracker"]').click();
   await page.keyboard.type('Run the long check.');
+  await holdsComposerText(page, 'Tracker', 'Run the long check.');
   await page.keyboard.press('Enter');
   await expect.poll(() => stack.provider.session('tracker')!.sent.includes('Run the long check.'), { timeout: 20_000 }).toBe(true);
   const trackerInputs = stack.provider.session('tracker')!.sent.length, chiefInputs = stack.provider.session('chief')!.sent.length;
@@ -172,6 +189,7 @@ it('E15: the person mentions a busy bot from another conversation, and the answe
   const composer = page.locator('[data-testid="prompt-input"][data-placeholder^="Message Chief"]');
   await composer.click();
   await page.keyboard.type('@Tracker What is the build status?');
+  await holdsComposerText(page, 'Chief', '@Tracker What is the build status?');
   await page.keyboard.press('Enter');
   await showsText(page, 'Tracker answered');
   await page.locator('summary', { hasText: 'Tracker answered' }).click();

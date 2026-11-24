@@ -29,11 +29,13 @@ As built: base instructions are v7 ("after a delivery or a report, do not acknow
 ## 9d. One approval per chain and folder (decided: yes)
 
 - When the person answers a bot's native approval, they may choose "for this chain in this folder": the bots of the same chain asking
-  for the same kind of action in the same working directory are answered alike until the chain ends. The person's own decision, applied
+  for any kind of tool action in the same working directory are answered alike until the chain ends. The person's own decision, applied
   by the Controller of each bot; listed in the audit with the chain, revocable there.
-- Approvals of other chains, other folders or other kinds still ask the person.
+- Approvals of other chains or other folders still ask the person.
 
 As built: the choice is "Allow for this chain in this folder", offered by the Controller of a bot's session (a standing bot's main session, its answer session, a temporary bot's worker) as one more policy of the native `tool_approval` (`CHAIN_APPROVAL_POLICY`, `chain-folder`, with `policy` added to the request's scopes), so the public interaction schemas are unchanged. It is offered only on a request that can be allowed once and whose session has a known working directory; a session that is no bot's sees no change. The card shows it beside Allow, apart from the adapter's own rules. When the person chooses it, the Controller's session wrapper (`watchChainTurns`) sends the Relay `chain_approval` with `grant` (the chain is found from the turn's cause, as for every bot call) and hands the adapter an ordinary allow once; the adapter never hears the policy. The Relay keeps `BotChain.approvals` (kind as the adapter reports it, folder, when, how many times applied; at most 20 per chain; one entry per kind and folder). For each later native tool approval of a bot session, the Controller asks `chain_approval` with the kind (the tool name) and the folder; a standing approval of the same chain answers `allowed` and counts the use, and the Controller answers allow once through the session's own answer path, as the person's decision. A stopped chain (or the bot's stopped part of it) answers nothing; a chain past its retention takes its approvals with it. Another chain, folder or kind is asked as before; plan and form approvals and questions are never answered. The audit lists each chain's approvals (kind and folder, when, applied n times) and `revoke_approval` ("Ask me again") removes one. Also: a `/side` bot's `message` to its chief now returns `held` with a reason saying the answer shows beside the conversation, since nothing reaches the chief. Tests: Relay (recorded, applied by kind and folder, revoked, stopped, retention, limit), Controller (offered only on bots, recorded on the person's choice, answered for the same chain, folder and kind, not for another or after revoking), page (the card; the audit lists and revokes) and E15c (a real chain across two bots, another chain asked, the audit revokes).
+
+Widened to every kind (owner, 2026-11-25): a standing approval is one grant per chain and folder (`StandingApproval` is `cwd`, `at`, `applied`; `chain_approval` and `revoke_approval` carry no kind). It answers every native tool approval of the chain's bots in that folder, Bash included; plan and form approvals and questions are still never answered. The audit lists "Any tool in <folder>" with how many times it applied. Tests: the Relay and Controller tests now prove that any kind in the folder is allowed and another folder or chain still asks (the folder condition was mutation-checked), E15c has the tracker ask for another tool kind.
 
 ## 9e. Asking for help shows on the page (decided: no)
 
@@ -42,6 +44,15 @@ Help is ordinary delegation by message and board item; the folded bot-message li
 ## Delegation is one path (decided: 2026-11-25)
 
 Asking another bot for help is handing it work: the base instructions say "work outside your mission goes to the bot whose mission fits (`list_bots`): hand it over by message and wait for its answer" (still v7). An item is assigned only by `create_bot` with the item or an explicit `update_board` assignee; a `message` naming an item tags the exchange and never changes the assignee, for staff, temporary bots and peers alike (the relation-based branch of af97cf2d is gone). The instructions tell a bot to assign with `update_board` (or `create_bot` with the item) when handing an item over.
+
+## After the second record (2026-11-25)
+
+The [second record](../reviews/2026-11-25-old-ways-with-bots-after-fixes.md) left four items, done here:
+
+- **C-1, T-1: base instructions v8.** The delegation line covers missing knowledge without naming help: "What you cannot see or are unsure of (a convention, a decision, someone else's work), ask the bot that knows (`list_bots`, by mission) rather than guess or copy a neighbour; work outside your mission goes to the bot whose mission fits." A chief is told not to ask its staff for progress: read the board and wait for their reports. Asking is still handing work over; there is no special case. T-1 only gets the instruction here; the cause in the Relay (every routed answer starts a turn) is not changed.
+- **S-3: the draft survived on the Relay.** The earlier fix cleared the page copy, but the shared draft sync publishes a change 800 ms later, and opening the side replaces the composer at once, which disposed the sync and dropped the pending publish. Disposal now publishes an edit that was still waiting.
+- **N-1: a side's cost.** The code between the records adds under 1k tokens to a side's start (about 550 characters of base instructions and 2k of tool text; the tool count is unchanged), so the start is not the cause. The totals step by about one cached-context round (56k, 81k, 108k-112k), so the side made more model calls in its turn. The one change on a side's path is that its message to its chief now returns `held`, which the tool text describes as waiting for the receiver; the reason now says nothing answers it and not to resend or wait. This is inferred from the code and the token steps, not measured; the next record counts model calls per side.
+- **9d widened** to every kind of tool action (see 9d).
 
 ## Checks
 

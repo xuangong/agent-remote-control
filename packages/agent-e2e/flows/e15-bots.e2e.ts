@@ -92,6 +92,8 @@ it('E15: a bot hands an item of its board to another bot, which reads the item n
   await hasTools('chief'); await hasTools('tracker');
   const written = await stack.provider.useTool('chief', 'update_board', { items: [{ title: 'Watch the build' }] }) as { items: Array<{ key: number; version: number }> };
   expect(written.items).toEqual([{ key: 1, version: 1 }]);
+  // The item is assigned by a board write; the message only names it.
+  await stack.provider.useTool('chief', 'update_board', { items: [{ key: 1, version: 1, assignee: 'Tracker', status: 'working', brief: 'Tell me when main is red.' }] });
   expect(await stack.provider.useTool('chief', 'message', { to: 'Tracker', text: 'Tell me when main is red.', item: 1 })).toMatchObject({ outcome: 'delivered' });
   await expect.poll(() => inputs('tracker').filter(input => input.kind === 'assistant').at(-1), { timeout: 20_000 })
     .toMatchObject({ from: 'Chief', body: '[Item 1 "Watch the build" · from Chief]\nTell me when main is red.' });
@@ -100,7 +102,7 @@ it('E15: a bot hands an item of its board to another bot, which reads the item n
     .toMatchObject({ report: 'Main is green.', status: 'working' });
   // The chief retitles it; the one who holds it is told, written from the record.
   await stack.provider.useTool('chief', 'update_board', { items: [{ key: 1, version: 3, title: 'Watch main' }] });
-  await expect.poll(() => stack.provider.session('tracker')!.sent.filter(text => text.startsWith('[Item "')), { timeout: 20_000 }).toEqual(['[Item "Watch main" changed · retitled to "Watch main"]']);
+  await expect.poll(() => stack.provider.session('tracker')!.sent.filter(text => text.startsWith('[Item "')), { timeout: 20_000 }).toEqual(['[Item "Watch the build" changed · assigned to you]', '[Item "Watch main" changed · retitled to "Watch main"]']);
   await context.close();
 });
 

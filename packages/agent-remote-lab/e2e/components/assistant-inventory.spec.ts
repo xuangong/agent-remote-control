@@ -377,16 +377,15 @@ const checks: Record<string, Check> = {
     // Over the window on a wide screen, a sheet on a phone.
     const panel = page.locator('.lab-tile-details:visible, dialog.orchard-sheet[open]').first();
     await expect(panel.locator('.lab-assistant-row').first()).toBeVisible();
-    const rows = Object.fromEntries(await panel.locator('.lab-assistant-row').evaluateAll(nodes => nodes.map(row => [row.firstElementChild?.textContent, row.lastElementChild?.textContent])));
-    expect(rows).toMatchObject({ Agent: 'Recorded', Machine: 'Work Mac' });
+    await expect.poll(async () => Object.fromEntries(await panel.locator('.lab-assistant-row').evaluateAll(nodes => nodes.map(row => [row.firstElementChild?.textContent, row.lastElementChild?.textContent])))).toMatchObject({ Agent: 'Recorded', Machine: 'Work Mac' });
     // The session's row opens to its ID.
     await press(panel.locator('.lab-assistant-chain .lab-assistant-session-toggle').first());
     await expect(panel.locator('.lab-assistant-identity')).toContainText('tile-1');
   },
   W3: async page => {
     await openBot(page);
-    const rows = Object.fromEntries(await details(page).locator('.lab-assistant-row').evaluateAll(nodes => nodes.map(row => [row.firstElementChild?.textContent, row.lastElementChild?.textContent])));
-    expect(rows).toMatchObject({ Agent: 'Claude Codebefore: Codex', Machine: 'Mac mini' });
+    // The details load with the sheet: read their rows once they are there.
+    await expect.poll(async () => Object.fromEntries(await details(page).locator('.lab-assistant-row').evaluateAll(nodes => nodes.map(row => [row.firstElementChild?.textContent, row.lastElementChild?.textContent])))).toMatchObject({ Agent: 'Claude Codebefore: Codex', Machine: 'Mac mini' });
     // The group is a heading of the Assistants directory, which `section` opens at that group.
     await page.goto('/e2e/fixtures/assistant-conversation.html?layout=bot&mode=bot&section=notes');
     await expect(page.locator('.lab-bot-section-head h2')).toContainText('Notes');

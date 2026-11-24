@@ -449,6 +449,15 @@ Ranked by impact; each is tied to the evidence above. Not implemented.
    because the message named the item (C-3 screenshot). A message that asks for help or review should not move the item's assignee, or
    should say "reviewer" instead of assignee.
 
+**Fixed (bots-8).**
+
+- C-1, base instructions v6 (f3190165): a bot that does not know how the project does something, or needs a review, asks the standing bot whose mission fits.
+- C-3, lost verdict (c4cb3cea): the cause was `inputCause`, which named no answered message for any input carrying `reply_to`. The builder's review request was itself sent as a reply, so the keeper's final text was never routed back. Only the Relay's own final-text reply ("final answer to") now ends the exchange.
+- S-3, draft (ef11bfc6): the composer cleared the saved draft only while its session was still shown; opening the side first left it behind.
+- T-2, item read (847cb599): the assignee reads the item handed to it on the other bot's board with `board` (bot and item), read only. Chosen over copying the brief into the input: one read rule, no second copy.
+- P-1, cause (d1698c48): the person's edit runs in a chain of its own with cause `person` (shown as "You asked ..."), instead of joining the bot's latest timer chain.
+- Item moved by a help request (af97cf2d): a message naming the sender's item assigns it only to the sender's own staff or temporary bots; to a peer it names the item and changes nothing.
+
 ### Larger changes
 
 1. **A short "close the loop" rule for teams (T-1).** After a delivery, staff should stop acknowledging each other's closure; the chief

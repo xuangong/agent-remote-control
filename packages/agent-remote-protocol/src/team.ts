@@ -65,6 +65,12 @@ export const TeamInbox = Type.Object({ botId: BotId, instructions: Type.Optional
   recent: Type.Optional(Type.Array(Type.Object({ id: AssistantMessageId, from: BotId, hop: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }), operationId: id,
     /** The bot answered its sender during the turn this message started, so that turn's final text sends no reply. */
     answered: Type.Optional(Type.Literal(true)) }, object), { maxItems: 64 })),
+  /**
+   * The requests this bot sent to peers that are neither its chief nor its staff (bots plan 9e), newest last, and the answers that came back:
+   * the page shows each as "Asked <bot>" in this bot's conversation, and in the asked bot's row while it waits. `id`: the message in the asked bot's inbox.
+   */
+  asked: Type.Optional(Type.Array(Type.Object({ id: AssistantMessageId, to: BotId, text: Type.String({ minLength: 1, maxLength: 600 }), at: Type.Number(),
+    answer: Type.Optional(Type.Object({ text: Type.String({ minLength: 1, maxLength: 600 }), at: Type.Number() }, object)) }, object), { maxItems: 16 })),
   /** The person paused the bot: its messages wait until resumed (bots design 7). */
   paused: Type.Optional(Type.Literal(true)),
   /** The bot's board and timers (bots design 6). */

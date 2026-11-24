@@ -37,6 +37,7 @@ type MessageCall = Extract<TeamHostCall, { action: 'message_assistant' }>;
 export interface Assistant { key: string; groupId: string; viewId: string; name: string; label?: string; mission?: string; memory?: BotFact[]; chief?: string; hidden: boolean; hostId: string; providerId: string; nativeSessionId: string }
 
 const RECENT_KEEP = 64;
+const ASKED_KEEP = 16;
 /** One answer for an assistant that does not exist and one this caller may not reach, so the roster cannot be probed. */
 const NOT_FOUND = 'No assistant of this account answers to that name. List them with list_assistants.';
 const fail = (message: string): never => { throw new Error(message); };
@@ -113,7 +114,7 @@ export class AssistantMessages {
     return this.deliver(from, to, call);
   }
   /** Queues a message from a bot (standing or temporary) in a standing bot's inbox. */
-  async deliver(from: { key: string; name: string }, to: Assistant, call: { operationId: string; text: string; replyTo?: string; final?: boolean; frame?: 'person'; tag?: string; ack?: true }): Promise<BotMessageResult> {
+  async deliver(from: { key: string; name: string }, to: Assistant, call: { operationId: string; text: string; replyTo?: string; final?: boolean; frame?: 'person'; tag?: string; ack?: true; request?: true; answerOf?: string }): Promise<BotMessageResult> {
     const sent = await this.broker.change(teams => {
       const now = this.broker.ports.now();
       const inbox = this.inboxes.prepare(teams, to, now) ?? fail('Team capacity reached.');
@@ -135,6 +136,13 @@ export class AssistantMessages {
       assertTeamQueueCapacity(inbox, message);
       inbox.messages.push(message); pushBackTimers(inbox, now);
       recent.push({ id: messageId, from: from.key, hop, operationId: call.operationId });
+      // A request to a peer is on the page as a line of its sender's conversation; the peer's answer folds under it.
+      if (call.request && 'hostId' in from) {
+        const own = this.inboxes.current(teams, from as Assistant), asked = own?.inbox ? own.inbox.asked ??= [] : undefined;
+        if (own && asked) { asked.push({ id: messageId, to: to.key, text: call.text.slice(0, 600), at: now }); if (asked.length > ASKED_KEEP) asked.splice(0, asked.length - ASKED_KEEP); own.revision++; own.updatedAt = now; }
+      }
+      const request = call.answerOf ? inbox.inbox!.asked?.find(item => item.id === call.answerOf && item.to === from.key && !item.answer) : undefined;
+      if (request) request.answer = { text: call.text.slice(0, 600), at: now };
       if (recent.length > RECENT_KEEP) recent.splice(0, recent.length - RECENT_KEEP);
       inbox.revision++; inbox.updatedAt = now;
       return { messageId, duplicate: false };

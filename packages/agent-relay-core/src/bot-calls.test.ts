@@ -39,7 +39,7 @@ function fixture() {
   const inputs = (team: SavedTeam, to: number) => team.messages.filter(message => message.to === team.members[to]!.id).flatMap(message => parseTaskInputs(message.text) ?? []);
   /** Everything queued so far reached its seat and started its turn. */
   const settle = () => { state = state.map(team => ({ ...team, messages: team.messages.map(message => message.status === 'queued' ? { ...message, status: 'accepted' as const, acceptance: 'started' as const } : message) })); };
-  return { broker, as, task, inputs, placed, settle, state: () => state, goOffline: () => { offline = true; } };
+  return { broker, as, task, inputs, placed, settle, groups, state: () => state, goOffline: () => { offline = true; } };
 }
 
 describe('bots calling as their own sessions', () => {
@@ -140,6 +140,24 @@ describe('bots calling as their own sessions', () => {
     expect((await given(0)).map(input => 'body' in input ? input.body : '')).toEqual(['Noted.', 'Yes.']);
     // Nothing else was queued for the chief, so its acknowledgement still waits.
     expect([await given(1), f.task().task!.state]).toEqual([[], 'working']);
+  });
+
+  it('records a request to a peer on its sender\'s inbox, and the peer\'s answer under it, but not messages to a chief or to staff', async () => {
+    const f = fixture();
+    const say = (from: string, to: string, text: string, extra: Record<string, unknown> = {}) => f.broker.hostCall('mac', { action: 'bot_message', owner: f.as(from), operationId: `${from}-${text}`, to, text, ...extra }) as Promise<{ messageId?: string }>;
+    const asked = (botId: string) => f.state().find(team => team.inbox?.botId === botId)?.inbox?.asked;
+    await say('tracker', 'Chief', 'Hello.');
+    const request = await say('chief', 'Tracker', 'Is the build green?');
+    expect(asked(ids.chief)).toEqual([{ id: request.messageId, to: ids.tracker, text: 'Is the build green?', at: expect.any(Number) }]);
+    await say('tracker', 'Chief', 'Yes, green.', { reply_to: request.messageId, replyTo: request.messageId });
+    expect(asked(ids.chief)![0]!.answer).toEqual({ text: 'Yes, green.', at: expect.any(Number) });
+    // A bot's own staff and its chief are told, not asked.
+    f.groups[0]!.bots!.members.v2!.chief = ids.chief;
+    await say('chief', 'Tracker', 'Please start the release.');
+    await say('tracker', 'Chief', 'Started.');
+    await say('tracker', 'Chief', 'Done.', { status: 'done' });
+    expect(asked(ids.chief)).toHaveLength(1);
+    expect(asked(ids.tracker)).toBeUndefined();
   });
 
   it('keeps a temporary bot as a standing bot of its chief\'s group when the person asks, and ends its task as done', async () => {

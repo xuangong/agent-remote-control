@@ -81,7 +81,7 @@ it.each(['codex', 'claude', 'copilot'] as const)('%s reuses equivalent role exte
 const changes: Array<[string, (value: AgentSessionExtensions) => void]> = [
   ['instructions', value => { value.instructions = 'A different delivery.'; }],
   ['system prompt', value => { value.systemPrompt = 'A different base prompt.'; }],
-  ['tool name', value => { value.tools![0]!.name = 'update_work'; }],
+  ['tool name', value => { value.tools![0]!.name = 'update_board'; }],
   ['tool description', value => { value.tools![0]!.description = 'Read another record.'; }],
   ['tool schema', value => { value.tools![0]!.inputSchema = { type: 'object', properties: { revision: { type: 'string' } } }; }],
 ];

@@ -7,7 +7,7 @@ import { SESSION_SOCKET_VARIABLE, SESSION_TOKEN_VARIABLE } from './session-calle
 const help = `Usage: agent-remote-controller role <command>
 
 What the role this session holds as a bot lets it do: start bots, message them, read their work and
-keep work items. Run it in the session's own shell.
+keep a board. Run it in the session's own shell.
 
   role list                     The commands of this session's role, with their options
   role <command> [--OPTION VALUE]... [--input JSON | --input-file PATH|-]

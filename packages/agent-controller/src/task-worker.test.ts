@@ -13,7 +13,7 @@ async function harness(toolNamespaces = false) { const h = await botsHarness({ t
 const owner = { providerId: 'codex', nativeSessionId: 'worker', title: 'Chief' };
 const createTask = { action: 'create_task' as const, owner, operationId: 'op', title: 'Collect logs', brief: 'Collect the build logs of the last run.' };
 /** Every bot's tools, as the Host gives them while the Relay runs tasks. */
-const BOT_TOOLS = ['create_bot', 'message', 'download_attachment', 'list_bots', 'read_bot', 'update_mission', 'update_work', 'complete_work', 'set_timer', 'stop_bot', 'retire_bot', 'open_room'];
+const BOT_TOOLS = ['create_bot', 'message', 'download_attachment', 'list_bots', 'read_bot', 'update_mission', 'board', 'update_board', 'set_timer', 'stop_bot', 'retire_bot', 'open_room'];
 const tool = (tools: readonly AgentSessionTool[] | undefined, name: string) => tools?.find(item => item.name === name) ?? (() => { throw new Error(`No ${name} tool.`); })();
 /** A temporary bot writes to its chief: its result (done, failed), its question (needs_input) or progress. */
 const report = (tools: readonly AgentSessionTool[] | undefined, status: 'done' | 'failed' | 'needs_input' | 'progress', text: string) => tool(tools, 'message').execute({ to: 'chief', text, status });
@@ -215,6 +215,28 @@ describe('the main session\'s task tools', () => {
     worker.turnEnded({ ...ref, nativeSessionId: 'plain' }, { cause: { kind: 'framed' }, tokens: 1 });
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(calls).toHaveLength(4);
+  });
+  it('maps the board tools to the Host calls of the calling session, and lets create_bot and message name an item', async () => {
+    const { worker, calls } = await support(true);
+    await worker.refresh('controller');
+    const tools = worker.namespace(() => ref, false).tools, owner = { providerId: 'codex', nativeSessionId: 'main' };
+    await tool(tools, 'board').execute({});
+    await tool(tools, 'board').execute({ bot: 'Tracker', item: 3 });
+    await tool(tools, 'update_board').execute({ items: [{ title: 'Run it', assignee: 'Tracker' }, { key: 3, version: 2, status: 'done', parent: null, result: 'Green.' }], plan: { text: 'Run, then ship.', why: 'The build is green.' } });
+    await tool(tools, 'create_bot').execute({ name: 'Regression', mission: 'Run the suite.', item: 3, operationId: 'op' });
+    await tool(tools, 'message').execute({ to: 'Tracker', text: 'Watch the build.', item: 3, status: 'progress', operationId: 'm1' });
+    expect(calls).toEqual([
+      { action: 'board', owner },
+      { action: 'board', owner, bot: 'Tracker', item: 3 },
+      { action: 'update_board', owner, items: [{ title: 'Run it', assignee: 'Tracker' }, { key: 3, version: 2, status: 'done', parent: null, result: 'Green.' }], plan: { text: 'Run, then ship.', why: 'The build is green.' } },
+      expect.objectContaining({ action: 'create_bot', name: 'Regression', item: 3 }),
+      expect.objectContaining({ action: 'bot_message', to: 'Tracker', item: 3, status: 'progress' }),
+    ]);
+    // The tool schemas refuse what the Relay would: a write without anything to write, an unknown status or link kind.
+    const schema = (name: string) => tools.find(item => item.name === name)!.inputSchema as { properties: Record<string, any> };
+    expect(schema('update_board').properties.items.items.properties.status.enum).toEqual(['open', 'working', 'waiting', 'done', 'cancelled']);
+    expect(schema('update_board').properties.items.items.properties.links.items.properties.kind.enum).toContain('pr');
+    expect(schema('message').properties.item).toEqual({ type: 'integer', minimum: 1 });
   });
   it('keeps the tools declared but refuses them while the Relay does not run tasks', async () => {
     const { worker, calls } = await support(false);

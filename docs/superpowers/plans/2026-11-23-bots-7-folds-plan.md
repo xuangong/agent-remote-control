@@ -23,6 +23,10 @@ Smallest and least shared first, so each fold leaves less for the next:
 - Deleted: Side creation (`/side` fork path), Side relations and their page state (selection, anchors, unlinking, navigation).
 - Tests: the Relay starts a temporary bot for the person; the page's `/side` creates one; the Side unit tests go; an E15 case.
 
+As built (7a, `652824f7`): `/side <text>` asks the Relay to start a temporary bot of the bot on screen (`TeamCreate.bot`), which opens
+beside its chief; Side creation, relations and their page state are deleted; existing Side views stay as ordinary views. Nothing
+deferred.
+
 ## 7b. Call For Support
 
 - Bot enablement moves from `support_enablement` to `bot_enablement` (bots and their tools), with the Controller asking for it.
@@ -30,6 +34,12 @@ Smallest and least shared first, so each fold leaves less for the next:
 - Deleted: profiles, enablement, support groups, calls, rosters, ledgers, report framing, the four tools, `callForSupport`,
   `readOnlyProvider`, the support panel and settings, and their tests.
 - Gate: a bot asks the bot whose mission is reviewing to review an uncommitted change it reads through the shared repository.
+
+As built (7b, `d40057bf`, docs `8ddb8d0e`, `a36f42f9`, last route `a7f1dfdd`): bot tools and enablement moved to `bot_enablement`;
+profiles, support groups, calls, rosters, ledgers, report framing, the four tools, `callForSupport`, `readOnlyProvider`, the panel
+and settings are deleted; a Relay drops old support groups when it loads and a Controller drops old support seats. The gate (a bot
+asks the reviewing bot about an uncommitted change through a shared repository or a bundle) is the `bundle` and `repository`
+scenarios of `pnpm test:bots`. Nothing deferred.
 
 ## 7c. Team
 

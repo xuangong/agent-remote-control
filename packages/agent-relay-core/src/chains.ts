@@ -17,6 +17,8 @@ const fail = (message: string): never => { throw new Error(message); };
 const chainId = (parts: unknown[]) => 'c_' + createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 16);
 /** The chain of the person's input to a session, named by its message. */
 export const personChainId = (session: Session, messageId: string) => chainId(['person', session.providerId, session.nativeSessionId, messageId]);
+/** The chain the person's edit of a bot's board starts at that bot. */
+export const editChainId = (botId: string, at: number) => chainId(['edit', botId, at]);
 /** A chain a timer starts when it comes due. */
 export const timerChainId = (inboxId: string, timer: string, at: number) => chainId(['timer', inboxId, timer, at]);
 

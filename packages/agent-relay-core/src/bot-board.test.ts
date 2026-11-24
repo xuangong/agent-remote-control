@@ -256,6 +256,18 @@ describe('the person\'s edits of a board', () => {
     expect(f.item(3)).toMatchObject({ parent: 1, brief: 'Main only.', assignee: ids.tracker });
   });
 
+  it('records the chain that the person\'s edit starts as caused by the person, apart from the timer chain the bot ran in before', async () => {
+    const f = fixture();
+    await write(f, [{ title: 'Write notes' }]);
+    await edit(f, { items: [{ key: 1, version: f.item(1).version, title: 'Write the release notes' }] });
+    const chains = f.broker.chains.list();
+    expect(chains).toEqual([expect.objectContaining({ cause: 'person', bot: ids.chief, messages: 1 })]);
+    expect(f.inbox(ids.chief).messages.filter(message => message.text.startsWith('[Item "')).map(message => message.chain)).toEqual([chains[0]!.id]);
+    // An edit that tells nobody starts no chain.
+    await edit(f, { items: [{ key: 1, version: f.item(1).version, title: 'Write the release notes' }] });
+    expect(f.broker.chains.list()).toHaveLength(1);
+  });
+
   it('says what a stale edit overwrote, in an item and in the plan note, and still applies it', async () => {
     const f = fixture();
     await write(f, [{ title: 'Release notes' }], { plan: { text: 'Notes.', why: 'Start.' } });

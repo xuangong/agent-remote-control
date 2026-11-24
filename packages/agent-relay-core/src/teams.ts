@@ -9,7 +9,7 @@ import { BotCalls } from './bot-calls.js';
 import { BotAsks } from './bot-asks.js';
 import { BotWork } from './bot-work.js';
 import { BotBoard } from './bot-board.js';
-import { BotChains, memoryChains, type ChainStore } from './chains.js';
+import { BotChains, editChainId, memoryChains, type ChainStore } from './chains.js';
 import { chainScope, inChain, seenBefore, stampChain, temporaryBotId } from './chain-scope.js';
 import { actOnBot, stopInTeams } from './audit.js';
 import { TaskGroups, taskAction, taskPresence, taskSettled, type TaskPorts } from './tasks.js';
@@ -177,7 +177,12 @@ export class TeamBroker {
       return { chainId: action.chainId, ...(botId ? { botId } : {}), ...result };
     }
     if (action.action === 'set_thresholds') { await this.chains.setThresholds(action.thresholds); return { thresholds: action.thresholds }; }
-    if (action.action === 'update_board') return (this.bots ?? fail(unavailableAssistants)).personUpdateBoard(action.botId, action.items, action.plan);
+    if (action.action === 'update_board') {
+      // What the bots are told of the person's edit is one chain of its own, caused by the person: not the timer chain the bot ran in last.
+      const bots = this.bots ?? fail(unavailableAssistants), scope = chainScope(editChainId(action.botId, this.ports.now()));
+      try { return await inChain(scope, () => bots.personUpdateBoard(action.botId, action.items, action.plan)); }
+      finally { await this.chains.record(scope, { cause: 'person', bot: action.botId }).catch(() => undefined); }
+    }
     if (action.action === 'set_chief') return (this.bots ?? fail(unavailableAssistants)).personSetChief(action.botId, action.chief);
     return this.change(teams => actOnBot(teams, action, this.ports.now()));
   }

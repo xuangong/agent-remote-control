@@ -132,11 +132,14 @@ handoff happens only while the bot is idle and moves its `main`; waiting message
 
 ### 3.3 Replies
 
-A turn started by exactly one message, which is not itself a reply, returns its final text to that message's sender as the reply, with no tool call, so a bot on
-any provider can be asked. A final text longer than 300 characters is cut there and ends with a pointer to the rest (`read_bot`),
-since the turn that wrote it is over. When several messages arrived together, the bot answers each with `reply_to`. A reply may be an
-acknowledgement ("received, working on it"); the result follows with `reply_to`. A turn that already answered its sender with
-`message` sends no second reply. Because a reply never earns an automatic reply, two bots cannot thank each other forever.
+A bot whose provider takes tools answers a message with `message` and `reply_to`; its final text is never routed to a sender, because a
+turn's closing monologue is not an answer and routed as one it started loops between bots. Only a bot whose provider takes no tools
+(no `message` tool to call) answers from its final text: a turn started by exactly one message, which is not itself a reply, returns its final text to
+that message's sender as the reply, with no tool call, so a bot on any provider can be asked. That final text, longer than 300
+characters, is cut and ends with a pointer to the rest (`read_bot`), since the turn that wrote it is over. When several messages
+arrived together, the bot answers each with `reply_to`. A reply may be an acknowledgement ("received, working on it"); the result
+follows with `reply_to`. Because a reply never earns an automatic reply, two bots cannot thank each other forever. A person's mention is
+answered by the final text of its answer session, and a `/side` records its final text as its result; neither is a reply to a bot.
 
 ### 3.4 Bounds
 
@@ -167,8 +170,9 @@ When the person writes to a bot that has an chief, the chief receives the person
 
 As built (`feat/bots-4-chains`, details in the [plan](../plans/2026-11-23-fold-into-assistants-plan.md)): `message` returns its
 outcome as `{ outcome, messageId?, reason? }`; a refusal is an outcome, not an error. A standing bot's turn started by one
-message answers its sender from its final text: the Host reports the ended turn and the Relay sends the reply (cut at 300
-characters, pointing to `read_bot`, which reads any standing bot of the account) unless a `message` of that turn already did.
+message answers its sender from its final text only when its provider takes no tools (2026-11-25; a bot with the tools answers with `message`):
+the Host reports the ended turn and the Relay sends the reply (cut at 300 characters, pointing to `read_bot`, which reads any standing
+bot of the account) unless a `message` of that turn already did.
 The Relay writes the `[The person wrote to <bot>]` frame from the Host's record of the person's input, like every other frame.
 An attachment is up to 3 files of 8 MiB, uploaded in chunks and checked by sha256, listed after the sender's 300 characters,
 kept a day, and downloaded by `download_attachment` to a verified file in the temporary directory that nothing applies.

@@ -62,7 +62,9 @@ The [third record](../reviews/2026-11-25-old-ways-with-bots-third.md) ranked wha
 - **T-2: an assignment notice carries the item.** When the board assigns an item to another bot, the notice reads `[Item 4 "title" changed · assigned to you · brief: ...]` with the item number and the first 500 characters of its brief on one line. `create_bot` with an item already names the item and the brief in its first message.
 - **C-1, N-3: base instructions v9.** One generic line: "Copying a neighbour's style is a guess too: if a bot's mission covers it, ask that bot first." and "Do not start work no one asked for."; the redundant "Say how you now understand your work." is dropped. No special case for help.
 
-Not done here: N-2/T-1 (routing narration as an answer), N-6 (reading persisted approvals that carry `kind`), S-4 and the roster preview of a finished team.
+- **T-1: final-text replies only for toolless providers (2026-11-25, the owner may revisit).** A bot that has the bot tools answers with `message`; its final text is never routed to a sender (the Controller asks `takesTools` of its provider before it sends `bot_reply`), which removes the loop where a turn's closing monologue was routed as `final answer to <message>`. The answer session of a mention and a side's result keep using the final text. Base instructions v10: "Answer a message with message and reply_to set to its id; your final text goes to no one."
+
+Not done here: N-6 (reading persisted approvals that carry `kind`), S-4 and the roster preview of a finished team.
 
 ## Checks
 

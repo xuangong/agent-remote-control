@@ -1,6 +1,6 @@
 import { useContext, useId, useState, type FormEvent } from 'react';
 import { errorWords } from '@orchardworks/agent-client';
-import { BOARD_BRIEF_LIMIT, BOARD_PLAN_LIMIT, type Board, type BoardItem, type BoardOverwrite, type BoardWriteResult } from '@orchardworks/agent-remote-protocol';
+import { BOARD_BRIEF_LIMIT, BOARD_PLAN_LIMIT, boardItemOpen, type Board, type BoardItemEdit, type BoardItem, type BoardOverwrite, type BoardWriteResult } from '@orchardworks/agent-remote-protocol';
 import { LocaleContext, useTranslate } from '@orchardworks/agent-client-web/react';
 import { dateLocale, replyTime } from '../../kernel/reply-time.js';
 import { Icon } from '../../ui/Icon.js';
@@ -27,6 +27,7 @@ export function BoardList({ choice }: { choice: BoardChoice }) {
   return <div className="lab-assistant-sessions lab-board">
     <PlanNote board={choice.board} choice={choice} save={save} pending={pending} />
     <BoardTree board={choice.board} choice={choice} ownerName={t('details.boardSelf')} save={save} pending={pending} depth={0} />
+    {save ? <NewItem board={choice.board} choice={choice} ownerName={t('details.boardSelf')} save={save} pending={pending} /> : null}
     {notice.map(line => <p key={line} role="status" className="lab-board-notice">{line}</p>)}
     {error ? <p role="alert" className="lab-board-notice">{error}</p> : null}
   </div>;
@@ -40,6 +41,33 @@ function overwritten(result: BoardWriteResult, choice: BoardChoice, t: Translate
     : field === 'assignee' ? (value === 'self' ? t('details.boardSelf') : choice.name(String(value))) : field === 'links' ? String((value as unknown[]).length) : clip(String(value ?? ''));
   return [...result.items.flatMap(item => item.overwrote ?? []), ...result.plan?.overwrote ?? []].map(over => t('details.boardOverwrote', {
     field: t(`details.boardField.${over.field}`), was: `“${words(over.was, over.field)}”`, by: over.by === 'person' ? t('details.boardYou') : choice.name(over.by) }));
+}
+
+/** A new item the person adds: a title, and optionally who does it, a brief and the item it belongs under. */
+function NewItem({ board, choice, ownerName, save, pending }: { board: Board; choice: BoardChoice; ownerName: string; save: NonNullable<Save>; pending: boolean }) {
+  const t = useTranslate();
+  const [form, setForm] = useState<{ title: string; assignee: string; brief: string; parent: string }>();
+  const parents = board.items.filter(item => boardItemOpen(item.status));
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    const title = form?.title.trim(), brief = form?.brief.trim();
+    if (!form || !title) return;
+    const item: BoardItemEdit = { title, ...form.assignee !== 'self' ? { assignee: form.assignee } : {}, ...brief ? { brief } : {}, ...form.parent ? { parent: Number(form.parent) } : {} };
+    if (await save({ items: [item] })) setForm(undefined);
+  }
+  if (!form) return <button type="button" className="lab-assistant-action" onClick={() => setForm({ title: '', assignee: 'self', brief: '', parent: '' })}>{t('details.boardNew')}</button>;
+  return <form onSubmit={event => void submit(event)} className="lab-board-form" aria-label={t('details.boardNew')} data-board-new>
+    <label>{t('details.boardTitle')}<input maxLength={120} value={form.title} onChange={event => setForm({ ...form, title: event.target.value })} /></label>
+    <label>{t('details.boardAssign')}<select value={form.assignee} onChange={event => setForm({ ...form, assignee: event.target.value })}>
+      {[{ botId: 'self', name: ownerName }, ...choice.choices].map(bot => <option key={bot.botId} value={bot.botId}>{bot.name}</option>)}</select></label>
+    <label>{t('details.boardBriefField')}<textarea rows={3} maxLength={BOARD_BRIEF_LIMIT} value={form.brief} onChange={event => setForm({ ...form, brief: event.target.value })} /></label>
+    {parents.length ? <label>{t('details.boardParent')}<select value={form.parent} onChange={event => setForm({ ...form, parent: event.target.value })}>
+      <option value="">{t('details.boardNoParent')}</option>{parents.map(item => <option key={item.key} value={item.key}>{item.title}</option>)}</select></label> : null}
+    <span className="lab-assistant-task-actions">
+      <button type="submit" className="lab-assistant-action" disabled={pending || !form.title.trim()}>{t('details.boardCreate')}</button>
+      <button type="button" className="lab-assistant-action" onClick={() => setForm(undefined)}>{t('details.boardDiscard')}</button>
+    </span>
+  </form>;
 }
 
 function PlanNote({ board, choice, save, pending }: { board: Board; choice: BoardChoice; save: Save; pending: boolean }) {

@@ -85,3 +85,20 @@ test('edits the plan note with a why, and cancels an item', async ({ page, isMob
   expect((await writes(page)).at(-1)).toEqual({ items: [{ key: 3, version: 1, status: 'cancelled' }] });
   await expect(board.locator('details.lab-board-done > summary')).toHaveText('Done (3)');
 });
+
+test('adds an item with an assignee, a brief and a parent from the details, and it shows in the tree', async ({ page, isMobile }, testInfo) => {
+  const board = await open(page, isMobile);
+  await board.getByRole('button', { name: 'New item' }).click();
+  const form = board.locator('[data-board-new]');
+  await form.getByLabel('Title').fill('Check the release checklist');
+  await form.getByLabel('Assigned to').selectOption({ label: 'Regression run' });
+  await form.getByLabel('Brief').fill('Tick every box before the cut.');
+  await form.getByLabel('Under item').selectOption({ label: 'Write the release notes' });
+  expect(await fits(page)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('board-new.png'), fullPage: true });
+  await form.getByRole('button', { name: 'Add item' }).click();
+  expect(await writes(page)).toEqual([{ items: [{ title: 'Check the release checklist', assignee: 'b_' + '3'.repeat(32), brief: 'Tick every box before the cut.', parent: 2 }] }]);
+  await expect(board.locator('[data-board-item="2"] [data-board-item]').filter({ hasText: 'Check the release checklist' })).toHaveCount(1);
+  await expect(board.locator('[data-board-new]')).toHaveCount(0);
+  expect(await fits(page)).toBe(true);
+});

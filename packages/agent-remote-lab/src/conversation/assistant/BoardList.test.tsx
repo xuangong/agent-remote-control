@@ -138,6 +138,33 @@ describe('the board in a bot\'s details', () => {
     expect(save).toHaveBeenLastCalledWith({ plan: { text: 'Ship notes first.', why: 'The notes block the release.', version: 3 } });
   });
 
+  it('creates an item from the details with a title and optionally an assignee, a brief and a parent, and only with a title', async () => {
+    const save = vi.fn(async (_edit: unknown): Promise<BoardWriteResult> => ({ items: [{ key: 5, version: 1 }] }));
+    const container = await render(<BoardList choice={choice(rich, { save })} />);
+    await click(button(container, 'New item'));
+    const form = container.querySelector('[data-board-new]')!;
+    const [title, assignee, brief, parent] = [...form.querySelectorAll<HTMLInputElement & HTMLSelectElement & HTMLTextAreaElement>('input, select, textarea')];
+    expect(button(form, 'Add item')!.disabled).toBe(true);
+    expect([...parent!.querySelectorAll('option')].map(option => option.textContent)).toEqual(['No parent', 'Release 2.0', 'Write notes']);
+    await type(title!, ' Check the logs ');
+    await click(button(form, 'Add item'));
+    expect(save).toHaveBeenLastCalledWith({ items: [{ title: 'Check the logs' }] });
+    expect(container.querySelector('[data-board-new]')).toBeNull();
+    await click(button(container, 'New item'));
+    const again = [...container.querySelectorAll<HTMLInputElement & HTMLSelectElement & HTMLTextAreaElement>('[data-board-new] input, [data-board-new] select, [data-board-new] textarea')];
+    await type(again[0]!, 'Trace the failure');
+    await type(again[1]!, id(2));
+    await type(again[2]!, 'Find the first red run.');
+    await type(again[3]!, '1');
+    await click(button(container.querySelector('[data-board-new]')!, 'Add item'));
+    expect(save).toHaveBeenLastCalledWith({ items: [{ title: 'Trace the failure', assignee: id(2), brief: 'Find the first red run.', parent: 1 }] });
+  });
+
+  it('offers no new item on a board that cannot be written', async () => {
+    const container = await render(<BoardList choice={choice(rich)} />);
+    expect(button(container, 'New item')).toBeUndefined();
+  });
+
   it('shows what a stale edit overwrote, who set it and what it was, and keeps the Relay\'s refusal as an alert', async () => {
     const save = vi.fn(async (_edit: unknown): Promise<BoardWriteResult> => ({ items: [{ key: 1, version: 3, overwrote: [{ field: 'status', was: 'waiting', by: id(2) }, { field: 'assignee', was: 'self', by: 'person' }] }],
       plan: { version: 4, overwrote: [{ field: 'plan', was: 'Old plan.', by: id(1) }] } }));

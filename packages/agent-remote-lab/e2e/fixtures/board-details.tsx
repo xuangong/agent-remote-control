@@ -37,6 +37,12 @@ const opened: string[] = (window as unknown as { openedBots: string[] }).openedB
 function write(edit: { items?: readonly BoardItemEdit[]; plan?: { text: string; why: string; version?: number } }): BoardWriteResult {
   const result: BoardWriteResult = { items: [] };
   for (const change of edit.items ?? []) {
+    if (change.key === undefined) {
+      const key = relay.next++;
+      relay.items = [...relay.items, item(key, { title: change.title!, assignee: change.assignee ?? 'self', ...(change.brief ? { brief: change.brief } : {}), ...(typeof change.parent === 'number' ? { parent: change.parent } : {}), updatedBy: 'person' })];
+      result.items.push({ key, version: 1 });
+      continue;
+    }
     const current = relay.items.find(entry => entry.key === change.key)!;
     const stale = change.version! < current.version && change.status !== undefined && change.status !== current.status;
     relay.items = relay.items.map(entry => entry.key !== change.key ? entry : { ...entry, ...(change.title ? { title: change.title } : {}), ...(change.status ? { status: change.status } : {}),

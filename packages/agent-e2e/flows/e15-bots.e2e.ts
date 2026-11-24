@@ -70,6 +70,24 @@ it('E15: a bot messages another bot in its inbox, which answers it, between thei
   await context.close();
 });
 
+it('E15: a bot hands an item of its board to another bot, which reads the item named, reports on it, and is told when it changes', async () => {
+  const { context } = await openPage(browser, stack.sessionUrl('chief'));
+  await team(context);
+  await hasTools('chief'); await hasTools('tracker');
+  const written = await stack.provider.useTool('chief', 'update_board', { items: [{ title: 'Watch the build' }] }) as { items: Array<{ key: number; version: number }> };
+  expect(written.items).toEqual([{ key: 1, version: 1 }]);
+  expect(await stack.provider.useTool('chief', 'message', { to: 'Tracker', text: 'Tell me when main is red.', item: 1 })).toMatchObject({ outcome: 'delivered' });
+  await expect.poll(() => inputs('tracker').filter(input => input.kind === 'assistant').at(-1), { timeout: 20_000 })
+    .toMatchObject({ from: 'Chief', body: '[Item 1 "Watch the build" · from Chief]\nTell me when main is red.' });
+  await stack.provider.useTool('tracker', 'message', { to: 'Chief', text: 'Main is green.', status: 'progress', item: 1 });
+  await expect.poll(async () => (await stack.provider.useTool('chief', 'board', {}) as { items: Array<{ report?: string; status: string; assignee: string }> }).items[0], { timeout: 20_000 })
+    .toMatchObject({ report: 'Main is green.', status: 'working' });
+  // The chief retitles it; the one who holds it is told, written from the record.
+  await stack.provider.useTool('chief', 'update_board', { items: [{ key: 1, version: 3, title: 'Watch main' }] });
+  await expect.poll(() => stack.provider.session('tracker')!.sent.filter(text => text.startsWith('[Item "')), { timeout: 20_000 }).toEqual(['[Item "Watch main" changed · retitled to "Watch main"]']);
+  await context.close();
+});
+
 it('E15: a bot creates a standing bot, which joins its group in the page and reads its first message', async () => {
   const { context, page } = await openPage(browser, stack.origin + '/?mode=bot');
   await team(context);

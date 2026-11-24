@@ -38,6 +38,31 @@ what it learns through a memory; work is tracked on a board per bot; reports to 
   cancel items; the plan note). `create_bot` and `message` may name the item they serve; the item then links the bot.
 - Existing work items and timers: work items become board items; the timer of open work stays (design 6.2). Old data may be dropped.
 
+As built (8a):
+
+- Protocol: `BoardItem`, `BoardPlan` and `Board` in `bots.ts` (limits as constants), `Board` on `TeamInbox` in place of `work`, the host calls
+  `board` and `update_board`, an `item` on `create_bot`, `bot_message` and `create_task`, and the item a task was created for on `TeamTask.item`
+  (board owner, key, title). `WorkItem`, `update_work` and `complete_work` are gone; a Relay drops an old inbox's `work` when it loads. Fixture
+  `fixtures/board.v1.json` holds valid and invalid items, boards and calls.
+- Items keep `changedAt` (the version at which each field last changed), which is how a stale write knows what it overwrote: only fields it
+  writes, with another value, that changed after the version it read. A new item names no version; a temporary bot may leave out the version
+  and the key of the one item it writes. The plan note has its own version and the same notice; each change keeps a `why` line (last 20).
+- Assigning: `create_bot` or `message` naming an item sets the assignee, the brief (the first one the assignee got; a follow-up leaves it) and
+  status working. The tag line `[Item 7 "title" · from Chief]` is written by the Relay after the frame's header, never in a payload
+  (`[Item` lines in a payload are quoted). For a temporary bot the tag also goes on its later inputs and its reports, from the stored item.
+- Reports: a `message` with a status, from a bot to the bot whose board holds an open item assigned to the sender (the named `item`, or the
+  only one), sets the item's latest report (a failed report reads "Failed: ..."). Status and result follow (progress working, needs_input
+  waiting, done done with the result, failed open) only when the sender is the temporary bot created for that item. A standing staff bot's
+  report changes neither status nor result.
+- Notices (retitled, brief changed, cancelled, assigned to you, reassigned) are queued after the write from the record, by the item's key
+  and version, to a standing bot's inbox or a running temporary bot's task; a bot that is gone is simply not told.
+- Timer of open work: unchanged rules, driven by open board items; the due timer lists their title, status and latest report.
+- `list_bots` returns `board: { open, items }` for the caller's own open items where it returned `work`; `read_bot` is unchanged.
+- Page: `TaskDirectory.board` replaces `work`; the assistant details list items with status, latest report and result; a quiet bot's roster
+  row shows its latest open item and status. Frames `[Item ...]` show as plain text in the timeline for now.
+- Tests: `bot-board.test.ts` (versions, stale writes, limits, the assignee notice, temporary bot writes, report binding, chief read access),
+  protocol fixture test, Controller tool mapping test, an E15 flow. The stale-write notice and the assignee notice were each mutation checked.
+
 ## 8b. Answer sessions (for the person's conversations)
 
 - The person's mention (8d) from conversation X opens, or reuses, the bot's answer session for X: one per (bot, conversation),

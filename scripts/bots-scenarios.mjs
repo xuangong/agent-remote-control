@@ -129,7 +129,7 @@ if (run('temporary')) {
 let reviewer;
 if (run('standing') || run('shared') || run('bundle') || run('repository')) {
   // An chief creates a standing bot with a mission; it reports in, works with the chief by message, takes the person's
-  // lasting change into its own mission, and keeps a work item to its end.
+  // lasting change into its own mission, and keeps a board item to its end.
   const target = `review-${tag}.txt`;
   execFileSync('/bin/sh', ['-c', `printf 'The release ships on Friday.\\n' > '${file(target)}'`]);
   await say(chief.address, `Create a standing bot named Reviewer ${tag} whose mission is to review text files in this working directory when a bot or the person asks, and to answer in one line. Then ask it to review ${target}.`);
@@ -147,9 +147,9 @@ if (run('standing') || run('shared') || run('bundle') || run('repository')) {
       return member?.mission && /word/i.test(member.mission) && member.mission;
     }, 4 * 60_000).catch(() => undefined);
     check('standing: the person\'s lasting change is in the reviewer\'s mission', !!mission, (mission ?? '').slice(0, 120));
-    await say(reviewer.address, `Keep a work item for reviewing ${target} again with the word count, do the review, then complete the work item.`);
-    const item = await until('a completed work item', () => inboxNamed(reviewer.name)?.inbox?.work?.find(work => work.phase === 'done'), 4 * 60_000).catch(() => undefined);
-    check('standing: the reviewer kept a work item to its end', !!item, item?.summary ?? 'none');
+    await say(reviewer.address, `Put an item for reviewing ${target} again with the word count on your board, do the review, then mark the item done with its result.`);
+    const item = await until('a finished board item', () => inboxNamed(reviewer.name)?.inbox?.board?.items.find(entry => entry.status === 'done'), 4 * 60_000).catch(() => undefined);
+    check('standing: the reviewer kept a board item to its end', !!item, item?.result ?? 'none');
   }
 }
 

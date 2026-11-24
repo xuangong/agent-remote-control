@@ -243,23 +243,21 @@ export class BotCalls {
     // The files the message carries are listed after the sender's words, written from their records.
     const files: BotAttachment[] = call.attachments ? await Promise.all(call.attachments.map(id => this.files().metadata(id))) : [];
     const text = files.length ? `${call.text}\n${attachmentLines(files)}` : call.text;
-    // A report to the chief is on the chief's item; any other message naming an item hands work away on one of the sender's own.
-    const reporting = call.status !== undefined && this.chiefKey(from, chief) === to.key;
-    if (call.item !== undefined && !reporting && from.standing) {
+    // A message with a status to the bot whose board holds an item assigned to the sender is a report on that item; any other message
+    // naming an item hands work away on one of the sender's own.
+    const held = call.status !== undefined && to.standing ? heldItem(this.board.read(to.standing), from.key, call.item ?? from.task?.task?.item?.key) : undefined;
+    if (call.item !== undefined && !held && from.standing) {
       const item = this.board.read(from.standing)?.items.find(entry => entry.key === call.item);
       if (!item) return { outcome: 'forbidden', reason: `No item ${call.item} on your board; read it with board.` };
       const result = await this.route(hostId, from, chief, to, { ...call, text, tag: itemTagText({ key: item.key, title: item.title, from: from.name }) });
       if (result.outcome === 'delivered' || result.outcome === 'held') await this.notify(await this.board.assign(from.standing, item.key, to.key, call.text, from.key));
       return result;
     }
-    const held = reporting && to.standing ? heldItem(this.board.read(to.standing), from.key, call.item ?? from.task?.task?.item?.key) : undefined;
     const result = await this.route(hostId, from, chief, to, { ...call, text, ...(held && !from.task ? { tag: itemTagText({ key: held.key, title: held.title, from: from.name }) } : {}) });
     // The report is the item's latest, whoever made it; its status follows only when the assignee is the bot created for the item.
     if (held && to.standing && (result.outcome === 'delivered' || result.outcome === 'held')) await this.board.report(to.standing, from.key, held.key, call.status, call.text, from.task?.task?.item?.board === to.key);
     return result;
   }
-  /** The key of the bot a bot reports to: its chief. */
-  private chiefKey(from: Bot, chief: Bot | undefined): string | undefined { return chief?.key ?? from.standing?.chief; }
   /** Sends where the sender and receiver say, and marks the messages a standing sender answered by it (bots design 3.3). */
   private async route(hostId: string, from: Bot, chief: Bot | undefined, to: Bot, call: SendCall): Promise<BotMessageResult> {
     const result = await this.send(hostId, from, chief, to, call);

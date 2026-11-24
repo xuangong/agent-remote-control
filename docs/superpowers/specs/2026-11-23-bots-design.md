@@ -203,7 +203,7 @@ Every bot's main session gets the same extensions, built by the Controller:
 | `read_bot` | Read the recent conversation of a bot it may read (2.1, `peers`) |
 | `stop_bot` | Stop the running turn of one of its staff |
 | `update_mission` | Record a lasting change in its own mission (2.3) |
-| `update_work`, `complete_work`, todo, confirmation | Keep its work items (6) |
+| `board`, `update_board` | Read and keep its board (6.1); read the board of its standing staff |
 | `set_timer`, `clear_timer` | Its fallback timers (6.2) |
 | `open_room` | Open a room with bots it may message |
 
@@ -241,29 +241,38 @@ own permission settings. No bot answers another bot's native interactions (tool,
 settings: those belong to the person. A native interaction pending in a bot makes its status `blocked`; its chief receives a
 frame saying what waits, and the person is reminded directly.
 
-## 6. Work items and timers
+## 6. The board and timers
 
-### 6.1 Work items
+### 6.1 The board
 
-Every bot can keep work items (a list on the bot), as every bot can create bots; a bot whose mission is a piece of work keeps one for it. A work item
-holds what was agreed, a plan with acceptance, a todo, a phase (clarifying, agreed, in progress, verifying, waiting for the person,
-done), a one-line summary and the next action. A confirmation step completes only by the person's Agree; no tool accepts it.
+A standing bot keeps one board (replacing the work items this section described first): a list of items and a plan note. An item is a
+piece of work with a title, a status (open, working, waiting, done, cancelled), an assignee (the bot itself, one of its temporary bots
+or a standing bot), a parent, links (commit, branch, pull request, file, attachment, bot), the brief as it was handed away, the
+latest report of its assignee and a result line. Its state lives in the record, not in the conversation, so a bot reads its board
+after a start, a resume or a compaction instead of remembering it. A confirmation step completes only by the person's Agree; no tool
+accepts it. A bot writes its own board; its chief reads the board of its standing staff, read only. A temporary bot writes the
+status, links and result of the item it was created for, as the chief's own worker.
 
-Progress moves with messages: a reply or report from a bot it asked, the person's words and decisions. The bot updates the item in
-the turn that reads them. Its state lives in the record, not in the conversation, so a bot rereads its items after a compaction or a
-handoff instead of remembering them. A turn that changes nothing visible is folded as a background check and sends no reminder.
-`complete_work` ends the item and retires the bots created for it (2.4).
+Every write names the version it read. A write on an older version is applied field by field, and the result tells the writer what it
+overwrote (the field, what it was, who wrote it). A change to an item another bot holds (retitled, reassigned, cancelled, its brief
+changed) queues `[Item "<title>" changed · <what>]` to that bot, and to the old assignee on reassignment, written by the Relay from the
+record.
+
+As built: the board lives on a standing bot's inbox (at most 50 open items; finished ones are kept for a week; the plan note keeps its
+last 20 changes, each with a line saying why). `create_bot` and `message` name an item: the item records the assignee and the brief,
+and the assignee's input carries `[Item 7 "<title>" · from <sender>]`. A message with a status to the bot whose board holds an item
+assigned to the sender is a report: its line becomes the item's latest report, and its status and result follow only when the sender
+is the temporary bot created for that item; a standing staff bot's chief decides. A temporary bot has no board of its own.
 
 ### 6.2 Timers
 
 A timer is a fallback, not a driver: it wakes a bot when nothing has happened for a while, so quiet work is looked at. It has a
 name, an interval and an optional end. It is due only after a quiet interval: every message to the bot pushes it back, so it never
 fires while progress flows. A due timer is a message (`[Timer "<name>" · due]`) and waits for idle like any other; missed ticks
-coalesce. A bot with an open work item has one by default, every five minutes, or thirty while all its open work waits.
+coalesce. A bot with an open board item has one by default, every five minutes, or thirty while all its open items wait.
 
-As built: work items and timers live on a standing bot's inbox (at most 20 items, done ones dropped first, and 8 timers); a
-temporary bot's work item is its brief. A due timer is queued only when nothing else is on its way to the bot, and carries the
-bot's open work (title, phase, next action).
+As built: timers live on a standing bot's inbox (at most 8). A due timer is queued only when nothing else is on its way to the bot, and carries the
+bot's open items (title, status, latest report).
 
 ## 7. Chains and the audit
 

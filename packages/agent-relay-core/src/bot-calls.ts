@@ -344,7 +344,8 @@ export class BotCalls {
     // naming an item only tags the exchange with it: an item is assigned by create_bot with the item or by a board write, never by a message.
     const held = call.status !== undefined && call.status !== 'ack' && to.standing ? heldItem(this.board.read(to.standing), from.key, call.item ?? from.task?.task?.item?.key) : undefined;
     if (call.item !== undefined && !held && from.standing) {
-      const item = this.board.read(from.standing)?.items.find(entry => entry.key === call.item);
+      // The item its receiver's board holds for the sender is the one it names; otherwise it names one of its own board.
+      const item = (to.standing ? heldItem(this.board.read(to.standing), from.key, call.item) : undefined) ?? this.board.read(from.standing)?.items.find(entry => entry.key === call.item);
       if (!item) return { outcome: 'forbidden', reason: `No item ${call.item} on your board; read it with board.` };
       return this.route(hostId, from, chief, to, { ...call, text, tag: itemTagText({ key: item.key, title: item.title, from: from.name }) });
     }

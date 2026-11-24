@@ -229,6 +229,18 @@ describe('the bots that hold an item', () => {
     expect(f.texts(f.task()).at(-1)).toContain('[Item 1 "Track the build" · from Chief]');
   });
 
+  it('lets an assignee name the item it was assigned on its chief\'s board in a message, tagging the exchange without writing that board', async () => {
+    const f = fixture();
+    await write(f, [{ title: 'Track the build' }, { title: 'Track the deploy' }]);
+    await hand(f, 2, 'Watch the deploy.');
+    const before = f.board();
+    expect(await f.say('tracker', 'Chief', 'Question about the deploy.', { item: 2 })).toMatchObject({ outcome: 'delivered' });
+    expect(f.texts(f.inbox(ids.chief)).at(-1)).toContain('[Item 2 "Track the deploy" · from Tracker]');
+    expect(f.board()).toEqual(before);
+    // An item neither on its own board nor assigned to it is still refused.
+    await expect(f.say('tracker', 'Chief', 'x', { item: 1 })).resolves.toMatchObject({ outcome: 'forbidden', reason: expect.stringContaining('No item 1 on your board') });
+  });
+
   it('lists the open items of the caller\'s board, with the latest report, in list_bots', async () => {
     const f = fixture();
     await write(f, [{ title: 'Track the build' }, { title: 'Old', status: 'done' }]);

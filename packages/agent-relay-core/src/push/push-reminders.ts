@@ -40,18 +40,21 @@ export interface PushRemindersPorts {
 const SENT_LIMIT = 4096;
 const sessionKey = (session: PresenceSession) => JSON.stringify([session.hostId, session.providerId, session.nativeSessionId]);
 
-interface Assistant { readonly group: WindowGroup; readonly viewId: string; readonly details?: WindowBotDetails }
+interface Assistant { readonly group: WindowGroup; readonly viewId: string; readonly session: PresenceSession; readonly details?: WindowBotDetails }
 /** The assistant each session is in the account: its bot view in a group shown in Bot mode first, else in any group, in catalog order. */
 function assistantsOf(groups: readonly WindowGroup[]): Map<string, Assistant> {
   const found = new Map<string, Assistant>();
   for (const group of [...groups.filter(hasBotAppearance), ...groups.filter(group => !hasBotAppearance(group))]) {
     for (const view of botViews(group)) {
       const key = sessionKey(view.binding);
-      if (!found.has(key)) found.set(key, { group, viewId: view.id, ...(group.bots?.members[view.id] ? { details: group.bots.members[view.id] } : {}) });
+      if (!found.has(key)) found.set(key, { group, viewId: view.id, session: { hostId: view.binding.hostId, providerId: view.binding.providerId, nativeSessionId: view.binding.nativeSessionId }, ...(group.bots?.members[view.id] ? { details: group.bots.members[view.id] } : {}) });
     }
   }
   return found;
 }
+
+/** The assistant of a bot's record, by `botId`, when it is among the account's assistants. */
+const assistantOfBot = (assistants: Iterable<Assistant>, botId: string) => [...assistants].find(item => item.details?.botId === botId);
 
 export type PushReminders = ReturnType<typeof createPushReminders>;
 
@@ -66,15 +69,18 @@ export function createPushReminders(ports: PushRemindersPorts) {
 
   function push(subject: string, state: ReminderState, kind: PushReminderKind, assistant: Assistant, devices: readonly string[], groups: readonly WindowGroup[]) {
     const names = new Map<PushLocale, Map<string, string>>();
-    const nameIn = (locale: PushLocale) => {
+    const nameIn = (locale: PushLocale, of: Assistant) => {
       let called = names.get(locale);
       if (!called) names.set(locale, called = assistantNamesIn(accountAssistants(groups), locale));
-      return called.get(viewAssistantKey(assistant.group.window.id, assistant.viewId)) ?? assistant.viewId;
+      return called.get(viewAssistantKey(of.group.window.id, of.viewId)) ?? of.viewId;
     };
-    const tag = pushTag(state), at = ports.now();
+    // A staff bot's need collapses under its chief: the chief's tag, the chief named with the bot in it, the click opening the bot's chat.
+    // A bot whose chief is the person, a chief that is no assistant of the account, and a finished turn remind on their own.
+    const chief = kind === 'needs_you' && assistant.details?.chief ? assistantOfBot(assistantsOf(groups).values(), assistant.details.chief) : undefined;
+    const tag = pushTag(chief ? chief.session : state), at = ports.now();
     for (const subscription of ports.subscriptions.list(subject)) {
       if (!devices.includes(subscription.device)) continue;
-      const payload = encodePushReminder({ v: 1, kind, name: nameIn(subscription.locale), locale: subscription.locale,
+      const payload = encodePushReminder({ v: 1, kind, name: nameIn(subscription.locale, chief ?? assistant), ...(chief ? { member: nameIn(subscription.locale, assistant) } : {}), locale: subscription.locale,
         url: assistantAddress(assistant.group.window.id, assistant.viewId), tag, at });
       const delivery = ports.sender.deliver(subscription, { payload, topic: tag, ttlSeconds: PUSH_REMINDER_TTL_SECONDS[kind], urgency: PUSH_REMINDER_URGENCY[kind] })
         .finally(() => { pending.delete(delivery); });

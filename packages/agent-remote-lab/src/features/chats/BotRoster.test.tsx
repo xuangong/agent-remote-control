@@ -187,3 +187,14 @@ it('marks a bot with its chief, and a quiet bot shows where its open work stands
   expect(scribe.querySelector('.lab-bot-sentence')?.textContent).toBe('Release notes · Waiting');
   expect(visibleButton(container, 'Chief').querySelector('[data-chief]')).toBeNull();
 });
+
+it('marks a chief\'s row with the needs-you dot while one of its staff needs the owner', async () => {
+  const group = botGroup('A');
+  group.window.views.push(createWindowView('A2', botTarget('A2'), 'primary'));
+  group.bots!.members = { A1: { name: 'Chief', botId: 'b_' + '1'.repeat(32) }, A2: { name: 'Scribe', botId: 'b_' + '2'.repeat(32), chief: 'b_' + '1'.repeat(32) } };
+  const model = projectBotRoster([group], [], { status: binding => binding.nativeSessionId === 'A2' ? 'waiting' : 'idle' });
+  const container = await render(<BotRoster model={model} groups={[group]} onSelect={() => {}} directoryControls={null} />);
+  const chief = visibleButton(container, 'Chief');
+  expect([chief.dataset.needsYou, chief.querySelector('.lab-bot-needs-you') !== null]).toEqual(['true', true]);
+  expect(visibleButton(container, 'Scribe').dataset.needsYou).toBe('true');
+});

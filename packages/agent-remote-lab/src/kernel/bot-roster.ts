@@ -32,6 +32,8 @@ export interface BotRow {
   muted?: true;
   /** The name of this bot's chief, the bot that created it (bots design 10). */
   chief?: string;
+  /** A bot this one is the chief of needs the owner: the row carries the needs-you mark, as reminders group under the chief (bots design 10). */
+  staffNeedsYou?: true;
 }
 /** `hidden` lists the views of this group's bots hidden in Bot mode, which the group can show again. */
 export interface BotSection { groupId: string; title: string; rows: BotRow[]; hidden: string[]; unread?: true; /** Only in the directory: the group is hidden in Bot mode. */ hiddenInChats?: true }
@@ -138,6 +140,8 @@ export function projectBotRoster(groups: readonly WindowGroup[], directory: read
     return [{ groupId: group.window.id, title: group.window.title, rows, hidden,
       ...(rows.some(row => row.unread) ? { unread: true as const } : {}), ...(everyone && !hasBotAppearance(group) ? { hiddenInChats: true as const } : {}) }];
   });
+  const chiefsNeeded = new Set(sections.flatMap(section => section.rows.flatMap(row => row.assistant.state === 'needs_you' && row.details.chief ? [row.details.chief] : [])));
+  for (const section of sections) for (const row of section.rows) if (row.details.botId && chiefsNeeded.has(row.details.botId)) row.staffNeedsYou = true;
   const grouped = new Set(groups.flatMap(group => group.window.views.flatMap(view => view.binding ? [sessionKey(view.binding)] : [])));
   return { sections, other: sortDirectorySessions(directory.filter(entry => !grouped.has(sessionKey(entry)))) };
 }

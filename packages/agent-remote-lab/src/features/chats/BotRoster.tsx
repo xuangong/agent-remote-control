@@ -29,7 +29,7 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
   // The sentence says what the assistant is doing; a draft takes the place of a quiet one (its latest reply, or ready).
   const quiet = row.assistant.state === 'idle' || row.assistant.state === 'unknown';
   // Needs you is not unread: it asks for the owner, so its dot is distinct and mute never quiets it.
-  const needsYou = row.assistant.state === 'needs_you';
+  const needsYou = row.assistant.state === 'needs_you' || !!row.staffNeedsYou;
   // A quiet bot that keeps work shows where its work stands (bots design 10): its latest open work item and phase.
   const work = quiet ? directory?.work?.(row.session).find(item => item.phase !== 'done') : undefined;
   const sentence = draft && quiet ? undefined : (work ? `${work.title} · ${t(`details.workPhase.${work.phase}`)}` : row.assistant.sentence) || undefined;

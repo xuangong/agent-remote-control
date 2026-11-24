@@ -151,3 +151,14 @@ it('names a bot\'s chief, by its record (bots design 10)', () => {
   const rows = projectBotRoster([team], [], { status: () => 'idle' }).sections[0]!.rows;
   expect(rows.map(row => [row.name, row.chief])).toEqual([['Chief', undefined], ['Scribe', 'Chief']]);
 });
+
+it('flags a chief whose staff bot needs the owner, and no one else (bots design 10)', () => {
+  const ids = { chief: 'b_' + '1'.repeat(32), staff: 'b_' + '2'.repeat(32), solo: 'b_' + '3'.repeat(32) };
+  const team = group('team', ['chief', 'staff', 'solo'].map(id => createWindowView(id, binding(id), 'primary')));
+  team.bots!.members = { chief: { botId: ids.chief }, staff: { botId: ids.staff, chief: ids.chief }, solo: { botId: ids.solo } };
+  const flagged = (waiting: string) => projectBotRoster([team], [], { status: item => item.nativeSessionId === waiting ? 'waiting' : 'idle' }).sections[0]!.rows.filter(row => row.staffNeedsYou).map(row => row.viewId);
+  expect(flagged('staff')).toEqual(['chief']);
+  // The chief's own need and a bot whose chief is the person flag no row.
+  expect(flagged('chief')).toEqual([]);
+  expect(flagged('solo')).toEqual([]);
+});

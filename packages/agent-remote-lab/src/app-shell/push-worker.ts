@@ -15,6 +15,8 @@ export const PUSH_TITLES: Readonly<Record<PushReminder['locale'], Readonly<Recor
   en: { needs_you: '{name} needs you', finished: '{name} finished' },
   zh: { needs_you: '{name} 需要你', finished: '{name} 做完了' },
 };
+/** The title of a staff bot's need, which its chief's notification carries: the chief, then the bot. */
+const MEMBER_TITLES: Readonly<Record<PushReminder['locale'], string>> = { en: '{name}: {member} needs you', zh: '{name}：{member} 需要你' };
 const GENERIC_TAG = 'orchard';
 
 /** What a notification of ours carries for its click and for ordering. */
@@ -26,7 +28,8 @@ export function reminderNotification(text: string | undefined, shown: ShownNotif
   const reminder = decodePushReminder(text);
   if (!reminder) return { title: 'Orchard', options: { tag: GENERIC_TAG, data: { url: '/', at: 0 }, icon: '/app/icon-192.png', badge: '/app/icon-monochrome-192.png' } };
   if (shown && shown.options.tag === reminder.tag && shown.options.data.at > reminder.at) return { title: shown.title, options: { ...shown.options, renotify: false } };
-  return { title: PUSH_TITLES[reminder.locale][reminder.kind].replace('{name}', reminder.name), options: {
+  const title = reminder.member ? MEMBER_TITLES[reminder.locale].replace('{name}', reminder.name).replace('{member}', reminder.member) : PUSH_TITLES[reminder.locale][reminder.kind].replace('{name}', reminder.name);
+  return { title, options: {
     tag: reminder.tag, data: { url: reminder.url, at: reminder.at, kind: reminder.kind }, renotify: true, lang: reminder.locale === 'zh' ? 'zh-CN' : 'en',
     icon: '/app/icon-192.png', badge: '/app/icon-monochrome-192.png' } };
 }

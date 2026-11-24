@@ -126,6 +126,39 @@ describe('what the Relay pushes', () => {
   });
 });
 
+describe('needs-you reminders grouped by chief', () => {
+  const team = () => [group('g1', [['v1', 's1'], ['v2', 's2'], ['v3', 's3']], { rank: 'm', members: {
+    v1: { name: 'Chief', botId: 'bot_chief' }, v2: { name: 'Reviewer', botId: 'bot_rev', chief: 'bot_chief' }, v3: { name: 'Solo', botId: 'bot_solo' } } })];
+
+  it('sends a staff bot\'s need under its chief\'s tag, naming the chief and the bot, and opening the bot\'s chat', async () => {
+    const r = relay({ groups: team() });
+    r.report([['s1', 'running', 1], ['s2', 'running', 1]]);
+    r.report([['s1', 'waiting', 2]]);
+    r.report([['s1', 'waiting', 2], ['s2', 'waiting', 3]]);
+    await r.reminders.settled();
+    const [own, staff] = r.payloads();
+    expect(own).toMatchObject({ name: 'Chief', url: '/?mode=bot&section=g1&bot=v1' });
+    expect(own!.member).toBeUndefined();
+    expect(staff).toMatchObject({ kind: 'needs_you', name: 'Chief', member: 'Reviewer', url: '/?mode=bot&section=g1&bot=v2', tag: own!.tag });
+    expect(r.pushed[1]!.message.topic).toBe(own!.tag);
+  });
+
+  it('keeps a bot whose chief is the person, a finished turn, and a chief that is no assistant of the account on their own tag', async () => {
+    const r = relay({ groups: team() });
+    r.report([['s2', 'running', 1], ['s3', 'running', 1]]);
+    r.report([['s2', 'idle', 2], ['s3', 'waiting', 2]]);
+    await r.reminders.settled();
+    const [finished, solo] = r.payloads();
+    expect(finished).toMatchObject({ kind: 'finished', name: 'Reviewer' });
+    expect(solo).toMatchObject({ name: 'Solo' });
+    expect(finished!.tag).not.toBe(solo!.tag);
+    const orphan = relay({ groups: [group('g1', [['v2', 's2']], { rank: 'm', members: { v2: { name: 'Reviewer', botId: 'bot_rev', chief: 'bot_gone' } } })] });
+    orphan.report([['s2', 'running', 1]]); orphan.report([['s2', 'waiting', 2]]);
+    await orphan.reminders.settled();
+    expect(orphan.payloads()).toEqual([expect.objectContaining({ name: 'Reviewer', url: '/?mode=bot&section=g1&bot=v2', tag: finished!.tag })]);
+  });
+});
+
 describe('a reminder outside a change of state', () => {
   it('reminds once per identity that a session needs the person, unless a page shows it or no device can take it', async () => {
     const r = relay({ devices: [subscription('phone'), subscription('tablet', { paused: true })] });

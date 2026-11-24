@@ -19,6 +19,13 @@ describe('the notification of a push', () => {
     expect(shown.options.body).toBeUndefined();
   });
 
+  it('titles a staff bot\'s need with its chief first, in the device\'s language, under the chief\'s tag', () => {
+    expect(reminderNotification(push({ member: 'Reviewer' }), undefined)).toMatchObject({ title: 'Chief: Reviewer needs you', options: { tag: 'schief' } });
+    expect(reminderNotification(push({ member: '评审', name: '主管', locale: 'zh' }), undefined).title).toBe('主管：评审 需要你');
+    const first = reminderNotification(push({ member: 'Reviewer', at: 2_000 }), undefined);
+    expect(reminderNotification(push({ member: 'Tester', at: 3_000 }), first)).toMatchObject({ title: 'Chief: Tester needs you', options: { tag: 'schief', renotify: true } });
+  });
+
   it('replaces the reminder shown for the session with a newer one, and shows the newer again, quietly, for an older one that came late', () => {
     const shown = reminderNotification(push({ at: 2_000 }), undefined);
     expect(reminderNotification(push({ kind: 'finished', at: 3_000 }), shown)).toMatchObject({ title: 'Chief finished', options: { renotify: true, data: { at: 3_000 } } });

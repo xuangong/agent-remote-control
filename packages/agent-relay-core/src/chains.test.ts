@@ -34,7 +34,7 @@ function fixture() {
         await broker.hostCall('mac', { action: 'claim', teamId: team.id, memberId: member.id, messageId: message.id, expectedNativeSessionId: nativeSessionId });
   };
   const chain = () => broker.chains.list()[0]!;
-  return { broker, as, deliver, chain, alerts, state: () => state, advance: (ms: number) => { now += ms; } };
+  return { broker, as, deliver, chain, alerts, groups, state: () => state, advance: (ms: number) => { now += ms; } };
 }
 const person = (messageId: string) => ({ kind: 'person' as const, messageId });
 const framed = { kind: 'framed' as const };
@@ -162,6 +162,20 @@ describe('thresholds that notify', () => {
     expect(f.chain()).toMatchObject({ passed: ['tokens', 'depth', 'minutes'] });
     expect(f.chain().stopped).toBeUndefined();
     expect(f.broker.chainView().thresholds).toEqual({ tokens: 1000, depth: 2, minutes: 30 });
+  });
+  it('reminds through the latest bot of a chain still there when the bot that started it is gone', async () => {
+    const f = fixture();
+    await f.broker.chainAction({ action: 'set_thresholds', thresholds: { tokens: 1000 } });
+    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'o1', to: 'Tracker', text: 'Status?', cause: person('u1') });
+    const id = f.chain().id;
+    await f.deliver('tracker');
+    // The person removes Chief from its group: the chain's first bot has no session any more.
+    const [only] = f.groups, members = (only!.bots as { members: Record<string, unknown> }).members;
+    (only!.window as { views: Array<{ id: string }> }).views = only!.window.views.filter(view => view.id !== 'v1'); delete members.v1;
+    // Tracker's turn on Chief's message passes the threshold.
+    await f.broker.hostCall('mac', { action: 'chain_turn', owner: f.as('tracker'), cause: framed, tokens: 1500 });
+    expect(f.chain()).toMatchObject({ id, passed: ['tokens'] });
+    expect(f.alerts).toEqual([{ session: 'tracker', identity: `chain:${id}:tokens` }]);
   });
 });
 

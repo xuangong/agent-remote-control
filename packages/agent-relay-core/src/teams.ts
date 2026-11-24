@@ -61,7 +61,10 @@ export class TeamBroker {
   constructor(private readonly ports: TeamBrokerPorts) {
     const key = (session: { hostId: string; providerId: string; nativeSessionId: string }) => { try { return nativeSessionRefKey(ports.resolveSession(session.hostId, session.providerId, session.nativeSessionId)); } catch { return undefined; } };
     this.chains = new BotChains(ports.chains ?? memoryChains(), () => ports.now(), (a, b) => { const left = key(a); return left !== undefined && left === key(b); },
-      (chain, passed) => { const session = this.botSession(chain.bot); if (session) for (const item of passed) ports.alertChain?.(session, `chain:${chain.id}:${item}`); });
+      (chain, passed) => {
+        // The reminder names the bot that started the chain, or the latest of its bots still there when that one is gone.
+        const session = [chain.bot, ...[...chain.bots].reverse()].map(bot => this.botSession(bot)).find(Boolean);
+        if (session) for (const item of passed) ports.alertChain?.(session, `chain:${chain.id}:${item}`); });
     if (ports.tasks) this.tasks = new TaskGroups({ ports, change: update => this.change(update), provision: (teamId, memberId) => this.provision(teamId, memberId) }, ports.tasks);
     if (ports.assistants) {
       const lent = { ports, change: <T>(update: (teams: SavedTeam[]) => T) => this.change(update), provision: (teamId: string, memberId: string) => this.provision(teamId, memberId) };

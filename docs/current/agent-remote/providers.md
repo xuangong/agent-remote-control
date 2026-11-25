@@ -16,7 +16,7 @@ Native connection mode and Remote client sharing are separate properties. Both n
 
 | Boundary | Native shared connection | Private native connection shared through the Host |
 | --- | --- | --- |
-| Current Controller integrations | Codex shared app-server daemon; OpenCode HTTP server. | Claude Code Agent SDK Query; Copilot SDK stdio runtime. |
+| Current Controller integrations | Codex shared app-server daemon; OpenCode HTTP server. | Claude Code Agent SDK Query; Copilot SDK stdio runtime; pi RPC process (no native sharing: pi has no server or lock, and two processes on one session file fork its history). |
 | Native access | The Host connects to a service that can also serve compatible native clients. | The Host's adapter owns the private SDK connection and runtime. |
 | Other local tools | Compatible tools can connect directly to the same native service and session, subject to its protocol, authentication and permissions. They can share live work outside Agent Remote Control. | Tools can share live work by using the Host's public Remote protocol. A separate native CLI cannot join the Host's private SDK connection merely by opening the same saved session ID. |
 | Multiple Remote clients | Pages and ARDB reuse one Host binding and its native observation; the Host distributes events and accepts authorized operations. | The same Host-level sharing applies; additional pages do not create separate SDK sessions or transfer native ownership. |
@@ -28,7 +28,7 @@ The public `capabilities.sessionControl: "shared"` describes Remote client acces
 
 Common authorization, operation settlement and interaction claims apply to operations routed through the Host; the native service coordinates clients that connect directly to it. One native observation is reused per Host binding, not globally across external native clients. See [Session interaction control](protocol.md#session-interaction-control).
 
-Implementation anchors: `packages/agent-controller/src/registrations.ts`, `packages/agent-provider-codex/src/provider.ts`, `packages/agent-provider-opencode/src/transport.ts`, `packages/agent-provider-claude/src/session.ts`, `packages/agent-provider-copilot/src/provider.ts`, and `packages/agent-session-runtime/src/session-control.ts`.
+Implementation anchors: `packages/agent-controller/src/registrations.ts`, `packages/agent-provider-codex/src/provider.ts`, `packages/agent-provider-opencode/src/transport.ts`, `packages/agent-provider-claude/src/session.ts`, `packages/agent-provider-copilot/src/provider.ts`, `packages/agent-provider-pi/src/provider.ts`, and `packages/agent-session-runtime/src/session-control.ts`.
 
 ## Collaborators
 
@@ -195,6 +195,12 @@ The root Query owns direct native agent tasks. Task lifecycle announcements and 
 
 When Claude child history reveals an input before an already-streamed answer, the adapter submits the complete ordered Timeline through the internal SDK replacement item. Relay reuses its existing epoch replacement notification so open views and reconnects recover the input in order. Forwarded messages absent from an SDK catalog read retain their position relative to known native message identities; equal text with different native UUIDs remains distinct. This includes repeated parent `SendMessage` work on the same native child.
 
+## pi RPC process
+
+pi (npm `@mariozechner/pi-coding-agent`) runs in Agent Host as one `pi --mode rpc` process per attached session, over JSONL on stdio; there is no SDK. Verified version and minimum: **0.73.1**; pi is pre-1.0 and its RPC protocol changes between releases, so newer releases are not covered automatically. The executable comes from `AGENT_HOST_PI`, else PATH, else npm and Node-manager global directories; `AGENT_HOST_PI_HOME` sets `PI_CODING_AGENT_DIR`. Authentication and models stay in pi's own profile.
+
+pi has no permission system and no MCP. The adapter loads an extension of its own (from a private temporary directory, never `~/.pi`) that asks the adapter before each tool call and registers the Host's tools. The Host owner's new sessions start in YOLO (no approval); otherwise each tool call is a typed approval. Read-only sessions run with read-only tools. See the [pi audit](pi-support-audit.md).
+
 ## Copilot official SDK and parent-owned tasks
 
 Copilot runs through `@github/copilot-sdk` 1.0.11 and CLI 1.0.83 in Agent Host. The adapter owns `CopilotClient`/SDK stdio, native callback interpretation, interaction-aware turn projection and resources. Host supplies provider/workspace discovery and native identity loading; Relay and renderer use unchanged public contracts. Copilot is explicitly selected in the launcher or `AGENT_HOST_PROVIDERS`.
@@ -211,6 +217,6 @@ Codex `collabAgentToolCall` waits normalize all unique `receiverThreadIds` into 
 
 ## Generic file references
 
-The SDK represents a generic file as a typed resource input with an opaque ID, Host-managed local path, name, media type, length and SHA256. Codex, Claude and Copilot advertise resource input when their session can accept input. Their native adapters encode a bounded local-file reference in a text block rather than treating arbitrary bytes as an image. Receiving the reference does not execute the file or bypass native tool permissions. Resource-only Copilot input does not require a vision-capable model.
+The SDK represents a generic file as a typed resource input with an opaque ID, Host-managed local path, name, media type, length and SHA256. Codex, Claude, Copilot and pi advertise resource input when their session can accept input. Their native adapters encode a bounded local-file reference in a text block rather than treating arbitrary bytes as an image. Receiving the reference does not execute the file or bypass native tool permissions. Resource-only Copilot input does not require a vision-capable model.
 
 Live and replay projectors recover these references as structured resource timeline parts; merged native text preserves surrounding ordinary text. Native text can contain user-authored markers, so recovered display metadata is not proof of a stored file. Actual downloads resolve the opaque ID through the Host's authenticated scope and verify complete bytes. OpenCode and DSH do not advertise generic resource input; their existing image/text capabilities remain unchanged.

@@ -317,7 +317,7 @@ disabled.
 
 | Shared | Effect |
 | --- | --- |
-| Native sessions | The Controller only lists, creates and opens sessions inside the instance workspace and locks permission settings. Claude Code also runs in its restricted sandbox; Codex and Copilot sessions run with their own permissions, so only their working directory is checked. Test sessions are stored in the native histories and also appear in your own Controller. |
+| Native sessions | The Controller only lists, creates and opens sessions inside the instance workspace and locks permission settings. Claude Code also runs in its restricted sandbox; Codex, Copilot and pi sessions run with their own permissions, so only their working directory is checked. Test sessions are stored in the native histories and also appear in your own Controller. |
 | Session ownership | Recorded in the profile (`.arc-session-owners`), so both Controllers see which one owns a session. |
 | Codex daemon, OpenCode server | Never started, restarted or updated by the instance (`AGENT_HOST_CODEX_AUTO_START=0`, `AGENT_HOST_OPENCODE_AUTO_START=0`). Codex sessions use your running Codex daemon; without it, Codex is unavailable. OpenCode may be unavailable, because its server credentials belong to your own Controller's state. |
 | Per-session stores | Permission modes, references and creation records under `~/.agent-remote-control/session-*` are keyed by session, so test sessions add entries there. |

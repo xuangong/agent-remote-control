@@ -14,7 +14,7 @@
 | `api` | Any website request as the signed-in user, for what the groups above do not cover. |
 | `--skill` | Prints the `agent-remote` skill. |
 
-The rest manage this computer's Controller and work while the Relay is unreachable: `start`, `stop`, `status`, `foreground`, `pair`, `autostart`, `update`, `diagnostics`; and the native CLIs with the Controller's configuration: `codex` (with `codex daemon`), `claude`, `copilot`, `opencode` (with `opencode server` and `opencode callbacks`).
+The rest manage this computer's Controller and work while the Relay is unreachable: `start`, `stop`, `status`, `foreground`, `pair`, `autostart`, `update`, `diagnostics`; and the native CLIs with the Controller's configuration: `codex` (with `codex daemon`), `claude`, `copilot`, `opencode` (with `opencode server` and `opencode callbacks`), `pi` (the native pi with the configured executable and profile).
 
 Replaced commands are gone: `share` (`session list` and `session link --qr`), `claude|copilot|opencode resume` (`session attach`, which also opens Codex sessions), `environment` (`host read`). The provider commands answer `resume` with a pointer to `session attach`, so that it is not sent to the agent as a prompt.
 
@@ -72,7 +72,7 @@ All of them except `attach`, `handoff` and `--star` run on the Host in one handl
 - `release` lets the Controller close an idle session's native process when nothing else needs it.
 - `link` prints the website link that opens the session; `--qr` also draws it on stderr.
 
-`attach` runs the session's native CLI in this terminal: `claude --resume` and `copilot --resume=` with their profile leases (`--take-over` interrupts a client that holds the session), `codex resume` through the shared daemon, and OpenCode's TUI attached to its server. A `local/...` address needs no Controller; any other is checked to be this computer's. `handoff` drives the website's Handoff through the Relay (`describe`, `prepare`, `status` until ready, `commit`); repeating it with the same `--operation-id` continues the same handoff. `--star` adds or removes the session in the user's favorites (`/v1/stars`).
+`attach` runs the session's native CLI in this terminal: `claude --resume` and `copilot --resume=` with their profile leases (`--take-over` interrupts a client that holds the session), `codex resume` through the shared daemon, OpenCode's TUI attached to its server, and `pi --session <id>` (pi has no lease, so two writers fork the history and `--take-over` is refused). A `local/...` address needs no Controller; any other is checked to be this computer's. `handoff` drives the website's Handoff through the Relay (`describe`, `prepare`, `status` until ready, `commit`); repeating it with the same `--operation-id` continues the same handoff. `--star` adds or removes the session in the user's favorites (`/v1/stars`).
 
 ### References
 

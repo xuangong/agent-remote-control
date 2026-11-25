@@ -1,6 +1,6 @@
 # Agent Remote Control
 
-Run your coding agents on your own machines and work with them from one browser workspace. Agent Remote Control connects to Codex, Claude Code, GitHub Copilot, OpenCode, and DSH, with shared session views, saved Window layouts, and collaboration across Hosts.
+Run your coding agents on your own machines and work with them from one browser workspace. Agent Remote Control connects to Codex, Claude Code, GitHub Copilot, OpenCode, pi, and DSH, with shared session views, saved Window layouts, and collaboration across Hosts.
 
 Use a wide screen to work across several conversations, or open the same workspace on a phone to focus on one at a time. Self-host the website with Docker or Cloudflare Workers; Controller connects the machines where your agents and project directories live.
 

@@ -101,6 +101,9 @@ describe('Codex Lab composition', () => {
         },
       },
       providers: [
+        { providerId: 'pi', native: { name: 'pi', version: '0.73.1', revision: null },
+          degradations: ['sessions.empty-persistence', 'controls.concurrent-writers', 'sessions.prompt-edit-succession', 'interactions.native-producers', 'events.resources', 'native.rpc-protocol'].map(capability => ({ capability, status: 'degraded', reason: 'Accepted pi limitation.' })),
+        },
         { providerId: 'opencode', native: { name: 'opencode', version: '2.0.25', revision: null },
           sdk: { name: '@opencode/client', version: '2.0.25' },
           degradations: ['controls.queue-steer', 'controls.source-references', 'controls.prompt-edit.atomicity', 'events.resources', 'events.usage', 'interactions.native-producers'].map(capability => ({ capability, status: 'degraded', reason: 'Bounded shared native provider.' })),

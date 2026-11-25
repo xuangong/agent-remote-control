@@ -212,6 +212,7 @@ export const sessions = {
   'sessions.native.noteCodex': 'Run on the Host computer using its Controller configuration. The Controller supplies the shared daemon automatically.',
   'sessions.native.noteCopilot': 'Run on the Host computer using the same Copilot profile. If another client controls this session, the command offers to take it over.',
   'sessions.native.noteClaude': 'Run on the Host computer using the same Claude profile. If this session is open here, the command asks before interrupting it and taking control.',
+  'sessions.native.notePi': 'Run on the Host computer using the same pi profile. pi does not lock a session, so close this session here first if you continue it in the terminal.',
   'sessions.native.noteOpencode': 'Run on the Host computer. It attaches to the shared OpenCode server; this session stays open here.',
   'sessions.native.runFromDirectory': '{note} Run it from the session’s working directory.',
   'sessions.native.terminalCommand': 'Terminal command',

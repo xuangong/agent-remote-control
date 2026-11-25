@@ -18,12 +18,13 @@ function CopyCommand({ command, label, action }: { command: string; label: strin
 }
 
 const uuid = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
-const attachableIds: Readonly<Record<string, RegExp>> = { codex: uuid, copilot: uuid, claude: uuid, opencode: /^ses_[A-Za-z\d]+$/ };
+const attachableIds: Readonly<Record<string, RegExp>> = { codex: uuid, copilot: uuid, claude: uuid, pi: uuid, opencode: /^ses_[A-Za-z\d]+$/ };
 const attachNotes: Readonly<Record<string, MessageKey>> = {
   codex: 'sessions.native.noteCodex',
   copilot: 'sessions.native.noteCopilot',
   claude: 'sessions.native.noteClaude',
   opencode: 'sessions.native.noteOpencode',
+  pi: 'sessions.native.notePi',
 };
 
 /** Moves to the session's working directory, then opens it with the Controller's session attach. */

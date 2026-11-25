@@ -10,7 +10,7 @@ import type { NativePrefixSelection } from '@orchardworks/agent-remote-protocol'
 type Action = 'prepare' | 'commit' | 'cancel' | 'status' | 'reconcile';
 const statusDelays = [1000, 2000, 4000, 8000, 15000];
 const isTerminal = (value?: SuccessionActionResult) => !!value && ['committed', 'cancelled', 'rejected'].includes(value.record.phase);
-const providerName = (id: string) => ({ codex: 'Codex', 'claude-code': 'Claude Code', claude: 'Claude Code', copilot: 'Copilot', opencode: 'OpenCode' })[id] ?? id;
+const providerName = (id: string) => ({ codex: 'Codex', 'claude-code': 'Claude Code', claude: 'Claude Code', copilot: 'Copilot', opencode: 'OpenCode', pi: 'pi' })[id] ?? id;
 function preferredTarget(description: SuccessionDescription, initialProvider?: string): string {
   const requested = initialProvider?.toLowerCase();
   if (requested) return description.targets.find(item => item.providerId === requested)?.providerId

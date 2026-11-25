@@ -3,6 +3,7 @@
 // delivery between turns, and a standing bot joining its chief's group.
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Browser, BrowserContext, Page } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
@@ -10,7 +11,7 @@ import { parseTaskInputs } from '@orchardworks/agent-remote-protocol';
 import { startStack, type Stack } from '@orchardworks/agent-e2e/stack';
 import { hasTools as hasToolsOf, inputs as inputsOf, team as teamOf } from './bot-team.js';
 import { launchBrowser, openPage } from './browser.js';
-import { holdsText, showsText, waitForEntries } from './page.js';
+import { holdsText, pairSecondHost, showsText, waitForEntries } from './page.js';
 
 /**
  * Enter submits what the page has rendered of the draft: a key that comes in the same frame as the last typed character reaches a
@@ -157,6 +158,35 @@ it('E15: a bot attaches a file to a message and the receiver downloads it, check
   expect(got).toMatchObject({ sha256: createHash('sha256').update(bytes).digest('hex'), verified: true });
   expect(await readFile(got.path)).toEqual(bytes);
   await context.close();
+});
+
+it('E15: a chief lists the Hosts, starts a bot in a new folder of another Host, and the item records where it works', async () => {
+  const studio = await pairSecondHost(stack, { name: 'Studio', installationId: 'e2e-e15-studio', teams: true, workspaces: true, tools: true, sessions: {} });
+  try {
+    const { context } = await openPage(browser, stack.sessionUrl('chief'));
+    await team(context);
+    await hasTools('chief');
+    const listed = await stack.provider.useTool('chief', 'list_hosts', {}) as { hosts: Array<{ id: string; name: string; online: boolean; providers: string[]; workspaces?: Array<{ path: string; folders: string[] }> }> };
+    expect(listed.hosts.map(host => host.name).sort()).toEqual([stack.hostName, 'Studio']);
+    expect(listed.hosts.find(host => host.id === studio.hostId)).toMatchObject({ name: 'Studio', online: true, providers: [studio.provider.providerId], workspaces: [{ path: studio.workspace }] });
+    // The chief puts the work on its board, then starts the bot for that item in a new folder of the other Host.
+    const written = await stack.provider.useTool('chief', 'update_board', { items: [{ title: 'Build the shop API', brief: 'Build the shop API.' }] }) as { items: Array<{ key: number }> };
+    const folder = join(studio.workspace, 'shop-api');
+    const created = await stack.provider.useTool('chief', 'create_bot', { name: 'Shop', mission: 'Build the shop API.', host: studio.hostId, new_folder: { name: 'shop-api' }, item: written.items[0]!.key });
+    expect(created).toMatchObject({ status: 'working', host: 'Studio', folder });
+    expect(existsSync(folder)).toBe(true);
+    const workers = () => studio.provider.known().filter(id => id.includes('-new-'));
+    await expect.poll(workers, { timeout: 20_000 }).toHaveLength(1);
+    expect(studio.provider.startedIn(workers()[0]!)).toBe(folder);
+    expect(stack.provider.known().filter(id => id.includes('-new-')).every(id => stack.provider.startedIn(id) !== folder)).toBe(true);
+    await expect.poll(() => studio.provider.given(workers()[0]!)?.tools.map(tool => tool.name) ?? [], { timeout: 20_000 }).toContain('message');
+    const board = await stack.provider.useTool('chief', 'board', {}) as { items: Array<{ links: unknown[] }> };
+    expect(board.items.at(-1)!.links).toEqual([{ kind: 'host', value: 'Studio' }, { kind: 'folder', value: folder }]);
+    // A folder that already exists is refused as the outcome, and no second bot starts.
+    await expect(stack.provider.useTool('chief', 'create_bot', { name: 'Again', mission: 'Build it again.', host: studio.hostId, new_folder: { name: 'shop-api' } })).rejects.toThrow('already exists');
+    expect(workers()).toHaveLength(1);
+    await context.close();
+  } finally { await studio.close(); }
 });
 
 it('E15: the person stops a chain from the audit in Settings, and a bot\'s next call in it is refused', async () => {

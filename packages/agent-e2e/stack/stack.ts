@@ -147,12 +147,14 @@ export async function startStack(options: StackOptions = {}) {
      * A second Controller paired with a key the page generated: a Host of its own, with its own scripted provider. `close` stops it.
      * Its device credential is kept by the Controller object, as an installed one keeps its own.
      */
-    async pairController(pairing: { key: string; name: string; installationId: string } & ScriptedProviderOptions) {
-      const paired = scriptedProvider(pairing);
-      const host = createAgentHost({ registrations: [paired.registration], installationId: pairing.installationId, name: pairing.name, uplink: { url: `ws://127.0.0.1:${port}/ws/remote-host`, remoteKey: pairing.key, onCredential: async () => {} } });
+    async pairController(pairing: { key: string; name: string; installationId: string; /** Team state for bots, and a workspace folder of its own that the page may browse and create folders in. */ teams?: boolean; workspaces?: boolean } & ScriptedProviderOptions) {
+      const folder = pairing.workspaces ? await realpath(await mkdtemp(join(state, 'paired-workspace-'))) : undefined;
+      const paired = scriptedProvider({ ...pairing, ...(folder ? { workspaceRoot: folder, cwd: folder } : {}) });
+      const host = createAgentHost({ ...(pairing.teams ? { team: { stateDirectory: join(state, `teams-${pairing.installationId}`) } } : {}),
+        ...(folder ? { executionPolicy: { defaultWorkspace: folder, allowedWorkspaceRoots: [folder], lockPermissions: false } } : {}), registrations: [paired.registration], installationId: pairing.installationId, name: pairing.name, uplink: { url: `ws://127.0.0.1:${port}/ws/remote-host`, remoteKey: pairing.key, onCredential: async () => {} } });
       const { hostId: pairedHostId } = await host.ready;
       return {
-        provider: paired, hostId: pairedHostId,
+        provider: paired, hostId: pairedHostId, ...(folder ? { workspace: folder } : {}),
         sessionUrl: (nativeSessionId: string) => origin + controllerPath({ hostId: pairedHostId, providerId: paired.providerId, nativeSessionId }),
         async close() { await host.close(); await paired.registration.directory.close?.(); },
       };

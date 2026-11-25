@@ -627,7 +627,7 @@
 .agent-session-panel { position: absolute; z-index: 12; bottom: calc(100% + var(--orchard-space-m)); left: 0; box-sizing: border-box; width: min(420px, 100%); max-height: 320px; overflow-y: auto;
   padding: var(--orchard-space-xl); border-radius: var(--orchard-radius-group); background: var(--orchard-surface); box-shadow: var(--orchard-elevation-popover); }
 /* A list of settings (the assistant's details) opens its choices below the rows, in the flow, where the reader is looking. */
-.agent-session-controls:has(> .agent-session-settings-list) > .agent-session-panel { position: static; width: auto; max-height: none; margin-top: var(--orchard-space-m); box-shadow: none; border: 1px solid var(--agent-rule); }
+.agent-session-controls:has(> .agent-session-settings-list) > .agent-session-panel { position: static; width: auto; max-height: none; margin-top: var(--orchard-space-m); box-shadow: none; border: 1px solid var(--orchard-separator); }
 .agent-session-panel-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
 .agent-session-setting { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; margin-bottom: 12px; font-size: 12px; }
 .agent-session-setting select { width: 100%; min-width: 0; min-height: 36px; border: 1px solid var(--agent-rule); border-radius: 6px; color: var(--agent-ink); background: var(--agent-panel); padding: 6px 8px; font: inherit; }

@@ -1,3 +1,4 @@
+import type { HostPlaces } from './host-places.js';
 import { compactTeamDeliveries, teamNeedsCompaction, unresolvedTeamDelivery, stripPrivateTeamEvidence, validSavedTeam, withoutHeldAcks, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
 export { teamMessageBudgetBytes } from './team-delivery.js';
@@ -35,6 +36,8 @@ export interface TeamBrokerPorts {
   chains?: ChainStore;
   /** Where the files bots attach to messages are kept (bots design 3.4); absent, this Relay takes no attachments. */
   attachments?: AttachmentStore;
+  /** Where bots can work: the account's Hosts and their folders, read from their Controllers when asked. */
+  places?: HostPlaces;
   /** A chain passed one of the person's thresholds: remind the person that this session, the chain's first bot, needs them, once per identity. */
   alertChain?(session: { hostId: string; providerId: string; nativeSessionId: string }, identity: string): void;
 }
@@ -74,7 +77,7 @@ export class TeamBroker {
       this.inboxes = new BotInboxes(lent, ports.assistants); this.assistants = new AssistantMessages(lent, ports.assistants, this.inboxes); this.rooms = new Rooms(lent, ports.assistants);
       this.work = new BotWork(lent, this.inboxes, this.chains);
       this.asks = new BotAsks(lent, ports.assistants, this.chains);
-      if (this.tasks) this.bots = new BotCalls(lent, ports.assistants, this.tasks, this.assistants, this.inboxes, this.rooms, this.work, new BotBoard(lent, this.inboxes, this.work), this.asks);
+      if (this.tasks) this.bots = new BotCalls(lent, ports.assistants, this.tasks, this.assistants, this.inboxes, this.rooms, this.work, new BotBoard(lent, this.inboxes, this.work), this.asks, ports.places);
       this.rooms.arm(); this.work.arm(); this.asks.arm();
     }
   }
@@ -245,6 +248,7 @@ export class TeamBroker {
     if (call.action === 'forget') return (this.bots ?? fail(unavailableAssistants)).forget(hostId, call);
     if (call.action === 'set_chief') return (this.bots ?? fail(unavailableAssistants)).setChief(hostId, call);
     if (call.action === 'update_mission') return (this.bots ?? fail(unavailableAssistants)).updateMission(hostId, call);
+    if (call.action === 'list_hosts') return (this.bots ?? fail(unavailableAssistants)).listHosts(hostId, call);
     if (call.action === 'list_bots') return (this.bots ?? fail(unavailableAssistants)).list(hostId, call);
     if (call.action === 'stop_bot' || call.action === 'retire_bot') return (this.bots ?? fail(unavailableAssistants)).manageStaff(hostId, call);
     if (call.action === 'bot_session') return (this.bots ?? fail(unavailableAssistants)).readSession(hostId, call);

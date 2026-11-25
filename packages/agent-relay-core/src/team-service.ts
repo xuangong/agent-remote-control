@@ -16,6 +16,7 @@ import type { BrokerState } from './broker-state.js';
 import { BrokerError, type Host, type HostBrokerOptions } from './broker-types.js';
 import { committed, detached } from './drafts.js';
 import { TEAM_RECORD_BYTES, teamBytes, teamStateBytes, trimTeamDeliveryReceipts, validSavedTeam, type SavedTeam } from './team-delivery.js';
+import { createHostPlaces } from './host-places.js';
 import { TeamBroker, teamMessageBudgetBytes } from './teams.js';
 import type { HostSession } from './host-session.js';
 import type { Succession } from './succession-service.js';
@@ -55,6 +56,7 @@ export function createTeamService(ports: TeamServicePorts) {
   };
   const teams = new TeamBroker({ chains, ...(options.alertChain ? { alertChain: options.alertChain } : {}),
     resolveSession: resolveRole,
+    places: createHostPlaces({ hosts: () => [...brokerState.hosts.values()], rpc: (host, method, path, sessionId, body) => ports.rpc(host, method, path, sessionId, body) }),
     scheduler: options.scheduler ?? defaultBrokerScheduler,
     assertRecipient: target => ports.assertAssociationOpen(target),
     assertRecipientSupport(hostId, generic) {

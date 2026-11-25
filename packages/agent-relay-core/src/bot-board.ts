@@ -3,7 +3,7 @@
  * where they stand, and a plan note. Every write names the version it read; a stale write is applied field by field and says what it
  * overwrote. A change to an item another bot holds is told to that bot, written from the record.
  */
-import { BOARD_BRIEF_LIMIT, BOARD_FIELDS, BOARD_ITEM_LIMIT, BOARD_KEEP_MS, BOARD_OPEN_LIMIT, BOARD_PLAN_CHANGES, boardItemOpen, itemChangedText, type Board, type BoardField, type BoardItem,
+import { BOARD_BRIEF_LIMIT, BOARD_FIELDS, BOARD_ITEM_LIMIT, BOARD_KEEP_MS, BOARD_LINK_LIMIT, BOARD_OPEN_LIMIT, BOARD_PLAN_CHANGES, boardItemOpen, itemChangedText, type Board, type BoardField, type BoardItem,
   type BoardLink, type BoardStatus, type TeamInbox } from '@orchardworks/agent-remote-protocol';
 import type { Assistant, AssistantBrokerPorts } from './assistants.js';
 import type { BotInboxes } from './inboxes.js';
@@ -139,11 +139,13 @@ export function writeBoard(box: TeamInbox, edits: readonly ItemEdit[] | undefine
  * The assignee and brief an item takes when work is handed away with it (create_bot or message naming it): the item is working while
  * its assignee does it. The brief is the first one the assignee got, so a follow-up leaves it. Returns what to tell the former assignee.
  */
-export function assignItem(box: TeamInbox, key: number, assignee: string, brief: string, by: Writer, now: number): ItemNotice[] {
+export function assignItem(box: TeamInbox, key: number, assignee: string, brief: string, by: Writer, now: number, places: readonly BoardLink[] = []): ItemNotice[] {
   const board = boardOf(box, now), item = board.items.find(entry => entry.key === key);
   if (!item) return [];
   const before = snapshot(item), moved = before.assignee !== assignee;
-  const edit: ItemEdit = { assignee, ...moved || !item.brief ? { brief: brief.slice(0, BOARD_BRIEF_LIMIT) } : {}, ...item.status === 'open' ? { status: 'working' as const } : {} };
+  // Where the assignee works is added to the item's links when there is room for it.
+  const links = [...item.links, ...places.filter(place => !item.links.some(link => link.kind === place.kind && link.value === place.value))].slice(0, BOARD_LINK_LIMIT);
+  const edit: ItemEdit = { assignee, ...moved || !item.brief ? { brief: brief.slice(0, BOARD_BRIEF_LIMIT) } : {}, ...item.status === 'open' ? { status: 'working' as const } : {}, ...links.length > item.links.length ? { links } : {} };
   if (moved) delete item.report;
   apply(item, edit, by, now);
   return before.assignee !== 'self' && moved ? [{ to: before.assignee, text: itemChangedText({ title: item.title, what: 'reassigned' }), key: ['item-notice', box.botId, key, item.version, before.assignee] }] : [];
@@ -194,8 +196,8 @@ export class BotBoard {
     return this.change(bot, (box, now) => writeBoard(box, edits, plan, by, now, own));
   }
   /** Work handed away names its item: the item records the assignee and the brief. */
-  assign(bot: Assistant, key: number, assignee: string, brief: string, by: Writer): Promise<ItemNotice[]> {
-    return this.change(bot, (box, now) => assignItem(box, key, assignee, brief, by, now));
+  assign(bot: Assistant, key: number, assignee: string, brief: string, by: Writer, places: readonly BoardLink[] = []): Promise<ItemNotice[]> {
+    return this.change(bot, (box, now) => assignItem(box, key, assignee, brief, by, now, places));
   }
   report(bot: Assistant, assignee: string, key: number | undefined, status: string | undefined, text: string, worker: boolean): Promise<void> {
     return this.change(bot, (box, now) => { reportItem(box, assignee, key, status, text, worker, now); });

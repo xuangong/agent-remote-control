@@ -1,5 +1,5 @@
 # Provider conformance kit
-Module: `agent-provider-sdk/src/conformance.ts` (`runProviderConformance`, the `./conformance` entry) and its pure checks `agent-provider-sdk/src/conformance-checks.ts`; the Controller's ports `agent-controller/src/test-utils/provider-conformance.ts` (the journal's window decision over a real agent manager, and the host runtime beside the CLI simulator on a fake clock); each adapter's subject in its `./recordings` entry (`codexConformanceSubject`, `claudeConformanceSubject`, `copilotConformanceSubject`), with a fake of its CLI in `src/test-utils/native-fake.ts`. Run by `pnpm test:providers` (`agent-controller/src/provider-conformance.test.ts`), on mock data, in about 3 s. Design source: section 4.3 of `docs/superpowers/specs/2026-11-21-requirements-vs-external-dependencies.md` (step B3, with part 2 of B5).
+Module: `agent-provider-sdk/src/conformance.ts` (`runProviderConformance`, the `./conformance` entry) and its pure checks `agent-provider-sdk/src/conformance-checks.ts`; the Controller's ports `agent-controller/src/test-utils/provider-conformance.ts` (the journal's window decision over a real agent manager, and the host runtime beside the CLI simulator on a fake clock); each adapter's subject in its `./recordings` entry (`codexConformanceSubject`, `claudeConformanceSubject`, `copilotConformanceSubject`, `piConformanceSubject`), with a fake of its CLI in `src/test-utils/native-fake.ts`. Run by `pnpm test:providers` (`agent-controller/src/provider-conformance.test.ts`), on mock data, in about 3 s. Design source: section 4.3 of `docs/superpowers/specs/2026-11-21-requirements-vs-external-dependencies.md` (step B3, with part 2 of B5).
 
 | Clauses | Gaps when written | Closed by a test | Not tested, with the reason |
 |---:|---:|---:|---:|
@@ -14,7 +14,7 @@ Module: `agent-provider-sdk/src/conformance.ts` (`runProviderConformance`, the `
 
 | Clause | Test(s) that prove it |
 |---|---|
-| P1 | `provider-conformance.test.ts` runs `runProviderConformance` for Codex (the shared daemon's declaration), Claude Code and Copilot |
+| P1 | `provider-conformance.test.ts` runs `runProviderConformance` for Codex (the shared daemon's declaration), Claude Code, Copilot and pi |
 | P2 | `provider-conformance.test.ts` > "has the recordings every journal-capable adapter makes: settled and restart", "%s: is read again in the declared order (reread.order …, K1)", "%s: gives every row a usable identity, and a reread names no item the live run lacked (K2)", "%s: a journal of the live run meets five more rereads unchanged, and a settled session reopens unchanged" (39 recordings) |
 | P3 | `provider-conformance.test.ts` > "marks live-only only items of the declared kinds (K3)", "reports the client's input id with the user row, live and when read again (K4)", "fails the turn the CLI's limit signal stops as declared (K5)", "raises the CLI's refusal of a second writer typed (K6)", "reports an event of a kind it does not know as one diagnostic, never a row and never a silent drop (gap 10, K7)" |
 | P4 | `provider-conformance.test.ts` > part 2 (7 to 8 tests per declaration); mutations caught: the resume deadline 1 ms later, the late session not closed, the watchdog 1 ms later, the watchdog's release removed, the reason or the reset dropped from the Controller's answer |
@@ -22,16 +22,16 @@ Module: `agent-provider-sdk/src/conformance.ts` (`runProviderConformance`, the `
 
 Matrix on 2026-11-22 (pass, or `fails` for an open item reproduced as an expected failure; n/a when the declaration excludes the check):
 
-| Check | Codex (shared daemon) | Claude Code | Copilot | OpenCode |
-|---|---|---|---|---|
-| K1 order, K2 identity, continuity (each recording) | pass (12) | pass (19) | pass (8) | n/a, no journal |
-| K3 live-only kinds | pass | pass | pass, after the declaration gained `partial_output` | n/a |
-| K4 input identity | pass | pass | n/a (`none`) | n/a |
-| K5 usage limit | pass | pass | pass | n/a |
-| K6 writer elsewhere | pass | n/a | pass | n/a |
-| K7 an event of a kind it does not know (gap 10) | pass, was a row | pass, was dropped | pass, was dropped | pass, was a refresh |
-| Slow resume, hung resume, limit at open and at a turn, crash, silent turn, unknown event | pass | pass | pass | n/a |
-| Writer elsewhere | pass (refused, `writer_elsewhere`) | pass (not refused) | pass (refused, `writer_elsewhere`) | n/a |
-| The CLI again after it exited | pass | pass | pass | n/a |
+| Check | Codex (shared daemon) | Claude Code | Copilot | OpenCode | pi |
+|---|---|---|---|---|---|
+| K1 order, K2 identity, continuity (each recording) | pass (12) | pass (19) | pass (8) | n/a, no journal | pass (8) |
+| K3 live-only kinds | pass | pass | pass, after the declaration gained `partial_output` | n/a | pass |
+| K4 input identity | pass | pass | n/a (`none`) | n/a | n/a (`none`) |
+| K5 usage limit | pass | pass | pass | n/a | n/a (no limit signal) |
+| K6 writer elsewhere | pass | n/a | pass | n/a | n/a |
+| K7 an event of a kind it does not know (gap 10) | pass, was a row | pass, was dropped | pass, was dropped | pass, was a refresh | fails: its fake drops the unknown entry when it rewrites the session file (open) |
+| Slow resume, hung resume, limit at open and at a turn, crash, silent turn, unknown event | pass | pass | pass | n/a | pass |
+| Writer elsewhere | pass (refused, `writer_elsewhere`) | pass (not refused) | pass (refused, `writer_elsewhere`) | n/a | n/a (fork on divergence) |
+| The CLI again after it exited | pass | pass | pass | n/a | pass |
 
 The kit found that a session whose CLI exited mid-turn kept its failed runtime ("Provider observation stream failed"), also when the page opened it again; closed by session core C26 (native exit), so the row above now passes for every declaration.

@@ -120,6 +120,10 @@
     "@orchardworks/agent-e2e": {
       "dir": "packages/agent-e2e",
       "entry": "faults/latency-proxy.mjs"
+    },
+    "@orchardworks/agent-provider-pi": {
+      "dir": "packages/agent-provider-pi",
+      "entry": "src/index.ts"
     }
   },
   "modules": [
@@ -197,7 +201,8 @@
       "paths": [
         "packages/agent-provider-claude/src/recordings.ts",
         "packages/agent-provider-codex/src/recordings.ts",
-        "packages/agent-provider-copilot/src/recordings.ts"
+        "packages/agent-provider-copilot/src/recordings.ts",
+        "packages/agent-provider-pi/src/recordings.ts"
       ],
       "seams": [
         "S1"
@@ -474,6 +479,8 @@
         "packages/agent-controller/src/codex*.ts",
         "packages/agent-controller/src/copilot*.ts",
         "packages/agent-controller/src/opencode*.ts",
+        "packages/agent-controller/src/pi.ts",
+        "packages/agent-controller/src/pi-*.ts",
         "packages/agent-controller/src/windows-codex-command.ts",
         "packages/agent-controller/src/directory.ts",
         "packages/agent-controller/src/stdio*.ts",
@@ -680,6 +687,20 @@
       "layer": 3,
       "paths": [
         "packages/agent-provider-opencode/src/**"
+      ],
+      "seams": [
+        "S1"
+      ],
+      "flows": [],
+      "invariants": [
+        "item-key-stability"
+      ]
+    },
+    {
+      "name": "provider-pi",
+      "layer": 3,
+      "paths": [
+        "packages/agent-provider-pi/src/**"
       ],
       "seams": [
         "S1"
@@ -1068,6 +1089,7 @@
         "provider-codex",
         "provider-copilot",
         "provider-opencode",
+        "provider-pi",
         "provider-dsh"
       ],
       "comment": "The Relay does not know the Controller or the client: relay core never imports providers, the session runtime, the Controller or the client library."
@@ -1099,6 +1121,7 @@
         "provider-codex",
         "provider-copilot",
         "provider-opencode",
+        "provider-pi",
         "provider-dsh"
       ],
       "exceptFiles": [
@@ -1132,6 +1155,7 @@
         "provider-codex",
         "provider-copilot",
         "provider-opencode",
+        "provider-pi",
         "provider-dsh"
       ],
       "to": [

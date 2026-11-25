@@ -1,0 +1,37 @@
+{
+  "name": "@orchardworks/agent-provider-pi",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "pi coding agent adapter (RPC mode) for the provider-neutral Agent SDK.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
+    },
+    "./recordings": {
+      "types": "./dist/recordings.d.ts",
+      "import": "./dist/recordings.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "test": "vitest run --testTimeout=10000 --exclude '**/*.local.test.ts'",
+    "test:native": "vitest run --project process tests/native-assumptions.local.test.ts --testTimeout=90000 --hookTimeout=30000"
+  },
+  "dependencies": {
+    "@orchardworks/agent-provider-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11",
+    "@orchardworks/agent-timeline": "workspace:*"
+  }
+}

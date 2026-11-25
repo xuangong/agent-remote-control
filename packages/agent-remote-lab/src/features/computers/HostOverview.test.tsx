@@ -11,6 +11,11 @@ const status: HostStatus = {
   memory: { total: 24 * GiB, used: 14.2 * GiB },
   disks: [{ kind: 'home', path: '/Users/xian', total: 460 * GiB, used: 442 * GiB }, { kind: 'workspace', path: '/Volumes/Projects', total: 1907 * GiB, used: 432 * GiB }],
 };
+const processes: NonNullable<HostStatus['processes']> = [
+  { kind: 'session', label: 'claude', providerId: 'claude', cpu: 0.65, memory: 1.5 * GiB }, { kind: 'server', label: 'opencode', cpu: 0.02, memory: 70 * 2 ** 20 },
+  { kind: 'controller', label: 'controller', cpu: 0.01, memory: 20 * 2 ** 20 }, { kind: 'daemon', label: 'codex', cpu: 0, memory: 10 * 2 ** 20 },
+  { kind: 'session', label: 'zsh', cpu: 0, memory: 9 * 2 ** 20 }, { kind: 'session', label: 'sixth', cpu: 0, memory: 2 ** 20 },
+];
 const environment = { detectedAt: 1, os: { platform: 'darwin', name: 'macOS', arch: 'arm64', release: '25.0.0' }, wsl: false, container: false,
   shell: { source: 'account' as const }, shells: [], browsers: [], vscode: { status: 'found' as const } };
 const homelab: RemoteHost = { id: 'homelab', name: 'homelab', online: true, hostStatus: true, sessionControl: true, environment, access: 'owner',
@@ -134,4 +139,13 @@ it('offers pairing when no Host is paired yet', async () => {
   const container = await render(<HostOverview hosts={[]} service={service(async () => status)} visible onOpenHost={() => {}} />);
   expect(container.querySelector('.lab-host-empty')?.textContent).toBe('No Hosts paired yet. Pair a Host to see it here.');
   expect(container.querySelector('button.lab-host-pair')).not.toBeNull();
+});
+
+it('lists the heaviest five processes of a Host for its owner, and none for a Host shared with the viewer', async () => {
+  const container = await render(<HostOverview hosts={[homelab, shared]} service={service(async id => id === 'shared' ? { sampledAt: 1, sessions: status.sessions } : { ...status, processes })} visible onOpenHost={() => {}} />);
+  await act(async () => {});
+  const rows = [...card(container, 'homelab').querySelectorAll('.lab-host-processes li')].map(row => row.textContent);
+  expect(rows).toEqual(['claudesession65%1.5 GB', 'opencodeserver2%70 MB', 'controllerController1%20 MB', 'codexdaemon0%10 MB', 'zshsession0%9 MB']);
+  expect(card(container, 'homelab').querySelector('.lab-host-processes h4')?.textContent).toBe('What uses this machine');
+  expect(card(container, 'shared').querySelector('.lab-host-processes')).toBeNull();
 });

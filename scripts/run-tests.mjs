@@ -125,6 +125,7 @@ const commands = {
   claude: ['--filter', '@orchardworks/agent-provider-claude', 'exec', 'vitest', 'run', '--testTimeout=10000', '--hookTimeout=15000', '--maxWorkers=1'],
   'claude-succession-evidence': ['--filter', '@orchardworks/agent-provider-claude', 'exec', 'vitest', 'run', 'src/native-succession-evidence.local.test.ts', '--testTimeout=30000', '--hookTimeout=10000', '--maxWorkers=1'],
   copilot: ['--filter', '@orchardworks/agent-provider-copilot', 'run', 'test', '--hookTimeout=30000'],
+  pi: ['--filter', '@orchardworks/agent-provider-pi', 'run', 'test', '--hookTimeout=30000'],
   setup: ['exec', 'node', '--test', '--test-timeout=60000', 'scripts/native-test-versions.test.mjs', 'scripts/dsh-debug.test.mjs', 'scripts/start.test.mjs', 'scripts/relay-local.test.mjs', 'scripts/deploy-readiness.test.mjs', 'scripts/prepare-relay-docker-lock.test.mjs', 'scripts/controller/entrypoint.test.mjs', 'scripts/controller/create-host.test.mjs', 'scripts/controller/install.test.mjs', 'scripts/local/instance.test.mjs', 'scripts/local/environment.test.mjs', 'scripts/local/controller.test.mjs', 'scripts/local/session.test.mjs', 'scripts/local/runner.test.mjs', 'scripts/lib/arch-check.test.mjs', 'scripts/lib/test-inventory.test.mjs', 'scripts/lib/fixtures-check.test.mjs', 'scripts/lib/slow-test-reporter.test.mjs', 'scripts/lib/slow-test-allowlist.test.mjs', 'scripts/lib/compatibility.test.mjs', 'scripts/lib/postmerge.test.mjs', 'scripts/lib/open-items.test.mjs', 'scripts/lib/legacy-token-budget.test.mjs', 'scripts/lib/test-selection.test.mjs'],
   // Each package's Vitest already uses every core; running packages one at a time avoids load-induced timeouts.
   unit: ['-r', '--workspace-concurrency=1', 'run', 'test'],
@@ -147,6 +148,7 @@ const commands = {
   'native-claude': ['--filter', '@orchardworks/agent-provider-claude', 'run', 'test:native'],
   'native-copilot': ['--filter', '@orchardworks/agent-provider-copilot', 'run', 'test:native'],
   'native-opencode': ['--filter', '@orchardworks/agent-provider-opencode', 'run', 'test:native'],
+  'native-pi': ['--filter', '@orchardworks/agent-provider-pi', 'run', 'test:native'],
   // The provider conformance kit for every journal-capable adapter, on mock data: recordings, declared behaviour and faults through the port.
   providers: ['--filter', '@orchardworks/agent-remote-controller', 'exec', 'vitest', 'run', 'src/provider-conformance.test.ts', '--testTimeout=10000', '--hookTimeout=10000'],
   'e2e-flows': ['--filter', '@orchardworks/agent-e2e', 'run', 'test:e2e'],

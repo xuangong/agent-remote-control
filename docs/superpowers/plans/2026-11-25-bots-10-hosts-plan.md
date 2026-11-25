@@ -70,4 +70,4 @@ how loaded it is, and which folder a bot works in. A bot chooses, guided by what
 - Base instructions: one bullet, `BOT_INSTRUCTIONS_VERSION` 10 to 11.
 - Tests: process reader per platform, schema and ordering, owner-only filtering, the card (jsdom and the settings component spec on desktop and phone),
   `list_hosts` shape and bounds, `create_bot` with host and folder (once, refusal, item links, standing and temporary), the Controller's seat in a
-  chosen folder, and E15 with a second paired Host. Left: the live `pnpm test:bots`-style run where a chief chooses a Host.
+  chosen folder, and E15 with a second paired Host. The live run where a chief chooses a Host is recorded in [the review](../reviews/2026-11-26-chief-chooses-a-host.md).

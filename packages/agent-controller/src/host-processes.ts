@@ -22,7 +22,7 @@ export function parseWindowsProcesses(output: string): ProcessRow[] {
   });
 }
 
-const PROVIDERS = ['claude', 'codex', 'opencode', 'copilot'];
+const PROVIDERS = ['claude', 'codex', 'opencode', 'copilot', 'pi'];
 const INTERPRETERS = /^(node|python3?|bun|deno)(\.exe)?$/i;
 
 function name(command: string): string {

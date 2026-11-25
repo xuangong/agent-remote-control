@@ -1,20 +1,23 @@
 import type { OpenCodeHostRegistrationOptions } from './opencode.js';
 import { sanitizeNativeEnvironment } from './execution-policy.js';
+import type { PiHostRegistrationOptions } from './pi.js';
 import type { CopilotHostRegistrationOptions } from './copilot.js';
 import type { ClaudeHostRegistrationOptions } from './claude.js';
 import type { CodexHostRegistrationOptions } from './codex.js';
 import type { AgentHostProviderRegistration } from './host.js';
 
-export const hostProviderIds = ['codex', 'claude', 'copilot', 'opencode'] as const;
+export const hostProviderIds = ['codex', 'claude', 'copilot', 'opencode', 'pi'] as const;
 type HostProviderId = typeof hostProviderIds[number];
 interface HostRegistrationFactories {
   opencode(options: OpenCodeHostRegistrationOptions): Promise<AgentHostProviderRegistration>;
+  pi(options: PiHostRegistrationOptions): Promise<AgentHostProviderRegistration>;
   copilot(options: CopilotHostRegistrationOptions): Promise<AgentHostProviderRegistration>;
   codex(options: CodexHostRegistrationOptions): Promise<AgentHostProviderRegistration>;
   claude(options: ClaudeHostRegistrationOptions): Promise<AgentHostProviderRegistration>;
 }
 const defaultFactories: HostRegistrationFactories = {
   opencode: async options => (await import('./opencode.js')).createOpenCodeHostRegistration(options),
+  pi: async options => (await import('./pi.js')).createPiHostRegistration(options),
   copilot: async (options) => (await import('./copilot.js')).createCopilotHostRegistration(options),
   codex: async (options) => (await import('./codex.js')).createCodexHostRegistration(options),
   claude: async (options) => (await import('./claude.js')).createClaudeHostRegistration(options),
@@ -24,7 +27,7 @@ export function selectedHostProviders(env: NodeJS.ProcessEnv): HostProviderId[] 
   const selected = (env.AGENT_HOST_PROVIDERS ?? 'codex').split(',').map((value) => value.trim());
   const providers = new Set<HostProviderId>();
   for (const provider of selected) {
-    if (provider !== 'codex' && provider !== 'claude' && provider !== 'copilot' && provider !== 'opencode') throw new Error(`Unknown or empty Agent Host provider: ${provider || '(empty)'}. Use a comma-separated selection of codex, claude, copilot, opencode.`);
+    if (provider !== 'codex' && provider !== 'claude' && provider !== 'copilot' && provider !== 'opencode' && provider !== 'pi') throw new Error(`Unknown or empty Agent Host provider: ${provider || '(empty)'}. Use a comma-separated selection of codex, claude, copilot, opencode, pi.`);
     if (providers.has(provider)) throw new Error(`Duplicate Agent Host provider: ${provider}.`);
     providers.add(provider);
   }
@@ -55,6 +58,8 @@ export async function createHostRegistrations(env: NodeJS.ProcessEnv, onDiagnost
         : provider === 'opencode'
         ? await factories.opencode({ workspaces: common.workspaces, restrictedNative: (env.AGENT_HOST_OPENCODE_TRUST_SHARED ?? '1') === '1' ? false : common.restrictedNative, onDiagnostic,
           probe: env.AGENT_HOST_PROVIDER_DISCOVERY === '1', serverUrl: env.AGENT_HOST_OPENCODE_URL, callbackConfigPath: env.AGENT_HOST_OPENCODE_CALLBACK_CONFIG, username: env.AGENT_HOST_OPENCODE_USERNAME, password: env.AGENT_HOST_OPENCODE_PASSWORD })
+        : provider === 'pi'
+        ? await factories.pi({ ...common, env: nativeEnv, executable: env.AGENT_HOST_PI, piHome: env.AGENT_HOST_PI_HOME })
         : provider === 'copilot'
         ? await factories.copilot({ ...common, env: nativeEnv, executable: env.AGENT_HOST_COPILOT, copilotHome: env.AGENT_HOST_COPILOT_HOME })
         : await factories.claude({ ...common, env: nativeEnv, executable: env.AGENT_HOST_CLAUDE, claudeHome: env.AGENT_HOST_CLAUDE_HOME }));

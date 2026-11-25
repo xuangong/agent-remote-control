@@ -47,6 +47,11 @@ it('rejects unsupported selected providers before requesting a token', async () 
   await expect(configureGatewayProviders(f.root, f.connection, 'host-test')).rejects.toThrow(/copilot.*not supported/i);
   expect(f.requests).toBe(0);
 }, 10000);
+it('rejects a selected pi before requesting a token', async () => {
+  const f = await fixture('codex,pi');
+  await expect(configureGatewayProviders(f.root, f.connection, 'host-test')).rejects.toThrow(/pi.*not supported/i);
+  expect(f.requests).toBe(0);
+}, 10000);
 it('rejects personal Claude home overrides before requesting a token', async () => {
   const f = await fixture('claude');
   await expect(configureGatewayProviders(f.root, { ...f.connection, environment: { ...f.connection.environment, AGENT_HOST_CLAUDE_HOME: '/personal/claude' } }, 'host-test')).rejects.toThrow(/dedicated/i);

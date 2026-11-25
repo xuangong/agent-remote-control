@@ -409,15 +409,10 @@ export function decodeHostedSnapshot(manifests: HostedManifest[], chunks: Hosted
   if (consumed.size !== records.size) invalid('orphan or unlisted record');
   const state = validateRelayState(relay, auth);
   // Re-encoding checks payload-derived identities, parent versions and complete coverage after the owning validators.
-  // Validate identities against the original Window bytes after their owning
-  // validator has accepted them; normalization must not invalidate old digests.
+  // Identities are verified against the state as stored, not as loaded: loading drops and converts what an earlier build
+  // wrote (Windows, bots, Teams, Call For Support state, handoff receipts), and the stored records still carry their bytes.
   const verifying = cache && new HostedRecordCache(cache.options);
-  // Bots are compared as stored too: a snapshot written before bot records moves its bots into records when it loads.
-  const stored: HostedRelayState = { ...state,
-    ...(relay.workspaceWindows === undefined ? {} : { workspaceWindows: relay.workspaceWindows as HostedRelayState['workspaceWindows'] }) };
-
-  if (relay.bots === undefined) delete stored.bots; else stored.bots = relay.bots as HostedRelayState['bots'];
-  const expected = encodeValidatedHostedSnapshot(stored, format, verifying).records;
+  const expected = encodeValidatedHostedSnapshot(relay as unknown as HostedRelayState, format, verifying).records;
   if (expected.size !== manifests.length) invalid('identity coverage');
   for (const manifest of manifests) {
     const wanted = expected.get(physicalKey(manifest.kind, manifest.identity))?.manifest;

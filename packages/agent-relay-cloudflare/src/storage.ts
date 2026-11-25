@@ -78,8 +78,9 @@ export class SqliteRelayStore implements RelayStateStore {
     } else {
       if (legacyRows.length) throw new Error(`Legacy records remain in SQL snapshot format ${this.format}.`);
       this.initial = decodeSqlSnapshot(manifests, chunks, auth, this.format as SqlSnapshotFormat, this.cache);
-      // The rows as stored: an older format's are replaced on the next commit, which also marks the new format.
-      this.records = encodeSqlSnapshot(this.initial, auth, this.format as SqlSnapshotFormat, this.cache).records;
+      // The rows as stored, not as the loaded state encodes: a state an earlier build wrote may hold rows the load dropped or
+      // converted, and the next commit has to replace or delete them.
+      this.records = new Map(manifests.map(manifest => [JSON.stringify([manifest.kind, manifest.identity]), { manifest, chunks: [] }]));
     }
     this.loaded = { records: manifests.length + legacyRows.length, bytes: manifests.reduce((total, row) => total + row.byte_length, 0), durationMs: performance.now() - started };
   }

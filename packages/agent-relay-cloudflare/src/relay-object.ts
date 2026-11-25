@@ -34,7 +34,7 @@ export class RelayObject {
   private replacingCore = false;
   constructor(private readonly context: DurableObjectState, private readonly env: RelayEnvironment) {
     this.ready = context.blockConcurrencyWhile(async () => {
-      try { this.initialize('runtime_start'); } catch { /* Invalid persisted configuration remains unavailable without exposing it. */ }
+      try { this.initialize('runtime_start'); } catch (error) { reportFailure('Relay initialization failed; the Relay stays unavailable.', error); }
     });
   }
   /** The deadlines of a connected Host's registration and heartbeat; the defaults are the Relay's. */
@@ -106,7 +106,8 @@ export class RelayObject {
       if (this.recoveryRequired) await this.discardCore();
       if (!this.core) { this.recoveryRequired = false; this.initialize('core_recovery'); }
       await this.core!.refresh();
-    } catch {
+    } catch (error) {
+      reportFailure('Relay refresh failed; background retry scheduled.', error);
       // A failed core remains closed to traffic. A later alarm can restore the last atomic commit.
       this.recoveryRequired = true;
       await this.discardCore();
@@ -119,5 +120,9 @@ export class RelayObject {
     try { await failed?.close().catch(() => undefined); }
     finally { this.replacingCore = false; }
   }
+}
+/** Logs what failed (the error's name, message and stack) so an unavailable Relay can be diagnosed; it holds no request data. */
+function reportFailure(message: string, error: unknown) {
+  console.error(message, error instanceof Error ? `${error.name}: ${error.message}\n${error.stack ?? ''}` : String(error));
 }
 function unavailable() { return Response.json({ error: 'Relay is unavailable.' }, { status: 503, headers: { 'cache-control': 'no-store' } }); }

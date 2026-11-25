@@ -20,3 +20,9 @@ it('loads OpenCode using local server configuration without launching an executa
 it('rejects executable overrides for the externally managed OpenCode server', async () => {
   await expect(loadAdapter('opencode', undefined, '/tmp/native')).rejects.toThrow('OpenCode connects to an existing server');
 });
+
+it('loads pi with the executable it resolves and the debugger environment', async () => {
+  const { loadAdapter: load } = await import('./load-adapter.js');
+  const adapter = await load('pi', undefined, process.execPath);
+  expect(adapter.descriptor.providerId).toBe('pi');
+});

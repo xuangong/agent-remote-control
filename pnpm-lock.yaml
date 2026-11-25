@@ -651,6 +651,9 @@ importers:
       '@orchardworks/agent-provider-opencode':
         specifier: workspace:*
         version: link:../agent-provider-opencode
+      '@orchardworks/agent-provider-pi':
+        specifier: workspace:*
+        version: link:../agent-provider-pi
       '@orchardworks/agent-relay-node':
         specifier: workspace:*
         version: link:../agent-relay-node

@@ -29,14 +29,13 @@ export interface SectionCreationState { state: 'idle' | 'saving' | 'unknown' | '
 const knownRejection = (error: unknown) => error instanceof WindowRequestError && (error.result?.status === 'rejected' || error.status >= 400 && error.status < 500);
 const emptyWindow = (): WorkspaceWindow => ({ schemaVersion: 3, id: crypto.randomUUID(), revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] });
 
-/** `group` is the Window's group when known: a bot of it keeps its conversation, so the linked session opens beside it. */
-function sessionLinkOperation(window: WorkspaceWindow, binding: WindowSessionBinding, group?: WindowGroup): WindowOperation | undefined {
+function sessionLinkOperation(window: WorkspaceWindow, binding: WindowSessionBinding): WindowOperation | undefined {
   const selected = window.views.find(view => view.id === window.selectedViewId);
   const matches = (view: WorkspaceWindow['views'][number]) => view.binding?.hostId === binding.hostId && view.binding.providerId === binding.providerId
     && view.binding.nativeSessionId === binding.nativeSessionId && view.binding.sessionIntent === binding.sessionIntent;
   const matching = selected && matches(selected) ? selected : window.views.find(matches);
   if (matching) return matching.id === selected?.id && !matching.collapsed ? undefined : { type: 'view.select', viewId: matching.id };
-  if (!selected || selected.bindingPolicy === 'managed' || rebindsBot(group, selected, binding)) {
+  if (!selected || selected.bindingPolicy === 'managed') {
     const view = createWindowView(crypto.randomUUID(), binding, selected ? 'dock' : 'primary');
     return { type: 'batch', operations: [{ type: 'view.create', view }, { type: 'view.select', viewId: view.id }] };
   }
@@ -44,6 +43,17 @@ function sessionLinkOperation(window: WorkspaceWindow, binding: WindowSessionBin
     { type: 'view.bind', viewId: selected.id, binding, expectedBinding: selected.binding ?? null },
     { type: 'view.select', viewId: selected.id },
   ] };
+}
+
+/**
+ * Whether a deep link cannot open in this Window: the session is not in it and the selected view is a bot, which keeps its
+ * conversation. Opening it beside the bots would add a bot to the account with every link, so another Window takes the link.
+ */
+function linkNeedsAnotherWindow(group: WindowGroup, binding: WindowSessionBinding): boolean {
+  const { views, selectedViewId } = group.window;
+  const matches = (view: WorkspaceWindow['views'][number]) => view.binding?.hostId === binding.hostId && view.binding.providerId === binding.providerId
+    && view.binding.nativeSessionId === binding.nativeSessionId && view.binding.sessionIntent === binding.sessionIntent;
+  return !views.some(matches) && rebindsBot(group, views.find(view => view.id === selectedViewId), binding);
 }
 
 /** Product page catalog and URL selection; each chosen Window keeps its own store. */
@@ -471,7 +481,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     const live = () => current && inScope() && generation === selection.generation;
     const restore = async (group: WindowGroup) => {
       if (!live()) return;
-      const operation = target && sessionLinkOperation(group.window, target, group);
+      const operation = target && sessionLinkOperation(group.window, target);
       choose(group);
       if (operation) { const pending = makeStore(group).operate(operation); void pending.catch(error => { if (live()) setError(shown(error)); }); }
     };
@@ -535,7 +545,9 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
             forgetDeletedWindow(id);
             continue;
           }
-          await restore(toWindowGroup(next)); return;
+          const group = toWindowGroup(next);
+          if (target && linkNeedsAnotherWindow(group, target)) continue;
+          await restore(group); return;
         }
       }
       if (!live()) return;

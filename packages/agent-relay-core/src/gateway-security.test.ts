@@ -84,7 +84,7 @@ it('rejects a guest\'s stale permission changes without closing the session and 
     return granted.payload.token;
   };
   const token = await controlled(stream);
-  for (const setting of ['sandbox', 'approval', 'permissions']) {
+  for (const setting of ['sandbox', 'approval', 'permissions', 'tool_approval_mode', 'permission:bash']) {
     const response = event(stream, 'message'); stream.send(JSON.stringify(request(setting, setting, token)));
     const denied = await response;
     expect(decodeServerMessage(JSON.stringify(denied)).status).toBe('ok');

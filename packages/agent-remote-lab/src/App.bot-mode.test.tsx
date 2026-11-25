@@ -612,3 +612,19 @@ it('on a phone, leaves a pushed conversation by the back gesture, then Settings,
     expect(app.container.querySelector('.lab-page')!.hasAttribute('hidden')).toBe(true);
   } finally { await app.close(); }
 });
+
+it("changes a bot's model from its details", async () => {
+  const scope = 'http://localhost/bot-details-settings/'; seedGroup(scope, botGroup('B')); history.replaceState(null, '', '/?mode=bot&section=B&bot=B1');
+  const choices = (values: string[]) => values.map(value => ({ value, label: value }));
+  const app = await mountBotApp(scope, { hosted: true, settings: [
+    { id: 'model', category: 'model', label: 'Model', value: 'default', mutable: true, scope: 'session', options: choices(['default', 'sonnet']) },
+    { id: 'permissions', category: 'permissions', label: 'Permissions', value: 'default', mutable: true, scope: 'session', options: choices(['default', 'plan']) }] });
+  try {
+    await until(() => expect(app.container.querySelector('[data-testid="session-model-button"]')).not.toBeNull());
+    await act(async () => app.container.querySelector<HTMLButtonElement>('[data-testid="session-model-button"]')!.click());
+    const model = () => app.container.querySelector<HTMLSelectElement>('[data-testid="session-setting-model"]')!;
+    await until(() => expect(model().disabled).toBe(false));
+    await act(async () => { model().value = 'sonnet'; model().dispatchEvent(new Event('change', { bubbles: true })); });
+    await until(() => expect(app.settingChanges).toEqual([{ agentId: 'agent-B1', settingId: 'model', value: 'sonnet' }]));
+  } finally { await app.close(); }
+});

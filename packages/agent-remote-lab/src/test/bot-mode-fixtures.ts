@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto';
 import { act, createElement, useContext, useState } from 'react';
 import { vi } from 'vitest';
 import { PROTOCOL_VERSION, applyGroupOperation, createWindowView, type WindowGroup, type SessionSuccessionReplay, type ProjectedTimelineEntry, type SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
+import type { AgentReplicaState } from '@orchardworks/agent-client';
 import { SessionDraftStore, SessionOutboxStore, SessionReadStore, SessionStateStore, WindowWorkspaceClient, type RemoteTransportListener, type SessionDraftsFrame, type SessionOutboxFrame, type SessionReadsFrame, type SessionStatesFrame } from '@orchardworks/agent-client';
 import { App, type LabTransport } from '../App.js';
 import { DirectoryError, SessionDirectoryClient } from '../kernel/directory-client.js';
@@ -32,7 +33,9 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
   /** The listed Host: offline, or with a Controller that delivers from the outbox. */
   host?: { online?: boolean; outbox?: 1 };
   /** Sessions the Host reports missing when the page attaches them. */
-  missing?: readonly string[] } = {}) {
+  missing?: readonly string[];
+  /** The session's changeable settings: the Provider offers them and takes a change. */
+  settings?: NonNullable<AgentReplicaState['agent']>['runtimeInfo']['settings'] } = {}) {
   let workspace!: ReturnType<typeof workspaceHooks.useWindowWorkspace>;
   let succession!: ReturnType<typeof successionHooks.useSessionSuccession>;
   // A desktop window, where Bot mode's details sit beside the conversation (jsdom's own is 1024 px wide, where they wait to be opened).
@@ -71,8 +74,10 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
   // The outbox, as the Relay keeps it, and what this page queued and cancelled.
   const sharedOutbox = new SessionOutboxStore(), queued: Array<{ id: string; nativeSessionId: string; text: string }> = [], cancelled: string[] = [];
   const attachments: string[] = [], sendMessages: Array<{ agentId: string; text?: string }> = [];
+  const settingChanges: Array<{ agentId: string; settingId: string; value: string }> = [];
   const snapshot = (agentId: string) => ({ ...replicaState.agent!, id: agentId, status: 'idle' as const,
-    runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: agentId.slice(6), connection: { state: 'connected' as const } } });
+    ...(options.settings ? { capabilities: { ...replicaState.agent!.capabilities, sessionSettings: true } } : {}),
+    runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: agentId.slice(6), connection: { state: 'connected' as const }, ...(options.settings ? { settings: options.settings } : {}) } });
   const timeline = (agentId: string, requestId = 'timeline'): Awaited<ReturnType<LabTransport['fetchTimeline']>> => ({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_page' as const, payload: {
     requestId, agentId, epoch: `epoch-${agentId}`, direction: 'tail' as const, reset: false, staleCursor: false, gap: false,
     window: { minSeq: 1, maxSeq: options.timeline?.at(-1)?.seqEnd ?? 0, nextSeq: (options.timeline?.at(-1)?.seqEnd ?? 0) + 1 }, startCursor: null, endCursor: null, entries: options.timeline ?? [], hasOlder: false, hasNewer: false, error: null,
@@ -115,7 +120,10 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
         } else if (message.type === 'timeline_subscription') listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [agentId] } });
         else if (message.type === 'timeline_request') listener.onMessage(timeline(agentId, message.payload.requestId));
         else if (message.type === 'session_control_request') listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { agentId, requestId: message.payload.requestId, revision: 'control', access: 'control', available: false, token: 'token' } });
-        else if (message.type === 'send_message') {
+        else if (message.type === 'set_session_setting') {
+          settingChanges.push({ agentId, settingId: message.payload.settingId, value: message.payload.value });
+          listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'command_acknowledged', payload: { agentId, requestId: message.payload.requestId, command: 'set_session_setting' } });
+        } else if (message.type === 'send_message') {
           sendMessages.push({ agentId, text: 'text' in message.payload ? message.payload.text : undefined });
           const acknowledge = () => listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'command_acknowledged', payload: { agentId, requestId: message.payload.requestId, command: 'send_message' } });
           if (options.holdMessages) acknowledgements.push(acknowledge); else acknowledge();
@@ -147,7 +155,7 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
     return createElement(WorkspaceReady.Provider, { value: inheritedReady && ready }, createElement(App, { baseUrl, directory, transport, userScoped: options.hosted, hostService }));
   }
   const container = await render(createElement(Access));
-  return { container, workspace: () => workspace, succession: () => succession, sendMessages, attachments, transport, hostedGroups, setAccessReady: (ready: boolean) => setAccessReady(ready), setScope: (scope: string) => setScope(scope), setReplays(value: SessionSuccessionReplay[]) { replays = value; },
+  return { container, workspace: () => workspace, succession: () => succession, sendMessages, settingChanges, attachments, transport, hostedGroups, setAccessReady: (ready: boolean) => setAccessReady(ready), setScope: (scope: string) => setScope(scope), setReplays(value: SessionSuccessionReplay[]) { replays = value; },
     activityListeners, releaseInspect: () => releaseInspect(),
     /** Whether the Host list reports the Host online from now on. */
     setHostOnline(online: boolean) { hostOnline = online; },

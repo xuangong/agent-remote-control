@@ -48,6 +48,22 @@ it('stands open as rows in the details: no "+", and Escape gives the focus back 
   expect(document.activeElement).toBe(model);
 });
 
+it('brings the choices into view when a row of the details opens them below the list', async () => {
+  const scrolled: Element[] = [];
+  const original = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this); };
+  try {
+    function Details() {
+      const [view, setView] = useState<SessionControlView>();
+      return <AgentSessionSettings state={state} presentation="list" disabled={false} busy={false} view={view} onView={setView} onPendingChange={() => {}} />;
+    }
+    const container = await render(<Details />);
+    expect(scrolled).toEqual([]);
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="session-model-button"]')!.click());
+    expect(scrolled).toEqual([container.querySelector('.agent-session-panel')]);
+  } finally { Element.prototype.scrollIntoView = original; }
+});
+
 it('gives the focus back to the row that opened the panel when its Close button is pressed, and opens the panel again from that row', async () => {
   function Details() {
     const [view, setView] = useState<SessionControlView>();

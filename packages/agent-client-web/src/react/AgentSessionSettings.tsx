@@ -44,6 +44,11 @@ export function AgentSessionSettings({ state, sessionState, children, entries = 
     const target = trigger.current?.isConnected ? trigger.current : layer.current?.querySelector<HTMLElement>('.agent-composer-plus');
     target?.focus({ preventScroll: true });
   };
+  // In a list the choices open below the rows; bring them into view so a click visibly does something.
+  useEffect(() => {
+    if (presentation !== 'list' || !view || view === 'actions') return;
+    layer.current?.querySelector<HTMLElement>('.agent-session-panel')?.scrollIntoView?.({ block: 'nearest' });
+  }, [presentation, view]);
   useEffect(() => {
     if (!view || view === 'actions') return;
     const controls = layer.current;

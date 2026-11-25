@@ -64,7 +64,7 @@ async function fixture(purpose: 'host-only' | 'gateway-setup' | 'legacy' = 'gate
   const start = (overrides: NodeJS.ProcessEnv = {}, saved = false, command = 'foreground') => {
     output = '';
     child = spawn(process.execPath, ['dist/cli.js', command], { env: {
-      PATH: process.env.PATH, HOME: root, AGENT_HOST_STATE_DIR: root, AGENT_HOST_WORKSPACE: root, AGENT_HOST_CODEX: executable, ...(saved ? {} : { AGENT_HOST_CLAUDE: join(root, 'missing-claude') }), AGENT_HOST_COPILOT: join(root, 'missing-copilot'), AGENT_HOST_OPENCODE_URL: 'http://127.0.0.1:1', TEST_CLAUDE_CAPTURE: join(root, 'claude-native.json'),
+      PATH: process.env.PATH, HOME: root, AGENT_HOST_STATE_DIR: root, AGENT_HOST_WORKSPACE: root, AGENT_HOST_CODEX: executable, ...(saved ? {} : { AGENT_HOST_CLAUDE: join(root, 'missing-claude') }), AGENT_HOST_COPILOT: join(root, 'missing-copilot'), AGENT_HOST_PI: join(root, 'missing-pi'), AGENT_HOST_OPENCODE_URL: 'http://127.0.0.1:1', TEST_CLAUDE_CAPTURE: join(root, 'claude-native.json'),
       TEST_CAPTURE: join(root, 'native.json'), ...(nativeFails ? { TEST_NATIVE_FAIL: '1' } : {}),
       ...(saved ? {} : { AGENT_HOST_SERVER: `http://127.0.0.1:${address.port}`, AGENT_HOST_REMOTE_KEY: 'invitation' }), ...overrides,
     }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -149,7 +149,7 @@ it('rejects the pair command for saved managed state even when the caller disabl
     environment: { AGENT_HOST_BOOTSTRAP_CODEX: '1' } }));
   const connection = await readFile(join(f.root, 'connection.json'), 'utf8');
   await expect(promisify(execFile)(process.execPath, ['dist/cli.js', 'pair'], { timeout: 5000, env: {
-    HOME: f.root, PATH: process.env.PATH, AGENT_HOST_STATE_DIR: f.root, AGENT_HOST_SERVER: f.serverUrl,
+    HOME: f.root, PATH: process.env.PATH, AGENT_HOST_PI: join(f.root, 'missing-pi'), AGENT_HOST_STATE_DIR: f.root, AGENT_HOST_SERVER: f.serverUrl,
     AGENT_HOST_REMOTE_KEY: 'other-account-device', AGENT_HOST_BOOTSTRAP_CODEX: '0',
   } })).rejects.toMatchObject({ code: 1, stderr: expect.stringMatching(/Gateway.*new.*AGENT_HOST_STATE_DIR/i) });
   expect(f.registrations).toHaveLength(0);
@@ -208,7 +208,7 @@ it('saves a live pairing that requires Gateway setup and stops before exposing e
   f.setPurpose('gateway-setup');
   const exited = once(child, 'exit');
   const result = await promisify(execFile)(process.execPath, ['dist/cli.js', 'pair'], { timeout: 5000, env: {
-    HOME: f.root, PATH: process.env.PATH, AGENT_HOST_STATE_DIR: f.root, AGENT_HOST_SERVER: f.serverUrl, AGENT_HOST_REMOTE_KEY: 'invitation',
+    HOME: f.root, PATH: process.env.PATH, AGENT_HOST_PI: join(f.root, 'missing-pi'), AGENT_HOST_STATE_DIR: f.root, AGENT_HOST_SERVER: f.serverUrl, AGENT_HOST_REMOTE_KEY: 'invitation',
   } });
   expect(result.stdout).toMatch(/restart.*initializ/i);
   await exited;
@@ -227,7 +227,7 @@ it('keeps the daemon and its native providers running when live pairing remains 
   let before: string;
   await vi.waitFor(async () => { before = await readFile(join(f.root, 'daemon.json'), 'utf8'); expect(f.registrations).toHaveLength(2); }, { timeout: 5000 });
   const result = await promisify(execFile)(process.execPath, ['dist/cli.js', 'pair'], { timeout: 5000, env: {
-    HOME: f.root, PATH: process.env.PATH, AGENT_HOST_STATE_DIR: f.root, AGENT_HOST_SERVER: f.serverUrl, AGENT_HOST_REMOTE_KEY: 'invitation',
+    HOME: f.root, PATH: process.env.PATH, AGENT_HOST_PI: join(f.root, 'missing-pi'), AGENT_HOST_STATE_DIR: f.root, AGENT_HOST_SERVER: f.serverUrl, AGENT_HOST_REMOTE_KEY: 'invitation',
   } });
   expect(result.stdout).toContain('without restarting sessions');
   expect(await readFile(join(f.root, 'daemon.json'), 'utf8')).toBe(before!);
@@ -241,7 +241,7 @@ it('waits for a slow live pairing enrollment instead of timing out after the key
   await vi.waitFor(async () => { await readFile(join(f.root, 'daemon.json')); expect(f.registrations).toHaveLength(2); }, { timeout: 5000 });
   f.delayNextRegistration(6000);
   const result = await promisify(execFile)(process.execPath, ['dist/cli.js', 'pair'], { timeout: 12000, env: {
-    HOME: f.root, PATH: process.env.PATH, AGENT_HOST_STATE_DIR: f.root, AGENT_HOST_SERVER: f.serverUrl, AGENT_HOST_REMOTE_KEY: 'invitation',
+    HOME: f.root, PATH: process.env.PATH, AGENT_HOST_PI: join(f.root, 'missing-pi'), AGENT_HOST_STATE_DIR: f.root, AGENT_HOST_SERVER: f.serverUrl, AGENT_HOST_REMOTE_KEY: 'invitation',
   } });
   expect(result.stdout).toContain('without restarting sessions');
   expect(f.registrations.length).toBeGreaterThanOrEqual(4);

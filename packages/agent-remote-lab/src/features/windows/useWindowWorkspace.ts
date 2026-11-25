@@ -10,7 +10,7 @@ import type { WindowSaveState } from '../../kernel/window-workspace-store.js';
 import { appendedRank } from '../../kernel/bot-roster.js';
 import { applyMoveSteps, type MoveStep } from '../../kernel/assistant-groups.js';
 import { newAssistantPicture } from '../../kernel/assistant-picture.js';
-import { applyGroupOperation, applyWindowOperation, createWindowView, decodeWindowGroup, decodeWorkspaceWindow, hasWindowAppearance, isWindowCreateRequest, isWindowGroupCreateRequest, toWindowGroup, windowPrimaryViewId, type WindowGroup, type WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
+import { applyGroupOperation, applyWindowOperation, createWindowView, decodeWindowGroup, decodeWorkspaceWindow, hasWindowAppearance, isWindowCreateRequest, isWindowGroupCreateRequest, rebindsBot, toWindowGroup, windowPrimaryViewId, type WindowGroup, type WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 
 interface PendingCreation { request: WindowCreateRequest; candidate: WorkspaceWindow; bindings: Array<[string, string]> }
@@ -29,13 +29,14 @@ export interface SectionCreationState { state: 'idle' | 'saving' | 'unknown' | '
 const knownRejection = (error: unknown) => error instanceof WindowRequestError && (error.result?.status === 'rejected' || error.status >= 400 && error.status < 500);
 const emptyWindow = (): WorkspaceWindow => ({ schemaVersion: 3, id: crypto.randomUUID(), revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] });
 
-function sessionLinkOperation(window: WorkspaceWindow, binding: WindowSessionBinding): WindowOperation | undefined {
+/** `group` is the Window's group when known: a bot of it keeps its conversation, so the linked session opens beside it. */
+function sessionLinkOperation(window: WorkspaceWindow, binding: WindowSessionBinding, group?: WindowGroup): WindowOperation | undefined {
   const selected = window.views.find(view => view.id === window.selectedViewId);
   const matches = (view: WorkspaceWindow['views'][number]) => view.binding?.hostId === binding.hostId && view.binding.providerId === binding.providerId
     && view.binding.nativeSessionId === binding.nativeSessionId && view.binding.sessionIntent === binding.sessionIntent;
   const matching = selected && matches(selected) ? selected : window.views.find(matches);
   if (matching) return matching.id === selected?.id && !matching.collapsed ? undefined : { type: 'view.select', viewId: matching.id };
-  if (!selected || selected.bindingPolicy === 'managed') {
+  if (!selected || selected.bindingPolicy === 'managed' || rebindsBot(group, selected, binding)) {
     const view = createWindowView(crypto.randomUUID(), binding, selected ? 'dock' : 'primary');
     return { type: 'batch', operations: [{ type: 'view.create', view }, { type: 'view.select', viewId: view.id }] };
   }
@@ -470,7 +471,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     const live = () => current && inScope() && generation === selection.generation;
     const restore = async (group: WindowGroup) => {
       if (!live()) return;
-      const operation = target && sessionLinkOperation(group.window, target);
+      const operation = target && sessionLinkOperation(group.window, target, group);
       choose(group);
       if (operation) { const pending = makeStore(group).operate(operation); void pending.catch(error => { if (live()) setError(shown(error)); }); }
     };

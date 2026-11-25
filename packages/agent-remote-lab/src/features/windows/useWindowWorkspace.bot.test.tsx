@@ -208,3 +208,14 @@ it('leaves a cached Window shown read-only when the service says it became a sec
   await act(async () => { finish(section); }); await vi.waitFor(async () => { await act(async () => {}); expect(sectionRoute).toHaveBeenCalledWith('a'); });
   expect(read().window).toBeUndefined(); expect(read().provisional).toBe(false); expect(read().unavailable).toBe(true); expect(mutate).not.toHaveBeenCalled();
 });
+it('opens a deep link beside the bots of a Window that has bot details instead of asking one to change its conversation', async () => {
+  const bots: WindowGroup = group('bots'); bots.bots = { rank: 'm', members: {} };
+  const side = createWindowView('side', { hostId: 'h', providerId: 'p', nativeSessionId: 'side', title: 'side' }, 'attached'); side.attachedTo = 'main';
+  bots.window.views.push(side); bots.window.selectedViewId = 'side';
+  server(bots); history.replaceState(null, '', '/?host=h&provider=p&session=target');
+  const { read } = await mount('https://deep-link-bots/', true);
+  await vi.waitFor(async () => { await act(async () => {}); const window = read().window; expect(window?.views.find(view => view.id === window.selectedViewId)?.binding?.nativeSessionId).toBe('target'); });
+  const window = read().window!;
+  expect(window.id).toBe('bots'); expect(window.views.find(view => view.id === 'side')?.binding?.nativeSessionId).toBe('side'); expect(window.views.find(view => view.id === 'main')?.binding?.nativeSessionId).toBe('bots');
+  expect(read().error).toBeUndefined();
+});

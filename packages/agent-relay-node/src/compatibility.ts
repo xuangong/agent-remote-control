@@ -10,7 +10,7 @@ const requiredDegradations: Record<
   (typeof requiredProviderIds)[number],
   ReadonlyArray<{ capability: string; status: ProviderCompatibility['degradations'][number]['status'] }>
 > = {
-  // Provisional pi degradations: the block ends at the line below.
+  // pi: no empty-session reopen, forked concurrent writers, no native prefix, no question or plan producers, no image or resource reads, a pre-1.0 RPC.
   pi: [
     { capability: 'sessions.empty-persistence', status: 'degraded' },
     { capability: 'controls.concurrent-writers', status: 'degraded' },

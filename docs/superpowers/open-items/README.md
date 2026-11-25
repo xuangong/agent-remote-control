@@ -31,7 +31,7 @@ open
 ```
 
 <!-- open-items:start (generated from the item files by scripts/open-items.mjs; pnpm postmerge writes it on main) -->
-5 open, 5 partly closed and 58 closed.
+8 open, 5 partly closed and 58 closed.
 
 | # | Item | Found in | Owner step | Status |
 |---|---|---|---|---|
@@ -103,7 +103,7 @@ open
 | [O66](O66.md) | Bot mode's panel widths are applied over the chats module's stylesheet, and Window mode's sidebar keeps its own handle | I5a, desktop panels (2026-11-22), which could not edit the chats and windows feature modules while the IM audit worked in them | the next change to `workbench-chats` or `workbench-windows` | open |
 | [O67](O67.md) | The WebKit composer-owner component test loses its own selection now and then | the I5a end gate, `pnpm test:components` at `5e924da3` (2026-11-22) | owner | closed |
 | [O68](O68.md) | Deeper screens still drawn with the legacy controls | the I5d finish pass (2026-11-22), which restyled the main screens and Settings' General, Privacy and data, Advanced and the support profiles | the next change to `workbench-computers`, `workbench-windows`, `workbench-sessions` or the toast | open |
-| [O69](O69.md) | Tasks on the Team path lack the rest of the task model | step T2a of the assistant tasks design (2026-11-23) | T2 and T3 of that design, after the P2 operation queue | open |
-| [O70](O70.md) | Assistants are a directory over the Window groups, not their own record | M3 of the assistant tasks plan (2026-11-23) | T1 of the assistant tasks design | open |
-| [O71](O71.md) | Rooms live in the Teams panel and are opened only by an assistant | M4 of the assistant tasks plan (2026-11-23) | T6 of the assistant tasks design | open |
+| [O69](O69.md) | Tasks on the Team path lack the rest of the task model | step T2a of the [assistant tasks design](../specs/2026-11-23-assistant-coordinator-and-tasks-design.md) (2026-11-23) | steps 2 and 3 of the [bots plan](../plans/2026-11-23-fold-into-assistants-plan.md) | open |
+| [O70](O70.md) | Assistants are a directory over the Window groups, not their own record | M3 of the [assistant tasks plan](../plans/2026-11-23-assistant-tasks-plan.md) (2026-11-23) | step 1 of the [bots plan](../plans/2026-11-23-fold-into-assistants-plan.md) | open |
+| [O71](O71.md) | Rooms live in the Teams panel and are opened only by an assistant | M4 of the [assistant tasks plan](../plans/2026-11-23-assistant-tasks-plan.md) (2026-11-23) | step 3 of the [bots plan](../plans/2026-11-23-fold-into-assistants-plan.md) | open |
 <!-- open-items:end -->

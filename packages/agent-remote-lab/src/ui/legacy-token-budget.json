@@ -1,7 +1,7 @@
 {
   "description": "The most uses of the legacy --ui-*, --obs-* and --agent-* variables each stylesheet may have (ui/tokens.css defines them and is not counted); a stylesheet not listed may have none, since new rules use --orchard-*. stylesheets.test.ts fails on a count above its budget and passes on one below it. The budgets only fall: a task that removes uses leaves this file alone, and pnpm postmerge lowers them to the counts on main (scripts/lib/legacy-token-budget.mjs).",
   "budget": {
-    "agent-client-web/src/styles.css": 381,
+    "agent-client-web/src/styles.css": 364,
     "agent-remote-lab/src/app.css": 478,
     "agent-remote-lab/src/conversation/session-succession.css": 15,
     "agent-remote-lab/src/conversation/session-view-options.css": 22,
@@ -11,7 +11,6 @@
     "agent-remote-lab/src/features/session-links/session-quotes.css": 11,
     "agent-remote-lab/src/features/sessions/outbox-messages.css": 2,
     "agent-remote-lab/src/features/team/ask-resize.css": 3,
-    "agent-remote-lab/src/features/team/call-for-support/call-for-support.css": 15,
     "agent-remote-lab/src/features/windows/window-overview.css": 46,
     "agent-remote-lab/src/features/windows/window-workspaces.css": 47,
     "agent-remote-lab/src/shell/shell.css": 64,

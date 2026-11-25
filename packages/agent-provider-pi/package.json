@@ -23,7 +23,7 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run --testTimeout=10000 --exclude '**/*.local.test.ts'",
-    "test:native": "vitest run --project process tests/native-assumptions.local.test.ts --testTimeout=90000 --hookTimeout=30000"
+    "test:native": "vitest run --project process tests/native-assumptions.local.test.ts tests/journal-recording.local.test.ts tests/native.local.test.ts --testTimeout=90000 --hookTimeout=30000 --maxWorkers=1"
   },
   "dependencies": {
     "@orchardworks/agent-provider-sdk": "workspace:*"

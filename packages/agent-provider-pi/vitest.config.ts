@@ -2,7 +2,7 @@ import { configDefaults, defineConfig } from 'vitest/config';
 import { workspaceSource } from '../../scripts/lib/workspace-source.mjs';
 import { SlowTestReporter } from '../../scripts/lib/slow-test-reporter.mjs';
 
-// The tests under `tests/` start the pinned pi CLI as a child process against a scripted loopback model
+// The tests under `tests/` start the installed pi CLI as a child process against a scripted loopback model
 // (`src/test-utils/native-fixture.ts`): the process tier, outside the speed rule for mock-data tests.
 const processTests = ['tests/**/*.test.ts'];
 

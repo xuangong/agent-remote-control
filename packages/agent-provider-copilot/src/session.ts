@@ -319,8 +319,9 @@ export class CopilotAgentSession implements AgentSession {
   private async initializePermissions(resume: boolean): Promise<void> {
     try {
       // The stdio runtime exposes mutations but no tool-policy getter. Do not infer restored policy.
-      const result = await this.mutateNative(() => resume ? this.rpc.permissions.configure({}) : this.rpc.permissions.setApproveAll({enabled: false}), 'Copilot tool permissions');
-      if (result.success) this.applyPermissions(resume ? null : 'ask');
+      const allow = !resume && this.config.yolo === true;
+      const result = await this.mutateNative(() => resume ? this.rpc.permissions.configure({}) : this.rpc.permissions.setApproveAll({enabled: allow}), 'Copilot tool permissions');
+      if (result.success) this.applyPermissions(resume ? null : allow ? 'allow' : 'ask');
     } catch (error) {this.options.onDiagnostic?.(`Copilot permission controls unavailable: ${String(error)}`);}
   }
   async setSessionSetting(id: string, value: string): Promise<void | {status: 'pending'}> {

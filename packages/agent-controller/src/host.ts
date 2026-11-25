@@ -43,7 +43,8 @@ import { createSessionCatalog, catalogSessionStates } from './session-core/catal
 import { handoffRefusal } from './session-core/family.js';
 import * as lineage from './session-core/lineage.js';
 import { bounded, json, positiveTimeout } from './session-core/requests.js';
-import type { AgentHostProviderRegistration, AgentHostRuntime, AgentHostRuntimeOptions, SessionBinding as Binding } from './session-core/types.js';
+import type { DirectoryMutationEvidence } from './directory-mutation.js';
+import type { AgentHostDirectory, AgentHostProviderRegistration, AgentHostRuntime, AgentHostRuntimeOptions, SessionBinding as Binding } from './session-core/types.js';
 import { createUplinkFence } from './session-core/uplink-fence.js';
 import { createAttachment } from './session-core/attachment.js';
 import { createControlRoutes } from './session-core/control-routes.js';
@@ -246,6 +247,11 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   /** Every read of a provider's directory, whoever asks for it (the page's revision check, a listing, the state confirmation), passes the summaries to `listed`. */
   const observeListing = (registration: AgentHostProviderRegistration): AgentHostProviderRegistration => ({ ...registration, directory: new Proxy(registration.directory, {
     get(target, key) {
+      // The owner's new sessions start in YOLO; a share recipient's request says otherwise. A Host that locks a provider's permissions keeps its policy.
+      if (key === 'create') {
+        const locked = !!options.executionPolicy?.lockPermissions && !registration.nativePermissionControl;
+        return (input: Parameters<AgentHostDirectory['create']>[0], evidence?: DirectoryMutationEvidence) => target.create(locked ? input : { yolo: true, ...input }, evidence);
+      }
       if (key === 'list') return async () => {
         const summaries = await target.list();
         // A refresh never fails the listing it rides on.

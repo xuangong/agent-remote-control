@@ -137,13 +137,11 @@ it('sends session commands to a Host that takes them, for its owner only', async
   expect((await call(current.hostId, { request: { command: 'list' }, extra: true }))?.status).toBe(400);
   expect((await call(current.hostId, { request: 'list' }))?.status).toBe(400);
 
-  // Permission settings need a recent sign-in, as they do in the website; other settings do not.
+  // The Host owner changes permission settings without a recent sign-in.
   const stale = { ...alice, authorizeMessage: (raw: string) => !['approval', 'sandbox', 'permissions'].includes(JSON.parse(raw).payload?.settingId) };
-  const refused = await call(current.hostId, { request: { command: 'set', target: 'h/codex/s', settings: { approval: 'never' } } }, stale);
-  expect(refused?.status).toBe(403);
-  expect(await refused!.json()).toMatchObject({ code: 'reauthentication_required' });
+  expect((await call(current.hostId, { request: { command: 'set', target: 'h/codex/s', settings: { approval: 'never' } } }, stale))?.status).toBe(200);
   expect((await call(current.hostId, { request: { command: 'set', target: 'h/codex/s', settings: { model: 'gpt-6' } } }, stale))?.status).toBe(200);
-  expect(calls).toHaveLength(2);
+  expect(calls).toHaveLength(3);
 }, 10_000);
 
 const restoredState: RemoteHostBrokerState = {

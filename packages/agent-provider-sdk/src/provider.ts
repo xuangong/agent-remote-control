@@ -166,6 +166,9 @@ export interface AgentSessionConfig extends AgentSessionExtensions {
   model?: string;
   reasoningEffort?: string;
   planning?: boolean;
+  /** A new session starts in the adapter's YOLO mode: every tool runs without asking and without a sandbox. Adapters without
+   * one ignore it, and so does a read-only session. A resumed session keeps the mode it has. */
+  yolo?: boolean;
   /** Applied by adapters with descriptor.sessionHostAccess; others ignore it. */
   hostAccess?: AgentSessionHostAccess;
 }

@@ -109,7 +109,7 @@ test('same-Host cross-provider snapshots authorize the concrete provider and str
   const input = snapshot('X','other');
   const initial = await f.post('/remote/create', input); expect(initial.status).toBe(200);
   expect(await f.post('/remote/create', input)).toEqual(initial); expect(f.creates()).toBe(1);
-  expect(f.configurations[0]).toEqual({}); expect(f.grants).toEqual([]);
+  expect(f.configurations[0]).toEqual({ yolo: true }); expect(f.grants).toEqual([]);
   expect((await f.post('/remote/create', { ...input, creationSource: { providerId: 'fixture', nativeSessionId: 'C' } })).data.code).toBe('operation_conflict');
 }, 5000);
 
@@ -121,7 +121,7 @@ test('malformed, cross-Host, missing and contradictory provenance refuse before 
   expect((await f.post('/remote/create', { ...snapshot('C'), sourceNativeSessionId: 'A' })).status).toBe(400);
   expect(f.creates()).toBe(0);
   expect((await f.post('/remote/create', { ...snapshot(), sourceNativeSessionId: 'A' })).status).toBe(200);
-  expect(f.configurations[0]).toEqual({ sourceNativeSessionId: 'A' }); expect(f.grants).toHaveLength(1);
+  expect(f.configurations[0]).toEqual({ sourceNativeSessionId: 'A', yolo: true }); expect(f.grants).toHaveLength(1);
 }, 5000);
 
 test('rename validation holds admission and exact retry reads current title without renaming again', async () => {

@@ -62,10 +62,6 @@ export function createSessionDirectoryRoutes(ports: SessionDirectoryRoutesPorts)
       const input = await readBody(request);
       const command = input.request as Record<string, unknown> | undefined;
       if (!command || typeof command !== 'object' || Array.isArray(command) || Object.keys(input).some(key => key !== 'request')) throw new BrokerError(400, 'invalid_request', 'A session command is required.');
-      // Permission settings need a recent sign-in in the website; the same holds for commands.
-      const settings = command.command === 'set' && command.settings && typeof command.settings === 'object' ? Object.keys(command.settings) : [];      if (settings.some(settingId => context.authorizeMessage?.(JSON.stringify({ type: 'set_session_setting', payload: { settingId } })) === false)) {
-        throw new BrokerError(403, 'reauthentication_required', 'Sign in again in the website before changing permission settings.');
-      }
       return rawJson(await rpc(host, 'POST', '/remote/session/call', undefined, JSON.stringify({ request: command })));
     }
     const rename = /^\/v1\/remote\/hosts\/([^/]+)\/session\/rename$/.exec(url.pathname);

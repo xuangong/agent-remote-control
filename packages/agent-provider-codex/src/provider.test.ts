@@ -187,6 +187,27 @@ it.each(['create', 'resume'] as const)('applies locally required sandbox and app
 });
 
 
+describe('a new session in YOLO', () => {
+  const started = async (config: Parameters<CodexAppServerProvider['createSession']>[0], options: { restrictedNative?: boolean } = {}) => {
+    const appServer = createScriptedAppServer({ 'thread/start': () => ({ thread: { id: 'fresh' } }), 'thread/read': () => ({ thread: { id: 'fresh', turns: [] } }) });
+    const provider = new CodexAppServerProvider({ spawn: () => appServer.child, ...options });
+    const session = await provider.createSession(config);
+    try { return appServer.requests.find(request => request.method === 'thread/start')!.params as Record<string, unknown>; } finally { await session.dispose(); }
+  };
+  it('never asks and runs without a sandbox when YOLO is asked for', async () => {
+    expect(await started({ sessionId: 'a', yolo: true })).toMatchObject({ sandbox: 'danger-full-access', approvalPolicy: 'never' });
+  });
+  it('keeps the native defaults otherwise', async () => {
+    const params = await started({ sessionId: 'a' });
+    expect(params).not.toHaveProperty('sandbox'); expect(params).not.toHaveProperty('approvalPolicy');
+  });
+  it('leaves a Host-restricted or read-only session as its policy sets it', async () => {
+    expect(await started({ sessionId: 'a', yolo: true }, { restrictedNative: true })).toMatchObject({ sandbox: 'workspace-write', approvalPolicy: 'never' });
+    expect(await started({ sessionId: 'a', yolo: true, access: 'read_only' })).toMatchObject({ sandbox: 'read-only' });
+  });
+});
+
+
 it('classifies an unavailable shared socket without disclosing the socket path', async () => {
   const provider = new CodexAppServerProvider({ connectionMode: 'shared', socketPath: `/tmp/arc-missing-${process.pid}.sock`, requestTimeoutMs: 100 });
   await expect(provider.resumeSession({ providerId: 'codex', sessionId: 'native', opaque: '{}' }))

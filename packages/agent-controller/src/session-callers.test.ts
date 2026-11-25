@@ -1,6 +1,6 @@
 import { atomicWriteFile } from '@orchardworks/agent-platform';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -72,11 +72,12 @@ function summary(providerId: string, nativeSessionId: string, updatedAt: string,
   return { providerId, nativeSessionId, title: `${nativeSessionId} title`, workspace, createdAt: updatedAt, updatedAt, state: 'idle' };
 }
 
-async function host(registrations: ReturnType<typeof provider>[], sessionBin?: string) {
+async function host(registrations: ReturnType<typeof provider>[], sessionBin?: string, executionPolicy?: { root: string; nativePermissionControl: boolean }) {
   const state = await temporary('session-callers-');
   const store = new SessionCallerStore(join(state, 'session-callers.json'), atomicWriteFile);
   const endpoint = await sessionCallerEndpoint(state);
-  const runtime = createAgentHostRuntime({ registrations: registrations.map(item => item.registration), hostId: async () => 'host-1',
+  const runtime = createAgentHostRuntime({ registrations: registrations.map(item => executionPolicy ? { ...item.registration, nativePermissionControl: executionPolicy.nativePermissionControl } : item.registration), hostId: async () => 'host-1',
+    ...(executionPolicy ? { executionPolicy: { allowedWorkspaceRoots: [executionPolicy.root], defaultWorkspace: executionPolicy.root, lockPermissions: true } } : {}),
     sessionCallers: { store, endpoint, skills: '/controller/skills/agent-remote', ...(sessionBin ? { sessionBin } : {}) }, sessionRefs: new SessionRefStore(join(state, 'session-refs.json'), atomicWriteFile) });
   cleanup.push(() => runtime.close());
   return { runtime, store, endpoint, state };
@@ -162,6 +163,25 @@ describe('Host access for managed sessions', () => {
     expect((await attach(runtime, 'attached', { providerId: 'claude', nativeSessionId: 'recipient', shared: true })).status).toBe(200);
     expect(claude.resumed[0]?.hostAccess).toBeUndefined();
     expect(store.isShared({ providerId: 'claude', nativeSessionId: 'recipient' })).toBe(true);
+  });
+
+  it('starts the owner\'s new session in YOLO and a share recipient\'s with the provider default', async () => {
+    const cwd = await temporary('session-work-');
+    const claude = provider('claude', cwd);
+    const { runtime } = await host([claude]);
+    expect((await create(runtime, 'owner', { providerId: 'claude' })).status).toBe(200);
+    expect((await create(runtime, 'recipient', { providerId: 'claude', shared: true })).status).toBe(200);
+    expect(claude.created.map(config => config.yolo)).toEqual([true, false]);
+    expect((await attach(runtime, 'attached', { providerId: 'claude', nativeSessionId: 'existing' })).status).toBe(200);
+    expect(claude.resumed[0]).not.toHaveProperty('yolo');
+  });
+
+  it('leaves a provider whose permissions the Host locks at its own default', async () => {
+    const cwd = await realpath(await temporary('session-work-'));
+    const locked = provider('claude', cwd), open = provider('claude', cwd);
+    expect((await create((await host([locked], undefined, { root: cwd, nativePermissionControl: false })).runtime, 'locked', { providerId: 'claude', cwd })).status).toBe(200);
+    expect((await create((await host([open], undefined, { root: cwd, nativePermissionControl: true })).runtime, 'open', { providerId: 'claude', cwd })).status).toBe(200);
+    expect([locked.created[0]!.yolo, open.created[0]!.yolo]).toEqual([undefined, true]);
   });
 
   it('passes Host access through the Codex directory on creation and resume', async () => {

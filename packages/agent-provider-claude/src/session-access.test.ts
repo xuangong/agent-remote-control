@@ -83,3 +83,18 @@ it('protects the directory a read-only session runs in when it names no workspac
   await provider.createSession({ sessionId: 'local', access: 'read_only' });
   try { expect(f.captured[0]).toMatchObject(claudeReadOnlyOptions(cwd)); } finally { await provider.dispose(); }
 }, 10000);
+
+it('starts a new session in YOLO when asked to, and keeps the default otherwise', async () => {
+  const f = fixture(); const provider = f.provider();
+  try {
+    const yolo = await provider.createSession({ sessionId: 'yolo', cwd, yolo: true });
+    expect(f.captured[0]).toMatchObject({ permissionMode: 'bypassPermissions', sandbox: { enabled: false } });
+    expect((await yolo.runtimeInfo()).settings!.find(setting => setting.id === 'permissions')).toMatchObject({ value: 'bypassPermissions' });
+    expect(JSON.parse((await yolo.runtimeInfo()).persistence!.opaque)).toMatchObject({ permissionMode: 'bypassPermissions' });
+    await provider.createSession({ sessionId: 'plain', cwd });
+    expect(f.captured[1]).toMatchObject({ permissionMode: 'default' });
+    const readOnly = await provider.createSession({ sessionId: 'ro', cwd, yolo: true, access: 'read_only' });
+    expect(f.captured[2]).toMatchObject({ permissionMode: 'dontAsk' });
+    expect((await readOnly.runtimeInfo()).settings!.find(setting => setting.id === 'permissions')).toMatchObject({ value: 'dontAsk' });
+  } finally { await provider.dispose(); }
+}, 10000);

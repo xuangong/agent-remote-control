@@ -59,6 +59,7 @@ export class OpenCodeAgentProvider implements AgentProviderAdapter {
     const opened = await this.open(session, { cwd, model: config.model, agent: config.planning ? 'plan' : undefined }, config);
     try {
       if (config.model !== undefined) await opened.setSessionSetting('model', config.model);
+      if (config.yolo) await opened.setSessionSetting('permission:*', 'allow');
       if (config.planning !== undefined) await opened.setPlanning(config.planning);
       return opened;
     } catch (error) { await opened.dispose(); throw error; }

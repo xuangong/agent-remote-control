@@ -125,6 +125,42 @@
         "attachments": [
           "a_0123456789abcdef0123456789abcdef"
         ]
+      },
+      {
+        "action": "list_hosts",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        }
+      },
+      {
+        "action": "create_bot",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "operationId": "op-host",
+        "name": "Builder",
+        "mission": "Build it.",
+        "lifetime": "temporary",
+        "host": "studio",
+        "cwd": "/Users/x/projects/shop"
+      },
+      {
+        "action": "create_bot",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "operationId": "op-new",
+        "name": "Builder",
+        "mission": "Build it.",
+        "lifetime": "standing",
+        "host": "studio",
+        "newFolder": {
+          "name": "shop-api",
+          "under": "/Users/x/projects"
+        }
       }
     ],
     "invalid": [
@@ -274,6 +310,55 @@
         "to": "Chief",
         "text": "None.",
         "attachments": []
+      },
+      {
+        "action": "list_hosts",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "host": "studio"
+      },
+      {
+        "action": "create_bot",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "operationId": "op-bad",
+        "name": "Builder",
+        "mission": "Build it.",
+        "lifetime": "temporary",
+        "cwd": ""
+      },
+      {
+        "action": "create_bot",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "operationId": "op-bad",
+        "name": "Builder",
+        "mission": "Build it.",
+        "lifetime": "temporary",
+        "newFolder": {
+          "under": "/x"
+        }
+      },
+      {
+        "action": "create_bot",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "operationId": "op-bad",
+        "name": "Builder",
+        "mission": "Build it.",
+        "lifetime": "temporary",
+        "newFolder": {
+          "name": "a",
+          "extra": 1
+        }
       }
     ]
   },

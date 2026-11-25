@@ -13,7 +13,7 @@ async function harness(toolNamespaces = false) { const h = await botsHarness({ t
 const owner = { providerId: 'codex', nativeSessionId: 'worker', title: 'Chief' };
 const createTask = { action: 'create_task' as const, owner, operationId: 'op', title: 'Collect logs', brief: 'Collect the build logs of the last run.' };
 /** Every bot's tools, as the Host gives them while the Relay runs tasks. */
-const BOT_TOOLS = ['create_bot', 'message', 'download_attachment', 'list_bots', 'read_bot', 'update_mission', 'remember', 'forget', 'set_chief', 'board', 'update_board', 'set_timer', 'stop_bot', 'retire_bot', 'open_room'];
+const BOT_TOOLS = ['create_bot', 'message', 'download_attachment', 'list_bots', 'list_hosts', 'read_bot', 'update_mission', 'remember', 'forget', 'set_chief', 'board', 'update_board', 'set_timer', 'stop_bot', 'retire_bot', 'open_room'];
 const tool = (tools: readonly AgentSessionTool[] | undefined, name: string) => tools?.find(item => item.name === name) ?? (() => { throw new Error(`No ${name} tool.`); })();
 /** A temporary bot writes to its chief: its result (done, failed), its question (needs_input) or progress. */
 const report = (tools: readonly AgentSessionTool[] | undefined, status: 'done' | 'failed' | 'needs_input' | 'progress', text: string) => tool(tools, 'message').execute({ to: 'chief', text, status });
@@ -216,6 +216,14 @@ describe('the main session\'s task tools', () => {
     expect(calls).toEqual([{ action: 'create_bot', owner: { providerId: 'codex', nativeSessionId: 'main', title: 'Chief' }, operationId: 'op', name: 'Collect logs', mission: 'Collect them.', lifetime: 'temporary', message: 'Start with the last run.' }]);
     await tool(tools, 'list_bots').execute({});
     expect(calls[1]).toEqual({ action: 'list_bots', owner: { providerId: 'codex', nativeSessionId: 'main' } });
+    // Where a bot works is chosen from what list_hosts shows, and passed to the Relay as named.
+    await tool(tools, 'list_hosts').execute({});
+    await tool(tools, 'create_bot').execute({ name: 'Builder', mission: 'Build it.', operationId: 'op2', host: 'studio', new_folder: { name: 'shop-api', under: '/work' } });
+    await tool(tools, 'create_bot').execute({ name: 'Fixer', mission: 'Fix it.', operationId: 'op3', host: 'studio', cwd: '/work/shop' });
+    expect(calls.slice(2)).toEqual([{ action: 'list_hosts', owner: { providerId: 'codex', nativeSessionId: 'main' } },
+      expect.objectContaining({ action: 'create_bot', operationId: 'op2', host: 'studio', newFolder: { name: 'shop-api', under: '/work' } }),
+      expect.objectContaining({ action: 'create_bot', operationId: 'op3', host: 'studio', cwd: '/work/shop' })]);
+    calls.length = 2;
     // A provider that cannot keep a session read-only is refused before anything is asked of the Relay.
     await expect(tool(tools, 'create_bot').execute({ name: 'T', mission: 'B', workspace: 'read_only' })).rejects.toThrow('cannot work read-only');
     expect(calls).toHaveLength(2);

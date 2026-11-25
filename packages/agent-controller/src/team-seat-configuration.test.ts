@@ -30,3 +30,26 @@ it('creates a task worker\'s seat with its model, effort and access, and keeps t
     expect(await runtime.extensions(holder, () => holder)).toMatchObject({ access: 'read_only' });
   } finally { await runtime.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+it('creates a bot\'s seat in the folder the Relay chose without reading its source, which lives on another Host', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'team-seat-folder-'));
+  const created: SessionCreation[] = [];
+  const acquired: string[] = [];
+  const access: TeamRuntimeAccess = {
+    controllerId: 'controller', available: () => true, supportedProviders: () => ['claude'],
+    sessionRouting: { resolve: anchor => ({ anchor, target: anchor, operationIds: [] }), assertCurrent() {} },
+    async create(_provider, creation) { created.push(creation); return 'builder-native'; }, tasks: () => true,
+    async acquire(_provider, id) { acquired.push(id); throw new Error('The source session is on another Host.'); }, async execute() { throw new Error('unused'); },
+  };
+  const runtime = new TeamRuntime(root, access, async () => [], 1_000_000);
+  const seat = (id: string, cwd?: string): TeamSeat => ({ teamId: id, source: { hostId: 'mac', providerId: 'claude', nativeSessionId: 'chief', title: 'Chief' }, task: { title: 'Build' },
+    member: { id: `${id}-builder`, hostId: 'studio', providerId: 'claude', role: 'leader', name: 'Worker', responsibility: 'Build.', ...(cwd ? { cwd } : {}), creation: 'reserved', activity: 'unknown', summary: '', updatedAt: 1 } });
+  try {
+    expect(await runtime.create(seat('chosen', '/work/shop'))).toMatchObject({ creation: 'ready', cwd: '/work/shop' });
+    expect(created).toEqual([expect.objectContaining({ cwd: '/work/shop' })]);
+    expect(acquired).toEqual([]);
+    // Without a chosen folder the seat still starts where its source works.
+    await expect(runtime.create(seat('default'))).rejects.toThrow('another Host');
+    expect(acquired).toEqual(['chief']);
+  } finally { await runtime.close(); await rm(root, { recursive: true, force: true }); }
+});

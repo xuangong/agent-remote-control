@@ -70,12 +70,20 @@ export function playRun(script: RunScript, clock: FakeClock, options: { steering
 }
 
 /** One entry per message, chained by parent as pi writes them. */
-export function sessionLines(id: string, cwd: string, messages: readonly Json[], options: { model?: string } = {}): string[] {
+export function sessionLines(id: string, cwd: string, messages: readonly Json[], options: { model?: string; after?: readonly Json[] } = {}): string[] {
   const lines: Json[] = [{ type: 'session', version: 3, id, timestamp: new Date(1_795_000_000_000).toISOString(), cwd }];
   let parent: string | null = null;
+  // Entries already in the file stay as they are, and the messages that follow continue from the last of them.
+  if (options.after) {
+    lines.push(...options.after);
+    const last = options.after.at(-1);
+    parent = typeof last?.id === 'string' ? last.id : null;
+  }
   const add = (entry: Json) => { const entryId = randomUUID().slice(0, 8); lines.push({ ...entry, id: entryId, parentId: parent, timestamp: new Date(1_795_000_000_000).toISOString() }); parent = entryId; };
-  add({ type: 'model_change', provider: 'fixture', modelId: options.model ?? 'm1' });
-  add({ type: 'thinking_level_change', thinkingLevel: 'off' });
+  if (!options.after) {
+    add({ type: 'model_change', provider: 'fixture', modelId: options.model ?? 'm1' });
+    add({ type: 'thinking_level_change', thinkingLevel: 'off' });
+  }
   for (const message of messages) add({ type: 'message', message });
   return lines.map(line => JSON.stringify(line));
 }
@@ -92,7 +100,8 @@ export class FakeProcess implements PiChannel {
   model: FakeModel = MODELS[0]!;
   thinkingLevel = 'off';
   readonly uiAnswers = new Map<string, Json>();
-  constructor(readonly fake: FakePi, readonly launch: PiLaunch, readonly sessionId: string, readonly sessionFile: string, private messages: Json[]) {}
+  /** `base` is what the file held when pi opened it (entries of any kind), which a save keeps before the messages of later runs. */
+  constructor(readonly fake: FakePi, readonly launch: PiLaunch, readonly sessionId: string, readonly sessionFile: string, private messages: Json[], readonly base: Json[] = [], readonly loaded = messages.length) {}
 
   onMessage(listener: (message: Json) => void): void { this.messageListeners.push(listener); }
   onExit(listener: (exit: PiExit) => void): void { if (this.exited) listener(this.exited); else this.exitListeners.push(listener); }
@@ -181,17 +190,18 @@ export class FakePi {
   readonly launcher: PiLauncher = launch => {
     this.launches.push(launch);
     const session = launch.args.indexOf('--session');
-    let id: string, file: string, messages: Json[] = [];
+    let id: string, file: string, messages: Json[] = [], base: Json[] = [];
     if (session >= 0) {
       file = launch.args[session + 1]!;
       const parsed = existsSync(file) ? parsePiSession(readFileSync(file, 'utf8')) : undefined;
       id = parsed?.header.id ?? randomUUID();
-      messages = (parsed?.entries ?? []).flatMap(entry => entry.type === 'message' ? [entry.message as Json] : []);
+      base = (parsed?.entries ?? []) as Json[];
+      messages = base.flatMap(entry => entry.type === 'message' ? [entry.message as Json] : []);
     } else {
       id = randomUUID();
       file = join(this.agentDirectory, 'sessions', `--${launch.cwd.replace(/\//g, '-')}--`, `2026-11-26T00-00-00-000Z_${id}.jsonl`);
     }
-    const process = new FakeProcess(this, launch, id, file, messages);
+    const process = new FakeProcess(this, launch, id, file, messages, base);
     this.processes.push(process);
     return process;
   };
@@ -204,7 +214,10 @@ export class FakePi {
   readonly steered: string[] = [];
   save(process: FakeProcess): void {
     mkdirSync(join(process.sessionFile, '..'), { recursive: true });
-    writeFileSync(process.sessionFile, `${sessionLines(process.sessionId, process.launch.cwd, process.conversation).join('\n')}\n`);
+    const lines = process.base?.length
+      ? sessionLines(process.sessionId, process.launch.cwd, process.conversation.slice(process.loaded), { after: process.base as unknown as Json[] })
+      : sessionLines(process.sessionId, process.launch.cwd, process.conversation);
+    writeFileSync(process.sessionFile, `${lines.join('\n')}\n`);
   }
   get last(): FakeProcess { return this.processes.at(-1)!; }
 }

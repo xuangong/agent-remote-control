@@ -63,9 +63,12 @@ async function scrub(recording: Recording, paths: string[]): Promise<Recording> 
   // every other clock reading is one fixed value.
   const stamps = new Map<string, number>();
   const ordinal = (kind: string, stamp: string) => { const key = `${kind}:${stamp}`; if (!stamps.has(key)) stamps.set(key, 1_795_000_000_000 + stamps.size); return stamps.get(key)!; };
-  text = text.replace(/\b(user|assistant|reasoning|error|bash):(1[67]\d{11})\b/g, (_whole, kind: string, stamp: string) => `${kind}:${ordinal(kind, stamp)}`);
-  text = text.replace(/\bturn:(1[67]\d{11})\b/g, (_whole, stamp: string) => `turn:${stamps.get(`user:${stamp}`) ?? 1_795_000_000_000}`);
-  text = text.replace(/\b1[67]\d{11}\b/g, () => '1795000000000');
+  // One pass, so a number just written is never read as a clock reading again.
+  text = text.replace(/\b(user|assistant|reasoning|error|bash|turn):(1[67]\d{11})\b|\b1[67]\d{11}\b/g, (whole, kind: string | undefined, stamp: string | undefined) => {
+    if (!kind) return '1795000000000';
+    if (kind === 'turn') return `turn:${stamps.get(`user:${stamp}`) ?? 1_795_000_000_000}`;
+    return `${kind}:${ordinal(kind, stamp!)}`;
+  });
   return JSON.parse(text) as Recording;
 }
 

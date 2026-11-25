@@ -32,10 +32,9 @@ function fromDocument(doc: ProseMirrorNode): DraftPart[] {
   doc.forEach(node => { if (node.isText) parts.push({ type: 'text', text: node.text! }); else if (node.type.name === 'resource') parts.push({ type: 'resource', resourceId: String(node.attrs.resourceId), label: String(node.attrs.label) }); else if (node.type.name === 'image') parts.push({ type: 'image', imageId: String(node.attrs.imageId), label: String(node.attrs.label) }); });
   return normalizeDraftParts(parts);
 }
-/** An empty draft shows its placeholder: ProseMirror always keeps a paragraph, so `:empty` never matches the editor. */
+/** An empty draft shows its placeholder: ProseMirror keeps a break element in an empty editor, so `:empty` never matches it. The document holds inline nodes directly, so only an empty content marks an empty draft. */
 function markEmpty(editor: EditorView): void {
-  const { doc } = editor.state;
-  editor.dom.toggleAttribute('data-empty', doc.childCount <= 1 && !doc.firstChild?.childCount);
+  editor.dom.toggleAttribute('data-empty', editor.state.doc.content.size === 0);
 }
 export interface ComposerEditorHandle { focus(options?: { atEnd?: boolean }): void; openImage(imageId: string): void; insertText(text: string): void; captureSelection(): void; insertParts(parts: readonly DraftPart[]): void }
 interface Props {

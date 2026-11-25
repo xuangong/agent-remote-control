@@ -45,6 +45,8 @@ export interface HostStatusSources {
   sessions(): readonly { state: SessionActivityState }[];
   /** Directories whose volumes matter: the home directory first, then the workspaces. */
   paths(): Promise<readonly { path: string; kind: HostDiskKind }[]>;
+  /** What this Controller runs, read with the status; absent when the platform cannot be read. */
+  processes?(): Promise<HostStatus['processes']>;
   platform?: NodeJS.Platform;
   cpus?(): CpuInfo[];
   totalmem?(): number;
@@ -105,9 +107,10 @@ export function createHostStatusReader(sources: HostStatusSources) {
     async read(): Promise<HostStatus> {
       const sessions = { running: 0, waiting: 0, idle: 0, failed: 0 };
       for (const session of sources.sessions()) sessions[session.state] += 1;
-      const [cpuStatus, memoryStatus, diskStatus] = await Promise.all([optional(cpu), optional(memory), optional(disks)]);
+      const [cpuStatus, memoryStatus, diskStatus, processStatus] = await Promise.all([optional(cpu), optional(memory), optional(disks), optional(async () => sources.processes?.())]);
       return { sampledAt: now(), sessions,
-        ...(cpuStatus ? { cpu: cpuStatus } : {}), ...(memoryStatus ? { memory: memoryStatus } : {}), ...(diskStatus?.length ? { disks: diskStatus } : {}) };
+        ...(cpuStatus ? { cpu: cpuStatus } : {}), ...(memoryStatus ? { memory: memoryStatus } : {}), ...(diskStatus?.length ? { disks: diskStatus } : {}),
+        ...(processStatus?.length ? { processes: processStatus } : {}) };
     },
   };
 }

@@ -19,6 +19,7 @@ import { createAttachmentLedger } from './session-core/attachment-ledger.js';
 import { createProviderRegistry } from './session-core/provider-registry.js';
 import { createIdleSessions } from './idle-sessions.js';
 import { createShownSessions } from './session-core/shown-sessions.js';
+import { createHostProcessReader } from './host-processes.js';
 import { createHostStatusReader, hostStatusPaths } from './host-status.js';
 import { allowedWorkspace, protectHostDirectory } from './execution-policy.js';
 import { SessionRoles } from './session-role-succession.js';
@@ -342,7 +343,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     catalogs: () => providers.all().filter(({ directory }) => options.providerEnabled?.(directory.providerId) !== false)
       .map(({ directory }) => ({ providerId: directory.providerId, read: async () => catalogSessionStates(await directory.list()) })),
   });
-  const hostStatus = createHostStatusReader({ sessions: liveSessionStates,
+  const hostProcesses = createHostProcessReader();
+  const hostStatus = createHostStatusReader({ sessions: liveSessionStates, processes: () => hostProcesses.read(),
     paths: () => hostStatusPaths(async () => (await Promise.all(providers.all().filter(({ directory }) => options.providerEnabled?.(directory.providerId) !== false)
       .map(async ({ directory }) => (await directory.workspaces()).map(workspace => workspace.path)))).flat()) });
   const pending = new Set<Promise<unknown>>();

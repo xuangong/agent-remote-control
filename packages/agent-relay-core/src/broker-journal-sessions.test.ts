@@ -217,12 +217,14 @@ it('answers an operation with the reason when the Host is offline, keeps control
   expect(returned.streams).toHaveLength(1);
 });
 
-it('limits and authorizes the messages it answers itself like the ones it forwards', async () => {
-  const r = await relay({ seed: store => seedJournal(store) });
-  const browser = await r.openBrowser({ authorizeMessage: () => false });
-  browser.send(tail('page-1'));
-  expect(await browser.take(message => message.type === 'protocol_error' && message.payload.requestId === 'page-1', 'refusal')).toMatchObject({ payload: { code: 'reauthentication_required' } });
-  const limited = await r.openBrowser();
+it('limits the messages it answers itself like the ones it forwards, and asks the Host owner for no fresh sign-in', async () => {
+  const r = await relay({ seed: store => seedJournal(store), broker: { ownerSubject: 'owner' } });
+  const owner = await r.openBrowser({ principalSubject: () => 'owner', authorizeMessage: () => false });
+  await subscribed(owner);
+  owner.send(tail('page-2'));
+  expect((await owner.take(message => message.type === 'timeline_page' && message.payload.requestId === 'page-2', 'page')).payload).toMatchObject({ agentId: PUBLIC_ID });
+  expect(owner.frames.some(message => message.type === 'protocol_error')).toBe(false);
+  const limited = await r.openBrowser({ principalSubject: () => 'owner' });
   limited.send({ type: 'negotiate' });
   await limited.take(message => message.type === 'agent_snapshot', 'Snapshot');
   for (let at = 0; at < 125; at++) limited.send({ type: 'timeline_subscription', payload: { requestId: `sub-${at}`, agentIds: [PUBLIC_ID] } });

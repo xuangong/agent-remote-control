@@ -492,7 +492,7 @@ export class CodexAppServerSession implements AgentSession {
     const session = new CodexAppServerSession(transport, stored, codexHome, undefined, restrictedNative, recoveryPlan);
     session.tools = bindAgentSessionTools(config.tools, () => session.assertOpen());
     session.bindNamespaces(config.toolNamespaces);
-    const host = codexHostAccess(config.hostAccess, stored.access, restrictedNative, await session.initialize());
+    const host = codexHostAccess(config.hostAccess, stored.access, restrictedNative, await session.initialize(), config.yolo === true);
     await prepare?.(transport);
     const response = await transport.request('thread/start', {
       ...(session.tools.length || session.toolNamespaces.length ? { dynamicTools: codexDynamicTools(session.tools, session.toolNamespaces) } : {}),

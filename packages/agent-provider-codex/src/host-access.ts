@@ -9,10 +9,14 @@ const SOCKET_PROFILE_VERSION = [0, 166, 0] as const;
 
 type Access = 'read_only' | undefined;
 
-/** Read-only sessions take the read-only sandbox; restricted Hosts otherwise confine writes to the workspace. */
-export function sandboxParams(access: Access, restrictedNative: boolean) {
+/**
+ * Read-only sessions take the read-only sandbox; restricted Hosts otherwise confine writes to the workspace. A new YOLO
+ * session on a Host that leaves permissions to the owner never asks and runs without a sandbox.
+ */
+export function sandboxParams(access: Access, restrictedNative: boolean, yolo = false) {
   if (access === 'read_only') return { sandbox: 'read-only', approvalPolicy: 'never' } as const;
-  return restrictedNative ? { sandbox: 'workspace-write', approvalPolicy: 'never' } as const : {};
+  if (restrictedNative) return { sandbox: 'workspace-write', approvalPolicy: 'never' } as const;
+  return yolo ? { sandbox: 'danger-full-access', approvalPolicy: 'never' } as const : {};
 }
 
 /**
@@ -25,15 +29,16 @@ export function sandboxParams(access: Access, restrictedNative: boolean) {
  * Host imposes the sandbox, on versions and platforms verified to honor it. The sandbox parameter would override the
  * profile, so the profile replaces it. A sandbox from the user's own configuration is left unchanged.
  */
-export function codexHostAccess(hostAccess: AgentSessionHostAccess | undefined, access: Access, restrictedNative: boolean, initialization: unknown) {
-  const params = sandboxParams(access, restrictedNative);
+export function codexHostAccess(hostAccess: AgentSessionHostAccess | undefined, access: Access, restrictedNative: boolean, initialization: unknown, yolo = false) {
+  const params = sandboxParams(access, restrictedNative, yolo);
   if (!hostAccess) return { params, config: {} };
   const config: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(hostAccess.environment)) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error('Invalid Host environment variable name.');
     config[`shell_environment_policy.set.${name}`] = value;
   }
-  if (!('sandbox' in params) || !hostAccess.unixSockets.length || !socketProfileSupported(initialization)) return { params, config };
+  // Without a sandbox every socket is reachable already.
+  if (!('sandbox' in params) || params.sandbox === 'danger-full-access' || !hostAccess.unixSockets.length || !socketProfileSupported(initialization)) return { params, config };
   config['features.network_proxy'] = true;
   config[`permissions.${HOST_ACCESS_PROFILE}`] = { extends: params.sandbox === 'read-only' ? ':read-only' : ':workspace',
     network: { enabled: true, unix_sockets: Object.fromEntries(hostAccess.unixSockets.map(path => [path, 'allow'])) } };

@@ -98,3 +98,18 @@ test('a computer opens as a page with its smart reading switch per agent, and a 
   await expect(page.locator('.lab-host-page-head h2')).toHaveText('Studio');
   await expect(page.getByRole('switch', { name: /Smart reading/ })).toHaveCount(0);
 });
+
+test('a computer card lists what uses the machine, fitted to the card and readable', async ({ page }) => {
+  await page.goto('/e2e/fixtures/assistant-conversation.html?layout=bot&mode=bot');
+  await (phone(page) ? page.locator('.lab-tab-bar .lab-tab').last() : page.locator('.lab-rail').getByRole('button', { name: 'Settings', exact: true })).click();
+  await page.locator('.lab-settings-group', { has: page.locator('strong', { hasText: /^Computers$/ }) }).click();
+  const list = page.locator('.lab-host-card[data-host-id="mac"] .lab-host-processes');
+  await expect(list.locator('h4')).toHaveText('What uses this machine');
+  await expect(list.locator('li')).toHaveCount(5);
+  await expect(list.locator('li').first()).toContainText('claude');
+  await expect(list.locator('li').first()).toContainText('1.4 GB');
+  const fit = await list.evaluate(node => ({ card: node.closest('.lab-host-card')!.getBoundingClientRect().width, rows: [...node.querySelectorAll('li')].map(row => row.scrollWidth - row.clientWidth) }));
+  expect(Math.max(...fit.rows)).toBeLessThanOrEqual(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  expect(await contrastFailures(page)).toEqual([]);
+});

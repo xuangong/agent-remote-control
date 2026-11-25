@@ -137,13 +137,11 @@ it('sends session commands to a Host that takes them, for its owner only', async
   expect((await call(current.hostId, { request: { command: 'list' }, extra: true }))?.status).toBe(400);
   expect((await call(current.hostId, { request: 'list' }))?.status).toBe(400);
 
-  // Permission settings need a recent sign-in, as they do in the website; other settings do not.
+  // The Host owner changes permission settings without a recent sign-in.
   const stale = { ...alice, authorizeMessage: (raw: string) => !['approval', 'sandbox', 'permissions'].includes(JSON.parse(raw).payload?.settingId) };
-  const refused = await call(current.hostId, { request: { command: 'set', target: 'h/codex/s', settings: { approval: 'never' } } }, stale);
-  expect(refused?.status).toBe(403);
-  expect(await refused!.json()).toMatchObject({ code: 'reauthentication_required' });
+  expect((await call(current.hostId, { request: { command: 'set', target: 'h/codex/s', settings: { approval: 'never' } } }, stale))?.status).toBe(200);
   expect((await call(current.hostId, { request: { command: 'set', target: 'h/codex/s', settings: { model: 'gpt-6' } } }, stale))?.status).toBe(200);
-  expect(calls).toHaveLength(2);
+  expect(calls).toHaveLength(3);
 }, 10_000);
 
 const restoredState: RemoteHostBrokerState = {
@@ -187,7 +185,8 @@ it('shows a Host\'s status to its owner in full and to people it is shared with 
   expect((await listed!.json()).hosts[0].hostStatus).toBe(true);
   await broker.manageShares('alice', 'host', 'share', 'bob', 'Bob', 1);
   const full = { sampledAt: 5, sessions: { running: 1, waiting: 0, idle: 2, failed: 0 }, cpu: { cores: 8, usage: 0.25 },
-    memory: { total: 100, used: 40 }, disks: [{ kind: 'home', path: '/home/alice', total: 1000, used: 600 }] };
+    memory: { total: 100, used: 40 }, disks: [{ kind: 'home', path: '/home/alice', total: 1000, used: 600 }],
+    processes: [{ kind: 'session', label: 'claude', providerId: 'claude', cpu: 0.5, memory: 30 }] };
   let reply: { status: number; body: unknown } = { status: 200, body: full };
   const calls: string[] = [];
   native.onMessage(data => {

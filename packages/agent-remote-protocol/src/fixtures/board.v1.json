@@ -51,6 +51,31 @@
         "changedAt": {},
         "updatedBy": "person",
         "updatedAt": 0
+      },
+      {
+        "key": 8,
+        "title": "Run the regression",
+        "status": "working",
+        "assignee": "b_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "links": [
+          {
+            "kind": "host",
+            "value": "Studio"
+          },
+          {
+            "kind": "folder",
+            "value": "/Users/x/projects/shop"
+          }
+        ],
+        "brief": "Run the suite on the branch and report failures.",
+        "report": "Half done.",
+        "version": 3,
+        "changedAt": {
+          "title": 1,
+          "status": 3
+        },
+        "updatedBy": "b_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "updatedAt": 1000
       }
     ],
     "invalid": [
@@ -276,6 +301,27 @@
         ],
         "brief": "Run the suite on the branch and report failures.",
         "report": "Half done.",
+        "changedAt": {
+          "title": 1,
+          "status": 3
+        },
+        "updatedBy": "b_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "updatedAt": 1000
+      },
+      {
+        "key": 8,
+        "title": "Run the regression",
+        "status": "working",
+        "assignee": "b_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "links": [
+          {
+            "kind": "machine",
+            "value": "Studio"
+          }
+        ],
+        "brief": "Run the suite on the branch and report failures.",
+        "report": "Half done.",
+        "version": 3,
         "changedAt": {
           "title": 1,
           "status": 3

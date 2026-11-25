@@ -164,7 +164,10 @@ export const TeamHostCall = Type.Union([
   Type.Object({ action: Type.Literal('create_bot'), owner: TaskOwner, operationId: id, name: TaskTitle, mission: TaskBrief, lifetime: Type.Union([Type.Literal('temporary'), Type.Literal('standing')]),
     message: Type.Optional(BotText), workspace: Type.Optional(TaskWorkspace), commit: Type.Optional(gitObject), provider: Type.Optional(id), model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
     /** The item of the caller's board this bot is created for: it records the assignee and the brief, and the bot's input names it. */
-    item: Type.Optional(BoardItem.properties.key), cause: Type.Optional(TurnCause) }, object),
+    item: Type.Optional(BoardItem.properties.key), cause: Type.Optional(TurnCause),
+    /** Where the bot works: a Host the caller read from `list_hosts` (default: the caller's own), and in it one existing folder, or a new folder created under a workspace of that Host. */
+    host: Type.Optional(id), cwd: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
+    newFolder: Type.Optional(Type.Object({ name: Type.String({ minLength: 1, maxLength: 255 }), under: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })) }, object)) }, object),
   Type.Object({ action: Type.Literal('bot_message'), owner: BotCaller, operationId: id, to: Type.String({ minLength: 1, maxLength: 300 }), text: BotText, cause: Type.Optional(TurnCause),
     replyTo: Type.Optional(AssistantMessageId), status: Type.Optional(Type.Union([Type.Literal('progress'), Type.Literal('done'), Type.Literal('failed'), Type.Literal('needs_input'), Type.Literal('ack')])),
     /** In a room: pass this turn instead of speaking. */
@@ -194,6 +197,8 @@ export const TeamHostCall = Type.Union([
   Type.Object({ action: Type.Literal('attachment_finish'), owner: BotCaller, attachment: AttachmentId }, object),
   Type.Object({ action: Type.Literal('attachment_read'), owner: BotCaller, attachment: AttachmentId, offset: Type.Integer({ minimum: 0 }) }, object),
   Type.Object({ action: Type.Literal('list_bots'), owner: BotCaller }, object),
+  /** The Hosts the caller's account runs, with what each reports and its workspaces' folders, for choosing where a bot works. */
+  Type.Object({ action: Type.Literal('list_hosts'), owner: BotCaller }, object),
   // A bot's turn ended: its Host counts the turn and its usage in the turn's chain.
   Type.Object({ action: Type.Literal('chain_turn'), owner: BotCaller, cause: TurnCause, tokens: Type.Integer({ minimum: 0 }), costUsd: Type.Optional(Type.Number({ minimum: 0 })) }, object),
   // A bot's native tool approval is pending, or the person chose "for this chain in this folder" for it: the Host asks whether a standing approval of the turn's chain covers the folder
@@ -263,7 +268,8 @@ const validShape = (value: Team) => {
 export const isTeam = (value: unknown): value is Team => Value.Check(Team, value)
   // A link binds two main sessions; every other Team starts with its Leader.
   && (value.link || value.room || value.inbox ? true : value.members[0]?.role === 'leader' && value.members.slice(1).every(member => member.role === 'member' || member.role === 'requester')) && validShape(value)
-  && value.members[0]!.hostId === value.source.hostId
+  // A task's worker and an inbox's seat may run on another Host than the session that made them (source); any other Team lives on one Host.
+  && (value.task !== undefined || value.inbox !== undefined || value.members[0]!.hostId === value.source.hostId)
   && new Set(value.members.map(member => member.id)).size === value.members.length
   && new Set([...value.messages, ...(value.unresolvedReceipts ?? [])].map(message => message.id)).size === value.messages.length + (value.unresolvedReceipts?.length ?? 0)
   && (value.unresolvedReceipts ?? []).every(receipt => value.members.some(member => member.id === receipt.from) && value.members.some(member => member.id === receipt.to && (!receipt.resolvedTarget || member.providerId === receipt.resolvedTarget.providerId)))

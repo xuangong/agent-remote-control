@@ -76,6 +76,15 @@ describe('Host status reader', () => {
     expect(input.waits).toHaveLength(1);
   });
 
+  it('lists the processes the Controller runs with the status, and leaves them out when they cannot be read', async () => {
+    const processes = [{ kind: 'controller' as const, label: 'controller', cpu: 0.1, memory: 5 }];
+    const status = await createHostStatusReader(sources({ processes: async () => processes })).read();
+    expect(status.processes).toEqual(processes);
+    expect(isHostStatus(status)).toBe(true);
+    expect((await createHostStatusReader(sources({ processes: async () => undefined })).read()).processes).toBeUndefined();
+    expect((await createHostStatusReader(sources({ processes: async () => { throw new Error('ps'); } })).read()).processes).toBeUndefined();
+  });
+
   it('measures CPU since the previous read when it is recent, without waiting again', async () => {
     let clock = 1_000;
     const input = sources({ now: () => clock });

@@ -68,8 +68,8 @@ describe('client admission', () => {
     expect(accepted).toBe(Math.floor(192 * 1024 * KIB / Buffer.byteLength(chunk)));
   });
 
-  it('answers a message that needs a fresh sign-in with reauthentication_required and keeps the stream open', () => {
-    const s = stream({ context: { authorizeMessage: () => false } });
+  it('answers a guest message that needs a fresh sign-in with reauthentication_required and keeps the stream open', () => {
+    const s = stream({ owner: false, context: { authorizeMessage: () => false } });
     const raw = encodeClientMessage({ protocolVersion: PROTOCOL_VERSION, type: 'send_message', controlToken: 'token', payload: { requestId: 'r-1', operationId: '00000000-0000-4000-8000-000000000001', agentId: 'a', text: 'hi' } } as never);
     if (raw.status !== 'ok') throw new Error(`the fixture message must encode: ${JSON.stringify(raw)}`);
     expect(s.admit(raw.json, false)).toBe(false);
@@ -77,8 +77,16 @@ describe('client admission', () => {
     expect(s.sent).toEqual([{ protocolVersion: PROTOCOL_VERSION, type: 'protocol_error', payload: { requestId: 'r-1', code: 'reauthentication_required', message: expect.any(String), recoverable: true } }]);
   });
 
-  it('closes the stream when a message that needs a fresh sign-in cannot be read for its request id', () => {
-    const s = stream({ context: { authorizeMessage: () => false } });
+  it('admits the Host owner\'s permission changes without a fresh sign-in', () => {
+    const s = stream({ owner: true, context: { authorizeMessage: () => false } });
+    const raw = encodeClientMessage({ protocolVersion: PROTOCOL_VERSION, type: 'send_message', controlToken: 'token', payload: { requestId: 'r-1', operationId: '00000000-0000-4000-8000-000000000001', agentId: 'a', text: 'hi' } } as never);
+    if (raw.status !== 'ok') throw new Error('the fixture message must encode');
+    expect(s.admit(raw.json, false)).toBe(true);
+    expect(s.sent).toEqual([]);
+  });
+
+  it('closes the stream when a guest message that needs a fresh sign-in cannot be read for its request id', () => {
+    const s = stream({ owner: false, context: { authorizeMessage: () => false } });
     expect(s.admit(message('unknown_type'), false)).toBe(false);
     expect(s.closed).toEqual([{ code: 1008, reason: 'Invalid session message' }]);
   });

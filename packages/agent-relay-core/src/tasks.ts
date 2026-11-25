@@ -141,10 +141,13 @@ export function ownerTasks(teams: SavedTeam[], resolve: TeamBrokerPorts['resolve
 export class TaskGroups {
   constructor(private readonly broker: TaskBrokerPorts, private readonly ports: TaskPorts) {}
   capable(hostId: string): boolean { return this.ports.capable(hostId); }
-  async create(hostId: string, call: CreateCall, options: { side?: true } = {}): Promise<{ taskId: string; state: TaskView['state']; message: string }> {
+  /** `where`: the worker runs on another Host of the account, or in a folder chosen for it, instead of beside its owner. */
+  async create(hostId: string, call: CreateCall, options: { side?: true; where?: { hostId: string; cwd?: string } } = {}): Promise<{ taskId: string; state: TaskView['state']; message: string }> {
     this.ports.assertHost(hostId);
+    const workerHost = options.where?.hostId ?? hostId, cwd = options.where?.cwd;
+    this.ports.assertHost(workerHost);
     const providerId = call.provider ?? call.owner.providerId;
-    this.broker.ports.assertHost(hostId, providerId);
+    this.broker.ports.assertHost(workerHost, providerId);
     if (call.workspace === 'worktree' && !call.commit) fail('A worktree task needs the commit it starts from.');
     const resolve = this.broker.ports.resolveSession;
     if (!sameKey(resolve, hostId, call.owner.providerId, call.owner.nativeSessionId)) fail('The owner session is not on this Host.');
@@ -155,14 +158,15 @@ export class TaskGroups {
         const item = existing.task, seat = existing.task && owner(existing);
         const worker = existing.members[0];
         if (!item || seat?.nativeSessionId !== call.owner.nativeSessionId || seat.hostId !== hostId || item.title !== call.title || item.brief !== call.brief || item.doneWhen !== call.doneWhen
-          || (item.workspace ?? 'same') !== (call.workspace ?? 'same') || worker?.providerId !== providerId || worker.model !== call.model) fail('Task identity has different input.');
+          || (item.workspace ?? 'same') !== (call.workspace ?? 'same') || worker?.providerId !== providerId || worker.model !== call.model
+          || worker.hostId !== workerHost || (cwd !== undefined && worker.cwd !== cwd)) fail('Task identity has different input.');
         return existing;
       }
       const count = ownerTasks(plain(teams), resolve, hostId, call.owner).filter(team => running(team.task!.state)).length;
       if (count >= TASK_RUNNING_LIMIT) fail(`This session already has ${count} tasks running. Wait for a result before starting another.`);
       pruneCoordination(teams, 1);
       if (plain(teams).length >= ACCOUNT_TEAM_LIMIT) fail('Team capacity reached.');
-      const worker: TeamMember = { id: randomUUID(), role: 'leader', hostId, providerId, name: 'Worker', responsibility: call.title,
+      const worker: TeamMember = { id: randomUUID(), role: 'leader', hostId: workerHost, providerId, name: 'Worker', responsibility: call.title, ...(cwd ? { cwd } : {}),
         creation: 'reserved', activity: 'unknown', summary: '', updatedAt: now, ...(call.model ? { model: call.model } : {}),
         ...(call.workspace === 'read_only' ? { access: 'read_only' as const } : {}), ...(call.workspace === 'worktree' ? { workspace: { kind: 'worktree' as const, commit: call.commit! } } : {}) };
       const main: TeamMember = { id: randomUUID(), role: 'requester', hostId, providerId: call.owner.providerId, nativeSessionId: call.owner.nativeSessionId,

@@ -3,7 +3,7 @@ import { PROTOCOL_VERSION, decodeServerMessage } from '@orchardworks/agent-remot
 import { event, origin, send } from './test-utils/relay-harness.js';
 import { world } from './test-utils/relay-world.js';
 
-it('rejects stale permission changes without closing the session and permits retry after sign-in', async () => {
+it('lets the Host owner change permissions without a recent sign-in', async () => {
   const f = await world(); const alice = await f.signIn('alice');
   const pairing = await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json() as any;
   const host = await f.host(pairing.key);
@@ -41,6 +41,51 @@ it('rejects stale permission changes without closing the session and permits ret
   const token = await controlled(stream);
   for (const setting of ['sandbox', 'approval', 'permissions']) {
     const response = event(stream, 'message'); stream.send(JSON.stringify(request(setting, setting, token)));
+    expect(await response).toMatchObject({ type: 'command_acknowledged', payload: { requestId: setting } });
+  }
+  expect(forwarded.map(message => message.payload.settingId)).toEqual(['sandbox', 'approval', 'permissions']);
+  expect(stream.readyState).toBe(1);
+});
+
+it('rejects a guest\'s stale permission changes without closing the session and permits retry after sign-in', async () => {
+  const f = await world(); const alice = await f.signIn('alice'); const bob = await f.signIn('bob');
+  const pairing = await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json() as any;
+  const host = await f.host(pairing.key);
+  const forwarded: any[] = [];
+  host.socket.addEventListener('message', message => {
+    const frame = JSON.parse(String(message.data));
+    if (frame.type === 'rpc_request') send(host.socket, { type: 'rpc_response', requestId: frame.requestId, status: 200, body: JSON.stringify({ agentId: 'permission-agent', nativeSessionId: 'permission-native' }) });
+    if (frame.type === 'stream_open') {
+      send(host.socket, { type: 'stream_opened', streamId: frame.streamId });
+      send(host.socket, { type: 'stream_message', streamId: frame.streamId, message: '{"ready":true}' });
+    }
+    if (frame.type === 'stream_message') {
+      const request = JSON.parse(frame.message);
+      if (request.type === 'negotiate') { send(host.socket, { type: 'stream_message', streamId: frame.streamId, message: JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: {} }) }); return; }
+      forwarded.push(request);
+      send(host.socket, { type: 'stream_message', streamId: frame.streamId, message: JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'command_acknowledged', payload: { requestId: request.payload.requestId, agentId: 'permission-agent', command: 'set_session_setting', accepted: true } }) });
+    }
+  });
+  expect((await f.control({ subject: 'alice', operation: 'share', hostId: host.hostId, targetSubject: 'bob', targetLabel: 'Bob', sessionLimit: 1 })()).status).toBe(200);
+  expect((await f.json(bob.basePath + `v1/remote/hosts/${host.hostId}/create`, bob.cookie, { providerId: 'codex', operationId: '00000000-0000-4000-8000-000000000002' })).status).toBe(200);
+  f.authority.setAuthenticatedAt(Date.now() - 601_000);
+  expect((await f.json('/auth/refresh', bob.cookie, {})).status).toBe(200);
+  const path = bob.basePath + 'v1/sessions/permission-agent/events';
+  const stream = await f.upgrade(path, { cookie: bob.cookie, origin }); await event(stream, 'message');
+  const request = (settingId: string, requestId: string, controlToken?: string) => ({ protocolVersion: PROTOCOL_VERSION, type: 'set_session_setting', ...(controlToken ? { controlToken } : {}), payload: { requestId, operationId: '00000000-0000-4000-8000-000000000001', agentId: 'permission-agent', settingId, value: 'next' } });
+  /** Negotiates and acquires control from the Relay, as a page does; the token that grants it. */
+  const controlled = async (socket: typeof stream): Promise<string> => {
+    socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate' }));
+    let announced = await event(socket, 'message');
+    while (announced.type !== 'session_control') announced = await event(socket, 'message');
+    socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'session_control_request', payload: { agentId: 'permission-agent', requestId: 'acquire', revision: announced.payload.revision, action: 'acquire' } }));
+    let granted = await event(socket, 'message');
+    while (granted.payload?.requestId !== 'acquire') granted = await event(socket, 'message');
+    return granted.payload.token;
+  };
+  const token = await controlled(stream);
+  for (const setting of ['sandbox', 'approval', 'permissions', 'tool_approval_mode', 'permission:bash']) {
+    const response = event(stream, 'message'); stream.send(JSON.stringify(request(setting, setting, token)));
     const denied = await response;
     expect(decodeServerMessage(JSON.stringify(denied)).status).toBe('ok');
     expect(denied).toMatchObject({ type: 'protocol_error', payload: { requestId: setting, code: 'reauthentication_required', recoverable: true } });
@@ -51,7 +96,7 @@ it('rejects stale permission changes without closing the session and permits ret
   expect((await model).type).toBe('command_acknowledged');
   expect(forwarded).toHaveLength(1);
   f.authority.setAuthenticatedAt(Date.now());
-  const renewed = await f.signIn('alice');
+  const renewed = await f.signIn('bob');
   const fresh = await f.upgrade(path, { cookie: renewed.cookie, origin }); await event(fresh, 'message');
   const freshToken = await controlled(fresh);
   expect(forwarded).toHaveLength(1);

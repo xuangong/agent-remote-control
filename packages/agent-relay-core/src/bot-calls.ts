@@ -5,7 +5,7 @@
  * an chief's to its temporary bot, and any other bot's, is input to that task; anything to a standing bot goes to its inbox.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { assistantMessageText, attachmentLines, boardItemOpen, BOARD_BRIEF_LIMIT, BOT_SPAN_LIMIT, chiefChangedText, itemTagText, nativeSessionRefKey, taskView, type BoardItem, type BoardItemEdit, type BoardPlanEdit, type BotAttachment, type BotFact, type BotMessageResult, type TeamHostCall, type TaskView, type TeamMember } from '@orchardworks/agent-remote-protocol';
+import { assistantMessageText, attachmentLines, boardItemOpen, BOARD_BRIEF_LIMIT, BOT_SPAN_LIMIT, chiefChangedText, itemTagText, nativeSessionRefKey, taskView, type BoardItem, type BoardItemEdit, type BoardLink, type BoardPlanEdit, type BotAttachment, type BotFact, type BotMessageResult, type TeamHostCall, type TaskView, type TeamMember } from '@orchardworks/agent-remote-protocol';
 import { accountDirectory, callerAssistant, type Assistant, type AssistantBrokerPorts, type AssistantMessages, type AssistantPorts } from './assistants.js';
 import { ownerTasks, taskAction, type TaskGroups } from './tasks.js';
 import { ACCOUNT_TEAM_LIMIT, type SavedTeam } from './team-delivery.js';
@@ -21,6 +21,7 @@ import { forgotten, remembered } from './bot-memory.js';
 import { temporaryBotId } from './chain-scope.js';
 import { cutReply } from './reply-text.js';
 import type { AttachmentStore } from './attachments.js';
+import type { HostPlaces } from './host-places.js';
 
 type Call<A extends TeamHostCall['action']> = Extract<TeamHostCall, { action: A }>;
 type Owner = { providerId: string; nativeSessionId: string };
@@ -33,6 +34,9 @@ const summary = (item: BoardItem) => ({ key: item.key, title: item.title, status
 const clip = (text: string, limit: number) => text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
 
 const fail = (message: string): never => { throw new Error(message); };
+/** What an item records of where its bot works, and what the creating call returns of it. */
+const placeLinks = (place?: { name: string; cwd: string }): BoardLink[] => place ? [{ kind: 'host', value: place.name.slice(0, 300) }, { kind: 'folder', value: place.cwd.slice(0, 300) }] : [];
+const placeResult = (place?: { name: string; cwd: string }) => place ? { host: place.name, folder: place.cwd } : {};
 const fold = (text: string) => text.trim().toLocaleLowerCase('en');
 const running = (team: SavedTeam) => team.status === 'active' && (team.task?.state === 'working' || team.task?.state === 'needs_input');
 export { temporaryBotId };
@@ -40,7 +44,7 @@ type SendCall = Pick<Call<'bot_message'>, 'owner' | 'operationId' | 'text' | 'st
 const NOT_FOUND = 'No bot of this account answers to that name. List them with list_bots.';
 
 export class BotCalls {
-  constructor(private readonly broker: AssistantBrokerPorts, private readonly ports: AssistantPorts, private readonly tasks: TaskGroups, private readonly messages: AssistantMessages, private readonly inboxes: BotInboxes, private readonly rooms: Rooms, private readonly work: BotWork, private readonly board: BotBoard, private readonly asks: BotAsks) {}
+  constructor(private readonly broker: AssistantBrokerPorts, private readonly ports: AssistantPorts, private readonly tasks: TaskGroups, private readonly messages: AssistantMessages, private readonly inboxes: BotInboxes, private readonly rooms: Rooms, private readonly work: BotWork, private readonly board: BotBoard, private readonly asks: BotAsks, private readonly places?: HostPlaces) {}
   private key(hostId: string, providerId: string, nativeSessionId: string): string | undefined {
     try { return nativeSessionRefKey(this.broker.ports.resolveSession(hostId, providerId, nativeSessionId)); } catch { return undefined; }
   }
@@ -90,37 +94,59 @@ export class BotCalls {
     return matches[0]!.key === caller.key ? 'self' : matches[0]!;
   }
 
+  /**
+   * Where the bot is to work when the caller chose: its Host and folder, an existing one or a new one created once (a replay of the same
+   * operation finds the folder its first call made). Undefined when the caller chose nothing: the bot works beside its chief.
+   */
+  private async chosenPlace(hostId: string, call: Call<'create_bot'>): Promise<{ hostId: string; name: string; cwd: string } | undefined> {
+    if (call.host === undefined && call.cwd === undefined && call.newFolder === undefined) return undefined;
+    if (call.cwd !== undefined && call.newFolder !== undefined) fail('Give cwd or new_folder, not both.');
+    if (call.cwd === undefined && call.newFolder === undefined) {
+      if (call.host === undefined || call.host === hostId) return undefined;
+      fail('Name the folder the bot works in on that Host: an existing one (cwd) or a new one (new_folder). list_hosts shows them.');
+    }
+    if (call.workspace === 'worktree') fail('A worktree starts from your own commit; choose a folder with workspace same or read_only.');
+    const places = this.places ?? fail('Choosing a Host or folder is not available on this Relay.');
+    const target = call.host ?? hostId, providerId = call.provider ?? call.owner.providerId;
+    const name = places.name(target);
+    const first = this.broker.ports.read().find(team => team.operationId === call.operationId && (team.task || team.inbox))?.members[0];
+    if (first?.cwd) return { hostId: first.hostId, name, cwd: first.cwd };
+    if (call.cwd !== undefined) { await places.assertFolder(target, providerId, call.cwd); return { hostId: target, name, cwd: call.cwd }; }
+    return { hostId: target, name, cwd: await places.createFolder(target, providerId, call.newFolder!.name, call.newFolder!.under) };
+  }
   async create(hostId: string, call: Call<'create_bot'>) {
     const self = this.main(hostId, call.owner);
     // A chief manages at most twelve bots directly, standing and temporary alike (bots design 2.5).
     if (self.standing && this.span(self.standing) >= BOT_SPAN_LIMIT) fail(`You already manage ${BOT_SPAN_LIMIT} bots; retire one, or give some to a sub-chief.`);
     const item = call.item === undefined ? undefined : this.ownItem(self, call.item);
-    if (call.lifetime === 'standing') return this.createStanding(hostId, self, call, item);
+    const place = await this.chosenPlace(hostId, call);
+    if (call.lifetime === 'standing') return this.createStanding(hostId, self, call, item, place);
     // What the item says to do reaches the bot in its first input, with its mission and the chief's words.
     const brief = [call.mission, item?.brief, call.message].filter((part, index, parts): part is string => !!part && parts.indexOf(part) === index).join('\n\n');
     const created = await this.tasks.create(hostId, { action: 'create_task', owner: call.owner, operationId: call.operationId, title: call.name, brief,
       ...(item ? { item: { board: self.key, key: item.key, title: item.title } } : {}),
-      ...(call.workspace ? { workspace: call.workspace } : {}), ...(call.commit ? { commit: call.commit } : {}), ...(call.provider ? { provider: call.provider } : {}), ...(call.model ? { model: call.model } : {}) });
-    // The item records its assignee and the brief the bot was created with.
-    if (item) await this.notify(await this.board.assign(self.standing!, item.key, temporaryBotId(created.taskId), (item?.brief ?? brief).slice(0, BOARD_BRIEF_LIMIT), self.key));
-    return { botId: temporaryBotId(created.taskId), status: created.state, message: created.message.replace(/^Task \S+/, `Bot "${call.name}"`) };
+      ...(call.workspace ? { workspace: call.workspace } : {}), ...(call.commit ? { commit: call.commit } : {}), ...(call.provider ? { provider: call.provider } : {}), ...(call.model ? { model: call.model } : {}) },
+    place ? { where: { hostId: place.hostId, cwd: place.cwd } } : {});
+    // The item records its assignee, the brief the bot was created with, and where it works.
+    if (item) await this.notify(await this.board.assign(self.standing!, item.key, temporaryBotId(created.taskId), (item?.brief ?? brief).slice(0, BOARD_BRIEF_LIMIT), self.key, placeLinks(place)));
+    return { botId: temporaryBotId(created.taskId), status: created.state, message: created.message.replace(/^Task \S+/, `Bot "${call.name}"`), ...placeResult(place) };
   }
   /**
    * A standing bot another bot creates (bots design 2.2): its inbox's seat creates its session where its chief works, with its
    * standing instructions; once ready, it is placed in its chief's group (`BotInboxes.place`). Its first message waits in its inbox.
    */
-  private async createStanding(hostId: string, self: Bot, call: Call<'create_bot'>, item?: BoardItem) {
+  private async createStanding(hostId: string, self: Bot, call: Call<'create_bot'>, item?: BoardItem, place?: { hostId: string; name: string; cwd: string }) {
     if (!self.standing) fail('A temporary bot asks its chief for a standing bot.');
     if (!this.ports.placeBot) fail('Standing bots cannot be created on this Relay.');
-    const providerId = call.provider ?? call.owner.providerId;
-    this.broker.ports.assertHost(hostId, providerId);
+    const providerId = call.provider ?? call.owner.providerId, botHost = place?.hostId ?? hostId;
+    this.broker.ports.assertHost(botHost, providerId);
     const team = await this.broker.change(teams => {
       const existing = teams.find(item => item.operationId === call.operationId && item.inbox);
       if (existing) return existing;
       pruneCoordination(teams, 1);
       if (plain(teams).length >= ACCOUNT_TEAM_LIMIT) fail('Team capacity reached.');
       const now = this.broker.ports.now(), botId = newBotId();
-      const seat: TeamMember = { id: randomUUID(), role: 'leader', hostId, providerId, name: call.name, responsibility: call.mission.slice(0, 2048), creation: 'reserved', activity: 'unknown',
+      const seat: TeamMember = { id: randomUUID(), role: 'leader', hostId: botHost, providerId, name: call.name, responsibility: call.mission.slice(0, 2048), ...(place ? { cwd: place.cwd } : {}), creation: 'reserved', activity: 'unknown',
         summary: '', updatedAt: now, ...(call.model ? { model: call.model } : {}) };
       const created: SavedTeam = { id: randomUUID(), operationId: call.operationId, revision: 1, title: `${call.name}'s inbox`, status: 'active',
         source: { hostId, providerId: call.owner.providerId, nativeSessionId: call.owner.nativeSessionId, title: self.name }, members: [seat], messages: [],
@@ -136,10 +162,10 @@ export class BotCalls {
       return created;
     });
     await this.broker.provision(team.id, team.members[0]!.id).catch(() => undefined);
-    await this.inboxes.place(hostId);
-    if (item) await this.notify(await this.board.assign(self.standing!, item.key, team.inbox!.botId, (item?.brief ?? call.message ?? call.mission).slice(0, BOARD_BRIEF_LIMIT), self.key));
+    await this.inboxes.place(botHost);
+    if (item) await this.notify(await this.board.assign(self.standing!, item.key, team.inbox!.botId, (item?.brief ?? call.message ?? call.mission).slice(0, BOARD_BRIEF_LIMIT), self.key, placeLinks(place)));
     const placed = !this.broker.ports.read().find(entry => entry.id === team.id)?.inbox?.pending;
-    return { botId: team.inbox!.botId, status: placed ? 'ready' : 'waiting',
+    return { botId: team.inbox!.botId, status: placed ? 'ready' : 'waiting', ...placeResult(place),
       message: placed ? `Bot "${call.name}" is ready in your group; it reads its mission first and reports in.` : `Bot "${call.name}" is recorded; its session starts when this computer can create it.` };
   }
   /**
@@ -446,6 +472,11 @@ export class BotCalls {
     // A standing bot also reads where its open board items stand here.
     const open = (self.standing && this.board.read(self.standing)?.items.filter(entry => boardItemOpen(entry.status)).map(summary)) || [];
     return { bots: [...above, ...mine, ...standing], ...(open.length ? { board: { open: open.length, items: open } } : {}) };
+  }
+  /** The Hosts of the account with what each reports, for choosing where a bot works. */
+  async listHosts(hostId: string, call: Call<'list_hosts'>) {
+    this.caller(hostId, call.owner);
+    return { hosts: await (this.places ?? fail('Choosing a Host is not available on this Relay.')).list() };
   }
   /** Where a bot's conversation is, for `read_bot`: one of the caller's staff, or any standing bot of the account (the person's bots are not secret from each other). */
   readSession(hostId: string, call: Call<'bot_session'>): { providerId: string; nativeSessionId: string } {

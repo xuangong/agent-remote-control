@@ -514,9 +514,11 @@ export function createHostedRelay(options: HostedRelayOptions) {
     return result.grant;
   }
   const originAllowed = (request: Request) => request.headers.get('origin') === auth.origin;
+  // The settings that decide what a session may do without asking: each provider's name for them.
+  const permissionSetting = (id: unknown) => typeof id === 'string' && (['approval', 'sandbox', 'permissions', 'tool_approval_mode'].includes(id) || id.startsWith('permission:'));
   function context(request: Request, grant: HostedGrant): BrokerRequestContext {
     return { principalSubject: () => grant.subject, authorizeMessage: raw => {
-      try { const message = JSON.parse(raw); return message.type !== 'set_session_setting' || !['approval', 'sandbox', 'permissions'].includes(message.payload?.settingId) || recentAuthentication(grant); } catch { return true; }
+      try { const message = JSON.parse(raw); return message.type !== 'set_session_setting' || !permissionSetting(message.payload?.settingId) || recentAuthentication(grant); } catch { return true; }
     }, authorize: () => !closing && !failed && sessions.expiresAt(request, grant) > Date.now(),
       validateMutation: () => ({ status: 'allowed' }), connectionExpiresAt: () => failed || closing ? 0 : sessions.expiresAt(request, grant) };
   }

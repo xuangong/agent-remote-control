@@ -156,7 +156,7 @@ export class ClaudeAgentSession implements AgentSession {
     if (this.readOnly) this.capabilities = { ...this.capabilities, planning: false, interactions: { ...this.capabilities.interactions, planApproval: false } };
     this.planning = !this.readOnly && (config.planning ?? false);
     // The owner's last confirmed mode is kept on restricted Hosts too; YOLO there also lifts the sandbox.
-    this.resumePermissionMode = this.readOnly ? 'dontAsk' : isResumableClaudePermissionMode(config.permissionMode) ? config.permissionMode : 'default';
+    this.resumePermissionMode = this.readOnly ? 'dontAsk' : isResumableClaudePermissionMode(config.permissionMode) ? config.permissionMode : config.yolo ? 'bypassPermissions' : 'default';
     this.storedPermissionMode = this.resumePermissionMode;
     this.permissionMode = this.planning ? 'plan' : this.resumePermissionMode;
     this.images = new ClaudeImageRegistry(config.sessionId);

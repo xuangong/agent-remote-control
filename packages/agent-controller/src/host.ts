@@ -19,6 +19,7 @@ import { createAttachmentLedger } from './session-core/attachment-ledger.js';
 import { createProviderRegistry } from './session-core/provider-registry.js';
 import { createIdleSessions } from './idle-sessions.js';
 import { createShownSessions } from './session-core/shown-sessions.js';
+import { createHostProcessReader } from './host-processes.js';
 import { createHostStatusReader, hostStatusPaths } from './host-status.js';
 import { allowedWorkspace, protectHostDirectory } from './execution-policy.js';
 import { SessionRoles } from './session-role-succession.js';
@@ -42,7 +43,8 @@ import { createSessionCatalog, catalogSessionStates } from './session-core/catal
 import { handoffRefusal } from './session-core/family.js';
 import * as lineage from './session-core/lineage.js';
 import { bounded, json, positiveTimeout } from './session-core/requests.js';
-import type { AgentHostProviderRegistration, AgentHostRuntime, AgentHostRuntimeOptions, SessionBinding as Binding } from './session-core/types.js';
+import type { DirectoryMutationEvidence } from './directory-mutation.js';
+import type { AgentHostDirectory, AgentHostProviderRegistration, AgentHostRuntime, AgentHostRuntimeOptions, SessionBinding as Binding } from './session-core/types.js';
 import { createUplinkFence } from './session-core/uplink-fence.js';
 import { createAttachment } from './session-core/attachment.js';
 import { createControlRoutes } from './session-core/control-routes.js';
@@ -245,6 +247,11 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   /** Every read of a provider's directory, whoever asks for it (the page's revision check, a listing, the state confirmation), passes the summaries to `listed`. */
   const observeListing = (registration: AgentHostProviderRegistration): AgentHostProviderRegistration => ({ ...registration, directory: new Proxy(registration.directory, {
     get(target, key) {
+      // The owner's new sessions start in YOLO; a share recipient's request says otherwise. A Host that locks a provider's permissions keeps its policy.
+      if (key === 'create') {
+        const locked = !!options.executionPolicy?.lockPermissions && !registration.nativePermissionControl;
+        return (input: Parameters<AgentHostDirectory['create']>[0], evidence?: DirectoryMutationEvidence) => target.create(locked ? input : { yolo: true, ...input }, evidence);
+      }
       if (key === 'list') return async () => {
         const summaries = await target.list();
         // A refresh never fails the listing it rides on.
@@ -342,7 +349,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     catalogs: () => providers.all().filter(({ directory }) => options.providerEnabled?.(directory.providerId) !== false)
       .map(({ directory }) => ({ providerId: directory.providerId, read: async () => catalogSessionStates(await directory.list()) })),
   });
-  const hostStatus = createHostStatusReader({ sessions: liveSessionStates,
+  const hostProcesses = createHostProcessReader();
+  const hostStatus = createHostStatusReader({ sessions: liveSessionStates, processes: () => hostProcesses.read(),
     paths: () => hostStatusPaths(async () => (await Promise.all(providers.all().filter(({ directory }) => options.providerEnabled?.(directory.providerId) !== false)
       .map(async ({ directory }) => (await directory.workspaces()).map(workspace => workspace.path)))).flat()) });
   const pending = new Set<Promise<unknown>>();

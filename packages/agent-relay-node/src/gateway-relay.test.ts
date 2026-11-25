@@ -130,7 +130,7 @@ it('stops an already-open browser stream when its grant expires', async () => {
   expect((await fetch(f.url + '/auth/status', { headers: { authorization: `Bearer ${short}` } })).status).toBe(401);
   host.close();
 }, 5000);
-it('still requires recent authentication for production permission changes on a real session WebSocket', async () => {
+it('lets the Host owner change permissions on a real session WebSocket without a recent sign-in', async () => {
   const f = await setup(); const alice = await f.login('alice');
   const pair = await (await alice.request('v1/remote/pairings', {})).json() as { key: string };
   const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${pair.key}` }, handshakeTimeout: 3000 });
@@ -169,11 +169,8 @@ it('still requires recent authentication for production permission changes on a 
   const token = await acquire(stream, 'production-agent');
   const setting = { protocolVersion: PROTOCOL_VERSION, type: 'set_session_setting', controlToken: token, payload: { agentId: 'production-agent', settingId: 'sandbox', value: 'workspace-write',
     requestId: 'permission-change', operationId: '00000000-0000-4000-8000-000000000001' } };
-  const refused = once(stream, 'message'); stream.send(JSON.stringify(setting));
-  expect(JSON.parse((await refused)[0].toString())).toMatchObject({ type: 'protocol_error', payload: { code: 'reauthentication_required', requestId: 'permission-change' } });
-  expect(forwarded).toEqual([]);
-  const model = { ...setting, payload: { ...setting.payload, settingId: 'model', value: 'native-model', requestId: 'model-change' } };
-  stream.send(JSON.stringify(model)); expect(await received).toEqual(model);
+  // The owner's session runs on the owner's own computer: the change reaches the Host although the sign-in is eleven minutes old.
+  stream.send(JSON.stringify(setting)); expect(await received).toEqual(setting);
   stream.close(); host.close();
 }, 10000);
 it('keeps the same installation ID isolated across users and restores an owner Host on reconnect', async () => {

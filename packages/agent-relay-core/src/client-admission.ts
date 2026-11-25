@@ -4,7 +4,7 @@
  * Contract. `createClientAdmission` returns `admitClientMessages(client, context, subject, expiry)`, which returns one function per stream:
  * `(raw, binary) => boolean`, true when the message may proceed. Otherwise the stream is already closed (a binary frame 1003; a message that
  * is not JSON, an upload, resource or control rate over its minute window, a credential past `expiry()`, or a non-owner resolving a locator
- * other than an input image: 1008) or the sender was answered (`reauthentication_required` when the context says the message changes
+ * other than an input image: 1008) or the sender was answered (`reauthentication_required` when a guest's message changes
  * permissions and the sign-in is too old; the stream stays open). Limits per window of 60 seconds: 120 control messages, 600 timeline
  * requests, 2,048 image chunks of at most 48 KiB and 48 MiB, 8,192 resource messages of at most 48 KiB and 192 MiB. A window starts at the
  * first message after the previous one ended; a message from a past window counts against none of the old counters.
@@ -41,7 +41,8 @@ export function createClientAdmission(ports: ClientAdmissionPorts) {
         // Searching and reading older history take one page per request over the session wire; they are reads, not control messages.
         if (++timelineCount > 600) return refuse(1008, 'Timeline request rate exceeded');
       } else if (++messageCount > 120) return refuse(1008, 'Control message rate exceeded');
-      if (context.authorizeMessage?.(raw.toString()) === false) {
+      // The Host owner changes permissions without a recent sign-in; a guest's session runs on the owner's computer, so a guest still needs one.
+      if (!owner(subject) && context.authorizeMessage?.(raw.toString()) === false) {
         const decoded = decodeClientMessage(raw.toString());
         if (decoded.status !== 'ok' || !('payload' in decoded.value) || !('requestId' in decoded.value.payload)) return refuse(1008, 'Invalid session message');
         client.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'protocol_error', payload: {

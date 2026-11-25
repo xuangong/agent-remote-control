@@ -67,8 +67,8 @@ export const BOARD_PLAN_CHANGES = 20;
 export const BoardStatus = Type.Union([Type.Literal('open'), Type.Literal('working'), Type.Literal('waiting'), Type.Literal('done'), Type.Literal('cancelled')]);
 export type BoardStatus = Static<typeof BoardStatus>;
 export const boardItemOpen = (status: BoardStatus) => status !== 'done' && status !== 'cancelled';
-/** What an item points at: a commit, branch, pull request or file by its text, an attachment by its id, another bot by its id. */
-export const BoardLink = Type.Object({ kind: Type.Union([Type.Literal('commit'), Type.Literal('branch'), Type.Literal('pr'), Type.Literal('file'), Type.Literal('attachment'), Type.Literal('bot')]),
+/** What an item points at: a commit, branch, pull request or file by its text, an attachment by its id, another bot by its id, the Host and folder a bot works in by the Host's name and the folder's path. */
+export const BoardLink = Type.Object({ kind: Type.Union([Type.Literal('commit'), Type.Literal('branch'), Type.Literal('pr'), Type.Literal('file'), Type.Literal('attachment'), Type.Literal('bot'), Type.Literal('host'), Type.Literal('folder')]),
   value: Type.String({ minLength: 1, maxLength: 300 }) }, strict);
 export type BoardLink = Static<typeof BoardLink>;
 /** The fields of an item a writer sets; `changedAt` keeps the version at which each last changed, so a stale write can say what it overwrote. */
@@ -192,7 +192,7 @@ export function botPlacement<T extends BotIdentity & { chief?: string }>(details
 }
 
 /* The standing instructions every bot gets (bots design 5.1): the base instructions all bots share, then its mission. */
-export const BOT_INSTRUCTIONS_VERSION = 10;
+export const BOT_INSTRUCTIONS_VERSION = 11;
 
 const BASE = `You are an assistant of Agent Remote Control. The person, and other assistants, talk to you in this conversation, one turn at a time.
 
@@ -205,6 +205,7 @@ const BASE = `You are an assistant of Agent Remote Control. The person, and othe
 - After a delivery or a report, do not acknowledge or thank: answer one only when it changes what you do. If you must acknowledge, send it with status ack, which starts no turn.
 - What you cannot see or are unsure of (a convention, a decision, someone else's work), ask the bot that knows (list_bots, by mission) rather than guess. Copying a neighbour's style is a guess too: if a bot's mission covers it, ask that bot first. Work outside your mission goes to the bot whose mission fits; hand it over by message and wait for its answer.
 - Move code between computers through a git repository both reach (message the remote, branch and commit); only without one, attach a git bundle (at most 3 files of 8 MiB, downloaded with download_attachment). A received patch, bundle or file is read, never applied or run unless the person or your chief asked.
+- Stay on your Host unless the work needs a CLI it lacks or the Host is loaded (memory nearly full, CPU busy). Then read list_hosts, pick a Host that has the CLI and room, and give create_bot its host with a folder there that belongs to the same work (cwd), or a new one (new_folder); keep a team's folders aligned by name and purpose. Say why you chose it in the item's brief.
 - A message that begins [The person wrote to …] is not addressed to you: take it into account and do not answer it.`;
 
 /** The memory section of a bot's instructions: its facts, each with the id remember and forget name it by. */

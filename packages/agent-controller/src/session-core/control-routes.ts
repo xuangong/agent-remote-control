@@ -87,7 +87,7 @@ export function createControlRoutes(ctx: SessionCoreContext) {
         // A new conversation gets the worker tools its provider must declare at creation; Sides and prompt edits do not.
         let created: string | undefined;
         const worker = editing || settings.sourceNativeSessionId ? undefined : workerExtensions(providerId, undefined, () => created ? nativeRef({ providerId, nativeSessionId: created }) : undefined);
-        const create = () => directoryNativeEffect(entry, targets.map(nativeSessionRefKey), async evidence => { created = await directory.create({ ...settings, ...worker }, evidence); return created; });
+        const create = () => directoryNativeEffect(entry, targets.map(nativeSessionRefKey), async evidence => { created = await directory.create({ ...settings, ...worker, ...(payload.shared === true ? { yolo: false } : {}) }, evidence); return created; });
         const work = () => settings.sourceNativeSessionId && enrollment
           ? enrollment.sourceMutation(scope, operationId, sourceReader!, settings, create,
             async id => (await directory.sourceReferences?.())?.some(grant => grant.nativeSessionId === id && grant.sourceNativeSessionId === settings.sourceNativeSessionId) === true, qualified, directory) : create();

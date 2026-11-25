@@ -121,10 +121,10 @@ describe('a bot\'s memory', () => {
     expect(standingInstructionsText('Coordinate.', facts)).toContain(botInstructions('Coordinate.', facts));
   });
 
-  it('teaches the coordinating habits of version 10 in a short text', () => {
-    expect(BOT_INSTRUCTIONS_VERSION).toBe(10);
+  it('teaches the coordinating habits of version 11 in a short text', () => {
+    expect(BOT_INSTRUCTIONS_VERSION).toBe(11);
     const text = botInstructions(undefined);
-    for (const habit of ['read your board first', 'update_board', 'remember', 'update_mission', 'under 300 characters', 'git bundle', 'between turns', 'ask the bot that knows (list_bots, by mission) rather than guess', 'Copying a neighbour\'s style is a guess too: if a bot\'s mission covers it, ask that bot first.', 'Do not start work no one asked for.', 'goes to the bot whose mission fits', 'Do not ask your staff for progress', 'update_board (assignee)', 'do not acknowledge or thank', 'status ack', 'Answer a message with message and reply_to set to its id; your final text goes to no one.']) expect(text).toContain(habit);
+    for (const habit of ['read your board first', 'update_board', 'remember', 'update_mission', 'under 300 characters', 'git bundle', 'between turns', 'ask the bot that knows (list_bots, by mission) rather than guess', 'Copying a neighbour\'s style is a guess too: if a bot\'s mission covers it, ask that bot first.', 'Do not start work no one asked for.', 'Stay on your Host unless the work needs a CLI it lacks', 'list_hosts', 'new_folder', 'Say why you chose it in the item\'s brief.', 'goes to the bot whose mission fits', 'Do not ask your staff for progress', 'update_board (assignee)', 'do not acknowledge or thank', 'status ack', 'Answer a message with message and reply_to set to its id; your final text goes to no one.']) expect(text).toContain(habit);
     expect(text.length).toBeLessThan(3200);
   });
 

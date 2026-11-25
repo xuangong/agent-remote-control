@@ -214,7 +214,8 @@ export class TeamRuntime implements SessionRole {
     // An answer session is read-only where its provider enforces that, and otherwise works as the provider allows.
     if (seat.ask && seat.member.access === 'read_only' && !(this.access.readOnlyProviders?.() ?? []).includes(seat.member.providerId)) delete seat.member.access;
     if (seat.member.role === 'requester') return this.bindWorker(seat);
-    if (seat.member.role === 'leader') {
+    // A member created in a folder the Relay chose (a bot on another Host) works there; any other starts where its source works.
+    if (seat.member.role === 'leader' && !seat.member.cwd) {
       const source = await this.access.acquire(seat.source.providerId, seat.source.nativeSessionId);
       try { seat.member.cwd = source.agent.snapshot().payload.runtimeInfo.cwd; } finally { source.release(); }
       if (!seat.member.cwd) throw new Error('Source working directory is unavailable.');

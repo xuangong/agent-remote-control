@@ -6,7 +6,7 @@ import { OpenCodeAgentProvider } from './provider.js';
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
-test('persists explicit creation model and planning selections on the native session', async () => {
+test('persists explicit creation model, planning and YOLO selections on the native session', async () => {
   const cwd = process.cwd();
   const native: SessionInfo = { id: 'created', projectID: 'project', location: { directory: cwd }, title: 'Created', cost: 0,
     tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, time: { created: 1, updated: 1 } };
@@ -20,7 +20,8 @@ test('persists explicit creation model and planning selections on the native ses
       response.writeHead(200, { 'Content-Type': 'text/event-stream' }); response.write('data: {"type":"server.connected","data":{}}\n\n'); return;
     }
     let raw = ''; for await (const part of request) raw += part;
-    if (request.method === 'POST') writes.push({ path, body: JSON.parse(raw || '{}') });
+    if (request.method === 'POST' || request.method === 'PATCH') writes.push({ path, body: JSON.parse(raw || '{}') });
+    if (path === '/api/session/created' && request.method === 'PATCH') { Object.assign(native, JSON.parse(raw)); response.writeHead(204).end(); return; }
     if (path === '/api/session' && request.method === 'POST' || path === '/api/session/created') return json({ data: native });
     if (path === '/api/model') return json({ location: { directory: cwd }, data: [{ providerID: 'test', id: 'model', modelID: 'model', name: 'Model', enabled: true, variants: [], limit: { context: 10000, output: 1000 } }] });
     if (path === '/api/agent') return json({ location: { directory: cwd }, data: ['plan', 'build'].map(name => ({ id: name, name, mode: 'primary', hidden: false, permissions: [] })) });
@@ -36,6 +37,9 @@ test('persists explicit creation model and planning selections on the native ses
   const provider = new OpenCodeAgentProvider({ serverUrl: `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}` });
   cleanups.push(() => provider.close());
   await provider.createSession({ sessionId: 'requested', cwd, model: 'test/model', planning: true });
+  expect(writes.some(write => write.path === '/api/session/created' && write.body && 'permissions' in (write.body as object))).toBe(false);
+  await provider.createSession({ sessionId: 'yolo', cwd, yolo: true });
+  expect(writes).toContainEqual({ path: '/api/session/created', body: { permissions: [{ action: '*', resource: '*', effect: 'allow' }] } });
   expect(writes).toContainEqual({ path: '/api/session/created/model', body: { model: { providerID: 'test', id: 'model' } } });
   expect(writes).toContainEqual({ path: '/api/session/created/agent', body: { agent: 'plan' } });
   expect(native.model).toEqual({ providerID: 'test', id: 'model' });

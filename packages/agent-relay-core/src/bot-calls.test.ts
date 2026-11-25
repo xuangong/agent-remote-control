@@ -8,6 +8,7 @@ import type { SavedTeam } from './team-delivery.js';
 import { temporaryBotId } from './bot-calls.js';
 import { memoryAttachmentStorage, PortableAttachmentStore } from './attachments.js';
 import { instructionsHash } from './inboxes.js';
+import type { HostPlace, HostPlaces } from './host-places.js';
 
 // Bots call as their own sessions. The groups and the Hosts are stubs; the broker, tasks, inboxes and their validation are real.
 const ids = { chief: 'b_' + '1'.repeat(32), tracker: 'b_' + '2'.repeat(32) };
@@ -15,15 +16,17 @@ const group = () => ({ window: { id: 'g', title: 'g', revision: 1, views: [['v1'
   binding: { hostId: 'mac', providerId: 'codex', nativeSessionId, title: nativeSessionId } })) },
   bots: { rank: 'm', members: { v1: { botId: ids.chief, name: 'Chief' }, v2: { botId: ids.tracker, name: 'Tracker' } } } }) as unknown as WindowGroup;
 
-function fixture() {
+function fixture(places?: HostPlaces) {
   let state: SavedTeam[] = [], now = 100, workers = 0, offline = false;
   const groups = [group()], placed: Array<{ groupId: string; viewId: string; details: Record<string, unknown> }> = [];
+  const seats: Array<{ hostId: string; cwd?: string }> = [];
   const broker = new TeamBroker({
+    ...(places ? { places } : {}),
     resolveSession: (hostId, providerId, nativeSessionId) => ({ controllerId: hostId, providerId, nativeSessionId }),
     read: () => state, now: () => ++now, assertHost: () => {},
     // Drafts as the Relay's state makes them.
     change: async update => { let result: unknown; state = committed.produce(state, draft => { result = structuredClone(detached(update(draft))); }); return result as never; },
-    createSeat: async (_hostId, seat) => offline ? Promise.reject(new Error('Host offline.')) : ({ ...seat.member, creation: 'ready', activity: 'idle', cwd: '/repo', ...(seat.member.nativeSessionId ? {} : { nativeSessionId: `worker-${++workers}` }) }),
+    createSeat: async (hostId, seat) => { seats.push({ hostId, ...(seat.member.cwd ? { cwd: seat.member.cwd } : {}) }); return offline ? Promise.reject(new Error('Host offline.')) : ({ ...seat.member, creation: 'ready', activity: 'idle', cwd: seat.member.cwd ?? '/repo', ...(seat.member.nativeSessionId ? {} : { nativeSessionId: `worker-${++workers}` }) }); },
     attachments: new PortableAttachmentStore(memoryAttachmentStorage()),
     tasks: { capable: () => true, assertHost: () => {} },
     assistants: { groups: () => groups, capable: () => true,
@@ -39,8 +42,77 @@ function fixture() {
   const inputs = (team: SavedTeam, to: number) => team.messages.filter(message => message.to === team.members[to]!.id).flatMap(message => parseTaskInputs(message.text) ?? []);
   /** Everything queued so far reached its seat and started its turn. */
   const settle = () => { state = state.map(team => ({ ...team, messages: team.messages.map(message => message.status === 'queued' ? { ...message, status: 'accepted' as const, acceptance: 'started' as const } : message) })); };
-  return { broker, as, task, inputs, placed, settle, state: () => state, goOffline: () => { offline = true; } };
+  return { broker, as, task, seats, inputs, placed, settle, state: () => state, goOffline: () => { offline = true; } };
 }
+
+/** Hosts as the Controllers report them; a folder is allowed when it is listed, and a new one is created once. */
+function hostPlaces(hosts: HostPlace[], refuse?: string) {
+  const calls: string[] = [], made = new Set<string>();
+  const places: HostPlaces = {
+    list: async () => hosts, name: id => hosts.find(host => host.id === id)?.name ?? id,
+    assertFolder: async (host, _provider, path) => { calls.push(`open ${host} ${path}`); if (!hosts.find(item => item.id === host)?.workspaces?.some(root => path === root.path || root.folders.includes(path))) throw new Error(`Host "${host}" does not open ${path}.`); },
+    createFolder: async (host, _provider, name, under) => { calls.push(`create ${host} ${name}`); if (refuse) throw new Error(refuse);
+      const path = `${under ?? hosts.find(item => item.id === host)!.workspaces![0]!.path}/${name}`; if (made.has(path)) throw new Error('A file or folder with this name already exists.'); made.add(path); return path; },
+  };
+  return { places, calls };
+}
+const studio: HostPlace = { id: 'studio', name: 'Studio', online: true, providers: ['codex'], cpu: { usage: 0.1, cores: 10 }, memory: { used: 20, total: 64 }, sessions: 1,
+  workspaces: [{ path: '/Users/x/projects', folders: ['/Users/x/projects/shop'] }] };
+
+describe('bots on another Host', () => {
+  it('lists the Hosts of the account to any bot, and to nothing that is no bot', async () => {
+    const f = fixture(hostPlaces([studio]).places);
+    expect(await f.broker.hostCall('mac', { action: 'list_hosts', owner: f.as('chief') })).toEqual({ hosts: [studio] });
+    await expect(f.broker.hostCall('mac', { action: 'list_hosts', owner: f.as('stranger') })).rejects.toThrow();
+    await expect(fixture().broker.hostCall('mac', { action: 'list_hosts', owner: f.as('chief') })).rejects.toThrow('not available on this Relay');
+  });
+
+  it('starts a temporary bot in a folder of another Host, and the item records the Host and the folder', async () => {
+    const { places, calls } = hostPlaces([studio]), f = fixture(places);
+    await f.broker.hostCall('mac', { action: 'update_board', owner: f.as('chief'), items: [{ title: 'Build the shop', brief: 'Build it.' }] });
+    const created = await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Builder', mission: 'Build it.', lifetime: 'temporary', host: 'studio', cwd: '/Users/x/projects/shop', item: 1 });
+    expect(created).toMatchObject({ status: 'working', host: 'Studio', folder: '/Users/x/projects/shop' });
+    expect(calls).toEqual(['open studio /Users/x/projects/shop']);
+    expect(f.task().members.map(member => [member.role, member.hostId])).toEqual([['leader', 'studio'], ['requester', 'mac']]);
+    expect(f.task().members[0]!.cwd).toBe('/Users/x/projects/shop');
+    expect(f.seats).toEqual([{ hostId: 'mac' }, { hostId: 'studio', cwd: '/Users/x/projects/shop' }]);
+    const board = await f.broker.hostCall('mac', { action: 'board', owner: f.as('chief') }) as { items: Array<{ links: unknown[]; assignee: string }> };
+    expect(board.items[0]).toMatchObject({ assignee: (created as { botId: string }).botId, links: [{ kind: 'host', value: 'Studio' }, { kind: 'folder', value: '/Users/x/projects/shop' }] });
+  });
+
+  it('creates a new folder once, even when the call is repeated, and answers a refused folder as the outcome with nothing started', async () => {
+    const { places, calls } = hostPlaces([studio]), f = fixture(places);
+    const input = { action: 'create_bot' as const, owner: f.as('chief'), operationId: 'op', name: 'Builder', mission: 'Build it.', lifetime: 'temporary' as const, host: 'studio', newFolder: { name: 'shop-api' } };
+    const first = await f.broker.hostCall('mac', input) as { botId: string; folder: string };
+    expect(first.folder).toBe('/Users/x/projects/shop-api');
+    expect(await f.broker.hostCall('mac', input)).toMatchObject({ botId: first.botId, folder: '/Users/x/projects/shop-api' });
+    expect(calls.filter(call => call.startsWith('create'))).toEqual(['create studio shop-api']);
+    expect(f.state().filter(team => team.task)).toHaveLength(1);
+    const refused = fixture(hostPlaces([studio], 'Cannot create a folder here.').places);
+    await expect(refused.broker.hostCall('mac', { ...input, owner: refused.as('chief') })).rejects.toThrow('Cannot create a folder here.');
+    expect(refused.state().filter(team => team.task)).toHaveLength(0);
+  });
+
+  it('starts a standing bot on another Host, whose inbox seat is created there in the folder chosen', async () => {
+    const f = fixture(hostPlaces([studio]).places);
+    const created = await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Scribe', mission: 'Keep the docs.', lifetime: 'standing', host: 'studio', newFolder: { name: 'docs', under: '/Users/x/projects' } });
+    expect(created).toMatchObject({ host: 'Studio', folder: '/Users/x/projects/docs' });
+    expect(f.seats).toEqual([{ hostId: 'studio', cwd: '/Users/x/projects/docs' }]);
+    expect(f.state().find(team => team.inbox?.botId)!.members[0]).toMatchObject({ hostId: 'studio', cwd: '/Users/x/projects/docs' });
+  });
+
+  it('refuses a Host without a folder, a folder named twice, a folder the Host does not open and a worktree there', async () => {
+    const f = fixture(hostPlaces([studio]).places);
+    const call = (extra: Record<string, unknown>) => f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Builder', mission: 'Build it.', lifetime: 'temporary', ...extra } as never);
+    await expect(call({ host: 'studio' })).rejects.toThrow('Name the folder');
+    await expect(call({ host: 'studio', cwd: '/a', newFolder: { name: 'b' } })).rejects.toThrow('not both');
+    await expect(call({ host: 'studio', cwd: '/etc' })).rejects.toThrow('does not open /etc');
+    await expect(call({ host: 'studio', cwd: '/Users/x/projects/shop', workspace: 'worktree' })).rejects.toThrow('worktree starts from your own commit');
+    expect(f.state().filter(team => team.task)).toHaveLength(0);
+    // Naming the chief's own Host alone changes nothing.
+    expect(await call({ host: 'mac' })).toMatchObject({ status: 'working' });
+  });
+});
 
 describe('bots calling as their own sessions', () => {
   it('starts a temporary bot that its chief lists, and that reports, asks and tells progress to it', async () => {

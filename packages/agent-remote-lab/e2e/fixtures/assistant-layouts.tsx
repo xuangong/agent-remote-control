@@ -77,10 +77,14 @@ const chain = (history: boolean) => ({ roleKey: 'chief', history, session: histo
   current: sessionOf('chief-session', currentTitle), ...(history ? { ancestors: [sessionOf('chief-oldest', SAMPLE.oldest)] } : { predecessor: sessionOf('chief-earlier', SAMPLE.earlier), ancestors: [sessionOf('chief-oldest', SAMPLE.oldest)] }) });
 
 const hosts: RemoteHost[] = [
-  { id: 'mac', name: 'Mac mini', online: true, managed: true, credentialRotation: true, providers: [{ providerId: 'claude', displayName: 'Claude Code' }, { providerId: 'codex', displayName: 'Codex' }],
+  { id: 'mac', name: 'Mac mini', online: true, hostStatus: true, sessionControl: true, managed: true, credentialRotation: true, providers: [{ providerId: 'claude', displayName: 'Claude Code' }, { providerId: 'codex', displayName: 'Codex' }],
     controller: { version: '0.3.0', platform: 'darwin', arch: 'arm64', nodeMajor: 22 } as RemoteHost['controller'] },
   { id: 'studio', name: 'Studio', online: false, managed: true, access: 'shared', providers: [{ providerId: 'claude', displayName: 'Claude Code' }] },
 ];
+const GiB = 2 ** 30, MiB = 2 ** 20;
+const macStatus = { sampledAt: 1, sessions: { running: 2, waiting: 0, idle: 1, failed: 0 }, cpu: { cores: 8, usage: 0.31 }, memory: { total: 16 * GiB, used: 9 * GiB },
+  processes: [{ kind: 'session' as const, label: 'claude', providerId: 'claude', cpu: 0.62, memory: 1.4 * GiB }, { kind: 'server' as const, label: 'opencode', cpu: 0.03, memory: 310 * MiB },
+    { kind: 'controller' as const, label: 'controller', cpu: 0.01, memory: 96 * MiB }, { kind: 'daemon' as const, label: 'codex', cpu: 0, memory: 64 * MiB }, { kind: 'session' as const, label: 'a-long-process-name-that-must-not-widen-the-card', cpu: 0, memory: 12 * MiB }] };
 const noService = async () => { throw new Error('This fixture has no Relay.'); };
 /** What the Settings page reads in a fixture: a signed-in account, two computers and no Relay. */
 const settingsContext: SettingsContext = {
@@ -90,7 +94,7 @@ const settingsContext: SettingsContext = {
   openTrace: () => {}, openInspector: () => {},
   computers: { hosts, loaded: true, previewClient: new HttpPreviewClient('http://fixture/'),
     tunnelService: { status: noService, start: noService, stop: noService }, openPreviewSource: () => {}, onRevoked: () => {},
-    service: { hosts: async () => ({ hosts }), pair: noService, smartReading: async () => ({ providers: ['claude'] }), setSmartReading: async (_host: string, provider: string, enabled: boolean) => ({ providers: enabled ? ['claude', provider] : [] }) } },
+    service: { hosts: async () => ({ hosts }), pair: noService, hostStatus: async () => macStatus, smartReading: async () => ({ providers: ['claude'] }), setSmartReading: async (_host: string, provider: string, enabled: boolean) => ({ providers: enabled ? ['claude', provider] : [] }) } },
 };
 
 /** Bot mode with the assistants of `initialGroup`, the rail (or the phone's tab bar) beside it and Settings or the directory over it; `conversation` renders the conversation of the assistant shown. */

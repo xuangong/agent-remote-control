@@ -46,7 +46,13 @@ these labels are user-agent descriptions, not verified device identities.
   request Stop work before revocation if native cancellation is wanted. Stop the
   local daemon and inspect remaining native processes when termination matters.
 
-If a sensitive action requires another login, use **Sign in again**. It appears
+The Host owner changes a session's permissions without a recent sign-in, and the
+owner's new sessions start in YOLO (each provider's equivalent: Claude
+`bypassPermissions`, Codex never ask with full access, Copilot allow tools,
+OpenCode allow all) unless the Host locks that provider's permissions. A share
+recipient's sessions run on the owner's computer with the provider default, and
+the recipient needs a recent sign-in to change permissions. If that action
+requires another login, use **Sign in again**. It appears
 where the action failed: in the permission settings, or beneath the composer for
 a command such as `/fork` or `/side` that carries the source's permission
 settings to its new session. The client

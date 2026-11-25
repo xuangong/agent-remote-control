@@ -119,7 +119,7 @@ One implementation, `runHostRequest` (`host-command.ts`), runs over either the C
 
 ## The Relay route
 
-`POST /v1/remote/hosts/:hostId/session/call` with `{ request }` forwards a session command to the Host's `POST /remote/session/call`, for the Host owner only, and only to Controllers whose providers declare `sessionCommands` (older ones close their uplink on an unknown route). Changing `approval`, `sandbox` or `permissions` settings needs a recent sign-in, as in the website, so a command line changes them only on its own computer's Host, through the management socket. Deploy the website before Controllers that declare it: older Relays reject the declaration.
+`POST /v1/remote/hosts/:hostId/session/call` with `{ request }` forwards a session command to the Host's `POST /remote/session/call`, for the Host owner only, and only to Controllers whose providers declare `sessionCommands` (older ones close their uplink on an unknown route). The Host owner changes `approval`, `sandbox` or `permissions` settings without a recent sign-in, in the website and here. The owner's new sessions start in YOLO where the Host leaves permissions to its owner; a share recipient's sessions keep the provider default and its changes need a recent sign-in. Deploy the website before Controllers that declare it: older Relays reject the declaration.
 
 ## Session credentials
 

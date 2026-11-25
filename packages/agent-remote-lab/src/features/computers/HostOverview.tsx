@@ -25,6 +25,10 @@ function usageText(used: number, total: number): string {
   const unit = totalText.slice(-2);
   return usedText.endsWith(unit) ? `${usedText.slice(0, -3)} / ${totalText}` : `${usedText} / ${totalText}`;
 }
+/** Megabytes under a gigabyte, so a small process does not read as 0.0 GB. */
+const processBytes = (value: number) => value >= GiB ? formatBytes(value) : `${Math.max(1, Math.round(value / 2 ** 20))} MB`;
+/** How many of the processes that use the most memory a card lists. */
+const PROCESS_ROWS = 5;
 const lastSegment = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 
 interface HostReading { status?: HostStatus; error?: string }
@@ -80,6 +84,18 @@ function Sessions({ sessions }: { sessions: HostStatus['sessions'] }) {
   </div>;
 }
 
+/** What uses this machine: the Controller's heaviest processes, as the Host reported them with its status. */
+function Processes({ processes }: { processes: NonNullable<HostStatus['processes']> }) {
+  const t = useTranslate();
+  return <div className="lab-host-processes">
+    <h4>{t('hosts.processes')}</h4>
+    <ul>{processes.slice(0, PROCESS_ROWS).map((process, index) => <li key={index} data-kind={process.kind}>
+      <span className="lab-host-process-name" title={process.label} translate="no">{process.label}</span><small>{t(`hosts.processKind.${process.kind}`)}</small>
+      <span className="lab-host-process-figure">{Math.round(process.cpu * 100)}%</span><span className="lab-host-process-figure">{processBytes(process.memory)}</span>
+    </li>)}</ul>
+  </div>;
+}
+
 function HostCard({ host, reading, onOpenHost }: { host: RemoteHost; reading?: HostReading; onOpenHost(id: string): void }) {
   const t = useTranslate();
   const status = reading?.status, shared = host.access === 'shared';
@@ -98,6 +114,7 @@ function HostCard({ host, reading, onOpenHost }: { host: RemoteHost; reading?: H
       {status.disks?.map(disk => <Meter key={disk.path} label={disk.kind === 'home' ? t('hosts.home') : lastSegment(disk.path)} name={t('hosts.disk', { name: disk.kind === 'home' ? t('hosts.home') : lastSegment(disk.path) })} title={disk.path}
         value={disk.used} total={disk.total} text={usageText(disk.used, disk.total)} />)}
     </div> : null}
+    {host.online && status?.processes?.length ? <Processes processes={status.processes} /> : null}
     {!host.online ? <p className="lab-host-note">{t('settings.computer.offline')}</p>
       : !host.sessionControl ? <p className="lab-host-note" role="status" data-update-required>
         {shared ? t('hosts.updateSharedOwner')

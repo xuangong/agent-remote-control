@@ -27,6 +27,13 @@
 .lab-host-bar { height: 4px; margin-top: 5px; overflow: hidden; border-radius: 2px; background: var(--ui-fill); }
 .lab-host-bar i { display: block; height: 100%; border-radius: 2px; background: var(--ui-accent); }
 .lab-host-meter[data-warning] .lab-host-bar i { background: var(--ui-status-attention); }
+.lab-host-processes { display: grid; gap: 6px; min-width: 0; }
+.lab-host-processes h4 { margin: 0; color: var(--orchard-text-secondary); font-size: 12px; font-weight: 600; }
+.lab-host-processes ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.lab-host-processes li { display: grid; grid-template-columns: minmax(0, 1fr) auto 3.5em 5em; align-items: baseline; gap: 8px; min-width: 0; font-size: 12px; }
+.lab-host-process-name { overflow: hidden; color: var(--orchard-text-strong); text-overflow: ellipsis; white-space: nowrap; }
+.lab-host-processes small { color: var(--orchard-text-secondary); font-size: 11px; }
+.lab-host-process-figure { color: var(--orchard-text-strong); font-variant-numeric: tabular-nums; text-align: right; }
 .lab-host-note { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; color: var(--ui-label-secondary); font-size: 12px; }
 .lab-host-update.lab-host-update { flex: none; white-space: nowrap; }
 .lab-host-empty { margin: 0; color: var(--ui-label-secondary); }

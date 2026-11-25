@@ -22,7 +22,7 @@ beforeEach(() => {
   }};
   mock.client = {rpc: {sessions: {checkInUse: vi.fn(async () => ({inUse: []})), close: vi.fn(async () => ({}))}, skills: {getDiscoveryPaths: vi.fn(async () => ({paths: [{path: '/native/project/skills'}]}))}}, start: vi.fn(async () => {}), stop: vi.fn(async () => []), forceStop: vi.fn(async () => {}), createSession: vi.fn(async (config: unknown) => {mock.config = config; return mock.native;}), resumeSession: vi.fn(async (_id: string, config: unknown) => {mock.config = config; return mock.native;}), getSessionMetadata: vi.fn(async () => undefined), listSessions: vi.fn(async () => [])};
 });
-async function open() { const provider = new CopilotAgentProvider({executable: '/test/copilot'}); return {provider, session: await provider.createSession({sessionId: 'public', cwd: process.cwd()})}; }
+async function open(extra: {yolo?: boolean} = {}) { const provider = new CopilotAgentProvider({executable: '/test/copilot'}); return {provider, session: await provider.createSession({sessionId: 'public', cwd: process.cwd(), ...extra})}; }
 async function collect(session: {observe(): AsyncIterable<ProviderStreamItem>}) { const values: ProviderStreamItem[] = []; const done = (async () => {for await (const value of session.observe()) values.push(value);})(); return {values, done}; }
 function usageMetrics(models: Record<string, {inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number}>) {
   return {totalPremiumRequestCost: 0, totalUserRequests: Object.keys(models).length, totalApiDurationMs: 0, sessionStartTime: new Date(0).toISOString(), codeChanges: {linesAdded: 0, linesRemoved: 0, filesModifiedCount: 0, filesModified: []}, modelMetrics: Object.fromEntries(Object.entries(models).map(([model, usage]) => [model, {requests: {count: 1, cost: 0}, usage}]))};
@@ -639,6 +639,17 @@ it('publishes an overlapping completed approval once without leaving a pending p
  await provider.dispose(); await seen.done;
  expect(seen.values.filter(v => v.type === 'observation' && v.event.type === 'timeline' && v.event.item.type === 'interaction')).toHaveLength(1);
  expect(seen.values.some(v => v.type === 'observation' && v.event.type.startsWith('interaction_'))).toBe(false);
+}, 10000);
+
+it('starts a new session allowing every tool when YOLO is asked for, and asking otherwise', async () => {
+ mock.native.rpc.permissions.setApproveAll = vi.fn(async () => ({success: true}));
+ const yolo = await open({yolo: true});
+ try {
+  expect(mock.native.rpc.permissions.setApproveAll).toHaveBeenLastCalledWith({enabled: true});
+  expect((await yolo.session.runtimeInfo()).settings).toContainEqual(expect.objectContaining({id: 'tool_approval_mode', value: 'allow'}));
+ } finally {await yolo.provider.dispose();}
+ const plain = await open();
+ try { expect(mock.native.rpc.permissions.setApproveAll).toHaveBeenLastCalledWith({enabled: false}); } finally {await plain.provider.dispose();}
 }, 10000);
 
 it('exposes acknowledged native tool permissions without an unsupported allow-all getter', async () => {

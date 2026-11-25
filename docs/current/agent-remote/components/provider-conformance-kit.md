@@ -29,7 +29,7 @@ Matrix on 2026-11-22 (pass, or `fails` for an open item reproduced as an expecte
 | K4 input identity | pass | pass | n/a (`none`) | n/a | n/a (`none`) |
 | K5 usage limit | pass | pass | pass | n/a | n/a (no limit signal) |
 | K6 writer elsewhere | pass | n/a | pass | n/a | n/a |
-| K7 an event of a kind it does not know (gap 10) | pass, was a row | pass, was dropped | pass, was dropped | pass, was a refresh | fails: its fake drops the unknown entry when it rewrites the session file (open) |
+| K7 an event of a kind it does not know (gap 10) | pass, was a row | pass, was dropped | pass, was dropped | pass, was a refresh | pass |
 | Slow resume, hung resume, limit at open and at a turn, crash, silent turn, unknown event | pass | pass | pass | n/a | pass |
 | Writer elsewhere | pass (refused, `writer_elsewhere`) | pass (not refused) | pass (refused, `writer_elsewhere`) | n/a | n/a (fork on divergence) |
 | The CLI again after it exited | pass | pass | pass | n/a | pass |

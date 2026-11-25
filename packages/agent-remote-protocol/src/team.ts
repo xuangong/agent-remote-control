@@ -268,7 +268,8 @@ const validShape = (value: Team) => {
 export const isTeam = (value: unknown): value is Team => Value.Check(Team, value)
   // A link binds two main sessions; every other Team starts with its Leader.
   && (value.link || value.room || value.inbox ? true : value.members[0]?.role === 'leader' && value.members.slice(1).every(member => member.role === 'member' || member.role === 'requester')) && validShape(value)
-  && value.members[0]!.hostId === value.source.hostId
+  // A task's worker and an inbox's seat may run on another Host than the session that made them (source); any other Team lives on one Host.
+  && (value.task !== undefined || value.inbox !== undefined || value.members[0]!.hostId === value.source.hostId)
   && new Set(value.members.map(member => member.id)).size === value.members.length
   && new Set([...value.messages, ...(value.unresolvedReceipts ?? [])].map(message => message.id)).size === value.messages.length + (value.unresolvedReceipts?.length ?? 0)
   && (value.unresolvedReceipts ?? []).every(receipt => value.members.some(member => member.id === receipt.from) && value.members.some(member => member.id === receipt.to && (!receipt.resolvedTarget || member.providerId === receipt.resolvedTarget.providerId)))

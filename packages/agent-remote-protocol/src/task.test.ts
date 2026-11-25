@@ -15,6 +15,9 @@ describe('task contract', () => {
     expect(isTeam(team())).toBe(true);
     expect(isTeam(team({ members: [member('worker', 'leader', 'w')] }))).toBe(false);
     expect(isTeam(team({ members: [member('worker', 'leader', 'w'), member('owner', 'requester', 'main'), member('other', 'requester', 'x')] }))).toBe(false);
+    // The worker may run on another Host than its owner; a Team of another kind lives on one Host.
+    expect(isTeam(team({ members: [{ ...member('worker', 'leader', 'w'), hostId: 'studio', cwd: '/work/shop' }, member('owner', 'requester', 'main')] }))).toBe(true);
+    expect(isTeam(team({ task: undefined, members: [{ ...member('worker', 'leader', 'w'), hostId: 'studio' }, member('x', 'member', 'm')] }))).toBe(false);
     expect(isTeam(team({ members: [member('worker', 'leader', 'w'), { ...member('owner', 'requester', 'main'), access: 'read_only' }] }))).toBe(false);
   });
   it('keeps a result exactly for reported tasks', () => {

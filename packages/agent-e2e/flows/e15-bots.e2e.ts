@@ -171,7 +171,7 @@ it('E15: a chief lists the Hosts, starts a bot in a new folder of another Host, 
     expect(listed.hosts.find(host => host.id === studio.hostId)).toMatchObject({ name: 'Studio', online: true, providers: [studio.provider.providerId], workspaces: [{ path: studio.workspace }] });
     // The chief puts the work on its board, then starts the bot for that item in a new folder of the other Host.
     const written = await stack.provider.useTool('chief', 'update_board', { items: [{ title: 'Build the shop API', brief: 'Build the shop API.' }] }) as { items: Array<{ key: number }> };
-    const folder = join(studio.workspace, 'shop-api');
+    const folder = join(studio.workspace!, 'shop-api');
     const created = await stack.provider.useTool('chief', 'create_bot', { name: 'Shop', mission: 'Build the shop API.', host: studio.hostId, new_folder: { name: 'shop-api' }, item: written.items[0]!.key });
     expect(created).toMatchObject({ status: 'working', host: 'Studio', folder });
     expect(existsSync(folder)).toBe(true);

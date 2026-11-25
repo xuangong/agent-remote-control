@@ -59,8 +59,13 @@ async function scrub(recording: Recording, paths: string[]): Promise<Recording> 
   const variants = (await Promise.all(paths.map(async path => [path, await realpath(path).catch(() => path)]))).flat();
   for (const path of [...new Set(variants)].sort((a, b) => b.length - a.length)) text = text.replaceAll(path, path === homedir() ? '/home/user' : '/workspace');
   text = text.replaceAll(homedir(), '/home/user');
+  // The timestamps that name an item are numbered, per kind of item, in the order the items appear (two kinds may share a millisecond);
+  // every other clock reading is one fixed value.
   const stamps = new Map<string, number>();
-  text = text.replace(/\b1[67]\d{11}\b/g, stamp => { if (!stamps.has(stamp)) stamps.set(stamp, 1_795_000_000_000 + stamps.size); return String(stamps.get(stamp)); });
+  const ordinal = (kind: string, stamp: string) => { const key = `${kind}:${stamp}`; if (!stamps.has(key)) stamps.set(key, 1_795_000_000_000 + stamps.size); return stamps.get(key)!; };
+  text = text.replace(/\b(user|assistant|reasoning|error|bash):(1[67]\d{11})\b/g, (_whole, kind: string, stamp: string) => `${kind}:${ordinal(kind, stamp)}`);
+  text = text.replace(/\bturn:(1[67]\d{11})\b/g, (_whole, stamp: string) => `turn:${stamps.get(`user:${stamp}`) ?? 1_795_000_000_000}`);
+  text = text.replace(/\b1[67]\d{11}\b/g, () => '1795000000000');
   return JSON.parse(text) as Recording;
 }
 

@@ -30,6 +30,19 @@ export function validBrokerAssociations(value: unknown): value is BrokerAssociat
     && validCommittedSuccessionLineage(state.freezes);
 }
 
+type PreparedParticipants = { participants: Array<{ kind: string }> } | undefined;
+const tpmParticipants = (row: BrokerAssociationState['freezes'][number]) => (row.projection?.receipt.prepared as PreparedParticipants)?.participants?.some(item => item.kind === 'tpm') === true;
+/** Whether a receipt of an earlier handoff still names a TPM among its participants. */
+export const hasTpmParticipants = (state: BrokerAssociationState | undefined): boolean => state?.freezes?.some(tpmParticipants) === true;
+/** A TPM's relation is not carried anymore: its participants are dropped, in place, from the receipts of earlier handoffs. */
+export function dropTpmParticipants(state: BrokerAssociationState): void {
+  for (const row of state.freezes ?? []) {
+    if (!tpmParticipants(row)) continue;
+    const prepared = row.projection!.receipt.prepared as NonNullable<PreparedParticipants>;
+    prepared.participants = prepared.participants.filter(item => item.kind !== 'tpm');
+  }
+}
+
 /** Explicit additive migration; old writers must reject the resulting version. */
 export function migrateBrokerAssociations(value: unknown): BrokerAssociationState {
   const legacy = value as { version: number; relationChanges?: unknown; relationResets?: unknown };
@@ -49,11 +62,7 @@ export function migrateBrokerAssociations(value: unknown): BrokerAssociationStat
     if ((candidate as unknown as BrokerAssociationState).freezes?.some(row => row.receipt.version === 3 || row.receipt.request.preparation)) throw new Error('Legacy association storage cannot certify native prefix.');
     candidate = { ...candidate, version: 6 };
   }
-  // A TPM's relation is not carried anymore: its participants are dropped from the receipts of earlier handoffs.
-  for (const row of (candidate as unknown as BrokerAssociationState).freezes ?? []) {
-    const prepared = row.projection?.receipt.prepared as { participants: Array<{ kind: string }> } | undefined;
-    if (prepared?.participants?.some(item => item.kind === 'tpm')) prepared.participants = prepared.participants.filter(item => item.kind !== 'tpm');
-  }
+  dropTpmParticipants(candidate as unknown as BrokerAssociationState);
   if (!validBrokerAssociations(candidate)) throw new Error('Invalid durable association state.');
   return candidate;
 }

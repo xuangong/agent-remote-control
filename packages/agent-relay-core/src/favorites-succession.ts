@@ -18,6 +18,14 @@ function identity(row: Row) {
   return { token: row.receipt.token, operationId: projection.receipt.operationId, roleId: projection.role.id, roleRevision: projection.role.revision,
     receiptHash: createHash('sha256').update(JSON.stringify([successionFreezeKey(row.receipt), projection])).digest('hex') };
 }
+/** Names the handoffs of the progress again by their receipts as they are now, after a migration changed what a receipt holds. */
+export function rehashFavoritesProgress(tenant: Tenant): void {
+  const rows = committedSuccessionRows(tenant.broker);
+  for (const entry of tenant.favoritesSuccession?.receipts ?? []) {
+    const row = rows.find(candidate => candidate.receipt.token === entry.token);
+    if (row) entry.receiptHash = identity(row).receiptHash;
+  }
+}
 function address(row: Row, target = false): StarIdentity {
   const ref = target ? row.projection!.role.current : row.projection!.receipt.from;
   return { hostId: row.hostId, providerId: ref.providerId, nativeSessionId: ref.nativeSessionId };

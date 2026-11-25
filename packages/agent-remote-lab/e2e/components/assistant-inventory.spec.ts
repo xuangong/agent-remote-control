@@ -412,6 +412,12 @@ const checks: Record<string, Check> = {
     const settings = details(page).locator('.lab-assistant-settings');
     await expect(settings.getByTestId('session-model-button')).toBeVisible();
     await expect(settings.getByTestId('session-permissions-button')).toBeVisible();
+    // Model and Permissions open their choices in the details, where the reader can reach them.
+    for (const [row, choice] of [['session-model-button', 'Model settings'], ['session-permissions-button', 'Permission settings']] as const) {
+      await press(settings.getByTestId(row));
+      await expect(settings.getByRole('region', { name: choice })).toBeVisible();
+      await expect(settings.getByRole('region', { name: choice })).toBeInViewport();
+    }
     await press(settings.getByRole('button', { name: 'Status' }));
     await expect(settings.getByRole('region', { name: 'Session status' })).toBeVisible();
     await expect(settings.getByLabel('Planning mode').first()).toBeVisible();

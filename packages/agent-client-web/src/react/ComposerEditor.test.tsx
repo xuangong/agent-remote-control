@@ -191,3 +191,16 @@ it('reads the paragraph input as a line break under a coarse pointer', async () 
     expect(change).toHaveBeenCalledWith([{ type: 'text', text: '\n' }]);
   } finally { vi.unstubAllGlobals(); }
 });
+
+it('hides the placeholder while the draft holds text, and shows it for an empty draft', async () => {
+  const view = (parts: DraftPart[]) => <ComposerEditor id="editor" parts={parts} images={{}} disabled={false} placeholder="Message Peach…" onChange={() => {}} onFiles={() => []} onImport={value => [...value]} onRetry={() => {}} onKeyDown={() => {}} />;
+  const container = await render(view([]));
+  const editor = container.querySelector('[role="textbox"]')!;
+  expect(editor.hasAttribute('data-empty')).toBe(true);
+  await rerender(container, view([{ type: 'text', text: 'hello' }]));
+  expect(editor.hasAttribute('data-empty')).toBe(false);
+  await rerender(container, view([{ type: 'text', text: 'a' }, { type: 'image', imageId: 'one', label: 'image #1' }]));
+  expect(editor.hasAttribute('data-empty')).toBe(false);
+  await rerender(container, view([]));
+  expect(editor.hasAttribute('data-empty')).toBe(true);
+});

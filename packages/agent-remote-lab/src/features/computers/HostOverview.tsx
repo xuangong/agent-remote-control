@@ -1,6 +1,6 @@
 import { errorWords } from '@orchardworks/agent-client';
 import './host-overview.css';
-import { Fragment, useEffect, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { HostStatus } from '@orchardworks/agent-remote-protocol';
 import { Button } from '../../ui/Button.js';
 import { Pill } from '@orchardworks/agent-client-web/primitives';
@@ -8,6 +8,7 @@ import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { Icon } from '../../ui/Icon.js';
 import type { HostPairingService, RemoteHost } from '../../kernel/remote-host.js';
 import { PairingKeys } from './PairingKeys.js';
+import { useKeptPlace, useReservedHeight } from './kept-place.js';
 
 /** How often an open Hosts page reads each Host's status. */
 const REFRESH_MS = 5_000;
@@ -32,11 +33,16 @@ const PROCESS_ROWS = 5;
 const lastSegment = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 
 interface HostReading { status?: HostStatus; error?: string }
+/** The last reading of each Host per service, kept while the page lives: Settings opens with the figures it last showed and refreshes them in place. */
+const remembered = new WeakMap<object, Map<string, HostReading>>();
+const lastReadings = (service: object) => { let map = remembered.get(service); if (!map) remembered.set(service, map = new Map()); return map; };
+/** The height a card's figures are expected to take before the first reading arrives: sessions, CPU, memory and a disk. */
+const FIGURES_HEIGHT = 150;
 
 /** Reads the status of every online Host that offers it, while the page is visible; a failed read keeps the last figures. */
 function useHostStatuses(service: Pick<HostPairingService, 'hostStatus'>, hosts: readonly RemoteHost[], visible: boolean): Record<string, HostReading> {
   const t = useTranslate();
-  const [readings, setReadings] = useState<Record<string, HostReading>>({});
+  const [readings, setReadings] = useState<Record<string, HostReading>>(() => Object.fromEntries(lastReadings(service)));
   const eligible = hosts.filter(host => host.online && host.hostStatus).map(host => host.id).join('\n');
   useEffect(() => {
     const read = service.hostStatus?.bind(service);
@@ -44,7 +50,10 @@ function useHostStatuses(service: Pick<HostPairingService, 'hostStatus'>, hosts:
     let cancelled = false;
     const reading = new Set<string>();
     const update = (id: string, next: (previous: HostReading | undefined) => HostReading) => {
-      if (!cancelled) setReadings(current => ({ ...current, [id]: next(current[id]) }));
+      if (cancelled) return;
+      const value = next(lastReadings(service).get(id));
+      lastReadings(service).set(id, value);
+      setReadings(current => ({ ...current, [id]: value }));
     };
     const refresh = () => {
       if (document.visibilityState === 'hidden') return;
@@ -99,6 +108,9 @@ function Processes({ processes }: { processes: NonNullable<HostStatus['processes
 function HostCard({ host, reading, onOpenHost }: { host: RemoteHost; reading?: HostReading; onOpenHost(id: string): void }) {
   const t = useTranslate();
   const status = reading?.status, shared = host.access === 'shared';
+  // An online Host that answers status reads holds the space of its figures from the start, so they arrive in place.
+  const figuresExpected = host.online && Boolean(host.hostStatus) && !shared;
+  const figures = useReservedHeight(host.id, figuresExpected ? FIGURES_HEIGHT : 0);
   const subtitle = [host.environment?.os.name ?? host.controller?.platform, host.environment?.os.arch ?? host.controller?.arch,
     host.controller ? t('settings.computer.version', { version: host.controller.version }) : undefined].filter(Boolean).join(' · ');
   return <article className="lab-host-card" data-host-id={host.id} data-online={host.online || undefined}>
@@ -107,14 +119,16 @@ function HostCard({ host, reading, onOpenHost }: { host: RemoteHost; reading?: H
       <span className="lab-host-name"><strong>{host.name}</strong>{subtitle ? <small>{subtitle}</small> : null}</span>
       <Icon name="chevron-right" size={16} />
     </button>
-    {host.online && status ? <Sessions sessions={status.sessions} /> : null}
-    {host.online && status?.cpu || host.online && status?.memory || host.online && status?.disks ? <div className="lab-host-meters">
-      {status.cpu ? <Meter label="CPU" value={status.cpu.usage} total={1} text={`${Math.round(status.cpu.usage * 100)}% · ${t('hosts.cores', { count: status.cpu.cores })}`} /> : null}
-      {status.memory ? <Meter label={t('hosts.memory')} value={status.memory.used} total={status.memory.total} text={usageText(status.memory.used, status.memory.total)} /> : null}
-      {status.disks?.map(disk => <Meter key={disk.path} label={disk.kind === 'home' ? t('hosts.home') : lastSegment(disk.path)} name={t('hosts.disk', { name: disk.kind === 'home' ? t('hosts.home') : lastSegment(disk.path) })} title={disk.path}
-        value={disk.used} total={disk.total} text={usageText(disk.used, disk.total)} />)}
+    {figuresExpected || host.online && status ? <div ref={figures.ref} className="lab-host-figures" style={{ minHeight: figures.minHeight }}>
+      {status ? <Sessions sessions={status.sessions} /> : null}
+      {status?.cpu || status?.memory || status?.disks ? <div className="lab-host-meters">
+        {status.cpu ? <Meter label="CPU" value={status.cpu.usage} total={1} text={`${Math.round(status.cpu.usage * 100)}% · ${t('hosts.cores', { count: status.cpu.cores })}`} /> : null}
+        {status.memory ? <Meter label={t('hosts.memory')} value={status.memory.used} total={status.memory.total} text={usageText(status.memory.used, status.memory.total)} /> : null}
+        {status.disks?.map(disk => <Meter key={disk.path} label={disk.kind === 'home' ? t('hosts.home') : lastSegment(disk.path)} name={t('hosts.disk', { name: disk.kind === 'home' ? t('hosts.home') : lastSegment(disk.path) })} title={disk.path}
+          value={disk.used} total={disk.total} text={usageText(disk.used, disk.total)} />)}
+      </div> : null}
+      {status?.processes?.length ? <Processes processes={status.processes} /> : null}
     </div> : null}
-    {host.online && status?.processes?.length ? <Processes processes={status.processes} /> : null}
     {!host.online ? <p className="lab-host-note">{t('settings.computer.offline')}</p>
       : !host.sessionControl ? <p className="lab-host-note" role="status" data-update-required>
         {shared ? t('hosts.updateSharedOwner')
@@ -139,10 +153,12 @@ export function HostOverview({ hosts, service, visible, compact = false, lead, o
   const t = useTranslate();
   const readings = useHostStatuses(service, hosts, visible);
   const [pairing, setPairing] = useState(false);
+  const grid = useRef<HTMLDivElement>(null);
+  useKeptPlace(grid, hosts.length);
   return <section className="lab-host-overview" aria-label={t('settings.group.computers')}>
     <div className="lab-host-overview-head">{lead}<Pill className="lab-host-pair" aria-expanded={pairing} onClick={() => setPairing(value => !value)}>{t('settings.computers.pair')}</Pill></div>
     {pairing ? <div className="lab-host-pairing-panel"><PairingKeys service={service} /></div> : null}
-    {hosts.length ? <div className="lab-host-grid" data-compact={compact || undefined}>
+    {hosts.length ? <div ref={grid} className="lab-host-grid" data-compact={compact || undefined}>
       {hosts.map(host => <HostCard key={host.id} host={host} reading={readings[host.id]} onOpenHost={onOpenHost} />)}
     </div> : <p className="lab-host-empty">{t('hosts.empty')}</p>}
   </section>;

@@ -1,9 +1,8 @@
 import { startLatencyProxy } from '../../faults/latency-proxy.mjs';
 import { catchUpCostsOneTailRequest, draftAndPositionKept, halfOpenSocketRecovers, journalSequencesContiguous, noBlankFrame, noDuplicateItemKey, noSessionConnectionLabel, type InvariantResult } from '../invariants/index.js';
 import { PageProbe, withContext } from '../lib/probe.js';
-import { mergeInvariantResults, type ScheduleStep } from '../report.js';
+import { mergeInvariantResults } from '../report.js';
 import type { Scenario } from '../scenario.js';
-import { TranscriptRecorder } from '../transcript.js';
 import { setTimeout as delay } from 'node:timers/promises';
 
 /**
@@ -17,10 +16,10 @@ export const hiddenAndDrops: Scenario = {
   quick: true,
   async run(context) {
     const offlineSeconds = context.quick ? [10] : [10, 60, 300];
-    const recorder = new TranscriptRecorder();
-    const schedule: ScheduleStep[] = [];
-    const conditions: Array<{ label: string; results: InvariantResult[] }> = [];
-    const measurements: Record<string, unknown> = { drops: [] as unknown[] };
+    const recorder = context.evidence.recorder;
+    const schedule = context.evidence.schedule;
+    const conditions = context.evidence.conditions;
+    const measurements: Record<string, unknown> = Object.assign(context.evidence.measurements, { drops: [] as unknown[] });
     const address = await context.sessionWithLongHistory('claude');
     const url = await context.pool.link(address);
     /** A turn the session runs while the page watches, after the page came back: it reaches the page live, not in a catch-up page. */
@@ -34,6 +33,7 @@ export const hiddenAndDrops: Scenario = {
     try {
       await withContext(context.browser, proxy.origin, async browserContext => {
         const probe = await PageProbe.create(browserContext, recorder.origin);
+        context.evidence.step('opening the page');
         await probe.open(url.replace(context.instance.origin, proxy.origin), 'open');
         await probe.page.waitForFunction(() => (window as any).__smoke.read().composer === 'enabled', undefined, { timeout: 60_000 });
         for (const seconds of offlineSeconds) {
@@ -52,6 +52,7 @@ export const hiddenAndDrops: Scenario = {
           const before = await probe.page.evaluate(() => ({ composer: (window as any).__smoke.composer(), anchor: (window as any).__smoke.anchor() }));
           recorder.mark('page-hidden'); await probe.setHidden(true);
           recorder.mark('offline'); proxy.setOffline(true);
+          context.evidence.step(`hidden and offline for ${seconds} s`);
           schedule.push({ t: recorder.clock(), action: 'hidden-and-offline', detail: { seconds } });
           // The session keeps working while the page is away: a new message arrives through the command line.
           await context.pool.send(address, `Reply with the single word ${word} and nothing else.`);
@@ -79,6 +80,7 @@ export const hiddenAndDrops: Scenario = {
           const first = recorder.transcript().at(-1)?.n ?? 0;
           const affected = proxy.halfOpenWebSockets();
           recorder.mark('fault', { kind: 'half-open', sockets: affected });
+          context.evidence.step('half-open sockets');
           schedule.push({ t: recorder.clock(), action: 'half-open', detail: { sockets: affected } });
           await context.pool.send(address, `Reply with the single word ${word} and nothing else.`);
           const caughtUp = await probe.waitForReplyContaining(word, 120_000);

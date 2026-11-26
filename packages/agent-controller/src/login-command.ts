@@ -42,11 +42,11 @@ export async function runLoginCommand(command: 'login' | 'logout', args: readonl
       if (args.length > 1) usage('login status takes no arguments.');
       const credentials = await readCredentials(context.stateDir);
       if (!credentials) return printResult(context.write, { signedIn: false });
-      const { status, data } = await relayRequest(credentials, 'GET', '/auth/status', undefined, fetcher, 15_000).catch(error => {
-        if (error instanceof CliError && error.code === 'signed_out') return { status: 401, data: {} };
-        throw error;
-      });
-      return printResult(context.write, status === 200 ? { signedIn: true, serverUrl: credentials.serverUrl, user: data.user, expiresAt: new Date(credentials.expiresAt).toISOString() }
+      // /auth/status can accept a session that the user API refuses, so the status is the answer of both.
+      const refused = (error: unknown) => { if (error instanceof CliError && error.code === 'signed_out') return { status: 401, data: {} }; throw error; };
+      const session = await relayRequest(credentials, 'GET', '/auth/status', undefined, fetcher, 15_000).catch(refused);
+      const accepted = session.status === 200 && (await relayRequest(credentials, 'GET', '/v1/remote/hosts', undefined, fetcher, 15_000).catch(refused)).status !== 401;
+      return printResult(context.write, accepted ? { signedIn: true, serverUrl: credentials.serverUrl, user: session.data.user, expiresAt: new Date(credentials.expiresAt).toISOString() }
         : { signedIn: false, serverUrl: credentials.serverUrl });
     }
     const { positional, options } = parseOptions(args, { server: 'value', 'no-browser': 'flag' });

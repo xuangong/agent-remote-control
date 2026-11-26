@@ -1,5 +1,6 @@
 import type { InvariantResult } from './invariants/types.js';
 import type { Finding, ScheduleStep } from './report.js';
+import type { ScenarioEvidence } from './evidence.js';
 import type { TranscriptRecorder } from './transcript.js';
 import type { SessionPool, Provider } from './lib/sessions.js';
 import type { Instance } from '../faults/instance-process.mjs';
@@ -20,6 +21,8 @@ export interface RunContext {
   sessionWithHistory(provider: Provider): Promise<string>;
   /** A session whose history is taller than the page's viewport, so a reader can be somewhere in the middle of it. */
   sessionWithLongHistory(provider: Provider): Promise<string>;
+  /** Where the scenario writes its schedule, measurements, finished conditions, wire transcript and current step as it goes, so a run that times out still reports them. */
+  evidence: ScenarioEvidence;
   /** The scenario's clock: milliseconds since it started. */
   now(): number;
 }

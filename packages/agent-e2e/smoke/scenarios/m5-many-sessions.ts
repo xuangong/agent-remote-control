@@ -5,9 +5,8 @@ import { positiveInteger } from '../lib/arguments.js';
 import { createBotGroup } from '../lib/bot-group.js';
 import { PageProbe, withContext } from '../lib/probe.js';
 import { startScriptedHost } from '../lib/scripted-host.js';
-import { mergeInvariantResults, type ScheduleStep } from '../report.js';
+import { mergeInvariantResults } from '../report.js';
 import type { Scenario } from '../scenario.js';
-import { TranscriptRecorder } from '../transcript.js';
 import { setTimeout as delay } from 'node:timers/promises';
 
 /**
@@ -32,9 +31,9 @@ export const manySessions: Scenario = {
     const groupSize = Math.min(50, sessionCount);
     const actions = positiveInteger('--actions', 300);
     const plan = planManySessions({ seed: context.seed, sessionCount, groupSize, actions, spacingMs: 300 });
-    const recorder = new TranscriptRecorder();
-    const schedule: ScheduleStep[] = [];
-    const measurements: Record<string, unknown> = { sessions: sessionCount, groupSize, actions };
+    const recorder = context.evidence.recorder;
+    const schedule = context.evidence.schedule;
+    const measurements: Record<string, unknown> = Object.assign(context.evidence.measurements, { sessions: sessionCount, groupSize, actions });
     const titleOf = (id: string) => `Bot ${id}`;
     const host = await startScriptedHost(context.instance, { name: 'Smoke M5 Host', installationId: `smoke-m5-${context.seed}`,
       sessions: Object.fromEntries(plan.sessions.map(session => [session.id, { title: titleOf(session.id), history: [{ role: 'user' as const, text: `Question for ${session.id}` }, { role: 'assistant' as const, text: `Answer from ${session.id}` }] }])) });
@@ -46,6 +45,7 @@ export const manySessions: Scenario = {
         const probe = await PageProbe.create(browserContext, recorder.origin);
         const url = new URL(host.sessionUrl(grouped[0]!).replace(context.instance.origin, proxy.origin));
         url.search = `?mode=bot&section=${encodeURIComponent(group.id)}&bot=${encodeURIComponent(group.viewOf(grouped[0]!))}`;
+        context.evidence.step('opening the group page');
         await probe.open(url.toString(), 'open group', { rowsDeadlineMs: 90_000 });
         await probe.page.waitForSelector('.lab-bot-row', { timeout: 60_000 });
         const rosterRows = await probe.page.locator('.lab-bot-row').count();
@@ -61,7 +61,8 @@ export const manySessions: Scenario = {
         const started = Date.now();
         let nextSample = started + SAMPLE_EVERY_MS;
         const applied: Record<string, number> = { open: 0, fold: 0, sleep: 0, wake: 0, churn: 0 };
-        for (const step of plan.plan) {
+        for (const [index, step] of plan.plan.entries()) {
+          context.evidence.step(`applying action ${index + 1} of ${plan.plan.length}: ${step.action}`);
           const wait = started + step.at - Date.now();
           if (wait > 0) await delay(wait);
           const inGroup = grouped.includes(step.session);

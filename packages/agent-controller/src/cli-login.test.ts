@@ -80,6 +80,17 @@ it('signs the command line in once the browser allows its code, and out again', 
   expect(JSON.parse(output)).toEqual({ signedIn: false });
 });
 
+it('reports a command line session the user API refuses as signed out, though the sign-in endpoint accepts it', async () => {
+  const dir = await stateDir();
+  await saveCredentials(dir, credentials);
+  let output = '';
+  const refusedHere = relay(call => call.url.endsWith('/auth/status') ? { status: 200, body: { user: { id: 'alice' } } } : { status: 401, body: { error: 'signed_out' } });
+  const context = { stateDir: dir, pairedServer: async () => undefined, write: (text: string) => { output += text; }, fetcher: refusedHere.fetcher };
+  expect(await runLoginCommand('login', ['status'], context)).toBe(0);
+  expect(JSON.parse(output)).toEqual({ signedIn: false, serverUrl: 'https://relay.example' });
+  expect(refusedHere.calls.map(call => call.url)).toEqual(['https://relay.example/auth/status', 'https://relay.example/u/alice-ns/v1/remote/hosts']);
+});
+
 it('reports a refused sign-in and wrong usage', async () => {
   const dir = await stateDir();
   const { fetcher } = relay(call => call.url.endsWith('/auth/cli/start')

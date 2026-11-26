@@ -2,9 +2,8 @@ import { startLatencyProxy } from '../../faults/latency-proxy.mjs';
 import { firstPaintFromDeviceStore, journalSequencesContiguous, messagesSettleOnce, noDuplicateItemKey, noSessionConnectionLabel, type InvariantResult } from '../invariants/index.js';
 import { PageProbe, withContext } from '../lib/probe.js';
 import type { Provider } from '../lib/sessions.js';
-import { mergeInvariantResults, type ScheduleStep } from '../report.js';
+import { mergeInvariantResults } from '../report.js';
 import type { Scenario } from '../scenario.js';
-import { TranscriptRecorder } from '../transcript.js';
 
 interface Condition { provider: Provider; rttMs: number; lossRate: number }
 
@@ -24,13 +23,14 @@ export const badNetwork: Scenario = {
     const conditions: Condition[] = chosen.length > 0 ? chosen.map(text => { const [provider, rttMs, lossRate] = text.split(':'); return { provider: provider as Provider, rttMs: Number(rttMs), lossRate: Number(lossRate) }; }) : context.quick
       ? [{ provider: 'claude', rttMs: 300, lossRate: 0.02 }, { provider: 'codex', rttMs: 300, lossRate: 0.02 }]
       : [...[50, 300, 1500].flatMap(rttMs => [0.02, 0.1].map(lossRate => ({ provider: 'claude' as const, rttMs, lossRate }))), { provider: 'codex', rttMs: 300, lossRate: 0.02 }];
-    const schedule: ScheduleStep[] = [];
-    const results: Array<{ label: string; results: InvariantResult[] }> = [];
-    const measurements: Record<string, unknown> = { conditions: [] as unknown[] };
-    const recorder = new TranscriptRecorder();
+    const schedule = context.evidence.schedule;
+    const results = context.evidence.conditions;
+    const measurements: Record<string, unknown> = Object.assign(context.evidence.measurements, { conditions: [] as unknown[] });
+    const recorder = context.evidence.recorder;
     for (const condition of conditions) {
       const name = label(condition);
       context.log(`M1: ${name}`);
+      context.evidence.step(`condition ${name}: preparing a session`);
       const address = await context.sessionWithHistory(condition.provider);
       const url = await context.pool.link(address);
       const proxy = await startLatencyProxy({ target: context.instance.origin, rttMs: condition.rttMs, jitterMs: Math.round(condition.rttMs * 0.2), lossRate: condition.lossRate,
@@ -42,11 +42,13 @@ export const badNetwork: Scenario = {
         const word = `ZEPHYR${context.random.int(100, 999)}`;
         const condition_ = await withContext(context.browser, proxy.origin, async browserContext => {
           const first = await PageProbe.create(browserContext, recorder.origin);
+          context.evidence.step(`condition ${name}: first open`);
           const firstOpen = await first.open(viaProxy, `first open, ${name}`, { rowsDeadlineMs: 90_000 });
           const kept = firstOpen.timedOut || await first.waitForKeptRecord();
           await first.close();
           if (!kept) context.log(`M1: ${name}: the first open left no record on the device`);
           const probe = await PageProbe.create(browserContext, recorder.origin);
+          context.evidence.step(`condition ${name}: revisit`);
           const revisit = firstOpen.timedOut ? firstOpen : await probe.open(viaProxy, `revisit, ${name}`, { rowsDeadlineMs: 90_000 });
           const ready = !revisit.timedOut && await probe.page.waitForFunction(() => (window as any).__smoke.read().composer === 'enabled', undefined, { timeout: 90_000 }).then(() => true, () => false);
           if (!ready) {

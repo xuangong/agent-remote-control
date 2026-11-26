@@ -16,7 +16,7 @@ const gatewayMode = document.querySelector('meta[name="agent-remote-auth"]')?.ge
 void keepInstalledAppStorage();
 // The browser may offer installation before anything renders; Settings offers it from then on.
 keepInstallPrompt();
-// A production build starts offline from its stored shell and takes a new build at the next reload (app-shell.ts).
+// A production build starts from its stored shell whatever the network does, and takes a new build at the next launch (app-shell.ts).
 registerAppShell(window, import.meta.env.PROD);
 // The application chunk waits at most a second for the stored conversations, so its first render already reads them.
 const storedConversations = Promise.race([startDeviceStore(gatewayMode), new Promise<void>(resolve => setTimeout(resolve, 1000))]);

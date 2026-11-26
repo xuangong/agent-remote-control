@@ -14,12 +14,10 @@ interface InstallEvent extends ExtendableEvent { addRoutes?(routes: readonly unk
 declare const URLPattern: (new (input: { pathname: string; baseURL?: string }) => unknown) | undefined;
 interface FetchEvent extends ExtendableEvent {
   readonly request: Request;
-  readonly preloadResponse: Promise<Response | undefined>;
   respondWith(response: Promise<Response>): void;
 }
 interface WorkerScope {
   readonly location: { readonly origin: string };
-  readonly registration: { readonly navigationPreload?: { enable(): Promise<void> } };
   skipWaiting(): Promise<void>;
   addEventListener(type: 'install', listener: (event: InstallEvent) => void): void;
   addEventListener(type: 'activate', listener: (event: ExtendableEvent) => void): void;
@@ -38,12 +36,11 @@ function directRoutes(event: InstallEvent): Promise<void> {
     .catch(() => undefined);
 }
 
-// A new build takes over as soon as its shell is stored: the page asks the network first, so no open page depends on the older worker.
+// A new build takes over as soon as its shell is stored. The next page opens from it; pages already open keep their own build's bundles.
 scope.addEventListener('install', event => event.waitUntil(Promise.all([directRoutes(event), worker.install()]).then(() => scope.skipWaiting())));
-// The navigation preload starts the page's request while the worker wakes, so a network-first open costs no worker start-up.
-scope.addEventListener('activate', event => event.waitUntil(Promise.all([worker.activate(), scope.registration.navigationPreload?.enable()])));
+scope.addEventListener('activate', event => event.waitUntil(worker.activate()));
 scope.addEventListener('fetch', event => {
-  const answer = worker.respond(event.request, { origin: scope.location.origin, preload: event.preloadResponse, waitUntil: work => event.waitUntil(work) });
+  const answer = worker.respond(event.request, { origin: scope.location.origin, waitUntil: work => event.waitUntil(work) });
   if (answer) event.respondWith(answer);
 });
 // A push shows its reminder and sets the badge's dot; a click focuses the page that shows the conversation, or opens it.

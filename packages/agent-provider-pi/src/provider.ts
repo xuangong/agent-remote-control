@@ -35,7 +35,7 @@ export class PiAgentProvider implements AgentProviderAdapter {
   readonly journal = { itemIdentity: 1 as const };
   /** A session's id is the UUID pi generates. */
   readonly createdSessionIdMaxLength: number = 36;
-  readonly descriptor = { providerId: provider, displayName: 'pi', sessionExtensions: { instructions: true, tools: true, toolNamespaces: 'attachment' as const },
+  readonly descriptor = { providerId: provider, displayName: 'pi', sessionExtensions: { instructions: true, tools: true, toolNamespaces: 'live' as const },
     sessionAccess: { readOnly: true as const }, sessionHostAccess: true as const, behaviour: piBehaviour };
   private readonly sessions = new Map<string, PiAgentSession>();
   private readonly loading = new Set<string>();

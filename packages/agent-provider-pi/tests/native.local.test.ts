@@ -83,6 +83,24 @@ describe('the adapter over the real pi', () => {
     } finally { await f.close(); }
   }, 60_000);
 
+  it('offers tools the Host gives a running session at its next run, without reopening it', async () => {
+    const calls: unknown[] = [];
+    const message: AgentSessionTool = { name: 'message', description: 'Send a message to another bot.', inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false },
+      execute: async args => { calls.push(args); return 'delivered'; } };
+    const f = await fixture((body, res, index) => reply(res, body, index === 2 ? call('agent_remote__message', { text: 'now a bot' }) : index === 3 ? 'SENT' : 'PLAIN'));
+    try {
+      const session = await f.provider.createSession({ sessionId: 'a', cwd: f.cwd });
+      const seen = observe(session);
+      await session.sendMessage('plain'); await turns(seen, 1);
+      expect(toolNames(f.requests[0]!)).not.toContain('agent_remote__message');
+      await session.updateToolNamespaces!([{ name: 'agent_remote', description: 'Bots', tools: [message] }]);
+      await session.sendMessage('now report'); await turns(seen, 2);
+      expect(toolNames(f.requests[1]!)).toContain('agent_remote__message');
+      expect(calls).toEqual([{ text: 'now a bot' }]);
+      await session.dispose(); await seen.done;
+    } finally { await f.close(); }
+  }, 60_000);
+
   it('offers a read-only session only tools that cannot write, and its own', async () => {
     const own: AgentSessionTool = { name: 'board', description: 'Read the board.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, execute: async () => '{}' };
     const f = await fixture((body, res) => reply(res, body, 'READ ONLY'));

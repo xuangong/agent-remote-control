@@ -32,7 +32,8 @@
         "name": "RELAY",
         "class_name": "RelayObject"
       }
-    ]
+    ],
+    "code_update_strategy": { "mode": "immediate" }
   },
   "migrations": [
     {

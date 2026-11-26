@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, test } from 'vitest';
+import { unstable_readConfig } from 'wrangler';
 
 /** Reads a wrangler JSONC file whose comments sit on lines of their own. */
 function read(path: string): any {
@@ -34,5 +35,13 @@ for (const [relay, enabled, partitions, partitionsName] of [
     expect(config.migrations).toEqual([{ tag: 'v1', new_sqlite_classes: ['JournalPartition'] }]);
     expect(config.vars).toBeUndefined();
     expect(config.routes).toBeUndefined();
+  });
+}
+
+/** A deploy must reach the running Durable Objects at once: Cloudflare defers an update by 300 s unless the config says `immediate`. */
+for (const path of ['wrangler.jsonc', 'wrangler.journals.jsonc', 'wrangler.journals-enabled.jsonc', '../../deploy/self-hosted/wrangler.jsonc', '../../deploy/self-hosted/wrangler.journals.jsonc', '../../deploy/self-hosted/wrangler.journals-enabled.jsonc']) {
+  test(`${path} applies a code update to its Durable Objects immediately, as the installed wrangler reads it`, () => {
+    const config = unstable_readConfig({ config: resolve(__dirname, '..', path) }, {});
+    expect(config.durable_objects.code_update_strategy).toEqual({ mode: 'immediate' });
   });
 }

@@ -16,7 +16,7 @@ function harness({ repo = {}, yes = true, dry = false, changed = ['packages/agen
       const key = argv.join(' ');
       if (key === 'git rev-parse --abbrev-ref HEAD') return { status: 0, stdout: facts.branch };
       if (key.startsWith('git status')) return { status: 0, stdout: facts.dirty };
-      if (key === 'git fetch origin main') return { status: 0, stdout: '' };
+      if (key === 'git fetch --tags origin') { calls.push({ argv: 'fetch' }); return { status: facts.fetchStatus ?? 0, stdout: '' }; }
       if (key === 'git rev-parse HEAD') return { status: 0, stdout: facts.head };
       if (key === 'git rev-parse origin/main') return { status: 0, stdout: facts.origin };
       if (key.startsWith('git log')) return { status: 0, stdout: facts.subject };
@@ -75,6 +75,15 @@ test('refuses off main, with a dirty tree, or behind origin, before changing any
     await assert.rejects(runRelease(h.ctx, options), error => error instanceof Refusal && /^a\. preconditions refused/.test(error.message));
     assert.deepEqual(h.calls, []);
   }
+});
+
+test('fetches tags first and refuses, changing nothing, when the fetch fails', async () => {
+  const ok = harness();
+  await runRelease(ok.ctx, options);
+  assert.equal(ok.commands()[0], 'fetch');
+  const failed = harness({ repo: { fetchStatus: 1 } });
+  await assert.rejects(runRelease(failed.ctx, options), /a\. preconditions refused: `git fetch --tags origin` failed/);
+  assert.deepEqual(failed.commands(), ['fetch']);
 });
 
 test('refuses a bad version and a missing summary', async () => {

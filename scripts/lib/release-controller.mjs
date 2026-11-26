@@ -41,7 +41,8 @@ export async function runRelease(ctx, options, { only } = {}) {
       check() {
         if (out('rev-parse', '--abbrev-ref', 'HEAD') !== 'main') refuse('A release runs on main.');
         if (out('status', '--porcelain', '--untracked-files=no')) refuse('The working tree has uncommitted changes.');
-        git('fetch', 'origin', 'main');
+        // Releases create tags on GitHub, so local tags lag; never decide from a stale list.
+        if (git('fetch', '--tags', 'origin').status !== 0) refuse('`git fetch --tags origin` failed or timed out; check the network and rerun rather than using stale tags.');
         if (out('rev-parse', 'HEAD') !== out('rev-parse', 'origin/main')) refuse('main is not at origin/main; pull or push first.');
       },
       run: () => ctx.log('On main, clean, and at origin/main.'),

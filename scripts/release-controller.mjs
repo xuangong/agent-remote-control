@@ -14,7 +14,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const { values, positionals } = parseArgs({ allowPositionals: true, options: { summary: { type: 'string' }, 'gate-passed': { type: 'string' }, yes: { type: 'boolean' }, 'dry-run': { type: 'boolean' } } });
 const [version] = positionals;
 const dry = Boolean(values['dry-run']);
-const spawnIn = (argv, extra) => spawnSync(argv[0], argv.slice(1), { cwd: root, encoding: 'utf8', ...extra });
+const spawnIn = (argv, extra) => spawnSync(argv[0], argv.slice(1), { cwd: root, encoding: 'utf8', timeout: argv[1] === 'fetch' ? 60_000 : undefined, ...extra });
 const gitPath = spawnIn(['git', 'rev-parse', '--git-path', `arc-release-${version}.json`]).stdout.trim();
 const statePath = resolve(root, gitPath);
 const load = () => existsSync(statePath) ? JSON.parse(readFileSync(statePath, 'utf8')) : {};

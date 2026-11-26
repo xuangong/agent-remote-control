@@ -13,6 +13,11 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const git = (...args) => { const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' }); return result.status === 0 ? result.stdout.trim() : null; };
 const { values } = parseArgs({ options: { base: { type: 'string' }, plan: { type: 'boolean' }, full: { type: 'boolean' } } });
 
+if (!values.base && !values.full) {
+  // Releases create tags on GitHub, so local tags lag; the default base needs the current list.
+  const fetched = spawnSync('git', ['fetch', '--tags', 'origin'], { cwd: root, stdio: 'ignore', timeout: 60_000 });
+  if (fetched.status !== 0) { console.error('gate:release: `git fetch --tags origin` failed or timed out; check the network, or pass --base <ref> to skip it.'); process.exit(1); }
+}
 const base = values.base ?? git('tag', '--list', 'controller-v*', '--sort=-v:refname')?.split('\n')[0];
 if (!base) { console.error('gate:release: no controller-v* tag to compare with; pass --base <ref> or use --full.'); process.exit(values.full ? 0 : 1); }
 const baseCommit = git('rev-parse', '--verify', '--quiet', `${base}^{commit}`);

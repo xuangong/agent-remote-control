@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { HttpPreviewClient } from '@orchardworks/agent-client';
 import { Pill } from '@orchardworks/agent-client-web/primitives';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
@@ -7,6 +7,7 @@ import { HostCodexDaemon } from '../computers/HostCodexDaemon.js';
 import { HostEnvironmentDetails, HostRevoke } from '../computers/HostPairing.js';
 import { type HostPairingService, type RemoteHost } from '../../kernel/remote-host.js';
 import { HostOverview } from '../computers/HostOverview.js';
+import { scrollParent } from '../computers/kept-place.js';
 import { HostPreviewGroups } from '../computers/HostPreviewGroups.js';
 import { HostProviders } from '../computers/HostProviders.js';
 import { HostSecurityActions } from '../computers/HostSecurityActions.js';
@@ -45,12 +46,27 @@ export function ComputerSettings({ services, visible }: { services: ComputerServ
     addEventListener('popstate', popped);
     return () => removeEventListener('popstate', popped);
   }, []);
-  const open = (id: string) => { history.pushState({ ...history.state, [COMPUTER_ENTRY]: id }, ''); setOpenId(id); };
+  // The list stays mounted, hidden, while a computer's page is open: its figures, its pairing panel and its place come back as they were.
+  const root = useRef<HTMLDivElement>(null);
+  const listScroll = useRef(0);
+  const open = (id: string) => {
+    listScroll.current = scrollParent(root.current)?.scrollTop ?? 0;
+    history.pushState({ ...history.state, [COMPUTER_ENTRY]: id }, ''); setOpenId(id);
+  };
   const host = services.hosts.find(item => item.id === openId);
-  if (host) return <HostPage host={host} services={services} visible={visible} onBack={() => history.back()} />;
+  // A computer's page opens at its top; the list returns to where the reader left it.
+  useLayoutEffect(() => {
+    const scroller = scrollParent(root.current);
+    if (scroller) scroller.scrollTop = host ? 0 : listScroll.current;
+  }, [host?.id]);
   const state = hostsState(services.hosts);
-  return <HostOverview hosts={services.hosts} service={services.service} visible={visible} compact={phone} onOpenHost={open}
-    lead={<p className="lab-host-lead"><span className="lab-host-dot-lead" data-host-state={state} aria-hidden="true" />{hostSummary(services.hosts, services.loaded, t)}</p>} />;
+  return <div ref={root} className="lab-computers">
+    <div hidden={Boolean(host)}>
+      <HostOverview hosts={services.hosts} service={services.service} visible={visible && !host} compact={phone} onOpenHost={open}
+        lead={<p className="lab-host-lead"><span className="lab-host-dot-lead" data-host-state={state} aria-hidden="true" />{hostSummary(services.hosts, services.loaded, t)}</p>} />
+    </div>
+    {host ? <HostPage host={host} services={services} visible={visible} onBack={() => history.back()} /> : null}
+  </div>;
 }
 
 /** One computer: its state and system, its agents, previews and VS Code tunnel, and for its owner its updates, smart reading and keys. */

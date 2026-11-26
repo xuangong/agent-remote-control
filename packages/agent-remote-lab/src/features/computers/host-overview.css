@@ -12,6 +12,7 @@
 .lab-host-name { flex: 1; min-width: 0; display: grid; }
 .lab-host-name strong { overflow: hidden; color: var(--ui-label); font-size: var(--ui-size-headline); text-overflow: ellipsis; white-space: nowrap; }
 .lab-host-name small { overflow: hidden; color: var(--ui-label-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.lab-host-figures { display: grid; gap: 12px; align-content: start; min-width: 0; }
 .lab-host-sessions { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; }
 .lab-host-sessions strong { color: var(--ui-label); font-size: 22px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .lab-host-sessions span { color: var(--ui-label-secondary); font-size: 13px; }

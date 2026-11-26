@@ -6,7 +6,7 @@
     "agent-remote-lab/src/conversation/session-succession.css": 15,
     "agent-remote-lab/src/conversation/session-view-options.css": 22,
     "agent-remote-lab/src/conversation/session-view-responsive.css": 1,
-    "agent-remote-lab/src/features/computers/host-overview.css": 24,
+    "agent-remote-lab/src/features/computers/host-overview.css": 16,
     "agent-remote-lab/src/features/diagnostics/trace.css": 41,
     "agent-remote-lab/src/features/session-links/session-quotes.css": 11,
     "agent-remote-lab/src/features/sessions/outbox-messages.css": 2,

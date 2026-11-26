@@ -37,6 +37,7 @@ describe('a scenario that does not finish', () => {
     expect(report.steps?.map(step => step.step)).toEqual(['restarting the instance', 'opening page 3 of hostQuota']);
     expect(report.note).toContain('M4 exceeded its 8 minute deadline');
     expect(report.note).toContain('stuck in "opening page 3 of hostQuota"');
+    expect(report.note).not.toContain(' at ');
     expect(transcript?.name).toBe('M4.transcript.jsonl');
     expect(report.transcript).toBe('M4.transcript.jsonl');
     const text = summarize({ format: 'arc-smoke-report-1', startedAt: 'now', mode: 'quick', commit: 'abc', build: 'clean', node: 'v22', scenarios: [report], sessions: [] });

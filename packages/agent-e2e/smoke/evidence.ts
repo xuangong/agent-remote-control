@@ -29,7 +29,7 @@ export function unfinishedReport(evidence: ScenarioEvidence, error: Error): Pick
   const stuck = evidence.currentStep();
   const where = stuck ? ` [stuck in "${stuck.step}" since t=${Math.round(stuck.t)} ms]` : '';
   return { schedule: [...evidence.schedule], measurements: { ...evidence.measurements }, invariants: evidence.invariants(), steps: evidence.steps.slice(-50),
-    note: `${error.message}${where}${error.stack ? ' | ' + error.stack.split('\n').slice(1, 4).map(line => line.trim()).join(' | ') : ''}` };
+    note: `${error.message}${where}${error.stack && error.name !== 'DeadlineError' ? ' | ' + error.stack.split('\n').slice(1, 4).map(line => line.trim()).join(' | ') : ''}` };
 }
 
 /** Logs worth keeping when a scenario fails, relative to the instance directory. Credential files and cookies are never in this list. */

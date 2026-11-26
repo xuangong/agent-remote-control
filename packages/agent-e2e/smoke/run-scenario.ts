@@ -18,8 +18,8 @@ export async function runScenario({ scenario, context, evidence, deadlineMs, see
   const base = { scenario: scenario.id, title: scenario.title, seed, startedAt: new Date(started).toISOString(), schedule: [], measurements: {}, invariants: [], findings: [] };
   let timer: NodeJS.Timeout | undefined;
   try {
-    const message = `${scenario.id} exceeded its ${deadlineMs / 60_000} minute deadline`;
-    const outcome = await Promise.race([scenario.run(context), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(message)), deadlineMs); })]);
+    const message = `${scenario.id} exceeded its ${deadlineMs >= 60_000 ? `${deadlineMs / 60_000} minute` : `${deadlineMs / 1000} second`} deadline`;
+    const outcome = await Promise.race([scenario.run(context), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error(message), { name: 'DeadlineError' })), deadlineMs); })]);
     const transcriptName = outcome.transcript ? `${scenario.id}.transcript.jsonl` : undefined;
     const report: ScenarioReport = { ...base, status: scenarioStatus(outcome.invariants), durationMs: now() - started, schedule: outcome.schedule, measurements: outcome.measurements, invariants: outcome.invariants,
       ...(transcriptName ? { transcript: transcriptName } : {}),

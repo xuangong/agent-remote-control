@@ -187,8 +187,6 @@ export function BotWorkspace({ visible, covered = false, compact, scope, rooms, 
         {phone && onSearch ? <IconButton icon="search" label={t('navigation.search')} onClick={onSearch} /> : null}
         {onNewBot ? <IconButton icon="plus" label={t('assistants.new')} onClick={onNewBot} /> : null}</> : undefined} />
       {unavailable ? availabilityNotice : null}
-      {/* When the Relay cannot be reached the roster is the device's copy, and says so in one quiet line. */}
-      {offline ? <p className="lab-bot-notice lab-bot-offline" role="status">{t('navigation.savedChats')}</p> : null}
       {saving ? <p className="lab-bot-notice" role="status">{t('navigation.botWorkspace.saving')}</p> : null}
       {error || creation.error ? <p className="lab-bot-notice" role="alert">{error ?? creation.error}</p> : null}
       {creation.state === 'unknown' ? <p className="lab-bot-notice" role="status">{t('navigation.botWorkspace.groupUnconfirmed')} <button type="button" onClick={() => void retryGroup()}>{t('common.retry')}</button></p> : null}
@@ -203,6 +201,8 @@ export function BotWorkspace({ visible, covered = false, compact, scope, rooms, 
             {source.hasMore && !source.expired ? <button type="button" disabled={!source.online || source.loading} onClick={() => void directory.loadMore(source.id)}>{t('navigation.botWorkspace.loadMore')}</button> : null}
           </div>)}
         </div>} /></div>
+      {/* When the Relay cannot be reached the roster is the device's copy, and says so in one quiet line below the list, which moves no row. */}
+      {offline ? <p className="lab-bot-notice lab-bot-offline" role="status">{t('navigation.savedChats')}</p> : null}
     </aside>
     <section className="lab-bot-conversation orchard-panel" aria-label={t('navigation.botConversation')} hidden={phone && !showConversation}
       onTouchStart={event => { const touch = event.touches[0]; edgeSwipe.current = phone && touch && touch.clientX <= 24 ? { x: touch.clientX, y: touch.clientY } : undefined; }}

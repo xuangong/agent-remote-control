@@ -234,3 +234,6 @@
   position: absolute; top: calc(100% + 4px); right: max(8px, env(safe-area-inset-right)); left: max(8px, env(safe-area-inset-left));
   width: auto; max-height: min(560px, 70dvh);
 }
+
+/* A Window mode page whose Window has not loaded keeps the place of the toolbar the Window brings, so the workspace does not drop when it arrives. */
+#lab-workbench[data-window-pending] { padding-top: 52px; box-sizing: border-box; }

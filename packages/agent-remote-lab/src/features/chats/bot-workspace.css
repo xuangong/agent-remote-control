@@ -224,5 +224,5 @@ button.lab-assistant-title:is(:hover, [aria-expanded="true"]):not(:disabled) { b
 .lab-bot-quiet-lines::before, .lab-bot-quiet-lines::after { content: ""; display: block; height: 10px; border-radius: var(--orchard-radius-pill); background: var(--orchard-fill); }
 .lab-bot-quiet-lines::before { width: 38%; }
 .lab-bot-quiet-lines::after { width: 64%; }
-/* The offline line is one quiet row of the roster's own notices, not a banner. */
-.lab-bot-offline { color: var(--orchard-text-secondary); }
+/* The offline line is one quiet row of the roster's own notices, kept at the foot of the list so that it moves no row. */
+.lab-bot-offline { position: sticky; bottom: 0; margin-top: auto; color: var(--orchard-text-secondary); background: var(--orchard-surface); }

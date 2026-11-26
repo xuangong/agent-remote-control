@@ -57,6 +57,39 @@ describe('InteractionPanel', () => {
     expect(container.querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toContain('Choose tools');
   });
 
+  it('shows a typed answer within the event itself, even when the owner hands the draft back later', async () => {
+    const pending: Array<() => void> = [];
+    function Host() {
+      const [draft, setDraft] = useState<QuestionDraft>({ answers: {} });
+      return <InteractionPanel request={request} onResponse={async () => undefined} questionDraft={draft} onQuestionDraftChange={next => pending.push(() => setDraft(next))} />;
+    }
+    const container = await render(<Host />);
+    const field = container.querySelector<HTMLInputElement>('input[name="runtime-custom"]')!;
+    const writes: string[] = [];
+    const native = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!;
+    Object.defineProperty(field, 'value', { configurable: true, get() { return native.get!.call(this); }, set(value: string) { writes.push(value); native.set!.call(this, value); } });
+    for (const text of ['n', 'ni', '你好']) {
+      await act(async () => { native.set!.call(field, text); field.dispatchEvent(new Event('input', { bubbles: true })); });
+      expect(field.value).toBe(text);
+    }
+    // The owner's late copies of the draft are the card's own and change nothing.
+    await act(async () => { for (const hand of pending.splice(0)) hand(); });
+    expect(field.value).toBe('你好');
+    expect(writes).toEqual([]);
+  });
+
+  it('takes a draft the owner changes on its own, such as a reset', async () => {
+    function Host({ draft }: { draft: QuestionDraft | undefined }) {
+      return <InteractionPanel request={request} onResponse={async () => undefined} questionDraft={draft} onQuestionDraftChange={() => undefined} />;
+    }
+    const container = await render(<Host draft={undefined} />);
+    await type(container.querySelector<HTMLInputElement>('input[name="runtime-custom"]')!, 'Typed here');
+    await rerender(container, <Host draft={{ answers: { runtime: { selectedValues: [], customText: 'From elsewhere' } } }} />);
+    expect(container.querySelector<HTMLInputElement>('input[name="runtime-custom"]')?.value).toBe('From elsewhere');
+    await rerender(container, <Host draft={undefined} />);
+    expect(container.querySelector<HTMLInputElement>('input[name="runtime-custom"]')?.value).toBe('');
+  });
+
   it('returns to the missing required question without sending an incomplete response', async () => {
     const respond = vi.fn();
     const container = await render(<InteractionPanel request={request} onResponse={respond} />);

@@ -11,10 +11,13 @@ export const LazySettingsPage = lazy(() => loadSettings().then(module => ({ defa
 export const LazyTraceView = lazy(() => loadTrace().then(module => ({ default: module.TraceView })));
 export const LazyReplicaInspector = lazy(() => loadInspector().then(module => ({ default: module.ReplicaInspector })));
 
+/** Loads the code of every screen. */
+export const loadScreens = () => Promise.all([loadSettings(), loadTrace(), loadInspector()]);
+
 /** Loads the screens' code once the page is idle; a failed load is retried when the screen opens. */
 export function useScreenPreload(): void {
   useEffect(() => {
-    const load = () => { for (const loader of [loadSettings, loadTrace, loadInspector]) loader().catch(() => undefined); };
+    const load = () => { loadScreens().catch(() => undefined); };
     const idle = (window as { requestIdleCallback?: (callback: () => void, options: { timeout: number }) => number }).requestIdleCallback;
     if (idle) { idle(load, { timeout: 3000 }); return undefined; }
     const timer = setTimeout(load, 1500);

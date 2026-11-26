@@ -1,7 +1,7 @@
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import { SESSION_CONNECTION_PATTERN } from '@orchardworks/agent-client/testing';
 import { act, useState, type ComponentProps } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   PROTOCOL_VERSION,
   createWindowView,
@@ -18,6 +18,10 @@ import { replicaState } from './test/fixtures.js';
 import { SessionDirectoryClient } from './kernel/directory-client.js';
 import * as windowWorkspaceHooks from './features/windows/useWindowWorkspace.js';
 import * as directoryComponents from './features/sessions/SessionDirectory.js';
+import { loadScreens } from './app/lazy-screens.js';
+
+// Settings, the Trace and the Inspector are chunks the page warms when idle; a test opens them as a settled page would.
+beforeAll(() => loadScreens());
 
 describe('App', () => {
   it('renders a supplied Session View snapshot without a Window controller', async () => {
@@ -680,6 +684,8 @@ describe('App', () => {
     expect(transport.resumeAgent).toHaveBeenCalledWith(expect.any(String), previousState.agent.persistence);
     expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
     expect(container.querySelector('[aria-label="Agent timeline"]')).toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="View options"]')!.click());
+    await act(async () => container.querySelector<HTMLInputElement>('[aria-controls="lab-inspector"]')!.click());
     expect(container.querySelector('[data-testid="connection-status"]')?.textContent).toBe('Connecting');
   });
 

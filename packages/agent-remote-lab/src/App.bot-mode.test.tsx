@@ -1,11 +1,15 @@
 import { act } from 'react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { beforeAll, afterEach, expect, it, vi } from 'vitest';
 import { createWindowView } from '@orchardworks/agent-remote-protocol';
 import { botGroup, botTarget, mountBotApp, seedGroup, until, visibleButton } from './test/bot-mode-fixtures.js';
 import * as workspaceHooks from './features/windows/useWindowWorkspace.js';
 import * as trackingHooks from './features/sessions/useSessionTracking.js';
 import { promptText, setPromptText } from './test/setup.js';
 import { nextPopstate } from './test/wait.js';
+import { loadScreens } from './app/lazy-screens.js';
+
+// Settings, the Trace and the Inspector are chunks the page warms when idle; a test opens them as a settled page would.
+beforeAll(() => loadScreens());
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); sessionStorage.clear(); });
 

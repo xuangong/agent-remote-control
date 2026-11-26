@@ -56,10 +56,14 @@ async function withLimits<T>(context: RunContext, recorder: TranscriptRecorder, 
   const restart = await restartInstance(context.instance, { checkout: context.checkout, journalLimits: limits });
   context.evidence.step(`starting the proxies and the scripted Host ${hostName}`);
   const uplink = await startLatencyProxy({ target: context.instance.origin, rttMs: 0, tap: message => recorder.tap({ ...message, connection: message.connection + UPLINK_CONNECTION_BASE }) });
-  const proxy = await startLatencyProxy({ target: context.instance.origin, rttMs: 0, tap: recorder.tap, onSocket: recorder.socket });
-  const host = await startScriptedHost(context.instance, { name: hostName, installationId: `smoke-${hostName.replace(/\W+/g, '-').toLowerCase()}-${context.seed}`, uplinkVia: uplink.origin, sessions });
-  try { return { value: await body(host, proxy), restart }; }
-  finally { await proxy.close(); await host.close(); await uplink.close(); }
+  // Whatever fails from here on must close the proxies: their listening sockets would keep the process alive after the run's report.
+  let proxy: Awaited<ReturnType<typeof startLatencyProxy>> | undefined;
+  let host: Awaited<ReturnType<typeof startScriptedHost>> | undefined;
+  try {
+    proxy = await startLatencyProxy({ target: context.instance.origin, rttMs: 0, tap: recorder.tap, onSocket: recorder.socket });
+    host = await startScriptedHost(context.instance, { name: hostName, installationId: `smoke-${hostName.replace(/\W+/g, '-').toLowerCase()}-${context.seed}`, uplinkVia: uplink.origin, sessions });
+    return { value: await body(host, proxy), restart };
+  } finally { await proxy?.close(); await host?.close(); await uplink.close(); }
 }
 
 async function sessionQuota(context: RunContext, recorder: TranscriptRecorder, schedule: ScheduleStep[], measurements: Record<string, unknown>) {
@@ -69,6 +73,7 @@ async function sessionQuota(context: RunContext, recorder: TranscriptRecorder, s
   const first = recorder.transcript().length;
   const { value, restart } = await withLimits(context, recorder, schedule, SESSION_LIMITS, 'Smoke M4 session Host', sessions, async (host, proxy) => withContext(context.browser, proxy.origin, async browserContext => {
     // The scenario reads tool calls, the running ones included, as rows of their own: the Full process display shows every step of a turn.
+    context.evidence.step('creating the browser page');
     const probe = await PageProbe.create(browserContext, recorder.origin, { process: 'full' });
     context.evidence.step('opening the heavy session');
     await probe.open(host.sessionUrl('heavy').replace(context.instance.origin, proxy.origin), 'open heavy', { rowsDeadlineMs: 90_000 });

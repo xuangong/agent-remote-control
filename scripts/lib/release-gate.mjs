@@ -102,3 +102,35 @@ export function describeGate(plan, { base, head }) {
   }
   return lines.join('\n');
 }
+
+/** Every tier id in run order; `--from` and `--only` name these. */
+export const TIER_ORDER = ['verify', 'components', 'preview-browser', 'e2e-chromium', 'e2e-webkit', 'smoke'];
+
+/**
+ * Which tiers of a plan run: `--from <tier>` starts at that tier (earlier ones are skipped), `--only <tier>[,<tier>]` runs just those.
+ * Returns `{ run, skipped }` (each skipped entry has the tier and why); throws on an unknown tier name or on both options together.
+ */
+export function selectTiers(plan, { from, only } = {}) {
+  const names = only ? only.split(',').map(name => name.trim()).filter(Boolean) : from ? [from] : [];
+  const unknown = names.filter(name => !TIER_ORDER.includes(name));
+  if (unknown.length) throw new Error(`Unknown tier ${unknown.map(name => JSON.stringify(name)).join(', ')}; the tiers are ${TIER_ORDER.join(', ')}.`);
+  if (from && only) throw new Error('Pass --from or --only, not both.');
+  if (!names.length) return { run: plan.tiers, skipped: [] };
+  const start = from ? TIER_ORDER.indexOf(from) : 0;
+  const keeps = tier => only ? names.includes(tier.id) : TIER_ORDER.indexOf(tier.id) >= start;
+  return {
+    run: plan.tiers.filter(keeps),
+    skipped: plan.tiers.filter(tier => !keeps(tier)).map(tier => ({ tier: tier.id, why: from ? '--from' : '--only' })),
+  };
+}
+
+/**
+ * The newest ref of what production runs: the newer, by commit date, of the newest `relay-deployed-*` tag (a Relay deploy without a
+ * Controller release) and the newest `controller-v*` tag. `git(...args)` returns trimmed stdout or null; `exclude` is a tag to ignore.
+ */
+export function releasedBase(git, { exclude } = {}) {
+  const newest = (pattern, sort) => git('tag', '--list', pattern, `--sort=${sort}`)?.split('\n').find(name => name && name !== exclude);
+  return [newest('controller-v*', '-v:refname'), newest('relay-deployed-*', '-refname')].filter(Boolean)
+    .map(name => ({ name, time: Number(git('log', '-1', '--format=%ct', `${name}^{commit}`)) || 0 }))
+    .sort((a, b) => b.time - a.time)[0]?.name;
+}

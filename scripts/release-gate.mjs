@@ -1,25 +1,27 @@
-// pnpm gate:release [--base <ref>] [--plan] [--full]: the release gate, scoped by what changed since the last released commit
-// (default base: the newest controller-v* tag). It prints the plan, runs the tiers one at a time, and stops at the first failure
+// pnpm gate:release [--base <ref>] [--plan] [--full] [--from <tier>] [--only <tier>,...]: the release gate, scoped by what changed since
+// the commit production runs (default base: the newer of the newest controller-v* and relay-deployed-* tags). It prints the plan, runs the tiers one at a time, and stops at the first failure
 // with the log path. The planning is scripts/lib/release-gate.mjs.
 import { spawn, spawnSync } from 'node:child_process';
 import { createWriteStream, mkdirSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { describeGate, planGate } from './lib/release-gate.mjs';
+import { describeGate, planGate, releasedBase, selectTiers } from './lib/release-gate.mjs';
 import { packageFiles, readModules, workspacePackages } from './lib/test-selection.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const git = (...args) => { const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' }); return result.status === 0 ? result.stdout.trim() : null; };
-const { values } = parseArgs({ options: { base: { type: 'string' }, plan: { type: 'boolean' }, full: { type: 'boolean' } } });
+const { values } = parseArgs({ options: { base: { type: 'string' }, plan: { type: 'boolean' }, full: { type: 'boolean' }, from: { type: 'string' }, only: { type: 'string' } } });
 
+// Refuse an unknown tier name before anything is fetched or planned.
+try { selectTiers({ tiers: [] }, values); } catch (error) { console.error(`gate:release: ${error.message}`); process.exit(1); }
 if (!values.base && !values.full) {
   // Releases create tags on GitHub, so local tags lag; the default base needs the current list.
   const fetched = spawnSync('git', ['fetch', '--tags', 'origin'], { cwd: root, stdio: 'ignore', timeout: 60_000 });
   if (fetched.status !== 0) { console.error('gate:release: `git fetch --tags origin` failed or timed out; check the network, or pass --base <ref> to skip it.'); process.exit(1); }
 }
-const base = values.base ?? git('tag', '--list', 'controller-v*', '--sort=-v:refname')?.split('\n')[0];
-if (!base) { console.error('gate:release: no controller-v* tag to compare with; pass --base <ref> or use --full.'); process.exit(values.full ? 0 : 1); }
+const base = values.base ?? releasedBase(git);
+if (!base) { console.error('gate:release: no controller-v* or relay-deployed-* tag to compare with; pass --base <ref> or use --full.'); process.exit(values.full ? 0 : 1); }
 const baseCommit = git('rev-parse', '--verify', '--quiet', `${base}^{commit}`);
 if (!baseCommit) { console.error(`gate:release: ${base} is not a commit.`); process.exit(1); }
 const head = git('rev-parse', 'HEAD');
@@ -29,6 +31,8 @@ const plan = planGate({
   flowFiles: readdirSync(join(root, 'packages/agent-e2e/flows')), force: values.full,
 });
 console.log(describeGate(plan, { base: `${base} (${baseCommit.slice(0, 8)})`, head: head.slice(0, 8) }));
+const { run: tiers, skipped } = selectTiers(plan, values);
+for (const { tier, why } of skipped) console.log(`  skipped: ${why}  ${tier}`);
 if (values.plan) process.exit(0);
 if (git('status', '--porcelain', '--untracked-files=no')) console.error('gate:release: uncommitted changes are built, but only committed ones choose the tiers.');
 
@@ -51,7 +55,7 @@ function run({ command, env }, log, deadlineMs) {
 }
 const results = [];
 let failed = null;
-for (const tier of plan.tiers) {
+for (const tier of tiers) {
   const logPath = join(logDirectory, `${tier.id}.log`);
   const log = createWriteStream(logPath);
   console.log(`\n== ${tier.id}: ${tier.why}`);

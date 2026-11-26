@@ -37,9 +37,13 @@ finished steps and continues at the failed one.
 | b. bump | Sets the version of `packages/agent-controller/package.json`, runs `pnpm install --lockfile-only`, `pnpm compatibility:update` and `pnpm compatibility:check`, and commits those three files only as `release: Controller <version> (<summary>)`. |
 | c. gate | `pnpm gate:release`; `--gate-passed <log>` skips it for a gate you already ran on this commit. |
 | d. push | `git push origin main`. Needs `--yes` or an interactive yes. |
-| e. deploy | Only when the Relay or the website changed since the last `controller-v*` tag, otherwise it says it is skipped. Records the current Worker version as the rollback target, builds, `wrangler deploy`, then `scripts/deploy-readiness.mjs` (deadline 480 s). Needs `--yes` or yes. |
+| e. deploy | Only when the Relay or the website changed since the commit production runs (see the base below), otherwise it says it is skipped. Records the current Worker version as the rollback target, builds, `wrangler deploy`, then `scripts/deploy-readiness.mjs` (deadline 480 s), then tags the deployed commit `relay-deployed-<UTC yyyymmddHHMMSS>` and pushes the tag. Needs `--yes` or yes. |
 | f. release | Builds the package, creates the manifest (`scripts/controller-release.mjs`) and `gh release create controller-v<version>` with the four assets at the release commit. Needs `--yes` or yes. |
 | g. report | Prints the rollback target and the reminder that the owner updates Controllers from Settings -> Computers. |
+
+A Relay-only deploy (no Controller release) runs just step e on `main` at `origin/main`:
+`pnpm deploy:relay [--yes] [--dry-run]`. It also leaves the `relay-deployed-*` tag, so the next
+gate does not diff against an older base.
 
 Create the tag through the GitHub release (step f), then explicitly dispatch npm publication when requested. A manual retry uses the same tag:
 
@@ -49,11 +53,14 @@ gh workflow run publish-controller.yml --ref controller-v0.1.0
 
 ## Scoped release gate
 
-`pnpm gate:release [--base <ref>] [--plan] [--full]` decides what to run from the files changed
-since the commit production runs (default: the newest `controller-v*` tag) and
+`pnpm gate:release [--base <ref>] [--plan] [--full] [--from <tier>] [--only <tier>,...]` decides what to run from the files changed
+since the commit production runs (default base: the newer, by commit date, of the newest `controller-v*` and `relay-deployed-*` tag, after `git fetch --tags origin`) and
 `architecture/modules.json`, prints the plan with the reason for each tier, runs the tiers one at a
 time, and stops at the first failure with its log (`.artifacts/gate-release/<time>/<tier>.log`).
-`--plan` only prints; `--full` runs every tier.
+`--plan` only prints; `--full` runs every tier. After a known flake, `--from <tier>` resumes at that
+tier (earlier ones print as `skipped: --from`) and `--only <tier>,<tier>` runs just those; the tier
+names are `verify`, `components`, `preview-browser`, `e2e-chromium`, `e2e-webkit`, `smoke`, and any
+other name is refused.
 
 | Tier | Runs when |
 | --- | --- |

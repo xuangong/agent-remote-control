@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { describeGate, flowIdOf, planGate, relayDeployNeeded } from './release-gate.mjs';
+import { describeGate, flowIdOf, planGate, relayDeployNeeded, releasedBase, selectTiers } from './release-gate.mjs';
 import { readModules } from './test-selection.mjs';
 
 const root = join(import.meta.dirname, '../..');
@@ -87,4 +87,54 @@ test('every flow file is named by a module in modules.json, and every named flow
   assert.deepEqual([...fileIds].filter(id => !named.has(id)), [], 'add the new flow to the flows of the modules it exercises');
   assert.deepEqual([...named].filter(id => !fileIds.has(id)), [], 'a module names a flow that has no file');
   assert.ok(readFileSync(join(root, 'packages/agent-e2e/vitest.e2e.config.ts'), 'utf8').includes('flows/**/*.e2e.ts'));
+});
+
+const wideChange = () => planGate({ changed: ['packages/agent-relay-core/src/a.ts'], files: [], modules, packages: [], flowFiles: [], force: false });
+const tierIds = tiers => tiers.map(tier => tier.id);
+
+test('--from runs the plan from that tier on and lists the earlier tiers as skipped', () => {
+  const plan = wideChange();
+  const { run, skipped } = selectTiers(plan, { from: 'preview-browser' });
+  assert.deepEqual(tierIds(run), tierIds(plan.tiers).slice(tierIds(plan.tiers).indexOf('preview-browser')));
+  assert.deepEqual(skipped, [{ tier: 'verify', why: '--from' }, { tier: 'components', why: '--from' }]);
+});
+
+test('--from a tier the plan lacks still skips what precedes it in the tier order', () => {
+  const plan = wideChange();
+  const { run } = selectTiers({ tiers: plan.tiers.filter(tier => tier.id !== 'e2e-chromium') }, { from: 'e2e-chromium' });
+  assert.deepEqual(tierIds(run), ['e2e-webkit', 'smoke'].filter(id => tierIds(plan.tiers).includes(id)));
+});
+
+test('--only runs just the named tiers; no option runs the whole plan', () => {
+  const plan = wideChange();
+  assert.deepEqual(tierIds(selectTiers(plan, { only: 'verify, e2e-webkit' }).run), ['verify', 'e2e-webkit']);
+  assert.equal(selectTiers(plan, {}).run, plan.tiers);
+  assert.deepEqual(selectTiers(plan, {}).skipped, []);
+});
+
+test('unknown tier names and --from with --only are refused', () => {
+  const plan = wideChange();
+  assert.throws(() => selectTiers(plan, { from: 'e2e' }), /Unknown tier "e2e"/);
+  assert.throws(() => selectTiers(plan, { only: 'verify,nope' }), /Unknown tier "nope"/);
+  assert.throws(() => selectTiers(plan, { from: 'verify', only: 'verify' }), /not both/);
+});
+
+/** A git stub over tags per pattern and commit times per tag. */
+const gitStub = ({ controller = '', relay = '', times = {} }) => (...args) => {
+  if (args[0] === 'tag') return args[2] === 'controller-v*' ? controller : relay;
+  if (args[0] === 'log') return String(times[args[3].replace('^{commit}', '')] ?? 0);
+  return null;
+};
+
+test('the base is the newer of the newest relay-deployed tag and the newest controller tag', () => {
+  const tags = { controller: 'controller-v0.3.9\ncontroller-v0.3.8', relay: 'relay-deployed-20261126\nrelay-deployed-20261120' };
+  assert.equal(releasedBase(gitStub({ ...tags, times: { 'controller-v0.3.9': 10, 'relay-deployed-20261126': 20 } })), 'relay-deployed-20261126');
+  assert.equal(releasedBase(gitStub({ ...tags, times: { 'controller-v0.3.9': 30, 'relay-deployed-20261126': 20 } })), 'controller-v0.3.9');
+});
+
+test('the base is whichever kind of tag exists, or nothing', () => {
+  assert.equal(releasedBase(gitStub({ controller: 'controller-v0.3.9' })), 'controller-v0.3.9');
+  assert.equal(releasedBase(gitStub({ relay: 'relay-deployed-1' })), 'relay-deployed-1');
+  assert.equal(releasedBase(gitStub({})), undefined);
+  assert.equal(releasedBase(gitStub({ controller: 'controller-v0.3.9' }), { exclude: 'controller-v0.3.9' }), undefined);
 });

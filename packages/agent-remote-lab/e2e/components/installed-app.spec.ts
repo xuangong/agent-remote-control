@@ -84,3 +84,22 @@ test('keeps the conversation and the composer inside the viewport, with the keyb
   await expect.poll(() => inside(Math.round(viewport.height * 0.55))).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+for (const scheme of ['light', 'dark'] as const) {
+  test(`draws a wordless launch screen in the ${scheme} system theme before the app starts, and gives way once the app draws`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    // The app's entry script is held back: what shows is the page alone, as on a first visit over a slow link.
+    let release: (() => void) | undefined;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    await page.route(url => url.pathname === '/src/main.tsx', async route => { await held; await route.continue(); });
+    await page.goto('/', { waitUntil: 'commit' });
+    const launch = page.locator('#launch');
+    await expect(launch).toBeVisible();
+    await expect(launch.locator('svg')).toBeVisible();
+    expect(await page.evaluate(() => document.body.innerText.trim())).toBe('');
+    expect(await page.evaluate(() => getComputedStyle(document.getElementById('launch')!).backgroundColor)).toBe(rgb(GROUND[scheme]));
+    expect(await page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor)).toBe(rgb(GROUND[scheme]));
+    release?.();
+    await expect(launch).toBeHidden();
+  });
+}

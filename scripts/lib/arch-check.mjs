@@ -72,6 +72,28 @@ function resolvePackage(root, specifier, packages, fileSet) {
   return { name, file: found?.file ?? undefined, subpath, declared: found !== undefined, wildcard: found?.wildcard === true };
 }
 
+/**
+ * The import graph of the scanned files: for each file, the scanned files it imports, re-exports or dynamically imports,
+ * by relative path or through a workspace package's entry and `exports` map. Test files take part, so a test is found
+ * through the source it exercises.
+ */
+export function importGraph({ root, config }) {
+  const globs = config.scan.map(globToRegExp);
+  const files = listFiles(join(root, 'packages')).map(file => `packages/${file.split('\\').join('/')}`)
+    .filter(file => sourceExtension.test(file) && !file.endsWith('.d.ts') && globs.some(glob => glob.test(file)));
+  const fileSet = new Set(files);
+  const graph = new Map();
+  for (const file of files) {
+    const targets = new Set();
+    for (const specifier of importsOf(readFileSync(join(root, file), 'utf8'))) {
+      const target = specifier.startsWith('.') ? resolveRelative(file, specifier, fileSet) : resolvePackage(root, specifier, config.packages, fileSet)?.file;
+      if (target && fileSet.has(target) && target !== file) targets.add(target);
+    }
+    graph.set(file, [...targets]);
+  }
+  return graph;
+}
+
 /** Finds the wire message type names the protocol declares, so tests that hand-write one can be counted. */
 function wireTypeNames(root, protocolFiles) {
   const names = new Set();

@@ -39,7 +39,7 @@ export const DEFAULT_LIMITS = {
   /** The share of the cores the gate may keep busy (the larger of the cores busy now and the running tiers' declared cores). */
   cpuCeiling: 1,
   /** How long a tier waits for memory pressure to fall when nothing else is running, before it starts anyway. */
-  idleWaitMs: 5 * 60_000,
+  idleWaitMs: 2 * 60_000,
 };
 
 /** The most Playwright workers of a tier that fit in the headroom, at least one. */
@@ -78,7 +78,7 @@ export function decideNext({ pending, running, milestones, machine, limits = DEF
     if (profile.exclusive && (running.length || pending.length > 1)) { reasons.push(`${tier.id} runs alone and last`); continue; }
     if (running.length >= limits.maxParallel) { reasons.push(`${tier.id} waits: ${limits.maxParallel} tiers are running`); continue; }
     if (!running.length) {
-      if (machine.pressure !== 'normal' && idleMs < limits.idleWaitMs) { reasons.push(`${tier.id} waits for memory pressure to fall (${numbers})`); continue; }
+      if (machine.pressure !== 'normal' && idleMs < limits.idleWaitMs) { reasons.push(`${tier.id} waits for memory pressure to fall`); continue; }
       return { start: { tier, workers: workersThatFit(profile, { memoryMiB: Math.max(room.memoryMiB, profile.memoryMiB), cores: machine.cores }) }, reason: `${tier.id} starts, nothing else running (${numbers})` };
     }
     if (machine.pressure !== 'normal') { reasons.push(`${tier.id} waits: memory pressure is ${machine.pressure}`); continue; }
@@ -86,7 +86,7 @@ export function decideNext({ pending, running, milestones, machine, limits = DEF
     if (room.cores < profile.cores) { reasons.push(`${tier.id} waits: needs ${profile.cores} cores, ${Math.max(0, room.cores).toFixed(1)} free`); continue; }
     return { start: { tier, workers: workersThatFit(profile, room) }, reason: `${tier.id} starts (${numbers}; needs ${gib(profile.memoryMiB)}, ${profile.cores} cores)` };
   }
-  return { start: null, reason: reasons.join('; ') || 'nothing pending' };
+  return { start: null, reason: reasons.length ? `${reasons.join('; ')} (${numbers})` : 'nothing pending' };
 }
 
 /**
@@ -105,7 +105,7 @@ export async function runSchedule({ tiers, limits = DEFAULT_LIMITS, profiles = T
   const results = [];
   const milestones = new Set(tiers.some(tier => tier.id === 'verify') ? [] : ['build']);
   const milestone = name => { if (!milestones.has(name)) { milestones.add(name); log(`milestone ${name} reached`); } };
-  let stopped = false, idleSince = null, lastReason = '', lastLogged = -Infinity;
+  let stopped = false, idleSince = null, lastReason = '', lastLogged = -Infinity, lastStatus = now();
   const observed = { minAvailableMiB: Infinity, worstPressure: 'normal' };
   const startedAt = now();
   const stamp = () => `[+${Math.round((now() - startedAt) / 1000)} s]`;
@@ -114,6 +114,10 @@ export async function runSchedule({ tiers, limits = DEFAULT_LIMITS, profiles = T
     observed.minAvailableMiB = Math.min(observed.minAvailableMiB, machine.availableMiB);
     if (machine.pressure !== 'normal') observed.worstPressure = machine.pressure === 'critical' || observed.worstPressure === 'critical' ? 'critical' : 'warn';
     for (const entry of running.values()) { entry.rssMiB = memoryOf(entry.handle.pid, entry.tier); entry.peakMiB = Math.max(entry.peakMiB, entry.rssMiB); }
+    if (running.size && now() - lastStatus >= heartbeatMs) {
+      lastStatus = now();
+      log(`${stamp()} running: ${[...running.values()].map(entry => `${entry.tier.id} ${gib(entry.rssMiB)}`).join(', ')}; ${gib(machine.availableMiB)} available; ${(machine.busyCores ?? machine.load1).toFixed(1)} of ${machine.cores} cores busy; pressure ${machine.pressure}`);
+    }
     if (!running.size && !pending.some(tier => !profileOf(tier.id, profiles).needs || milestones.has(profileOf(tier.id, profiles).needs))) break;
     const idleMs = running.size || idleSince === null ? 0 : now() - idleSince;
     const decision = decideNext({ pending, running: [...running.values()], milestones, machine, limits, profiles, idleMs, stopped });
@@ -140,7 +144,7 @@ export async function runSchedule({ tiers, limits = DEFAULT_LIMITS, profiles = T
     if (!running.size && idleSince === null) idleSince = now();
     // The readings change on every poll; a new line is printed when the cause of the wait changes, and once a heartbeat.
     const cause = decision.reason.replace(/[\d.]+/g, '#');
-    if (cause !== lastReason || now() - lastLogged >= heartbeatMs) {
+    if (pending.length && (cause !== lastReason || now() - lastLogged >= heartbeatMs)) {
       lastReason = cause; lastLogged = now();
       log(`${stamp()} waiting: ${decision.reason}`);
     }

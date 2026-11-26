@@ -218,3 +218,10 @@ test('granted workers become the arguments of the tier\'s command, and one worke
   assert.deepEqual(withWorkers(['pnpm', 'verify'], 'verify', 3), ['pnpm', 'verify']);
   assert.ok(TIER_PROFILES.components.workers.max >= 2);
 });
+
+test('a long run prints the running tiers, their memory and the machine once a heartbeat', async () => {
+  const world = virtualWorld({ durations: { 'e2e-chromium': 200 }, memory: { 100: 1.5 * GIB } });
+  await world.drive(() => runSchedule({ tiers: plan(['e2e-chromium']), limits, profiles, heartbeatMs: 60_000, ...world.ports }));
+  const status = world.log.filter(line => /running: e2e-chromium 1\.5 GiB; 16\.0 GiB available/.test(line));
+  assert.equal(status.length, 3);
+});

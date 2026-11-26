@@ -83,7 +83,7 @@ keeping `--reserve-gib` (default 2) free for other apps; at most `--max-parallel
   fixed workers. `e2e-chromium` and `e2e-webkit` use a free port and a temporary directory per stack and can run together.
 - `smoke` runs alone and last: `pnpm local up` rebuilds the Relay, the devbox and the Workbench for the local instance.
 - Under memory pressure (`warn` or `critical`) or with less than the reserve available, no new tier starts until it recovers; a lone
-  tier waits at most five minutes, then starts anyway. A tier's running memory is the resident size of its process tree (and, for the
+  tier waits at most two minutes, then starts anyway. A tier's running memory is the resident size of its process tree (and, for the
   WebKit tiers, the Playwright WebKit helpers). Every decision is printed with the readings, and the summary lists each tier's peak.
 - `--serial` is the old behaviour: one tier at a time, with its output on the terminal.
 

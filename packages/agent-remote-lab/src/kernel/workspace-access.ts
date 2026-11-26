@@ -6,7 +6,10 @@ export const workspaceDisplayLifetime = 24 * 60 * 60 * 1000;
 const accessKey = 'agent-remote:workspace-access';
 const automaticKey = 'agent-remote:automatic-sign-in';
 const logoutKey = 'agent-remote:signed-out';
+/** The Relay confirmed this person's access: the page may write and talk to the Relay. */
 export const WorkspaceReady = createContext(true);
+/** This device holds a lease the Relay granted (see `storedRowsRelay`): the page may read and show what the device stores, with no network. */
+export const WorkspaceReadable = createContext(true);
 /** Where the page's transport reports the device's link to the Relay; GatewayController provides it and shows the one indicator. */
 export interface RelayLinkReporter {
   report(link: ChannelLink): void;
@@ -76,20 +79,20 @@ export function claimAutomaticSignIn(): boolean {
  * ready: access is confirmed. confirming: the local copy of the lease ran out and the Relay is being asked; live
  * sockets stay open but hold what they send, and requests wait, until the answer.
  */
-type Gate = { optimisticUntil?: number; ready: boolean; confirming?: boolean; retired?: boolean; listeners: Set<() => void> };
+type Gate = { granted: boolean; ready: boolean; confirming?: boolean; retired?: boolean; listeners: Set<() => void> };
 const gates = new Map<string, Gate>();
 export function scopeFor(input: string): string {
   const url = new URL(input, globalThis.location?.origin ?? 'http://localhost');
   url.protocol = url.protocol === 'wss:' ? 'https:' : url.protocol === 'ws:' ? 'http:' : url.protocol;
   return url.origin + (url.pathname.match(/^\/u\/[a-f0-9]{64}\//)?.[0] ?? '/');
 }
-export function setWorkspaceReady(basePath: string, ready: boolean, optimisticUntil?: number): void {
+/** `cachedLease`: this device holds a lease the Relay granted earlier; it may read what it stores, though it has not been confirmed on this page. */
+export function setWorkspaceReady(basePath: string, ready: boolean, cachedLease = false): void {
   const scope = scopeFor(basePath);
-  const gate = gates.get(scope) ?? { ready: false, listeners: new Set() };
+  const gate = gates.get(scope) ?? { ready: false, granted: false, listeners: new Set() };
   gates.set(scope, gate);
   gate.ready = ready; gate.confirming = false;
-  // A confirmed lease needs no optimistic window; a cached one opens it until its own expiry.
-  gate.optimisticUntil = ready ? undefined : optimisticUntil ?? gate.optimisticUntil;
+  if (ready || cachedLease) gate.granted = true;
   if (ready) gate.retired = false;
   for (const listener of [...gate.listeners]) listener();
 }
@@ -186,19 +189,19 @@ export function workspaceSocket(url: string) {
 }
 
 /**
- * The Relay URL whose stored conversations may be read, and the only way to reach them: while the Relay has confirmed the access lease, or the lease the last
- * status reported has not ended and the Relay has not yet answered. Not after a refusal, while an expired lease is being confirmed again, or after the
- * workspace was retired. A workspace with no gate has no accounts.
+ * The Relay URL whose stored conversations may be read, and the only way to reach them: while this device holds a lease the Relay granted, confirmed or cached, and
+ * has not refused it. Reading needs no network, so it does not wait for the Relay's answer or stop while a lease is confirmed again. Not after a refusal or
+ * after the workspace was retired. A workspace with no gate has no accounts.
  */
 export function storedRowsRelay(baseUrl: string): string | undefined {
   const relayUrl = scopeFor(baseUrl);
-  return displayLeaseValid(gates.get(relayUrl), Date.now()) ? relayUrl : undefined;
+  return displayLeaseValid(gates.get(relayUrl)) ? relayUrl : undefined;
 }
 /** The Relay refused the lease (401 or 403): nothing stored shows until a confirmation, and every subscriber learns at once. */
 export function revokeStoredRows(basePath: string): void {
   const gate = gates.get(scopeFor(basePath));
   if (!gate) return;
-  gate.optimisticUntil = undefined;
+  gate.granted = false;
   if (!gate.ready) for (const listener of [...gate.listeners]) listener();
 }
 /** The scope change signal of `storedRowsRelay`. */

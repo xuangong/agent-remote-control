@@ -22,9 +22,9 @@ import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';
 import type { AppInputs } from './types.js';
 import type { AppLate } from './types.js';
 
-export function useSessionSuccessionBinding(scope: Pick<AppInputs & ProviderStateSlice & WorkbenchShellSlice & RequestedSessionSlice & ConversationConnectionsSlice & WorkbenchRecordsSlice, 'accessReady' | 'activated' | 'asleepSlot' | 'baseUrl' | 'cachedState' | 'clientRef' | 'connections' | 'directory' | 'draftStores' | 'initialLayout' | 'initialSession' | 'initialState' | 'liveConnections' | 'markSessionMissing' | 'navigation' | 'navigationGeneration' | 'openedSessionsRef' | 'pendingViewRestore' | 'primaryBinding' | 'replicaFor' | 'replicaRef' | 'replicas' | 'selectedHost' | 'setProviderName' | 'teamRoster' | 'teamRosterRef' | 'transport' | 'unsubscribeReplicaRef' | 'userScoped'>, late: AppLate) {
+export function useSessionSuccessionBinding(scope: Pick<AppInputs & ProviderStateSlice & WorkbenchShellSlice & RequestedSessionSlice & ConversationConnectionsSlice & WorkbenchRecordsSlice, 'accessReady' | 'canRead' | 'activated' | 'asleepSlot' | 'baseUrl' | 'cachedState' | 'clientRef' | 'connections' | 'directory' | 'draftStores' | 'initialLayout' | 'initialSession' | 'initialState' | 'liveConnections' | 'markSessionMissing' | 'navigation' | 'navigationGeneration' | 'openedSessionsRef' | 'pendingViewRestore' | 'primaryBinding' | 'replicaFor' | 'replicaRef' | 'replicas' | 'selectedHost' | 'setProviderName' | 'teamRoster' | 'teamRosterRef' | 'transport' | 'unsubscribeReplicaRef' | 'userScoped'>, late: AppLate) {
   const t = useTranslate();
-  const { accessReady, activated, asleepSlot, baseUrl, cachedState, clientRef, connections, directory, draftStores, initialLayout, initialSession, initialState, liveConnections, markSessionMissing, navigation, navigationGeneration, openedSessionsRef, pendingViewRestore, primaryBinding, replicaFor, replicaRef, replicas, selectedHost, setProviderName, teamRoster, teamRosterRef, transport, unsubscribeReplicaRef, userScoped } = scope;
+  const { accessReady, canRead, activated, asleepSlot, baseUrl, cachedState, clientRef, connections, directory, draftStores, initialLayout, initialSession, initialState, liveConnections, markSessionMissing, navigation, navigationGeneration, openedSessionsRef, pendingViewRestore, primaryBinding, replicaFor, replicaRef, replicas, selectedHost, setProviderName, teamRoster, teamRosterRef, transport, unsubscribeReplicaRef, userScoped } = scope;
 
   const succession = useSessionSuccession({
     // A slot the live budget has not met yet counts as live, so a sleeping bot is checked here too: attaching it would
@@ -70,7 +70,7 @@ export function useSessionSuccessionBinding(scope: Pick<AppInputs & ProviderStat
   useEffect(() => { if (nativeBootstrap && succession.binding) setBootstrapComplete(true); }, [nativeBootstrap, succession.binding]);
 
   // A supplied snapshot is a standalone rendering input; it does not require a Window controller.
-  const workspaceController = useWindowWorkspace(baseUrl, userScoped, accessReady, succession.document, !initialState && bootstrapComplete, { mode: navigation.mode, onSectionRoute: navigation.acceptSectionRoute });
+  const workspaceController = useWindowWorkspace(baseUrl, userScoped, accessReady, succession.document, !initialState && bootstrapComplete, { mode: navigation.mode, onSectionRoute: navigation.acceptSectionRoute }, canRead);
 
   const sharedWindow = initialState ? undefined : workspaceController.window;
 

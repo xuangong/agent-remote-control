@@ -223,3 +223,24 @@ it('marks the row of a bot whose /side waits on an approval only the person can 
   expect((await rowWith('interaction')).getAttribute('data-needs-you')).toBe('true');
   expect((await rowWith('question')).getAttribute('data-needs-you')).toBeNull();
 });
+
+it('keeps a quiet shell, with no words, for a roster nothing has answered, and says it is empty only once a load confirmed so', async () => {
+  const model = projectBotRoster([], [], { status: () => 'idle' });
+  const quiet = await render(<BotRoster model={model} groups={[]} knowledge="unknown" onSelect={() => {}} directoryControls={null} />);
+  expect(quiet.querySelector('.lab-bot-quiet')).not.toBeNull();
+  expect(quiet.querySelector('.lab-bot-empty')).toBeNull();
+  expect(quiet.textContent).not.toContain('No chats yet');
+  const stored = await render(<BotRoster model={model} groups={[]} knowledge="stored" onSelect={() => {}} directoryControls={null} />);
+  expect(stored.querySelector('.lab-bot-empty')).toBeNull();
+  const confirmed = await render(<BotRoster model={model} groups={[]} knowledge="confirmed" onSelect={() => {}} directoryControls={null} />);
+  expect(confirmed.querySelector('.lab-bot-quiet')).toBeNull();
+  expect(confirmed.querySelector('.lab-bot-empty')?.textContent).toContain('No chats yet');
+});
+
+it('shows the stored rows and no shell while the roster is not confirmed yet', async () => {
+  const group = botGroup('A');
+  const model = projectBotRoster([group], [], { status: () => 'idle' });
+  const container = await render(<BotRoster model={model} groups={[group]} knowledge="stored" onSelect={() => {}} directoryControls={null} />);
+  expect(container.querySelector('.lab-bot-quiet')).toBeNull();
+  expect(container.querySelectorAll('.lab-bot-row').length).toBeGreaterThan(0);
+});

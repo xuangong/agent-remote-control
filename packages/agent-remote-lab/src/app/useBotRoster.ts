@@ -21,10 +21,10 @@ import type { ViewTargetsSlice } from './useViewTargets.js';
 import type { ProviderCreationSlice } from './useProviderCreation.js';
 
 // The bots Bot mode lists and shows.
-export function useBotRoster(scope: Pick<AppInputs & WorkbenchRecordsSlice & FocusedAskSlice & SessionOpeningSlice & SideSelectionSlice & SessionSuccessionBindingSlice & ViewSessionStateSlice & WindowModeActionsSlice & HostAndStackSlice & WorkbenchShellSlice & ConversationConnectionsSlice & ActiveSessionSlice & PanelsAndShortcutsSlice & DocksAndBotSelectionSlice & WindowViewActionsSlice & RequestedSessionSlice & ViewTargetsSlice & ProviderCreationSlice, 'accessReady' | 'activated' | 'compactLayout' | 'connections' | 'currentBotSession' | 'navigation' | 'selectedBot' | 'windowMode' | 'windowWorkspace'>) {
-  const { accessReady, activated, compactLayout, connections, currentBotSession, navigation, selectedBot, windowMode, windowWorkspace } = scope;
+export function useBotRoster(scope: Pick<AppInputs & WorkbenchRecordsSlice & FocusedAskSlice & SessionOpeningSlice & SideSelectionSlice & SessionSuccessionBindingSlice & ViewSessionStateSlice & WindowModeActionsSlice & HostAndStackSlice & WorkbenchShellSlice & ConversationConnectionsSlice & ActiveSessionSlice & PanelsAndShortcutsSlice & DocksAndBotSelectionSlice & WindowViewActionsSlice & RequestedSessionSlice & ViewTargetsSlice & ProviderCreationSlice, 'accessReady' | 'canRead' | 'activated' | 'compactLayout' | 'connections' | 'currentBotSession' | 'navigation' | 'selectedBot' | 'windowMode' | 'windowWorkspace'>) {
+  const { accessReady, canRead, activated, compactLayout, connections, currentBotSession, navigation, selectedBot, windowMode, windowWorkspace } = scope;
 
-  const botTargets = !windowMode && activated && accessReady
+  const botTargets = !windowMode && canRead
     ? projectBotRoster(windowWorkspace.groups, [], { status: () => 'unknown', current: currentBotSession }).sections.flatMap(section => section.rows.map(({ binding, session }) => {
       const { role: _role, ...entry } = binding;
       return { ...entry, ...session };

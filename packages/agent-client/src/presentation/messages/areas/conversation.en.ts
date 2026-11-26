@@ -312,7 +312,7 @@ export const conversation = {
   'tiles.page': 'Tile {position} of {count}: {title}',
 
   // This device's own link to the service: the page's one connection indicator.
-  'device.offline': 'Offline. Messages will be sent when this device is back online.',
+  'device.offline': 'Offline. Showing saved chats. Messages will be sent when this device is back online.',
   'device.signIn': 'Sign in again to keep sending.',
   'device.signInAction': 'Sign in',
   'device.retry': 'Retry',

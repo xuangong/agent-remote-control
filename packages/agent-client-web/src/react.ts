@@ -1,5 +1,6 @@
 import './page/browser-environment.js';
 export { AgentTimeline } from './react/AgentTimeline.js';
+export { TimelineSkeleton } from './react/TimelineSkeleton.js';
 export { ProcessModeContext, TimelineLettersVisible, TimelineStepLevel } from './react/TimelineDisplay.js';
 export { LocaleContext, LocaleProvider, browserLocale, useLanguageChoice, useTranslate, type LanguageSource } from './react/locale.js';
 export type { AgentTimelineProps, AgentTimelineState, TimelineEntrySelection } from './react/AgentTimeline.js';

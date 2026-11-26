@@ -4,7 +4,7 @@ import type { AccountFacts } from './kernel/account.js';
 import { deviceStore } from '@orchardworks/agent-client/device-store';
 import { withMessageKey } from '@orchardworks/agent-client/locale';
 import { controllerPath, readControllerLocation } from '@orchardworks/agent-remote-protocol/model';
-import { Suspense, lazy, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { signInReturnKey } from '@orchardworks/agent-relay-core/access-page';
 import { WorkspaceShell } from './features/windows/WorkspaceShell.js';
 import { AccessPage } from './features/computers/AccessPage.js';
@@ -12,7 +12,7 @@ import { clearConversationRecovery } from './kernel/conversation-recovery.js';
 import { flushRecoveryWrites } from './kernel/recovery-writes.js';
 import { useRecoveryNotice } from './conversation/useRecoveryNotice.js';
 import { leaseDeadlineOnDeviceClock } from './kernel/lease-clock.js';
-import { RelayLinkReport, WorkspaceReady, scopeFor, confirmWorkspaceAccess, readStoredLease, revokeStoredRows, retireWorkspace, workspaceSignedOut, previousWorkspacePath, parseAccess, readWorkspaceAccess, rememberWorkspaceAccess, forgetWorkspaceAccess, claimAutomaticSignIn, prepareManualSignIn, setWorkspaceReady, type WorkspaceAccess } from './kernel/workspace-access.js';
+import { RelayLinkReport, WorkspaceReady, WorkspaceReadable, scopeFor, storedRowsRelay, subscribeStoredRows, confirmWorkspaceAccess, readStoredLease, revokeStoredRows, retireWorkspace, workspaceSignedOut, previousWorkspacePath, parseAccess, readWorkspaceAccess, rememberWorkspaceAccess, forgetWorkspaceAccess, claimAutomaticSignIn, prepareManualSignIn, setWorkspaceReady, type WorkspaceAccess } from './kernel/workspace-access.js';
 
 /** The Security panel loads when it opens: the sign-in entry stays small, and the panel brings the page's words and components with it. */
 const SecurityPanel = lazy(() => import('./features/computers/SecurityPanel.js').then(module => ({ default: module.SecurityPanel })));
@@ -28,10 +28,12 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
 }) {
   const [access, setAccess] = useState<WorkspaceAccess | null | undefined>(() => {
     const cached = readWorkspaceAccess();
-    if (cached) setWorkspaceReady(cached.basePath, false, readStoredLease());
+    if (cached) setWorkspaceReady(cached.basePath, false, readStoredLease() !== undefined);
     return cached;
   });
   const display = useRef(access); display.current = access;
+  // Reading what the device stores waits for nothing: the cached lease, until the Relay refuses it, is enough.
+  const readable = useSyncExternalStore(listener => access ? subscribeStoredRows(access.basePath, listener) : () => {}, () => !!access && !!storedRowsRelay(access.basePath));
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const [needsSignIn, setNeedsSignIn] = useState(false);
@@ -223,13 +225,14 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
   const signIn = { href: '/auth/login' + returnPath.slice(1), onClick: rememberTarget };
   const retryLink = () => { setAttempt(value => value + 1); reopenLink.current?.(); };
   const deviceLink: DeviceLink = { claim, ...(notice && !securityOpen ? { notice: { state: link.state === 'sign_in' ? 'sign_in' : 'offline', signIn, retry: retryLink } } : {}) };
-  if (access) return <WorkspaceReady.Provider value={ready}><RelayLinkReport.Provider value={relayLinkReporter}><DeviceLinkContext.Provider value={deviceLink}>
+  if (access) return <WorkspaceReady.Provider value={ready}><WorkspaceReadable.Provider value={readable}><RelayLinkReport.Provider value={relayLinkReporter}><DeviceLinkContext.Provider value={deviceLink}>
     <div className="gateway-private" key={access.basePath} hidden={securityOpen} {...(securityOpen ? { inert: '' } : {})}>{children(new URL(access.basePath, window.location.origin).href, account, ready)}</div>
     {securityOpen ? <Suspense fallback={null}><SecurityPanel onClose={closeSecurity} onSignedOut={signedOut} /></Suspense> : null}
     {deviceLink.notice && !claims ? <div className="gateway-recovery"><Suspense fallback={null}><DeviceLinkWords notice={deviceLink.notice} /></Suspense></div> : null}
-  </DeviceLinkContext.Provider></RelayLinkReport.Provider></WorkspaceReady.Provider>;
-  if (access === undefined && previousWorkspacePath()) return <WorkspaceShell />;
-  return entry(access === undefined ? 'checking' : failed ? 'unavailable' : 'signin');
+  </DeviceLinkContext.Provider></RelayLinkReport.Provider></WorkspaceReadable.Provider></WorkspaceReady.Provider>;
+  // While the Relay has not answered, the page is the wordless shell, whether or not this device has been here before.
+  if (access === undefined) return <WorkspaceShell />;
+  return entry(failed ? 'unavailable' : 'signin');
 }
 
 function useBrowserOnline(): boolean {

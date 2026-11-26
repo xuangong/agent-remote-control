@@ -17,36 +17,34 @@ const sentence = (display: ReturnType<typeof readStoredDisplay>) => display?.tim
 beforeEach(async () => { await deviceStore.purge(); });
 afterEach(async () => { vi.restoreAllMocks(); await deviceStore.purge(); localStorage.clear(); });
 
-it('shows no stored row before the Relay confirms the lease, only while it is confirmed, and none again when it must be confirmed anew', () => {
+it('shows no stored row before a lease was granted on this device, and shows them while one is held, confirmed or not', () => {
   const scope = base('a');
+  setWorkspaceReady(scope, false);
+  expect(storedRowsRelay(scope)).toBeUndefined();
   setWorkspaceReady(scope, true);
   saveStoredDisplay(scope, target, replicaState);
   expect(readStoredDisplay(scope, target)?.agent?.id).toBe('agent-1');
   expect(readStoredDisplay(scope, target)?.timeline.restoredFromDevice).toBe(true);
-  // The page starts again: the access is cached for display, the lease is not confirmed.
+  // The page is paused or the Relay cannot be reached: what the device stores still shows.
   setWorkspaceReady(scope, false);
-  expect(storedRowsRelay(scope)).toBeUndefined();
-  expect(readStoredDisplay(scope, target)).toBeUndefined();
-  setWorkspaceReady(scope, true);
   expect(readStoredDisplay(scope, target)?.agent?.id).toBe('agent-1');
-  // The local copy of the lease ran out and the Relay is asked: stored rows hide until it answers.
-  confirmWorkspaceAccess(scope);
-  expect(readStoredDisplay(scope, target)).toBeUndefined();
+  // The local copy of the lease ran out and the Relay is asked: the rows stay while it answers.
   setWorkspaceReady(scope, true);
+  confirmWorkspaceAccess(scope);
   expect(readStoredDisplay(scope, target)?.agent?.id).toBe('agent-1');
   retireWorkspace(scope);
   expect(readStoredDisplay(scope, target)).toBeUndefined();
 });
 
-it('does not seed a replica while the lease is not confirmed', () => {
+it('seeds a replica from the device on a cached lease, and not before any lease was granted', () => {
   const scope = base('b');
   setWorkspaceReady(scope, true);
   saveStoredDisplay(scope, target, replicaState);
-  setWorkspaceReady(scope, false);
+  setWorkspaceReady(scope, true); revokeStoredRows(scope);
   const replica = new AgentReplica();
   restoreReplicaFromDevice(scope, target, replica);
   expect(replica.getState().timeline.initialized).toBe(false);
-  setWorkspaceReady(scope, true);
+  setWorkspaceReady(scope, false, true);
   restoreReplicaFromDevice(scope, target, replica);
   expect(replica.getState().timeline).toMatchObject({ initialized: true, restoredFromDevice: true });
 });
@@ -133,17 +131,14 @@ it('keeps memory copies only while Clear cache on close is on, and removes the d
   } finally { await setClearCacheOnClose(false); }
 });
 
-it('shows stored rows before the Relay answers only while the lease the last status reported has not ended', () => {
+it('shows stored rows on a cached lease for as long as the Relay has not refused it, however long ago it ended', () => {
   const scope = base('5');
   setWorkspaceReady(scope, true);
   saveStoredDisplay(scope, target, replicaState);
-  // A new page load: the cached lease runs for another minute.
-  setWorkspaceReady(scope, false, Date.now() + 60_000);
-  expect(readStoredDisplay(scope, target)?.agent?.id).toBe('agent-1');
-  // The same lease, ended: nothing shows until the Relay confirms.
-  setWorkspaceReady(scope, false, Date.now() - 1);
+  revokeStoredRows(scope);
   expect(readStoredDisplay(scope, target)).toBeUndefined();
-  setWorkspaceReady(scope, true);
+  // A new page load offline: the device holds the lease it cached, which may have ended.
+  setWorkspaceReady(scope, false, true);
   expect(readStoredDisplay(scope, target)?.agent?.id).toBe('agent-1');
 });
 
@@ -151,7 +146,7 @@ it('clears the rows shown on a cached lease at once when the Relay refuses it, a
   const scope = base('6');
   setWorkspaceReady(scope, true);
   saveStoredDisplay(scope, target, replicaState);
-  setWorkspaceReady(scope, false, Date.now() + 60_000);
+  setWorkspaceReady(scope, false, true);
   const heard = vi.fn();
   const stop = subscribeStoredRows(scope, heard);
   expect(readStoredDisplay(scope, target)).toBeDefined();

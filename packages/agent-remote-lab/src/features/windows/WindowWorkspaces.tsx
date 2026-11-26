@@ -1,4 +1,5 @@
 import './window-workspaces.css';
+import { listPresentation } from '../../kernel/known-list.js';
 import { useEffect, useRef, useState } from 'react';
 import { createWindowView, hasBotAppearance, isBotView, type WindowBotDetails, type WindowSessionBinding, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from './useWindowWorkspace.js';
@@ -201,7 +202,7 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
     {workspace.saveState?.state === 'saving' ? <p className="lab-window-note" role="status">{t('common.saving')}</p>
       : workspace.saveState?.state === 'offline' || workspace.saveState?.state === 'error' ? <p className="lab-window-note" role="status">{t('windows.unsaved')}{' '}<button type="button" onClick={() => background(workspace.retrySave)}>{t('common.retry')}</button>
         {workspace.saveState.state === 'error' && workspace.saveState.pending > 0 ? <button type="button" title={t('windows.useSaved.hint')} onClick={() => background(workspace.discardLocalChanges)}>{t('windows.useSaved')}</button> : null}</p> : null}
-    {!catalog.length ? <p className="lab-window-note">{t('windows.note.create')}</p> : null}
+    {listPresentation(catalog.length, workspace.groupsKnowledge ?? 'confirmed') === 'empty' ? <p className="lab-window-note">{t('windows.note.create')}</p> : null}
     {workspace.window ? <>
       {sidebar ? <div className="lab-window-section-heading"><h2 className="lab-sidebar-section-title">{t('windows.inThisWindow')}</h2>
         <IconButton icon="plus" label={t('windows.newSessionView')} disabled={busy || workspace.unavailable} onClick={createView} /></div>

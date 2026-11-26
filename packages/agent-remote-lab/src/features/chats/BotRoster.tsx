@@ -10,6 +10,7 @@ import { dateLocale, replyTime } from '../../kernel/reply-time.js';
 import { LocaleContext, useTaskDirectory, useTranslate } from '@orchardworks/agent-client-web/react';
 import { useChainAlerts } from '../../kernel/chain-alerts.js';
 import { contextMenuEvents } from '../../ui/ContextMenu.js';
+import { listPresentation, type Knowledge } from '../../kernel/known-list.js';
 
 export function botPlaceKey(place: BotPlace): string {
   return place.kind === 'bot' ? JSON.stringify([place.groupId, place.viewId]) : place.kind === 'session' ? sessionKey(place.session) : place.groupId;
@@ -60,11 +61,12 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
           {row.muted ? <span className="lab-bot-muted" aria-hidden="true"><Icon name="bell-off" size={13} /></span> : null}
           {time ? <span className="lab-bot-time" aria-hidden="true">{time}</span> : null}</span>
         {/* One sentence of what the assistant is doing; an unread reply is a dot, never a number, and needs you a ringed dot in its place. */}
-        {sentence || draft || row.unread || needsYou ? <span className="lab-bot-summary" aria-hidden="true">
+        {/* The line is always there, empty or not, so a sentence that arrives later takes its place without moving the rows below. */}
+        <span className="lab-bot-summary" aria-hidden="true">
           {sentence ? <span className="lab-bot-sentence" data-state={row.assistant.state}>{sentence}</span> : null}
           {draft ? <span className="lab-bot-draft"><span className="lab-bot-draft-label">{t('assistants.draft')}</span>{draft}</span> : null}
           {needsYou ? <span className="lab-bot-needs-you" /> : row.unread ? <span className="lab-bot-unread" /> : null}
-        </span> : null}
+        </span>
       </span>
       {row.details.pinned ? <span className="lab-bot-pinned" role="img" aria-label={t('assistants.pinned')}><Icon name="pin" size={14} /></span> : null}
     </button>
@@ -81,8 +83,10 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
  * Chats: the assistants Bot mode shows, by group in the groups' order with the default group last, each group by activity
  * (pinned first, then by latest reply); no headings while the default group is all there is. Then Other sessions.
  */
-export function BotRoster({ model, groups, place, onSelect, directoryControls, hostName = id => id, compact = false, menu }: {
-  model: BotRosterModel; groups: readonly WindowGroup[]; place?: BotPlace; onSelect(place: BotPlace): void; directoryControls: ReactNode;
+export function BotRoster({ model, groups, knowledge = 'confirmed', place, onSelect, directoryControls, hostName = id => id, compact = false, menu }: {
+  model: BotRosterModel; groups: readonly WindowGroup[];
+  /** What is known of the list: only a confirmed empty roster says so; one nothing has answered yet keeps a quiet shell and no words. */
+  knowledge?: Knowledge; place?: BotPlace; onSelect(place: BotPlace): void; directoryControls: ReactNode;
   /** Opens an assistant's context menu (pin, mute, rename, move). */
   menu?(row: BotRow, anchor: HTMLElement, point?: { x: number; y: number }): void;
   /** A phone's roster: larger pictures and taller rows, as in a native chat list. */
@@ -93,10 +97,12 @@ export function BotRoster({ model, groups, place, onSelect, directoryControls, h
   const t = useTranslate();
   const sections = groupSections(model, groups, { order: 'activity', defaultTitle: t('navigation.groups.default') });
   const headings = showsGroupHeadings(sections);
+  const presentation = listPresentation(sections.length, knowledge);
   const member = (row: BotRow) => <BotMember key={`${row.groupId}/${row.viewId}`} row={row} compact={compact} hostName={hostName} onSelect={onSelect}
     current={place?.kind === 'bot' && place.groupId === row.groupId && place.viewId === row.viewId} {...(menu ? { menu: (anchor, point) => menu(row, anchor, point) } : {})} />;
   return <nav aria-label={t('navigation.chats')} className="lab-bot-roster-list">
-    {!sections.length ? <p className="lab-bot-empty">{t('navigation.chatsEmpty')}</p>
+    {presentation === 'empty' ? <p className="lab-bot-empty">{t('navigation.chatsEmpty')}</p>
+      : presentation === 'quiet' ? <div className="lab-bot-quiet" data-compact={compact || undefined} aria-hidden="true">{[0, 1, 2].map(index => <div key={index} className="lab-bot-quiet-row"><span className="lab-bot-quiet-picture" /><span className="lab-bot-quiet-lines" /></div>)}</div>
       : headings ? sections.map(section => { const key = section.groupId ?? 'default';
         return <section key={key} className="lab-bot-chats lab-chat-group" aria-labelledby={`chat-group-${key}`} data-chat-group={key} data-muted={section.muted || undefined}>
           <h2 id={`chat-group-${key}`} className="lab-chat-group-title"><span>{section.title}</span>

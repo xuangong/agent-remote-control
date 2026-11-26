@@ -44,7 +44,8 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
   const answering = detailsShown && botId && directory?.answering ? directory.answering(botId) : [];
   const bots = detailsShown && botId && directory?.staff ? directory.staff(botId) : [];
   const chiefs = detailsShown && botId ? directory?.chief?.(botId) : undefined;
-  const files = useMemo(() => detailsShown && state ? sessionFiles(state.timeline.entries) : [], [detailsShown, state?.timeline.entries]);
+  // The files of a timeline that has not loaded are unknown, not none: the section waits rather than say nothing was changed.
+  const files = useMemo(() => detailsShown && state?.timeline.initialized ? sessionFiles(state.timeline.entries) : undefined, [detailsShown, state?.timeline.initialized, state?.timeline.entries]);
   const reportedSession = state?.agent?.runtimeInfo.sessionId;
   const lastTurn = detailsShown ? Date.parse(state?.timeline.entries.at(-1)?.timestamp ?? '') || undefined : undefined;
   const assistantRef: AssistantRef | undefined = detailsShown ? {

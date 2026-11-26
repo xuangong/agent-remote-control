@@ -57,4 +57,4 @@
 .lab-host-fleet-confirm li span { min-width: 0; overflow-wrap: anywhere; }
 .lab-host-fleet-confirm li small { color: var(--ui-label-secondary); font-size: 12px; }
 .lab-host-fleet-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
-@media (pointer: coarse) { .lab-host-update-all.lab-host-update-all { min-height: 44px; } }
+@media (pointer: coarse) { .lab-host-update-line { min-height: 44px; } .lab-host-update-all.lab-host-update-all { min-height: 44px; } }

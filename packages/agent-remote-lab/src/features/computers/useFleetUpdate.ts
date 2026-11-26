@@ -53,7 +53,7 @@ export function useFleetUpdate(service: Pick<HostPairingService, 'controllerRele
       try {
         const values = await Promise.all(updatingIds.split('\n').map(async id => { try { return [id, await service.controllerUpdate!(id)] as const; } catch { return undefined; } }));
         // A restarted Controller that no longer remembers the request answers idle: the Host's version decides, so the last phase stays.
-        if (!retired) setStatuses(previous => ({ ...previous, ...Object.fromEntries(values.filter(value => value !== undefined && value[1].phase !== 'idle')) }));
+        if (!retired) setStatuses(previous => ({ ...previous, ...Object.fromEntries(values.flatMap(value => value && value[1].phase !== 'idle' ? [value] : [])) }));
       } finally { loading = false; }
     }, PROGRESS_MS);
     return () => { retired = true; stop(); };

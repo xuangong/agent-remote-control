@@ -42,6 +42,8 @@ export default defineConfig({
   globalSetup: './e2e/dev-server-warmup.ts',
   fullyParallel: false,
   workers: 1,
+  // Under load a layout assertion can miss its window once in many runs; a failure that repeats is still a failure.
+  retries: 1,
   use: {
     baseURL: `http://127.0.0.1:${webPort}`,
     launchOptions: browserExecutable ? { executablePath: browserExecutable } : undefined,

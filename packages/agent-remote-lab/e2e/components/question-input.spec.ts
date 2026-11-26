@@ -43,13 +43,14 @@ async function compose(page: Page, browserName: string, selector: string): Promi
 }
 
 for (const [label, selector] of [['question', 'input[name="directory-custom"]'], ['form', 'input[name="note"]']] as const) {
-  test(`${label} text field composes Chinese without the page writing its value, and keeps its node and focus`, async ({ page, browserName }) => {
+  test(`${label} text field composes Chinese without the page writing its value, and keeps its node and focus`, async ({ page, browserName, hasTouch }) => {
     test.setTimeout(30_000);
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto('/e2e/fixtures/question-input.html');
     const field = page.locator(selector);
-    await field.tap();
+    // The installed app takes Chinese input on phones (tap) and desktops (click) alike.
+    if (hasTouch) await field.tap(); else await field.click();
     const state = await watchWrites(page, selector);
     expect(await compose(page, browserName, selector)).toEqual(steps);
     // Let the owner hand the draft back, then read what the page did to the field.

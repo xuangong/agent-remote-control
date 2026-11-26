@@ -13,7 +13,7 @@ test('a roster nothing has answered keeps a quiet shell of the height of real ro
   await expect(shell.locator('.lab-bot-quiet-row')).toHaveCount(3);
   expect(await shell.locator('.lab-bot-quiet-row').first().evaluate(node => node.getBoundingClientRect().height)).toBeGreaterThanOrEqual(56);
   await expect(page.locator('body')).not.toContainText(emptyWords);
-  expect(await shell.evaluate(node => node.innerText.trim())).toBe('');
+  expect((await shell.textContent())?.trim()).toBe('');
 });
 
 test('the quiet shell holds the place of the rows that replace it', async ({ page }) => {

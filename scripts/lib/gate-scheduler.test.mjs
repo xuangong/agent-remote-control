@@ -11,7 +11,7 @@ const profiles = {
   'e2e-webkit': { memoryMiB: 2 * GIB, cores: 2, needs: 'verify' },
   smoke: { memoryMiB: 3 * GIB, cores: 3, needs: 'verify', exclusive: true },
 };
-const limits = { ...DEFAULT_LIMITS, reserveMiB: 3 * GIB };
+const limits = { ...DEFAULT_LIMITS, reserveMiB: 3 * GIB, cpuCeiling: 1 };
 const tier = id => ({ id });
 const machine = (overrides = {}) => ({ availableMiB: 12 * GIB, pressure: 'normal', load1: 1, cores: 10, ...overrides });
 const decide = (overrides = {}) => decideNext({ pending: [tier('components'), tier('e2e-chromium')], running: [], milestones: new Set(['verify']), machine: machine(), limits, profiles, ...overrides });
@@ -226,4 +226,12 @@ test('a running tier counts the memory and cores of the workers it was given', (
   assert.match(decide({ pending: [tier('e2e-chromium')], running, machine: machine({ availableMiB: 8 * GIB, busyCores: 0 }) }).reason, /needs 2\.0 GiB, 1\.0 GiB free/);
   const busy = decide({ pending: [tier('e2e-chromium')], running: [{ tier: tier('components'), workers: 3, rssMiB: 3 * GIB }], machine: machine({ availableMiB: 12 * GIB, busyCores: 0, cores: 5 }) });
   assert.match(busy.reason, /needs 2 cores, 1\.5 free/);
+});
+
+test('by default the gate keeps to 60 percent of the cores, so a two-worker component run is alone', () => {
+  const defaults = { ...DEFAULT_LIMITS, reserveMiB: 3 * GIB };
+  const idle = decide({ limits: defaults, profiles: TIER_PROFILES, machine: machine({ availableMiB: 16 * GIB, busyCores: 0 }) });
+  assert.deepEqual([idle.start.tier.id, idle.start.workers], ['components', 2]);
+  const running = [{ tier: tier('components'), workers: 2, rssMiB: 3 * GIB }];
+  assert.match(decide({ pending: [tier('e2e-chromium')], running, limits: defaults, profiles: TIER_PROFILES, machine: machine({ availableMiB: 16 * GIB, busyCores: 3 }) }).reason, /needs 2 cores, 0\.0 free/);
 });

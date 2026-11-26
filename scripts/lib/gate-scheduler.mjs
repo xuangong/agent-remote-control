@@ -38,8 +38,12 @@ export const DEFAULT_LIMITS = {
   reserveMiB: 2 * GIB,
   /** Most tiers at once. */
   maxParallel: 3,
-  /** The share of the cores the gate may keep busy (the larger of the cores busy now and the running tiers' declared cores). */
-  cpuCeiling: 1,
+  /**
+   * The share of the cores the gate may keep busy (the larger of the cores busy now and the running tiers' declared cores). At 1.0,
+   * three tiers beside each other held the machine at 9 of 10 cores and the installed-app flow (E14) failed in all three runs, a
+   * bot flow (E15) timed out and two layout specs failed; each passes alone.
+   */
+  cpuCeiling: 0.6,
   /** How long a tier waits for memory pressure to fall when nothing else is running, before it starts anyway. */
   idleWaitMs: 2 * 60_000,
 };
@@ -82,7 +86,7 @@ export function decideNext({ pending, running, milestones, machine, limits = DEF
     if (running.length >= limits.maxParallel) { reasons.push(`${tier.id} waits: ${limits.maxParallel} tiers are running`); continue; }
     if (!running.length) {
       if (machine.pressure !== 'normal' && idleMs < limits.idleWaitMs) { reasons.push(`${tier.id} waits for memory pressure to fall`); continue; }
-      return { start: { tier, workers: workersThatFit(profile, { memoryMiB: Math.max(room.memoryMiB, profile.memoryMiB), cores: machine.cores }) }, reason: `${tier.id} starts, nothing else running (${numbers})` };
+      return { start: { tier, workers: workersThatFit(profile, { memoryMiB: Math.max(room.memoryMiB, profile.memoryMiB), cores: machine.cores * limits.cpuCeiling }) }, reason: `${tier.id} starts, nothing else running (${numbers})` };
     }
     if (machine.pressure !== 'normal') { reasons.push(`${tier.id} waits: memory pressure is ${machine.pressure}`); continue; }
     if (room.memoryMiB < profile.memoryMiB) { reasons.push(`${tier.id} waits: needs ${gib(profile.memoryMiB)}, ${gib(Math.max(0, room.memoryMiB))} free to use`); continue; }

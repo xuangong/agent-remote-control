@@ -74,7 +74,7 @@ other name is refused.
 Before it starts a tier, and every two seconds while one waits, the gate reads the machine: memory it can give away (free, inactive and
 purgeable pages from `vm_stat`, `MemAvailable` on Linux), the macOS memory pressure level, the load average and the core count. A tier
 starts when the tiers it needs have finished and its measured peak memory and CPU fit on top of what is running, after
-keeping `--reserve-gib` (default 2) free for other apps; at most `--max-parallel` (default 3) run at once. The measured costs are
+keeping `--reserve-gib` (default 2) free for other apps and 40 percent of the cores free; at most `--max-parallel` (default 3) run at once. The measured costs are
 `TIER_PROFILES` in `scripts/lib/gate-scheduler.mjs`. In practice:
 
 - `verify` runs first and alone. Its build step rewrites the package outputs and the Workbench `dist` that every other tier reads, and

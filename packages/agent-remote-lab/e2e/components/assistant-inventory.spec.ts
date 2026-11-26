@@ -1,4 +1,4 @@
-// Component projects: orchard-phone-chromium, orchard-phone-webkit
+// Component projects: orchard-phone-webkit
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { ASSISTANT_INVENTORY } from '../fixtures/assistant-inventory.js';
 

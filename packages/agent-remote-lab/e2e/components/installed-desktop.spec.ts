@@ -1,4 +1,4 @@
-// Component projects: webkit-desktop, orchard-phone-chromium, orchard-phone-webkit
+// Component projects: webkit-desktop, orchard-phone-webkit
 import { expect, test, type Page } from '@playwright/test';
 import { installLifecycle, type TitleBarArea } from '@orchardworks/agent-e2e/lifecycle';
 import { contrastFailures } from './contrast.js';

@@ -1,4 +1,4 @@
-// Component projects: orchard-phone-chromium, orchard-phone-webkit
+// Component projects: orchard-phone-webkit
 import { expect, test } from '@playwright/test';
 
 // Tracking from the Favorites panel of the Sessions drawer on a 320px phone: the tracked-sessions panel has no per-row close buttons, and the

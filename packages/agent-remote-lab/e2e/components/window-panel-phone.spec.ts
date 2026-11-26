@@ -1,4 +1,4 @@
-// Component projects: webkit-conversation, orchard-phone-chromium, orchard-phone-webkit
+// Component projects: webkit-conversation, orchard-phone-webkit
 import { expect, test } from '@playwright/test';
 
 // The groups panel of the launcher row, on the narrowest phones: it stays inside the screen with a long group name, and every control stays inside it.

@@ -1,4 +1,4 @@
-// Component projects: orchard-phone-chromium, orchard-phone-webkit
+// Component projects: orchard-phone-webkit
 import { expect, test } from '@playwright/test';
 
 // On a compact screen the Window's Sessions panel is a full-width drawer that covers the page (its focus rules, Escape and the Tab loop,

@@ -21,6 +21,8 @@
     "test:changed": "node scripts/run-tests.mjs changed",
     "task:start": "sh scripts/task-start.sh",
     "postmerge": "node scripts/postmerge.mjs",
+    "gate:release": "node scripts/release-gate.mjs",
+    "release:controller": "node scripts/release-controller.mjs",
     "open-items": "node scripts/open-items.mjs",
     "prepare": "node scripts/git-setup.mjs",
     "test:unit": "node scripts/run-tests.mjs unit-package",

@@ -20,15 +20,50 @@ in `packages/agent-controller/package.json`, and its commit must be on `main` hi
 Prerelease versions are deliberately excluded from this workflow.
 
 A release is cut on `main` after the last merge's `pnpm postmerge` (README,
-"Merging into main"). Update that package's version, refresh `pnpm-lock.yaml`,
-run `pnpm compatibility:update`, review the changes and commit the three files
-together on `main`; `pnpm compatibility:check` then verifies the digest there, as
-the workflows do on the tag. Create a tag at that commit, publish its GitHub Release, then explicitly
-dispatch npm publication when requested. A manual retry uses the same tag:
+"Merging into main"), with one command:
+
+```sh
+pnpm release:controller 0.3.9 --summary "what changed" [--gate-passed <log>] [--yes] [--dry-run]
+```
+
+It runs explicit steps and checks each one's precondition first; `--dry-run` prints every command and
+runs none (it still reads git state, and says where a real run would refuse). Progress is kept in
+the git directory (`arc-release-<version>.json`), so after a failure the same command skips the
+finished steps and continues at the failed one.
+
+| Step | What it does |
+| --- | --- |
+| a. preconditions | On `main`, clean tree, at `origin/main` (after a fetch). |
+| b. bump | Sets the version of `packages/agent-controller/package.json`, runs `pnpm install --lockfile-only`, `pnpm compatibility:update` and `pnpm compatibility:check`, and commits those three files only as `release: Controller <version> (<summary>)`. |
+| c. gate | `pnpm gate:release`; `--gate-passed <log>` skips it for a gate you already ran on this commit. |
+| d. push | `git push origin main`. Needs `--yes` or an interactive yes. |
+| e. deploy | Only when the Relay or the website changed since the last `controller-v*` tag, otherwise it says it is skipped. Records the current Worker version as the rollback target, builds, `wrangler deploy`, then `scripts/deploy-readiness.mjs` (deadline 480 s). Needs `--yes` or yes. |
+| f. release | Builds the package, creates the manifest (`scripts/controller-release.mjs`) and `gh release create controller-v<version>` with the four assets at the release commit. Needs `--yes` or yes. |
+| g. report | Prints the rollback target and the reminder that the owner updates Controllers from Settings -> Computers. |
+
+Create the tag through the GitHub release (step f), then explicitly dispatch npm publication when requested. A manual retry uses the same tag:
 
 ```sh
 gh workflow run publish-controller.yml --ref controller-v0.1.0
 ```
+
+## Scoped release gate
+
+`pnpm gate:release [--base <ref>] [--plan] [--full]` decides what to run from the files changed
+since the commit production runs (default: the newest `controller-v*` tag) and
+`architecture/modules.json`, prints the plan with the reason for each tier, runs the tiers one at a
+time, and stops at the first failure with its log (`.artifacts/gate-release/<time>/<tier>.log`).
+`--plan` only prints; `--full` runs every tier.
+
+| Tier | Runs when |
+| --- | --- |
+| `pnpm verify` | Always. |
+| `pnpm test:components`, `pnpm test:preview-browser` | The client (`agent-client`, `agent-client-web`, `agent-remote-lab`, `agent-timeline`), the Relay, the protocol or a root manifest changed. |
+| `pnpm test:e2e:flows`, then `E2E_BROWSER=webkit` | The client, Relay, protocol or Controller changed. After a Controller-only change, only the flow files whose id (`E1`, `E14b`, ...) a changed module names in its `flows` in `modules.json`; none when no flow does. A new flow file must be named by a module (a unit test checks it). |
+| `pnpm smoke:quick` | The client or Relay changed. The script starts the instance with `ARC_LOCAL_JOURNALS=1` itself and afterwards restores it: stopped if it was stopped, else restarted as a normal run. |
+
+The regenerated compatibility digest alone changes nothing. Run the gate on the release commit
+(or on `main` before it) and pass its log to `release:controller --gate-passed`, or let step c run it.
 
 The workflow never overwrites a published npm version. If publication succeeds
 but the final registry check fails, inspect npm before retrying; an already

@@ -51,6 +51,8 @@ export type ScriptedStep =
   | { tool: string; input: ScriptedToolInput; output: string; ms?: number }
   /** A pending `tool_approval` of `command`; the turn waits until the page answers it. Allow goes on; deny or cancel ends the turn. */
   | { approval: string; command: string; toolName?: string }
+  /** A pending `question` with one single-choice question that also takes free text; the turn goes on once the page answers it. */
+  | { question: string; options: readonly string[] }
   /** An assistant message. */
   | { reply: string };
 
@@ -174,6 +176,13 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
           emit({ type: 'timeline', provider: providerId, turnId, item: { ...item, status: 'running', error: null } }, `${callId}:started`, { key: callId });
           if (step.ms) await new Promise(resolve => setTimeout(resolve, step.ms));
           emit({ type: 'timeline', provider: providerId, turnId, item: { ...item, status: 'completed', error: null, result: { content: [{ type: 'text', text: step.output }], exitCode: 0, durationMs: step.ms ?? 0 } } }, `${callId}:completed`, { key: callId, completes: true });
+        } else if ('question' in step) {
+          const requestId = `${turnId}:question-${index}`;
+          const answered = new Promise<AgentInteractionResponse>(resolve => pendingApprovals.set(requestId, resolve));
+          emit({ type: 'interaction_requested', provider: providerId, turnId, request: { kind: 'question', requestId, questions: [{ questionId: 'choice', header: 'Choice', prompt: step.question,
+            required: true, selection: 'single', options: step.options.map(option => ({ value: option, label: option })), allowCustomText: true, allowDismiss: false }] } }, `${requestId}:requested`);
+          const response = await answered;
+          emit({ type: 'interaction_resolved', provider: providerId, turnId, requestId, response }, `${requestId}:resolved`, { key: `interaction:${requestId}`, completes: true, liveOnly: true });
         } else {
           const requestId = `${turnId}:approval-${index}`;
           const answered = new Promise<AgentInteractionResponse>(resolve => pendingApprovals.set(requestId, resolve));

@@ -8,7 +8,7 @@ import { createWriteStream, mkdirSync, readFileSync, readdirSync } from 'node:fs
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { DEFAULT_LIMITS, runSchedule, withWorkers } from './lib/gate-scheduler.mjs';
+import { DEFAULT_LIMITS, runSchedule, tierCommand } from './lib/gate-scheduler.mjs';
 import { processTreeMiB, readMachine } from './lib/machine-state.mjs';
 import { describeGate, planGate, releasedBase, selectTiers } from './lib/release-gate.mjs';
 import { packageFiles, readModules, workspacePackages } from './lib/test-selection.mjs';
@@ -70,8 +70,8 @@ function run({ command, env }, log, deadlineMs, onSpawn) {
     child.once('close', (code, signal) => { clearTimeout(timer); live.delete(child); done(code ?? (signal === 'SIGKILL' ? 124 : 1)); });
   });
 }
-/** The steps of a tier; tiers that support it take the granted workers. */
-const stepsOf = (tier, workers) => tier.steps.map(step => ({ ...step, command: withWorkers(step.command, tier.id, workers) }));
+/** The steps of a tier; tiers that support it take the granted workers, and in a parallel run one retry of a failed test. */
+const stepsOf = (tier, workers) => tier.steps.map(step => ({ ...step, command: tierCommand(step.command, tier.id, { workers, retry: !serial }) }));
 /** Starts a tier: its steps run in order in the background. Returns `{ handle, done }`, `handle.pid` is the process now running. */
 function launch(tier, { workers }) {
   const logPath = join(logDirectory, `${tier.id}.log`);

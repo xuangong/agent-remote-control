@@ -82,6 +82,9 @@ keeping `--reserve-gib` (default 2) free for other apps; at most `--max-parallel
 - `components` takes as many Playwright workers (`--workers`, at most 2) as the memory and cores allow, and the e2e tiers as many Vitest
   workers (`--fileParallelism --maxWorkers`, at most 2). `e2e-chromium`, `e2e-webkit`, `components` and `preview-browser` use a free
   port or a fixed Vite port of their own and a temporary directory per stack, and run together.
+- In a parallel run `components` and the e2e tiers retry a failed test once; a test that passes on its retry is listed as flaky in the log.
+  Tiers beside each other produced load-induced failures that passed alone (a flow timing out at 25 s that takes 9 s, two layout specs).
+  `--serial` runs without retries.
 - `smoke` runs alone and last: `pnpm local up` rebuilds the Relay, the devbox and the Workbench for the local instance.
 - Under memory pressure (`warn` or `critical`) or with less than the reserve available, no new tier starts until it recovers; a lone
   tier waits at most two minutes, then starts anyway. A tier's running memory is the resident size of its process tree (and, for the

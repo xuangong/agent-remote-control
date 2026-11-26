@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { decideNext, DEFAULT_LIMITS, runSchedule, withWorkers, TIER_PROFILES } from './gate-scheduler.mjs';
+import { decideNext, DEFAULT_LIMITS, runSchedule, tierCommand, TIER_PROFILES } from './gate-scheduler.mjs';
 import { busyCoresBetween, matchingMiB, parseMeminfo, parseProcessTable, parseVmStat, pressureName, treeMiB } from './machine-state.mjs';
 
 const GIB = 1024;
@@ -203,11 +203,12 @@ test('busy cores come from the CPU times between two readings, and a too short i
   assert.equal(busyCoresBetween({ busy: 0, total: 0 }, { busy: 10, total: 100 }, 10), undefined);
 });
 
-test('granted workers become the arguments of the tier\'s command, and one worker changes nothing', () => {
-  assert.deepEqual(withWorkers(['pnpm', 'test:components'], 'components', 3), ['pnpm', 'test:components', '--workers', '3']);
-  assert.deepEqual(withWorkers(['pnpm', 'test:e2e:flows', 'flows/e1-'], 'e2e-webkit', 2), ['pnpm', 'test:e2e:flows', 'flows/e1-', '--fileParallelism', '--maxWorkers=2']);
-  assert.deepEqual(withWorkers(['pnpm', 'test:components'], 'components', 1), ['pnpm', 'test:components']);
-  assert.deepEqual(withWorkers(['pnpm', 'verify'], 'verify', 3), ['pnpm', 'verify']);
+test('granted workers and a retry become arguments of the tier\'s command, and one worker without retry changes nothing', () => {
+  assert.deepEqual(tierCommand(['pnpm', 'test:components'], 'components', { workers: 2 }), ['pnpm', 'test:components', '--workers', '2']);
+  assert.deepEqual(tierCommand(['pnpm', 'test:e2e:flows', 'flows/e1-'], 'e2e-webkit', { workers: 2, retry: true }), ['pnpm', 'test:e2e:flows', 'flows/e1-', '--fileParallelism', '--maxWorkers=2', '--retry=1']);
+  assert.deepEqual(tierCommand(['pnpm', 'test:components'], 'components', { retry: true }), ['pnpm', 'test:components', '--retries', '1']);
+  assert.deepEqual(tierCommand(['pnpm', 'test:components'], 'components', {}), ['pnpm', 'test:components']);
+  assert.deepEqual(tierCommand(['pnpm', 'verify'], 'verify', { workers: 3, retry: true }), ['pnpm', 'verify']);
   assert.ok(TIER_PROFILES.components.workers.max >= 2);
 });
 

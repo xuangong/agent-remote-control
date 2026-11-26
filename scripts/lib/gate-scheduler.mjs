@@ -9,8 +9,9 @@ const GIB = 1024;
 /**
  * What each tier costs, measured on the 10-core, 16 GiB Mac mini with each tier run alone on an otherwise idle machine
  * (docs/superpowers/reviews/2026-11-26-test-gate-retrospective.md): `memoryMiB` is the fall of the memory the system can give away
- * (free + inactive + purgeable) while the tier ran, with a margin of about a quarter; `cores` is the CPU it keeps busy, counted
- * over its whole run with a margin, since the Vitest and Playwright bursts are short. `needs` names the milestone that must be reached
+ * (free + inactive + purgeable) while the tier ran, with a margin of about a quarter; `cores` is the CPU it uses at its peak: the
+ * flows and component specs wait much of the time (mean 0.2 to 1.4 cores) but their browsers start in bursts, and in a run that
+ * counted the mean instead, a flow timed out at 25 s (9 s alone) while three tiers had the machine at 9 of 10 cores. `needs` names the milestone that must be reached
  * first: `verify` is the end of the verify tier. Verify rebuilds the package outputs and the Workbench `dist` the other tiers read,
  * and its process-spawning unit tests fail under load (the opencode supervisor test and the one-second speed rule did, in two of
  * two runs that overlapped it with a browser tier), so nothing runs beside it. A tier with `workers` can run several workers (`flags(n)` are the arguments that ask for n); each extra worker adds the given
@@ -21,12 +22,12 @@ const GIB = 1024;
 /** Vitest runs the flow files one at a time; each file has its own stack on free ports, so files can run in separate workers. */
 const E2E_WORKER_FLAGS = count => ['--fileParallelism', `--maxWorkers=${count}`];
 export const TIER_PROFILES = {
-  verify: { memoryMiB: 3.2 * GIB, cores: 3 },
-  components: { memoryMiB: 2 * GIB, cores: 1.5, needs: 'verify', workers: { max: 2, extraMemoryMiB: 0.7 * GIB, extraCores: 1, flags: count => ['--workers', String(count)] } },
-  'preview-browser': { memoryMiB: 1.4 * GIB, cores: 1, needs: 'verify' },
-  'e2e-chromium': { memoryMiB: 1 * GIB, cores: 1, needs: 'verify', workers: { max: 2, extraMemoryMiB: 0.6 * GIB, extraCores: 1, flags: E2E_WORKER_FLAGS } },
-  'e2e-webkit': { memoryMiB: 1.3 * GIB, cores: 1, needs: 'verify', workers: { max: 2, extraMemoryMiB: 0.6 * GIB, extraCores: 1, flags: E2E_WORKER_FLAGS } },
-  smoke: { memoryMiB: 1 * GIB, cores: 1, needs: 'verify', exclusive: true },
+  verify: { memoryMiB: 3.2 * GIB, cores: 8 },
+  components: { memoryMiB: 2 * GIB, cores: 4, needs: 'verify', workers: { max: 2, extraMemoryMiB: 0.7 * GIB, extraCores: 2, flags: count => ['--workers', String(count)] }, retryFlags: ['--retries', '1'] },
+  'preview-browser': { memoryMiB: 1.4 * GIB, cores: 3, needs: 'verify' },
+  'e2e-chromium': { memoryMiB: 1 * GIB, cores: 2, needs: 'verify', workers: { max: 2, extraMemoryMiB: 0.6 * GIB, extraCores: 1, flags: E2E_WORKER_FLAGS }, retryFlags: ['--retry=1'] },
+  'e2e-webkit': { memoryMiB: 1.3 * GIB, cores: 2, needs: 'verify', workers: { max: 2, extraMemoryMiB: 0.6 * GIB, extraCores: 1, flags: E2E_WORKER_FLAGS }, retryFlags: ['--retry=1'] },
+  smoke: { memoryMiB: 1 * GIB, cores: 7, needs: 'verify', exclusive: true },
 };
 /** A tier without a measured profile is assumed heavy, so it never overlaps blindly. */
 const UNKNOWN_PROFILE = { memoryMiB: 3 * GIB, cores: 3, needs: 'verify' };
@@ -154,7 +155,12 @@ export async function runSchedule({ tiers, limits = DEFAULT_LIMITS, profiles = T
   return { results, skipped: pending.map(tier => tier.id), observed };
 }
 
-/** The command of a tier step with the arguments that ask for `workers` workers, when the tier supports them and more than one was granted. */
-export function withWorkers(command, tierId, workers, profiles = TIER_PROFILES) {
-  return workers > 1 && profiles[tierId]?.workers ? [...command, ...profiles[tierId].workers.flags(workers)] : command;
+/**
+ * The command of a tier step with the arguments for the granted `workers` (when the tier supports them and more than one was granted)
+ * and, with `retry`, one retry of a failed test: tiers that run beside others see load-induced failures that pass alone, and the
+ * reporters list a test that passed on its retry as flaky.
+ */
+export function tierCommand(command, tierId, { workers = 1, retry = false, profiles = TIER_PROFILES } = {}) {
+  const profile = profiles[tierId];
+  return [...command, ...(workers > 1 && profile?.workers ? profile.workers.flags(workers) : []), ...(retry && profile?.retryFlags ? profile.retryFlags : [])];
 }

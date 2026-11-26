@@ -16,9 +16,9 @@ const group = () => ({ window: { id: 'g', title: 'g', revision: 1, views: [['v1'
   binding: { hostId: 'mac', providerId: 'codex', nativeSessionId, title: nativeSessionId } })) },
   bots: { rank: 'm', members: { v1: { botId: ids.chief, name: 'Chief' }, v2: { botId: ids.tracker, name: 'Tracker' } } } }) as unknown as WindowGroup;
 
-function fixture(places?: HostPlaces) {
+function fixture(places?: HostPlaces, leading: WindowGroup[] = []) {
   let state: SavedTeam[] = [], now = 100, workers = 0, offline = false;
-  const groups = [group()], placed: Array<{ groupId: string; viewId: string; details: Record<string, unknown> }> = [];
+  const groups = [...leading, group()], placed: Array<{ groupId: string; viewId: string; details: Record<string, unknown> }> = [];
   const seats: Array<{ hostId: string; cwd?: string }> = [];
   const broker = new TeamBroker({
     ...(places ? { places } : {}),
@@ -437,5 +437,19 @@ describe('bots calling as their own sessions', () => {
       await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'w3', to: 'chief', text: 'Done.', status: 'done' });
       expect(await f.broker.hostCall('mac', { action: 'bot_reply', owner: f.as('tracker'), text: 'v0.3', cause: { kind: 'framed', answers: second } })).toMatchObject({ outcome: 'unreachable' });
     });
+  });
+});
+
+describe('a session that a plain window also shows', () => {
+  // Opening a session in a page gives it a window of its own, with no bot details, ahead of the group that makes it a bot.
+  const plainWindow = (nativeSessionId: string) => ({ window: { id: 'plain-' + nativeSessionId, title: nativeSessionId, revision: 1, views: [{ id: 'main', placement: 'primary',
+    binding: { hostId: 'mac', providerId: 'codex', nativeSessionId, title: nativeSessionId } }] } }) as unknown as WindowGroup;
+
+  it('speaks as the bot, so a message to another bot is recorded as received from a bot id', async () => {
+    const f = fixture(undefined, [plainWindow('chief')]);
+    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'm1', to: 'Tracker', text: 'The notes are ready.' });
+    const inbox = f.state().find(team => team.inbox)!;
+    expect(inbox.inbox!.recent).toEqual([expect.objectContaining({ from: ids.chief })]);
+    expect(inbox.messages.at(-1)!.text).toContain('from Chief');
   });
 });

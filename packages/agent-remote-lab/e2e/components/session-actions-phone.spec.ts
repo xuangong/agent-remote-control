@@ -1,4 +1,4 @@
-// Component projects: orchard-phone-chromium, orchard-phone-webkit
+// Component projects: orchard-phone-webkit
 import { expect, test, type Locator } from '@playwright/test';
 
 // A phone shows a Session View's actions behind one control; the logic of that control is `SessionTimelineTools.test.tsx`.

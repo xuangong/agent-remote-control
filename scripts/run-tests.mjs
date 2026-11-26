@@ -1,5 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { availableParallelism } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { importGraph, readModuleMap } from './lib/arch-check.mjs';
 import { packageManager } from './lib/package-manager.mjs';
@@ -158,26 +159,43 @@ const commands = {
 };
 if (!(mode in commands) && mode !== 'changed') throw new Error(`Unknown test suite: ${mode}`);
 await verifyNativeTestVersions(mode);
-const runs = plannedRuns ?? [commands[mode]];
-let child;
-function start(args) {
-  child = spawn(...packageManager('pnpm', args), { stdio: 'inherit', windowsHide: true, detached: process.platform !== 'win32',
+/**
+ * The unit packages whose Vitest cannot use many cores (one worker, or files one at a time). The recursive unit run goes one package
+ * at a time because the others use every core; these run in a lane of their own beside it, one at a time, when the machine has cores
+ * to spare. The per-test deadlines and the slow-test rule are the packages' own and do not change.
+ */
+const LOW_PARALLELISM_PACKAGES = ['@orchardworks/agent-relay-cloudflare', '@orchardworks/agent-remote-debugger', '@orchardworks/agent-provider-copilot'];
+const MIN_CORES_FOR_SIDE_LANE = 8;
+const sideLane = mode === 'unit' && availableParallelism() >= MIN_CORES_FOR_SIDE_LANE;
+if (sideLane) commands.unit = ['-r', '--workspace-concurrency=1', ...LOW_PARALLELISM_PACKAGES.flatMap(name => ['--filter', `!${name}`]), 'run', 'test'];
+const lanes = [plannedRuns ?? [commands[mode]]];
+if (sideLane) lanes.push([['-r', '--workspace-concurrency=1', ...LOW_PARALLELISM_PACKAGES.flatMap(name => ['--filter', name]), 'run', 'test']]);
+const children = new Set();
+let running = lanes.length;
+function start(runs) {
+  const args = runs.shift();
+  const child = spawn(...packageManager('pnpm', args), { stdio: 'inherit', windowsHide: true, detached: process.platform !== 'win32',
     env: { ...process.env, AGENT_CLAUDE_SUCCESSION_EVIDENCE: successionEvidence ? '1' : undefined,
       AGENT_OPENCODE_SUCCESSION_EVIDENCE: mode === 'opencode-succession-evidence' ? '1' : undefined,
       AGENT_OPENCODE_ACTUAL_SUCCESSION: mode === 'opencode-succession-adapter' ? '1' : undefined } });
+  children.add(child);
   child.once('error', (error) => { clearTimeout(deadline); console.error(error); process.exitCode = 1; });
-  // Planned runs go one package at a time, as the recursive suites do, and stop at the first failure.
+  // Planned runs go one package at a time within a lane and stop at the first failure, which also stops the other lane.
   child.once('exit', (code) => {
-    if (code === 0 && runs.length) { start(runs.shift()); return; }
-    clearTimeout(deadline); process.exitCode = code ?? 1;
+    children.delete(child);
+    if (code === 0 && runs.length) { start(runs); return; }
+    if (code !== 0) { process.exitCode = process.exitCode || (code ?? 1); stop('SIGTERM'); }
+    if (--running === 0) clearTimeout(deadline);
   });
 }
 function stop(signal) {
-  try {
-    if (process.platform === 'win32') spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on('error', () => child.kill(signal));
-    else process.kill(-child.pid, signal);
-  } catch (error) {
-    if (error.code !== 'ESRCH') throw error;
+  for (const child of children) {
+    try {
+      if (process.platform === 'win32') spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on('error', () => child.kill(signal));
+      else process.kill(-child.pid, signal);
+    } catch (error) {
+      if (error.code !== 'ESRCH') throw error;
+    }
   }
 }
 // The Playwright runs use one worker over several projects (desktop, phone, Safari); each has a global deadline below its outer one.
@@ -188,4 +206,4 @@ const deadline = setTimeout(() => {
 }, outerDeadlineMs);
 process.once('SIGINT', () => stop('SIGINT'));
 process.once('SIGTERM', () => stop('SIGTERM'));
-start(runs.shift());
+for (const lane of lanes) start(lane);

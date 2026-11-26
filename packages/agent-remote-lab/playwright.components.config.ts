@@ -29,7 +29,8 @@ const projects: PlaywrightTestProject[] = [
   { name: 'webkit-ask-desktop', testMatch: specsIn('webkit-ask-desktop'), use: { ...devices['Desktop Safari'] } },
   { name: 'webkit-ask-mobile', testMatch: specsIn('webkit-ask-mobile'), use: { ...devices['iPhone 13'] } },
   { name: 'webkit-desktop', testMatch: specsIn('webkit-desktop'), use: { ...devices['Desktop Safari'] } },
-  // The Orchard primitives and the assistant's conversation at exactly 390 x 844, in Chromium and in mobile WebKit.
+  // The phone specs at exactly 390 x 844. Chromium's phone width is covered by chromium-mobile (every other spec runs there), so this
+  // project holds only the specs that need Chromium's DevTools touch and safe-area emulation, which WebKit lacks.
   { name: 'orchard-phone-chromium', testMatch: specsIn('orchard-phone-chromium'), use: { ...devices['Desktop Chrome'], viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } },
   { name: 'orchard-phone-webkit', testMatch: specsIn('orchard-phone-webkit'), use: { ...devices['iPhone 13'], viewport: { width: 390, height: 844 } } },
   { name: 'webkit-mobile', testMatch: specsIn('webkit-mobile'), use: { ...devices['iPhone 13'] } },
@@ -42,6 +43,8 @@ export default defineConfig({
   globalSetup: './e2e/dev-server-warmup.ts',
   fullyParallel: false,
   workers: 1,
+  // Under load a layout assertion can miss its window once in many runs; a failure that repeats is still a failure.
+  retries: 1,
   use: {
     baseURL: `http://127.0.0.1:${webPort}`,
     launchOptions: browserExecutable ? { executablePath: browserExecutable } : undefined,

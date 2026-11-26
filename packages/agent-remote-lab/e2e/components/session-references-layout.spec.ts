@@ -1,4 +1,4 @@
-// Component projects: orchard-phone-chromium, orchard-phone-webkit
+// Component projects: orchard-phone-webkit
 import { expect, test, type Locator } from '@playwright/test';
 
 /** On a phone only the Side shows: two panes would not fit beside each other. */

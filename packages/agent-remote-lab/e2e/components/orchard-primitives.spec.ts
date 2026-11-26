@@ -1,4 +1,4 @@
-// Component projects: orchard-phone-chromium, orchard-phone-webkit
+// Component projects: orchard-phone-webkit
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { installLifecycle } from '@orchardworks/agent-e2e/lifecycle';

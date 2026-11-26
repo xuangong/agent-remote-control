@@ -1,4 +1,4 @@
-// Component projects: orchard-phone-chromium, orchard-phone-webkit
+// Component projects: orchard-phone-webkit
 import { expect, test } from '@playwright/test';
 
 // The touch minimum is 44 px. The composer's stop button is drawn at 32 px; under a coarse pointer

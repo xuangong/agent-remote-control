@@ -1,4 +1,4 @@
-// Component projects: orchard-phone-chromium, orchard-phone-webkit
+// Component projects: orchard-phone-webkit
 import { expect, test, type Page } from '@playwright/test';
 import { coveringControls } from './covering';
 

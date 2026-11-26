@@ -144,6 +144,24 @@ D. **Run smoke only when the client or the Relay changed** (already so in the pl
 
 I did not delete or change a test in this task.
 
+### Applied (branch feat/test-speed)
+
+- Item 4: the `standalone-layout` assertions now measure the shell in one page evaluation and poll until it is inside the safe area. Under 20 busy
+  loops and 10 workers the old spec failed 1 of 120 runs in `chromium-mobile` (tab bar bottom 326, expected 402; the failure was the
+  unpolled `toBeCloseTo`, not only the null `boundingBox`); the new one passed 240 of 240. The component config has `retries: 1`, because the
+  same document records other load flakes (`chat-scroll-memory`, `navigation:96`).
+- Item 5: with 8 or more cores, `scripts/run-tests.mjs unit` runs the cloudflare, debugger and copilot packages in a lane beside the recursive run of the
+  others. `pnpm verify` took 370 s before and 292 s after (one run each, idle machine; minus 78 s, below the estimated 90 to 120 s). The first
+  parallel run failed the load-sensitive controller test `opencode-server-supervisor` (`unreaped` was 0, not 3), the one section 4 names; the next
+  three runs passed. That is a flake risk of this change to watch.
+- Trade-off A: `orchard-phone-chromium` now holds only the Chromium-only touch specs (`phone-touch`, `phone-keyboard`, `ask-window`): 29 runs, 21 s
+  measured against 150 s. `chromium-mobile` stays because it runs every spec at a phone width (about 25 spec files branch on `isMobile`), while the
+  phone-exact specs still run in `orchard-phone-webkit`. Loses: Chromium runs of the phone-exact specs other than those three.
+- Trade-off B: with A applied, `assistant-inventory` runs in `chromium-desktop`, `chromium-mobile` and `orchard-phone-webkit` (141 runs instead of 188),
+  which is one desktop and one phone project per engine; no separate change was needed.
+- Trade-off C: E15, E15b, E15c and E15d run in Chromium only (`scripts/lib/chromium-only-flows.mjs`; excluded under `E2E_BROWSER=webkit`, and the gate
+  has no WebKit tier when a selection holds only them). Measured: the four files took 107 s in WebKit on one worker.
+
 ## 4. Why verify runs alone
 
 The scheduler first overlapped verify with the browser tiers (they only need verify's build). Two runs of that, both with one browser tier beside

@@ -1,4 +1,4 @@
-// Component projects: webkit-desktop, orchard-phone-chromium, orchard-phone-webkit
+// Component projects: webkit-desktop, orchard-phone-webkit
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { englishWords } from './english-words.js';
 

@@ -1,4 +1,4 @@
-// Component projects: orchard-phone-chromium, orchard-phone-webkit
+// Component projects: orchard-phone-webkit
 import { expect, test } from '@playwright/test';
 
 // A command's feedback is the only word that says it ran. On a compact layout the composer's own status notes are visually hidden

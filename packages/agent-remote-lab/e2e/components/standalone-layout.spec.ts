@@ -1,5 +1,33 @@
 // Component projects: webkit-mobile-viewport
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+
+type Insets = { top: number; bottom: number; left: number; right: number };
+
+/**
+ * Measures the shell in one page evaluation, so the tab bar cannot re-render between two reads, and lists what is not yet inside
+ * the safe area. Poll it until it is empty: a rotation settles over a few frames.
+ */
+function settledLayoutProblems(page: Page, size: { width: number; height: number }, insets: Insets) {
+  return page.evaluate(({ size, insets }) => {
+    const rect = (selector: string) => {
+      const box = document.querySelector(selector)?.getBoundingClientRect();
+      return box && box.width > 0 && box.height > 0 ? box : undefined;
+    };
+    const sessions = rect('button[aria-label="Open sessions"]');
+    const composer = rect('.lab-composer-dock');
+    const bar = rect('.lab-tab-bar');
+    const send = rect('[data-testid="prompt-submit"]');
+    const problems: string[] = [];
+    if (!sessions || !composer || !send) return ['the sessions button, the composer or the send button is not laid out'];
+    if (sessions.y !== insets.top) problems.push(`sessions button y ${sessions.y}, expected ${insets.top}`);
+    if (sessions.x < insets.left) problems.push(`sessions button x ${sessions.x} is left of the inset ${insets.left}`);
+    if (bar && Math.abs(bar.bottom - size.height) >= 0.05) problems.push(`tab bar bottom ${bar.bottom}, expected ${size.height}`);
+    const floor = bar ? bar.y : size.height;
+    if (Math.abs(composer.bottom - floor) >= 0.05) problems.push(`composer bottom ${composer.bottom}, expected ${floor}`);
+    if (send.bottom > size.height - insets.bottom) problems.push(`send button bottom ${send.bottom} is under the bottom inset`);
+    return problems;
+  }, { size, insets });
+}
 
 test('serves browser-owned safe areas with the non-overlay Home Screen status bar', async ({ page }) => {
   await page.goto('/');
@@ -39,17 +67,8 @@ test('reserves the notch once above navigation and keeps controls inside each ro
     await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets });
     await expect(navigation).toHaveCSS('padding-top', `${insets.top}px`);
     await expect(header).toHaveCSS('padding-top', '0px');
-    const sessions = (await page.getByRole('button', { name: 'Open sessions', exact: true }).boundingBox())!;
-    expect(sessions.y).toBe(insets.top);
-    expect(sessions.x).toBeGreaterThanOrEqual(insets.left);
-    const composer = (await page.locator('.lab-composer-dock').first().boundingBox())!;
     // A phone's tab bar stands under the composer (and under the home indicator); a wide screen has the rail instead.
-    const bar = page.locator('.lab-tab-bar');
-    const floor = await bar.isVisible() ? (await bar.boundingBox())!.y : size.height;
-    if (await bar.isVisible()) expect((await bar.boundingBox())!.y + (await bar.boundingBox())!.height).toBeCloseTo(size.height, 1);
-    expect(composer.y + composer.height).toBeCloseTo(floor, 1);
-    const send = (await page.getByTestId('prompt-submit').boundingBox())!;
-    expect(send.y + send.height).toBeLessThanOrEqual(size.height - insets.bottom);
+    await expect.poll(() => settledLayoutProblems(page, size, insets), { message: 'the layout settles inside the rotated safe area' }).toEqual([]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   }
   await page.screenshot({ path: info.outputPath('portrait-safe-area.png') });
@@ -81,12 +100,18 @@ test('keeps composer controls inside the standalone viewport before native recov
       const send = (await page.getByTestId('prompt-submit').boundingBox())!;
       return send.y + send.height;
     }).toBeLessThanOrEqual(viewportBottom);
-    const frame = (await page.locator('.lab-composer-dock .agent-composer').first().boundingBox())!;
-    const bounds = (await dock.boundingBox())!;
-    expect(frame.y).toBeGreaterThanOrEqual(0);
-    expect(frame.y + frame.height).toBeLessThanOrEqual(viewportBottom - 34);
-    const bar = page.locator('.lab-tab-bar');
-    expect(bounds.y + bounds.height).toBeCloseTo(await bar.isVisible() ? (await bar.boundingBox())!.y : viewportBottom, 1);
+    // One evaluation per poll, so the tab bar cannot re-render between the reads.
+    await expect.poll(() => page.evaluate(viewportBottom => {
+      const box = (selector: string) => { const rect = document.querySelector(selector)?.getBoundingClientRect(); return rect && rect.width > 0 && rect.height > 0 ? rect : undefined; };
+      const frame = box('.lab-composer-dock .agent-composer'), dock = box('.lab-composer-dock'), bar = box('.lab-tab-bar');
+      if (!frame || !dock) return ['the composer is not laid out'];
+      const problems: string[] = [];
+      if (frame.y < 0) problems.push(`composer frame y ${frame.y} is above the viewport`);
+      if (frame.bottom > viewportBottom - 34) problems.push(`composer frame bottom ${frame.bottom} is under the bottom inset`);
+      const floor = bar ? bar.y : viewportBottom;
+      if (Math.abs(dock.bottom - floor) >= 0.05) problems.push(`composer dock bottom ${dock.bottom}, expected ${floor}`);
+      return problems;
+    }, viewportBottom)).toEqual([]);
   };
   await expectVisibleComposer();
   const before = (await dock.boundingBox())!;

@@ -70,15 +70,17 @@ export function useBotWorkspace(workspace: Workspace, succession: Succession, pl
   const view = candidate && isBotView(candidate) ? candidate : undefined;
   // Every group Bot mode shows, the live selected one in place of its catalog copy: their bots are enrolled so a handoff
   // resolves to the current session for status, and a verified handoff is written into each group's layout.
-  const enrolledGroups: WindowGroup[] = !enabled ? [] : [...new Map([...workspace.groups, ...(group ? [group] : [])]
+  const enrolledGroups: WindowGroup[] = !canRead ? [] : [...new Map([...workspace.groups, ...(group ? [group] : [])]
     .filter(item => hasBotAppearance(item) && !workspace.deletedWindowIds.includes(item.window.id)).map(item => [item.window.id, item])).values()];
   const locatorSet = JSON.stringify(enrolledGroups.map(item => [item.window.id, item.window.revision, botViews(item).map(bot => [bot.id, bot.binding])]));
   useEffect(() => {
-    if (!enabled || !runtime.active || !enrolledGroups.length) return;
+    if (!canRead || !runtime.active || !enrolledGroups.length) return;
     const current = latest.current.succession, before = current.document.editRevision;
     try {
+      // Placing each bot's view needs only the groups the device holds; asking the Relay about their sessions waits for it.
       for (const item of enrolledGroups) for (const bot of botViews(item)) current.ensureWindowView(item.window.id, bot.id, bot.binding);
       if (current.document.editRevision !== before) { current.save(); runtime.emit(); }
+      if (!enabled) return;
       const identities = JSON.stringify([current.document.scope, enrolledGroups.map(item => [item.window.id, botViews(item).map(bot => [bot.id, bot.binding])])]);
       if (!runtime.enrolled.has(identities)) {
         runtime.enrolled.add(identities);
@@ -87,7 +89,7 @@ export function useBotWorkspace(workspace: Workspace, succession: Succession, pl
         });
       }
     } catch (error) { if (selectedId) { runtime.errors.set(selectedId, words(error)); runtime.emit(); } }
-  }, [runtime, locatorSet, enabled, succession.document]);
+  }, [runtime, locatorSet, canRead, enabled, succession.document]);
   useEffect(() => {
     if (!enabled || succession.discovering || !runtime.active) return;
     for (const item of enrolledGroups) {

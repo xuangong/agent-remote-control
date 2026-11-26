@@ -1,8 +1,8 @@
 #!/bin/sh
 # Checks what a task changed, on demand: builds and type-checks the changed packages and their dependents, then runs the
 # unit tests of each changed module of architecture/modules.json with the seam suites the module names (`pnpm test:changed`;
-# scripts/lib/test-selection.mjs). Dependent modules are not run: the seams and the type check stand for them, and the full
-# `pnpm verify` runs everything at the end of a step. Files outside packages/ run nothing, except that scripts/**/*.test.mjs
+# scripts/lib/test-selection.mjs). The unit tests of modules that import a changed module run too when they reach the changed file
+# (nearest first, at most 80 files); the full `pnpm verify` runs everything at the end of a step. Files outside packages/ run nothing, except that scripts/**/*.test.mjs
 # changed run alone and a change to the root package.json, the lockfile or the workspace file runs the full `pnpm verify`,
 # as releases do.
 # The compatibility digest is not checked here: task branches never update it, and `pnpm postmerge` checks it on main.

@@ -1,6 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { importGraph, readModuleMap } from './lib/arch-check.mjs';
 import { packageManager } from './lib/package-manager.mjs';
 import { verifyNativeTestVersions } from './lib/native-test-versions.mjs';
 import { describePlan, isUnitTest, packageFiles, planTests, readModules, workspacePackages } from './lib/test-selection.mjs';
@@ -91,7 +92,8 @@ function unitPackageRuns(selector, args) {
 /** The module plan of the files changed since a commit (section 5.9): each changed module's own tests and its seams. */
 function changedRuns(base) {
   const changed = execFileSync('git', ['diff', '--name-only', base, 'HEAD'], { encoding: 'utf8' }).split('\n').filter(Boolean);
-  const plan = planTests({ changed, files: packageFiles('.'), modules: readModules('.'), packages: workspacePackages('.') });
+  const graph = importGraph({ root: '.', config: readModuleMap('architecture/modules.json') });
+  const plan = planTests({ changed, files: packageFiles('.'), modules: readModules('.'), packages: workspacePackages('.'), graph });
   console.log(describePlan(plan));
   return plan.runs.map(entry => ['--filter', entry.name, 'run', entry.script, ...entry.files, '--passWithNoTests']);
 }

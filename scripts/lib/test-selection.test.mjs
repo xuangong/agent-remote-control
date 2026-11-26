@@ -85,3 +85,60 @@ test('the plan reads as one line per package, then the flows to run at the step\
   assert.match(describePlan(plan(['packages/app/src/features/settings/Settings.tsx'])), /settings; seams: S6\.\n {2}@sample\/app: 2 test paths\n {2}@sample\/seams: 1 test path\nFlows these modules take part in, for the step's end: E2, E11\./);
   assert.equal(describePlan(plan([])), 'No module test changed, so no unit test runs.');
 });
+
+// A mock graph: the app's shell imports the client's index, which imports its rules; the settings feature imports only the shell kernel (not the client).
+const graph = new Map([
+  ['packages/app/src/App.tsx', ['packages/client/src/index.ts']],
+  ['packages/app/src/App.test.tsx', ['packages/app/src/App.tsx']],
+  ['packages/app/src/features/chats/Roster.tsx', ['packages/client/src/index.ts']],
+  ['packages/app/src/features/chats/Roster.test.tsx', ['packages/app/src/features/chats/Roster.tsx']],
+  ['packages/app/src/features/settings/Settings.tsx', []],
+  ['packages/app/src/features/settings/Settings.test.tsx', ['packages/app/src/features/settings/Settings.tsx']],
+  ['packages/client/src/index.ts', ['packages/client/src/rules/rule.ts']],
+  ['packages/client/src/index.test.ts', ['packages/client/src/index.ts']],
+  ['packages/client/src/rules/rule.ts', []],
+  ['packages/client/src/rules/rule.test.ts', ['packages/client/src/rules/rule.ts']],
+  ['packages/app/src/test/setup.ts', ['packages/client/src/index.ts']],
+]);
+const planWith = (changed, extra = {}) => planTests({ changed, files, modules, packages, graph, ...extra });
+
+test('a change runs the tests of the modules that import it, when those tests reach the changed file', () => {
+  const result = planWith(['packages/client/src/index.ts']);
+  assert.deepEqual(run(result, 'packages/client').files, ['src/index.test.ts']);
+  assert.deepEqual(run(result, 'packages/app').files, ['src/App.test.tsx', 'src/features/chats/Roster.test.tsx']);
+  assert.deepEqual(result.dependents, { count: 2, reached: 2, capped: false });
+});
+
+test('a dependent whose tests do not reach the changed file does not run', () => {
+  assert.equal(run(planWith(['packages/client/src/index.ts']), 'packages/app').files.some(file => file.includes('settings')), false);
+});
+
+test('only direct dependents run: the app does not import the client rules, so a rule change leaves its tests out', () => {
+  const result = planWith(['packages/client/src/rules/rule.ts']);
+  assert.deepEqual(run(result, 'packages/client').files, ['src/index.test.ts', 'src/rules/rule.test.ts']);
+  assert.equal(run(result, 'packages/app'), undefined);
+});
+
+test('a test file, test support and a document change run no dependent', () => {
+  assert.equal(planWith(['packages/client/src/rules/rule.test.ts']).dependents.count, 0);
+  assert.equal(planWith(['packages/app/src/test/setup.ts']).dependents.count, 0);
+  assert.equal(planWith(['packages/client/README.md']).dependents.count, 0);
+});
+
+test('a module that imports nothing of the changed module runs only its own tests', () => {
+  const result = planWith(['packages/app/src/App.tsx']);
+  assert.deepEqual(run(result, 'packages/app').files, ['src/App.test.tsx']);
+  assert.equal(result.dependents.count, 0);
+});
+
+test('past the limit the tests nearest to the changed file run, and the plan says it was cut', () => {
+  const result = planWith(['packages/client/src/index.ts'], { dependentLimit: 1 });
+  assert.deepEqual(result.dependents, { count: 1, reached: 2, capped: true });
+  assert.deepEqual(run(result, 'packages/client').files, ['src/index.test.ts']);
+  assert.deepEqual(run(result, 'packages/app').files, ['src/App.test.tsx']);
+  assert.match(describePlan(result), /Dependent modules: 1 test files reach the changed files \(the 1 nearest of 2;/);
+});
+
+test('without a graph no dependent runs', () => {
+  assert.equal(plan(['packages/client/src/index.ts']).dependents.count, 0);
+});

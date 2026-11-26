@@ -3,6 +3,7 @@ import { nativePrefixSegmentAncestors, nativeSessionRefKey, type NativePrefixSel
 import { serializeAgentInputMaterialization, type AgentNativeValidityToken, type AgentProviderAdapter, type AgentSession, type AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import { type RemoteHostSessionLease } from '@orchardworks/agent-session-runtime';
 
+import { workerToolsIn } from '../bot-tools.js';
 import { directoryOperationId } from '../directory-mutation.js';
 import { admitNativeOwnerTransfer } from '../native-owner-admission.js';
 import { allowedWorkspace, HostExecutionPolicyError } from '../execution-policy.js';
@@ -32,8 +33,9 @@ export function hasCurrentNativeEvidence(owner: Pick<AgentProviderAdapter | Agen
  *   their evidence changed; releasing it releases them.
  * - `bindProvider` gives a directory what it needs of the succession: the handoff admission and handler, the source binding reader, the source reference
  *   ancestry and the session-host access. A provider added later is bound the same way.
- * - Worker tools: a session without a role gets the worker namespace when its provider declares tools at creation, or while enabled; `applyWorkerTools`
- *   brings live sessions in line when enablement changes.
+ * - Worker tools: a session without a role gets the worker namespace when its provider declares tools at creation, or while enabled; a session with a role
+ *   gets its role's tool namespaces. `applyWorkerTools` brings sessions of providers that declare live tools in line when enablement or a role changes;
+ *   the others take them at their next attachment.
  *
  * State is read through the context; the wiring keeps none of its own.
  */
@@ -212,10 +214,12 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
       const agent = liveAgent(binding.agentId), session = agent && ledger.attachmentOf(agent)?.session;
       if (!session?.updateToolNamespaces || providers.require(binding.providerId).adapter.descriptor.sessionExtensions?.toolNamespaces !== 'live') continue;
       const ref = nativeRef(binding);
-      if (await roles.extensions(ref, () => ref)) continue;
-      const tools = workerSupport.tools(ref);
-      if (ledger.workerToolsApplied(binding.agentId) === tools) continue;
-      try { await session.updateToolNamespaces(tools === 'none' ? [] : [workerSupport.namespace(() => ref, false)]); ledger.recordWorkerTools(binding.agentId, tools); }
+      // A session with a role has the tool namespaces its role gives it; any other has the worker namespace while enabled.
+      const role = await roles.extensions(ref, () => ref);
+      const namespaces = role ? role.toolNamespaces ?? [] : workerSupport.tools(ref) === 'none' ? [] : [workerSupport.namespace(() => ref, false)];
+      const applied = workerToolsIn(namespaces);
+      if (ledger.workerToolsApplied(binding.agentId) === applied) continue;
+      try { await session.updateToolNamespaces(namespaces); ledger.recordWorkerTools(binding.agentId, applied); }
       catch { /* The next enablement change or attachment applies it again. */ }
     }
   }

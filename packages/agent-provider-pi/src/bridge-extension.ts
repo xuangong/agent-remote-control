@@ -5,6 +5,8 @@
  * stdin. The title names this bridge, the placeholder carries one JSON request, and the answer is one JSON string.
  *
  * - approval: before a tool runs, `{kind: 'approval', toolCallId, toolName, input}`; the answer `{allow: true}` or `{allow: false, reason}`.
+ * - tools: at the start of every run, `{kind: 'tools'}`; the answer `{tools: [{name, description, inputSchema}]}` is what the session has now, so
+ *   a session given tools after it started offers them from its next run, and one that lost them stops running them.
  * - tool: a Host tool the session was given runs in the adapter, `{kind: 'tool', name, toolCallId, arguments}`; the answer `{ok: true, text}`
  *   or `{ok: false, error}`.
  *
@@ -20,7 +22,8 @@ export interface BridgeConfig { tools: BridgeTool[] }
 
 export type BridgeRequest =
   | { kind: 'approval'; toolCallId: string; toolName: string; input: unknown }
-  | { kind: 'tool'; name: string; toolCallId: string; arguments: unknown };
+  | { kind: 'tool'; name: string; toolCallId: string; arguments: unknown }
+  | { kind: 'tools' };
 
 export const BRIDGE_EXTENSION_SOURCE = `import { readFileSync } from 'node:fs';
 
@@ -28,21 +31,12 @@ const TITLE = ${JSON.stringify(BRIDGE_TITLE)};
 
 export default function (pi) {
   const config = JSON.parse(readFileSync(process.env.${BRIDGE_CONFIG_ENV}, 'utf8'));
-  const own = new Set(config.tools.map(tool => tool.name));
+  const own = new Set();
   const ask = (ctx, request, signal) => ctx.ui.input(TITLE, JSON.stringify(request), { signal });
 
-  pi.on('tool_call', async (event, ctx) => {
-    // The Host's own tools run without a prompt, as they do in every other provider.
-    if (own.has(event.toolName)) return undefined;
-    const answer = await ask(ctx, { kind: 'approval', toolCallId: event.toolCallId, toolName: event.toolName, input: event.input }, ctx.signal);
-    if (answer === undefined) return { block: true, reason: 'The approval was canceled.' };
-    let decision;
-    try { decision = JSON.parse(answer); } catch { return { block: true, reason: 'The approval answer was unreadable.' }; }
-    if (decision && decision.allow === true) return undefined;
-    return { block: true, reason: decision && typeof decision.reason === 'string' ? decision.reason : 'The user denied this tool call.' };
-  });
-
-  for (const tool of config.tools) {
+  function offer(tool) {
+    if (own.has(tool.name)) return;
+    own.add(tool.name);
     pi.registerTool({
       name: tool.name,
       label: tool.name,
@@ -59,6 +53,28 @@ export default function (pi) {
       },
     });
   }
+  for (const tool of config.tools) offer(tool);
+
+  // The tools the session has now, asked at the start of each run: tools given after pi started are registered before the model is called.
+  pi.on('before_agent_start', async (_event, ctx) => {
+    const answer = await ask(ctx, { kind: 'tools' }, ctx.signal);
+    if (answer === undefined) return undefined;
+    let current;
+    try { current = JSON.parse(answer); } catch { return undefined; }
+    for (const tool of current && Array.isArray(current.tools) ? current.tools : []) offer(tool);
+    return undefined;
+  });
+
+  pi.on('tool_call', async (event, ctx) => {
+    // The Host's own tools run without a prompt, as they do in every other provider.
+    if (own.has(event.toolName)) return undefined;
+    const answer = await ask(ctx, { kind: 'approval', toolCallId: event.toolCallId, toolName: event.toolName, input: event.input }, ctx.signal);
+    if (answer === undefined) return { block: true, reason: 'The approval was canceled.' };
+    let decision;
+    try { decision = JSON.parse(answer); } catch { return { block: true, reason: 'The approval answer was unreadable.' }; }
+    if (decision && decision.allow === true) return undefined;
+    return { block: true, reason: decision && typeof decision.reason === 'string' ? decision.reason : 'The user denied this tool call.' };
+  });
 }
 `;
 
@@ -70,6 +86,7 @@ export function parseBridgeRequest(ui: Record<string, unknown>): BridgeRequest |
   if (typeof value !== 'object' || value === null) return undefined;
   const request = value as Record<string, unknown>;
   if (request.kind === 'approval' && typeof request.toolCallId === 'string' && typeof request.toolName === 'string') return { kind: 'approval', toolCallId: request.toolCallId, toolName: request.toolName, input: request.input };
+  if (request.kind === 'tools') return { kind: 'tools' };
   if (request.kind === 'tool' && typeof request.name === 'string' && typeof request.toolCallId === 'string') return { kind: 'tool', name: request.name, toolCallId: request.toolCallId, arguments: request.arguments };
   return undefined;
 }

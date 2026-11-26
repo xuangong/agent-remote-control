@@ -9,7 +9,7 @@ This records the first admission of pi on `feat/pi-provider` (based on `d212c184
 | Provider / integration | `pi`; executable Host provider (`packages/agent-provider-pi`, registered by `packages/agent-controller/src/pi.ts`). |
 | Revision / compatibility | Branch `feat/pi-provider`. Native CLI pi **0.73.1** (npm `@mariozechner/pi-coding-agent`), driven through `pi --mode rpc` (JSONL over stdio). No SDK. Minimum and verified version are both 0.73.1: pi is pre-1.0 and its RPC protocol changes between releases. |
 | Native identity | The session UUID in the header of a JSONL file `$PI_CODING_AGENT_DIR/sessions/--<cwd>--/<timestamp>_<uuid>.jsonl` (default `~/.pi/agent`; `PI_CODING_AGENT_SESSION_DIR` overrides the directory). `sessionDir` in the user's `settings.json` is not read, so a profile that sets it is not listed. |
-| Capability / descriptor | `sessionExtensions { instructions, tools, toolNamespaces: 'attachment' }`, `sessionAccess.readOnly`, `sessionHostAccess`, `journal.itemIdentity 1`, `behaviour` in `src/behaviour.ts`. Root capabilities: history, send, queue, steer, cancel, session settings, commands, tool approval, resource input. |
+| Capability / descriptor | `sessionExtensions { instructions, tools, toolNamespaces: 'live' }`, `sessionAccess.readOnly`, `sessionHostAccess`, `journal.itemIdentity 1`, `behaviour` in `src/behaviour.ts`. Root capabilities: history, send, queue, steer, cancel, session settings, commands, tool approval, resource input. |
 | Disposition | Implemented, with the accepted limits below. |
 
 ## Native boundary
@@ -27,7 +27,7 @@ pi has no server and no lock. A Remote session is one pi process; a pi terminal 
 pi has no permission system and no MCP. The adapter loads one extension with `-e` from a private temporary directory it removes with the session; nothing is written under `~/.pi`. The extension hooks `tool_call` and registers the Host's tools. It reaches the adapter through pi's extension UI sub-protocol: `ctx.ui.input` titled `arc.v1` whose placeholder carries one JSON request; the adapter answers on stdin. Dialogs of user-installed extensions (select, confirm, input, editor) are cancelled by the adapter, so they cannot hang pi (native check).
 
 - **Approvals.** In ask mode a tool call becomes a typed `tool_approval`: allow once, allow for the session (that tool name until the session closes), deny with a message, or cancel (which also aborts the run). In YOLO every call is answered at once with no interaction. Approvals are live-only items.
-- **Host tools.** Tools of `toolNamespaces` are named `<namespace>__<tool>` (a bot's `message` is `agent_remote__message`), flat `tools` keep their name. Arguments are validated by the SDK binding before the Host callback runs; the tools run without a prompt. Namespaces are fixed while attached (`attachment`).
+- **Host tools.** Tools of `toolNamespaces` are named `<namespace>__<tool>` (a bot's `message` is `agent_remote__message`), flat `tools` keep their name. Arguments are validated by the SDK binding before the Host callback runs; the tools run without a prompt. Namespaces are `live`: the extension asks the adapter for the session's current tools at the start of every run and registers any it lacks before the model is called, so a plain session that becomes a bot offers the bot tools from its next run without a reopen (native check: `tests/native.local.test.ts`, real pi 0.73.1). A tool removed later is refused by the adapter when called (pi has no tool unregister that the extension uses). Read-only sessions, whose pi starts with a fixed tool list, reject changes.
 - **Environment and skills.** `hostAccess.environment` is given to pi's process; `hostAccess.skills` is passed as `--skill <dir>/skills`.
 
 ## YOLO, permission mode and read-only
@@ -95,7 +95,7 @@ Keys come from the message timestamp pi keeps live and in the file: `user:<ts>`,
 
 ## Verification record (2026-11-26)
 
-- `pnpm test:unit agent-provider-pi`: 6 files, **68 passed** (mock data; a fake of pi behind the native port `PiLauncher`).
-- `pnpm test:native:pi` (real pi 0.73.1, temporary profile, scripted loopback OpenAI-compatible model; nothing signs in): 3 files, **25 passed**: `tests/native-assumptions.local.test.ts` (9), `tests/native.local.test.ts` (8), `tests/journal-recording.local.test.ts` (8, the recorder compared with the eight committed recordings).
+- `pnpm test:unit agent-provider-pi`: 6 files, **70 passed** (mock data; a fake of pi behind the native port `PiLauncher`).
+- `pnpm test:native:pi` (real pi 0.73.1, temporary profile, scripted loopback OpenAI-compatible model; nothing signs in): 3 files, **26 passed**: `tests/native-assumptions.local.test.ts` (9), `tests/native.local.test.ts` (9), `tests/journal-recording.local.test.ts` (8, the recorder compared with the eight committed recordings).
 - A fixture proves the adapter's use of pi's protocol; it does not prove an online model workflow.
 - Not verified: online model workflows, a deployed Relay with a pi Host, Windows (the process port and framing are platform neutral but nothing ran there), pi versions other than 0.73.1, a profile whose `settings.json` sets `sessionDir`, and image input.

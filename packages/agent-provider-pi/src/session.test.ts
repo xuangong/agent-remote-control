@@ -303,6 +303,37 @@ describe('Host tools', () => {
   });
 });
 
+describe('live Host tools', () => {
+  const tool = (name: string, execute: (args: unknown) => Promise<string>): AgentSessionTool => ({ name, description: `Tool ${name}.`, inputSchema: { type: 'object', properties: { text: { type: 'string' } }, additionalProperties: false }, execute });
+
+  it('answers the extension\'s question for the tools the session has now, so a session given tools later offers them at its next run', async () => {
+    const h = harness();
+    const session = await h.provider.createSession({ sessionId: 'a', cwd: h.cwd });
+    h.fake.last.emit(uiRequest('q1', { kind: 'tools' }));
+    expect(JSON.parse(String(h.fake.last.uiAnswers.get('q1')!.value))).toEqual({ tools: [] });
+    await session.updateToolNamespaces!([{ name: 'agent_remote', description: 'Bots', tools: [tool('message', async () => 'sent')] }]);
+    h.fake.last.emit(uiRequest('q2', { kind: 'tools' }));
+    const answer = JSON.parse(String(h.fake.last.uiAnswers.get('q2')!.value)) as { tools: Array<{ name: string; description: string }> };
+    expect(answer.tools.map(entry => entry.name)).toEqual(['agent_remote__message']);
+    h.fake.last.emit(uiRequest('t1', { kind: 'tool', name: 'agent_remote__message', toolCallId: 'c1', arguments: { text: 'hi' } }));
+    await new Promise(resolve => setTimeout(resolve, 5));
+    expect(JSON.parse(String(h.fake.last.uiAnswers.get('t1')!.value))).toEqual({ ok: true, text: 'sent' });
+    await session.updateToolNamespaces!([]);
+    h.fake.last.emit(uiRequest('t2', { kind: 'tool', name: 'agent_remote__message', toolCallId: 'c2', arguments: {} }));
+    await new Promise(resolve => setTimeout(resolve, 5));
+    expect(JSON.parse(String(h.fake.last.uiAnswers.get('t2')!.value))).toMatchObject({ ok: false });
+    await session.dispose();
+  });
+
+  it('refuses tools of a read-only session, whose pi has a fixed tool list, and duplicate names', async () => {
+    const h = harness();
+    const readOnly = await h.provider.createSession({ sessionId: 'a', cwd: h.cwd, access: 'read_only' });
+    await expect(readOnly.updateToolNamespaces!([{ name: 'ns', description: 'x', tools: [tool('t', async () => '')] }])).rejects.toBeInstanceOf(AgentOperationRejectedError);
+    const session = await h.provider.createSession({ sessionId: 'b', cwd: h.cwd, tools: [tool('t', async () => '')] });
+    await expect(session.updateToolNamespaces!([{ name: 'ns', description: 'x', tools: [tool('t', async () => '')] }, { name: 'ns', description: 'x', tools: [] }])).rejects.toThrow();
+  });
+});
+
 describe('resuming', () => {
   const seed = (h: ReturnType<typeof harness>, id = '0f5c51e2-71e4-4ab9-b111-e054c951bc6a') => {
     const clock = new FakeClock();

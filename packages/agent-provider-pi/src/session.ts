@@ -59,7 +59,9 @@ export class PiAgentSession implements AgentSession {
   private readonly readOnly: boolean;
   private readonly grants = new Set<string>();
   private readonly approvals = new Map<string, PendingApproval>();
-  private readonly hostTools = new Map<string, AgentSessionTool>();
+  /** The tools the session was created with, and the tools of its namespaces, which the Host may change while it runs. */
+  private flatTools = new Map<string, AgentSessionTool>();
+  private namespaceTools = new Map<string, AgentSessionTool>();
   /** A prompt was accepted and pi has not yet reported its run, so whether the next input queues is not known. */
   private awaitingStart = false;
   /** The stream has ended, closed or failed: nothing more is pushed. */
@@ -86,23 +88,38 @@ export class PiAgentSession implements AgentSession {
 
   // Opening ---------------------------------------------------------------------------------------------------------------------
 
-  private bindHostTools(): BridgeConfig['tools'] {
-    const { config } = this.start;
-    const declared: Array<{ name: string; tool: AgentSessionTool }> = [];
-    for (const tool of bindAgentSessionTools(config.tools, () => this.assertOpen())) declared.push({ name: hostToolName(undefined, tool.name), tool });
-    for (const namespace of bindAgentSessionToolNamespaces(config.toolNamespaces, () => this.assertOpen())) {
-      for (const tool of namespace.tools) declared.push({ name: hostToolName(namespace.name, tool.name), tool });
+  private bindFlatTools(): void {
+    for (const tool of bindAgentSessionTools(this.start.config.tools, () => this.assertOpen())) this.flatTools.set(hostToolName(undefined, tool.name), tool);
+  }
+  private bindNamespaces(namespaces: AgentSessionConfig['toolNamespaces']): Map<string, AgentSessionTool> {
+    const bound = new Map<string, AgentSessionTool>();
+    for (const namespace of bindAgentSessionToolNamespaces(namespaces, () => this.assertOpen())) {
+      for (const tool of namespace.tools) {
+        const name = hostToolName(namespace.name, tool.name);
+        if (bound.has(name) || this.flatTools.has(name)) throw new Error('pi session tools have duplicate names.');
+        bound.set(name, tool);
+      }
     }
-    for (const { name, tool } of declared) {
-      if (this.hostTools.has(name)) throw new Error('pi session tools have duplicate names.');
-      this.hostTools.set(name, tool);
-    }
-    return declared.map(({ name, tool }) => ({ name, description: tool.description, inputSchema: tool.inputSchema }));
+    return bound;
+  }
+  private hostTool(name: string): AgentSessionTool | undefined { return this.flatTools.get(name) ?? this.namespaceTools.get(name); }
+  private toolDeclarations(): BridgeConfig['tools'] {
+    return [...this.flatTools, ...this.namespaceTools].map(([name, tool]) => ({ name, description: tool.description, inputSchema: tool.inputSchema }));
+  }
+
+  /** The Host changed the session's tool namespaces: pi offers them from its next run (the extension asks at each run's start). */
+  async updateToolNamespaces(namespaces: NonNullable<AgentSessionConfig['toolNamespaces']>): Promise<void> {
+    this.assertOpen();
+    // A read-only session's pi was started with a fixed list of tool names.
+    if (this.readOnly) throw new AgentOperationRejectedError('operation_rejected', 'The tools of a read-only pi session cannot change.');
+    this.namespaceTools = this.bindNamespaces(namespaces);
   }
 
   private async begin(): Promise<void> {
     const { config, resume } = this.start;
-    const tools = this.bindHostTools();
+    this.bindFlatTools();
+    this.namespaceTools = this.bindNamespaces(config.toolNamespaces);
+    const tools = this.toolDeclarations();
     this.workDirectory = await mkdtemp(join(this.runtime.workRoot ?? tmpdir(), 'arc-pi-'));
     const extension = join(this.workDirectory, 'bridge.mjs'), settings = join(this.workDirectory, 'bridge.json');
     await writeFile(extension, BRIDGE_EXTENSION_SOURCE, { mode: 0o600 });
@@ -232,7 +249,8 @@ export class PiAgentSession implements AgentSession {
       if (['select', 'confirm', 'input', 'editor'].includes(String(request.method))) this.rpc.answerUi(id, { cancelled: true });
       return;
     }
-    if (bridge.kind === 'approval') this.approve(id, bridge);
+    if (bridge.kind === 'tools') this.rpc.answerUi(id, { value: JSON.stringify({ tools: this.toolDeclarations() }) });
+    else if (bridge.kind === 'approval') this.approve(id, bridge);
     else void this.runHostTool(id, bridge);
   }
 
@@ -276,7 +294,7 @@ export class PiAgentSession implements AgentSession {
   }
 
   private async runHostTool(uiId: string, request: Extract<BridgeRequest, { kind: 'tool' }>): Promise<void> {
-    const tool = this.hostTools.get(request.name);
+    const tool = this.hostTool(request.name);
     let answer: Json;
     if (!tool) answer = { ok: false, error: `The tool ${request.name} is not available in this session.` };
     else {

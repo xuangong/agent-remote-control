@@ -74,7 +74,10 @@ function run({ command, env }, log, deadlineMs, onSpawn) {
 function stepsOf(tier, workers) {
   if (tier.id === 'verify' && !serial && tier.steps.length === 1 && tier.steps[0].command.join(' ') === 'pnpm verify') {
     const script = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts.verify;
-    return verifySteps(script).map(step => ({ ...tier.steps[0], ...step }));
+    // The speed rule fails a test that takes over a second even alone, which other tiers running at the same time can cause; in a
+    // parallel run the unit tests only list those tests (ARC_SLOW_TEST_ENFORCE=0), and `--serial` or a local `pnpm verify` enforces it.
+    const overlapped = tiers.length > 1;
+    return verifySteps(script).map(step => ({ ...tier.steps[0], ...step, ...(overlapped && step.command.join(' ') === 'pnpm test' ? { env: { ...tier.steps[0].env, ARC_SLOW_TEST_ENFORCE: '0' } } : {}) }));
   }
   return tier.steps.map(step => ({ ...step, command: withWorkers(step.command, tier.id, workers) }));
 }

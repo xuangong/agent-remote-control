@@ -1,8 +1,9 @@
 // Settings or the Assistants directory, over whichever mode is current; the mode keeps its place, so leaving returns to it.
-import { useMemo } from 'react';
+import { Suspense, useMemo } from 'react';
+import { LazySettingsPage as SettingsPage } from '../lazy-screens.js';
 import { usePhoneLayout } from '../../kernel/usePhoneLayout.js';
 import { AssistantDirectory } from '../../features/chats/AssistantDirectory.js';
-import { SettingsPage, type SettingsContext } from '../../features/settings/SettingsPage.js';
+import { type SettingsContext } from '../../features/settings/SettingsPage.js';
 import { RecordedPlaybackControls } from '../../features/diagnostics/RecordedPlaybackControls.js';
 import type { SettingsGroupId } from '../../kernel/destinations.js';
 import { useDeviceLink } from '../../kernel/DeviceLinkIndicator.js';
@@ -17,7 +18,7 @@ export function PageSurface({ scope }: { readonly scope: PageScope }) {
   const phone = usePhoneLayout();
   return <main className="lab-page" data-workbench-mode="page" data-page={page?.destination} hidden={!page} {...(!page ? { inert: '' } : {})}>
     {page?.destination === 'assistants' ? <DirectoryPage scope={scope} /> : null}
-    {page?.destination === 'settings' ? <SettingsSurface scope={scope} group={page.group} phone={phone} userScoped={userScoped} directoryAvailable={!!directory} /> : null}
+    {page?.destination === 'settings' ? <Suspense fallback={null}><SettingsSurface scope={scope} group={page.group} phone={phone} userScoped={userScoped} directoryAvailable={!!directory} /></Suspense> : null}
   </main>;
 }
 

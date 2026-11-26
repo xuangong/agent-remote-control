@@ -1,5 +1,6 @@
 // The Replica Inspector rail.
-import { ReplicaInspector } from '../../features/diagnostics/ReplicaInspector.js';
+import { Suspense } from 'react';
+import { LazyReplicaInspector as ReplicaInspector, useEverShown } from '../lazy-screens.js';
 import { SupportingRail } from '../../features/windows/SupportingRail.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import type { AppScope } from '../types.js';
@@ -7,6 +8,7 @@ import type { AppScope } from '../types.js';
 export function InspectorRail({ scope }: { readonly scope: Pick<AppScope, 'closeInspector' | 'compactLayout' | 'inspectorOpen' | 'providerName' | 'state' | 'status' | 'viewTriggerRef' | 'windowMode'> }) {
   const { closeInspector, compactLayout, inspectorOpen, providerName, state, status, viewTriggerRef, windowMode } = scope;
   const t = useTranslate();
+  const opened = useEverShown(windowMode && inspectorOpen);
   return <>
     <SupportingRail
       id="lab-inspector"
@@ -22,7 +24,7 @@ export function InspectorRail({ scope }: { readonly scope: Pick<AppScope, 'close
         <p className="lab-eyebrow">{t('diagnostics.inspector.title')}</p>
         <span>{t('diagnostics.inspector.subtitle')}</span>
       </div>
-      <ReplicaInspector state={state} sessionStatus={status} providerName={providerName} />
+      {opened ? <Suspense fallback={null}><ReplicaInspector state={state} sessionStatus={status} providerName={providerName} /></Suspense> : null}
     </SupportingRail>
   </>;
 }

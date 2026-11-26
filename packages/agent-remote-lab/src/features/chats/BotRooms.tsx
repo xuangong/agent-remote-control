@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import { RemoteTeamClient } from '@orchardworks/agent-client';
 import type { Team, TeamAction } from '@orchardworks/agent-remote-protocol';
 import { Sheet } from '@orchardworks/agent-client-web/primitives';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { workspaceFetch } from '../../kernel/workspace-access.js';
-import { RoomView } from '../team/RoomView.js';
+const RoomView = lazy(() => import('../team/RoomView.js').then(module => ({ default: module.RoomView })));
 import { Icon } from '../../ui/Icon.js';
 
 /** A room that ended stays listed for a day, so its result can be read. */
@@ -37,6 +37,6 @@ export function BotRooms({ scope, rooms: listed, client: given, now = Date.now }
           <small>{team.room!.state === 'open' ? t('assistants.roomMembers', { count: team.members.length }) : t(team.room!.state === 'done' ? 'team.room.done' : 'team.room.closed')}</small></span>
       </button></li>)}</ul>
     {shown ? <Sheet open title={t('team.room.label', { name: shown.room!.name })} detent="large" onClose={() => setOpen(undefined)}>
-      <RoomView team={shown} busy={busy} onChange={change} /></Sheet> : null}
+      <Suspense fallback={null}><RoomView team={shown} busy={busy} onChange={change} /></Suspense></Sheet> : null}
   </section>;
 }

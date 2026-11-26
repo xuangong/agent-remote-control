@@ -37,9 +37,13 @@ finished steps and continues at the failed one.
 | b. bump | Sets the version of `packages/agent-controller/package.json`, runs `pnpm install --lockfile-only`, `pnpm compatibility:update` and `pnpm compatibility:check`, and commits those three files only as `release: Controller <version> (<summary>)`. |
 | c. gate | `pnpm gate:release`; `--gate-passed <log>` skips it for a gate you already ran on this commit. |
 | d. push | `git push origin main`. Needs `--yes` or an interactive yes. |
-| e. deploy | Only when the Relay or the website changed since the last `controller-v*` tag, otherwise it says it is skipped. Records the current Worker version as the rollback target, builds, `wrangler deploy`, then `scripts/deploy-readiness.mjs` (deadline 480 s). Needs `--yes` or yes. |
+| e. deploy | Only when the Relay or the website changed since the commit production runs (see the base below), otherwise it says it is skipped. Records the current Worker version as the rollback target, builds, `wrangler deploy`, then `scripts/deploy-readiness.mjs` (deadline 480 s), then tags the deployed commit `relay-deployed-<UTC yyyymmddHHMMSS>` and pushes the tag. Needs `--yes` or yes. |
 | f. release | Builds the package, creates the manifest (`scripts/controller-release.mjs`) and `gh release create controller-v<version>` with the four assets at the release commit. Needs `--yes` or yes. |
 | g. report | Prints the rollback target and the reminder that the owner updates Controllers from Settings -> Computers. |
+
+A Relay-only deploy (no Controller release) runs just step e on `main` at `origin/main`:
+`pnpm deploy:relay [--yes] [--dry-run]`. It also leaves the `relay-deployed-*` tag, so the next
+gate does not diff against an older base.
 
 Create the tag through the GitHub release (step f), then explicitly dispatch npm publication when requested. A manual retry uses the same tag:
 
@@ -49,18 +53,43 @@ gh workflow run publish-controller.yml --ref controller-v0.1.0
 
 ## Scoped release gate
 
-`pnpm gate:release [--base <ref>] [--plan] [--full]` decides what to run from the files changed
-since the commit production runs (default: the newest `controller-v*` tag) and
-`architecture/modules.json`, prints the plan with the reason for each tier, runs the tiers one at a
-time, and stops at the first failure with its log (`.artifacts/gate-release/<time>/<tier>.log`).
-`--plan` only prints; `--full` runs every tier.
+`pnpm gate:release [--base <ref>] [--plan] [--full] [--from <tier>] [--only <tier>,...] [--serial] [--max-parallel N] [--reserve-gib N]` decides what to run from the files changed
+since the commit production runs (default base: the newer, by commit date, of the newest `controller-v*` and `relay-deployed-*` tag, after `git fetch --tags origin`) and
+`architecture/modules.json`, prints the plan with the reason for each tier, runs the tiers (see below for which run together), and after a failure starts nothing new, lets the
+running tiers finish and prints the failed logs (`.artifacts/gate-release/<time>/<tier>.log`).
+`--plan` only prints; `--full` runs every tier. After a known flake, `--from <tier>` resumes at that
+tier (earlier ones print as `skipped: --from`) and `--only <tier>,<tier>` runs just those; the tier
+names are `verify`, `components`, `preview-browser`, `e2e-chromium`, `e2e-webkit`, `smoke`, and any
+other name is refused.
 
 | Tier | Runs when |
 | --- | --- |
 | `pnpm verify` | Always. |
-| `pnpm test:components`, `pnpm test:preview-browser` | The client (`agent-client`, `agent-client-web`, `agent-remote-lab`, `agent-timeline`), the Relay, the protocol or a root manifest changed. |
-| `pnpm test:e2e:flows`, then `E2E_BROWSER=webkit` | The client, Relay, protocol or Controller changed. After a Controller-only change, only the flow files whose id (`E1`, `E14b`, ...) a changed module names in its `flows` in `modules.json`; none when no flow does. A new flow file must be named by a module (a unit test checks it). |
+| `pnpm test:components`, `pnpm test:preview-browser` | The client (`agent-client`, `agent-client-web`, `agent-remote-lab`, `agent-timeline`), the protocol or a root manifest changed. These tiers render the client on builder states without a Relay or Controller. |
+| `pnpm test:e2e:flows`, then `E2E_BROWSER=webkit` | Every flow when the client, protocol or a root manifest changed. After a Relay or Controller change, only the flow files whose id (`E1`, `E14b`, ...) a changed module names in its `flows` in `modules.json`; none when no flow does. A new flow file must be named by a module (a unit test checks it). |
 | `pnpm smoke:quick` | The client or Relay changed. The script starts the instance with `ARC_LOCAL_JOURNALS=1` itself and afterwards restores it: stopped if it was stopped, else restarted as a normal run. |
+
+### Tiers that run together
+
+Before it starts a tier, and every two seconds while one waits, the gate reads the machine: memory it can give away (free, inactive and
+purgeable pages from `vm_stat`, `MemAvailable` on Linux), the macOS memory pressure level, the load average and the core count. A tier
+starts when the tiers it needs have finished and its measured peak memory and CPU fit on top of what is running, after
+keeping `--reserve-gib` (default 2) free for other apps and 40 percent of the cores free; at most `--max-parallel` (default 3) run at once. The measured costs are
+`TIER_PROFILES` in `scripts/lib/gate-scheduler.mjs`. In practice:
+
+- `verify` runs first and alone. Its build step rewrites the package outputs and the Workbench `dist` that every other tier reads, and
+  its process-spawning unit tests and one-second speed rule failed in both runs where a browser tier ran beside them.
+- `components` takes as many Playwright workers (`--workers`, at most 2) as the memory and cores allow, and the e2e tiers as many Vitest
+  workers (`--fileParallelism --maxWorkers`, at most 2). `e2e-chromium`, `e2e-webkit`, `components` and `preview-browser` use a free
+  port or a fixed Vite port of their own and a temporary directory per stack, and run together.
+- In a parallel run `components` and the e2e tiers retry a failed test once; a test that passes on its retry is listed as flaky in the log.
+  Tiers beside each other produced load-induced failures that passed alone (a flow timing out at 25 s that takes 9 s, two layout specs).
+  `--serial` runs without retries.
+- `smoke` runs alone and last: `pnpm local up` rebuilds the Relay, the devbox and the Workbench for the local instance.
+- Under memory pressure (`warn` or `critical`) or with less than the reserve available, no new tier starts until it recovers; a lone
+  tier waits at most two minutes, then starts anyway. A tier's running memory is the resident size of its process tree (and, for the
+  WebKit tiers, the Playwright WebKit helpers). Every decision is printed with the readings, and the summary lists each tier's peak.
+- `--serial` is the old behaviour: one tier at a time, with its output on the terminal.
 
 The regenerated compatibility digest alone changes nothing. Run the gate on the release commit
 (or on `main` before it) and pass its log to `release:controller --gate-passed`, or let step c run it.

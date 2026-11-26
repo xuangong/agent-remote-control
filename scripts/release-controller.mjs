@@ -1,3 +1,4 @@
+// pnpm deploy:relay [--yes] [--dry-run] runs only the Relay deploy step (rollback target, builds, wrangler deploy, readiness, tag).
 // pnpm release:controller <version> --summary "<text>" [--gate-passed <log>] [--yes] [--dry-run]
 // Cuts a Controller release from main (docs/controller-npm-release.md). The steps are scripts/lib/release-controller.mjs. Pushing,
 // deploying and creating the GitHub release each need --yes or an interactive yes; --dry-run prints every command and runs none.
@@ -8,14 +9,14 @@ import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { Refusal, runRelease } from './lib/release-controller.mjs';
+import { Refusal, runRelayDeploy, runRelease } from './lib/release-controller.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const { values, positionals } = parseArgs({ allowPositionals: true, options: { summary: { type: 'string' }, 'gate-passed': { type: 'string' }, yes: { type: 'boolean' }, 'dry-run': { type: 'boolean' } } });
+const { values, positionals } = parseArgs({ allowPositionals: true, options: { summary: { type: 'string' }, 'gate-passed': { type: 'string' }, yes: { type: 'boolean' }, 'dry-run': { type: 'boolean' }, 'relay-only': { type: 'boolean' } } });
 const [version] = positionals;
 const dry = Boolean(values['dry-run']);
 const spawnIn = (argv, extra) => spawnSync(argv[0], argv.slice(1), { cwd: root, encoding: 'utf8', timeout: argv[1] === 'fetch' ? 60_000 : undefined, ...extra });
-const gitPath = spawnIn(['git', 'rev-parse', '--git-path', `arc-release-${version}.json`]).stdout.trim();
+const gitPath = spawnIn(['git', 'rev-parse', '--git-path', `arc-release-${version ?? 'relay'}.json`]).stdout.trim();
 const statePath = resolve(root, gitPath);
 const load = () => existsSync(statePath) ? JSON.parse(readFileSync(statePath, 'utf8')) : {};
 const manifest = join(root, 'packages/agent-controller/package.json');
@@ -59,6 +60,10 @@ const ctx = {
     writeFileSync(manifest, readFileSync(manifest, 'utf8').replace(/("version":\s*")[^"]+(")/, `$1${next}$2`));
   },
 };
+if (values['relay-only']) {
+  try { await runRelayDeploy(ctx); } catch (error) { console.error(error instanceof Refusal ? error.message : error.stack ?? error); process.exit(1); }
+  process.exit(0);
+}
 if (!version) { console.error('Usage: pnpm release:controller <version> --summary "<text>" [--gate-passed <log>] [--yes] [--dry-run]'); process.exit(1); }
 try {
   await runRelease(ctx, { version, summary: values.summary, gatePassed: values['gate-passed'], dry });

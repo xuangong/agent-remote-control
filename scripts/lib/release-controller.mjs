@@ -1,7 +1,7 @@
 // The Controller release as resumable explicit steps (docs/controller-npm-release.md). Every step checks its precondition, does one
 // thing, prints what it did, and is recorded in the release state, so a rerun skips what is done and continues at the failed step.
 // Commands go through injected ports, so the steps run in tests against stubs and under --dry-run print instead of running.
-import { relayDeployNeeded } from './release-gate.mjs';
+import { relayDeployNeeded, releasedBase } from './release-gate.mjs';
 
 export const STEPS = ['preconditions', 'bump', 'gate', 'push', 'deploy', 'release', 'report'];
 const VERSION = /^\d+\.\d+\.\d+$/;
@@ -16,8 +16,36 @@ export const lastWorkerVersion = text => [...text.matchAll(new RegExp(`\\(\\d+%\
 /** The id `wrangler deploy` prints for the version it created. */
 export const deployedWorkerVersion = text => new RegExp(`Version ID:\\s*(${UUID.source})`).exec(text)?.[1];
 
+/** `relay-deployed-<UTC yyyymmddHHMMSS>`: the tag a Relay deploy leaves on the deployed commit. */
+export const relayDeployedTag = date => `relay-deployed-${date.toISOString().replace(/\.\d+Z$/, '').replace(/[-:T]/g, '')}`;
+
 export class Refusal extends Error {}
 const refuse = message => { throw new Refusal(message); };
+
+/** The Relay deploy of both `release:controller` and `deploy:relay`: rollback target, builds, `wrangler deploy`, readiness, then the `relay-deployed-*` tag on the deployed commit. */
+function deployRelay(ctx) {
+  const out = (...args) => { const result = ctx.read(['git', ...args]); return result.status === 0 ? result.stdout.trim() : null; };
+  const remember = patch => { if (!ctx.dry) ctx.state.set(patch); };
+  const listing = ctx.capture(['pnpm', ...WORKER, 'exec', 'wrangler', 'deployments', 'list']);
+  const rollback = lastWorkerVersion(listing) ?? (ctx.dry ? '<current Worker version>' : refuse('No current Worker version found in `wrangler deployments list`; deploy by hand.'));
+  remember({ rollback });
+  ctx.log(`Rollback target: Worker version ${rollback}.`);
+  ctx.exec(['pnpm', 'build:relay']);
+  ctx.exec(['pnpm', ...WORKER, 'run', 'build']);
+  const deployedAt = ctx.now().toISOString();
+  const output = ctx.capture(['pnpm', ...WORKER, 'exec', 'wrangler', 'deploy']);
+  const deployed = deployedWorkerVersion(output) ?? (ctx.dry ? '<new Version ID>' : refuse('Could not read the new Version ID from `wrangler deploy`; check the deployment and run readiness by hand.'));
+  remember({ deployed });
+  ctx.log(`Deployed Worker version ${deployed}.`);
+  ctx.exec(['node', 'scripts/deploy-readiness.mjs', '--version', deployed, '--deployed-at', deployedAt, '--deadline-seconds', '480', '--interval-seconds', '15']);
+  ctx.log('The Relay reports the new version.');
+  const sha = out('rev-parse', 'HEAD') ?? '<HEAD>';
+  const deployTag = relayDeployedTag(ctx.now());
+  ctx.exec(['git', 'tag', deployTag, sha]);
+  ctx.exec(['git', 'push', 'origin', deployTag]);
+  remember({ relayTag: deployTag });
+  ctx.log(`Tagged ${sha.slice(0, 8)} as ${deployTag}; the next gate diffs against it.`);
+}
 
 /**
  * ctx ports: `read(argv)` runs a read-only command and returns `{ status, stdout }`; `exec(argv, { env })` runs a command with effects
@@ -32,7 +60,7 @@ export async function runRelease(ctx, options, { only } = {}) {
   const tag = `controller-v${version}`;
   const git = (...args) => ctx.read(['git', ...args]);
   const out = (...args) => { const result = git(...args); return result.status === 0 ? result.stdout.trim() : null; };
-  const lastTag = () => out('tag', '--list', 'controller-v*', '--sort=-v:refname')?.split('\n').find(name => name && name !== tag);
+  const lastTag = () => releasedBase(out, { exclude: tag });
   const headIsRelease = () => out('log', '-1', '--format=%s')?.startsWith(`release: Controller ${version} (`);
   const pushed = () => out('rev-parse', 'HEAD') === out('rev-parse', 'origin/main');
   const remember = patch => { if (!ctx.dry) ctx.state.set(patch); };
@@ -82,19 +110,7 @@ export async function runRelease(ctx, options, { only } = {}) {
         const previous = lastTag();
         const changed = previous ? (out('diff', '--name-only', previous, 'HEAD') ?? '').split('\n').filter(Boolean) : null;
         if (changed && !relayDeployNeeded(changed)) { ctx.log(`Relay deploy skipped: nothing the Relay or the website ships changed since ${previous}.`); remember({ rollback: null }); return; }
-        const listing = ctx.capture(['pnpm', ...WORKER, 'exec', 'wrangler', 'deployments', 'list']);
-        const rollback = lastWorkerVersion(listing) ?? (ctx.dry ? '<current Worker version>' : refuse('No current Worker version found in `wrangler deployments list`; deploy by hand.'));
-        remember({ rollback });
-        ctx.log(`Rollback target: Worker version ${rollback}.`);
-        ctx.exec(['pnpm', 'build:relay']);
-        ctx.exec(['pnpm', ...WORKER, 'run', 'build']);
-        const deployedAt = ctx.now().toISOString();
-        const output = ctx.capture(['pnpm', ...WORKER, 'exec', 'wrangler', 'deploy']);
-        const deployed = deployedWorkerVersion(output) ?? (ctx.dry ? '<new Version ID>' : refuse('Could not read the new Version ID from `wrangler deploy`; check the deployment and run readiness by hand.'));
-        remember({ deployed });
-        ctx.log(`Deployed Worker version ${deployed}.`);
-        ctx.exec(['node', 'scripts/deploy-readiness.mjs', '--version', deployed, '--deployed-at', deployedAt, '--deadline-seconds', '480', '--interval-seconds', '15']);
-        ctx.log('The Relay reports the new version.');
+        deployRelay(ctx);
       },
     },
     release: {
@@ -139,4 +155,24 @@ export async function runRelease(ctx, options, { only } = {}) {
     await step.run();
     remember({ done: [...done, id], summary: summary ?? ctx.state.get().summary });
   }
+}
+
+/** `pnpm deploy:relay`: only the Relay deploy of a release, on main at origin/main, after confirmation (ctx ports as for runRelease). */
+export async function runRelayDeploy(ctx) {
+  const out = (...args) => { const result = ctx.read(['git', ...args]); return result.status === 0 ? result.stdout.trim() : null; };
+  const check = () => {
+    if (out('rev-parse', '--abbrev-ref', 'HEAD') !== 'main') refuse('A Relay deploy runs on main.');
+    if (out('status', '--porcelain', '--untracked-files=no')) refuse('The working tree has uncommitted changes.');
+    if (ctx.read(['git', 'fetch', '--tags', 'origin']).status !== 0) refuse('`git fetch --tags origin` failed or timed out; check the network and rerun.');
+    if (out('rev-parse', 'HEAD') !== out('rev-parse', 'origin/main')) refuse('main is not at origin/main; pull or push first.');
+  };
+  try { check(); } catch (error) {
+    if (!(error instanceof Refusal) || !ctx.dry) throw error;
+    ctx.log(`(dry run) would refuse: ${error.message}`);
+  }
+  if (ctx.dry) ctx.log('(dry run) would ask to deploy the Relay Worker to Cloudflare');
+  else if (!(await ctx.confirm('deploy the Relay Worker to Cloudflare'))) throw new Refusal('The deploy needs confirmation: pass --yes or answer yes.');
+  deployRelay(ctx);
+  const { rollback, deployed } = ctx.state.get();
+  ctx.log(deployed ? `Relay deployed as ${deployed}; roll back to Worker version ${rollback} with wrangler rollback if needed.` : 'Dry run: nothing deployed.');
 }

@@ -2,17 +2,18 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { describeGate, flowIdOf, planGate, relayDeployNeeded } from './release-gate.mjs';
+import { describeGate, flowIdOf, planGate, relayDeployNeeded, releasedBase, selectTiers } from './release-gate.mjs';
 import { readModules } from './test-selection.mjs';
 
 const root = join(import.meta.dirname, '../..');
 const modules = [
   { name: 'controller', layer: 2, paths: ['packages/agent-controller/src/**'], flows: ['E1', 'E5'] },
   { name: 'provider-pi', layer: 3, paths: ['packages/agent-provider-pi/src/**'], flows: [] },
+  { name: 'relay-core', layer: 2, paths: ['packages/agent-relay-core/src/**'], flows: ['E2'] },
   { name: 'client', layer: 2, paths: ['packages/agent-client/src/**'], flows: ['E2'] },
   { name: 'e2e', layer: 5, paths: ['packages/agent-e2e/**'], flows: ['E1', 'E2'] },
 ];
-const packages = { 'packages/agent-controller': { name: 'c', script: 'test' }, 'packages/agent-provider-pi': { name: 'p', script: 'test' }, 'packages/agent-client': { name: 'k', script: 'test' } };
+const packages = { 'packages/agent-relay-core': { name: 'r', script: 'test' }, 'packages/agent-controller': { name: 'c', script: 'test' }, 'packages/agent-provider-pi': { name: 'p', script: 'test' }, 'packages/agent-client': { name: 'k', script: 'test' } };
 const flowFiles = ['e1-pair.e2e.ts', 'e2-send.e2e.ts', 'e2-multi.e2e.ts', 'e5-succession.e2e.ts', 'e14b-push.e2e.ts', 'page.ts'];
 const plan = (changed, force) => planGate({ changed, files: changed, modules, packages, flowFiles, force });
 const ids = result => result.tiers.map(tier => tier.id);
@@ -39,8 +40,10 @@ test('smoke sets the journals variable itself on every step', () => {
   for (const step of smoke.steps) assert.equal(step.env.ARC_LOCAL_JOURNALS, '1');
 });
 
-test('a Relay change runs every tier; a protocol change runs the browser tiers without smoke', () => {
-  assert.ok(ids(plan(['packages/agent-relay-core/src/a.ts'])).includes('smoke'));
+test('a Relay change runs the flows of its modules and smoke, no component or preview tier; a protocol change runs the browser tiers without smoke', () => {
+  const relay = plan(['packages/agent-relay-core/src/a.ts']);
+  assert.deepEqual(ids(relay), ['verify', 'e2e-chromium', 'e2e-webkit', 'smoke']);
+  assert.deepEqual(commands(relay, 'e2e-chromium'), ['pnpm test:e2e:flows flows/e2-']);
   const protocol = ids(plan(['packages/agent-remote-protocol/src/a.ts']));
   assert.deepEqual(protocol, ['verify', 'components', 'preview-browser', 'e2e-chromium', 'e2e-webkit']);
 });
@@ -87,4 +90,54 @@ test('every flow file is named by a module in modules.json, and every named flow
   assert.deepEqual([...fileIds].filter(id => !named.has(id)), [], 'add the new flow to the flows of the modules it exercises');
   assert.deepEqual([...named].filter(id => !fileIds.has(id)), [], 'a module names a flow that has no file');
   assert.ok(readFileSync(join(root, 'packages/agent-e2e/vitest.e2e.config.ts'), 'utf8').includes('flows/**/*.e2e.ts'));
+});
+
+const wideChange = () => planGate({ changed: ['packages/agent-client/src/a.ts'], files: [], modules, packages: [], flowFiles: [], force: false });
+const tierIds = tiers => tiers.map(tier => tier.id);
+
+test('--from runs the plan from that tier on and lists the earlier tiers as skipped', () => {
+  const plan = wideChange();
+  const { run, skipped } = selectTiers(plan, { from: 'preview-browser' });
+  assert.deepEqual(tierIds(run), tierIds(plan.tiers).slice(tierIds(plan.tiers).indexOf('preview-browser')));
+  assert.deepEqual(skipped, [{ tier: 'verify', why: '--from' }, { tier: 'components', why: '--from' }]);
+});
+
+test('--from a tier the plan lacks still skips what precedes it in the tier order', () => {
+  const plan = wideChange();
+  const { run } = selectTiers({ tiers: plan.tiers.filter(tier => tier.id !== 'e2e-chromium') }, { from: 'e2e-chromium' });
+  assert.deepEqual(tierIds(run), ['e2e-webkit', 'smoke'].filter(id => tierIds(plan.tiers).includes(id)));
+});
+
+test('--only runs just the named tiers; no option runs the whole plan', () => {
+  const plan = wideChange();
+  assert.deepEqual(tierIds(selectTiers(plan, { only: 'verify, e2e-webkit' }).run), ['verify', 'e2e-webkit']);
+  assert.equal(selectTiers(plan, {}).run, plan.tiers);
+  assert.deepEqual(selectTiers(plan, {}).skipped, []);
+});
+
+test('unknown tier names and --from with --only are refused', () => {
+  const plan = wideChange();
+  assert.throws(() => selectTiers(plan, { from: 'e2e' }), /Unknown tier "e2e"/);
+  assert.throws(() => selectTiers(plan, { only: 'verify,nope' }), /Unknown tier "nope"/);
+  assert.throws(() => selectTiers(plan, { from: 'verify', only: 'verify' }), /not both/);
+});
+
+/** A git stub over tags per pattern and commit times per tag. */
+const gitStub = ({ controller = '', relay = '', times = {} }) => (...args) => {
+  if (args[0] === 'tag') return args[2] === 'controller-v*' ? controller : relay;
+  if (args[0] === 'log') return String(times[args[3].replace('^{commit}', '')] ?? 0);
+  return null;
+};
+
+test('the base is the newer of the newest relay-deployed tag and the newest controller tag', () => {
+  const tags = { controller: 'controller-v0.3.9\ncontroller-v0.3.8', relay: 'relay-deployed-20261126\nrelay-deployed-20261120' };
+  assert.equal(releasedBase(gitStub({ ...tags, times: { 'controller-v0.3.9': 10, 'relay-deployed-20261126': 20 } })), 'relay-deployed-20261126');
+  assert.equal(releasedBase(gitStub({ ...tags, times: { 'controller-v0.3.9': 30, 'relay-deployed-20261126': 20 } })), 'controller-v0.3.9');
+});
+
+test('the base is whichever kind of tag exists, or nothing', () => {
+  assert.equal(releasedBase(gitStub({ controller: 'controller-v0.3.9' })), 'controller-v0.3.9');
+  assert.equal(releasedBase(gitStub({ relay: 'relay-deployed-1' })), 'relay-deployed-1');
+  assert.equal(releasedBase(gitStub({})), undefined);
+  assert.equal(releasedBase(gitStub({ controller: 'controller-v0.3.9' }), { exclude: 'controller-v0.3.9' }), undefined);
 });

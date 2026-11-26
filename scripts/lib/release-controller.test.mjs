@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assetsOf, deployedWorkerVersion, lastWorkerVersion, RELEASED_FILES, Refusal, runRelease, STEPS } from './release-controller.mjs';
+import { assetsOf, deployedWorkerVersion, lastWorkerVersion, RELEASED_FILES, Refusal, relayDeployedTag, runRelayDeploy, runRelease, STEPS } from './release-controller.mjs';
 
 const OLD = '11111111-1111-4111-8111-111111111111';
 const NEW = '22222222-2222-4222-8222-222222222222';
@@ -8,7 +8,7 @@ const LISTING = `Created: x\nVersion(s):  (100%) ${OLD}\n`;
 
 /** A repository stub: git answers from `repo`, every effect is recorded in `calls`. */
 function harness({ repo = {}, yes = true, dry = false, changed = ['packages/agent-controller/src/a.ts'], listing = LISTING, deployOutput = `Current Version ID: ${NEW}`, missing = [], releaseExists = false } = {}) {
-  const facts = { branch: 'main', dirty: '', head: 'aaa', origin: 'aaa', subject: 'feat: x', tags: 'controller-v0.3.8\ncontroller-v0.3.7', ...repo };
+  const facts = { branch: 'main', dirty: '', head: 'aaa', origin: 'aaa', subject: 'feat: x', tags: 'controller-v0.3.8\ncontroller-v0.3.7', relayTags: '', times: {}, ...repo };
   const calls = []; const fetches = []; const lines = []; let state = {}; let version = '0.3.8';
   const ctx = {
     dry, log: line => lines.push(line),
@@ -19,8 +19,10 @@ function harness({ repo = {}, yes = true, dry = false, changed = ['packages/agen
       if (key === 'git fetch --tags origin') { fetches.push(1); return { status: facts.fetchStatus ?? 0, stdout: '' }; }
       if (key === 'git rev-parse HEAD') return { status: 0, stdout: facts.head };
       if (key === 'git rev-parse origin/main') return { status: 0, stdout: facts.origin };
+      if (key.startsWith('git log -1 --format=%ct')) return { status: 0, stdout: String(facts.times[argv[4].replace('^{commit}', '')] ?? 0) };
       if (key.startsWith('git log')) return { status: 0, stdout: facts.subject };
-      if (key.startsWith('git tag')) return { status: 0, stdout: facts.tags };
+      if (key.startsWith('git tag --list relay-deployed-*')) return { status: 0, stdout: facts.relayTags };
+      if (key.startsWith('git tag --list')) return { status: 0, stdout: facts.tags };
       if (key.startsWith('git diff')) return { status: 0, stdout: changed.join('\n') };
       if (key.startsWith('gh release view')) return { status: releaseExists ? 0 : 1, stdout: '' };
       throw new Error(`unexpected read ${key}`);
@@ -141,4 +143,57 @@ test('--dry-run prints the effects, runs none, and does not record progress', as
   assert.match(h.lines.join('\n'), /would refuse: A release runs on main/);
   assert.deepEqual(h.state, {});
   assert.ok(h.commands().includes('git push origin main'));
+});
+
+test('names the deploy tag by UTC time', () => {
+  assert.equal(relayDeployedTag(new Date('2026-11-26T10:05:09.123Z')), 'relay-deployed-20261126100509');
+});
+
+test('a Relay deploy in a release tags the deployed commit and pushes the tag after readiness', async () => {
+  const h = harness({ changed: ['packages/agent-relay-core/src/a.ts'] });
+  await runRelease(h.ctx, options);
+  const commands = h.commands();
+  const ready = commands.findIndex(command => command.includes('deploy-readiness'));
+  assert.equal(commands[ready + 1], 'git tag relay-deployed-20261126100000 bbb');
+  assert.equal(commands[ready + 2], 'git push origin relay-deployed-20261126100000');
+  assert.equal(h.state.relayTag, 'relay-deployed-20261126100000');
+});
+
+test('no deploy tag when readiness fails or the deploy is skipped', async () => {
+  const skipped = harness();
+  await runRelease(skipped.ctx, options);
+  assert.ok(!skipped.commands().some(command => command.startsWith('git tag')));
+  const failed = harness({ changed: ['packages/agent-relay-core/src/a.ts'], deployOutput: 'no id here' });
+  await assert.rejects(runRelease(failed.ctx, options));
+  assert.ok(!failed.commands().some(command => command.startsWith('git tag')));
+});
+
+test('the deploy skip compares with a newer relay-deployed tag instead of the Controller tag', async () => {
+  const h = harness({ repo: { relayTags: 'relay-deployed-20261125000000', times: { 'controller-v0.3.8': 100, 'relay-deployed-20261125000000': 200 } } });
+  await runRelease(h.ctx, options);
+  assert.match(h.lines.join('\n'), /nothing the Relay or the website ships changed since relay-deployed-20261125000000/);
+});
+
+test('deploy:relay runs only the deploy step with its confirmation and tags the commit', async () => {
+  const h = harness();
+  await runRelayDeploy(h.ctx);
+  const commands = h.commands();
+  assert.deepEqual(commands.map(command => command.split(' ').slice(0, 2).join(' ')).filter(command => !command.startsWith('pnpm --filter')), ['pnpm build:relay', 'node scripts/deploy-readiness.mjs', 'git tag', 'git push']);
+  assert.ok(commands.some(command => command.includes('wrangler deployments list')) && commands.some(command => command.endsWith('wrangler deploy')));
+  assert.equal(h.fetches.length, 1);
+  assert.ok(commands.includes('git tag relay-deployed-20261126100000 aaa'));
+  assert.match(h.lines.join('\n'), new RegExp(`roll back to Worker version ${OLD}`));
+});
+
+test('deploy:relay refuses off main, without confirmation, and under --dry-run runs nothing', async () => {
+  const off = harness({ repo: { branch: 'feat/x' } });
+  await assert.rejects(runRelayDeploy(off.ctx), Refusal);
+  assert.deepEqual(off.calls, []);
+  const declined = harness({ yes: false });
+  await assert.rejects(runRelayDeploy(declined.ctx), /needs confirmation/);
+  assert.deepEqual(declined.calls, []);
+  const dry = harness({ dry: true });
+  await runRelayDeploy(dry.ctx);
+  assert.ok(dry.commands().some(command => command.startsWith('git tag relay-deployed-')));
+  assert.deepEqual(dry.state, {});
 });

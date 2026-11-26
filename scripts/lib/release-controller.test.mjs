@@ -9,14 +9,14 @@ const LISTING = `Created: x\nVersion(s):  (100%) ${OLD}\n`;
 /** A repository stub: git answers from `repo`, every effect is recorded in `calls`. */
 function harness({ repo = {}, yes = true, dry = false, changed = ['packages/agent-controller/src/a.ts'], listing = LISTING, deployOutput = `Current Version ID: ${NEW}`, missing = [], releaseExists = false } = {}) {
   const facts = { branch: 'main', dirty: '', head: 'aaa', origin: 'aaa', subject: 'feat: x', tags: 'controller-v0.3.8\ncontroller-v0.3.7', ...repo };
-  const calls = []; const lines = []; let state = {}; let version = '0.3.8';
+  const calls = []; const fetches = []; const lines = []; let state = {}; let version = '0.3.8';
   const ctx = {
     dry, log: line => lines.push(line),
     read(argv) {
       const key = argv.join(' ');
       if (key === 'git rev-parse --abbrev-ref HEAD') return { status: 0, stdout: facts.branch };
       if (key.startsWith('git status')) return { status: 0, stdout: facts.dirty };
-      if (key === 'git fetch --tags origin') { calls.push({ argv: 'fetch' }); return { status: facts.fetchStatus ?? 0, stdout: '' }; }
+      if (key === 'git fetch --tags origin') { fetches.push(1); return { status: facts.fetchStatus ?? 0, stdout: '' }; }
       if (key === 'git rev-parse HEAD') return { status: 0, stdout: facts.head };
       if (key === 'git rev-parse origin/main') return { status: 0, stdout: facts.origin };
       if (key.startsWith('git log')) return { status: 0, stdout: facts.subject };
@@ -33,7 +33,7 @@ function harness({ repo = {}, yes = true, dry = false, changed = ['packages/agen
     now: () => new Date('2026-11-26T10:00:00Z'),
     readVersion: () => version, writeVersion: next => { version = next; calls.push({ argv: `write version ${next}` }); },
   };
-  return { ctx, calls, lines, facts, commands: () => calls.map(call => call.argv), get state() { return state; } };
+  return { ctx, calls, fetches, lines, facts, commands: () => calls.map(call => call.argv), get state() { return state; } };
 }
 const options = { version: '0.3.9', summary: 'bots get tools' };
 
@@ -80,10 +80,11 @@ test('refuses off main, with a dirty tree, or behind origin, before changing any
 test('fetches tags first and refuses, changing nothing, when the fetch fails', async () => {
   const ok = harness();
   await runRelease(ok.ctx, options);
-  assert.equal(ok.commands()[0], 'fetch');
+  assert.equal(ok.fetches.length, 1);
   const failed = harness({ repo: { fetchStatus: 1 } });
   await assert.rejects(runRelease(failed.ctx, options), /a\. preconditions refused: `git fetch --tags origin` failed/);
-  assert.deepEqual(failed.commands(), ['fetch']);
+  assert.equal(failed.fetches.length, 1);
+  assert.deepEqual(failed.calls, []);
 });
 
 test('refuses a bad version and a missing summary', async () => {

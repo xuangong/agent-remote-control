@@ -2,6 +2,9 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { InvariantResult, InvariantStatus } from './invariants/types.js';
 
+/** A step or phase a scenario was in: what it was doing, and when. */
+export interface StepMarker { at: string; t: number; step: string }
+
 /** A step of a fault schedule: what was done, when, and what came of it. */
 export interface ScheduleStep { t: number; action: string; detail?: Record<string, unknown> }
 
@@ -34,6 +37,10 @@ export interface ScenarioReport {
   findings: Finding[];
   /** Why the scenario was not run or could not finish. */
   note?: string;
+  /** The last steps an unfinished scenario was in, the last one being where it stopped. */
+  steps?: StepMarker[];
+  /** Diagnostic logs copied into the scenario's directory of the run when it errored or timed out. */
+  diagnostics?: string[];
 }
 
 export interface RunReport {
@@ -62,6 +69,7 @@ export function summarize(run: RunReport): string {
   for (const scenario of run.scenarios) {
     lines.push(`${label[scenario.status].padEnd(6)} ${scenario.scenario}  ${scenario.title}  (${Math.round(scenario.durationMs / 1000)} s, seed ${scenario.seed})`);
     if (scenario.note) lines.push(`       ${scenario.note}`);
+    if (scenario.diagnostics?.length) lines.push(`       logs kept in ${scenario.scenario}/: ${scenario.diagnostics.join(', ')}`);
     for (const item of scenario.invariants) {
       lines.push(`       ${label[item.status].padEnd(6)} ${item.invariant}  checked ${item.checked}`);
       for (const violation of item.violations.slice(0, 3)) lines.push(`              - ${violation.message}${violation.at === undefined ? '' : ` (t=${Math.round(violation.at)} ms)`}`);

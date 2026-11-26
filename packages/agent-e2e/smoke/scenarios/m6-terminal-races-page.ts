@@ -43,11 +43,11 @@ export const terminalRacesPage: Scenario = {
     const pageRounds = positiveInteger('--page-rounds', context.quick ? 2 : 5);
     const reading = await smartReading(context);
     if (!reading.includes('claude') || !reading.includes('codex')) throw new Error(`M6 reads its sessions from the journal: turn smart reading on for Claude Code and Codex (now ${JSON.stringify(reading)}).`);
-    const recorder = new TranscriptRecorder();
-    const schedule: ScheduleStep[] = [];
+    const recorder = context.evidence.recorder;
+    const schedule = context.evidence.schedule;
     const records: RoundRecord[] = [];
-    const conditions: Array<{ label: string; results: InvariantResult[] }> = [];
-    const measurements: Record<string, unknown> = { rounds, pageRounds, smartReading: reading, providers: {} as Record<string, unknown> };
+    const conditions = context.evidence.conditions;
+    const measurements: Record<string, unknown> = Object.assign(context.evidence.measurements, { rounds, pageRounds, smartReading: reading, providers: {} as Record<string, unknown> });
     const terminal = new TerminalDriver({ checkout: context.checkout, workspace: context.instance.workspace });
     const startedAt = new Date().toISOString();
     const proxy = await startLatencyProxy({ target: context.instance.origin, rttMs: 0, tap: recorder.tap, onSocket: recorder.socket });
@@ -107,6 +107,7 @@ class Race {
 
   async open(browserContext: any, url: string, name: string): Promise<OpenPage> {
     const probe = await PageProbe.create(browserContext, this.recorder.origin);
+    this.context.evidence.step(`opening ${name}`);
     const paint = await probe.open(url, name, { rowsDeadlineMs: 90_000 });
     if (paint.timedOut) throw new Error(`The ${name} showed no rows of ${this.address} within 90 s.`);
     await probe.page.waitForFunction(() => (window as any).__smoke.read().composer === 'enabled', undefined, { timeout: 60_000 });
@@ -148,6 +149,7 @@ class Race {
     const lead = this.context.random.pick(['page', 'terminal'] as const);
     // A terminal needs a second or two to start its CLI: leading, it is given that start before the page sends.
     const gapMs = lead === 'page' ? this.context.random.int(0, 600) : this.context.random.int(1500, 3000);
+    this.context.evidence.step(`terminal race ${index + 1} of ${provider}`);
     this.schedule.push({ t: this.recorder.clock(), action: 'terminal-race', detail: { provider, index, lead, gapMs } });
     const nativeId = this.address.split('/').slice(2).join('/');
     const samples: Array<{ at: number; status?: string }> = [];
@@ -284,7 +286,7 @@ async function separateWriter(context: RunContext, address: string, origin: stri
     refused += 1;
     await delay(5000);
   }
-  const measurements: Record<string, unknown> = { refusedWhileLoaded: refused, writableAfterReleaseMs: writing ? Date.now() - releasedAt - 5000 : null, ...(other ? { failed: other } : {}) };
+  const measurements: Record<string, unknown> = Object.assign(context.evidence.measurements, { refusedWhileLoaded: refused, writableAfterReleaseMs: writing ? Date.now() - releasedAt - 5000 : null, ...(other ? { failed: other } : {}) });
   if (!writing) return { records: [], measurements };
   const record = await withContext(context.browser, origin, async browserContext => {
     const probe = await PageProbe.create(browserContext, recorder.origin);

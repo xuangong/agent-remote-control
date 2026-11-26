@@ -2,6 +2,7 @@ import { readInstance } from '../../faults/instance-process.mjs';
 import { seededRandom } from '../../faults/seeded-random.mjs';
 import { loadChromium } from './probe.js';
 import { SessionPool, type Provider } from './sessions.js';
+import { ScenarioEvidence } from '../evidence.js';
 import type { RunContext } from '../scenario.js';
 
 /** Builds the run's context: the instance of this checkout, one headless browser, a pool of own sessions and the seeded generator. */
@@ -29,6 +30,7 @@ export async function createRunContext({ checkout, seed, quick, runDirectory, lo
   const startedAt = Date.now();
   const context: RunContext = {
     checkout, instance, seed, quick, random: seededRandom(seed), pool, browser, runDirectory, log,
+    evidence: new ScenarioEvidence(),
     now: () => Date.now() - startedAt,
     sessionWithHistory: provider => history(provider, 'short', ['Now reply with the single word AGAIN and nothing else.']),
     sessionWithLongHistory: provider => history(provider, 'long', ['Print the integers from 1 to 150, one per line, with no other text.', 'Now reply with the single word AGAIN and nothing else.']),

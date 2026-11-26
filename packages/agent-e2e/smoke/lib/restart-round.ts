@@ -54,6 +54,7 @@ export async function runRestartRound(context: RunContext, plan: RoundPlan, reco
     const outcome = await withContext(context.browser, proxy.origin, async browserContext => {
       // The fault lands on a tool call the page shows as a row of its own: the Full process display shows every step of a turn.
       const probe = await PageProbe.create(browserContext, recorder.origin, { process: 'full' });
+      context.evidence.step(`opening the page, ${label}`);
       await probe.open(url.replace(context.instance.origin, proxy.origin), `open, ${label}`);
       await probe.page.waitForFunction(() => (window as any).__smoke.read().composer === 'enabled', undefined, { timeout: 60_000 });
       // The session is shared by the rounds of a run: only the rows of this turn may say that the model is mid-turn.

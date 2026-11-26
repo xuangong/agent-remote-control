@@ -4,9 +4,8 @@ import { positiveInteger } from '../lib/arguments.js';
 import { createBotGroup } from '../lib/bot-group.js';
 import { PageProbe, withContext } from '../lib/probe.js';
 import { startScriptedHost } from '../lib/scripted-host.js';
-import { mergeInvariantResults, type ScheduleStep } from '../report.js';
+import { mergeInvariantResults } from '../report.js';
 import type { Scenario } from '../scenario.js';
-import { TranscriptRecorder } from '../transcript.js';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const SESSIONS = ['soak-a', 'soak-b', 'soak-c'];
@@ -26,9 +25,9 @@ export const soak: Scenario = {
   journals: true,
   async run(context) {
     const minutes = positiveInteger('--duration', 30);
-    const recorder = new TranscriptRecorder();
-    const schedule: ScheduleStep[] = [];
-    const measurements: Record<string, unknown> = { minutes, sessions: SESSIONS.length, cycleMs: CYCLE_MS };
+    const recorder = context.evidence.recorder;
+    const schedule = context.evidence.schedule;
+    const measurements: Record<string, unknown> = Object.assign(context.evidence.measurements, { minutes, sessions: SESSIONS.length, cycleMs: CYCLE_MS });
     const host = await startScriptedHost(context.instance, { name: 'Smoke M8 Host', installationId: `smoke-m8-${context.seed}`, stream: true, replyDelayMs: 1500,
       answer: text => `Soak answer to ${text}. ${'The lighthouse keeper watched the water. '.repeat(4)}`,
       sessions: Object.fromEntries(SESSIONS.map(id => [id, { title: id, history: [{ role: 'user' as const, text: `Hello ${id}` }, { role: 'assistant' as const, text: `Ready ${id}` }] }])) });
@@ -39,12 +38,14 @@ export const soak: Scenario = {
         // The Relay keeps one Window per user, so three pages of one browser would share it; the three sessions are the panes of one Window in one page.
         const probe = await PageProbe.create(browserContext, recorder.origin);
         await probe.page.setViewportSize({ width: 1800, height: 900 });
+        context.evidence.step('opening the Window page');
         await probe.open(`${proxy.origin}/?window=${encodeURIComponent(group.id)}`, 'open Window', { rowsDeadlineMs: 90_000 });
         let written = SESSIONS.length * 2;
         const started = Date.now();
         const until = started + minutes * 60_000;
         let cycles = 0, lastWord = '';
         let nextSample = started;
+        context.evidence.step(`soaking for ${minutes} minutes`);
         schedule.push({ t: recorder.clock(), action: 'soak-start', detail: { minutes, cycleMs: CYCLE_MS } });
         while (Date.now() < until) {
           const cycleStart = Date.now();
@@ -68,6 +69,7 @@ export const soak: Scenario = {
         // A fresh page opens the same Window and loads the rows the soaked page held: the heap those rows cost without thirty minutes of history.
         const fresh = await PageProbe.create(browserContext, recorder.origin);
         await fresh.page.setViewportSize({ width: 1800, height: 900 });
+        context.evidence.step('opening a fresh page after the soak');
         await fresh.open(`${proxy.origin}/?window=${encodeURIComponent(group.id)}`, 'fresh page', { rowsDeadlineMs: 90_000 });
         const loaded = await fresh.loadOlderUntil(soaked?.retainedRows ?? 0, 180_000);
         await fresh.page.waitForTimeout(2000);

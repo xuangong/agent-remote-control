@@ -63,9 +63,11 @@ export function accountDirectory(groups: readonly WindowGroup[]): Assistant[] {
 export function callerAssistant(resolve: TeamBrokerPorts['resolveSession'], hostId: string, owner: { providerId: string; nativeSessionId: string }, directory: readonly Assistant[]): Assistant {
   const key = (host: string, providerId: string, nativeSessionId: string) => { try { return nativeSessionRefKey(resolve(host, providerId, nativeSessionId)); } catch { return undefined; } };
   const own = key(hostId, owner.providerId, owner.nativeSessionId);
-  return (own ? directory.find(item => item.hostId === hostId && key(item.hostId, item.providerId, item.nativeSessionId) === own) : undefined)
+  return (own ? sessionAssistant(directory.filter(item => item.hostId === hostId && key(item.hostId, item.providerId, item.nativeSessionId) === own)) : undefined)
     ?? fail('Only an assistant\'s main session does this.');
 }
+/** A session a plain window shows beside the group that makes it a bot speaks as the bot, never as the plain window. */
+export const sessionAssistant = (shown: readonly Assistant[]): Assistant | undefined => shown.find(item => item.key.startsWith('b_')) ?? shown[0];
 /** The assistant a name or id means, other than the caller; one answer for unknown and unreachable. */
 export function namedAssistant(directory: readonly Assistant[], name: string, caller: Assistant): Assistant {
   const named = directory.filter(item => item.key === name || fold(item.name) === fold(name));

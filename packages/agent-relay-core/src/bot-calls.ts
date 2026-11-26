@@ -6,7 +6,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { assistantMessageText, attachmentLines, boardItemOpen, BOARD_BRIEF_LIMIT, BOT_SPAN_LIMIT, chiefChangedText, itemTagText, nativeSessionRefKey, taskView, type BoardItem, type BoardItemEdit, type BoardLink, type BoardPlanEdit, type BotAttachment, type BotFact, type BotMessageResult, type TeamHostCall, type TaskView, type TeamMember } from '@orchardworks/agent-remote-protocol';
-import { accountDirectory, callerAssistant, type Assistant, type AssistantBrokerPorts, type AssistantMessages, type AssistantPorts } from './assistants.js';
+import { accountDirectory, callerAssistant, sessionAssistant, type Assistant, type AssistantBrokerPorts, type AssistantMessages, type AssistantPorts } from './assistants.js';
 import { ownerTasks, taskAction, type TaskGroups } from './tasks.js';
 import { ACCOUNT_TEAM_LIMIT, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
@@ -77,7 +77,7 @@ export class BotCalls {
     if (!bot.task) return undefined;
     const seat = bot.task.members[1]!, key = this.key(seat.hostId, seat.providerId, seat.nativeSessionId!);
     const directory = accountDirectory(this.ports.groups());
-    const standing = directory.find(item => this.key(item.hostId, item.providerId, item.nativeSessionId) === key);
+    const standing = sessionAssistant(directory.filter(item => this.key(item.hostId, item.providerId, item.nativeSessionId) === key));
     if (standing) return { key: standing.key, name: standing.name, standing };
     const parent = this.broker.ports.read().find(team => team.task && this.key(team.members[0]!.hostId, team.members[0]!.providerId, team.members[0]!.nativeSessionId!) === key);
     // The task's owner session is the chief whether or not it is a bot of the groups now.

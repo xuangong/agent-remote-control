@@ -3,7 +3,7 @@
 // instructions without reopening it, so its next turn can call `message` and the other bot receives what it says.
 import { randomUUID } from 'node:crypto';
 import type { Browser } from '@playwright/test';
-import { afterAll, beforeAll, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it } from 'vitest';
 import { createWindowView } from '@orchardworks/agent-remote-protocol';
 import { startStack, type Stack } from '@orchardworks/agent-e2e/stack';
 import { inputs } from './bot-team.js';
@@ -11,16 +11,16 @@ import { launchBrowser, openPage } from './browser.js';
 import { showsText } from './page.js';
 
 let stack: Stack; let browser: Browser;
-beforeAll(async () => {
+beforeEach(async () => {
   stack = await startStack({ teams: true, tools: true, sessions: {
     plain: { title: 'Plain', history: [{ role: 'user', text: 'Keep the notes.' }, { role: 'assistant', text: 'Plain is ready.' }] },
     peer: { title: 'Peer', history: [{ role: 'user', text: 'Watch the build.' }, { role: 'assistant', text: 'Peer is ready.' }] },
   } });
   browser = await launchBrowser();
 });
-afterAll(async () => { await browser?.close(); await stack?.close(); });
+afterEach(async () => { await browser?.close(); await stack?.close(); });
 
-it('E15d: a plain session put into a group as a bot gets its tools and standing instructions while it runs, and its next turn messages the other bot', async () => {
+for (const peerOpened of [true, false]) it(`E15d: a plain session put into a group as a bot gets its tools and standing instructions while it runs, and its next turn messages the other bot (peer ${peerOpened ? 'opened in a page' : 'never opened'})`, async () => {
   const { context, page } = await openPage(browser, stack.sessionUrl('plain'));
   await showsText(page, 'Plain is ready.');
   // The session runs as a plain one: the page opened it, and nothing gave it the bots' tools or instructions.
@@ -28,10 +28,12 @@ it('E15d: a plain session put into a group as a bot gets its tools and standing 
   const running = stack.provider.session('plain')!;
   expect(stack.provider.given('plain')?.tools.map(tool => tool.name) ?? []).not.toContain('message');
   const before = running.sent.length;
-  // The other session runs too, opened in a page of its own.
-  const other = await context.newPage();
-  await other.goto(stack.sessionUrl('peer'));
-  await showsText(other, 'Peer is ready.');
+  // The other session runs too, opened in a page of its own, or never opened: a bot that a person or another bot created has no page.
+  if (peerOpened) {
+    const other = await context.newPage();
+    await other.goto(stack.sessionUrl('peer'));
+    await showsText(other, 'Peer is ready.');
+  }
 
   // The person groups it with another session as bots, and gives it a mission.
   const status = await (await context.request.get(stack.origin + '/auth/status')).json() as { basePath: string };

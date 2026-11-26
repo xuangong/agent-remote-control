@@ -14,7 +14,7 @@ const modules = [
   { name: 'e2e', layer: 5, paths: ['packages/agent-e2e/**'], flows: ['E1', 'E2'] },
 ];
 const packages = { 'packages/agent-relay-core': { name: 'r', script: 'test' }, 'packages/agent-controller': { name: 'c', script: 'test' }, 'packages/agent-provider-pi': { name: 'p', script: 'test' }, 'packages/agent-client': { name: 'k', script: 'test' } };
-const flowFiles = ['e1-pair.e2e.ts', 'e2-send.e2e.ts', 'e2-multi.e2e.ts', 'e5-succession.e2e.ts', 'e14b-push.e2e.ts', 'page.ts'];
+const flowFiles = ['e1-pair.e2e.ts', 'e2-send.e2e.ts', 'e2-multi.e2e.ts', 'e5-succession.e2e.ts', 'e14b-push.e2e.ts', 'e15-bots.e2e.ts', 'e15b-bot-thresholds.e2e.ts', 'page.ts'];
 const plan = (changed, force) => planGate({ changed, files: changed, modules, packages, flowFiles, force });
 const ids = result => result.tiers.map(tier => tier.id);
 const commands = (result, id) => result.tiers.find(tier => tier.id === id).steps.map(step => step.command.join(' '));
@@ -140,4 +140,14 @@ test('the base is whichever kind of tag exists, or nothing', () => {
   assert.equal(releasedBase(gitStub({ relay: 'relay-deployed-1' })), 'relay-deployed-1');
   assert.equal(releasedBase(gitStub({})), undefined);
   assert.equal(releasedBase(gitStub({ controller: 'controller-v0.3.9' }), { exclude: 'controller-v0.3.9' }), undefined);
+});
+
+test('the bot flows run in Chromium only: WebKit drops them from a selection and has no tier when nothing else is selected', () => {
+  const bots = (changed) => planGate({ changed, files: changed, modules: [...modules, { name: 'bots', layer: 2, paths: ['packages/agent-bots/**'], flows: ['E15', 'E15b'] }, { name: 'mixed', layer: 2, paths: ['packages/agent-mixed/**'], flows: ['E2', 'E15'] }], packages: { ...packages, 'packages/agent-bots': { name: 'b', script: 'test' }, 'packages/agent-mixed': { name: 'm', script: 'test' } }, flowFiles });
+  const only = bots(['packages/agent-bots/a.ts']);
+  assert.deepEqual(ids(only), ['verify', 'e2e-chromium']);
+  assert.deepEqual(commands(only, 'e2e-chromium'), ['pnpm test:e2e:flows flows/e15- flows/e15b-']);
+  const mixed = bots(['packages/agent-mixed/a.ts']);
+  assert.deepEqual(commands(mixed, 'e2e-chromium'), ['pnpm test:e2e:flows flows/e15- flows/e2-']);
+  assert.deepEqual(commands(mixed, 'e2e-webkit'), ['pnpm test:e2e:flows flows/e2-']);
 });

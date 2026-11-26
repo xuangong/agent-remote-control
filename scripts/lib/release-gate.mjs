@@ -1,5 +1,6 @@
 // The scoped release gate: which tiers a release runs, decided from what changed since the last released commit.
 // The plan is a pure function of the changed files and architecture/modules.json; scripts/release-gate.mjs runs it.
+import { CHROMIUM_ONLY_FLOWS } from './chromium-only-flows.mjs';
 import { planTests } from './test-selection.mjs';
 
 const PACKAGE_DIRECTORY = /^packages\/([^/]+)\//;
@@ -77,7 +78,9 @@ export function planGate({ changed, files, modules, packages, flowFiles, force =
     const filters = selection ? selection.map(name => `flows/${name.split('-')[0]}-`) : [];
     const flowsCommand = [...pnpm('test:e2e:flows'), ...[...new Set(filters)].sort()];
     tiers.push({ id: 'e2e-chromium', why: flowWhy, steps: [flowsCommand], deadlineMs: 10 * 60_000 });
-    tiers.push({ id: 'e2e-webkit', why: flowWhy, steps: [flowsCommand], env: { E2E_BROWSER: 'webkit' }, deadlineMs: 10 * 60_000 });
+    // The Chromium-only flows (the bot flows) do not run in WebKit; a selection made of them alone leaves that tier nothing to run.
+    const webkitFilters = selection ? [...new Set(selection.filter(name => !CHROMIUM_ONLY_FLOWS.includes(flowIdOf(name))).map(name => `flows/${name.split('-')[0]}-`))].sort() : [];
+    if (!selection || webkitFilters.length) tiers.push({ id: 'e2e-webkit', why: flowWhy, steps: [[...pnpm('test:e2e:flows'), ...webkitFilters]], env: { E2E_BROWSER: 'webkit' }, deadlineMs: 10 * 60_000 });
   }
   if (force || touched.client || touched.relay) {
     tiers.push({
@@ -99,7 +102,7 @@ export function describeGate(plan, { base, head }) {
     lines.push(`  run  ${tier.id.padEnd(16)} ${commands}  (${tier.why})`);
   }
   for (const id of ['components', 'preview-browser', 'e2e-chromium', 'smoke']) {
-    if (!names.has(id)) lines.push(`  skip ${id.padEnd(16)} ${id === 'e2e-chromium' ? 'no flow exercises the changed modules (e2e-webkit too)' : 'nothing it covers changed'}`);
+    if (!names.has(id)) lines.push(`  skip ${id.padEnd(16)} ${id === 'e2e-chromium' ? 'no flow exercises the changed modules (e2e-webkit too, or only Chromium-only flows)' : 'nothing it covers changed'}`);
   }
   return lines.join('\n');
 }

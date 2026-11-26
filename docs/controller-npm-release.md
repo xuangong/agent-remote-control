@@ -66,7 +66,7 @@ other name is refused.
 | --- | --- |
 | `pnpm verify` | Always. |
 | `pnpm test:components`, `pnpm test:preview-browser` | The client (`agent-client`, `agent-client-web`, `agent-remote-lab`, `agent-timeline`), the protocol or a root manifest changed. These tiers render the client on builder states without a Relay or Controller. |
-| `pnpm test:e2e:flows`, then `E2E_BROWSER=webkit` | Every flow when the client, protocol or a root manifest changed. After a Relay or Controller change, only the flow files whose id (`E1`, `E14b`, ...) a changed module names in its `flows` in `modules.json`; none when no flow does. A new flow file must be named by a module (a unit test checks it). |
+| `pnpm test:e2e:flows`, then `E2E_BROWSER=webkit` | Every flow when the client, protocol or a root manifest changed. After a Relay or Controller change, only the flow files whose id (`E1`, `E14b`, ...) a changed module names in its `flows` in `modules.json`; none when no flow does. A new flow file must be named by a module (a unit test checks it). The bot flows (E15, E15b, E15c, E15d) run in Chromium only (`scripts/lib/chromium-only-flows.mjs`); under `E2E_BROWSER=webkit` they are excluded, and the gate has no WebKit tier when a selection holds only them. |
 | `pnpm smoke:quick` | The client or Relay changed. The script starts the instance with `ARC_LOCAL_JOURNALS=1` itself and afterwards restores it: stopped if it was stopped, else restarted as a normal run. |
 
 ### Tiers that run together

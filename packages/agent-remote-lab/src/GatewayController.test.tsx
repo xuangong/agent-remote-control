@@ -389,7 +389,7 @@ describe('the device link indicator', () => {
     expect(view.querySelector('.gateway-recovery')).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(200); });
     const banner = view.querySelector('.gateway-recovery');
-    expect(banner?.textContent).toContain('Offline. Showing saved chats. Messages will be sent when this device is back online.');
+    expect(banner?.textContent).toContain('Offline. Messages will be sent when this device is back online.');
     expect(banner?.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
     // Retry asks the transport to reopen the link now.
     await act(async () => view.querySelector<HTMLButtonElement>('.gateway-recovery button')!.click());

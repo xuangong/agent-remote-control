@@ -1,4 +1,5 @@
-import { forwardRef, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ComponentType } from 'react';
+import { forwardRef, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ComponentType } from 'react';
+import { DeviceLinkContext } from '../../kernel/device-link.js';
 import type { Team } from '@orchardworks/agent-remote-protocol';
 import { BotRooms } from './BotRooms.js';
 import type { useWindowWorkspace } from '../windows/useWindowWorkspace.js';
@@ -90,6 +91,7 @@ export function BotWorkspace({ visible, covered = false, compact, scope, rooms, 
   const descriptor = conversation ? describeConversation(place) : undefined;
   const unavailable = phone && !!selected.error && !descriptor;
   const showConversation = botConversationShown({ ...(place ? { place } : {}), phone, rosterVisible: navigation.rosterVisible, unavailable });
+  const offline = useContext(DeviceLinkContext)?.notice?.state === 'offline';
   const availabilityNotice = selected.loading ? <p role="status">{t('navigation.botWorkspace.opening')}</p> : selected.error && place?.kind !== 'session'
     ? <p role="alert">{selected.error} <button type="button" onClick={() => void selected.retry()}>{t('common.retry')}</button></p> : null;
   const creation = workspace.sectionCreationState, saving = creation.state === 'saving';
@@ -185,6 +187,8 @@ export function BotWorkspace({ visible, covered = false, compact, scope, rooms, 
         {phone && onSearch ? <IconButton icon="search" label={t('navigation.search')} onClick={onSearch} /> : null}
         {onNewBot ? <IconButton icon="plus" label={t('assistants.new')} onClick={onNewBot} /> : null}</> : undefined} />
       {unavailable ? availabilityNotice : null}
+      {/* When the Relay cannot be reached the roster is the device's copy, and says so in one quiet line. */}
+      {offline ? <p className="lab-bot-notice lab-bot-offline" role="status">{t('navigation.savedChats')}</p> : null}
       {saving ? <p className="lab-bot-notice" role="status">{t('navigation.botWorkspace.saving')}</p> : null}
       {error || creation.error ? <p className="lab-bot-notice" role="alert">{error ?? creation.error}</p> : null}
       {creation.state === 'unknown' ? <p className="lab-bot-notice" role="status">{t('navigation.botWorkspace.groupUnconfirmed')} <button type="button" onClick={() => void retryGroup()}>{t('common.retry')}</button></p> : null}

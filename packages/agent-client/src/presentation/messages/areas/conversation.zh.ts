@@ -299,7 +299,7 @@ export const conversation: AreaMessages<typeof english> = {
   'tiles.pages': '这个窗口的卡片',
   'tiles.page': '第 {position}/{count} 张：{title}',
 
-  'device.offline': '这台设备离线了，正在显示已保存的聊天，恢复联网后消息会自动发出。',
+  'device.offline': '这台设备离线了，恢复联网后消息会自动发出。',
   'device.signIn': '请重新登录，才能继续发送。',
   'device.signInAction': '登录',
   'device.retry': '重试',

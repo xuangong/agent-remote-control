@@ -78,6 +78,13 @@
         "packages/agent-provider-opencode/tsconfig.json",
         "packages/agent-provider-opencode/tsconfig.test.json",
         "packages/agent-provider-opencode/vitest.config.ts",
+        "packages/agent-provider-pi/README.md",
+        "packages/agent-provider-pi/package.json",
+        "packages/agent-provider-pi/src",
+        "packages/agent-provider-pi/tests",
+        "packages/agent-provider-pi/tsconfig.json",
+        "packages/agent-provider-pi/tsconfig.test.json",
+        "packages/agent-provider-pi/vitest.config.ts",
         "packages/agent-provider-sdk/README.md",
         "packages/agent-provider-sdk/package.json",
         "packages/agent-provider-sdk/src",
@@ -188,7 +195,7 @@
         "packages/codex-daemon-client/tsconfig.test.json",
         "packages/codex-daemon-client/vitest.config.ts"
       ],
-      "digest": "sha256:747f2eff5e62b30ead9f6483e8fa6d6dbe959633c65c1c2ec7142b11ed828c2f"
+      "digest": "sha256:f1de1c5bb4e04413bc0aac5219f109bc97c16e77aa6e7f150ffb4558612eba50"
     }
   },
   "providers": [

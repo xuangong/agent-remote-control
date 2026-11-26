@@ -339,7 +339,10 @@
         "E2",
         "E3",
         "E4",
-        "E7"
+        "E7",
+        "E15",
+        "E15b",
+        "E15c"
       ],
       "invariants": [
         "lease-single-owner",
@@ -362,7 +365,8 @@
         "S3"
       ],
       "flows": [
-        "E1"
+        "E1",
+        "E12"
       ],
       "invariants": [
         "lease-single-owner"
@@ -406,7 +410,10 @@
         "E1",
         "E2",
         "E4",
-        "E5"
+        "E5",
+        "E15",
+        "E15b",
+        "E15c"
       ],
       "invariants": [
         "journal-reopen-recovery",
@@ -768,9 +775,14 @@
         "E6",
         "E7",
         "E9",
+        "E12",
         "E13",
+        "E13b",
         "E14",
-        "E14b"
+        "E14b",
+        "E15",
+        "E15b",
+        "E15c"
       ],
       "invariants": [
         "draft-ownership",

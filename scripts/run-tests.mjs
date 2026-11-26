@@ -126,7 +126,7 @@ const commands = {
   'claude-succession-evidence': ['--filter', '@orchardworks/agent-provider-claude', 'exec', 'vitest', 'run', 'src/native-succession-evidence.local.test.ts', '--testTimeout=30000', '--hookTimeout=10000', '--maxWorkers=1'],
   copilot: ['--filter', '@orchardworks/agent-provider-copilot', 'run', 'test', '--hookTimeout=30000'],
   pi: ['--filter', '@orchardworks/agent-provider-pi', 'run', 'test', '--hookTimeout=30000'],
-  setup: ['exec', 'node', '--test', '--test-timeout=60000', 'scripts/native-test-versions.test.mjs', 'scripts/dsh-debug.test.mjs', 'scripts/start.test.mjs', 'scripts/relay-local.test.mjs', 'scripts/deploy-readiness.test.mjs', 'scripts/prepare-relay-docker-lock.test.mjs', 'scripts/controller/entrypoint.test.mjs', 'scripts/controller/create-host.test.mjs', 'scripts/controller/install.test.mjs', 'scripts/local/instance.test.mjs', 'scripts/local/environment.test.mjs', 'scripts/local/controller.test.mjs', 'scripts/local/session.test.mjs', 'scripts/local/runner.test.mjs', 'scripts/lib/arch-check.test.mjs', 'scripts/lib/test-inventory.test.mjs', 'scripts/lib/fixtures-check.test.mjs', 'scripts/lib/slow-test-reporter.test.mjs', 'scripts/lib/slow-test-allowlist.test.mjs', 'scripts/lib/compatibility.test.mjs', 'scripts/lib/postmerge.test.mjs', 'scripts/lib/open-items.test.mjs', 'scripts/lib/legacy-token-budget.test.mjs', 'scripts/lib/test-selection.test.mjs'],
+  setup: ['exec', 'node', '--test', '--test-timeout=60000', 'scripts/native-test-versions.test.mjs', 'scripts/dsh-debug.test.mjs', 'scripts/start.test.mjs', 'scripts/relay-local.test.mjs', 'scripts/deploy-readiness.test.mjs', 'scripts/prepare-relay-docker-lock.test.mjs', 'scripts/controller/entrypoint.test.mjs', 'scripts/controller/create-host.test.mjs', 'scripts/controller/install.test.mjs', 'scripts/local/instance.test.mjs', 'scripts/local/environment.test.mjs', 'scripts/local/controller.test.mjs', 'scripts/local/session.test.mjs', 'scripts/local/runner.test.mjs', 'scripts/lib/arch-check.test.mjs', 'scripts/lib/test-inventory.test.mjs', 'scripts/lib/fixtures-check.test.mjs', 'scripts/lib/slow-test-reporter.test.mjs', 'scripts/lib/slow-test-allowlist.test.mjs', 'scripts/lib/compatibility.test.mjs', 'scripts/lib/postmerge.test.mjs', 'scripts/lib/open-items.test.mjs', 'scripts/lib/legacy-token-budget.test.mjs', 'scripts/lib/test-selection.test.mjs', 'scripts/lib/release-gate.test.mjs', 'scripts/lib/release-controller.test.mjs'],
   // Each package's Vitest already uses every core; running packages one at a time avoids load-induced timeouts.
   unit: ['-r', '--workspace-concurrency=1', 'run', 'test'],
   // The packages changed since a commit and the packages that depend on them; the workspace root runs everything.
@@ -151,7 +151,8 @@ const commands = {
   'native-pi': ['--filter', '@orchardworks/agent-provider-pi', 'run', 'test:native'],
   // The provider conformance kit for every journal-capable adapter, on mock data: recordings, declared behaviour and faults through the port.
   providers: ['--filter', '@orchardworks/agent-remote-controller', 'exec', 'vitest', 'run', 'src/provider-conformance.test.ts', '--testTimeout=10000', '--hookTimeout=10000'],
-  'e2e-flows': ['--filter', '@orchardworks/agent-e2e', 'run', 'test:e2e'],
+  // Extra arguments select flow files, as `pnpm test:e2e:flows flows/e1-` (scripts/lib/release-gate.mjs).
+  'e2e-flows': ['--filter', '@orchardworks/agent-e2e', 'run', 'test:e2e', ...process.argv.slice(3)],
 };
 if (!(mode in commands) && mode !== 'changed') throw new Error(`Unknown test suite: ${mode}`);
 await verifyNativeTestVersions(mode);

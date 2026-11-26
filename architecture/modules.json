@@ -342,7 +342,8 @@
         "E7",
         "E15",
         "E15b",
-        "E15c"
+        "E15c",
+        "E15d"
       ],
       "invariants": [
         "lease-single-owner",
@@ -413,7 +414,8 @@
         "E5",
         "E15",
         "E15b",
-        "E15c"
+        "E15c",
+        "E15d"
       ],
       "invariants": [
         "journal-reopen-recovery",
@@ -782,7 +784,8 @@
         "E14b",
         "E15",
         "E15b",
-        "E15c"
+        "E15c",
+        "E15d"
       ],
       "invariants": [
         "draft-ownership",

@@ -16,7 +16,8 @@
         "name": "JOURNALS",
         "class_name": "JournalPartition"
       }
-    ]
+    ],
+    "code_update_strategy": { "mode": "immediate" }
   },
   "migrations": [
     {

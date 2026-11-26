@@ -8,6 +8,10 @@ import { promisify } from 'node:util';
  * live while the Relay object still runs the previous release. The object reports its `workerVersionId` in the diagnostics it
  * delivers to a registered Host; the Relay is ready when an entry written after the deploy names the deployed version.
  *
+ * With `code_update_strategy` set to `immediate` in the Wrangler configs the object adopts the deployed code when the deploy completes
+ * and a Controller reconnects within seconds, so a wait near the default deadline means the deploy did not apply the strategy
+ * (see docs/current/agent-remote/deployment.md, "How a deploy reaches the Relay Durable Object").
+ *
  * It only reads: the owner's installed `agent-remote-controller diagnostics --source server`. Entries older than the deploy time are
  * not evidence, whatever version they name.
  *

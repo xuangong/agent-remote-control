@@ -136,6 +136,29 @@ Validate production `/health`, login redirect/cookies, Host registration, sharin
 Controller streams and reconnect over the public TLS domain. A successful local
 workerd test or deployment dry-run does not establish public DNS/TLS readiness.
 
+### How a deploy reaches the Relay Durable Object
+
+A deploy replaces the Worker at once, but a Durable Object instance that is already running keeps its old code until
+Cloudflare resets it. What decides when is the code update strategy (`durable_objects.code_update_strategy` in the Wrangler
+config). The default is `deferred` with `max_delay` 300 seconds: the object is given up to five minutes to hibernate and is
+reset only then. The Relay object never hibernates. It accepts its WebSockets with the standard `server.accept()` (not the
+Hibernation API), keeps them open for every Controller and browser, and holds alarms and timers, so it is still active when
+the deadline arrives; the old code therefore served every connection for the full five minutes after each deploy, and the
+`relay_started` diagnostics entry of the new `workerVersionId` appeared only after that reset. The same default applies to the
+journal partitions.
+
+All six Wrangler configs (the two Workers, in the repository and in `deploy/self-hosted`) set `"mode": "immediate"`, so the
+update is applied when the deploy completes. The object is reset, its WebSockets are terminated (Cloudflare closes the connections of a shut-down object; clients see an abnormal close) and
+Controllers and pages reconnect with their ordinary backoff: the Controller uplink treats every close code except 1008 as a
+reason to reconnect, and the page treats every close of a Relay socket as temporary. No state is lost, because the Relay
+commits its state to the object's SQLite storage with the write that changes it, and a reset loses only memory; the same reset
+happened before, five minutes later. `wrangler` 4.141.0 is the first release that knows the key (its config schema lacks the key in 4.140.0 and older), so the pinned
+version is 4.141.0 or newer. A test reads each config through the installed Wrangler and expects
+the strategy. Expected wait for `scripts/deploy-readiness.mjs` after a deploy: the reconnect backoff of a Controller, seconds
+rather than minutes. If a deploy shows the old version for longer, check that the deploy printed no unknown-key warning. That the strategy
+of the same deploy applies to the update that deploy carries is documented as a deploy-time setting (it also exists as
+`wrangler deploy --durable-objects-code-update-mode`) and is confirmed by the first production deploy that carries it.
+
 Before activating Controllers that advertise new uplink fields, verify the running
 Durable Object as well as the Worker deployment and static assets. Cloudflare
 propagates Worker and Durable Object code independently. A successful deployment

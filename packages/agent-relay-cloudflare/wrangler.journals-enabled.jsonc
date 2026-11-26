@@ -40,7 +40,8 @@
         "class_name": "JournalPartition",
         "script_name": "agent-remote-control-journals"
       }
-    ]
+    ],
+    "code_update_strategy": { "mode": "immediate" }
   },
   "migrations": [
     {

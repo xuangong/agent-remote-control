@@ -8,7 +8,7 @@
   "preview_urls": false,
   "assets": { "directory": "../../dist/relay/web", "binding": "ASSETS", "run_worker_first": true },
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
-  "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "RelayObject" }] },
+  "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "RelayObject" }], "code_update_strategy": { "mode": "immediate" } },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayObject"] }],
   "vars": {
     "AGENT_REMOTE_RELAY_URL": "https://my-agent-remote.YOUR-SUBDOMAIN.workers.dev",

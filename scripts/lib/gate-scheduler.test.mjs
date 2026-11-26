@@ -1,20 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { decideNext, DEFAULT_LIMITS, runSchedule, verifySteps, withWorkers, TIER_PROFILES } from './gate-scheduler.mjs';
+import { decideNext, DEFAULT_LIMITS, runSchedule, withWorkers, TIER_PROFILES } from './gate-scheduler.mjs';
 import { busyCoresBetween, matchingMiB, parseMeminfo, parseProcessTable, parseVmStat, pressureName, treeMiB } from './machine-state.mjs';
 
 const GIB = 1024;
 const profiles = {
   verify: { memoryMiB: 4 * GIB, cores: 6 },
-  components: { memoryMiB: 2 * GIB, cores: 1.5, needs: 'build', workers: { max: 3, extraMemoryMiB: GIB, extraCores: 1 } },
-  'e2e-chromium': { memoryMiB: 2 * GIB, cores: 2, needs: 'build' },
-  'e2e-webkit': { memoryMiB: 2 * GIB, cores: 2, needs: 'build' },
-  smoke: { memoryMiB: 3 * GIB, cores: 3, needs: 'build', exclusive: true },
+  components: { memoryMiB: 2 * GIB, cores: 1.5, needs: 'verify', workers: { max: 3, extraMemoryMiB: GIB, extraCores: 1 } },
+  'e2e-chromium': { memoryMiB: 2 * GIB, cores: 2, needs: 'verify' },
+  'e2e-webkit': { memoryMiB: 2 * GIB, cores: 2, needs: 'verify' },
+  smoke: { memoryMiB: 3 * GIB, cores: 3, needs: 'verify', exclusive: true },
 };
 const limits = { ...DEFAULT_LIMITS, reserveMiB: 3 * GIB };
 const tier = id => ({ id });
 const machine = (overrides = {}) => ({ availableMiB: 12 * GIB, pressure: 'normal', load1: 1, cores: 10, ...overrides });
-const decide = (overrides = {}) => decideNext({ pending: [tier('components'), tier('e2e-chromium')], running: [], milestones: new Set(['build']), machine: machine(), limits, profiles, ...overrides });
+const decide = (overrides = {}) => decideNext({ pending: [tier('components'), tier('e2e-chromium')], running: [], milestones: new Set(['verify']), machine: machine(), limits, profiles, ...overrides });
 
 test('the first tier starts on an idle machine and takes as many workers as fit', () => {
   const { start } = decide({ machine: machine({ availableMiB: 16 * GIB }) });
@@ -65,10 +65,10 @@ test('the parallel limit and a failure stop new starts', () => {
   assert.match(decide({ stopped: true }).reason, /failed/);
 });
 
-test('a tier waits for the build milestone', () => {
+test('a tier waits for verify', () => {
   const blocked = decide({ milestones: new Set() });
   assert.equal(blocked.start, null);
-  assert.match(blocked.reason, /components waits for build/);
+  assert.match(blocked.reason, /components waits for verify/);
 });
 
 test('smoke runs alone and last', () => {
@@ -85,7 +85,7 @@ test('a tier that fits later is started ahead of one that does not', () => {
 });
 
 /** A virtual clock: timers fire in time order each time every task is waiting. */
-function virtualWorld({ durations, readings = [], codes = {}, memory = {}, buildAt }) {
+function virtualWorld({ durations, readings = [], codes = {}, memory = {} }) {
   let time = 0;
   const timers = [];
   const at = (when, fire) => timers.push({ when, fire });
@@ -98,13 +98,12 @@ function virtualWorld({ durations, readings = [], codes = {}, memory = {}, build
     log: line => log.push(line),
     readMachine: () => ({ ...machine({ availableMiB: 16 * GIB }), ...readings.findLast(([from]) => from <= time)?.[1] }),
     memoryOf: pid => memory[pid] ?? 1 * GIB,
-    launch: (spec, { milestone }) => {
+    launch: spec => {
       const pid = 100 + started.length;
       started.push({ id: spec.id, at: time });
       let end;
       const done = new Promise(resolve => { end = () => resolve({ code: codes[spec.id] ?? 0 }); });
       at(time + durations[spec.id] * 1000, end);
-      if (spec.id === 'verify' && buildAt) at(time + buildAt * 1000, () => milestone('build'));
       return { handle: { pid }, done };
     },
   };
@@ -127,13 +126,13 @@ function virtualWorld({ durations, readings = [], codes = {}, memory = {}, build
 
 const plan = ids => ids.map(tier);
 
-test('verify builds first, then the browser tiers overlap it, the third waits for a free slot, and smoke runs last', async () => {
-  const world = virtualWorld({ durations: { verify: 360, components: 600, 'e2e-chromium': 240, 'e2e-webkit': 250, smoke: 400 }, buildAt: 180 });
+test('verify runs alone first, then the browser tiers run together within the parallel limit, and smoke runs last', async () => {
+  const world = virtualWorld({ durations: { verify: 360, components: 600, 'e2e-chromium': 240, 'e2e-webkit': 250, smoke: 400 } });
   const { results, skipped } = await world.drive(() => runSchedule({ tiers: plan(['verify', 'components', 'e2e-chromium', 'e2e-webkit', 'smoke']), limits: { ...limits, maxParallel: 3 }, profiles, ...world.ports }));
-  assert.deepEqual(world.started.map(({ id, at }) => [id, at]), [['verify', 0], ['components', 180000], ['e2e-chromium', 180000], ['e2e-webkit', 360000], ['smoke', 780000]]);
+  assert.deepEqual(world.started.map(({ id, at }) => [id, at]), [['verify', 0], ['components', 360000], ['e2e-chromium', 360000], ['e2e-webkit', 360000], ['smoke', 960000]]);
   assert.deepEqual(results.map(result => result.code), [0, 0, 0, 0, 0]);
   assert.deepEqual(skipped, []);
-  assert.equal(Math.max(...results.map(result => result.endedMs)), 1180000);
+  assert.equal(Math.max(...results.map(result => result.endedMs)), 1360000);
 });
 
 test('a serial run starts the next tier only when the previous one is done', async () => {
@@ -161,8 +160,8 @@ test('a tier waits until memory pressure falls, then starts', async () => {
 });
 
 test('after a failure the running tiers finish, nothing new starts and the rest is reported skipped', async () => {
-  const world = virtualWorld({ durations: { verify: 100, components: 300, 'e2e-chromium': 20, 'e2e-webkit': 20 }, buildAt: 50, codes: { 'e2e-chromium': 1 } });
-  const { results, skipped } = await world.drive(() => runSchedule({ tiers: plan(['verify', 'components', 'e2e-chromium', 'e2e-webkit']), limits: { ...limits, maxParallel: 3 }, profiles, ...world.ports }));
+  const world = virtualWorld({ durations: { verify: 100, components: 300, 'e2e-chromium': 20, 'e2e-webkit': 20 }, codes: { 'e2e-chromium': 1, 'e2e-webkit': 0 } });
+  const { results, skipped } = await world.drive(() => runSchedule({ tiers: plan(['verify', 'components', 'e2e-chromium', 'e2e-webkit']), limits: { ...limits, maxParallel: 2 }, profiles, ...world.ports }));
   assert.deepEqual(results.map(result => [result.tier, result.code]).sort(), [['components', 0], ['e2e-chromium', 1], ['verify', 0]]);
   assert.deepEqual(skipped, ['e2e-webkit']);
   const failedEarly = virtualWorld({ durations: { verify: 10, components: 5 }, codes: { verify: 1 } });
@@ -192,13 +191,6 @@ test('the pressure level names and the process tree memory', () => {
   const table = parseProcessTable('  10     1  2048\n  11    10  1024\n  12    11   512\n  20     1  9999\n');
   assert.equal(treeMiB(table, 10), 3.5);
   assert.equal(treeMiB(table, 99), 0);
-});
-
-test('verify splits at each && and marks the build step as the milestone the other tiers wait for', () => {
-  assert.deepEqual(verifySteps('pnpm compatibility:check && pnpm arch:check && pnpm -r run build && pnpm typecheck && pnpm test'), [
-    { command: ['pnpm', 'compatibility:check'] }, { command: ['pnpm', 'arch:check'] },
-    { command: ['pnpm', '-r', 'run', 'build'], milestone: 'build' }, { command: ['pnpm', 'typecheck'] }, { command: ['pnpm', 'test'] },
-  ]);
 });
 
 test('the memory of processes outside the tree, such as Playwright WebKit helpers, can be added by command', () => {

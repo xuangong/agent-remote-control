@@ -73,14 +73,15 @@ other name is refused.
 
 Before it starts a tier, and every two seconds while one waits, the gate reads the machine: memory it can give away (free, inactive and
 purgeable pages from `vm_stat`, `MemAvailable` on Linux), the macOS memory pressure level, the load average and the core count. A tier
-starts when the tiers it needs have reached their milestone and its measured peak memory and CPU fit on top of what is running, after
+starts when the tiers it needs have finished and its measured peak memory and CPU fit on top of what is running, after
 keeping `--reserve-gib` (default 2) free for other apps; at most `--max-parallel` (default 3) run at once. The measured costs are
 `TIER_PROFILES` in `scripts/lib/gate-scheduler.mjs`. In practice:
 
-- `verify` runs first. Its build step rewrites the package outputs and the Workbench `dist` that every other tier reads, so the other
-  tiers start when that step is done, while verify's typecheck and unit tests continue.
-- `components` takes as many Playwright workers (`--workers`, at most 3) as the memory and cores allow; the other tiers use their own
-  fixed workers. `e2e-chromium` and `e2e-webkit` use a free port and a temporary directory per stack and can run together.
+- `verify` runs first and alone. Its build step rewrites the package outputs and the Workbench `dist` that every other tier reads, and
+  its process-spawning unit tests and one-second speed rule failed in both runs where a browser tier ran beside them.
+- `components` takes as many Playwright workers (`--workers`, at most 2) as the memory and cores allow, and the e2e tiers as many Vitest
+  workers (`--fileParallelism --maxWorkers`, at most 2). `e2e-chromium`, `e2e-webkit`, `components` and `preview-browser` use a free
+  port or a fixed Vite port of their own and a temporary directory per stack, and run together.
 - `smoke` runs alone and last: `pnpm local up` rebuilds the Relay, the devbox and the Workbench for the local instance.
 - Under memory pressure (`warn` or `critical`) or with less than the reserve available, no new tier starts until it recovers; a lone
   tier waits at most two minutes, then starts anyway. A tier's running memory is the resident size of its process tree (and, for the

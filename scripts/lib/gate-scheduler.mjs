@@ -11,8 +11,9 @@ const GIB = 1024;
  * (docs/superpowers/reviews/2026-11-26-test-gate-retrospective.md): `memoryMiB` is the fall of the memory the system can give away
  * (free + inactive + purgeable) while the tier ran, with a margin of about a quarter; `cores` is the CPU it keeps busy, counted
  * over its whole run with a margin, since the Vitest and Playwright bursts are short. `needs` names the milestone that must be reached
- * first: `build` is the end of verify's build step, after which the package outputs and the Workbench `dist` the other tiers read
- * stay unchanged. A tier with `workers` can run several workers (`flags(n)` are the arguments that ask for n); each extra worker adds the given
+ * first: `verify` is the end of the verify tier. Verify rebuilds the package outputs and the Workbench `dist` the other tiers read,
+ * and its process-spawning unit tests fail under load (the opencode supervisor test and the one-second speed rule did, in two of
+ * two runs that overlapped it with a browser tier), so nothing runs beside it. A tier with `workers` can run several workers (`flags(n)` are the arguments that ask for n); each extra worker adds the given
  * memory and cores. The e2e flows were measured with two workers (about half the time, every flow passing); the components ran in half the time
  * with three workers but one WebKit phone spec failed under a load of 16 (it passes alone), so two are the most asked for. `exclusive` tiers run alone and last: smoke rebuilds the Relay, the devbox and the Workbench
  * for the local instance, so nothing may read those outputs while it runs.
@@ -21,14 +22,14 @@ const GIB = 1024;
 const E2E_WORKER_FLAGS = count => ['--fileParallelism', `--maxWorkers=${count}`];
 export const TIER_PROFILES = {
   verify: { memoryMiB: 3.2 * GIB, cores: 3 },
-  components: { memoryMiB: 2 * GIB, cores: 1.5, needs: 'build', workers: { max: 2, extraMemoryMiB: 0.7 * GIB, extraCores: 1, flags: count => ['--workers', String(count)] } },
-  'preview-browser': { memoryMiB: 1.4 * GIB, cores: 1, needs: 'build' },
-  'e2e-chromium': { memoryMiB: 1 * GIB, cores: 1, needs: 'build', workers: { max: 2, extraMemoryMiB: 0.6 * GIB, extraCores: 1, flags: E2E_WORKER_FLAGS } },
-  'e2e-webkit': { memoryMiB: 1.3 * GIB, cores: 1, needs: 'build', workers: { max: 2, extraMemoryMiB: 0.6 * GIB, extraCores: 1, flags: E2E_WORKER_FLAGS } },
-  smoke: { memoryMiB: 1 * GIB, cores: 1, needs: 'build', exclusive: true },
+  components: { memoryMiB: 2 * GIB, cores: 1.5, needs: 'verify', workers: { max: 2, extraMemoryMiB: 0.7 * GIB, extraCores: 1, flags: count => ['--workers', String(count)] } },
+  'preview-browser': { memoryMiB: 1.4 * GIB, cores: 1, needs: 'verify' },
+  'e2e-chromium': { memoryMiB: 1 * GIB, cores: 1, needs: 'verify', workers: { max: 2, extraMemoryMiB: 0.6 * GIB, extraCores: 1, flags: E2E_WORKER_FLAGS } },
+  'e2e-webkit': { memoryMiB: 1.3 * GIB, cores: 1, needs: 'verify', workers: { max: 2, extraMemoryMiB: 0.6 * GIB, extraCores: 1, flags: E2E_WORKER_FLAGS } },
+  smoke: { memoryMiB: 1 * GIB, cores: 1, needs: 'verify', exclusive: true },
 };
 /** A tier without a measured profile is assumed heavy, so it never overlaps blindly. */
-const UNKNOWN_PROFILE = { memoryMiB: 3 * GIB, cores: 3, needs: 'build' };
+const UNKNOWN_PROFILE = { memoryMiB: 3 * GIB, cores: 3, needs: 'verify' };
 export const profileOf = (id, profiles = TIER_PROFILES) => profiles[id] ?? UNKNOWN_PROFILE;
 
 export const DEFAULT_LIMITS = {
@@ -103,8 +104,7 @@ export async function runSchedule({ tiers, limits = DEFAULT_LIMITS, profiles = T
   const pending = [...tiers];
   const running = new Map();
   const results = [];
-  const milestones = new Set(tiers.some(tier => tier.id === 'verify') ? [] : ['build']);
-  const milestone = name => { if (!milestones.has(name)) { milestones.add(name); log(`milestone ${name} reached`); } };
+  const milestones = new Set(tiers.some(tier => tier.id === 'verify') ? [] : ['verify']);
   let stopped = false, idleSince = null, lastReason = '', lastLogged = -Infinity, lastStatus = now();
   const observed = { minAvailableMiB: Infinity, worstPressure: 'normal' };
   const startedAt = now();
@@ -127,13 +127,13 @@ export async function runSchedule({ tiers, limits = DEFAULT_LIMITS, profiles = T
       idleSince = null;
       log(`${stamp()} ${decision.reason}${workers > 1 ? `; ${workers} workers` : ''}`);
       const entry = { tier, workers, startedMs: now(), rssMiB: 0, peakMiB: 0, handle: undefined };
-      const { handle, done } = launch(tier, { workers, milestone });
+      const { handle, done } = launch(tier, { workers });
       entry.handle = handle;
       entry.done = done.then(({ code }) => {
         running.delete(tier.id);
         const result = { tier: tier.id, code, startedMs: entry.startedMs, endedMs: now(), peakMiB: entry.peakMiB, workers };
         results.push(result);
-        if (code !== 0) stopped = true; else if (tier.id === 'verify') milestone('build');
+        if (code !== 0) stopped = true; else if (tier.id === 'verify') milestones.add('verify');
         log(`${stamp()} ${tier.id} finished with exit ${code} after ${Math.round((result.endedMs - result.startedMs) / 1000)} s; peak ${gib(entry.peakMiB)}`);
         return result;
       });
@@ -152,15 +152,6 @@ export async function runSchedule({ tiers, limits = DEFAULT_LIMITS, profiles = T
   }
   await Promise.all([...running.values()].map(entry => entry.done));
   return { results, skipped: pending.map(tier => tier.id), observed };
-}
-
-/**
- * The steps of `pnpm verify`, one per `&&` of the package script, so the scheduler can see when the build is done: the step that
- * runs the workspace build carries `milestone: 'build'`. Each step is `{ command, milestone? }`.
- */
-export function verifySteps(script) {
-  return script.split('&&').map(part => part.trim()).filter(Boolean)
-    .map(part => ({ command: part.split(/\s+/), ...(/run build\b/.test(part) ? { milestone: 'build' } : {}) }));
 }
 
 /** The command of a tier step with the arguments that ask for `workers` workers, when the tier supports them and more than one was granted. */

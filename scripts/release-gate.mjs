@@ -8,7 +8,7 @@ import { createWriteStream, mkdirSync, readFileSync, readdirSync } from 'node:fs
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { DEFAULT_LIMITS, runSchedule, verifySteps, withWorkers } from './lib/gate-scheduler.mjs';
+import { DEFAULT_LIMITS, runSchedule, withWorkers } from './lib/gate-scheduler.mjs';
 import { processTreeMiB, readMachine } from './lib/machine-state.mjs';
 import { describeGate, planGate, releasedBase, selectTiers } from './lib/release-gate.mjs';
 import { packageFiles, readModules, workspacePackages } from './lib/test-selection.mjs';
@@ -70,19 +70,10 @@ function run({ command, env }, log, deadlineMs, onSpawn) {
     child.once('close', (code, signal) => { clearTimeout(timer); live.delete(child); done(code ?? (signal === 'SIGKILL' ? 124 : 1)); });
   });
 }
-/** The steps of a tier. Run in parallel, verify is split at each `&&` so the others can start once its build is done; tiers that support it take the granted workers. */
-function stepsOf(tier, workers) {
-  if (tier.id === 'verify' && !serial && tier.steps.length === 1 && tier.steps[0].command.join(' ') === 'pnpm verify') {
-    const script = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts.verify;
-    // The speed rule fails a test that takes over a second even alone, which other tiers running at the same time can cause; in a
-    // parallel run the unit tests only list those tests (ARC_SLOW_TEST_ENFORCE=0), and `--serial` or a local `pnpm verify` enforces it.
-    const overlapped = tiers.length > 1;
-    return verifySteps(script).map(step => ({ ...tier.steps[0], ...step, ...(overlapped && step.command.join(' ') === 'pnpm test' ? { env: { ...tier.steps[0].env, ARC_SLOW_TEST_ENFORCE: '0' } } : {}) }));
-  }
-  return tier.steps.map(step => ({ ...step, command: withWorkers(step.command, tier.id, workers) }));
-}
+/** The steps of a tier; tiers that support it take the granted workers. */
+const stepsOf = (tier, workers) => tier.steps.map(step => ({ ...step, command: withWorkers(step.command, tier.id, workers) }));
 /** Starts a tier: its steps run in order in the background. Returns `{ handle, done }`, `handle.pid` is the process now running. */
-function launch(tier, { workers, milestone }) {
+function launch(tier, { workers }) {
   const logPath = join(logDirectory, `${tier.id}.log`);
   const log = createWriteStream(logPath);
   if (serial) console.log(`\n== ${tier.id}: ${tier.why}`);
@@ -94,7 +85,6 @@ function launch(tier, { workers, milestone }) {
     for (const step of stepsOf(tier, workers)) {
       code = await run(step, log, tier.deadlineMs, child => { handle.pid = child.pid; });
       if (code !== 0) break;
-      if (step.milestone) milestone(step.milestone);
     }
     if (tier.id === 'smoke') await run({ command: ['pnpm', 'local', wasRunning ? 'up' : 'down'] }, log, tier.deadlineMs, child => { handle.pid = child.pid; });
     await new Promise(finish => log.end(finish));

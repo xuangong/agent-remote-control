@@ -53,10 +53,10 @@ gh workflow run publish-controller.yml --ref controller-v0.1.0
 
 ## Scoped release gate
 
-`pnpm gate:release [--base <ref>] [--plan] [--full] [--from <tier>] [--only <tier>,...]` decides what to run from the files changed
+`pnpm gate:release [--base <ref>] [--plan] [--full] [--from <tier>] [--only <tier>,...] [--serial] [--max-parallel N] [--reserve-gib N]` decides what to run from the files changed
 since the commit production runs (default base: the newer, by commit date, of the newest `controller-v*` and `relay-deployed-*` tag, after `git fetch --tags origin`) and
-`architecture/modules.json`, prints the plan with the reason for each tier, runs the tiers one at a
-time, and stops at the first failure with its log (`.artifacts/gate-release/<time>/<tier>.log`).
+`architecture/modules.json`, prints the plan with the reason for each tier, runs the tiers (see below for which run together), and after a failure starts nothing new, lets the
+running tiers finish and prints the failed logs (`.artifacts/gate-release/<time>/<tier>.log`).
 `--plan` only prints; `--full` runs every tier. After a known flake, `--from <tier>` resumes at that
 tier (earlier ones print as `skipped: --from`) and `--only <tier>,<tier>` runs just those; the tier
 names are `verify`, `components`, `preview-browser`, `e2e-chromium`, `e2e-webkit`, `smoke`, and any
@@ -68,6 +68,24 @@ other name is refused.
 | `pnpm test:components`, `pnpm test:preview-browser` | The client (`agent-client`, `agent-client-web`, `agent-remote-lab`, `agent-timeline`), the protocol or a root manifest changed. These tiers render the client on builder states without a Relay or Controller. |
 | `pnpm test:e2e:flows`, then `E2E_BROWSER=webkit` | Every flow when the client, protocol or a root manifest changed. After a Relay or Controller change, only the flow files whose id (`E1`, `E14b`, ...) a changed module names in its `flows` in `modules.json`; none when no flow does. A new flow file must be named by a module (a unit test checks it). |
 | `pnpm smoke:quick` | The client or Relay changed. The script starts the instance with `ARC_LOCAL_JOURNALS=1` itself and afterwards restores it: stopped if it was stopped, else restarted as a normal run. |
+
+### Tiers that run together
+
+Before it starts a tier, and every two seconds while one waits, the gate reads the machine: memory it can give away (free, inactive and
+purgeable pages from `vm_stat`, `MemAvailable` on Linux), the macOS memory pressure level, the load average and the core count. A tier
+starts when the tiers it needs have reached their milestone and its measured peak memory and CPU fit on top of what is running, after
+keeping `--reserve-gib` (default 2) free for other apps; at most `--max-parallel` (default 3) run at once. The measured costs are
+`TIER_PROFILES` in `scripts/lib/gate-scheduler.mjs`. In practice:
+
+- `verify` runs first. Its build step rewrites the package outputs and the Workbench `dist` that every other tier reads, so the other
+  tiers start when that step is done, while verify's typecheck and unit tests continue.
+- `components` takes as many Playwright workers (`--workers`, at most 3) as the memory and cores allow; the other tiers use their own
+  fixed workers. `e2e-chromium` and `e2e-webkit` use a free port and a temporary directory per stack and can run together.
+- `smoke` runs alone and last: `pnpm local up` rebuilds the Relay, the devbox and the Workbench for the local instance.
+- Under memory pressure (`warn` or `critical`) or with less than the reserve available, no new tier starts until it recovers; a lone
+  tier waits at most five minutes, then starts anyway. A tier's running memory is the resident size of its process tree (and, for the
+  WebKit tiers, the Playwright WebKit helpers). Every decision is printed with the readings, and the summary lists each tier's peak.
+- `--serial` is the old behaviour: one tier at a time, with its output on the terminal.
 
 The regenerated compatibility digest alone changes nothing. Run the gate on the release commit
 (or on `main` before it) and pass its log to `release:controller --gate-passed`, or let step c run it.

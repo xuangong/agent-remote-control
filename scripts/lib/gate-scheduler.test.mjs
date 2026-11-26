@@ -218,3 +218,12 @@ test('a long run prints the running tiers, their memory and the machine once a h
   const status = world.log.filter(line => /running: e2e-chromium 1\.5 GiB; 16\.0 GiB available/.test(line));
   assert.equal(status.length, 3);
 });
+
+test('a running tier counts the memory and cores of the workers it was given', () => {
+  const running = [{ tier: tier('components'), workers: 3, rssMiB: 0 }];
+  // components at 3 workers: 2 + 2 GiB of growth and 1.5 + 2 cores; 12 GiB available leaves 12 - 3 - 4 = 5 GiB and 6.5 cores.
+  assert.equal(decide({ pending: [tier('e2e-chromium')], running, machine: machine({ availableMiB: 12 * GIB, busyCores: 0 }) }).start.tier.id, 'e2e-chromium');
+  assert.match(decide({ pending: [tier('e2e-chromium')], running, machine: machine({ availableMiB: 8 * GIB, busyCores: 0 }) }).reason, /needs 2\.0 GiB, 1\.0 GiB free/);
+  const busy = decide({ pending: [tier('e2e-chromium')], running: [{ tier: tier('components'), workers: 3, rssMiB: 3 * GIB }], machine: machine({ availableMiB: 12 * GIB, busyCores: 0, cores: 5 }) });
+  assert.match(busy.reason, /needs 2 cores, 1\.5 free/);
+});

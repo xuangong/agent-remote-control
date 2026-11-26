@@ -59,15 +59,16 @@ const gib = mib => `${(mib / GIB).toFixed(1)} GiB`;
 
 /**
  * The next tier to start, or why none can.
- * - `pending`: tiers of the plan not started, in plan order; `running`: `{ tier, rssMiB }` for each running tier (rssMiB is the
+ * - `pending`: tiers of the plan not started, in plan order; `running`: `{ tier, workers, rssMiB }` for each running tier (rssMiB is the
  *   observed memory of its process tree); `milestones`: the milestone names reached; `machine`: `{ availableMiB, pressure, load1, busyCores, cores }`.
  * - `idleMs`: how long nothing has been running while a tier waited (see `idleWaitMs`); `stopped`: a tier failed, start nothing new.
  * Returns `{ start: { tier, workers }, reason }` or `{ start: null, reason }`.
  */
 export function decideNext({ pending, running, milestones, machine, limits = DEFAULT_LIMITS, profiles = TIER_PROFILES, idleMs = 0, stopped = false }) {
   if (stopped) return { start: null, reason: 'a tier failed; nothing new starts' };
-  const growthMiB = running.reduce((sum, { tier, rssMiB }) => sum + Math.max(0, profileOf(tier.id, profiles).memoryMiB - rssMiB), 0);
-  const demandCores = running.reduce((sum, { tier }) => sum + profileOf(tier.id, profiles).cores, 0);
+  const costOf = ({ tier, workers = 1 }) => { const profile = profileOf(tier.id, profiles); const extra = (profile.workers ? workers - 1 : 0); return { memoryMiB: profile.memoryMiB + extra * (profile.workers?.extraMemoryMiB ?? 0), cores: profile.cores + extra * (profile.workers?.extraCores ?? 0) }; };
+  const growthMiB = running.reduce((sum, entry) => sum + Math.max(0, costOf(entry).memoryMiB - entry.rssMiB), 0);
+  const demandCores = running.reduce((sum, entry) => sum + costOf(entry).cores, 0);
   const room = {
     memoryMiB: machine.availableMiB - limits.reserveMiB - growthMiB,
     cores: machine.cores * limits.cpuCeiling - Math.max(machine.busyCores ?? machine.load1, demandCores),

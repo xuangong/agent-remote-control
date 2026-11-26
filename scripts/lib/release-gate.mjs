@@ -45,18 +45,19 @@ const SMOKE_ENVIRONMENT = { ARC_LOCAL_JOURNALS: '1' };
  * The plan for a change: `{ touched, full, tiers }`; each tier has an id, the reason it runs, its commands (`steps`, argv arrays
  * with an optional `env`) and a `deadlineMs`.
  * - `verify` always runs.
- * - A client, Relay or protocol change (or a root manifest) runs every tier: components, preview, all flows in both browsers.
+ * - A client or protocol change (or a root manifest) runs every tier: components, preview, all flows in both browsers.
+ *   The component and preview tiers render the client on builder states without a Relay or Controller, so only these changes reach them.
+ * - A Relay or Controller change runs only the flow files whose id a changed module names in modules.json, and none if no flow does.
  *   Smoke runs for a client or Relay change.
- * - A Controller-only change runs only the flow files whose id a changed module names in modules.json, and none if no flow does.
  * - A changed flow file runs itself; other changes under agent-e2e/flows or stack run every flow.
  * `files` are all files under `packages/`; `flowFiles` are the file names in packages/agent-e2e/flows; `force` is `--full`.
  */
 export function planGate({ changed, files, modules, packages, flowFiles, force = false }) {
   const touched = categorize(changed);
-  const wide = force || touched.client || touched.relay || touched.protocol || touched.manifests;
+  const wide = force || touched.client || touched.protocol || touched.manifests;
   const named = flowFiles.filter(name => flowIdOf(name));
   const tiers = [{ id: 'verify', why: 'always: the base gate', steps: [pnpm('verify')], deadlineMs: 40 * 60_000 }];
-  const cause = force ? '--full' : [touched.client && 'client', touched.relay && 'Relay', touched.protocol && 'protocol', touched.manifests && 'root manifests'].filter(Boolean).join(', ');
+  const cause = force ? '--full' : [touched.client && 'client', touched.protocol && 'protocol', touched.manifests && 'root manifests'].filter(Boolean).join(', ');
   if (wide) {
     tiers.push({ id: 'components', why: `${cause} changed: every tier runs`, steps: [pnpm('test:components')], deadlineMs: 30 * 60_000 });
     tiers.push({ id: 'preview-browser', why: `${cause} changed: every tier runs`, steps: [pnpm('test:preview-browser')], deadlineMs: 15 * 60_000 });
@@ -69,7 +70,7 @@ export function planGate({ changed, files, modules, packages, flowFiles, force =
     const ids = new Set(modulesPlan.flows);
     for (const file of e2eChanged) { const id = FLOW_FILE.exec(file) ? flowIdOf(file.split('/').pop()) : null; if (id) ids.add(id); else if (E2E_SUPPORT.test(file)) ids.add('*'); }
     if (ids.has('*')) { flowWhy = 'flow support code changed: every flow'; }
-    else if (ids.size) { selection = named.filter(name => ids.has(flowIdOf(name))); flowWhy = `${touched.controller ? 'Controller changed' : 'flows changed'}: flows ${[...ids].join(', ')}`; }
+    else if (ids.size) { selection = named.filter(name => ids.has(flowIdOf(name))); flowWhy = `${[touched.relay && 'Relay', touched.controller && 'Controller'].filter(Boolean).join(' and ') || 'flows'} changed: flows ${[...ids].join(', ')}`; }
     else selection = [];
   }
   if (selection === null || selection.length) {

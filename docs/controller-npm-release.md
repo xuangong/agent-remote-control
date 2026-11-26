@@ -65,8 +65,8 @@ other name is refused.
 | Tier | Runs when |
 | --- | --- |
 | `pnpm verify` | Always. |
-| `pnpm test:components`, `pnpm test:preview-browser` | The client (`agent-client`, `agent-client-web`, `agent-remote-lab`, `agent-timeline`), the Relay, the protocol or a root manifest changed. |
-| `pnpm test:e2e:flows`, then `E2E_BROWSER=webkit` | The client, Relay, protocol or Controller changed. After a Controller-only change, only the flow files whose id (`E1`, `E14b`, ...) a changed module names in its `flows` in `modules.json`; none when no flow does. A new flow file must be named by a module (a unit test checks it). |
+| `pnpm test:components`, `pnpm test:preview-browser` | The client (`agent-client`, `agent-client-web`, `agent-remote-lab`, `agent-timeline`), the protocol or a root manifest changed. These tiers render the client on builder states without a Relay or Controller. |
+| `pnpm test:e2e:flows`, then `E2E_BROWSER=webkit` | Every flow when the client, protocol or a root manifest changed. After a Relay or Controller change, only the flow files whose id (`E1`, `E14b`, ...) a changed module names in its `flows` in `modules.json`; none when no flow does. A new flow file must be named by a module (a unit test checks it). |
 | `pnpm smoke:quick` | The client or Relay changed. The script starts the instance with `ARC_LOCAL_JOURNALS=1` itself and afterwards restores it: stopped if it was stopped, else restarted as a normal run. |
 
 The regenerated compatibility digest alone changes nothing. Run the gate on the release commit

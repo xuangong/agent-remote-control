@@ -9,10 +9,11 @@ const root = join(import.meta.dirname, '../..');
 const modules = [
   { name: 'controller', layer: 2, paths: ['packages/agent-controller/src/**'], flows: ['E1', 'E5'] },
   { name: 'provider-pi', layer: 3, paths: ['packages/agent-provider-pi/src/**'], flows: [] },
+  { name: 'relay-core', layer: 2, paths: ['packages/agent-relay-core/src/**'], flows: ['E2'] },
   { name: 'client', layer: 2, paths: ['packages/agent-client/src/**'], flows: ['E2'] },
   { name: 'e2e', layer: 5, paths: ['packages/agent-e2e/**'], flows: ['E1', 'E2'] },
 ];
-const packages = { 'packages/agent-controller': { name: 'c', script: 'test' }, 'packages/agent-provider-pi': { name: 'p', script: 'test' }, 'packages/agent-client': { name: 'k', script: 'test' } };
+const packages = { 'packages/agent-relay-core': { name: 'r', script: 'test' }, 'packages/agent-controller': { name: 'c', script: 'test' }, 'packages/agent-provider-pi': { name: 'p', script: 'test' }, 'packages/agent-client': { name: 'k', script: 'test' } };
 const flowFiles = ['e1-pair.e2e.ts', 'e2-send.e2e.ts', 'e2-multi.e2e.ts', 'e5-succession.e2e.ts', 'e14b-push.e2e.ts', 'page.ts'];
 const plan = (changed, force) => planGate({ changed, files: changed, modules, packages, flowFiles, force });
 const ids = result => result.tiers.map(tier => tier.id);
@@ -39,8 +40,10 @@ test('smoke sets the journals variable itself on every step', () => {
   for (const step of smoke.steps) assert.equal(step.env.ARC_LOCAL_JOURNALS, '1');
 });
 
-test('a Relay change runs every tier; a protocol change runs the browser tiers without smoke', () => {
-  assert.ok(ids(plan(['packages/agent-relay-core/src/a.ts'])).includes('smoke'));
+test('a Relay change runs the flows of its modules and smoke, no component or preview tier; a protocol change runs the browser tiers without smoke', () => {
+  const relay = plan(['packages/agent-relay-core/src/a.ts']);
+  assert.deepEqual(ids(relay), ['verify', 'e2e-chromium', 'e2e-webkit', 'smoke']);
+  assert.deepEqual(commands(relay, 'e2e-chromium'), ['pnpm test:e2e:flows flows/e2-']);
   const protocol = ids(plan(['packages/agent-remote-protocol/src/a.ts']));
   assert.deepEqual(protocol, ['verify', 'components', 'preview-browser', 'e2e-chromium', 'e2e-webkit']);
 });
@@ -89,7 +92,7 @@ test('every flow file is named by a module in modules.json, and every named flow
   assert.ok(readFileSync(join(root, 'packages/agent-e2e/vitest.e2e.config.ts'), 'utf8').includes('flows/**/*.e2e.ts'));
 });
 
-const wideChange = () => planGate({ changed: ['packages/agent-relay-core/src/a.ts'], files: [], modules, packages: [], flowFiles: [], force: false });
+const wideChange = () => planGate({ changed: ['packages/agent-client/src/a.ts'], files: [], modules, packages: [], flowFiles: [], force: false });
 const tierIds = tiers => tiers.map(tier => tier.id);
 
 test('--from runs the plan from that tier on and lists the earlier tiers as skipped', () => {

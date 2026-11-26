@@ -158,13 +158,22 @@ describe('the simulated CLI', () => {
 
   it('refuses a resume with a typed usage limit until the limit resets (S6)', async () => {
     fakeTimers(1_000_000);
-    const cli = simulatedCli({ behaviour: sharedDaemon });
+    const cli = simulatedCli({ behaviour: { ...sharedDaemon, failures: { runtime: ['native_usage_limited'], inUse: [] } } });
     cli.faults.usageLimit({ resetsAt: 1_060_000 });
     const limited = await open(cli).catch((error: unknown) => error);
     expect(limited).toBeInstanceOf(AgentRuntimeError);
     expect(limited).toMatchObject({ code: 'native_usage_limited', resetsAt: 1_060_000 });
     await vi.advanceTimersByTimeAsync(60_000);
     expect((await open(cli)).capabilities.sendMessage).toBe(true);
+  });
+
+  it('refuses a resume with an untyped failure while limited when the declaration does not type the limit (S6)', async () => {
+    fakeTimers(1_000_000);
+    const cli = simulatedCli({ behaviour: sharedDaemon });
+    cli.faults.usageLimit({ resetsAt: 1_060_000 });
+    const limited = await open(cli).catch((error: unknown) => error);
+    expect(limited).toBeInstanceOf(Error);
+    expect(limited).not.toBeInstanceOf(AgentRuntimeError);
   });
 
   it('fails each turn with native_usage_limited after its user message until the limit resets, and says when it resets meanwhile (S6)', async () => {

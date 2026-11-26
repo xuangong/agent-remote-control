@@ -47,6 +47,11 @@ it.each([
   expect(nativeOpenCommand({ providerId: 'codex', nativeSessionId: '01a0ba06-321d-7600-9141-a1ad0779fc9f' }, workspace)).toBe(command);
 });
 
+it('opens a pi session by its UUID and refuses another shape', () => {
+  expect(nativeOpenCommand({ providerId: 'pi', nativeSessionId: '01a0ba06-321d-7600-9141-a1ad0779fc9f' })).toBe('agent-remote-controller session attach local/pi/01a0ba06-321d-7600-9141-a1ad0779fc9f');
+  expect(nativeOpenCommand({ providerId: 'pi', nativeSessionId: '$(touch /tmp/unsafe)' })).toBeUndefined();
+});
+
 it('asks to run from the working directory when it is unknown', async () => {
   const container = await render(<NativeSessionCommand providerId="opencode" nativeSessionId="ses_0123456789abcdefghijklmnop" />);
   expect(container.querySelector('input')?.value).toBe('agent-remote-controller session attach local/opencode/ses_0123456789abcdefghijklmnop');

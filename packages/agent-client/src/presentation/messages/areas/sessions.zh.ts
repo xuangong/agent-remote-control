@@ -212,6 +212,7 @@ export const sessions: AreaMessages<typeof english> = {
   'sessions.native.noteCodex': '在 Host 电脑上运行，用它的 Controller 配置。共享的守护进程由 Controller 自动提供。',
   'sessions.native.noteCopilot': '在 Host 电脑上运行，用同一个 Copilot 配置。如果别的客户端正在控制这段会话，命令会问你要不要接手。',
   'sessions.native.noteClaude': '在 Host 电脑上运行，用同一个 Claude 配置。如果这段会话在这里开着，命令会先问你再打断并接手。',
+  'sessions.native.notePi': '在 Host 电脑上运行，用同一个 pi 配置。pi 不会给会话加锁，如果要在终端里接着聊，请先在这里关闭这段会话。',
   'sessions.native.noteOpencode': '在 Host 电脑上运行，它会连到共享的 OpenCode 服务，这段会话在这里仍保持打开。',
   'sessions.native.runFromDirectory': '{note} 请在这段会话的工作目录里运行。',
   'sessions.native.terminalCommand': '终端命令',

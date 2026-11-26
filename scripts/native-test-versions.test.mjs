@@ -8,18 +8,18 @@ import { test } from 'node:test';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const nativeVariables = ['AGENT_CLAUDE_TEST_EXECUTABLE', 'BORGEE_CODEX_TEST_EXECUTABLE', 'AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE',
-  'ARC_PROMPT_EDIT_TEST_EXECUTABLE', 'ARC_SESSION_FORK_TEST_EXECUTABLE', 'ARC_CODEX_SUCCESSION_TEST_EXECUTABLE', 'AGENT_OPENCODE_TEST_EXECUTABLE',
+  'ARC_PROMPT_EDIT_TEST_EXECUTABLE', 'ARC_SESSION_FORK_TEST_EXECUTABLE', 'ARC_CODEX_SUCCESSION_TEST_EXECUTABLE', 'AGENT_OPENCODE_TEST_EXECUTABLE', 'AGENT_PI_TEST_EXECUTABLE',
   'BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST'];
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-native-preflight-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   await mkdir(join(directory, 'scripts/lib'), { recursive: true });
-  for (const file of ['scripts/run-tests.mjs', 'scripts/lib/package-manager.mjs', 'scripts/lib/native-test-versions.mjs']) {
+  for (const file of ['scripts/run-tests.mjs', 'scripts/lib/package-manager.mjs', 'scripts/lib/native-test-versions.mjs', 'scripts/lib/test-selection.mjs', 'scripts/lib/arch-check.mjs', 'scripts/lib/test-inventory.mjs', 'scripts/lib/test-tiers.mjs']) {
     await cp(join(root, file), join(directory, file));
   }
   const bin = join(directory, 'bin'); await mkdir(bin);
-  for (const provider of ['claude', 'codex', 'opencode']) await mkdir(join(directory, 'packages', `agent-provider-${provider}`), { recursive: true });
+  for (const provider of ['claude', 'codex', 'opencode', 'pi']) await mkdir(join(directory, 'packages', `agent-provider-${provider}`), { recursive: true });
   const lab = join(directory, 'packages/agent-relay-node'); await mkdir(lab, { recursive: true });
   await writeFile(join(lab, 'compatibility.json'), JSON.stringify({ providers: [{ providerId: 'codex', native: { name: 'codex-cli', version: '0.162.0' } }] }));
   async function executable(name, body) {
@@ -181,4 +181,15 @@ test('newer OpenCode passes ordinary native tests but preserves the managed-serv
   assert.notEqual(evidence.code, 0); assert.match(evidence.output, /actual=2\.0\.26/); assert.doesNotMatch(evidence.output, /TEST_RUNNER_STARTED/);
   const fixtures = await run(f, 'host-package');
   assert.equal(fixtures.code, 0, fixtures.output); assert.doesNotMatch(fixtures.output, /Native test preflight/);
+});
+
+test('a native pi suite runs only on the verified version', options, async t => {
+  const f = await fixture(t);
+  const other = await f.executable('selected-pi-old', "console.log('0.72.0');");
+  const rejected = await run(f, 'native-pi', { AGENT_PI_TEST_EXECUTABLE: other });
+  assert.notEqual(rejected.code, 0); assert.match(rejected.output, /0\.72\.0/); assert.match(rejected.output, /0\.73\.1/);
+  assert.doesNotMatch(rejected.output, /TEST_RUNNER_STARTED/);
+  const verified = await f.executable('selected-pi', "console.log('0.73.1');");
+  const accepted = await run(f, 'native-pi', { AGENT_PI_TEST_EXECUTABLE: verified });
+  assert.equal(accepted.code, 0, accepted.output); assert.match(accepted.output, /TEST_RUNNER_STARTED/);
 });

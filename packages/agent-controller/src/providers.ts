@@ -10,6 +10,8 @@ export { CodexAppServerProvider, readWindowsCodexDaemon, requestWindowsCodexDaem
 export type { CodexAppServerProviderOptions, CodexSessionSummary } from '@orchardworks/agent-provider-codex';
 export { CopilotAgentProvider, resolveCopilotExecutable } from '@orchardworks/agent-provider-copilot';
 export type { CopilotAgentProviderOptions } from '@orchardworks/agent-provider-copilot';
+export { PiAgentProvider, parsePiVersion, piInvocation, piVersionIssue, resolvePiExecutable } from '@orchardworks/agent-provider-pi';
+export type { PiAgentProviderOptions } from '@orchardworks/agent-provider-pi';
 export { openCodeVersionIssue, parseOpenCodeCliVersion } from '@orchardworks/agent-provider-opencode';
 export type { OpenCodeAgentProvider, OpenCodeAgentProviderOptions, OpenCodeSessionSummary } from '@orchardworks/agent-provider-opencode';
 

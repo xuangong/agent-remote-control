@@ -12,8 +12,8 @@ const registration = (providerId: string): AgentHostProviderRegistration => ({ a
 it('discovers every supported provider despite an old saved codex selection and isolates failures', async () => {
   const create = vi.fn(async (id: string) => { if (id === 'claude') throw new Error('secret'); return registration(id); });
   const manager = await createHostProviderDiscovery({ stateDir: await root(), env: { AGENT_HOST_PROVIDERS: 'codex' }, create });
-  expect(create.mock.calls.map(([id]) => id)).toEqual(['codex', 'claude', 'copilot', 'opencode']);
-  expect(manager.snapshot().providers.map(item => item.state)).toEqual(['enabled', 'unavailable', 'enabled', 'enabled']);
+  expect(create.mock.calls.map(([id]) => id).sort()).toEqual(['claude', 'codex', 'copilot', 'opencode', 'pi']);
+  expect(manager.snapshot().providers.map(item => item.state)).toEqual(['enabled', 'unavailable', 'enabled', 'enabled', 'enabled']);
   expect(JSON.stringify(manager.snapshot())).not.toContain('secret'); await manager.stop();
 });
 it('persists disabled preferences, rejects stale writes and never closes an active registration', async () => {
@@ -37,7 +37,7 @@ it('adds a newly installed provider without duplicate registrations or unchanged
   const added = vi.fn(), updated = vi.fn(); manager.onRegistration(added); manager.subscribe(updated);
   const revision = manager.snapshot().revision; await manager.refresh(); expect(manager.snapshot().revision).toBe(revision);
   installed = true; await manager.refresh(); await manager.refresh();
-  expect(added).toHaveBeenCalledTimes(1); expect(updated).toHaveBeenCalledTimes(1); expect(manager.registrations).toHaveLength(4); await manager.stop();
+  expect(added).toHaveBeenCalledTimes(1); expect(updated).toHaveBeenCalledTimes(1); expect(manager.registrations).toHaveLength(5); await manager.stop();
 });
 it('stays manageable with no native providers and preserves unknown disabled IDs', async () => {
   const stateDir = await root(); await writeFile(join(stateDir, 'provider-settings.json'), JSON.stringify({ disabled: ['future-agent'] }));

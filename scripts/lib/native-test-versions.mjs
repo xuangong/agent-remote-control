@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 // These are native test baselines, not product-wide compatibility claims.
-const baselines = { claude: '2.1.247', codex: '0.162.0', copilot: '1.0.83', opencode: '2.0.25' };
+const baselines = { claude: '2.1.247', codex: '0.162.0', copilot: '1.0.83', opencode: '2.0.25', pi: '0.73.1' };
 
 async function executablePath(selected, cwd, env) {
   const searchPath = [join(cwd, 'node_modules/.bin'), join(root, 'node_modules/.bin'),
@@ -56,6 +56,7 @@ function versionFrom(provider, output) {
     claude: /^(\d+\.\d+\.\d+)\s+\(Claude Code\)$/m,
     codex: /^codex-cli\s+(\d+\.\d+\.\d+)$/m,
     copilot: /^(?:GitHub Copilot CLI\s+)?(\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?)\.?$/m,
+    pi: /^v?(\d+\.\d+\.\d+)$/m,
     opencode: /^(?:opencode\s+)?v?(\d+\.\d+\.\d+)$/im,
   };
   return patterns[provider].exec(output)?.[1];
@@ -73,6 +74,8 @@ function meetsBaseline(actual, target, range) {
 export async function verifyNativeTestVersions(mode, env = process.env) {
   const selections = [];
   const add = (provider, variable, fallback, range = 'exact') => selections.push({ provider, variable, selected: env[variable] ?? fallback, range });
+  // pi is pre-1.0 and its RPC mode changes between releases, so the native check runs on the verified version only.
+  if (mode === 'native-pi') add('pi', 'AGENT_PI_TEST_EXECUTABLE', 'pi', 'exact');
   if (mode === 'native-claude') add('claude', 'AGENT_CLAUDE_TEST_EXECUTABLE', 'claude', 'minimum');
   if (mode === 'native-codex') add('codex', 'BORGEE_CODEX_TEST_EXECUTABLE', 'codex', 'minimum');
   if (['local', 'claude', 'claude-succession-evidence'].includes(mode))

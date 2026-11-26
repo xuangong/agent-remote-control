@@ -13,6 +13,8 @@ export * from './workspace-folders.js';
 export * from './session-reference.js';
 export * from './environment.js';
 export * from './opencode.js';
+export * from './pi.js';
+export * from './pi-directory.js';
 export * from './opencode-directory.js';
 
 export * from './provider-discovery.js';

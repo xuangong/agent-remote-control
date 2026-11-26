@@ -16,11 +16,12 @@ export async function loadAdapter(provider: string | undefined, module: string |
   if (provider === 'codex') { const { CodexAppServerProvider } = await import('@orchardworks/agent-provider-codex'); return new CodexAppServerProvider({ executable, connectionMode: 'private' }); }
   if (provider === 'claude') { const { ClaudeAgentProvider } = await import('./providers/claude.js'); return new ClaudeAgentProvider({ executable }); }
   if (provider === 'copilot') { const { CopilotAgentProvider } = await import('./providers/copilot.js'); return new CopilotAgentProvider({ executable }); }
+  if (provider === 'pi') { const { PiAgentProvider, resolvePiExecutable } = await import('./providers/pi.js'); return new PiAgentProvider({ executable: resolvePiExecutable(executable, process.env), env: process.env }); }
   if (provider === 'opencode') {
     if (executable) throw usage('OpenCode connects to an existing server; configure AGENT_HOST_OPENCODE_URL instead of --executable.');
     const { OpenCodeAgentProvider } = await import('./providers/opencode.js');
     return new OpenCodeAgentProvider({ serverUrl: process.env.AGENT_HOST_OPENCODE_URL, callbackConfigPath: process.env.AGENT_HOST_OPENCODE_CALLBACK_CONFIG, username: process.env.AGENT_HOST_OPENCODE_USERNAME, password: process.env.AGENT_HOST_OPENCODE_PASSWORD });
   }
-  throw usage('Provider must be codex, claude, copilot or opencode; use --adapter for a custom provider.');
+  throw usage('Provider must be codex, claude, copilot, opencode or pi; use --adapter for a custom provider.');
 }
 function usage(message: string) { return new DebuggerError(2, 'invalid_server_options', message, false); }

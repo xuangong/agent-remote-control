@@ -5,11 +5,20 @@ import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 
 const manifestEnvironment = 'BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST';
-const requiredProviderIds = ['claude', 'codex', 'copilot', 'dsh', 'opencode'] as const;
+const requiredProviderIds = ['claude', 'codex', 'copilot', 'dsh', 'opencode', 'pi'] as const;
 const requiredDegradations: Record<
   (typeof requiredProviderIds)[number],
   ReadonlyArray<{ capability: string; status: ProviderCompatibility['degradations'][number]['status'] }>
 > = {
+  // pi: no empty-session reopen, forked concurrent writers, no native prefix, no question or plan producers, no image or resource reads, a pre-1.0 RPC.
+  pi: [
+    { capability: 'sessions.empty-persistence', status: 'degraded' },
+    { capability: 'controls.concurrent-writers', status: 'degraded' },
+    { capability: 'sessions.prompt-edit-succession', status: 'degraded' },
+    { capability: 'interactions.native-producers', status: 'degraded' },
+    { capability: 'events.resources', status: 'degraded' },
+    { capability: 'native.rpc-protocol', status: 'degraded' },
+  ],
   opencode: [
     { capability: 'controls.queue-steer', status: 'degraded' },
     { capability: 'controls.source-references', status: 'degraded' },
@@ -111,7 +120,7 @@ export function loadCompatibilityManifest(path?: string): CompatibilityManifest 
   const providerIds = providers.map(({ providerId }) => providerId).sort();
   if (providerIds.length !== requiredProviderIds.length
     || providerIds.some((providerId, index) => providerId !== requiredProviderIds[index])) {
-    throw new Error('Agent Remote compatibility manifest must contain the exact Provider set: claude, codex, copilot, dsh, and opencode.');
+    throw new Error('Agent Remote compatibility manifest must contain the exact Provider set: claude, codex, copilot, dsh, opencode, and pi.');
   }
   for (const provider of providers) validateRequiredDegradations(provider);
   verifyImplementationDigest(manifestPath, borgee);
@@ -152,6 +161,9 @@ function parseProviderCompatibility(value: unknown): ProviderCompatibility {
   if (value.providerId === 'opencode' && (value.native.name !== 'opencode' || value.native.version !== '2.0.25'
     || value.native.revision !== null || !isRecord(value.sdk) || value.sdk.name !== '@opencode/client' || value.sdk.version !== '2.0.25')) {
     throw new Error('Agent Remote compatibility manifest must pin OpenCode 2.0.25 and @opencode/client 2.0.25.');
+  }
+  if (value.providerId === 'pi' && (value.native.name !== 'pi' || value.native.version !== '0.73.1' || value.native.revision !== null || value.sdk !== undefined)) {
+    throw new Error('Agent Remote compatibility manifest must pin pi 0.73.1 and no SDK.');
   }
   let sdk: ProviderCompatibility['sdk'];
   if (value.sdk !== undefined) {
@@ -206,8 +218,8 @@ function parseDegradation(value: unknown): ProviderCompatibility['degradations']
 }
 
 function validateRequiredDegradations(provider: ProviderCompatibility): void {
-  if (provider.providerId !== 'dsh' && provider.providerId !== 'codex' && provider.providerId !== 'claude' && provider.providerId !== 'copilot' && provider.providerId !== 'opencode') return;
-  const displayName = provider.providerId === 'opencode' ? 'OpenCode' : provider.providerId === 'dsh' ? 'DSH' : provider.providerId === 'codex' ? 'Codex' : provider.providerId === 'copilot' ? 'Copilot' : 'Claude';
+  if (provider.providerId !== 'dsh' && provider.providerId !== 'codex' && provider.providerId !== 'claude' && provider.providerId !== 'copilot' && provider.providerId !== 'opencode' && provider.providerId !== 'pi') return;
+  const displayName = provider.providerId === 'opencode' ? 'OpenCode' : provider.providerId === 'pi' ? 'pi' : provider.providerId === 'dsh' ? 'DSH' : provider.providerId === 'codex' ? 'Codex' : provider.providerId === 'copilot' ? 'Copilot' : 'Claude';
   const actual = new Map(provider.degradations.map((entry) => [entry.capability, entry.status]));
   if (actual.size !== provider.degradations.length) {
     throw new Error(`Agent Remote compatibility manifest must contain unique degradation capabilities for ${displayName}.`);

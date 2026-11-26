@@ -1,6 +1,6 @@
 ---
 name: agent-remote
-description: Work with Agent Remote Control from the shell with agent-remote-controller - list, read, create and drive agent sessions (Claude Code, Codex, Copilot, OpenCode) on any of the user's computers, answer their requests, manage references, Windows and Hosts, and run the commands of a bot role. Use when the user refers to another session or an earlier conversation, asks what other agents did, wants work continued, checked or delegated in another session, or asks to arrange Windows or manage Hosts.
+description: Work with Agent Remote Control from the shell with agent-remote-controller - list, read, create and drive agent sessions (Claude Code, Codex, Copilot, OpenCode, pi) on any of the user's computers, answer their requests, manage references, Windows and Hosts, and run the commands of a bot role. Use when the user refers to another session or an earlier conversation, asks what other agents did, wants work continued, checked or delegated in another session, or asks to arrange Windows or manage Hosts.
 ---
 
 # Agent Remote Control

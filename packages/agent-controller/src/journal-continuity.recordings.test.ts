@@ -14,7 +14,7 @@ const CHANGED: ContinuityOutcome = { outcome: 'replaced', reason: 'changed' };
 const OPEN_ITEM: ContinuityOutcome = { outcome: 'replaced', reason: 'open_item' };
 
 /** The recordings each provider's tests below name, so none is recorded and forgotten. */
-const named: Record<RecordedProvider, Set<string>> = { copilot: new Set(), codex: new Set(), claude: new Set() };
+const named: Record<RecordedProvider, Set<string>> = { copilot: new Set(), codex: new Set(), claude: new Set(), pi: new Set() };
 const unchangedOnReopen = (provider: RecordedProvider, names: string[]) => { for (const name of names) named[provider].add(name); return names; };
 const use = (provider: RecordedProvider, name: string) => { named[provider].add(name); return recording(provider, name); };
 
@@ -22,7 +22,7 @@ const keyKind = (key: string) => key.replace(/:.*$/, '');
 const liveOnlyKinds = async (provider: RecordedProvider, names: string[]) =>
   [...new Set((await Promise.all(names.map(async name => (await journalOfRun(recording(provider, name).live)).liveOnlyKeys().map(keyKind)))).flat())].sort();
 
-describe.each(['copilot', 'codex', 'claude'] as const)('journal continuity of %s, from the recordings of the real CLI', provider => {
+describe.each(['copilot', 'codex', 'claude', 'pi'] as const)('journal continuity of %s, from the recordings of the real CLI', provider => {
   const names = recordingNames(provider);
   const present = (...wanted: string[]) => wanted.filter(name => names.includes(name));
 
@@ -40,6 +40,7 @@ describe.each(['copilot', 'codex', 'claude'] as const)('journal continuity of %s
   if (provider === 'codex') codexScenarios(present);
   if (provider === 'copilot') copilotScenarios();
   if (provider === 'claude') claudeScenarios(present);
+  if (provider === 'pi') piScenarios();
 
   // Defined last, so it runs after the scenarios above have named their recordings.
   it('has a test for every recording it has', () => {
@@ -162,6 +163,25 @@ function codexScenarios(present: (...wanted: string[]) => string[]): void {
 
     it('the live-only items of the recordings are the plan board and the interactions, and an error that history does not hold', async () => {
       expect(await liveOnlyKinds('codex', present('settled', 'reasoning', 'approval', 'todos', 'plan-mode', 'compaction', 'interrupted', 'correction', 'steer', 'errors'))).toEqual(['interaction', 'startup', 'todo']);
+    });
+  });
+}
+
+function piScenarios(): void {
+  describe.skipIf(recordingNames('pi').length === 0)('pi', () => {
+    it.each(unchangedOnReopen('pi', ['settled', 'restart', 'reasoning', 'approval', 'interrupted', 'failed', 'steered', 'partial-tool']))('%s: reopening gives unchanged, and a second reread adds nothing', async name => {
+      const run = use('pi', name);
+      const journal = await journalOfRun(run.live);
+      expect(await journal.reread(run.reread)).toEqual(UNCHANGED);
+      expect(await journal.reread(run.reread)).toEqual(UNCHANGED);
+      expect(journal.openKeys()).toEqual([]);
+    });
+
+    it('approval: the tool approval the file cannot reproduce stays in the journal, live-only', async () => {
+      const run = use('pi', 'approval');
+      const journal = await journalOfRun(run.live);
+      await journal.reread(run.reread);
+      expect((await liveOnlyKinds('pi', ['approval']))).toEqual(['interaction']);
     });
   });
 }

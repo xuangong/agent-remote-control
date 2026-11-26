@@ -15,7 +15,7 @@ const output = resolve(args[1] ?? join(root, 'dist/agent-remote-controller'));
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const manifest = await readJson(join(root, 'packages/agent-controller/package.json'));
 const sdkDependencies = {};
-for (const provider of ['claude', 'copilot', 'opencode']) {
+for (const provider of ['claude', 'copilot', 'opencode', 'pi']) {
   const { dependencies } = await readJson(join(root, `packages/agent-provider-${provider}/package.json`));
   for (const [name, version] of Object.entries(dependencies)) {
     if (!version.startsWith('workspace:')) sdkDependencies[name] = version;
@@ -46,7 +46,7 @@ try {
     name: manifest.name, version: manifest.version,
     repository: { type: 'git', url: 'git+https://github.com/xuangong/agent-remote-control.git', directory: 'packages/agent-controller' },
     publishConfig: { access: 'public', registry: 'https://registry.npmjs.org/' },
-    description: 'Agent Remote Controller CLI: connect local Codex, Claude Code, Copilot and OpenCode to a Relay.',
+    description: 'Agent Remote Controller CLI: connect local Codex, Claude Code, Copilot, OpenCode and pi to a Relay.',
     type: 'module', bin: { 'agent-remote-controller': 'dist/launcher.js' }, engines: { node: '>=22' }, os: ['darwin', 'linux', 'win32'],
     files: ['dist', 'README.md', 'licenses', 'NOTICE', 'build-info.json'],
     dependencies: sdkDependencies,

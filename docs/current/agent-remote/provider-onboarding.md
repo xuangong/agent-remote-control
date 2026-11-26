@@ -79,7 +79,7 @@ The kit holds the adapter to its declaration: the reread order, item identity an
 
 ## Native assumption checks
 
-Each CLI has a native assumption check, run by hand or nightly with `pnpm test:native:<cli>` (`codex`, `claude`, `copilot`, `opencode`). It runs the real CLI in a temporary home against a scripted model, so nothing signs in and no session of the person's own CLIs is touched, and re-verifies against the installed version what the adapter declares and what its recordings record:
+Each CLI has a native assumption check, run by hand or nightly with `pnpm test:native:<cli>` (`codex`, `claude`, `copilot`, `opencode`, `pi`). It runs the real CLI in a temporary home against a scripted model, so nothing signs in and no session of the person's own CLIs is touched, and re-verifies against the installed version what the adapter declares and what its recordings record:
 - the installed version is the declaration's `verifiedVersion`, and the version every recording's header names;
 - the recorder, run against the committed recordings, finds the same shape (`recordingShape`);
 - each declared field it can provoke holds: the probe and the refusal of a second writer, the echoed input id, every error text the adapter matches as words;

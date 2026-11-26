@@ -9,7 +9,7 @@ import { createHostRegistrations, hostProviderIds } from './registrations.js';
 import type { AgentHostProviderRegistration } from './host.js';
 import type { AgentRemoteHttpResult, RemoteHostControlRequest } from '@orchardworks/agent-session-runtime';
 
-const names: Record<string, string> = { codex: 'Codex', claude: 'Claude Code', copilot: 'GitHub Copilot', opencode: 'OpenCode' };
+const names: Record<string, string> = { codex: 'Codex', claude: 'Claude Code', copilot: 'GitHub Copilot', opencode: 'OpenCode', pi: 'pi' };
 export interface HostProviderDiscovery {
   readonly registrations: AgentHostProviderRegistration[];
   enabled(providerId: string): boolean;

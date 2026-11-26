@@ -2,7 +2,7 @@
 
 The `@orchardworks/agent-remote-controller` npm package provides the
 `agent-remote-controller` command. It runs the local Agent Host and connects
-Codex, Claude Code, GitHub Copilot and OpenCode sessions to a Relay for the browser
+Codex, Claude Code, GitHub Copilot, OpenCode and pi sessions to a Relay for the browser
 controller. Supports macOS, Linux and native Windows with Node.js 22 or newer. No repository
 checkout or pnpm is needed after installation. The npm package declares
 `darwin`, `linux` and `win32`. The package contains the latest bundled provider
@@ -154,10 +154,12 @@ export AGENT_HOST_CLAUDE=/absolute/path/to/claude
 export AGENT_HOST_OPENCODE=/absolute/path/to/opencode
 # Optional override of the packaged Copilot CLI:
 export AGENT_HOST_COPILOT=/absolute/path/to/copilot
+# pi (npm @mariozechner/pi-coding-agent 0.73.1) is found on PATH or in npm/nvm global bin directories:
+export AGENT_HOST_PI=/absolute/path/to/pi
 ```
 
 Optional profile settings are `AGENT_REMOTE_CODEX_HOME`,
-`AGENT_HOST_CLAUDE_HOME` and `AGENT_HOST_COPILOT_HOME`.
+`AGENT_HOST_CLAUDE_HOME`, `AGENT_HOST_COPILOT_HOME` and `AGENT_HOST_PI_HOME` (pi's `PI_CODING_AGENT_DIR`).
 Disabled providers are not started; no model prompt is submitted at launch.
 
 Once registration succeeds, the Host privately retains its connection and

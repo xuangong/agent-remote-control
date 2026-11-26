@@ -187,7 +187,7 @@ test('installs the tarball independently and manages a paired daemon from a path
   assert.deepEqual(denied, { error: 'Unauthorized local management request.' });
   assert.match((await run(['status'])).stdout, /uplink: registered/);
   assert.deepEqual(registrations[0].providers, []);
-  assert.deepEqual(registrations.at(-1).providers.map(provider => provider.providerId), ['codex', 'claude', 'copilot', 'opencode']);
+  assert.deepEqual(registrations.at(-1).providers.map(provider => provider.providerId), ['codex', 'claude', 'copilot', 'opencode', 'pi']);
   const buildInfo = JSON.parse(await readFile(join(packageRoot, 'build-info.json'), 'utf8'));
   assert.deepEqual(registrations.at(-1).controller, {
     version: manifest.version, revision: buildInfo.revision, platform: process.platform,

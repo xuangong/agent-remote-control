@@ -8,7 +8,7 @@ import { rowsOfRecording, serializeRowsGolden } from '../src/recorded-rows.js';
 // Writes `<recording>.rows.json` next to every provider recording: the rows the runtime holds for it, reviewed once.
 // ARC_RECORDINGS_ROOT names the directory that holds the provider packages; ARC_ROWS_OUT writes the files somewhere else.
 const root = process.env.ARC_RECORDINGS_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '../..');
-const directories = { codex: 'agent-provider-codex/src/journal-fixtures', claude: 'agent-provider-claude/src/journal-fixtures', copilot: 'agent-provider-copilot/tests/fixtures/journal' } as const;
+const directories = { codex: 'agent-provider-codex/src/journal-fixtures', claude: 'agent-provider-claude/src/journal-fixtures', copilot: 'agent-provider-copilot/tests/fixtures/journal', pi: 'agent-provider-pi/tests/fixtures/journal' } as const;
 
 for (const [provider, directory] of Object.entries(directories)) {
   const names = readdirSync(join(root, directory)).filter(file => file.endsWith('.json') && !file.endsWith('.rows.json')).map(file => file.slice(0, -'.json'.length)).sort();

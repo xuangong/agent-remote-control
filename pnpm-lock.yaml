@@ -171,6 +171,9 @@ importers:
       '@orchardworks/agent-provider-opencode':
         specifier: workspace:*
         version: link:../agent-provider-opencode
+      '@orchardworks/agent-provider-pi':
+        specifier: workspace:*
+        version: link:../agent-provider-pi
       '@orchardworks/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk
@@ -424,6 +427,25 @@ importers:
         specifier: 4.1.11
         version: 4.1.11(@types/node@24.13.3)(jsdom@25.0.1)(vite@6.4.3(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0))
 
+  packages/agent-provider-pi:
+    dependencies:
+      '@orchardworks/agent-provider-sdk':
+        specifier: workspace:*
+        version: link:../agent-provider-sdk
+    devDependencies:
+      '@orchardworks/agent-timeline':
+        specifier: workspace:*
+        version: link:../agent-timeline
+      '@types/node':
+        specifier: 24.13.3
+        version: 24.13.3
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.13.3)(jsdom@25.0.1)(vite@6.4.3(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0))
+
   packages/agent-provider-sdk:
     dependencies:
       ajv:
@@ -629,6 +651,9 @@ importers:
       '@orchardworks/agent-provider-opencode':
         specifier: workspace:*
         version: link:../agent-provider-opencode
+      '@orchardworks/agent-provider-pi':
+        specifier: workspace:*
+        version: link:../agent-provider-pi
       '@orchardworks/agent-relay-node':
         specifier: workspace:*
         version: link:../agent-relay-node

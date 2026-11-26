@@ -24,6 +24,11 @@ const SCENARIOS: Record<RecordedProvider, Scenarios> = {
     interrupted: { name: 'interrupted', open: [], first: 'unchanged' },
     toolAway: { name: 'partial-tool', key: key => key.startsWith('tool:') },
   },
+  pi: {
+    unchanged: [{ name: 'approval', liveOnly: true }, { name: 'reasoning', liveOnly: false }, { name: 'steered', liveOnly: false }, { name: 'failed', liveOnly: false }],
+    interrupted: { name: 'interrupted', open: [], first: 'unchanged' },
+    toolAway: { name: 'partial-tool', key: key => key.startsWith('tool:') },
+  },
   codex: {
     unchanged: [{ name: 'approval', liveOnly: true }, { name: 'todos', liveOnly: true }, { name: 'plan-mode', liveOnly: true }, { name: 'reasoning', liveOnly: false }, { name: 'steer', liveOnly: false }, { name: 'compaction', liveOnly: false }, { name: 'after-reopen', liveOnly: false }, { name: 'errors', liveOnly: true }],
     interrupted: { name: 'interrupted', open: ['tool:c1'], first: 'changed' },
@@ -37,7 +42,7 @@ const SCENARIOS: Record<RecordedProvider, Scenarios> = {
   },
 };
 
-describe.each(['copilot', 'codex', 'claude'] as const)('a recorded %s session that is opened again', provider => {
+describe.each(['copilot', 'codex', 'claude', 'pi'] as const)('a recorded %s session that is opened again', provider => {
   const names = recordingNames(provider);
   const h = windowHarness(provider);
   const scenarios = SCENARIOS[provider];

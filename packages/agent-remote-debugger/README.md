@@ -27,7 +27,7 @@ Client commands expect an existing reachable Relay and appropriate access. `serv
 ardb server --open
 # Or start directly with a live session:
 ardb server --provider codex --cwd /path/to/workspace --open --jsonl
-# Or: --provider claude / --provider copilot / --provider opencode / --adapter /path/to/adapter.mjs
+# Or: --provider claude / --provider copilot / --provider opencode / --provider pi / --adapter /path/to/adapter.mjs
 ```
 
 Without a Provider option, the server starts without a native process. In the compact top-right controls, select **Live**, choose a Provider and working directory, and click **Start live session**. The optional executable path is on the server machine. Select **Replay** to open a server recording. **Clear view** unloads the recording and clears the displayed view; it does not delete files or change native history. Select Live to display the retained session again. Both modes share one URL; switching preserves the live session, recording capture, and playback position. `ardb replay FILE` selects the initial recording but exposes the same Live controls. Starting Live never resumes or re-executes operations from that file.
@@ -189,7 +189,7 @@ Use `--until idle`, `--until interaction`, or `--until failed` to make a stream 
 
 ```text
 ardb
-|-- server --provider <codex|claude|copilot|opencode> [--open]
+|-- server --provider <codex|claude|copilot|opencode|pi> [--open]
 |-- server --adapter <module-path> [--open]
 |-- replay <session.jsonl> [--open]
 |-- settings list <agent-id>

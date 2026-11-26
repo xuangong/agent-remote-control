@@ -30,7 +30,7 @@ export function ModeControls({ mode, onMode, onClear, session, directory, execut
     </div>
     {mode === 'live' && !session ? <form onSubmit={event => { event.preventDefault(); void start(); }}>
       <label>Provider<select value={provider} disabled={busy} onChange={event => setProvider(event.target.value)}>
-        <option value="codex">Codex</option><option value="claude">Claude</option><option value="copilot">Copilot</option><option value="opencode">OpenCode</option>
+        <option value="codex">Codex</option><option value="claude">Claude</option><option value="copilot">Copilot</option><option value="opencode">OpenCode</option><option value="pi">pi</option>
       </select></label>
       <label>Working directory<input value={cwd} required disabled={busy} onChange={event => setCwd(event.target.value)} /></label>
       {provider !== 'opencode' ? <details><summary>Executable (optional)</summary><input aria-label="Provider executable" placeholder="Use server PATH" value={binary} disabled={busy} onChange={event => setBinary(event.target.value)} /></details> : <p>Connects to the OpenCode server configured on this machine.</p>}

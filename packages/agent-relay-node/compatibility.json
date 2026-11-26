@@ -398,6 +398,46 @@
           "reason": "Native permissions, typed forms, custom-choice questions and standalone external actions are normalized. Persistent approval is project scoped. Conditional, hidden, pattern-constrained or unrepresentable mixed forms remain visibly waiting for a native client; no fields or receipts are fabricated."
         }
       ]
+    },
+    {
+      "providerId": "pi",
+      "native": {
+        "name": "pi",
+        "version": "0.73.1",
+        "revision": null
+      },
+      "degradations": [
+        {
+          "capability": "sessions.empty-persistence",
+          "status": "degraded",
+          "reason": "pi writes a session file only with its first assistant message and cannot reopen a session under an identity it has not saved. A session never used is unavailable after a Controller restart."
+        },
+        {
+          "capability": "controls.concurrent-writers",
+          "status": "degraded",
+          "reason": "pi neither locks nor announces a session: another pi process appending to the same file forks the history, and its turns appear only when history is read again."
+        },
+        {
+          "capability": "sessions.prompt-edit-succession",
+          "status": "degraded",
+          "reason": "pi offers no native prefix branch the adapter can certify, so editing a previous prompt and quiescent succession are unsupported for pi sessions."
+        },
+        {
+          "capability": "interactions.native-producers",
+          "status": "degraded",
+          "reason": "pi has no permission system, questions or forms. Tool approval comes from an extension the adapter loads for the session; no other interaction kind is produced."
+        },
+        {
+          "capability": "events.resources",
+          "status": "degraded",
+          "reason": "Image and attachment input and output resources are not exposed; resource parts reach the model as text paths."
+        },
+        {
+          "capability": "native.rpc-protocol",
+          "status": "degraded",
+          "reason": "The RPC mode of the pre-1.0 pi CLI is verified on 0.73.1 only; a newer release is not accepted until its native assumption check passes."
+        }
+      ]
     }
   ]
 }

@@ -8,6 +8,7 @@ export const recordingDirectories = [
   'packages/agent-provider-claude/src/journal-fixtures',
   'packages/agent-provider-codex/src/journal-fixtures',
   'packages/agent-provider-copilot/tests/fixtures/journal',
+  'packages/agent-provider-pi/tests/fixtures/journal',
 ];
 
 const readJson = path => JSON.parse(readFileSync(path, 'utf8'));

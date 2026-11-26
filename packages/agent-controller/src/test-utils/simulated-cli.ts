@@ -30,7 +30,7 @@ import { ScriptedSession } from './journal-scripted-session.js';
  *   the other one. Through the managed stdio directory, a resident client tells the records it holds and the transcript its records as a
  *   reread gives them, so divergence is decided by content.
  * - S6 Faults at resume: `slowResume(ms)`, `hangResume()` (answers once healed; `{ once: true }` hangs only the next resume),
- *   `usageLimit({ resetsAt })` (typed `native_usage_limited` with `resetsAt` until that time). `usageLimit({ resetsAt, at: 'turn' })` is the
+ *   `usageLimit({ resetsAt })` (typed `native_usage_limited` with `resetsAt` until that time when the declaration types it, `failures.runtime`). `usageLimit({ resetsAt, at: 'turn' })` is the
  *   limit as CLIs signal it, on a turn: until `resetsAt` each turn fails with code `native_usage_limited` after its user message, and the
  *   session reports `runtimeInfo.usageLimit { resetsAt }` until a turn runs again.
  * - S7 Faults mid-turn, on the next turn: `crash()` fails it, typed `native_exited` when the declaration types it (`failures.runtime`), and
@@ -99,6 +99,7 @@ export function simulatedCli(options: SimulatedCliOptions) {
     { type: 'timeline', provider: providerId, turnId: item.turnId, item: { type: item.type, text: item.text, messageId: item.key, ...(item.clientId ? { clientMessageId: item.clientId } : {}) } }, item);
   const keepsClientIds = behaviour.input.identity === 'echoes_client_id';
   const typedExit = behaviour.failures.runtime.includes('native_exited');
+  const typedLimit = behaviour.failures.runtime.includes('native_usage_limited');
   /** An event of a kind the adapter does not know, as a CLI update could add one: a diagnostic of the simulated adapter, never a row (S8). */
   const diagnostics: string[] = [];
   const unknown = (delivery: 'history' | 'live', kind: string): void => { diagnostics.push(unknownNativeEventLine(providerId, kind, delivery)); };
@@ -200,7 +201,8 @@ export function simulatedCli(options: SimulatedCliOptions) {
     }
     if (resumeFaults.slowMs) await new Promise<void>(resolve => { clock.setTimeout(resolve, resumeFaults.slowMs!); });
     if (resumeFaults.resetsAt !== undefined && clock.now() < resumeFaults.resetsAt) {
-      throw new AgentRuntimeError('native_usage_limited', 'The CLI reached its usage limit.', { resetsAt: resumeFaults.resetsAt });
+      // Typed only by an adapter that declares it; any other one fails the resume untyped.
+      throw typedLimit ? new AgentRuntimeError('native_usage_limited', 'The CLI reached its usage limit.', { resetsAt: resumeFaults.resetsAt }) : new Error('The CLI reached its usage limit.');
     }
     if (native.writer) throw new AgentSessionInUseError('Another process writes this session.', { reason: 'writer_elsewhere', ...(native.writer.retryAfterMs === undefined ? {} : { retryAfterMs: native.writer.retryAfterMs }) });
     const session = new SimulatedSession(native);

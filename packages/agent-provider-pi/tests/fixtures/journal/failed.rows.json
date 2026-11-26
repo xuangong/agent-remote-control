@@ -1,0 +1,14 @@
+{
+ "kind": "recording-rows",
+ "producedBy": "transcripts:record",
+ "provider": "pi",
+ "recording": "failed",
+ "live": [
+  {"key":"user:1795000000000","completes":true,"liveOnly":false,"providerId":"pi","sourceKey":"pi:01a2140f-8908-7299-a358-7c57ed0aa396:user:1795000000000","turnId":"turn:1795000000000","row":{"providerId":"pi","sourceKey":"pi:01a2140f-8908-7299-a358-7c57ed0aa396:user:1795000000000","nativeRevision":1,"occurredAt":1795000000000,"turnId":"turn:1795000000000","item":{"type":"user_message","text":"Fail","messageId":"1795000000000"},"epoch":"epoch-rows","seq":1,"timestamp":"2026-11-18T11:06:40.000Z","resources":[]}},
+  {"key":"error:1795000000001","completes":true,"liveOnly":false,"providerId":"pi","sourceKey":"pi:01a2140f-8908-7299-a358-7c57ed0aa396:error:1795000000001","turnId":"turn:1795000000000","row":{"providerId":"pi","sourceKey":"pi:01a2140f-8908-7299-a358-7c57ed0aa396:error:1795000000001","nativeRevision":3,"occurredAt":1795000000000,"turnId":"turn:1795000000000","item":{"type":"error","message":"400 refused by the fixture"},"epoch":"epoch-rows","seq":2,"timestamp":"2026-11-18T11:06:40.000Z","resources":[]}}
+ ],
+ "reread": [
+  {"key":"user:1795000000000","completes":true,"liveOnly":false,"providerId":"pi","sourceKey":"pi:01a2140f-8908-7299-a358-7c57ed0aa396:user:1795000000000","turnId":"turn:1795000000000","row":{"providerId":"pi","sourceKey":"pi:01a2140f-8908-7299-a358-7c57ed0aa396:user:1795000000000","nativeRevision":1,"occurredAt":1795000000000,"turnId":"turn:1795000000000","item":{"type":"user_message","text":"Fail","messageId":"1795000000000"},"epoch":"epoch-rows","seq":1,"timestamp":"2026-11-18T11:06:40.000Z","resources":[]}},
+  {"key":"error:1795000000001","completes":true,"liveOnly":false,"providerId":"pi","sourceKey":"pi:01a2140f-8908-7299-a358-7c57ed0aa396:error:1795000000001","turnId":"turn:1795000000000","row":{"providerId":"pi","sourceKey":"pi:01a2140f-8908-7299-a358-7c57ed0aa396:error:1795000000001","nativeRevision":3,"occurredAt":1795000000000,"turnId":"turn:1795000000000","item":{"type":"error","message":"400 refused by the fixture"},"epoch":"epoch-rows","seq":2,"timestamp":"2026-11-18T11:06:40.000Z","resources":[]}}
+ ]
+}

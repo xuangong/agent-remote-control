@@ -10,6 +10,7 @@ const manifestEnvironment = 'BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST';
 const implementationDigest = 'sha256:d8fdc7cc1b3b4a412e46aaacede0afa478eee509c99e48f2d684e2ede8ee5a15';
 
 const opencodeCapabilities = ['controls.queue-steer', 'controls.source-references', 'controls.prompt-edit.atomicity', 'events.resources', 'events.usage', 'interactions.native-producers'];
+const piCapabilities = ['sessions.empty-persistence', 'controls.concurrent-writers', 'sessions.prompt-edit-succession', 'interactions.native-producers', 'events.resources', 'native.rpc-protocol'];
 const copilotCapabilities = ['native.experimental-rpc', 'controls.settings', 'events.subagent.navigation', 'interactions.callback-identity', 'events.resources-usage', 'controls.immediate-input'];
 
 describe('Agent Remote compatibility manifest', () => {
@@ -38,6 +39,7 @@ describe('Agent Remote compatibility manifest', () => {
           sdk: { name: '@anthropic-ai/claude-agent-sdk', version: '0.3.247' } },
         { providerId: 'opencode', native: {name: 'opencode', version: '2.0.25', revision: null}, sdk: {name: '@opencode/client', version: '2.0.25'} },
         { providerId: 'copilot', native: {name: 'github-copilot-cli', version: '1.0.83', revision: null}, sdk: {name: '@github/copilot-sdk', version: '1.0.11'} },
+        { providerId: 'pi', native: {name: 'pi', version: '0.73.1', revision: null} },
       ],
     });
   });
@@ -59,7 +61,7 @@ describe('Agent Remote compatibility manifest', () => {
     expect(() => loadCompatibilityManifest()).not.toThrow();
   });
 
-  it('requires exactly the Claude, Codex, Copilot, and DSH Provider entries', () => {
+  it('requires exactly the Claude, Codex, Copilot, DSH, OpenCode and pi Provider entries', () => {
     process.env[manifestEnvironment] = writeManifest(validManifest({ omitCodex: true }));
 
     expect(() => loadCompatibilityManifest()).toThrow('exact Provider set');
@@ -287,6 +289,7 @@ function validManifest(overrides: {
     },
     {providerId: 'opencode', native: {name: 'opencode', version: '2.0.25', revision: null}, sdk: {name: '@opencode/client', version: '2.0.25'}, degradations: opencodeCapabilities.map(capability => ({capability, status: 'degraded', reason: 'Bounded shared native provider.'}))},
     {providerId: 'copilot', native: {name: 'github-copilot-cli', version: '1.0.83', revision: null}, sdk: {name: '@github/copilot-sdk', version: '1.0.11'}, degradations: copilotCapabilities.map(capability => ({capability, status: 'degraded', reason: 'Accepted bounded native integration scope.'}))},
+    {providerId: 'pi', native: {name: 'pi', version: '0.73.1', revision: null}, degradations: piCapabilities.map(capability => ({capability, status: 'degraded', reason: 'Accepted pi limitation.'}))},
   ];
   return {
     schemaVersion: 1,
@@ -305,3 +308,20 @@ function validManifest(overrides: {
     providers,
   };
 }
+
+describe('pi compatibility entry', () => {
+  it('rejects another native version and an SDK entry', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'borgee-compatibility-pi-'));
+    try {
+      for (const mutate of [(pi: any) => { pi.native.version = '0.73.0'; }, (pi: any) => { pi.sdk = { name: 'x', version: '1' }; }, (pi: any) => { pi.degradations = []; }]) {
+        const manifest = validManifest();
+        mutate(manifest.providers.find(p => p.providerId === 'pi'));
+        writeFileSync(join(dir, 'implementation.txt'), 'implementation\n');
+        const path = join(dir, 'compatibility.json');
+        writeFileSync(path, JSON.stringify(manifest));
+        process.env[manifestEnvironment] = path;
+        expect(() => loadCompatibilityManifest()).toThrow(/pi/);
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});

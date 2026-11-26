@@ -14,8 +14,15 @@ let hosts: RemoteHost[] = [host('mac', 'Studio Mac'), host('studio', 'Design stu
 const statuses = new Map<string, ControllerUpdateStatus>();
 const release = { protocolVersion: '1.8.0', version: '0.2.0', revision: 'b'.repeat(40), sha256: 'c'.repeat(64), asset: 'orchardworks-agent-remote-controller-0.2.0.tgz', nodeMajor: 22, platforms: ['darwin-arm64'] };
 const requests: string[] = [];
+// With ?holdStatus the Hosts' status readings wait for window.fleet.releaseStatus(), so the cards show their placeholder rows.
+let releaseStatus = () => {};
+const statusGate = location.search.includes('holdStatus') ? new Promise<void>(resolve => { releaseStatus = resolve; }) : Promise.resolve();
 const service: HostPairingService = { hosts: async () => ({ hosts }), pair: async () => { throw new Error('unused'); },
-  hostStatus: async () => ({ sampledAt: 1, sessions: { running: 1, waiting: 0, idle: 0, failed: 0 }, cpu: { cores: 8, usage: 0.2 } }),
+  hostStatus: async () => {
+    await statusGate;
+    return { sampledAt: 1, sessions: { running: 1, waiting: 0, idle: 0, failed: 0 }, cpu: { cores: 8, usage: 0.2 },
+      memory: { total: 24 * 2 ** 30, used: 8 * 2 ** 30 }, disks: [{ kind: 'home' as const, path: '/Users/a', total: 460 * 2 ** 30, used: 100 * 2 ** 30 }] };
+  },
   controllerRelease: async () => ({ release }),
   controllerUpdate: async (id, input) => {
     if (!input) return statuses.get(id) ?? { phase: 'idle', updatedAt: 0 };
@@ -25,12 +32,12 @@ const service: HostPairingService = { hosts: async () => ({ hosts }), pair: asyn
     statuses.set(id, status); return status;
   } };
 const root = createRoot(document.getElementById('root')!);
-const draw = () => root.render(<main style={{ maxWidth: 1100, padding: 12, boxSizing: 'border-box' }}><HostOverview hosts={hosts} service={service} visible onOpenHost={() => {}} /></main>);
+const draw = () => root.render(<main style={{ maxWidth: 1100, padding: 12, boxSizing: 'border-box' }}><HostOverview hosts={hosts} service={service} visible updatePatienceMs={8_000} onOpenHost={() => {}} /></main>);
 Object.assign(window, { fleet: {
-  requests,
+  requests, releaseStatus: () => releaseStatus(),
   /** The Controllers restart: updating Hosts report their next phase. */
   restart: () => { for (const [id, status] of statuses) statuses.set(id, { ...status, phase: 'restarting' }); },
-  /** Updating Hosts register again with the new version. */
-  back: () => { hosts = hosts.map(item => statuses.has(item.id) ? { ...item, controller: { ...controller, version: '0.2.0' } } : item); draw(); },
+  /** The given updating Hosts register again with the new version; the others stay away. */
+  back: (ids: string[]) => { hosts = hosts.map(item => ids.includes(item.id) && statuses.has(item.id) ? { ...item, controller: { ...controller, version: '0.2.0' } } : item); draw(); },
 } });
 draw();

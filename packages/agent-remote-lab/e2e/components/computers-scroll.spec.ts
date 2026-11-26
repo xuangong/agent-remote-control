@@ -10,7 +10,7 @@ const hosts = Array.from({ length: 12 }, (_, index) => ({
   id: `host-${index}`, name: `computer-${index}`, online: true, managed: true, access: 'owner', hostStatus: true, sessionControl: true,
   providers: [{ providerId: 'codex', displayName: 'Codex' }],
 }));
-const light = { sampledAt: 1, sessions: { running: 1, waiting: 0, idle: 0, failed: 0 }, cpu: { cores: 8, usage: 0.1 } };
+const light = { sampledAt: 1, sessions: { running: 1, waiting: 0, idle: 0, failed: 0 }, cpu: { cores: 8, usage: 0.1 }, memory: { total: 24 * GiB, used: 14 * GiB }, disks: [{ kind: 'home', path: '/Users/a', total: 460 * GiB, used: 100 * GiB }] };
 const full = {
   sampledAt: 2, sessions: { running: 2, waiting: 1, idle: 3, failed: 0 }, cpu: { cores: 8, usage: 0.4 }, memory: { total: 24 * GiB, used: 14 * GiB },
   disks: [{ kind: 'home', path: '/Users/a', total: 460 * GiB, used: 100 * GiB }, { kind: 'workspace', path: '/Volumes/P', total: 900 * GiB, used: 100 * GiB }],
@@ -31,7 +31,7 @@ async function openComputers(page: Page, held = false) {
   const settings = await openSettingsPage(page, 'Computers');
   const cards = settings.locator('.lab-host-card');
   await expect(cards).toHaveCount(hosts.length);
-  if (!held) await expect(cards.first().locator('.lab-host-sessions')).toBeVisible();
+  if (!held) await expect(cards.first().locator('.lab-host-sessions:not([data-pending])')).toBeVisible();
   return { settings, cards, deliver: (next: object) => { answer = next; }, release: () => release(), hold: () => { gate = new Promise<void>(resolve => { release = resolve; }); } };
 }
 
@@ -81,7 +81,7 @@ test('the first status fills the space its card already holds, and a reopened pa
   const { settings, cards, release, hold } = await openComputers(page, true);
   const waiting = await cards.evaluateAll(items => items.map(item => Math.round(item.getBoundingClientRect().height)));
   release();
-  await expect(settings.locator('.lab-host-sessions')).toHaveCount(hosts.length);
+  await expect(settings.locator('.lab-host-sessions:not([data-pending])')).toHaveCount(hosts.length);
   const loaded = await cards.evaluateAll(items => items.map(item => Math.round(item.getBoundingClientRect().height)));
   expect(loaded, 'no card changed its height when its figures arrived').toEqual(waiting);
   // Leave Settings and come back while the Relay does not answer: the cards open with the figures they last showed.
@@ -90,6 +90,6 @@ test('the first status fills the space its card already holds, and a reopened pa
   await (phone ? page.locator('.lab-tab-bar').getByRole('button', { name: 'Home' }).or(page.locator('.lab-tab-bar .lab-tab').first()) : page.locator('.lab-rail').getByRole('button').first()).click();
   await expect(settings).toBeHidden();
   const again = await openSettingsPage(page, 'Computers');
-  await expect(again.locator('.lab-host-sessions')).toHaveCount(hosts.length);
+  await expect(again.locator('.lab-host-sessions:not([data-pending])')).toHaveCount(hosts.length);
   expect(await cards.evaluateAll(items => items.map(item => Math.round(item.getBoundingClientRect().height)))).toEqual(waiting);
 });

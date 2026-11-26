@@ -55,7 +55,8 @@ export function useReservedHeight(key: string, initial: number): { ref: (node: H
     if (!node || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => {
       // A hidden page measures 0; only a real height raises the reservation.
-      const height = Math.ceil(node.getBoundingClientRect().height);
+      const height = node.getBoundingClientRect().height;
+      // The measured height as it is: rounding it up would make the block taller than its content and move what follows by a fraction of a pixel.
       if (height > (tallest.get(key) ?? 0)) { tallest.set(key, height); setMinHeight(height); }
     });
     observer.observe(node);

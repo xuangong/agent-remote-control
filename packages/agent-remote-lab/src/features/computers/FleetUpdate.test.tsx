@@ -75,6 +75,32 @@ it('shows the result when a computer comes back with the new version, and Update
   expect(container.textContent).not.toContain('Update all');
   expect(container.textContent).not.toContain('Updating');
 });
+it('stops saying Reconnecting after the patience: the card says the computer did not come back and offers a retry, until then it waits', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const { service } = setup(async (_id, input) => input ? { ...input, phase: 'restarting', updatedAt: 1 } : { phase: 'idle', updatedAt: 0 });
+    const list = [host('mac'), host('studio')];
+    function Page() {
+      const [hosts, setHosts] = useState(list);
+      return <><HostOverview hosts={hosts} service={service} visible updatePatienceMs={1000} onOpenHost={() => {}} />
+        <button id="drop" onClick={() => setHosts(current => current.map(item => item.id === 'studio' ? { ...item, online: false } : item))}>drop</button></>;
+    }
+    const container = await render(<Page />);
+    await press(container, 'Update all (2)'); await press(container, 'Confirm update');
+    await press(container, 'drop');
+    await act(async () => { vi.advanceTimersByTime(999); });
+    expect(card(container, 'mac').textContent).toContain('Reconnecting…');
+    await act(async () => { vi.advanceTimersByTime(2); });
+    expect(card(container, 'mac').textContent).toContain('Came back on 0.1.0, not 0.2.0');
+    expect(card(container, 'mac').textContent).not.toContain('Reconnecting');
+    expect(card(container, 'studio').textContent).toContain('Did not come back on 0.2.0 yet');
+    expect(container.textContent).not.toContain('Updating');
+    const before = vi.mocked(service.controllerUpdate!).mock.calls.filter(call => call[1]).length;
+    await press(card(container, 'mac'), 'Retry update'); await press(card(container, 'mac'), 'Confirm update');
+    expect(vi.mocked(service.controllerUpdate!).mock.calls.filter(call => call[1])).toHaveLength(before + 1);
+    expect(card(container, 'mac').textContent).toContain('Reconnecting…');
+  } finally { vi.useRealTimers(); }
+});
 it('gives a card of a current computer its version and no button, and a shared viewer no action', async () => {
   const { mount } = setup(async () => ({ phase: 'idle', updatedAt: 0 }));
   const container = await mount();

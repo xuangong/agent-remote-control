@@ -286,6 +286,8 @@ export const hosts: AreaMessages<typeof english> = {
   'hosts.fleet.reconnecting': '正在重新连接…',
   'hosts.fleet.updated': '已更新到 {version}',
   'hosts.fleet.failed': '更新失败',
+  'hosts.fleet.stalled': '还没有以 {version} 重新连上',
+  'hosts.fleet.stalledOnOld': '重新连上了，但仍是 {current}，不是 {version}',
   'hosts.updates.healthLabel': 'Controller 健康状况',
   'hosts.updates.healthOk': '过去一小时 Controller 没出问题。',
   'hosts.updates.launcherVersion': '启动器 {version}',

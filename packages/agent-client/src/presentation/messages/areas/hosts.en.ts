@@ -286,6 +286,8 @@ export const hosts = {
   'hosts.fleet.reconnecting': 'Reconnecting…',
   'hosts.fleet.updated': 'Updated to {version}',
   'hosts.fleet.failed': 'Update failed',
+  'hosts.fleet.stalled': 'Did not come back on {version} yet',
+  'hosts.fleet.stalledOnOld': 'Came back on {current}, not {version}',
   'hosts.updates.healthLabel': 'Controller health',
   'hosts.updates.healthOk': 'No Controller problems in the last hour.',
   'hosts.updates.launcherVersion': 'launcher {version}',

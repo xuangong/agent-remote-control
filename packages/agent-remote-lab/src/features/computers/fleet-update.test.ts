@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import type { ControllerRelease, ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
 import type { RemoteHost } from '../../kernel/remote-host.js';
-import { cardUpdate, planFleetUpdate } from './fleet-update.js';
+import { UPDATE_PATIENCE_MS, cardUpdate, planFleetUpdate } from './fleet-update.js';
 
 const release: ControllerRelease = { protocolVersion: '1.8.0', version: '0.2.0', revision: 'b'.repeat(40), sha256: 'c'.repeat(64), asset: 'controller-0.2.0.tgz', nodeMajor: 22, platforms: ['darwin-arm64'] };
 const mac: RemoteHost = { id: 'mac', name: 'Mac', online: true, access: 'owner', controller: { version: '0.1.0', revision: 'a'.repeat(40), platform: 'darwin', arch: 'arm64', nodeMajor: 22, remoteUpdate: true } };
@@ -31,4 +31,17 @@ it('shows the phases of an update on its card and the version the computer came 
   expect(at('succeeded', back)).toEqual({ kind: 'updated', version: '0.2.0' });
   expect(at('restarting', back)).toEqual({ kind: 'updated', version: '0.2.0' });
   expect(cardUpdate(mac, undefined)).toBeUndefined();
+});
+it('says a computer did not come back once the patience is over, with the version it runs if it returned on the old one', () => {
+  const status: ControllerUpdateStatus = { phase: 'restarting', version: '0.2.0', updatedAt: 1 };
+  expect(cardUpdate({ ...mac, online: false }, status, true)).toEqual({ kind: 'stalled', version: '0.2.0' });
+  expect(cardUpdate(mac, status, true)).toEqual({ kind: 'stalled', version: '0.2.0', current: '0.1.0' });
+  expect(cardUpdate({ ...mac, controller: { ...mac.controller!, version: '0.2.0' } }, status, true)).toEqual({ kind: 'updated', version: '0.2.0' });
+  expect(cardUpdate(mac, { ...status, phase: 'failed' }, true)?.kind).toBe('failed');
+  expect(UPDATE_PATIENCE_MS).toBe(300_000);
+});
+it('offers an update again for a computer that returned on the old version', () => {
+  const status: ControllerUpdateStatus = { phase: 'restarting', version: '0.2.0', updatedAt: 1 };
+  expect(planFleetUpdate(release, [mac], undefined, { mac: status }, new Set(['mac'])).eligible.map(entry => entry.host.id)).toEqual(['mac']);
+  expect(planFleetUpdate(release, [mac], undefined, { mac: status }).eligible).toEqual([]);
 });

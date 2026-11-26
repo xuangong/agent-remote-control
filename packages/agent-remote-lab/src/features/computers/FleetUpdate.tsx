@@ -39,22 +39,24 @@ export function FleetConfirm({ fleet, onConfirm, onCancel }: { fleet: FleetUpdat
 export function HostUpdateLine({ host, fleet }: { host: RemoteHost; fleet: FleetUpdate }) {
   const t = useTranslate();
   const [asking, setAsking] = useState(false);
-  if (host.access === 'shared' || !host.online || !host.controller) return null;
-  const state = cardUpdate(host, fleet.statuses[host.id]);
+  const state = cardUpdate(host, fleet.statuses[host.id], fleet.overdue.has(host.id));
+  // A computer that goes offline while it restarts keeps its line: that is where its update reads Reconnecting.
+  if (host.access === 'shared' || !host.controller || (!host.online && !state)) return null;
   const eligible = fleet.plan.eligible.some(entry => entry.host.id === host.id);
   const latest = fleet.release?.version ?? '';
   const outdated = eligible || fleet.plan.skipped.some(entry => entry.host.id === host.id && entry.reason !== 'current' && entry.reason !== 'updating');
   const text = state?.kind === 'updating' ? t(state.phase === 'downloading' ? 'hosts.updates.phaseDownloading' : 'hosts.updates.phaseWaiting')
     : state?.kind === 'reconnecting' ? t('hosts.fleet.reconnecting')
     : state?.kind === 'updated' ? t('hosts.fleet.updated', { version: state.version })
+    : state?.kind === 'stalled' ? (state.current ? t('hosts.fleet.stalledOnOld', { current: state.current, version: state.version }) : t('hosts.fleet.stalled', { version: state.version }))
     : state?.kind === 'failed' ? `${t('hosts.fleet.failed')}${state.message ? ` ${state.message}` : ''}`
     : eligible ? t('hosts.fleet.available', { version: latest }) : fleet.release && !outdated ? t('hosts.fleet.upToDate') : '';
   const go = () => { setAsking(false); void fleet.start([host.id]); };
   const version = t('hosts.fleet.version', { version: host.controller.version });
   const shown = asking ? t('hosts.fleet.confirmOne', { version: latest }) : text;
   return <div className="lab-host-update-line" data-update-state={state?.kind}>
-    <p className="lab-host-update-text" title={`${version}${shown ? ` · ${shown}` : ''}`}>{version}{shown ? <> · <span role="status" data-failed={state?.kind === 'failed' || undefined}>{shown}</span></> : null}</p>
+    <p className="lab-host-update-text" title={`${version}${shown ? ` · ${shown}` : ''}`}>{version}{shown ? <> · <span role="status" data-failed={state?.kind === 'failed' || state?.kind === 'stalled' || undefined}>{shown}</span></> : null}</p>
     {asking ? <span className="lab-host-update-buttons"><Button onClick={go}>{t('hosts.updates.confirmAction')}</Button><Button onClick={() => setAsking(false)}>{t('common.cancel')}</Button></span>
-      : eligible && state?.kind !== 'updated' ? <Button className="lab-host-update-action" onClick={() => setAsking(true)}>{state?.kind === 'failed' ? t('hosts.updates.retryUpdate') : t('hosts.fleet.update')}</Button> : null}
+      : eligible && state?.kind !== 'updated' ? <Button className="lab-host-update-action" onClick={() => setAsking(true)}>{state?.kind === 'failed' || state?.kind === 'stalled' ? t('hosts.updates.retryUpdate') : t('hosts.fleet.update')}</Button> : null}
   </div>;
 }

@@ -38,8 +38,6 @@ interface HostReading { status?: HostStatus; error?: string }
 /** The last reading of each Host per service, kept while the page lives: Settings opens with the figures it last showed and refreshes them in place. */
 const remembered = new WeakMap<object, Map<string, HostReading>>();
 const lastReadings = (service: object) => { let map = remembered.get(service); if (!map) remembered.set(service, map = new Map()); return map; };
-/** The height a card's figures are expected to take before the first reading arrives: sessions, CPU, memory and a disk. */
-const FIGURES_HEIGHT = 150;
 
 /** Reads the status of every online Host that offers it, while the page is visible; a failed read keeps the last figures. */
 function useHostStatuses(service: Pick<HostPairingService, 'hostStatus'>, hosts: readonly RemoteHost[], visible: boolean): Record<string, HostReading> {
@@ -83,6 +81,14 @@ function Meter({ label, name, value, total, text, title }: { label: string; name
   </div>;
 }
 
+/** A meter's label with an empty bar and no value: it holds the row's place until the Host's reading arrives, and has the real row's height. */
+function PendingMeter({ label }: { label: string }) {
+  return <div className="lab-host-meter" data-pending aria-hidden="true">
+    <div className="lab-host-meter-line"><span>{label}</span><span className="lab-host-meter-value">&nbsp;</span></div>
+    <div className="lab-host-bar"><i style={{ width: 0 }} /></div>
+  </div>;
+}
+
 /** The open sessions as a count, then by state, with the ones that need their owner stressed. */
 function Sessions({ sessions }: { sessions: HostStatus['sessions'] }) {
   const t = useTranslate();
@@ -110,9 +116,9 @@ function Processes({ processes }: { processes: NonNullable<HostStatus['processes
 function HostCard({ host, reading, fleet, onOpenHost }: { host: RemoteHost; reading?: HostReading; fleet: FleetUpdate; onOpenHost(id: string): void }) {
   const t = useTranslate();
   const status = reading?.status, shared = host.access === 'shared';
-  // An online Host that answers status reads holds the space of its figures from the start, so they arrive in place.
+  // Placeholder heights are not remembered as the figures' height. An online Host that answers status reads shows quiet placeholder rows from the start (the labels, empty bars, no values); the figures fill them in place.
   const figuresExpected = host.online && Boolean(host.hostStatus) && !shared;
-  const figures = useReservedHeight(host.id, figuresExpected ? FIGURES_HEIGHT : 0);
+  const figures = useReservedHeight(host.id, 0);
   const subtitle = [host.environment?.os.name ?? host.controller?.platform, host.environment?.os.arch ?? host.controller?.arch,
     host.controller ? t('settings.computer.version', { version: host.controller.version }) : undefined].filter(Boolean).join(' · ');
   return <article className="lab-host-card" data-host-id={host.id} data-online={host.online || undefined}>
@@ -121,8 +127,9 @@ function HostCard({ host, reading, fleet, onOpenHost }: { host: RemoteHost; read
       <span className="lab-host-name"><strong>{host.name}</strong>{subtitle ? <small>{subtitle}</small> : null}</span>
       <Icon name="chevron-right" size={16} />
     </button>
-    {figuresExpected || host.online && status ? <div ref={figures.ref} className="lab-host-figures" style={{ minHeight: figures.minHeight }}>
-      {status ? <Sessions sessions={status.sessions} /> : null}
+    {figuresExpected || host.online && status ? <div ref={status ? figures.ref : undefined} className="lab-host-figures" style={{ minHeight: figures.minHeight }}>
+      {status ? <Sessions sessions={status.sessions} /> : <div className="lab-host-sessions" data-pending aria-hidden="true"><strong>&ndash;</strong> <span>{t('hosts.sessionNoun', { count: 2 })}</span> <small>&nbsp;</small></div>}
+      {!status ? <div className="lab-host-meters"><PendingMeter label="CPU" /><PendingMeter label={t('hosts.memory')} /><PendingMeter label={t('hosts.home')} /></div> : null}
       {status?.cpu || status?.memory || status?.disks ? <div className="lab-host-meters">
         {status.cpu ? <Meter label="CPU" value={status.cpu.usage} total={1} text={`${Math.round(status.cpu.usage * 100)}% · ${t('hosts.cores', { count: status.cpu.cores })}`} /> : null}
         {status.memory ? <Meter label={t('hosts.memory')} value={status.memory.used} total={status.memory.total} text={usageText(status.memory.used, status.memory.total)} /> : null}
@@ -150,14 +157,14 @@ function HostCard({ host, reading, fleet, onOpenHost }: { host: RemoteHost; read
  * Every Host with its open sessions and, for its owner, CPU, memory and disks. A card opens the Host's settings.
  * `lead` is the line above the cards (how many are online); Pair a computer opens the pairing keys.
  */
-export function HostOverview({ hosts, service, visible, compact = false, lead, onOpenHost }: {
-  hosts: readonly RemoteHost[]; service: HostPairingService; visible: boolean; compact?: boolean; lead?: ReactNode; onOpenHost(id: string): void;
+export function HostOverview({ hosts, service, visible, compact = false, lead, updatePatienceMs, onOpenHost }: {
+  hosts: readonly RemoteHost[]; service: HostPairingService; visible: boolean; compact?: boolean; lead?: ReactNode; /** How long an updating computer may take to return on the new version; defaults to `UPDATE_PATIENCE_MS`. */ updatePatienceMs?: number; onOpenHost(id: string): void;
 }) {
   const t = useTranslate();
   const readings = useHostStatuses(service, hosts, visible);
   const [pairing, setPairing] = useState(false);
   const [asking, setAsking] = useState(false);
-  const fleet = useFleetUpdate(service, hosts);
+  const fleet = useFleetUpdate(service, hosts, updatePatienceMs);
   // A confirmation for a plan that no longer has a computer to update closes by itself.
   const confirming = asking && fleet.plan.eligible.length > 0;
   const grid = useRef<HTMLDivElement>(null);

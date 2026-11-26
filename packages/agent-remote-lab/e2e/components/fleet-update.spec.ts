@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 // Settings > Computers on a fake update service: Update all (n), its confirmation, and each card's own progress, failure and retry. The
 // cards keep their places while the states change.
-declare global { interface Window { fleet: { requests: string[]; restart(): void; back(): void } } }
+declare global { interface Window { fleet: { requests: string[]; restart(): void; releaseStatus(): void; back(ids: string[]): void } } }
 
 const cardTops = (page: Page) => page.locator('.lab-host-card').evaluateAll(cards => { const list = cards[0]!.closest('.lab-host-overview')!.getBoundingClientRect().top; return cards.map(item => Math.round(item.getBoundingClientRect().top - list)); });
 const cardHeights = (page: Page) => page.locator('.lab-host-card').evaluateAll(cards => cards.map(card => Math.round(card.getBoundingClientRect().height)));
@@ -16,7 +16,7 @@ test('Update all updates every eligible computer at once and each card shows its
   await expect(card(page, 'Current mini')).toContainText('Controller 0.2.0 · up to date');
   await expect(card(page, 'Current mini').getByRole('button', { name: 'Update', exact: true })).toHaveCount(0);
   // The figures of every online computer have arrived, so what is measured next is the settled list.
-  await expect(page.locator('.lab-host-sessions')).toHaveCount(5);
+  await expect(page.locator('.lab-host-sessions:not([data-pending])')).toHaveCount(5);
   const tops = await cardTops(page), heights = await cardHeights(page);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('update-all-button.png') });
@@ -48,9 +48,13 @@ test('Update all updates every eligible computer at once and each card shows its
   await page.evaluate(() => window.fleet.restart());
   await expect(card(page, 'Studio Mac')).toContainText('Reconnecting…', { timeout: 10_000 });
   expect(await cardTops(page)).toEqual(tops);
-  await page.evaluate(() => window.fleet.back());
+  await page.evaluate(() => window.fleet.back(['mac']));
   await expect(card(page, 'Studio Mac')).toContainText('Updated to 0.2.0');
   await expect(card(page, 'Design studio')).toContainText('Update failed');
+  // Desk PC never comes back on the new version: after the patience its card says so instead of waiting for ever.
+  await expect(card(page, 'Desk PC')).toContainText('Reconnecting…');
+  await expect(card(page, 'Desk PC')).toContainText('Came back on 0.1.0, not 0.2.0', { timeout: 12_000 });
+  await expect(card(page, 'Desk PC').getByRole('button', { name: 'Retry update' })).toBeVisible();
   await expect(card(page, 'Offline laptop')).not.toContainText('Updated');
   expect(await cardTops(page)).toEqual(tops);
   expect(await cardHeights(page)).toEqual(heights);
@@ -58,4 +62,26 @@ test('Update all updates every eligible computer at once and each card shows its
   await card(page, 'Design studio').getByRole('button', { name: 'Retry update' }).click();
   await card(page, 'Design studio').getByRole('button', { name: 'Confirm update' }).click();
   await expect.poll(() => page.evaluate(() => window.fleet.requests)).toEqual(['mac', 'studio', 'desk', 'studio']);
+});
+
+test('a card shows quiet placeholder rows until its Host reports, and the figures fill them in place', async ({ page }, testInfo) => {
+  await page.goto('/e2e/fixtures/fleet-update.html?holdStatus');
+  const mac = card(page, 'Studio Mac');
+  await expect(mac.locator('.lab-host-meter[data-pending]')).toHaveCount(3);
+  await expect(mac.locator('.lab-host-meter[data-pending]').first()).toContainText('CPU');
+  await expect(mac.locator('.lab-host-meter[data-pending]').nth(1)).toContainText('Memory');
+  await expect(card(page, 'Offline laptop').locator('[data-pending]')).toHaveCount(0);
+  await expect(card(page, 'Shared server').locator('.lab-host-meter[data-pending]')).toHaveCount(0);
+  const rows = () => mac.locator('.lab-host-meter').evaluateAll(items => items.map(item => { const box = item.getBoundingClientRect(); return [Math.round(box.top), Math.round(box.height)]; }));
+  const before = await rows(), tops = await cardTops(page), heights = await cardHeights(page);
+  expect(before).toHaveLength(3);
+  await page.screenshot({ path: testInfo.outputPath('placeholder-rows.png') });
+  await page.evaluate(() => window.fleet.releaseStatus());
+  await expect(mac.locator('.lab-host-meter[role=meter]')).toHaveCount(3);
+  await expect(mac.locator('[data-pending]')).toHaveCount(0);
+  expect(await rows(), 'the figures take the placeholder rows\' places').toEqual(before);
+  // The computer shared with the reader shows its sessions only once read, so the cards after it may move; the owned computers keep their places.
+  expect((await cardTops(page)).slice(0, 5)).toEqual(tops.slice(0, 5));
+  const settled = await cardHeights(page);
+  for (const index of [0, 1, 2, 3, 5]) expect(settled[index]).toBe(heights[index]);
 });

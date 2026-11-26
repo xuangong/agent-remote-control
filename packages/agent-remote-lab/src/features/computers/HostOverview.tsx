@@ -9,6 +9,8 @@ import { Icon } from '../../ui/Icon.js';
 import type { HostPairingService, RemoteHost } from '../../kernel/remote-host.js';
 import { PairingKeys } from './PairingKeys.js';
 import { useKeptPlace, useReservedHeight } from './kept-place.js';
+import { FleetConfirm, FleetUpdateAction, HostUpdateLine } from './FleetUpdate.js';
+import { useFleetUpdate, type FleetUpdate } from './useFleetUpdate.js';
 
 /** How often an open Hosts page reads each Host's status. */
 const REFRESH_MS = 5_000;
@@ -105,7 +107,7 @@ function Processes({ processes }: { processes: NonNullable<HostStatus['processes
   </div>;
 }
 
-function HostCard({ host, reading, onOpenHost }: { host: RemoteHost; reading?: HostReading; onOpenHost(id: string): void }) {
+function HostCard({ host, reading, fleet, onOpenHost }: { host: RemoteHost; reading?: HostReading; fleet: FleetUpdate; onOpenHost(id: string): void }) {
   const t = useTranslate();
   const status = reading?.status, shared = host.access === 'shared';
   // An online Host that answers status reads holds the space of its figures from the start, so they arrive in place.
@@ -129,6 +131,7 @@ function HostCard({ host, reading, onOpenHost }: { host: RemoteHost; reading?: H
       </div> : null}
       {status?.processes?.length ? <Processes processes={status.processes} /> : null}
     </div> : null}
+    <HostUpdateLine host={host} fleet={fleet} />
     {!host.online ? <p className="lab-host-note">{t('settings.computer.offline')}</p>
       : !host.sessionControl ? <p className="lab-host-note" role="status" data-update-required>
         {shared ? t('hosts.updateSharedOwner')
@@ -153,13 +156,18 @@ export function HostOverview({ hosts, service, visible, compact = false, lead, o
   const t = useTranslate();
   const readings = useHostStatuses(service, hosts, visible);
   const [pairing, setPairing] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const fleet = useFleetUpdate(service, hosts);
+  // A confirmation for a plan that no longer has a computer to update closes by itself.
+  const confirming = asking && fleet.plan.eligible.length > 0;
   const grid = useRef<HTMLDivElement>(null);
   useKeptPlace(grid, hosts.length);
   return <section className="lab-host-overview" aria-label={t('settings.group.computers')}>
-    <div className="lab-host-overview-head">{lead}<Pill className="lab-host-pair" aria-expanded={pairing} onClick={() => setPairing(value => !value)}>{t('settings.computers.pair')}</Pill></div>
+    <div className="lab-host-overview-head">{lead}<FleetUpdateAction fleet={fleet} asking={confirming} onAsk={() => setAsking(value => !value)} /><Pill className="lab-host-pair" aria-expanded={pairing} onClick={() => setPairing(value => !value)}>{t('settings.computers.pair')}</Pill></div>
+    {confirming ? <FleetConfirm fleet={fleet} onCancel={() => setAsking(false)} onConfirm={() => { setAsking(false); void fleet.start(fleet.plan.eligible.map(entry => entry.host.id)); }} /> : null}
     {pairing ? <div className="lab-host-pairing-panel"><PairingKeys service={service} /></div> : null}
     {hosts.length ? <div ref={grid} className="lab-host-grid" data-compact={compact || undefined}>
-      {hosts.map(host => <HostCard key={host.id} host={host} reading={readings[host.id]} onOpenHost={onOpenHost} />)}
+      {hosts.map(host => <HostCard key={host.id} host={host} reading={readings[host.id]} fleet={fleet} onOpenHost={onOpenHost} />)}
     </div> : <p className="lab-host-empty">{t('hosts.empty')}</p>}
   </section>;
 }

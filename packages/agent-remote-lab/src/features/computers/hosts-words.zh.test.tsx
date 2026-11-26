@@ -4,6 +4,7 @@ import { LocaleContext } from '@orchardworks/agent-client-web/react';
 import { translator, errorWords } from '@orchardworks/agent-client';
 import { render } from '../../test/setup.js';
 import { ControllerUpdates } from './ControllerUpdates.js';
+import { HostOverview } from './HostOverview.js';
 import { HostEnvironmentDetails, HostPairing } from './HostPairing.js';
 import { type HostPairingService, type RemoteHost } from '../../kernel/remote-host.js';
 import { HostSecurityActions } from './HostSecurityActions.js';
@@ -51,6 +52,15 @@ describe('the Computers, pairing and security screens in Chinese', () => {
     await act(async () => view.querySelector('button')!.click());
     expect(view.textContent).toContain('最新版本：');
     expect([...view.querySelectorAll('button')].some(button => button.textContent === '更新 Host')).toBe(true);
+  });
+
+  it('says Update all and its confirmation in the reader\'s words', async () => {
+    const release = { protocolVersion: '1.8.0', version: '0.2.0', revision: 'a'.repeat(40), sha256: 'b'.repeat(64), asset: 'x.tgz', nodeMajor: 22, platforms: ['darwin-arm64'] };
+    const hosts: RemoteHost[] = [{ ...host, sessionControl: true, hostStatus: true, access: 'owner' }, { ...host, id: 'lent', name: 'Lent', access: 'shared' }];
+    const view = await zh(<HostOverview hosts={hosts} service={{ ...service, controllerRelease: async () => ({ release }) }} visible onOpenHost={() => {}} />);
+    await act(async () => [...view.querySelectorAll('button')].find(button => button.textContent === '全部更新 (1)')!.click());
+    expect(view.textContent).toContain('把 1 台电脑更新到 0.2.0？');
+    expect(view.textContent).toContain('别人共享给你的，只有它的所有者能更新');
   });
 
   it('says the security panel in the reader\'s words', async () => {

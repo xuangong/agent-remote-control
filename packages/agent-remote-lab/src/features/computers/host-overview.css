@@ -40,3 +40,21 @@
 .lab-host-empty { margin: 0; color: var(--ui-label-secondary); }
 .lab-host-pairing-panel { max-width: 720px; min-width: 0; padding: 14px; border-radius: 12px; background: var(--ui-background); box-shadow: var(--ui-shadow-pane); }
 @media (pointer: coarse) { .lab-host-update.lab-host-update, .lab-host-pair.lab-host-pair { min-height: 44px; } }
+.lab-host-update-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; color: var(--ui-label-secondary); }
+/* Two lines are reserved and the text is clamped to them: a longer reason reads in full from the title and the Host's page. */
+.lab-host-update-text { display: -webkit-box; flex: 1; min-width: 0; min-height: 2.7em; margin: 0; overflow: hidden; font-size: 12px; line-height: 1.35;
+  overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.lab-host-update-text [data-failed] { color: var(--ui-status-attention); }
+.lab-host-update-buttons { display: flex; flex: none; align-items: center; gap: 6px; }
+.lab-host-update-progress { flex: none; color: var(--ui-label-secondary); font-size: 12px; }
+.lab-host-update-action.lab-host-update-action, .lab-host-update-all.lab-host-update-all { flex: none; white-space: nowrap; }
+.lab-host-fleet-confirm { display: grid; gap: 8px; max-width: 720px; min-width: 0; padding: 14px; border-radius: 12px; background: var(--ui-background); box-shadow: var(--ui-shadow-pane); }
+.lab-host-fleet-confirm p, .lab-host-fleet-confirm h4 { margin: 0; }
+.lab-host-fleet-confirm h4 { color: var(--ui-label-secondary); font-size: 12px; font-weight: 600; }
+.lab-host-fleet-note { color: var(--ui-label-secondary); font-size: 12px; }
+.lab-host-fleet-confirm ul { display: grid; gap: 4px; max-height: 220px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.lab-host-fleet-confirm li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; min-width: 0; font-size: 13px; }
+.lab-host-fleet-confirm li span { min-width: 0; overflow-wrap: anywhere; }
+.lab-host-fleet-confirm li small { color: var(--ui-label-secondary); font-size: 12px; }
+.lab-host-fleet-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (pointer: coarse) { .lab-host-update-all.lab-host-update-all { min-height: 44px; } }

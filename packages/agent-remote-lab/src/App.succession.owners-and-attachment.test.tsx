@@ -18,7 +18,7 @@ import { RecoveryScope, type ReadingPositions } from './kernel/conversation-reco
 import * as attentionHooks from './kernel/useSessionAttention.js';
 import * as managerComponents from './features/sessions/ChatSessionManager.js';
 import * as windowWorkspaceHooks from './features/windows/useWindowWorkspace.js';
-import { act, cleanups, committed, failureFixture, native, saveSessionComposition, settleApp, visibleQuery, waitFor } from './App.succession.fixture.js';
+import { act, cleanups, committed, failureFixture, native, saveSessionComposition, settleApp, settleAppEagerly, visibleQuery, waitFor } from './App.succession.fixture.js';
 
 it('rejects a retired source after awaiting Ask relations before creating any native target', async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
@@ -378,35 +378,35 @@ it.each(['B', 'D'])('restores the selected Window owner while a new %s Window ke
     saveSessionComposition(scope, { path: [source, independent], focus: sessionKey(independent), anchor: sessionKey(source), addressKey: sessionKey(independent) });
     const draft = new DraftStore(scope); draft.set(independent.agentId, 'Independent B draft'); draft.flush();
   } });
-  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  await settleAppEagerly(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
   const slot = succession.document.slots.find(value => value.owners.text.key === 'agent-B')!;
   const primarySlot = succession.desired!.slot.id, owners = structuredClone(slot.owners), askOwner = succession.ownerFor(slot.id);
   await act(async () => manager.onOpenView!({ slotId: slot.id, session: { hostId: 'host', providerId: 'recorded', nativeSessionId: 'B', title: 'Independent B' } }));
-  await settleApp(() => expect(succession.document.focus).toBe(slot.id));
+  await settleAppEagerly(() => expect(succession.document.focus).toBe(slot.id));
   const originalUrl = window.location.href, windowId = new URL(originalUrl).searchParams.get('window');
   const sideDraft = () => f.view.querySelector('.lab-side-conversation [data-testid="prompt-input"]')?.textContent;
   expect(sideDraft()).toBe('Independent B draft');
   expect(readCompositionDocument(f.scope)).toMatchObject({ status: 'ready', document: { address: slot.id } });
   await f.reload();
-  await settleApp(() => { expect(succession.document.focus).toBe(slot.id); expect(sideDraft()).toBe('Independent B draft'); });
+  await settleAppEagerly(() => { expect(succession.document.focus).toBe(slot.id); expect(sideDraft()).toBe('Independent B draft'); });
   expect(succession.document.slots.find(value => value.id === slot.id)?.owners).toEqual(owners);
   expect(succession.ownerFor(slot.id)).toBe(askOwner);
   await act(async () => f.view.querySelector<HTMLButtonElement>(':is(.lab-launcher, .lab-window-floating, .lab-toolbar-launchers, #lab-context) button[aria-label="Groups"]')!.click());
   const createWindow = [...f.view.querySelectorAll<HTMLButtonElement>('.lab-window-panel button')].find(button => button.textContent === 'New group')!;
   expect(createWindow).toBeDefined();
   await act(async () => createWindow.click());
-  await settleApp(() => expect(new URL(window.location.href).searchParams.get('window')).not.toBe(windowId));
+  await settleAppEagerly(() => expect(new URL(window.location.href).searchParams.get('window')).not.toBe(windowId));
   await act(async () => manager.onOpen({ hostId: 'host', providerId: 'recorded', nativeSessionId: selected, title: `Independent ${selected}` }));
-  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe(selected));
+  await settleAppEagerly(() => expect(succession.binding?.session.nativeSessionId).toBe(selected));
   expect(new URL(window.location.href).searchParams.get('window')).not.toBe(windowId);
   expect(succession.desired?.slot.id).not.toBe(slot.id); expect(succession.desired?.slot.id).not.toBe(primarySlot);
   expect(succession.desired?.slot.owners.text).not.toEqual(owners.text);
   window.history.replaceState(null, '', originalUrl);
   await f.reload();
-  await settleApp(() => { expect(succession.document.focus).toBe(slot.id); expect(sideDraft()).toBe('Independent B draft'); });
+  await settleAppEagerly(() => { expect(succession.document.focus).toBe(slot.id); expect(sideDraft()).toBe('Independent B draft'); });
   expect(succession.ownerFor(slot.id)).toBe(askOwner);
   await act(async () => manager.onOpen({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'B', title: 'Ordinary B' }));
-  await settleApp(() => expect(succession.document.focus).toBe(primarySlot));
+  await settleAppEagerly(() => expect(succession.document.focus).toBe(primarySlot));
   expect(f.view.querySelector('.lab-primary-conversation [data-testid="prompt-input"]')?.textContent).toBe('A local draft');
 });
 

@@ -320,6 +320,20 @@ export async function settleApp(assertion: () => void, options?: { timeout?: num
   await waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); assertion(); }, options);
 }
 
+/**
+ * settleApp for a step that only waits for the page to reach a state: pending effects settle first, and the real 20 ms pause is spent only when the assertion
+ * does not hold yet. A step that asserts something stays false, or must see the page quiet, keeps settleApp.
+ */
+export async function settleAppEagerly(assertion: () => void, options?: { timeout?: number }) {
+  await waitFor(async () => {
+    await act(async () => {});
+    try { assertion(); } catch {
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+      assertion();
+    }
+  }, options);
+}
+
 /** The handoff chain is the Sessions list of the assistant's details: opens the shown tile's details when they are closed. */
 export async function openSessions(view: HTMLElement): Promise<HTMLElement> {
   await settleApp(() => expect(visibleQuery(view, '.lab-assistant-sessions') ?? visibleQuery(view, 'button.lab-tile-who')).not.toBeNull());

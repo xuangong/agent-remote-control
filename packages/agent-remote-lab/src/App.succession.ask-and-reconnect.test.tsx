@@ -18,7 +18,7 @@ import { saveTrackedSessions } from './kernel/tracking-state.js';
 import * as remoteReact from '@orchardworks/agent-client-web/react';
 import * as imageDrafts from '@orchardworks/agent-client-web/browser';
 import * as managerComponents from './features/sessions/ChatSessionManager.js';
-import { act, cleanups, committed, editVisiblePrompt, failureFixture, native, setGlobalAskVisible, settleApp, testDeadline, visibleQuery, waitFor } from './App.succession.fixture.js';
+import { act, cleanups, committed, editVisiblePrompt, failureFixture, native, setGlobalAskVisible, settleApp, settleAppEagerly, testDeadline, visibleQuery, waitFor } from './App.succession.fixture.js';
 
 it('keeps post-upgrade view preferences and owners when opening the same Window in a new tab', async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
@@ -354,27 +354,27 @@ it('keeps one global Ask launcher and retains the original Ask draft when anothe
   } });
   const group = (id: string) => f.view.querySelector<HTMLElement>(`[data-primary-group-id="${id}"]`)!;
   const trigger = () => f.view.querySelector<HTMLButtonElement>('[aria-label="Ask about this session"]')!;
-  await settleApp(() => expect(f.view.querySelectorAll('.lab-primary-group [data-testid="prompt-input"]'), f.view.textContent ?? '').toHaveLength(2));
+  await settleAppEagerly(() => expect(f.view.querySelectorAll('.lab-primary-group [data-testid="prompt-input"]'), f.view.textContent ?? '').toHaveLength(2));
   expect(trigger()).toBeNull();
   await setGlobalAskVisible(f.view, true);
   expect(f.view.querySelectorAll('[aria-label="Ask about this session"]')).toHaveLength(1);
   expect(trigger().closest('[data-view-id], [data-primary-group-id]')).toBeNull();
   expect(f.requests.filter(request => request.url.endsWith('/create'))).toHaveLength(0);
-  await settleApp(() => expect(trigger().disabled).toBe(false));
+  await settleAppEagerly(() => expect(trigger().disabled).toBe(false));
   await act(async () => trigger().click());
-  await settleApp(() => expect(f.view.querySelector('[role="dialog"][aria-label="Ask"] [data-testid="prompt-input"]')).not.toBeNull());
+  await settleAppEagerly(() => expect(f.view.querySelector('[role="dialog"][aria-label="Ask"] [data-testid="prompt-input"]')).not.toBeNull());
   const original = f.view.querySelector<HTMLElement>('[role="dialog"][aria-label="Ask"]')!;
   await editVisiblePrompt(original, 'Keep the question about A');
   await act(async () => group('primary-X').dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
-  await settleApp(() => expect(group('primary-X').getAttribute('data-selected')).toBe('true'));
+  await settleAppEagerly(() => expect(group('primary-X').getAttribute('data-selected')).toBe('true'));
   expect(f.view.contains(original)).toBe(true);
   expect(original.closest('[hidden]')).toBeNull();
-  await settleApp(() => expect(original.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Keep the question about A'));
+  await settleAppEagerly(() => expect(original.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Keep the question about A'));
   expect(f.view.querySelectorAll('[aria-label="Ask about this session"]')).toHaveLength(1);
-  await settleApp(() => expect(trigger().disabled).toBe(false));
+  await settleAppEagerly(() => expect(trigger().disabled).toBe(false));
   await act(async () => trigger().click());
-  await settleApp(() => expect(f.requests.filter(request => request.url.endsWith('/create')).map(request => request.body?.sourceNativeSessionId)).toEqual(['X']));
-  await settleApp(() => expect(f.view.querySelectorAll('[role="dialog"][aria-label="Ask"] [data-testid="prompt-input"]')).toHaveLength(2));
+  await settleAppEagerly(() => expect(f.requests.filter(request => request.url.endsWith('/create')).map(request => request.body?.sourceNativeSessionId)).toEqual(['X']));
+  await settleAppEagerly(() => expect(f.view.querySelectorAll('[role="dialog"][aria-label="Ask"] [data-testid="prompt-input"]')).toHaveLength(2));
   expect(f.view.contains(original)).toBe(true);
   expect(original.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Keep the question about A');
   expect(f.view.querySelectorAll('[aria-label="Ask about this session"]')).toHaveLength(1);
@@ -382,7 +382,7 @@ it('keeps one global Ask launcher and retains the original Ask draft when anothe
   expect(f.view.querySelector('[aria-label="Ask about this session"]')).toBeNull();
   expect(f.view.querySelector('[role="dialog"][aria-label="Ask"]')).toBeNull();
   await setGlobalAskVisible(f.view, true);
-  await settleApp(() => expect([...f.view.querySelectorAll('[role="dialog"][aria-label="Ask"] [data-testid="prompt-input"]')]
+  await settleAppEagerly(() => expect([...f.view.querySelectorAll('[role="dialog"][aria-label="Ask"] [data-testid="prompt-input"]')]
     .map(input => input.textContent)).toContain('Keep the question about A'));
   expect(f.requests.filter(request => request.url.endsWith('/create')).map(request => request.body?.sourceNativeSessionId)).toEqual(['X']);
 }, testDeadline);
@@ -411,29 +411,29 @@ it.each(['global-hidden', 'source-collapsed', 'source-rebound'] as const)('track
   const key = sessionKey({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'T' });
   await setGlobalAskVisible(f.view, true);
   const trigger = () => f.view.querySelector<HTMLButtonElement>('[aria-label="Ask about this session"]')!;
-  await settleApp(() => expect(trigger().disabled).toBe(false));
+  await settleAppEagerly(() => expect(trigger().disabled).toBe(false));
   await act(async () => trigger().click());
-  await settleApp(() => expect(f.view.querySelector('[role="dialog"][aria-label="Ask"] [data-testid="prompt-input"]')).not.toBeNull());
-  await settleApp(() => expect(tracking.observations[key]?.connection).toBe('ready'));
+  await settleAppEagerly(() => expect(f.view.querySelector('[role="dialog"][aria-label="Ask"] [data-testid="prompt-input"]')).not.toBeNull());
+  await settleAppEagerly(() => expect(tracking.observations[key]?.connection).toBe('ready'));
   if (scenario === 'global-hidden') {
     await setGlobalAskVisible(f.view, false);
     expect(f.view.querySelector('[role="dialog"][aria-label="Ask"]')).toBeNull();
   } else if (scenario === 'source-rebound') {
     await act(async () => manager.onOpen({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'B', title: 'Main B' }));
-    await settleApp(() => expect(f.view.querySelector('[data-primary-group-id="primary-A"]')?.textContent).toContain('Main B'));
+    await settleAppEagerly(() => expect(f.view.querySelector('[data-primary-group-id="primary-A"]')?.textContent).toContain('Main B'));
     expect(f.view.querySelector('[role="dialog"][aria-label="Ask"]')?.closest('[hidden]')).toBeNull();
   } else {
     const sourceGroup = f.view.querySelector<HTMLElement>('[data-primary-group-id="primary-A"]')!;
     await act(async () => sourceGroup.querySelector<HTMLButtonElement>('.lab-primary-group-minimize')!.click());
     const other = f.view.querySelector<HTMLElement>('[data-primary-group-id="primary-X"]')!;
     await act(async () => other.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
-    await settleApp(() => expect(other.getAttribute('data-selected')).toBe('true'));
+    await settleAppEagerly(() => expect(other.getAttribute('data-selected')).toBe('true'));
     expect(f.view.querySelector('[role="dialog"][aria-label="Ask"]')?.closest('[hidden]')).toBeNull();
   }
   await act(async () => f.emitActivity('agent-T', 'running'));
-  await settleApp(() => expect(tracking.observations[key]?.activity).toBe('running'));
+  await settleAppEagerly(() => expect(tracking.observations[key]?.activity).toBe('running'));
   await act(async () => f.emitActivity('agent-T', 'waiting'));
-  await settleApp(() => expect(tracking.observations[key]?.activity).toBe('waiting'));
+  await settleAppEagerly(() => expect(tracking.observations[key]?.activity).toBe('waiting'));
   expect(tracking.observations[key]?.attention).toBe(scenario === 'global-hidden' ? 'pending' : undefined);
 }, testDeadline);
 

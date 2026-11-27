@@ -1,4 +1,5 @@
 import { ToastProvider } from './kernel/Toast.js';
+import { useState } from 'react';
 import { LocaleProvider } from '@orchardworks/agent-client-web/react';
 import { deviceChoices } from './kernel/device-choices.js';
 import { useWorkbenchShell } from './app/useWorkbenchShell.js';
@@ -31,6 +32,8 @@ import { useSendingAndSuccession } from './app/useSendingAndSuccession.js';
 import { useQuotesAndReferences } from './app/useQuotesAndReferences.js';
 import { useSessionViewPresentation } from './app/useSessionViewPresentation.js';
 import { useViewModel } from './app/useViewModel.js';
+import { useSessionUse } from './app/useSessionUse.js';
+import { takeSessionUse } from './features/sessions/session-use-page.js';
 import { WorkbenchView } from './app/WorkbenchView.js';
 import type { AppInputs, AppLate, AppProps } from './app/types.js';
 export type { AppActions, AppProps, LabTransport } from './app/types.js';
@@ -54,6 +57,8 @@ function AppContent({
   userScoped = false,
 }: AppProps) {
   const inputs: AppInputs = { baseUrl, injectedTransport, injectedDirectory, hostService, initialState, initialSessionStatus, initialProviderName, actions, fixtureAction, account, userScoped };
+  // A link that asks for a bot is read, and removed from the address, before anything can open its session.
+  const [openedUse] = useState(() => takeSessionUse());
   const late = {} as AppLate;
   const scope1 = { ...inputs, ...useWorkbenchShell(inputs) };
   const scope2 = { ...scope1, ...useRequestedSession(scope1) };
@@ -86,7 +91,9 @@ function AppContent({
   const scope29 = { ...scope28, ...useSessionViewPresentation(scope28) };
   const scope30 = { ...scope29, ...useViewModel(scope29) };
 
-  return <WorkbenchView scope={scope30} />;
+  const scope31 = { ...scope30, ...useSessionUse(scope30, openedUse) };
+
+  return <WorkbenchView scope={scope31} />;
 }
 
 

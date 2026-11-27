@@ -27,6 +27,10 @@
       "types": "./dist/session-state-publisher.d.ts",
       "import": "./dist/session-state-publisher.js"
     },
+    "./session-command": {
+      "types": "./dist/session-command.d.ts",
+      "import": "./dist/session-command.js"
+    },
     "./window-command": {
       "types": "./dist/window-command.d.ts",
       "import": "./dist/window-command.js"

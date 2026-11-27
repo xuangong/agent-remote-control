@@ -267,7 +267,7 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
   };
   const directory: AgentHostDirectory = {
     providerId,
-    list: async () => [...known].map(([nativeSessionId, saved]) => ({ nativeSessionId, providerId, title: saved.title, createdAt: saved.createdAt, updatedAt: saved.updatedAt, state: 'idle' as const })),
+    list: async () => [...known].map(([nativeSessionId, saved]) => ({ nativeSessionId, providerId, title: saved.title, createdAt: saved.createdAt, updatedAt: saved.updatedAt, state: 'idle' as const, ...(options.cwd ? { workspace: options.cwd } : {}) })),
     workspaces: async () => options.workspaceRoot ? [{ id: 'root', name: 'Projects', path: options.workspaceRoot }] : [],
     create: async config => { const id = `${providerId}-new-${++created}`; startedIn.set(id, config.cwd); give(id, config); known.set(id, { title: 'New session', history: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), diverged: false }); return id; },
     canReleaseSession: () => true,

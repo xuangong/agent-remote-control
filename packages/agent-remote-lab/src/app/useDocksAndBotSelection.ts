@@ -8,8 +8,8 @@ import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
 import type { AppInputs } from './types.js';
 
-export function useDocksAndBotSelection(scope: Pick<AppInputs & SessionSuccessionBindingSlice & WorkbenchRecordsSlice & WorkbenchShellSlice, 'accessReady' | 'activated' | 'baseUrl' | 'navigation' | 'sharedWindow' | 'succession' | 'toast' | 'transport' | 'windowActions' | 'windowMode' | 'windowWorkspace'>) {
-  const { accessReady, activated, baseUrl, navigation, sharedWindow, succession, toast, transport, windowActions, windowMode, windowWorkspace } = scope;
+export function useDocksAndBotSelection(scope: Pick<AppInputs & SessionSuccessionBindingSlice & WorkbenchRecordsSlice & WorkbenchShellSlice, 'accessReady' | 'canRead' | 'activated' | 'baseUrl' | 'navigation' | 'sharedWindow' | 'succession' | 'toast' | 'transport' | 'windowActions' | 'windowMode' | 'windowWorkspace'>) {
+  const { accessReady, canRead, activated, baseUrl, navigation, sharedWindow, succession, toast, transport, windowActions, windowMode, windowWorkspace } = scope;
 
   // A notice is cleared once a toast shows it; while toasts are inactive (Bot mode) it waits.
   useEffect(() => {
@@ -24,7 +24,7 @@ export function useDocksAndBotSelection(scope: Pick<AppInputs & SessionSuccessio
 
   // Docking a view in the open Window shows the docks again, and so does closing its last dock; switching Windows keeps the choice.
 
-  const selectedBot = useBotWorkspace(windowWorkspace, succession, navigation.place, activated && accessReady && !windowMode);
+  const selectedBot = useBotWorkspace(windowWorkspace, succession, navigation.place, activated && accessReady && !windowMode, canRead && !windowMode);
 
   const botPresentation = useMemo(() => ({ recovering: false, confirmed: undefined as { groupId: string; viewId: string; slotId: string; bindingKey: string } | undefined }), [baseUrl, transport]);
 

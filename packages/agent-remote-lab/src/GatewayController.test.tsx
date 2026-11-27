@@ -198,7 +198,9 @@ it('offers a bounded retry when the initial access check hangs and ignores its l
     .mockResolvedValue(Response.json({}, { status: 401 }));
   vi.stubGlobal('fetch', fetcher);
   const view = await render(<GatewayController>{() => <p>Private controller</p>}</GatewayController>);
-  expect(view.querySelector('[role="status"]')?.textContent).toBe('Opening Orchard…');
+  // A short wait shows no words; assistive technology hears the label.
+  expect(view.querySelector('[role="status"]')?.textContent).toBe('');
+  expect(view.querySelector('[role="status"]')?.getAttribute('aria-label')).toBe('Opening Orchard…');
   await act(async () => { await vi.advanceTimersByTimeAsync(12_001); });
   expect(view.querySelector('h1')?.textContent).toBe('Can’t reach Orchard right now');
   await act(async () => view.querySelector<HTMLButtonElement>('.arc-access-action')!.click());
@@ -410,12 +412,13 @@ describe('the access page of a session link', () => {
   const link = '?host=desk&provider=codex&session=native';
   afterEach(() => window.history.replaceState(null, '', '/'));
 
-  it('waits with a sentence about the conversation, then asks to sign in with the focus on its heading and the link on the same session', async () => {
+  it('waits without words, then asks to sign in with the focus on its heading and the link on the same session', async () => {
     window.history.replaceState(null, '', '/' + link);
     let answer!: (response: Response) => void;
     vi.stubGlobal('fetch', () => new Promise<Response>(resolve => { answer = resolve; }));
     const view = await render(<GatewayController>{() => <p>Private controller</p>}</GatewayController>);
-    expect(view.querySelector('[role="status"]')?.textContent).toBe('Opening your conversation…');
+    expect(view.querySelector('[role="status"]')?.textContent).toBe('');
+    expect(view.querySelector('.gateway-workspace-shell')).not.toBeNull();
     expect(view.querySelector('h1')).toBeNull();
     await act(async () => answer(Response.json({}, { status: 401 })));
     const heading = view.querySelector('h1')!;

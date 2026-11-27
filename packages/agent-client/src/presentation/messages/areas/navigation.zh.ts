@@ -21,6 +21,7 @@ export const navigation: AreaMessages<typeof english> = {
   'navigation.panels.value': '{width} 像素',
   'navigation.panels.hint': '拖动调整宽度，双击恢复默认。',
   'navigation.chatsEmpty': '还没有聊天，去「助手」里开始一个吧。',
+  'navigation.savedChats': '离线中，正在显示已保存的聊天。',
   'navigation.directoryTitle': '助手',
   'navigation.directoryEmpty': '还没有助手，添加一个就能开始聊天。',
   'navigation.directoryGroupEmpty': '这个分组里还没有助手。',

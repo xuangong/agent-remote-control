@@ -10,7 +10,7 @@ const session = { ...binding, agentId: 'agent-bot1' };
 
 function scopeOf(facts: Record<string, unknown> = {}) {
   return mockScope<typeof useBotRoster>({
-    accessReady: true, activated: true, compactLayout: false, connections: { find: () => ({ agentId: 'agent-bot1' }), shown: (): boolean => true },
+    accessReady: true, canRead: true, activated: true, compactLayout: false, connections: { find: () => ({ agentId: 'agent-bot1' }), shown: (): boolean => true },
     currentBotSession: () => session, navigation: { rosterVisible: false }, selectedBot: { view, group, slot: 'slot' }, windowMode: false, windowWorkspace: { groups: [group] }, ...facts,
   });
 }
@@ -20,9 +20,16 @@ describe('the bots Bot mode lists', () => {
     const { result } = await renderHook(() => useBotRoster(scopeOf()));
     expect(result.current.botTargets.map(target => (target as { agentId?: string }).agentId)).toEqual(['agent-bot1']);
   });
-  it.each([['Window mode', { windowMode: true }], ['an unactivated page', { activated: false }], ['restoring access', { accessReady: false }]])('are none in %s', async (_name, change) => {
+  it.each([['Window mode', { windowMode: true }], ['a device holding no lease', { canRead: false }]])('are none in %s', async (_name, change) => {
     const { result } = await renderHook(() => useBotRoster(scopeOf(change)));
     expect(result.current.botTargets).toEqual([]);
+  });
+});
+
+describe('the bots Bot mode lists while access is being confirmed', () => {
+  it('are those the device holds, because listing needs no network', async () => {
+    const { result } = await renderHook(() => useBotRoster(scopeOf({ accessReady: false, activated: false })));
+    expect(result.current.botTargets.map(target => (target as { agentId?: string }).agentId)).toEqual(['agent-bot1']);
   });
 });
 

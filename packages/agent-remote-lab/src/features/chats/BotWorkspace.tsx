@@ -1,4 +1,5 @@
-import { forwardRef, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ComponentType } from 'react';
+import { forwardRef, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ComponentType } from 'react';
+import { DeviceLinkContext } from '../../kernel/device-link.js';
 import type { Team } from '@orchardworks/agent-remote-protocol';
 import { BotRooms } from './BotRooms.js';
 import type { useWindowWorkspace } from '../windows/useWindowWorkspace.js';
@@ -21,7 +22,7 @@ import { Button } from '../../ui/Button.js';
 import { Icon } from '../../ui/Icon.js';
 import { botViews, type BotPicture } from '@orchardworks/agent-remote-protocol';
 import { errorWords } from '@orchardworks/agent-client';
-import { useTranslate } from '@orchardworks/agent-client-web/react';
+import { TimelineSkeleton, useTranslate } from '@orchardworks/agent-client-web/react';
 import { AssistantTopBar } from './AssistantTopBar.js';
 import { AssistantDetailsHostContext, type AssistantDetailsHost } from '../../conversation/assistant/details-host.js';
 import { useAssistantNames } from '../../kernel/names-context.js';
@@ -90,6 +91,7 @@ export function BotWorkspace({ visible, covered = false, compact, scope, rooms, 
   const descriptor = conversation ? describeConversation(place) : undefined;
   const unavailable = phone && !!selected.error && !descriptor;
   const showConversation = botConversationShown({ ...(place ? { place } : {}), phone, rosterVisible: navigation.rosterVisible, unavailable });
+  const offline = useContext(DeviceLinkContext)?.notice?.state === 'offline';
   const availabilityNotice = selected.loading ? <p role="status">{t('navigation.botWorkspace.opening')}</p> : selected.error && place?.kind !== 'session'
     ? <p role="alert">{selected.error} <button type="button" onClick={() => void selected.retry()}>{t('common.retry')}</button></p> : null;
   const creation = workspace.sectionCreationState, saving = creation.state === 'saving';
@@ -190,7 +192,7 @@ export function BotWorkspace({ visible, covered = false, compact, scope, rooms, 
       {creation.state === 'unknown' ? <p className="lab-bot-notice" role="status">{t('navigation.botWorkspace.groupUnconfirmed')} <button type="button" onClick={() => void retryGroup()}>{t('common.retry')}</button></p> : null}
       {actions.notice}
       {groupActions.error ? <p className="lab-bot-notice" role="alert">{groupActions.error}</p> : groupActions.notice ? <p className="lab-bot-notice" role="status">{groupActions.notice}</p> : null}
-      <div className="lab-bot-roster-scroll" onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}>{rooms ? <BotRooms scope={scope} rooms={rooms} /> : null}<SharedBotRoster model={roster} groups={workspace.groups} project={projectRoster} place={place} onSelect={open} hostName={hostName} compact={phone} menu={chatMenu}
+      <div className="lab-bot-roster-scroll" onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}>{rooms ? <BotRooms scope={scope} rooms={rooms} /> : null}<SharedBotRoster model={roster} groups={workspace.groups} knowledge={workspace.groupsKnowledge} project={projectRoster} place={place} onSelect={open} hostName={hostName} compact={phone} menu={chatMenu}
         directoryControls={<div className="lab-bot-directory-controls">
           {directory.sources.map(source => <div key={source.id}><small>{hostName(source.hostId)} · {source.providerId}</small>
             {!source.online ? <p>{t('navigation.botWorkspace.hostOffline')}</p> : null}{source.loading ? <p role="status">{t('navigation.botWorkspace.loadingSessions')}</p> : null}
@@ -199,6 +201,8 @@ export function BotWorkspace({ visible, covered = false, compact, scope, rooms, 
             {source.hasMore && !source.expired ? <button type="button" disabled={!source.online || source.loading} onClick={() => void directory.loadMore(source.id)}>{t('navigation.botWorkspace.loadMore')}</button> : null}
           </div>)}
         </div>} /></div>
+      {/* When the Relay cannot be reached the roster is the device's copy, and says so in one quiet line below the list, which moves no row. */}
+      {offline ? <p className="lab-bot-notice lab-bot-offline" role="status">{t('navigation.savedChats')}</p> : null}
     </aside>
     <section className="lab-bot-conversation orchard-panel" aria-label={t('navigation.botConversation')} hidden={phone && !showConversation}
       onTouchStart={event => { const touch = event.touches[0]; edgeSwipe.current = phone && touch && touch.clientX <= 24 ? { x: touch.clientX, y: touch.clientY } : undefined; }}
@@ -215,11 +219,16 @@ export function BotWorkspace({ visible, covered = false, compact, scope, rooms, 
       {descriptor ? <AssistantDetailsHostContext.Provider value={detailsHost}>
         <Mount mode="bot" active={visible && showConversation} descriptor={{ ...descriptor, props: { ...descriptor.props, visible: visible && showConversation, active: visible && showConversation, folded: asleep } }} />
       </AssistantDetailsHostContext.Provider>
-        : !selected.loading && !selected.error ? <div className="lab-bot-welcome">
+        : selected.loading || selected.error ? null
+        // A conversation was chosen and its group has not loaded: its layout holds the place, and nothing says it is missing.
+        : place?.kind === 'bot' || place?.kind === 'session' ? <div className="lab-bot-pending"><TimelineSkeleton /></div>
+        // Before the roster loads, nobody is known to be missing: the welcome keeps its place and says nothing yet.
+        : workspace.groupsKnowledge && workspace.groupsKnowledge !== 'confirmed' && !workspace.groups.length ? <div className="lab-bot-welcome" data-quiet><OrchardMark size={56} /><h2>&nbsp;</h2><p>&nbsp;</p></div>
+        : <div className="lab-bot-welcome">
           <OrchardMark size={56} />
           <h2>{t('assistants.chooseTitle')}</h2>
           <p>{place?.kind === 'section' ? t('assistants.chooseInGroup') : t('assistants.chooseHint', { keys: shortcutKeys('search', applePlatform()).shown })}</p>
-        </div> : null}
+        </div>}
     </section>
     <aside ref={setDetailsSlot} id={detailsId} className="lab-assistant-details orchard-panel" aria-label={t('details.title')} hidden={!detailsShown || phone}>
       <header className="lab-assistant-details-head"><h2>{t('details.title')}</h2>

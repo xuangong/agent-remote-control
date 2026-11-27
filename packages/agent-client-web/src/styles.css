@@ -285,6 +285,9 @@
 .agent-error .agent-notice-details { margin: 4px 10px 8px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-compaction { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; min-height: 36px; color: var(--agent-muted); background: var(--agent-panel); }
 .agent-timeline-empty { margin: 0; padding: 28px 18px; color: var(--agent-muted); text-align: center; }
+.agent-timeline-skeleton { display: flex; flex-direction: column; gap: var(--orchard-space-l); padding: var(--orchard-space-l); }
+.agent-timeline-skeleton-bubble { width: 62%; height: 56px; border-radius: var(--orchard-radius-bubble); background: var(--orchard-fill); }
+.agent-timeline-skeleton-bubble[data-from="mine"] { align-self: flex-end; width: 44%; height: 40px; }
 
 .agent-interaction-lock { min-width: 0; margin: 0; padding: 0; border: 0; }
 .agent-interaction {

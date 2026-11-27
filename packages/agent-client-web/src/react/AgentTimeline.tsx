@@ -1,4 +1,5 @@
 import { ResourceDownloadContext, type DownloadResource } from './ResourceDownload.js';
+import { TimelineSkeleton } from './TimelineSkeleton.js';
 import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
@@ -282,7 +283,9 @@ export function AgentTimeline({
     <ProcessModeContext.Provider value={processMode}><BubbleAvatarContext.Provider value={assistant?.avatar}><div className="agent-timeline-entries" aria-live="polite" data-process-mode={processMode}
       data-revealing={searchEntryKey !== undefined || inspectedEntryKey !== undefined || undefined}>
       {turns.length === 0 && outgoing.length === 0
-        ? timelineStart && !state.timeline.hasOlder ? null : <p className="agent-timeline-empty">{t('timeline.empty')}</p>
+        // Until the timeline's first page or the device's copy arrived, nothing is known of it: the shape of a conversation shows, never that it is empty.
+        ? !state.timeline.initialized ? <TimelineSkeleton />
+          : timelineStart && !state.timeline.hasOlder ? null : <p className="agent-timeline-empty">{t('timeline.empty')}</p>
         : turns.map((turn, index) => {
             const disclosure = disclosures[index]!;
             return <Fragment key={turn.key}>

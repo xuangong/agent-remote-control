@@ -1082,8 +1082,8 @@ it('notifies a failed send, keeps the message as Check delivery and does not rep
   }
 });
 
-it('shows no stored conversation content before the Relay confirms access, and shows it once it does', async () => {
-  const { WorkspaceReady, rememberWorkspaceAccess, setWorkspaceReady } = await import('./kernel/workspace-access.js');
+it('shows no stored conversation content before this device holds a lease, and shows it once it does', async () => {
+  const { WorkspaceReadable, WorkspaceReady, rememberWorkspaceAccess, revokeStoredRows, setWorkspaceReady } = await import('./kernel/workspace-access.js');
   const { saveStoredDisplay } = await import('./kernel/stored-display.js');
   const { saveLastSession } = await import('./kernel/conversation-recovery.js');
   const path = '/u/' + 'a'.repeat(64) + '/';
@@ -1096,16 +1096,22 @@ it('shows no stored conversation content before the Relay confirms access, and s
     providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-09-18T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [],
     item: { type: 'assistant_message', text: 'Cached conversation, immediately visible.' },
   }] } });
-  setWorkspaceReady(path, false);
+  // The Relay refused this device's lease: nothing it stored shows, and nothing goes to the Relay.
+  revokeStoredRows(path); setWorkspaceReady(path, false);
   const fetcher = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Business requests must wait.'));
+  let grant!: () => void;
+  function Gate() {
+    const [granted, setGranted] = useState(false); grant = () => setGranted(true);
+    return <WorkspaceReady.Provider value={granted}><WorkspaceReadable.Provider value={granted}><App baseUrl={scope} userScoped /></WorkspaceReadable.Provider></WorkspaceReady.Provider>;
+  }
   try {
-    const view = await render(<WorkspaceReady.Provider value={false}><App baseUrl={scope} userScoped /></WorkspaceReady.Provider>);
+    const view = await render(<Gate />);
     expect(view.textContent).not.toContain('Cached conversation, immediately visible.');
     expect(fetcher).not.toHaveBeenCalled();
-    // The Relay confirms the lease: the stored rows show, with no opening label over them.
-    await act(async () => setWorkspaceReady(path, true));
+    // The Relay grants the lease: the stored rows show, with no opening label over them.
+    await act(async () => { setWorkspaceReady(path, true); grant(); });
     await vi.waitFor(() => expect(view.textContent).toContain('Cached conversation, immediately visible.'));
-    expect(view.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
+    expect(view.textContent).not.toContain('Opening session');
   } finally { fetcher.mockRestore(); setWorkspaceReady(path, true); localStorage.removeItem('agent-remote:workspace-access'); }
 });
 
@@ -1123,7 +1129,7 @@ it('shows stored conversation content in the first render on a cached lease, wit
     providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-09-18T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [],
     item: { type: 'assistant_message', text: 'Cached on a lease, first render.' },
   }] } });
-  setWorkspaceReady(path, false, Date.now() + 60_000);
+  setWorkspaceReady(path, false, true);
   window.history.replaceState(null, '', '/?window=w1&host=desk&agent=agent-1&provider=recorded&session=recorded-session');
   const fetcher = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Business requests must wait.'));
   try {

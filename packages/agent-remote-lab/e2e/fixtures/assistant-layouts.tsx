@@ -70,7 +70,9 @@ const researchGroup: WindowGroup = { window: { schemaVersion: 3, id: 'research',
 const ownGroup = ([name, title]: readonly [string, string], index: number): WindowGroup => ({ window: { schemaVersion: 3, id: `own-${index + 1}`, revision: 0, title,
   selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', binding(`own-${index + 1}`, title), 'primary')] },
   bots: { rank: 'z', members: { main: { name, picture: { shape: index ? 'triangle' : 'sideways', color: index ? '#f2b33d' : '#5b8def', gaze: index + 1 } } } } });
-const initialGroups: WindowGroup[] = withGroups ? [initialGroup, researchGroup, ...SAMPLE.own.map(ownGroup)] : [initialGroup];
+/** `?roster=unknown` is a roster nothing has answered yet, `?roster=empty` one a load confirmed empty; either has no assistants. */
+const rosterState = new URLSearchParams(location.search).get('roster');
+const initialGroups: WindowGroup[] = rosterState ? [] : withGroups ? [initialGroup, researchGroup, ...SAMPLE.own.map(ownGroup)] : [initialGroup];
 const sessionOf = (id: string, title: string) => ({ hostId: 'mac', providerId: 'claude', nativeSessionId: id, title });
 /** Chief's handoff chain (?history=1 shows the earlier session, with Return to current) and its subagents. */
 const chain = (history: boolean) => ({ roleKey: 'chief', history, session: history ? sessionOf('chief-earlier', SAMPLE.earlier) : sessionOf('chief-session', currentTitle),
@@ -105,7 +107,7 @@ export function BotFixture({ conversation }: { conversation(props: { assistant: 
   const navigation = useWorkbenchMode('fixture');
   const readGroup = (id: string) => latest.current.find(group => group.window.id === id);
   const workspace = {
-    groups, readGroup, sectionCreationState: { state: 'idle' }, retrySection: async () => undefined,
+    groups, groupsKnowledge: rosterState === 'unknown' ? 'unknown' : 'confirmed', readGroup, sectionCreationState: { state: 'idle' }, retrySection: async () => undefined,
     operateGroup: async (id: string, operation: WindowGroupOperation) => {
       const next = latest.current.map(group => group.window.id === id ? applyGroupOperation(group, operation) : group);
       latest.current = next; setGroups(next);

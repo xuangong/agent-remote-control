@@ -103,6 +103,7 @@ export function WorkbenchView({ scope }: { readonly scope: AppScope }) {
         className={sharedWindow ? 'lab-window-workbench' : (sessionNotice && !nativeTakeover && !(compactLayout && contextOpen)) || promptMigrations.notice ? 'lab-workbench-with-notice' : undefined}
         id="lab-workbench"
         data-testid="workbench"
+        data-window-pending={!sharedWindow && windowMode && !windowWorkspace.unavailable || undefined}
         data-window-provisional={windowWorkspace.provisional || undefined}
         aria-busy={windowWorkspace.provisional || undefined}
         role="tabpanel"

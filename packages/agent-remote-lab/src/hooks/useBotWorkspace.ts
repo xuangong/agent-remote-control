@@ -9,7 +9,7 @@ import type { GroupHandle, useWindowWorkspace } from '../features/windows/useWin
 
 type Workspace = ReturnType<typeof useWindowWorkspace>;
 type Succession = Pick<ReturnType<typeof useSessionSuccession>, 'document' | 'ensureWindowView' | 'save' | 'refresh' | 'discovering'>;
-export function useBotWorkspace(workspace: Workspace, succession: Succession, place: BotPlace | undefined, enabled: boolean) {
+export function useBotWorkspace(workspace: Workspace, succession: Succession, place: BotPlace | undefined, enabled: boolean, canRead = enabled) {
   const t = useTranslate();
   const latest = useRef({ workspace, succession, enabled, t }); latest.current = { workspace, succession, enabled, t };
   const words = (error: unknown) => errorWords(error, latest.current.t, 'navigation.botWorkspace.failed');
@@ -64,20 +64,23 @@ export function useBotWorkspace(workspace: Workspace, succession: Succession, pl
     return () => { active = false; removeEventListener('focus', refreshCatalog); };
   }, [runtime, enabled]);
   const handle = enabled && !deleted && selectedId ? runtime.leases.get(selectedId)?.handle : undefined;
-  const group = handle?.getGroup();
+  // Until the Relay's copy is leased, or with no Relay to ask, the group the device has stored is shown read-only.
+  const group = handle?.getGroup() ?? (canRead && selectedId && !deleted ? workspace.readGroup(selectedId) : undefined);
   const candidate = place?.kind === 'bot' && group && hasBotAppearance(group) ? group.window.views.find(view => view.id === place.viewId && isBotView(view) && !group.bots?.members[view.id]?.hidden) : undefined;
   const view = candidate && isBotView(candidate) ? candidate : undefined;
   // Every group Bot mode shows, the live selected one in place of its catalog copy: their bots are enrolled so a handoff
   // resolves to the current session for status, and a verified handoff is written into each group's layout.
-  const enrolledGroups: WindowGroup[] = !enabled ? [] : [...new Map([...workspace.groups, ...(group ? [group] : [])]
+  const enrolledGroups: WindowGroup[] = !canRead ? [] : [...new Map([...workspace.groups, ...(group ? [group] : [])]
     .filter(item => hasBotAppearance(item) && !workspace.deletedWindowIds.includes(item.window.id)).map(item => [item.window.id, item])).values()];
   const locatorSet = JSON.stringify(enrolledGroups.map(item => [item.window.id, item.window.revision, botViews(item).map(bot => [bot.id, bot.binding])]));
   useEffect(() => {
-    if (!enabled || !runtime.active || !enrolledGroups.length) return;
+    if (!canRead || !runtime.active || !enrolledGroups.length) return;
     const current = latest.current.succession, before = current.document.editRevision;
     try {
+      // Placing each bot's view needs only the groups the device holds; asking the Relay about their sessions waits for it.
       for (const item of enrolledGroups) for (const bot of botViews(item)) current.ensureWindowView(item.window.id, bot.id, bot.binding);
       if (current.document.editRevision !== before) { current.save(); runtime.emit(); }
+      if (!enabled) return;
       const identities = JSON.stringify([current.document.scope, enrolledGroups.map(item => [item.window.id, botViews(item).map(bot => [bot.id, bot.binding])])]);
       if (!runtime.enrolled.has(identities)) {
         runtime.enrolled.add(identities);
@@ -86,7 +89,7 @@ export function useBotWorkspace(workspace: Workspace, succession: Succession, pl
         });
       }
     } catch (error) { if (selectedId) { runtime.errors.set(selectedId, words(error)); runtime.emit(); } }
-  }, [runtime, locatorSet, enabled, succession.document]);
+  }, [runtime, locatorSet, canRead, enabled, succession.document]);
   useEffect(() => {
     if (!enabled || succession.discovering || !runtime.active) return;
     for (const item of enrolledGroups) {
@@ -108,7 +111,8 @@ export function useBotWorkspace(workspace: Workspace, succession: Succession, pl
   }, [runtime, locatorSet, succession.document, succession.document.editRevision, succession.discovering, enabled]);
   const slotId = view && group ? succession.document.windowBindings?.find(entry => entry.windowId === group.window.id && entry.viewId === view.id && entry.bindingKey === windowBindingKey(view.binding))?.slotId : undefined;
   const slot = slotId ? succession.document.slots.find(slot => slot.id === slotId) : undefined;
-  const loading = enabled && !!selectedId && !deleted && runtime.pending.has(selectedId);
+  // A group the device already shows needs no opening word while the Relay's copy is leased.
+  const loading = enabled && !!selectedId && !deleted && runtime.pending.has(selectedId) && !group;
   const error = !enabled || !selectedId ? undefined : deleted ? t('navigation.botWorkspace.unavailable') : runtime.errors.get(selectedId) ?? (!loading && (!group || place?.kind === 'bot' && !view) ? t('navigation.botWorkspace.unavailable') : undefined);
   return { group, view, slot, loading, error, saveState: handle?.getSyncState(),
     retry: async () => {

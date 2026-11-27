@@ -138,7 +138,8 @@ it('selects a bot from Bot mode, and opens a Window from Bot mode in Window mode
     await shortcut();
     await search(app.container, 'Chats');
     await until(() => expect(app.container.querySelector<HTMLElement>('[data-workbench-mode="bot"]')!.hidden).toBe(false));
-    expect(document.activeElement).toBe(app.container.querySelector('.lab-rail [aria-current="page"]'));
+    // The bot that was open shows at once from what the device holds, so focus goes into it.
+    expect(document.activeElement!.closest('[data-workbench-mode="bot"]')).not.toBeNull();
 
     // A Window made from Bot mode stays open once Window mode restores its Window.
     await app.switchMode('bot');

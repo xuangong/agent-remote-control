@@ -1,5 +1,5 @@
 import { createWindowSessionBridge, resolveCompositionWindowViewId } from '../../kernel/window-composition.js';
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { errorWords, keyedError, WindowMutationUnknownError, WindowRequestError, WindowWorkspaceClient, type WindowOperationIdentity, type WindowSnapshot } from '@orchardworks/agent-client';
 import type { WindowCreateRequest, WindowOperation, WindowSessionBinding, WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { conversationLocalStorage, conversationSessionStorage } from '../../kernel/conversation-storage.js';
@@ -12,6 +12,8 @@ import { applyMoveSteps, type MoveStep } from '../../kernel/assistant-groups.js'
 import { newAssistantPicture } from '../../kernel/assistant-picture.js';
 import { applyGroupOperation, applyWindowOperation, createWindowView, decodeWindowGroup, decodeWorkspaceWindow, hasWindowAppearance, isWindowCreateRequest, isWindowGroupCreateRequest, rebindsBot, toWindowGroup, windowPrimaryViewId, type WindowGroup, type WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
+import { advanceKnowledge, type Knowledge, type KnowledgeEvent } from '../../kernel/known-list.js';
+import { readCatalogCache, writeCatalogCache } from '../../kernel/window-catalog-cache.js';
 
 interface PendingCreation { request: WindowCreateRequest; candidate: WorkspaceWindow; bindings: Array<[string, string]> }
 interface CreatedWindow { candidate: WorkspaceWindow; snapshot: WindowSnapshot }
@@ -56,8 +58,12 @@ function linkNeedsAnotherWindow(group: WindowGroup, binding: WindowSessionBindin
   return !views.some(matches) && rebindsBot(group, views.find(view => view.id === selectedViewId), binding);
 }
 
-/** Product page catalog and URL selection; each chosen Window keeps its own store. */
-export function useWindowWorkspace(scope: string, hosted: boolean, enabled: boolean, composition: CompositionDocument, participating = true, workspaceNavigation?: WorkspaceNavigation) {
+/**
+ * Product page catalog and URL selection; each chosen Window keeps its own store.
+ * `canRead`: the device may show what it stored (the catalog its last load left) while `enabled`, which talks to the Relay, is still false.
+ * The catalog's `groupsKnowledge` says whether an empty `groups` means nothing exists yet or only that nothing has loaded.
+ */
+export function useWindowWorkspace(scope: string, hosted: boolean, enabled: boolean, composition: CompositionDocument, participating = true, workspaceNavigation?: WorkspaceNavigation, canRead = enabled) {
   const client = useMemo(() => hosted ? new WindowWorkspaceClient(scope) : undefined, [scope, hosted]);
   const key = `agent-remote:recovery:${scope}:shared-window`;
   const creation = useMemo(() => ({ pending: undefined as PendingCreation | null | undefined, running: undefined as Promise<CreatedWindow> | undefined }), [key, client]);
@@ -76,7 +82,10 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   const catalogSubscriptions = useMemo(() => new Map<string, () => void>(), [stores]);
   const watches = useMemo(() => new Map<WindowWorkspaceStore, { leases: Set<symbol>; abort: AbortController }>(), [stores]);
   const acquisitions = useMemo(() => new Map<string, Promise<WindowWorkspaceStore>>(), [stores]);
-  const catalog = useMemo(() => ({ groups: [] as WindowGroup[], generation: 0 }), [stores]);
+  const catalog = useMemo(() => {
+    const groups = hosted && canRead ? readCatalogCache(scope) : [];
+    return { groups, generation: 0, knowledge: (groups.length ? 'stored' : 'unknown') as Knowledge, persistQueued: false };
+  }, [stores]);
   const admission = useMemo(() => ({}), [stores, enabled, participating]);
   const currentAdmission = useRef(admission); currentAdmission.current = admission;
   const foreground = useRef(true); foreground.current = (workspaceNavigation?.mode ?? 'window') === 'window';
@@ -86,7 +95,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   const inScope = () => selection.active && currentSelection.current === selection;
   const [store, setStore] = useState<WindowWorkspaceStore>();
   const currentStore = useRef<WindowWorkspaceStore>();
-  useEffect(() => {
+  useLayoutEffect(() => {
     selection.active = true;
     for (const saved of stores.values()) saved.setEnabled(access.current);
     return () => {
@@ -115,8 +124,9 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   const selectStore = (next: WindowWorkspaceStore | undefined, cachedOnly = false) => {
     currentStore.current = next; setStore(next); currentlyProvisional.current = cachedOnly; setProvisional(cachedOnly);
   };
-  const [publishedCatalog, setPublishedCatalog] = useState(() => ({ catalog, groups: catalog.groups }));
+  const [publishedCatalog, setPublishedCatalog] = useState(() => ({ catalog, groups: catalog.groups, knowledge: catalog.knowledge }));
   const groups = publishedCatalog.catalog === catalog ? publishedCatalog.groups : catalog.groups;
+  const groupsKnowledge = publishedCatalog.catalog === catalog ? publishedCatalog.knowledge : catalog.knowledge;
   // Only a group shown as a Window can be opened in the workbench; a section alone belongs to Bot mode.
   const windows = useMemo(() => groups.filter(hasWindowAppearance).map(group => group.window), [groups]);
   const t = useTranslate();
@@ -268,7 +278,18 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   };
   const publishCatalog = (next: WindowGroup[]) => {
     if (!inScope()) return;
-    catalog.groups = next; setPublishedCatalog({ catalog, groups: next });
+    catalog.groups = next; setPublishedCatalog({ catalog, groups: next, knowledge: catalog.knowledge });
+    // The device keeps the catalog a load confirmed, once per burst of updates.
+    if (client && catalog.knowledge === 'confirmed' && !catalog.persistQueued) {
+      catalog.persistQueued = true;
+      queueMicrotask(() => { catalog.persistQueued = false; writeCatalogCache(scope, catalog.groups); });
+    }
+  };
+  const learnCatalog = (event: KnowledgeEvent) => {
+    if (!inScope()) return;
+    catalog.knowledge = advanceKnowledge(catalog.knowledge, event);
+    setPublishedCatalog({ catalog, groups: catalog.groups, knowledge: catalog.knowledge });
+    if (client && event === 'confirmed') writeCatalogCache(scope, catalog.groups);
   };
   const updateCatalog = (group: WindowGroup) => {
     if (!inScope() || selection.deleted.has(group.window.id)) return;
@@ -367,6 +388,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       if (retained) confirmedStores.add(retained);
       updateCatalog(retained?.getGroup() ?? group);
     }
+    learnCatalog('confirmed');
     const ids = new Set(listed.map(group => group.window.id));
     await Promise.all(catalog.groups.filter(group => !ids.has(group.window.id)).map(async group => {
       try {
@@ -432,7 +454,8 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     if (!enabled || !participating) return;
     try { if (pendingSection()) void createSectionRequest(undefined, false).catch(() => {}); } catch (error) { sectionCreation.publish({ state: 'error', error: shown(error) }); }
   }, [sectionCreation, enabled, participating]);
-  useEffect(() => {
+  // The Window this device last showed is selected before the first paint, so its top bar and tile are in place in the first frame.
+  useLayoutEffect(() => {
     const generation = ++selection.generation;
     if (foreground.current || !currentStore.current || stores.get(currentStore.current.getSnapshot().id) !== currentStore.current) {
       selectStore(undefined); setUnavailable(false); setDeleted(false); setError(undefined);
@@ -490,7 +513,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       for (const entry of conversationLocalStorage.keys().filter(entry => entry.startsWith(`${key}:`))) {
         try { const value = decodeWindowGroup(JSON.parse(conversationLocalStorage.getItem(entry) ?? 'null')); if (value) local.push(value); } catch { /* A corrupt cache is not a usable Window. */ }
       }
-      publishCatalog(local);
+      publishCatalog(local); learnCatalog('confirmed');
       if (!foreground.current) return;
       if (requested && !cached && linked) {
         // A local Window exists only in the browser that made it. Elsewhere, a link to it opens the session it carries
@@ -521,6 +544,15 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
         const retained = stores.get(group.window.id);
         retained?.accept(group);
         updateCatalog(retained?.getGroup() ?? group);
+      }
+      learnCatalog('confirmed');
+      // A group restored from this device's copy that the Relay no longer lists is checked: it is gone, or it only fell out of the list.
+      const answered = new Set(all.map(group => group.window.id));
+      for (const stale of catalog.groups.filter(group => !answered.has(group.window.id))) {
+        void client.inspect(stale.window.id).then(next => {
+          if (!live()) return;
+          const retained = stores.get(stale.window.id); retained?.accept(next); updateCatalog(retained?.getGroup() ?? toWindowGroup(next));
+        }, error => { if (live() && error instanceof WindowRequestError && error.status === 404) forgetDeletedWindow(stale.window.id); });
       }
       const list = all.filter(hasWindowAppearance);
       // A background journal may outlive a Window deleted on another page.
@@ -618,7 +650,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   };
   const hasActiveWindow = confirmed && !unavailable;
   const deletedWindowIds = useMemo(() => [...selection.deleted] as readonly string[], [selection, selection.deleted.size]);
-  return { window, group, windows, groups, error, client, deleted, deletedWindowIds, hasActiveWindow, saveState, provisional: !!window && provisional,
+  return { window, group, windows, groups, groupsKnowledge, error, client, deleted, deletedWindowIds, hasActiveWindow, saveState, provisional: !!window && provisional,
     retrySave: () => currentStore.current?.retry() ?? Promise.resolve(),
     sectionCreationState, retrySection: () => createSectionRequest(undefined, true),
     acquireGroup, readGroup, operateGroup, refreshGroups,

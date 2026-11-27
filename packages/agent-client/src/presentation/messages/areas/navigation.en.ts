@@ -21,6 +21,7 @@ export const navigation = {
   'navigation.panels.value': '{width} pixels',
   'navigation.panels.hint': 'Drag to resize. Double-click to reset.',
   'navigation.chatsEmpty': 'No chats yet. Start one from Assistants.',
+  'navigation.savedChats': 'Offline. Showing saved chats.',
   'navigation.directoryTitle': 'Assistants',
   'navigation.directoryEmpty': 'No assistants yet. Add one to start a conversation.',
   'navigation.directoryGroupEmpty': 'No assistants in this group yet.',

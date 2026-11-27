@@ -64,6 +64,9 @@ function linkNeedsAnotherWindow(group: WindowGroup, binding: WindowSessionBindin
  * The catalog's `groupsKnowledge` says whether an empty `groups` means nothing exists yet or only that nothing has loaded.
  */
 export function useWindowWorkspace(scope: string, hosted: boolean, enabled: boolean, composition: CompositionDocument, participating = true, workspaceNavigation?: WorkspaceNavigation, canRead = enabled) {
+  // A hosted workspace selects the Window this device last showed before the first paint, so its top bar and tile are in place in the first frame; what it
+  // reads from the Relay comes later. A local one builds its Window from the composition, which the effects above it fill first, so it keeps the passive order.
+  const useScopeEffect = hosted ? useLayoutEffect : useEffect;
   const client = useMemo(() => hosted ? new WindowWorkspaceClient(scope) : undefined, [scope, hosted]);
   const key = `agent-remote:recovery:${scope}:shared-window`;
   const creation = useMemo(() => ({ pending: undefined as PendingCreation | null | undefined, running: undefined as Promise<CreatedWindow> | undefined }), [key, client]);
@@ -95,7 +98,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   const inScope = () => selection.active && currentSelection.current === selection;
   const [store, setStore] = useState<WindowWorkspaceStore>();
   const currentStore = useRef<WindowWorkspaceStore>();
-  useLayoutEffect(() => {
+  useScopeEffect(() => {
     selection.active = true;
     for (const saved of stores.values()) saved.setEnabled(access.current);
     return () => {
@@ -454,8 +457,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     if (!enabled || !participating) return;
     try { if (pendingSection()) void createSectionRequest(undefined, false).catch(() => {}); } catch (error) { sectionCreation.publish({ state: 'error', error: shown(error) }); }
   }, [sectionCreation, enabled, participating]);
-  // The Window this device last showed is selected before the first paint, so its top bar and tile are in place in the first frame.
-  useLayoutEffect(() => {
+  useScopeEffect(() => {
     const generation = ++selection.generation;
     if (foreground.current || !currentStore.current || stores.get(currentStore.current.getSnapshot().id) !== currentStore.current) {
       selectStore(undefined); setUnavailable(false); setDeleted(false); setError(undefined);

@@ -208,6 +208,7 @@ export function BotWorkspace({ visible, covered = false, compact, scope, rooms, 
     </aside>
     {phone ? <div ref={stack.scrim} className="lab-bot-scrim" aria-hidden="true" /> : null}
     <section ref={stack.conversation} className="lab-bot-conversation orchard-panel" aria-label={t('navigation.botConversation')} hidden={phone && !panelShown}>
+      {phone ? <div ref={stack.edge} className="lab-bot-edge" aria-hidden="true" /> : null}
       {panelConversation ? <SharedTopBar ref={title} place={panelPlace} row={botRow} project={projectRoster} name={name}
         detailsOpen={detailsShown} detailsId={detailsId} onToggleDetails={panelDescriptor ? () => setDetailsOpen(open => !open) : undefined}
         leading={phone ? <Button ref={backButton} variant="plain" className="lab-bot-back" aria-label={t('assistants.back')} onClick={back}><Icon name="chevron-left" size={20} />{t('assistants.backShort')}</Button> : undefined}

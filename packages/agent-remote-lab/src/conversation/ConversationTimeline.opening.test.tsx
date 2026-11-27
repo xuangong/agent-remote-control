@@ -1,3 +1,4 @@
+import { createElement } from 'react';
 import { expect, it } from 'vitest';
 import { OpeningReplyContext } from '@orchardworks/agent-client-web/react';
 import { render } from '../test/setup.js';
@@ -5,9 +6,9 @@ import { ConversationTimeline } from './ConversationTimeline.js';
 
 // A conversation whose session is not attached yet shows the shape of one, with the newest reply the list knows as its last bubble,
 // not a blank body; a Host that is away says so in words instead.
-const timeline = (extra: object = {}) => <ConversationTimeline {...({
+const timeline = (extra: object = {}) => createElement(ConversationTimeline, {
   state: undefined, sessionStatus: 'connecting', attachingAgentId: 'agent', visible: true, readingPositions: new Map(), actions: {},
-  toolsTargetRef: () => {}, toolsCollapsible: false, hasTarget: true, runtimeMutationDisabled: false, ...extra } as never)} />;
+  toolsTargetRef: () => {}, toolsCollapsible: false, hasTarget: true, runtimeMutationDisabled: false, ...extra } as never);
 
 it('opens with the shape of a conversation and the newest reply the list knows', async () => {
   const container = await render(<OpeningReplyContext.Provider value="The report is ready.">{timeline()}</OpeningReplyContext.Provider>);

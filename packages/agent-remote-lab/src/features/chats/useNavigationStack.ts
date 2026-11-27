@@ -3,7 +3,7 @@
  * away. This hook owns the motion (stack-transition.ts has the rules); the workspace owns what each layer shows.
  *
  * - A push or a pop keeps both layers on screen until it ends: `motion` says which, `leavingKey` which conversation is sliding out.
- * - An edge swipe follows the finger with both layers; `peek` says the list must be on screen under the conversation while it does.
+ * - An edge swipe, from the strip along the conversation's left edge, follows the finger with both layers; `peek` says the list must be on screen under the conversation while it does.
  *   A release past halfway asks the page to go back and carries on from where the finger left; any other release returns.
  * - Motion off, by the system or by the reader's own choice, settles every transition at once: the durations are read from the
  *   motion tokens, which the page zeroes in both cases.
@@ -30,7 +30,7 @@ const tokenMilliseconds = (element: Element, token: string): number => {
 };
 
 export function useNavigationStack({ root, list, phone, showConversation, shownKey, onBack }: NavigationStackInput) {
-  const conversation = useRef<HTMLElement>(null), scrim = useRef<HTMLDivElement>(null);
+  const conversation = useRef<HTMLElement>(null), scrim = useRef<HTMLDivElement>(null), edge = useRef<HTMLDivElement>(null);
   const [motion, setMotion] = useState<Motion>();
   const [leavingKey, setLeavingKey] = useState<string>();
   const [peek, setPeek] = useState(false);
@@ -71,9 +71,11 @@ export function useNavigationStack({ root, list, phone, showConversation, shownK
     void run.then(finished => { if (finished) { committed.current = undefined; setMotion(undefined); } });
   }, [motion, chat]);
 
-  // An edge swipe: a finger that starts at the left edge of the conversation drags it away, and the list shows underneath.
+  // An edge swipe: a finger that starts on the strip along the conversation's left edge drags the conversation away, and the list shows underneath.
+  // The strip is the part of the screen whose touch action leaves horizontal movement to the page: under it, the timeline would take the
+  // gesture for a scroll of its own and cancel the pointer.
   useEffect(() => {
-    const element = conversation.current;
+    const element = edge.current;
     if (!element || !phone) return;
     let swipe: EdgeSwipe | undefined, pointer = -1;
     const end = () => {
@@ -111,5 +113,5 @@ export function useNavigationStack({ root, list, phone, showConversation, shownK
     return () => { element.removeEventListener('pointerdown', down); end(); };
   }, [phone]);
 
-  return { motion, leavingKey, peek, conversation, scrim };
+  return { motion, leavingKey, peek, conversation, scrim, edge };
 }

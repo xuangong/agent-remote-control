@@ -175,7 +175,7 @@ test.describe('on a phone', () => {
     for (const step of steps) {
       await page.evaluate(({ step }) => {
         const options = { pointerId: 41, pointerType: 'touch', isPrimary: true, bubbles: true, cancelable: true, clientX: step.x, clientY: step.y ?? 400 };
-        const target = step.type === 'down' ? document.querySelector('.lab-bot-conversation .lab-assistant-top-bar')! : window;
+        const target = step.type === 'down' ? document.querySelector('.lab-bot-edge')! : window;
         target.dispatchEvent(new PointerEvent(step.type === 'down' ? 'pointerdown' : step.type === 'move' ? 'pointermove' : 'pointerup', options));
       }, { step });
       await page.waitForTimeout(120);
@@ -204,6 +204,26 @@ test.describe('on a phone', () => {
     await expect(list).toBeHidden();
     expect(page.url()).toBe(before);
     await expect(bot.locator('.lab-timeline-scroll:visible')).toHaveCount(1);
+  });
+
+  test('a real touch from the edge follows the finger: the browser leaves the gesture to the page', async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', "Real touch input is Chromium's DevTools input; the other engines are driven by pointer events.");
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.goto(url);
+    const { bot, open } = await chats(page);
+    await open(0);
+    await expect(bot.locator('.lab-bot-roster')).toBeHidden();
+    const cdp = await page.context().newCDPSession(page);
+    const touch = (type: string, x: number, y: number) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 1 }] } as never);
+    // Over the conversation's text, where a vertical drag scrolls and a horizontal one has nothing to scroll.
+    await touch('touchStart', 6, 400);
+    for (const x of [40, 90, 160, 210]) { await touch('touchMove', x, 405); await page.waitForTimeout(80); }
+    await expect.poll(async () => Math.round((await bot.locator('.lab-bot-conversation').boundingBox())!.x)).toBeGreaterThan(150);
+    await expect(bot.locator('.lab-bot-roster')).toBeVisible();
+    // Back toward the edge and up: the chat returns.
+    for (const x of [120, 50]) { await touch('touchMove', x, 405); await page.waitForTimeout(100); }
+    await touch('touchEnd', 0, 0);
+    await expect.poll(async () => Math.round((await bot.locator('.lab-bot-conversation').boundingBox())!.x)).toBe(0);
   });
 
   test('releasing the edge swipe past the middle goes back to the list', async ({ page }) => {

@@ -73,7 +73,7 @@ for (const theme of ['light', 'dark'] as const) {
     await page.getByRole('button', { name: 'Helper 20', exact: true }).click();
     await expect(page.locator('.lab-bot-conversation')).toBeVisible();
     // A swipe from the left edge goes back, as in a native navigation stack.
-    await swipe(page.locator('.lab-bot-conversation'), { x: 8, y: 400 }, { x: 260, y: 410 });
+    await swipe(page.locator('.lab-bot-edge'), { x: 8, y: 400 }, { x: 260, y: 410 });
     await expect(roster).toBeVisible();
     expect(Math.abs(await roster.evaluate(node => node.scrollTop) - scrolled)).toBeLessThanOrEqual(1);
     // The top bar's Back too.

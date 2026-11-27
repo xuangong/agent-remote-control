@@ -160,8 +160,9 @@ button.lab-assistant-title:is(:hover, [aria-expanded="true"]):not(:disabled) { b
 .lab-bot-workspace[data-phone] > .lab-bot-roster.orchard-panel { z-index: 0; padding: calc(var(--orchard-space-xl) + var(--orchard-safe-area-top)) calc(var(--orchard-space-m) + var(--orchard-safe-area-right))
   0 calc(var(--orchard-space-m) + var(--orchard-safe-area-left)); }
 .lab-bot-workspace[data-phone] > .lab-bot-conversation.orchard-panel { z-index: 2; padding: var(--orchard-safe-area-top) var(--orchard-safe-area-right) 0 var(--orchard-safe-area-left);
-  /* A finger from the left edge is the stack's own (useNavigationStack); vertical scrolling stays the browser's. */
-  touch-action: pan-y; }
+  position: relative; }
+/* The strip along the left edge, below the top bar, belongs to the stack's swipe back (useNavigationStack): horizontal movement on it is the page's, vertical scrolling stays the browser's. */
+.lab-bot-edge { position: absolute; z-index: 3; inset-block: calc(var(--orchard-safe-area-top) + 58px) 0; inset-inline-start: 0; width: 20px; touch-action: pan-y; }
 .lab-bot-scrim { z-index: 1; opacity: 0; pointer-events: none; background: var(--orchard-shadow-ink); }
 .lab-bot-workspace[data-stacking] > :is(.lab-bot-roster, .lab-bot-conversation) { will-change: transform; }
 .lab-bot-workspace[data-stacking] > .lab-bot-conversation { box-shadow: -8px 0 24px var(--orchard-shadow-ink); }

@@ -85,21 +85,22 @@ const SITE = {
   '/assets/Trace-2.js': { body: 'trace 2' },
 };
 /** A fetch event's context: what the worker keeps alive is awaited before the test looks at the cache. */
-function context(preload?: Promise<Response | undefined>) {
+function context() {
   const work: Promise<unknown>[] = [];
-  return { origin: ORIGIN, ...(preload ? { preload } : {}), waitUntil: (promise: Promise<unknown>) => { work.push(promise); }, settled: () => Promise.all(work) };
+  return { origin: ORIGIN, waitUntil: (promise: Promise<unknown>) => { work.push(promise); }, settled: () => Promise.all(work) };
 }
 
 describe('the worker', () => {
-  it('stores the shell at install and deletes the older builds\' caches at activation', async () => {
+  it('stores the shell at install and, at activation, keeps the build before it and deletes the older ones', async () => {
     const { caches, stores, kept } = memoryCaches();
+    await (await caches.open(shellCacheName('build-0'))).put('/', new Response('older'));
     await (await caches.open(shellCacheName('build-1'))).put('/', new Response('old'));
     await (await caches.open('another-app')).put('/', new Response('theirs'));
     const worker = appShellWorker(SHELL, { caches, fetch: network(SITE).fetch });
     await worker.install();
     expect(kept(shellCacheName('build-2'))).toEqual(['/', '/assets/App-2.js', '/assets/index-2.css', '/assets/index-2.js']);
     await worker.activate();
-    expect([...stores.keys()].sort()).toEqual(['another-app', shellCacheName('build-2')]);
+    expect([...stores.keys()].sort()).toEqual(['another-app', shellCacheName('build-1'), shellCacheName('build-2')]);
   });
 
   it('fails an install whose shell cannot be stored whole, and keeps nothing of it', async () => {
@@ -113,53 +114,61 @@ describe('the worker', () => {
     expect(stores.has(shellCacheName('build-2'))).toBe(false);
   });
 
-  it('opens the page from the network first and keeps it as the shell; offline, the kept shell answers', async () => {
+  it('opens the page from the stored shell without asking the network, offline or on a network that never answers', async () => {
     const { caches } = memoryCaches();
     const site = { ...SITE };
     const net = network(site);
     const worker = appShellWorker(SHELL, { caches, fetch: net.fetch });
     await worker.install();
-    // A new build is deployed: the next open takes it from the network, whatever the shell kept.
+    net.state.asked = [];
+    // A new page is deployed meanwhile: this build keeps serving its own, so its page and its bundles stay together.
     site['/'] = { body: '<!doctype html><title>Orchard build 3</title>', type: 'text/html' };
-    const online = context();
-    expect(await (await worker.respond(get('/?mode=bot', 'navigate'), online))!.text()).toContain('build 3');
-    await online.settled();
-    net.state.offline = true;
-    const offline = context();
-    const shell = await worker.respond(get('/?mode=window&window=w1', 'navigate'), offline)!;
-    expect(shell.status).toBe(200);
-    expect(await shell.text()).toContain('build 3');
+    for (const mode of ['online', 'offline', 'hung'] as const) {
+      const hung = new Promise<Response>(() => undefined);
+      const ports = { caches, fetch: mode === 'hung' ? () => hung : net.fetch };
+      net.state.offline = mode === 'offline';
+      const answer = await appShellWorker(SHELL, ports).respond(get('/?mode=window&window=w1', 'navigate'), context())!;
+      expect(answer.status).toBe(200);
+      expect(await answer.text()).toContain('build 2');
+    }
+    expect(net.state.asked).toEqual([]);
     // Its bundles come from the cache too.
     expect(await (await worker.respond(get('/assets/App-2.js'), context()))!.text()).toBe('app 2');
   });
 
-  it('uses the navigation preload when the browser started one', async () => {
-    const { caches } = memoryCaches();
+  it('takes the page from the network, and keeps it, only where the install has not stored it', async () => {
+    const { caches, kept } = memoryCaches();
     const net = network(SITE);
     const worker = appShellWorker(SHELL, { caches, fetch: net.fetch });
-    const preloaded = new Response('<!doctype html><title>preloaded</title>', { headers: { 'content-type': 'text/html' } });
-    const answer = await worker.respond(get('/', 'navigate'), context(Promise.resolve(preloaded)))!;
-    expect(await answer.text()).toContain('preloaded');
-    expect(net.state.asked).toEqual([]);
-    // Another navigation is answered from its preload and never kept.
-    const signIn = new Response('', { status: 302, headers: { location: '/auth/callback' } });
-    expect((await worker.respond(get('/auth/login', 'navigate'), context(Promise.resolve(signIn)))!).status).toBe(302);
+    const first = context();
+    expect(await (await worker.respond(get('/', 'navigate'), first)!).text()).toContain('build 2');
+    await first.settled();
+    expect(kept(shellCacheName('build-2'))).toEqual(['/']);
+    net.state.offline = true;
+    await expect(appShellWorker({ ...SHELL, version: 'build-9' }, { caches, fetch: net.fetch }).respond(get('/', 'navigate'), context())).rejects.toThrow('Failed to fetch');
   });
 
-  it('keeps neither a redirect, an error nor another navigation as the shell', async () => {
-    const { caches, kept } = memoryCaches();
-    const net = network({ ...SITE, '/': { body: 'Controller assets are unavailable.', type: 'text/plain', status: 503 }, '/auth/login': { body: '<p>sign in</p>', type: 'text/html' } });
+  it('answers another navigation from the network, and never keeps it', async () => {
+    const { caches, stores } = memoryCaches();
+    const net = network({ ...SITE, '/auth/login': { body: '<p>sign in</p>', type: 'text/html' } });
     const worker = appShellWorker(SHELL, { caches, fetch: net.fetch });
-    const unavailable = context();
-    expect((await worker.respond(get('/', 'navigate'), unavailable)!).status).toBe(503);
     const signIn = context();
     expect(await (await worker.respond(get('/auth/login', 'navigate'), signIn)!).text()).toBe('<p>sign in</p>');
+    await signIn.settled();
+    expect(stores.size).toBe(0);
+  });
+
+  it('keeps neither a redirect nor an error as the shell', async () => {
+    const { caches, kept } = memoryCaches();
+    const unavailable = context();
+    const down = network({ ...SITE, '/': { body: 'Controller assets are unavailable.', type: 'text/plain', status: 503 } });
+    expect((await appShellWorker(SHELL, { caches, fetch: down.fetch }).respond(get('/', 'navigate'), unavailable)!).status).toBe(503);
     // A page the network reached through a redirect (a sign-in that came back) is shown, not kept.
     const followed = new Response('<!doctype html><title>after sign-in</title>', { headers: { 'content-type': 'text/html' } });
     Object.defineProperty(followed, 'redirected', { value: true });
     const redirected = context();
-    expect(await (await worker.respond(get('/', 'navigate'), { ...redirected, preload: Promise.resolve(followed) })!).text()).toContain('after sign-in');
-    await Promise.all([unavailable.settled(), signIn.settled(), redirected.settled()]);
+    expect(await (await appShellWorker(SHELL, { caches, fetch: async () => followed }).respond(get('/', 'navigate'), redirected)!).text()).toContain('after sign-in');
+    await Promise.all([unavailable.settled(), redirected.settled()]);
     expect(kept(shellCacheName('build-2'))).toEqual([]);
   });
 
@@ -181,6 +190,15 @@ describe('the worker', () => {
     expect((await worker.respond(get('/assets/Portal-1.js'), missing)!).headers.get('content-type')).toBe('text/plain');
     await missing.settled();
     expect(kept(shellCacheName('build-2'))).toEqual(['/assets/Trace-2.js']);
+  });
+
+  it('answers a page still open on the previous build from that build\'s cache, so its chunks survive a deployment', async () => {
+    const { caches } = memoryCaches();
+    await (await caches.open(shellCacheName('build-1'))).put('/assets/Trace-1.js', new Response('trace 1', { headers: { 'content-type': 'text/javascript' } }));
+    const net = network(SITE);
+    net.state.offline = true;
+    const worker = appShellWorker(SHELL, { caches, fetch: net.fetch });
+    expect(await (await worker.respond(get('/assets/Trace-1.js'), context())!).text()).toBe('trace 1');
   });
 
   it('fails a bundle the network cannot give and the cache does not have, as the page would without the worker', async () => {

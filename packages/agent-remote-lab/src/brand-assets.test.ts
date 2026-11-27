@@ -54,3 +54,14 @@ it('links only the files the Relay serves, and the Relay serves every icon of th
   expect(manifest.icons.map(icon => icon.src).filter(path => !STATIC_SITE_FILES.includes(path))).toEqual([]);
   expect(STATIC_SITE_FILES).toContain('/sw.js');
 });
+
+it('draws a wordless launch screen from the page itself: the brand\'s ground for each theme and its mark, with no script', () => {
+  const [, style = ''] = /<style>([\s\S]*?)<\/style>/.exec(html) ?? [];
+  expect(style).toContain(`html { --launch-ground: ${orchardColors.ground.light};`);
+  expect(style).toMatch(new RegExp(`prefers-color-scheme: dark\\) \\{ html \\{ --launch-ground: ${orchardColors.ground.dark};`));
+  expect(style).toContain(`html[data-theme="dark"] { --launch-ground: ${orchardColors.ground.dark}; }`);
+  const [, launch = ''] = /<div id="launch"[^>]*>([\s\S]*?)<\/div>/.exec(html) ?? [];
+  expect(launch.trim()).toBe(markSvg().trim());
+  expect(launch.replace(/<[^>]*>/g, '')).toBe('');
+  expect(html).not.toMatch(/<script(?![^>]*src=)/);
+});

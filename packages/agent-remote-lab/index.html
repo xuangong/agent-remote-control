@@ -16,9 +16,26 @@
     <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
     <link rel="icon" type="image/png" sizes="32x32" href="/app/favicon-32.png" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <style>
+      /* The launch screen: drawn from this page alone, before any script or stylesheet loads. It carries the app's ground and mark for each
+         theme and shows no words. It leaves once the app draws something other than its own empty loading ground (a browser without
+         :has() simply shows the ground). `brand-assets.test.ts` keeps its colours and mark equal to the brand's. */
+      html { --launch-ground: #f3efe9; background: var(--launch-ground); color-scheme: light dark; }
+      @media (prefers-color-scheme: dark) { html { --launch-ground: #151517; } }
+      html[data-theme="light"] { --launch-ground: #f3efe9; }
+      html[data-theme="dark"] { --launch-ground: #151517; }
+      body { margin: 0; }
+      #launch { display: none; }
+      @supports selector(:has(*)) {
+        #launch { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; background: var(--launch-ground); }
+        #launch svg { width: 72px; height: 72px; }
+        #root:has(> :not(.gateway-workspace-shell)) ~ #launch { display: none; }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <div id="launch" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><clipPath id="tile"><rect width="64" height="64" rx="15"/></clipPath></defs><g clip-path="url(#tile)"><rect width="64" height="64" fill="#24242a"/><g transform="rotate(-14 32 44)"><path d="M33 20c0-4 1-7 4-9" stroke="#2f8f55" stroke-width="3.2" stroke-linecap="round" fill="none"/><path d="M37 11.5c2-7 10-9 15-6-2 6-10 8-15 6z" fill="#4cc27a"/><path d="M33 19c-17 0-29 12-29 28 0 10 4 19 8 24h42c4-5 8-14 8-24 0-16-12-28-29-28z" fill="#ff7f45"/><ellipse cx="25" cy="35" rx="3.9" ry="6" fill="#16161a"/><ellipse cx="36" cy="35" rx="3.9" ry="6" fill="#16161a"/></g></g></svg></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

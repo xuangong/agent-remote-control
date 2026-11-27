@@ -1,6 +1,10 @@
 import { act } from 'react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { beforeAll, afterEach, expect, it, vi } from 'vitest';
 import { botGroup, mountBotApp, seedGroup, until } from './test/bot-mode-fixtures.js';
+import { loadScreens } from './app/lazy-screens.js';
+
+// Settings, the Trace and the Inspector are chunks the page warms when idle; a test opens them as a settled page would.
+beforeAll(() => loadScreens());
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); localStorage.clear(); history.replaceState(null, '', '/'); });
 

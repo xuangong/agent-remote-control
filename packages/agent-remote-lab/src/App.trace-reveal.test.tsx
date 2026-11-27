@@ -1,12 +1,16 @@
 import 'fake-indexeddb/auto';
 import { act } from 'react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { beforeAll, afterEach, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { configureImageDraftPersistence } from '@orchardworks/agent-client-web/browser';
 import { App, type LabTransport } from './App.js';
 import { SessionDirectoryClient } from './kernel/directory-client.js';
 import { render } from './test/setup.js';
 import { replicaState } from './test/fixtures.js';
+import { loadScreens } from './app/lazy-screens.js';
+
+// Settings, the Trace and the Inspector are chunks the page warms when idle; a test opens them as a settled page would.
+beforeAll(() => loadScreens());
 
 const scope = 'http://localhost/trace-reveal/';
 

@@ -1,11 +1,15 @@
 import { act } from 'react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { beforeAll, afterEach, expect, it, vi } from 'vitest';
 import type { HostProvider } from './kernel/remote-host.js';
 import { App, type LabTransport } from './App.js';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import { SessionDirectoryClient } from './kernel/directory-client.js';
 import { replicaState } from './test/fixtures.js';
 import { render } from './test/setup.js';
+import { loadScreens } from './app/lazy-screens.js';
+
+// Settings, the Trace and the Inspector are chunks the page warms when idle; a test opens them as a settled page would.
+beforeAll(() => loadScreens());
 
 afterEach(() => { vi.unstubAllGlobals(); window.localStorage.clear(); });
 

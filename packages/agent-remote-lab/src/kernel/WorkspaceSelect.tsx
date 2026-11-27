@@ -1,9 +1,9 @@
 import { errorWords } from '@orchardworks/agent-client';
-import { useEffect, useId, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useId, useRef, useState } from 'react';
 import type { SessionDirectoryClient, SessionWorkspace } from './directory-client.js';
 import { useFeedbackToast } from './Toast.js';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
-import { WorkspaceFolderPicker } from './WorkspaceFolderPicker.js';
+const WorkspaceFolderPicker = lazy(() => import('./WorkspaceFolderPicker.js').then(module => ({ default: module.WorkspaceFolderPicker })));
 
 export interface WorkspaceSelection { workspaceId?: string; path?: string }
 interface Scope { directory: SessionDirectoryClient; providerId: string }
@@ -51,9 +51,9 @@ export function WorkspaceSelect({ directory, providerId, disabled, value, onChan
       {canBrowse && providerId !== 'dsh' ? <button ref={browseButton} type="button" disabled={disabled || loading || !providerId} onClick={() => setBrowsing({ directory, providerId })}>{t('sessions.workspace.browse')}</button> : null}
     </div>
     {browsing?.directory === directory && browsing.providerId === providerId && canBrowse && !disabled
-      ? <WorkspaceFolderPicker directory={directory} providerId={providerId} workspaces={workspaces} opener={browseButton}
+      ? <Suspense fallback={null}><WorkspaceFolderPicker directory={directory} providerId={providerId} workspaces={workspaces} opener={browseButton}
           initialPath={value.path ?? workspaces.find(workspace => workspace.id === value.workspaceId)?.path}
-          onClose={() => setBrowsing(undefined)} onSelect={path => { onChange({ path }); setBrowsing(undefined); }} /> : null}
+          onClose={() => setBrowsing(undefined)} onSelect={path => { onChange({ path }); setBrowsing(undefined); }} /></Suspense> : null}
     {failure ? <p className="lab-control-note" role="alert">{failure} <button type="button" disabled={disabled} onClick={() => setRetry(value => value + 1)}>{t('sessions.workspace.retry')}</button></p> : null}
   </div>;
 }

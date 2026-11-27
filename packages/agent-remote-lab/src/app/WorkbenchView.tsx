@@ -44,6 +44,7 @@ import { EmptyWindow } from './views/EmptyWindow.js';
 import { WorkspaceNotices } from './views/WorkspaceNotices.js';
 import { SessionDocks } from './views/SessionDocks.js';
 import { TraceSection } from './views/TraceSection.js';
+import { useScreenPreload } from './lazy-screens.js';
 import { SessionDialogs } from './views/SessionDialogs.js';
 import { InspectorRail } from './views/InspectorRail.js';
 import { WindowSheets } from './views/WindowSheets.js';
@@ -58,6 +59,7 @@ const WINDOW_INSPECTOR_WIDTH = 320;
 export function WorkbenchView({ scope }: { readonly scope: AppScope }) {
   const { assistantNames, activated, activeAgentId, activeOpened, activeView, askView, attention, backgroundInert, baseUrl, commandItems, compactLayout, connections, contextOpen, contextVisible, desktopContextVisible, focusManagedWindow, headerHidden, inspectorOpen, liveConnections, nativeTakeover, navigation, openExcerptSource, pageOpen, presentedPrimaryViewId, presentedViewId, previewClient, previewHost, promptMigrations, readingPositions, searchOpen, sessionDescriptions, sessionNotice, sessionViewOperations, setSearchOpen, setShortcutsOpen, sharedDrafts, sharedFeeds, sharedWindow, shellRef, shortcutsOpen, sidebar, state, supportingRailOpen, tracking, transport, userScoped, vscodeTunnelClient, windowMode, windowPageTitle, windowWorkspace, workbenchPanelRef , teamRoster , openSession , updateTaskRoster } = scope;
   const t = useTranslate();
+  useScreenPreload();
   const phone = usePhoneLayout();
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), [setShortcutsOpen]);
   const pageShown = !!navigation.page;

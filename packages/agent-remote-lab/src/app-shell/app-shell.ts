@@ -1,15 +1,18 @@
 /**
- * The installed app's service worker: an app shell for an offline start. Its push reminders and their clicks are push-events.ts (I5c).
- * - The shell is the page (`/`) and the bundles it starts with; each build lists them and names its version (app-shell-plugin.ts).
- * - Opening the page asks the network first, so a reload always takes the newest build; the stored shell answers only when the network
- *   fails, which is what lets the app start offline.
+ * The installed app's service worker: an app shell that starts from the device. Its push reminders and their clicks are push-events.ts (I5c).
+ * - The shell is the page (`/`) and the bundles it starts with; each build lists them and names its version (app-shell-plugin.ts). The
+ *   worker stores the whole shell at install, so a build's page and its bundles always belong together.
+ * - Opening the page answers from the stored shell at once, cache first: a slow or hung network never delays the first paint. The page is
+ *   not refreshed from the network. A new build is found by the browser's own check of `/sw.js` (at every navigation, and when the app
+ *   comes back to the front, register.ts); its worker stores its shell in a cache of its own while this one keeps serving, and the next
+ *   launch starts from it. An open page is never swapped: it keeps loading its own build's bundles from the build's cache.
  * - Built bundles are immutable (their names carry a content hash): the cache answers first and the network fills it. Only a whole
  *   bundle is kept, never an error or an HTML fallback, so a missing chunk still fails and the chunk recovery reloads (O27, O54).
- * - Other navigations (sign-in, previews, the file frame) come from the network, through the navigation preload, and are never kept.
+ * - Other navigations (sign-in, previews, the file frame) come from the network and are never kept.
  * - Every other request, the API and session traffic included, passes by: the worker neither answers nor keeps it. Where the browser
  *   has static routes (Chromium), they send those requests to the network without waking the worker (`DIRECT_ROUTES`).
- * - A new build's worker takes over at once (`skipWaiting`) and deletes the older builds' caches. Pages already open keep loading
- *   their bundles from the network; a page whose bundle is gone recovers by reloading.
+ * - A new build's worker takes over at once (`skipWaiting`) once its shell is stored, and deletes the caches of every build but the one
+ *   before it, which pages that are still open on that build read their lazy bundles from.
  * Pure apart from its ports: the cache storage, the network and the event's lifetime come in as arguments.
  */
 
@@ -34,8 +37,6 @@ export interface ShellPorts<Request extends ShellRequest> {
 export interface FetchContext {
   /** The worker's own origin; requests to any other pass by. */
   readonly origin: string;
-  /** The navigation preload's response, when the browser started one. */
-  readonly preload?: Promise<Response | undefined>;
   /** Keeps the worker alive for work that follows the answer, such as storing it. */
   waitUntil(work: Promise<unknown>): void;
 }
@@ -88,16 +89,11 @@ export function appShellWorker<Request extends ShellRequest>(shell: AppShell, po
   const name = shellCacheName(shell.version);
   const cache = () => ports.caches.open(name);
 
-  /** The page from the network, kept as the shell; the kept shell when the network fails. */
+  /** The page from this build's stored shell; from the network, kept, only where the install has not stored it yet. */
   async function page(request: Request, context: FetchContext): Promise<Response> {
-    let response: Response;
-    try {
-      response = (await context.preload) ?? await ports.fetch(request);
-    } catch (failure) {
-      const kept = await (await cache()).match(SHELL_PAGE);
-      if (kept) return kept;
-      throw failure;
-    }
+    const kept = await (await cache()).match(SHELL_PAGE);
+    if (kept) return kept;
+    const response = await ports.fetch(request);
     if (isShell(response)) {
       const copy = response.clone();
       context.waitUntil(cache().then(store => store.put(SHELL_PAGE, copy)));
@@ -105,10 +101,13 @@ export function appShellWorker<Request extends ShellRequest>(shell: AppShell, po
     return response;
   }
 
-  /** A built bundle from the cache, or from the network into the cache. */
+  /** A built bundle from this build's cache, else the previous build's (a page still open on it), else the network into this cache. */
   async function bundle(request: Request, context: FetchContext): Promise<Response> {
     const store = await cache();
-    const kept = await store.match(request);
+    const kept = await store.match(request) ?? await olderBuilds().then(async names => {
+      for (const older of names) { const found = await (await ports.caches.open(older)).match(request); if (found) return found; }
+      return undefined;
+    });
     if (kept) return kept;
     const response = await ports.fetch(request);
     if (isBundle(new URL(request.url).pathname, response)) {
@@ -116,6 +115,11 @@ export function appShellWorker<Request extends ShellRequest>(shell: AppShell, po
       context.waitUntil(store.put(request, copy));
     }
     return response;
+  }
+
+  /** The other builds' caches, newest first (the storage lists them in the order they were created). */
+  async function olderBuilds(): Promise<string[]> {
+    return (await ports.caches.keys()).filter(key => key.startsWith(CACHE_PREFIX) && key !== name).reverse();
   }
 
   return {
@@ -133,17 +137,17 @@ export function appShellWorker<Request extends ShellRequest>(shell: AppShell, po
         throw failure;
       }
     },
-    /** Deletes every other build's cache. */
+    /** Deletes the caches of every build but this one and the one before it. */
     async activate(): Promise<void> {
-      const names = await ports.caches.keys();
-      await Promise.all(names.filter(key => key.startsWith(CACHE_PREFIX) && key !== name).map(key => ports.caches.delete(key)));
+      const [, ...stale] = await olderBuilds();
+      await Promise.all(stale.map(key => ports.caches.delete(key)));
     },
     /** The answer to a request, or `undefined` to let the browser fetch it as if there were no worker. */
     respond(request: Request, context: FetchContext): Promise<Response> | undefined {
       switch (routeOf(request, context.origin)) {
         case 'page': return page(request, context);
         case 'bundle': return bundle(request, context);
-        case 'navigation': return (context.preload ?? Promise.resolve(undefined)).then(preloaded => preloaded ?? ports.fetch(request));
+        case 'navigation': return ports.fetch(request);
         case 'pass': return undefined;
       }
     },

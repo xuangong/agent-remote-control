@@ -4,7 +4,7 @@ import { useCallback, useContext, useId, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { remoteSessionState, sessionActivityLabel, sessionNotice, sessionNoticeWords, type SessionFacts } from '@orchardworks/agent-client';
 import type { AgentCommand, BotFact } from '@orchardworks/agent-remote-protocol';
-import { AgentCommandDetails, LocaleContext, PreviewDock, ProcessModeContext, SessionAttributions, TimelineLettersVisible, useTranslate } from '@orchardworks/agent-client-web/react';
+import { AgentCommandDetails, LocaleContext, OpeningReplyContext, PreviewDock, ProcessModeContext, SessionAttributions, TimelineLettersVisible, useTranslate } from '@orchardworks/agent-client-web/react';
 import { SessionViewFrame } from './SessionViewFrame.js';
 import { SessionViewOptions } from './SessionViewOptions.js';
 import { SessionHeadingActionsPresentationContext } from './SessionHeadingActions.js';
@@ -87,13 +87,13 @@ export function SessionWorkbench({ assistant, details, conversationTitle: _conve
       viewOptions={viewOptions} headingContext={headingContext} attributionToggle={toggle} attributionDetails={attributionDetails} activity={activity} activityLabel={activityLabel}
       host={host} notice={notice} titled={hasReplica || hasTarget} displayScope={displayScope} tileDetails={tileDetails} searchSlotRef={setHeadingSearchTarget} />
     <PreviewDock sessionId={state?.agent?.id ?? attachingAgentId} />
-    <ConversationTimeline toolsTargetRef={setTimelineToolsTarget} toolsCollapsible={headingMode === 'toolbar'} toolsScope={displayScope}
+    <OpeningReplyContext.Provider value={detailsHost?.latestReply}><ConversationTimeline toolsTargetRef={setTimelineToolsTarget} toolsCollapsible={headingMode === 'toolbar'} toolsScope={displayScope}
       searchTriggerTarget={headingMode === 'inline' || tileChrome ? headingSearchTarget : assistantChrome ? detailsHost?.tools ?? null : undefined} nativeTakeover={!!nativeTakeover} readOnly={readOnly} state={state} sessionStatus={sessionStatus} attachingAgentId={attachingAgentId}
       visible={visible} readingPositions={readingPositions} actions={actions} revealEntry={revealEntry}
       notice={timelineNotice} hasTarget={hasTarget} runtimeMutationDisabled={runtimeMutationDisabled}
       onInspectEntry={onInspectEntry} onOpenChildSession={onOpenChildSession} childrenFor={childrenFor} resolveSessionLink={resolveSessionLink}
       questionDrafts={questionDrafts} onQuestionDraftChange={onQuestionDraftChange} entrySelection={entrySelection} timelineStart={timelineStart} timelineEnd={timelineEnd} loadingNotice={loadingNotice} assistant={assistant}
-      onQuote={quotable ? quoteMessage : undefined} />
+      onQuote={quotable ? quoteMessage : undefined} /></OpeningReplyContext.Provider>
     {headingMode === 'toolbar' && timelineToolsTarget ? createPortal(<SessionHeadingActionsPresentationContext.Provider value="inline">{workspaceLink}{sessionManager}{viewOptions}{toggle}</SessionHeadingActionsPresentationContext.Provider>, timelineToolsTarget) : null}
     <ConversationComposer composerStatus={composerStatus} composerContext={composerContext} composerNotice={composerNotice} authenticationNotice={authenticationNotice} reauthenticate={reauthenticate}
       hostNotice={hostNotice} nativeTakeover={nativeTakeover} host={host} opening={opening} openFailed={openFailed} onPendingInputChange={onPendingInputChange}

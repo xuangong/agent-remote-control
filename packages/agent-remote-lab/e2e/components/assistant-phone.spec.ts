@@ -13,17 +13,13 @@ async function home(page: Page, query = '') {
   await page.goto(`/e2e/fixtures/assistant-conversation.html?layout=bot&mode=bot${query}`);
   await expect(page.locator(query.includes('bot=') ? '.lab-bot-conversation' : '.lab-bot-roster')).toBeVisible();
 }
-/** A swipe from `from` to `to` on `target`, as touch events carry it. */
+/** A swipe from `from` to `to` on `target`, as a finger's pointer events carry it: down on the target, moves and up on the page. */
 async function swipe(target: Locator, from: { x: number; y: number }, to: { x: number; y: number }) {
   await target.evaluate((node, { from, to }) => {
-    const touch = (point: { x: number; y: number }) => ({ clientX: point.x, clientY: point.y, identifier: 1, target: node });
-    for (const [type, point, list] of [['touchstart', from, 'touches'], ['touchend', to, 'changedTouches']] as const) {
-      const event = new Event(type, { bubbles: true, cancelable: true });
-      Object.defineProperty(event, 'touches', { value: type === 'touchstart' ? [touch(point)] : [] });
-      Object.defineProperty(event, 'changedTouches', { value: [touch(point)] });
-      void list;
-      node.dispatchEvent(event);
-    }
+    const event = (type: string, point: { x: number; y: number }) => new PointerEvent(type, { pointerId: 9, pointerType: 'touch', isPrimary: true, bubbles: true, cancelable: true, clientX: point.x, clientY: point.y });
+    node.dispatchEvent(event('pointerdown', from));
+    for (const share of [0.25, 0.5, 0.75, 1]) window.dispatchEvent(event('pointermove', { x: from.x + (to.x - from.x) * share, y: from.y + (to.y - from.y) * share }));
+    window.dispatchEvent(event('pointerup', to));
   }, { from, to });
 }
 
@@ -77,7 +73,7 @@ for (const theme of ['light', 'dark'] as const) {
     await page.getByRole('button', { name: 'Helper 20', exact: true }).click();
     await expect(page.locator('.lab-bot-conversation')).toBeVisible();
     // A swipe from the left edge goes back, as in a native navigation stack.
-    await swipe(page.locator('.lab-bot-conversation'), { x: 8, y: 400 }, { x: 260, y: 410 });
+    await swipe(page.locator('.lab-bot-edge'), { x: 8, y: 400 }, { x: 260, y: 410 });
     await expect(roster).toBeVisible();
     expect(Math.abs(await roster.evaluate(node => node.scrollTop) - scrolled)).toBeLessThanOrEqual(1);
     // The top bar's Back too.

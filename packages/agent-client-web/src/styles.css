@@ -288,6 +288,9 @@
 .agent-timeline-skeleton { display: flex; flex-direction: column; gap: var(--orchard-space-l); padding: var(--orchard-space-l); }
 .agent-timeline-skeleton-bubble { width: 62%; height: 56px; border-radius: var(--orchard-radius-bubble); background: var(--orchard-fill); }
 .agent-timeline-skeleton-bubble[data-from="mine"] { align-self: flex-end; width: 44%; height: 40px; }
+/* The newest reply as the list has it: the last bubble grows to its text, at most four lines. */
+.agent-timeline-opening-reply { box-sizing: border-box; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; width: auto; max-width: 80%; height: auto; min-height: 56px; margin: 0;
+  padding: var(--orchard-space-l) var(--orchard-space-xl); overflow: hidden; color: var(--orchard-text); font: var(--orchard-type-body-size) / var(--orchard-type-body-leading) var(--orchard-font-text); }
 
 .agent-interaction-lock { min-width: 0; margin: 0; padding: 0; border: 0; }
 .agent-interaction {

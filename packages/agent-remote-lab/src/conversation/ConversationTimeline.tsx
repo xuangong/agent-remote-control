@@ -3,7 +3,7 @@
 import { memo, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { sessionNoticeWords, type SessionNotice } from '@orchardworks/agent-client';
-import { AgentTimeline, ProcessModeContext, TimelineLettersVisible, TimelineSearch, useTranslate } from '@orchardworks/agent-client-web/react';
+import { AgentTimeline, ProcessModeContext, TimelineLettersVisible, TimelineSearch, TimelineSkeleton, useTranslate } from '@orchardworks/agent-client-web/react';
 import { SessionTimelineTools } from './SessionTimelineTools.js';
 import { useTimelineScroll } from './useTimelineScroll.js';
 import type { SessionWorkbenchProps } from './session-workbench-props.js';
@@ -140,12 +140,12 @@ export const ConversationTimeline = memo(function ConversationTimeline({ nativeT
               timelineEnd={timelineEnd}
             />
           </> : nativeTakeover ? null : isAttaching ? <>
-            {/* A conversation that is still opening shows nothing until its rows exist, unless something must be said (a Host that is away). */}
+            {/* A conversation that is still opening shows the shape of one until its rows exist, unless something must be said (a Host that is away). */}
             {loadingNotice ? <div className="lab-empty-state">
               <span className="lab-empty-icon" aria-hidden="true">↗</span>
               <h3>{loadingNotice.title}</h3>
               <p>{loadingNotice.detail}</p>
-            </div> : null}
+            </div> : <TimelineSkeleton />}
             {/* What follows the conversation (messages waiting for an offline Host) shows before it loads too. */}
             {timelineEnd ? <div className="agent-timeline-entries lab-timeline-end">{timelineEnd}</div> : null}
           </> : <div className="lab-empty-state">

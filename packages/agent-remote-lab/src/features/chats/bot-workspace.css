@@ -153,22 +153,25 @@ button.lab-assistant-title:is(:hover, [aria-expanded="true"]):not(:disabled) { b
 .lab-new-bot-value { flex: 1; min-width: 0; overflow: hidden; padding-right: var(--orchard-space-m); color: var(--orchard-text-secondary); font: var(--orchard-type-body-size) / 1.35 var(--orchard-font-text);
   text-align: end; text-overflow: ellipsis; white-space: nowrap; }
 
-/* At phone width one panel fills the screen: the list is home, a chat pushes in and Back pops to the list where it left. */
-.lab-bot-workspace[data-phone] { position: fixed; inset-inline: 0; top: var(--lab-viewport-top, 0px); grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0; }
-.lab-bot-workspace[data-phone] > .lab-bot-roster.orchard-panel { padding: calc(var(--orchard-space-xl) + var(--orchard-safe-area-top)) calc(var(--orchard-space-m) + var(--orchard-safe-area-right))
+/* At phone width one panel fills the screen: the list is home, a chat slides over it and Back slides it away. The layers share one grid cell, the
+   list under the chat; while they move (stack-transition.ts) the list shifts and dims under the chat, which carries a shadow on its leading edge. */
+.lab-bot-workspace[data-phone] { position: fixed; inset-inline: 0; top: var(--lab-viewport-top, 0px); grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 0; padding: 0; }
+.lab-bot-workspace[data-phone] > :is(.lab-bot-roster, .lab-bot-scrim, .lab-bot-conversation) { grid-area: 1 / 1; }
+.lab-bot-workspace[data-phone] > .lab-bot-roster.orchard-panel { z-index: 0; padding: calc(var(--orchard-space-xl) + var(--orchard-safe-area-top)) calc(var(--orchard-space-m) + var(--orchard-safe-area-right))
   0 calc(var(--orchard-space-m) + var(--orchard-safe-area-left)); }
-.lab-bot-workspace[data-phone] > .lab-bot-conversation.orchard-panel { padding: var(--orchard-safe-area-top) var(--orchard-safe-area-right) 0 var(--orchard-safe-area-left); }
+.lab-bot-workspace[data-phone] > .lab-bot-conversation.orchard-panel { z-index: 2; padding: var(--orchard-safe-area-top) var(--orchard-safe-area-right) 0 var(--orchard-safe-area-left);
+  position: relative; }
+/* The strip along the left edge, below the top bar, belongs to the stack's swipe back (useNavigationStack): horizontal movement on it is the page's, vertical scrolling stays the browser's. */
+.lab-bot-edge { position: absolute; z-index: 3; inset-block: calc(var(--orchard-safe-area-top) + 58px) 0; inset-inline-start: 0; width: 20px; touch-action: pan-y; }
+.lab-bot-scrim { z-index: 1; opacity: 0; pointer-events: none; background: var(--orchard-shadow-ink); }
+.lab-bot-workspace[data-stacking] > :is(.lab-bot-roster, .lab-bot-conversation) { will-change: transform; }
+.lab-bot-workspace[data-stacking] > .lab-bot-conversation { box-shadow: -8px 0 24px var(--orchard-shadow-ink); }
+.lab-bot-slot { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+.lab-bot-slot[hidden] { display: none; }
 .lab-bot-workspace[data-phone] .lab-bot-row { min-height: 64px; }
 .lab-bot-workspace[data-phone] .lab-bot-name { font-size: 16px; }
 .lab-bot-workspace[data-phone] .lab-bot-asks { padding-left: 54px; }
-.lab-bot-workspace[data-phone][data-navigation="push"] > .lab-bot-conversation:not([hidden]) { animation: lab-bot-push 240ms var(--orchard-ease-standard); }
-.lab-bot-workspace[data-phone][data-navigation="pop"] > .lab-bot-roster:not([hidden]) { animation: lab-bot-pop 240ms var(--orchard-ease-standard); }
-@keyframes lab-bot-push { from { opacity: .4; transform: translateX(32%); } to { opacity: 1; transform: none; } }
-@keyframes lab-bot-pop { from { opacity: .6; transform: translateX(-12%); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) {
-  .lab-bot-workspace[data-phone][data-navigation] > :is(.lab-bot-conversation, .lab-bot-roster) { animation: none; }
-  .lab-bot-workspace * { scroll-behavior: auto; }
-}
+@media (prefers-reduced-motion: reduce) { .lab-bot-workspace * { scroll-behavior: auto; } }
 
 /* The Assistants directory: one wide panel of groups; a hidden or resting assistant says so, and a hidden one offers Show in Chats. */
 .lab-directory.orchard-panel.orchard-panel { gap: var(--orchard-space-xl); padding: var(--orchard-space-xl) var(--orchard-space-m) var(--orchard-space-3xl); }

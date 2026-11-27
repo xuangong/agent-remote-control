@@ -46,7 +46,7 @@ Findings that shape the design:
   a finished task is not `running`, so `named()` no longer finds it and `message` answers `unreachable`. The 24 h retention exists only
   in the text of 2.4. Nothing has to be removed for it; the design text is corrected.
 - A worker today has the full bot tool namespace (it can message bots, create bots, write a board item, ask `ask_owner`). That makes
-  it a bot and is why it needs bot-shaped bookkeeping. The new sub-session gets almost no tools (section 5.4), which removes most of
+  it a bot and is why it needs bot-shaped bookkeeping. The new sub-session gets almost no tools (section 4), which removes most of
   that bookkeeping instead of renaming it.
 - The worker's lifecycle ends at its report; its Controller seat is forgotten once the task is finished. Reuse needs the seat to
   survive the end of a turn.
@@ -329,7 +329,7 @@ No code. Review gate: the owner reads 2.4 and 5.1.
 
 **Step 2. Protocol and contracts.** `sub-session.ts` (record, id, state, waiting, result, view, limits, frames
 `[Sub-session …]`, `[Work …]`, build and parse), new host calls and `TeamAction.end_sub_session`, `Team.sub`, `BoardItem.assignee`
-accepting `SubSessionId`, `BoardResult`/`board` read shape with `subSessions`, `Chain.subSessions`, base instructions v12 and
+accepting `SubSessionId`, the `board` read shape with `subSessions`, `Chain.subSessions`, base instructions v12 and
 `standingInstructionsText`. Fixtures `fixtures/sub-session.v1.json` (valid and invalid records, calls, frames, an ended turn) and an
 update of `bot-messages.v1.json` for the board shape. Old types stay for now. Tests: protocol unit tests; the fixture is consumed by
 the Relay and Controller suites in steps 3 and 4 (contract: both ends read the same file). Compatibility metadata is not updated on

@@ -251,6 +251,7 @@ export class TeamBroker {
     if (call.action === 'list_hosts') return (this.bots ?? fail(unavailableAssistants)).listHosts(hostId, call);
     if (call.action === 'list_bots') return (this.bots ?? fail(unavailableAssistants)).list(hostId, call);
     if (call.action === 'bot_session') return (this.bots ?? fail(unavailableAssistants)).readSession(hostId, call);
+    if (call.action === 'read_sub_session') return (this.bots ?? fail(unavailableAssistants)).readSub(hostId, call);
     if (call.action === 'open_room') { const rooms = this.rooms ?? fail(unavailableAssistants); return this.chained(hostId, call.owner, call.cause, () => rooms.open(hostId, call)); }
     if (call.action === 'room_say' || call.action === 'room_pass') return (this.rooms ?? fail(unavailableAssistants)).speak(hostId, call);
     if (call.action === 'list_assistants') return (this.assistants ?? fail(unavailableAssistants)).list(hostId, call);

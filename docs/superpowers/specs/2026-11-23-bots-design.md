@@ -87,7 +87,7 @@ after a lasting change, a compaction or a handoff.
   is no bot's id, so it is in no `list_bots` and `message` never finds it. It reports each piece of work with `communicate_update`
   (`final_summary`, or its final text) and its bot reads the result as one input between its turns. Its bot decides how long it lives:
   nothing releases it by time, and it is reviewed in the bot's ordinary turns (each result is a decision point, the board and
-  `get_sub_session_status` show how long each has been idle) and by the bot's optional timer. When its bot retires, its sub-sessions end. A bot
+  `get_sub_session_status` show how long each has been idle, and its due timer's frame lists them) and by the bot's optional timer; it reads what one did with `read_sub_session`. When its bot retires, its sub-sessions end. A bot
   keeps at most eight live. A native in-turn subagent of a coding agent (Claude Code's Task and the like) stays the agent's own, for
   quick lookups inside a turn; nothing is built for it.
 - `/side` is a sub-session the person starts from a conversation: its result shows as a card beside that conversation, Bring back
@@ -211,6 +211,7 @@ Every bot's main session gets the same extensions, built by the Controller:
 | `message` | Send to a bot or a room (3); `pass` in a room |
 | `list_bots` | The account's bots it may message, with name, label, mission and status |
 | `read_bot` | Read the recent conversation of a bot it may read (2.1, `peers`) |
+| `read_sub_session` | Read the recent conversation of one of its own sub-sessions (2.4): a sub-session is not a bot, so `read_bot` never reads it |
 | `stop_bot` | Stop the running turn of one of its staff |
 | `update_mission` | Record a lasting change in its own mission (2.3) |
 | `board`, `update_board` | Read and keep its board (6.1); read the board of its standing staff |

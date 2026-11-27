@@ -89,6 +89,12 @@ describe('a bot\'s board', () => {
     expect(assigned.endsWith('x…]')).toBe(true);
     expect(parseTaskInputs(assigned)).toEqual([{ kind: 'item_changed', key: 4, title: 'Run it', what: expect.stringContaining('brief: Run the suite') }]);
     expect(quoteFrames('[Item 7 "x" · from Chief]')).toBe('(Item 7 "x" · from Chief]');
+    // The sub-sessions a bot holds ride on the same frame, each with how long it has been idle and what it last did.
+    const withSubs = timerText({ name: 'work', items: [], subSessions: [{ name: 'Collect logs', idle: '3 h', lastWork: 'Compress' }, { name: 'Run tests', lastWork: 'Run the suite', step: 'Reading' }] });
+    expect(withSubs).toContain('\nSub-session "Collect logs" · idle 3 h · last: Compress\n');
+    expect(withSubs).toContain('\nSub-session "Run tests" · working · last: Run the suite · now: Reading\n');
+    expect(withSubs).toContain('get_sub_session_status');
+    expect(parseTaskInputs(withSubs)).toEqual([expect.objectContaining({ kind: 'timer', name: 'work' })]);
     expect(timerText({ name: 'work', items: [{ title: 'Release notes', status: 'waiting', report: 'Needs the build.' }] })).toContain('\nRelease notes · waiting · Needs the build.\n');
   });
 });
@@ -123,11 +129,14 @@ describe('a bot\'s memory', () => {
     expect(standingInstructionsText('Coordinate.', facts)).toContain(botInstructions('Coordinate.', facts));
   });
 
-  it('teaches the coordinating habits of version 12 in a short text', () => {
-    expect(BOT_INSTRUCTIONS_VERSION).toBe(12);
+  it('teaches the coordinating habits of version 13 in a short text', () => {
+    expect(BOT_INSTRUCTIONS_VERSION).toBe(13);
     const text = botInstructions(undefined);
-    for (const habit of ['read your ledger first', 'update_board', 'remember', 'update_mission', 'under 300 characters', 'git bundle', 'between turns', 'ask the bot that knows (list_bots, by mission) rather than guess', 'Copying a neighbour\'s style is a guess too: if a bot\'s mission covers it, ask that bot first.', 'Do not start work no one asked for.', 'Stay on your Host unless the work needs a CLI it lacks', 'list_hosts', 'new_folder', 'Say why you chose it in the item\'s brief.', 'goes to the bot whose mission fits', 'Do not ask your staff or sub-sessions for progress', 'create_sub_session', 'send_to_sub_session', 'stop_sub_session', 'tracked_task_keys', 'Eight live at most', 'Your own in-turn subagents (the Task tool and the like) are fine for a quick lookup inside a turn', 'do not acknowledge or thank', 'status ack', 'Answer a message with message and reply_to set to its id; your final text goes to no one.']) expect(text).toContain(habit);
+    for (const habit of ['read your ledger first', 'update_board', 'remember', 'update_mission', 'under 300 characters', 'git bundle', 'between turns', 'ask the bot that knows (list_bots, by mission) rather than guess', 'Copying a neighbour\'s style is a guess too: if a bot\'s mission covers it, ask that bot first.', 'Do not start work no one asked for.', 'Stay on your Host unless the work needs a CLI it lacks', 'list_hosts', 'new_folder', 'Say why you chose it in the item\'s brief.', 'goes to the bot whose mission fits', 'Do not ask your staff or sub-sessions for progress', 'create_sub_session', 'send_to_sub_session', 'stop_sub_session', 'tracked_task_keys', 'Eight live at most', 'read_sub_session', 'Your own in-turn subagents (the Task tool and the like) are fine for a quick lookup inside a turn', 'do not acknowledge or thank', 'status ack', 'Answer a message with message and reply_to set to its id; your final text goes to no one.']) expect(text).toContain(habit);
     // Sub-sessions are the way to hand work off; a bot's own subagents are no longer forbidden.
+    // A sub-session is read with its own tool; read_bot reads bots only.
+    expect(text).toMatch(/read what one did with read_sub_session/);
+    expect(text).not.toMatch(/read_bot[^.]*sub-session/);
     expect(text).not.toContain('never your own subagents');
     expect(text).not.toContain('temporary bot');
     expect(text.length).toBeLessThan(4300);

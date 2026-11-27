@@ -144,7 +144,7 @@ Findings that shape the design:
 and of its card (zh 旁路, unchanged).
 
 Ids: `s_` plus 32 hex (`SubSessionId`), derived from the Team id like `temporaryBotId` was, but a different pattern so a sub-session id can never be taken
-for a `BotId`: nothing that resolves a bot (`named`, `byKey`, `list`, `read_bot` of other bots' sessions, `message`) ever sees an `s_` id.
+for a `BotId`: nothing that resolves a bot (`named`, `byKey`, `list`, `read_bot`, `message`) ever sees an `s_` id.
 
 ## 4. The tool surface
 
@@ -159,7 +159,8 @@ Every bot has the same tools (design 2.1); the primary bot differs only by its i
 | `create_sub_session`, `send_to_sub_session`, `get_sub_session_status`, `stop_sub_session` | New (4.1); they replace the temporary form of `create_bot` and `stop_bot`/`retire_bot` |
 | `board`, `update_board` | The bot's ledger (4.3): an owner may be a sub-session; nothing else changes |
 | `write_page`, `read_page` | New (4.5): a bot's pages |
-| `read_bot` | Also reads the caller's own sub-sessions |
+| `read_bot` | Reads bots only (standing or staff), as before |
+| `read_sub_session` | New (2026-11-28, owner): a bounded page of one of the caller's own sub-sessions' conversation, by id or name, with `mode` (`last_turn` or `recent`) and `max_turns`; it sits with the other `*_sub_session` tools, and `read_bot` no longer finds a sub-session |
 | `set_timer` | Gains `until_minutes`; a due timer's frame carries the sub-session roster (section 6) |
 | `list_bots` | No temporary entries; each standing bot shows whether it is the primary bot |
 | `stop_bot`, `retire_bot` | Removed: they only managed temporary bots; the person removes a standing bot |
@@ -296,7 +297,7 @@ called `communicate_update`, `sub_update { current_step?, final_summary? }` befo
 - records `lastTerminalTurnStatus`, `lastResult` (`final_summary` of this turn if given, else the final text; cut to 4000), clears
   `turnInFlight` and `currentStep`, sets `lastActivityAt`; `lifecycle` is `needs_you` if an interaction is pending;
 - for a **bot-started** sub-session, queues one input for its bot: `[Sub-session "QA" · result]` + the first 300 characters,
-  ending with `…` and "read it with read_bot" when cut; `failed` and `interrupted` have their own header so its bot is never left
+  ending with `…` and "read it with read_sub_session" when cut; `failed` and `interrupted` have their own header so its bot is never left
   waiting. It waits for its bot's idle and is combined with other waiting inputs by the existing rule (3.2): reports are folded
   newest per sender, so ten sub-sessions finishing wake its bot once. A `current_step` queues nothing;
 - for an owned board item, writes the item's `report` line (300) with the existing `board.report`. The status is not changed by the
@@ -594,7 +595,7 @@ On a configurable free port with this checkout's Relay, Controller and website, 
 - **Held idle leases.** If a CLI keeps a process per lease, eight idle sub-sessions per bot may be heavy. Step 4 measures; the fallback (release at idle,
   re-acquire on dispatch or open) does not change the Relay side.
 - **Weak results.** A model that ends its turn with an empty or noisy summary gives its bot a weak result; the instruction says what to lead with and
-  `read_bot` reads the rest.
+  `read_sub_session` reads the rest.
 - **Pages grow state.** Ten pages of 8000 characters per bot sit in the Relay's Team records; bounds are enforced and the record-size test covers a bot
   with a full page set.
 - **Grok evidence is shapes, a screenshot and docs.** Prompts, enum values and per-role permissions are not available; behaviour that depends on them is
@@ -614,7 +615,7 @@ On a configurable free port with this checkout's Relay, Controller and website, 
 ### Removed from earlier drafts
 
 Tags and notes on items; custom statuses; string-replacement plan edits; the shared team board and nested team boards; `members` and the same-chief
-ledger read; renamed conflict results; `read_bot` `mode`/`max_turns`; a goal concept; a main bot above project bots. Kept from today without change: the
+ledger read; renamed conflict results; `read_bot` `mode`/`max_turns` (they went to `read_sub_session`); a goal concept; a main bot above project bots. Kept from today without change: the
 board, `create_bot` and its report-in, the chief reading staff boards, answer sessions for mentions, memory, folded bot messages, the timer.
 
 ## 15. The owner's answers, and where Grok still differs from an earlier decision
@@ -631,7 +632,7 @@ board, `create_bot` and its report-in, the chief reading staff boards, answer se
 | 8 | `send_to_agent` has no length bound | 300-character bot messages | `message` stays at 300; a sub-session dispatch takes 8000 |
 | 9 | `delivery` | Nothing a bot sends steers | `queue | interrupt` only |
 | 10 | Custom statuses; string-replacement plans | Five statuses; plan note | Not adopted |
-| 11 | Separate transcript, goal, project tools | Complexity watched | Not adopted; `read_bot` takes `mode`/`max_turns`; a goal is a ledger item |
+| 11 | Separate transcript, goal, project tools | Complexity watched | Not adopted; `read_sub_session` takes `mode`/`max_turns` (a sub-session is not a bot, so it is not `read_bot`); a goal is a ledger item |
 
 
 ## 16. As built (feat/sub-sessions)
@@ -650,3 +651,11 @@ Not built, ordered after sub-sessions by the owner: pages (`write_page`/`read_pa
 (`until_minutes`) with the roster in its frame, the board card, the extended folding of bot traffic, `fork_from`/`fork_turns`, the `/side` seed, and the Grok-shaped
 board fields (tags, notes, `members`). The earlier trimming of this plan removed tags, notes and custom statuses anyway; the rest stays as steps 5 and 6 of
 section 11 for a follow-up.
+
+### 16.1 `read_sub_session` (feat/read-sub-session)
+
+Owner feedback after the release: `read_bot` for a bot's own sub-session was misleading, since a sub-session is not a bot. `read_sub_session` reads one of the
+caller's own sub-sessions (host call `read_sub_session`, tool with `mode` and `max_turns`, the page trimmed to its last turns in the Controller), and `read_bot` reads
+standing bots only; no alias. The result pointer of a long result says `read_sub_session`. The base instructions are v13. The v12 line "your timer shows each live
+one" was ahead of the code; the roster is now built (small): a due timer's frame lists each live sub-session of the bot with how long it has been idle, what it last
+did and its current step, never a person's own side.

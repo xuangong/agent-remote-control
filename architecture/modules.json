@@ -343,8 +343,7 @@
         "E15",
         "E15b",
         "E15c",
-        "E15d",
-        "E15e"
+        "E15d"
       ],
       "invariants": [
         "lease-single-owner",

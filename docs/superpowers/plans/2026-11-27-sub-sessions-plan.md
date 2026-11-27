@@ -89,6 +89,13 @@ Second round (this correction, which replaces the first round's hierarchy and bo
 4. Keep the optional review timer and fork.
 5. Keep Grok's tool and status shapes where they still fit; drop what only served the main-bot design.
 
+Final answers (owner): (1) the bot or sub-session that owns an item may change its status; the chief and the person may change any item; an
+Agree-gated status stays person-only. (2) Nested teams as recommended: a staff bot that recruits leads its own team board, which its chief only reads.
+(3) **Native in-turn subagents** (Claude Code's Task and the like): the owner's sessions are all coding agents and already have them, so **nothing is built
+for them and they are no longer forbidden**: the instruction "never your own subagents" is dropped; work that is handed off, long, reused, or that the
+person or other bots must see goes to sub-sessions (or to a bot by message), while a coding agent's own in-turn subagents are fine for quick lookups
+inside a turn.
+
 In the owner's sub-session decisions of section 1, "main bot" means **the bot whose main session owns the sub-session** (its bot); there is no
 separate main bot. This plan writes "its bot" or "the owning bot".
 
@@ -202,8 +209,10 @@ read-only (`board { bot: "S" }`, as a chief reads its staff's board today). Work
 breaks it down on S's board. A bot sees its home board, the board of the team it leads if different, and, for an item another bot handed it, that one
 item. Between teams there is no shared board: a bot asks a bot of another team by `message` and the receiver puts the item on its own home board.
 
-**Who writes what.** Items, links, tags and notes: every member (the chief, its staff bots, the sub-sessions), through the same call. Board structure
-(statuses, plan): the chief that leads the team and the person; staff bots and sub-sessions read them. The person edits anything. This replaces
+**Who writes what (owner, final).** The bot or sub-session that **owns an item** may change its status (and its links, tags and notes); the chief that
+leads the team and the person may change **any** item; a member may create items it owns. A status gated by the person's Agree stays person-only for
+everyone. Board structure (the status list, the plan): the leading chief and the person; others read it. This replaces the earlier "every member writes
+every item": a member writes its own items only (the version and conflict rules still apply to every write). This replaces
 design 6.1's "a bot writes only its own board" and plan 8a's "a staff bot never writes its chief's board".
 
 **Versioning.** Every write names the `version` it read (a new item names none). A stale write still applies field by field and the result lists
@@ -386,7 +395,7 @@ Frames bullet: `[Sub-session …]` joins the bracket examples.
 
 Coordinate bullet (replaces the v11 one):
 
-> You coordinate. Keep each turn short: answer what you can at once, and hand work of any size away. Long or context-heavy work of your own goes to a sub-session (create_sub_session); work that belongs to another role goes to the bot whose mission fits (list_bots), by message, or to a bot you recruited (create_bot, for a role your work keeps needing). Sub-sessions are yours alone: no other bot sees or reaches them. These tools, never your own subagents, are how the person sees your helpers. Your team shares one board (board, update_board): put the plan there with a line saying why whenever it changes, give each item an owner, and read it first whenever you start, resume or were compacted. Answer your staff's questions first. Do not ask your staff or sub-sessions for progress: read the board and wait for their reports, then decide and sum them up for the person in your own words.
+> You coordinate. Keep each turn short: answer what you can at once, and hand work of any size away. Work that you hand off, that is long or context-heavy, that you will give more of later, or that the person or other bots must see goes to a sub-session (create_sub_session); work that belongs to another role goes to the bot whose mission fits (list_bots), by message, or to a bot you recruited (create_bot, for a role your work keeps needing). Your own in-turn subagents (the Task tool and the like) are fine for a quick lookup inside a turn; anything the person should see goes to a sub-session. Sub-sessions are yours alone: no other bot sees or reaches them. Your team shares one board (board, update_board): put the plan there with a line saying why whenever it changes, give each item an owner, and read it first whenever you start, resume or were compacted. Answer your staff's questions first. Do not ask your staff or sub-sessions for progress: read the board and wait for their reports, then decide and sum them up for the person in your own words.
 
 New bullet:
 
@@ -397,7 +406,7 @@ your chief, your staff and your sub-sessions write items on it; the team's statu
 
 **Sub-session instructions** (`sub-session-roles.ts`, replaces `taskWorkerInstructions`; the session's instructions, not a message):
 
-> You are a sub-session of the bot "<bot>", named "<title>": a working session of its own, not a bot. Work arrives as input labelled [Work …]; the first is your prompt, and more related work may follow later, so keep what you learn in mind. [workspace sentence as today: same, read-only, or worktree at commit …] Do the work yourself with your own tools. Your team's board is shared with your bot: update the items you work on (board, update_board) and leave its statuses and plan alone. At the end of each piece of work call communicate_update with a final_summary (what you did and found, where results are, what is left; only its first 300 characters reach your bot in the input, the rest it reads on request); use current_step while you work. If you need a decision, say so first in the summary and stop; the answer arrives as the next input. You cannot message or create bots. Read the conversation you were started from with read_main_session only if the prompt is not enough. The person may also write to you directly. Native permissions still apply.
+> You are a sub-session of the bot "<bot>", named "<title>": a working session of its own, not a bot. Work arrives as input labelled [Work …]; the first is your prompt, and more related work may follow later, so keep what you learn in mind. [workspace sentence as today: same, read-only, or worktree at commit …] Do the work yourself with your own tools. Your team's board is shared with your bot: update the status, links and notes of the items you own (board, update_board); leave other items, the status list and the plan to your bot. At the end of each piece of work call communicate_update with a final_summary (what you did and found, where results are, what is left; only its first 300 characters reach your bot in the input, the rest it reads on request); use current_step while you work. If you need a decision, say so first in the summary and stop; the answer arrives as the next input. You cannot message or create bots. Read the conversation you were started from with read_main_session only if the prompt is not enough. The person may also write to you directly. Native permissions still apply.
 
 ## 9. What the person sees
 
@@ -500,14 +509,13 @@ file exists. No code.
 **Step 2. Protocol and contracts.** `sub-session.ts`; the sub-session calls and `TeamAction.stop_sub_session`; `Team.sub`; the board shape of 4.3
 (statuses, owner, links, tags, notes, members, conflicts, plan edits); `read_bot` `mode`/`max_turns`; `set_timer` `until_minutes`; `communicate_update`;
 frames `[Sub-session …]`, `[Work …]`; instructions v12. Fixtures `sub-session.v1.json`, `board.v1.json` (new shape), `bot-messages.v1.json`. Old types
-stay until step 7. Compatibility metadata is not updated on the task branch (AGENTS); `pnpm postmerge` after the merge. Tests: protocol units; fixtures
-consumed by Relay and Controller suites.
+stay until step 7. Compatibility metadata is not updated on the task branch (AGENTS); `pnpm postmerge` after the merge. Tests: protocol units (including that the v12 text no longer forbids a bot's own in-turn subagents, names sub-sessions for handed-off, long, reused or
+person-visible work, and names the version); fixtures consumed by Relay and Controller suites.
 
 **Step 3a. Team board (independent of sub-sessions).** `homeBoard(caller)` (4.3), the board record on the team, nested boards read by the chief, writes by
 chief, staff and sub-session callers, structure only by the leader and the person, `status_id`/categories, `owner`, `members`, tags, notes, `position`,
 plan edits, conflicts, notices to owners, the board card's data (latest writer, time). Tests (unit): the home-board rule for a top-level bot, a staff
-bot without recruits, a staff bot with recruits, a sub-session of each; version and stale field with `conflicts`; staff write the chief's board and are
-refused structure; a chief reads a nested board and cannot write it by `bot`; a bot of another team cannot read the board except one handed item; plan
+bot without recruits, a staff bot with recruits, a sub-session of each; version and stale field with `conflicts`; a member changes the status of the items it owns and is refused on others' items and on structure; the chief and the person change any item; an Agree-gated status is refused for everyone but the person; a chief reads a nested board and cannot write it by `bot`; a bot of another team cannot read the board except one handed item; plan
 replacement fails when `old_string` is not found exactly once; Agree stays person-only. Contract fixture on both ends.
 
 **Step 3. Relay: `SubSessions`.** `sub-sessions.ts` with `create`, `send` (delivery queue or interrupt, title), `status`, `stop`, results from
@@ -574,7 +582,7 @@ under the mutation-check rule. Add the old-state load test of section 10. Lower 
 | (new) | **Status and step:** `get_sub_session_status` shows `turn_in_flight`, `current_step` while it works and `last_terminal_turn_status` after; a `current_step` starts no turn of its bot |
 | (new) | **Fork:** `create_sub_session` with `fork_from: "main"` and `fork_turns` starts a session that holds those turns (scripted provider records the seed); a provider without the capability is refused |
 | (new) | **Review:** a due timer's frame lists an idle sub-session with its idle time and last work, and a bot with no open item gets no timer turn |
-| (new) | **Team board:** the chief, a staff bot and a sub-session write the same item; a stale write returns `conflicts` and the owner is noticed; a staff bot's or sub-session's write of the plan or statuses is refused; the board card in the chief's conversation updates in place with the writer and time |
+| (new) | **Team board:** the chief, a staff bot and a sub-session write the same item; a stale write returns `conflicts` and the owner is noticed; a sub-session's write to an item it does not own, and a member's write of the plan or the status list, are refused while the chief's write to any item is accepted; the board card in the chief's conversation updates in place with the writer and time |
 | (new) | **Nested team:** a staff bot recruits two bots; its board is separate, its chief reads it and cannot write it by `bot`; its card sits in the staff bot's conversation |
 | (new) | **Recruit and fold:** a bot recruits another; the recruit reports in (its own conversation shows it, the chief gets the reply); six bot messages in the chief's conversation fold to "6 messages with 4 bots" and expand |
 | (new) | **Its bot retires:** its live sub-sessions end |

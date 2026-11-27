@@ -6,7 +6,7 @@
 import { ACCOUNT_TEAM_LIMIT, unresolvedTeamDelivery, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
 
-/** Finished tasks kept per account. */
+/** Ended sub-sessions kept per account. */
 export const TASK_FINISHED_KEEP = 200;
 /** Ended rooms kept per account, so the person can read them. */
 export const ROOM_ENDED_KEEP = 50;
@@ -22,7 +22,7 @@ const KEEP: Record<Kind, number> = { task: TASK_FINISHED_KEEP, room: ROOM_ENDED_
 const kind = (team: SavedTeam): Kind | undefined => team.task ? 'task' : team.room ? 'room' : team.link ? 'link' : team.ask ? 'ask' : undefined;
 /** Nothing more will happen to it: a finished task, an ended room, or any link (it opens again with the next message). */
 const ended = (team: SavedTeam): boolean => {
-  if (team.task) return team.task.state === 'done' || team.task.state === 'failed' || team.task.state === 'cancelled';
+  if (team.task) return team.task.state === 'ended';
   if (team.room) return team.room.state !== 'open';
   if (team.ask) return team.status === 'archived';
   return !!team.link;

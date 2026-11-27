@@ -48,13 +48,13 @@ export class BotChains {
   }
   /** Adds what a call in a chain did, starting the chain at this bot if it is new. */
   async record(scope: ChainScope, start: { cause: BotChain['cause']; bot: string }, turn?: { tokens: number; costUsd?: number }): Promise<void> {
-    if (!turn && !scope.messages && !scope.created && !scope.bots.size) return;
+    if (!turn && !scope.messages && !scope.created && !scope.subSessions && !scope.bots.size) return;
     const limits = this.store.thresholds();
     const crossed = await this.store.change(chains => {
       const now = this.now();
       const chain = chains.find(item => item.id === scope.id) ?? began(chains, scope.id, start, now);
       for (const bot of scope.bots) if (!chain.bots.includes(bot) && chain.bots.length < CHAIN_BOT_LIMIT) chain.bots.push(bot);
-      chain.messages += scope.messages; chain.created += scope.created; chain.depth = Math.max(chain.depth, scope.depth);
+      chain.messages += scope.messages; chain.created += scope.created; if (scope.subSessions) chain.subSessions = (chain.subSessions ?? 0) + scope.subSessions; chain.depth = Math.max(chain.depth, scope.depth);
       if (turn) {
         chain.turns++; chain.usage.tokens += turn.tokens;
         if (turn.costUsd !== undefined) chain.usage.costUsd = (chain.usage.costUsd ?? 0) + turn.costUsd;

@@ -142,17 +142,17 @@ describe('answer sessions for the person\'s mentions', () => {
     expect(f.memory('Tracker')!.map(fact => fact.text)).toEqual(['Releases ship on Thursdays.']);
   });
 
-  it('cannot message bots, create bots, manage staff or change the mission, timers or chief', async () => {
+  it('cannot message bots, create bots or sub-sessions, or change the mission, timers or chief', async () => {
     const f = fixture();
     const owner = answerSession(await f.ask('Tracker', 'Notes', 'Do it all.'));
     expect(await f.call({ action: 'bot_message', owner, operationId: 'm1', to: 'Reviewer', text: 'Hello.' })).toMatchObject({ outcome: 'forbidden' });
     expect(f.teams().find(team => team.inbox?.botId === f.id('Reviewer'))?.messages ?? []).toEqual([]);
-    await expect(f.call({ action: 'create_bot', owner, operationId: 'c1', name: 'Helper', mission: 'Help.', lifetime: 'standing' })).rejects.toThrow('answer session');
-    await expect(f.call({ action: 'create_bot', owner, operationId: 'c2', name: 'Helper', mission: 'Help.', lifetime: 'temporary' })).rejects.toThrow('answer session');
+    await expect(f.call({ action: 'create_bot', owner, operationId: 'c1', name: 'Helper', mission: 'Help.' })).rejects.toThrow('answer session');
+    await expect(f.call({ action: 'create_sub_session', owner, operationId: 'c2', name: 'Helper', prompt: 'Help.' })).rejects.toThrow('answer session');
     await expect(f.call({ action: 'update_mission', owner, mission: 'Something else.' })).rejects.toThrow('answer session');
     await expect(f.call({ action: 'set_timer', owner, name: 'x', minutes: 5 })).rejects.toThrow('answer session');
     await expect(f.call({ action: 'set_chief', owner, bot: 'Reviewer', chief: 'person' })).rejects.toThrow('answer session');
-    await expect(f.call({ action: 'stop_bot', owner, bot: 'Reviewer' })).rejects.toThrow('answer session');
+    await expect(f.call({ action: 'stop_sub_session', owner, subSessionId: 'Helper' })).rejects.toThrow('answer session');
   });
 
   it('reads the asking conversation and the bot\'s main session with read_bot, and other bots as any bot does', async () => {

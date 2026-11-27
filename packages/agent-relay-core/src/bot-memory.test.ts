@@ -71,7 +71,7 @@ describe('a bot\'s memory', () => {
     await expect(f.call({ action: 'remember', owner: f.as('Tracker'), text: 'x'.repeat(301) })).rejects.toThrow();
   });
 
-  it('writes only the memory of the bot that calls: another bot, a temporary bot and a stranger change nothing', async () => {
+  it('writes only the memory of the bot that calls: another bot, a sub-session and a stranger change nothing', async () => {
     const f = fixture();
     f.person.setMemory('Reviewer', [fact(1)]);
     f.members.v2!.chief = f.id('Chief');
@@ -81,8 +81,8 @@ describe('a bot\'s memory', () => {
     // Even the chief of a bot cannot name its memory: a call has no target, and the reviewer's facts stay as they were.
     expect(f.memoryOf('Reviewer')).toEqual([fact(1)]);
     expect(f.memoryOf('Chief')!.map(item => item.text)).toEqual(['Chief learned this.']);
-    await f.call({ action: 'create_bot', owner: f.as('Chief'), operationId: 'op', name: 'Helper', mission: 'Help.', lifetime: 'temporary' });
-    await expect(f.call({ action: 'remember', owner: { providerId: 'codex', nativeSessionId: 'worker-1' }, text: 'Mine.' })).rejects.toThrow('A temporary bot has no memory');
+    await f.call({ action: 'create_sub_session', owner: f.as('Chief'), operationId: 'op', name: 'Helper', prompt: 'Help.' });
+    await expect(f.call({ action: 'remember', owner: { providerId: 'codex', nativeSessionId: 'worker-1' }, text: 'Mine.' })).rejects.toThrow('Only a standing bot has a memory');
     await expect(f.call({ action: 'remember', owner: { providerId: 'codex', nativeSessionId: 'nobody' }, text: 'Mine.' })).rejects.toThrow('main session');
     expect(f.memoryOf('Reviewer')).toEqual([fact(1)]);
   });
@@ -175,11 +175,11 @@ describe('changing a chief', () => {
     expect(f.chiefOf('Scribe')).toBeUndefined();
   });
 
-  it('refuses a thirteenth bot a chief creates, counting its standing staff and its temporary bots at work', async () => {
+  it('refuses a thirteenth bot a chief creates, counting its standing staff, and never counting its sub-sessions', async () => {
     const f = fixture(12);
-    for (let index = 0; index < 11; index++) f.members[`v${4 + index}`]!.chief = f.id('Reviewer');
-    await f.call({ action: 'create_bot', owner: f.as('Reviewer'), operationId: 'twelfth', name: 'Helper', mission: 'Help.', lifetime: 'temporary' });
-    await expect(f.call({ action: 'create_bot', owner: f.as('Reviewer'), operationId: 'thirteenth', name: 'Helper 2', mission: 'Help.', lifetime: 'temporary' })).rejects.toThrow('already manage 12 bots');
-    await expect(f.call({ action: 'create_bot', owner: f.as('Reviewer'), operationId: 'standing', name: 'Scribe 2', mission: 'Write.', lifetime: 'standing' })).rejects.toThrow('already manage 12 bots');
+    for (let index = 0; index < 12; index++) f.members[`v${4 + index}`]!.chief = f.id('Reviewer');
+    // A sub-session is not a bot: it takes no place of the twelve.
+    await f.call({ action: 'create_sub_session', owner: f.as('Reviewer'), operationId: 'sub', name: 'Helper', prompt: 'Help.' });
+    await expect(f.call({ action: 'create_bot', owner: f.as('Reviewer'), operationId: 'standing', name: 'Scribe 2', mission: 'Write.' })).rejects.toThrow('already manage 12 bots');
   });
 });

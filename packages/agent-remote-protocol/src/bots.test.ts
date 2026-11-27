@@ -8,9 +8,11 @@ const id = 'b_' + 'a'.repeat(32);
 describe('bot records', () => {
   it('accepts a standing bot of the person with identity and mission, and refuses unknown fields', () => {
     const record = { botId: id, name: 'Chief', label: 'Lead', picture: { shape: 'circle', color: '#ff8a3d' }, mission: 'Coordinate the release.',
-      chief: { kind: 'person' }, lifetime: 'standing', createdAt: 1, updatedAt: 2 };
+      chief: { kind: 'person' }, createdAt: 1, updatedAt: 2 };
     expect(Value.Check(BotRecord, record)).toBe(true);
     expect(Value.Check(BotRecord, { ...record, mode: 'coordinator' })).toBe(false);
+    // Every bot is standing: a record naming a lifetime is no record.
+    expect(Value.Check(BotRecord, { ...record, lifetime: 'standing' })).toBe(false);
     expect(Value.Check(BotRecord, { ...record, botId: 'chief' })).toBe(false);
     expect(Value.Check(BotRecord, { ...record, mission: 'x'.repeat(BOT_MISSION_LIMIT + 1) })).toBe(false);
   });
@@ -100,7 +102,7 @@ describe('a bot\'s memory', () => {
     const many = (count: number) => Array.from({ length: count }, (_, index) => ({ id: `f${index.toString(16).padStart(8, '0')}`, text: `Fact ${index}` }));
     expect(Value.Check(BotMemory, many(BOT_MEMORY_FACTS))).toBe(true);
     expect(Value.Check(BotMemory, many(BOT_MEMORY_FACTS + 1))).toBe(false);
-    expect(Value.Check(BotRecord, { botId: id, chief: { kind: 'person' }, lifetime: 'standing', createdAt: 1, updatedAt: 2, memory: many(2) })).toBe(true);
+    expect(Value.Check(BotRecord, { botId: id, chief: { kind: 'person' }, createdAt: 1, updatedAt: 2, memory: many(2) })).toBe(true);
     expect(Value.Check(WindowBotDetails, { botId: id, memory: many(2) })).toBe(true);
     expect(botIdentity({ mission: 'Coordinate.', memory: many(1) })).toEqual({ mission: 'Coordinate.', memory: many(1) });
   });
@@ -121,11 +123,14 @@ describe('a bot\'s memory', () => {
     expect(standingInstructionsText('Coordinate.', facts)).toContain(botInstructions('Coordinate.', facts));
   });
 
-  it('teaches the coordinating habits of version 11 in a short text', () => {
-    expect(BOT_INSTRUCTIONS_VERSION).toBe(11);
+  it('teaches the coordinating habits of version 12 in a short text', () => {
+    expect(BOT_INSTRUCTIONS_VERSION).toBe(12);
     const text = botInstructions(undefined);
-    for (const habit of ['read your board first', 'update_board', 'remember', 'update_mission', 'under 300 characters', 'git bundle', 'between turns', 'ask the bot that knows (list_bots, by mission) rather than guess', 'Copying a neighbour\'s style is a guess too: if a bot\'s mission covers it, ask that bot first.', 'Do not start work no one asked for.', 'Stay on your Host unless the work needs a CLI it lacks', 'list_hosts', 'new_folder', 'Say why you chose it in the item\'s brief.', 'goes to the bot whose mission fits', 'Do not ask your staff for progress', 'update_board (assignee)', 'do not acknowledge or thank', 'status ack', 'Answer a message with message and reply_to set to its id; your final text goes to no one.']) expect(text).toContain(habit);
-    expect(text.length).toBeLessThan(3200);
+    for (const habit of ['read your ledger first', 'update_board', 'remember', 'update_mission', 'under 300 characters', 'git bundle', 'between turns', 'ask the bot that knows (list_bots, by mission) rather than guess', 'Copying a neighbour\'s style is a guess too: if a bot\'s mission covers it, ask that bot first.', 'Do not start work no one asked for.', 'Stay on your Host unless the work needs a CLI it lacks', 'list_hosts', 'new_folder', 'Say why you chose it in the item\'s brief.', 'goes to the bot whose mission fits', 'Do not ask your staff or sub-sessions for progress', 'create_sub_session', 'send_to_sub_session', 'stop_sub_session', 'tracked_task_keys', 'Eight live at most', 'Your own in-turn subagents (the Task tool and the like) are fine for a quick lookup inside a turn', 'do not acknowledge or thank', 'status ack', 'Answer a message with message and reply_to set to its id; your final text goes to no one.']) expect(text).toContain(habit);
+    // Sub-sessions are the way to hand work off; a bot's own subagents are no longer forbidden.
+    expect(text).not.toContain('never your own subagents');
+    expect(text).not.toContain('temporary bot');
+    expect(text.length).toBeLessThan(4300);
   });
 
   it('is told to the three bots of a change of chief in lines written from the record, which a name cannot forge', () => {

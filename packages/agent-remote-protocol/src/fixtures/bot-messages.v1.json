@@ -56,11 +56,10 @@
         }
       },
       {
-        "action": "side_final",
-        "owner": {
-          "providerId": "codex",
-          "nativeSessionId": "notes"
-        },
+        "action": "sub_turn_end",
+        "teamId": "team",
+        "memberId": "worker",
+        "outcome": "finished",
         "text": "The notes are written."
       },
       {
@@ -134,17 +133,19 @@
         }
       },
       {
-        "action": "create_bot",
+        "action": "create_sub_session",
         "owner": {
           "providerId": "claude",
           "nativeSessionId": "main"
         },
         "operationId": "op-host",
         "name": "Builder",
-        "mission": "Build it.",
-        "lifetime": "temporary",
+        "prompt": "Build it.",
         "host": "studio",
-        "cwd": "/Users/x/projects/shop"
+        "cwd": "/Users/x/projects/shop",
+        "trackedTaskKeys": [
+          1
+        ]
       },
       {
         "action": "create_bot",
@@ -155,22 +156,70 @@
         "operationId": "op-new",
         "name": "Builder",
         "mission": "Build it.",
-        "lifetime": "standing",
         "host": "studio",
         "newFolder": {
           "name": "shop-api",
           "under": "/Users/x/projects"
         }
+      },
+      {
+        "action": "send_to_sub_session",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "subSessionId": "s_11111111111111111111111111111111",
+        "operationId": "op-more",
+        "text": "Now the second suite.",
+        "title": "Second suite",
+        "delivery": "interrupt"
+      },
+      {
+        "action": "get_sub_session_status",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        }
+      },
+      {
+        "action": "stop_sub_session",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "subSessionId": "s_11111111111111111111111111111111"
+      },
+      {
+        "action": "sub_update",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "currentStep": "Running the suite"
+      },
+      {
+        "action": "sub_update",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "finalSummary": "Two suites passed."
+      },
+      {
+        "action": "sub_told",
+        "teamId": "team",
+        "memberId": "worker",
+        "operationId": "op-told",
+        "text": "Skip the docs."
       }
     ],
     "invalid": [
       {
-        "action": "side_final",
-        "owner": {
-          "providerId": "codex",
-          "nativeSessionId": "notes"
-        },
-        "text": ""
+        "action": "sub_turn_end",
+        "teamId": "team",
+        "memberId": "worker",
+        "outcome": "cancelled",
+        "text": "x"
       },
       {
         "action": "bot_reply",
@@ -328,7 +377,6 @@
         "operationId": "op-bad",
         "name": "Builder",
         "mission": "Build it.",
-        "lifetime": "temporary",
         "cwd": ""
       },
       {
@@ -340,7 +388,6 @@
         "operationId": "op-bad",
         "name": "Builder",
         "mission": "Build it.",
-        "lifetime": "temporary",
         "newFolder": {
           "under": "/x"
         }
@@ -354,11 +401,49 @@
         "operationId": "op-bad",
         "name": "Builder",
         "mission": "Build it.",
-        "lifetime": "temporary",
         "newFolder": {
           "name": "a",
           "extra": 1
         }
+      },
+      {
+        "action": "create_bot",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "operationId": "op-bad",
+        "name": "Builder",
+        "mission": "Build it.",
+        "lifetime": "temporary"
+      },
+      {
+        "action": "send_to_sub_session",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "subSessionId": "s_11111111111111111111111111111111",
+        "operationId": "op",
+        "text": "x",
+        "title": "t",
+        "delivery": "steer"
+      },
+      {
+        "action": "stop_bot",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "bot": "Builder"
+      },
+      {
+        "action": "sub_update",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "currentStep": ""
       }
     ]
   },

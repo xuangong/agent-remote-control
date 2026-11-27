@@ -45,7 +45,7 @@ describe('assistants messaging one another', () => {
     expect(await f.broker.hostCall('mac', { action: 'message_assistant', owner: f.chief, to: 'Solo', text: 'Hello.', operationId: 'op' })).toMatchObject({ outcome: 'delivered' });
     const stranger = { providerId: 'claude', nativeSessionId: 'stranger' };
     for (const call of [{ action: 'list_assistants', owner: stranger }, { action: 'message_assistant', owner: stranger, to: 'Chief', text: 'Hello.', operationId: 'op' },
-      { action: 'create_task', owner: stranger, operationId: 'task', title: 'Fix', brief: 'Fix it.' }] as const)
+      { action: 'create_sub_session', owner: stranger, operationId: 'task', name: 'Fix', prompt: 'Fix it.' }] as const)
       await expect(f.broker.hostCall('mac', call)).rejects.toThrow('Only an assistant');
   });
 

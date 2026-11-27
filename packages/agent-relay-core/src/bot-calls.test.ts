@@ -5,7 +5,7 @@ import { attachmentLines, isBotMessageResult, parseTaskInputs, type WindowGroup 
 import { TeamBroker } from './teams.js';
 import { committed, detached } from './drafts.js';
 import type { SavedTeam } from './team-delivery.js';
-import { temporaryBotId } from './bot-calls.js';
+import { subSessionId } from './chain-scope.js';
 import { memoryAttachmentStorage, PortableAttachmentStore } from './attachments.js';
 import { instructionsHash } from './inboxes.js';
 import type { HostPlace, HostPlaces } from './host-places.js';
@@ -67,25 +67,26 @@ describe('bots on another Host', () => {
     await expect(fixture().broker.hostCall('mac', { action: 'list_hosts', owner: f.as('chief') })).rejects.toThrow('not available on this Relay');
   });
 
-  it('starts a temporary bot in a folder of another Host, and the item records the Host and the folder', async () => {
+  it('starts a sub-session in a folder of another Host, and the item records the Host and the folder', async () => {
     const { places, calls } = hostPlaces([studio]), f = fixture(places);
     await f.broker.hostCall('mac', { action: 'update_board', owner: f.as('chief'), items: [{ title: 'Build the shop', brief: 'Build it.' }] });
-    const created = await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Builder', mission: 'Build it.', lifetime: 'temporary', host: 'studio', cwd: '/Users/x/projects/shop', item: 1 });
+    const created = await f.broker.hostCall('mac', { action: 'create_sub_session', owner: f.as('chief'), operationId: 'op', name: 'Builder', prompt: 'Build it.', host: 'studio', cwd: '/Users/x/projects/shop', trackedTaskKeys: [1] });
     expect(created).toMatchObject({ status: 'working', host: 'Studio', folder: '/Users/x/projects/shop' });
     expect(calls).toEqual(['open studio /Users/x/projects/shop']);
     expect(f.task().members.map(member => [member.role, member.hostId])).toEqual([['leader', 'studio'], ['requester', 'mac']]);
     expect(f.task().members[0]!.cwd).toBe('/Users/x/projects/shop');
     expect(f.seats).toEqual([{ hostId: 'mac' }, { hostId: 'studio', cwd: '/Users/x/projects/shop' }]);
     const board = await f.broker.hostCall('mac', { action: 'board', owner: f.as('chief') }) as { items: Array<{ links: unknown[]; assignee: string }> };
-    expect(board.items[0]).toMatchObject({ assignee: (created as { botId: string }).botId, links: [{ kind: 'host', value: 'Studio' }, { kind: 'folder', value: '/Users/x/projects/shop' }] });
+    const id = (created as { sub_session_id: string }).sub_session_id;
+    expect(board.items[0]).toMatchObject({ assignee: id, links: [{ kind: 'host', value: 'Studio' }, { kind: 'folder', value: '/Users/x/projects/shop' }, { kind: 'sub_session', value: id }] });
   });
 
   it('creates a new folder once, even when the call is repeated, and answers a refused folder as the outcome with nothing started', async () => {
     const { places, calls } = hostPlaces([studio]), f = fixture(places);
-    const input = { action: 'create_bot' as const, owner: f.as('chief'), operationId: 'op', name: 'Builder', mission: 'Build it.', lifetime: 'temporary' as const, host: 'studio', newFolder: { name: 'shop-api' } };
-    const first = await f.broker.hostCall('mac', input) as { botId: string; folder: string };
+    const input = { action: 'create_sub_session' as const, owner: f.as('chief'), operationId: 'op', name: 'Builder', prompt: 'Build it.', host: 'studio', newFolder: { name: 'shop-api' } };
+    const first = await f.broker.hostCall('mac', input) as { sub_session_id: string; folder: string };
     expect(first.folder).toBe('/Users/x/projects/shop-api');
-    expect(await f.broker.hostCall('mac', input)).toMatchObject({ botId: first.botId, folder: '/Users/x/projects/shop-api' });
+    expect(await f.broker.hostCall('mac', input)).toMatchObject({ sub_session_id: first.sub_session_id, folder: '/Users/x/projects/shop-api' });
     expect(calls.filter(call => call.startsWith('create'))).toEqual(['create studio shop-api']);
     expect(f.state().filter(team => team.task)).toHaveLength(1);
     const refused = fixture(hostPlaces([studio], 'Cannot create a folder here.').places);
@@ -95,7 +96,7 @@ describe('bots on another Host', () => {
 
   it('starts a standing bot on another Host, whose inbox seat is created there in the folder chosen', async () => {
     const f = fixture(hostPlaces([studio]).places);
-    const created = await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Scribe', mission: 'Keep the docs.', lifetime: 'standing', host: 'studio', newFolder: { name: 'docs', under: '/Users/x/projects' } });
+    const created = await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Scribe', mission: 'Keep the docs.', host: 'studio', newFolder: { name: 'docs', under: '/Users/x/projects' } });
     expect(created).toMatchObject({ host: 'Studio', folder: '/Users/x/projects/docs' });
     expect(f.seats).toEqual([{ hostId: 'studio', cwd: '/Users/x/projects/docs' }]);
     expect(f.state().find(team => team.inbox?.botId)!.members[0]).toMatchObject({ hostId: 'studio', cwd: '/Users/x/projects/docs' });
@@ -103,7 +104,7 @@ describe('bots on another Host', () => {
 
   it('refuses a Host without a folder, a folder named twice, a folder the Host does not open and a worktree there', async () => {
     const f = fixture(hostPlaces([studio]).places);
-    const call = (extra: Record<string, unknown>) => f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Builder', mission: 'Build it.', lifetime: 'temporary', ...extra } as never);
+    const call = (extra: Record<string, unknown>) => f.broker.hostCall('mac', { action: 'create_sub_session', owner: f.as('chief'), operationId: 'op', name: 'Builder', prompt: 'Build it.', ...extra } as never);
     await expect(call({ host: 'studio' })).rejects.toThrow('Name the folder');
     await expect(call({ host: 'studio', cwd: '/a', newFolder: { name: 'b' } })).rejects.toThrow('not both');
     await expect(call({ host: 'studio', cwd: '/etc' })).rejects.toThrow('does not open /etc');
@@ -115,100 +116,6 @@ describe('bots on another Host', () => {
 });
 
 describe('bots calling as their own sessions', () => {
-  it('starts a temporary bot that its chief lists, and that reports, asks and tells progress to it', async () => {
-    const f = fixture();
-    const created = await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review the release branch.', lifetime: 'temporary', message: 'Start with the changelog.' }) as { botId: string; status: string };
-    expect(created).toMatchObject({ botId: temporaryBotId(f.task().id), status: 'working' });
-    expect(f.inputs(f.task(), 0)).toEqual([expect.objectContaining({ kind: 'brief', title: 'Reviewer', brief: 'Review the release branch.\n\nStart with the changelog.' })]);
-    expect(await f.broker.hostCall('mac', { action: 'list_bots', owner: f.as('chief') })).toEqual({ bots: [
-      { id: created.botId, name: 'Reviewer', kind: 'temporary', chief: 'you', status: 'working', mission: 'Review the release branch.\n\nStart with the changelog.' },
-      { id: ids.tracker, name: 'Tracker', kind: 'standing' }] });
-    const worker = f.as(f.task().members[0]!.nativeSessionId!);
-    await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'p1', to: 'chief', text: 'Changelog read.', status: 'progress' });
-    await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'q1', to: 'Chief', text: 'Include the hotfix?', status: 'needs_input' });
-    expect(f.task().task!.state).toBe('needs_input');
-    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'a1', to: 'Reviewer', text: 'Yes.' });
-    expect(f.task().task!.state).toBe('working');
-    await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'd1', to: 'chief', text: 'Two issues, both in the notes.', status: 'done' });
-    expect(f.task().task!.state).toBe('done');
-    expect(f.inputs(f.task(), 1).map(input => input.kind)).toEqual(['progress', 'question', 'done']);
-  });
-
-  it('lets other bots write to a temporary bot, which messages standing bots in their inboxes, and only its chief stops it', async () => {
-    const f = fixture();
-    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
-    const worker = f.as(f.task().members[0]!.nativeSessionId!);
-    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('tracker'), operationId: 't1', to: 'Reviewer', text: 'The build is green.' });
-    expect(f.inputs(f.task(), 0).at(-1)).toMatchObject({ kind: 'message', from: 'Tracker', body: 'The build is green.' });
-    expect(await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'r1', to: 'Tracker', text: 'Thanks.' })).toMatchObject({ outcome: 'delivered' });
-    const inbox = f.state().find(team => team.inbox?.botId === ids.tracker)!;
-    expect(parseTaskInputs(inbox.messages.at(-1)!.text)).toEqual([expect.objectContaining({ kind: 'assistant', from: 'Reviewer', body: 'Thanks.' })]);
-    await expect(f.broker.hostCall('mac', { action: 'stop_bot', owner: f.as('tracker'), bot: 'Reviewer' })).rejects.toThrow('None of your staff');
-    expect(await f.broker.hostCall('mac', { action: 'bot_session', owner: f.as('chief'), bot: 'Reviewer' })).toEqual(worker);
-    // Any standing bot can be read, which is where a cut reply points; a bot that does not exist cannot.
-    expect(await f.broker.hostCall('mac', { action: 'bot_session', owner: f.as('chief'), bot: 'Tracker' })).toEqual(f.as('tracker'));
-    await expect(f.broker.hostCall('mac', { action: 'bot_session', owner: f.as('chief'), bot: 'Nobody' })).rejects.toThrow('No bot of this account');
-    expect(await f.broker.hostCall('mac', { action: 'stop_bot', owner: f.as('chief'), bot: 'Reviewer' })).toMatchObject({ status: 'cancelled' });
-  });
-
-  it('starts a temporary bot the person asks for, with the session they ask it from as its chief (/side)', async () => {
-    const f = fixture();
-    const team = await f.broker.startBot({ operationId: 's1', source: { hostId: 'mac', providerId: 'codex', nativeSessionId: 'chief', title: 'Chief' }, bot: { name: 'Notes', mission: 'Write the release notes.' } });
-    expect(team.task).toMatchObject({ title: 'Notes', brief: 'Write the release notes.', state: 'working' });
-    expect(team.members[1]).toMatchObject({ role: 'requester', nativeSessionId: 'chief' });
-    expect(f.inputs(f.task(), 0)).toEqual([expect.objectContaining({ kind: 'brief', title: 'Notes', brief: 'Write the release notes.' })]);
-    expect(await f.broker.hostCall('mac', { action: 'list_bots', owner: f.as('chief') })).toMatchObject({ bots: expect.arrayContaining([expect.objectContaining({ name: 'Notes', kind: 'temporary', chief: 'you' })]) });
-  });
-
-  it('keeps a /side bot beside its conversation: its result is recorded on the task and nothing reaches the chief as input', async () => {
-    const f = fixture();
-    await f.broker.startBot({ operationId: 's1', source: { hostId: 'mac', providerId: 'codex', nativeSessionId: 'chief', title: 'Chief' }, bot: { name: 'Notes', mission: 'Write the release notes.' } });
-    const worker = f.as(f.task().members[0]!.nativeSessionId!);
-    expect(f.task().task!.side).toBe(true);
-    expect(await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'p1', to: 'chief', text: 'Reading the log.', status: 'progress' })).toMatchObject({ outcome: 'held', reason: expect.stringMatching(/beside the conversation[\s\S]*do not send it again or wait/) });
-    expect(await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'd1', to: 'chief', text: 'Two notes written.', status: 'done' })).toMatchObject({ outcome: 'held' });
-    expect(f.task().task).toMatchObject({ state: 'done', result: { status: 'done', summary: 'Two notes written.' } });
-    expect(f.inputs(f.task(), 1)).toEqual([]);
-    expect(f.task().messages.filter(message => message.to === f.task().members[1]!.id && message.status !== 'canceled')).toEqual([]);
-  });
-
-  it('takes a /side bot\'s final text as its answer: the result on its card, once, with nothing queued for the chief', async () => {
-    const f = fixture();
-    await f.broker.startBot({ operationId: 's1', source: { hostId: 'mac', providerId: 'codex', nativeSessionId: 'chief', title: 'Chief' }, bot: { name: 'Notes', mission: 'Write the release notes.' } });
-    const worker = f.as(f.task().members[0]!.nativeSessionId!), answer = 'The notes are:\n\n'.concat('line\n'.repeat(200));
-    expect(await f.broker.hostCall('mac', { action: 'side_final', owner: worker, text: answer })).toEqual({ outcome: 'recorded' });
-    expect(f.task().task).toMatchObject({ state: 'done', result: { status: 'done', summary: answer } });
-    expect(await f.broker.hostCall('mac', { action: 'side_final', owner: worker, text: 'Another turn.' })).toEqual({ outcome: 'ignored' });
-    expect(f.task().task!.result!.summary).toBe(answer);
-    expect(f.task().messages.filter(message => message.to === f.task().members[1]!.id && message.status !== 'canceled')).toEqual([]);
-  });
-
-  it('tells a /side bot in its brief to answer in its reply and tell no one, and any other temporary bot to message its chief', async () => {
-    const side = fixture();
-    await side.broker.startBot({ operationId: 's1', source: { hostId: 'mac', providerId: 'codex', nativeSessionId: 'chief', title: 'Chief' }, bot: { name: 'Notes', mission: 'Write the release notes.' } });
-    const other = fixture();
-    await other.broker.hostCall('mac', { action: 'create_bot', owner: other.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
-    expect(side.task().messages[0]!.text).toMatch(/Answer in your reply[\s\S]*Do not message anyone, and write no file you were not asked for/);
-    expect(side.task().messages[0]!.text).not.toMatch(/message your chief/);
-    expect(side.inputs(side.task(), 0)).toEqual([expect.objectContaining({ kind: 'brief', title: 'Notes' })]);
-    expect(other.task().messages[0]!.text).toMatch(/message your chief once with status done or failed/);
-  });
-
-  it('records nothing from the final text of a temporary bot another bot created', async () => {
-    const f = fixture();
-    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
-    expect(await f.broker.hostCall('mac', { action: 'side_final', owner: f.as(f.task().members[0]!.nativeSessionId!), text: 'Fine.' })).toEqual({ outcome: 'ignored' });
-    expect(f.task().task).toMatchObject({ state: 'working' });
-  });
-
-  it('still reports a temporary bot another bot created to its chief as input', async () => {
-    const f = fixture();
-    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
-    expect(f.task().task!.side).toBeUndefined();
-    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as(f.task().members[0]!.nativeSessionId!), operationId: 'd1', to: 'chief', text: 'Fine.', status: 'done' });
-    expect(f.inputs(f.task(), 1).map(input => input.kind)).toEqual(['done']);
-  });
-
   it('holds a bot\'s acknowledgement back from the Host until another input is queued for the same seat, then sends them together', async () => {
     const f = fixture();
     const polled = async (nativeSessionId: string) => ((await f.broker.hostCall('mac', { action: 'poll' }) as SavedTeam[]).find(team => team.inbox && team.members[0]!.nativeSessionId === nativeSessionId)?.messages ?? [])
@@ -226,45 +133,9 @@ describe('bots calling as their own sessions', () => {
     expect((await polled('chief')).map(input => 'body' in input ? input.body : '')).toEqual(['Received.', 'Thanks.', 'The branch is cut.']);
   });
 
-  it('holds an acknowledgement to a temporary bot and to its chief the same way, and an acknowledgement does not answer what a bot waits for', async () => {
-    const f = fixture();
-    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
-    const worker = f.as(f.task().members[0]!.nativeSessionId!);
-    await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'q1', to: 'chief', text: 'Include the hotfix?', status: 'needs_input' });
-    f.settle();
-    const given = async (to: number) => { const team = (await f.broker.hostCall('mac', { action: 'poll' }) as SavedTeam[]).find(item => item.task)!; return team.messages.filter(message => message.to === team.members[to]!.id && message.status === 'queued').map(message => parseTaskInputs(message.text)![0]); };
-    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'k1', to: 'Reviewer', text: 'Noted.', status: 'ack' });
-    await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'p1', to: 'chief', text: 'Got it.', status: 'ack' });
-    // Both wait on the Relay; the worker still waits for its answer.
-    expect([await given(0), await given(1), f.task().task!.state]).toEqual([[], [], 'needs_input']);
-    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'a1', to: 'Reviewer', text: 'Yes.' });
-    expect((await given(0)).map(input => 'body' in input ? input.body : '')).toEqual(['Noted.', 'Yes.']);
-    // Nothing else was queued for the chief, so its acknowledgement still waits.
-    expect([await given(1), f.task().task!.state]).toEqual([[], 'working']);
-  });
-
-  it('counts a worker\'s turn as ended while an acknowledgement waits for it: a held acknowledgement is not input', async () => {
-    const f = fixture();
-    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
-    const worker = f.task().members[0]!;
-    f.settle();
-    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'k1', to: 'Reviewer', text: 'Noted.', status: 'ack' });
-    const presence = (activity: 'idle' | 'busy') => f.broker.hostCall('mac', { action: 'presence', teamId: f.task().id, memberId: worker.id, activity });
-    await presence('busy'); await presence('idle');
-    expect(f.task().task!.reminded).toEqual(expect.any(Number));
-  });
-
-  it('keeps a temporary bot as a standing bot of its chief\'s group when the person asks, and ends its task as done', async () => {
-    const f = fixture();
-    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review the release branch.', lifetime: 'temporary' });
-    await f.broker.action({ teamId: f.task().id, action: 'keep_task' });
-    expect(f.placed).toEqual([{ groupId: 'g', viewId: expect.stringMatching(/^bot-/), details: { botId: expect.stringMatching(/^b_[0-9a-f]{32}$/), name: 'Reviewer', mission: 'Review the release branch.', chief: ids.chief } }]);
-    expect(f.task().task!.state).toBe('done');
-  });
-
   it('creates a standing bot in its chief\'s group, with its mission and chief, whose first message waits in its inbox', async () => {
     const f = fixture();
-    const created = await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Scribe', mission: 'Keep the release notes.', lifetime: 'standing', message: 'Start from v0.3.' }) as { botId: string; status: string };
+    const created = await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Scribe', mission: 'Keep the release notes.', message: 'Start from v0.3.' }) as { botId: string; status: string };
     expect(created).toMatchObject({ botId: expect.stringMatching(/^b_[0-9a-f]{32}$/), status: 'ready' });
     expect(f.placed).toEqual([{ groupId: 'g', viewId: expect.stringMatching(/^bot-/), details: { botId: created.botId, name: 'Scribe', mission: 'Keep the release notes.', chief: ids.chief } }]);
     const inbox = f.state().find(team => team.inbox?.botId === created.botId)!;
@@ -278,13 +149,13 @@ describe('bots calling as their own sessions', () => {
     expect(await f.broker.hostCall('mac', { action: 'bot_message', owner: scribe, operationId: 'r1', to: 'Chief', text: 'The file exists.', replyTo: first })).toMatchObject({ outcome: 'delivered' });
   });
 
-  it('gives a bot created for an item the item\'s brief in its first input, standing or temporary', async () => {
+  it('gives a bot or sub-session created for an item the item\'s brief in its first input', async () => {
     const f = fixture();
     await f.broker.hostCall('mac', { action: 'update_board', owner: f.as('chief'), items: [{ title: 'Write the script', brief: 'Usage: wordstat FILE; exit 2 on a missing file.' }, { title: 'Write the README', brief: 'Document both scripts.' }] });
-    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op1', name: 'Scribe', mission: 'Keep the docs.', lifetime: 'standing', item: 2 });
+    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op1', name: 'Scribe', mission: 'Keep the docs.', item: 2 });
     const inbox = f.state().find(team => team.inbox?.botId && team.members[0]!.name === 'Scribe')!;
     expect(inbox.messages.map(message => parseTaskInputs(message.text)?.[0])).toEqual([expect.objectContaining({ kind: 'assistant', body: expect.stringContaining('Document both scripts.') })]);
-    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op2', name: 'Coder', mission: 'Code it.', message: 'Start now.', lifetime: 'temporary', item: 1 });
+    await f.broker.hostCall('mac', { action: 'create_sub_session', owner: f.as('chief'), operationId: 'op2', name: 'Coder', prompt: 'Code it.', trackedTaskKeys: [1] });
     expect(parseTaskInputs(f.task().messages[0]!.text)?.[0]).toMatchObject({ kind: 'brief', brief: expect.stringContaining('Usage: wordstat FILE; exit 2 on a missing file.') });
   });
 
@@ -297,8 +168,8 @@ describe('bots calling as their own sessions', () => {
     // Its inbox counts the new standing instructions as sent, so the next poll queues nothing.
     expect(f.state().find(team => team.inbox?.botId === ids.chief)!.inbox!.instructions).toBe(instructionsHash('Lead the release; review every change first.'));
     expect(f.state().find(team => team.inbox?.botId === ids.chief)!.messages).toHaveLength(before);
-    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
-    await expect(f.broker.hostCall('mac', { action: 'update_mission', owner: f.as(f.task().members[0]!.nativeSessionId!), mission: 'Something else.' })).rejects.toThrow('mission is its brief');
+    await f.broker.hostCall('mac', { action: 'create_sub_session', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', prompt: 'Review it.' });
+    await expect(f.broker.hostCall('mac', { action: 'update_mission', owner: f.as(f.task().members[0]!.nativeSessionId!), mission: 'Something else.' })).rejects.toThrow('not a bot');
   });
   it('answers every message with one of the five outcomes, each of them a valid result of the protocol', async () => {
     const f = fixture();
@@ -311,14 +182,11 @@ describe('bots calling as their own sessions', () => {
       await send(f.as('chief'), 'Chief', 'o3'),
     ];
     expect(results.map(result => result.outcome)).toEqual(['delivered', 'duplicate', 'unreachable', 'forbidden']);
-    // A temporary bot: reached while it runs, unreachable once it finished, and a repeated report queues nothing new.
-    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
+    // A sub-session is no bot: another bot's message to its name or its id is unreachable, and it messages no one.
+    const sub = await f.broker.hostCall('mac', { action: 'create_sub_session', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', prompt: 'Review it.' }) as { sub_session_id: string };
     const worker = f.as(f.task().members[0]!.nativeSessionId!);
-    results.push(await send(f.as('tracker'), 'Reviewer', 't1'), await send(worker, 'chief', 'p1', { status: 'progress' }), await send(worker, 'chief', 'p1', { status: 'progress' }));
-    expect(results.slice(4).map(result => result.outcome)).toEqual(['delivered', 'delivered', 'duplicate']);
-    await send(worker, 'chief', 'd1', { status: 'done' });
-    results.push(await send(f.as('tracker'), 'Reviewer', 't2'), await send(f.as('chief'), 'Reviewer', 't3'));
-    expect(results.slice(7).map(result => result.outcome)).toEqual(['unreachable', 'unreachable']);
+    results.push(await send(f.as('tracker'), 'Reviewer', 't1'), await send(f.as('tracker'), sub.sub_session_id, 't2'), await send(worker, 'chief', 'p1', { status: 'progress' }));
+    expect(results.slice(4).map(result => result.outcome)).toEqual(['unreachable', 'unreachable', 'forbidden']);
     // What the sender is told is what the fixtures of the protocol allow.
     const fixtures = JSON.parse(readFileSync(new URL('../../agent-remote-protocol/src/fixtures/bot-messages.v1.json', import.meta.url), 'utf8'));
     expect(fixtures.results.valid.every(isBotMessageResult)).toBe(true);
@@ -333,7 +201,7 @@ describe('bots calling as their own sessions', () => {
 
   it('tells a bot\'s chief what the person wrote to the bot, once, and nobody when the person is its chief', async () => {
     const f = fixture();
-    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Scribe', mission: 'Keep the release notes.', lifetime: 'standing' });
+    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Scribe', mission: 'Keep the release notes.' });
     const scribe = f.as(f.state().find(team => team.inbox?.pending === undefined && team.members[0]!.nativeSessionId?.startsWith('worker-'))!.members[0]!.nativeSessionId!);
     const wrote = { action: 'bot_told' as const, owner: scribe, text: 'Skip   the\nflaky test.', cause: { kind: 'person' as const, messageId: 'u1' } };
     expect(await f.broker.hostCall('mac', wrote)).toMatchObject({ outcome: 'delivered' });
@@ -341,9 +209,9 @@ describe('bots calling as their own sessions', () => {
     expect(parseTaskInputs(chief.messages.at(-1)!.text)).toEqual([{ kind: 'person_wrote', bot: 'Scribe', body: 'Skip the flaky test.' }]);
     expect(await f.broker.hostCall('mac', wrote)).toMatchObject({ outcome: 'duplicate' });
     expect(f.state().find(team => team.inbox?.botId === ids.chief)!.messages).toHaveLength(chief.messages.length);
-    // Its chief is the person, or it is a temporary bot, whose chief hears the person through its task.
+    // Its chief is the person, or it is a sub-session, which is no bot and whose own report tells its bot what the person wrote.
     expect(await f.broker.hostCall('mac', { ...wrote, owner: f.as('tracker') })).toMatchObject({ outcome: 'unreachable' });
-    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op2', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
+    await f.broker.hostCall('mac', { action: 'create_sub_session', owner: f.as('chief'), operationId: 'op2', name: 'Reviewer', prompt: 'Review it.' });
     expect(await f.broker.hostCall('mac', { ...wrote, owner: f.as(f.task().members[0]!.nativeSessionId!) })).toMatchObject({ outcome: 'forbidden' });
   });
 
@@ -365,16 +233,6 @@ describe('bots calling as their own sessions', () => {
       expect(read.attachment.byteLength).toBe(bytes.length);
     });
 
-    it('carries a temporary bot\'s report with a file, and refuses files that are not stored, in a room, or from a session that is no bot', async () => {
-      const f = fixture();
-      await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
-      const worker = f.as(f.task().members[0]!.nativeSessionId!), file = await upload(f, worker, 'review.log');
-      await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'd1', to: 'chief', text: 'Two issues.', status: 'done', attachments: [file.id] });
-      expect(f.inputs(f.task(), 1).at(-1)).toMatchObject({ kind: 'done', body: expect.stringContaining(`- ${file.id} · review.log`) });
-      await expect(f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'a2', to: 'Tracker', text: 'Look.', attachments: ['a_' + '1'.repeat(32)] })).rejects.toThrow('no longer stored');
-      await expect(f.broker.hostCall('mac', { action: 'attachment_begin', owner: f.as('stranger'), name: 'x.log', mediaType: 'text/plain', byteLength: 1, sha256: 'a'.repeat(64) })).rejects.toThrow('Only an assistant');
-      await expect(f.broker.hostCall('mac', { action: 'attachment_chunk', owner: worker, attachment: file.id, offset: 0, contentBase64: 'aGVsbG8' })).rejects.toThrow('Invalid file chunk');
-    });
   });
 
   describe('replies from the final text of a turn', () => {
@@ -421,22 +279,6 @@ describe('bots calling as their own sessions', () => {
       expect(await f2.broker.hostCall('mac', { action: 'bot_reply', owner: f2.as('chief'), text: 'Asked the reviewer.', cause: { kind: 'framed', answers: asked2 } })).toMatchObject({ outcome: 'delivered' });
     });
 
-    it('answers a temporary bot that wrote, refuses a message that is not in the bot\'s inbox, and says so when the sender is gone', async () => {
-      const f = fixture();
-      await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
-      const worker = f.as(f.task().members[0]!.nativeSessionId!);
-      await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'w1', to: 'Tracker', text: 'Which branch?' });
-      const asked = inboxOf(f, ids.tracker).inbox!.recent!.at(-1)!.id;
-      expect(await f.broker.hostCall('mac', { action: 'bot_reply', owner: f.as('tracker'), text: 'release/0.3', cause: { kind: 'framed', answers: asked } })).toMatchObject({ outcome: 'delivered' });
-      expect(f.inputs(f.task(), 0).at(-1)).toMatchObject({ kind: 'message', from: 'Tracker', body: 'release/0.3' });
-      expect(await f.broker.hostCall('mac', { action: 'bot_reply', owner: f.as('tracker'), text: 'Hi', cause: { kind: 'framed', answers: 'm000000000000' } })).toMatchObject({ outcome: 'forbidden' });
-      // A temporary bot has no inbox, so it never answers from final text.
-      expect(await f.broker.hostCall('mac', { action: 'bot_reply', owner: worker, text: 'Hi', cause: { kind: 'framed', answers: asked } })).toMatchObject({ outcome: 'forbidden' });
-      await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'w2', to: 'Tracker', text: 'And the tag?' });
-      const second = inboxOf(f, ids.tracker).inbox!.recent!.at(-1)!.id;
-      await f.broker.hostCall('mac', { action: 'bot_message', owner: worker, operationId: 'w3', to: 'chief', text: 'Done.', status: 'done' });
-      expect(await f.broker.hostCall('mac', { action: 'bot_reply', owner: f.as('tracker'), text: 'v0.3', cause: { kind: 'framed', answers: second } })).toMatchObject({ outcome: 'unreachable' });
-    });
   });
 });
 

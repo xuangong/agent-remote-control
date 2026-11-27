@@ -21,7 +21,9 @@ it('has no ordinary Team to make, change or message: a Team is made only to star
   expect(isTeamCreate({operationId:'new',source,bot:{name:'Review',mission:'Review the change.'}})).toBe(true);
   for (const action of [{action:'resolve_message',messageId:'message',outcome:'accepted'},{action:'archive'},{action:'restore'},{action:'rename',title:'x'},{action:'abandon_creation',memberId:'m'},
     {action:'retry_creation',memberId:'m'},{action:'add_member',operationId:'o',hostId:'h',providerId:'p',cwd:'',name:'n',responsibility:''}]) expect(isTeamAction({teamId:'team',...action})).toBe(false);
-  expect(isTeamAction({teamId:'team',action:'keep_task'})).toBe(true);
+  expect(isTeamAction({teamId:'team',action:'stop_sub_session'})).toBe(true);
+  // Keeping a sub-session as a bot, and the older ways to end a task, are gone.
+  for (const action of ['keep_task','cancel_task','mark_task_done']) expect(isTeamAction({teamId:'team',action})).toBe(false);
 });
 
 

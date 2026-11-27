@@ -68,7 +68,7 @@ export function reconcileBots(subject: string, rows: SavedWorkspaceWindow[], bot
       let record = mine.get(botId);
       // The chief is set when the record is made, by the Relay placing a bot another bot created; a later change cannot set it.
       const chief = details.chief && mine.has(details.chief) ? { kind: 'bot' as const, botId: details.chief } : { kind: 'person' as const };
-      if (!record) { record = { subject, botId, chief, lifetime: 'standing', createdAt: now, updatedAt: now }; bots.push(record); mine.set(botId, record); }
+      if (!record) { record = { subject, botId, chief, createdAt: now, updatedAt: now }; bots.push(record); mine.set(botId, record); }
       const identity = botIdentity(details as WindowBotDetails);
       if (BOT_IDENTITY_FIELDS.some(field => JSON.stringify(record![field]) !== JSON.stringify(identity[field]))) {
         for (const field of BOT_IDENTITY_FIELDS) { if (identity[field] === undefined) delete record[field]; else (record as Record<string, unknown>)[field] = identity[field]; }
@@ -79,7 +79,7 @@ export function reconcileBots(subject: string, rows: SavedWorkspaceWindow[], bot
       shown.add(botId);
     }
   }
-  for (const record of mine.values()) if (record.lifetime === 'standing' && !shown.has(record.botId) && record.retiredAt === undefined) record.retiredAt = now;
+  for (const record of mine.values()) if (!shown.has(record.botId) && record.retiredAt === undefined) record.retiredAt = now;
 }
 
 /** Stored bot details with each picture read in the current form; stored rows may hold shapes an older build wrote. Anything that is not bots is returned as it is. */

@@ -3,7 +3,7 @@ import { NativeSessionRef } from './session-succession.js';
 import { Value } from '@sinclair/typebox/value';
 import { ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, AttachmentId, BotAttachment, BotId, BotFact, BotMission, BotName, Board, BOARD_ITEM_LIMIT, BOARD_PLAN_LIMIT, BoardItem, BoardItemEdit, BoardPlanEdit, BotTimer } from './bots.js';
 import { ChainId, StandingApproval, TurnCause } from './chains.js';
-import { TaskBrief, ASK_LIMIT, TaskDoneWhen, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_LIMIT, ROOM_MINUTES_LIMIT, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, TaskReportStatus, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_QUESTION_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, isTeamTask } from './task.js';
+import { TaskBrief, ASK_LIMIT, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_LIMIT, ROOM_MINUTES_LIMIT, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, TaskOutcome, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, SUB_SESSION_LINE_LIMIT, SUB_SESSION_NAME_LIMIT, isTeamTask } from './task.js';
 const object = { additionalProperties: false } as const;
 const id = Type.String({ minLength: 1, maxLength: 256 });
 const short = Type.String({ maxLength: 2048 });
@@ -12,7 +12,7 @@ const enumOf = <T extends string>(...values: T[]) => Type.Union(values.map(value
 const gitObject = Type.String({ pattern: '^[0-9a-f]{7,64}$' });
 export const TeamSource = Type.Object({ hostId: id, providerId: id, nativeSessionId: id, title: Type.String({ minLength: 1, maxLength: 256 }) }, object);
 export type TeamSource = Static<typeof TeamSource>;
-/** Where a temporary bot works beside its chief: the same directory, its own worktree at a commit, or another machine's clone. */
+/** Where a sub-session works beside its bot: the same directory, its own worktree at a commit, or another machine's clone. */
 export const TeamMemberWorkspace = Type.Union([
   Type.Object({ kind: Type.Literal('shared') }, object),
   Type.Object({ kind: Type.Literal('worktree'), commit: gitObject }, object),
@@ -117,18 +117,15 @@ export const Team = Type.Object({ id, operationId: id, revision: Type.Integer({ 
   ask: Type.Optional(TeamAsk),
 }, object);
 export type Team = Static<typeof Team>;
-/** The person starts a temporary bot whose chief is the source session (`/side`, bots design 9): its name and its mission. */
+/** The person starts a sub-session beside the source conversation (`/side`): its name and its first work. */
 export const TeamCreate = Type.Object({ operationId: id, source: TeamSource, bot: Type.Object({ name: TaskTitle, mission: TaskBrief }, object) }, object);
 export type TeamCreate = Static<typeof TeamCreate>;
 /** The person mentions a bot (`@Name text`) in the conversation `source`: the bot answers in a session of its own for it. `bot`: the bot's id or name. */
 export const TeamAskRequest = Type.Object({ operationId: id, source: TeamSource, bot: Type.String({ minLength: 1, maxLength: 300 }), text: Type.String({ minLength: 1, maxLength: ASK_LIMIT }) }, object);
 export type TeamAskRequest = Static<typeof TeamAskRequest>;
 export const TeamAction = Type.Union([
-  // The person stops a task, or takes it as done.
-  Type.Object({ teamId: id, action: Type.Literal('cancel_task') }, object),
-  Type.Object({ teamId: id, action: Type.Literal('mark_task_done') }, object),
-  // The person keeps a temporary bot as a standing bot of its chief's group (bots design 10).
-  Type.Object({ teamId: id, action: Type.Literal('keep_task') }, object),
+  // The person ends a sub-session: its running turn stops and its session is released.
+  Type.Object({ teamId: id, action: Type.Literal('stop_sub_session') }, object),
   // The person writes in a room, or ends it.
   Type.Object({ teamId: id, action: Type.Literal('room_post'), operationId: id, text: Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT }) }, object),
   Type.Object({ teamId: id, action: Type.Literal('close_room') }, object),
@@ -149,20 +146,31 @@ export const TeamHostCall = Type.Union([
   Type.Object({ action: Type.Literal('settle'), teamId: id, memberId: id, messageId: id, resolvedTarget: Type.Optional(NativeSessionRef), outcome: enumOf('accepted', 'rejected', 'unknown'), acceptance: Type.Optional(enumOf('started', 'queued', 'handled')), error: Type.Optional(short) }, object),
   // The calling Host's sessions that are bots, with their missions: they get the bots' tools and standing instructions.
   Type.Object({ action: Type.Literal('bot_enablement') }, object),
-  // A main session's task tools, by the main session on the calling Host.
-  // workspace: where the worker works (default same); worktree needs the commit it starts from. provider and model choose the worker's agent.
-  Type.Object({ action: Type.Literal('create_task'), owner: TaskOwner, operationId: id, title: TaskTitle, brief: TaskBrief, doneWhen: Type.Optional(TaskDoneWhen),
+  // A bot's sub-session tools, called as its main session (bots design 5.1). Work reaches a sub-session as input; its results come from its turns.
+  // workspace: where it works (default same); worktree needs the commit it starts from. provider and model choose its agent.
+  Type.Object({ action: Type.Literal('create_sub_session'), owner: TaskOwner, operationId: id, name: Type.String({ minLength: 1, maxLength: SUB_SESSION_NAME_LIMIT, pattern: '\\S' }), prompt: TaskBrief,
     workspace: Type.Optional(TaskWorkspace), commit: Type.Optional(gitObject), provider: Type.Optional(id), model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
-    item: TeamTask.properties.item }, object),
-  Type.Object({ action: Type.Literal('task_status'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), taskId: Type.Optional(id) }, object),
-  Type.Object({ action: Type.Literal('message_task'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), taskId: id, operationId: id,
-    text: Type.String({ minLength: 1, maxLength: TASK_BRIEF_LIMIT }) }, object),
-  Type.Object({ action: Type.Literal('cancel_task'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), taskId: id }, object),
-  Type.Object({ action: Type.Literal('mark_task_done'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), taskId: id,
-    summary: Type.Optional(Type.String({ minLength: 1, maxLength: TASK_SUMMARY_LIMIT })) }, object),
-  // Every bot's own calls, made as its main session (bots design 5.1). A temporary bot is a task: its chief is the task's owner.
-  Type.Object({ action: Type.Literal('create_bot'), owner: TaskOwner, operationId: id, name: TaskTitle, mission: TaskBrief, lifetime: Type.Union([Type.Literal('temporary'), Type.Literal('standing')]),
-    message: Type.Optional(BotText), workspace: Type.Optional(TaskWorkspace), commit: Type.Optional(gitObject), provider: Type.Optional(id), model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    /** The board items it takes up: it becomes their owner. */
+    trackedTaskKeys: Type.Optional(Type.Array(BoardItem.properties.key, { maxItems: 10, uniqueItems: true })), cause: Type.Optional(TurnCause),
+    /** Where it works: a Host the caller read from `list_hosts` (default: the caller's own), and in it one existing folder, or a new folder created under a workspace of that Host. */
+    host: Type.Optional(id), cwd: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
+    newFolder: Type.Optional(Type.Object({ name: Type.String({ minLength: 1, maxLength: 255 }), under: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })) }, object)) }, object),
+  // More work for a sub-session of the caller. title: one line naming this piece of work. delivery: queue (between turns) or interrupt (stop the running turn first).
+  Type.Object({ action: Type.Literal('send_to_sub_session'), owner: BotCaller, subSessionId: id, operationId: id, text: Type.String({ minLength: 1, maxLength: TASK_BRIEF_LIMIT }),
+    title: Type.String({ minLength: 1, maxLength: SUB_SESSION_LINE_LIMIT }), delivery: Type.Optional(enumOf('queue', 'interrupt')),
+    trackedTaskKeys: Type.Optional(Type.Array(BoardItem.properties.key, { maxItems: 10, uniqueItems: true })), cause: Type.Optional(TurnCause) }, object),
+  Type.Object({ action: Type.Literal('get_sub_session_status'), owner: BotCaller, subSessionIds: Type.Optional(Type.Array(id, { maxItems: 20 })) }, object),
+  Type.Object({ action: Type.Literal('stop_sub_session'), owner: BotCaller, subSessionId: id }, object),
+  // A sub-session's own report (communicate_update): what it is doing now, and the result of the piece of work it finished.
+  Type.Object({ action: Type.Literal('sub_update'), owner: BotCaller, currentStep: Type.Optional(Type.String({ minLength: 1, maxLength: SUB_SESSION_LINE_LIMIT })),
+    finalSummary: Type.Optional(Type.String({ minLength: 1, maxLength: TASK_SUMMARY_LIMIT })) }, object),
+  // A sub-session's turn ended: its Host sends the outcome and the final text, never the model.
+  Type.Object({ action: Type.Literal('sub_turn_end'), teamId: id, memberId: id, outcome: TaskOutcome, text: Type.Optional(Type.String({ minLength: 1, maxLength: TASK_SUMMARY_LIMIT })) }, object),
+  // The person wrote to a sub-session directly: its Host says so.
+  Type.Object({ action: Type.Literal('sub_told'), teamId: id, memberId: id, operationId: id, text: Type.String({ minLength: 1, maxLength: TASK_TOLD_LIMIT }) }, object),
+  // Every bot's own calls, made as its main session (bots design 5.1). A bot creates standing bots: its recruits.
+  Type.Object({ action: Type.Literal('create_bot'), owner: TaskOwner, operationId: id, name: TaskTitle, mission: TaskBrief,
+    message: Type.Optional(BotText), provider: Type.Optional(id), model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
     /** The item of the caller's board this bot is created for: it records the assignee and the brief, and the bot's input names it. */
     item: Type.Optional(BoardItem.properties.key), cause: Type.Optional(TurnCause),
     /** Where the bot works: a Host the caller read from `list_hosts` (default: the caller's own), and in it one existing folder, or a new folder created under a workspace of that Host. */
@@ -184,8 +192,6 @@ export const TeamHostCall = Type.Union([
   // An answer session's turn ended: its final text answers what the person asked (bots plan 8b). The Host sends it, never the model.
   Type.Object({ action: Type.Literal('bot_answer'), owner: BotCaller, text: Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT }),
     cause: Type.Object({ kind: Type.Literal('framed'), asked: Type.Literal(true) }, object) }, object),
-  // A `/side` bot's turn ended with a final text: that text is the side's answer and its result. The Host sends it, never the model.
-  Type.Object({ action: Type.Literal('side_final'), owner: BotCaller, text: Type.String({ minLength: 1, maxLength: TASK_SUMMARY_LIMIT }) }, object),
   // The person wrote into a standing bot's session: its chief, if a bot, hears it (bots design 3.5). The Host sends it from its record of the input.
   Type.Object({ action: Type.Literal('bot_told'), owner: BotCaller, text: Type.String({ minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT }),
     cause: Type.Object({ kind: Type.Literal('person'), messageId: Type.String({ minLength: 1, maxLength: 256 }) }, object) }, object),
@@ -216,11 +222,7 @@ export const TeamHostCall = Type.Union([
   Type.Object({ action: Type.Literal('update_board'), owner: BotCaller,
     items: Type.Optional(Type.Array(BoardItemEdit, { minItems: 1, maxItems: 10 })), plan: Type.Optional(BoardPlanEdit) }, object),
   Type.Object({ action: Type.Literal('set_timer'), owner: BotCaller, name: BotTimer.properties.name, minutes: Type.Integer({ minimum: 0, maximum: 7 * 24 * 60 }) }, object),
-  Type.Object({ action: Type.Literal('stop_bot'), owner: BotCaller, bot: Type.String({ minLength: 1, maxLength: 300 }) }, object),
-  Type.Object({ action: Type.Literal('retire_bot'), owner: BotCaller, bot: Type.String({ minLength: 1, maxLength: 300 }) }, object),
   Type.Object({ action: Type.Literal('bot_session'), owner: BotCaller, bot: Type.String({ minLength: 1, maxLength: 300 }) }, object),
-  // A task's worker reports its result once.
-  Type.Object({ action: Type.Literal('report_task'), teamId: id, memberId: id, status: TaskReportStatus, summary: Type.String({ minLength: 1, maxLength: TASK_SUMMARY_LIMIT }) }, object),
   // An assistant's main session lists the account's other assistants, and messages one.
   Type.Object({ action: Type.Literal('list_assistants'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object) }, object),
   Type.Object({ action: Type.Literal('message_assistant'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object),
@@ -232,14 +234,11 @@ export const TeamHostCall = Type.Union([
   Type.Object({ action: Type.Literal('room_say'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), roomId: id, text: roomText,
     done: Type.Optional(Type.Boolean()) }, object),
   Type.Object({ action: Type.Literal('room_pass'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object), roomId: id }, object),
-  // A task's worker asks its owner, and the worker's Host says what the person wrote to the worker directly.
-  Type.Object({ action: Type.Literal('ask_owner'), teamId: id, memberId: id, question: Type.String({ minLength: 1, maxLength: TASK_QUESTION_LIMIT }) }, object),
-  Type.Object({ action: Type.Literal('tell_task'), teamId: id, memberId: id, operationId: id, text: Type.String({ minLength: 1, maxLength: TASK_TOLD_LIMIT }) }, object),
 ]);
 export type TeamHostCall = Static<typeof TeamHostCall>;
 export const TeamSeat = Type.Object({ teamId: id, source: TeamSource, member: TeamMember,
   /** The seat belongs to a task: its worker as Leader, or the main session that owns it as requester. */
-  task: Type.Optional(Type.Object({ title: TaskTitle, side: Type.Optional(Type.Literal(true)) }, object)),
+  task: Type.Optional(Type.Object({ title: TaskTitle }, object)),
   /** The seat is one assistant's main session in a link: bound where it is, it only receives messages. */
   link: Type.Optional(Type.Object({ peer: Type.String({ minLength: 1, maxLength: 256 }) }, object)),
   /** The seat is one bot's main session, receiving its inbox; mission: a bot this seat creates, which starts with it. */

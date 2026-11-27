@@ -1,4 +1,3 @@
-.lab-ordinary-workspace { display: contents; }
 /* A room: its transcript and the person's message. */
 .lab-room { display: grid; gap: var(--orchard-space-s); padding: 4px 10px 10px; font-size: 12px; }
 .lab-room-state { margin: 0; color: var(--orchard-text-secondary); }

@@ -1,3 +1,4 @@
+.lab-ordinary-workspace { display: contents; }
 .lab-session-placement-home, .lab-session-placement { display: contents; }
 .lab-session-dock-rail { display: flex; flex: 1; min-width: 0; min-height: 0; height: 100%; width: 100%; }
 .lab-session-dock-rail[data-docked] { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; }

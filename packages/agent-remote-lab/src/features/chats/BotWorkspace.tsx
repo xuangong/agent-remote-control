@@ -22,7 +22,7 @@ import { Button } from '../../ui/Button.js';
 import { Icon } from '../../ui/Icon.js';
 import { botViews, type BotPicture } from '@orchardworks/agent-remote-protocol';
 import { errorWords } from '@orchardworks/agent-client';
-import { TimelineSkeleton, useTranslate } from '@orchardworks/agent-client-web/react';
+import { OpeningReplyContext, TimelineSkeleton, useTranslate } from '@orchardworks/agent-client-web/react';
 import { AssistantTopBar } from './AssistantTopBar.js';
 import { AssistantDetailsHostContext, type AssistantDetailsHost } from '../../conversation/assistant/details-host.js';
 import { useAssistantNames } from '../../kernel/names-context.js';
@@ -137,6 +137,7 @@ export function BotWorkspace({ visible, covered = false, compact, scope, rooms, 
       ...(onPinToWindow ? { action: { label: t('card.pin'), icon: 'window' as const, onSelect: () => onPinToWindow({ groupId: botRow.groupId, viewId: botRow.viewId }) } } : {}),
       setPicture: (picture: BotPicture) => actions.setPicture(botRow, picture), rename: (name: string) => actions.rename(botRow, name) } : {}),
     ...(info ? { where: info } : {}),
+    ...(botRow?.reply?.preview ? { latestReply: botRow.reply.preview } : {}),
   };
   // Choosing another bot dismisses a notice about the last one.
   useEffect(() => { if (place?.kind === 'bot') actions.clearNotice(); }, [key]);
@@ -224,7 +225,7 @@ export function BotWorkspace({ visible, covered = false, compact, scope, rooms, 
       {panelDescriptor ? null
         : selected.loading || selected.error ? null
         // A conversation was chosen and its group has not loaded: its layout holds the place, and nothing says it is missing.
-        : place?.kind === 'bot' || place?.kind === 'session' ? <div className="lab-bot-pending"><TimelineSkeleton /></div>
+        : place?.kind === 'bot' || place?.kind === 'session' ? <div className="lab-bot-pending"><OpeningReplyContext.Provider value={botRow?.reply?.preview}><TimelineSkeleton /></OpeningReplyContext.Provider></div>
         // Before the roster loads, nobody is known to be missing: the welcome keeps its place and says nothing yet.
         : workspace.groupsKnowledge && workspace.groupsKnowledge !== 'confirmed' && !workspace.groups.length ? <div className="lab-bot-welcome" data-quiet><OrchardMark size={56} /><h2>&nbsp;</h2><p>&nbsp;</p></div>
         : <div className="lab-bot-welcome">

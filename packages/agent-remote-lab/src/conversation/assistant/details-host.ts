@@ -25,6 +25,8 @@ export interface AssistantDetailsHost {
   /** Stores the assistant's own name, on every device; absent where it cannot be stored (a session in no group). */
   readonly rename?: (name: string) => void;
   readonly where?: AssistantWhere;
+  /** The assistant's newest reply as its list row has it: a conversation not loaded yet shows it as its last bubble. */
+  readonly latestReply?: string;
   /** A place in the host's top bar for the conversation's own tools (its search). */
   readonly tools?: HTMLElement | null;
 }

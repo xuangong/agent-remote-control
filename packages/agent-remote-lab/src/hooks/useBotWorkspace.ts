@@ -68,10 +68,10 @@ export function useBotWorkspace(workspace: Workspace, succession: Succession, pl
   const group = handle?.getGroup() ?? (canRead && selectedId && !deleted ? workspace.readGroup(selectedId) : undefined);
   const candidate = place?.kind === 'bot' && group && hasBotAppearance(group) ? group.window.views.find(view => view.id === place.viewId && isBotView(view) && !group.bots?.members[view.id]?.hidden) : undefined;
   const view = candidate && isBotView(candidate) ? candidate : undefined;
-  // Every group Bot mode shows, the live selected one in place of its catalog copy: their bots are enrolled so a handoff
+  // Every group Bot mode shows that holds a bot (a group with none has nothing to enroll or to ask the Relay about), the live selected one in place of its catalog copy: their bots are enrolled so a handoff
   // resolves to the current session for status, and a verified handoff is written into each group's layout.
   const enrolledGroups: WindowGroup[] = !canRead ? [] : [...new Map([...workspace.groups, ...(group ? [group] : [])]
-    .filter(item => hasBotAppearance(item) && !workspace.deletedWindowIds.includes(item.window.id)).map(item => [item.window.id, item])).values()];
+    .filter(item => hasBotAppearance(item) && botViews(item).length > 0 && !workspace.deletedWindowIds.includes(item.window.id)).map(item => [item.window.id, item])).values()];
   const locatorSet = JSON.stringify(enrolledGroups.map(item => [item.window.id, item.window.revision, botViews(item).map(bot => [bot.id, bot.binding])]));
   useEffect(() => {
     if (!canRead || !runtime.active || !enrolledGroups.length) return;

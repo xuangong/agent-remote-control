@@ -217,6 +217,19 @@ describe('sub-sessions of a bot', () => {
     expect(f.sub().task!.state).toBe('working');
   });
 
+  it('stays ended when the turn it was stopped in reports its end afterwards', async () => {
+    const f = fixture();
+    await f.start();
+    f.settle();
+    await f.call(f.as('chief'), 'stop_sub_session', { subSessionId: 'Collect logs' });
+    // Stopping interrupts the running turn, whose end reaches the Relay after the stop: it records the result and revives nothing.
+    await f.end(0, 'interrupted');
+    expect(f.sub().task).toMatchObject({ state: 'ended', endedBy: 'bot', result: { outcome: 'interrupted' } });
+    expect(f.inputs(f.sub(), 1)).toEqual([]);
+    await f.broker.hostCall('mac', { action: 'presence', teamId: f.sub().id, memberId: f.sub().members[0]!.id, activity: 'busy' } as never);
+    expect(f.sub().task!.state).toBe('ended');
+  });
+
   it('ends on its bot\'s stop and on the person\'s, withdrawing what waits and stopping its turn, and tells its bot of the person\'s', async () => {
     const f = fixture();
     await f.start('Collect logs');

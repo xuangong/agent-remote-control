@@ -238,6 +238,8 @@ export class TaskGroups {
     return this.workerChange(hostId, call, (team, self, item, now) => {
       item.result = { outcome: call.outcome, text: (item.reportedSummary ?? call.text ?? withoutResult(call.outcome)).slice(0, TASK_SUMMARY_LIMIT), at: now };
       delete item.reportedSummary;
+      // An ended sub-session stays ended: the turn it was stopped in reports its end after the stop, and that revives nothing and tells no one.
+      if (item.state === 'ended') { touch(team, item, now); return { taskId: team.id, state: item.state }; }
       delete item.currentStep;
       if (item.state !== 'needs_input' || item.waiting?.reason !== 'interaction') { delete item.waiting; item.state = inbound(team, self.id) ? 'working' : 'idle'; }
       touch(team, item, now);

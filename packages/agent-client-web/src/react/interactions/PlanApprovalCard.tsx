@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useId } from 'react';
 import type { AgentInteractionRequest, AgentInteractionResponse } from '@orchardworks/agent-remote-protocol';
 import type { Translate } from '@orchardworks/agent-client';
 
@@ -6,6 +6,8 @@ import { Pill } from '../../primitives/Pill.js';
 import { MarkdownContent } from '../MarkdownContent.js';
 import { useTranslate } from '../locale.js';
 import { ApprovalChanges } from './ApprovalChanges.js';
+import { useInteractionDraft } from './interaction-draft.js';
+import type { QuestionDraft } from './QuestionCard.js';
 
 export interface PlanApprovalCardProps {
   readonly request: Extract<AgentInteractionRequest, { kind: 'plan_approval' }>;
@@ -13,16 +15,19 @@ export interface PlanApprovalCardProps {
   readonly pending: boolean;
   readonly failure?: string;
   readonly assistantName?: string;
+  readonly draft?: QuestionDraft;
+  readonly onDraftChange?: (draft: QuestionDraft) => void;
 }
 
 /**
  * A plan review inline: Allow approves it, Not now asks for changes without words; the plan, revision feedback and every
  * action (Approve, Approve and execute, Request changes) are under Show what changes.
  */
-export function PlanApprovalCard({ request, onResponse, pending, failure, assistantName }: PlanApprovalCardProps) {
+export function PlanApprovalCard({ request, onResponse, pending, failure, assistantName, draft, onDraftChange }: PlanApprovalCardProps) {
   const id = useId();
   const t = useTranslate();
-  const [feedback, setFeedback] = useState('');
+  const [stored, setStored] = useInteractionDraft(draft, onDraftChange);
+  const feedback = stored.feedback ?? '';
   const approve = request.allowedActions.includes('approve') ? 'approve' : request.allowedActions.includes('approve_and_resume') ? 'approve_and_resume' : undefined;
   const respond = (action: PlanApprovalCardProps['request']['allowedActions'][number]) => onResponse(action === 'reject'
     ? { kind: 'plan_approval', action, ...(feedback.trim() ? { feedback: feedback.trim() } : {}) }
@@ -36,7 +41,7 @@ export function PlanApprovalCard({ request, onResponse, pending, failure, assist
         <MarkdownContent markdown={request.plan} />
         {request.allowedActions.includes('reject') ? <label className="agent-plan-feedback">
           <span>{t('timeline.receipt.revisionFeedback')}</span>
-          <textarea value={feedback} onChange={(event) => setFeedback(event.target.value)} disabled={pending} placeholder={t('timeline.plan.feedbackPlaceholder')} rows={3} />
+          <textarea value={feedback} onChange={(event) => setStored({ ...stored, feedback: event.target.value })} disabled={pending} placeholder={t('timeline.plan.feedbackPlaceholder')} rows={3} />
           <small>{t('timeline.plan.feedbackHint')}</small>
         </label> : null}
         <div className="agent-interaction-actions">

@@ -8,3 +8,7 @@ import './conversation/session-view-options.css';
 import './features/team/ask-resize.css';
 import './ui/ui.css';
 import '@orchardworks/agent-client-web/primitives.css';
+import './shell/touch.css';
+import { enableTouchPressedState } from './kernel/touch-feedback.js';
+
+if (typeof document !== 'undefined') enableTouchPressedState(document);

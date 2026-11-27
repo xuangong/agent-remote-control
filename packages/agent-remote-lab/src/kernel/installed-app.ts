@@ -27,3 +27,13 @@ export async function keepInstalledAppStorage(view: InstalledAppView = window as
   if (!runsInstalled(view) || typeof view.navigator.storage?.persist !== 'function') return undefined;
   try { return await view.navigator.storage.persist(); } catch { return false; }
 }
+
+/**
+ * Whether the platform draws its own swipe back from the left edge for the page's history: iOS and iPadOS WebKit as a home-screen app.
+ * iOS alone defines `navigator.standalone`; an iPad that asks for the desktop site is told by Apple's vendor string, touch and the
+ * standalone display mode. Chromium on Android and desktop browsers have no such gesture on a page, so the page draws its own.
+ */
+export function platformSwipesBack(view: InstalledAppView & { navigator: { vendor?: string; maxTouchPoints?: number } } = window as never): boolean {
+  if (view.navigator.standalone === true) return true;
+  return view.matchMedia?.('(display-mode: standalone)').matches === true && /Apple/i.test(view.navigator.vendor ?? '') && (view.navigator.maxTouchPoints ?? 0) > 0;
+}

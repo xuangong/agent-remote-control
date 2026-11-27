@@ -7,12 +7,16 @@
  *   A release past halfway asks the page to go back and carries on from where the finger left; any other release returns.
  * - A touch the system takes over (the browser's or the installed app's own swipe back, which draws its own slide) cancels the pointer; a
  *   page that goes back soon after it is the system's, and slides nothing of its own.
+ * - Where the platform has its own swipe back for the page's history (iOS and iPadOS as a home-screen app, `platformSwipesBack`), the
+ *   page draws no swipe of its own, and a back that follows a touch from the left edge within a second, or any back that is not the Back
+ *   button, is the platform's: it already drew the list, so the page swaps to it with no transition.
  * - Motion off, by the system or by the reader's own choice, settles every transition at once: the durations are read from the
  *   motion tokens, which the page zeroes in both cases.
  * - On a wide screen nothing moves.
  */
 import { useLayoutEffect, useRef, useState, useEffect, type RefObject } from 'react';
-import { EdgeSwipe, StackLayers } from './stack-transition.js';
+import { EDGE_ZONE_PX, EdgeSwipe, StackLayers } from './stack-transition.js';
+import { platformSwipesBack } from '../../kernel/installed-app.js';
 
 type Motion = 'push' | 'pop';
 
@@ -27,6 +31,8 @@ export interface NavigationStackInput {
 
 /** How long after a touch the system took, a pop is the system's own and is not slid again. */
 const SYSTEM_BACK_WINDOW_MS = 800;
+/** A back this soon after a touch from the left edge is the platform's swipe back. */
+const EDGE_TOUCH_WINDOW_MS = 1000;
 
 const tokenMilliseconds = (element: Element, token: string): number => {
   const value = getComputedStyle(element).getPropertyValue(token).trim();
@@ -39,6 +45,8 @@ export function useNavigationStack({ root, list, phone, showConversation, shownK
   const [motion, setMotion] = useState<Motion>();
   const [leavingKey, setLeavingKey] = useState<string>();
   const [peek, setPeek] = useState(false);
+  const [systemSwipe] = useState(() => platformSwipesBack());
+  const edgeTouchAt = useRef(-Infinity), ownBackAt = useRef(-Infinity);
   const chat = phone && showConversation;
   const layersRef = useRef<StackLayers>();
   const swiping = useRef(false), committed = useRef<Promise<boolean>>(), systemTouchAt = useRef(-Infinity), holdTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -58,7 +66,9 @@ export function useNavigationStack({ root, list, phone, showConversation, shownK
   const [wasChat, setWasChat] = useState(chat);
   if (wasChat !== chat) {
     setWasChat(chat);
-    const systemBack = !chat && performance.now() - systemTouchAt.current < SYSTEM_BACK_WINDOW_MS;
+    const now = performance.now();
+    const systemBack = !chat && (now - systemTouchAt.current < SYSTEM_BACK_WINDOW_MS
+      || systemSwipe && (now - edgeTouchAt.current < EDGE_TOUCH_WINDOW_MS || now - ownBackAt.current > EDGE_TOUCH_WINDOW_MS));
     const animates = !!root.current && !systemBack && tokenMilliseconds(root.current, '--orchard-duration-pop') > 0;
     setMotion(animates && phone ? (chat ? 'push' : 'pop') : undefined);
   }
@@ -77,12 +87,23 @@ export function useNavigationStack({ root, list, phone, showConversation, shownK
     void run.then(finished => { if (finished) { committed.current = undefined; setMotion(undefined); } });
   }, [motion, chat]);
 
+  // Where the platform swipes back itself, the touches from the left edge are only noted: its back follows them.
+  useEffect(() => {
+    if (!systemSwipe) return;
+    const note = (x: number | undefined) => { if (x !== undefined && x <= EDGE_ZONE_PX + 8) edgeTouchAt.current = performance.now(); };
+    const touch = (event: TouchEvent) => note(event.touches[0]?.clientX);
+    const pointer = (event: PointerEvent) => { if (event.pointerType === 'touch') note(event.clientX); };
+    window.addEventListener('touchstart', touch, { capture: true, passive: true });
+    window.addEventListener('pointerdown', pointer, { capture: true, passive: true });
+    return () => { window.removeEventListener('touchstart', touch, true); window.removeEventListener('pointerdown', pointer, true); };
+  }, [systemSwipe]);
+
   // An edge swipe: a finger that starts on the strip along the conversation's left edge drags the conversation away, and the list shows underneath.
   // The strip is the part of the screen whose touch action leaves horizontal movement to the page: under it, the timeline would take the
   // gesture for a scroll of its own and cancel the pointer.
   useEffect(() => {
     const element = edge.current;
-    if (!element || !phone) return;
+    if (!element || !phone || systemSwipe) return;
     let swipe: EdgeSwipe | undefined, pointer = -1;
     const end = () => {
       swipe = undefined; swiping.current = false;
@@ -122,7 +143,7 @@ export function useNavigationStack({ root, list, phone, showConversation, shownK
     };
     element.addEventListener('pointerdown', down);
     return () => { element.removeEventListener('pointerdown', down); clearTimeout(holdTimer.current); end(); };
-  }, [phone]);
+  }, [phone, systemSwipe]);
 
-  return { motion, leavingKey, peek, conversation, scrim, edge };
+  return { motion, leavingKey, peek, conversation, scrim, edge, systemSwipe, ownBack: () => { ownBackAt.current = performance.now(); } };
 }

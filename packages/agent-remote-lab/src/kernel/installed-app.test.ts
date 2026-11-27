@@ -1,5 +1,5 @@
-import { expect, it } from 'vitest';
-import { keepInstalledAppStorage, runsInstalled, type InstalledAppView } from './installed-app.js';
+import { describe, expect, it } from 'vitest';
+import { keepInstalledAppStorage, platformSwipesBack, runsInstalled, type InstalledAppView } from './installed-app.js';
 
 /** A page: installed through iOS's flag or the display mode, with a Storage API that answers `granted` or fails. */
 function view(options: { standalone?: boolean; displayMode?: 'standalone' | 'window-controls-overlay' | 'browser'; persist?: 'granted' | 'refused' | 'throws' | 'none' } = {}) {
@@ -35,4 +35,20 @@ it('does not ask in a browser tab, and never fails the start when the browser ca
   expect(tab.asked).toEqual([]);
   await expect(keepInstalledAppStorage(view({ standalone: true, persist: 'none' }).page)).resolves.toBeUndefined();
   await expect(keepInstalledAppStorage(view({ standalone: true, persist: 'throws' }).page)).resolves.toBe(false);
+});
+
+describe('the platform\'s own swipe back', () => {
+  const page = (navigator: object, standalone = false) => ({ navigator, matchMedia: (query: string) => ({ matches: standalone && query === '(display-mode: standalone)' }) }) as never;
+  it('is iOS as a home-screen app, told by navigator.standalone', () => {
+    expect(platformSwipesBack(page({ standalone: true }))).toBe(true);
+    expect(platformSwipesBack(page({ standalone: false }))).toBe(false);
+  });
+  it('is an iPad asking for the desktop site in the standalone display mode', () => {
+    expect(platformSwipesBack(page({ vendor: 'Apple Computer, Inc.', maxTouchPoints: 5 }, true))).toBe(true);
+  });
+  it('is not Chromium, nor a browser tab, nor a desktop app window', () => {
+    expect(platformSwipesBack(page({ vendor: 'Google Inc.', maxTouchPoints: 5 }, true))).toBe(false);
+    expect(platformSwipesBack(page({ vendor: 'Apple Computer, Inc.', maxTouchPoints: 5 }, false))).toBe(false);
+    expect(platformSwipesBack(page({ vendor: 'Apple Computer, Inc.', maxTouchPoints: 0 }, true))).toBe(false);
+  });
 });

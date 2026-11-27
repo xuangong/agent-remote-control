@@ -300,6 +300,54 @@ test.describe('on a phone', () => {
     await expect(bot.locator('.lab-bot-roster')).toBeHidden();
   });
 
+  /** The page as iOS runs it from the home screen: it has its own swipe back from the left edge for the page's history. */
+  async function installedOnIos(page: Page) {
+    await page.addInitScript(() => Object.defineProperty(navigator, 'standalone', { configurable: true, value: true }));
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.goto(url);
+  }
+
+  test('where the platform swipes back itself the page draws no swipe, and its back swaps to the list at once, with nothing slid', async ({ page }) => {
+    await installedOnIos(page);
+    const { bot, open } = await chats(page);
+    await open(0);
+    await expect(bot.locator('.lab-bot-roster')).toBeHidden();
+    await expect(bot.locator('.lab-bot-edge')).toHaveCount(0);
+    const before = await bot.locator('.lab-timeline-scroll:visible').count();
+    expect(before).toBe(1);
+    const seen = await frames(page, async () => {
+      await page.evaluate(() => {
+        const w = window as unknown as { __popAt?: number };
+        addEventListener('popstate', () => { w.__popAt = performance.now(); }, { once: true });
+        const touch = (type: string, x: number) => { const event = new Event(type, { bubbles: true, cancelable: true });
+          Object.defineProperty(event, 'touches', { value: type === 'touchend' ? [] : [{ clientX: x, clientY: 400, identifier: 1 }] }); document.body.dispatchEvent(event); };
+        touch('touchstart', 5); touch('touchmove', 120); touch('touchmove', 260); touch('touchend', 260);
+        // The system's swipe back goes back in the history, with nothing of the page's own in between.
+        history.back();
+      });
+    });
+    const popAt = await page.evaluate(() => (window as unknown as { __popAt?: number }).__popAt!);
+    const after = seen.filter(frame => frame.t >= popAt);
+    expect(after.length).toBeGreaterThan(5);
+    for (const frame of after) {
+      expect(frame.conversationShown).toBe(false);
+      expect(frame.listShown).toBe(true);
+      expect(Math.abs(frame.listLeft)).toBeLessThan(0.5);
+      expect(frame.scrim).toBe(0);
+    }
+    expect(await page.evaluate(() => document.getAnimations().length)).toBe(0);
+  });
+
+  test('where the platform swipes back itself, the Back button still slides the chat away', async ({ page }) => {
+    await installedOnIos(page);
+    const { bot, open } = await chats(page);
+    await open(0);
+    await expect(bot.locator('.lab-bot-roster')).toBeHidden();
+    const width = page.viewportSize()!.width;
+    const seen = await frames(page, () => bot.getByRole('button', { name: 'Back to chats' }).first().click());
+    expect(seen.filter(frame => frame.conversationShown && frame.left > 1 && frame.left < width - 1).length).toBeGreaterThan(2);
+  });
+
   test('a touch the system takes over, and the back it makes, are the system\'s: the stack slides nothing of its own', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.goto(url);

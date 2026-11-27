@@ -161,7 +161,7 @@ export function BotWorkspace({ visible, covered = false, compact, scope, rooms, 
   // A browser may drop the scroll position of a list it stops displaying, so the list's own is kept and put back when it returns.
   const rosterScroll = useRef(0);
   useLayoutEffect(() => { if (phone && !showConversation && rosterElement.current) rosterElement.current.scrollTop = rosterScroll.current; }, [phone, showConversation]);
-  function back() { returning.current = true; navigation.back(); }
+  function back() { returning.current = true; stack.ownBack(); navigation.back(); }
   /** Opening a sleeping bot wakes it for every device. */
   function open(next: BotPlace) {
     if (next.kind === 'bot' && workspace.readGroup(next.groupId)?.bots?.members[next.viewId]?.asleep) void actions.wake(next);
@@ -214,7 +214,7 @@ export function BotWorkspace({ visible, covered = false, compact, scope, rooms, 
     </aside>
     {phone ? <div ref={stack.scrim} className="lab-bot-scrim" aria-hidden="true" /> : null}
     <section ref={stack.conversation} className="lab-bot-conversation orchard-panel" aria-label={t('navigation.botConversation')} hidden={phone && !panelShown}>
-      {phone ? <div ref={stack.edge} className="lab-bot-edge" aria-hidden="true" /> : null}
+      {phone && !stack.systemSwipe ? <div ref={stack.edge} className="lab-bot-edge" aria-hidden="true" /> : null}
       {panelConversation ? <SharedTopBar ref={title} place={panelPlace} row={botRow} project={projectRoster} name={name}
         detailsOpen={detailsShown} detailsId={detailsId} onToggleDetails={panelDescriptor ? () => setDetailsOpen(open => !open) : undefined}
         leading={phone ? <Button ref={backButton} variant="plain" className="lab-bot-back" aria-label={t('assistants.back')} onClick={back}><Icon name="chevron-left" size={20} />{t('assistants.backShort')}</Button> : undefined}

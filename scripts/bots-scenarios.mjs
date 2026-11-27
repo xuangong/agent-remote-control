@@ -1,7 +1,7 @@
 // Behaviour scenarios of bots (bots design 11): real Claude Code or Codex sessions on this checkout's local instance, driven as the
 // person drives them, judged by facts the Relay and the sessions record, never by the wording of a reply.
 // Usage, from the checkout root, with the instance running (`pnpm local up`):
-//   pnpm test:bots [claude|codex] [scenario ...]        scenarios: temporary, standing, shared, bundle, repository, board, ask, copilot (default: all, in order)
+//   pnpm test:bots [claude|codex] [scenario ...]        scenarios: subsession, standing, shared, bundle, repository, board, ask, copilot (default: all, in order)
 // It creates its own sessions in the instance workspace and its own group, and leaves them for reading in the page.
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -94,13 +94,14 @@ const teams = () => api('GET', '/v1/remote/teams').teams;
 /** Whether a session's history holds an input with this text; the Relay forgets messages once delivered, the session does not. */
 const received = (address, text) => (controller('session', 'read', address, '--search', text, '--limit', '1').entries ?? []).length > 0;
 const chains = () => api('GET', '/v1/remote/chains');
+const chiefStaffNames = () => api('GET', '/v1/windows').groups?.flatMap(group => Object.values(group.bots?.members ?? {})).map(entry => entry.name) ?? [];
 const tasksOf = owner => teams().filter(team => team.task && team.members[1]?.nativeSessionId === owner.nativeSessionId);
 const inboxNamed = name => teams().find(team => team.inbox && team.members[0]?.name === name);
 const run = name => !wanted.length || wanted.includes(name);
 const file = name => join(workspace, name);
 const tag = randomUUID().slice(0, 6);
 
-const CHIEF = 'You are the person\'s chief of staff: you run their work with bots, your staff: split each request between temporary bots, or standing bots for roles that recur, and sum up their results for the person.';
+const CHIEF = 'You are the person\'s chief of staff: you run their work with bots, your staff: split each request between sub-sessions of your own (create_sub_session), or standing bots for roles that recur, and sum up their results for the person.';
 /** A bot in a group of its own, once it has read its standing instructions. */
 async function chiefBot(name) {
   const created = await bot(name, CHIEF), before = newest(created.address);
@@ -111,19 +112,30 @@ async function chiefBot(name) {
 }
 const chief = await chiefBot(`Chief ${tag}`);
 
-if (run('temporary')) {
-  // An chief splits the person's request between temporary bots, which report back; it sums up for the person.
-  const [a, b] = [`alpha-${tag}.txt`, `beta-${tag}.txt`];
-  await say(chief.address, `Use two temporary bots working in parallel: one creates ${a} containing the word alpha, the other creates ${b} containing the word beta, both in your working directory. When both have reported, tell me in one line what each did.`);
-  const done = await until('both temporary bots to report', () => { const own = tasksOf(chief); return own.length >= 2 && own.every(team => ['done', 'failed'].includes(team.task.state)) && own; });
-  check('temporary: the chief started two temporary bots', done.length === 2, `${done.length} started`);
-  check('temporary: both reported done', done.every(team => team.task.state === 'done'), done.map(team => team.task.state).join(', '));
-  check('temporary: both files exist', existsSync(file(a)) && existsSync(file(b)) && readFileSync(file(a), 'utf8').includes('alpha') && readFileSync(file(b), 'utf8').includes('beta'));
-  // Its summary may have come with the reply already; the latest entry once it is quiet is what the person reads.
+if (run('subsession')) {
+  // A chief splits the person's request between sub-sessions, which report back; it gives the first more work, which reuses its context, and ends both.
+  const [a, b] = [`alpha-${tag}.txt`, `beta-${tag}.txt`], code = `quince-${tag}`;
+  await say(chief.address, `Use two sub-sessions working in parallel (create_sub_session): the first creates ${a} containing the word alpha and also remembers the code word ${code}, the second creates ${b} containing the word beta, both in your working directory. When both have reported, tell me in one line what each did.`);
+  const done = await until('both sub-sessions to report', () => { const own = tasksOf(chief); return own.length >= 2 && own.every(team => team.task.result && team.task.state === 'idle') && own; });
+  check('subsession: the chief started two sub-sessions', done.length === 2, `${done.length} started`);
+  check('subsession: both reported, and stay idle with their context', done.every(team => team.task.result.outcome === 'finished'), done.map(team => `${team.task.state}/${team.task.result?.outcome}`).join(', '));
+  check('subsession: both files exist', existsSync(file(a)) && existsSync(file(b)) && readFileSync(file(a), 'utf8').includes('alpha') && readFileSync(file(b), 'utf8').includes('beta'));
+  check('subsession: neither is a bot', !(chiefStaffNames().some(name => done.some(team => team.task.title === name))), 'listed as a bot');
   const final = await settled(chief.address, undefined);
-  check('temporary: the chief summed up for the person', /alpha|beta|\.txt/i.test(final.text ?? ''), (final.text ?? '').slice(0, 120));
-  const view = chains(), chain = view.chains.find(item => item.bot && view.names[item.bot] === chief.name && item.cause === 'person' && item.created >= 2);
-  check('temporary: one chain from the person\'s input holds both bots', !!chain, chain ? `created ${chain.created}, messages ${chain.messages}, turns ${chain.turns}, tokens ${chain.usage.tokens}` : 'none');
+  check('subsession: the chief summed up for the person', /alpha|beta|\.txt/i.test(final.text ?? ''), (final.text ?? '').slice(0, 120));
+  // More related work goes to the same sub-session, which still knows what it was told in its first work.
+  const first = done.find(team => team.task.brief.includes('alpha'));
+  const out = `code-${tag}.txt`;
+  await say(chief.address, `Send the first sub-session (the alpha one) more work with send_to_sub_session, not a new one: write the code word it remembered into ${out}. Tell me when it is done.`);
+  await until('the file with the code word', () => existsSync(file(out)) && readFileSync(file(out), 'utf8').includes(code), 6 * 60_000).catch(() => undefined);
+  check('subsession: the same sub-session reused its context', existsSync(file(out)) && readFileSync(file(out), 'utf8').includes(code), existsSync(file(out)) ? readFileSync(file(out), 'utf8').slice(0, 60) : 'no file');
+  const own = tasksOf(chief);
+  check('subsession: no third session started for the follow-up', own.length === 2 && own.some(team => team.id === first?.id), `${own.length} sub-sessions`);
+  await say(chief.address, 'Stop both sub-sessions (stop_sub_session); you will not need them again. Tell me when they have ended.');
+  const ended = await until('both sub-sessions to end', () => { const now = tasksOf(chief); return now.length >= 2 && now.every(team => team.task.state === 'ended') && now; }, 4 * 60_000).catch(() => undefined);
+  check('subsession: the chief ended both', !!ended, ended ? 'ended' : tasksOf(chief).map(team => team.task.state).join(', '));
+  const view = chains(), chain = view.chains.find(item => item.bot && view.names[item.bot] === chief.name && item.cause === 'person' && (item.subSessions ?? 0) >= 2);
+  check('subsession: one chain from the person\'s input counts both', !!chain, chain ? `sub-sessions ${chain.subSessions}, messages ${chain.messages}, turns ${chain.turns}, tokens ${chain.usage.tokens}` : 'none');
 }
 
 let reviewer;
@@ -199,14 +211,14 @@ if (run('repository') && reviewer) {
 }
 
 if (run('board')) {
-  // The chief keeps its plan on its board: it gives an item to a temporary bot, which finishes it and fills it in; a lasting fact goes
+  // The chief keeps its plan on its board: it gives an item to a sub-session, which finishes it and fills it in; a lasting fact goes
   // to its memory.
   const out = `gamma-${tag}.txt`;
-  await say(chief.address, `Put an item "Write ${out}" on your board and give it to a temporary bot, naming the item when you create the bot: it creates ${out} containing the word gamma in your working directory. When it has finished, make sure the item is done with the file as its result.`);
+  await say(chief.address, `Put an item "Write ${out}" on your board and give it to a sub-session (create_sub_session with the item in tracked_task_keys): it creates ${out} containing the word gamma in your working directory. When it has finished, make sure the item is done with the file as its result (the sub-session may set the result of its own item).`);
   const item = await until('the board item to be done', () => inboxNamed(chief.name)?.inbox?.board?.items?.find(entry => entry.title.includes(out) && entry.status === 'done'), 8 * 60_000).catch(() => undefined);
   check('board: the chief\'s item is done', !!item, item ? `${item.status} · ${item.result ?? item.latestReport ?? ''}`.slice(0, 120) : 'none');
-  const worker = item ? tasksOf(chief).find(team => team.task.botId === item.assignee) : undefined;
-  check('board: the item was given to a temporary bot', !!worker, worker ? ` · ` : item?.assignee ?? 'none');
+  const worker = item ? tasksOf(chief).find(team => team.task.subSessionId === item.assignee) : undefined;
+  check('board: the item was given to a sub-session', !!worker, worker ? ` · ` : item?.assignee ?? 'none');
   check('board: the file exists', existsSync(file(out)) && readFileSync(file(out), 'utf8').includes('gamma'));
   await say(chief.address, 'Remember this for every session of yours: releases are approved by Dana.');
   const fact = await until('the fact in the chief\'s memory', () => {

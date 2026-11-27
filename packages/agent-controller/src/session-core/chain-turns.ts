@@ -8,8 +8,8 @@ import { CHAIN_APPROVAL_POLICY, nativeSessionRefKey, parseTaskInputs, type Agent
 import type { AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { accountUsage, type SessionUsage } from '../session-usage.js';
 
-/** An ended turn: what started it, what it cost, and the last text the bot wrote in it. */
-export interface TurnReport { cause: TurnCause; tokens: number; costUsd?: number; finalText?: string }
+/** An ended turn: what started it, how it ended (finished unless it failed or was canceled), what it cost, and the last text the session wrote in it. */
+export interface TurnReport { cause: TurnCause; tokens: number; costUsd?: number; finalText?: string; outcome?: 'finished' | 'failed' | 'interrupted' }
 
 /** The cause of each session's latest input, by native session. */
 export class TurnCauses {
@@ -100,6 +100,11 @@ export function watchChainTurns(session: AgentSession, ref: NativeSessionRef, ca
             final += event.item.text; writing = true; writingId = event.item.messageId;
           } else if (event.type === 'timeline' && event.item.type !== 'reasoning' && event.item.type !== 'user_message') writing = false;
           if (event.type === 'usage_updated') accountUsage(usage, event.usage, false);
+          if (event.type === 'turn_failed' || event.type === 'turn_canceled') {
+            const cause = causes.of(ref), text = (event.type === 'turn_failed' ? final.trim() || event.error : final.trim() || event.reason).trim();
+            final = ''; writing = false;
+            if (cause) report({ cause, tokens: 0, outcome: event.type === 'turn_failed' ? 'failed' : 'interrupted', ...(text ? { finalText: text } : {}) });
+          }
           if (event.type === 'turn_completed') {
             if (event.usage) accountUsage(usage, event.usage, true);
             const cause = causes.of(ref), tokens = usage.tokens - counted.tokens, cost = (usage.costUsd ?? 0) - counted.costUsd;

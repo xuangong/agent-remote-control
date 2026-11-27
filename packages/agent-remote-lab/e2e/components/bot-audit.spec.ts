@@ -2,7 +2,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 // The audit of the bots' work (bots design 7): each chain reads as its cause and what it set off, and the person stops a chain,
-// one bot's part of it, pauses or resumes a standing bot, retires a temporary one, and sets thresholds, by pointer or keyboard,
+// one bot's part of it, pauses or resumes a standing bot, and sets thresholds, by pointer or keyboard,
 // at any width without the page scrolling sideways.
 const actions = (page: Page) => page.evaluate(() => (window as unknown as { auditActions: unknown[] }).auditActions);
 const fitsWidth = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth
@@ -20,17 +20,16 @@ test('lists chains by cause, marks a stopped chain and a passed threshold, and a
 
   await audit.locator('.lab-assistant-session-toggle').first().click();
   const first = audit.locator('.lab-bot-audit > ul > li').first();
-  await expect(first.getByRole('button', { name: 'Stop Log reader here', exact: true })).toBeVisible();
+  await expect(first.getByRole('button', { name: 'Stop Log reviewer here', exact: true })).toBeVisible();
   await first.getByRole('button', { name: 'Pause Release tracker', exact: true }).click();
   await expect(first.getByRole('button', { name: 'Resume Release tracker', exact: true })).toBeVisible();
   await first.getByRole('button', { name: 'Resume Release tracker', exact: true }).click();
-  await first.getByRole('button', { name: 'Stop Log reader here', exact: true }).click();
-  await first.getByRole('button', { name: 'Retire Log reader', exact: true }).click();
+  await first.getByRole('button', { name: 'Stop Log reviewer here', exact: true }).click();
   await first.getByRole('button', { name: 'Stop', exact: true }).click();
   await expect(first.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
   expect(await actions(page)).toEqual([
     { action: 'pause_bot', botId: 'b_' + '2'.repeat(32) }, { action: 'resume_bot', botId: 'b_' + '2'.repeat(32) },
-    { action: 'stop_bot', chainId: 'c_0000000000000001', botId: 'b_' + '3'.repeat(32) }, { action: 'retire_bot', botId: 'b_' + '3'.repeat(32) },
+    { action: 'stop_bot', chainId: 'c_0000000000000001', botId: 'b_' + '3'.repeat(32) },
     { action: 'stop', chainId: 'c_0000000000000001' },
   ]);
   expect(await fitsWidth(page)).toBe(true);

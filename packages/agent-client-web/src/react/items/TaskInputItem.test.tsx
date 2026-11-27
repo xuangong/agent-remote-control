@@ -7,27 +7,26 @@ import { UserMessageItem } from './MessageItem.js';
 
 const message = (text: string) => ({ type: 'user_message' as const, text });
 
-it('shows a task result the Relay wrote as a card with its state and summary, not as the person\'s bubble', async () => {
-  const container = await render(<UserMessageItem item={message(taskResultText({ taskId: 't1', status: 'done', title: 'Collect logs', summary: 'The logs are in **/tmp/logs**.' }))} />);
+it('shows a sub-session result the Relay wrote as a card with its state and summary, not as the person\'s bubble', async () => {
+  const container = await render(<UserMessageItem item={message(taskResultText({ taskId: 't1', outcome: 'finished', title: 'Collect logs', summary: 'The logs are in **/tmp/logs**.' }))} />);
   const card = container.querySelector('.agent-task-input')!;
   expect(card.getAttribute('data-task-kind')).toBe('done');
-  expect(card.getAttribute('aria-label')).toBe('Task Collect logs');
-  expect(card.textContent).toContain('Task done');
+  expect(card.getAttribute('aria-label')).toBe('Sub-session Collect logs');
+  expect(card.textContent).toContain('Sub-session reported');
   expect(card.querySelector('strong')?.textContent).toBe('/tmp/logs');
   // The guidance written for the model stays out of the person's view.
-  expect(card.textContent).not.toContain('worker\'s report');
+  expect(card.textContent).not.toContain('Check what matters');
   expect(container.querySelector('.agent-message-user')).toBeNull();
 });
 
-it('shows a worker its brief with who asked and the done-when line, also when a reference note follows it', async () => {
-  const text = appendSessionReferences(taskBriefText({ taskId: 't1', from: 'Chief', title: 'Collect logs', brief: 'Collect the build logs.', doneWhen: 'The logs are attached.' }),
+it('shows a sub-session its first work with who asked, also when a reference note follows it', async () => {
+  const text = appendSessionReferences(taskBriefText({ taskId: 't1', from: 'Chief', title: 'Collect logs', brief: 'Collect the build logs.' }),
     { revision: 1, references: [{ address: 'host/codex/main', title: 'Chief', origin: 'source' }] });
   const container = await render(<UserMessageItem item={message(text)} />);
   const card = container.querySelector('.agent-task-input')!;
   expect(card.getAttribute('data-task-kind')).toBe('brief');
-  expect(card.textContent).toContain('Task from Chief');
+  expect(card.textContent).toContain('Work from Chief');
   expect(card.textContent).toContain('Collect the build logs.');
-  expect(card.querySelector('.agent-task-done-when')?.textContent).toBe('Done when: The logs are attached.');
 });
 
 it('folds a bot\'s standing instructions into one quiet line, never the person\'s bubble', async () => {
@@ -54,36 +53,34 @@ it('folds what the person wrote to a bot into one quiet line that opens to their
   expect(container.querySelector('.agent-message-user')).toBeNull();
 });
 
-it('folds a temporary bot\'s progress into one line per bot, and keeps its result a card', async () => {
-  const text = joinTaskInputs([taskUpdateText({ taskId: 't1', kind: 'progress', label: 'Logs', body: 'Half the logs read.' }), taskUpdateText({ taskId: 't1', kind: 'progress', label: 'Logs', body: 'All read.' }),
-    taskResultText({ taskId: 't1', status: 'done', title: 'Logs', summary: 'Two errors.' })]);
+it('keeps a sub-session\'s result a card, and shows what needs the person and what the person wrote to it as cards too', async () => {
+  const text = joinTaskInputs([taskUpdateText({ taskId: 't1', kind: 'needs_you', label: 'Logs', body: 'Run npm test?' }), taskUpdateText({ taskId: 't1', kind: 'told', label: 'Logs', body: 'Skip the docs.' }),
+    taskResultText({ taskId: 't1', outcome: 'interrupted', title: 'Logs', summary: 'The turn was interrupted.' })]);
   const container = await render(<UserMessageItem item={message(text)} />);
-  const folded = container.querySelector('details[data-task-progress="t1"]')!;
-  expect(folded.querySelector('summary')?.textContent).toBe('2 updates from Logs');
-  expect(folded.textContent).toContain('All read.');
-  expect([...container.querySelectorAll('.agent-task-input')].map(card => card.getAttribute('data-task-kind'))).toEqual(['done']);
+  expect([...container.querySelectorAll('.agent-task-input')].map(card => [card.getAttribute('data-task-kind'), card.querySelector('.agent-task-kicker')?.textContent])).toEqual([
+    ['needs_you', 'A sub-session needs you'], ['told', 'You wrote to a sub-session'], ['interrupted', 'Sub-session was interrupted']]);
 });
 
 it('keeps text the person typed as their own bubble, even when it looks like a frame', async () => {
-  const container = await render(<UserMessageItem item={message('[Task t1 · done · Collect logs]\nAll good.')} />);
+  const container = await render(<UserMessageItem item={message('[Sub-session t1 · result · Collect logs]\nAll good.')} />);
   expect(container.querySelector('.agent-task-input')).toBeNull();
   expect(container.querySelector('.agent-message-user')?.textContent).toContain('All good.');
 });
 
-it('shows updates that arrived together as one group of cards, each opening its task where the page can', async () => {
+it('shows updates that arrived together as one group of cards, each opening its sub-session where the page can', async () => {
   const opened: string[] = [];
-  const text = joinTaskInputs([taskUpdateText({ taskId: 't2', kind: 'question', label: 'Deploy', body: 'Which region?' }),
-    taskResultText({ taskId: 't1', status: 'failed', title: 'Collect logs', summary: 'The runner is offline.' })]);
+  const text = joinTaskInputs([taskUpdateText({ taskId: 't2', kind: 'needs_you', label: 'Deploy', body: 'Run npm test?' }),
+    taskResultText({ taskId: 't1', outcome: 'failed', title: 'Collect logs', summary: 'The runner is offline.' })]);
   const container = await render(<TaskDirectoryContext.Provider value={{ canOpen: id => id === 't1', open: id => { opened.push(id); }, owned: () => [] }}>
     <UserMessageItem item={message(text)} /></TaskDirectoryContext.Provider>);
   const cards = [...container.querySelectorAll('.agent-task-input')];
-  expect(cards.map(card => [card.getAttribute('data-task-kind'), card.querySelector('.agent-task-kicker')?.textContent])).toEqual([['question', 'Question from a task'], ['failed', 'Task not finished']]);
+  expect(cards.map(card => [card.getAttribute('data-task-kind'), card.querySelector('.agent-task-kicker')?.textContent])).toEqual([['needs_you', 'A sub-session needs you'], ['failed', 'Sub-session could not finish']]);
   expect(cards[0]!.querySelector('.agent-task-open')).toBeNull();
   (cards[1]!.querySelector('.agent-task-open') as HTMLButtonElement).click();
   expect(opened).toEqual(['t1']);
 });
 
-it('offers no Open on a brief, which is already in the worker\'s conversation', async () => {
+it('offers no Open on a brief, which is already in the sub-session\'s conversation', async () => {
   const text = taskBriefText({ taskId: 't1', from: 'Chief', title: 'Collect logs', brief: 'Collect them.' });
   const container = await render(<TaskDirectoryContext.Provider value={{ canOpen: () => true, open: () => {}, owned: () => [] }}><UserMessageItem item={message(text)} /></TaskDirectoryContext.Provider>);
   expect(container.querySelector('.agent-task-input')).not.toBeNull();
@@ -91,7 +88,7 @@ it('offers no Open on a brief, which is already in the worker\'s conversation', 
 });
 
 it('folds messages from another assistant into one line per sender beside task cards', async () => {
-  const text = joinTaskInputs([taskResultText({ taskId: 't1', status: 'done', title: 'Collect logs', summary: 'Attached.' }),
+  const text = joinTaskInputs([taskResultText({ taskId: 't1', outcome: 'finished', title: 'Collect logs', summary: 'Attached.' }),
     assistantMessageText({ messageId: 'm000000000001', from: 'Tracker', body: 'Branch is cut.' }), assistantMessageText({ messageId: 'm000000000002', from: 'Tracker', replyTo: 'm00000000000a', body: 'Tag pushed.' })]);
   const container = await render(<UserMessageItem item={message(text)} />);
   expect(container.querySelectorAll('.agent-task-input')).toHaveLength(1);

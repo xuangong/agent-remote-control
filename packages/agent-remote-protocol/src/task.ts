@@ -1,6 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
-import { BotId } from './bots.js';
+import { BotId, SubSessionId } from './bots.js';
 import type { Team } from './team.js';
 
 /**
@@ -12,53 +12,60 @@ const id = Type.String({ minLength: 1, maxLength: 256 });
 
 export const TASK_TITLE_LIMIT = 200;
 export const TASK_BRIEF_LIMIT = 8000;
-export const TASK_DONE_WHEN_LIMIT = 1000;
 export const TASK_SUMMARY_LIMIT = 4000;
-/** Tasks one main session may have running (queued or working) at once. */
-/** The bots an chief runs at once (bots design 2.5); a task is a temporary bot. */
-export const TASK_RUNNING_LIMIT = 12;
+/** Live sub-sessions (working, idle or waiting) one bot may have started at once; a person's own sides are not counted. */
+export const SUB_SESSION_LIVE_LIMIT = 8;
+/** A sub-session's name is also the title of the board items it owns. */
+export const SUB_SESSION_NAME_LIMIT = 120;
+/** One line naming a piece of work, and the one-line step a sub-session reports while it works. */
+export const SUB_SESSION_LINE_LIMIT = 120;
 
 /**
- * working: the worker has the brief or is being created; needs_input: it waits on its owner or the person (see TaskWaiting);
- * done and failed: it reported, or the owner or the person marked it; cancelled: stopped before it reported.
+ * working: a turn runs or work is on its way to the session; idle: its turn ended and nothing is inbound (its context is kept for more
+ * work); needs_input: it waits on the person or its input is unknown (see TaskWaiting); ended: released for good.
  */
-export const TaskState = Type.Union([Type.Literal('working'), Type.Literal('needs_input'), Type.Literal('done'), Type.Literal('failed'), Type.Literal('cancelled')]);
+export const TaskState = Type.Union([Type.Literal('working'), Type.Literal('idle'), Type.Literal('needs_input'), Type.Literal('ended')]);
 export type TaskState = Static<typeof TaskState>;
-export const TaskReportStatus = Type.Union([Type.Literal('done'), Type.Literal('failed')]);
-export type TaskReportStatus = Static<typeof TaskReportStatus>;
-export const TaskResult = Type.Object({ status: TaskReportStatus, summary: Type.String({ minLength: 1, maxLength: TASK_SUMMARY_LIMIT }), reportedAt: Type.Number() }, object);
+/** How a turn of the sub-session ended. */
+export const TaskOutcome = Type.Union([Type.Literal('finished'), Type.Literal('failed'), Type.Literal('interrupted')]);
+export type TaskOutcome = Static<typeof TaskOutcome>;
+/** The result of the latest piece of work: the `final_summary` it reported, or the final text of its turn. */
+export const TaskResult = Type.Object({ outcome: TaskOutcome, text: Type.String({ minLength: 1, maxLength: TASK_SUMMARY_LIMIT }), at: Type.Number() }, object);
 export type TaskResult = Static<typeof TaskResult>;
 export const TaskTitle = Type.String({ minLength: 1, maxLength: TASK_TITLE_LIMIT, pattern: '\\S' });
 export const TaskBrief = Type.String({ minLength: 1, maxLength: TASK_BRIEF_LIMIT, pattern: '\\S' });
-export const TaskDoneWhen = Type.String({ minLength: 1, maxLength: TASK_DONE_WHEN_LIMIT, pattern: '\\S' });
+const Line = Type.String({ minLength: 1, maxLength: SUB_SESSION_LINE_LIMIT });
 
-export const TASK_QUESTION_LIMIT = 2000;
-/** What the owner reads of the person's words to a worker, and of a pending interaction. */
+/** What the owner reads of the person's words to a sub-session, and of a pending interaction. */
 export const TASK_TOLD_LIMIT = 280;
 /**
- * Why a task needs input. question: the worker asked its owner (ask_owner); interaction: the worker waits on an approval or a
- * question only the person can answer; no_report: the worker stopped twice without reporting; brief_unknown: whether the worker was
- * created, or received its brief, is unknown.
+ * Why a sub-session needs input. interaction: it waits on an approval or a question only the person can answer; input_unknown: whether it
+ * received its last input is unknown, so that input is never sent again.
  */
-export const TaskWaiting = Type.Object({ reason: Type.Union([Type.Literal('question'), Type.Literal('interaction'), Type.Literal('no_report'), Type.Literal('brief_unknown')]),
-  text: Type.String({ minLength: 1, maxLength: TASK_QUESTION_LIMIT }), since: Type.Number() }, object);
+export const TaskWaiting = Type.Object({ reason: Type.Union([Type.Literal('interaction'), Type.Literal('input_unknown')]),
+  text: Type.String({ minLength: 1, maxLength: TASK_TOLD_LIMIT }), since: Type.Number() }, object);
 export type TaskWaiting = Static<typeof TaskWaiting>;
-/** Where a task's worker works: the owner's directory, the same read-only, or its own worktree at a commit of the owner's repository. */
+/** Where a sub-session works: its bot's directory, the same read-only, or its own worktree at a commit of its bot's repository. */
 export const TaskWorkspace = Type.Union([Type.Literal('same'), Type.Literal('read_only'), Type.Literal('worktree')]);
 export type TaskWorkspace = Static<typeof TaskWorkspace>;
-/** The task a Team carries. reminded: when the worker was last reminded to report. */
-export const TeamTask = Type.Object({ title: TaskTitle, brief: TaskBrief, doneWhen: Type.Optional(TaskDoneWhen), state: TaskState,
-  /** The temporary bot's id, which a board's items name it by; the Relay writes it when it lists the Team, so the page can name an item's assignee. */
-  botId: Type.Optional(BotId),
-  /** The item of its chief's board the temporary bot was created for, which it writes and whose assignee it is. */
+/** The sub-session a Team carries. startedBy person: a `/side`, which stays beside its conversation and reaches no bot. */
+export const TeamTask = Type.Object({ title: Type.String({ minLength: 1, maxLength: SUB_SESSION_NAME_LIMIT, pattern: '\\S' }), brief: TaskBrief, state: TaskState,
+  /** Its id, which board items name it by; the Relay writes it when it lists the Team. */
+  subSessionId: Type.Optional(SubSessionId),
+  /** The board item it works on now. */
   item: Type.Optional(Type.Object({ board: BotId, key: Type.Integer({ minimum: 1 }), title: Type.String({ minLength: 1, maxLength: 120 }) }, object)),
-  /** The person started it with `/side` from a conversation: it stays beside that conversation, and nothing it says reaches the conversation's bot as input. */
-  side: Type.Optional(Type.Literal(true)),
-  waiting: Type.Optional(TaskWaiting), workspace: Type.Optional(TaskWorkspace), reminded: Type.Optional(Type.Number()),
-  result: Type.Optional(TaskResult), createdAt: Type.Number(), updatedAt: Type.Number() }, object);
+  startedBy: Type.Optional(Type.Literal('person')),
+  waiting: Type.Optional(TaskWaiting), workspace: Type.Optional(TaskWorkspace),
+  /** The title of the latest piece of work sent to it, and when. */
+  lastWork: Type.Optional(Type.Object({ title: Line, at: Type.Number() }, object)),
+  /** What it reports it is doing now; it never wakes its bot. */
+  currentStep: Type.Optional(Line),
+  /** The `final_summary` it reported during the turn that runs now; the turn's end makes it the result and clears it. */
+  reportedSummary: Type.Optional(Type.String({ minLength: 1, maxLength: TASK_SUMMARY_LIMIT })),
+  result: Type.Optional(TaskResult), endedBy: Type.Optional(Type.Union([Type.Literal('bot'), Type.Literal('person'), Type.Literal('bot_retired'), Type.Literal('chain')])),
+  createdAt: Type.Number(), updatedAt: Type.Number() }, object);
 export type TeamTask = Static<typeof TeamTask>;
 export const isTeamTask = (value: unknown): value is TeamTask => Value.Check(TeamTask, value)
-  && (value.state === 'done' || value.state === 'failed' ? value.result?.status === value.state : value.result === undefined)
   && (value.state === 'needs_input') === (value.waiting !== undefined);
 
 /** The main session that owns a task, named by the session that calls on its Host. */
@@ -66,27 +73,28 @@ export const TaskOwner = Type.Object({ providerId: id, nativeSessionId: id, titl
 export type TaskOwner = Static<typeof TaskOwner>;
 
 /**
- * What the main session and the website see of a task. queued: the worker session is not created yet; working, done, failed and
- * cancelled as in TaskState.
+ * What the owning bot and the website see of a sub-session. queued: its session is not created yet; the other states are TaskState.
  */
-export const TaskView = Type.Object({ taskId: id, title: TaskTitle, state: Type.Union([Type.Literal('queued'), TaskState]),
-  doneWhen: Type.Optional(TaskDoneWhen), result: Type.Optional(TaskResult), waiting: Type.Optional(TaskWaiting), workspace: Type.Optional(TaskWorkspace),
+export const TaskView = Type.Object({ taskId: id, title: Type.String({ minLength: 1, maxLength: SUB_SESSION_NAME_LIMIT }), state: Type.Union([Type.Literal('queued'), TaskState]),
+  lastWork: Type.Optional(Type.Object({ title: Line, at: Type.Number() }, object)), currentStep: Type.Optional(Line), result: Type.Optional(TaskResult), waiting: Type.Optional(TaskWaiting), workspace: Type.Optional(TaskWorkspace),
+  startedBy: Type.Optional(Type.Literal('person')),
   worker: Type.Object({ hostId: id, providerId: id, nativeSessionId: Type.Optional(id), error: Type.Optional(Type.String({ maxLength: 2048 })) }, object),
   owner: Type.Object({ hostId: id, providerId: id, nativeSessionId: id }, object), createdAt: Type.Number(), updatedAt: Type.Number() }, object);
 export type TaskView = Static<typeof TaskView>;
 export const isTaskView = (value: unknown): value is TaskView => Value.Check(TaskView, value);
-/** A task Team as the owner and the website see it; a working task whose worker session is not created yet is queued. */
+/** A sub-session Team as its owner and the website see it; a working sub-session whose session is not created yet is queued. */
 export function taskView(team: Team): TaskView {
   const item = team.task!, worker = team.members[0]!, main = team.members[1]!;
   const state = item.state === 'working' && worker.creation !== 'ready' ? 'queued' : item.state;
-  return { taskId: team.id, title: item.title, state, ...(item.doneWhen ? { doneWhen: item.doneWhen } : {}), ...(item.result ? { result: structuredClone(item.result) } : {}),
-    ...(item.waiting ? { waiting: { ...item.waiting } } : {}), ...(item.workspace ? { workspace: item.workspace } : {}),
+  return { taskId: team.id, title: item.title, state, ...(item.lastWork ? { lastWork: { ...item.lastWork } } : {}), ...(item.currentStep ? { currentStep: item.currentStep } : {}),
+    ...(item.result ? { result: structuredClone(item.result) } : {}), ...(item.waiting ? { waiting: { ...item.waiting } } : {}), ...(item.workspace ? { workspace: item.workspace } : {}),
+    ...(item.startedBy ? { startedBy: item.startedBy } : {}),
     worker: { hostId: worker.hostId, providerId: worker.providerId, ...(worker.nativeSessionId ? { nativeSessionId: worker.nativeSessionId } : {}), ...(worker.error ? { error: worker.error } : {}) },
     owner: { hostId: main.hostId, providerId: main.providerId, nativeSessionId: main.nativeSessionId ?? team.source.nativeSessionId }, createdAt: item.createdAt, updatedAt: item.updatedAt };
 }
 
 /** A payload line that would read as a frame is quoted, so only the Relay opens one. */
-export const quoteFrames = (text: string) => text.replace(/^\[(?=(Task|Tasks|Team|Support|Message from|Room|The person wrote to|The person asks from|Item|Chief)\b)/gm, '(');
+export const quoteFrames = (text: string) => text.replace(/^\[(?=(Task|Tasks|Sub-session|Team|Support|Message from|Room|The person wrote to|The person asks from|Item|Chief)\b)/gm, '(');
 const heading = (text: string) => text.replace(/[\r\n\]]+/g, ' ').trim() || '…';
 /**
  * How a brief names the session that started the task: the first line of its title, at most 80 characters. A CLI may title a
@@ -94,55 +102,46 @@ const heading = (text: string) => text.replace(/[\r\n\]]+/g, ' ').trim() || '…
  */
 export function taskSenderName(title: string | undefined): string {
   const line = title?.split('\n')[0]?.trim() ?? '';
-  if (!line || /^[[(](Task|Tasks|Team|Support|Message from|Room)\b/.test(line)) return 'the main session';
+  if (!line || /^[[(](Task|Tasks|Sub-session|Team|Support|Message from|Room)\b/.test(line)) return 'the main session';
   return line.length <= 80 ? line : `${line.slice(0, 79)}…`;
 }
 
 /**
- * What a task's frame says. To the worker: brief, message (from its owner or the person), reminder. To the owner: done, failed,
- * question (the worker asks), needs_you (the worker waits on the person, or stopped without reporting), told (the person wrote to
- * the worker).
+ * What a sub-session's frame says. To the session: brief (its first work) and message (more work, from its bot or the person). To its bot:
+ * done, failed and interrupted (the result of a piece of work), needs_you (the session waits on the person), told (the person wrote to
+ * it) and cancelled (the person ended it).
  */
-export type TaskInputKind = 'brief' | 'message' | 'reminder' | 'progress' | 'done' | 'failed' | 'cancelled' | 'question' | 'needs_you' | 'told';
-const kindWords: Record<TaskInputKind, string> = { brief: 'brief', message: 'message', reminder: 'report', progress: 'progress', done: 'done', failed: 'failed', cancelled: 'stopped', question: 'question',
+export type TaskInputKind = 'brief' | 'message' | 'done' | 'failed' | 'interrupted' | 'cancelled' | 'needs_you' | 'told';
+const kindWords: Record<TaskInputKind, string> = { brief: 'brief', message: 'message', done: 'result', failed: 'failed', interrupted: 'interrupted', cancelled: 'ended',
   needs_you: 'needs the person', told: 'the person wrote' };
+const DECIDE = 'Check what matters before relying on it, then decide: send it more related work (send_to_sub_session) or end it (stop_sub_session), and tell the person what it means for their request.';
 export const TASK_GUIDANCE: Record<TaskInputKind, string> = {
   brief: 'Do the work with your own tools, where your instructions say. '
-    + 'Read your chief\'s conversation with read_source_session only when the brief is not enough. '
-    + 'When you finish, message your chief once with status done or failed: what you did, what you found and where, in your own words and at most 300 characters.',
-  message: 'This is input about your work. Continue it; when you finish, message your chief with status done or failed.',
-  reminder: 'Your last turn ended without a report. If the work is done or cannot be done, message your chief now with status done or failed; if you need something, message it with status needs_input.',
-  progress: 'This is progress from one of your staff. Take it into account; it reports again when it finishes or needs you.',
-  done: 'This is the worker\'s report. Check what matters before relying on it, then tell the person what it means for their request.',
-  failed: 'This is the worker\'s report. Check what matters before relying on it, then tell the person what it means for their request.',
-  cancelled: 'The person stopped this task; its worker does no more. Take it into account for their request.',
-  question: 'The bot waits for your answer. Answer it with message, or ask the person first if only they can decide.',
-  needs_you: 'The worker waits on the person, who sees the request in the task. Tell the person if they may not have noticed; do not answer it yourself.',
-  told: 'The person wrote this to the worker directly. Take it into account; the worker already has it.',
+    + 'Read the conversation you were started from with read_main_session only when the brief is not enough. '
+    + 'At the end of each piece of work call communicate_update with a final_summary: what you did, what you found and where, and what is left, leading with the result.',
+  message: 'This is more work, or input about your work. Continue it with the context you have, and report it the same way.',
+  done: `This is the sub-session's result. ${DECIDE}`,
+  failed: `The sub-session could not finish. ${DECIDE}`,
+  interrupted: `The sub-session's turn was interrupted before it finished. ${DECIDE}`,
+  cancelled: 'The person ended this sub-session; it does no more. Take it into account for their request.',
+  needs_you: 'The sub-session waits on the person, who sees the request in it. Tell the person if they may not have noticed; do not answer it yourself.',
+  told: 'The person wrote this to the sub-session directly. Take it into account; the sub-session already has it.',
 };
-/** What a `/side` bot's brief ends with: it answers in its reply, and tells no one. */
-export const TASK_SIDE_BRIEF_GUIDANCE = 'Do the work with your own tools, where your instructions say. '
-  + 'Read your chief\'s conversation with read_source_session only when the brief is not enough. '
-  + 'Answer in your reply: your final text is the answer the person reads. Do not message anyone, and write no file you were not asked for.';
 /** Kept for the brief and result callers. */
 export const TASK_BRIEF_GUIDANCE = TASK_GUIDANCE.brief;
 export const TASK_RESULT_GUIDANCE = TASK_GUIDANCE.done;
 
-/** The worker's first input: what to do, how to tell it is done, and how to report. */
-export function taskBriefText(input: { taskId: string; from: string; title: string; brief: string; doneWhen?: string; tag?: string; side?: true }): string {
-  // A brief line that would read as the done-when line is reworded, so the done-when line is only ever the task's own.
-  const lines = [`[Task ${input.taskId} · brief · from ${heading(input.from)}]`, `Task: ${heading(input.title)}`, ...(input.tag ? [input.tag] : []), quoteFrames(input.brief).replace(/^Done when: /gm, 'Done when — ')];
-  if (input.doneWhen) lines.push(`Done when: ${heading(input.doneWhen)}`);
-  lines.push(input.side ? TASK_SIDE_BRIEF_GUIDANCE : TASK_GUIDANCE.brief);
-  return lines.join('\n');
+/** The sub-session's first input: its work, and how to report it. */
+export function taskBriefText(input: { taskId: string; from: string; title: string; brief: string; tag?: string }): string {
+  return [`[Sub-session ${input.taskId} · brief · from ${heading(input.from)}]`, `Task: ${heading(input.title)}`, ...(input.tag ? [input.tag] : []), quoteFrames(input.brief), TASK_GUIDANCE.brief].join('\n');
 }
-/** The owner's view of a report: the worker's summary, labelled with the task. */
-export function taskResultText(input: { taskId: string; status: TaskReportStatus; title: string; summary: string; tag?: string }): string {
-  return taskUpdateText({ taskId: input.taskId, kind: input.status, label: input.title, body: input.summary, ...(input.tag ? { tag: input.tag } : {}) });
+/** The owner's view of a result: the sub-session's summary, labelled with its name. */
+export function taskResultText(input: { taskId: string; outcome: TaskOutcome; title: string; summary: string; tag?: string }): string {
+  return taskUpdateText({ taskId: input.taskId, kind: input.outcome === 'finished' ? 'done' : input.outcome, label: input.title, body: input.summary, ...(input.tag ? { tag: input.tag } : {}) });
 }
-/** Any other task input. label: the task's title, or for a message, who sends it. */
+/** Any other sub-session input. label: its name, or for a message, who sends it. */
 export function taskUpdateText(input: { taskId: string; kind: Exclude<TaskInputKind, 'brief'>; label: string; body: string; tag?: string }): string {
-  return [`[Task ${input.taskId} · ${kindWords[input.kind]} · ${input.kind === 'message' ? `from ${heading(input.label)}` : heading(input.label)}]`, ...(input.tag ? [input.tag] : []), quoteFrames(input.body), TASK_GUIDANCE[input.kind]].join('\n');
+  return [`[Sub-session ${input.taskId} · ${kindWords[input.kind]} · ${input.kind === 'message' ? `from ${heading(input.label)}` : heading(input.label)}]`, ...(input.tag ? [input.tag] : []), quoteFrames(input.body), TASK_GUIDANCE[input.kind]].join('\n');
 }
 /** What one message between assistants carries. */
 export const ASSISTANT_MESSAGE_LIMIT = 8000;
@@ -222,7 +221,7 @@ const itemTagFrame = /^\[Item (\d+) "([^"]+)" · from (.+)\]$/;
 const personWroteFrame = /^\[The person wrote to ([^\]]+)\] (.+)$/;
 const roomFrame = /^\[Room "(.+)" · (\S+) · your turn · (\d+) new messages? · ends in (\d+) min\]$/;
 export type TaskInput =
-  | { kind: 'brief'; taskId: string; from: string; title: string; brief: string; doneWhen?: string }
+  | { kind: 'brief'; taskId: string; from: string; title: string; brief: string }
   | { kind: 'message'; taskId: string; from: string; body: string }
   | { kind: Exclude<TaskInputKind, 'brief' | 'message'>; taskId: string; title: string; body: string }
   /** Not a task's: a message from another assistant, which arrives with task updates. */
@@ -242,7 +241,7 @@ export type TaskInput =
   /** What a bot reads when its chief, or the chief of a bot it manages, changed: one line, written from the record. */
   | { kind: 'chief_changed'; body: string };
 const wordKinds = new Map(Object.entries(kindWords).map(([kind, word]) => [word, kind as TaskInputKind]));
-const framePattern = new RegExp(`^\\[Task (\\S+) · (${Object.values(kindWords).join('|')}) · (.+)\\]$`);
+const framePattern = new RegExp(`^\\[Sub-session (\\S+) · (${Object.values(kindWords).join('|')}) · (.+)\\]$`);
 /** Reads one brief or update the Relay framed; any other text, or a frame without its closing guidance, is not a task input. */
 function parseOne(lines: string[]): TaskInput | undefined {
   const standing = standingFrame.exec(lines[0] ?? '');
@@ -264,13 +263,12 @@ function parseOne(lines: string[]): TaskInput | undefined {
     ? { kind: 'assistant', messageId: message[2]!, from: message[1]!, ...(message[4] ? { replyTo: message[4] } : {}), ...(message[3] === 'final answer' ? { final: true as const } : {}), body: lines.slice(1, -1).join('\n') } : undefined;
   const frame = framePattern.exec(lines[0] ?? '');
   const kind = frame && wordKinds.get(frame[2]!);
-  if (!frame || !kind || lines.length < 3 || lines.at(-1) !== TASK_GUIDANCE[kind] && !(kind === 'brief' && lines.at(-1) === TASK_SIDE_BRIEF_GUIDANCE)) return undefined;
+  if (!frame || !kind || lines.length < 3 || lines.at(-1) !== TASK_GUIDANCE[kind]) return undefined;
   const taskId = frame[1]!, label = frame[3]!;
   if (kind === 'brief') {
     const from = /^from (.+)$/.exec(label), title = /^Task: (.+)$/.exec(lines[1] ?? '');
     if (!from || !title || lines.length < 4) return undefined;
-    const body = lines.slice(2, -1), done = /^Done when: (.+)$/.exec(body.at(-1) ?? '');
-    return { kind, taskId, from: from[1]!, title: title[1]!, brief: (done ? body.slice(0, -1) : body).join('\n'), ...(done ? { doneWhen: done[1]! } : {}) };
+    return { kind, taskId, from: from[1]!, title: title[1]!, brief: lines.slice(2, -1).join('\n') };
   }
   const body = lines.slice(1, -1).join('\n');
   if (kind === 'message') { const from = /^from (.+)$/.exec(label); return from ? { kind, taskId, from: from[1]!, body } : undefined; }

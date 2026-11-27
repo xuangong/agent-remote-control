@@ -13,13 +13,12 @@ import './orchard-primitives.css';
 const ids = { chief: 'b_' + '1'.repeat(32), tracker: 'b_' + '2'.repeat(32), worker: 'b_' + '3'.repeat(32) };
 const now = Date.now();
 const chain = (id: string, extra: Partial<BotChain> = {}): BotChain => ({ id, cause: 'person', bot: ids.chief, bots: [ids.chief, ids.tracker, ids.worker],
-  messages: 14, turns: 9, created: 2, depth: 4, usage: { tokens: 248_000 }, startedAt: now - 600_000, updatedAt: now - 60_000, ...extra });
+  messages: 14, turns: 9, created: 2, subSessions: 3, depth: 4, usage: { tokens: 248_000 }, startedAt: now - 600_000, updatedAt: now - 60_000, ...extra });
 let view: ChainView = {
   chains: [chain('c_0000000000000001', { passed: ['tokens', 'depth'], approvals: [{ cwd: '/Users/someone/projects/agent-remote-control/packages/agent-remote-lab', at: now - 300_000, applied: 3 }] }), chain('c_0000000000000002', { cause: 'timer', bot: ids.tracker, bots: [ids.tracker], messages: 1, turns: 1, created: 0, depth: 0, usage: { tokens: 3_100 } }),
     chain('c_0000000000000003', { stopped: now - 120_000, messages: 3, turns: 2, created: 1, depth: 1, usage: { tokens: 18_000 } })],
   paused: [], thresholds: { tokens: 200_000 },
-  names: { [ids.chief]: 'Chief of staff', [ids.tracker]: 'Release tracker', [ids.worker]: 'Log reader' },
-  kinds: { [ids.chief]: 'standing', [ids.tracker]: 'standing', [ids.worker]: 'temporary' },
+  names: { [ids.chief]: 'Chief of staff', [ids.tracker]: 'Release tracker', [ids.worker]: 'Log reviewer' },
 };
 if (new URLSearchParams(location.search).has('empty')) view = { ...view, chains: [] };
 const actions: ChainAction[] = (window as unknown as { auditActions: ChainAction[] }).auditActions = [];

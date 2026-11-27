@@ -91,24 +91,40 @@ describe('the reply a bot\'s ended turn sends', () => {
   });
 });
 
-describe('the answer of a side', () => {
-  const turn = (finalText?: string) => ({ cause: { kind: 'framed' as const }, tokens: 5, ...(finalText ? { finalText } : {}) });
-  const workerTools = (calls: TeamHostCall[]) => new BotTools({ request: async call => { calls.push(call); return {}; }, tasks: () => true, working: candidate => candidate.nativeSessionId === 'worker' });
+describe('the end of a sub-session\'s turn', () => {
+  const turn = (finalText?: string, outcome?: 'finished' | 'failed' | 'interrupted') => ({ cause: { kind: 'framed' as const }, tokens: 5, ...(finalText ? { finalText } : {}), ...(outcome ? { outcome } : {}) });
+  const seat = { teamId: 'team', memberId: 'member' };
+  const workerTools = (calls: TeamHostCall[], patch?: string) => new BotTools({ request: async call => { calls.push(call); return {}; }, tasks: () => true,
+    workerSeat: candidate => candidate.nativeSessionId === 'worker' ? seat : undefined, ...(patch ? { patch: async () => patch } : {}) });
+  const flush = () => new Promise(resolve => setTimeout(resolve, 0));
 
-  it('is the final text of a temporary bot\'s turn, sent as a call the Host makes with no tool, kept to the size a result keeps', () => {
+  it('is sent as a call the Host makes with no tool: how it ended and its final text, kept to the size a result keeps', async () => {
     const calls: TeamHostCall[] = [], tools = workerTools(calls);
     tools.turnEnded(ref('worker'), turn('Two notes written.'));
     tools.turnEnded(ref('worker'), turn('x'.repeat(5000)));
+    tools.turnEnded(ref('worker'), turn('The runner is offline.', 'failed'));
+    tools.turnEnded(ref('worker'), turn(undefined, 'interrupted'));
+    await flush();
     expect(calls).toEqual([
-      { action: 'side_final', owner: { providerId: 'codex', nativeSessionId: 'worker' }, text: 'Two notes written.' },
-      { action: 'side_final', owner: { providerId: 'codex', nativeSessionId: 'worker' }, text: `${'x'.repeat(3999)}…` }]);
+      { action: 'sub_turn_end', ...seat, outcome: 'finished', text: 'Two notes written.' },
+      { action: 'sub_turn_end', ...seat, outcome: 'finished', text: `${'x'.repeat(3999)}…` },
+      { action: 'sub_turn_end', ...seat, outcome: 'failed', text: 'The runner is offline.' },
+      { action: 'sub_turn_end', ...seat, outcome: 'interrupted' }]);
   });
 
-  it('is sent for no turn that said nothing, and for no session that is not a temporary bot\'s worker', () => {
-    const calls: TeamHostCall[] = [], tools = workerTools(calls);
-    tools.turnEnded(ref('worker'), turn());
+  it('carries the patch of a worktree session after its text, and is sent for no session that is not a sub-session\'s', async () => {
+    const calls: TeamHostCall[] = [], tools = workerTools(calls, 'Patch (apply with git apply): /tmp/x.patch');
+    tools.turnEnded(ref('worker'), turn('Changed a.txt.'));
     tools.turnEnded(ref('plain'), turn('Done.'));
-    expect(calls).toEqual([]);
+    await flush();
+    expect(calls).toEqual([{ action: 'sub_turn_end', ...seat, outcome: 'finished', text: 'Changed a.txt.\n\nPatch (apply with git apply): /tmp/x.patch' }]);
+  });
+
+  it('counts only a finished turn in a chain: a failed or interrupted one reports nothing else', async () => {
+    const calls: TeamHostCall[] = [], tools = workerTools(calls);
+    tools.turnEnded(ref('worker'), turn('x', 'failed'));
+    await flush();
+    expect(calls.map(call => call.action)).toEqual(['sub_turn_end']);
   });
 });
 

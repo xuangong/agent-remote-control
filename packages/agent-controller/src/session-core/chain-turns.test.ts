@@ -21,6 +21,21 @@ function watched() {
 }
 
 describe('the causes and usage of a bot\'s turns', () => {
+  it('reports a failed or canceled turn with how it ended and the words it ended with, and a finished one without an outcome', async () => {
+    const { session, turns, settle } = watched();
+    session.push(input('Run the suite.', 'u1'));
+    session.push(event({ type: 'turn_failed', provider: 'fake', turnId: 't', error: 'The runner is offline.' }));
+    session.push(input('Again.', 'u2'));
+    session.push(event({ type: 'turn_canceled', provider: 'fake', turnId: 't', reason: 'Interrupted by the person.' }));
+    session.push(input('Once more.', 'u3'));
+    session.push(completed());
+    await settle();
+    expect(turns).toEqual([
+      { cause: { kind: 'person', messageId: 'u1' }, tokens: 0, outcome: 'failed', finalText: 'The runner is offline.' },
+      { cause: { kind: 'person', messageId: 'u2' }, tokens: 0, outcome: 'interrupted', finalText: 'Interrupted by the person.' },
+      { cause: { kind: 'person', messageId: 'u3' }, tokens: 0 }]);
+  });
+
   it('names the person\'s input by its message, framed input as the Relay\'s, and passes every item on', async () => {
     const { session, causes, items, settle } = watched();
     session.push(input('Plan the release.', 'u1'));

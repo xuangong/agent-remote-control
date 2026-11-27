@@ -5,7 +5,7 @@ import { AgentOperationRejectedError, bindAgentSessionTools, type AgentInputAcce
 import type { SessionExecutionRouting } from './session-succession-service.js';
 import type { RoleSuccessionDecision, SessionRole } from './session-role-succession.js';
 import type { SessionCreation } from './role-session-creation.js';
-import { TASK_WORKER_NAMESPACE, taskWorkerInstructions } from './task-roles.js';
+import { TASK_WORKER_NAMESPACE, subSessionInstructions } from './sub-session-roles.js';
 import { botInstructions } from './bot-instructions.js';
 import { collectPatch, prepareWorktree, removeWorktree, repositoryRoot, worktreePath } from './worktrees.js';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -15,7 +15,7 @@ import { OperationCacheError, type AgentManagerEvent, type RemoteHostSessionLeas
 
 export interface TeamRuntimeAccess {
   /** Every bot's tools, bound to the session that calls them: what a temporary bot (a task's worker) uses to report and message. */
-  botTools?(actual: () => NativeSessionRef | undefined): AgentSessionToolNamespace;
+  botTools?(actual: () => NativeSessionRef | undefined, kind?: 'sub'): AgentSessionToolNamespace;
   controllerId: string;
   /** Role routing: a seat follows every committed succession of its session, including one to another provider. */
   sessionRouting: SessionExecutionRouting;
@@ -49,7 +49,7 @@ const bound = (seat: TeamSeat) => !!(seat.task || seat.link || seat.room || seat
 interface Delivery { record: LocalSeat; team: Team; message: TeamMessage }
 /** A main session reads what waits on it before the rest. */
 /** At idle a main session reads what waits on it first, then other task updates, then other assistants' messages. */
-const taskUpdatePriority = (message: TeamMessage) => /^\[Task \S+ · (question|needs the person) · /.test(message.text) || message.text.startsWith('[The person wrote to ') ? 0 : message.text.startsWith('[Message from ') || message.text.startsWith('[Room ') ? 2 : 1;
+const taskUpdatePriority = (message: TeamMessage) => /^\[Sub-session \S+ · needs the person · /.test(message.text) || message.text.startsWith('[The person wrote to ') ? 0 : message.text.startsWith('[Message from ') || message.text.startsWith('[Room ') ? 2 : 1;
 /** A task Team missing from the poll this long was removed by the Relay. */
 const TASK_MISSING_FORGET_MS = 10 * 60_000;
 const errorText = (error: unknown) => (error instanceof Error ? error.message : 'Team operation failed.').slice(0, 2048);
@@ -162,9 +162,10 @@ export class TeamRuntime implements SessionRole {
   answering(ref: NativeSessionRef): boolean {
     return this.records.some(record => record.seat.ask && record.creation === 'ready' && record.seat.member.providerId === ref.providerId && record.seat.member.nativeSessionId === ref.nativeSessionId);
   }
-  /** Whether this session is a ready worker of a temporary bot of this Host. */
-  working(ref: NativeSessionRef): boolean {
-    return this.records.some(record => record.seat.task && record.seat.member.role === 'leader' && record.creation === 'ready' && record.seat.member.providerId === ref.providerId && record.seat.member.nativeSessionId === ref.nativeSessionId);
+  /** The Team and seat of this session if it is a ready sub-session's own session on this Host. */
+  workerSeat(ref: NativeSessionRef): { teamId: string; memberId: string } | undefined {
+    const record = this.records.find(item => item.seat.task && item.seat.member.role === 'leader' && item.creation === 'ready' && item.seat.member.providerId === ref.providerId && item.seat.member.nativeSessionId === ref.nativeSessionId);
+    return record ? { teamId: record.seat.teamId, memberId: record.seat.member.id } : undefined;
   }
   async extensions(holder: NativeSessionRef, actual: () => NativeSessionRef | undefined = () => holder): Promise<AgentSessionExtensions | undefined> {
     await this.ready;
@@ -294,7 +295,7 @@ export class TeamRuntime implements SessionRole {
     const tool = (name: string, description: string, properties: Record<string, unknown>, required: string[], execute: (args: Record<string, string>) => Promise<unknown>): AgentSessionTool => ({
       name, description, inputSchema: { type: 'object', properties, required, additionalProperties: false }, execute: async args => JSON.stringify(await execute(args as Record<string, string>)),
     });
-    const readSource = tool('read_source_session', 'Read a bounded page from the source conversation for context. The source agent has no Team tools and receives no automatic Team messages.', { before: { type: 'object', properties: { epoch: { type: 'string' }, seq: { type: 'integer' } }, required: ['epoch','seq'], additionalProperties: false } }, [], async args => {
+    const readSource = tool('read_main_session', 'Read a bounded page from the source conversation for context. The source agent has no Team tools and receives no automatic Team messages.', { before: { type: 'object', properties: { epoch: { type: 'string' }, seq: { type: 'integer' } }, required: ['epoch','seq'], additionalProperties: false } }, [], async args => {
       assertCurrent();
       const source = await this.access.acquire(seat.source.providerId, seat.source.nativeSessionId);
       try { assertCurrent(); const request = { requestId: randomUUID(), agentId: source.agent.agentId, direction: args.before ? 'before' as const : 'tail' as const, limit: 20, ...(args.before ? { cursor: args.before as unknown as {epoch:string;seq:number} } : {}) }; const page = (await source.agent.fetchTimeline(request)).payload; assertCurrent();
@@ -302,8 +303,8 @@ export class TeamRuntime implements SessionRole {
         return { ...page, entries, truncated: entries.length !== page.entries.length }; }
       finally { source.release(); }
     });
-    // A task's worker reads its brief as input and reports once; it has no Team inbox. Its tools come as a namespace where the
-    // provider takes one, so reporting never waits for the person's approval.
+    // A sub-session reads its first work as input and reports at the end of each piece of work (communicate_update); it has no Team inbox.
+    // Its tools come as a namespace where the provider takes one, so reporting never waits for the person's approval.
     // A standing bot another bot created: its session starts with its standing instructions and every bot's tools.
     if (seat.inbox) {
       const bots = this.access.botTools?.(actual);
@@ -318,15 +319,14 @@ export class TeamRuntime implements SessionRole {
       return this.access.toolNamespaces?.(member.providerId) ? { instructions, ...access, ...(bots ? { toolNamespaces: [bots] } : {}) } : { instructions, ...access, ...(bots ? { tools: bots.tools } : {}) };
     }
     if (seat.task) {
-      // A temporary bot has every bot's tools, called as its own session; it reports to its chief with message.
-      const bots = this.access.botTools?.(actual);
-      const standing = botInstructions(undefined);
-      const instructions = `${standing}\n\n${taskWorkerInstructions(seat)} ${locationInstructions(seat)}`;
+      // A sub-session is no bot: it has its own few tools (report, read its bot's conversation, the board items it owns) and no bot instructions.
+      const sub = this.access.botTools?.(actual, 'sub');
+      const instructions = `${subSessionInstructions(seat)} ${locationInstructions(seat)}`;
       const access = member.access ? { access: member.access } : {};
       const own = bindAgentSessionTools([readSource], assertCurrent);
       return this.access.toolNamespaces?.(member.providerId)
-        ? { instructions, ...access, toolNamespaces: [...(bots ? [bots] : []), { name: TASK_WORKER_NAMESPACE, description: 'Agent Remote Control: read your chief\'s conversation.', tools: own }] }
-        : { instructions, ...access, tools: [...own, ...(bots?.tools ?? [])] };
+        ? { instructions, ...access, toolNamespaces: [{ name: TASK_WORKER_NAMESPACE, description: 'Agent Remote Control: report to your bot, read the conversation you were started from, and keep the items you own on its board.', tools: [...(sub?.tools ?? []), ...own] }] }
+        : { instructions, ...access, tools: [...own, ...(sub?.tools ?? [])] };
     }
     throw new Error('Only bots carry Team tools.');
   }
@@ -357,8 +357,8 @@ export class TeamRuntime implements SessionRole {
         const pending = team.messages.some(item => item.to === member.id && (['queued','dispatching','unknown'].includes(item.status) || item.status === 'accepted' && !['started','handled'].includes(item.acceptance ?? '')));
         const leaseKey = `${team.id}:${member.id}`, current = this.leases.get(leaseKey);
         // The live session decides for a held runtime: reported presence can lag a delivery that just started a turn.
-        // A running task's worker stays held, so its ended turns, pending interactions and the person's input to it are seen.
-        const working = !!record.seat.task && member.role === 'leader' && (team.task?.state === 'working' || team.task?.state === 'needs_input');
+        // A live sub-session's session stays held, so its ended turns, pending interactions and the person's input to it are seen.
+        const working = !!record.seat.task && member.role === 'leader' && team.task?.state !== 'ended';
         if (!working && !pending && member.activity === 'idle' && !(current && !idle(current.lease))) continue;
         try {
           const target = this.access.sessionRouting.resolve(this.anchor(record.seat)).target;
@@ -415,9 +415,9 @@ export class TeamRuntime implements SessionRole {
       const team = listed.find(item => item.id === record.seat.teamId);
       if (team) {
         this.missingTasks.delete(team.id);
-        if (team.task?.state === 'cancelled' && record.seat.member.role === 'leader') cancelled.add(record);
+        if (team.task?.state === 'ended' && record.seat.member.role === 'leader') cancelled.add(record);
         // An answer session stays while the Relay lists it; a retired one is no longer listed.
-        if (record.seat.task && team.task?.state !== 'working' && team.task?.state !== 'needs_input' && settled(team, record.seat.member.id)) forgotten.add(record);
+        if (record.seat.task && team.task?.state === 'ended' && settled(team, record.seat.member.id)) forgotten.add(record);
         continue;
       }
       // A Team just created can be missing from a poll answered before its seats were committed; only a long absence means the Relay removed it.
@@ -559,7 +559,7 @@ export class TeamRuntime implements SessionRole {
     const item = event.event.item, text = item.text.trim();
     if (!text || item.withdrawn || parseTaskInputs(text)) return;
     const id = item.messageId ?? item.clientMessageId ?? createHash('sha256').update(text).digest('hex').slice(0, 64);
-    void this.request({ action: 'tell_task', teamId: record.seat.teamId, memberId: record.seat.member.id, operationId: id,
+    void this.request({ action: 'sub_told', teamId: record.seat.teamId, memberId: record.seat.member.id, operationId: id,
       text: text.length > TASK_TOLD_LIMIT ? `${text.slice(0, TASK_TOLD_LIMIT - 1)}…` : text }).catch(() => undefined);
   }
   async close() { this.closed = true; clearInterval(this.timer); for (const held of this.leases.values()) { held.unsubscribe?.(); held.lease.release(); } this.leases.clear(); await this.persistence; }

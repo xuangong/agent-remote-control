@@ -12,7 +12,7 @@ const REFRESH_MS = 10_000;
 
 /**
  * The audit (bots design 7): each chain the person's inputs and the bots' timers set off, newest first, with what it did, and the
- * person's decisions on it: stop it, stop one bot's part, pause or resume a standing bot, retire a temporary one, and revoke what the person allowed for the rest of a chain (plan 9d). It refreshes while
+ * person's decisions on it: stop it, stop one bot's part, pause or resume a standing bot, and revoke what the person allowed for the rest of a chain (plan 9d). It refreshes while
  * the page is visible.
  */
 export function BotAudit({ baseUrl, client: given }: { baseUrl: string; client?: Pick<RemoteChainClient, 'list' | 'act'> }) {
@@ -42,7 +42,7 @@ export function BotAudit({ baseUrl, client: given }: { baseUrl: string; client?:
     <Thresholds saved={view.thresholds} busy={busy} save={thresholds => void act({ action: 'set_thresholds', thresholds })} />
     {view.chains.length ? <ul className="lab-assistant-chain">{view.chains.map(chain => <SessionRow key={chain.id} title={cause(chain)}
       meta={[replyTime(chain.updatedAt, undefined, dateLocale(locale), t), chain.stopped !== undefined ? t('settings.audit.stopped') : undefined, passed(chain),
-        t('settings.audit.counts', { messages: chain.messages, turns: chain.turns, created: chain.created, depth: chain.depth, tokens: chain.usage.tokens.toLocaleString(locale) })]}
+        t('settings.audit.counts', { messages: chain.messages, turns: chain.turns, created: chain.created, subSessions: chain.subSessions ?? 0, depth: chain.depth, tokens: chain.usage.tokens.toLocaleString(locale) })]}
       heading={<span className="lab-assistant-session-title">{cause(chain)}</span>}>
       {chain.stopped === undefined ? <div className="lab-assistant-task-actions">{button(t('settings.audit.stop'), { action: 'stop', chainId: chain.id })}</div> : null}
       {chain.approvals?.length ? <section className="lab-bot-audit-approvals" aria-label={t('settings.audit.approvals')}>
@@ -54,12 +54,11 @@ export function BotAudit({ baseUrl, client: given }: { baseUrl: string; client?:
         </li>)}</ul>
       </section> : null}
       <ul className="lab-bot-audit-bots">{chain.bots.map(bot => {
-        const paused = view.paused.includes(bot), kind = view.kinds[bot];
+        const paused = view.paused.includes(bot);
         return <li key={bot}><span>{name(bot)}{paused ? ` · ${t('settings.audit.paused')}` : ''}</span>
           <div className="lab-assistant-task-actions">
             {chain.stopped === undefined && !chain.stoppedBots?.includes(bot) ? button(t('settings.audit.stopBot', { bot: name(bot) }), { action: 'stop_bot', chainId: chain.id, botId: bot }) : null}
-            {kind === 'standing' ? button(t(paused ? 'settings.audit.resume' : 'settings.audit.pause', { bot: name(bot) }), { action: paused ? 'resume_bot' : 'pause_bot', botId: bot }) : null}
-            {kind === 'temporary' ? button(t('settings.audit.retire', { bot: name(bot) }), { action: 'retire_bot', botId: bot }) : null}
+            {button(t(paused ? 'settings.audit.resume' : 'settings.audit.pause', { bot: name(bot) }), { action: paused ? 'resume_bot' : 'pause_bot', botId: bot })}
           </div></li>;
       })}</ul>
     </SessionRow>)}</ul> : <p>{t('settings.audit.empty')}</p>}

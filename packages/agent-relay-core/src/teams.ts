@@ -11,7 +11,7 @@ import { BotAsks } from './bot-asks.js';
 import { BotWork } from './bot-work.js';
 import { BotBoard } from './bot-board.js';
 import { BotChains, editChainId, memoryChains, type ChainStore } from './chains.js';
-import { chainScope, inChain, seenBefore, stampChain, temporaryBotId } from './chain-scope.js';
+import { chainScope, inChain, seenBefore, stampChain, subSessionId } from './chain-scope.js';
 import { actOnBot, stopInTeams } from './audit.js';
 import { TaskGroups, taskAction, taskPresence, taskSettled, type TaskPorts } from './tasks.js';
 import { nativeSessionRefKey, type TeamAskRequest, type BotMessageResult, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TurnCause, type BotChain, type ChainAction, type ChainView } from '@orchardworks/agent-remote-protocol';
@@ -99,7 +99,7 @@ export class TeamBroker {
   private project(source: SavedTeam): Team {
     const saved = plain(source);
     const team: Team = structuredClone(stripPrivateTeamEvidence(saved));
-    if (team.task) team.task.botId = temporaryBotId(team.id);
+    if (team.task) team.task.subSessionId = subSessionId(team.id);
     const unresolved = (saved.deliveryReceipts ?? []).flatMap(receipt => {
       if (receipt.status !== 'accepted' || receipt.acceptance !== undefined) return [];
       const { fingerprint: _hash, settledAt: _time, acceptance: _disposition, ...evidence } = receipt;
@@ -147,28 +147,26 @@ export class TeamBroker {
       this.rooms?.arm();
       return this.project(changed);
     }
-    if (input.action === 'keep_task') return this.project(await (this.bots ?? fail(unavailableAssistants)).keep(input.teamId));
-    if (input.action === 'cancel_task' || input.action === 'mark_task_done') {
+    if (input.action === 'stop_sub_session') {
       if (!this.tasks) fail(unavailableTasks);
-      return this.project(await this.change(teams => { const team = find(teams, input.teamId); taskAction(team, input.action as 'cancel_task' | 'mark_task_done', this.ports.now()); return team; }));
+      return this.project(await this.change(teams => { const team = find(teams, input.teamId); taskAction(team, this.ports.now(), 'person'); return team; }));
     }
     return fail('This action is not available.');
   }
-  /** The account's chains, newest first, and the names of the bots they name: standing bots by their records, temporary ones by their tasks. */
+  /** The account's chains, newest first, and the names of the bots they name. */
   chainView(): ChainView {
-    const chains = this.chains.list(), wanted = new Set(chains.flatMap(chain => chain.bots)), names: Record<string, string> = {}, kinds: ChainView['kinds'] = {};
-    for (const bot of this.ports.assistants ? accountDirectory(this.ports.assistants.groups()) : []) if (wanted.has(bot.key)) { names[bot.key] = bot.name; kinds[bot.key] = 'standing'; }
-    for (const team of this.ports.read()) if (team.task && wanted.has(temporaryBotId(team.id))) { names[temporaryBotId(team.id)] = team.task.title; kinds[temporaryBotId(team.id)] = 'temporary'; }
-    return { chains, names, kinds, thresholds: this.chains.thresholds(), paused: this.ports.read().filter(team => team.inbox?.paused).map(team => team.inbox!.botId) };
+    const chains = this.chains.list(), wanted = new Set(chains.flatMap(chain => chain.bots)), names: Record<string, string> = {};
+    for (const bot of this.ports.assistants ? accountDirectory(this.ports.assistants.groups()) : []) if (wanted.has(bot.key)) names[bot.key] = bot.name;
+    return { chains, names, thresholds: this.chains.thresholds(), paused: this.ports.read().filter(team => team.inbox?.paused).map(team => team.inbox!.botId) };
   }
   /** The person mentions a bot from a conversation: the bot answers in its answer session for that conversation (bots plan 8b). */
   async ask(input: TeamAskRequest): Promise<Team> { return this.project(await (this.asks ?? fail(unavailableAssistants)).ask(input)); }
-  /** The person starts a temporary bot whose chief is a session (`/side`, bots design 9): a task of that session, its mission the brief. */
+  /** The person starts a sub-session beside a conversation (`/side`, bots design 9): its first work is the text; its result shows beside the conversation and reaches no bot. */
   async startBot(input: TeamCreate): Promise<SavedTeam> {
-    const tasks = this.tasks ?? fail(unavailableTasks), bot = input.bot ?? fail('A bot needs a name and a mission.');
-    const created = await tasks.create(input.source.hostId, { action: 'create_task', owner: { providerId: input.source.providerId, nativeSessionId: input.source.nativeSessionId,
-      ...(input.source.title ? { title: input.source.title } : {}) }, operationId: input.operationId, title: bot.name, brief: bot.mission }, { side: true });
-    return this.ports.read().find(team => team.id === created.taskId) ?? fail('The bot could not be started.');
+    const tasks = this.tasks ?? fail(unavailableTasks), bot = input.bot ?? fail('A sub-session needs a name and its first work.');
+    const created = await tasks.create(input.source.hostId, { owner: { providerId: input.source.providerId, nativeSessionId: input.source.nativeSessionId,
+      ...(input.source.title ? { title: input.source.title } : {}) }, operationId: input.operationId, name: bot.name.slice(0, 120), prompt: bot.mission }, { startedBy: 'person' });
+    return this.ports.read().find(team => team.id === created.taskId) ?? fail('The sub-session could not be started.');
   }
   /** The person's decision from the audit: stop a chain or a bot's part of it, pause or resume a standing bot, retire a temporary one. */
   async chainAction(action: ChainAction): Promise<unknown> {
@@ -188,14 +186,14 @@ export class TeamBroker {
       finally { await this.chains.record(scope, { cause: 'person', bot: action.botId }).catch(() => undefined); }
     }
     if (action.action === 'set_chief') return (this.bots ?? fail(unavailableAssistants)).personSetChief(action.botId, action.chief);
+    if (action.action !== 'pause_bot' && action.action !== 'resume_bot') fail('This action is not available.');
     return this.change(teams => actOnBot(teams, action, this.ports.now()));
   }
-  /** Where a bot's main session is: a standing bot's view, or a temporary bot's worker. */
+  /** Where a bot's main session is: a standing bot's view. */
   private botSession(botId: string): { hostId: string; providerId: string; nativeSessionId: string } | undefined {
     const standing = this.ports.assistants ? accountDirectory(this.ports.assistants.groups()).find(bot => bot.key === botId) : undefined;
     if (standing) return { hostId: standing.hostId, providerId: standing.providerId, nativeSessionId: standing.nativeSessionId };
-    const worker = this.ports.read().find(team => team.task && temporaryBotId(team.id) === botId)?.members[0];
-    return worker?.nativeSessionId ? { hostId: worker.hostId, providerId: worker.providerId, nativeSessionId: worker.nativeSessionId } : undefined;
+    return undefined;
   }
   /** Runs a bot's call in the chain of the turn it is made in, then adds what it did to the chain (bots design 7). */
   private async chained<T>(hostId: string, owner: { providerId: string; nativeSessionId: string }, cause: TurnCause | undefined, run: () => Promise<T>, stopped?: (reason: string) => T): Promise<T> {
@@ -214,6 +212,7 @@ export class TeamBroker {
     // A Controller that does not run tasks never sees them.
     const visible = (team: SavedTeam) => (!team.task || this.ports.tasks?.capable(hostId) === true)
       && (!team.link && !team.room && !team.inbox && !team.ask || this.ports.assistants?.capable(hostId) === true);
+    if (call.action === 'poll') await this.bots?.endRetired().catch(() => undefined);
     if (call.action === 'poll') return this.ports.read().filter(team => team.status !== 'archived' && visible(team) && team.members.some(item => item.hostId === hostId && item.creation === 'ready'))
       // A paused bot's messages wait on the Relay until the person resumes it.
       .map(team => this.project(team.inbox?.paused ? { ...team, messages: team.messages.filter(message => message.status !== 'queued') } : withoutHeldAcks(team)));
@@ -224,16 +223,17 @@ export class TeamBroker {
       await this.inboxes!.ensure(this.assistants.hostBots(hostId));
       return { bots: this.assistants.bots(hostId) };
     }
-    if (call.action === 'create_task') {
-      const tasks = this.tasks ?? fail(unavailableTasks);
-      if (tasks.capable(hostId)) this.assistants?.assertBot(hostId, call.owner);
-      return tasks.create(hostId, call);
-    }
+    if (call.action === 'create_sub_session') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained(hostId, call.owner, call.cause, () => bots.createSub(hostId, call)); }
+    if (call.action === 'send_to_sub_session') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained(hostId, call.owner, call.cause, () => bots.sendSub(hostId, call)); }
+    if (call.action === 'get_sub_session_status') return (this.bots ?? fail(unavailableAssistants)).subStatus(hostId, call);
+    if (call.action === 'stop_sub_session') return (this.bots ?? fail(unavailableAssistants)).stopSub(hostId, call);
+    if (call.action === 'sub_update') return (this.bots ?? fail(unavailableAssistants)).subUpdate(hostId, call);
+    if (call.action === 'sub_turn_end') { assertCurrent(); return (this.bots ?? fail(unavailableAssistants)).subTurnEnd(hostId, call); }
+    if (call.action === 'sub_told') { assertCurrent(); return (this.tasks ?? fail(unavailableTasks)).tell(hostId, call); }
     if (call.action === 'create_bot') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained(hostId, call.owner, call.cause, () => bots.create(hostId, call)); }
     if (call.action === 'bot_message') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained<BotMessageResult>(hostId, call.owner, call.cause, () => bots.message(hostId, call), reason => ({ outcome: 'forbidden', reason })); }
     if (call.action === 'attachment_begin' || call.action === 'attachment_chunk' || call.action === 'attachment_finish' || call.action === 'attachment_read') return (this.bots ?? fail(unavailableAssistants)).attachment(hostId, call);
     if (call.action === 'bot_reply') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained<BotMessageResult>(hostId, call.owner, call.cause, () => bots.reply(hostId, call), reason => ({ outcome: 'forbidden', reason })); }
-    if (call.action === 'side_final') return (this.bots ?? fail(unavailableAssistants)).sideFinal(hostId, call);
     if (call.action === 'bot_answer') return (this.asks ?? fail(unavailableAssistants)).answer(hostId, call);
     if (call.action === 'bot_told') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained<BotMessageResult>(hostId, call.owner, call.cause, () => bots.told(hostId, call), reason => ({ outcome: 'forbidden', reason })); }
     if (call.action === 'chain_turn') { const bots = this.bots ?? fail(unavailableAssistants), found = this.chains.find(this.ports.read(), { hostId, ...call.owner }, call.cause);
@@ -250,18 +250,11 @@ export class TeamBroker {
     if (call.action === 'update_mission') return (this.bots ?? fail(unavailableAssistants)).updateMission(hostId, call);
     if (call.action === 'list_hosts') return (this.bots ?? fail(unavailableAssistants)).listHosts(hostId, call);
     if (call.action === 'list_bots') return (this.bots ?? fail(unavailableAssistants)).list(hostId, call);
-    if (call.action === 'stop_bot' || call.action === 'retire_bot') return (this.bots ?? fail(unavailableAssistants)).manageStaff(hostId, call);
     if (call.action === 'bot_session') return (this.bots ?? fail(unavailableAssistants)).readSession(hostId, call);
-    if (call.action === 'task_status') return (this.tasks ?? fail(unavailableTasks)).status(hostId, call);
-    if (call.action === 'report_task') { assertCurrent(); return (this.tasks ?? fail(unavailableTasks)).report(hostId, call); }
     if (call.action === 'open_room') { const rooms = this.rooms ?? fail(unavailableAssistants); return this.chained(hostId, call.owner, call.cause, () => rooms.open(hostId, call)); }
     if (call.action === 'room_say' || call.action === 'room_pass') return (this.rooms ?? fail(unavailableAssistants)).speak(hostId, call);
     if (call.action === 'list_assistants') return (this.assistants ?? fail(unavailableAssistants)).list(hostId, call);
     if (call.action === 'message_assistant') return (this.assistants ?? fail(unavailableAssistants)).message(hostId, call);
-    if (call.action === 'message_task') return (this.tasks ?? fail(unavailableTasks)).message(hostId, call);
-    if (call.action === 'cancel_task' || call.action === 'mark_task_done') return (this.tasks ?? fail(unavailableTasks)).finish(hostId, call);
-    if (call.action === 'ask_owner') { assertCurrent(); return (this.tasks ?? fail(unavailableTasks)).ask(hostId, call); }
-    if (call.action === 'tell_task') { assertCurrent(); return (this.tasks ?? fail(unavailableTasks)).tell(hostId, call); }
     return this.change(teams => {
       assertCurrent();
       const team = find(teams, call.teamId), self = member(team, call.memberId), now = this.ports.now();
@@ -312,7 +305,7 @@ export class TeamBroker {
     let result: TeamMember;
     try {
       result = await this.ports.createSeat(item.hostId, { teamId, source: team.source, member: item,
-        ...(team.task ? { task: { title: team.task.title, ...(team.task.side ? { side: true as const } : {}) } } : {}), ...(team.link ? { link: { peer: team.members.find(other => other.id !== item.id)!.name } } : {}), ...(team.room ? { room: { name: team.room.name } } : {}), ...(team.ask ? { ask: this.asks!.seat(team) } : {}), ...(team.inbox ? { inbox: { botId: team.inbox.botId, ...(team.inbox.pending ? { mission: team.inbox.pending.mission } : {}) } } : {}) });
+        ...(team.task ? { task: { title: team.task.title } } : {}), ...(team.link ? { link: { peer: team.members.find(other => other.id !== item.id)!.name } } : {}), ...(team.room ? { room: { name: team.room.name } } : {}), ...(team.ask ? { ask: this.asks!.seat(team) } : {}), ...(team.inbox ? { inbox: { botId: team.inbox.botId, ...(team.inbox.pending ? { mission: team.inbox.pending.mission } : {}) } } : {}) });
       if (!isTeamMember(result) || result.id !== item.id || result.hostId !== item.hostId || result.providerId !== item.providerId || result.role !== item.role || result.creation !== 'ready' || !result.nativeSessionId) fail('Invalid Host member registration.');
     } catch (error) { result = { ...item, creation: 'unknown', error: error instanceof Error ? error.message.slice(0, 2048) : 'Member creation is uncertain.' }; }
     return this.change(teams => {

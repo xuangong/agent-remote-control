@@ -61,7 +61,7 @@ export async function botsHarness(options: { groups?: WindowGroup[]; sessions?: 
   const bots = new BotTools({ request: call => broker.hostCall('host', call), tasks: () => options.tasks === true,
     title: async () => 'Chief', files: botFiles(async () => directory, join(directory, '.downloads')), readOnly: providerId => ['codex', 'claude'].includes(providerId), patch: ref => runtime.patchFor(ref) });
   const access: TeamRuntimeAccess = {
-    botTools: actual => bots.namespace(actual, false),
+    botTools: (actual, kind) => bots.namespace(actual, false, kind),
     controllerId: 'controller', available: () => true, supportedProviders: () => ['codex', 'claude', 'copilot'], readOnlyProviders: () => ['codex', 'claude'],
     tasks: () => options.tasks === true, toolNamespaces: () => options.toolNamespaces === true, genericSuccession: () => true,
     sessionRouting: { resolve: anchor => ({ anchor, target: anchor, operationIds: [] }), assertCurrent: (anchor, target) => { if (anchor.nativeSessionId !== target.nativeSessionId) throw new Error('Wrong recipient'); } },

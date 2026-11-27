@@ -50,7 +50,7 @@ export type StandingApproval = Static<typeof StandingApproval>;
  * longest run of replies along it. stopped: when the person stopped it.
  */
 export const BotChain = Type.Object({ id: ChainId, cause: Type.Union([Type.Literal('person'), Type.Literal('timer'), Type.Literal('bot')]), bot: BotId,
-  bots: Type.Array(BotId, { minItems: 1, maxItems: CHAIN_BOT_LIMIT }), messages: count, turns: count, created: count, depth: count, usage: ChainUsage,
+  bots: Type.Array(BotId, { minItems: 1, maxItems: CHAIN_BOT_LIMIT }), messages: count, turns: count, created: count, subSessions: Type.Optional(count), depth: count, usage: ChainUsage,
   startedAt: time, updatedAt: time, stopped: Type.Optional(time),
   /** Bots whose part of the chain the person stopped. */
   stoppedBots: Type.Optional(Type.Array(BotId, { maxItems: CHAIN_BOT_LIMIT })),
@@ -72,15 +72,14 @@ export const isChainThresholds = (value: unknown): value is ChainThresholds => V
 
 /**
  * What the person does from the audit (bots design 7). stop: the chain's waiting messages are withdrawn, its running turns stopped and
- * its temporary bots stopped; a bot's later call in it is refused. stop_bot: the same for one bot's part. pause_bot and resume_bot: a
- * standing bot's inbox holds its messages until resumed. retire_bot: a temporary bot ends, what it did standing as its result. update_board: the person edits a standing bot's items and plan note. set_chief: a standing bot moves to another standing bot as its chief, or to the person (null).
+ * its sub-sessions' running turns interrupted; a bot's later call in it is refused. stop_bot: the same for one bot's part. pause_bot and resume_bot: a
+ * standing bot's inbox holds its messages until resumed.  update_board: the person edits a standing bot's items and plan note. set_chief: a standing bot moves to another standing bot as its chief, or to the person (null).
  */
 export const ChainAction = Type.Union([
   Type.Object({ action: Type.Literal('stop'), chainId: ChainId }, object),
   Type.Object({ action: Type.Literal('stop_bot'), chainId: ChainId, botId: BotId }, object),
   Type.Object({ action: Type.Literal('pause_bot'), botId: BotId }, object),
   Type.Object({ action: Type.Literal('resume_bot'), botId: BotId }, object),
-  Type.Object({ action: Type.Literal('retire_bot'), botId: BotId }, object),
   Type.Object({ action: Type.Literal('set_chief'), botId: BotId, chief: Type.Union([BotId, Type.Null()]) }, object),
   // The person writes a standing bot's board as the person; the bots the write changes are told, as when a bot writes it.
   Type.Object({ action: Type.Literal('update_board'), botId: BotId, items: Type.Optional(Type.Array(BoardItemEdit, { minItems: 1, maxItems: 10 })), plan: Type.Optional(BoardPlanEdit) }, object),
@@ -89,5 +88,5 @@ export const ChainAction = Type.Union([
 ]);
 export type ChainAction = Static<typeof ChainAction>;
 export const isChainAction = (value: unknown): value is ChainAction => Value.Check(ChainAction, value);
-/** The audit's view: the account's chains, newest first, the names and kinds of their bots, and which standing bots are paused. */
-export interface ChainView { chains: BotChain[]; names: Record<string, string>; paused: string[]; kinds: Record<string, 'standing' | 'temporary'>; thresholds: ChainThresholds }
+/** The audit's view: the account's chains, newest first, the names of their bots, and which standing bots are paused. */
+export interface ChainView { chains: BotChain[]; names: Record<string, string>; paused: string[]; thresholds: ChainThresholds }

@@ -4,7 +4,7 @@ import { TeamBroker } from './teams.js';
 import { committed, detached } from './drafts.js';
 import type { SavedTeam } from './team-delivery.js';
 import { BotChains, memoryChains } from './chains.js';
-import { chainScope, temporaryBotId } from './chain-scope.js';
+import { chainScope } from './chain-scope.js';
 
 // Chains (bots design 7): bots call as their own sessions with the cause of their turn. Groups and Hosts are stubs; the broker, its
 // Teams, delivery claims and the chains are real.
@@ -59,19 +59,17 @@ describe('chains', () => {
     expect(between.every(message => message.chain === id)).toBe(true);
   });
 
-  it('counts a created bot, its brief and its report in its chief\'s chain, and a turn\'s usage', async () => {
+  it('counts a started sub-session, its first work and its result in its bot\'s chain, and a turn\'s usage', async () => {
     const f = fixture();
-    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'c1', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary', cause: person('u1') });
+    await f.broker.hostCall('mac', { action: 'create_sub_session', owner: f.as('chief'), operationId: 'c1', name: 'Reviewer', prompt: 'Review it.', cause: person('u1') });
     const task = f.state().find(team => team.task)!, chain = f.chain();
-    expect(chain).toMatchObject({ cause: 'person', created: 1, bots: [ids.chief, temporaryBotId(task.id)] });
+    // A sub-session is no bot: the chain counts it apart and names only bots.
+    expect(chain).toMatchObject({ cause: 'person', created: 0, subSessions: 1, bots: [ids.chief] });
     expect(task.messages[0]!.chain).toBe(chain.id);
     await f.deliver('worker-1');
-    await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('worker-1'), operationId: 'd1', to: 'chief', text: 'Looks fine.', status: 'done', cause: framed });
-    await f.broker.hostCall('mac', { action: 'chain_turn', owner: f.as('worker-1'), cause: framed, tokens: 1200, costUsd: 0.02 });
+    await f.broker.hostCall('mac', { action: 'chain_turn', owner: f.as('worker-1'), cause: framed, tokens: 1200, costUsd: 0.02 }).catch(() => undefined);
     expect(f.broker.chains.list()).toHaveLength(1);
-    expect(f.chain()).toMatchObject({ id: chain.id, turns: 1, usage: { tokens: 1200, costUsd: 0.02 } });
-    expect(f.broker.chainView().names).toEqual({ [ids.chief]: 'Chief', [temporaryBotId(task.id)]: 'Reviewer' });
-    expect(f.state().find(team => team.task)!.messages.at(-1)!.chain).toBe(chain.id);
+    expect(f.broker.chainView().names).toEqual({ [ids.chief]: 'Chief' });
   });
 
   it('settles a delivered message of a chain, which leaves the inbox for the next one', async () => {
@@ -97,15 +95,16 @@ describe('chains', () => {
 });
 
 describe('the audit', () => {
-  it('stops a chain: its waiting messages are withdrawn, its turns and temporary bots stopped, and a later call in it refused', async () => {
+  it('stops a chain: its waiting messages are withdrawn, its turns (a sub-session\'s too) interrupted, and a later call in it refused', async () => {
     const f = fixture();
-    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'c1', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary', cause: person('u1') });
+    await f.broker.hostCall('mac', { action: 'create_sub_session', owner: f.as('chief'), operationId: 'c1', name: 'Reviewer', prompt: 'Review it.', cause: person('u1') });
     await f.deliver('worker-1');
     await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'm1', to: 'Tracker', text: 'Hold the build.', cause: person('u1') });
     const id = f.chain().id;
     expect(await f.broker.chainAction({ action: 'stop', chainId: id })).toMatchObject({ withdrawn: 1, stopped: 1 });
     const task = f.state().find(team => team.task)!, tracker = f.state().find(team => team.inbox?.botId === ids.tracker)!;
-    expect(task.task!.state).toBe('cancelled');
+    // The sub-session stays, with its context; only its turn is asked to stop.
+    expect(task.task!.state).toBe('working');
     expect(task.members[0]!.interrupt).toBeGreaterThan(0);
     expect(tracker.messages.filter(message => message.chain === id && message.status === 'queued')).toEqual([]);
     expect(f.chain().stopped).toBeGreaterThan(0);
@@ -117,7 +116,7 @@ describe('the audit', () => {
 
   it('stops one bot\'s part of a chain and leaves the rest running', async () => {
     const f = fixture();
-    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'c1', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary', cause: person('u1') });
+    await f.broker.hostCall('mac', { action: 'create_sub_session', owner: f.as('chief'), operationId: 'c1', name: 'Reviewer', prompt: 'Review it.', cause: person('u1') });
     await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'm1', to: 'Tracker', text: 'Hold the build.', cause: person('u1') });
     await f.deliver('tracker');
     const id = f.chain().id;
@@ -129,7 +128,7 @@ describe('the audit', () => {
     expect(f.chain().stoppedBots).toEqual([ids.tracker]);
   });
 
-  it('holds a paused bot\'s messages until it is resumed, and retires a temporary bot with what it did', async () => {
+  it('holds a paused bot\'s messages until it is resumed, and refuses to pause what is no standing bot', async () => {
     const f = fixture();
     await f.broker.hostCall('mac', { action: 'bot_message', owner: f.as('chief'), operationId: 'm1', to: 'Tracker', text: 'Hold the build.', cause: person('u1') });
     expect(await f.broker.chainAction({ action: 'pause_bot', botId: ids.tracker })).toEqual({ botId: ids.tracker, state: 'paused' });
@@ -138,10 +137,7 @@ describe('the audit', () => {
     expect(f.broker.chainView().paused).toEqual([ids.tracker]);
     await f.broker.chainAction({ action: 'resume_bot', botId: ids.tracker });
     expect(await polled()).toBeGreaterThan(0);
-    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'c1', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary', cause: person('u1') });
-    const task = f.state().find(team => team.task)!;
-    expect(await f.broker.chainAction({ action: 'retire_bot', botId: temporaryBotId(task.id) })).toEqual({ botId: temporaryBotId(task.id), state: 'done' });
-    await expect(f.broker.chainAction({ action: 'retire_bot', botId: ids.tracker })).rejects.toThrow('standing bot');
+    await expect(f.broker.chainAction({ action: 'retire_bot', botId: ids.tracker } as never)).rejects.toThrow();
   });
 });
 

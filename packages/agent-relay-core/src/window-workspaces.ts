@@ -266,7 +266,7 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
     async setBotChief(principal: WindowPrincipal, botId: string, chief: string | null) {
       const id = await state.mutate(draft => {
         if (principal.authorize?.() === false) fail(401, 'unauthorized', 'Authorization is unavailable.');
-        const mine = (draft.bots ?? []).filter(bot => bot.subject === principal.subject && bot.lifetime === 'standing' && bot.retiredAt === undefined);
+        const mine = (draft.bots ?? []).filter(bot => bot.subject === principal.subject && bot.retiredAt === undefined);
         const record = mine.find(bot => bot.botId === botId) ?? fail(404, 'bot_not_found', 'This bot no longer exists.');
         if (chief !== null && !mine.some(bot => bot.botId === chief)) fail(404, 'bot_not_found', 'The new chief no longer exists.');
         record.chief = chief === null ? { kind: 'person' } : { kind: 'bot', botId: chief }; record.updatedAt = now();

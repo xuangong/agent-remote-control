@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BOARD_KEEP_MS, BOARD_OPEN_LIMIT, isTeam, parseTaskInputs, type Board, type BoardItem, type WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { TeamBroker } from './teams.js';
 import type { SavedTeam } from './team-delivery.js';
-import { temporaryBotId } from './bot-calls.js';
+import { subSessionId } from './chain-scope.js';
 import { committed, detached } from './drafts.js';
 
 // A standing bot's board and the bots that hold its items. Groups and Hosts are stubs; the broker, tasks, inboxes and boards are real.
@@ -94,52 +94,38 @@ describe('a bot\'s board', () => {
 });
 
 describe('the bots that hold an item', () => {
-  it('records the assignee and the brief of a temporary bot created for an item, and names the item in its first input', async () => {
+  it('records the sub-session as the owner of an item it takes up, with the brief and a link, and names the item in its first input', async () => {
     const f = fixture();
     await write(f, [{ title: 'Run the regression' }]);
-    const created = await f.call('chief', { action: 'create_bot', operationId: 'op', name: 'Regression', mission: 'Run the suite on the branch.', lifetime: 'temporary', item: 1 });
-    expect(f.item(1)).toMatchObject({ assignee: temporaryBotId(f.task().id), status: 'working', brief: 'Run the suite on the branch.' });
-    expect(created.botId).toBe(temporaryBotId(f.task().id));
+    const created = await f.call('chief', { action: 'create_sub_session', operationId: 'op', name: 'Regression', prompt: 'Run the suite on the branch.', trackedTaskKeys: [1] });
+    expect(f.item(1)).toMatchObject({ assignee: subSessionId(f.task().id), status: 'working', brief: 'Run the suite on the branch.', links: [{ kind: 'sub_session', value: subSessionId(f.task().id) }] });
+    expect(created.sub_session_id).toBe(subSessionId(f.task().id));
     expect(f.inputs(f.task())[0]).toMatchObject({ kind: 'brief', brief: expect.stringContaining('[Item 1 "Run the regression" · from ') });
-    await expect(f.call('chief', { action: 'create_bot', operationId: 'op2', name: 'Other', mission: 'x', lifetime: 'temporary', item: 7 })).rejects.toThrow('No item 7');
+    await expect(f.call('chief', { action: 'create_sub_session', operationId: 'op2', name: 'Other', prompt: 'x', trackedTaskKeys: [7] })).rejects.toThrow('No item 7');
   });
 
-  it('takes the reports of a temporary bot created for the item as its latest report, its status and its result', async () => {
+  it('takes the result of each turn of its sub-session as the latest report of the item, and leaves the status to its owner', async () => {
     const f = fixture();
     await write(f, [{ title: 'Run the regression' }]);
-    await f.call('chief', { action: 'create_bot', operationId: 'op', name: 'Regression', mission: 'Run it.', lifetime: 'temporary', item: 1 });
-    await f.say('worker-1', 'chief', 'Half of the suites ran.', { status: 'progress' });
-    expect(f.item(1)).toMatchObject({ status: 'working', report: 'Half of the suites ran.', updatedBy: temporaryBotId(f.task().id) });
-    await f.say('worker-1', 'chief', 'Which branch?', { status: 'needs_input' });
-    expect(f.item(1)).toMatchObject({ status: 'waiting', report: 'Which branch?' });
-    await f.say('worker-1', 'chief', 'All green.', { status: 'done' });
-    expect(f.item(1)).toMatchObject({ status: 'done', report: 'All green.', result: 'All green.' });
+    await f.call('chief', { action: 'create_sub_session', operationId: 'op', name: 'Regression', prompt: 'Run it.', trackedTaskKeys: [1] });
+    await f.broker.hostCall('mac', { action: 'sub_turn_end', teamId: f.task().id, memberId: f.task().members[0]!.id, outcome: 'finished', text: 'All green.' });
+    expect(f.item(1)).toMatchObject({ status: 'working', report: 'All green.' });
+    expect(f.item(1).result).toBeUndefined();
     expect(f.inputs(f.task(), 1).at(-1)).toMatchObject({ kind: 'done', body: expect.stringContaining('[Item 1 "Run the regression" · from Regression]') });
   });
 
-  it('puts a failed report on the item and reopens it', async () => {
-    const f = fixture();
-    await write(f, [{ title: 'Run the regression' }]);
-    await f.call('chief', { action: 'create_bot', operationId: 'op', name: 'Regression', mission: 'Run it.', lifetime: 'temporary', item: 1 });
-    await f.say('worker-1', 'chief', 'The suite does not start.', { status: 'failed' });
-    expect(f.item(1)).toMatchObject({ status: 'open', report: 'Failed: The suite does not start.' });
-    expect(f.item(1).result).toBeUndefined();
-  });
-
-  it('lets a temporary bot write the status, links and result of its own item, and nothing else', async () => {
+  it('lets a sub-session write the status, links and result of the items it owns, and nothing else', async () => {
     const f = fixture();
     await write(f, [{ title: 'Run the regression' }, { title: 'Other' }]);
-    await f.call('chief', { action: 'create_bot', operationId: 'op', name: 'Regression', mission: 'Run it.', lifetime: 'temporary', item: 1 });
-    const written = await f.call('worker-1', { action: 'update_board', items: [{ status: 'working', links: [{ kind: 'pr', value: '#12' }], result: 'Two suites left.' }] });
+    await f.call('chief', { action: 'create_sub_session', operationId: 'op', name: 'Regression', prompt: 'Run it.', trackedTaskKeys: [1] });
+    const written = await f.call('worker-1', { action: 'update_board', items: [{ key: 1, status: 'working', links: [{ kind: 'pr', value: '#12' }], result: 'Two suites left.' }] });
     expect(written.items).toEqual([{ key: 1, version: 3 }]);
-    expect(f.item(1)).toMatchObject({ links: [{ kind: 'pr', value: '#12' }], result: 'Two suites left.', updatedBy: temporaryBotId(f.task().id) });
-    await expect(f.call('worker-1', { action: 'update_board', items: [{ key: 2, status: 'done' }] })).rejects.toThrow('the item it was created for');
-    await expect(f.call('worker-1', { action: 'update_board', items: [{ title: 'Mine now' }] })).rejects.toThrow('only the status, links and result');
+    expect(f.item(1)).toMatchObject({ links: [{ kind: 'sub_session', value: subSessionId(f.task().id) }, { kind: 'pr', value: '#12' }].slice(1), result: 'Two suites left.', updatedBy: subSessionId(f.task().id) });
+    await expect(f.call('worker-1', { action: 'update_board', items: [{ key: 2, status: 'done' }] })).rejects.toThrow('writes the items it owns');
+    await expect(f.call('worker-1', { action: 'update_board', items: [{ key: 1, title: 'Mine now' }] })).rejects.toThrow('only the status, links and result');
     await expect(f.call('worker-1', { action: 'update_board', plan: { text: 'x', why: 'y' } })).rejects.toThrow('plan note');
-    // It reads its item, with its brief, and its chief's board no further.
-    expect(await f.call('worker-1', { action: 'board' })).toMatchObject({ item: { key: 1, brief: 'Run it.' }, readOnly: true });
-    await f.call('chief', { action: 'create_bot', operationId: 'op3', name: 'Free', mission: 'Run it.', lifetime: 'temporary' });
-    await expect(f.call('worker-2', { action: 'update_board', items: [{ status: 'done' }] })).rejects.toThrow('not created for a board item');
+    // It reads its bot's whole board.
+    expect((await f.call('worker-1', { action: 'board' })).items).toHaveLength(2);
   });
 
   it('names the item in a message to a staff bot without assigning it, and takes its reports as the latest report only', async () => {
@@ -182,13 +168,13 @@ describe('the bots that hold an item', () => {
     await write(f, [{ key: 2, version: 1, title: 'Own work 2' }]);
     expect(told()).toEqual(['[Item 1 "Track the build" changed · assigned to you · brief: Watch the build.]', '[Item "Track main" changed · retitled to "Track main"]', '[Item "Track main" changed · brief changed]']);
     // Moving it to a temporary bot tells the old assignee, and the new one.
-    await f.call('chief', { action: 'create_bot', operationId: 'op', name: 'Regression', mission: 'Run it.', lifetime: 'temporary' });
+    await f.call('chief', { action: 'create_sub_session', operationId: 'op', name: 'Regression', prompt: 'Run it.' });
     await write(f, [{ key: 1, version: version(), assignee: 'Regression' }]);
     expect(told().at(-1)).toBe('[Item "Track main" changed · reassigned]');
     expect(f.texts(f.task()).at(-1)).toBe('[Item 1 "Track main" changed · assigned to you · brief: Watch main only.]');
     await write(f, [{ key: 1, version: version(), status: 'cancelled' }]);
     expect(f.texts(f.task()).at(-1)).toBe('[Item "Track main" changed · cancelled]');
-    expect(f.item(1)).toMatchObject({ assignee: temporaryBotId(f.task().id), status: 'cancelled', closedAt: expect.any(Number) });
+    expect(f.item(1)).toMatchObject({ assignee: subSessionId(f.task().id), status: 'cancelled', closedAt: expect.any(Number) });
     // A bot that is not on the account, and one that is not the chief's own staff, cannot be assigned.
     await expect(write(f, [{ key: 2, version: 2, assignee: 'Nobody' }])).rejects.toThrow('No bot');
   });
@@ -220,13 +206,13 @@ describe('the bots that hold an item', () => {
     expect(f.item(1, ids.tracker)).toMatchObject({ assignee: 'self', version: 1 });
     expect(f.item(1, ids.tracker).brief).toBeUndefined();
     expect(f.texts(f.inbox(ids.chief)).at(-1)).toContain('[Item 1 "Add the changelog entry" · from Tracker]');
-    // Not to its own staff or temporary bots either.
+    // Not to its own staff or sub-sessions either.
     await write(f, [{ title: 'Track the build' }]);
     await f.say('chief', 'Tracker', 'Watch the build.', { item: 1 });
-    await f.call('chief', { action: 'create_bot', operationId: 'op', name: 'Regression', mission: 'Run it.', lifetime: 'temporary' });
-    await f.say('chief', 'Regression', 'Run it on main.', { item: 1 });
+    await f.call('chief', { action: 'create_sub_session', operationId: 'op', name: 'Regression', prompt: 'Run it.' });
+    // A sub-session is no bot: a message names no item to it and reaches it never.
+    expect(await f.say('chief', 'Regression', 'Run it on main.', { item: 1 })).toMatchObject({ outcome: 'unreachable' });
     expect(f.item(1)).toMatchObject({ assignee: 'self', version: 1 });
-    expect(f.texts(f.task()).at(-1)).toContain('[Item 1 "Track the build" · from Chief]');
   });
 
   it('lets an assignee name the item it was assigned on its chief\'s board in a message, tagging the exchange without writing that board', async () => {
@@ -314,15 +300,15 @@ describe('the person\'s edits of a board', () => {
     expect(f.item(1)).toMatchObject({ status: 'working', updatedBy: 'person' });
   });
 
-  it('assigns to the bot itself, its standing staff or its temporary bots, and tells the old and the new assignee', async () => {
+  it('assigns to the bot itself, its standing staff or its sub-sessions, and tells the old and the new assignee', async () => {
     const f = fixture();
     await write(f, [{ title: 'Track the build' }]);
-    await f.call('chief', { action: 'create_bot', operationId: 'op', name: 'Regression', mission: 'Run it.', lifetime: 'temporary' });
+    await f.call('chief', { action: 'create_sub_session', operationId: 'op', name: 'Regression', prompt: 'Run it.' });
     // The page names a temporary bot by the id its items carry.
-    expect(f.broker.readForClient(f.task().id).task!.botId).toBe(temporaryBotId(f.task().id));
+    expect(f.broker.readForClient(f.task().id).task!.subSessionId).toBe(subSessionId(f.task().id));
     await edit(f, { items: [{ key: 1, version: 1, assignee: ids.tracker }] });
     expect(told(f)).toEqual(['[Item 1 "Track the build" changed · assigned to you]']);
-    await edit(f, { items: [{ key: 1, version: f.item(1).version, assignee: temporaryBotId(f.task().id) }] });
+    await edit(f, { items: [{ key: 1, version: f.item(1).version, assignee: subSessionId(f.task().id) }] });
     expect(told(f).at(-1)).toBe('[Item "Track the build" changed · reassigned]');
     expect(f.texts(f.task()).at(-1)).toBe('[Item 1 "Track the build" changed · assigned to you]');
     await edit(f, { items: [{ key: 1, version: f.item(1).version, assignee: 'self' }] });

@@ -73,7 +73,7 @@ describe('a standing bot\'s timers', () => {
     expect(f.timerInputs()).toEqual([]);
   });
 
-  it('sets and clears named timers, and refuses them to a temporary bot', async () => {
+  it('sets and clears named timers, and refuses them to a sub-session', async () => {
     const f = fixture();
     expect(await f.broker.hostCall('mac', { action: 'set_timer', owner: f.as('chief'), name: 'Check CI', minutes: 10 })).toEqual({ timers: [expect.objectContaining({ name: 'Check CI', intervalMs: 600_000 })] });
     f.read();
@@ -81,7 +81,7 @@ describe('a standing bot\'s timers', () => {
     expect(f.timerInputs()).toEqual([expect.objectContaining({ name: 'Check CI', body: '' })]);
     expect(await f.broker.hostCall('mac', { action: 'set_timer', owner: f.as('chief'), name: 'Check CI', minutes: 0 })).toEqual({ timers: [] });
     await expect(f.broker.hostCall('mac', { action: 'set_timer', owner: f.as('chief'), name: 'work', minutes: 10 })).rejects.toThrow('work timer');
-    await f.broker.hostCall('mac', { action: 'create_bot', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', mission: 'Review it.', lifetime: 'temporary' });
-    await expect(f.broker.hostCall('mac', { action: 'set_timer', owner: f.as('worker-1'), name: 'Check CI', minutes: 5 })).rejects.toThrow('temporary bot');
+    await f.broker.hostCall('mac', { action: 'create_sub_session', owner: f.as('chief'), operationId: 'op', name: 'Reviewer', prompt: 'Review it.' });
+    await expect(f.broker.hostCall('mac', { action: 'set_timer', owner: f.as('worker-1'), name: 'Check CI', minutes: 5 })).rejects.toThrow('not a bot');
   });
 });

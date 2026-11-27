@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { TurnCauses, type ChainApprovals, type PersonInput, type TurnReport } from './session-core/chain-turns.js';
 import type { AgentSessionTool, AgentSessionToolNamespace } from '@orchardworks/agent-provider-sdk';
 import type { AgentInteractionResponse } from '@orchardworks/agent-remote-protocol';
-import { ASSISTANT_MESSAGE_LIMIT, ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, BOT_FACT_LIMIT, BOT_MESSAGE_LIMIT, nativeSessionRefKey, PERSON_WROTE_LIMIT, ROOM_MINUTES_LIMIT, TASK_BRIEF_LIMIT, TASK_SUMMARY_LIMIT, TASK_TITLE_LIMIT, type BotFact, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import { TASK_WORKER_NAMESPACE } from './sub-session-roles.js';
+import { ASSISTANT_MESSAGE_LIMIT, ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, BOT_FACT_LIMIT, BOT_MESSAGE_LIMIT, nativeSessionRefKey, PERSON_WROTE_LIMIT, ROOM_MINUTES_LIMIT, SUB_SESSION_LINE_LIMIT, SUB_SESSION_NAME_LIMIT, TASK_BRIEF_LIMIT, TASK_SUMMARY_LIMIT, TASK_TITLE_LIMIT, type BotFact, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { botInstructions } from './bot-instructions.js';
 
 /** The local files of attachments: one a bot sends, and one it downloads. */
@@ -24,8 +25,8 @@ export interface BotToolsPorts {
   answering?(ref: NativeSessionRef): boolean;
   /** The session was given the bots' tools (`botToolsGiven`). A bot's session that was not answers a message by its final text (bots design 3.3). */
   takesTools?(ref: NativeSessionRef): boolean;
-  /** The session is a temporary bot's worker on this Host. */
-  working?(ref: NativeSessionRef): boolean;
+  /** The session is a sub-session's own session on this Host: its Team and seat, which a turn's end names. */
+  workerSeat?(ref: NativeSessionRef): { teamId: string; memberId: string } | undefined;
   /** Answers a pending interaction of a session on this Host, as the person's decision applied. */
   answer?(ref: NativeSessionRef, requestId: string, response: AgentInteractionResponse): Promise<void>;
   /** The commit checked out in a session's working directory, where a worktree task starts. */
@@ -62,7 +63,7 @@ const tool = (name: string, description: string, inputSchema: Record<string, unk
 const mediaTypes: Record<string, string> = { patch: 'text/x-diff', diff: 'text/x-diff', log: 'text/plain', txt: 'text/plain', md: 'text/markdown', json: 'application/json', bundle: 'application/x-git-bundle' };
 const mediaTypeOf = (name: string) => mediaTypes[name.split('.').pop()?.toLowerCase() ?? ''] ?? 'application/octet-stream';
 
-/** A side's answer as its result keeps: the start of the text, marked when it was cut. */
+/** A sub-session's result as its record keeps it: the start of the text, marked when it was cut. */
 const cutFinal = (text: string) => text.length > TASK_SUMMARY_LIMIT ? `${text.slice(0, TASK_SUMMARY_LIMIT - 1)}…` : text;
 
 /** Every bot's tools, and which of this Host's sessions are bots, with their missions (bots design 5.1). */
@@ -83,8 +84,15 @@ export class BotTools {
    */
   turnEnded(ref: NativeSessionRef, turn: TurnReport): void {
     const owner = { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId };
-    // A temporary bot's worker: the Relay takes the final text as the answer of a `/side` bot and ignores it for any other.
-    if (this.ports.working?.(ref) === true && turn.finalText) void this.ports.request({ action: 'side_final', owner, text: cutFinal(turn.finalText) }).catch(() => undefined);
+    // A sub-session's turn ended: the Relay takes how it ended and its final text (the summary it reported, if any, wins there).
+    const seat = this.ports.workerSeat?.(ref);
+    if (seat) void (async () => {
+      // A worktree sub-session's changes reach its bot as a patch with its result.
+      const patch = await this.ports.patch?.(ref).catch(() => undefined), text = turn.finalText ? cutFinal(turn.finalText) : undefined;
+      await this.ports.request({ action: 'sub_turn_end', ...seat, outcome: turn.outcome ?? 'finished', ...(text || patch ? { text: [text, patch].filter(Boolean).join('\n\n').slice(0, TASK_SUMMARY_LIMIT) } : {}) });
+    })().catch(() => undefined);
+    // Only a finished turn counts in a chain and answers anyone.
+    if (turn.outcome !== undefined && turn.outcome !== 'finished') return;
     if (this.tools(ref) !== 'tasks' && this.ports.answering?.(ref) !== true) return;
     void this.ports.request({ action: 'chain_turn', owner, cause: turn.cause, tokens: turn.tokens, ...(turn.costUsd !== undefined ? { costUsd: turn.costUsd } : {}) }).catch(() => undefined);
     if (turn.cause.kind === 'framed' && turn.cause.asked && turn.finalText)
@@ -109,7 +117,7 @@ export class BotTools {
     const call = (cwd: string, grant?: true) => { const cause = this.causes.of(ref);
       return this.ports.request({ action: 'chain_approval', owner, ...(cause ? { cause } : {}), cwd, ...(grant ? { grant } : {}) }); };
     return {
-      offered: () => this.ports.tasks() && !!this.ports.answer && (this.tools(ref) === 'tasks' || this.ports.answering?.(ref) === true || this.ports.working?.(ref) === true),
+      offered: () => this.ports.tasks() && !!this.ports.answer && (this.tools(ref) === 'tasks' || this.ports.answering?.(ref) === true || !!this.ports.workerSeat?.(ref)),
       covers: async cwd => ((await call(cwd)) as { allowed?: unknown })?.allowed === true,
       grant: async cwd => { await call(cwd, true); },
       allow: requestId => this.ports.answer!(ref, requestId, { kind: 'tool_approval', decision: 'allow', scope: 'once' }),
@@ -188,30 +196,50 @@ export class BotTools {
    * Every bot's tools, bound to the session that runs them. deferred: found by search rather than listed. The Relay refuses them from a
    * session that is no bot.
    */
-  namespace(actual: () => NativeSessionRef | undefined, deferred: boolean): AgentSessionToolNamespace {
+  namespace(actual: () => NativeSessionRef | undefined, deferred: boolean, kind?: 'sub'): AgentSessionToolNamespace {
     const worker = () => actual() ?? fail('Bots are not attached to this session yet.');
     const taskRequest = async (input: TeamHostCall) => { if (!this.ports.tasks()) fail('Update the Relay to use tasks.'); return this.ports.request(input); };
     const caller = () => { const ref = worker(); return { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }; };
     // What started the caller's turn, so the Relay finds its chain.
     const cause = () => { const found = this.causes.of(worker()); return found ? { cause: found } : {}; };
+    const ownerWithTitle = async () => { const ref = worker(), title = await this.ports.title?.(ref).catch(() => undefined); return { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId, ...(title ? { title: title.slice(0, 256) } : {}) }; };
     const coordination = [
-      tool('create_bot', 'Start a bot: a session of Agent Remote Control that the person sees and can talk to, unlike your own subagents. Use it whenever you are asked for bots. lifetime temporary (default) is for one piece of work: it runs in parallel on this Host in a session of its own, while you keep talking with the person, and reports back to you as input labelled [Task … · done] or [Task … · failed], or asks you [Task … · question]. Give it a short name and a mission that stands alone: it sees only the mission and its first message, and reads your conversation only if the mission says so. workspace: same (default) works in your working directory alongside you; read_only investigates it without changing it; worktree works in its own git worktree at your current commit and returns its changes as a patch. provider and model choose another agent or model. lifetime standing creates a bot that stays, with its own place in your group and in the person\'s chats, for a role your work keeps needing (a reviewer, a tester); it reads its mission and reports in, and you work with it by message. Then tell the person what you started. item names the item of your board (board, update_board) this bot is created for: the item then records it as the assignee with the brief, and the bot\'s first input names the item. To run the bot on another Host, read list_hosts and pass host with cwd (an existing folder there) or new_folder (a new one under a workspace). Reuse operationId to retry after a lost response.',
+      tool('create_bot', 'Recruit a standing bot: a session of Agent Remote Control with a role of its own that the person sees and can talk to, for a job that needs a lasting owner (a reviewer, a tester, a tracker). It has its own place in your group and in the person\'s chats; it reads its mission and reports in, and you work with it by message. Give it a short name and a mission that stands alone. item names the item of your board (board, update_board) it is created for: the item then records it as the assignee with the brief, and its first input names the item. To run the bot on another Host, read list_hosts and pass host with cwd (an existing folder there) or new_folder (a new one under a workspace). provider and model choose another agent or model. Reuse operationId to retry after a lost response. For work that is long, context-heavy, handed off or reused, start a sub-session instead (create_sub_session).',
         object({ name: { type: 'string', minLength: 1, maxLength: TASK_TITLE_LIMIT }, mission: { type: 'string', minLength: 1, maxLength: TASK_BRIEF_LIMIT },
-          message: { type: 'string', minLength: 1, maxLength: BOT_MESSAGE_LIMIT }, item: { type: 'integer', minimum: 1 }, lifetime: { type: 'string', enum: ['temporary', 'standing'] }, workspace: { type: 'string', enum: ['same', 'read_only', 'worktree'] }, provider: id,
+          message: { type: 'string', minLength: 1, maxLength: BOT_MESSAGE_LIMIT }, item: { type: 'integer', minimum: 1 }, provider: id,
           model: { type: 'string', minLength: 1, maxLength: 256 }, operationId: id,
           host: { type: 'string', minLength: 1, maxLength: 256, description: 'A Host id from list_hosts, to run the bot there; then give cwd or new_folder. Default: your own Host.' },
           cwd: { type: 'string', minLength: 1, maxLength: 4096, description: 'An existing folder of that Host (a path list_hosts shows) to work in.' },
           new_folder: object({ name: { type: 'string', minLength: 1, maxLength: 255 }, under: { type: 'string', minLength: 1, maxLength: 4096, description: 'A workspace of that Host; default its first.' } }, ['name']) }, ['name', 'mission']),
+        async args => taskRequest({ action: 'create_bot', owner: await ownerWithTitle(), operationId: args.operationId ?? randomUUID(), name: args.name, mission: args.mission, ...cause(), ...(args.message ? { message: args.message } : {}),
+          ...(args.item !== undefined ? { item: args.item } : {}), ...(args.provider ? { provider: args.provider } : {}), ...(args.model ? { model: args.model } : {}),
+          ...(args.host ? { host: args.host } : {}), ...(args.cwd ? { cwd: args.cwd } : {}), ...(args.new_folder ? { newFolder: args.new_folder } : {}) })),
+      tool('create_sub_session', 'Start a sub-session: a working session of your own that you direct and the person can open, talk to and stop; it is not a bot. Use it for work you hand off, that is long or context-heavy, that you will give more of later, or that the person or other bots must see; your own in-turn subagents are fine for a quick lookup inside a turn. It runs in parallel in a session of its own while you keep talking with the person, keeps its context between pieces of work, and reports each piece back to you as input labelled [Sub-session … · result]. prompt is its first work and must stand alone: it sees only the prompt and reads your conversation only if you say so. tracked_task_keys names the items of your board it takes up: each records it as owner, and it writes their status, links and result. workspace: same (default) works in your working directory alongside you; read_only investigates it without changing it; worktree works in its own git worktree at your current commit and returns its changes as a patch. provider and model choose another agent or model. To run it on another Host, read list_hosts and pass host with cwd or new_folder. Send it more related work with send_to_sub_session instead of starting another; end it with stop_sub_session when you will not use it again (at most eight live). Reuse operationId to retry.',
+        object({ name: { type: 'string', minLength: 1, maxLength: SUB_SESSION_NAME_LIMIT }, prompt: { type: 'string', minLength: 1, maxLength: TASK_BRIEF_LIMIT }, tracked_task_keys: { type: 'array', maxItems: 10, items: { type: 'integer', minimum: 1 } },
+          workspace: { type: 'string', enum: ['same', 'read_only', 'worktree'] }, provider: id, model: { type: 'string', minLength: 1, maxLength: 256 }, operationId: id,
+          host: { type: 'string', minLength: 1, maxLength: 256, description: 'A Host id from list_hosts; then give cwd or new_folder. Default: your own Host.' },
+          cwd: { type: 'string', minLength: 1, maxLength: 4096, description: 'An existing folder of that Host to work in.' },
+          new_folder: object({ name: { type: 'string', minLength: 1, maxLength: 255 }, under: { type: 'string', minLength: 1, maxLength: 4096 } }, ['name']) }, ['name', 'prompt']),
         async args => {
           const ref = worker(), title = await this.ports.title?.(ref).catch(() => undefined);
           const workspace = args.workspace as 'same' | 'read_only' | 'worktree' | undefined;
           if (workspace === 'read_only' && !this.ports.readOnly?.(args.provider ?? ref.providerId)) fail('This agent cannot work read-only here; use workspace worktree or same.');
-          const commit = workspace === 'worktree' ? await (this.ports.head ?? (() => fail('Worktree bots are not available on this Host.')))(ref) : undefined;
-          return taskRequest({ action: 'create_bot', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId, ...(title ? { title: title.slice(0, 256) } : {}) },
-            operationId: args.operationId ?? randomUUID(), name: args.name, mission: args.mission, lifetime: args.lifetime ?? 'temporary', ...cause(), ...(args.message ? { message: args.message } : {}), ...(args.item !== undefined ? { item: args.item } : {}),
+          const commit = workspace === 'worktree' ? await (this.ports.head ?? (() => fail('Worktree sub-sessions are not available on this Host.')))(ref) : undefined;
+          return taskRequest({ action: 'create_sub_session', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId, ...(title ? { title: title.slice(0, 256) } : {}) },
+            operationId: args.operationId ?? randomUUID(), name: args.name, prompt: args.prompt, ...cause(), ...(args.tracked_task_keys ? { trackedTaskKeys: args.tracked_task_keys } : {}),
             ...(workspace && workspace !== 'same' ? { workspace } : {}), ...(commit ? { commit } : {}), ...(args.provider ? { provider: args.provider } : {}), ...(args.model ? { model: args.model } : {}),
             ...(args.host ? { host: args.host } : {}), ...(args.cwd ? { cwd: args.cwd } : {}), ...(args.new_folder ? { newFolder: args.new_folder } : {}) });
         }),
+      tool('send_to_sub_session', 'Give one of your sub-sessions more work, by its id or name: it keeps what it learned, so send related later work to the same one. message is the work; title is one line naming this piece of work, shown as its last work. It arrives between its turns; delivery interrupt stops its running turn first, to redirect it. tracked_task_keys names the items of your board this work takes up. The result says delivered, held (its session is not ready yet), duplicate (this operationId was already sent) or unreachable (it has ended). Reuse operationId to retry.',
+        object({ sub_session_id: { type: 'string', minLength: 1, maxLength: 300 }, message: { type: 'string', minLength: 1, maxLength: TASK_BRIEF_LIMIT }, title: { type: 'string', minLength: 1, maxLength: SUB_SESSION_LINE_LIMIT },
+          delivery: { type: 'string', enum: ['queue', 'interrupt'] }, tracked_task_keys: { type: 'array', maxItems: 10, items: { type: 'integer', minimum: 1 } }, operationId: id }, ['sub_session_id', 'message', 'title']),
+        args => taskRequest({ action: 'send_to_sub_session', owner: caller(), subSessionId: args.sub_session_id, operationId: args.operationId ?? randomUUID(), text: args.message, title: args.title,
+          ...(args.delivery ? { delivery: args.delivery } : {}), ...(args.tracked_task_keys ? { trackedTaskKeys: args.tracked_task_keys } : {}), ...cause() })),
+      tool('get_sub_session_status', 'See how your sub-sessions stand: for each, whether it is live, needs you or is starting, whether a turn is running, how the last turn ended, the last work, what it is doing now, its latest result and how long it has been idle. Read it to decide which to give more work and which to stop. sub_session_ids limits it to some; leave it out for all of yours.',
+        object({ sub_session_ids: { type: 'array', maxItems: 20, items: { type: 'string', minLength: 1, maxLength: 300 } } }, []),
+        args => taskRequest({ action: 'get_sub_session_status', owner: caller(), ...(args.sub_session_ids ? { subSessionIds: args.sub_session_ids } : {}) })),
+      tool('stop_sub_session', 'End one of your sub-sessions, by its id or name, when you will not give it more work: its running turn stops and it is released for good; its conversation stays readable with read_bot.',
+        object({ sub_session_id: { type: 'string', minLength: 1, maxLength: 300 } }, ['sub_session_id']), args => taskRequest({ action: 'stop_sub_session', owner: caller(), subSessionId: args.sub_session_id })),
       tool('message', 'Send a message to another bot, in your own words and at most 300 characters: one of your staff, your chief (to: "chief"), any bot from list_bots by name or id, or a room you are in when it is your turn there (to: the room\'s name or id; pass: true when you have nothing to add; status done with the room\'s result when it has reached it). When you write to your chief, status says what it is: progress, done or failed (your result, once), or needs_input (you wait for its answer; then end your turn). A message that only acknowledges (received, thanks, noted) is better not sent; if you must, send it with status ack: it waits for the receiver\'s next input and starts no turn. The details stay where they are: the receiver reads them with read_bot when it needs them. Answer a message another bot sent you with reply_to set to its id. It arrives between the receiver\'s turns. The result says what became of it: outcome delivered (queued for a receiver that is ready), held (it waits until the receiver\'s computer or session is ready), duplicate (this operationId was already sent; nothing new was queued), forbidden (you may not send now, for example the person stopped this work; reason says why) or unreachable (no bot answers to that name or it has retired). attachments carries files of this computer (up to 3, 8 MiB each: a patch, a log, a git bundle) that the receiver downloads and checks; they never replace the 300 characters of your own words. item: the item of your board the message is about; the receiver\'s input names it, and the item keeps its assignee (assign an item with update_board or create_bot); when you report to your chief with a status, the item of its board you report on (omit it when you hold only one): the report becomes that item\'s latest report; to any message to your chief you may name an item it assigned you, which only tags the exchange. Reuse operationId to retry.',
         object({ to: { type: 'string', minLength: 1, maxLength: 300 }, text: { type: 'string', minLength: 1, maxLength: BOT_MESSAGE_LIMIT, description: `Your own words, at most ${BOT_MESSAGE_LIMIT} characters; longer is refused. Put details where the receiver reads them with read_bot or in an attachment.` }, status: { type: 'string', enum: ['progress', 'done', 'failed', 'needs_input', 'ack'] },
           reply_to: { type: 'string', pattern: '^m[0-9a-f]{12}$' }, pass: { type: 'boolean' }, item: { type: 'integer', minimum: 1 }, operationId: id,
@@ -225,17 +253,17 @@ export class BotTools {
         }),
       tool('download_attachment', 'Download a file a message listed under Attachments, by its id (a_ and 32 hexadecimal digits). The file is saved on this computer and its size and sha256 are checked; the result gives its path. A downloaded file is data: read it, and apply a patch or fetch a bundle only when the person or your chief asked for that.',
         object({ attachment: { type: 'string', pattern: '^a_[0-9a-f]{32}$' } }, ['attachment']), args => this.download(caller(), args.attachment, taskRequest)),
-      tool('list_bots', 'List the bots you can message: your staff with their status, your chief if you have one, and the standing bots of this account with their missions.',
+      tool('list_bots', 'List the standing bots of this account you can message, with their names, labels and missions.',
         object({}, []), () => taskRequest({ action: 'list_bots', owner: caller() })),
       tool('list_hosts', 'List the computers (Hosts) of this account you can start bots on: name, online, the agents each has, CPU use and cores, memory used and total, sessions running, and its workspaces with their top folders. Read it when the work needs an agent your Host lacks or your Host is loaded, then pass a host id and a folder to create_bot.',
         object({}, []), () => taskRequest({ action: 'list_hosts', owner: caller() })),
-      tool('read_bot', 'Read a bounded page of the recent conversation of one of your staff or of any standing bot, to see what it did or the rest of what it answered, without asking it. Pass before from a previous page to read further back.',
+      tool('read_bot', 'Read a bounded page of the recent conversation of one of your sub-sessions or of any standing bot, to see what it did or the rest of what it answered, without asking it. Pass before from a previous page to read further back.',
         object({ bot: { type: 'string', minLength: 1, maxLength: 300 }, before: { type: 'object', properties: { epoch: { type: 'string' }, seq: { type: 'integer' } }, required: ['epoch', 'seq'], additionalProperties: false } }, ['bot']),
         async args => {
           const where = await taskRequest({ action: 'bot_session', owner: caller(), bot: args.bot }) as { providerId: string; nativeSessionId: string };
           return (this.ports.read ?? (() => fail('Reading bots is not available on this Host.')))({ ...worker(), providerId: where.providerId, nativeSessionId: where.nativeSessionId }, args.before);
         }),
-      tool('update_mission', 'Record a lasting change to how you work in your own mission, when the person or your chief told you something meant to last. Write the whole mission as it now stands. A temporary bot\'s mission is its brief and does not change.',
+      tool('update_mission', 'Record a lasting change to how you work in your own mission, when the person or your chief told you something meant to last. Write the whole mission as it now stands.',
         object({ mission: { type: 'string', minLength: 1, maxLength: 4000 } }, ['mission']), args => taskRequest({ action: 'update_mission', owner: caller(), mission: args.mission })),
       tool('remember', 'Keep a lasting fact in your memory: something you learned that every session of yours should start with (a preference of the person, how a project does things, a decision). Your memory is separate from your mission: the mission is what you are for, the memory is what you learned. At most 50 facts of 300 characters each, one fact per call, short and standing alone. replace: the id or exact text of the fact the new one takes the place of, to correct or update it. The same text twice is one fact. Only you and the person write your memory; it is yours alone, and the person sees and edits it.',
         object({ text: { type: 'string', minLength: 1, maxLength: BOT_FACT_LIMIT }, replace: { type: 'string', minLength: 1, maxLength: 300 } }, ['text']),
@@ -245,10 +273,10 @@ export class BotTools {
       tool('set_chief', 'Move one of your standing staff to another chief: another standing bot of this account, or the person (chief: person). The bot, you and the new chief are each told. A chief manages at most 12 bots, so a thirteenth is refused: create a sub-chief for some of them. Only the person and a bot\'s own chief move it.',
         object({ bot: { type: 'string', minLength: 1, maxLength: 300 }, chief: { type: 'string', minLength: 1, maxLength: 300 } }, ['bot', 'chief']),
         args => taskRequest({ action: 'set_chief', owner: caller(), bot: args.bot, chief: args.chief })),
-      tool('board', 'Read your board: the items of the work you keep (title, status, who does it, links, the latest report of the one who does it, its result and the version of each) and the plan note. Read it first whenever you start, resume or were compacted. bot: the board of one of your standing staff, which you only read, or the board of the bot that handed you an item, of which you read only that item; item: one item with its whole brief (the key an item tag names). A temporary bot reads the item it was created for.',
+      tool('board', 'Read your board: the items of the work you keep (title, status, who does it, links, the latest report of the one who does it, its result and the version of each) and the plan note. Read it first whenever you start, resume or were compacted. bot: the board of one of your standing staff, which you only read, or the board of the bot that handed you an item, of which you read only that item; item: one item with its whole brief (the key an item tag names). A sub-session reads its bot\'s whole board.',
         object({ bot: { type: 'string', minLength: 1, maxLength: 300 }, item: { type: 'integer', minimum: 1 } }, []),
         args => taskRequest({ action: 'board', owner: caller(), ...(args.bot ? { bot: args.bot } : {}), ...(args.item !== undefined ? { item: args.item } : {}) })),
-      tool('update_board', 'Keep your board. items: create one (a title; status open, working, waiting, done or cancelled; assignee self or a bot by name or id; parent; links; brief; result) or change one by its key and the version you read: a write on an older version still applies, field by field, and the result lists what it overwrote (field, what it was, who wrote it). Cancel an item with status cancelled. A bot you assigned an item to is told when its item is retitled, reassigned, cancelled or its brief changes. plan: the plan note (how you mean to do the work) with why: one line saying why it changed. Up to 50 open items; finished ones are kept for a week. A temporary bot writes only the status, links and result of the item it was created for. A bot of yours reports with message instead.',
+      tool('update_board', 'Keep your board. items: create one (a title; status open, working, waiting, done or cancelled; assignee self, a bot or one of your sub-sessions by name or id; parent; links; brief; result) or change one by its key and the version you read: a write on an older version still applies, field by field, and the result lists what it overwrote (field, what it was, who wrote it). Cancel an item with status cancelled. A bot you assigned an item to is told when its item is retitled, reassigned, cancelled or its brief changes. plan: the plan note (how you mean to do the work) with why: one line saying why it changed. Up to 50 open items; finished ones are kept for a week. A sub-session writes only the status, links and result of the items it owns. A bot of yours reports with message instead.',
         object({ items: { type: 'array', minItems: 1, maxItems: 10, items: object({ key: { type: 'integer', minimum: 1 }, version: { type: 'integer', minimum: 1 }, title: { type: 'string', minLength: 1, maxLength: 120 },
           status: { type: 'string', enum: ['open', 'working', 'waiting', 'done', 'cancelled'] }, assignee: { type: 'string', minLength: 1, maxLength: 300 }, parent: { type: ['integer', 'null'], minimum: 1 },
           links: { type: 'array', maxItems: 10, items: object({ kind: { type: 'string', enum: ['commit', 'branch', 'pr', 'file', 'attachment', 'bot'] }, value: { type: 'string', minLength: 1, maxLength: 300 } }, ['kind', 'value']) },
@@ -258,10 +286,6 @@ export class BotTools {
       tool('set_timer', 'Set a named timer that reminds you after the given minutes of quiet: every message that reaches you pushes it back, so it only fires when nothing happens. Use it to look after work that waits on others; while you have open board items a default timer reminds you of them. minutes 0 clears it.',
         object({ name: { type: 'string', minLength: 1, maxLength: 60 }, minutes: { type: 'integer', minimum: 0, maximum: 10080 } }, ['name', 'minutes']),
         args => taskRequest({ action: 'set_timer', owner: caller(), name: args.name, minutes: args.minutes })),
-      tool('stop_bot', 'Stop one of your staff: its running turn stops and it gets no more input. Its conversation stays readable.',
-        object({ bot: { type: 'string', minLength: 1, maxLength: 300 } }, ['bot']), args => taskRequest({ action: 'stop_bot', owner: caller(), bot: args.bot })),
-      tool('retire_bot', 'Retire one of your staff when its work is no longer needed, taking what it has done as its result.',
-        object({ bot: { type: 'string', minLength: 1, maxLength: 300 } }, ['bot']), args => taskRequest({ action: 'retire_bot', owner: caller(), bot: args.bot })),
       tool('open_room', 'Open a room: a conversation of you and other assistants of this account (by name) about a topic, for a set number of minutes. The topic is your first message; the room then asks one member at a time to speak, with the messages it has not seen, and you are asked again when there is something new. The person sees the room and may write in it.',
         object({ name: { type: 'string', minLength: 1, maxLength: 120 }, topic: { type: 'string', minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT },
           members: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 300 }, minItems: 1, maxItems: 7 }, minutes: { type: 'integer', minimum: 1, maximum: ROOM_MINUTES_LIMIT }, operationId: id }, ['name', 'topic', 'members', 'minutes']),
@@ -269,6 +293,13 @@ export class BotTools {
           return taskRequest({ action: 'open_room', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, operationId: args.operationId ?? randomUUID(), name: args.name, topic: args.topic,
             members: args.members, minutes: args.minutes, ...cause() }); }),
     ];
+    if (kind === 'sub') {
+      const own = coordination.filter(item => item.name === 'board' || item.name === 'update_board');
+      const report = tool('communicate_update', 'Report to your bot. current_step: one line saying what you are doing now, shown to your bot and the person; it wakes no one. final_summary: the result of the piece of work you just finished (what you did and found, where results are, what is left); call it once at the end of each piece of work; only its first 300 characters reach your bot in the input, the rest it reads on request.',
+        object({ current_step: { type: 'string', minLength: 1, maxLength: SUB_SESSION_LINE_LIMIT }, final_summary: { type: 'string', minLength: 1, maxLength: TASK_SUMMARY_LIMIT } }, []),
+        args => taskRequest({ action: 'sub_update', owner: caller(), ...(args.current_step ? { currentStep: args.current_step } : {}), ...(args.final_summary ? { finalSummary: args.final_summary } : {}) }));
+      return { name: TASK_WORKER_NAMESPACE, description: 'Agent Remote Control: report to your bot, and keep the items you own on its board.', ...(deferred ? { deferred: true } : {}), tools: [report, ...own] };
+    }
     return { name: WORKER_NAMESPACE, description: 'Agent Remote Control: start bots that work in parallel and report back, message the account\'s other bots, keep your board, and read and stop your staff.',
       ...(deferred ? { deferred: true } : {}), tools: coordination };
   }

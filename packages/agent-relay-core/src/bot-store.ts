@@ -21,8 +21,9 @@ export function validBots(value: unknown): value is SavedBot[] {
   const ids = new Set<string>();
   return value.every(item => {
     if (!item || typeof item !== 'object' || typeof item.subject !== 'string' || !item.subject) return false;
-    const { subject: _, ...record } = item;
-    if (!isBotRecord(record) || ids.has(record.botId)) return false;
+    const { subject: _, lifetime: __, ...record } = item;
+    // A record of an earlier build names a lifetime (standing or temporary); the load drops the field and the temporary records.
+    if (__ !== undefined && __ !== 'standing' && __ !== 'temporary' || !isBotRecord(record) || ids.has(record.botId)) return false;
     ids.add(record.botId); return true;
   });
 }
@@ -68,7 +69,7 @@ export function reconcileBots(subject: string, rows: SavedWorkspaceWindow[], bot
       let record = mine.get(botId);
       // The chief is set when the record is made, by the Relay placing a bot another bot created; a later change cannot set it.
       const chief = details.chief && mine.has(details.chief) ? { kind: 'bot' as const, botId: details.chief } : { kind: 'person' as const };
-      if (!record) { record = { subject, botId, chief, lifetime: 'standing', createdAt: now, updatedAt: now }; bots.push(record); mine.set(botId, record); }
+      if (!record) { record = { subject, botId, chief, createdAt: now, updatedAt: now }; bots.push(record); mine.set(botId, record); }
       const identity = botIdentity(details as WindowBotDetails);
       if (BOT_IDENTITY_FIELDS.some(field => JSON.stringify(record![field]) !== JSON.stringify(identity[field]))) {
         for (const field of BOT_IDENTITY_FIELDS) { if (identity[field] === undefined) delete record[field]; else (record as Record<string, unknown>)[field] = identity[field]; }
@@ -79,7 +80,7 @@ export function reconcileBots(subject: string, rows: SavedWorkspaceWindow[], bot
       shown.add(botId);
     }
   }
-  for (const record of mine.values()) if (record.lifetime === 'standing' && !shown.has(record.botId) && record.retiredAt === undefined) record.retiredAt = now;
+  for (const record of mine.values()) if (!shown.has(record.botId) && record.retiredAt === undefined) record.retiredAt = now;
 }
 
 /** Stored bot details with each picture read in the current form; stored rows may hold shapes an older build wrote. Anything that is not bots is returned as it is. */
@@ -120,4 +121,11 @@ export function migrateBots(rows: SavedWorkspaceWindow[], bots: SavedBot[], now:
     }
     reconcileBots(subject, rows, bots, changed, before, now);
   }
+}
+
+/** Whether some record still names a lifetime: an earlier build's. */
+export const hasLegacyBotLifetime = (bots: readonly object[] | undefined): boolean => !!bots?.some(bot => Object.hasOwn(bot, 'lifetime'));
+/** Drops the records of temporary bots, which are sub-sessions now, and the lifetime of every other: they were standing. Dropped, not converted. */
+export function dropLegacyBotLifetime(bots: Array<SavedBot & { lifetime?: string }>): Array<SavedBot> {
+  return bots.filter(bot => bot.lifetime !== 'temporary').map(({ lifetime: _lifetime, ...record }) => record);
 }

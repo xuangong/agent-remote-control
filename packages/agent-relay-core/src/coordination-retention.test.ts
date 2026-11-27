@@ -12,20 +12,20 @@ function base(id: string, at: number, delivery: Delivery): SavedTeam {
     members: [seat('a', 'requester'), seat('b', 'requester')],
     messages: [{ id: `m-${id}`, from: 'a', to: 'b', text: 'x', status: delivery, ...(delivery === 'accepted' ? { acceptance: 'started' as const } : {}), createdAt: at }] };
 }
-const task = (id: string, at: number, state: 'working' | 'done', delivery: Delivery = 'accepted'): SavedTeam => ({ ...base(id, at, delivery),
-  task: { title: 'T', brief: 'B', state, ...(state === 'done' ? { result: { status: 'done' as const, summary: 'S', reportedAt: at } } : {}), createdAt: at, updatedAt: at } });
+const task = (id: string, at: number, state: 'working' | 'ended', delivery: Delivery = 'accepted'): SavedTeam => ({ ...base(id, at, delivery),
+  task: { title: 'T', brief: 'B', state, ...(state === 'ended' ? { result: { outcome: 'finished' as const, text: 'S', at } } : {}), createdAt: at, updatedAt: at } });
 const room = (id: string, at: number, state: 'open' | 'closed', delivery: Delivery = 'accepted'): SavedTeam => ({ ...base(id, at, delivery),
   room: { name: 'R', topic: 'T', state, deadline: at + 1, turns: 0, seen: {}, passed: [], transcript: [] } });
 const link = (id: string, at: number, delivery: Delivery = 'accepted'): SavedTeam => ({ ...base(id, at, delivery), link: { assistants: ['g/a', 'g/b'], recent: [] } });
 const many = (count: number, make: (id: string, at: number) => SavedTeam, prefix: string) => Array.from({ length: count }, (_, index) => make(`${prefix}${index}`, index));
 const ids = (teams: SavedTeam[]) => teams.map(team => team.id);
 
-describe('what tasks, rooms and links leave behind', () => {
+describe('what sub-sessions, rooms and links leave behind', () => {
   it('keeps a bounded number of each ended kind, oldest removed first, and never what still has input on its way or is running', () => {
-    const teams = [...many(TASK_FINISHED_KEEP + 2, (id, at) => task(id, at, 'done'), 't'), ...many(ROOM_ENDED_KEEP + 2, (id, at) => room(id, at, 'closed'), 'r'),
-      ...many(LINK_KEEP + 2, (id, at) => link(id, at), 'l'), task('t-sending', 0, 'done', 'queued'), task('t-running', 0, 'working'), room('r-open', 0, 'open'), link('l-sending', 0, 'queued')];
+    const teams = [...many(TASK_FINISHED_KEEP + 2, (id, at) => task(id, at, 'ended'), 't'), ...many(ROOM_ENDED_KEEP + 2, (id, at) => room(id, at, 'closed'), 'r'),
+      ...many(LINK_KEEP + 2, (id, at) => link(id, at), 'l'), task('t-sending', 0, 'ended', 'queued'), task('t-running', 0, 'working'), room('r-open', 0, 'open'), link('l-sending', 0, 'queued')];
     pruneCoordination(teams);
-    expect(teams.filter(team => team.task?.state === 'done')).toHaveLength(TASK_FINISHED_KEEP);
+    expect(teams.filter(team => team.task?.state === 'ended')).toHaveLength(TASK_FINISHED_KEEP);
     expect(teams.filter(team => team.room?.state === 'closed')).toHaveLength(ROOM_ENDED_KEEP);
     expect(teams.filter(team => team.link)).toHaveLength(LINK_KEEP);
     expect(ids(teams)).not.toEqual(expect.arrayContaining(['t0']));

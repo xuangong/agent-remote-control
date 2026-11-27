@@ -86,17 +86,17 @@ function notices(board: string, before: Pick<BoardItem, 'title' | 'assignee' | '
 const snapshot = (item: BoardItem) => ({ title: item.title, assignee: item.assignee, status: item.status, brief: item.brief });
 
 /**
- * Writes items and the plan of one board in a change. `own`: the writer is the temporary bot the item was created for, which writes
- * its status, links and result and may leave out the version, being the only writer of them.
+ * Writes items and the plan of one board in a change. `own`: the writer is a sub-session of the board's bot, which writes the status, links
+ * and result of the items it owns (the ones assigned to its id) and may leave out the version, being the only writer of them.
  */
-export function writeBoard(box: TeamInbox, edits: readonly ItemEdit[] | undefined, plan: PlanEdit | undefined, by: Writer, now: number, own?: number): BoardWrite {
+export function writeBoard(box: TeamInbox, edits: readonly ItemEdit[] | undefined, plan: PlanEdit | undefined, by: Writer, now: number, own?: string): BoardWrite {
   const board = boardOf(box, now), written: ItemResult[] = [], told: ItemNotice[] = [], owner = box.botId;
   for (const edit of edits ?? []) {
     if (own !== undefined) {
-      if ((edit.key ?? own) !== own) fail('A temporary bot writes the item it was created for, and no other.');
-      if (edit.title !== undefined || edit.assignee !== undefined || edit.parent !== undefined || edit.brief !== undefined) fail('A temporary bot writes only the status, links and result of its item.');
+      if (edit.key === undefined || board.items.find(entry => entry.key === edit.key)?.assignee !== own) fail('A sub-session writes the items it owns, and no other.');
+      if (edit.title !== undefined || edit.assignee !== undefined || edit.parent !== undefined || edit.brief !== undefined) fail('A sub-session writes only the status, links and result of its items.');
     }
-    if (edit.key === undefined && own === undefined) {
+    if (edit.key === undefined) {
       const title = edit.title ?? fail('A new item needs a title.');
       if (edit.version !== undefined) fail('A new item names no version; name a key to change one.');
       if (openCount(board) >= BOARD_OPEN_LIMIT && boardItemOpen(edit.status ?? 'open')) fail(`Your board holds ${BOARD_OPEN_LIMIT} open items; finish or cancel one first.`);
@@ -110,7 +110,7 @@ export function writeBoard(box: TeamInbox, edits: readonly ItemEdit[] | undefine
       written.push({ key, version: 1 }); told.push(...notices(owner, undefined, item, by));
       continue;
     }
-    const item = itemOf(board, edit.key ?? own!);
+    const item = itemOf(board, edit.key!);
     const read = edit.version ?? (own !== undefined ? item.version : fail(`Name the version of item ${item.key} you read (it is ${item.version} now).`));
     const before = snapshot(item), reopening = !boardItemOpen(item.status) && edit.status !== undefined && boardItemOpen(edit.status);
     if (reopening && openCount(board) >= BOARD_OPEN_LIMIT) fail(`Your board holds ${BOARD_OPEN_LIMIT} open items; finish or cancel one first.`);
@@ -192,12 +192,16 @@ export class BotBoard {
     const board = this.inboxes.current(this.broker.ports.read(), bot)?.inbox?.board;
     return board && { ...board, items: board.items.filter(item => boardItemOpen(item.status) || this.broker.ports.now() - (item.closedAt ?? item.updatedAt) < BOARD_KEEP_MS) };
   }
-  write(bot: Assistant, edits: readonly ItemEdit[] | undefined, plan: PlanEdit | undefined, by: Writer, own?: number): Promise<BoardWrite> {
+  write(bot: Assistant, edits: readonly ItemEdit[] | undefined, plan: PlanEdit | undefined, by: Writer, own?: string): Promise<BoardWrite> {
     return this.change(bot, (box, now) => writeBoard(box, edits, plan, by, now, own));
   }
   /** Work handed away names its item: the item records the assignee and the brief. */
   assign(bot: Assistant, key: number, assignee: string, brief: string, by: Writer, places: readonly BoardLink[] = []): Promise<ItemNotice[]> {
     return this.change(bot, (box, now) => assignItem(box, key, assignee, brief, by, now, places));
+  }
+  /** A sub-session's result is the latest report of every open item it owns; the status stays with its owner to change. */
+  reportOwned(bot: Assistant, owner: string, text: string): Promise<void> {
+    return this.change(bot, (box, now) => { for (const item of boardOf(box, now).items.filter(entry => entry.assignee === owner && boardItemOpen(entry.status))) reportItem(box, owner, item.key, undefined, text, false, now); });
   }
   report(bot: Assistant, assignee: string, key: number | undefined, status: string | undefined, text: string, worker: boolean): Promise<void> {
     return this.change(bot, (box, now) => { reportItem(box, assignee, key, status, text, worker, now); });

@@ -31,6 +31,9 @@ beforeAll(async () => {
   stack = await startStack({ teams: true, tools: true,
     // A message that asks for a report in starts one turn that ends with a text; any other input is echoed.
     turns: text => text.includes('Report in with your status.') ? [{ reply: 'Scribe here: ready to keep the notes.' }]
+      // A sub-session's turn ends with a result: the text of its last words.
+      : text.includes('Collect the logs.') ? [{ reply: 'Logs saved in /tmp/logs.' }] : text.includes('Collect the tests.') ? [{ reply: 'Two tests fail.' }]
+      : text.includes('Compress them.') ? [{ reply: 'Compressed into logs.tgz.' }]
       // A long check keeps the bot's main session busy, waiting for an approval no one gives; a question asked of it is answered by one turn.
       : text.includes('Run the long check.') ? [{ approval: 'Run the check', command: 'npm run check' }]
       : text.includes('What is the build status?') ? [{ reply: 'The build is green.' }] : undefined,
@@ -46,22 +49,48 @@ const team = (context: BrowserContext) => teamOf(stack, context);
 const hasTools = (nativeSessionId: string) => hasToolsOf(stack, nativeSessionId);
 const inputs = (nativeSessionId: string) => inputsOf(stack, nativeSessionId);
 
-it('E15: a bot starts two temporary bots; both report while it is idle, as one input, and the page folds them', async () => {
+it('E15: a bot starts two sub-sessions; both report while it is idle, and the page shows their results as cards', async () => {
   const { context, page } = await openPage(browser, stack.sessionUrl('chief'));
   await team(context);
   await showsText(page, 'Chief is ready.');
   await hasTools('chief');
-  for (const name of ['Logs', 'Tests']) expect(await stack.provider.useTool('chief', 'create_bot', { name, mission: `Collect the ${name.toLowerCase()}.` })).toMatchObject({ status: 'working' });
+  const started = [];
+  for (const name of ['Logs', 'Tests']) started.push(await stack.provider.useTool('chief', 'create_sub_session', { name, prompt: `Collect the ${name.toLowerCase()}.` }));
+  expect(started).toEqual([expect.objectContaining({ status: 'working', sub_session_id: expect.stringMatching(/^s_[0-9a-f]{32}$/) }), expect.objectContaining({ status: 'working' })]);
   const workers = () => stack.provider.known().filter(id => id.includes('-new-'));
   await expect.poll(workers, { timeout: 20_000 }).toHaveLength(2);
-  for (const worker of workers()) await hasTools(worker);
-  const [logs, tests] = workers();
-  await stack.provider.useTool(logs!, 'message', { to: 'chief', text: 'Logs saved in /tmp/logs.', status: 'done' });
-  await stack.provider.useTool(tests!, 'message', { to: 'chief', text: 'Two tests fail.', status: 'failed' });
-  await expect.poll(() => inputs('chief').map(input => input.kind).sort(), { timeout: 20_000 }).toEqual(['done', 'failed']);
-  // Both results reached the chief in one input.
-  expect(stack.provider.session('chief')!.sent.filter(text => parseTaskInputs(text))).toHaveLength(1);
+  // A sub-session is no bot: it has its few tools, and another bot cannot list it.
+  for (const worker of workers()) await expect.poll(() => stack.provider.given(worker)?.tools.map(tool => tool.name).sort(), { timeout: 20_000 }).toEqual(['board', 'communicate_update', 'read_main_session', 'update_board']);
+  const listed = await stack.provider.useTool('chief', 'list_bots', {}) as { bots: Array<{ name: string }> };
+  expect(listed.bots.map(bot => bot.name)).not.toContain('Logs');
+  // Each turn ended with its result, which reached the chief as input.
+  await expect.poll(() => inputs('chief').map(input => input.kind).sort(), { timeout: 20_000 }).toEqual(['done', 'done']);
+  await showsText(page, 'Logs saved in /tmp/logs.');
   await showsText(page, 'Two tests fail.');
+  await context.close();
+});
+
+it('E15: a bot gives the same sub-session more work, reads its status and stops it', async () => {
+  const { context, page } = await openPage(browser, stack.sessionUrl('tracker'));
+  await team(context);
+  await showsText(page, 'Tracker is ready.');
+  await hasTools('tracker');
+  const created = await stack.provider.useTool('tracker', 'create_sub_session', { name: 'Collector', prompt: 'Collect the logs.' }) as { sub_session_id: string };
+  const worker = () => stack.provider.known().filter(id => id.includes('-new-')).at(-1)!;
+  const results = () => inputs('tracker').map(input => input.kind).filter(kind => kind === 'done');
+  await expect.poll(results, { timeout: 20_000 }).toEqual(['done']);
+  const sessionsBefore = stack.provider.known().length;
+  // More related work goes to the same session: no new session starts, and its next result arrives.
+  expect(await stack.provider.useTool('tracker', 'send_to_sub_session', { sub_session_id: created.sub_session_id, message: 'Compress them.', title: 'Compress' })).toMatchObject({ delivered_as: expect.stringMatching(/delivered|held/) });
+  await expect.poll(results, { timeout: 20_000 }).toEqual(['done', 'done']);
+  expect(stack.provider.known()).toHaveLength(sessionsBefore);
+  const status = await stack.provider.useTool('tracker', 'get_sub_session_status', {}) as { sub_sessions: Array<Record<string, unknown>> };
+  expect(status.sub_sessions).toEqual([expect.objectContaining({ name: 'Collector', lifecycle: 'live', turn_in_flight: false, last_terminal_turn_status: 'finished', last_work_title: 'Compress', last_result: 'Compressed into logs.tgz.' })]);
+  expect(stack.provider.session(worker())).toBeDefined();
+  // It ends when its bot stops it; more work is then unreachable.
+  await stack.provider.useTool('tracker', 'stop_sub_session', { sub_session_id: created.sub_session_id });
+  expect(await stack.provider.useTool('tracker', 'send_to_sub_session', { sub_session_id: created.sub_session_id, message: 'More.', title: 'More' })).toMatchObject({ delivered_as: 'unreachable' });
+  expect((await stack.provider.useTool('tracker', 'get_sub_session_status', {}) as { sub_sessions: unknown[] }).sub_sessions).toEqual([]);
   await context.close();
 });
 
@@ -113,7 +142,7 @@ it('E15: a bot creates a standing bot, which joins its group in the page and rea
   const { context, page } = await openPage(browser, stack.origin + '/?mode=bot');
   await team(context);
   await hasTools('chief');
-  expect(await stack.provider.useTool('chief', 'create_bot', { name: 'Scribe', mission: 'Keep the release notes.', lifetime: 'standing', message: 'Start from v0.3.' })).toMatchObject({ status: 'ready' });
+  expect(await stack.provider.useTool('chief', 'create_bot', { name: 'Scribe', mission: 'Keep the release notes.', message: 'Start from v0.3.' })).toMatchObject({ status: 'ready' });
   await showsText(page, 'Scribe');
   const scribe = () => stack.provider.known().filter(id => id.includes('-new-')).find(id => stack.provider.given(id)?.instructions?.includes('Keep the release notes.'));
   await expect.poll(scribe, { timeout: 20_000 }).toBeDefined();
@@ -125,7 +154,7 @@ it('E15: a bot with the tools answers a message with message, not its final text
   const { context, page } = await openPage(browser, stack.origin + '/?mode=bot');
   await team(context);
   await hasTools('chief');
-  expect(await stack.provider.useTool('chief', 'create_bot', { name: 'Archivist', mission: 'Keep the changelog.', lifetime: 'standing', message: 'Report in with your status.' })).toMatchObject({ status: 'ready' });
+  expect(await stack.provider.useTool('chief', 'create_bot', { name: 'Archivist', mission: 'Keep the changelog.', message: 'Report in with your status.' })).toMatchObject({ status: 'ready' });
   await showsText(page, 'Archivist');
   const archivist = () => stack.provider.known().filter(id => id.includes('-new-')).find(id => stack.provider.given(id)?.instructions?.includes('Keep the changelog.'));
   await expect.poll(archivist, { timeout: 20_000 }).toBeDefined();
@@ -160,7 +189,7 @@ it('E15: a bot attaches a file to a message and the receiver downloads it, check
   await context.close();
 });
 
-it('E15: a chief lists the Hosts, starts a bot in a new folder of another Host, and the item records where it works', async () => {
+it('E15: a chief lists the Hosts, starts a sub-session in a new folder of another Host, and the item records where it works', async () => {
   const studio = await pairSecondHost(stack, { name: 'Studio', installationId: 'e2e-e15-studio', teams: true, workspaces: true, tools: true, sessions: {} });
   try {
     const { context } = await openPage(browser, stack.sessionUrl('chief'));
@@ -169,21 +198,21 @@ it('E15: a chief lists the Hosts, starts a bot in a new folder of another Host, 
     const listed = await stack.provider.useTool('chief', 'list_hosts', {}) as { hosts: Array<{ id: string; name: string; online: boolean; providers: string[]; workspaces?: Array<{ path: string; folders: string[] }> }> };
     expect(listed.hosts.map(host => host.name).sort()).toEqual([stack.hostName, 'Studio']);
     expect(listed.hosts.find(host => host.id === studio.hostId)).toMatchObject({ name: 'Studio', online: true, providers: [studio.provider.providerId], workspaces: [{ path: studio.workspace }] });
-    // The chief puts the work on its board, then starts the bot for that item in a new folder of the other Host.
+    // The chief puts the work on its board, then starts the sub-session for that item in a new folder of the other Host.
     const written = await stack.provider.useTool('chief', 'update_board', { items: [{ title: 'Build the shop API', brief: 'Build the shop API.' }] }) as { items: Array<{ key: number }> };
     const folder = join(studio.workspace!, 'shop-api');
-    const created = await stack.provider.useTool('chief', 'create_bot', { name: 'Shop', mission: 'Build the shop API.', host: studio.hostId, new_folder: { name: 'shop-api' }, item: written.items[0]!.key });
+    const created = await stack.provider.useTool('chief', 'create_sub_session', { name: 'Shop', prompt: 'Build the shop API.', host: studio.hostId, new_folder: { name: 'shop-api' }, tracked_task_keys: [written.items[0]!.key] });
     expect(created).toMatchObject({ status: 'working', host: 'Studio', folder });
     expect(existsSync(folder)).toBe(true);
     const workers = () => studio.provider.known().filter(id => id.includes('-new-'));
     await expect.poll(workers, { timeout: 20_000 }).toHaveLength(1);
     expect(studio.provider.startedIn(workers()[0]!)).toBe(folder);
     expect(stack.provider.known().filter(id => id.includes('-new-')).every(id => stack.provider.startedIn(id) !== folder)).toBe(true);
-    await expect.poll(() => studio.provider.given(workers()[0]!)?.tools.map(tool => tool.name) ?? [], { timeout: 20_000 }).toContain('message');
+    await expect.poll(() => studio.provider.given(workers()[0]!)?.tools.map(tool => tool.name) ?? [], { timeout: 20_000 }).toContain('communicate_update');
     const board = await stack.provider.useTool('chief', 'board', {}) as { items: Array<{ links: unknown[] }> };
-    expect(board.items.at(-1)!.links).toEqual([{ kind: 'host', value: 'Studio' }, { kind: 'folder', value: folder }]);
+    expect(board.items.at(-1)!.links).toEqual([{ kind: 'host', value: 'Studio' }, { kind: 'folder', value: folder }, { kind: 'sub_session', value: (created as { sub_session_id: string }).sub_session_id }]);
     // A folder that already exists is refused as the outcome, and no second bot starts.
-    await expect(stack.provider.useTool('chief', 'create_bot', { name: 'Again', mission: 'Build it again.', host: studio.hostId, new_folder: { name: 'shop-api' } })).rejects.toThrow('already exists');
+    await expect(stack.provider.useTool('chief', 'create_sub_session', { name: 'Again', prompt: 'Build it again.', host: studio.hostId, new_folder: { name: 'shop-api' } })).rejects.toThrow('already exists');
     expect(workers()).toHaveLength(1);
     await context.close();
   } finally { await studio.close(); }

@@ -7,13 +7,13 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import type { SavedTeam } from './team-delivery.js';
 
-export interface ChainScope { readonly id: string; readonly bots: Set<string>; messages: number; created: number; depth: number }
+export interface ChainScope { readonly id: string; readonly bots: Set<string>; messages: number; created: number; subSessions: number; depth: number }
 const scopes = new AsyncLocalStorage<ChainScope>();
 /** Runs a call in a chain's scope. */
 export const inChain = <T>(scope: ChainScope, run: () => Promise<T>): Promise<T> => scopes.run(scope, run);
-export const chainScope = (id: string): ChainScope => ({ id, bots: new Set(), messages: 0, created: 0, depth: 0 });
-/** A temporary bot's id, derived from its task. */
-export const temporaryBotId = (teamId: string) => 'b_' + createHash('sha256').update(JSON.stringify(['temporary', teamId])).digest('hex').slice(0, 32);
+export const chainScope = (id: string): ChainScope => ({ id, bots: new Set(), messages: 0, created: 0, subSessions: 0, depth: 0 });
+/** A sub-session's id, derived from its Team: never shaped like a bot's id, so nothing that resolves a bot reaches it. */
+export const subSessionId = (teamId: string) => 's_' + createHash('sha256').update(JSON.stringify(['sub-session', teamId])).digest('hex').slice(0, 32);
 
 type Seen = Map<string, { messages: Set<string>; recent: Set<string> }>;
 /** What the Teams hold before a change, for `stampChain` to tell what it added. */
@@ -36,11 +36,11 @@ export function stampChain(before: Seen | undefined, teams: SavedTeam[]): void {
       if (chain) for (const message of added) message.chain = chain;
       continue;
     }
-    if (!seen && (team.task || team.inbox)) { scope.created++; scope.bots.add(team.task ? temporaryBotId(team.id) : team.inbox!.botId); }
+    if (!seen && team.task) scope.subSessions++;
+    if (!seen && team.inbox) { scope.created++; scope.bots.add(team.inbox.botId); }
     for (const message of added) {
       message.chain = scope.id; scope.messages++;
       if (team.inbox) scope.bots.add(team.inbox.botId);
-      else if (team.task && message.to === team.members[0]!.id) scope.bots.add(temporaryBotId(team.id));
     }
     for (const item of team.inbox?.recent ?? []) if (!seen?.recent.has(item.id)) scope.depth = Math.max(scope.depth, item.hop);
   }

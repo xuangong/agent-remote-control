@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useInteractionDraft } from './interaction-draft.js';
 import { useTranslate } from '../locale.js';
 import type { AgentInteractionRequest, AgentInteractionResponse } from '@orchardworks/agent-remote-protocol';
 
@@ -7,9 +8,14 @@ export interface QuestionAnswerDraft {
   readonly customText?: string;
 }
 
+/** What a person has typed or chosen on an interaction card, kept by the owner under the request id so a remount keeps it. */
 export interface QuestionDraft {
   readonly answers: Readonly<Record<string, QuestionAnswerDraft>>;
   readonly activeQuestionId?: string;
+  /** The values typed into a form request. */
+  readonly form?: Readonly<Record<string, string | string[]>>;
+  /** The revision feedback typed on a plan approval. */
+  readonly feedback?: string;
 }
 
 export interface QuestionCardProps {
@@ -24,25 +30,13 @@ export interface QuestionCardProps {
 
 export function QuestionCard({ request, onResponse, pending, failure, readOnly = false, draft: controlledDraft, onDraftChange }: QuestionCardProps) {
   const t = useTranslate();
-  // The card renders from its own draft, which a typed character changes within the event itself. An owner that hands the draft
-  // back later (after a render of its own, or a store that publishes) would otherwise show the old text for a render, and the
-  // browser drops the input method's composition when a field's value is written while it composes.
-  const [draft, setLocalDraft] = useState<QuestionDraft>(controlledDraft ?? { answers: {} });
-  const [offered, setOffered] = useState(controlledDraft);
-  const reported = useRef(new WeakSet<QuestionDraft>());
-  // A draft the owner offers that this card did not report (another device's answer, a reset) replaces the card's own.
-  if (controlledDraft !== offered) {
-    setOffered(controlledDraft);
-    if (!controlledDraft || !reported.current.has(controlledDraft)) setLocalDraft(controlledDraft ?? { answers: {} });
-  }
+  const [draft, setDraft] = useInteractionDraft(controlledDraft, onDraftChange);
   const [error, setError] = useState<string>();
   const tabsRef = useRef<Array<HTMLButtonElement | null>>([]);
   const activeIndex = Math.max(0, request.questions.findIndex(({ questionId }) => questionId === draft.activeQuestionId));
 
   function update(next: QuestionDraft): void {
-    reported.current.add(next);
-    setLocalDraft(next);
-    onDraftChange?.(next);
+    setDraft(next);
     setError(undefined);
   }
 

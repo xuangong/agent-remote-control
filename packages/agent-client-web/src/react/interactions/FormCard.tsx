@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import type { AgentFormField, AgentFormValues, AgentInteractionRequest, AgentInteractionResponse } from '@orchardworks/agent-remote-protocol';
 import { useTranslate } from '../locale.js';
+import { useInteractionDraft } from './interaction-draft.js';
+import type { QuestionDraft } from './QuestionCard.js';
 
 type FormRequest = Extract<AgentInteractionRequest, { kind: 'form' }>;
 type FormResponse = Extract<AgentInteractionResponse, { kind: 'form' }>;
@@ -10,18 +12,22 @@ interface Props {
   pending: boolean;
   disabled?: boolean;
   failure?: string;
+  draft?: QuestionDraft;
+  onDraftChange?: (draft: QuestionDraft) => void;
 }
 
-export function FormCard({ request, onResponse, pending, disabled = false, failure }: Props) {
+export function FormCard({ request, onResponse, pending, disabled = false, failure, draft: offered, onDraftChange }: Props) {
   const t = useTranslate();
-  const [draft, setDraft] = useState<Record<string, string | string[]>>(() => Object.fromEntries(request.fields.flatMap((field) =>
+  const [stored, setStored] = useInteractionDraft(offered, onDraftChange);
+  const defaults = (): Record<string, string | string[]> => Object.fromEntries(request.fields.flatMap((field) =>
     field.defaultValue === undefined
       ? field.required && (field.type === 'text' || field.type === 'multiselect') ? [[field.fieldId, field.type === 'text' ? '' : []]] : []
       : [[field.fieldId, Array.isArray(field.defaultValue) ? field.defaultValue : String(field.defaultValue)]],
-  )));
+  ));
+  const draft = stored.form ?? defaults();
   const [error, setError] = useState<string>();
   function change(fieldId: string, value: string | string[]) {
-    setDraft((current) => ({ ...current, [fieldId]: value }));
+    setStored({ ...stored, form: { ...draft, [fieldId]: value } });
     setError(undefined);
   }
   async function submit(event: FormEvent<HTMLFormElement>) {

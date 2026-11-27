@@ -60,7 +60,7 @@ function InteractionContent({ request, onResponse, questionDraft, onQuestionDraf
   }
 
   if (request.kind === 'form') {
-    return <Voiced sentence={t('approval.form', { name })}><FormCard request={request} onResponse={respond} pending={pending} disabled={readOnly || !onResponse} failure={readOnly || waitingForConnection ? undefined : onResponse ? failure : t('timeline.interaction.notReady')} /></Voiced>;
+    return <Voiced sentence={t('approval.form', { name })}><FormCard request={request} onResponse={respond} pending={pending} disabled={readOnly || !onResponse} failure={readOnly || waitingForConnection ? undefined : onResponse ? failure : t('timeline.interaction.notReady')} draft={questionDraft} onDraftChange={onQuestionDraftChange} /></Voiced>;
   }
 
   if (!onResponse && !readOnly && !waitingForConnection) {
@@ -89,7 +89,7 @@ function InteractionContent({ request, onResponse, questionDraft, onQuestionDraf
     case 'question':
       return <Voiced sentence={t('approval.question', { name })}><QuestionCard readOnly={readOnly} request={request} onResponse={respond} pending={pending} failure={failure} draft={questionDraft} onDraftChange={onQuestionDraftChange} /></Voiced>;
     case 'plan_approval':
-      return <PlanApprovalCard request={request} onResponse={respond} pending={pending} failure={failure} assistantName={name} />;
+      return <PlanApprovalCard request={request} onResponse={respond} pending={pending} failure={failure} assistantName={name} draft={questionDraft} onDraftChange={onQuestionDraftChange} />;
     case 'tool_approval':
       return <ToolApprovalCard request={request} onResponse={respond} pending={pending} failure={failure} assistantName={name} />;
     default: {

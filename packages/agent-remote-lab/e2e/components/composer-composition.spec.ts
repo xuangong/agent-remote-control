@@ -6,12 +6,13 @@ const field = (rich: boolean) => rich ? '.ProseMirror' : 'textarea';
 
 /** Counts the compositions the page ends on its own: only the test ends one, after the last step. */
 async function watchComposition(page: Page, selector: string) {
-  await page.locator(selector).evaluate((node: HTMLElement & { ends?: number; writes?: string[] }) => {
+  await page.locator(selector).evaluate((element: HTMLElement) => {
+    const node = element as HTMLElement & { ends?: number; writes?: string[] };
     node.ends = 0; node.writes = [];
     node.addEventListener('compositionend', () => { node.ends!++; });
-    if (node instanceof HTMLTextAreaElement) {
+    if (element instanceof HTMLTextAreaElement) {
       const native = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!;
-      Object.defineProperty(node, 'value', { configurable: true, get() { return native.get!.call(this); }, set(value: string) { node.writes!.push(value); native.set!.call(this, value); } });
+      Object.defineProperty(element, 'value', { configurable: true, get() { return native.get!.call(this); }, set(value: string) { node.writes!.push(value); native.set!.call(this, value); } });
     }
   });
   return () => page.locator(selector).evaluate((node: HTMLElement & { ends?: number; writes?: string[] }) =>

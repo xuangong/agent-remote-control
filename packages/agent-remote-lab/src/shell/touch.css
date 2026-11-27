@@ -1,0 +1,39 @@
+/* How the installed app answers a finger. The app's chrome (bars, buttons, rows, labels, icons) is not text to select, copy or
+   magnify; what people read and copy (message text, code, tool output, previews, inputs) stays selectable. A press shows the
+   app's own pressed state at once, and no tap or focus zooms the page. Colors come from --orchard-* tokens only. */
+
+:root {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  /* The shell never rubber-bands as a whole; each scroll container keeps its own bounce. */
+  overscroll-behavior: none;
+}
+html, body, #root { overscroll-behavior: none; }
+:where(*) { touch-action: manipulation; }
+
+/* Text people read and copy. */
+:where(.agent-timeline-entries, .agent-content-preview, .agent-preview-browser, .agent-tool-detail, .lab-state-grid, .lab-inspector-group,
+  .lab-session-summary code, pre, code, samp, kbd) {
+  -webkit-user-select: text; user-select: text;
+}
+/* ...except the controls inside it. */
+:where(.agent-timeline-entries) :is(button, summary, [role="button"], [role="tab"], .agent-diff-line-number, .agent-message-delivery) {
+  -webkit-user-select: none; user-select: none;
+}
+:where(input, textarea, select, [contenteditable], [contenteditable] *, .ProseMirror, .ProseMirror *) {
+  -webkit-user-select: text; user-select: text;
+}
+/* Links and images keep the system menu of a long press. */
+:where(a[href], img) { -webkit-touch-callout: default; }
+
+/* The pressed state (`:active` for a mouse, `[data-pressed]` from kernel/touch-feedback.ts for a finger): a layer over the control's own fill, so it shows on a transparent control and outranks every state rule. */
+:is(button, summary, [role="button"], [role="tab"], [role="menuitem"], [role="option"], [role="switch"], [role="checkbox"], [role="radio"], .lab-session-row, label[for]):is(:active, [data-pressed]):not(:disabled, [aria-disabled="true"]) {
+  background-image: linear-gradient(var(--orchard-fill-strong), var(--orchard-fill-strong)) !important;
+}
+
+/* A field under 16px makes Safari zoom the page on focus; the phone's fields are never smaller. */
+@media (max-width: 1180px), (pointer: coarse) {
+  :where(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="hidden"], [type="color"]), textarea, select, .ProseMirror) { font-size: max(16px, 1em) !important; }
+}

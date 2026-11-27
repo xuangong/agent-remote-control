@@ -188,21 +188,22 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     if (!heldDrafts.current.has(draftKey)) heldDrafts.current.set(draftKey, composerDrafts.hold(draftKey));
   }, [draftKey]);
   useLayoutEffect(() => () => { for (const release of heldDrafts.current.values()) release(); heldDrafts.current.clear(); }, []);
-  // The composer renders from its own text. The owner's value is adopted only when the owner changed it on its own: an owner that
-  // hands back the values this composer published, late or in a later render, never writes into the field while the person types
-  // or an input method composes.
-  const ownerDraft = useRef<{ key: string; value: string | undefined; published: string[] }>({ key: draftKey, value: undefined, published: [] });
+  // The composer renders from its own text while the owner is behind it. A value the composer published stays pending until the owner
+  // hands it (or a later one) back; while any is pending, the owner's unchanged value is the one from before, and writing it into the
+  // field would end an input method's composition. A value the owner changes on its own is adopted at once.
+  const ownerDraft = useRef<{ key: string; value: string | undefined; pending: string[] }>({ key: draftKey, value: undefined, pending: [] });
   function publishDraft(value: string): void {
-    const published = ownerDraft.current.published; published.push(value); if (published.length > 32) published.shift();
+    const { pending } = ownerDraft.current; pending.push(value); if (pending.length > 32) pending.shift();
     onDraftChange?.(value);
   }
   const owner = ownerDraft.current;
-  if (owner.key !== draftKey) { owner.key = draftKey; owner.published = []; owner.value = undefined; }
-  if (controlledDraft !== owner.value) {
+  if (owner.key !== draftKey) { owner.key = draftKey; owner.pending = []; owner.value = undefined; }
+  if (controlledDraft !== undefined) {
+    const changed = controlledDraft !== owner.value;
     owner.value = controlledDraft;
-    const echo = controlledDraft === undefined ? -1 : owner.published.indexOf(controlledDraft);
-    if (echo >= 0) owner.published.splice(0, echo + 1);
-    else { owner.published = []; if (controlledDraft !== undefined) currentDraft.text = controlledDraft; }
+    const handedBack = changed ? owner.pending.indexOf(controlledDraft) : -1;
+    if (handedBack >= 0) owner.pending.splice(0, handedBack + 1);
+    else if (changed || owner.pending.length === 0) { owner.pending = []; currentDraft.text = controlledDraft; }
   }
   // A send clears the draft through the callback it began with: that one belongs to its own session, even when another session is shown by the time it ends.
   function setText(value: string): void { currentDraft.text = value; if (richEnabled) imageDraft.setText(value); else publishDraft(value); }

@@ -28,7 +28,7 @@ function Fixture() {
   // The drafts live here, so a remount of the workbench (as a timeline re-render does to a card) starts from what the owner kept.
   const [generation, setGeneration] = useState(0);
   return <div className="lab-shell" style={{ display: 'block' }}><button type="button" data-testid="remount" onClick={() => setGeneration(value => value + 1)}>Remount</button><LabWorkbench key={generation} state={{ ...replicaState,
-    pendingInteractions: [question, form, plan],
+    pendingInteractions: new URLSearchParams(location.search).has('bare') ? [] : [question, form, plan],
     timeline: { ...replicaState.timeline, hasOlder: false, entries: Array.from({ length: 30 }, (_, index) => ({
       providerId: 'codex', seqStart: index + 1, seqEnd: index + 1, sourceSeqRanges: [], collapsed: [], resources: [],
       timestamp: '2026-09-22T09:00:00Z', item: index % 2 ? { type: 'assistant_message' as const, text: `Earlier answer ${index}.` } : { type: 'user_message' as const, text: `Earlier request ${index}.` },

@@ -188,9 +188,24 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     if (!heldDrafts.current.has(draftKey)) heldDrafts.current.set(draftKey, composerDrafts.hold(draftKey));
   }, [draftKey]);
   useLayoutEffect(() => () => { for (const release of heldDrafts.current.values()) release(); heldDrafts.current.clear(); }, []);
-  if (controlledDraft !== undefined) currentDraft.text = controlledDraft;
+  // The composer renders from its own text. The owner's value is adopted only when the owner changed it on its own: an owner that
+  // hands back the values this composer published, late or in a later render, never writes into the field while the person types
+  // or an input method composes.
+  const ownerDraft = useRef<{ key: string; value: string | undefined; published: string[] }>({ key: draftKey, value: undefined, published: [] });
+  function publishDraft(value: string): void {
+    const published = ownerDraft.current.published; published.push(value); if (published.length > 32) published.shift();
+    onDraftChange?.(value);
+  }
+  const owner = ownerDraft.current;
+  if (owner.key !== draftKey) { owner.key = draftKey; owner.published = []; owner.value = undefined; }
+  if (controlledDraft !== owner.value) {
+    owner.value = controlledDraft;
+    const echo = controlledDraft === undefined ? -1 : owner.published.indexOf(controlledDraft);
+    if (echo >= 0) owner.published.splice(0, echo + 1);
+    else { owner.published = []; if (controlledDraft !== undefined) currentDraft.text = controlledDraft; }
+  }
   // A send clears the draft through the callback it began with: that one belongs to its own session, even when another session is shown by the time it ends.
-  function setText(value: string): void { currentDraft.text = value; if (richEnabled) imageDraft.setText(value); else onDraftChange?.(value); }
+  function setText(value: string): void { currentDraft.text = value; if (richEnabled) imageDraft.setText(value); else publishDraft(value); }
   // A composer that is replaced while it has focus hands the focus to the one that takes its place, with the caret after the text.
   // The editor may still be disabled in its first renders, so the hand-over repeats until the editor takes the focus, the person
   // focuses something else, or the moment has passed.
@@ -248,7 +263,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   const blocked = !draftOnly && availability.input === 'disabled';
   const richEnabled = Boolean(imageDraftBinding || capabilities?.imageInput || capabilities?.resourceInput);
   const imageDraft = useImageDraft({ scope: draftScope, sessionKey: agentId, binding: imageDraftBinding, recipient: imageRecipient, text, enabled: richEnabled, active: visible && ready && !readOnly && !pendingFirstInputContext && Boolean(capabilities?.imageInput), upload: onUploadImage,
-    onTextChange: value => { currentDraft.text = value; onDraftChange?.(value); refresh(count => count + 1); } });
+    onTextChange: value => { currentDraft.text = value; publishDraft(value); refresh(count => count + 1); } });
   const hasImages = richEnabled && imageDraft.hasImages;
   const resourceDraft = useResourceDraft({ scope: imageDraftBinding?.scope ?? draftScope, sessionKey: imageDraftBinding?.key ?? agentId, parts: imageDraft.parts, documentHydrated: imageDraft.hydrated,
     active: visible && ready && !readOnly && !pendingFirstInputContext && Boolean(capabilities?.resourceInput) && (!imageDraftBinding || Boolean(imageRecipient?.isCurrent())), limits: capabilities?.resourceInput, upload: onUploadResource, recipient: imageRecipient });
@@ -449,7 +464,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     refresh(value => value + 1);
     try {
       await mentions!.ask(mention.bot, mention.text);
-      if (currentDraft.text === submitted) { if (richEnabled) imageDraft.setText(''); else { currentDraft.text = ''; onDraftChange?.(''); } }
+      if (currentDraft.text === submitted) { if (richEnabled) imageDraft.setText(''); else { currentDraft.text = ''; publishDraft(''); } }
       currentDraft.feedback = { kind: 'success', message: t('composer.mentionAsked', { bot: mention.bot.name }) };
       if (currentAgent.current === agentId) focusRequested.current = agentId;
     } catch (error) {
@@ -504,7 +519,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
       if (submittedSkill?.id === command.id && currentDraft.selectedSkill === submittedSkill) currentDraft.selectedSkill = undefined;
       if (currentDraft.text === submitted && (isCommand || submittedSkill?.id === command.id)) {
         if (richEnabled) imageDraft.setText('');
-        else { currentDraft.text = ''; onDraftChange?.(''); }
+        else { currentDraft.text = ''; publishDraft(''); }
       }
       if (result.text) currentDraft.feedback = { kind: 'success', message: result.text };
     } catch (error) {
@@ -525,7 +540,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     try {
       await sendLater.send(submitted.trim());
       // The message now shows as waiting in the conversation; the composer is ready for the next one.
-      if (currentDraft.text === submitted) { if (richEnabled) imageDraft.setText(''); else { currentDraft.text = ''; onDraftChange?.(''); } }
+      if (currentDraft.text === submitted) { if (richEnabled) imageDraft.setText(''); else { currentDraft.text = ''; publishDraft(''); } }
     } catch (error) {
       currentDraft.feedback = { kind: 'error', message: errorWords(error, t, 'composer.laterFailed') };
     } finally {
@@ -605,7 +620,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
       else await action!(submitted.trim());
       if (currentDraft.text === submitted && (!richEnabled || ownsImageEdit() && imageDraft.parts === submittedParts)) {
         if (hasResources) resourceDraft.clear();
-        if (richEnabled) imageDraft.setText(''); else { currentDraft.text = ''; onDraftChange?.(''); }
+        if (richEnabled) imageDraft.setText(''); else { currentDraft.text = ''; publishDraft(''); }
       }
       currentDraft.feedback = { kind: 'success', message: kind === 'send' ? t('composer.messageSent') : t('composer.messageQueued'), delivery: true };
       if (currentAgent.current === agentId) focusRequested.current = agentId;

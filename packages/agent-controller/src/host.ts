@@ -475,7 +475,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     toolNamespaces: providerId => !!providers.require(providerId).adapter.descriptor.sessionExtensions?.toolNamespaces,
     readOnlyProviders: () => automationAccess.supportedProviders().filter(providerId => providers.require(providerId).adapter.descriptor.sessionAccess?.readOnly),
     // A temporary bot uses every bot's tools; they exist once the worker support below does, before any seat attaches.
-    botTools: (actual): AgentSessionToolNamespace => workerSupport!.namespace(actual, false),
+    botTools: (actual, kind): AgentSessionToolNamespace => workerSupport!.namespace(actual, false, kind),
   }, options.team.request, options.team.tickMs) : undefined;
   const roles = new SessionRoles(team ? [team] : []);
   // A message that waited for this Host goes to the session that carries its conversation now, through the same access as roles.
@@ -493,7 +493,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     const lease = await automationAccess.acquire(ref.providerId, ref.nativeSessionId);
     try { return lease.agent.snapshot().payload.runtimeInfo.cwd; } finally { lease.release(); }
   };
-  const workerSupport: BotTools | undefined = options.team?.request ? new BotTools({ request: options.team.request, tasks: () => options.team?.tasks?.() === true, answering: ref => team?.answering(ref) === true, working: ref => team?.working(ref) === true,
+  const workerSupport: BotTools | undefined = options.team?.request ? new BotTools({ request: options.team.request, tasks: () => options.team?.tasks?.() === true, answering: ref => team?.answering(ref) === true, workerSeat: ref => team?.workerSeat(ref),
     takesTools: ref => {
       const binding = sessions.byNative(ref.providerId, ref.nativeSessionId);
       return botToolsGiven({ capability: providers.require(ref.providerId).adapter.descriptor.sessionExtensions?.toolNamespaces,

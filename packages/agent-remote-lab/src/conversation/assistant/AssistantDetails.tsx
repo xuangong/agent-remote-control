@@ -11,7 +11,7 @@ import { AssistantCard, type CardAction } from './AssistantCard.js';
 import { WhereItWorks } from './WhereItWorks.js';
 import { SessionsList, type AssistantSessions } from './SessionsList.js';
 import { FilesList } from './FilesList.js';
-import { TasksList } from './TasksList.js';
+import { SubSessionsList } from './SubSessionsList.js';
 import { BoardList } from './BoardList.js';
 import type { BoardChoice } from './board-model.js';
 import { AnsweringList } from './AnsweringList.js';
@@ -77,7 +77,7 @@ export function AssistantDetails({ assistant, surface, onClose }: { assistant: A
     {assistant.where ? section('where', t('details.where'), <WhereItWorks where={assistant.where} />) : null}
     {assistant.sessions ? section('sessions', t('details.sessions'), <SessionsList sessions={assistant.sessions} />) : null}
     {assistant.bots?.length ? section('bots', t('details.bots'), <ul className="lab-assistant-chain lab-assistant-bots">{assistant.bots.map(bot => <li key={bot.botId}><span className="lab-assistant-session-title">{bot.name}</span></li>)}</ul>) : null}
-    {assistant.tasks?.length ? section('tasks', t('details.tasks'), <TasksList tasks={assistant.tasks} />) : null}
+    {assistant.tasks?.length ? section('tasks', t('details.subSessions'), <SubSessionsList subSessions={assistant.tasks} />) : null}
     {assistant.settings ? section('model', t('details.model'), <div className="lab-assistant-settings">{assistant.settings}</div>) : null}
     {assistant.files ? section('files', t('details.files'), <FilesList files={assistant.files} {...(assistant.openFile ? { onOpen: assistant.openFile } : {})} />) : null}
   </div>;

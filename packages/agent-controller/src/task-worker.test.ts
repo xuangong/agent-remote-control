@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentSessionTool } from '@orchardworks/agent-provider-sdk';
-import { BOT_INSTRUCTIONS_VERSION, assistantMessageText, chiefChangedText, itemChangedText, itemTagText, parseTaskInputs, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import { BOT_INSTRUCTIONS_VERSION, assistantMessageText, chiefChangedText, itemChangedText, itemTagText, parseTaskInputs, taskUpdateText, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { botsHarness } from './test-utils/bots-harness.js';
 import { BotTools } from './bot-tools.js';
 
@@ -11,67 +11,77 @@ const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { while (cleanups.length) await cleanups.pop()!(); });
 async function harness(toolNamespaces = false) { const h = await botsHarness({ tasks: true, toolNamespaces }); cleanups.push(() => h.close()); return h; }
 const owner = { providerId: 'codex', nativeSessionId: 'worker', title: 'Chief' };
-const createTask = { action: 'create_task' as const, owner, operationId: 'op', title: 'Collect logs', brief: 'Collect the build logs of the last run.' };
+const createSub = { action: 'create_sub_session' as const, owner, operationId: 'op', name: 'Collect logs', prompt: 'Collect the build logs of the last run.' };
 /** Every bot's tools, as the Host gives them while the Relay runs tasks. */
-const BOT_TOOLS = ['create_bot', 'message', 'download_attachment', 'list_bots', 'list_hosts', 'read_bot', 'update_mission', 'remember', 'forget', 'set_chief', 'board', 'update_board', 'set_timer', 'stop_bot', 'retire_bot', 'open_room'];
+const BOT_TOOLS = ['create_bot', 'create_sub_session', 'send_to_sub_session', 'get_sub_session_status', 'stop_sub_session', 'message', 'download_attachment', 'list_bots', 'list_hosts', 'read_bot', 'update_mission', 'remember', 'forget', 'set_chief', 'board', 'update_board', 'set_timer', 'open_room'];
 const tool = (tools: readonly AgentSessionTool[] | undefined, name: string) => tools?.find(item => item.name === name) ?? (() => { throw new Error(`No ${name} tool.`); })();
-/** A temporary bot writes to its chief: its result (done, failed), its question (needs_input) or progress. */
-const report = (tools: readonly AgentSessionTool[] | undefined, status: 'done' | 'failed' | 'needs_input' | 'progress', text: string) => tool(tools, 'message').execute({ to: 'chief', text, status });
 
-describe('a task between a main session and its worker', () => {
-  it('starts the worker where the owner works, with every bot\'s tools, and delivers the framed brief', async () => {
+describe('a sub-session and its bot', () => {
+  const taskOf = (h: Awaited<ReturnType<typeof harness>>, index = 0) => h.teams().filter(team => team.task)[index]!;
+  const end = (h: Awaited<ReturnType<typeof harness>>, text: string, index = 0, outcome: 'finished' | 'failed' | 'interrupted' = 'finished') =>
+    h.host({ action: 'sub_turn_end', teamId: taskOf(h, index).id, memberId: taskOf(h, index).members[0]!.id, outcome, text });
+  it('starts the session where its bot works, with its own few tools and no bot instructions, and delivers the framed first work', async () => {
     const h = await harness();
-    expect(await h.host(createTask)).toMatchObject({ state: 'working' });
+    expect(await h.host(createSub)).toMatchObject({ status: 'working' });
     expect(h.created).toHaveLength(1);
     const worker = h.created[0]!;
     expect(worker.creation.cwd).toBe(h.directory);
-    expect(worker.extensions.tools?.map(item => item.name)).toEqual(['read_source_session', ...BOT_TOOLS]);
-    expect(worker.extensions.instructions).toContain('You are a temporary bot');
+    expect(worker.extensions.tools?.map(item => item.name)).toEqual(['read_main_session', 'communicate_update', 'board', 'update_board']);
+    expect(worker.extensions.instructions).toContain('You are a sub-session of the bot');
+    expect(worker.extensions.instructions).not.toContain('Your mission');
     await h.runtime.tick();
-    expect(h.sessions.get(worker.id)!.deliveries).toEqual([{ text: expect.stringMatching(/^\[Task \S+ · brief · from Chief\]\nTask: Collect logs\n/), delivery: 'immediate' }]);
-    // The owner keeps its own tools: its seat in the task carries none.
+    expect(h.sessions.get(worker.id)!.deliveries).toEqual([{ text: expect.stringMatching(/^\[Sub-session \S+ · brief · from Chief\]\nTask: Collect logs\n/), delivery: 'immediate' }]);
+    // The bot keeps its own tools: its seat in the sub-session carries none.
     expect(await h.runtime.extensions(h.ref('codex', 'worker'))).toBeUndefined();
   });
 
-  it('holds the result until the owner is idle, outside the CLI\'s own queue, then forgets the finished task\'s seats', async () => {
+  it('holds the result until the bot is idle, outside the CLI\'s own queue, and keeps the idle session for more work', async () => {
     const h = await harness();
-    await h.host(createTask);
+    await h.host(createSub);
     const worker = h.created[0]!;
     await h.runtime.tick();
     h.busy('worker', true);
-    expect(JSON.parse(await report(worker.extensions.tools, 'done', 'The logs are in /tmp/logs.') as string)).toMatchObject({ outcome: 'delivered' });
+    await end(h, 'The logs are in /tmp/logs.');
     await h.runtime.tick();
-    // The owner's provider has a native next-turn queue; a task result still waits for the turn to end.
+    // The bot's provider has a native next-turn queue; a result still waits for the turn to end.
     expect(h.sessions.get('worker')!.deliveries).toEqual([]);
-    // The worker reported and its brief settled: its seat is forgotten and its session becomes an ordinary one.
-    expect(await h.runtime.extensions(h.ref('codex', worker.id))).toBeUndefined();
+    // The sub-session is idle with its context: its seat stays, so it can be given more work.
+    expect(h.team(taskOf(h).id).task).toMatchObject({ state: 'idle', result: { outcome: 'finished', text: 'The logs are in /tmp/logs.' } });
+    expect(await h.runtime.extensions(h.ref('codex', worker.id))).toBeDefined();
     h.busy('worker', false);
     await h.runtime.tick();
-    const result = [{ text: expect.stringMatching(/^\[Task \S+ · done · Collect logs\]\nThe logs are in \/tmp\/logs\.\n/), delivery: 'immediate' }];
+    const result = [{ text: expect.stringMatching(/^\[Sub-session \S+ · result · Collect logs\]\nThe logs are in \/tmp\/logs\.\n/), delivery: 'immediate' }];
     expect(h.sessions.get('worker')!.deliveries).toEqual(result);
-    // Later polls neither deliver the result again nor keep the owner's seat.
     await h.runtime.tick(); await h.runtime.tick();
     expect(h.sessions.get('worker')!.deliveries).toEqual(result);
+    // More work reaches the same session, which works again.
+    const bots = new BotTools({ request: call => h.host(call), tasks: () => true, title: async () => 'Chief' });
+    await tool(bots.namespace(() => h.ref('codex', 'worker'), false).tools, 'send_to_sub_session').execute({ sub_session_id: 'Collect logs', message: 'Compress them.', title: 'Compress' });
+    await h.runtime.tick();
+    expect(h.sessions.get(worker.id)!.deliveries.map(delivery => parseTaskInputs(delivery.text)?.[0]?.kind)).toEqual(['brief', 'message']);
+    expect(h.created).toHaveLength(1);
+    expect(h.team(taskOf(h).id).task).toMatchObject({ state: 'working', lastWork: { title: 'Compress' } });
   });
 
-  it('gives the worker its tools as a namespace where the provider takes one, so reporting needs no approval', async () => {
+  it('gives the session its tools as one namespace where the provider takes one, so reporting needs no approval', async () => {
     const h = await harness(true);
-    await h.host(createTask);
+    await h.host(createSub);
     const { extensions } = h.created[0]!;
     expect(extensions.tools).toBeUndefined();
-    expect(extensions.toolNamespaces?.map(namespace => [namespace.name, namespace.tools.map(item => item.name)])).toEqual([['agent_remote', BOT_TOOLS], ['agent_remote_task', ['read_source_session']]]);
-    expect(JSON.parse(await report(extensions.toolNamespaces![0]!.tools, 'failed', 'The runner is offline.') as string)).toMatchObject({ outcome: 'delivered' });
+    expect(extensions.toolNamespaces?.map(namespace => [namespace.name, namespace.tools.map(item => item.name)])).toEqual([['agent_remote_sub', ['communicate_update', 'board', 'update_board', 'read_main_session']]]);
+    const report = tool(extensions.toolNamespaces![0]!.tools, 'communicate_update');
+    expect(JSON.parse(await report.execute({ current_step: 'Reading the logs' }) as string)).toEqual({ message: 'Recorded.' });
+    expect(taskOf(h).task).toMatchObject({ currentStep: 'Reading the logs' });
   });
 
-  it('delivers the results of several tasks that finished during one turn as one input', async () => {
+  it('delivers the results of several sub-sessions that finished during one turn as one input', async () => {
     const h = await harness();
-    await h.host(createTask);
-    await h.host({ ...createTask, operationId: 'op-2', title: 'Run tests', brief: 'Run the unit tests.' });
-    const [logs, tests] = h.created;
+    await h.host(createSub);
+    await h.host({ ...createSub, operationId: 'op-2', name: 'Run tests', prompt: 'Run the unit tests.' });
     await h.runtime.tick();
     h.busy('worker', true);
-    await report(tests!.extensions.tools, 'failed', 'Two tests fail.');
-    await report(logs!.extensions.tools, 'done', 'Logs attached.');
+    await end(h, 'Logs attached.', 0);
+    await end(h, 'Two tests fail.', 1, 'failed');
     await h.runtime.tick();
     expect(h.sessions.get('worker')!.deliveries).toEqual([]);
     h.busy('worker', false);
@@ -79,38 +89,31 @@ describe('a task between a main session and its worker', () => {
     const deliveries = h.sessions.get('worker')!.deliveries;
     expect(deliveries).toHaveLength(1);
     const results = parseTaskInputs(deliveries[0]!.text)?.map(input => [input.kind, input.kind === 'brief' || input.kind === 'message' ? '' : input.title]);
-    expect(results).toHaveLength(2);
     expect(results).toEqual(expect.arrayContaining([['failed', 'Run tests'], ['done', 'Collect logs']]));
+    expect(results).toHaveLength(2);
     await h.runtime.tick(); await h.runtime.tick();
     expect(h.sessions.get('worker')!.deliveries).toHaveLength(1);
   });
 
-  it('tells the owner of a pending interaction in the worker and of a question it asks, and delivers the answer', async () => {
+  it('tells its bot of a pending interaction in the session, and goes on when it is answered', async () => {
     const h = await harness();
-    const { taskId } = await h.host(createTask);
+    await h.host(createSub);
     const worker = h.created[0]!;
     await h.runtime.tick();
     h.busy(worker.id, true); h.interaction(worker.id, 'Run npm test?');
     await h.runtime.tick();
-    expect(h.team(taskId).task).toMatchObject({ state: 'needs_input', waiting: { reason: 'interaction', text: 'Run npm test? npm test' } });
+    expect(taskOf(h).task).toMatchObject({ state: 'needs_input', waiting: { reason: 'interaction', text: 'Run npm test? npm test' } });
     h.interaction(worker.id);
     await h.runtime.tick();
-    expect(h.team(taskId).task?.state).toBe('working');
-    await report(worker.extensions.tools, 'needs_input', 'Which branch?');
+    expect(taskOf(h).task?.state).toBe('working');
     h.busy(worker.id, false);
     await h.runtime.tick();
-    const inputs = h.sessions.get('worker')!.deliveries.flatMap(delivery => parseTaskInputs(delivery.text) ?? []);
-    expect(inputs.map(input => input.kind)).toEqual(['needs_you', 'question']);
-    const owner = new BotTools({ request: call => h.host(call), tasks: () => true, title: async () => 'Chief' });
-    await tool(owner.namespace(() => h.ref('codex', 'worker'), false).tools, 'message').execute({ to: 'Collect logs', text: 'Use main.' });
-    await h.runtime.tick();
-    expect(h.sessions.get(worker.id)!.deliveries.map(delivery => parseTaskInputs(delivery.text)?.[0]?.kind)).toEqual(['brief', 'message']);
-    expect(h.team(taskId).task?.state).toBe('working');
+    expect(h.sessions.get('worker')!.deliveries.flatMap(delivery => parseTaskInputs(delivery.text) ?? []).map(input => input.kind)).toEqual(['needs_you']);
   });
 
-  it('tells the owner what the person typed to the worker, and not the inputs the Relay sent it', async () => {
+  it('tells its bot what the person typed to the session, and not the inputs the Relay sent it', async () => {
     const h = await harness();
-    const { taskId } = await h.host(createTask);
+    await h.host(createSub);
     const worker = h.created[0]!;
     await h.runtime.tick();
     h.userMessage(worker.id, h.sessions.get(worker.id)!.deliveries[0]!.text, 'brief');
@@ -118,17 +121,16 @@ describe('a task between a main session and its worker', () => {
     await new Promise(resolve => setTimeout(resolve, 20));
     await h.runtime.tick();
     const told = h.sessions.get('worker')!.deliveries.flatMap(delivery => parseTaskInputs(delivery.text) ?? []);
-    expect(told).toEqual([expect.objectContaining({ kind: 'told', taskId, body: 'Skip the old logs.' })]);
+    expect(told).toEqual([expect.objectContaining({ kind: 'told', body: 'Skip the old logs.' })]);
   });
 
-  it('does not tell the owner the board notices and item-tagged messages the Relay wrote to a temporary bot as if the person typed them', async () => {
+  it('does not tell its bot the board notices and item-tagged messages the Relay wrote to the session as if the person typed them', async () => {
     const h = await harness();
-    await h.host(createTask);
+    await h.host(createSub);
     const worker = h.created[0]!;
     await h.runtime.tick();
     h.userMessage(worker.id, itemChangedText({ title: 'Collect logs', what: 'brief changed' }), 'n1');
-    h.userMessage(worker.id, chiefChangedText({ to: 'bot', bot: 'Collect logs', from: 'Ann', chief: 'Bo' }), 'n2');
-    h.userMessage(worker.id, assistantMessageText({ messageId: 'm0123456789ab', from: 'Chief', body: 'Use main.', tag: itemTagText({ key: 7, title: 'Collect logs', from: 'Chief' }) }), 'n3');
+    h.userMessage(worker.id, taskUpdateText({ taskId: 't', kind: 'message', label: 'Chief', body: 'More.', tag: itemTagText({ key: 7, title: 'Collect logs', from: 'Chief' }) }), 'n3');
     h.userMessage(worker.id, 'Skip the old logs.', 'u1');
     await new Promise(resolve => setTimeout(resolve, 20));
     await h.runtime.tick();
@@ -136,43 +138,42 @@ describe('a task between a main session and its worker', () => {
     expect(told).toEqual([expect.objectContaining({ kind: 'told', body: 'Skip the old logs.' })]);
   });
 
-  it('stops a cancelled task\'s running worker turn and lets its runtime go', async () => {
+  it('stops an ended sub-session\'s running turn and lets its runtime go', async () => {
     const h = await harness();
-    const { taskId } = await h.host(createTask);
+    await h.host(createSub);
     const worker = h.created[0]!;
     await h.runtime.tick();
     h.busy(worker.id, true);
     await h.runtime.tick();
-    const owner = new BotTools({ request: call => h.host(call), tasks: () => true, title: async () => 'Chief' });
-    expect(JSON.parse(await tool(owner.namespace(() => h.ref('codex', 'worker'), false).tools, 'stop_bot').execute({ bot: 'Collect logs' }) as string)).toMatchObject({ status: 'cancelled' });
-    expect(h.team(taskId).task?.state).toBe('cancelled');
+    const bots = new BotTools({ request: call => h.host(call), tasks: () => true, title: async () => 'Chief' });
+    expect(JSON.parse(await tool(bots.namespace(() => h.ref('codex', 'worker'), false).tools, 'stop_sub_session').execute({ sub_session_id: 'Collect logs' }) as string)).toMatchObject({ message: expect.stringContaining('ended') });
+    expect(taskOf(h).task?.state).toBe('ended');
     await h.runtime.tick();
     expect(h.cancelled).toEqual([worker.id]);
     expect(h.released).toContain(worker.id);
   });
 
-  it('starts a read-only worker that may not write, and a worktree worker whose report carries its patch', async () => {
+  it('starts a read-only session that may not write, and a worktree session of its own', async () => {
     const h = await harness();
-    await h.host({ ...createTask, operationId: 'read', workspace: 'read_only' });
+    await h.host({ ...createSub, operationId: 'read', workspace: 'read_only' });
     expect(h.created[0]!.extensions).toMatchObject({ access: 'read_only' });
-    expect(h.created[0]!.extensions.instructions).toContain('read-only');
-    const { taskId } = await h.host({ ...createTask, operationId: 'tree', title: 'Edit', workspace: 'worktree', commit: h.commit });
+    expect(h.created[0]!.extensions.instructions).toContain('without changing it');
+    await h.host({ ...createSub, operationId: 'tree', name: 'Edit', workspace: 'worktree', commit: h.commit });
     const worker = h.created[1]!;
     expect(worker.creation.cwd).not.toBe(h.directory);
     await writeFile(join(worker.creation.cwd!, 'a.txt'), 'two\n');
-    await report(worker.extensions.tools, 'done', 'Changed a.txt.');
-    const summary = h.team(taskId).task!.result!.summary, path = /apply with git apply\): (\S+)$/.exec(summary)?.[1];
-    expect(summary).toMatch(/^Changed a\.txt\.\n\nPatch/);
-    expect(await readFile(path!, 'utf8')).toContain('+two');
-    // Once the result is delivered and the task forgotten, its worktree goes.
+    expect(worker.extensions.instructions).toContain('worktree');
+    // Once ended and its deliveries settled, the session is forgotten and its worktree goes.
+    await h.host({ action: 'stop_sub_session', owner: { providerId: 'codex', nativeSessionId: 'worker' }, subSessionId: 'Edit' });
     await h.runtime.tick(); await h.runtime.tick();
     expect(await stat(worker.creation.cwd!).then(() => true, () => false)).toBe(false);
   });
 
-  it('reports one task listing to the owner', async () => {
+  it('reports the status of its bot\'s sub-sessions', async () => {
     const h = await harness();
-    const { taskId } = await h.host(createTask);
-    expect(await h.host({ action: 'task_status', owner: { providerId: 'codex', nativeSessionId: 'worker' } })).toEqual({ tasks: [expect.objectContaining({ taskId, state: 'working', title: 'Collect logs' })] });
+    await h.host(createSub);
+    expect(await h.host({ action: 'get_sub_session_status', owner: { providerId: 'codex', nativeSessionId: 'worker' } }))
+      .toMatchObject({ sub_sessions: [expect.objectContaining({ name: 'Collect logs', lifecycle: 'live', turn_in_flight: true })] });
   });
 });
 
@@ -181,7 +182,7 @@ describe('a standing bot another bot creates', () => {
     const h = await harness();
     const chief = new BotTools({ request: call => h.host(call), tasks: () => true, title: async () => 'Chief' });
     const created = JSON.parse(await tool(chief.namespace(() => h.ref('codex', 'worker'), false).tools, 'create_bot')
-      .execute({ name: 'Scribe', mission: 'Keep the release notes.', lifetime: 'standing', message: 'Start from v0.3.' }) as string);
+      .execute({ name: 'Scribe', mission: 'Keep the release notes.', message: 'Start from v0.3.' }) as string);
     expect(created).toMatchObject({ status: 'ready' });
     const scribe = h.created[0]!;
     expect(scribe.creation.cwd).toBe(h.directory);
@@ -203,7 +204,7 @@ describe('the main session\'s task tools', () => {
     return { worker, calls };
   }
   const ref = { controllerId: 'controller', providerId: 'codex', nativeSessionId: 'main' };
-  it('offers a bot\'s main session every bot\'s tools while the Relay runs tasks, and starts a temporary bot as the session', async () => {
+  it('offers a bot\'s main session every bot\'s tools while the Relay runs bots, and starts a sub-session as the session', async () => {
     const { worker, calls } = await support(true);
     expect(worker.tools(ref)).toBe('none');
     await worker.refresh('controller');
@@ -212,8 +213,8 @@ describe('the main session\'s task tools', () => {
     expect(worker.tools({ ...ref, nativeSessionId: 'plain' })).toBe('none');
     const tools = worker.namespace(() => ref, false).tools;
     expect(tools.map(item => item.name)).toEqual(BOT_TOOLS);
-    await tool(tools, 'create_bot').execute({ name: 'Collect logs', mission: 'Collect them.', message: 'Start with the last run.', operationId: 'op' });
-    expect(calls).toEqual([{ action: 'create_bot', owner: { providerId: 'codex', nativeSessionId: 'main', title: 'Chief' }, operationId: 'op', name: 'Collect logs', mission: 'Collect them.', lifetime: 'temporary', message: 'Start with the last run.' }]);
+    await tool(tools, 'create_sub_session').execute({ name: 'Collect logs', prompt: 'Collect them.', tracked_task_keys: [3], operationId: 'op' });
+    expect(calls).toEqual([{ action: 'create_sub_session', owner: { providerId: 'codex', nativeSessionId: 'main', title: 'Chief' }, operationId: 'op', name: 'Collect logs', prompt: 'Collect them.', trackedTaskKeys: [3] }]);
     await tool(tools, 'list_bots').execute({});
     expect(calls[1]).toEqual({ action: 'list_bots', owner: { providerId: 'codex', nativeSessionId: 'main' } });
     // Where a bot works is chosen from what list_hosts shows, and passed to the Relay as named.
@@ -225,7 +226,7 @@ describe('the main session\'s task tools', () => {
       expect.objectContaining({ action: 'create_bot', operationId: 'op3', host: 'studio', cwd: '/work/shop' })]);
     calls.length = 2;
     // A provider that cannot keep a session read-only is refused before anything is asked of the Relay.
-    await expect(tool(tools, 'create_bot').execute({ name: 'T', mission: 'B', workspace: 'read_only' })).rejects.toThrow('cannot work read-only');
+    await expect(tool(tools, 'create_sub_session').execute({ name: 'T', prompt: 'B', workspace: 'read_only' })).rejects.toThrow('cannot work read-only');
     expect(calls).toHaveLength(2);
     // After the person's input, a call carries its cause, and the turn's end reports to the turn's chain.
     worker.causes.set(ref, { kind: 'person', messageId: 'u1' });
@@ -300,7 +301,7 @@ describe('messages between assistants', () => {
     await h.host({ action: 'bot_enablement' });
     await h.runtime.tick();
     for (const id of ['worker', 'tracker']) h.sessions.get(id)!.deliveries.length = 0;
-    expect(JSON.parse(await tool(tools(chief, 'worker'), 'list_bots').execute({}) as string)).toEqual({ bots: [{ id: 'b_' + '2'.repeat(32), name: 'Tracker', kind: 'standing' }] });
+    expect(JSON.parse(await tool(tools(chief, 'worker'), 'list_bots').execute({}) as string)).toEqual({ bots: [{ id: 'b_' + '2'.repeat(32), name: 'Tracker' }] });
     h.busy('tracker', true);
     const sent = JSON.parse(await tool(tools(chief, 'worker'), 'message').execute({ to: 'Tracker', text: 'Is the branch cut?' }) as string);
     expect(sent).toMatchObject({ outcome: 'delivered' });

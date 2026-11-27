@@ -14,23 +14,24 @@ export function taskWorker(tasks: readonly Team[] | undefined, taskId: string): 
 /** What a side's answer says when the person brings it back into the conversation: their own words, quoting the answer. */
 export const bringBackText = (card: SideCard, t: Translate): string => `${t('timeline.side.quote', { title: card.title })}\n\n${card.summary.split('\n').map(line => `> ${line}`).join('\n')}`;
 
-/** The tasks and the bots' inboxes, as the Relay lists them. Task cards open a task's worker session the way the page opens any session. */
+/** The sub-sessions and the bots' inboxes, as the Relay lists them. A sub-session's card opens its session the way the page opens any session. */
 export function taskDirectory(tasks: readonly Team[] | undefined, open: (worker: TaskWorker) => void, act: TaskDirectory['act'] = async () => {}, groups: readonly WindowGroup[] = [], setChief?: TaskDirectory['setChief'], ask?: TaskDirectory['ask'], writeBoard?: TaskDirectory['writeBoard'], bringBack?: TaskDirectory['bringBack']): TaskDirectory {
   const standing = () => groups.flatMap(group => Object.values(group.bots?.members ?? {}).flatMap(item => item.botId ? [{ botId: item.botId, name: item.name ?? item.botId, ...(item.chief ? { chief: item.chief } : {}) }] : []));
   const inbox = (botId: string) => (tasks ?? []).find(team => team.inbox?.botId === botId);
-  const temporary = (botId: string) => (tasks ?? []).find(team => team.task?.botId === botId);
-  /** The session a bot works in that the page can open: a standing bot's main session, or a temporary bot's worker. */
+  const subSession = (id: string) => (tasks ?? []).find(team => team.task?.subSessionId === id);
+  /** The session a bot works in that the page can open: a standing bot's main session, or a sub-session's own session. */
   const sessionOf = (botId: string): TaskWorker | undefined => {
     const team = inbox(botId), seat = team?.members[0];
     if (team && seat?.nativeSessionId) return { hostId: seat.hostId, providerId: seat.providerId, nativeSessionId: seat.nativeSessionId, title: standing().find(bot => bot.botId === botId)?.name ?? seat.name };
-    const task = temporary(botId);
+    const task = subSession(botId);
     return task ? taskWorker(tasks, task.id) : undefined;
   };
   return {
     canOpen: taskId => !!taskWorker(tasks, taskId),
     open: taskId => { const worker = taskWorker(tasks, taskId); if (worker) open(worker); },
     act,
-    owned: owner => (tasks ?? []).filter(team => team.task && team.members[1]?.providerId === owner.providerId && team.members[1].nativeSessionId === owner.nativeSessionId)
+    // A person's own side is beside its conversation, not in its bot's list.
+    owned: owner => (tasks ?? []).filter(team => team.task && team.task.startedBy !== 'person' && team.members[1]?.providerId === owner.providerId && team.members[1].nativeSessionId === owner.nativeSessionId)
       .map(taskView).sort((a, b) => b.updatedAt - a.updatedAt),
     // A bot's standing bots are the ones whose record names it as their chief.
     staff: botId => groups.flatMap(group => Object.values(group.bots?.members ?? {}).flatMap(item => item.chief === botId && item.botId ? [{ botId: item.botId, name: item.name ?? item.botId }] : [])),
@@ -45,8 +46,8 @@ export function taskDirectory(tasks: readonly Team[] | undefined, open: (worker:
     ...(ask ? { ask } : {}),
     ...(bringBack ? { bringBack } : {}),
     // The sides asked from a conversation that have reported; their results never reach it as input.
-    sides: from => (tasks ?? []).filter(team => team.task?.side && team.task.result && team.members[1]?.providerId === from.providerId && team.members[1].nativeSessionId === from.nativeSessionId)
-      .map(team => ({ taskId: team.id, title: team.task!.title, status: team.task!.result!.status, summary: team.task!.result!.summary, at: team.task!.result!.reportedAt }))
+    sides: from => (tasks ?? []).filter(team => team.task?.startedBy === 'person' && team.task.result && team.members[1]?.providerId === from.providerId && team.members[1].nativeSessionId === from.nativeSessionId)
+      .map(team => ({ taskId: team.id, title: team.task!.title, status: team.task!.result!.outcome === 'finished' ? 'done' as const : 'failed' as const, summary: team.task!.result!.text, at: team.task!.result!.at }))
       .sort((a, b) => a.at - b.at),
     // What the person asked from a conversation, from the answer sessions that conversation has; oldest first.
     asks: from => (tasks ?? []).filter(team => team.ask && team.ask.from.providerId === from.providerId && team.ask.from.nativeSessionId === from.nativeSessionId)
@@ -58,12 +59,12 @@ export function taskDirectory(tasks: readonly Team[] | undefined, open: (worker:
       .map(team => ({ teamId: team.id, conversation: team.ask!.from.name, lastAt: team.ask!.lastAt, count: team.ask!.entries.length }))
       .sort((a, b) => b.lastAt - a.lastAt),
     boardOf: botId => inbox(botId)?.inbox?.board,
-    botName: botId => standing().find(bot => bot.botId === botId)?.name ?? temporary(botId)?.task?.title,
-    // The bot's standing staff, and its temporary bots at work (the tasks its main session owns).
+    botName: botId => standing().find(bot => bot.botId === botId)?.name ?? subSession(botId)?.task?.title,
+    // The bot's standing staff, and its live sub-sessions (the ones its main session owns).
     assignees: botId => {
       const seat = inbox(botId)?.members[0];
-      const working = (tasks ?? []).filter(team => team.task?.botId && team.task.state !== 'done' && team.task.state !== 'failed' && team.task.state !== 'cancelled' && !!seat
-        && team.members[1]?.providerId === seat.providerId && team.members[1].nativeSessionId === seat.nativeSessionId).map(team => ({ botId: team.task!.botId!, name: team.task!.title }));
+      const working = (tasks ?? []).filter(team => team.task?.subSessionId && team.task.startedBy !== 'person' && team.task.state !== 'ended' && !!seat
+        && team.members[1]?.providerId === seat.providerId && team.members[1].nativeSessionId === seat.nativeSessionId).map(team => ({ botId: team.task!.subSessionId!, name: team.task!.title }));
       return [...standing().filter(bot => bot.chief === botId).map(({ botId: id, name }) => ({ botId: id, name })), ...working];
     },
     canOpenBot: botId => !!sessionOf(botId),

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { BoardItem, Team, TeamTask, WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { TaskDirectoryContext } from '@orchardworks/agent-client-web/react';
 import { render } from '../../test/setup.js';
-import { TasksList } from '../../conversation/assistant/TasksList.js';
+import { SubSessionsList } from '../../conversation/assistant/SubSessionsList.js';
 import { bringBackText, taskDirectory } from './task-directory.js';
 import { translator } from '@orchardworks/agent-client';
 
@@ -16,7 +16,7 @@ function taskTeam(id: string, task: Partial<TeamTask>, worker: { ready?: boolean
     task: { title: `Task ${id}`, brief: 'B', state: 'working', createdAt: 1, updatedAt: 1, ...task } as TeamTask } as Team;
 }
 
-describe('the task directory', () => {
+describe('the sub-session directory', () => {
   it('opens a task\'s worker once its session exists, and lists a session\'s own tasks newest first', () => {
     const open = vi.fn();
     const directory = taskDirectory([taskTeam('a', { updatedAt: 1 }), taskTeam('b', { updatedAt: 5 }, { ready: false }), taskTeam('c', {}, { owner: 'other' })], open);
@@ -29,29 +29,33 @@ describe('the task directory', () => {
     expect(directory.owned({ providerId: 'claude', nativeSessionId: 'main' }).map(task => [task.taskId, task.state])).toEqual([['b', 'queued'], ['a', 'working']]);
   });
 
-  it('groups a session\'s tasks in its details, and a row opens the worker', async () => {
+  it('groups a bot\'s sub-sessions in its details, and a row opens the session', async () => {
     const open = vi.fn();
-    const teams = [taskTeam('w', {}), taskTeam('n', { state: 'needs_input', waiting: { reason: 'question', text: 'Which branch?', since: 2 } }),
-      taskTeam('d', { state: 'done', result: { status: 'done', summary: 'Logs attached.', reportedAt: 3 } })];
+    const teams = [taskTeam('w', {}), taskTeam('n', { state: 'needs_input', waiting: { reason: 'interaction', text: 'Run npm test?', since: 2 } }),
+      taskTeam('i', { state: 'idle', result: { outcome: 'finished', text: 'Logs attached.', at: 3 } }), taskTeam('e', { state: 'ended', result: { outcome: 'finished', text: 'Done.', at: 3 } })];
     const directory = taskDirectory(teams, open);
-    const container = await render(<TaskDirectoryContext.Provider value={directory}><TasksList tasks={directory.owned({ providerId: 'claude', nativeSessionId: 'main' })} /></TaskDirectoryContext.Provider>);
+    const container = await render(<TaskDirectoryContext.Provider value={directory}><SubSessionsList subSessions={directory.owned({ providerId: 'claude', nativeSessionId: 'main' })} /></TaskDirectoryContext.Provider>);
     expect([...container.querySelectorAll('section')].map(section => [section.getAttribute('aria-label'), [...section.querySelectorAll('li')].length]))
-      .toEqual([['Needs you', 1], ['Working', 1], ['Done', 1]]);
+      .toEqual([['Needs you', 1], ['Working', 1], ['Idle', 1], ['Ended', 1]]);
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button.lab-assistant-session-title')].find(button => button.textContent === 'Task n')!.click());
     expect(open).toHaveBeenCalledWith(expect.objectContaining({ nativeSessionId: 'n-session' }));
   });
 
-  it('stops a running task, marks it done or keeps its bot from its row, and offers only keeping on a finished one', async () => {
+  it('stops a live sub-session from its row, offers nothing on an ended one, and never offers Keep or Mark done', async () => {
     const act = vi.fn(async () => {});
-    const directory = taskDirectory([taskTeam('w', {}), taskTeam('d', { state: 'done', result: { status: 'done', summary: 'Done.', reportedAt: 3 } })], () => {}, act);
-    const container = await render(<TaskDirectoryContext.Provider value={directory}><TasksList tasks={directory.owned({ providerId: 'claude', nativeSessionId: 'main' })} /></TaskDirectoryContext.Provider>);
+    const directory = taskDirectory([taskTeam('w', {}), taskTeam('i', { state: 'idle' }), taskTeam('e', { state: 'ended', result: { outcome: 'finished', text: 'Done.', at: 3 } })], () => {}, act);
+    const container = await render(<TaskDirectoryContext.Provider value={directory}><SubSessionsList subSessions={directory.owned({ providerId: 'claude', nativeSessionId: 'main' })} /></TaskDirectoryContext.Provider>);
     const rows = [...container.querySelectorAll('li')];
     for (const row of rows) await act_(() => row.querySelector<HTMLButtonElement>('.lab-assistant-session-toggle')!.click());
-    expect(rows.map(row => [...row.querySelectorAll('.lab-assistant-task-actions button')].map(button => button.textContent))).toEqual([['Mark done', 'Stop', 'Keep as a bot'], ['Keep as a bot']]);
-    await act_(() => [...rows[0]!.querySelectorAll<HTMLButtonElement>('.lab-assistant-task-actions button')].find(button => button.textContent === 'Stop')!.click());
-    expect(act).toHaveBeenCalledWith('w', 'cancel_task');
-    await act_(() => rows[1]!.querySelector<HTMLButtonElement>('.lab-assistant-task-actions button')!.click());
-    expect(act).toHaveBeenCalledWith('d', 'keep_task');
+    expect(rows.map(row => [...row.querySelectorAll('.lab-assistant-task-actions button')].map(button => button.textContent))).toEqual([['Stop'], ['Stop'], []]);
+    await act_(() => rows[0]!.querySelector<HTMLButtonElement>('.lab-assistant-task-actions button')!.click());
+    expect(act).toHaveBeenCalledWith('w', 'stop_sub_session');
+  });
+
+  it('keeps a person\'s side out of its bot\'s list and gives its result as a card beside the conversation', () => {
+    const directory = taskDirectory([taskTeam('s', { startedBy: 'person', state: 'idle', result: { outcome: 'finished', text: 'A word counter.', at: 7 } }), taskTeam('b', {})], () => {});
+    expect(directory.owned({ providerId: 'claude', nativeSessionId: 'main' }).map(item => item.taskId)).toEqual(['b']);
+    expect(directory.sides!({ providerId: 'claude', nativeSessionId: 'main' })).toEqual([{ taskId: 's', title: 'Task s', status: 'done', summary: 'A word counter.', at: 7 }]);
   });
 
   describe('the boards of bots', () => {
@@ -70,18 +74,18 @@ describe('the task directory', () => {
       expect(directory.board!({ providerId: 'claude', nativeSessionId: 'chief' }).map(entry => entry.key)).toEqual([1, 3, 2]);
     });
 
-    it('names assignees, standing or temporary, offers the standing staff and the temporary bots at work, and opens the session doing an item', () => {
-      const working = { ...taskTeam('t1', { botId: id(5), title: 'Regression' }, { owner: 'chief' }) }, finished = taskTeam('t2', { botId: id(6), title: 'Old run', state: 'done', result: { status: 'done', summary: 'Ok.', reportedAt: 3 } }, { owner: 'chief' });
-      const strangers = taskTeam('t3', { botId: id(7), title: 'Other chief' }, { owner: 'someone' });
+    it('names assignees, standing or a sub-session, offers the standing staff and the live sub-sessions, and opens the session doing an item', () => {
+      const working = { ...taskTeam('t1', { subSessionId: 's_' + '5'.repeat(32), title: 'Regression' }, { owner: 'chief' }) }, finished = taskTeam('t2', { subSessionId: 's_' + '6'.repeat(32), title: 'Old run', state: 'ended', result: { outcome: 'finished', text: 'Ok.', at: 3 } }, { owner: 'chief' });
+      const strangers = taskTeam('t3', { subSessionId: 's_' + '7'.repeat(32), title: 'Other chief' }, { owner: 'someone' });
       const open = vi.fn();
       const directory = taskDirectory([inbox(1, 'chief', []), inbox(2, 'tracker', []), working, finished, strangers], open, undefined, groups);
       expect(directory.botName!(id(2))).toBe('Tracker');
-      expect(directory.botName!(id(6))).toBe('Old run');
-      expect(directory.assignees!(id(1))).toEqual([{ botId: id(2), name: 'Tracker' }, { botId: id(5), name: 'Regression' }]);
+      expect(directory.botName!('s_' + '6'.repeat(32))).toBe('Old run');
+      expect(directory.assignees!(id(1))).toEqual([{ botId: id(2), name: 'Tracker' }, { botId: 's_' + '5'.repeat(32), name: 'Regression' }]);
       expect(directory.canOpenBot!(id(2))).toBe(true);
       expect(directory.canOpenBot!(id(9))).toBe(false);
       directory.openBot!(id(2));
-      directory.openBot!(id(5));
+      directory.openBot!('s_' + '5'.repeat(32));
       expect(open.mock.calls).toEqual([[{ hostId: 'mac', providerId: 'claude', nativeSessionId: 'tracker', title: 'Tracker' }], [{ hostId: 'mac', providerId: 'claude', nativeSessionId: 't1-session', title: 'Regression' }]]);
     });
   });
@@ -150,9 +154,9 @@ describe('the task directory', () => {
   });
 
   it('lists the sides asked from a conversation once they have reported, oldest first, and quotes an answer to bring it back', () => {
-    const result = (summary: string, reportedAt: number) => ({ status: 'done' as const, summary, reportedAt });
-    const directory = taskDirectory([taskTeam('s2', { side: true, state: 'done', result: result('Second.\nMore.', 9) }), taskTeam('s1', { side: true, state: 'done', result: result('First.', 4) }),
-      taskTeam('working', { side: true }), taskTeam('bot', { state: 'done', result: result('Not a side.', 3) }), taskTeam('elsewhere', { side: true, state: 'done', result: result('Other chat.', 1) }, { owner: 'other' })], vi.fn());
+    const result = (text: string, at: number) => ({ outcome: 'finished' as const, text, at });
+    const directory = taskTeam && taskDirectory([taskTeam('s2', { startedBy: 'person', state: 'idle', result: result('Second.\nMore.', 9) }), taskTeam('s1', { startedBy: 'person', state: 'idle', result: result('First.', 4) }),
+      taskTeam('working', { startedBy: 'person' }), taskTeam('bot', { state: 'idle', result: result('Not a side.', 3) }), taskTeam('elsewhere', { startedBy: 'person', state: 'idle', result: result('Other chat.', 1) }, { owner: 'other' })], vi.fn());
     const cards = directory.sides!({ providerId: 'claude', nativeSessionId: 'main' });
     expect(cards.map(card => [card.taskId, card.at])).toEqual([['s1', 4], ['s2', 9]]);
     expect(bringBackText(cards[1]!, translator('en'))).toBe('From the side "Task s2":\n\n> Second.\n> More.');

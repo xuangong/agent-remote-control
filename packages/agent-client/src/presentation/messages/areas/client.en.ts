@@ -208,7 +208,7 @@ export const client = {
   'client.fork.parentFirst': 'Open the direct parent session before opening this nested subagent.',
   'client.fork.askDescription': 'Toggle global Ask view; use on/off, or add a question for this session',
   'client.fork.forkDescription': 'Create an independent session with this conversation’s context',
-  'client.fork.sideDescription': 'Start a temporary bot alongside this chat for what you write after /side',
+  'client.fork.sideDescription': 'Start a sub-session alongside this chat for what you write after /side',
   'client.fork.handoffDescription': 'Continue this conversation in a new session, optionally with another provider',
   'client.fork.handoffUsage': 'Use /handoff or /handoff <provider>, for example /handoff claude.',
 

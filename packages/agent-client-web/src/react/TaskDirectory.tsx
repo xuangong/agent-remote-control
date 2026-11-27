@@ -8,8 +8,8 @@ export interface SideCard { readonly taskId: string; readonly title: string; rea
 /** An answer session a bot has open: the conversation it answers, when it was last asked and how many questions it holds. */
 export interface AnswerSession { readonly teamId: string; readonly conversation: string; readonly lastAt: number; readonly count: number }
 /**
- * What the page knows about tasks, for task cards: whether a task's worker session can be opened, and opening it. The page supplies it;
- * without it a card shows the task without the action.
+ * What the page knows about sub-sessions, for their cards: whether a sub-session's session can be opened, and opening it. The page supplies it;
+ * without it a card shows the sub-session without the action.
  */
 export interface TaskDirectory {
   canOpen(taskId: string): boolean;
@@ -47,8 +47,8 @@ export interface TaskDirectory {
   bringBack?(card: SideCard, agentId: string): Promise<void>;
   /** The answer sessions a standing bot has open now, newest first. */
   answering?(botId: string): readonly AnswerSession[];
-  /** The person stops a running task, takes it as done, or keeps its bot as a standing bot (bots design 10). */
-  act(taskId: string, action: 'cancel_task' | 'mark_task_done' | 'keep_task'): Promise<void>;
+  /** The person ends a sub-session: its running turn stops and its session is released. */
+  act(taskId: string, action: 'stop_sub_session'): Promise<void>;
 }
 export const TaskDirectoryContext = createContext<TaskDirectory | undefined>(undefined);
 export const useTaskDirectory = (): TaskDirectory | undefined => useContext(TaskDirectoryContext);

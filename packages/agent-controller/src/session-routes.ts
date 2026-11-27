@@ -1,7 +1,7 @@
 import type { AgentHistoryPage, AgentHistoryQuery } from '@orchardworks/agent-provider-sdk';
 import { quotedSessionContextPrefix, type AgentInteractionRequest, type AgentInteractionResponse } from '@orchardworks/agent-remote-protocol';
 import type { RemoteSessionSummary } from '@orchardworks/agent-session-runtime';
-import { controllerPath } from '@orchardworks/agent-remote-protocol/model';
+import { controllerPath, type SessionUse } from '@orchardworks/agent-remote-protocol/model';
 import { changeSessionRef, describeSessionRefs, SessionRefError, type SessionRefContext, type SessionRefs } from './session-refs.js';
 
 /** A session on this Host, by provider and native identity. */
@@ -27,6 +27,8 @@ export interface SessionCallerCatalog {
   sessions(providerId: string): Promise<readonly RemoteSessionSummary[]>;
   session(ref: SessionCallerRef): Promise<RemoteSessionSummary | undefined>;
   history(ref: SessionCallerRef, query: AgentHistoryQuery): Promise<AgentHistoryPage>;
+  /** Lists a provider's sessions again when it lists only on request, and settles when that listing ends. */
+  refreshListing?(providerId: string): Promise<void>;
   /** The state of a session this Controller holds open. */
   liveState(ref: SessionCallerRef): SessionCallerState | undefined;
 }
@@ -146,12 +148,16 @@ export async function handleSessionRequest(input: unknown, caller: SessionCaller
           if (cursor.limit !== limit || cursor.providerId !== (providerId ?? null)) fail('invalid_request', 'The cursor belongs to another listing.');
           offset = cursor.offset;
         }
+        const cwd = optionalString(request.cwd, 'cwd', 4096);
+        if (request.refresh !== undefined && typeof request.refresh !== 'boolean') fail('invalid_request', 'Invalid refresh.');
         const providers = context.catalog.providers();
         if (providerId !== undefined && !providers.includes(providerId)) fail('invalid_request', 'The provider is unavailable on this Host.');
         const unavailable: string[] = [];
+        // A provider that lists only on request lists again first; a failed listing leaves the last one.
+        if (request.refresh === true) await Promise.all((providerId === undefined ? providers : [providerId]).map(id => context.catalog.refreshListing?.(id).catch(() => undefined)));
         const listed = await Promise.all((providerId === undefined ? providers : [providerId]).map(id => context.catalog.sessions(id)
           .catch(() => { unavailable.push(id); return []; })));
-        const summaries = listed.flat().filter(summary => !context.isShared(summary))
+        const summaries = listed.flat().filter(summary => !context.isShared(summary) && (cwd === undefined || sameDirectory(summary.workspace, cwd)))
           .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt) || refKey(left).localeCompare(refKey(right)));
         const page = summaries.slice(offset, offset + limit);
         const pageRefs = await Promise.all(page.map(summary => refsOf(summary)));
@@ -223,7 +229,8 @@ export async function handleSessionRequest(input: unknown, caller: SessionCaller
         await exists(ref);
         const site = context.siteOrigin?.() ?? fail('host_unregistered', 'This Host is not paired with a Relay, so its sessions have no link.');
         const hostId = await context.hostId() ?? fail('host_unregistered', 'This Host is not registered with the Relay yet.');
-        return { result: { session: { address: address(ref) }, url: site + controllerPath({ hostId, providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }) } };
+        const use = sessionUse(request.use);
+        return { result: { session: { address: address(ref) }, url: site + controllerPath({ hostId, providerId: ref.providerId, nativeSessionId: ref.nativeSessionId, ...(use ? { sessionUse: use } : {}) }) } };
       }
       case 'inspect': {
         const ref = target(request.target);
@@ -322,6 +329,17 @@ function historyQuery(request: Record<string, unknown>): AgentHistoryQuery {
   const textOffset = optionalInteger(request.textOffset, 'textOffset', 0, Number.MAX_SAFE_INTEGER);
   return { ...(cursor !== undefined ? { cursor } : {}), ...(query !== undefined ? { query } : {}), ...(turnId !== undefined ? { turnId } : {}),
     ...(limit !== undefined ? { limit } : {}), ...(textOffset !== undefined ? { textOffset } : {}) };
+}
+/** Whether a session's recorded working directory is the directory asked for, ignoring a trailing separator. */
+function sameDirectory(workspace: string | undefined, directory: string): boolean {
+  const plain = (value: string) => value.length > 1 ? value.replace(/[\\/]+$/, '') : value;
+  return workspace !== undefined && plain(workspace) === plain(directory);
+}
+function sessionUse(value: unknown): SessionUse | undefined {
+  if (value === undefined) return undefined;
+  const use = value as { kind?: unknown; name?: unknown } | null;
+  if (!use || typeof use !== 'object' || use.kind !== 'bot' || (use.name !== undefined && (typeof use.name !== 'string' || !use.name || use.name.length > 256 || /[\u0000-\u001f\u007f]/.test(use.name)))) fail('invalid_request', 'The use of the session is invalid.');
+  return use.name === undefined ? { kind: 'bot' } : { kind: 'bot', name: use.name as string };
 }
 function optionalString(value: unknown, field: string, maximum: number): string | undefined {
   if (value === undefined) return undefined;

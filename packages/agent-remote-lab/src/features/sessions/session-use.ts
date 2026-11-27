@@ -52,7 +52,7 @@ export interface SessionUsePorts {
   /** The bot of this session when one exists. */
   existingBot(binding: WindowSessionBinding): { groupId: string; viewId: string } | undefined;
   /** Starts the bot's group from the binding and returns where it is. */
-  createBot(binding: WindowSessionBinding): Promise<{ groupId: string; viewId: string }>;
+  createBot(binding: WindowSessionBinding, name: string): Promise<{ groupId: string; viewId: string }>;
   /** Shows the bot. */
   show(place: { groupId: string; viewId: string }): void;
 }
@@ -60,10 +60,13 @@ export type SessionUseOutcome =
   | { kind: 'created' | 'existing' }
   | { kind: 'held'; owner: NativeSessionOwner; message: string };
 
+/** The most a bot's name holds (`BotName`). */
+export const BOT_NAME_LIMIT = 60;
+
 /** A bot is named after what the person typed, else the session's own title, else its identity. */
 export function botBinding(request: SessionUseRequest, name: string, title: string | undefined): WindowSessionBinding {
   return { hostId: request.session.hostId, providerId: request.session.providerId, nativeSessionId: request.session.nativeSessionId,
-    title: name.trim() || title || request.session.nativeSessionId };
+    title: name.trim().slice(0, BOT_NAME_LIMIT) || title || request.session.nativeSessionId };
 }
 
 export async function applySessionUse(request: SessionUseRequest, binding: WindowSessionBinding, ports: SessionUsePorts, takeOver?: string): Promise<SessionUseOutcome> {
@@ -74,6 +77,6 @@ export async function applySessionUse(request: SessionUseRequest, binding: Windo
   }
   const known = ports.existingBot(binding);
   if (known) { ports.show(known); return { kind: 'existing' }; }
-  ports.show(await ports.createBot(binding));
+  ports.show(await ports.createBot(binding, binding.title.slice(0, BOT_NAME_LIMIT)));
   return { kind: 'created' };
 }

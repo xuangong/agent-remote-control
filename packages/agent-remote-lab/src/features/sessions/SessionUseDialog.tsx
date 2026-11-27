@@ -29,7 +29,7 @@ export function SessionUseDialog({ title, providerId, name, phase, failure, onNa
         ? <p className="lab-session-use-held" role="status">{t('sessions.use.held', { provider: providerId })}</p>
         : <>
           <p>{t('sessions.use.botBody')}</p>
-          <label>{t('sessions.use.nameLabel')}<input value={name} maxLength={256} disabled={working} onChange={event => onName(event.target.value)} autoComplete="off" /></label>
+          <label>{t('sessions.use.nameLabel')}<input value={name} maxLength={60} disabled={working} onChange={event => onName(event.target.value)} autoComplete="off" /></label>
         </>}
       {working ? <p role="status">{t('sessions.use.working')}</p> : null}
       {failure ? <p role="alert">{failure}</p> : null}

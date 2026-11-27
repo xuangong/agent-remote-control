@@ -76,7 +76,7 @@ it('round trips what a link asks the page to do with its session: make it a bot'
 
 it.each([
   'as=other', 'as=', 'as=window', 'as=bot&as=bot', 'as=bot&name=a&name=b', 'as=bot&name=%00',
-  'name=Bot', `as=bot&name=${'x'.repeat(257)}`, 'as=bot&intent=history', 'as=bot&keepOriginal=1',
+  'name=Bot', `as=bot&name=${'x'.repeat(61)}`, 'as=bot&intent=history', 'as=bot&keepOriginal=1',
 ])('rejects an invalid session use: %s', query => {
   expect(() => readControllerLocation(new URLSearchParams(`host=desk&provider=claude&session=A&${query}`))).toThrow();
 });

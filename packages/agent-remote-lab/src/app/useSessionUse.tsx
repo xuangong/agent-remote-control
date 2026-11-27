@@ -5,7 +5,7 @@ import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { NativeSessionOwner } from '@orchardworks/agent-remote-protocol';
 import { SessionDirectoryClient } from '../kernel/directory-client.js';
 import { SessionUseDialog, type SessionUsePhase } from '../features/sessions/SessionUseDialog.js';
-import { applySessionUse, botBinding, existingBot, type SessionUsePorts, type SessionUseRequest } from '../features/sessions/session-use.js';
+import { applySessionUse, BOT_NAME_LIMIT, botBinding, existingBot, type SessionUsePorts, type SessionUseRequest } from '../features/sessions/session-use.js';
 import { finishSessionUse } from '../features/sessions/session-use-page.js';
 import type { SessionSuccessionBindingSlice } from './useSessionSuccessionBinding.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
@@ -33,7 +33,7 @@ export function useSessionUse(scope: Pick<AppInputs & WorkbenchShellSlice & Sess
   }, [identity, accessReady]);
 
   // The bot starts with the name the link gave, else the session's own title, until the person types.
-  const shownName = edited ? name : request?.use.name ?? title ?? '';
+  const shownName = edited ? name : (request?.use.name ?? title ?? '').slice(0, BOT_NAME_LIMIT);
   function end() { finishSessionUse(); setRequest(undefined); }
   async function run(takeOver?: string) {
     if (!request || !directory) return;
@@ -41,7 +41,7 @@ export function useSessionUse(scope: Pick<AppInputs & WorkbenchShellSlice & Sess
     const ports: SessionUsePorts = {
       attach: async generation => { await directory.attach(request.session.providerId, request.session.nativeSessionId, undefined, generation); },
       existingBot: binding => existingBot(windowWorkspace.groups, binding),
-      createBot: binding => windowWorkspace.createBotGroup(binding),
+      createBot: (binding, name) => windowWorkspace.createBotGroup(binding, name),
       show: place => navigation.select({ kind: 'bot', groupId: place.groupId, viewId: place.viewId }),
     };
     try {

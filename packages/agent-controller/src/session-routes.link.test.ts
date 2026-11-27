@@ -77,7 +77,7 @@ describe('session link with a use', () => {
     expect([...url.searchParams.keys()].sort()).toEqual(['as', 'host', 'name', 'provider', 'session']);
   });
 
-  it.each([{ kind: 'bot', name: '' }, { kind: 'other' }, 'bot', { kind: 'bot', name: 'a'.repeat(300) }, { kind: 'bot', name: 3 }, { kind: 'window' }])('refuses the use %j', async use => {
+  it.each([{ kind: 'bot', name: '' }, { kind: 'other' }, 'bot', { kind: 'bot', name: 'a'.repeat(61) }, { kind: 'bot', name: 3 }, { kind: 'window' }])('refuses the use %j', async use => {
     const answer = await handleSessionRequest({ command: 'link', target: 'desk/claude/abc', use }, owner, context(sessions));
     expect(answer).toMatchObject({ error: { code: 'invalid_request' } });
   });

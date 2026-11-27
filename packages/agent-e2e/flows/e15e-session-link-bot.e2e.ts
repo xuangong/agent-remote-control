@@ -34,6 +34,8 @@ it('E15e: the link made in the session’s directory asks once, then shows the b
   await dialog.getByRole('button', { name: 'Make bot' }).click();
   await showsText(page, 'The notes are kept.');
   expect(new URL(page.url()).searchParams.get('mode')).toBe('bot');
+  // The bot carries the name the link gave, not a generated one.
+  await showsText(page, 'Reused');
   expect(stack.provider.session('reuse')).toBeDefined();
   await dialog.waitFor({ state: 'hidden' });
   // A reload does not ask again, and the bot is still there with its history.
@@ -54,6 +56,7 @@ it('E15e: a terminal that still holds the session is named, and taking it over m
   expect(await dialog.getByText('command line in a terminal still has this session open').count()).toBe(1);
   await dialog.getByRole('button', { name: 'Take over here' }).click();
   await showsText(page, 'The notes are kept.');
+  await showsText(page, 'Reuse test');
   expect(new URL(page.url()).searchParams.get('mode')).toBe('bot');
   await context.close();
 });

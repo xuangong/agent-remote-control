@@ -92,7 +92,7 @@ Codex lists sessions started outside the Controller only on request. When the la
 
 Errors name the provider's limit: `session_not_found` says no session of that provider has this working directory, and adds that pi saves a session only after its first message, that Claude Code saves one when its first message is sent, that Codex was asked and has none, or that Copilot or OpenCode list only the sessions they have saved. `provider_unavailable` means the provider's catalog could not be read. A session in another directory is not found; use its address or `--pick` there.
 
-`--bot [NAME]` makes the link ask the page to turn the session into a bot, called NAME when given (the page's confirmation proposes the session's own title otherwise). `NAME` is the next word unless it starts with `--`, or write `--bot=NAME`; put the address before `--bot`. The link adds `as=bot` and `name`; it carries no credential and no title, so showing it on a screen shows nothing the plain session link did not. Without `--bot` the link only opens the session.
+`--bot [NAME]` makes the link ask the page to turn the session into a bot, called NAME when given, at most 60 characters, the length of a bot's name (the page's confirmation proposes the session's own title otherwise, and the bot gets the name typed there). `NAME` is the next word unless it starts with `--`, or write `--bot=NAME`; put the address before `--bot`. The link adds `as=bot` and `name`; it carries no credential and no title, so showing it on a screen shows nothing the plain session link did not. Without `--bot` the link only opens the session.
 
 ### References
 

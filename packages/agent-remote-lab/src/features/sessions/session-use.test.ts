@@ -12,7 +12,7 @@ function ports(overrides: Partial<SessionUsePorts> = {}) {
   const value: SessionUsePorts = {
     attach: async takeOver => { log.push(`attach ${takeOver ?? ''}`.trim()); },
     existingBot: () => undefined,
-    createBot: async next => { log.push(`create ${next.title}`); return { groupId: 'g1', viewId: 'main' }; },
+    createBot: async (next, name) => { log.push(`create ${next.title} as ${name}`); return { groupId: 'g1', viewId: 'main' }; },
     show: place => { log.push(`show ${place.groupId}/${place.viewId}`); },
     ...overrides,
   };
@@ -41,7 +41,7 @@ describe('applying a bot use', () => {
   it('attaches the session, then makes the bot named after the person’s choice and shows it', async () => {
     const { log, value } = ports();
     expect(await applySessionUse(request, binding, value)).toEqual({ kind: 'created' });
-    expect(log).toEqual(['attach', 'create Reuse test', 'show g1/main']);
+    expect(log).toEqual(['attach', 'create Reuse test as Reuse test', 'show g1/main']);
   });
 
   it('makes nothing while a native CLI holds the session, and says who holds it', async () => {
@@ -53,7 +53,7 @@ describe('applying a bot use', () => {
   it('takes the session over with the owner generation and then makes the bot', async () => {
     const { log, value } = ports();
     expect(await applySessionUse(request, binding, value, 'gen-1')).toEqual({ kind: 'created' });
-    expect(log).toEqual(['attach gen-1', 'create Reuse test', 'show g1/main']);
+    expect(log).toEqual(['attach gen-1', 'create Reuse test as Reuse test', 'show g1/main']);
   });
 
   it('shows the bot the session already is, without making another', async () => {
@@ -75,6 +75,7 @@ describe('naming the bot', () => {
     expect(botBinding(request, ' Mine ', 'Native').title).toBe('Mine');
     expect(botBinding(request, '', 'Native').title).toBe('Native');
     expect(botBinding(request, '  ', undefined).title).toBe('abc');
+    expect(botBinding(request, 'x'.repeat(80), undefined).title).toHaveLength(60);
   });
 });
 

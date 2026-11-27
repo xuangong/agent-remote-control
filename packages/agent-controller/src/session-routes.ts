@@ -338,7 +338,7 @@ function sameDirectory(workspace: string | undefined, directory: string): boolea
 function sessionUse(value: unknown): SessionUse | undefined {
   if (value === undefined) return undefined;
   const use = value as { kind?: unknown; name?: unknown } | null;
-  if (!use || typeof use !== 'object' || use.kind !== 'bot' || (use.name !== undefined && (typeof use.name !== 'string' || !use.name || use.name.length > 256 || /[\u0000-\u001f\u007f]/.test(use.name)))) fail('invalid_request', 'The use of the session is invalid.');
+  if (!use || typeof use !== 'object' || use.kind !== 'bot' || (use.name !== undefined && (typeof use.name !== 'string' || !use.name || use.name.length > 60 || /[\u0000-\u001f\u007f]/.test(use.name)))) fail('invalid_request', 'The use of the session is invalid.');
   return use.name === undefined ? { kind: 'bot' } : { kind: 'bot', name: use.name as string };
 }
 function optionalString(value: unknown, field: string, maximum: number): string | undefined {

@@ -16,7 +16,8 @@ export interface ControllerLocation {
 }
 /** Making the session a bot, optionally named. */
 export type SessionUse = { kind: 'bot'; name?: string };
-const MAX_USE_TEXT = 256;
+/** A bot's name is at most this long (`BotName`). */
+const MAX_USE_NAME = 60;
 const fields = { window: 'windowId', host: 'hostId', agent: 'agentId', provider: 'providerId', session: 'nativeSessionId', parent: 'parentNativeSessionId', preview: 'previewId', path: 'previewPath', challenge: 'previewChallenge' } as const;
 
 export function readControllerLocation(query: URLSearchParams): ControllerLocation {
@@ -62,7 +63,7 @@ function readSessionUse(query: URLSearchParams): SessionUse | undefined {
     const values = query.getAll(key);
     if (!values.length) return undefined;
     const value = values[0]!;
-    if (values.length !== 1 || !value || value.length > MAX_USE_TEXT || /[\u0000-\u001f\u007f]/.test(value)) throw new Error('Invalid session use.');
+    if (values.length !== 1 || !value || value.length > MAX_USE_NAME || /[\u0000-\u001f\u007f]/.test(value)) throw new Error('Invalid session use.');
     return value;
   };
   const kinds = query.getAll('as');

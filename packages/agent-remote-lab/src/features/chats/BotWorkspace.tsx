@@ -97,7 +97,13 @@ export function BotWorkspace({ visible, covered = false, compact, scope, rooms, 
   const keptConversations = useRef<readonly KeptConversation<BotPlace, SessionSurfaceDescriptor>[]>([]);
   const keptScope = useRef(scope);
   if (keptScope.current !== scope) { keptScope.current = scope; keptConversations.current = []; }
-  const kept = keepRecent(keptConversations.current, key, key && place && descriptor ? { key, place, description: descriptor } : undefined);
+  // A kept assistant that was deleted, hidden or bound to another session elsewhere is no conversation any more: it is released.
+  const present = (item: KeptConversation<BotPlace, SessionSurfaceDescriptor>) => {
+    if (item.place.kind !== 'bot') return true;
+    const group = workspace.readGroup(item.place.groupId), binding = group?.window.views.find(view => view.id === (item.place as { viewId: string }).viewId)?.binding, target = item.description.props.target;
+    return !!binding && !group?.bots?.members[item.place.viewId]?.hidden && binding.providerId === target.providerId && binding.nativeSessionId === target.nativeSessionId;
+  };
+  const kept = keepRecent(keptConversations.current.filter(present), key, key && place && descriptor ? { key, place, description: descriptor } : undefined);
   useLayoutEffect(() => { keptConversations.current = kept; });
   const stack = useNavigationStack({ root, list: rosterElement, phone, showConversation, shownKey: showConversation ? key : undefined, onBack: () => back() });
   // What the conversation panel shows: the chosen conversation, or the one a phone is sliding away from.

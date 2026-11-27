@@ -1,5 +1,5 @@
 // E7 of the target architecture, as far as one local user reaches: a session opened from its address on a second device is the same
-// conversation, live on both devices; and a temporary bot a bot started is kept by the Controller across a restart. The recipient of
+// conversation, live on both devices; and a sub-session a bot started is kept by the Controller across a restart. The recipient of
 // another account who may only read needs a second account on the stack, which the Devbox Relay does not have (open item O23).
 import { randomUUID } from 'node:crypto';
 import type { Browser, BrowserContext, Page } from '@playwright/test';
@@ -45,24 +45,24 @@ it('E7: a session opened from its address on a second device shows the same conv
   await context.close();
 });
 
-it('E7: a temporary bot a bot started is kept across a Controller restart, and still reports to its chief', async () => {
+it('E7: a sub-session a bot started is kept across a Controller restart, and still reports to its bot', async () => {
   const { context, page } = await openPage(browser, stack.sessionUrl('chief'));
   await chiefGroup(context);
   await showsText(page, 'Chief answer');
   const tools = (nativeSessionId: string) => stack.provider.given(nativeSessionId)?.tools.map(tool => tool.name) ?? [];
-  await expect.poll(() => tools('chief'), { timeout: 20_000 }).toContain('create_bot');
-  // The Relay offers tasks to the Controller a moment after its tools arrive.
-  await expect.poll(async () => stack.provider.useTool('chief', 'create_bot', { name: 'Logs', mission: 'Collect the logs.' }).catch(() => undefined), { timeout: 20_000 }).toMatchObject({ status: 'working' });
+  await expect.poll(() => tools('chief'), { timeout: 20_000 }).toContain('create_sub_session');
+  // The Relay offers sub-sessions to the Controller a moment after its tools arrive.
+  await expect.poll(async () => stack.provider.useTool('chief', 'create_sub_session', { name: 'Logs', prompt: 'Collect the logs.' }).catch(() => undefined), { timeout: 20_000 }).toMatchObject({ status: 'working' });
   const worker = () => stack.provider.known().find(id => id.includes('-new-'));
   await expect.poll(worker, { timeout: 20_000 }).toBeDefined();
-  const bot = worker()!;
+  const sub = worker()!;
   await stack.stopController();
   await stack.startController();
   await page.reload({ waitUntil: 'domcontentloaded' });
   await showsText(page, 'Chief answer');
-  await expect.poll(() => tools(bot), { timeout: 30_000 }).toContain('message');
-  await expect.poll(async () => stack.provider.useTool(bot, 'message', { to: 'chief', text: 'Logs saved after the restart.', status: 'done' }).catch(() => undefined), { timeout: 20_000 }).toBeDefined();
-  await expect.poll(() => stack.provider.session('chief')!.sent.some(text => text.includes('Logs saved after the restart.')), { timeout: 20_000 }).toBe(true);
+  await expect.poll(() => tools(sub), { timeout: 30_000 }).toContain('communicate_update');
+  await expect.poll(async () => stack.provider.useTool(sub, 'communicate_update', { current_step: 'Collecting after the restart' }).catch(() => undefined), { timeout: 20_000 }).toBeDefined();
+  await expect.poll(async () => ((await stack.provider.useTool('chief', 'get_sub_session_status', {}).catch(() => undefined)) as { sub_sessions?: Array<{ current_step?: string }> } | undefined)?.sub_sessions?.[0]?.current_step, { timeout: 20_000 }).toBe('Collecting after the restart');
   await context.close();
 });
 

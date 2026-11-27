@@ -198,6 +198,25 @@ describe('sub-sessions of a bot', () => {
     expect(['needs_input', 'working']).toContain(f.sub().task!.state);
   });
 
+  it('is idle once its turn has ended after the latest work, even when the end was reported before that work\'s delivery settled', async () => {
+    const f = fixture();
+    await f.start();
+    f.settle();
+    await f.end(0, 'finished', 'Logs saved.');
+    await f.call(f.as('chief'), 'send_to_sub_session', { subSessionId: 'Collect logs', operationId: 'again', text: 'Compress them.', title: 'Compress' });
+    // The Host reports the end of the turn that took this work before it has settled the delivery of the work.
+    await f.end(0, 'finished', 'Compressed.');
+    expect(f.sub().task!.state).toBe('working');
+    f.settle();
+    await f.broker.hostCall('mac', { action: 'presence', teamId: f.sub().id, memberId: f.sub().members[0]!.id, activity: 'idle' } as never);
+    expect(f.sub().task!.state).toBe('idle');
+    // A turn that has not ended since the latest work leaves it working.
+    await f.call(f.as('chief'), 'send_to_sub_session', { subSessionId: 'Collect logs', operationId: 'third', text: 'And again.', title: 'Again' });
+    f.settle();
+    await f.broker.hostCall('mac', { action: 'presence', teamId: f.sub().id, memberId: f.sub().members[0]!.id, activity: 'idle' } as never);
+    expect(f.sub().task!.state).toBe('working');
+  });
+
   it('ends on its bot\'s stop and on the person\'s, withdrawing what waits and stopping its turn, and tells its bot of the person\'s', async () => {
     const f = fixture();
     await f.start('Collect logs');

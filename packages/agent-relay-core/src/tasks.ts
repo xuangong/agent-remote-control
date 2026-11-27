@@ -37,9 +37,9 @@ const clip = (text: string) => text.length > TASK_TOLD_LIMIT ? `${text.slice(0, 
 /** What its bot reads of a result: the start of it, with the way to read the rest. */
 const cutResult = (text: string) => text.length > BOT_MESSAGE_LIMIT ? `${text.slice(0, BOT_MESSAGE_LIMIT - 1)}… (the rest: read_bot)` : text;
 const withoutResult = (outcome: TaskOutcome) => outcome === 'failed' ? 'The turn failed without a message.' : outcome === 'interrupted' ? 'The turn was interrupted.' : 'The turn ended without a summary.';
-/** Whether more input is on its way to a member: queued, being delivered, or accepted but not yet started; a held acknowledgement is not input. */
+/** Whether more input is on its way to a member: queued or being delivered. An input already accepted was taken by the turn that just ended; a held acknowledgement is not input. */
 const inbound = (team: Team, memberId: string) => team.messages.some(message => message.to === memberId
-  && (message.status === 'queued' && !message.ack || message.status === 'dispatching' || message.status === 'unknown' || message.status === 'accepted' && message.acceptance !== 'started' && message.acceptance !== 'handled'));
+  && (message.status === 'queued' && !message.ack || message.status === 'dispatching' || message.status === 'unknown'));
 /** Queues an input; its id makes a repeated call queue it once. A person-started sub-session stays beside its conversation: nothing it says reaches its owner. */
 function enqueue(team: SavedTeam, from: TeamMember, to: TeamMember, key: unknown[], text: string, now: number, ack?: true): TeamMessage {
   const id = digest(key);
@@ -79,6 +79,8 @@ export function taskPresence(team: SavedTeam, self: TeamMember, _before: TeamMem
   }
   if (!interaction && item.state === 'needs_input' && item.waiting?.reason === 'interaction') { item.state = self.activity === 'busy' ? 'working' : 'idle'; delete item.waiting; touch(team, item, now); return; }
   if (self.activity === 'busy' && item.state === 'idle') { item.state = 'working'; touch(team, item, now); }
+  // A turn ended after the latest work was sent and nothing waits: the session is idle, though its end was reported before the work's delivery settled.
+  if (self.activity === 'idle' && item.state === 'working' && item.result && item.result.at >= (item.lastWork?.at ?? 0) && !inbound(team, self.id)) { item.state = 'idle'; touch(team, item, now); }
 }
 /** A delivery to the session whose outcome is unknown: it may not have that input, so it waits for a decision and the input is never sent again. */
 export function taskSettled(team: SavedTeam, message: TeamMessage, now: number): void {

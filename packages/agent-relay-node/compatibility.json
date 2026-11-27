@@ -149,6 +149,7 @@
         "packages/agent-remote-lab/bundle-budget.ts",
         "packages/agent-remote-lab/e2e",
         "packages/agent-remote-lab/index.html",
+        "packages/agent-remote-lab/launch-screen-plugin.ts",
         "packages/agent-remote-lab/package.json",
         "packages/agent-remote-lab/performance",
         "packages/agent-remote-lab/playwright.components.config.ts",
@@ -195,7 +196,7 @@
         "packages/codex-daemon-client/tsconfig.test.json",
         "packages/codex-daemon-client/vitest.config.ts"
       ],
-      "digest": "sha256:39b8f89db2216b4a434c262373bd8efef27df022eff6bdf8ca9bb9a7cd9cbf99"
+      "digest": "sha256:80833411f64bf15874b74138455792d77cb5f53e30054f5a5eecc7891134b967"
     }
   },
   "providers": [

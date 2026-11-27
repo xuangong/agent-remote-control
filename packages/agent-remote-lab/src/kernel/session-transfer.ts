@@ -1,4 +1,4 @@
-import { readControllerLocation } from '@orchardworks/agent-remote-protocol/model';
+import { readControllerLocation, type SessionUse } from '@orchardworks/agent-remote-protocol/model';
 import { withMessageKey } from '@orchardworks/agent-client';
 
 export interface ScannedSession {
@@ -8,6 +8,8 @@ export interface ScannedSession {
   parentNativeSessionId?: string;
   sessionIntent?: 'history';
   keepOriginal?: boolean;
+  /** What the link asks the page to do with the session; the person confirms it first. */
+  sessionUse?: SessionUse;
 }
 
 /** Scanning selects an identity on this Controller, never an arbitrary navigation target. */
@@ -23,5 +25,6 @@ export function readSessionCode(text: string, origin: string): ScannedSession {
   return { hostId: value.hostId, providerId: value.providerId, nativeSessionId: value.nativeSessionId,
     ...(value.sessionIntent ? { sessionIntent: value.sessionIntent } : {}),
     ...(value.keepOriginal ? { keepOriginal: true } : {}),
+    ...(value.sessionUse ? { sessionUse: value.sessionUse } : {}),
     ...(value.parentNativeSessionId ? { parentNativeSessionId: value.parentNativeSessionId } : {}) };
 }

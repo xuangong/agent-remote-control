@@ -40,6 +40,7 @@ import type { SendingAndSuccessionSlice } from './useSendingAndSuccession.js';
 import type { QuotesAndReferencesSlice } from './useQuotesAndReferences.js';
 import type { SessionViewPresentationSlice } from './useSessionViewPresentation.js';
 import type { ViewModelSlice } from './useViewModel.js';
+import type { SessionUseSlice } from './useSessionUse.js';
 
 export interface LabTransport extends RemoteAgentTransport {
   listProviders(): Promise<readonly AgentProviderDescriptor[]>;
@@ -120,4 +121,4 @@ export interface AppInputs {
 }
 
 /** Everything the hooks produced, in the order they ran. */
-export type AppScope = AppInputs & WorkbenchShellSlice & RequestedSessionSlice & WorkbenchRecordsSlice & ConversationConnectionsSlice & ViewTargetsSlice & ProviderStateSlice & SessionSuccessionBindingSlice & DocksAndBotSelectionSlice & ViewSessionStateSlice & PanelsAndShortcutsSlice & RemoteHostStateSlice & SideSelectionSlice & ProviderCreationSlice & ActiveSessionSlice & WindowViewActionsSlice & SharedFeedsSlice & HostAndStackSlice & SessionOpeningSlice & FocusedAskSlice & WindowModeActionsSlice & SideNavigationSlice & AttentionAndRosterSlice & CommandSearchSlice & SessionTitlesSlice & TraceNavigationSlice & CommunicationsAndForksSlice & SendingAndSuccessionSlice & QuotesAndReferencesSlice & SessionViewPresentationSlice & ViewModelSlice;
+export type AppScope = AppInputs & WorkbenchShellSlice & RequestedSessionSlice & WorkbenchRecordsSlice & ConversationConnectionsSlice & ViewTargetsSlice & ProviderStateSlice & SessionSuccessionBindingSlice & DocksAndBotSelectionSlice & ViewSessionStateSlice & PanelsAndShortcutsSlice & RemoteHostStateSlice & SideSelectionSlice & ProviderCreationSlice & ActiveSessionSlice & WindowViewActionsSlice & SharedFeedsSlice & HostAndStackSlice & SessionOpeningSlice & FocusedAskSlice & WindowModeActionsSlice & SideNavigationSlice & AttentionAndRosterSlice & CommandSearchSlice & SessionTitlesSlice & TraceNavigationSlice & CommunicationsAndForksSlice & SendingAndSuccessionSlice & QuotesAndReferencesSlice & SessionViewPresentationSlice & ViewModelSlice & SessionUseSlice;

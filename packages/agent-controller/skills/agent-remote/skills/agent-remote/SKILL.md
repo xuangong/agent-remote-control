@@ -31,7 +31,7 @@ Agent Remote Control's Controller runs agent sessions on the user's computers (H
 agent-remote-controller session list [--host H] [--provider P] [--limit 1..50] [--cursor C]
 agent-remote-controller session read ADDRESS [--limit 0..10] [--cursor C] [--search TEXT] [--turn TURN_ID] [--text-offset N]
 agent-remote-controller session inspect ADDRESS
-agent-remote-controller session link ADDRESS [--qr]
+agent-remote-controller session link (ADDRESS | --here [--provider P] | --pick [--provider P]) [--bot [NAME]] [--qr]
 agent-remote-controller session create --provider P [--host H] [--cwd DIR] [--model M] [--effort E] [--planning] [--from ADDRESS [--context]] [--ref ADDRESS]... [--message TEXT | --file PATH]
 agent-remote-controller session send ADDRESS (TEXT | --file PATH) [--steer]
 agent-remote-controller session cancel ADDRESS

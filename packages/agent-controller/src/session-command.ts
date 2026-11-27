@@ -1,9 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import { createConnection } from 'node:net';
-import { commandChannel, type ManagementAccess } from './command-client.js';
+import { commandChannel, type CommandChannel, type ManagementAccess } from './command-client.js';
 import { CliError, EXIT_OK, operationId, printError, printResult, usage } from './command-output.js';
 import type { CliCredentials } from './relay-client.js';
 import { handoffSession, namedSession, starSession } from './session-relay.js';
+import { resolveLinkTarget, type TargetTerminal } from './session-target.js';
 
 const help = `Usage: agent-remote-controller session <command>
 
@@ -11,10 +12,10 @@ Sessions are addressed as <hostId>/<providerId>/<nativeSessionId>; a session's o
 Every command prints JSON. Exit 0 done, 1 failed (see error.code), 2 wrong usage, 3 a change may or
 may not have happened (inspect before trying again with the same --operation-id).
 
-  session list [--host H] [--provider P] [--limit 1..50] [--cursor C]
+  session list [--host H] [--provider P] [--cwd DIR] [--refresh] [--limit 1..50] [--cursor C]
   session read <address> [--limit 0..10] [--cursor C] [--search TEXT] [--turn TURN_ID] [--text-offset N]
   session inspect <address>
-  session link <address> [--qr]
+  session link (<address> | --here [--provider P] | --pick [--provider P]) [--bot [NAME]] [--qr]
   session create --provider P [--host H] [--cwd DIR] [--model M] [--effort E] [--planning]
                  [--from ADDRESS [--context]] [--ref ADDRESS]... [--message TEXT | --file PATH]
   session send <address> (TEXT | --file PATH) [--steer]
@@ -28,17 +29,22 @@ may not have happened (inspect before trying again with the same --operation-id)
   session ref add|remove <address> [--session ADDRESS]
 
 Changes take --operation-id ID: repeating a change with the same ID does it once.
+link without an address means the calling session inside a session's shell; --here the newest session of this directory
+(Claude Code's shell names its own session; other providers need --provider); --pick lists this directory's recent sessions
+to choose by number. --bot asks the page to make the session a bot, with NAME if given: put the address before --bot, or
+write --bot=NAME. --qr draws the link on stderr; the page asks before it changes anything.
 read --limit 0 describes a session without its history. attach opens the session's native CLI in this terminal,
 on the Host that has it. Stars and handoffs are kept by the Relay, so they need agent-remote-controller login.
 `;
 
-type Spec = Record<string, 'value' | 'flag' | 'many'>;
+/** `optional` takes the next word as its value unless that is another option, or `--name=value`. */
+type Spec = Record<string, 'value' | 'flag' | 'many' | 'optional'>;
 const common: Spec = { 'operation-id': 'value' };
 const specs: Record<string, Spec> = {
-  list: { host: 'value', provider: 'value', limit: 'value', cursor: 'value' },
+  list: { host: 'value', provider: 'value', cwd: 'value', refresh: 'flag', limit: 'value', cursor: 'value' },
   read: { limit: 'value', cursor: 'value', search: 'value', turn: 'value', 'text-offset': 'value' },
   inspect: {},
-  link: { qr: 'flag' },
+  link: { qr: 'flag', here: 'flag', pick: 'flag', provider: 'value', bot: 'optional' },
   attach: { 'take-over': 'flag' },
   handoff: { ...common, to: 'value' },
   create: { ...common, provider: 'value', host: 'value', cwd: 'value', model: 'value', effort: 'value', planning: 'flag', from: 'value', context: 'flag', ref: 'many', message: 'value', file: 'value' },
@@ -55,10 +61,13 @@ function parse(args: readonly string[], spec: Spec): { positional: string[]; val
   for (let index = 0; index < args.length; index++) {
     const arg = args[index]!;
     if (!arg.startsWith('--')) { positional.push(arg); continue; }
-    const name = arg.slice(2), kind = spec[name];
+    const equals = arg.indexOf('=');
+    const name = arg.slice(2, equals < 0 ? undefined : equals), kind = spec[name];
     if (!kind) usage(`Unknown option --${name}. Run agent-remote-controller session --help.`);
     if (kind !== 'many' && values.has(name)) usage(`--${name} is given twice.`);
-    const value = kind === 'flag' ? 'true' : args[++index];
+    if (equals >= 0 && kind !== 'optional') usage(`--${name} takes its value as the next word.`);
+    const next = args[index + 1];
+    const value = kind === 'flag' ? 'true' : kind === 'optional' ? (equals >= 0 ? arg.slice(equals + 1) : next !== undefined && !next.startsWith('--') ? args[++index]! : '') : args[++index];
     if (value === undefined) usage(`--${name} needs a value.`);
     values.set(name, [...values.get(name) ?? [], value]);
   }
@@ -95,10 +104,20 @@ export async function sessionRequest(args: readonly string[]): Promise<Record<st
   const address = (index: number, what = 'session') => positional[index] ?? usage(`Name the ${what}: self or <hostId>/<providerId>/<nativeSessionId>.`);
   const extra = (count: number) => { if (positional.length > count) usage(`Unexpected argument: ${positional[count]}.`); };
   switch (command) {
-    case 'list': extra(0); return defined({ command, host: one(values, 'host'), providerId: one(values, 'provider'), limit: integer(values, 'limit'), cursor: one(values, 'cursor') });
+    case 'list': extra(0); return defined({ command, host: one(values, 'host'), providerId: one(values, 'provider'), cwd: one(values, 'cwd'), refresh: values.has('refresh') ? true : undefined, limit: integer(values, 'limit'), cursor: one(values, 'cursor') });
     case 'read': extra(1); return defined({ command, target: address(0), limit: integer(values, 'limit'), cursor: one(values, 'cursor'), search: one(values, 'search'),
       turnId: one(values, 'turn'), textOffset: integer(values, 'text-offset') });
-    case 'inspect': case 'cancel': case 'release': case 'link': extra(1); return { command, target: address(0), ...change };
+    case 'link': {
+      extra(1);
+      const here = values.has('here'), pick = values.has('pick');
+      if (positional.length && (here || pick)) usage('Name the session with its address, or with --here or --pick, not both.');
+      if (here && pick) usage('Use --here or --pick, not both.');
+      if (values.has('provider') && !here && !pick) usage('--provider goes with --here or --pick; an address names its provider.');
+      const bot = one(values, 'bot');
+      return defined({ command, target: positional[0], here: here ? true : undefined, pick: pick ? true : undefined, providerId: one(values, 'provider'),
+        use: bot === undefined ? undefined : bot ? { kind: 'bot', name: bot } : { kind: 'bot' }, ...change });
+    }
+    case 'inspect': case 'cancel': case 'release': extra(1); return { command, target: address(0), ...change };
     case 'attach': extra(1); return { command, target: address(0), ...(values.has('take-over') ? { takeOver: true } : {}) };
     case 'handoff': extra(1); return defined({ command, target: address(0), ...change, targetProviderId: one(values, 'to') });
     case 'create': {
@@ -152,6 +171,12 @@ export interface SessionCommandIO {
   attach?(providerId: string, nativeSessionId: string, takeOver: boolean): Promise<number>;
   /** Shows a link as a QR code beside the JSON output. */
   qr?(url: string): Promise<void>;
+  /** Asks the person to choose, for `link --pick`. */
+  terminal?: TargetTerminal;
+  /** Answers session commands instead of the Controller's sockets. */
+  channel?: CommandChannel;
+  /** The directory `link --here` and `--pick` look in; the process's own by default. */
+  cwd?: string;
 }
 
 /** Session commands: from a session's shell as that session, from an ordinary terminal as the Host owner. */
@@ -176,7 +201,7 @@ export async function runSessionCommand(args: readonly string[], env: NodeJS.Pro
       if (!providerId || !rest.length) usage('Name the session as local/<providerId>/<nativeSessionId> or <hostId>/<providerId>/<nativeSessionId>.');
       return await io.attach(providerId, rest.join('/'), request.takeOver === true);
     }
-    const channel = await commandChannel(env, io.management ?? (async () => undefined), io.connect ?? createConnection, credentials, io.fetcher);
+    const channel = io.channel ?? await commandChannel(env, io.management ?? (async () => undefined), io.connect ?? createConnection, credentials, io.fetcher);
     const call = async (value: Record<string, unknown>) => {
       const answer = await channel.call('session', value);
       if ('error' in answer) throw new CliError(answer.error.code, answer.error.message, answer.error.code === 'outcome_unknown' && typeof value.operationId === 'string' ? { operationId: value.operationId } : undefined);
@@ -192,9 +217,15 @@ export async function runSessionCommand(args: readonly string[], env: NodeJS.Pro
       const starred = await starSession(await namedSession(channel, request.target as string), star, await credentials(), io.fetcher);
       return printResult(write, { ...changed, ...starred });
     }
-    const result = await call(request);
-    if (request.command === 'link' && args.includes('--qr') && typeof result.url === 'string') await io.qr?.(result.url);
-    return printResult(write, result);
+    if (request.command === 'link') {
+      const { here, pick, providerId, ...link } = request;
+      if (link.target === undefined) link.target = await resolveLinkTarget({ here: here === true, pick: pick === true, ...(typeof providerId === 'string' ? { providerId } : {}) },
+        { call, env, cwd: io.cwd ?? process.cwd(), ...(io.terminal ? { terminal: io.terminal } : {}) });
+      const result = await call(link);
+      if (args.includes('--qr') && typeof result.url === 'string') await io.qr?.(result.url);
+      return printResult(write, result);
+    }
+    return printResult(write, await call(request));
   } catch (error) {
     return printError(write, error);
   }

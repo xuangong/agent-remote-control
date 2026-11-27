@@ -62,3 +62,26 @@ it('preserves a shared Window identity through controller and login return paths
   expect(() => readControllerLocation(new URLSearchParams('window=one&window=two'))).toThrow();
   expect(() => readControllerLocation(new URLSearchParams('window=invalid%2Fid'))).toThrow();
 });
+
+it('round trips what a link asks the page to do with its session: make it a bot', () => {
+  const bot = readControllerLocation(new URLSearchParams('host=desk&provider=claude&session=A&as=bot&name=Reuse%20test'));
+  expect(bot).toEqual({ hostId: 'desk', providerId: 'claude', nativeSessionId: 'A', sessionUse: { kind: 'bot', name: 'Reuse test' } });
+  expect(controllerPath(bot)).toBe('/?host=desk&provider=claude&session=A&as=bot&name=Reuse+test');
+  expect(validControllerPath(controllerPath(bot))).toBe(true);
+  const unnamed = readControllerLocation(new URLSearchParams('host=desk&provider=claude&session=A&as=bot'));
+  expect(unnamed.sessionUse).toEqual({ kind: 'bot' });
+  expect(controllerPath(unnamed)).toBe('/?host=desk&provider=claude&session=A&as=bot');
+  expect(controllerPath({ hostId: 'desk', providerId: 'claude', nativeSessionId: 'A' })).not.toContain('as=');
+});
+
+it.each([
+  'as=other', 'as=', 'as=window', 'as=bot&as=bot', 'as=bot&name=a&name=b', 'as=bot&name=%00',
+  'name=Bot', `as=bot&name=${'x'.repeat(61)}`, 'as=bot&intent=history', 'as=bot&keepOriginal=1',
+])('rejects an invalid session use: %s', query => {
+  expect(() => readControllerLocation(new URLSearchParams(`host=desk&provider=claude&session=A&${query}`))).toThrow();
+});
+
+it('requires a complete session identity for a session use', () => {
+  expect(() => readControllerLocation(new URLSearchParams('host=desk&as=bot'))).toThrow();
+  expect(() => readControllerLocation(new URLSearchParams('as=bot'))).toThrow();
+});

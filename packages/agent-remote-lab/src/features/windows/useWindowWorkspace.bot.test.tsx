@@ -75,6 +75,14 @@ it('starts a group from a new session, shown in both modes with bot details, wit
   expect(made.window.views).toEqual([expect.objectContaining({ id: created.viewId, placement: 'primary', binding: { hostId: 'h', providerId: 'p', nativeSessionId: 'new', title: 'New session' } })]);
   expect(made.window.selectedPrimaryViewId).toBe(created.viewId);
 });
+it('gives the bot of a group the name it was started with', async () => {
+  const backend = server(group('a')); history.replaceState(null, '', '/?window=a'); const { read } = await mount('https://bot-named/', true);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'createGroup').mockImplementation(async created => { backend.groups.set(created.window.id, created); return created; });
+  let created!: { groupId: string; viewId: string };
+  await act(async () => { created = await read().createBotGroup({ hostId: 'h', providerId: 'p', nativeSessionId: 'old', title: 'Reuse test' }, 'Reuse test'); });
+  expect(read().readGroup(created.groupId)!.bots!.members[created.viewId]).toMatchObject({ name: 'Reuse test' });
+  expect(read().readGroup(created.groupId)!.window.title).toBe('Reuse test');
+});
 it('stores a picture for a new assistant that no other assistant of the account has, while one pair remains', async () => {
   const pairs = avatarShapeNames.flatMap(shape => avatarPalette.map(entry => ({ shape, color: entry.value })));
   const [free, ...taken] = pairs.slice().reverse();

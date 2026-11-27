@@ -30,7 +30,7 @@ export interface SessionCatalogPorts {
   providerIds(): Iterable<string>;
   enabled(providerId: string): boolean;
   catalog(providerId: string): Pick<RemoteHostCatalog, 'page' | 'session'> | undefined;
-  directory(providerId: string): Pick<AgentHostDirectory, 'sessionSummary'> | undefined;
+  directory(providerId: string): Pick<AgentHostDirectory, 'sessionSummary' | 'listing'> | undefined;
   /** Throws a request error for a provider this Host does not have. */
   adapter(providerId: string): Pick<AgentProviderAdapter, 'readSessionHistory'>;
   /** The handoff admission state of the session's runtime, when it has one. */
@@ -54,6 +54,7 @@ export function createSessionCatalog(ports: SessionCatalogPorts): SessionCallerC
       } while (cursor);
       return sessions;
     },
+    async refreshListing(providerId) { await ports.directory(providerId)?.listing?.refresh(); },
     async session(ref) {
       if (!ports.enabled(ref.providerId)) return undefined;
       const directory = ports.directory(ref.providerId);

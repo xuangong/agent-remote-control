@@ -39,6 +39,7 @@ import { renderSessionQr } from './share-qr.js';
 import { handleSessionCall, listenSessionCalls, sessionCallerEndpoint, SessionCallerStore } from './session-callers.js';
 import { SessionRefStore } from './session-refs.js';
 import { runSessionCommand } from './session-command.js';
+import { sessionTerminal } from './session-terminal.js';
 import { runLoginCommand } from './login-command.js';
 import { readCredentials, relayRequest } from './relay-client.js';
 import { CliError } from './command-output.js';
@@ -98,7 +99,7 @@ async function main(): Promise<void> {
   else if (command === 'autostart') await autostart(args[1] ?? 'status');
   else if (command === 'pair') await pair();
   else if (command === 'session') process.exitCode = await runSessionCommand(args.slice(1), process.env, text => { process.stdout.write(text); }, {
-    management: managementAccess, credentials: () => readCredentials(stateDir), attach: attachSession, qr: async url => { process.stderr.write(await renderSessionQr(url)); } });
+    management: managementAccess, credentials: () => readCredentials(stateDir), attach: attachSession, qr: async url => { process.stderr.write(await renderSessionQr(url)); }, terminal: sessionTerminal() });
   else if (command === 'api') process.exitCode = await runApiCommand(args.slice(1), () => readCredentials(stateDir), text => { process.stdout.write(text); });
   else if (command === 'role') process.exitCode = await runRoleCommand(args.slice(1), process.env, text => { process.stdout.write(text); });
   else if (command === 'host') process.exitCode = await runHostCommand(args.slice(1), process.env, text => { process.stdout.write(text); }, managementAccess, undefined, () => readCredentials(stateDir));

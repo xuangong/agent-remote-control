@@ -17,6 +17,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createAgentHost, type AgentHost } from '@orchardworks/agent-remote-controller';
+import { runSessionCommand } from '@orchardworks/agent-remote-controller/session-command';
 import { controllerPath } from '@orchardworks/agent-remote-protocol/model';
 import type { ControllerRelease } from '@orchardworks/agent-remote-protocol';
 import { createDevboxServer } from '@orchardworks/agent-relay-node/devbox';
@@ -130,6 +131,15 @@ export async function startStack(options: StackOptions = {}) {
     /** The address of a scripted session's page; the Controller must be registered. */
     sessionUrl: (nativeSessionId: string, providerId: string = provider.providerId) => origin + controllerPath({ hostId, providerId, nativeSessionId }),
     get hostId() { return hostId; },
+    /** Runs `agent-remote-controller session ...` as a terminal of the Host owner does, in `cwd` (the stack's workspace by default), against the running Controller. */
+    async sessionCommand(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
+      if (!controller) throw new Error('The Controller is not running.');
+      const running = controller;
+      let output = '';
+      const code = await runSessionCommand(args, options.env ?? {}, text => { output += text; },
+        { cwd: options.cwd ?? workspace, channel: { caller: 'owner', call: async (scope, request) => await running.command(scope, request, { kind: 'owner' }) } });
+      return { code, output: JSON.parse(output) as Record<string, any> };
+    },
     get hostName() { return 'E2E Host'; },
     startController, stopController,
     /** What the Controller's updater did: the versions it installed and the versions it asked the launcher to restart into. */

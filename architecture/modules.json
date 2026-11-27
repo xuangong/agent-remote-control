@@ -415,7 +415,8 @@
         "E15",
         "E15b",
         "E15c",
-        "E15d"
+        "E15d",
+        "E15e"
       ],
       "invariants": [
         "journal-reopen-recovery",
@@ -529,6 +530,8 @@
         "packages/agent-controller/src/login-command.ts",
         "packages/agent-controller/src/role-command.ts",
         "packages/agent-controller/src/session-command.ts",
+        "packages/agent-controller/src/session-target*.ts",
+        "packages/agent-controller/src/session-terminal*.ts",
         "packages/agent-controller/src/window-command.ts",
         "packages/agent-controller/src/diagnostics-command.ts",
         "packages/agent-controller/src/update-command.ts",
@@ -785,7 +788,8 @@
         "E15",
         "E15b",
         "E15c",
-        "E15d"
+        "E15d",
+        "E15e"
       ],
       "invariants": [
         "draft-ownership",

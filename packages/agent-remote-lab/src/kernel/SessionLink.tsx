@@ -7,6 +7,7 @@ import { controllerPath } from '@orchardworks/agent-remote-protocol/model';
 import type { OpenedSession } from './directory-client.js';
 import { readSessionCode, type ScannedSession } from './session-transfer.js';
 import { SessionScanner } from './SessionScanner.js';
+import { imageOf, readQrImage } from './qr-image.js';
 
 type SessionLinkTarget = Pick<OpenedSession, 'hostId' | 'providerId' | 'nativeSessionId' | 'title' | 'parentNativeSessionId'> & { agentId?: string };
 
@@ -78,7 +79,27 @@ export function SessionTransferDialog({ session, sessionIntent, keepOriginal, on
     } catch (error) { setFailure(errorWords(error, t, 'sessions.link.openFailedShort')); }
     finally { pending.current = false; setOpening(false); }
   }
-  return createPortal(<dialog ref={dialog} className="lab-session-link-dialog" aria-label={title} onKeyDown={event => event.stopPropagation()} onClose={onClose}>
+  /** A screenshot of the QR code, pasted or dropped or chosen, continues as a pasted link does. */
+  async function receiveImage(image: Blob) {
+    if (pending.current || !onOpen) return;
+    setScanning(false); setFailure(undefined);
+    let text: string;
+    try { text = await readQrImage(image); }
+    catch (error) { setFailure(errorWords(error, t, 'sessions.qrImage.unreadable')); return; }
+    await receive(text);
+  }
+  const takesImages = !session && !!onOpen;
+  return createPortal(<dialog ref={dialog} className="lab-session-link-dialog" aria-label={title} onKeyDown={event => event.stopPropagation()} onClose={onClose}
+    {...(takesImages ? {
+      onPaste: (event: React.ClipboardEvent) => {
+        const image = imageOf(event.clipboardData);
+        if (image) { event.preventDefault(); void receiveImage(image); return; }
+        const text = event.clipboardData.getData('text/plain').trim();
+        if (text && !(event.target instanceof HTMLInputElement)) { event.preventDefault(); setPasted(text); void receive(text); }
+      },
+      onDragOver: (event: React.DragEvent) => { if (imageOf(event.dataTransfer)) event.preventDefault(); },
+      onDrop: (event: React.DragEvent) => { const image = imageOf(event.dataTransfer); if (image) { event.preventDefault(); void receiveImage(image); } },
+    } : {})}>
       <header><h2>{title}</h2><button type="button" aria-label={session ? t('sessions.link.closeLink') : t('sessions.link.closeScanner')} onClick={() => dialog.current?.close()}>×</button></header>
       <div className="lab-session-transfer-body">
         {session ? <>
@@ -95,6 +116,8 @@ export function SessionTransferDialog({ session, sessionIntent, keepOriginal, on
           {['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname) ? <p className="lab-control-note">{t('sessions.link.localAddressNote')}</p> : null}
         </> : <>
           {scanning && !opening ? <SessionScanner onRead={text => void receive(text)} /> : opening ? <div className="lab-session-scan-result" role="status">{t('sessions.link.opening')}</div> : <button type="button" onClick={() => { setFailure(undefined); setScanning(true); }}>{t('sessions.link.scanAgain')}</button>}
+          <p className="lab-session-transfer-hint">{t('sessions.link.imageHint')}</p>
+          <label className="lab-session-image-choice">{t('sessions.link.chooseImage')}<input type="file" accept="image/*" onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void receiveImage(file); }} /></label>
           <details className="lab-session-transfer-details"><summary>{t('sessions.link.pasteSummary')}</summary><form onSubmit={event => { event.preventDefault(); void receive(pasted); }}>
             <label htmlFor="session-transfer-paste">{t('sessions.link.pasteLabel')}</label><input id="session-transfer-paste" type="url" required value={pasted} onChange={event => setPasted(event.target.value)} placeholder="https://…" autoComplete="off" />
             <button type="submit" disabled={opening || !pasted.trim()}>{t('sessions.link.openSession')}</button>

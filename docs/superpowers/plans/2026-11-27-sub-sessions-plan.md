@@ -633,3 +633,20 @@ board, `create_bot` and its report-in, the chief reading staff boards, answer se
 | 10 | Custom statuses; string-replacement plans | Five statuses; plan note | Not adopted |
 | 11 | Separate transcript, goal, project tools | Complexity watched | Not adopted; `read_bot` takes `mode`/`max_turns`; a goal is a ledger item |
 
+
+## 16. As built (feat/sub-sessions)
+
+Built, in the order the owner set (sub-sessions first, as one shippable change): the protocol (`task.ts` sub-session record, frames `[Sub-session …]`,
+host calls `create_sub_session`, `send_to_sub_session`, `get_sub_session_status`, `stop_sub_session`, `sub_update`, `sub_turn_end`, `sub_told`; `SubSessionId`;
+instructions v12 without the ban on a bot's own subagents; `BotRecord` without `lifetime`; the chain's `subSessions` count); the Relay (`tasks.ts` as the sub-session
+service, `bot-calls.ts` tools, owner-written board items, end on retire, the person's `/side` as a person-started sub-session, the load-time drop of old tasks and
+`lifetime` records with a Cloudflare SQLite load test); the Controller (the sub-session tool namespace and instructions, seats held while live, turn outcomes
+including failed and interrupted turns); the page (details list grouped by need with Stop and no Keep, result cards, audit counter, strings in English and Chinese);
+the E15 and E7 flows, component specs and the behaviour scenarios.
+
+Internals keep the `task` field and `Task*` type names; the rename to `sub` is a mechanical commit not made.
+
+Not built, ordered after sub-sessions by the owner: pages (`write_page`/`read_page`) and the team page card, the primary-bot mark, the optional timer end
+(`until_minutes`) with the roster in its frame, the board card, the extended folding of bot traffic, `fork_from`/`fork_turns`, the `/side` seed, and the Grok-shaped
+board fields (tags, notes, `members`). The earlier trimming of this plan removed tags, notes and custom statuses anyway; the rest stays as steps 5 and 6 of
+section 11 for a follow-up.

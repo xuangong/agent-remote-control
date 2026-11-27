@@ -11,7 +11,12 @@ export interface ControllerLocation {
   parentNativeSessionId?: string;
   sessionIntent?: 'history';
   keepOriginal?: boolean;
+  /** What the page should do with the session once the person confirms; a link without it only opens the session. */
+  sessionUse?: SessionUse;
 }
+/** Making the session a bot, optionally named. */
+export type SessionUse = { kind: 'bot'; name?: string };
+const MAX_USE_TEXT = 256;
 const fields = { window: 'windowId', host: 'hostId', agent: 'agentId', provider: 'providerId', session: 'nativeSessionId', parent: 'parentNativeSessionId', preview: 'previewId', path: 'previewPath', challenge: 'previewChallenge' } as const;
 
 export function readControllerLocation(query: URLSearchParams): ControllerLocation {
@@ -32,6 +37,8 @@ export function readControllerLocation(query: URLSearchParams): ControllerLocati
     if (values.length !== 1 || values[0] !== 'history') throw new Error('Invalid session intent.');
     result.sessionIntent = 'history';
   }
+  const use = readSessionUse(query);
+  if (use) result.sessionUse = use;
   if (query.has('keepOriginal')) {
     const values = query.getAll('keepOriginal');
     if (values.length !== 1 || values[0]!.length > 4096 || /[\u0000-\u001f\u007f]/.test(values[0]!)) throw new Error('Invalid original-session option.');
@@ -39,7 +46,8 @@ export function readControllerLocation(query: URLSearchParams): ControllerLocati
   }
   if ((result.nativeSessionId || result.providerId || result.parentNativeSessionId) &&
     !(result.nativeSessionId && result.providerId && result.hostId)) throw new Error('Incomplete session link.');
-  if ((result.sessionIntent || result.keepOriginal) && !(result.hostId && result.providerId && result.nativeSessionId)) throw new Error('Incomplete session link.');
+  if (result.sessionUse && (result.sessionIntent || result.keepOriginal)) throw new Error('A session use cannot combine with a history intent.');
+  if ((result.sessionIntent || result.keepOriginal || result.sessionUse) && !(result.hostId && result.providerId && result.nativeSessionId)) throw new Error('Incomplete session link.');
   if (result.previewId || result.previewPath || result.previewChallenge) {
     if (!result.hostId || !result.previewId || !result.previewPath || result.agentId || result.providerId || result.nativeSessionId || result.parentNativeSessionId) throw new Error('Invalid preview link.');
     const prefix = '/p/' + result.previewId + '/';
@@ -49,11 +57,33 @@ export function readControllerLocation(query: URLSearchParams): ControllerLocati
   return result;
 }
 
+function readSessionUse(query: URLSearchParams): SessionUse | undefined {
+  const text = (key: string) => {
+    const values = query.getAll(key);
+    if (!values.length) return undefined;
+    const value = values[0]!;
+    if (values.length !== 1 || !value || value.length > MAX_USE_TEXT || /[\u0000-\u001f\u007f]/.test(value)) throw new Error('Invalid session use.');
+    return value;
+  };
+  const kinds = query.getAll('as');
+  if (!kinds.length) {
+    if (query.has('name')) throw new Error('Invalid session use.');
+    return undefined;
+  }
+  if (kinds.length !== 1 || kinds[0] !== 'bot') throw new Error('Invalid session use.');
+  const name = text('name');
+  return name === undefined ? { kind: 'bot' } : { kind: 'bot', name };
+}
+
 export function controllerPath(location: ControllerLocation): string {
   const query = new URLSearchParams();
   for (const [key, field] of Object.entries(fields)) if (location[field]) query.set(key, location[field]!);
   if (location.sessionIntent !== undefined) query.set('intent', location.sessionIntent);
   if (location.keepOriginal) query.set('keepOriginal', '1');
+  if (location.sessionUse) {
+    query.set('as', location.sessionUse.kind);
+    if (location.sessionUse.name !== undefined) query.set('name', location.sessionUse.name);
+  }
   readControllerLocation(query);
   return query.size ? `/?${query}` : '/';
 }

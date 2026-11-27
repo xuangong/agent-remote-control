@@ -157,9 +157,9 @@ Every bot has the same tools (design 2.1); the primary bot differs only by its i
 |---|---|
 | `create_bot` | Always standing (a recruit): `lifetime` removed, and the fields the standing path ignores. Report-in and group placement as today |
 | `create_sub_session`, `send_to_sub_session`, `get_sub_session_status`, `stop_sub_session` | New (4.1); they replace the temporary form of `create_bot` and `stop_bot`/`retire_bot` |
-| `board`, `update_board` | The bot's ledger (4.3): owner may be a sub-session, `tags`, `notes`, `conflicts` in the result; a chief reads a staff bot's ledger as today |
+| `board`, `update_board` | The bot's ledger (4.3): an owner may be a sub-session; nothing else changes |
 | `write_page`, `read_page` | New (4.5): a bot's pages |
-| `read_bot` | Takes `mode` (`last_turn` | `recent`) and `max_turns`; also reads the caller's own sub-sessions; the result carries `truncated` |
+| `read_bot` | Also reads the caller's own sub-sessions |
 | `set_timer` | Gains `until_minutes`; a due timer's frame carries the sub-session roster (section 6) |
 | `list_bots` | No temporary entries; each standing bot shows whether it is the primary bot |
 | `stop_bot`, `retire_bot` | Removed: they only managed temporary bots; the person removes a standing bot |
@@ -189,27 +189,24 @@ It is not a bot: no `message`, `create_bot`, memory, timers or sub-sessions of i
 - `communicate_update { current_step?, final_summary? }` (Grok's shape). `current_step` is one line, shown in the status and on the page,
   and never wakes its bot. `final_summary` is the result of the piece of work; a turn that ends without one uses its final text.
 - `read_main_session`: the conversation it was started from.
-- `board` and `update_board` on its owning bot's ledger: the status, links, tags and notes of the items it owns, and items it creates for itself (4.3); `read_page`.
+- `board` and `update_board` on its owning bot's ledger: the status, links and result of the items it owns (4.3); `read_page`.
 
-### 4.3 The ledger: each bot's own board
+### 4.3 The ledger: today's board, with sub-session owners
 
-The board stays a bot's own (design 6.1, plan 8a), now called its ledger. Changes:
+Owner's remark: "we were already doing almost exactly this." The per-bot board **is** the personal ledger and stays as it is: `board` and `update_board`, the
+fields, the five statuses, the plan note, per-field versions with the overwrite notice (today's conflict report between a bot and the writer it raced),
+the notices to an item's owner, and the chief reading its staff bots' boards read-only. Only what the decisions need changes:
 
-- **Owner.** An item's `assignee` may be `self`, a standing bot (as today: a staff bot or a peer) or one of the bot's own live sub-sessions
-  (`SubSessionId`, which `members`-style listings name from the Team record). Dispatching with `tracked_task_keys` records the sub-session as owner,
-  adds a link of kind `sub_session` with its id, and the dispatch `title`; messages never reassign items.
-- **Who writes.** The bot and its sub-sessions. A sub-session writes the status, links, tags, notes and result of the items it owns, and may create
-  items it owns; it reads the whole ledger. The bot writes any item. The **owner of an item may change its status**: a staff bot changes the status of
-  an item its chief handed it on the **chief's** ledger (this narrows the old rule "a staff bot never writes its chief's board" to exactly that: status,
-  tags and notes of its own item, nothing else); the **person may change any item**; a status gated by the person's Agree is person-only for everyone.
-  Ledger structure (the plan note) is written by the bot that owns the ledger and the person.
-- **Reading.** A chief reads its staff bots' ledgers (`board { bot }`, as today). Members of one chief's group may read each other's ledgers read-only
-  (`board { bot }`), so a tracker bot can build the team page (4.5); this widens the chief-only read by one rule: same chief.
-- **Fields kept from Grok:** `key`, `title`, `parent`, `version`; per-field versions and **conflicts**: a stale write still applies field by field, and the
-  result lists `conflicts [{ field, was, by }]` (today's `overwrote`, named as Grok names it) between the bot and its sub-sessions. New: `tags[]` (at most
-  8, each up to 40 characters) and `notes` (up to 1000 characters, visible to the person). Statuses stay the five fixed ones (open, working, waiting, done,
-  cancelled); Grok's custom statuses are dropped.
-- **Notices.** A change to an item another owner holds queues `[Item "…" changed · …]` to that owner, a bot or a sub-session, written by the Relay.
+- An item's `assignee` may be one of the bot's own live sub-sessions (`SubSessionId`). Dispatching with `tracked_task_keys` records it as owner, adds a
+  link of kind `sub_session` with its id and records the dispatch `title`; messages never reassign items.
+- A sub-session writes its bot's ledger as the temporary bot did: the status, links and result of the items it owns (the existing `own` writer rule,
+  generalised from one item to every item it owns); it reads the whole ledger. The bot writes any item; the person any item; an Agree-gated status is
+  person-only (as today).
+- The owner of an item changes its status: for a sub-session that is the rule above. A staff bot changing the status of an item on its chief's board is
+  **not built** (staff report by message and the chief decides, as today).
+
+Removed from earlier drafts: tags and notes, custom statuses, string-replacement plan edits, the shared team board, nested boards, `members` lists, the
+same-chief read widening, conflict renaming.
 
 ### 4.4 Limits
 
@@ -220,24 +217,17 @@ count (200), never by age.
 
 ### 4.5 Pages (Grok's pages and `write_canvas`/`read_canvas`)
 
-A **page** is a markdown document a bot keeps. Everyone with access to the account reads it; only the bot that wrote it edits it (Grok: "only the Bot
-changes a page's content"; the person asks the bot in chat).
+A **page** is a markdown document a bot keeps; everyone of the account reads it, only the bot that wrote it edits it (Grok: "only the Bot changes a
+page's content"). A team tracker is a page: the chief (or a bot it assigns, which reads boards the chief may read) writes a table of tasks, owners and statuses.
 
 | Tool | Arguments | Result |
 |---|---|---|
-| `write_page` | `title` (up to 120), `contents` (markdown, up to 8000 characters), `page_id?` (omit to create), `version?` (the version it read; a stale one is applied and reported as a conflict, like the ledger), `operationId?` | `{ page_id, version, message }` |
-| `read_page` | `page_id?`, `bot?` (a bot of the account; default the caller) | with a `page_id`: `{ page_id, title, contents, version, updated_at_ms, bot }`; without: the bot's pages `[{ page_id, title, version, updated_at_ms }]` |
+| `write_page` | `title` (up to 120), `contents` (markdown, up to 8000 characters), `page_id?` (omit to create), `version?` (the version it read; a stale one is applied and reported) | `{ page_id, version, message }` |
+| `read_page` | `page_id?`, `bot?` (default the caller) | with `page_id`: `{ page_id, title, contents, version, updated_at_ms, bot }`; without: the bot's pages `[{ page_id, title, version, updated_at_ms }]` |
 
-- A bot keeps at most 10 pages. A page is the whole document; `write_page` replaces it (edits by string replacement are not adopted). Charts are text
-  in markdown; tables are markdown tables; nothing is rendered by a model.
-- **The team page.** A chief that wants a tracker has the chief or a tracker bot it assigns read the members' ledgers (4.3) and write a page, "Team
-  tracker": a table of tasks, owners and statuses. Nothing in the Relay knows a page is a tracker.
-- **The card.** A page shows as one card in the conversation of the bot that wrote it and, if that bot is a staff bot, in its chief's conversation too
-  (the team page appears where the chief reads). The card is the page rendered from the record, placed at the turn where the page was first written, and
-  **updated in place** (title, rendered markdown, "Updated by <bot> 2 min ago"); a rewrite adds no timeline entry. Pages are also listed in the bot's
-  details (Library, Grok's term).
-- Stored on the bot's inbox record next to its ledger (`pages`), bounded by the same Team record size; shared with the page client in the room list
-  the Relay already sends.
+At most 10 pages per bot, whole-document rewrites, stored on the bot's inbox next to its board. **The card**: a page shows as one card in the conversation of
+the bot that wrote it and, for a staff bot, in its chief's conversation, rendered from the record and updated in place ("Updated by <bot> 2 min ago", no new
+timeline entry per rewrite); pages are listed in the bot's details.
 
 ### 4.6 The primary bot
 
@@ -256,11 +246,9 @@ changes a page's content"; the person asks the bot in chat).
 
 ### 5.0 Records
 
-No new kind of bot, and no shared board. `BotRecord` gains `primary?: true` (at most one) and loses `lifetime`. The ledger stays on the bot's inbox (as
-now) with two optional item fields (`tags`, `notes`) and a widened `assignee`; pages are a new optional `pages` array on the same inbox. A sub-session's
-caller identity resolves to its owning bot, so its `board`/`update_board`/`read_page` calls act on that bot's ledger with the sub-session as the writer
-(`updatedBy` takes a `SubSessionId`). The report-in of a recruit is unchanged (design 2.2): a turn in its own conversation, visible to the person who
-can open it, and the reply to its chief.
+No new kind of bot and no new board. `BotRecord` gains `primary?: true` (at most one) and loses `lifetime`. The board stays on the bot's inbox; `assignee`
+and `updatedBy` widen to `SubSessionId`; pages are a new optional `pages` array on the same inbox. A sub-session's caller identity resolves to its owning
+bot, so its `board`/`update_board`/`read_page` calls act on that bot's board with the sub-session as the writer. The report-in of a recruit is unchanged.
 
 ### 5.1 The record
 
@@ -413,7 +401,7 @@ New bullets:
 
 **Sub-session instructions** (`sub-session-roles.ts`, replaces `taskWorkerInstructions`; the session's instructions, not a message):
 
-> You are a sub-session of the bot "<bot>", named "<title>": a working session of its own, not a bot. Work arrives as input labelled [Sub-session …]; the first is your prompt, and more related work may follow later, so keep what you learn in mind. [workspace sentence as today: same, read-only, or worktree at commit …] Do the work yourself with your own tools. Your bot's ledger is shared with you: update the status, links, tags and notes of the items you own (board, update_board). At the end of each piece of work call communicate_update with a final_summary (what you did and found, where results are, what is left; only its first 300 characters reach your bot in the input, the rest it reads on request); use current_step while you work. If you need a decision, say so first in the summary and stop; the answer arrives as the next input. You cannot message or create bots. Read the conversation you were started from with read_main_session only if the prompt is not enough. The person may also write to you directly. Native permissions still apply.
+> You are a sub-session of the bot "<bot>", named "<title>": a working session of its own, not a bot. Work arrives as input labelled [Sub-session …]; the first is your prompt, and more related work may follow later, so keep what you learn in mind. [workspace sentence as today: same, read-only, or worktree at commit …] Do the work yourself with your own tools. Your bot's ledger is shared with you: update the status, links and result of the items you own (board, update_board). At the end of each piece of work call communicate_update with a final_summary (what you did and found, where results are, what is left; only its first 300 characters reach your bot in the input, the rest it reads on request); use current_step while you work. If you need a decision, say so first in the summary and stop; the answer arrives as the next input. You cannot message or create bots. Read the conversation you were started from with read_main_session only if the prompt is not enough. The person may also write to you directly. Native permissions still apply.
 
 ## 9. What the person sees
 
@@ -435,7 +423,7 @@ New bullets:
 | Primary | none | A bot's details and its Chats row action **Make primary** (zh 设为主机器人) for a bot whose chief is the person; marking another replaces it; the app opens on the primary bot's conversation when one exists |
 | Chief's conversation | the chief's words; reports fold to one line per sender | Bot-to-bot traffic folds further in Grok's wording: **"6 messages with 4 bots"**, **"3 messages with Windows Worker 1 and tracker"**, **"Message from tracker"**; each line expands; the chief's own words stay full |
 | **Page card** | none | One live card per page in the conversation of its bot and, for a staff bot, its chief's: title, rendered markdown (tables), "Updated by tracker 2 min ago"; updated in place, never a new entry per rewrite |
-| Details of a bot | mission, staff, temporary bots, board | mission and memory; staff; **Sub-sessions**; the **ledger** (items with owner, tags, notes, links, version; the plan note); **Pages** (Library: title, updated); the timer with its end; **Make primary** |
+| Details of a bot | mission, staff, temporary bots, board | mission and memory; staff; **Sub-sessions**; the **board** (items with owner, links, version; the plan note); **Pages** (Library: title, updated); the timer with its end; **Make primary** |
 | Sub-session list in details | Tasks: Mark done, Stop, Keep | rows grouped *Needs you* / *Working* / *Idle* / *Ended* (last 10): name, state, "idle 3 h", the current step or last work line, the last result line, session id; actions **Open** and **Stop**. No Mark done, no Keep |
 | Audit | chains with bots by kind; Retire for a temporary bot | bots only; "Sub-sessions started: n" per chain; stopping a chain interrupts its sub-session turns; `Retire` removed |
 
@@ -464,8 +452,6 @@ English and Chinese strings (new or replaced; all in `conversation.*.ts`, `timel
 | `timeline.bots.messageFrom` | Message from {name} | 来自 {name} 的消息 |
 | `details.pages` | Pages | 页面 |
 | `details.pageUpdated` | Updated {time} | 更新于 {time} |
-| `details.ledgerTags` | Tags | 标签 |
-| `details.ledgerNotes` | Notes | 备注 |
 | `chats.primary` | Primary | 主 |
 | `details.makePrimary` | Make primary | 设为主机器人 |
 | `details.primaryRefused` | Only a bot that reports to you can be primary. | 只有直接向你汇报的机器人才能设为主机器人。 |
@@ -515,23 +501,21 @@ Pointers from plans 8a, 9a, 9d and 10. No code.
 
 **Step 2. Protocol and contracts.** Sub-session record and frames (`task.ts`), host calls (`create_sub_session`, `send_to_sub_session`,
 `get_sub_session_status`, `stop_sub_session`, `sub_update`, `sub_turn_end`, `sub_told`, `write_page`, `read_page`, `set_primary`), `TeamAction.stop_sub_session`,
-ledger fields (`tags`, `notes`, `SubSessionId` owners), pages, `BotRecord.primary`, `set_timer` `until_minutes`, `read_bot` `mode`/`max_turns`, instructions v12.
+`SubSessionId` owners, pages, `BotRecord.primary`, `set_timer` `until_minutes`, instructions v12.
 Fixtures `sub-session.v1.json`, `board.v1.json` (new fields), `bot-messages.v1.json`, `page.v1.json`. Compatibility metadata is not updated on the task
 branch (AGENTS). Tests: protocol units, including that v12 no longer forbids a bot's own subagents, names sub-sessions for handed-off, long, reused or
 person-visible work, carries the primary section only for the primary bot, and names the version.
 
 **Step 3. Relay.** `SubSessions` (create, send with delivery and title, status, stop, results from `sub_turn_end`/`sub_update`, the limit with roster,
-end on retire, `/side` start, chain counter, audit stop), the ledger rules of 4.3 (sub-session writer, owner status write, person any, Agree
-person-only, same-chief read, tags/notes, conflicts), pages (`write_page`/`read_page`, bounds, in-place version), `set_primary` (at most one,
+end on retire, `/side` start, chain counter, audit stop), the ledger rules of 4.3 (a sub-session writes the items it owns; person any; Agree person-only), pages (`write_page`/`read_page`, bounds, in-place version), `set_primary` (at most one,
 chief-is-person), timer `until_minutes` and the roster in its frame. Integration with the real Team broker and in-memory store; the host broker settling a
 claimed work input and validating the team (the 2026-11-25 N-7 class of bug).
 
-**Step 4. Controller.** `sub-session-roles.ts`, the sub-session tool namespace (`communicate_update`, `read_main_session`, board), the six new bot tools,
+**Step 4. Controller.** `sub-session-roles.ts`, the sub-session tool namespace (`communicate_update`, `read_main_session`, board), the new bot tools (the four sub-session tools and the two page tools),
 the seat lifecycle (held while live; forgotten on ended and settled), `sub_turn_end`/`sub_update`/`sub_told`, chain approvals on sub-session turns, the
 primary section of instructions, no standing instructions for a sub-session. Measure the memory and process cost of a held idle lease per provider.
 
-**Step 5. Page.** Sub-sessions list and cards, `SideCards` on the new result, page cards (in place) and Pages in details, the ledger panel with
-tags/notes/owner, folding lines, Make primary and the Primary mark, locale files in both languages, `--orchard-*` tokens in the lines touched.
+**Step 5. Page.** Sub-sessions list and cards, `SideCards` on the new result, page cards (in place) and Pages in details, the board's owner display, folding lines, Make primary and the Primary mark, locale files in both languages, `--orchard-*` tokens in the lines touched.
 
 **Step 6. Behaviour scenarios and instructions.** Rewrite `scripts/bots-scenarios.mjs` and run v12 with real Claude Code and Codex.
 
@@ -620,13 +604,18 @@ On a configurable free port with this checkout's Relay, Controller and website, 
 
 ## 14. Remaining gaps, with a recommendation
 
-1. **Who may be primary.** Only a bot whose chief is the person (Grok: a Team Bot cannot be). Recommendation as built.
-2. **Reading the team's ledgers.** Members of one chief's group read each other's ledgers read-only so a tracker can build the team page. One rule wider than
-   "a chief reads its staff"; the owner may narrow it to the chief and have it pass the data.
-3. **Page card placement.** A page shows in its bot's conversation and its chief's; the first-write turn anchors it. The owner may prefer an explicit "pin to
-   chief".
-4. **Custom statuses and string-replacement plan edits** (Grok) are dropped; five fixed statuses, whole-page rewrites.
+1. **Who may be primary.** Only a bot whose chief is the person (Grok: a Team Bot cannot be). As built.
+2. **Who writes the team page.** The chief, or a bot that can read the boards it needs; the chief reads staff boards as today and may pass the data. The
+   owner may later widen board reading to the whole group.
+3. **A staff bot changing the status of an item on its chief's board** is not built; it reports by message.
+4. **Page card placement.** The writing bot's conversation and its chief's. The owner may prefer an explicit pin.
 5. **`/side` seed size** (taste), **live limit 8** (a number).
+
+### Removed from earlier drafts
+
+Tags and notes on items; custom statuses; string-replacement plan edits; the shared team board and nested team boards; `members` and the same-chief
+ledger read; renamed conflict results; `read_bot` `mode`/`max_turns`; a goal concept; a main bot above project bots. Kept from today without change: the
+board, `create_bot` and its report-in, the chief reading staff boards, answer sessions for mentions, memory, folded bot messages, the timer.
 
 ## 15. The owner's answers, and where Grok still differs from an earlier decision
 

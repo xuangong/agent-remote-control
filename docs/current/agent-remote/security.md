@@ -61,6 +61,10 @@ uses an arbitrary server-supplied redirect and never automatically repeats the
 sensitive operation after authentication. Signing out or revoking access does
 not require recent authentication.
 
+## Session links
+
+A session link names a Host, a provider and a native session, and may ask the page to make the session a bot (`as=bot`, optional `name`). It holds no credential, no title and no permission: opening it needs the receiving person's own sign-in and access, and the page asks before it changes anything, so a link in a chat or on a shared screen cannot make a bot by being opened. `session link --here` and `--pick` read the Host's session list through the command line's own caller (the management socket as the Host owner, or the session's socket as that session); the list follows the Host's workspace policy and never includes share recipients' sessions.
+
 ## Local execution setup
 
 Use the CLI's default policy and set an explicit workspace before startup:

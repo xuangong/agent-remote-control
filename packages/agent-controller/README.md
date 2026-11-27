@@ -71,6 +71,7 @@ agent-remote-controller session list
 agent-remote-controller session read <hostId>/<providerId>/<nativeSessionId> --search "plan"
 agent-remote-controller session send <address> "Please check the tests"
 agent-remote-controller session link <address> --qr     # open it on a phone with Scan to open
+agent-remote-controller session link --here --provider claude --bot --qr   # hand this directory's newest session to the page as a bot
 agent-remote-controller session attach <address>        # open it in its native CLI here
 agent-remote-controller host read
 agent-remote-controller window list

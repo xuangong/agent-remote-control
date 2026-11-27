@@ -46,10 +46,10 @@ The command line sends its session as a cookie with the Relay's own `origin`, as
 ## Session commands
 
 ```sh
-session list [--host H] [--provider P] [--limit 1..50] [--cursor C]
+session list [--host H] [--provider P] [--cwd DIR] [--refresh] [--limit 1..50] [--cursor C]
 session read <address> [--limit 0..10] [--cursor C] [--search TEXT] [--turn TURN_ID] [--text-offset N]
 session inspect <address>
-session link <address> [--qr]
+session link (<address> | --here [--provider P] | --pick [--provider P]) [--bot [NAME]] [--qr]
 session create --provider P [--host H] [--cwd DIR] [--model M] [--effort E] [--planning]
                [--from ADDRESS [--context]] [--ref ADDRESS]... [--message TEXT | --file PATH]
 session send <address> (TEXT | --file PATH) [--steer]
@@ -70,9 +70,29 @@ All of them except `attach`, `handoff` and `--star` run on the Host in one handl
 - `create` uses the Host's own creation path (operation cache, workspace policy). `--from` makes the source a reference the agent hears about with its first input; `--context` quotes the source's recent conversation into the first message.
 - `send`, `steer`, `cancel`, `answer`, `set` take a lease on the session and run as operations of scope `host:cli`, with the same receipts as the website's.
 - `release` lets the Controller close an idle session's native process when nothing else needs it.
-- `link` prints the website link that opens the session; `--qr` also draws it on stderr.
+- `list --cwd DIR` keeps the sessions whose recorded working directory is DIR (a trailing separator is ignored); `--refresh` first asks a provider that lists only on request (Codex) to list again, and waits until that listing ends.
+- `link` prints the website link that opens the session; `--qr` also draws it on stderr. See [Handing a native session to the page](#handing-a-native-session-to-the-page).
 
 `attach` runs the session's native CLI in this terminal: `claude --resume` and `copilot --resume=` with their profile leases (`--take-over` interrupts a client that holds the session), `codex resume` through the shared daemon, OpenCode's TUI attached to its server, and `pi --session <id>` (pi has no lease, so two writers fork the history and `--take-over` is refused). A `local/...` address needs no Controller; any other is checked to be this computer's. `handoff` drives the website's Handoff through the Relay (`describe`, `prepare`, `status` until ready, `commit`); repeating it with the same `--operation-id` continues the same handoff. `--star` adds or removes the session in the user's favorites (`/v1/stars`).
+
+### Handing a native session to the page
+
+`session link` can name the session by where the person is, so that a session a coding agent already wrote on this computer is reused without finding it in the page's lists. The choice runs in the command line on the Controller's `list` and `read` (`resolveLinkTarget`, `session-target.ts`); the Host builds the link.
+
+| Form | Session |
+|---|---|
+| `link <address>` | The one named. |
+| `link` inside a session the Controller started (`AGENT_REMOTE_SESSION_TOKEN`) | That session (`self`). |
+| `link --here [--provider P]` | The newest session of the provider whose working directory is the current directory. |
+| `link --pick [--provider P]` | A choice among the nine newest sessions of the current directory, all providers or the one named: the terminal lists title, provider and last activity, and the person types a number (standard error and input are terminals). Otherwise the command refuses with `selection_needed` and prints the same list, with addresses, in the error. Enter cancels. |
+
+`--here` takes its provider from `--provider`, or from the shell when it can: inside Claude Code (`CLAUDECODE=1`) the provider is `claude`, and when its shell has `CLAUDE_CODE_SESSION_ID` the command links that exact session, not merely the newest of the directory. No other native CLI tells its shell reliably which session it runs, so Codex, Copilot, OpenCode and pi need `--provider`. An address cannot be combined with `--here` or `--pick`; `--provider` needs one of them.
+
+Codex lists sessions started outside the Controller only on request. When the last listing has none for this directory, `--here` and `--pick --provider codex` ask Codex to list (`list --refresh`), say so on standard error and wait; the other providers list on their own and are not asked again.
+
+Errors name the provider's limit: `session_not_found` says no session of that provider has this working directory, and adds that pi saves a session only after its first message, that Claude Code saves one when its first message is sent, that Codex was asked and has none, or that Copilot or OpenCode list only the sessions they have saved. `provider_unavailable` means the provider's catalog could not be read. A session in another directory is not found; use its address or `--pick` there.
+
+`--bot [NAME]` makes the link ask the page to turn the session into a bot, called NAME when given (the page's confirmation proposes the session's own title otherwise). `NAME` is the next word unless it starts with `--`, or write `--bot=NAME`; put the address before `--bot`. The link adds `as=bot` and `name`; it carries no credential and no title, so showing it on a screen shows nothing the plain session link did not. Without `--bot` the link only opens the session.
 
 ### References
 

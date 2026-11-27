@@ -7,16 +7,16 @@ const entry = '/e2e/fixtures/access-entry.html';
 const sessionLink = '?host=desk&provider=codex&session=native';
 const answer = (page: Page, status: number) => page.route('**/auth/status', route => route.fulfill({ status, json: {} }));
 
-test('a check that lasts under 400 ms paints no text, then asks to sign in with the focus on the heading', async ({ page }) => {
+test('a check that has not answered paints no text, then asks to sign in with the focus on the heading', async ({ page }) => {
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   await page.route('**/auth/status', async route => { await gate; await route.fulfill({ status: 401, json: {} }); });
   await page.goto(entry);
   const status = page.getByRole('status');
-  await expect(status).toHaveText('Opening Orchard…');
-  await expect(status).toHaveCSS('animation-delay', '0.4s');
-  await expect(status).toHaveCSS('opacity', '0');
-  await expect(page.locator('.arc-access-mark')).toHaveCSS('opacity', '0');
+  // A wait before the Relay answers paints no words at all: the ground of the page, announced to assistive technology only.
+  await expect(status).toHaveAttribute('aria-label', 'Opening Orchard…');
+  await expect(status).toHaveText('');
+  await expect(page.locator('.arc-access-mark')).toHaveCount(0);
   expect(await page.getByRole('heading').count()).toBe(0);
   release();
   await expect(page.getByRole('heading', { name: 'Sign in to Orchard' })).toBeFocused();

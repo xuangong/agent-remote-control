@@ -12,6 +12,7 @@ import type { Assistant, AssistantBrokerPorts } from './assistants.js';
 import type { BotInboxes } from './inboxes.js';
 import { timerChainId, type BotChains } from './chains.js';
 import { chainScope } from './chain-scope.js';
+import { ownerTasks } from './tasks.js';
 
 type Call<A extends TeamHostCall['action']> = Extract<TeamHostCall, { action: A }>;
 const fail = (message: string): never => { throw new Error(message); };
@@ -72,6 +73,15 @@ export class BotWork {
     const wait = Math.min(Math.max(0, Math.min(...due) - this.broker.ports.now()), 24 * 60 * 60_000);
     this.timer = scheduler.setTimeout(() => { this.timer = undefined; void this.due().catch(() => undefined).finally(() => this.arm()); }, wait);
   }
+  /** The live sub-sessions the bot's session owns, as its timer's frame lists them; a person's own side is not the bot's. */
+  private roster(teams: readonly SavedTeam[], seat: { hostId: string; providerId: string; nativeSessionId?: string }, now: number) {
+    return ownerTasks([...teams], this.broker.ports.resolveSession, seat.hostId, { providerId: seat.providerId, nativeSessionId: seat.nativeSessionId ?? '' })
+      .filter(team => team.task!.state !== 'ended' && team.task!.startedBy !== 'person').sort((a, b) => a.createdAt - b.createdAt).map(team => {
+        const item = team.task!, idle = item.state === 'idle' ? Math.max(1, Math.round((now - item.updatedAt) / 60_000)) : undefined;
+        return { name: item.title, ...(idle !== undefined ? { idle: idle < 60 ? `${idle} min` : idle < 1440 ? `${Math.round(idle / 60)} h` : `${Math.round(idle / 1440)} d` } : {}),
+          ...(item.lastWork ? { lastWork: item.lastWork.title } : {}), ...(item.currentStep ? { step: item.currentStep } : {}) };
+      });
+  }
   private async due(): Promise<void> {
     // Each reminder starts a chain of its own (bots design 7).
     const started = await this.broker.change(teams => {
@@ -84,7 +94,7 @@ export class BotWork {
           if (settled(inbox)) {
             const open = (inbox.inbox!.board?.items ?? []).filter(item => boardItemOpen(item.status)).map(item => ({ title: item.title, status: item.status, ...(item.report ? { report: item.report } : {}) }));
             const chain = timerChainId(inbox.id, timer.name, now);
-            const message = { id: digest(['timer', inbox.id, timer.name, now]), from: seat.id, to: seat.id, text: timerText({ name: timer.name, items: open }), status: 'queued' as const, createdAt: now, chain };
+            const message = { id: digest(['timer', inbox.id, timer.name, now]), from: seat.id, to: seat.id, text: timerText({ name: timer.name, items: open, subSessions: this.roster(teams, seat, now) }), status: 'queued' as const, createdAt: now, chain };
             assertTeamQueueCapacity(inbox, message); inbox.messages.push(message); chains.push({ id: chain, bot: inbox.inbox!.botId });
           }
           timer.dueAt = now + timer.intervalMs;

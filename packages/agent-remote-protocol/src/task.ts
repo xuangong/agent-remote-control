@@ -184,9 +184,12 @@ export function askText(input: { from: string; text: string }): string {
   return [`[The person asks from ${heading(input.from)}]`, quoteFrames(input.text), ASK_GUIDANCE].join('\n');
 }
 /** A bot's timer came due after a quiet while. */
-export const TIMER_GUIDANCE = 'Nothing has reached you for a while. Look at your open work: read your board, read your staff with read_bot, update your board, and act or wait as the work needs. A quiet check that changes nothing needs no message.';
-export function timerText(input: { name: string; items: ReadonlyArray<{ title: string; status: string; report?: string }> }): string {
-  return [`[Timer "${heading(input.name).replace(/"/g, "'")}" · due]`, ...input.items.map(item => quoteFrames(`${heading(item.title)} · ${item.status}${item.report ? ` · ${item.report}` : ''}`)), TIMER_GUIDANCE].join('\n');
+export const TIMER_GUIDANCE = 'Nothing has reached you for a while. Look at your open work: read your board, read your staff with read_bot and your sub-sessions with get_sub_session_status (stop those you will not use again), update your board, and act or wait as the work needs. A quiet check that changes nothing needs no message.';
+/** A sub-session as a timer's frame lists it: its name, how long it has been idle (none while it works), what it last did and what it does now. */
+export interface TimerSubSession { name: string; idle?: string; lastWork?: string; step?: string }
+export function timerText(input: { name: string; items: ReadonlyArray<{ title: string; status: string; report?: string }>; subSessions?: readonly TimerSubSession[] }): string {
+  const subs = (input.subSessions ?? []).map(sub => quoteFrames(`Sub-session "${heading(sub.name).replace(/"/g, "'")}" · ${sub.idle ? `idle ${sub.idle}` : 'working'}${sub.lastWork ? ` · last: ${heading(sub.lastWork)}` : ''}${sub.step ? ` · now: ${heading(sub.step)}` : ''}`));
+  return [`[Timer "${heading(input.name).replace(/"/g, "'")}" · due]`, ...input.items.map(item => quoteFrames(`${heading(item.title)} · ${item.status}${item.report ? ` · ${item.report}` : ''}`)), ...subs, TIMER_GUIDANCE].join('\n');
 }
 /** The line that names the board item a message serves, written by the Relay from the record: `[Item 7 "Run the regression" · from Chief]`. */
 export function itemTagText(input: { key: number; title: string; from: string }): string {

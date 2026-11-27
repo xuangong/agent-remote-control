@@ -196,3 +196,42 @@ describe('whether a session was given the bots\' tools, which decides if its fin
     expect(botToolsGiven({ capability: 'creation', applied: 'none', isBot: false })).toBe(false);
   });
 });
+
+describe('reading a sub-session and reading a bot', () => {
+  const owner = { providerId: 'codex', nativeSessionId: 'main' };
+  const page = { entries: [{ id: 'a1', type: 'user_message', turnId: 't1' }, { id: 'a2', type: 'assistant_message', turnId: 't1' }, { id: 'b1', type: 'user_message', turnId: 't2' }, { id: 'b2', type: 'assistant_message', turnId: 't2' }], truncated: false };
+  function reader() {
+    const calls: TeamHostCall[] = [], read: Array<[string, unknown]> = [];
+    const tools = new BotTools({ request: async call => { calls.push(call); return { providerId: 'codex', nativeSessionId: 'worker-1' }; }, tasks: () => true,
+      read: async (target, before) => { read.push([target.nativeSessionId, before]); return page; } });
+    return { calls, read, tools: tools.namespace(() => ref('main'), false).tools };
+  }
+  const named = (tools: ReturnType<typeof reader>['tools'], name: string) => tools.find(item => item.name === name)!;
+
+  it('reads a sub-session by id or name with read_sub_session, not with read_bot, and limits the page to its last turns', async () => {
+    const { calls, read, tools } = reader();
+    const parsed = async (args: Record<string, unknown>) => JSON.parse(await named(tools, 'read_sub_session').execute(args) as string);
+    expect((await parsed({ sub_session_id: 's_' + '1'.repeat(32) })).entries.map((item: { id: string }) => item.id)).toEqual(['a1', 'a2', 'b1', 'b2']);
+    expect((await parsed({ sub_session_id: 'Collect logs', mode: 'last_turn' })).entries.map((item: { id: string }) => item.id)).toEqual(['b1', 'b2']);
+    expect((await parsed({ sub_session_id: 'Collect logs', max_turns: 2 })).entries).toHaveLength(4);
+    expect(calls).toEqual([{ action: 'read_sub_session', owner, subSessionId: 's_' + '1'.repeat(32) }, { action: 'read_sub_session', owner, subSessionId: 'Collect logs' }, { action: 'read_sub_session', owner, subSessionId: 'Collect logs' }]);
+    expect(read.every(([session]) => session === 'worker-1')).toBe(true);
+    // read_bot still reads a bot, through the bot call, and says it reads bots.
+    await named(tools, 'read_bot').execute({ bot: 'Tracker' });
+    expect(calls.at(-1)).toEqual({ action: 'bot_session', owner, bot: 'Tracker' });
+    const description = named(tools, 'read_bot').description;
+    // It reads bots only, and says where a sub-session is read instead.
+    expect(description).not.toMatch(/one of your (own )?sub-sessions/);
+    expect(description).toContain('A sub-session is not a bot: read it with read_sub_session.');
+    expect(named(tools, 'read_sub_session').description).toMatch(/not a bot/);
+  });
+
+  it('is offered with the other sub-session tools, and to no session that is not a bot', async () => {
+    const { tools } = reader();
+    const names = tools.map(item => item.name);
+    expect(names.slice(names.indexOf('create_sub_session'), names.indexOf('create_sub_session') + 5)).toEqual(['create_sub_session', 'send_to_sub_session', 'get_sub_session_status', 'read_sub_session', 'stop_sub_session']);
+    const schema = named(tools, 'read_sub_session').inputSchema as { properties: Record<string, { enum?: string[] }>; required: string[] };
+    expect(schema.required).toEqual(['sub_session_id']);
+    expect(schema.properties.mode!.enum).toEqual(['last_turn', 'recent']);
+  });
+});

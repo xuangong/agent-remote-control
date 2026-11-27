@@ -35,7 +35,7 @@ const owner = (team: Team): TeamMember => team.members[1] ?? fail('Sub-session h
 const live = (state: TeamTask['state']) => state !== 'ended';
 const clip = (text: string) => text.length > TASK_TOLD_LIMIT ? `${text.slice(0, TASK_TOLD_LIMIT - 1)}…` : text;
 /** What its bot reads of a result: the start of it, with the way to read the rest. */
-const cutResult = (text: string) => text.length > BOT_MESSAGE_LIMIT ? `${text.slice(0, BOT_MESSAGE_LIMIT - 1)}… (the rest: read_bot)` : text;
+const cutResult = (text: string) => text.length > BOT_MESSAGE_LIMIT ? `${text.slice(0, BOT_MESSAGE_LIMIT - 1)}… (the rest: read_sub_session)` : text;
 const withoutResult = (outcome: TaskOutcome) => outcome === 'failed' ? 'The turn failed without a message.' : outcome === 'interrupted' ? 'The turn was interrupted.' : 'The turn ended without a summary.';
 /** Whether more input is on its way to a member: queued or being delivered. An input already accepted was taken by the turn that just ended; a held acknowledgement is not input. */
 const inbound = (team: Team, memberId: string) => team.messages.some(message => message.to === memberId

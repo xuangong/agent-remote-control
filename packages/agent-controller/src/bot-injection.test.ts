@@ -59,7 +59,7 @@ async function fixture(options: { tickMs?: number } = {}) {
 }
 const worker = (extensions: AgentSessionExtensions | undefined) => extensions?.toolNamespaces?.find(namespace => namespace.name === 'agent_remote');
 
-const BOT_TOOLS = ['create_bot', 'create_sub_session', 'send_to_sub_session', 'get_sub_session_status', 'stop_sub_session', 'message', 'download_attachment', 'list_bots', 'list_hosts', 'read_bot', 'update_mission', 'remember', 'forget', 'set_chief', 'board', 'update_board', 'set_timer', 'open_room'];
+const BOT_TOOLS = ['create_bot', 'create_sub_session', 'send_to_sub_session', 'get_sub_session_status', 'read_sub_session', 'stop_sub_session', 'message', 'download_attachment', 'list_bots', 'list_hosts', 'read_bot', 'update_mission', 'remember', 'forget', 'set_chief', 'board', 'update_board', 'set_timer', 'open_room'];
 it('declares the bots namespace, deferred, on every Codex thread it creates, so a thread that becomes a bot finds it', async () => {
   const f = await fixture();
   try {

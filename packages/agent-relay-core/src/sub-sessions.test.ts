@@ -60,11 +60,18 @@ describe('sub-sessions of a bot', () => {
     expect(await f.call(f.as('tracker'), 'bot_message', { operationId: 'o1', to: id, text: 'Hi.' })).toMatchObject({ outcome: 'unreachable' });
     expect(await f.call(f.as('tracker'), 'bot_message', { operationId: 'o2', to: 'Collect logs', text: 'Hi.' })).toMatchObject({ outcome: 'unreachable' });
     await expect(f.call(f.as('tracker'), 'bot_session', { bot: id })).rejects.toThrow();
+    await expect(f.call(f.as('tracker'), 'read_sub_session', { subSessionId: id })).rejects.toThrow('None of your sub-sessions');
     expect(await f.call(f.worker(), 'bot_message', { operationId: 'o3', to: 'Tracker', text: 'Hi.' })).toMatchObject({ outcome: 'forbidden' });
     await expect(f.call(f.worker(), 'create_bot', { operationId: 'o4', name: 'X', mission: 'Y.' })).rejects.toThrow('not a bot');
-    // Its bot reads its conversation with read_bot, by id or name.
-    expect(await f.call(f.as('chief'), 'bot_session', { bot: id })).toEqual(f.worker());
-    expect(await f.call(f.as('chief'), 'bot_session', { bot: 'collect logs' })).toEqual(f.worker());
+    // read_bot reads bots only: a sub-session is no bot, by id or by name.
+    await expect(f.call(f.as('chief'), 'bot_session', { bot: id })).rejects.toThrow();
+    await expect(f.call(f.as('chief'), 'bot_session', { bot: 'collect logs' })).rejects.toThrow();
+    // Its bot reads its conversation with read_sub_session, by id or name; the sub-session itself reads no one's.
+    expect(await f.call(f.as('chief'), 'read_sub_session', { subSessionId: id })).toEqual(f.worker());
+    expect(await f.call(f.as('chief'), 'read_sub_session', { subSessionId: 'collect logs' })).toEqual(f.worker());
+    await expect(f.call(f.worker(), 'read_sub_session', { subSessionId: id })).rejects.toThrow('not a bot');
+    // A standing bot is still read with read_bot.
+    expect(await f.call(f.as('chief'), 'bot_session', { bot: 'Tracker' })).toEqual(f.as('tracker'));
   });
 
   it('keeps at most eight live for a bot, naming them when it refuses the next, and never counts a side the person started', async () => {
@@ -116,7 +123,7 @@ describe('sub-sessions of a bot', () => {
     const kinds: string[] = [], [result] = f.inputs(f.sub(), 1);
     kinds.push(result!.kind);
     expect(result).toMatchObject({ kind: 'done', title: 'Collect logs' });
-    expect((result as { body: string }).body).toBe(`${'x'.repeat(299)}… (the rest: read_bot)`);
+    expect((result as { body: string }).body).toBe(`${'x'.repeat(299)}… (the rest: read_sub_session)`);
     // The next turn has no summary of its own: its final text is the result, not the earlier summary.
     await f.call(f.as('chief'), 'send_to_sub_session', { subSessionId: 'Collect logs', operationId: 'm', text: 'Again.', title: 'Again' });
     f.settle();

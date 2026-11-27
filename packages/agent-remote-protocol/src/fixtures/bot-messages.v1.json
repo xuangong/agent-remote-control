@@ -211,6 +211,14 @@
         "memberId": "worker",
         "operationId": "op-told",
         "text": "Skip the docs."
+      },
+      {
+        "action": "read_sub_session",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "subSessionId": "Collect logs"
       }
     ],
     "invalid": [
@@ -444,6 +452,30 @@
           "nativeSessionId": "main"
         },
         "currentStep": ""
+      },
+      {
+        "action": "read_sub_session",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        }
+      },
+      {
+        "action": "read_sub_session",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "subSessionId": ""
+      },
+      {
+        "action": "read_sub_session",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "subSessionId": "x",
+        "bot": "Chief"
       }
     ]
   },

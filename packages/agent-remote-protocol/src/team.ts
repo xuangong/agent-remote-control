@@ -161,6 +161,8 @@ export const TeamHostCall = Type.Union([
     trackedTaskKeys: Type.Optional(Type.Array(BoardItem.properties.key, { maxItems: 10, uniqueItems: true })), cause: Type.Optional(TurnCause) }, object),
   Type.Object({ action: Type.Literal('get_sub_session_status'), owner: BotCaller, subSessionIds: Type.Optional(Type.Array(id, { maxItems: 20 })) }, object),
   Type.Object({ action: Type.Literal('stop_sub_session'), owner: BotCaller, subSessionId: id }, object),
+  // Where one of the caller's own sub-sessions is, so its Host reads a page of its conversation (read_sub_session); bots are read with bot_session.
+  Type.Object({ action: Type.Literal('read_sub_session'), owner: BotCaller, subSessionId: Type.String({ minLength: 1, maxLength: 300 }) }, object),
   // A sub-session's own report (communicate_update): what it is doing now, and the result of the piece of work it finished.
   Type.Object({ action: Type.Literal('sub_update'), owner: BotCaller, currentStep: Type.Optional(Type.String({ minLength: 1, maxLength: SUB_SESSION_LINE_LIMIT })),
     finalSummary: Type.Optional(Type.String({ minLength: 1, maxLength: TASK_SUMMARY_LIMIT })) }, object),

@@ -13,7 +13,7 @@ async function harness(toolNamespaces = false) { const h = await botsHarness({ t
 const owner = { providerId: 'codex', nativeSessionId: 'worker', title: 'Chief' };
 const createSub = { action: 'create_sub_session' as const, owner, operationId: 'op', name: 'Collect logs', prompt: 'Collect the build logs of the last run.' };
 /** Every bot's tools, as the Host gives them while the Relay runs tasks. */
-const BOT_TOOLS = ['create_bot', 'create_sub_session', 'send_to_sub_session', 'get_sub_session_status', 'stop_sub_session', 'message', 'download_attachment', 'list_bots', 'list_hosts', 'read_bot', 'update_mission', 'remember', 'forget', 'set_chief', 'board', 'update_board', 'set_timer', 'open_room'];
+const BOT_TOOLS = ['create_bot', 'create_sub_session', 'send_to_sub_session', 'get_sub_session_status', 'read_sub_session', 'stop_sub_session', 'message', 'download_attachment', 'list_bots', 'list_hosts', 'read_bot', 'update_mission', 'remember', 'forget', 'set_chief', 'board', 'update_board', 'set_timer', 'open_room'];
 const tool = (tools: readonly AgentSessionTool[] | undefined, name: string) => tools?.find(item => item.name === name) ?? (() => { throw new Error(`No ${name} tool.`); })();
 
 describe('a sub-session and its bot', () => {

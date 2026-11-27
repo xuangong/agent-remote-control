@@ -12,7 +12,7 @@ const group = () => ({ window: { id: 'g', title: 'g', revision: 1, views: [['v1'
   bots: { rank: 'm', members: { v1: { botId: ids.chief, name: 'Chief' }, v2: { botId: ids.tracker, name: 'Tracker' } } } }) as unknown as WindowGroup;
 
 function fixture() {
-  let state: SavedTeam[] = [], now = 1_000_000;
+  let state: SavedTeam[] = [], now = 1_000_000, workers = 0;
   const timers = new Map<number, { at: number; run: () => void }>(); let next = 0;
   const scheduler = { setTimeout: (run: () => void, delayMs: number) => { timers.set(++next, { at: now + delayMs, run }); return next; }, clearTimeout: (id: unknown) => { timers.delete(id as number); } };
   const fire = async () => { for (const [id, timer] of [...timers]) if (timer.at <= now) { timers.delete(id); timer.run(); } for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 0)); };
@@ -22,7 +22,7 @@ function fixture() {
     read: () => state, now: () => now, assertHost: () => {},
     // Drafts as the Relay's state makes them, so what a change returns is detached as there.
     change: async update => { let result: unknown; state = committed.produce(state, draft => { result = structuredClone(detached(update(draft))); }); return result as never; },
-    createSeat: async (_, seat) => ({ ...seat.member, creation: 'ready', activity: 'idle', cwd: '/repo', ...(seat.member.nativeSessionId ? {} : { nativeSessionId: 'worker-1' }) }),
+    createSeat: async (_, seat) => ({ ...seat.member, creation: 'ready', activity: 'idle', cwd: '/repo', ...(seat.member.nativeSessionId ? {} : { nativeSessionId: `worker-${++workers}` }) }),
     tasks: { capable: () => true, assertHost: () => {} },
     assistants: { groups: () => groups, capable: () => true },
   });
@@ -31,9 +31,32 @@ function fixture() {
   const timerInputs = () => inbox().messages.flatMap(message => parseTaskInputs(message.text) ?? []).filter(input => input.kind === 'timer');
   // The bot read everything queued for it.
   const read = () => { state = committed.produce(state, draft => { for (const team of draft) if (team.inbox?.botId === ids.chief) for (const message of team.messages) { message.status = 'accepted'; message.acceptance = 'handled'; } }); };
-  return { broker, as, inbox, timerInputs, read, fire, advance: (ms: number) => { now += ms; } };
+  // What was queued for the sub-sessions reached them and started their turns.
+  const settleSubs = () => { state = committed.produce(state, draft => { for (const team of draft) if (team.task) for (const message of team.messages) if (message.status === 'queued') { message.status = 'accepted'; message.acceptance = 'started'; } }); };
+  return { broker, as, inbox, timerInputs, read, fire, state: () => state, settleSubs, advance: (ms: number) => { now += ms; } };
 }
 describe('a standing bot\'s timers', () => {
+  it('lists the sub-sessions a bot holds on its due timer, with how long each has been idle and what it last did, and not a person\'s side', async () => {
+    const f = fixture();
+    await f.broker.hostCall('mac', { action: 'update_board', owner: f.as('chief'), items: [{ title: 'Release notes', status: 'working' }] });
+    await f.broker.hostCall('mac', { action: 'create_sub_session', owner: f.as('chief'), operationId: 'a', name: 'Collect logs', prompt: 'Collect them.' });
+    await f.broker.hostCall('mac', { action: 'create_sub_session', owner: f.as('chief'), operationId: 'b', name: 'Run tests', prompt: 'Run them.' });
+    await f.broker.startBot({ operationId: 'side', source: { hostId: 'mac', providerId: 'claude', nativeSessionId: 'chief', title: 'Chief' }, bot: { name: 'Look it up', mission: 'What?' } });
+    f.settleSubs();
+    // The first one finished its turn and sits idle; the second still works and says what it does.
+    const [first, second] = [0, 1].map(index => state_(f).filter(team => team.task)[index]!);
+    await f.broker.hostCall('mac', { action: 'sub_turn_end', teamId: first.id, memberId: first.members[0]!.id, outcome: 'finished', text: 'Logs saved.' });
+    await f.broker.hostCall('mac', { action: 'sub_update', owner: f.as(second.members[0]!.nativeSessionId!), currentStep: 'Reading the suite' });
+    f.read();
+    f.advance(WORK_TIMER_MS + 3 * 3_600_000); await f.fire();
+    const [timer] = f.timerInputs();
+    expect(timer).toMatchObject({ kind: 'timer', name: 'work' });
+    const lines = (timer as { body: string }).body.split('\n');
+    expect(lines).toContain('Sub-session "Collect logs" · idle 3 h · last: Collect logs');
+    expect(lines).toContain('Sub-session "Run tests" · working · last: Run tests · now: Reading the suite');
+    expect(lines.some(line => line.includes('Look it up'))).toBe(false);
+  });
+
   it('keeps a quiet timer that reminds the bot of its open board items, which list_bots shows', async () => {
     const f = fixture();
     await f.broker.hostCall('mac', { action: 'update_board', owner: f.as('chief'), items: [{ title: 'Release notes', status: 'working' }] });
@@ -85,3 +108,5 @@ describe('a standing bot\'s timers', () => {
     await expect(f.broker.hostCall('mac', { action: 'set_timer', owner: f.as('worker-1'), name: 'Check CI', minutes: 5 })).rejects.toThrow('not a bot');
   });
 });
+
+const state_ = (f: ReturnType<typeof fixture>) => f.state();

@@ -175,6 +175,14 @@ export class BotCalls {
     if (team.task!.state !== 'ended') await this.tasks.stop(hostId, { owner: call.owner, teamId: team.id });
     return { sub_session_id: subSessionId(team.id), message: 'The sub-session has ended; its conversation stays readable.' };
   }
+  /** Where one of the caller's own sub-sessions is, by id or name, for `read_sub_session`; no other bot's, and no bot's. */
+  readSub(hostId: string, call: Call<'read_sub_session'>): { providerId: string; nativeSessionId: string } {
+    this.main(hostId, call.owner);
+    const found = this.ownSub(hostId, { owner: call.owner, subSessionId: call.subSessionId }).members[0]!, nativeSessionId = found.nativeSessionId;
+    if (!nativeSessionId || found.hostId !== hostId) throw new Error('That sub-session runs on another computer; its result reaches you as input.');
+    const current = this.broker.ports.resolveSession(found.hostId, found.providerId, nativeSessionId);
+    return { providerId: current.providerId, nativeSessionId: current.nativeSessionId };
+  }
   /** Ends the live sub-sessions of a bot that is no longer one: when a bot retires, its sub-sessions end. A person's own sides stay with the person. */
   async endRetired(): Promise<void> {
     const directory = accountDirectory(this.ports.groups());
@@ -493,13 +501,12 @@ export class BotCalls {
     this.caller(hostId, call.owner);
     return { hosts: await (this.places ?? fail('Choosing a Host is not available on this Relay.')).list() };
   }
-  /** Where a bot's conversation is, for `read_bot`: one of the caller's sub-sessions, or any standing bot of the account (the person's bots are not secret from each other). */
+  /** Where a bot's conversation is, for `read_bot`: any standing bot of the account (the person's bots are not secret from each other). A sub-session is no bot: `readSub` reads it. */
   readSession(hostId: string, call: Call<'bot_session'>): { providerId: string; nativeSessionId: string } {
     const self = this.caller(hostId, call.owner);
     // An answer session reads the conversation it was asked from ("asking") and its bot's main session ("main").
     const own = self.answer && fold(call.bot) === 'asking' ? self.answer.ask!.from : self.answer && fold(call.bot) === 'main' ? self.standing : undefined;
-    const team = self.task ? undefined : this.staff(hostId, call.owner).find(item => subSessionId(item.id) === call.bot || fold(item.task!.title) === fold(call.bot));
-    const found = own ?? team?.members[0] ?? (() => { const bot = this.named(call.bot, self); return typeof bot === 'object' ? bot.standing : undefined; })();
+    const found = own ?? (() => { const bot = this.named(call.bot, self); return typeof bot === 'object' ? bot.standing : undefined; })();
     if (!found?.nativeSessionId || found.hostId !== hostId) fail(found ? 'That bot runs on another computer; ask it with message instead.' : NOT_FOUND);
     const current = this.broker.ports.resolveSession(found!.hostId, found!.providerId, found!.nativeSessionId!);
     return { providerId: current.providerId, nativeSessionId: current.nativeSessionId };

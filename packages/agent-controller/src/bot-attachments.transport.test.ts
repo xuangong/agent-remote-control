@@ -34,7 +34,7 @@ function relaySocket(socket: WebSocket) {
 async function relayAndController() {
   let saved: RemoteHostBrokerState = { keys: [[createHash('sha256').update('key').digest('hex'), { kind: 'device', installationId: 'controller', expires: Number.MAX_SAFE_INTEGER }]],
     hosts: [{ id: 'host', installationId: 'controller', name: 'Host', legacyDsh: false, teamManagement: true, providers: [{ providerId: 'codex', displayName: 'Codex' }] }], bindings: [], creations: [], teams: [] };
-  const broker = createHostBroker({ origin, assistantGroups: () => groups, initialState: saved, attachments: new PortableAttachmentStore(memoryAttachmentStorage()), heartbeatIntervalMs: 200, heartbeatTimeoutMs: 100,
+  const broker = createHostBroker({ origin, assistantGroups: () => groups, initialState: saved, attachments: new PortableAttachmentStore(memoryAttachmentStorage()),
     onStateChange: state => { saved = structuredClone(state); } });
   close.push(() => broker.close());
   const http = createServer((incoming, response) => { void (async () => {

@@ -124,7 +124,7 @@ async function composerGeometry(view: Locator) {
   });
 }
 
-test('composed Session Views keep the same controls and responsive layout at equal container sizes', async ({ page }) => {
+test('composed Session Views keep the same controls and responsive layout at equal container sizes', async ({ page, hasTouch }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/e2e/fixtures/session-view-responsive.html');
@@ -134,8 +134,8 @@ test('composed Session Views keep the same controls and responsive layout at equ
     await page.getByRole('spinbutton', { name: 'View width' }).fill(String(width));
     await page.getByRole('spinbutton', { name: 'View height' }).fill(String(height));
     for (const view of await views.all()) {
-      // Wait for container-query typography to settle before measuring menu effects.
-      await expect(view.getByTestId('prompt-input')).toHaveCSS('font-size', width > 760 ? '14.5px' : '16px');
+      // Wait for container-query typography to settle before measuring menu effects. On a touch screen a field never goes under 16px, so focusing it never zooms.
+      await expect(view.getByTestId('prompt-input')).toHaveCSS('font-size', width > 760 && !hasTouch ? '14.5px' : '16px');
       await expect(view.getByRole('button', { name: 'Hide message input', exact: true })).toBeVisible();
       // The turn's time shows in the timeline's status line; the stop button stands beside send while it runs.
       await expect(view.locator('.agent-turn-status')).toContainText(/\d+s/);

@@ -93,14 +93,12 @@ it('goes back to the chat list from a chat on a phone with ‹ Chats, at the pla
     // Like a phone's navigation bar: a chevron and the list's name, never a bare Back.
     expect(back.textContent).toBe('Chats');
     expect(back.querySelector('svg')).not.toBeNull();
-    expect(app.container.querySelector('.lab-bot-workspace')!.getAttribute('data-navigation')).toBe('push');
     // A browser drops the scroll position of a list it stops displaying.
     roster().scrollTop = 0;
     // Back pops the history entry that opening the chat pushed, as the system back gesture does.
     await act(async () => back.click());
     await until(() => expect(roster().hidden).toBe(false));
     expect(roster().scrollTop).toBe(120);
-    expect(app.container.querySelector('.lab-bot-workspace')!.getAttribute('data-navigation')).toBe('pop');
   } finally { await app.close(); }
 });
 

@@ -1,5 +1,11 @@
 const selector = '[data-entry-key]';
 
+/**
+ * Whether an entry has a place on the screen. The entries of a turn the browser has not rendered (content-visibility: auto, a turn far from
+ * the viewport) all report the turn's collapsed box, so none of them is a line a reader can be on.
+ */
+const rendered = (entry: HTMLElement): boolean => typeof entry.checkVisibility !== 'function' || entry.checkVisibility({ contentVisibilityAuto: true });
+
 /** Index only rendered entries; geometry is read lazily so reflow cannot stale it. */
 export class TimelineEntryIndex {
   private root?: HTMLElement;
@@ -37,7 +43,7 @@ export class TimelineEntryIndex {
       const entry = this.entries[index];
       if (!entry) continue;
       const bounds = entry.getBoundingClientRect();
-      if (bounds.top <= top && bounds.bottom > top) { this.current = index; return entry; }
+      if (bounds.top <= top && bounds.bottom > top && rendered(entry)) { this.current = index; return entry; }
     }
     let low = 0;
     let high = this.entries.length;
@@ -46,7 +52,8 @@ export class TimelineEntryIndex {
       if (this.entries[middle]!.getBoundingClientRect().bottom > top) high = middle;
       else low = middle + 1;
     }
-    this.current = low;
+    while (low < this.entries.length && !rendered(this.entries[low]!)) low++;
+    this.current = Math.min(low, Math.max(0, this.entries.length - 1));
     return this.entries[low];
   }
   dispose(): void {

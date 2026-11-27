@@ -30,6 +30,8 @@ import { useContextMenu } from '../../ui/ContextMenu.js';
 import { OrchardMark } from '@orchardworks/agent-client-web/primitives';
 import { shortcutKeys } from '../../kernel/shortcuts.js';
 import { applePlatform } from '../../kernel/platform.js';
+import { useNavigationStack } from './useNavigationStack.js';
+import { keepRecent, type KeptConversation } from './kept-conversations.js';
 import './bot-workspace.css';
 
 /** What Bot mode shows of the selected group while it is acquired: whether it loads, why it is unavailable, and a retry. */
@@ -91,6 +93,19 @@ export function BotWorkspace({ visible, covered = false, compact, scope, rooms, 
   const descriptor = conversation ? describeConversation(place) : undefined;
   const unavailable = phone && !!selected.error && !descriptor;
   const showConversation = botConversationShown({ ...(place ? { place } : {}), phone, rosterVisible: navigation.rosterVisible, unavailable });
+  // The conversations under the one on screen stay mounted, parked, and the one a phone is leaving stays on screen while it slides out.
+  const keptConversations = useRef<readonly KeptConversation<BotPlace, SessionSurfaceDescriptor>[]>([]);
+  const keptScope = useRef(scope);
+  if (keptScope.current !== scope) { keptScope.current = scope; keptConversations.current = []; }
+  const kept = keepRecent(keptConversations.current, key, key && place && descriptor ? { key, place, description: descriptor } : undefined);
+  useLayoutEffect(() => { keptConversations.current = kept; });
+  const stack = useNavigationStack({ root, list: rosterElement, phone, showConversation, shownKey: showConversation ? key : undefined, onBack: () => back() });
+  // What the conversation panel shows: the chosen conversation, or the one a phone is sliding away from.
+  const leaving = !showConversation && stack.motion === 'pop' ? kept.find(item => item.key === stack.leavingKey) : undefined;
+  const panelPlace = leaving ? leaving.place : place, panelKey = leaving ? leaving.key : key;
+  const panelConversation = !!panelPlace && panelPlace.kind !== 'section';
+  const panelDescriptor = leaving ? leaving.description : descriptor;
+  const panelShown = showConversation || !!leaving;
   const offline = useContext(DeviceLinkContext)?.notice?.state === 'offline';
   const availabilityNotice = selected.loading ? <p role="status">{t('navigation.botWorkspace.opening')}</p> : selected.error && place?.kind !== 'session'
     ? <p role="alert">{selected.error} <button type="button" onClick={() => void selected.retry()}>{t('common.retry')}</button></p> : null;
@@ -105,17 +120,17 @@ export function BotWorkspace({ visible, covered = false, compact, scope, rooms, 
   const contextMenu = useContextMenu();
   const chatMenu = (row: BotRow, anchor: HTMLElement, point?: { x: number; y: number }) =>
     contextMenu.show(anchor, t('card.more', { name: row.name }), groupActions.assistantMenu(row), point);
-  const botSection = place?.kind === 'bot' ? roster.sections.find(section => section.groupId === place.groupId) : undefined;
-  const botRow = place?.kind === 'bot' ? botSection?.rows.find(row => row.viewId === place.viewId) : undefined;
+  const botSection = panelPlace?.kind === 'bot' ? roster.sections.find(section => section.groupId === panelPlace.groupId) : undefined;
+  const botRow = panelPlace?.kind === 'bot' ? botSection?.rows.find(row => row.viewId === panelPlace.viewId) : undefined;
   // A bot put to sleep elsewhere while open here: its conversation is released until it is woken.
-  const asleep = place?.kind === 'bot' && !!workspace.readGroup(place.groupId)?.bots?.members[place.viewId]?.asleep;
+  const asleep = panelPlace?.kind === 'bot' && !!workspace.readGroup(panelPlace.groupId)?.bots?.members[panelPlace.viewId]?.asleep;
   // The details sit beside the conversation from the compact width up; below it they wait to be opened.
   const [detailsOpen, setDetailsOpen] = useState(!compact);
   useEffect(() => { setDetailsOpen(!compact); }, [compact]);
   const [detailsSlot, setDetailsSlot] = useState<HTMLElement | null>(null);
   const [toolsSlot, setToolsSlot] = useState<HTMLElement | null>(null);
-  const detailsShown = detailsOpen && !!descriptor && showConversation;
-  const info = place?.kind === 'bot' ? botInfo?.(place) : undefined;
+  const detailsShown = detailsOpen && !!panelDescriptor && panelShown;
+  const info = panelPlace?.kind === 'bot' ? botInfo?.(panelPlace) : undefined;
   const detailsHost: AssistantDetailsHost = {
     surface: phone ? 'sheet' : 'panel', slot: detailsSlot, tools: toolsSlot, open: detailsShown, setOpen: setDetailsOpen,
     ...(botRow && botSection ? { actions: actions.cardActions(botRow, botSection.title, groupActions.assistantMenu(botRow, { rename: false })),
@@ -136,24 +151,10 @@ export function BotWorkspace({ visible, covered = false, compact, scope, rooms, 
       [...root.current?.querySelectorAll<HTMLButtonElement>('[data-bot-place]') ?? []].find(row => row.dataset.botPlace === key)?.focus({ preventScroll: true });
     } else if (keyboardOpen.current && showConversation && title.current) { keyboardOpen.current = false; title.current.focus({ preventScroll: true }); }
   }, [visible, key, showConversation, navigation.rosterVisible, titleFocusable]);
-  // A phone moves between the list and a chat like a navigation stack: the chat pushes in, Back pops to the list at the
-  // place it left. Hiding the list drops its scroll position, so it is kept here.
-  const [motion, setMotion] = useState<'push' | 'pop'>();
+  // A browser may drop the scroll position of a list it stops displaying, so the list's own is kept and put back when it returns.
   const rosterScroll = useRef(0);
-  const phoneChat = phone && showConversation;
-  const wasPhoneChat = useRef(phoneChat);
-  useLayoutEffect(() => {
-    if (wasPhoneChat.current === phoneChat) return;
-    wasPhoneChat.current = phoneChat;
-    if (phoneChat) setMotion('push');
-    else if (phone) {
-      setMotion('pop');
-      if (rosterElement.current) rosterElement.current.scrollTop = rosterScroll.current;
-    }
-  }, [phoneChat, phone]);
+  useLayoutEffect(() => { if (phone && !showConversation && rosterElement.current) rosterElement.current.scrollTop = rosterScroll.current; }, [phone, showConversation]);
   function back() { returning.current = true; navigation.back(); }
-  // A phone goes back from a conversation by a swipe from its left edge, as a native navigation stack does.
-  const edgeSwipe = useRef<{ x: number; y: number }>();
   /** Opening a sleeping bot wakes it for every device. */
   function open(next: BotPlace) {
     if (next.kind === 'bot' && workspace.readGroup(next.groupId)?.bots?.members[next.viewId]?.asleep) void actions.wake(next);
@@ -170,11 +171,11 @@ export function BotWorkspace({ visible, covered = false, compact, scope, rooms, 
     } catch (reason) { if (currentScope.current === requestScope) setError(errorWords(reason, t, 'navigation.botWorkspace.failed')); }
   }
   // An assistant is called by its name, never by its session's title (often its first prompt).
-  const name = place?.kind === 'session' ? names.session(place.session)
-    : place?.kind === 'bot' ? botRow?.name ?? names.view(place.groupId, place.viewId) : '';
+  const name = panelPlace?.kind === 'session' ? names.session(panelPlace.session)
+    : panelPlace?.kind === 'bot' ? botRow?.name ?? names.view(panelPlace.groupId, panelPlace.viewId) : '';
   return <main ref={root} className="lab-bot-workspace" hidden={!visible || covered} {...(!visible || covered ? { inert: '' } : {})} data-workbench-mode="bot" data-compact={compact || undefined} data-phone={phone || undefined}
     data-details={detailsShown && !phone || undefined} data-chat={phone && showConversation || undefined}
-    data-navigation={phone ? motion : undefined}
+    data-navigation={phone ? stack.motion : undefined}
     onClickCapture={() => { if (phone && !showConversation && rosterElement.current) rosterScroll.current = rosterElement.current.scrollTop; }}
     onPointerDown={event => event.stopPropagation()} onFocus={event => event.stopPropagation()}
     onKeyDown={event => {
@@ -182,7 +183,7 @@ export function BotWorkspace({ visible, covered = false, compact, scope, rooms, 
       if (phone && showConversation) { event.preventDefault(); back(); }
     }}>
     <h1 className="lab-bot-title agent-visually-hidden">{t('navigation.chats')}</h1>
-    <aside ref={rosterElement} id={rosterId} className="lab-bot-roster orchard-panel" hidden={phone && showConversation}>
+    <aside ref={rosterElement} id={rosterId} className="lab-bot-roster orchard-panel" hidden={phone && showConversation && stack.motion !== 'push' && !stack.peek}>
       <SidebarHeader brand actions={onNewBot || phone && onSearch ? <>
         {phone && onSearch ? <IconButton icon="search" label={t('navigation.search')} onClick={onSearch} /> : null}
         {onNewBot ? <IconButton icon="plus" label={t('assistants.new')} onClick={onNewBot} /> : null}</> : undefined} />
@@ -204,21 +205,23 @@ export function BotWorkspace({ visible, covered = false, compact, scope, rooms, 
       {/* When the Relay cannot be reached the roster is the device's copy, and says so in one quiet line below the list, which moves no row. */}
       {offline ? <p className="lab-bot-notice lab-bot-offline" role="status">{t('navigation.savedChats')}</p> : null}
     </aside>
-    <section className="lab-bot-conversation orchard-panel" aria-label={t('navigation.botConversation')} hidden={phone && !showConversation}
-      onTouchStart={event => { const touch = event.touches[0]; edgeSwipe.current = phone && touch && touch.clientX <= 24 ? { x: touch.clientX, y: touch.clientY } : undefined; }}
-      onTouchEnd={event => {
-        const start = edgeSwipe.current, touch = event.changedTouches[0]; edgeSwipe.current = undefined;
-        if (start && touch && touch.clientX - start.x > 80 && Math.abs(touch.clientY - start.y) < 48) back();
-      }}>
-      {conversation ? <SharedTopBar ref={title} place={place} row={botRow} project={projectRoster} name={name}
-        detailsOpen={detailsShown} detailsId={detailsId} onToggleDetails={descriptor ? () => setDetailsOpen(open => !open) : undefined}
+    {phone ? <div ref={stack.scrim} className="lab-bot-scrim" aria-hidden="true" /> : null}
+    <section ref={stack.conversation} className="lab-bot-conversation orchard-panel" aria-label={t('navigation.botConversation')} hidden={phone && !panelShown}>
+      {panelConversation ? <SharedTopBar ref={title} place={panelPlace} row={botRow} project={projectRoster} name={name}
+        detailsOpen={detailsShown} detailsId={detailsId} onToggleDetails={panelDescriptor ? () => setDetailsOpen(open => !open) : undefined}
         leading={phone ? <Button ref={backButton} variant="plain" className="lab-bot-back" aria-label={t('assistants.back')} onClick={back}><Icon name="chevron-left" size={20} />{t('assistants.backShort')}</Button> : undefined}
         trailing={<span ref={setToolsSlot} className="lab-assistant-tools" />} /> : null}
       {!unavailable ? availabilityNotice : null}
-      {asleep && descriptor ? <AsleepNotice onWake={() => place?.kind === 'bot' && void actions.wake(place)} /> : null}
-      {descriptor ? <AssistantDetailsHostContext.Provider value={detailsHost}>
-        <Mount mode="bot" active={visible && showConversation} descriptor={{ ...descriptor, props: { ...descriptor.props, visible: visible && showConversation, active: visible && showConversation, folded: asleep } }} />
-      </AssistantDetailsHostContext.Provider>
+      {asleep && panelDescriptor ? <AsleepNotice onWake={() => panelPlace?.kind === 'bot' && void actions.wake(panelPlace)} /> : null}
+      {/* Each kept conversation has its slot: the one on screen is shown, the others wait parked and detached with their state. */}
+      {kept.map(item => item.key === panelKey && panelShown
+        ? <div key={item.key} className="lab-bot-slot"><AssistantDetailsHostContext.Provider value={detailsHost}>
+          <Mount mode="bot" active={visible} descriptor={{ ...item.description, props: { ...item.description.props, visible, active: visible, folded: asleep } }} />
+        </AssistantDetailsHostContext.Provider></div>
+        : <div key={item.key} className="lab-bot-slot" hidden>
+          <Mount mode="bot" active={false} descriptor={{ ...item.description, props: { ...item.description.props, visible: false, active: false } }} />
+        </div>)}
+      {panelDescriptor ? null
         : selected.loading || selected.error ? null
         // A conversation was chosen and its group has not loaded: its layout holds the place, and nothing says it is missing.
         : place?.kind === 'bot' || place?.kind === 'session' ? <div className="lab-bot-pending"><TimelineSkeleton /></div>

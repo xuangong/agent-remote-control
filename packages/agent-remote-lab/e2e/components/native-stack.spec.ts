@@ -239,6 +239,26 @@ test.describe('on a phone', () => {
     await expect(bot.locator('.lab-bot-scrim')).toHaveCSS('opacity', '0');
   });
 
+  test('a touch the system takes over, and the back it makes, are the system\'s: the stack slides nothing of its own', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.goto(url);
+    const { bot, open } = await chats(page);
+    await open(0);
+    await expect(bot.locator('.lab-bot-roster')).toBeHidden();
+    const width = page.viewportSize()!.width;
+    const seen = await frames(page, async () => {
+      await page.evaluate(() => {
+        const options = (x: number) => ({ pointerId: 51, pointerType: 'touch', isPrimary: true, bubbles: true, cancelable: true, clientX: x, clientY: 400 });
+        document.querySelector('.lab-bot-edge')!.dispatchEvent(new PointerEvent('pointerdown', options(6)));
+        window.dispatchEvent(new PointerEvent('pointercancel', options(6)));
+        history.back();
+      });
+    });
+    await expect(bot.locator('.lab-bot-conversation')).toBeHidden();
+    await expect(bot.locator('.lab-bot-roster')).toBeVisible();
+    expect(seen.filter(frame => frame.conversationShown && frame.left > 1 && frame.left < width - 1)).toEqual([]);
+  });
+
   test('a finger that starts away from the edge, or goes down the screen, leaves the chat alone', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.goto(url);

@@ -5,6 +5,8 @@
  * - A push or a pop keeps both layers on screen until it ends: `motion` says which, `leavingKey` which conversation is sliding out.
  * - An edge swipe, from the strip along the conversation's left edge, follows the finger with both layers; `peek` says the list must be on screen under the conversation while it does.
  *   A release past halfway asks the page to go back and carries on from where the finger left; any other release returns.
+ * - A touch the system takes over (the browser's or the installed app's own swipe back, which draws its own slide) cancels the pointer; a
+ *   page that goes back soon after it is the system's, and slides nothing of its own.
  * - Motion off, by the system or by the reader's own choice, settles every transition at once: the durations are read from the
  *   motion tokens, which the page zeroes in both cases.
  * - On a wide screen nothing moves.
@@ -23,6 +25,9 @@ export interface NavigationStackInput {
   onBack(): void;
 }
 
+/** How long after a touch the system took, a pop is the system's own and is not slid again. */
+const SYSTEM_BACK_WINDOW_MS = 800;
+
 const tokenMilliseconds = (element: Element, token: string): number => {
   const value = getComputedStyle(element).getPropertyValue(token).trim();
   const number = Number.parseFloat(value);
@@ -36,7 +41,7 @@ export function useNavigationStack({ root, list, phone, showConversation, shownK
   const [peek, setPeek] = useState(false);
   const chat = phone && showConversation;
   const layersRef = useRef<StackLayers>();
-  const swiping = useRef(false), committed = useRef<Promise<boolean>>();
+  const swiping = useRef(false), committed = useRef<Promise<boolean>>(), systemTouchAt = useRef(-Infinity);
   const latest = useRef({ chat, onBack }); latest.current = { chat, onBack };
   const layers = (): StackLayers | undefined => {
     const elements = { root: root.current, list: list.current, conversation: conversation.current, scrim: scrim.current };
@@ -53,7 +58,8 @@ export function useNavigationStack({ root, list, phone, showConversation, shownK
   const [wasChat, setWasChat] = useState(chat);
   if (wasChat !== chat) {
     setWasChat(chat);
-    const animates = !!root.current && tokenMilliseconds(root.current, '--orchard-duration-pop') > 0;
+    const systemBack = !chat && performance.now() - systemTouchAt.current < SYSTEM_BACK_WINDOW_MS;
+    const animates = !!root.current && !systemBack && tokenMilliseconds(root.current, '--orchard-duration-pop') > 0;
     setMotion(animates && phone ? (chat ? 'push' : 'pop') : undefined);
   }
 
@@ -100,6 +106,7 @@ export function useNavigationStack({ root, list, phone, showConversation, shownK
     function cancel(event: PointerEvent) {
       if (event.pointerId !== pointer || !swipe) return;
       const target = swipe.cancel(); end();
+      systemTouchAt.current = performance.now();
       if (target === 1) settleBack(); else setPeek(false);
     }
     const down = (event: PointerEvent) => {

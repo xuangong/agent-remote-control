@@ -368,7 +368,7 @@ Grok's side chat is a child chat seeded with some turns of its parent (`SideChat
 sub-session with `startedBy: 'person'`, prompt = the text, workspace `same`, main = that conversation's session (a bot or not),
 opened beside the conversation as today (`useForks.ts`; `startBot` becomes `startSub`). It is seeded from the conversation with
 `forkedFrom { turns }` when the provider supports the fork the page already uses for `/fork` (`withForkContext`); otherwise it starts
-fresh as today. The number of seeded turns is a taste decision (open question 3). Differences from a bot-started sub-session, all today's
+fresh as today. The number of seeded turns is a taste decision (gap 4 in section 14). Differences from a bot-started sub-session, all today's
 side behaviour, now one field:
 
 - Nothing reaches its bot as input: no result frame, no `sub_told`. The card beside the conversation shows `lastResult` and updates

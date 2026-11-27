@@ -171,12 +171,12 @@ test.describe('on a phone', () => {
   });
 
   /** A finger on the screen, as pointer events carry it, with a pause on each move so that it has a speed. */
-  async function finger(page: Page, steps: { type: 'down' | 'move' | 'up'; x: number; y?: number }[]) {
+  async function finger(page: Page, steps: { type: 'down' | 'move' | 'up' | 'cancel'; x: number; y?: number }[]) {
     for (const step of steps) {
       await page.evaluate(({ step }) => {
         const options = { pointerId: 41, pointerType: 'touch', isPrimary: true, bubbles: true, cancelable: true, clientX: step.x, clientY: step.y ?? 400 };
         const target = step.type === 'down' ? document.querySelector('.lab-bot-edge')! : window;
-        target.dispatchEvent(new PointerEvent(step.type === 'down' ? 'pointerdown' : step.type === 'move' ? 'pointermove' : 'pointerup', options));
+        target.dispatchEvent(new PointerEvent(step.type === 'down' ? 'pointerdown' : step.type === 'move' ? 'pointermove' : step.type === 'cancel' ? 'pointercancel' : 'pointerup', options));
       }, { step });
       await page.waitForTimeout(120);
     }
@@ -237,6 +237,67 @@ test.describe('on a phone', () => {
     expect(Math.abs((await bot.locator('.lab-bot-roster').boundingBox())!.x)).toBeLessThan(1);
     // The same history entry the Back button pops: the list is home and nothing is left half-way.
     await expect(bot.locator('.lab-bot-scrim')).toHaveCSS('opacity', '0');
+  });
+
+  type Frame = Awaited<ReturnType<typeof frames>>[number];
+  /** From the end of a drag to rest the chat only moves away, the list only settles in, and the dimming only fades: nothing reverses, resets or flashes. */
+  function expectOneWay(seen: Frame[], width: number) {
+    const shown = seen.filter(frame => frame.conversationShown);
+    for (let i = 1; i < shown.length; i++) {
+      expect(shown[i]!.left, `chat at frame ${i}`).toBeGreaterThanOrEqual(shown[i - 1]!.left - 0.5);
+      expect(shown[i]!.listLeft, `list at frame ${i}`).toBeGreaterThanOrEqual(shown[i - 1]!.listLeft - 0.5);
+      expect(shown[i]!.scrim, `dimming at frame ${i}`).toBeLessThanOrEqual(shown[i - 1]!.scrim + 0.01);
+      if (shown[i]!.left > 1) expect(shown[i]!.listShown, `list shown at frame ${i}`).toBe(true);
+    }
+    expect(shown.at(-1)!.left).toBeGreaterThanOrEqual(0);
+    void width;
+  }
+
+  test('releasing the swipe past the middle carries on to the list in one movement, with a popstate before, during or after it', async ({ page }) => {
+    for (const delay of [0, 100, 450]) {
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      await page.goto(url);
+      const { bot, open } = await chats(page);
+      await open(0);
+      await expect(bot.locator('.lab-bot-roster')).toBeHidden();
+      await finger(page, [{ type: 'down', x: 8 }, { type: 'move', x: 80 }, { type: 'move', x: 200 }, { type: 'move', x: 280 }]);
+      const seen = await frames(page, async () => {
+        await finger(page, [{ type: 'up', x: 280 }]);
+        // The page's own history goes back, as the app does after a swipe, and as a system back would.
+        await page.waitForTimeout(delay);
+      });
+      await expect(bot.locator('.lab-bot-conversation')).toBeHidden();
+      expectOneWay(seen, page.viewportSize()!.width);
+    }
+  });
+
+  test('a swipe the system cancels part-way, and the back it makes, never bring the chat back across the screen', async ({ page }) => {
+    for (const delay of [0, 150, 400]) {
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      await page.goto(url);
+      const { bot, open } = await chats(page);
+      await open(0);
+      await expect(bot.locator('.lab-bot-roster')).toBeHidden();
+      await finger(page, [{ type: 'down', x: 8 }, { type: 'move', x: 80 }, { type: 'move', x: 150 }]);
+      const seen = await frames(page, async () => {
+        await finger(page, [{ type: 'cancel', x: 150 }]);
+        await page.waitForTimeout(delay);
+        await page.evaluate(() => history.back());
+      });
+      await expect(bot.locator('.lab-bot-conversation')).toBeHidden();
+      expectOneWay(seen, page.viewportSize()!.width);
+    }
+  });
+
+  test('a swipe the system cancels with no back after it returns the chat once the system has had its time', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.goto(url);
+    const { bot, open } = await chats(page);
+    await open(0);
+    await expect(bot.locator('.lab-bot-roster')).toBeHidden();
+    await finger(page, [{ type: 'down', x: 8 }, { type: 'move', x: 80 }, { type: 'move', x: 150 }, { type: 'cancel', x: 150 }]);
+    await expect.poll(async () => Math.round((await bot.locator('.lab-bot-conversation').boundingBox())!.x), { timeout: 4000 }).toBe(0);
+    await expect(bot.locator('.lab-bot-roster')).toBeHidden();
   });
 
   test('a touch the system takes over, and the back it makes, are the system\'s: the stack slides nothing of its own', async ({ page }) => {

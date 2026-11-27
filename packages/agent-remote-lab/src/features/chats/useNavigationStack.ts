@@ -41,7 +41,7 @@ export function useNavigationStack({ root, list, phone, showConversation, shownK
   const [peek, setPeek] = useState(false);
   const chat = phone && showConversation;
   const layersRef = useRef<StackLayers>();
-  const swiping = useRef(false), committed = useRef<Promise<boolean>>(), systemTouchAt = useRef(-Infinity);
+  const swiping = useRef(false), committed = useRef<Promise<boolean>>(), systemTouchAt = useRef(-Infinity), holdTimer = useRef<ReturnType<typeof setTimeout>>();
   const latest = useRef({ chat, onBack }); latest.current = { chat, onBack };
   const layers = (): StackLayers | undefined => {
     const elements = { root: root.current, list: list.current, conversation: conversation.current, scrim: scrim.current };
@@ -66,7 +66,7 @@ export function useNavigationStack({ root, list, phone, showConversation, shownK
   useLayoutEffect(() => {
     const stack = layers();
     if (!stack) return;
-    if (!motion) { if (!swiping.current) { committed.current = undefined; stack.rest(); setPeek(false); } return; }
+    if (!motion) { if (!swiping.current) { clearTimeout(holdTimer.current); committed.current = undefined; stack.rest(); setPeek(false); } return; }
     let run: Promise<boolean>;
     if (committed.current) run = committed.current;
     else {
@@ -107,17 +107,21 @@ export function useNavigationStack({ root, list, phone, showConversation, shownK
       if (event.pointerId !== pointer || !swipe) return;
       const target = swipe.cancel(); end();
       systemTouchAt.current = performance.now();
-      if (target === 1) settleBack(); else setPeek(false);
+      // The conversation holds where the finger left it: the system's back, if it comes, takes it from there with nothing slid back and
+      // forth; only when none comes does the conversation return.
+      if (target === 1) holdTimer.current = setTimeout(() => { if (latest.current.chat) settleBack(); }, SYSTEM_BACK_WINDOW_MS);
+      else setPeek(false);
     }
     const down = (event: PointerEvent) => {
       if (event.pointerType !== 'touch' || !latest.current.chat || swipe || !root.current) return;
+      clearTimeout(holdTimer.current);
       const next = new EdgeSwipe(root.current.clientWidth);
       if (!next.start(event.clientX, event.clientY, event.timeStamp)) return;
       swipe = next; pointer = event.pointerId; swiping.current = true; setPeek(true);
       window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', cancel);
     };
     element.addEventListener('pointerdown', down);
-    return () => { element.removeEventListener('pointerdown', down); end(); };
+    return () => { element.removeEventListener('pointerdown', down); clearTimeout(holdTimer.current); end(); };
   }, [phone]);
 
   return { motion, leavingKey, peek, conversation, scrim, edge };

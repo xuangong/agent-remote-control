@@ -22,11 +22,16 @@ async function chats(page: Page) {
     const row = [...node.querySelectorAll<HTMLElement>('[data-entry-key]')].find(item => item.getBoundingClientRect().bottom > top + 1);
     return { key: row?.dataset.entryKey, offset: Math.round((row?.getBoundingClientRect().top ?? 0) - top), latest: Math.abs(node.scrollTop) < 2 };
   });
-  /** The reader scrolls toward older messages: a wheel turn and the scroll it makes (a phone has no wheel). */
-  const readBack = (distance: number) => scroller.evaluate((node, distance) => {
+  /**
+   * The reader scrolls toward older messages: a wheel turn and the scroll it makes (a phone has no wheel). It returns once the scroll
+   * event has been delivered and a frame has followed, which is when the page has taken the reader's new line; a reload sooner than that
+   * restores the line before the scroll, as it does for a person who reloads within the frame of their own scroll.
+   */
+  const readBack = (distance: number) => scroller.evaluate((node, distance) => new Promise<void>(settled => {
+    node.addEventListener('scroll', () => requestAnimationFrame(() => requestAnimationFrame(() => settled())), { once: true });
     node.dispatchEvent(new WheelEvent('wheel', { deltaY: -distance, bubbles: true, cancelable: true }));
     node.scrollBy({ top: -distance, behavior: 'instant' });
-  }, distance);
+  }), distance);
   /** Whether the reader is at `seen` again: the same row at the top, within the 2 px device pixels round to. */
   const at = async (seen: { key?: string; offset: number; latest: boolean }) => {
     const now = await place();

@@ -11,7 +11,7 @@ import { PROTOCOL_VERSION, type AgentInteractionRequest } from '@orchardworks/ag
 import { createReplicaState, translator, type AgentReplicaState, type RemoteSessionStatus } from '@orchardworks/agent-client';
 import { buildEveryKindConversation, buildTailPage, TimelineRows } from '@orchardworks/agent-client/testing';
 import { bindAppearance } from '@orchardworks/agent-client-web/browser';
-import { browserLocale, LocaleProvider } from '@orchardworks/agent-client-web/react';
+import { browserLocale, LocaleProvider, TaskDirectoryContext, type PageView } from '@orchardworks/agent-client-web/react';
 import { deviceChoices } from '../../src/kernel/device-choices.js';
 import { AssistantAvatar, MotionProvider } from '@orchardworks/agent-client-web/primitives';
 import { LabWorkbench } from '../../src/conversation/LabWorkbench.js';
@@ -39,7 +39,7 @@ const invalid: AgentInteractionRequest = { kind: 'tool_approval', requestId: 'pe
   detail: { type: 'shell', command: 'rm -rf build' }, allowedDecisions: ['allow'], allowScopes: [] };
 const base = createReplicaState();
 const answered = params.get('pending') === 'none';
-const state: AgentReplicaState = { ...base, agent: { ...conversation.snapshot, status: answered ? 'running' : 'waiting' },
+const state: AgentReplicaState = { ...base, agent: { ...conversation.snapshot, status: answered ? 'running' : 'waiting', runtimeInfo: { ...conversation.snapshot.runtimeInfo, sessionId: conversation.snapshot.runtimeInfo?.sessionId ?? 'chief-session' } },
   pendingInteractions: answered ? [] : [...conversation.pendingInteractions, invalid],
   timeline: { ...base.timeline, epoch: 'fixture', initialized: true, entries: conversation.entries, nextSeq: conversation.entries.length + 1, hasOlder: params.get('older') === '1' },
   outgoingMessages: [
@@ -73,10 +73,22 @@ function Conversation() {
   </div></ToastProvider>;
 }
 
+// ?pages=1 gives the conversation a team page, which `window.rewritePage()` rewrites as its bot would.
+const teamPage = (rows: number): PageView => ({ pageId: 'pg_0a1b2c3d4e5f', botId: 'b_' + '1'.repeat(32), bot: 'Release tracker', title: 'Release 2.0 tracker', version: rows, updatedAt: Date.now() - 120_000, team: true,
+  contents: ['| Task | Owner | Status |', '|---|---|---|', ...Array.from({ length: rows }, (_, index) => `| Task ${index + 1} | Tracker | open |`)].join('\n') });
+let page = teamPage(2);
+const pageListeners = new Set<() => void>();
+(window as unknown as { rewritePage(): void }).rewritePage = () => { page = { ...teamPage(page.version + 1), updatedAt: Date.now() }; for (const listener of pageListeners) listener(); };
+function WithPage({ children }: { children: React.ReactNode }) {
+  const [, tick] = useState(0);
+  pageListeners.add(() => tick(value => value + 1));
+  return <TaskDirectoryContext.Provider value={{ canOpen: () => false, open: () => {}, owned: () => [], act: async () => {}, pages: () => [page] }}>{children}</TaskDirectoryContext.Provider>;
+}
+
 /** Chief's conversation: every kind of entry, as the Lab's workbench shows it. */
 export function EveryKindWorkbench({ selected, setSelected, respond, setInspected, ...props }: { selected?: ReadonlySet<string>; setSelected(keys: ReadonlySet<string>): void;
   respond?: () => Promise<void>; setInspected(key: string): void } & Partial<ComponentProps<typeof LabWorkbench>>) {
-  return <LabWorkbench state={state} sessionStatus={status} draftSessionKey="every-kind"
+  const workbench = <LabWorkbench state={state} sessionStatus={status} draftSessionKey="every-kind"
       assistant={{ name: SAMPLE.names[0]!, avatar: <AssistantAvatar id="chief" picture={{ shape: 'triangle', color: '#ff8a3d', gaze: 1 }} size={26} mood="working" /> }}
       onInspectEntry={key => setInspected(key)}
       entrySelection={{ selected, label: translator(locale)('sessions.quotes.quote'), select(keys, value) { const next = new Set(selected); for (const key of keys) if (value) next.add(key); else next.delete(key); setSelected(next); } }}
@@ -88,6 +100,7 @@ export function EveryKindWorkbench({ selected, setSelected, respond, setInspecte
         sendMessage: async () => {}, retryMessage: async () => {}, deleteMessage: () => {}, editPrompt: async () => {}, cancel: async () => {},
         loadOlder: async () => { await new Promise(resolve => setTimeout(resolve, 300)); throw new Error('Earlier activity could not be loaded.'); },
       }} {...props} />;
+  return params.get('pages') === '1' ? <WithPage>{workbench}</WithPage> : workbench;
 }
 
 function Fixture() {

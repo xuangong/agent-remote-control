@@ -88,12 +88,14 @@
 .agent-task-open:hover { text-decoration: underline; }
 .agent-task-open:focus-visible { outline: 2px solid var(--orchard-brand); outline-offset: 2px; border-radius: 2px; }
 @media (pointer: coarse) { .agent-task-open { min-height: 44px; padding: 0 8px; } }
-.agent-page-cards { display: grid; gap: var(--orchard-space-xs); margin: 0 0 var(--orchard-space-s); }
-.agent-page-card { display: grid; gap: var(--orchard-space-xs); min-width: 0; padding: var(--orchard-space-s) var(--orchard-space-m); border-radius: var(--orchard-radius-card); background: var(--orchard-fill); }
-.agent-page-card-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--orchard-space-s); min-width: 0; }
-.agent-page-card-title { min-width: 0; overflow-wrap: anywhere; color: var(--orchard-text-strong); }
-.agent-page-card-updated { font-size: var(--orchard-type-footnote-size); color: var(--orchard-text-secondary); }
-.agent-page-card-body { min-width: 0; max-height: 50vh; overflow: auto; overscroll-behavior: contain; }
+.agent-page-cards { position: sticky; top: 0; z-index: 3; display: grid; gap: 1px; margin: 0; }
+.agent-page-card { position: relative; min-width: 0; border-radius: var(--orchard-radius-card); background: var(--orchard-surface); box-shadow: inset 0 0 0 1px var(--orchard-separator); }
+.agent-page-card-header { display: flex; align-items: baseline; gap: var(--orchard-space-s); min-width: 0; height: 36px; padding: 0 var(--orchard-space-m); align-items: center; white-space: nowrap; }
+.agent-page-card-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--orchard-text-strong); }
+.agent-page-card-updated { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--orchard-type-footnote-size); color: var(--orchard-text-secondary); }
+.agent-page-card-header .agent-task-open { flex: none; margin-inline-start: 0; }
+/* The page opens over the conversation, so neither opening it nor a rewrite moves an entry. */
+.agent-page-card-body { position: absolute; inset-inline: 0; top: 100%; z-index: 1; min-width: 0; max-height: 60vh; overflow: auto; overscroll-behavior: contain; padding: var(--orchard-space-s) var(--orchard-space-m); border-radius: var(--orchard-radius-card); background: var(--orchard-surface, Canvas); box-shadow: 0 8px 24px color-mix(in srgb, var(--orchard-text) 16%, transparent); }
 .agent-task-card { display: grid; gap: var(--orchard-space-xs); }
 .agent-task-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--orchard-space-s); }
 .agent-task-kicker { font-size: var(--orchard-type-footnote-size); color: var(--orchard-text-secondary); }

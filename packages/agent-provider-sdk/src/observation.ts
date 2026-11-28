@@ -84,6 +84,29 @@ export interface AgentChildSession {
   observation: 'live' | 'saved_history';
 }
 
+/**
+ * The completion goal a session works toward until it is met, as the CLI keeps it (Claude Code's `/goal`, Codex's goals). The adapter
+ * reads the CLI's own record of it and reports what that record says; every figure the CLI does not keep is absent.
+ */
+export interface AgentSessionGoal {
+  /** The condition or objective the person set, at most 4,096 characters. */
+  objective: string;
+  /** `blocked`: the CLI cannot reach it; `usage_limited` and `budget_limited`: the account's limit or the goal's own budget stopped it. */
+  status: 'active' | 'paused' | 'blocked' | 'usage_limited' | 'budget_limited' | 'complete';
+  /** Times the CLI checked the goal and found it not yet met. */
+  iterations?: number;
+  tokensUsed?: number;
+  tokenBudget?: number;
+  timeUsedSeconds?: number;
+  /** Why the last check found the goal not met, or why the CLI stopped. At most 1,024 characters. */
+  lastReason?: string;
+  /** Milliseconds since the epoch. */
+  startedAt?: number;
+  updatedAt?: number;
+  /** What the person can do to it now. Each is a command of the session's directory: `commandId` run with `args`. */
+  actions?: Array<{ kind: 'clear' | 'pause' | 'resume'; commandId: string; args: string }>;
+}
+
 /** Current native execution facts. Pending interaction presentation is projected separately. */
 export interface AgentRuntimeInfo {
   providerId: string;
@@ -105,6 +128,8 @@ export interface AgentRuntimeInfo {
    * A turn it stops fails with `code` `native_usage_limited`.
    */
   usageLimit?: { resetsAt?: number };
+  /** The session's completion goal; omitted when it has none. */
+  goal?: AgentSessionGoal;
 }
 
 export type AgentStreamEvent =

@@ -83,7 +83,9 @@ export class TeamBroker {
       this.inboxes = new BotInboxes(lent, ports.assistants); this.assistants = new AssistantMessages(lent, ports.assistants, this.inboxes); this.rooms = new Rooms(lent, ports.assistants);
       this.work = new BotRoutines(lent, this.inboxes, this.chains, { zone: () => this.unattended.zone(),
         refuse: (inbox, routine, now) => this.unattended.refuse(inbox.inbox!.botId, `${inbox.members[0]!.hostId}/${inbox.members[0]!.providerId}`, routine, now),
-        started: bot => this.unattended.countRun(bot) });
+        started: bot => this.unattended.countRun(bot),
+        startSub: async start => { await (this.tasks ?? fail(unavailableTasks)).create(start.hostId, { owner: { providerId: start.providerId, nativeSessionId: start.nativeSessionId, title: start.title }, operationId: start.operationId,
+          name: start.name.slice(0, 120), prompt: start.prompt, model: start.model }); } });
       this.asks = new BotAsks(lent, ports.assistants, this.chains, this.inboxes);
       if (this.tasks) this.bots = new BotCalls(lent, ports.assistants, this.tasks, this.assistants, this.inboxes, this.rooms, this.work, new BotBoard(lent, this.inboxes, this.work), this.asks, new BotPages(lent, this.inboxes), ports.places);
       this.rooms.arm(); this.work.arm(); this.asks.arm();
@@ -246,7 +248,23 @@ export class TeamBroker {
     if (call.action === 'get_sub_session_status') return (this.bots ?? fail(unavailableAssistants)).subStatus(hostId, call);
     if (call.action === 'stop_sub_session') return (this.bots ?? fail(unavailableAssistants)).stopSub(hostId, call);
     if (call.action === 'sub_update') return (this.bots ?? fail(unavailableAssistants)).subUpdate(hostId, call);
-    if (call.action === 'sub_turn_end') { assertCurrent(); return (this.bots ?? fail(unavailableAssistants)).subTurnEnd(hostId, call); }
+    if (call.action === 'sub_turn_end') {
+      assertCurrent();
+      const result = await (this.bots ?? fail(unavailableAssistants)).subTurnEnd(hostId, call);
+      // A routine's run in a sub-session of its own ends with the sub-session's turn; its team is named by the run's chain.
+      const team = this.ports.read().find(item => item.id === call.teamId);
+      if (team?.operationId.startsWith('routine:')) {
+        const chainId = team.operationId.slice('routine:'.length), bot = this.chains.list().find(chain => chain.id === chainId)?.bot, estimate = estimateCost(call.usage, call.tokens ?? 0, this.unattended.settings());
+        if (bot) {
+          await this.chains.record(chainScope(chainId), { cause: 'routine', bot }, { tokens: call.tokens ?? 0, estimatedUsd: estimate.usd }).catch(() => undefined);
+          await this.unattended.record(bot, estimate, call.usage?.model).catch(() => undefined);
+        }
+        await this.work?.turnEnded(chainId, { tokens: estimate.tokens || call.tokens || 0, usd: estimate.usd, flags: estimate.flags }, call.outcome);
+        // The sub-session did its one piece of work: it ends, so a routine that runs often does not fill the bot's sub-sessions.
+        await this.change(teams => { const own = find(teams, call.teamId); if (own.task?.state !== 'ended') taskAction(own, this.ports.now(), 'person'); }).catch(() => undefined);
+      }
+      return result;
+    }
     if (call.action === 'sub_told') { assertCurrent(); return (this.tasks ?? fail(unavailableTasks)).tell(hostId, call); }
     if (call.action === 'create_bot') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained(hostId, call.owner, call.cause, () => bots.create(hostId, call)); }
     if (call.action === 'bot_message') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained<BotMessageResult>(hostId, call.owner, call.cause, () => bots.message(hostId, call), reason => ({ outcome: 'forbidden', reason })); }

@@ -184,7 +184,9 @@ export const TeamHostCall = Type.Union([
   Type.Object({ action: Type.Literal('sub_update'), owner: BotCaller, currentStep: Type.Optional(Type.String({ minLength: 1, maxLength: SUB_SESSION_LINE_LIMIT })),
     finalSummary: Type.Optional(Type.String({ minLength: 1, maxLength: TASK_SUMMARY_LIMIT })) }, object),
   // A sub-session's turn ended: its Host sends the outcome and the final text, never the model.
-  Type.Object({ action: Type.Literal('sub_turn_end'), teamId: id, memberId: id, outcome: TaskOutcome, text: Type.Optional(Type.String({ minLength: 1, maxLength: TASK_SUMMARY_LIMIT })) }, object),
+  Type.Object({ action: Type.Literal('sub_turn_end'), teamId: id, memberId: id, outcome: TaskOutcome, text: Type.Optional(Type.String({ minLength: 1, maxLength: TASK_SUMMARY_LIMIT })),
+    /** What the turn used, which a routine's run in this sub-session is priced by. */
+    tokens: Type.Optional(Type.Integer({ minimum: 0 })), usage: Type.Optional(TurnUsage) }, object),
   // The person wrote to a sub-session directly: its Host says so.
   Type.Object({ action: Type.Literal('sub_told'), teamId: id, memberId: id, operationId: id, text: Type.String({ minLength: 1, maxLength: TASK_TOLD_LIMIT }) }, object),
   // Every bot's own calls, made as its main session (bots design 5.1). A bot creates standing bots: its recruits.

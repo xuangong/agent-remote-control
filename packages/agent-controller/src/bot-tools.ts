@@ -92,7 +92,7 @@ export class BotTools {
     if (seat) void (async () => {
       // A worktree sub-session's changes reach its bot as a patch with its result.
       const patch = await this.ports.patch?.(ref).catch(() => undefined), text = turn.finalText ? cutFinal(turn.finalText) : undefined;
-      await this.ports.request({ action: 'sub_turn_end', ...seat, outcome: turn.outcome ?? 'finished', ...(text || patch ? { text: [text, patch].filter(Boolean).join('\n\n').slice(0, TASK_SUMMARY_LIMIT) } : {}) });
+      await this.ports.request({ action: 'sub_turn_end', ...seat, outcome: turn.outcome ?? 'finished', tokens: turn.tokens, ...(turn.usage ? { usage: turn.usage } : {}), ...(text || patch ? { text: [text, patch].filter(Boolean).join('\n\n').slice(0, TASK_SUMMARY_LIMIT) } : {}) });
     })().catch(() => undefined);
     // Only a finished turn counts in a chain and answers anyone.
     if (turn.outcome !== undefined && turn.outcome !== 'finished') return;

@@ -11,7 +11,7 @@ const group = () => ({ window: { id: 'g', title: 'g', revision: 1, views: [['v1'
   binding: { hostId: 'mac', providerId: 'claude', nativeSessionId, title: nativeSessionId } })) },
   bots: { rank: 'm', members: { v1: { botId: ids.chief, name: 'Chief' }, v2: { botId: ids.tracker, name: 'Tracker' } } } }) as unknown as WindowGroup;
 
-function fixture() {
+function fixture(brokenSeats = false) {
   let state: SavedTeam[] = [], now = 1_000_000, workers = 0;
   const timers = new Map<number, { at: number; run: () => void }>(); let next = 0;
   const scheduler = { setTimeout: (run: () => void, delayMs: number) => { timers.set(++next, { at: now + delayMs, run }); return next; }, clearTimeout: (id: unknown) => { timers.delete(id as number); } };
@@ -23,7 +23,7 @@ function fixture() {
     // Drafts as the Relay's state makes them, so what a change returns is detached as there.
     change: async update => { let result: unknown; state = committed.produce(state, draft => { result = structuredClone(detached(update(draft))); }); return result as never; },
     createSeat: async (_, seat) => ({ ...seat.member, creation: 'ready', activity: 'idle', cwd: '/repo', ...(seat.member.nativeSessionId ? {} : { nativeSessionId: `worker-${++workers}` }) }),
-    tasks: { capable: () => true, assertHost: () => {} },
+    tasks: { capable: () => true, assertHost: () => { if (brokenSeats) throw new Error('This Host cannot start sub-sessions.'); } },
     assistants: { groups: () => groups, capable: () => true },
   });
   const as = (nativeSessionId: string) => ({ providerId: 'claude', nativeSessionId });
@@ -227,5 +227,33 @@ describe('a standing bot\'s routines', () => {
     f.read(); await f.broker.hostCall('mac', { action: 'chain_turn', owner: f.as('chief'), cause: { kind: 'framed' }, tokens: 1 });
     f.advance(3 * 3_600_000); await f.fire();
     expect(f.inbox().inbox!.routines![0]!.runs.at(-1)).toMatchObject({ state: 'waiting' });
+  });
+  it('sends a run that names another model to a sub-session of that model, never switching the bot\'s own session, and ends the run with the sub-session\'s turn', async () => {
+    const f = fixture();
+    await f.broker.hostCall('mac', { action: 'set_routine', owner: f.as('chief'), name: 'Cheap check', schedule: everyTen, prompt: 'Summarise the overnight failures.', model: 'claude-haiku-4-5' });
+    f.read(); f.advance(600_000); await f.fire();
+    // Nothing is queued for the bot's own session; a sub-session of the bot works on the prompt with the named model.
+    expect(f.routineInputs()).toEqual([]);
+    const [sub] = f.state().filter(team => team.task);
+    expect(sub!.members[0]).toMatchObject({ role: 'leader', model: 'claude-haiku-4-5' });
+    expect(sub!.task!.brief).toContain('Summarise the overnight failures.');
+    expect(sub!.task!.brief).toContain('[Routine "Cheap check"');
+    const run = f.broker.routines(ids.chief)[0]!.runs[0]!;
+    expect(run).toMatchObject({ state: 'running', model: 'claude-haiku-4-5', chain: f.broker.chains.list().find(chain => chain.cause === 'routine')!.id });
+    expect(f.broker.chains.list().find(chain => chain.cause === 'routine')).toMatchObject({ subSessions: 1 });
+    // The sub-session's turn ends: the run is done, or failed when the turn failed.
+    f.settleSubs();
+    await f.broker.hostCall('mac', { action: 'sub_turn_end', teamId: sub!.id, memberId: sub!.members[0]!.id, outcome: 'finished', text: 'Nothing failed overnight.',
+      tokens: 1_100_000, usage: { model: 'claude-haiku-4-5', input: 1_000_000, output: 100_000, cacheCreation: 0, cachedInput: 0 } });
+    // The run is priced by the sub-session's model (Haiku: $1 per million input, $5 per million output), and counts in the unattended usage.
+    expect(f.broker.routines(ids.chief)[0]!.runs[0]).toMatchObject({ state: 'done', usd: 1.5, tokens: 1_100_000 });
+    expect(f.broker.chainView().unattended!.today.usd).toBeCloseTo(1.5, 6);
+    expect(f.state().find(team => team.task)!.task!.state).toBe('ended');
+  });
+  it('ends a run as failed, with the reason, when its sub-session cannot start', async () => {
+    const f = fixture(true);
+    await f.broker.hostCall('mac', { action: 'set_routine', owner: f.as('chief'), name: 'Cheap check', schedule: everyTen, model: 'claude-haiku-4-5' });
+    f.read(); f.advance(600_000); await f.fire();
+    expect(f.broker.routines(ids.chief)[0]!.runs[0]).toMatchObject({ state: 'failed', reason: expect.stringContaining('cannot start sub-sessions') });
   });
 });

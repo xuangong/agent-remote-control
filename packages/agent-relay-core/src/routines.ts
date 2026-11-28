@@ -16,7 +16,7 @@ import { plain } from './drafts.js';
 import type { Assistant, AssistantBrokerPorts } from './assistants.js';
 import type { BotInboxes } from './inboxes.js';
 import { routineChainId, type BotChains } from './chains.js';
-import { chainScope } from './chain-scope.js';
+import { chainScope, inChain } from './chain-scope.js';
 import { ownerTasks } from './tasks.js';
 
 type Call<A extends TeamHostCall['action']> = Extract<TeamHostCall, { action: A }>;
@@ -37,7 +37,11 @@ export interface RoutineOptions {
   refuse?: (inbox: SavedTeam, routine: Routine, now: number) => string | undefined;
   /** A run was queued for the bot: the account counts it. */
   started?: (bot: string) => Promise<void>;
+  /** Starts a sub-session of the bot's own, with the model a routine names, to do a run's work; its result reaches the bot as a sub-session's does. */
+  startSub?: (start: { hostId: string; providerId: string; nativeSessionId: string; title: string; operationId: string; name: string; prompt: string; model: string }) => Promise<void>;
 }
+/** A run that goes to a sub-session of its own: the routine names a model, and the bot's own session is never switched to it. */
+interface SubStart { chain: string; bot: string; hostId: string; providerId: string; nativeSessionId: string; title: string; name: string; model: string; text: string }
 
 /** Every message queued for the bot pushes its quiet routines back to a full interval from now. */
 export function pushBackQuietRoutines(inbox: SavedTeam, now: number): void {
@@ -73,6 +77,8 @@ export function settledRuns(inbox: SavedTeam, routine: Routine, now: number): Ro
 
 export class BotRoutines {
   private timer: unknown;
+  /** Runs a change decided to send to sub-sessions; they start once the change has committed. */
+  private subs: SubStart[] = [];
   constructor(private readonly broker: AssistantBrokerPorts, private readonly inboxes: BotInboxes, private readonly chains?: BotChains, private readonly options: RoutineOptions = {}) {}
   private zone(routine?: { timeZone?: string }): string { return routine?.timeZone ?? this.options.zone?.() ?? 'UTC'; }
   private async change<T>(bot: Assistant, update: (inbox: SavedTeam, now: number) => T): Promise<T> {
@@ -143,16 +149,17 @@ export class BotRoutines {
       return { run: run.n };
     });
     await this.recordStarted(started);
+    await this.startSubs();
     return result;
   }
   /** A turn of a routine's chain ended: its run is done. */
-  async turnEnded(chainId: string, used?: { tokens: number; usd: number; flags: string[] }): Promise<void> {
+  async turnEnded(chainId: string, used?: { tokens: number; usd: number; flags: string[] }, outcome: 'finished' | 'failed' | 'interrupted' = 'finished'): Promise<void> {
     await this.broker.change(teams => {
       const now = this.broker.ports.now();
       for (const team of plain(teams).map((_, index) => teams[index]!)) for (const routine of team.inbox?.routines ?? []) {
         const run = routine.runs.find(item => item.chain === chainId);
         if (!run) continue;
-        if (run.state !== 'done') { run.state = 'done'; run.startedAt ??= now; run.endedAt = now; }
+        if (run.state !== 'done' && run.state !== 'failed') { run.state = outcome === 'finished' ? 'done' : 'failed'; run.startedAt ??= now; run.endedAt = now; if (outcome !== 'finished') run.reason = outcome === 'failed' ? 'the turn failed' : 'interrupted'; }
         if (used) { run.tokens = (run.tokens ?? 0) + used.tokens; run.usd = (run.usd ?? 0) + used.usd; const flags = [...new Set([...run.flags ?? [], ...used.flags])].slice(0, 6); if (flags.length) run.flags = flags; }
         team.revision++; team.updatedAt = now;
       }
@@ -190,14 +197,43 @@ export class BotRoutines {
   private queue(inbox: SavedTeam, teams: readonly SavedTeam[], routine: Routine, dueAt: number, now: number, trigger: RoutineRun['trigger'], missed: number, started: Array<{ id: string; bot: string }>): RoutineRun {
     const seat = inbox.members[0]!, chain = routineChainId(inbox.id, routine.id, now, routine.runCount + 1);
     const run: RoutineRun = { n: ++routine.runCount, trigger, dueAt, state: 'waiting', chain, ...(routine.model ? { model: routine.model } : {}), ...(missed ? { missed } : {}) };
-    const message = { id: digest(['routine', inbox.id, routine.id, run.n]), from: seat.id, to: seat.id, text: this.frame(inbox, teams, routine, run, now), status: 'queued' as const, createdAt: now, chain };
-    assertTeamQueueCapacity(inbox, message); inbox.messages.push(message);
+    const text = this.frame(inbox, teams, routine, run, now);
     routine.runs = [...routine.runs, run].slice(-ROUTINE_RUNS_KEPT);
+    if (routine.model && this.options.startSub) {
+      // The work goes to a sub-session with the routine's model; the run is working from the start and ends with the first turn of its chain.
+      run.state = 'running'; run.startedAt = now;
+      this.subs.push({ chain, bot: inbox.inbox!.botId, hostId: seat.hostId, providerId: seat.providerId, nativeSessionId: seat.nativeSessionId ?? '', title: inbox.title, name: routine.name, model: routine.model, text });
+      return run;
+    }
+    const message = { id: digest(['routine', inbox.id, routine.id, run.n]), from: seat.id, to: seat.id, text, status: 'queued' as const, createdAt: now, chain };
+    assertTeamQueueCapacity(inbox, message); inbox.messages.push(message);
     started.push({ id: chain, bot: inbox.inbox!.botId });
     return run;
   }
   private skip(routine: Routine, dueAt: number, now: number, reason: string): void {
     routine.runs = [...routine.runs, { n: ++routine.runCount, trigger: 'schedule' as const, dueAt, state: 'skipped' as const, endedAt: now, reason }].slice(-ROUTINE_RUNS_KEPT);
+  }
+  /** Starts the sub-sessions of the runs the last change decided on; one that cannot start ends its run as failed. */
+  private async startSubs(): Promise<void> {
+    const subs = this.subs; this.subs = [];
+    for (const item of subs) {
+      const scope = chainScope(item.chain); scope.bots.add(item.bot);
+      try {
+        await inChain(scope, () => this.options.startSub!({ hostId: item.hostId, providerId: item.providerId, nativeSessionId: item.nativeSessionId, title: item.title,
+          operationId: `routine:${item.chain}`, name: item.name, prompt: item.text, model: item.model }));
+        await this.chains?.record(scope, { cause: 'routine', bot: item.bot }).catch(() => undefined);
+        await this.options.started?.(item.bot).catch(() => undefined);
+      } catch (error) {
+        const reason = (error instanceof Error ? error.message : 'could not start').slice(0, 100);
+        await this.broker.change(teams => {
+          const now = this.broker.ports.now();
+          for (const team of plain(teams).map((_, index) => teams[index]!)) for (const routine of team.inbox?.routines ?? []) {
+            const run = routine.runs.find(candidate => candidate.chain === item.chain);
+            if (run) { run.state = 'failed'; run.endedAt = now; run.reason = reason; team.revision++; team.updatedAt = now; }
+          }
+        });
+      }
+    }
   }
   private async recordStarted(started: ReadonlyArray<{ id: string; bot: string }>): Promise<void> {
     for (const chain of started) {
@@ -237,5 +273,6 @@ export class BotRoutines {
       });
     });
     await this.recordStarted(started);
+    await this.startSubs();
   }
 }

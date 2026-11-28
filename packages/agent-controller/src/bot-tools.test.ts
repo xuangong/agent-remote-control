@@ -138,10 +138,10 @@ describe('the end of a sub-session\'s turn', () => {
     tools.turnEnded(ref('worker'), turn(undefined, 'interrupted'));
     await flush();
     expect(calls).toEqual([
-      { action: 'sub_turn_end', ...seat, outcome: 'finished', text: 'Two notes written.' },
-      { action: 'sub_turn_end', ...seat, outcome: 'finished', text: `${'x'.repeat(3999)}…` },
-      { action: 'sub_turn_end', ...seat, outcome: 'failed', text: 'The runner is offline.' },
-      { action: 'sub_turn_end', ...seat, outcome: 'interrupted' }]);
+      { action: 'sub_turn_end', ...seat, outcome: 'finished', tokens: 5, text: 'Two notes written.' },
+      { action: 'sub_turn_end', ...seat, outcome: 'finished', tokens: 5, text: `${'x'.repeat(3999)}…` },
+      { action: 'sub_turn_end', ...seat, outcome: 'failed', tokens: 5, text: 'The runner is offline.' },
+      { action: 'sub_turn_end', ...seat, outcome: 'interrupted', tokens: 5 }]);
   });
 
   it('carries the patch of a worktree session after its text, and is sent for no session that is not a sub-session\'s', async () => {
@@ -149,7 +149,7 @@ describe('the end of a sub-session\'s turn', () => {
     tools.turnEnded(ref('worker'), turn('Changed a.txt.'));
     tools.turnEnded(ref('plain'), turn('Done.'));
     await flush();
-    expect(calls).toEqual([{ action: 'sub_turn_end', ...seat, outcome: 'finished', text: 'Changed a.txt.\n\nPatch (apply with git apply): /tmp/x.patch' }]);
+    expect(calls).toEqual([{ action: 'sub_turn_end', ...seat, outcome: 'finished', tokens: 5, text: 'Changed a.txt.\n\nPatch (apply with git apply): /tmp/x.patch' }]);
   });
 
   it('counts only a finished turn in a chain: a failed or interrupted one reports nothing else', async () => {

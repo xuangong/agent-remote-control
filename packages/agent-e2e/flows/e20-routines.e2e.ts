@@ -32,8 +32,8 @@ it('E20: a bot\'s routine is tested, costs what its model costs, is refused at t
   await hasTools(stack, 'chief');
 
   // The bot sets a routine with its tool: it takes effect at once, and the person sees it as the bot's.
-  const set = await stack.provider.useTool('chief', 'set_routine', { name: 'Overnight', every_minutes: 5, prompt: TASK, model: 'claude-haiku-4-5' }) as { routines: Routine[] };
-  expect(set.routines).toEqual([expect.objectContaining({ name: 'Overnight', by: 'bot', model: 'claude-haiku-4-5', schedule: { kind: 'every', minutes: 5 } })]);
+  const set = await stack.provider.useTool('chief', 'set_routine', { name: 'Overnight', every_minutes: 5, prompt: TASK }) as { routines: Routine[] };
+  expect(set.routines).toEqual([expect.objectContaining({ name: 'Overnight', by: 'bot', schedule: { kind: 'every', minutes: 5 } })]);
   await expect.poll(async () => Object.keys((await view()).routines ?? {}).length, { timeout: 15_000 }).toBe(1);
   const botId = Object.keys((await view()).routines!)[0]!;
   const runs = async (name: string) => ((await view()).routines?.[botId] ?? []).find(routine => routine.name === name)?.runs ?? [];
@@ -80,5 +80,15 @@ it('E20: a bot\'s routine is tested, costs what its model costs, is refused at t
   expect(inputs(stack, 'chief').filter(input => input.kind === 'routine' && input.name === 'Held')).toEqual([]);
   await act({ action: 'routine_test', botId, name: 'Overnight' });
   await expect.poll(() => inputs(stack, 'chief').filter(input => input.kind === 'routine' && input.name === 'Overnight').length, { timeout: 20_000 }).toBe(2);
+
+  // A routine that names a model runs in a sub-session of its own, which reads the prompt; the bot's own session is not given the run.
+  await act({ action: 'routine_pause', botId, name: 'Overnight', paused: true });
+  await act({ action: 'routine_set', botId, name: 'Cheap', schedule: { kind: 'every', minutes: 60 }, prompt: TASK, model: 'claude-haiku-4-5' });
+  await act({ action: 'routine_test', botId, name: 'Cheap' });
+  const worker = () => stack.provider.known().find(id => id.includes('-new-'));
+  await expect.poll(() => (worker() ? stack.provider.session(worker()!)?.sent.join('\n') : '') ?? '', { timeout: 25_000 }).toContain(TASK);
+  expect(stack.provider.session(worker()!)!.sent.join('\n')).toContain('[Routine "Cheap"');
+  expect(inputs(stack, 'chief').filter(input => input.kind === 'routine' && input.name === 'Cheap')).toEqual([]);
+  await expect.poll(async () => (await runs('Cheap'))[0]?.state, { timeout: 30_000 }).toBe('done');
   await context.close();
 });

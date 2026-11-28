@@ -1,4 +1,5 @@
 // The Workbench screen: the context providers, the Window-mode shell and the Bot-mode surfaces, composed from the views of the views directory.
+import { useWatchTeamRoster } from '../kernel/useTeamRoster.js';
 import { LiveConnectionsContext } from '../kernel/useLiveBudget.js';
 import { WindowSessionBridgeContext } from '../kernel/window-session-bridge-context.js';
 import { SharedDraftsContext } from '../conversation/useSharedDraft.js';
@@ -66,6 +67,8 @@ export function WorkbenchView({ scope }: { readonly scope: AppScope }) {
   const pageShown = !!navigation.page;
   const detailsBeside = useDetailsBeside(phone);
   const tasks = teamRoster?.baseUrl === baseUrl ? teamRoster.tasks : undefined;
+  // A team page is a card that bots rewrite as they work, so the roster is followed closely while one exists.
+  useWatchTeamRoster(!!tasks?.some(team => team.inbox?.pages?.some(page => page.team)));
   const taskClient = useMemo(() => new RemoteTeamClient(baseUrl, workspaceFetch), [baseUrl]);
   const chainClient = useMemo(() => new RemoteChainClient(baseUrl, workspaceFetch), [baseUrl]);
   const tasksDirectory = useMemo(() => taskDirectory(tasks, worker => void openSession(worker, undefined, undefined, false, undefined, undefined, undefined, undefined, compactLayout ? 'primary' : undefined),

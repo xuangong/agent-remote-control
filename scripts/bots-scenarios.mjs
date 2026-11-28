@@ -239,6 +239,11 @@ if (run('ask') && reviewer) {
   check('ask: the mention was answered', !!answer && /42/.test(answer.text), answer?.text?.slice(0, 80) ?? 'none');
   check('ask: the chief\'s session received nothing', !received(chief.address, `6 times 7 (${tag})`));
   check('ask: the reviewer\'s main session never saw the question', !received(reviewer.address, `6 times 7 (${tag})`));
+  // What the answer session did reaches the reviewer's main session with the next input it is given, as a work-log line.
+  check('ask: the answer is in the reviewer\'s work log', !!teams().find(team => team.inbox?.worklog?.some(entry => entry.question === question)), 'worklog');
+  await say(chief.address, `Use your message tool to send ${reviewer.name} the words "Anything to report?" and then stop.`);
+  const logged = await until('the work-log line in the reviewer\'s main session', () => received(reviewer.address, 'Work log since your last turn') && received(reviewer.address, `6 times 7 (${tag})`), 6 * 60_000).catch(() => undefined);
+  check('ask: the reviewer\'s main session received the work-log line with the next input', !!logged);
   await settled(reviewer.address, undefined).catch(() => undefined);
 }
 

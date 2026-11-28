@@ -4,6 +4,14 @@ Decided with the owner (2026-11-24), after comparing bots with the Grok Bot app 
 1.2.3; its protocol read from the bundle, its server not seen): one bot has many sessions (one per thread it is asked in) and shares
 what it learns through a memory; work is tracked on a board per bot; reports to a coordinator always reach its main session.
 
+> **Work log (2026-11-28, answer sessions stay; owner follows Grok Bot: an @mention and a DM are different levels).** After an answer session
+> answers, the Relay appends one entry to the bot's work log (`TeamInbox.worklog`: seq, time, conversation title, the question cut at 200
+> characters, the answer cut at 300; the latest 50 are kept, which bounds an often-asked bot near 30 KB). The next input queued for the main
+> session carries one frame ahead of it, `[Work log since your last turn · N new]` (one line per entry, the newest 8, the rest named), and the
+> bot reads the whole log with `board` and `work_log: true`. The person sees it in the bot's details. Base instructions are version 14.
+> Only answer sessions write the log for now (a sub-session's result and a `/side` result already reach their readers).
+
+
 ## Principles
 
 1. **Bots talk to main sessions; people get sessions of their own.** Every message from another bot reaches the receiving bot's

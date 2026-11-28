@@ -2,8 +2,9 @@ import { beforeEach, expect, it } from 'vitest';
 import type { Team } from '@orchardworks/agent-remote-protocol';
 import { readStoredTasks, writeStoredTasks } from './team-roster-store.js';
 
-const team = (id: string) => ({ id, operationId: `op-${id}`, revision: 1, source: { hostId: 'h', providerId: 'p', nativeSessionId: 'n', title: 't' }, title: id, status: 'active',
-  members: [{ id: 'm', hostId: 'h', providerId: 'p', role: 'leader', name: 'm', responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 }], messages: [], createdAt: 1, updatedAt: 1 }) as unknown as Team;
+const team = (id: string) => ({ id, operationId: `op-${id}`, revision: 1, source: { hostId: 'mac', providerId: 'codex', nativeSessionId: 'worker', title: 'Worker' }, title: 'Inbox', status: 'active', inbox: { botId: 'b_' + '1'.repeat(32) },
+  members: [{ id: 'm', hostId: 'mac', providerId: 'codex', role: 'requester', name: 'Coordinator', responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1, nativeSessionId: 'native' }],
+  messages: [], createdAt: 1, updatedAt: 1 }) as unknown as Team;
 beforeEach(() => localStorage.clear());
 
 it('keeps the tasks last read, per scope, for the next launch', () => {

@@ -280,7 +280,7 @@ export const conversation = {
   'card.moveTo': 'Move to group…',
   'card.removeFromGroup': 'Remove from “{group}”',
   'assistants.muted': 'Muted',
-  'card.pin': 'Pin to a window',
+  'card.pin': 'Pin to a workbench',
   'card.openInBot': 'Open in Bot mode',
   'card.rename': 'Rename {name}',
   'card.name': 'Name',
@@ -313,7 +313,7 @@ export const conversation = {
   'tile.menu': 'More actions for {name}',
   'tile.star': 'Star',
   'tile.unstar': 'Remove star',
-  'tiles.pages': 'Tiles of this window',
+  'tiles.pages': 'Tiles of this workbench',
   'tiles.page': 'Tile {position} of {count}: {title}',
 
   // This device's own link to the service: the page's one connection indicator.

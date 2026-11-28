@@ -48,8 +48,8 @@ describe('which actions the palette offers', () => {
     { name: 'no All groups without overview support', given: { windowOverviewSupported: false }, has: 'action:all-windows', not: true },
     { name: 'Open in Bot mode for a selected tile that is an assistant', given: { canOpenInBotMode: true }, has: 'action:open-in-bot-mode', not: false },
     { name: 'no Open in Bot mode without one', given: {}, has: 'action:open-in-bot-mode', not: true },
-    { name: 'Pin to a window for the assistant shown in Bot mode', given: { windowMode: false, canPinToWindow: true }, has: 'action:pin-to-window', not: false },
-    { name: 'no Pin to a window in Window mode', given: { canPinToWindow: true }, has: 'action:pin-to-window', not: true },
+    { name: 'Pin to a workbench for the assistant shown in Bot mode', given: { windowMode: false, canPinToWindow: true }, has: 'action:pin-to-window', not: false },
+    { name: 'no Pin to a workbench in Window mode', given: { canPinToWindow: true }, has: 'action:pin-to-window', not: true },
   ])('$name', ({ given, has, not }) => {
     expect(ids(given).includes(has)).toBe(!not);
   });

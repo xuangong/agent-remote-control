@@ -12,7 +12,7 @@ describe('quote targets', () => {
   it('lists the open Window first, without the source, and labels each view by its placement', () => {
     const windows = quoteTargets([other, open], open, source);
     expect(windows.map(window => window.id)).toEqual(['open', 'other']);
-    expect(windows[0]).toMatchObject({ title: 'Untitled Window', current: true });
+    expect(windows[0]).toMatchObject({ title: 'Untitled workbench', current: true });
     expect(windows[0]!.views).toEqual([
       { viewId: 'D', title: 'D', detail: 'Docked' }, { viewId: 'F', title: 'F', detail: 'Floating' }, { viewId: 'X', title: 'X', detail: 'Side' },
     ]);

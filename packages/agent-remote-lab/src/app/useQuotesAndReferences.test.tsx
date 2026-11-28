@@ -125,7 +125,7 @@ describe('where the quote lands', () => {
     expect(quoted('far')).toHaveLength(1);
     expect(scope.windowWorkspace.operate).not.toHaveBeenCalled();
     const { notice } = scope.dispatchQuote.mock.calls.at(-1)![0] as { notice: { message: string; open(): Promise<void> } };
-    expect(notice.message).toBe('Quoted into “Far session” in Window “Other window”.');
+    expect(notice.message).toBe('Quoted into “Far session” in workbench “Other window”.');
     await notice.open();
     expect(scope.windowWorkspace.open).toHaveBeenCalledWith('other');
     expect(scope.windowWorkspace.operate).toHaveBeenCalledWith({ type: 'view.select', viewId: 'far' });

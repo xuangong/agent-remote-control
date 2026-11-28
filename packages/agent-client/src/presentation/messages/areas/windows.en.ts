@@ -14,7 +14,7 @@ export const windows = {
   'windows.opening': 'Opening…',
   'windows.currentWindow': 'Current group',
   'windows.selectedView': 'Selected view',
-  'windows.windowView': 'Window view',
+  'windows.windowView': 'Workbench view',
   'windows.inThisWindow': 'In this group',
   'windows.newSessionView': 'New session view',
   'windows.sessionViews': 'Session views',

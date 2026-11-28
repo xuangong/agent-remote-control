@@ -98,7 +98,7 @@ test('shares sidebar and title favorites while retaining only local activity tra
   const showFavorites = async () => { if (!mobile) await openSessionsPage(page, 'Favorites'); else if (!await page.locator('.lab-title-favorites section').isVisible()) await title.click(); };
   const leaveFavorites = async () => {
     if (mobile) { await page.getByRole('button', { name: 'Close Favorites', exact: true }).click(); await expect(title).toBeFocused(); }
-    else await page.locator('#lab-sessions-page').getByRole('button', { name: 'Back to Window', exact: true }).click();
+    else await page.locator('#lab-sessions-page').getByRole('button', { name: 'Back to workbench', exact: true }).click();
   };
   await showFavorites();
   const favorites = page.locator(mobile ? '.lab-title-favorites section' : '#lab-sessions-page').getByRole('tree', { name: 'Favorites folders and sessions', exact: true });

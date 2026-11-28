@@ -11,7 +11,7 @@ export type CardAction = Extract<MenuEntry, { label: string }>;
 
 /**
  * The assistant's name card: its avatar (which opens the picker when the avatar can change), its name, which a click edits
- * where the name can be stored, and one line of its role. One action stands visible (Pin to a window, or Open in Bot mode);
+ * where the name can be stored, and one line of its role. One action stands visible (Pin to a workbench, or Open in Bot mode);
  * the others are in the card's ⋯ menu (Label…, Sleep or Wake, Hide in Bot mode, Remove from group…).
  */
 export function AssistantCard({ id, picture, name, label, role, mood = 'idle', action, actions = [], setPicture, rename }: {

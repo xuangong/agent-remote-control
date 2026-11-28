@@ -72,7 +72,7 @@ describe.each(variants)('E10 at %s', (_name, view) => {
     } finally { await context.close(); }
   });
 
-  it('E10: Open in Bot mode, this assistant set to Process in its details for every device of the account, and Pin to a window, with no connection word', async () => {
+  it('E10: Open in Bot mode, this assistant set to Process in its details for every device of the account, and Pin to a workbench, with no connection word', async () => {
     const { context, page, words } = await openPage(browser, stack.sessionUrl('chief'), view);
     try {
       await waitForEntries(page, 2);
@@ -106,8 +106,8 @@ describe.each(variants)('E10 at %s', (_name, view) => {
         await expect.poll(() => assistantDetails(second.page).getByRole('group', { name: 'This assistant' }).getByRole('button', { name: 'Process', exact: true }).getAttribute('aria-pressed'), { timeout: 10_000 }).toBe('true');
         expect(await second.words.seen()).toEqual([]);
       } finally { await other.close(); }
-      // Pin to a window shows its tile in Window mode, and Bot mode keeps the assistant for the way back.
-      await assistantDetails(page).getByRole('button', { name: 'Pin to a window', exact: true }).click();
+      // Pin to a workbench shows its tile in Window mode, and Bot mode keeps the assistant for the way back.
+      await assistantDetails(page).getByRole('button', { name: 'Pin to a workbench', exact: true }).click();
       await expect.poll(() => page.locator('[data-workbench-mode="window"]').getAttribute('hidden')).toBeNull();
       await page.getByRole('button', { name: /^Details of / }).first().waitFor();
       if (view.mobile) {

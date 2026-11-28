@@ -29,7 +29,7 @@ Module: `agent-remote-lab/src/features/windows/bot-workbench.ts` (the projection
 - B11. The header names the bot, what needs the person, its chief and staff (each opens that bot's workbench) and "Open in chat"; the ledger beside the rail links an item's owner to its tile (a staff bot's to its workbench). (Tests: `WorkbenchHeader.test.tsx`, `WorkbenchLedger.test.tsx`, `bot-workbench-teams.test.ts` owner target; `e17`, ledger.)
 - B12. On a phone the workbench is a list (main, needs you, working, idle, added, Answers and Ended folded, Ledger); a row pushes its conversation full screen and Back returns to the list. (Tests: `phone-bot-workbench.spec.ts`; `e17` phone flow in Chromium and WebKit.)
 - B13. The sub-sessions, inboxes and answer sessions last read are kept on the device (inside the recovery records the cache setting clears), so the workbench draws at launch before the Relay answers. (Tests: `team-roster-store.test.ts`.)
-- B14. A conversation of a tile keeps its reading position and draft as any conversation does (per session); only the visible mode holds its composer. Not tested at this tier: confirmed in the live check on a real Claude Code bot (a conversation left and returned to keeps its line), and the edge swipe is the navigation stack's N12, device only.
+- B14. A conversation of a tile keeps its reading position and draft as any conversation does (per session), and only the visible mode holds its composer. Not tested at this tier: the live check on a real Claude Code bot showed the tiles, folds, ledger focus, staff switch and phone list working but did not measure reading positions across folding; the edge swipe is the navigation stack's N12, device only.
 
 | Clause | Test(s) that prove it |
 |---|---|

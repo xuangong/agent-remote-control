@@ -38,7 +38,8 @@
 .lab-workbench-overview > header { display: flex; align-items: center; justify-content: space-between; gap: var(--orchard-space-m); }
 .lab-workbench-overview h2 { margin: 0; font: var(--orchard-type-footnote-weight) var(--orchard-type-title-size) / 1.2 var(--orchard-font-text); color: var(--orchard-text-strong); }
 .lab-workbench-overview h3 { margin: 0 0 var(--orchard-space-xs); font: var(--orchard-type-footnote-weight) var(--orchard-type-footnote-size) / 1.4 var(--orchard-font-text); color: var(--orchard-text-secondary); }
-.lab-workbench-overview h3 > button { padding: 0; background: transparent; color: inherit; font: inherit; }
+.lab-workbench-overview h3 > button { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; }
+.lab-workbench-overview-ledger > button, .lab-workbench-overview > header > button, .lab-workbench-overview .lab-workbench-chips button { min-height: 36px; padding: 0 var(--orchard-space-l); border: 0; border-radius: var(--orchard-radius-pill); background: var(--orchard-surface); color: var(--orchard-text-strong); }
 .lab-workbench-overview ul { display: grid; gap: var(--orchard-space-2xs); margin: 0; padding: 0; list-style: none; }
 .lab-workbench-overview li > button { display: grid; width: 100%; min-height: 44px; padding: var(--orchard-space-s) var(--orchard-space-m); border: 0; border-radius: var(--orchard-radius-row); background: var(--orchard-fill); color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .lab-workbench-overview li > button[data-state="needs_input"] { box-shadow: inset 3px 0 0 var(--orchard-text-strong); }

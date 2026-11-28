@@ -58,6 +58,7 @@ export function taskDirectory(tasks: readonly Team[] | undefined, open: (worker:
     answering: botId => (tasks ?? []).filter(team => team.ask?.botId === botId && team.status === 'active')
       .map(team => ({ teamId: team.id, conversation: team.ask!.from.name, lastAt: team.ask!.lastAt, count: team.ask!.entries.length }))
       .sort((a, b) => b.lastAt - a.lastAt),
+    workLog: botId => [...inbox(botId)?.inbox?.worklog ?? []].reverse(),
     boardOf: botId => inbox(botId)?.inbox?.board,
     botName: botId => standing().find(bot => bot.botId === botId)?.name ?? subSession(botId)?.task?.title,
     // The bot's standing staff, and its live sub-sessions (the ones its main session owns).

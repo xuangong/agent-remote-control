@@ -19,17 +19,20 @@ export function TaskInputItem({ inputs, resourceContext }: { readonly inputs: re
   const standing = inputs.filter((input): input is StandingInput => input.kind === 'standing');
   const timers = inputs.filter((input): input is TimerInput => input.kind === 'timer');
   const wrote = inputs.filter((input): input is PersonWroteInput => input.kind === 'person_wrote');
+  const logged = inputs.filter((input): input is WorkLogInput => input.kind === 'work_log');
   const asked = inputs.filter((input): input is AskInput => input.kind === 'ask');
   const changes = inputs.filter((input): input is ItemChangedInput | ChiefChangedInput => input.kind === 'item_changed' || input.kind === 'chief_changed');
   return <div className="agent-timeline-item agent-task-inputs">
     {standing.map((input, index) => <details key={`standing:${index}`} className="agent-assistant-messages" data-standing-version={input.version}>
       <summary>{t('timeline.standingInstructions')}</summary><MarkdownContent markdown={input.body} resourceContext={resourceContext} /></details>)}
-    {inputs.map((input, index) => input.kind === 'assistant' || input.kind === 'room' || input.kind === 'standing' || input.kind === 'timer' || input.kind === 'person_wrote' || input.kind === 'ask' || input.kind === 'item_changed' || input.kind === 'chief_changed' ? null : <TaskInputCard key={`${input.taskId}:${index}`} input={input} resourceContext={resourceContext} />)}
+    {inputs.map((input, index) => input.kind === 'assistant' || input.kind === 'room' || input.kind === 'standing' || input.kind === 'timer' || input.kind === 'person_wrote' || input.kind === 'ask' || input.kind === 'work_log' || input.kind === 'item_changed' || input.kind === 'chief_changed' ? null : <TaskInputCard key={`${input.taskId}:${index}`} input={input} resourceContext={resourceContext} />)}
     {[...messages].map(([from, items]) => <AssistantMessages key={from} from={from} items={items} resourceContext={resourceContext} />)}
     {rooms.map(room => <details key={room.roomId} className="agent-assistant-messages" data-room-id={room.roomId}>
       <summary>{t('timeline.roomTurn', { name: room.name, count: room.count })}</summary><MarkdownContent markdown={room.body} resourceContext={resourceContext} /></details>)}
     {wrote.map((input, index) => <details key={`wrote:${index}`} className="agent-assistant-messages" data-person-wrote={input.bot}>
       <summary>{t('timeline.personWrote', { bot: input.bot })}</summary><MarkdownContent markdown={input.body} resourceContext={resourceContext} /></details>)}
+    {logged.map((input, index) => <details key={`log:${index}`} className="agent-assistant-messages" data-work-log-new={input.count}>
+      <summary>{t('timeline.workLog', { count: input.count })}</summary><MarkdownContent markdown={input.body} resourceContext={resourceContext} /></details>)}
     {asked.map((input, index) => <details key={`ask:${index}`} className="agent-assistant-messages" data-asked-from={input.from}>
       <summary>{t('timeline.personAsks', { from: input.from })}</summary><MarkdownContent markdown={input.body} resourceContext={resourceContext} /></details>)}
     {changes.map((change, index) => <details key={`change:${index}`} className="agent-assistant-messages" data-item-change={change.kind}>
@@ -45,6 +48,7 @@ type StandingInput = Extract<TaskInput, { kind: 'standing' }>;
 type TimerInput = Extract<TaskInput, { kind: 'timer' }>;
 type PersonWroteInput = Extract<TaskInput, { kind: 'person_wrote' }>;
 type AskInput = Extract<TaskInput, { kind: 'ask' }>;
+type WorkLogInput = Extract<TaskInput, { kind: 'work_log' }>;
 type ItemChangedInput = Extract<TaskInput, { kind: 'item_changed' }>;
 type ChiefChangedInput = Extract<TaskInput, { kind: 'chief_changed' }>;
 
@@ -58,7 +62,7 @@ function AssistantMessages({ from, items, resourceContext }: { readonly from: st
   </details>;
 }
 
-function TaskInputCard({ input, resourceContext }: { readonly input: Exclude<TaskInput, AssistantInput | RoomInput | StandingInput | TimerInput | PersonWroteInput | AskInput | ItemChangedInput | ChiefChangedInput>; readonly resourceContext?: MarkdownResourceContext }) {
+function TaskInputCard({ input, resourceContext }: { readonly input: Exclude<TaskInput, AssistantInput | RoomInput | StandingInput | TimerInput | PersonWroteInput | AskInput | WorkLogInput | ItemChangedInput | ChiefChangedInput>; readonly resourceContext?: MarkdownResourceContext }) {
   const t = useTranslate();
   const directory = useTaskDirectory();
   const kicker = input.kind === 'brief' ? t('timeline.sub.brief', { from: input.from }) : input.kind === 'message' ? t('timeline.sub.message', { from: input.from })

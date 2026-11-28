@@ -41,6 +41,7 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
     staffBoard: id => directory.boardOf?.(id), canOpen: id => directory.canOpenBot?.(id) ?? false, open: id => directory.openBot?.(id),
     ...(directory.writeBoard ? { save: edit => directory.writeBoard!(botId, edit) } : {}) } : undefined;
   useWatchTeamRoster(!!board);
+  const workLog = detailsShown && botId && directory?.workLog ? directory.workLog(botId) : [];
   const answering = detailsShown && botId && directory?.answering ? directory.answering(botId) : [];
   const bots = detailsShown && botId && directory?.staff ? directory.staff(botId) : [];
   const chiefs = detailsShown && botId ? directory?.chief?.(botId) : undefined;
@@ -54,7 +55,7 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
     ...(host?.where ? { where: host.where } : {}), ...(host?.setPicture ? { setPicture: host.setPicture } : {}),
     ...(host?.rename ? { rename: host.rename } : {}),
     process, ...(mission ? { mission } : {}), ...(memory ? { memory } : {}),
-    ...(chiefs && botId && directory?.setChief ? { chief: { ...chiefs, move: (chief: string | null) => directory.setChief!(botId, chief) } } : {}), ...(tasks.length ? { tasks } : {}), ...(board ? { board } : {}), ...(answering.length ? { answering } : {}), ...(bots.length ? { bots } : {}),
+    ...(chiefs && botId && directory?.setChief ? { chief: { ...chiefs, move: (chief: string | null) => directory.setChief!(botId, chief) } } : {}), ...(tasks.length ? { tasks } : {}), ...(board ? { board } : {}), ...(answering.length ? { answering } : {}), ...(workLog.length ? { workLog } : {}), ...(bots.length ? { bots } : {}),
     sessions: { ...details?.sessions, ...(lastTurn ? { time: lastTurn } : {}), ...(state?.agent?.cwd ? { directory: state.agent.cwd } : {}), ...(reportedSession ? { sessionId: reportedSession } : {}),
       subagents: reportedSession ? childrenFor?.(reportedSession) ?? [] : [], ...(onOpenChildSession ? { openSubagent: onOpenChildSession } : {}),
       tools: <>{details?.sessions?.tools}{workspaceLink}</> },

@@ -136,6 +136,21 @@ describe('the sub-session directory', () => {
       expect(directory.answering!(id(2)).map(item => item.teamId)).toEqual(['b']);
     });
 
+    it('lists a bot\'s work log newest first, and a list that renders as dated entries that open to the answer', async () => {
+      const entry = (seq: number, answer: string) => ({ seq, at: Date.parse('2026-11-28T10:00:00Z') + seq * 1000, where: 'Notes', question: `Q${seq}`, answer });
+      const member = { id: 'seat', hostId: 'mac', providerId: 'claude', role: 'requester' as const, name: 'Bot', responsibility: '', creation: 'ready' as const, activity: 'idle' as const, summary: '', updatedAt: 1, nativeSessionId: 'main-1' };
+      const inbox = { id: 'inbox', operationId: 'inbox', revision: 1, title: 'Inbox', status: 'active', createdAt: 1, updatedAt: 1, source: { hostId: 'mac', providerId: 'claude', nativeSessionId: 'main-1', title: 'Bot' }, messages: [], members: [member],
+        inbox: { botId: id(1), worklog: [entry(1, 'One.'), entry(2, 'Two.')] } } as unknown as Team;
+      const directory = taskDirectory([inbox, ...teams], () => {}, async () => {}, groups);
+      expect(directory.workLog!(id(1)).map(item => item.seq)).toEqual([2, 1]);
+      expect(directory.workLog!(id(2))).toEqual([]);
+      const { WorkLogList } = await import('../../conversation/assistant/WorkLogList.js');
+      const container = await render(<WorkLogList entries={directory.workLog!(id(1))} />);
+      const rows = [...container.querySelectorAll('[data-work-log]')];
+      expect(rows.map(row => row.querySelector('summary')!.textContent!.startsWith('Notes · Q'))).toEqual([true, true]);
+      expect(rows[0]!.textContent).toContain('Two.');
+    });
+
     it('offers the standing bots to mention, and asks through the call the page gave', async () => {
       const asked: unknown[] = [];
       const directory = taskDirectory([], () => {}, async () => {}, groups, undefined, async (source, bot, text) => { asked.push([source.nativeSessionId, bot.botId, text]); });

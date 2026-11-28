@@ -62,6 +62,7 @@ export const timeline: AreaMessages<typeof english> = {
   'timeline.itemTag': '事项 {key} · {title}',
   'timeline.itemKey': '事项 {key}',
   'timeline.personAsks': '用户从 {from} 提问',
+  'timeline.workLog': { other: '工作日志：新增 {count} 条' },
   'timeline.botAnswered': '{bot} 回答了',
   'timeline.botAnswering': '{bot} 正在回答',
   'timeline.botAsked': '你问',

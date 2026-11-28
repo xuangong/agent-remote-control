@@ -273,5 +273,13 @@ it('E15: the person mentions a busy bot from another conversation, and the answe
   const status = await (await context.request.get(stack.origin + '/auth/status')).json() as { basePath: string };
   const audit = await (await context.request.get(stack.origin + status.basePath + 'v1/remote/chains')).json() as { chains: Array<{ cause: string; bots: string[]; turns: number }>; names: Record<string, string> };
   expect(audit.chains.filter(chain => chain.cause === 'person' && chain.bots.some(bot => audit.names[bot] === 'Tracker') && chain.turns === 1)).toHaveLength(1);
+  // The bot's main session learns what its answer session did without replaying the chat: the next input it is given carries the work log.
+  // Its busy turn ends when the person allows the check; then Chief's message reaches it with the log line in front.
+  await expect(stack.provider.useTool('chief', 'message', { to: 'Tracker', text: 'Where does the build stand?', operationId: 'log-1' })).resolves.toMatchObject({ outcome: expect.stringMatching(/delivered|held/) });
+  const allow = page.locator('.agent-tool-approval').getByRole('button', { name: 'Allow', exact: true });
+  for (let attempt = 0; attempt < 5 && await allow.count(); attempt++) { await allow.click(); await page.waitForTimeout(1500); }
+  await expect.poll(() => inputs('tracker').find(input => input.kind === 'work_log'), { timeout: 30_000 }).toMatchObject({ count: 1, body: expect.stringContaining('What is the build status? → The build is green.') });
+  expect(inputs('tracker').map(input => input.kind).filter(kind => kind === 'work_log' || kind === 'assistant')).toEqual(['work_log', 'assistant']);
+  await showsText(page, 'Work log: 1 new entry');
   await context.close();
-});
+}, 90_000);

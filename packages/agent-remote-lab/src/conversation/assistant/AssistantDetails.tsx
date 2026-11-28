@@ -3,7 +3,7 @@ import { PROCESS_MODES, type ProcessMode, type SessionFile } from '@orchardworks
 import type { BotPicture, TaskView } from '@orchardworks/agent-remote-protocol';
 import type { AvatarMood } from '@orchardworks/agent-client-web/theme';
 import { SegmentedControl, Sheet } from '@orchardworks/agent-client-web/primitives';
-import { useTranslate, type AnswerSession } from '@orchardworks/agent-client-web/react';
+import { useTranslate, type AnswerSession, type WorkLogLine } from '@orchardworks/agent-client-web/react';
 import type { MenuEntry } from '../../ui/Menu.js';
 import type { ProcessModeChoice } from '../useProcessMode.js';
 import type { AssistantWhere } from './details-host.js';
@@ -15,6 +15,7 @@ import { SubSessionsList } from './SubSessionsList.js';
 import { BoardList } from './BoardList.js';
 import type { BoardChoice } from './board-model.js';
 import { AnsweringList } from './AnsweringList.js';
+import { WorkLogList } from './WorkLogList.js';
 import { MissionEditor, type MissionChoice } from './MissionEditor.js';
 import { MemoryList, type MemoryChoice } from './MemoryList.js';
 import { ChiefPicker, type ChiefChoice } from './ChiefPicker.js';
@@ -37,6 +38,8 @@ export interface AssistantRef {
   readonly board?: BoardChoice;
   /** The sessions this standing bot has open to answer the person's mentions from other conversations. */
   readonly answering?: readonly AnswerSession[];
+  /** What this standing bot's answer sessions answered elsewhere, newest first. */
+  readonly workLog?: readonly WorkLogLine[];
   /** This assistant's own process mode; the device's default, notifications and letters are in Settings > Assistants. */
   readonly process?: ProcessModeChoice;
   /** The mission, for an assistant whose bot details the reader may change. */
@@ -73,6 +76,7 @@ export function AssistantDetails({ assistant, surface, onClose }: { assistant: A
     {assistant.mission ? section('mission', t('details.mission'), <MissionEditor mission={assistant.mission} />) : null}
     {assistant.memory ? section('memory', t('details.memory'), <MemoryList memory={assistant.memory} />) : null}
     {assistant.chief ? section('chief', t('details.chief'), <ChiefPicker chief={assistant.chief} />) : null}
+    {assistant.workLog?.length ? section('worklog', t('details.workLog'), <WorkLogList entries={assistant.workLog} />) : null}
     {assistant.answering?.length ? section('answering', t('details.answering'), <AnsweringList sessions={assistant.answering} />) : null}
     {assistant.where ? section('where', t('details.where'), <WhereItWorks where={assistant.where} />) : null}
     {assistant.sessions ? section('sessions', t('details.sessions'), <SessionsList sessions={assistant.sessions} />) : null}

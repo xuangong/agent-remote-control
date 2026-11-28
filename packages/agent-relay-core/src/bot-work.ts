@@ -33,6 +33,8 @@ function syncWorkTimer(inbox: SavedTeam, now: number): void {
   const current = box.timers?.find(timer => timer.work);
   box.timers = [...others, current && current.intervalMs === intervalMs ? current : { name: 'work', intervalMs, dueAt: now + intervalMs, work: true }];
 }
+/** When a timer next needs the Relay: it is due, or it ends, whichever comes first. */
+const timerStirsAt = (timer: BotTimer): number => Math.min(timer.dueAt, timer.endsAt ?? Infinity);
 const settled = (inbox: SavedTeam) => !inbox.messages.some(pendingTeamMessage);
 
 export class BotWork {
@@ -55,8 +57,9 @@ export class BotWork {
       // The work timer follows the open board items; a bot names its own timers otherwise.
       if (call.name === 'work') fail('The work timer follows your open board items; name your timer otherwise.');
       const box = inbox.inbox!, timers = (box.timers ?? []).filter(timer => timer.name !== call.name);
+      if (call.untilMinutes !== undefined && call.minutes === 0) fail('until_minutes ends a running timer; give minutes above 0 with it, or minutes 0 to clear.');
       if (call.minutes > 0) {
-        timers.push({ name: call.name, intervalMs: call.minutes * 60_000, dueAt: now + call.minutes * 60_000 });
+        timers.push({ name: call.name, intervalMs: call.minutes * 60_000, dueAt: now + call.minutes * 60_000, ...(call.untilMinutes !== undefined ? { endsAt: now + call.untilMinutes * 60_000 } : {}) });
         if (timers.length > 8) fail('A bot keeps at most 8 timers.');
       }
       box.timers = timers;
@@ -68,7 +71,7 @@ export class BotWork {
     const scheduler = this.broker.ports.scheduler;
     if (!scheduler) return;
     scheduler.clearTimeout(this.timer); this.timer = undefined;
-    const due = this.broker.ports.read().flatMap(team => team.inbox && team.status === 'active' ? (team.inbox.timers ?? []).map(timer => timer.dueAt) : []);
+    const due = this.broker.ports.read().flatMap(team => team.inbox && team.status === 'active' ? (team.inbox.timers ?? []).map(timerStirsAt) : []);
     if (!due.length) return;
     const wait = Math.min(Math.max(0, Math.min(...due) - this.broker.ports.now()), 24 * 60 * 60_000);
     this.timer = scheduler.setTimeout(() => { this.timer = undefined; void this.due().catch(() => undefined).finally(() => this.arm()); }, wait);
@@ -87,9 +90,11 @@ export class BotWork {
     const started = await this.broker.change(teams => {
       const now = this.broker.ports.now(), chains: Array<{ id: string; bot: string }> = [];
       plain(teams).forEach((team, index) => {
-        if (!team.inbox || team.status !== 'active' || !team.inbox.timers?.some(timer => timer.dueAt <= now)) return;
+        if (!team.inbox || team.status !== 'active' || !team.inbox.timers?.some(timer => timerStirsAt(timer) <= now)) return;
         const inbox = teams[index]!, seat = inbox.members[0]!;
-        for (const timer of inbox.inbox!.timers!.filter(item => item.dueAt <= now)) {
+        // A timer past its end is dropped without waking the bot.
+        inbox.inbox!.timers = inbox.inbox!.timers!.filter(timer => timer.endsAt === undefined || timer.endsAt > now);
+        for (const timer of inbox.inbox!.timers.filter(item => item.dueAt <= now)) {
           // Something already on its way wakes the bot anyway; the timer only waits again.
           if (settled(inbox)) {
             const open = (inbox.inbox!.board?.items ?? []).filter(item => boardItemOpen(item.status)).map(item => ({ title: item.title, status: item.status, ...(item.report ? { report: item.report } : {}) }));

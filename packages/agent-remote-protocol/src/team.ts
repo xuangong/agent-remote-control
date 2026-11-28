@@ -229,7 +229,9 @@ export const TeamHostCall = Type.Union([
   // Every write names the version it read (bots design 6.1). A new item names none; `assignee` is a bot by name or id, or self. parent null clears it.
   Type.Object({ action: Type.Literal('update_board'), owner: BotCaller,
     items: Type.Optional(Type.Array(BoardItemEdit, { minItems: 1, maxItems: 10 })), plan: Type.Optional(BoardPlanEdit) }, object),
-  Type.Object({ action: Type.Literal('set_timer'), owner: BotCaller, name: BotTimer.properties.name, minutes: Type.Integer({ minimum: 0, maximum: 7 * 24 * 60 }) }, object),
+  Type.Object({ action: Type.Literal('set_timer'), owner: BotCaller, name: BotTimer.properties.name, minutes: Type.Integer({ minimum: 0, maximum: 7 * 24 * 60 }),
+    /** The timer ends by itself after this many minutes from now. */
+    untilMinutes: Type.Optional(Type.Integer({ minimum: 1, maximum: 30 * 24 * 60 })) }, object),
   Type.Object({ action: Type.Literal('bot_session'), owner: BotCaller, bot: Type.String({ minLength: 1, maxLength: 300 }) }, object),
   // An assistant's main session lists the account's other assistants, and messages one.
   Type.Object({ action: Type.Literal('list_assistants'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object) }, object),

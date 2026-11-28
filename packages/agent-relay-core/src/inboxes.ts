@@ -5,7 +5,7 @@
  * appended when it opens (design 5.1).
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { botInstructions, type BotFact, nativeSessionRefKey, standingInstructionsText, type TeamMember } from '@orchardworks/agent-remote-protocol';
+import { botInstructions, type BotFact, nativeSessionRefKey, standingInstructionsText, workLogLine, workLogText, WORK_LOG_ANSWER_LIMIT, WORK_LOG_KEEP, WORK_LOG_QUESTION_LIMIT, type TeamMember, type WorkLogEntry } from '@orchardworks/agent-remote-protocol';
 import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
 import { assistantSeat, type Assistant, type AssistantBrokerPorts, type AssistantPorts } from './assistants.js';
@@ -50,8 +50,27 @@ export class BotInboxes {
       inbox.inbox!.instructions = hash;
       inbox.revision++; inbox.updatedAt = now;
     }
+    // Whatever is queued next carries what the bot's answer sessions did since it was last told: one frame ahead of it.
+    const log = inbox.inbox!.worklog ?? [], seen = inbox.inbox!.logSeen ?? 0, fresh = log.filter(entry => entry.seq > seen);
+    if (fresh.length) {
+      const seat = inbox.members[0]!, last = fresh.at(-1)!.seq;
+      const message = { id: digest(['work-log', inbox.id, last]), from: seat.id, to: seat.id, text: workLogText({ lines: fresh.map(workLogLine), total: fresh.length }), status: 'queued' as const, createdAt: now };
+      if (!inbox.messages.some(item => item.id === message.id)) { assertTeamQueueCapacity(inbox, message); inbox.messages.push(message); pushBackTimers(inbox, now); }
+      inbox.inbox!.logSeen = last; inbox.revision++; inbox.updatedAt = now;
+    }
     return inbox;
   }
+  /** In a change: one entry of the bot's work log, bounded; the log keeps the latest `WORK_LOG_KEEP`, so a bot that is asked a great deal keeps a recent picture in a few kilobytes. Delivered with the next input the bot gets. */
+  appendLog(teams: SavedTeam[], bot: Assistant, now: number, entry: { where: string; question: string; answer: string }): void {
+    const inbox = this.current(teams, bot) ?? this.prepare(teams, bot, now);
+    if (!inbox) return;
+    const log = inbox.inbox!.worklog ??= [], one = (text: string, limit: number) => { const line = text.replace(/\s+/g, ' ').trim(); return line.length > limit ? `${line.slice(0, limit - 1)}…` : line || '…'; };
+    log.push({ seq: (log.at(-1)?.seq ?? inbox.inbox!.logSeen ?? 0) + 1, at: now, where: one(entry.where, 256), question: one(entry.question, WORK_LOG_QUESTION_LIMIT), answer: one(entry.answer, WORK_LOG_ANSWER_LIMIT) });
+    if (log.length > WORK_LOG_KEEP) log.splice(0, log.length - WORK_LOG_KEEP);
+    inbox.revision++; inbox.updatedAt = now;
+  }
+  /** The bot's work log, oldest first. */
+  log(bot: Assistant): WorkLogEntry[] { return [...this.current(this.broker.ports.read(), bot)?.inbox?.worklog ?? []]; }
   /**
    * Places the standing bots other bots created whose sessions on this Host are ready: their view and details go into the chief's
    * group, and the inbox becomes an ordinary one. The session was created with its standing instructions, so they count as sent. A

@@ -76,7 +76,7 @@ export class TeamBroker {
       const lent = { ports, change: <T>(update: (teams: SavedTeam[]) => T) => this.change(update), provision: (teamId: string, memberId: string) => this.provision(teamId, memberId) };
       this.inboxes = new BotInboxes(lent, ports.assistants); this.assistants = new AssistantMessages(lent, ports.assistants, this.inboxes); this.rooms = new Rooms(lent, ports.assistants);
       this.work = new BotWork(lent, this.inboxes, this.chains);
-      this.asks = new BotAsks(lent, ports.assistants, this.chains);
+      this.asks = new BotAsks(lent, ports.assistants, this.chains, this.inboxes);
       if (this.tasks) this.bots = new BotCalls(lent, ports.assistants, this.tasks, this.assistants, this.inboxes, this.rooms, this.work, new BotBoard(lent, this.inboxes, this.work), this.asks, ports.places);
       this.rooms.arm(); this.work.arm(); this.asks.arm();
     }

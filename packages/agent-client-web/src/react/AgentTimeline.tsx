@@ -26,6 +26,7 @@ import { LocaleContext, useTranslate } from './locale.js';
 import { TurnStatus } from './TurnStatus.js';
 import { AnswerLines } from './items/AnswerLines.js';
 import { SideCards } from './items/SideCards.js';
+import { PageCards } from './items/PageCards.js';
 import { useTaskDirectory, type SideCard } from './TaskDirectory.js';
 import { dayLineLabel, errorWords, foldTurns, startsDayLine, timelineEntryKey, workDisclosure, type AgentReplicaState, type ProcessMode, type Turn } from '@orchardworks/agent-client';
 
@@ -236,6 +237,7 @@ export function AgentTimeline({
   // The sides asked from this conversation and their answers sit the same way, as cards beside it.
   const sides: readonly SideCard[] = state.agent?.runtimeInfo.sessionId && state.agent.providerId ? directory?.sides?.({ providerId: state.agent.providerId, nativeSessionId: state.agent.runtimeInfo.sessionId }) ?? [] : [];
   const sidesIn = sides.length ? byTurn(turns, sides) : undefined;
+  const pages = state.agent?.runtimeInfo.sessionId && state.agent.providerId ? directory?.pages?.({ providerId: state.agent.providerId, nativeSessionId: state.agent.runtimeInfo.sessionId }) ?? [] : [];
   const assistantName = assistant?.name || t('conversation.assistant');
   // The live line shows while the assistant works on a turn and nothing waits for the person.
   const agent = state.agent;
@@ -274,6 +276,8 @@ export function AgentTimeline({
   children.sort((a, b) => (Date.parse(a.createdAt ?? '') - Date.parse(b.createdAt ?? ''))
     || discovered.current.order.get(a.nativeSessionId)! - discovered.current.order.get(b.nativeSessionId)!);
   return <ResourceDownloadContext.Provider value={onDownloadResource}><section className="agent-remote-surface" aria-label={t('timeline.label')}>
+
+    <PageCards pages={pages} />
 
     {state.timeline.hasOlder ? <HistoryControls loading={historyLoading} error={historyError}
       key={JSON.stringify([state.agent?.id])}

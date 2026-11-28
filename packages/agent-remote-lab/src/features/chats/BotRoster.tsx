@@ -40,7 +40,7 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
   const sentence = draft && quiet ? undefined : (work ? `${work.title} · ${t(`details.boardStatus.${work.status}`)}` : row.assistant.sentence) || undefined;
   // The role and label are tags beside the name, like a job title; screen readers hear them after the name.
   const staffOf = row.chief ? t('assistants.staffOf', { name: row.chief }) : undefined;
-  const description = [row.role, row.details.label, staffOf, sentence, draft ? `${t('assistants.draft')}: ${draft}` : undefined, row.unread ? t('assistants.unread') : undefined,
+  const description = [row.role, row.details.primary ? t('assistants.primary') : undefined, row.details.label, staffOf, sentence, draft ? `${t('assistants.draft')}: ${draft}` : undefined, row.unread ? t('assistants.unread') : undefined,
     row.details.pinned ? t('assistants.pinned') : undefined, row.muted ? t('assistants.muted') : undefined, time].filter(Boolean).join(' · ');
   const menuEvents = menu ? contextMenuEvents(({ target, point }) => {
     const anchor = target.closest<HTMLElement>('.lab-bot-row');
@@ -55,6 +55,7 @@ export function BotMember({ row, current, compact, hostName, onSelect, marks, ex
       <span className="lab-bot-row-text">
         <span className="lab-bot-name-line"><strong className="lab-bot-name">{name}</strong>
           {row.role ? <span className="lab-bot-role">{row.role}</span> : null}
+          {row.details.primary ? <span className="lab-bot-role" data-primary="">{t('assistants.primary')}</span> : null}
           {row.details.label ? <span className="lab-bot-label">{row.details.label}</span> : null}
           {staffOf ? <span className="lab-bot-label" data-chief>{staffOf}</span> : null}
           {marks}

@@ -74,11 +74,11 @@ export interface GroupSection {
 }
 
 /**
- * Pinned chats first, then by the time of the latest reply, newest first; chats that never replied keep roster order after them.
+ * The primary bot first, then pinned chats, then by the time of the latest reply, newest first; chats that never replied keep roster order after them.
  * A send moves its chat when the assistant answers, so the list does not jump while assistants work.
  */
 function byActivity(rows: readonly BotRow[]): BotRow[] {
-  return rows.map((row, order) => ({ row, order })).sort((a, b) => Number(!!b.row.details.pinned) - Number(!!a.row.details.pinned)
+  return rows.map((row, order) => ({ row, order })).sort((a, b) => Number(!!b.row.details.primary) - Number(!!a.row.details.primary) || Number(!!b.row.details.pinned) - Number(!!a.row.details.pinned)
     || (b.row.reply?.replyAt ?? -1) - (a.row.reply?.replyAt ?? -1) || a.order - b.order).map(item => item.row);
 }
 
@@ -101,7 +101,9 @@ export function groupSections(model: BotRosterModel, groups: readonly WindowGrou
   });
   // The default group lists the assistants of every group of one, in catalog order before Chats orders them by activity.
   const personal = model.sections.filter(section => { const group = byId.get(section.groupId); return !!group && isPersonalGroup(group); }).flatMap(section => section.rows);
-  return personal.length ? [...named, { title: options.defaultTitle, rows: ordered(personal), ...unread(personal) }] : named;
+  const sections = personal.length ? [...named, { title: options.defaultTitle, rows: ordered(personal), ...unread(personal) }] : named;
+  // The section of the primary bot leads Chats; the directory keeps the groups' order.
+  return options.order === 'activity' ? [...sections.filter(section => section.rows.some(row => row.details.primary)), ...sections.filter(section => !section.rows.some(row => row.details.primary))] : sections;
 }
 /** Chats show no headings while one group is all there is, as a plain list. */
 export const showsGroupHeadings = (sections: readonly GroupSection[]): boolean => sections.length > 1;

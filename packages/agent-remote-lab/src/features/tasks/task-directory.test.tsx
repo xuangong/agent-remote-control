@@ -176,4 +176,35 @@ describe('the sub-session directory', () => {
     expect(cards.map(card => [card.taskId, card.at])).toEqual([['s1', 4], ['s2', 9]]);
     expect(bringBackText(cards[1]!, translator('en'))).toBe('From the side "Task s2":\n\n> Second.\n> More.');
   });
+
+  describe('the pages of bots and the primary bot', () => {
+    const id = (n: number) => 'b_' + String(n).repeat(32);
+    const groups = [{ window: { id: 'g', title: 'g', revision: 1, views: [] }, bots: { rank: 'm', members: { v1: { botId: id(1), name: 'Chief', primary: true }, v2: { botId: id(2), name: 'Tracker', chief: id(1) }, v3: { botId: id(3), name: 'Scout' } } } }] as unknown as WindowGroup[];
+    const page = (n: number, updatedAt: number, team?: true) => ({ pageId: `pg_${String(n).repeat(12)}`, title: `Page ${n}`, contents: `Body ${n}`, version: 1, updatedAt, ...(team ? { team } : {}) });
+    const inbox = (bot: number, session: string, pages: ReturnType<typeof page>[]): Team => ({ ...taskTeam(`i${bot}`, {}), task: undefined, members: [{ ...taskTeam(`i${bot}`, {}).members[1]!, name: `Bot ${bot}`, nativeSessionId: session }], inbox: { botId: id(bot), pages } } as Team);
+    const teams = [inbox(1, 'chief', [page(1, 5), page(2, 9, true)]), inbox(2, 'tracker', [page(3, 7, true), page(4, 8)]), inbox(3, 'scout', [page(5, 1, true)])];
+
+    it('lists every page of a bot newest first with the bot that holds it', () => {
+      const directory = taskDirectory(teams, () => {}, undefined, groups);
+      expect(directory.pagesOf!(id(2)).map(page => [page.title, page.bot])).toEqual([['Page 4', 'Tracker'], ['Page 3', 'Tracker']]);
+      expect(directory.pagesOf!(id(9))).toEqual([]);
+    });
+
+    it('shows the team page of a bot and of its staff as cards in the conversation of its main session, and no other bot\'s', () => {
+      const directory = taskDirectory(teams, () => {}, undefined, groups);
+      expect(directory.pages!({ providerId: 'claude', nativeSessionId: 'chief' }).map(page => [page.title, page.bot])).toEqual([['Page 2', 'Chief'], ['Page 3', 'Tracker']]);
+      expect(directory.pages!({ providerId: 'claude', nativeSessionId: 'tracker' }).map(page => page.title)).toEqual(['Page 3']);
+      expect(directory.pages!({ providerId: 'claude', nativeSessionId: 'nowhere' })).toEqual([]);
+    });
+
+    it('knows the primary bot and that only a bot reporting to the person can be primary, and changes it through the port', async () => {
+      const marks: Array<[string, boolean]> = [];
+      const directory = taskDirectory(teams, () => {}, undefined, groups, undefined, undefined, undefined, undefined, async (botId, primary) => { marks.push([botId, primary]); });
+      expect([id(1), id(2), id(3)].map(botId => directory.primary!(botId))).toEqual([{ current: true, eligible: true }, { current: false, eligible: false }, { current: false, eligible: true }]);
+      await directory.setPrimary!(id(3), true);
+      expect(marks).toEqual([[id(3), true]]);
+      expect(taskDirectory(teams, () => {}).setPrimary).toBeUndefined();
+    });
+  });
 });
+

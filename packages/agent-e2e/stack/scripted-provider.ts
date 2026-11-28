@@ -54,7 +54,9 @@ export type ScriptedStep =
   /** A pending `question` with one single-choice question that also takes free text; the turn goes on once the page answers it. */
   | { question: string; options: readonly string[] }
   /** An assistant message. */
-  | { reply: string };
+  | { reply: string }
+  /** What the turn used, reported when it completes (cumulative within the turn). */
+  | { usage: { inputTokens?: number; cachedInputTokens?: number; cacheCreationInputTokens?: number; outputTokens?: number } };
 
 const toolDetail = (input: ScriptedToolInput): AgentToolDetail => typeof input === 'string' ? { type: 'shell', command: input } : input;
 
@@ -92,6 +94,8 @@ export interface ScriptedProviderOptions {
   tools?: boolean;
   /** The working directory sessions report, as a real CLI does: Team seats, tasks and bots start where it is. */
   cwd?: string;
+  /** The model sessions report in their runtime info, as a real CLI does: a bot's turn is priced by it. */
+  model?: string;
 }
 
 export function scriptedProvider(options: ScriptedProviderOptions = {}) {
@@ -150,7 +154,7 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
     /** A scripted turn: the rows and state events of a real provider's turn, under one turn id. */
     const pendingApprovals = new Map<string, (response: AgentInteractionResponse) => void>();
     let turnCount = 0, eventCount = 0, status: 'idle' | 'running' = 'idle';
-    const runtimeInfo = () => ({ providerId, sessionId: nativeSessionId, status, ...(options.succession ? { cwd: options.succession.workspace } : options.workspaceRoot ? { cwd: startedIn.get(nativeSessionId) ?? options.workspaceRoot } : options.cwd ? { cwd: startedIn.get(nativeSessionId) ?? options.cwd } : {}),
+    const runtimeInfo = () => ({ providerId, sessionId: nativeSessionId, status, ...(options.model ? { model: options.model } : {}), ...(options.succession ? { cwd: options.succession.workspace } : options.workspaceRoot ? { cwd: startedIn.get(nativeSessionId) ?? options.workspaceRoot } : options.cwd ? { cwd: startedIn.get(nativeSessionId) ?? options.cwd } : {}),
       persistence: { providerId, sessionId: nativeSessionId, opaque: '{}' } });
     const playTurn = async (text: string, steps: ScriptedStep[]) => {
       const turnId = `${nativeSessionId}-turn-${++turnCount}`;
@@ -166,11 +170,13 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
         saved.history.push({ role, text: body }); saved.updatedAt = new Date().toISOString();
         emit({ type: 'timeline', provider: providerId, turnId, item: { type: role === 'user' ? 'user_message' : 'assistant_message', text: body, messageId: key } }, key, { key, completes: true });
       };
+      let used: Extract<ScriptedStep, { usage: unknown }>['usage'] | undefined;
       emit({ type: 'turn_started', provider: providerId, turnId }, 'turn-started');
       message('user', text);
       for (const [index, step] of steps.entries()) {
         const callId = `${nativeSessionId}:${turnId}:c${index}`;
         if ('reply' in step) message('assistant', step.reply);
+        else if ('usage' in step) used = step.usage;
         else if ('tool' in step) {
           const item = { type: 'tool_call' as const, callId, name: step.tool, detail: toolDetail(step.input) };
           emit({ type: 'timeline', provider: providerId, turnId, item: { ...item, status: 'running', error: null } }, `${callId}:started`, { key: callId });
@@ -193,7 +199,7 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
           if (response.kind === 'tool_approval' && response.decision !== 'allow') break;
         }
       }
-      emit({ type: 'turn_completed', provider: providerId, turnId }, 'turn-completed');
+      emit({ type: 'turn_completed', provider: providerId, turnId, ...(used ? { usage: { tokenScope: 'turn' as const, ...used, totalTokens: (used.inputTokens ?? 0) + (used.cachedInputTokens ?? 0) + (used.cacheCreationInputTokens ?? 0) + (used.outputTokens ?? 0) } } : {}) }, 'turn-completed');
       running('idle');
     };
     const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');

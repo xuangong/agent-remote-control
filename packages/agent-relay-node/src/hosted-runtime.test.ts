@@ -191,8 +191,8 @@ it.each(['google', 'mainsite', 'gateway'] as const)('Node %s keeps login, pairin
   }
 }, 20000);
 
-/** A small durable-state ceiling: the rules near it do not depend on its size, and filling the default 64 MiB costs seconds. */
-const STATE_CEILING = 5 * 1024 * 1024;
+/** A small durable-state ceiling just above the 2 MiB succession reserve: the rules near it do not depend on its size, and filling the default 64 MiB costs seconds. */
+const STATE_CEILING = 2560 * 1024;
 const envelopeBytes = (state: HostedRelayState) => Buffer.byteLength(JSON.stringify({ payload: JSON.stringify(state), signature: '0'.repeat(64) }));
 function fillOrdinaryReceipts(state: HostedRelayState, targetBytes: number) {
   const broker = state.tenants[0]!.broker;

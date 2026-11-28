@@ -69,8 +69,8 @@ export function WindowToolbar({ windowId, title, summary, leading, launchers, di
   };
   const actions: MenuEntry[] = [
     ...(workbench ? [workbench.boundName
-      ? { label: t('workbench.menu.unbind', { name: workbench.boundName }), icon: 'link', disabled: readOnly, onSelect: workbench.onUnbind } as const
-      : { label: t('workbench.menu.bind'), icon: 'link', disabled: readOnly, onSelect: workbench.onBind } as const] : []),
+      ? { label: t('windows.workbench.menu.unbind', { name: workbench.boundName }), icon: 'link', disabled: readOnly, onSelect: workbench.onUnbind } as const
+      : { label: t('windows.workbench.menu.bind'), icon: 'link', disabled: readOnly, onSelect: workbench.onBind } as const] : []),
     ...(botAppearance === undefined ? [] : [botAppearance
       ? { label: t('navigation.windowToolbar.hideInBot'), icon: 'eye-off', disabled: readOnly, onSelect: () => onBotAppearance(false) } as const
       : { label: t('navigation.windowToolbar.showInBot'), icon: 'sidebar', disabled: readOnly, onSelect: () => onBotAppearance(true) } as const]),

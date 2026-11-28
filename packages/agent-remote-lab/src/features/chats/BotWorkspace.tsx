@@ -142,7 +142,7 @@ export function BotWorkspace({ visible, covered = false, compact, scope, rooms, 
   const botId = panelPlace?.kind === 'bot' ? workspace.readGroup(panelPlace.groupId)?.bots?.members[panelPlace.viewId]?.botId : undefined;
   const detailsHost: AssistantDetailsHost = {
     surface: phone ? 'sheet' : 'panel', slot: detailsSlot, tools: toolsSlot, open: detailsShown, setOpen: setDetailsOpen,
-    ...(botRow && botSection ? { actions: [...(workbench && botId ? [{ label: t('workbench.open'), icon: 'window', onSelect: () => void workbench.openWorkbench(botId) } as const] : []),
+    ...(botRow && botSection ? { actions: [...(workbench && botId ? [{ label: t('windows.workbench.open'), icon: 'window', onSelect: () => void workbench.openWorkbench(botId) } as const] : []),
         ...actions.cardActions(botRow, botSection.title, groupActions.assistantMenu(botRow, { rename: false }))],
       ...(onPinToWindow ? { action: { label: t('card.pin'), icon: 'window' as const, onSelect: () => onPinToWindow({ groupId: botRow.groupId, viewId: botRow.viewId }) } } : {}),
       setPicture: (picture: BotPicture) => actions.setPicture(botRow, picture), rename: (name: string) => actions.rename(botRow, name) } : {}),

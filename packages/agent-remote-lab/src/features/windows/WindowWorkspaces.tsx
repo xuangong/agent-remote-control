@@ -174,7 +174,7 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
       const deleteTitle = !workspace.hasActiveWindow ? t('windows.delete.needWindow') : window.id === workspace.window?.id ? t('windows.delete.switchFirst') : t('windows.delete.hint');
       const deleteDisabled = busy || !workspace.hasActiveWindow || window.id === workspace.window?.id;
       const remove = () => startDelete(window);
-      return <div key={window.id} className="lab-window-row" data-window-row={window.id} data-bot-workbench={bound?.botId} title={bound ? t('workbench.kind.bot', { name: bound.name }) : undefined} data-renaming={renaming?.id === window.id || undefined}>
+      return <div key={window.id} className="lab-window-row" data-window-row={window.id} data-bot-workbench={bound?.botId} title={bound ? t('windows.workbench.kind.bot', { name: bound.name }) : undefined} data-renaming={renaming?.id === window.id || undefined}>
       {renaming?.id === window.id ? <form className="lab-window-rename" aria-label={renameLabel} onKeyDown={event => {
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (!saving) closeRename(); }
       }} onSubmit={event => { event.preventDefault(); void saveRename(window.id); }}>

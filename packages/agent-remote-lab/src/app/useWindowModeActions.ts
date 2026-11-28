@@ -185,7 +185,7 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
         id = await windowWorkspace.createBotWorkbench(botId, assistantNames.view(bot.groupId, bot.viewId), bot.binding);
       }
       await windowWorkspace.open(id);
-    } catch (error) { windowActions.setNotice(errorWords(error, t, 'workbench.notice.notOpened')); return; }
+    } catch (error) { windowActions.setNotice(errorWords(error, t, 'windows.workbench.notice.notOpened')); return; }
     closeContext();
     navigation.setMode('window', { window: id });
     inMode('window', () => searchRuns.current.focusShownMode('window'));
@@ -196,7 +196,7 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
     const open = windowWorkspace.readWindow(), bot = standingBots(windowWorkspace.groups).find(item => item.botId === botId);
     if (!open || !bot) return;
     try { await windowWorkspace.operate({ type: 'layout.apply', layout: bindWorkbench(open, botId, bot.binding) }); }
-    catch (error) { windowActions.setNotice(errorWords(error, t, 'workbench.notice.notChanged')); }
+    catch (error) { windowActions.setNotice(errorWords(error, t, 'windows.workbench.notice.notChanged')); }
   }
 
   /** Unbinds the open Window: it becomes a free workbench and keeps its tiles. */
@@ -204,7 +204,7 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
     const open = windowWorkspace.readWindow();
     if (!open) return;
     try { await windowWorkspace.operate({ type: 'layout.apply', layout: unbindWorkbench(open, []) }); }
-    catch (error) { windowActions.setNotice(errorWords(error, t, 'workbench.notice.notChanged')); }
+    catch (error) { windowActions.setNotice(errorWords(error, t, 'windows.workbench.notice.notChanged')); }
   }
 
   async function navigateAttribution(attribution: SessionAttribution): Promise<void> {

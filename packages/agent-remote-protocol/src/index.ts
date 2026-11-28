@@ -66,6 +66,7 @@ export * from './bots.js';
 export * from './chains.js';
 export * from './routine-schedule.js';
 export * from './routines.js';
+export * from './unattended.js';
 export * from './assistant-names.js';
 export * from './push-notifications.js';
 export * from './push-reminder.js';

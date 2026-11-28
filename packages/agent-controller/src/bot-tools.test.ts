@@ -59,6 +59,38 @@ it('returns the outcome of a message to the bot as the tool result, whichever of
   expect(calls[0]).toMatchObject({ action: 'bot_message', to: 'Tracker', text: 'Hello.' });
 });
 
+describe('the routine tools', () => {
+  const routineTools = () => {
+    const calls: TeamHostCall[] = [], tools = new BotTools({ request: async call => { calls.push(call); return { routines: [] }; }, tasks: () => true });
+    const tool = (name: string) => tools.namespace(() => ref('chief'), false).tools.find(item => item.name === name)!;
+    return { calls, tool };
+  };
+  it('turns each way of saying when into the one schedule the Relay stores, and refuses to guess between them', async () => {
+    const { calls, tool } = routineTools(), set = tool('set_routine');
+    await set.execute({ name: 'A', quiet_minutes: 10, until_minutes: 60 });
+    await set.execute({ name: 'B', every_minutes: 30, prompt: 'Look.', model: 'claude-haiku-4-5', max_runs_per_day: 4 });
+    await set.execute({ name: 'C', daily_at: '08:30' });
+    await set.execute({ name: 'D', weekdays: [1, 2, 3, 4, 5], at: '09:00' });
+    const before = Date.now();
+    await set.execute({ name: 'E', in_minutes: 90 });
+    expect(calls.map(call => (call as { schedule: unknown }).schedule)).toEqual([{ kind: 'quiet', minutes: 10 }, { kind: 'every', minutes: 30 }, { kind: 'daily', time: '08:30' }, { kind: 'weekdays', days: [1, 2, 3, 4, 5], time: '09:00' },
+      { kind: 'once', at: expect.any(Number) }]);
+    expect(((calls[4] as { schedule: { at: number } }).schedule.at)).toBeGreaterThanOrEqual(before + 90 * 60_000);
+    expect(calls[0]).toMatchObject({ action: 'set_routine', untilMinutes: 60 });
+    expect(calls[1]).toMatchObject({ prompt: 'Look.', model: 'claude-haiku-4-5', maxRunsPerDay: 4 });
+    await expect(set.execute({ name: 'F', daily_at: '08:30', every_minutes: 10 })).rejects.toThrow('exactly one');
+    await expect(set.execute({ name: 'G' })).rejects.toThrow('exactly one');
+    await expect(set.execute({ name: 'H', weekdays: [1] })).rejects.toThrow('at');
+    expect(calls).toHaveLength(5);
+  });
+  it('lists, pauses and deletes by name, and has no tool to set an event routine', async () => {
+    const { calls, tool } = routineTools();
+    await tool('list_routines').execute({}); await tool('pause_routine').execute({ name: 'A', paused: true }); await tool('delete_routine').execute({ name: 'A' });
+    expect(calls.map(call => call.action)).toEqual(['list_routines', 'pause_routine', 'delete_routine']);
+    expect(JSON.stringify(tool('set_routine'))).not.toContain('event');
+  });
+});
+
 describe('the reply a bot\'s ended turn sends', () => {
   const asked = { kind: 'framed' as const, answers: 'm0123456789ab' };
   const ended = async (turn: Parameters<BotTools['turnEnded']>[1], takesTools = false) => {

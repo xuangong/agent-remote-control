@@ -3,6 +3,7 @@ import { Value } from '@sinclair/typebox/value';
 import { BoardItemEdit, BoardPlanEdit, BotId } from './bots.js';
 import { Routine, ROUTINE_PROMPT_LIMIT, ROUTINE_RUNS_PER_DAY_LIMIT } from './routines.js';
 import { RoutineSchedule } from './routine-schedule.js';
+import { ModelRates, UnattendedBudget, UnattendedSettings, UsageDay } from './unattended.js';
 
 /**
  * A chain is the work one cause set off (bots design 7): an input the person sent to a bot, a routine's run coming due, or a bot's own
@@ -37,7 +38,8 @@ export const TurnCause = Type.Union([
     asked: Type.Optional(Type.Literal(true)) }, object),
 ]);
 export type TurnCause = Static<typeof TurnCause>;
-export const ChainUsage = Type.Object({ tokens: count, costUsd: Type.Optional(Type.Number({ minimum: 0 })) }, object);
+/** tokens: what the providers reported. costUsd: what a provider itself reported. estimatedUsd: ≈$ from the price table (routines design 11). */
+export const ChainUsage = Type.Object({ tokens: count, costUsd: Type.Optional(Type.Number({ minimum: 0 })), estimatedUsd: Type.Optional(Type.Number({ minimum: 0 })) }, object);
 export type ChainUsage = Static<typeof ChainUsage>;
 
 /**
@@ -93,11 +95,27 @@ export const ChainAction = Type.Union([
   Type.Object({ action: Type.Literal('routine_set'), botId: BotId, name: Type.String({ minLength: 1, maxLength: 60 }), schedule: RoutineSchedule, prompt: Type.Optional(Type.String({ minLength: 1, maxLength: ROUTINE_PROMPT_LIMIT })),
     model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })), timeZone: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })), maxRunsPerDay: Type.Optional(Type.Integer({ minimum: 1, maximum: ROUTINE_RUNS_PER_DAY_LIMIT })),
     untilMinutes: Type.Optional(Type.Integer({ minimum: 1, maximum: 30 * 24 * 60 })), paused: Type.Optional(Type.Boolean()) }, object),
+  // The person changes the unattended settings: the fields given are replaced, null removes one; bots and prices are merged by key.
+  Type.Object({ action: Type.Literal('set_unattended'), patch: Type.Object({
+    timeZone: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })), paused: Type.Optional(Type.Boolean()), absenceDays: Type.Optional(Type.Integer({ minimum: 0, maximum: 365 })),
+    budget: Type.Optional(Type.Union([UnattendedBudget, Type.Null()])), defaultPrice: Type.Optional(Type.Union([ModelRates, Type.Null()])),
+    prices: Type.Optional(Type.Record(Type.String({ minLength: 1, maxLength: 256 }), Type.Union([ModelRates, Type.Null()]), { maxProperties: 50 })),
+    bots: Type.Optional(Type.Record(Type.String({ minLength: 1, maxLength: 64 }), Type.Object({ paused: Type.Optional(Type.Boolean()), budget: Type.Optional(Type.Union([UnattendedBudget, Type.Null()])) }, object), { maxProperties: 50 })),
+    allowMoreToday: Type.Optional(Type.Number({ minimum: 0, maximum: 1_000_000 })) }, object) }, object),
   Type.Object({ action: Type.Literal('routine_pause'), botId: BotId, name: Type.String({ minLength: 1, maxLength: 60 }), paused: Type.Boolean() }, object),
   Type.Object({ action: Type.Literal('routine_delete'), botId: BotId, name: Type.String({ minLength: 1, maxLength: 60 }) }, object),
   Type.Object({ action: Type.Literal('routine_test'), botId: BotId, name: Type.String({ minLength: 1, maxLength: 60 }) }, object),
 ]);
 export type ChainAction = Static<typeof ChainAction>;
 export const isChainAction = (value: unknown): value is ChainAction => Value.Check(ChainAction, value);
+/**
+ * What the person sees of unattended work: the settings, today's and the month's usage by bot, the provider limits that stand, the scopes
+ * that reached a cap (`account` or a bot id, for `day` or `month`), and the models priced by the default price.
+ */
+export interface UnattendedView {
+  settings: UnattendedSettings; timeZone: string; day: string;
+  today: { usd: number; bots: Record<string, UsageDay> }; month: { usd: number; bots: Record<string, UsageDay> };
+  limits: Array<{ provider: string; resetsAt?: number }>; tripped: Array<{ scope: string; period: 'day' | 'month' }>; unpriced: string[]; absent?: true;
+}
 /** The audit's view: the account's chains, newest first, the names of their bots, and which standing bots are paused. */
-export interface ChainView { chains: BotChain[]; names: Record<string, string>; paused: string[]; thresholds: ChainThresholds; routines?: Record<string, Routine[]> }
+export interface ChainView { chains: BotChain[]; names: Record<string, string>; paused: string[]; thresholds: ChainThresholds; routines?: Record<string, Routine[]>; unattended?: UnattendedView }

@@ -194,4 +194,38 @@ describe('a standing bot\'s routines', () => {
     expect(f.routineInputs()).toEqual([expect.objectContaining({ name: 'Often', detail: expect.stringContaining('test') })]);
     await expect(f.broker.routineTest(ids.chief, 'Often')).rejects.toThrow('still active');
   });
+  it('refuses new starts once the budget is spent, lets the run that spent it finish, and shows what it cost', async () => {
+    const f = fixture();
+    await f.broker.chainAction({ action: 'set_unattended', patch: { budget: { perDay: 1 } } });
+    await f.broker.hostCall('mac', { action: 'set_routine', owner: f.as('chief'), name: 'Often', schedule: everyTen });
+    f.advance(600_000); await f.fire(); f.read();
+    // The run's turn costs about $18 on Sonnet: one million input and one million output tokens. The cap is $1, and the run is done all the same.
+    await f.broker.hostCall('mac', { action: 'chain_turn', owner: f.as('chief'), cause: { kind: 'framed' }, tokens: 2_000_000, usage: { model: 'sonnet', input: 1_000_000, output: 1_000_000, cacheCreation: 0, cachedInput: 0 } });
+    expect(f.broker.routines(ids.chief)[0]!.runs[0]).toMatchObject({ state: 'done', usd: 18, tokens: 2_000_000 });
+    expect(f.broker.chains.list()[0]!.usage).toMatchObject({ estimatedUsd: 18 });
+    f.advance(600_000); await f.fire();
+    expect(f.inbox().inbox!.routines![0]!.runs.at(-1)).toMatchObject({ state: 'skipped', reason: 'budget' });
+    expect(f.broker.chainView().unattended).toMatchObject({ today: { usd: 18 }, tripped: [{ scope: 'account', period: 'day' }] });
+    // The person raises today's cap, and the next due time starts a run.
+    await f.broker.chainAction({ action: 'set_unattended', patch: { allowMoreToday: 20 } });
+    f.read(); f.advance(600_000); await f.fire();
+    expect(f.inbox().inbox!.routines![0]!.runs.at(-1)).toMatchObject({ state: 'waiting' });
+  });
+  it('holds every unattended start while the person paused unattended work or the provider reported its usage limit, and still tests', async () => {
+    const f = fixture();
+    await f.broker.hostCall('mac', { action: 'set_routine', owner: f.as('chief'), name: 'Often', schedule: everyTen });
+    await f.broker.chainAction({ action: 'set_unattended', patch: { paused: true } });
+    f.advance(600_000); await f.fire();
+    expect(f.inbox().inbox!.routines![0]!.runs.at(-1)).toMatchObject({ state: 'skipped', reason: 'paused' });
+    await f.broker.chainAction({ action: 'set_unattended', patch: { paused: false } });
+    await f.broker.hostCall('mac', { action: 'provider_limit', owner: f.as('chief'), resetsAt: 1_000_000 + 3 * 3_600_000 });
+    f.advance(600_000); await f.fire();
+    expect(f.inbox().inbox!.routines![0]!.runs.at(-1)).toMatchObject({ state: 'skipped', reason: 'provider limit' });
+    expect(f.broker.chainView().unattended!.limits).toEqual([{ provider: 'mac/claude', resetsAt: 1_000_000 + 3 * 3_600_000 }]);
+    expect(await f.broker.routineTest(ids.chief, 'Often')).toEqual({ run: 3 });
+    // The test run ends, the window ends, and the next due time starts again.
+    f.read(); await f.broker.hostCall('mac', { action: 'chain_turn', owner: f.as('chief'), cause: { kind: 'framed' }, tokens: 1 });
+    f.advance(3 * 3_600_000); await f.fire();
+    expect(f.inbox().inbox!.routines![0]!.runs.at(-1)).toMatchObject({ state: 'waiting' });
+  });
 });

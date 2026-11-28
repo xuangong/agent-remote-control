@@ -97,7 +97,7 @@ export class BotTools {
     // Only a finished turn counts in a chain and answers anyone.
     if (turn.outcome !== undefined && turn.outcome !== 'finished') return;
     if (this.tools(ref) !== 'tasks' && this.ports.answering?.(ref) !== true) return;
-    void this.ports.request({ action: 'chain_turn', owner, cause: turn.cause, tokens: turn.tokens, ...(turn.costUsd !== undefined ? { costUsd: turn.costUsd } : {}) }).catch(() => undefined);
+    void this.ports.request({ action: 'chain_turn', owner, cause: turn.cause, tokens: turn.tokens, ...(turn.costUsd !== undefined ? { costUsd: turn.costUsd } : {}), ...(turn.usage ? { usage: turn.usage } : {}) }).catch(() => undefined);
     if (turn.cause.kind === 'framed' && turn.cause.asked && turn.finalText)
       void this.ports.request({ action: 'bot_answer', owner, text: turn.finalText.slice(0, ASSISTANT_MESSAGE_LIMIT), cause: { kind: 'framed', asked: true } }).catch(() => undefined);
     else if (turn.cause.kind === 'framed' && turn.cause.answers && turn.finalText && this.ports.takesTools?.(ref) === false)
@@ -107,6 +107,11 @@ export class BotTools {
    * The person wrote into a bot's session: its Relay tells its chief, if a bot, the first 300 characters framed as what they are
    * (bots design 3.5). The Host sends the person's own words from the record of the input, never a model's.
    */
+  /** The session's provider reported a usage limit: the Relay holds unattended work of this provider until it resets. */
+  providerLimited(ref: NativeSessionRef, resetsAt?: number): void {
+    if (this.tools(ref) !== 'tasks') return;
+    void this.ports.request({ action: 'provider_limit', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, ...(resetsAt !== undefined ? { resetsAt } : {}) }).catch(() => undefined);
+  }
   personWrote(ref: NativeSessionRef, input: PersonInput): void {
     if (this.tools(ref) !== 'tasks') return;
     void this.ports.request({ action: 'bot_told', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, text: input.text.slice(0, PERSON_WROTE_LIMIT), cause: { kind: 'person', messageId: input.messageId } }).catch(() => undefined);

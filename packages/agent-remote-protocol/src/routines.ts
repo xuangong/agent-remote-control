@@ -26,6 +26,8 @@ export const RoutineRun = Type.Object({
   state: Type.Union([Type.Literal('waiting'), Type.Literal('running'), Type.Literal('done'), Type.Literal('failed'), Type.Literal('skipped')]),
   startedAt: Type.Optional(time), endedAt: Type.Optional(time), reason: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })), chain: Type.Optional(Type.String({ pattern: '^c_[0-9a-f]{16}$' })),
   model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })), missed: Type.Optional(Type.Integer({ minimum: 1 })),
+  /** What the run's chain used: tokens, the estimated cost in ≈$, and where the estimate is soft. */
+  tokens: Type.Optional(count), usd: Type.Optional(Type.Number({ minimum: 0 })), flags: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 40 }), { maxItems: 6 })),
 }, strict);
 export type RoutineRun = Static<typeof RoutineRun>;
 

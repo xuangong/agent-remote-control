@@ -34,7 +34,9 @@ export interface RoutineOptions {
   /** The account's time zone, where daily and weekdays times are read. */
   zone?: () => string;
   /** Why an unattended start must not happen now (a budget, a pause, a provider limit), or undefined. */
-  refuse?: (bot: string, routine: Routine, now: number) => string | undefined;
+  refuse?: (inbox: SavedTeam, routine: Routine, now: number) => string | undefined;
+  /** A run was queued for the bot: the account counts it. */
+  started?: (bot: string) => Promise<void>;
 }
 
 /** Every message queued for the bot pushes its quiet routines back to a full interval from now. */
@@ -144,12 +146,15 @@ export class BotRoutines {
     return result;
   }
   /** A turn of a routine's chain ended: its run is done. */
-  async turnEnded(chainId: string): Promise<void> {
+  async turnEnded(chainId: string, used?: { tokens: number; usd: number; flags: string[] }): Promise<void> {
     await this.broker.change(teams => {
       const now = this.broker.ports.now();
       for (const team of plain(teams).map((_, index) => teams[index]!)) for (const routine of team.inbox?.routines ?? []) {
         const run = routine.runs.find(item => item.chain === chainId);
-        if (run && run.state !== 'done') { run.state = 'done'; run.startedAt ??= now; run.endedAt = now; team.revision++; team.updatedAt = now; }
+        if (!run) continue;
+        if (run.state !== 'done') { run.state = 'done'; run.startedAt ??= now; run.endedAt = now; }
+        if (used) { run.tokens = (run.tokens ?? 0) + used.tokens; run.usd = (run.usd ?? 0) + used.usd; const flags = [...new Set([...run.flags ?? [], ...used.flags])].slice(0, 6); if (flags.length) run.flags = flags; }
+        team.revision++; team.updatedAt = now;
       }
     });
   }
@@ -198,6 +203,7 @@ export class BotRoutines {
     for (const chain of started) {
       const scope = chainScope(chain.id); scope.messages = 1; scope.bots.add(chain.bot);
       await this.chains?.record(scope, { cause: 'routine', bot: chain.bot }).catch(() => undefined);
+      await this.options.started?.(chain.bot).catch(() => undefined);
     }
   }
   private async due(): Promise<void> {
@@ -222,7 +228,7 @@ export class BotRoutines {
           const message = waiting && inbox.messages.find(item => item.chain === waiting.chain);
           if (waiting && message?.status === 'queued') { waiting.missed = (waiting.missed ?? 0) + 1; message.text = this.frame(inbox, teams, routine, waiting, now); continue; }
           if (waiting || working) { this.skip(routine, dueAt, now, 'overlap'); continue; }
-          const refused = this.options.refuse?.(box.botId, routine, now);
+          const refused = this.options.refuse?.(inbox, routine, now);
           if (refused) { this.skip(routine, dueAt, now, refused); continue; }
           if (routine.maxRunsPerDay !== undefined && routine.runs.filter(run => run.state !== 'skipped' && now - run.dueAt < DAY_MS).length >= routine.maxRunsPerDay) { this.skip(routine, dueAt, now, 'daily limit'); continue; }
           this.queue(inbox, teams, routine, dueAt, now, 'schedule', 0, started);

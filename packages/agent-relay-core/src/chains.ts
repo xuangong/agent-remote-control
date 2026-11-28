@@ -47,7 +47,7 @@ export class BotChains {
     return latest ? { id: latest.id, cause: 'bot' } : { id: chainId(['bot', randomUUID()]), cause: 'bot' };
   }
   /** Adds what a call in a chain did, starting the chain at this bot if it is new. */
-  async record(scope: ChainScope, start: { cause: BotChain['cause']; bot: string }, turn?: { tokens: number; costUsd?: number }): Promise<void> {
+  async record(scope: ChainScope, start: { cause: BotChain['cause']; bot: string }, turn?: { tokens: number; costUsd?: number; estimatedUsd?: number }): Promise<void> {
     if (!turn && !scope.messages && !scope.created && !scope.subSessions && !scope.bots.size) return;
     const limits = this.store.thresholds();
     const crossed = await this.store.change(chains => {
@@ -58,6 +58,7 @@ export class BotChains {
       if (turn) {
         chain.turns++; chain.usage.tokens += turn.tokens;
         if (turn.costUsd !== undefined) chain.usage.costUsd = (chain.usage.costUsd ?? 0) + turn.costUsd;
+        if (turn.estimatedUsd !== undefined) chain.usage.estimatedUsd = (chain.usage.estimatedUsd ?? 0) + turn.estimatedUsd;
       }
       chain.updatedAt = now;
       // What the chain passed for the first time, measured against the person's thresholds as they are now.

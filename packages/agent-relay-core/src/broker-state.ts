@@ -1,4 +1,4 @@
-import { isBotChain, isChainThresholds, CHAIN_LIMIT, type BotChain, type ChainThresholds } from '@orchardworks/agent-remote-protocol';
+import { isBotChain, isChainThresholds, isUnattendedState, CHAIN_LIMIT, type BotChain, type ChainThresholds, type UnattendedState } from '@orchardworks/agent-remote-protocol';
 import { freeze } from 'immer';
 import { BrokerError, type Binding, type DeviceCredential, type Host, type RemoteHostBrokerState } from './broker-types.js';
 import { HostSharing } from './host-sharing.js';
@@ -39,6 +39,7 @@ export interface BrokerState {
   teams: SavedTeam[];
   chains: BotChain[] | undefined;
   chainThresholds: ChainThresholds | undefined;
+  unattended: UnattendedState | undefined;
   sharing: HostSharing;
   /** The registry whose snapshot is part of the saved state; set once by the composition. */
   previews: { snapshot(): HostPreviewState[] } | undefined;
@@ -92,6 +93,8 @@ export function createBrokerState(options: BrokerStateOptions): BrokerState {
   if (chains && !validChains(chains)) throw new Error('Invalid saved chains.');
   const chainThresholds = initialState?.chainThresholds && structuredClone(initialState.chainThresholds);
   if (chainThresholds && !isChainThresholds(chainThresholds)) throw new Error('Invalid saved chain thresholds.');
+  const unattended = initialState?.unattended && structuredClone(initialState.unattended);
+  if (unattended && !isUnattendedState(unattended)) throw new Error('Invalid saved unattended state.');
   const savedTeams: SavedTeam[] = structuredClone(initialState?.teams ?? []);
   // The work items of an earlier Relay are not carried over to boards.
   for (const team of savedTeams) if (team.inbox) delete (team.inbox as { work?: unknown }).work;
@@ -114,6 +117,7 @@ export function createBrokerState(options: BrokerStateOptions): BrokerState {
     teams: freeze(savedTeams, true),
     chains,
     chainThresholds,
+    unattended,
     sharing: new HostSharing(initialState?.sharing, () => {}),
     previews: undefined,
     validTeams: new WeakSet<SavedTeam>(),
@@ -129,7 +133,7 @@ export function createBrokerState(options: BrokerStateOptions): BrokerState {
       catch (error) { throw new BrokerError(409, 'host_recovery_capacity', error instanceof Error ? error.message : 'Retained Host identities are unavailable.'); }
     },
     snapshot() {
-      return { teams: state.teams, ...(state.chains?.length ? { chains: state.chains } : {}), ...(state.chainThresholds ? { chainThresholds: state.chainThresholds } : {}), ...(state.revokedHosts ? { revokedHosts: structuredClone(state.revokedHosts) } : {}),
+      return { teams: state.teams, ...(state.chains?.length ? { chains: state.chains } : {}), ...(state.chainThresholds ? { chainThresholds: state.chainThresholds } : {}), ...(state.unattended ? { unattended: state.unattended } : {}), ...(state.revokedHosts ? { revokedHosts: structuredClone(state.revokedHosts) } : {}),
         ...(state.journalDeletions.length > 0 ? { journalDeletions: [...state.journalDeletions] } : {}), ...(options.keepsAssociations ? { associations: state.associations } : {}),
         pairings: structuredClone(state.pairings), previews: structuredClone(state.previews?.snapshot() ?? []), ...(options.keepsSharing ? { sharing: state.sharing.snapshot() } : {}),
         keys: [...keys].map(([key, value]) => [key, structuredClone(value)]),

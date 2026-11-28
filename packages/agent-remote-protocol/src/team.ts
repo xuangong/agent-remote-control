@@ -5,6 +5,7 @@ import { ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, AttachmentId, BotAttac
 import { ChainId, StandingApproval, TurnCause } from './chains.js';
 import { Routine, ROUTINES_PER_BOT, ROUTINE_PROMPT_LIMIT, ROUTINE_RUNS_PER_DAY_LIMIT } from './routines.js';
 import { RoutineSchedule } from './routine-schedule.js';
+import { TurnUsage } from './unattended.js';
 import { TaskBrief, ASK_LIMIT, WORK_LOG_KEEP, WORK_LOG_QUESTION_LIMIT, WORK_LOG_ANSWER_LIMIT, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_LIMIT, ROOM_MINUTES_LIMIT, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, TaskOutcome, TaskTitle, TeamTask, SubSessionFork, TASK_BRIEF_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, SUB_SESSION_LINE_LIMIT, SUB_SESSION_NAME_LIMIT, isTeamTask } from './task.js';
 const object = { additionalProperties: false } as const;
 const id = Type.String({ minLength: 1, maxLength: 256 });
@@ -224,7 +225,9 @@ export const TeamHostCall = Type.Union([
   /** The Hosts the caller's account runs, with what each reports and its workspaces' folders, for choosing where a bot works. */
   Type.Object({ action: Type.Literal('list_hosts'), owner: BotCaller }, object),
   // A bot's turn ended: its Host counts the turn and its usage in the turn's chain.
-  Type.Object({ action: Type.Literal('chain_turn'), owner: BotCaller, cause: TurnCause, tokens: Type.Integer({ minimum: 0 }), costUsd: Type.Optional(Type.Number({ minimum: 0 })) }, object),
+  Type.Object({ action: Type.Literal('chain_turn'), owner: BotCaller, cause: TurnCause, tokens: Type.Integer({ minimum: 0 }), costUsd: Type.Optional(Type.Number({ minimum: 0 })), usage: Type.Optional(TurnUsage) }, object),
+  // A bot's provider reported a usage limit (the CLI's own window), until `resetsAt` when it says: unattended work of that provider waits.
+  Type.Object({ action: Type.Literal('provider_limit'), owner: BotCaller, resetsAt: Type.Optional(Type.Integer({ minimum: 0 })) }, object),
   // A bot's native tool approval is pending, or the person chose "for this chain in this folder" for it: the Host asks whether a standing approval of the turn's chain covers the folder
   // (counting the use), or, with `grant`, records the person's choice. Only the person's recorded choice ever answers.
   Type.Object({ action: Type.Literal('chain_approval'), owner: BotCaller, cause: Type.Optional(TurnCause), cwd: StandingApproval.properties.cwd, grant: Type.Optional(Type.Literal(true)) }, object),

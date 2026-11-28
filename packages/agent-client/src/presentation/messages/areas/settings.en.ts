@@ -52,7 +52,7 @@ export const settings = {
   'settings.notifications.failed': 'Permission could not be requested. Try Allow browser notifications again.',
   'settings.letters': 'Team messages',
   'settings.audit': 'Bots\' work',
-  'settings.audit.hint': 'What each of your inputs, and each timer, set off among your bots. Nothing stops on its own: stop what you choose.',
+  'settings.audit.hint': 'What each of your inputs, and each routine, set off among your bots. Nothing stops on its own: stop what you choose.',
   'settings.audit.empty': 'Your bots have not worked together yet.',
   'settings.audit.cause.person': 'You asked {bot}',
   'settings.audit.cause.timer': 'Routine of {bot}',

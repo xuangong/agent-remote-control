@@ -1,0 +1,88 @@
+import { act } from 'react';
+import { describe, expect, it, vi } from 'vitest';
+import type { Routine } from '@orchardworks/agent-remote-protocol';
+import { render } from '../../test/setup.js';
+import { RoutinesList, specOf, type RoutinesChoice, type RoutineSpec } from './RoutinesList.js';
+
+const T = Date.parse('2026-11-30T10:00:00Z');
+const routine = (extra: Partial<Routine> = {}): Routine => ({ id: 'r1', name: 'Morning check', schedule: { kind: 'weekdays', days: [1, 2, 3, 4, 5], time: '08:30' }, by: 'bot', anchor: 0, dueAt: T + 3_600_000, runCount: 2,
+  runs: [{ n: 1, trigger: 'schedule', dueAt: T - 86_400_000, state: 'done', usd: 0.0421 }, { n: 2, trigger: 'schedule', dueAt: T - 3_600_000, state: 'skipped', reason: 'budget' }], ...extra });
+function choice(routines: Routine[], extra: Partial<RoutinesChoice> = {}) {
+  const saved: RoutineSpec[] = [], paused: Array<[string, boolean]> = [], removed: string[] = [], tested: string[] = [];
+  const value: RoutinesChoice = { routines, zone: 'UTC', save: async spec => { saved.push(spec); }, pause: async (name, flag) => { paused.push([name, flag]); }, remove: async name => { removed.push(name); }, test: async name => { tested.push(name); }, ...extra };
+  return { value, saved, paused, removed, tested };
+}
+const click = (element: Element | null | undefined) => act(async () => { (element as HTMLElement).click(); });
+const type = (input: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, value: string) => act(async () => {
+  const prototype = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : input instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+  Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event(input instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
+});
+const button = (container: Element, label: string) => [...container.querySelectorAll('button')].find(item => item.textContent === label);
+
+describe('a bot\'s routines in its details', () => {
+  it('shows each routine with its schedule in words, who set it, its last run and what the runs cost, and says when there are none', async () => {
+    const container = await render(<RoutinesList choice={choice([routine(), routine({ id: 'r2', name: 'work', work: true, by: 'system', schedule: { kind: 'quiet', minutes: 5 }, runs: [] })]).value} />);
+    const rows = [...container.querySelectorAll('li[data-routine]')];
+    expect(rows.map(row => row.getAttribute('data-routine'))).toEqual(['Morning check', 'work']);
+    const text = rows[0]!.textContent!;
+    expect(text).toContain('Weekdays at 08:30');
+    expect(text).toContain('Set by the bot');
+    expect(text).toContain('About ≈ $0.042 a run');
+    expect(text).toContain('Run 2 ·');
+    expect(text).toContain('skipped: over budget');
+    // The automatic routine cannot be edited or deleted, only paused and tested.
+    expect([...rows[1]!.querySelectorAll('button')].map(item => item.textContent)).toEqual(['Test', 'Pause', 'History']);
+    const empty = await render(<RoutinesList choice={choice([]).value} />);
+    expect(empty.textContent).toContain('No routines.');
+  });
+  it('tests, pauses, resumes and deletes a routine, and opens its history', async () => {
+    const c = choice([routine(), routine({ id: 'r3', name: 'Held', paused: true })]);
+    const container = await render(<RoutinesList choice={c.value} />);
+    const [first, second] = [...container.querySelectorAll('li[data-routine]')] as [HTMLElement, HTMLElement];
+    await click(button(first, 'Test')); await click(button(first, 'Pause')); await click(button(second, 'Resume')); await click(button(first, 'Delete'));
+    expect(c.tested).toEqual(['Morning check']); expect(c.paused).toEqual([['Morning check', true], ['Held', false]]); expect(c.removed).toEqual(['Morning check']);
+    await click(button(first, 'History'));
+    expect([...first.querySelectorAll('ol li')].map(item => item.textContent)).toEqual([expect.stringContaining('Run 2'), expect.stringContaining('Run 1')]);
+  });
+  it('says why nothing starts when the account holds unattended work, and when an action did not go through', async () => {
+    const held = await render(<RoutinesList choice={choice([routine()], { hold: 'budget' }).value} />);
+    expect(held.querySelector('li[data-routine]')!.textContent).toContain('Over budget until the period ends');
+    const failing = choice([routine()], { pause: async () => { throw new Error('No.'); } });
+    const container = await render(<RoutinesList choice={failing.value} />);
+    await click(button(container, 'Pause'));
+    expect(container.querySelector('[role="alert"]')!.textContent).toBe('That did not work. Try again.');
+  });
+  it('makes a new routine from the form: weekdays with chosen days and a time, a prompt and a model; and edits one without renaming it', async () => {
+    const c = choice([routine()]);
+    const container = await render(<RoutinesList choice={c.value} />);
+    await click(button(container, 'New routine'));
+    const form = container.querySelector('form')!;
+    const field = (label: string) => [...form.querySelectorAll('label')].find(item => item.textContent!.startsWith(label))!.querySelector('input, select, textarea') as HTMLInputElement;
+    expect(button(form, 'Save')!.disabled).toBe(true);
+    await type(field('Name'), 'Standup'); await type(field('When') as unknown as HTMLSelectElement, 'weekdays');
+    await type(field('Time'), '09:15'); await click(button(form, 'Sat')); await click(button(form, 'Fri'));
+    await type(field('What to do'), 'Summarise yesterday.'); await type(field('Model'), 'claude-haiku-4-5'); await type(field('Runs a day'), '2');
+    await click(button(form, 'Save'));
+    expect(c.saved).toEqual([{ name: 'Standup', schedule: { kind: 'weekdays', days: [1, 2, 3, 4, 6], time: '09:15' }, prompt: 'Summarise yesterday.', model: 'claude-haiku-4-5', maxRunsPerDay: 2 }]);
+    const edit = await render(<RoutinesList choice={c.value} />);
+    await click(button(edit, 'Edit'));
+    const editForm = edit.querySelector('form')!;
+    expect((editForm.querySelector('input[disabled]') as HTMLInputElement).value).toBe('Morning check');
+    await type([...editForm.querySelectorAll('label')].find(item => item.textContent!.startsWith('Time'))!.querySelector('input')!, '07:45');
+    await click(button(editForm, 'Save'));
+    expect(c.saved.at(-1)).toMatchObject({ name: 'Morning check', schedule: { kind: 'weekdays', days: [1, 2, 3, 4, 5], time: '07:45' } });
+  });
+});
+
+describe('the form\'s schedule', () => {
+  const draft = (extra: Record<string, unknown>) => ({ name: 'A', kind: 'every', minutes: '30', time: '09:00', days: [1], at: '', prompt: '', model: '', maxRuns: '', ...extra }) as Parameters<typeof specOf>[0];
+  it('takes only what the Relay would take, and reads a once time in the person\'s zone', () => {
+    expect(specOf(draft({}), 'UTC')).toEqual({ name: 'A', schedule: { kind: 'every', minutes: 30 } });
+    expect(specOf(draft({ minutes: '4' }), 'UTC')).toBeUndefined();
+    expect(specOf(draft({ kind: 'quiet', minutes: '1' }), 'UTC')).toEqual({ name: 'A', schedule: { kind: 'quiet', minutes: 1 } });
+    expect(specOf(draft({ name: ' ' }), 'UTC')).toBeUndefined();
+    expect(specOf(draft({ kind: 'weekdays', days: [] }), 'UTC')).toBeUndefined();
+    expect(specOf(draft({ kind: 'once', at: '2026-12-04T09:00' }), 'Asia/Tokyo')).toEqual({ name: 'A', schedule: { kind: 'once', at: Date.parse('2026-12-04T00:00:00Z') } });
+    expect(specOf(draft({ kind: 'once', at: '' }), 'UTC')).toBeUndefined();
+  });
+});

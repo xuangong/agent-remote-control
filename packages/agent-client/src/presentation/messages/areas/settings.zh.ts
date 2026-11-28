@@ -52,7 +52,7 @@ export const settings: AreaMessages<typeof english> = {
   'settings.notifications.failed': '没能请求通知权限，再点一次「允许浏览器通知」试试。',
   'settings.letters': '团队消息',
   'settings.audit': '机器人的工作',
-  'settings.audit.hint': '你的每次输入、每个定时器在机器人之间引出的工作。不会自行停止：你决定停下什么。',
+  'settings.audit.hint': '你的每次输入、每个例行任务在机器人之间引出的工作。不会自行停止：你决定停下什么。',
   'settings.audit.empty': '你的机器人还没有一起工作过。',
   'settings.audit.cause.person': '你让 {bot} 做的',
   'settings.audit.cause.timer': '{bot} 的例行任务',

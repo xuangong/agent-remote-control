@@ -13,6 +13,7 @@ import { SessionsList, type AssistantSessions } from './SessionsList.js';
 import { FilesList } from './FilesList.js';
 import { SubSessionsList } from './SubSessionsList.js';
 import { BoardList } from './BoardList.js';
+import { RoutinesList, type RoutinesChoice } from './RoutinesList.js';
 import type { BoardChoice } from './board-model.js';
 import { AnsweringList } from './AnsweringList.js';
 import { WorkLogList } from './WorkLogList.js';
@@ -38,6 +39,8 @@ export interface AssistantRef {
   readonly bots?: readonly { botId: string; name: string }[];
   /** A standing bot's board: its plan note and items, which the person may edit. */
   readonly board?: BoardChoice;
+  /** A standing bot's routines, which the person sets, pauses, tests and deletes. */
+  readonly routines?: RoutinesChoice;
   /** The sessions this standing bot has open to answer the person's mentions from other conversations. */
   readonly answering?: readonly AnswerSession[];
   /** What this standing bot's answer sessions answered elsewhere, newest first. */
@@ -75,6 +78,7 @@ export function AssistantDetails({ assistant, surface, onClose }: { assistant: A
       {...(assistant.role ? { role: assistant.role } : {})} {...(assistant.mood ? { mood: assistant.mood } : {})} {...(assistant.action ? { action: assistant.action } : {})}
       {...(assistant.actions ? { actions: assistant.actions } : {})} {...(assistant.setPicture ? { setPicture: assistant.setPicture } : {})} {...(assistant.rename ? { rename: assistant.rename } : {})} />
     {assistant.board ? section('work', t('details.work'), <BoardList choice={assistant.board} />) : null}
+    {assistant.routines ? section('routines', t('routines.details'), <RoutinesList choice={assistant.routines} />) : null}
     {assistant.pages?.length ? section('pages', t('details.pages'), <PagesList pages={assistant.pages} />) : null}
     {assistant.process?.chooseForAssistant ? section('process', t('process.heading'), <div className="lab-assistant-process">
       <div className="lab-process-choice"><span>{t('process.assistant')}</span>

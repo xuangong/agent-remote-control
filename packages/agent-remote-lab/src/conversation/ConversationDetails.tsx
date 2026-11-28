@@ -12,6 +12,7 @@ import type { useProcessMode } from './useProcessMode.js';
 import type { MissionChoice } from './assistant/MissionEditor.js';
 import type { MemoryChoice } from './assistant/MemoryList.js';
 import type { BoardChoice } from './assistant/board-model.js';
+import type { RoutinesChoice } from './assistant/RoutinesList.js';
 import { useWatchTeamRoster } from '../kernel/useTeamRoster.js';
 import type { LabWorkbenchActions, SessionWorkbenchProps } from './session-workbench-props.js';
 
@@ -40,6 +41,10 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
     board: boardOf, name: id => directory.botName?.(id) ?? id, choices: directory.assignees?.(botId) ?? [],
     staffBoard: id => directory.boardOf?.(id), canOpen: id => directory.canOpenBot?.(id) ?? false, open: id => directory.openBot?.(id),
     ...(directory.writeBoard ? { save: edit => directory.writeBoard!(botId, edit) } : {}) } : undefined;
+  const routinesState = detailsShown && botId ? directory?.routinesOf?.(botId) : undefined;
+  const routines: RoutinesChoice | undefined = routinesState && directory?.routineAct && botId ? { routines: routinesState.routines, zone: routinesState.zone, ...(routinesState.hold ? { hold: routinesState.hold } : {}),
+    save: spec => directory.routineAct!({ action: 'routine_set', botId, ...spec }), pause: (name, paused) => directory.routineAct!({ action: 'routine_pause', botId, name, paused }),
+    remove: name => directory.routineAct!({ action: 'routine_delete', botId, name }), test: name => directory.routineAct!({ action: 'routine_test', botId, name }) } : undefined;
   useWatchTeamRoster(!!board);
   const workLog = detailsShown && botId && directory?.workLog ? directory.workLog(botId) : [];
   const answering = detailsShown && botId && directory?.answering ? directory.answering(botId) : [];
@@ -56,7 +61,7 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
     ...(host?.action ? { action: host.action } : {}), ...(host?.actions ? { actions: host.actions } : {}),
     ...(host?.where ? { where: host.where } : {}), ...(host?.setPicture ? { setPicture: host.setPicture } : {}),
     ...(host?.rename ? { rename: host.rename } : {}),
-    process, ...(mission ? { mission } : {}), ...(memory ? { memory } : {}),
+    ...(routines ? { routines } : {}), process, ...(mission ? { mission } : {}), ...(memory ? { memory } : {}),
     ...(chiefs && botId && directory?.setChief ? { chief: { ...chiefs, move: (chief: string | null) => directory.setChief!(botId, chief) } } : {}), ...(primaryState && botId && directory?.setPrimary ? { primary: { ...primaryState, set: (primary: boolean) => directory.setPrimary!(botId, primary) } } : {}), ...(pages.length ? { pages } : {}), ...(tasks.length ? { tasks } : {}), ...(board ? { board } : {}), ...(answering.length ? { answering } : {}), ...(workLog.length ? { workLog } : {}), ...(bots.length ? { bots } : {}),
     sessions: { ...details?.sessions, ...(lastTurn ? { time: lastTurn } : {}), ...(state?.agent?.cwd ? { directory: state.agent.cwd } : {}), ...(reportedSession ? { sessionId: reportedSession } : {}),
       subagents: reportedSession ? childrenFor?.(reportedSession) ?? [] : [], ...(onOpenChildSession ? { openSubagent: onOpenChildSession } : {}),

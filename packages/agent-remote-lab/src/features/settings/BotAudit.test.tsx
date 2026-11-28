@@ -13,13 +13,13 @@ const flush = () => act(async () => { await new Promise(resolve => setTimeout(re
 
 describe('the audit of the bots\' work', () => {
   it('lists each chain with its cause and what it did, and stops it, a bot\'s part, and pauses a standing bot', async () => {
-    let current = view([chain('c_0000000000000001'), chain('c_0000000000000002', { cause: 'timer', bot: ids.tracker, bots: [ids.tracker], stopped: 3 })]);
+    let current = view([chain('c_0000000000000001'), chain('c_0000000000000002', { cause: 'routine', bot: ids.tracker, bots: [ids.tracker], stopped: 3 })]);
     const acted: ChainAction[] = [];
     const client = { list: vi.fn(async () => current), act: vi.fn(async (action: ChainAction) => { acted.push(action); if (action.action === 'pause_bot') current = { ...current, paused: [action.botId] }; }) };
     const container = await render(<BotAudit baseUrl="/" client={client} />);
     await flush();
     const rows = [...container.querySelectorAll('.lab-bot-audit > ul > li')];
-    expect(rows.map(row => row.querySelector('.lab-assistant-session-title')!.textContent)).toEqual(['You asked Chief', 'Timer of Tracker']);
+    expect(rows.map(row => row.querySelector('.lab-assistant-session-title')!.textContent)).toEqual(['You asked Chief', 'Routine of Tracker']);
     expect(rows[0]!.querySelector('small')!.textContent).toContain('4 messages · 3 turns · 1 bots created · 2 sub-sessions started · depth 2');
     expect(rows[1]!.querySelector('small')!.textContent).toContain('Stopped');
     await act(async () => rows[0]!.querySelector<HTMLButtonElement>('.lab-assistant-session-toggle')!.click());

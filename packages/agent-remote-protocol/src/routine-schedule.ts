@@ -52,6 +52,7 @@ const offsetAt = (instant: number, timeZone: string): number => {
   return Date.UTC(local.year, local.month - 1, local.day, local.hour, local.minute, local.second) - Math.floor(instant / 1000) * 1000;
 };
 /** The instant a wall-clock reading happens in a zone: the first one when the hour repeats, shifted forward by the gap when it does not exist. */
+export function zonedInstant(year: number, month: number, day: number, hour: number, minute: number, timeZone: string): number { return instantOf(year, month, day, hour, minute, timeZone); }
 function instantOf(year: number, month: number, day: number, hour: number, minute: number, timeZone: string): number {
   const wall = Date.UTC(year, month - 1, day, hour, minute);
   const candidates = [wall - offsetAt(wall - 86_400_000, timeZone), wall - offsetAt(wall + 86_400_000, timeZone)];

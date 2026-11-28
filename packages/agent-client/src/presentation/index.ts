@@ -8,3 +8,4 @@ export * from './day-line.js';
 export * from './assistant-status.js';
 export * from './assistant-name.js';
 export * from './session-files.js';
+export * from './routine-words.js';

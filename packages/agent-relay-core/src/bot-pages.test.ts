@@ -94,6 +94,13 @@ describe('the primary bot', () => {
     expect((await f.call('scout', { action: 'list_bots' })).bots.map((bot: { id: string; primary?: true }) => [bot.id, bot.primary])).toEqual([[ids.chief, true], [ids.tracker, undefined]]);
   });
 
+  it('is named to the Host with the bots it enables, so the bot\'s session starts with its section', async () => {
+    const f = fixture();
+    await f.broker.chainAction({ action: 'set_primary', botId: ids.scout, primary: true });
+    const { bots } = await f.broker.hostCall('mac', { action: 'bot_enablement' } as never) as { bots: Array<{ botId: string; primary?: true }> };
+    expect(bots.map(bot => [bot.botId, bot.primary])).toEqual([[ids.chief, undefined], [ids.tracker, undefined], [ids.scout, true]]);
+  });
+
   it('is refused for a bot that reports to another bot, and for a bot that is gone', async () => {
     const f = fixture();
     await expect(f.broker.chainAction({ action: 'set_primary', botId: ids.tracker, primary: true })).rejects.toThrow('Only a bot that reports to you can be primary.');

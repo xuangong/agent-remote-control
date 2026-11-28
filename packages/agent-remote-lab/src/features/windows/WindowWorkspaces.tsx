@@ -233,6 +233,11 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
       <details ref={options} className="lab-window-options"><summary>{t('windows.options')}</summary>
         <div className="lab-window-actions">
           <button type="button" onClick={() => void copyLink()}>{t('windows.copyLink')}</button>
+          {workbench && !sidebar ? (() => {
+            const boundHere = workbench.boundTo(workspace.window!);
+            return boundHere ? <button type="button" disabled={busy || workspace.unavailable} onClick={() => workbench.request('unbind')}>{t('windows.workbench.menu.unbind', { name: boundHere.name })}</button>
+              : <button type="button" disabled={busy || workspace.unavailable} onClick={() => workbench.request('bind')}>{t('windows.workbench.menu.bind')}</button>;
+          })() : null}
           {workspace.group ? <button type="button" disabled={busy || workspace.unavailable} onClick={() => void setBotAppearance(!hasBotAppearance(workspace.group!))}>
             {hasBotAppearance(workspace.group) ? t('windows.botMode.hide') : t('windows.botMode.show')}</button> : null}
         </div>

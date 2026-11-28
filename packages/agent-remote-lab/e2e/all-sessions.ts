@@ -70,6 +70,6 @@ export async function addSessionView(page: Page): Promise<void> {
   const sessions = page.locator('#lab-sessions-page');
   await expect(sessions).toHaveAttribute('aria-label', 'All sessions');
   await expect(sessions).toBeVisible();
-  await sessions.getByRole('button', { name: 'Back to Window', exact: true }).click();
+  await sessions.getByRole('button', { name: 'Back to workbench', exact: true }).click();
   await expect(sessions).toBeHidden();
 }

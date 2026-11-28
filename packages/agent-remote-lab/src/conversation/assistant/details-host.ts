@@ -17,7 +17,7 @@ export interface AssistantDetailsHost {
   readonly slot?: HTMLElement | null;
   readonly open: boolean;
   setOpen(open: boolean): void;
-  /** The card's actions, which the assistant's place owns: one visible (Pin to a window), the others in its ⋯ menu (Label…, Sleep or Wake, Hide, Remove). */
+  /** The card's actions, which the assistant's place owns: one visible (Pin to a workbench), the others in its ⋯ menu (Label…, Sleep or Wake, Hide, Remove). */
   readonly action?: CardAction;
   readonly actions?: readonly MenuEntry[];
   /** Stores a new avatar for the assistant, on every device. */

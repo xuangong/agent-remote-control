@@ -29,7 +29,7 @@ test('long sessions page content never scrolls the desktop workspace away from t
       await discovery.locator('.lab-session-row').last().focus();
       await expect(discovery.locator('.lab-session-row').last()).toBeInViewport();
       expect(await scroller.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
-      await sessions.getByRole('button', { name: 'Back to Window', exact: true }).click();
+      await sessions.getByRole('button', { name: 'Back to workbench', exact: true }).click();
       await expect.poll(() => fitsViewport('.lab-composer-dock')).toEqual({ scrollY: 0, overflow: 0, top: 0, bottom: 0 });
       await page.getByTestId('prompt-input').focus();
       expect(await page.evaluate(() => scrollY)).toBe(0);

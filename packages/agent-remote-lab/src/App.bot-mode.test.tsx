@@ -269,7 +269,7 @@ it('shows Windows, In this group and Shortcuts in the desktop sidebar, and sessi
     expect(page.getAttribute('aria-label')).toBe('All sessions');
     expect(app.container.querySelector<HTMLElement>('#lab-workbench')!.hidden).toBe(true);
     await until(() => expect(page.querySelector('section[aria-label="Discover sessions"]')).not.toBeNull());
-    await act(async () => app.button('Back to Window').click());
+    await act(async () => app.button('Back to workbench').click());
     expect(page.hidden).toBe(true);
     expect(app.container.querySelector<HTMLElement>('#lab-workbench')!.hidden).toBe(false);
     // Escape on the page returns to the Window too, unless something inside the page handled it.
@@ -367,7 +367,7 @@ it('does not count the hidden Window as seen while the sessions page is open', a
     await until(() => expect(visible.length).toBeGreaterThan(0));
     await act(async () => app.button('All sessions').click());
     expect(visible).toEqual([]);
-    await act(async () => app.button('Back to Window').click());
+    await act(async () => app.button('Back to workbench').click());
     await until(() => expect(visible.length).toBeGreaterThan(0));
   } finally { await app.close(); }
 });
@@ -381,7 +381,7 @@ it('returns focus to the Window when the sessions page closes, and leaves Escape
     const page = app.container.querySelector<HTMLElement>('#lab-sessions-page')!;
     const workbench = app.container.querySelector<HTMLElement>('#lab-workbench')!;
     await act(async () => app.button('All sessions').click());
-    const back = app.button('Back to Window');
+    const back = app.button('Back to workbench');
     back.focus();
     await act(async () => back.click());
     expect(page.hidden).toBe(true);
@@ -393,7 +393,7 @@ it('returns focus to the Window when the sessions page closes, and leaves Escape
     search.focus();
     await act(async () => { search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
     expect(page.hidden).toBe(false);
-    const backAgain = app.button('Back to Window');
+    const backAgain = app.button('Back to workbench');
     backAgain.focus();
     await act(async () => { backAgain.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
     expect(page.hidden).toBe(true);
@@ -430,7 +430,7 @@ it('focuses the sessions page heading when the page opens from inside the Window
     expect(document.activeElement).toBe(page.querySelector('.lab-sessions-page-toolbar h2'));
 
     // Opened from the sidebar, focus stays on the sidebar's entry.
-    await act(async () => app.button('Back to Window').click());
+    await act(async () => app.button('Back to workbench').click());
     const favorites = app.button('All sessions');
     favorites.focus();
     await act(async () => favorites.click());
@@ -469,7 +469,7 @@ it('keeps the Window\'s conversations attached while the sessions page covers th
     await act(async () => app.button('All sessions').click());
     expect(app.container.querySelector<HTMLElement>('#lab-workbench')!.hidden).toBe(true);
     expect(families().every(family => !family.hidden && family.querySelector('[data-testid="prompt-input"]'))).toBe(true);
-    await act(async () => app.button('Back to Window').click());
+    await act(async () => app.button('Back to workbench').click());
     expect(families().every(family => !family.hidden && family.querySelector('[data-testid="prompt-input"]'))).toBe(true);
   } finally { await app.close(); }
 });
@@ -527,8 +527,8 @@ it('opens a tile in Bot mode, keeping the Window route, and pins it back with it
     await app.switchMode('window');
     await until(() => expect(new URL(location.href).searchParams.get('window')).toBe('B'));
     await app.switchMode('bot');
-    // Pin to a window shows its group with its tile presented, and the Bot place stays for the way back.
-    const pin = [...app.container.querySelectorAll<HTMLButtonElement>('.lab-assistant-details .lab-assistant-card-actions button')].find(button => button.textContent === 'Pin to a window')!;
+    // Pin to a workbench shows its group with its tile presented, and the Bot place stays for the way back.
+    const pin = [...app.container.querySelectorAll<HTMLButtonElement>('.lab-assistant-details .lab-assistant-card-actions button')].find(button => button.textContent === 'Pin to a workbench')!;
     expect(pin).toBeDefined();
     await act(async () => pin.click());
     await until(() => expect(app.container.querySelector('[data-workbench-mode="window"]')?.hasAttribute('hidden')).toBe(false));
@@ -545,8 +545,8 @@ it('pins a bot whose group is hidden from Window mode by showing its group there
   seedGroup(scope, group); history.replaceState(null, '', '/?mode=bot&section=A&bot=A1');
   const app = await mountBotApp(scope, { hosted: true });
   try {
-    await until(() => expect([...app.container.querySelectorAll('.lab-assistant-details .lab-assistant-card-actions button')].some(button => button.textContent === 'Pin to a window')).toBe(true));
-    await act(async () => [...app.container.querySelectorAll<HTMLButtonElement>('.lab-assistant-details .lab-assistant-card-actions button')].find(button => button.textContent === 'Pin to a window')!.click());
+    await until(() => expect([...app.container.querySelectorAll('.lab-assistant-details .lab-assistant-card-actions button')].some(button => button.textContent === 'Pin to a workbench')).toBe(true));
+    await act(async () => [...app.container.querySelectorAll<HTMLButtonElement>('.lab-assistant-details .lab-assistant-card-actions button')].find(button => button.textContent === 'Pin to a workbench')!.click());
     await until(() => expect(app.workspace().readGroup('A')?.presentation).toBeUndefined());
     await until(() => expect(app.workspace().window?.id).toBe('A'));
     await until(() => expect(app.workspace().readGroup('A')?.window.selectedViewId).toBe('A1'));

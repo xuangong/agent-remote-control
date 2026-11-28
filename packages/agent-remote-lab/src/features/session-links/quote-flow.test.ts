@@ -39,9 +39,9 @@ describe('where a quote lands', () => {
   it('reveals a view of the open Window', () => expect(quoteLanding(windows, { windowId: 'open' }, 'a')).toEqual({ kind: 'reveal' }));
   it('reveals when the Window is not in the catalog', () => expect(quoteLanding(windows, { windowId: 'gone' }, 'a')).toEqual({ kind: 'reveal' }));
   it('leaves a notice naming the session and Window for another Window', () => {
-    expect(quoteLanding(windows, { windowId: 'other' }, 'b')).toEqual({ kind: 'notice', windowId: 'other', message: 'Quoted into “B” in Window “Other”.' });
+    expect(quoteLanding(windows, { windowId: 'other' }, 'b')).toEqual({ kind: 'notice', windowId: 'other', message: 'Quoted into “B” in workbench “Other”.' });
   });
   it('names a generic session when the destination is not listed (a new session)', () => {
-    expect(quoteLanding(windows, { windowId: 'other' }, 'new')).toMatchObject({ kind: 'notice', message: 'Quoted into “the session” in Window “Other”.' });
+    expect(quoteLanding(windows, { windowId: 'other' }, 'new')).toMatchObject({ kind: 'notice', message: 'Quoted into “the session” in workbench “Other”.' });
   });
 });

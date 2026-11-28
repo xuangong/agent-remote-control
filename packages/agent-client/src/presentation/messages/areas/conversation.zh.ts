@@ -269,7 +269,7 @@ export const conversation: AreaMessages<typeof english> = {
   'card.moveTo': '移到分组…',
   'card.removeFromGroup': '从“{group}”移出',
   'assistants.muted': '免打扰',
-  'card.pin': '放进一个窗口',
+  'card.pin': '放进一个工作台',
   'card.openInBot': '在 Bot 模式里打开',
   'card.rename': '重命名 {name}',
   'card.name': '名字',
@@ -301,7 +301,7 @@ export const conversation: AreaMessages<typeof english> = {
   'tile.menu': '{name} 的更多操作',
   'tile.star': '加星标',
   'tile.unstar': '取消星标',
-  'tiles.pages': '这个窗口的卡片',
+  'tiles.pages': '这个工作台的卡片',
   'tiles.page': '第 {position}/{count} 张：{title}',
 
   'device.offline': '这台设备离线了，恢复联网后消息会自动发出。',

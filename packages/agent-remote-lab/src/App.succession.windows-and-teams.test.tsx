@@ -385,7 +385,7 @@ it.each(['other Window', 'new session'] as const)('quotes into a session view of
   await settleApp(() => expect(quote()).not.toBeNull());
   await act(async () => quote()!.click());
   const selects = () => source().querySelectorAll<HTMLSelectElement>('.lab-quote-bar select');
-  await settleApp(() => expect([...selects()[0]!.options].map(option => option.textContent)).toEqual(['Quotes (this Window)', 'Other work']));
+  await settleApp(() => expect([...selects()[0]!.options].map(option => option.textContent)).toEqual(['Quotes (this workbench)', 'Other work']));
   // This Window has no other view, so only a new session can receive the quote here.
   expect([...selects()[1]!.options].map(option => option.textContent)).toEqual(['New session in this workspace']);
   if (destination === 'other Window') {
@@ -394,7 +394,7 @@ it.each(['other Window', 'new session'] as const)('quotes into a session view of
   }
   await act(async () => [...source().querySelectorAll<HTMLButtonElement>('.lab-quote-bar button')].find(button => button.textContent === 'Quote')!.click());
   if (destination === 'other Window') {
-    await settleApp(() => expect(source().querySelector('.lab-quote-notice')?.textContent).toContain('Quoted into “Session R” in Window “Other work”.'));
+    await settleApp(() => expect(source().querySelector('.lab-quote-notice')?.textContent).toContain('Quoted into “Session R” in workbench “Other work”.'));
     expect(readQuotes(f.scope, 'primary-R').map(excerpt => excerpt.segments)).toEqual([[[{ role: 'assistant', text: 'Worth quoting' }]]]);
     expect(f.requests.some(request => request.url.endsWith('/create'))).toBe(false);
   } else {

@@ -84,8 +84,16 @@ export class TeamBroker {
       this.work = new BotRoutines(lent, this.inboxes, this.chains, { zone: () => this.unattended.zone(),
         refuse: (inbox, routine, now) => this.unattended.refuse(inbox.inbox!.botId, `${inbox.members[0]!.hostId}/${inbox.members[0]!.providerId}`, routine, now),
         started: bot => this.unattended.countRun(bot),
-        startSub: async start => { await (this.tasks ?? fail(unavailableTasks)).create(start.hostId, { owner: { providerId: start.providerId, nativeSessionId: start.nativeSessionId, title: start.title }, operationId: start.operationId,
-          name: start.name.slice(0, 120), prompt: start.prompt, ...(start.model ? { model: start.model } : {}), ...(start.workspace ? { workspace: start.workspace } : {}) }); } });
+        startSub: async start => { const created = await (this.tasks ?? fail(unavailableTasks)).create(start.hostId, { owner: { providerId: start.providerId, nativeSessionId: start.nativeSessionId, title: start.title }, operationId: start.operationId,
+          name: start.name.slice(0, 120), prompt: start.prompt, ...(start.model ? { model: start.model } : {}), ...(start.workspace ? { workspace: start.workspace } : {}) });
+          // A session that could not be created (a provider that cannot run read only, say) fails the run with the Host's reason, and the sub-session ends.
+          const team = this.ports.read().find(item => item.id === created.taskId), seat = team?.members[0];
+          if (team && seat && (seat.creation === 'unknown' || seat.creation === 'abandoned')) {
+            const reason = (seat as { error?: string }).error ?? 'The sub-session could not be created.';
+            await this.change(teams => { const own = find(teams, team.id); if (own.task?.state !== 'ended') taskAction(own, this.ports.now(), 'person'); }).catch(() => undefined);
+            throw new Error(reason);
+          }
+        } });
       this.asks = new BotAsks(lent, ports.assistants, this.chains, this.inboxes);
       if (this.tasks) this.bots = new BotCalls(lent, ports.assistants, this.tasks, this.assistants, this.inboxes, this.rooms, this.work, new BotBoard(lent, this.inboxes, this.work), this.asks, new BotPages(lent, this.inboxes), ports.places);
       this.rooms.arm(); this.work.arm(); this.asks.arm();

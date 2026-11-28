@@ -35,7 +35,7 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --testTimeout=10000 --exclude '**/*.local.test.ts' --exclude '**/*.local.test.tsx'",
-    "test:native": "vitest run src/native-assumptions.local.test.ts src/journal-recording.local.test.ts --testTimeout=90000 --hookTimeout=30000 --maxWorkers=1"
+    "test:native": "vitest run src/native-assumptions.local.test.ts src/journal-recording.local.test.ts src/native-goal.local.test.ts --testTimeout=90000 --hookTimeout=30000 --maxWorkers=1"
   },
   "dependencies": {
     "@orchardworks/agent-provider-sdk": "workspace:*",

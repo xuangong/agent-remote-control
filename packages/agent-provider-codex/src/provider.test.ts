@@ -86,7 +86,7 @@ describe('CodexAppServerProvider contract', () => {
     expect((await session.runtimeInfo()).settings?.find(({ id }) => id === 'sandbox')?.value).toBe('readOnly');
 
     expect(appServer.requests.map((request) => request.method)).toEqual([
-      'initialize', 'model/list', 'configRequirements/read', 'collaborationMode/list', 'thread/resume', 'thread/turns/list', 'thread/read',
+      'initialize', 'model/list', 'configRequirements/read', 'collaborationMode/list', 'thread/resume', 'thread/turns/list', 'thread/read', 'thread/goal/get',
     ]);
     const iterator = session.observe()[Symbol.asyncIterator]();
     await expect(iterator.next()).resolves.toMatchObject({ value: { type: 'history_boundary' } });

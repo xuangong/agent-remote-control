@@ -3,6 +3,7 @@ import { open, opendir } from 'node:fs/promises';
 import path from 'node:path';
 import type { AgentCommand, AgentResourceReadResult } from '@orchardworks/agent-provider-sdk';
 import type { CodexAppServerTransport } from './app-server-transport.js';
+import { CODEX_GOAL_COMMAND, GOAL_INPUT_HINT } from './goal.js';
 import { isRecord, readString } from './native.js';
 
 export type CodexCommand = { descriptor: AgentCommand } & (
@@ -19,6 +20,7 @@ export async function discoverCodexCommands(transport: CodexAppServerTransport, 
     { descriptor: { id: 'model', name: 'model', description: 'Choose model and reasoning effort', kind: 'command' }, type: 'builtin' },
     { descriptor: { id: 'permissions', name: 'permissions', description: 'Choose native approval policy or sandbox', kind: 'command' }, type: 'builtin' },
     { descriptor: { id: 'compact', name: 'compact', description: 'Compact the current Codex thread', kind: 'command' }, type: 'builtin' },
+    { descriptor: { id: CODEX_GOAL_COMMAND, name: 'goal', description: 'Set a goal Codex keeps working toward, or pause, resume or clear it', kind: 'command', inputHint: GOAL_INPUT_HINT }, type: 'builtin' },
   ];
   const result = await transport.request('skills/list', { cwds: cwd ? [cwd] : [], forceReload: true });
   if (!isRecord(result) || !Array.isArray(result.data)) throw new Error('Codex returned an invalid skills directory.');

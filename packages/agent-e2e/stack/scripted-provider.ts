@@ -16,7 +16,7 @@
  * active turn until the turn ends, as a real provider does, and a denied approval ends it.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { AgentRuntimeError, type AgentSessionTool, parseAgentPreparedTextInput, serializeAgentPreparedTextInput, type AgentInteractionResponse, type AgentProviderAdapter, type AgentToolDetail, type AgentSessionNativeEvidence, type ProviderObservation, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import { AgentRuntimeError, type AgentSessionGoal, type AgentSessionTool, parseAgentPreparedTextInput, serializeAgentPreparedTextInput, type AgentInteractionResponse, type AgentProviderAdapter, type AgentToolDetail, type AgentSessionNativeEvidence, type ProviderObservation, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory, AgentHostProviderRegistration } from '@orchardworks/agent-remote-controller';
 import { NativeSessionOwnerError, type NativeOwnerIdentity } from '@orchardworks/agent-remote-controller/testing';
 import { ScriptedSession } from '@orchardworks/agent-remote-fixtures';
@@ -96,6 +96,11 @@ export interface ScriptedProviderOptions {
   cwd?: string;
   /** The model sessions report in their runtime info, as a real CLI does: a bot's turn is priced by it. */
   model?: string;
+  /**
+   * Sessions have a `/goal` command, as Claude Code and Codex do: it sets, pauses, resumes and clears the session's goal, which the session
+   * reports in its runtime info and keeps across a reopen. A flow plays the CLI's own checks of it with `goal`.
+   */
+  goals?: boolean;
 }
 
 export function scriptedProvider(options: ScriptedProviderOptions = {}) {
@@ -113,10 +118,16 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
     given.set(id, { ...(extensions.instructions ? { instructions: extensions.instructions } : {}), tools: [...(extensions.tools ?? []), ...(extensions.toolNamespaces ?? []).flatMap(namespace => namespace.tools)] });
   };
   let created = 0;
+  const goalReporters = new Map<string, (goal: AgentSessionGoal | undefined) => void>();
   /** The working directory each session the page created was started in. */
   const startedIn = new Map<string, string | undefined>();
   let held: Promise<void> | undefined;
   const owners = new Map<string, NativeOwnerIdentity>();
+  /** The goal of each session, which the native session keeps: a reopened session reports it again. */
+  const goals = new Map<string, AgentSessionGoal>();
+  const goalActions = (status: AgentSessionGoal['status']): NonNullable<AgentSessionGoal['actions']> => status === 'active'
+    ? [{ kind: 'pause', commandId: 'goal', args: 'pause' }, { kind: 'clear', commandId: 'goal', args: 'clear' }]
+    : status === 'paused' ? [{ kind: 'resume', commandId: 'goal', args: 'resume' }, { kind: 'clear', commandId: 'goal', args: 'clear' }] : [];
   let handoff: ((nativeSessionId: string, next: NativeOwnerIdentity) => Promise<void>) | undefined;
 
   const observation = (id: string, entry: HistoryEntry, at: number, delivery: 'history' | 'live'): ProviderObservation =>
@@ -154,7 +165,7 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
     /** A scripted turn: the rows and state events of a real provider's turn, under one turn id. */
     const pendingApprovals = new Map<string, (response: AgentInteractionResponse) => void>();
     let turnCount = 0, eventCount = 0, status: 'idle' | 'running' = 'idle';
-    const runtimeInfo = () => ({ providerId, sessionId: nativeSessionId, status, ...(options.model ? { model: options.model } : {}), ...(options.succession ? { cwd: options.succession.workspace } : options.workspaceRoot ? { cwd: startedIn.get(nativeSessionId) ?? options.workspaceRoot } : options.cwd ? { cwd: startedIn.get(nativeSessionId) ?? options.cwd } : {}),
+    const runtimeInfo = () => ({ providerId, sessionId: nativeSessionId, status, ...(goals.has(nativeSessionId) ? { goal: structuredClone(goals.get(nativeSessionId)!) } : {}), ...(options.model ? { model: options.model } : {}), ...(options.succession ? { cwd: options.succession.workspace } : options.workspaceRoot ? { cwd: startedIn.get(nativeSessionId) ?? options.workspaceRoot } : options.cwd ? { cwd: startedIn.get(nativeSessionId) ?? options.cwd } : {}),
       persistence: { providerId, sessionId: nativeSessionId, opaque: '{}' } });
     const playTurn = async (text: string, steps: ScriptedStep[]) => {
       const turnId = `${nativeSessionId}-turn-${++turnCount}`;
@@ -202,6 +213,13 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
       emit({ type: 'turn_completed', provider: providerId, turnId, ...(used ? { usage: { tokenScope: 'turn' as const, ...used, totalTokens: (used.inputTokens ?? 0) + (used.cachedInputTokens ?? 0) + (used.cacheCreationInputTokens ?? 0) + (used.outputTokens ?? 0) } } : {}) }, 'turn-completed');
       running('idle');
     };
+    /** The goal as the CLI reports it after a change: one runtime update, which the page and the journal take as the state. */
+    const reportGoal = (goal: AgentSessionGoal | undefined) => {
+      if (goal) goals.set(nativeSessionId, { ...goal, actions: goalActions(goal.status) }); else goals.delete(nativeSessionId);
+      base.push({ type: 'observation', sourceKey: `live:goal:${++eventCount}`, occurredAt: Date.now(), delivery: 'live',
+        event: { type: 'runtime_updated', provider: providerId, runtimeInfo: runtimeInfo(), activeTurnId: null } });
+    };
+    goalReporters.set(nativeSessionId, reportGoal);
     const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
     let epoch = 0, preparations = 0;
     const evidence = (workspace: string): AgentSessionNativeEvidence => ({
@@ -230,6 +248,18 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
     });
     const session = Object.assign(base, {
       title: saved.title, sent, write, runtimeInfo: async () => runtimeInfo(),
+      ...(options.goals ? {
+        capabilities: { ...base.capabilities, commands: true },
+        listCommands: async () => [{ id: 'goal', name: 'goal', description: 'Set a goal, or pause, resume or clear it', kind: 'command' as const, inputHint: 'Objective, or pause, resume, clear' }],
+        executeCommand: async (id: string, args: string) => {
+          const text = args.trim(), current = goals.get(nativeSessionId);
+          if (id !== 'goal') throw new Error(`No scripted command ${id}.`);
+          if (text === 'clear') reportGoal(undefined);
+          else if ((text === 'pause' || text === 'resume') && current) reportGoal({ ...current, status: text === 'pause' ? 'paused' : 'active', updatedAt: Date.now() });
+          else if (text && text !== 'pause' && text !== 'resume') reportGoal({ objective: text, status: 'active', iterations: 0, startedAt: Date.now(), updatedAt: Date.now() });
+          return {};
+        },
+      } : {}),
       ...(options.succession ? { nativeEvidence: evidence(options.succession.workspace) } : {}),
       sendMessage: (async (text: string) => {
         await held;
@@ -309,6 +339,14 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
       const tool = given.get(nativeSessionId)?.tools.find(item => item.name === name);
       if (!tool) throw new Error(`Session ${nativeSessionId} has no tool ${name}.`);
       return JSON.parse(await tool.execute(args) as string);
+    },
+    /** What the session's CLI does to its goal by itself: it checks the condition, finds it met, or stops. `null` takes the goal away. */
+    goal(nativeSessionId: string, patch: Partial<AgentSessionGoal> | null) {
+      const report = goalReporters.get(nativeSessionId), current = goals.get(nativeSessionId);
+      if (!report) throw new Error(`Session ${nativeSessionId} is not open.`);
+      if (patch === null) report(undefined);
+      else if (current || patch.objective) report({ ...current, ...patch, updatedAt: Date.now() } as AgentSessionGoal);
+      else throw new Error(`Session ${nativeSessionId} has no goal to change.`);
     },
     /** The working directory the page chose for a session it created, by native session id. */
     startedIn: (nativeSessionId: string) => startedIn.get(nativeSessionId),

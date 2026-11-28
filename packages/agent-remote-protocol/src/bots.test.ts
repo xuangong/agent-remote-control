@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
-import { assistantMessageText, attachmentLines, Board, BoardItem, BOT_MISSION_LIMIT, BOT_INSTRUCTIONS_VERSION, itemChangedText, itemTagText, quoteFrames, timerText, BotAttachment, BotMessageResult, BotRecord, BotFact, BotMemory, BOT_MEMORY_FACTS, botInstructions, chiefChangedText, isChainAction, isBoardWriteResult, standingInstructionsText, isTeamHostCall, isTeam, isTeamSeat, isTeamAskRequest, askText, workLogText, workLogLine, WORK_LOG_ENTRY_LIMIT, WORK_LOG_FRAME_ENTRIES, parseTaskInputs, botIdentity, botPlacement, WindowBotDetails } from './index.js';
+import { assistantMessageText, attachmentLines, Board, BoardItem, BOT_MISSION_LIMIT, BOT_INSTRUCTIONS_VERSION, itemChangedText, itemTagText, quoteFrames, timerText, BotAttachment, BotMessageResult, BotRecord, BotFact, BotMemory, BOT_MEMORY_FACTS, botInstructions, chiefChangedText, isChainAction, isBoardWriteResult, standingInstructionsText, isTeamHostCall, isTeam, isTeamSeat, isTeamAskRequest, askText, workLogText, workLogLine, WORK_LOG_ENTRY_LIMIT, WORK_LOG_FRAME_ENTRIES, parseTaskInputs, botIdentity, botPlacement, WindowBotDetails, Page, PAGE_CONTENTS_LIMIT, PAGES_PER_BOT, TeamInbox } from './index.js';
 
 const id = 'b_' + 'a'.repeat(32);
 
@@ -129,8 +129,8 @@ describe('a bot\'s memory', () => {
     expect(standingInstructionsText('Coordinate.', facts)).toContain(botInstructions('Coordinate.', facts));
   });
 
-  it('teaches the coordinating habits of version 14 in a short text', () => {
-    expect(BOT_INSTRUCTIONS_VERSION).toBe(14);
+  it('teaches the coordinating habits of version 15 in a short text', () => {
+    expect(BOT_INSTRUCTIONS_VERSION).toBe(15);
     const text = botInstructions(undefined);
     for (const habit of ['read your ledger first', 'update_board', 'remember', 'update_mission', 'under 300 characters', 'git bundle', 'between turns', 'ask the bot that knows (list_bots, by mission) rather than guess', 'Copying a neighbour\'s style is a guess too: if a bot\'s mission covers it, ask that bot first.', 'Do not start work no one asked for.', 'Stay on your Host unless the work needs a CLI it lacks', 'list_hosts', 'new_folder', 'Say why you chose it in the item\'s brief.', 'goes to the bot whose mission fits', 'Do not ask your staff or sub-sessions for progress', 'create_sub_session', 'send_to_sub_session', 'stop_sub_session', 'tracked_task_keys', 'Eight live at most', 'read_sub_session', 'Your own in-turn subagents (the Task tool and the like) are fine for a quick lookup inside a turn', 'do not acknowledge or thank', 'status ack', 'Answer a message with message and reply_to set to its id; your final text goes to no one.']) expect(text).toContain(habit);
     // Sub-sessions are the way to hand work off; a bot's own subagents are no longer forbidden.
@@ -139,7 +139,7 @@ describe('a bot\'s memory', () => {
     expect(text).not.toMatch(/read_bot[^.]*sub-session/);
     expect(text).not.toContain('never your own subagents');
     expect(text).not.toContain('temporary bot');
-    expect(text.length).toBeLessThan(4300);
+    expect(text.length).toBeLessThan(4600);
   });
 
   it('is told to the three bots of a change of chief in lines written from the record, which a name cannot forge', () => {
@@ -208,5 +208,57 @@ describe('a bot\'s work log', () => {
     expect(text).toContain('- entry 11');
     expect(text).not.toContain('- entry 3');
     expect(parseTaskInputs(text)![0]).toMatchObject({ kind: 'work_log', count: 12 });
+  });
+});
+
+const pages = JSON.parse(readFileSync(new URL('./fixtures/pages.v1.json', import.meta.url), 'utf8'));
+
+describe('a bot\'s pages', () => {
+  it('are markdown documents of at most 8000 characters with a title, a version and one optional team mark', () => {
+    for (const page of pages.pages.valid) expect(Value.Check(Page, page)).toBe(true);
+    for (const page of pages.pages.invalid) expect(Value.Check(Page, page)).toBe(false);
+    expect(PAGE_CONTENTS_LIMIT).toBe(8000);
+  });
+
+  it('are written and read by the calls write_page and read_page, which carry no version and no author', () => {
+    for (const call of pages.calls.valid) expect(isTeamHostCall(call)).toBe(true);
+    for (const call of pages.calls.invalid) expect(isTeamHostCall(call)).toBe(false);
+  });
+
+  it('are kept on an inbox, at most ten', () => {
+    const page = pages.pages.valid[0];
+    const inbox = (count: number) => ({ botId: id, pages: Array.from({ length: count }, (_, index) => ({ ...page, pageId: `pg_${index.toString(16).padStart(12, '0')}` })) });
+    expect(Value.Check(TeamInbox, inbox(PAGES_PER_BOT))).toBe(true);
+    expect(Value.Check(TeamInbox, inbox(PAGES_PER_BOT + 1))).toBe(false);
+  });
+});
+
+describe('the primary bot', () => {
+  it('is a flag of the bot\'s record and of its details, which the group never stores', () => {
+    const record = { botId: id, chief: { kind: 'person' }, createdAt: 1, updatedAt: 2 };
+    expect(Value.Check(BotRecord, { ...record, primary: true })).toBe(true);
+    expect(Value.Check(BotRecord, { ...record, primary: false })).toBe(false);
+    expect(Value.Check(WindowBotDetails, { botId: id, primary: true })).toBe(true);
+    expect(botPlacement({ botId: id, primary: true as const, name: 'Chief' })).toEqual({ botId: id });
+  });
+
+  it('is set and cleared by the person with set_primary', () => {
+    for (const action of pages.primaryActions.valid) expect(isChainAction(action)).toBe(true);
+    for (const action of pages.primaryActions.invalid) expect(isChainAction(action)).toBe(false);
+  });
+
+  it('adds one section to the instructions of the primary bot only, and the version text is otherwise the same', () => {
+    const plain = botInstructions('Coordinate.');
+    const primary = botInstructions('Coordinate.', undefined, { primary: true });
+    expect(primary).toContain('You are the person\'s primary bot: their main contact.');
+    expect(plain).not.toContain('primary bot');
+    expect(botInstructions('Coordinate.', undefined, { primary: false })).toBe(plain);
+    expect(primary.replace(/\n\nYou are the person's primary bot[^\n]*/, '')).toBe(plain);
+    expect(standingInstructionsText('Coordinate.', undefined, { primary: true })).toContain(primary);
+  });
+
+  it('teaches the page habit in the base instructions', () => {
+    const text = botInstructions(undefined);
+    for (const habit of ['write_page', 'only you edit', 'team set']) expect(text).toContain(habit);
   });
 });

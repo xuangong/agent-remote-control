@@ -245,3 +245,17 @@ it('speaks Chinese: the title description and the Group actions', async () => {
   expect(container.querySelector('button[aria-label="分组操作"]')).not.toBeNull();
   expect(container.querySelector('button[aria-label="添加"]')).not.toBeNull();
 });
+
+it('offers Bind to a bot on a free workbench and Unbind from the bot on a bot workbench', async () => {
+  const onBind = vi.fn(), onUnbind = vi.fn();
+  const free = await toolbar({ workbench: { onBind, onUnbind } });
+  const freeMenu = await openMenu(free.bar, 'Group actions');
+  expect(items(freeMenu).map(entry => entry.textContent)).toContain('Bind to a bot…');
+  await act(async () => item(freeMenu, 'Bind to a bot…').click());
+  expect(onBind).toHaveBeenCalledTimes(1);
+  const bound = await toolbar({ workbench: { boundName: 'Dango', onBind, onUnbind } });
+  const boundMenu = await openMenu(bound.bar, 'Group actions');
+  expect(items(boundMenu).map(entry => entry.textContent)).not.toContain('Bind to a bot…');
+  await act(async () => item(boundMenu, 'Unbind from Dango').click());
+  expect(onUnbind).toHaveBeenCalledTimes(1);
+});

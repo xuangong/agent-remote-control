@@ -7,6 +7,8 @@ import * as trackingHooks from './features/sessions/useSessionTracking.js';
 import { promptText, setPromptText } from './test/setup.js';
 import { nextPopstate } from './test/wait.js';
 import { loadScreens } from './app/lazy-screens.js';
+import { chooseFreeWorkbench, stubDialogs } from './test/new-workbench.js';
+stubDialogs();
 
 // Settings, the Trace and the Inspector are chunks the page warms when idle; a test opens them as a settled page would.
 beforeAll(() => loadScreens());
@@ -177,6 +179,7 @@ it('puts the title and the New menu at the top of the Window sidebar, and the mo
     expect(app.container.querySelector<HTMLElement>('#lab-sessions-page[aria-label="New session"]')?.hidden).toBe(false);
     await open();
     await act(async () => item('New group').click());
+    await chooseFreeWorkbench();
     await until(() => expect(app.workspace().window?.id).toMatch(/^(?!A$)/));
     expect(app.workspace().windows.map(window => window.id)).toContain('A');
   } finally { await app.close(); }
@@ -202,6 +205,7 @@ it('creates one Window at a time from the New menu and clears its error toast af
     const toast = () => [...document.querySelectorAll('.lab-toast')].find(node => node.textContent?.includes('Group not created'));
     const first = await item();
     await act(async () => first.click());
+    await chooseFreeWorkbench();
     expect(create).toHaveBeenCalledTimes(1);
     const repeat = await item();
     expect(repeat.getAttribute('aria-disabled')).toBe('true');
@@ -212,6 +216,7 @@ it('creates one Window at a time from the New menu and clears its error toast af
     const again = await item();
     expect(again.getAttribute('aria-disabled')).toBeNull();
     await act(async () => again.click());
+    await chooseFreeWorkbench();
     expect(create).toHaveBeenCalledTimes(2);
     await act(async () => pending[1]!.resolve());
     await until(() => expect(toast()).toBeUndefined());

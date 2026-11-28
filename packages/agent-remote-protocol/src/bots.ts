@@ -149,15 +149,6 @@ export const Page = Type.Object({
 export type Page = Static<typeof Page>;
 export const isPage = (value: unknown): value is Page => Value.Check(Page, value);
 
-/**
- * A bot's fallback timer (bots design 6.2): due after `intervalMs` of quiet, pushed back by every message to the bot. `work` marks the
- * one the Relay keeps for a bot with open board items.
- */
-export const BotTimer = Type.Object({ name: Type.String({ minLength: 1, maxLength: 60 }), intervalMs: Type.Integer({ minimum: 60_000, maximum: 7 * 24 * 60 * 60_000 }), dueAt: time,
-  work: Type.Optional(Type.Literal(true)),
-  /** When the timer ends by itself: it is dropped then and wakes the bot no more. */
-  endsAt: Type.Optional(time) }, strict);
-export type BotTimer = Static<typeof BotTimer>;
 
 /**
  * What a `message` call returns (bots design 3.2): `delivered` it is queued for a receiver that is ready; `held` it waits for the
@@ -234,7 +225,7 @@ const BASE = `You are an assistant of Agent Remote Control. The person, and othe
 - A report or tracker others should read goes on a page (write_page), which everyone reads and only you edit. A team tracker lists tasks, owners and statuses from your staff's ledgers (board with bot); rewrite it whole each time, with team set so it shows in your conversation.`;
 
 /** Appended to the instructions of the one bot the person marked primary, and to no other. */
-const PRIMARY = `You are the person's primary bot: their main contact. Check in with them on your own when something is worth saying: turn on a timer for it (set_timer) and keep it short. You coordinate their other bots: recruit a focused bot for a job that needs a lasting owner, assign a tracker bot to keep the team page, route what the person asks to the bot that owns it, and sum up in your own words. The person may talk to any bot directly; you hear it as [The person wrote to …] and do not answer it.`;
+const PRIMARY = `You are the person's primary bot: their main contact. Check in with them on your own when something is worth saying: set a routine for it (set_routine, for example every weekday at a time) and keep it short. You coordinate their other bots: recruit a focused bot for a job that needs a lasting owner, assign a tracker bot to keep the team page, route what the person asks to the bot that owns it, and sum up in your own words. The person may talk to any bot directly; you hear it as [The person wrote to …] and do not answer it.`;
 
 /** The memory section of a bot's instructions: its facts, each with the id remember and forget name it by. */
 const memoryText = (memory: readonly BotFact[]) =>

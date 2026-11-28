@@ -1,8 +1,10 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { NativeSessionRef } from './session-succession.js';
 import { Value } from '@sinclair/typebox/value';
-import { ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, AttachmentId, BotAttachment, BotId, BotFact, BotMission, BotName, Board, BOARD_ITEM_LIMIT, BOARD_PLAN_LIMIT, BoardItem, BoardItemEdit, BoardPlanEdit, BotTimer, Page, PageId, PAGES_PER_BOT } from './bots.js';
+import { ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, AttachmentId, BotAttachment, BotId, BotFact, BotMission, BotName, Board, BOARD_ITEM_LIMIT, BOARD_PLAN_LIMIT, BoardItem, BoardItemEdit, BoardPlanEdit, Page, PageId, PAGES_PER_BOT } from './bots.js';
 import { ChainId, StandingApproval, TurnCause } from './chains.js';
+import { Routine, ROUTINES_PER_BOT, ROUTINE_PROMPT_LIMIT, ROUTINE_RUNS_PER_DAY_LIMIT } from './routines.js';
+import { RoutineSchedule } from './routine-schedule.js';
 import { TaskBrief, ASK_LIMIT, WORK_LOG_KEEP, WORK_LOG_QUESTION_LIMIT, WORK_LOG_ANSWER_LIMIT, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_LIMIT, ROOM_MINUTES_LIMIT, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, TaskOutcome, TaskTitle, TeamTask, SubSessionFork, TASK_BRIEF_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, SUB_SESSION_LINE_LIMIT, SUB_SESSION_NAME_LIMIT, isTeamTask } from './task.js';
 const object = { additionalProperties: false } as const;
 const id = Type.String({ minLength: 1, maxLength: 256 });
@@ -77,7 +79,9 @@ export const TeamInbox = Type.Object({ botId: BotId, instructions: Type.Optional
   board: Type.Optional(Board),
   /** The bot's pages (bots design: pages), at most PAGES_PER_BOT. */
   pages: Type.Optional(Type.Array(Page, { maxItems: PAGES_PER_BOT })),
-  timers: Type.Optional(Type.Array(BotTimer, { maxItems: 8 })),
+  routines: Type.Optional(Type.Array(Routine, { maxItems: ROUTINES_PER_BOT })),
+  /** Retired: the quiet timers of an earlier Relay. They are dropped when the state loads. */
+  timers: Type.Optional(Type.Array(Type.Unknown())),
   /** A standing bot another bot created: its seat creates its session, then the Relay places it in its chief's group (bots design 2.2). */
   pending: Type.Optional(Type.Object({ name: BotName, mission: BotMission, chief: BotId, groupId: id, message: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })) }, object)) }, object);
 export type TeamInbox = Static<typeof TeamInbox>;
@@ -238,9 +242,16 @@ export const TeamHostCall = Type.Union([
   // A bot's pages: it writes its own (omit pageId to create; team marks the one shown in its conversation and its chief's), and reads any bot's of the account.
   Type.Object({ action: Type.Literal('write_page'), owner: BotCaller, title: Page.properties.title, contents: Page.properties.contents, pageId: Type.Optional(PageId), team: Type.Optional(Type.Literal(true)) }, object),
   Type.Object({ action: Type.Literal('read_page'), owner: BotCaller, pageId: Type.Optional(PageId), bot: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })) }, object),
-  Type.Object({ action: Type.Literal('set_timer'), owner: BotCaller, name: BotTimer.properties.name, minutes: Type.Integer({ minimum: 0, maximum: 7 * 24 * 60 }),
-    /** The timer ends by itself after this many minutes from now. */
-    untilMinutes: Type.Optional(Type.Integer({ minimum: 1, maximum: 30 * 24 * 60 })) }, object),
+  // A bot sets one of its routines by name (replacing the one of that name); a bot's routine runs in its own session, or in a sub-session when it names another model.
+  Type.Object({ action: Type.Literal('set_routine'), owner: BotCaller, name: Routine.properties.name, schedule: RoutineSchedule, prompt: Type.Optional(Type.String({ minLength: 1, maxLength: ROUTINE_PROMPT_LIMIT })),
+    model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })), maxRunsPerDay: Type.Optional(Type.Integer({ minimum: 1, maximum: ROUTINE_RUNS_PER_DAY_LIMIT })),
+    /** The routine ends by itself after this many minutes from now. */
+    untilMinutes: Type.Optional(Type.Integer({ minimum: 1, maximum: 30 * 24 * 60 })),
+    /** What started the turn the call is made in: an unattended chain sets no routines. */
+    cause: Type.Optional(TurnCause) }, object),
+  Type.Object({ action: Type.Literal('list_routines'), owner: BotCaller }, object),
+  Type.Object({ action: Type.Literal('pause_routine'), owner: BotCaller, name: Routine.properties.name, paused: Type.Boolean() }, object),
+  Type.Object({ action: Type.Literal('delete_routine'), owner: BotCaller, name: Routine.properties.name }, object),
   Type.Object({ action: Type.Literal('bot_session'), owner: BotCaller, bot: Type.String({ minLength: 1, maxLength: 300 }) }, object),
   // An assistant's main session lists the account's other assistants, and messages one.
   Type.Object({ action: Type.Literal('list_assistants'), owner: Type.Object({ providerId: id, nativeSessionId: NativeSessionRef.properties.nativeSessionId }, object) }, object),

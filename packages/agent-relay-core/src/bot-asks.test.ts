@@ -150,7 +150,7 @@ describe('answer sessions for the person\'s mentions', () => {
     await expect(f.call({ action: 'create_bot', owner, operationId: 'c1', name: 'Helper', mission: 'Help.' })).rejects.toThrow('answer session');
     await expect(f.call({ action: 'create_sub_session', owner, operationId: 'c2', name: 'Helper', prompt: 'Help.' })).rejects.toThrow('answer session');
     await expect(f.call({ action: 'update_mission', owner, mission: 'Something else.' })).rejects.toThrow('answer session');
-    await expect(f.call({ action: 'set_timer', owner, name: 'x', minutes: 5 })).rejects.toThrow('answer session');
+    await expect(f.call({ action: 'set_routine', owner, name: 'x', schedule: { kind: 'quiet', minutes: 5 } })).rejects.toThrow('answer session');
     await expect(f.call({ action: 'set_chief', owner, bot: 'Reviewer', chief: 'person' })).rejects.toThrow('answer session');
     await expect(f.call({ action: 'stop_sub_session', owner, subSessionId: 'Helper' })).rejects.toThrow('answer session');
   });

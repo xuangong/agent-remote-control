@@ -40,11 +40,12 @@ function storePreviousState() {
   return { db, storage };
 }
 
-test('loads the state the Worker stored before timer ends and forked sub-sessions: the timer runs without an end, the sub-session without a fork, and it commits again', async () => {
+test('loads the state the Worker stored before routines: the retired quiet timer is dropped without breaking the inbox, the sub-session has no fork, and it commits again', async () => {
   const { storage } = storePreviousState();
   const store = new SqliteRelayStore(storage, auth);
   const teams = store.initial.tenants[0]!.broker.teams ?? [];
   expect(teams.map(team => team.id)).toEqual(['inbox', 'sub']);
+  // The earlier timer is still valid state to read; the Relay drops it when it builds its broker state.
   expect(teams[0]!.inbox!.timers).toEqual([{ name: 'Check in', intervalMs: 600_000, dueAt: 5 }]);
   expect(teams[1]!.task).not.toHaveProperty('forkedFrom');
   expect(teams.every(team => isTeam(team))).toBe(true);

@@ -212,13 +212,21 @@ export function workLogText(input: { lines: readonly string[]; total: number }):
   return [`[Work log since your last turn · ${input.total} new]`, ...(more > 0 ? [`(${more} earlier ${more === 1 ? 'entry' : 'entries'}: read them with board and work_log)`] : []),
     ...shown.map(line => quoteFrames(`- ${cut(line, WORK_LOG_LINE_LIMIT)}`)), WORK_LOG_GUIDANCE].join('\n');
 }
-/** A bot's timer came due after a quiet while. */
-export const TIMER_GUIDANCE = 'Nothing has reached you for a while. Look at your open work: read your board, read your staff with read_bot and your sub-sessions with get_sub_session_status (stop those you will not use again), update your board, and act or wait as the work needs. A quiet check that changes nothing needs no message.';
-/** A sub-session as a timer's frame lists it: its name, how long it has been idle (none while it works), what it last did and what it does now. */
-export interface TimerSubSession { name: string; idle?: string; lastWork?: string; step?: string }
-export function timerText(input: { name: string; items: ReadonlyArray<{ title: string; status: string; report?: string }>; subSessions?: readonly TimerSubSession[] }): string {
+/** A quiet routine came due: nothing reached the bot for a while. */
+export const QUIET_GUIDANCE = 'Nothing has reached you for a while. Look at your open work: read your board, read your staff with read_bot and your sub-sessions with get_sub_session_status (stop those you will not use again), update your board, and act or wait as the work needs. A quiet check that changes nothing needs no message.';
+/** A clock, event or test routine came due: the person set it up to work unattended. */
+export const ROUTINE_GUIDANCE = 'This is a routine you or the person set up; nobody is watching, so work within your own permissions. If a source you need is missing or fails, say so in your reply; do not reuse an earlier result as if it were current. A run that finds nothing to report needs no message.';
+/** A sub-session as a routine's frame lists it: its name, how long it has been idle (none while it works), what it last did and what it does now. */
+export interface RoutineSubSession { name: string; idle?: string; lastWork?: string; step?: string }
+/**
+ * The frame of a routine's run, written from the record. detail: what the Relay says about this run (`quiet`, `run 14 · due 08:30 · started 09:20`,
+ * `test`). prompt: the routine's own text. items and subSessions: the bot's open work, listed on a quiet run. missed: the runs this one stands for.
+ */
+export function routineText(input: { name: string; detail: string; quiet: boolean; prompt?: string; missed?: { count: number; since: string }; items?: ReadonlyArray<{ title: string; status: string; report?: string }>; subSessions?: readonly RoutineSubSession[] }): string {
   const subs = (input.subSessions ?? []).map(sub => quoteFrames(`Sub-session "${heading(sub.name).replace(/"/g, "'")}" · ${sub.idle ? `idle ${sub.idle}` : 'working'}${sub.lastWork ? ` · last: ${heading(sub.lastWork)}` : ''}${sub.step ? ` · now: ${heading(sub.step)}` : ''}`));
-  return [`[Timer "${heading(input.name).replace(/"/g, "'")}" · due]`, ...input.items.map(item => quoteFrames(`${heading(item.title)} · ${item.status}${item.report ? ` · ${item.report}` : ''}`)), ...subs, TIMER_GUIDANCE].join('\n');
+  return [`[Routine "${heading(input.name).replace(/"/g, "'")}" · ${heading(input.detail)}]`, ...(input.prompt ? input.prompt.split('\n').map(line => quoteFrames(line)) : []),
+    ...(input.missed ? [quoteFrames(`${input.missed.count} earlier ${input.missed.count === 1 ? 'run was' : 'runs were'} missed while you could not be reached, the first due ${heading(input.missed.since)}.`)] : []),
+    ...(input.items ?? []).map(item => quoteFrames(`${heading(item.title)} · ${item.status}${item.report ? ` · ${item.report}` : ''}`)), ...subs, input.quiet ? QUIET_GUIDANCE : ROUTINE_GUIDANCE].join('\n');
 }
 /** The line that names the board item a message serves, written by the Relay from the record: `[Item 7 "Run the regression" · from Chief]`. */
 export function itemTagText(input: { key: number; title: string; from: string }): string {
@@ -245,7 +253,7 @@ export function splitItemTag(body: string): { item?: { key: number; title: strin
 }
 /** The frame of a bot's standing instructions, written by `standingInstructionsText`. */
 const standingFrame = /^\[Your standing instructions · v(\d+)\]$/;
-const timerFrame = /^\[Timer "(.+)" · due\]$/;
+const routineFrame = /^\[Routine "(.+?)" · (.+)\]$/;
 const askFrame = /^\[The person asks from ([^\]]+)\]$/;
 const workLogFrame = /^\[Work log since your last turn · (\d+) new\]$/;
 const itemChangedFrame = /^\[Item (?:(\d+) )?"([^"]+)" changed · (.+)\]$/;
@@ -263,8 +271,8 @@ export type TaskInput =
   | { kind: 'room'; roomId: string; name: string; count: number; body: string }
   /** The bot's standing instructions, sent when they changed (bots design 5.1). */
   | { kind: 'standing'; version: number; body: string }
-  /** A bot's quiet timer came due, with its open work. */
-  | { kind: 'timer'; name: string; body: string }
+  /** One of the bot's routines came due, with its prompt and, on a quiet one, its open work. */
+  | { kind: 'routine'; name: string; detail: string; quiet: boolean; body: string }
   /** What the person wrote to one of the receiver's bots. */
   | { kind: 'person_wrote'; bot: string; body: string }
   /** What the person asks the receiver from another conversation: an answer session's input. */
@@ -291,8 +299,8 @@ function parseOne(lines: string[]): TaskInput | undefined {
   if (log) return lines.length >= 3 && lines.at(-1) === WORK_LOG_GUIDANCE ? { kind: 'work_log', count: Number(log[1]), body: lines.slice(1, -1).join('\n') } : undefined;
   const ask = askFrame.exec(lines[0] ?? '');
   if (ask) return lines.length >= 3 && lines.at(-1) === ASK_GUIDANCE ? { kind: 'ask', from: ask[1]!, body: lines.slice(1, -1).join('\n') } : undefined;
-  const timer = timerFrame.exec(lines[0] ?? '');
-  if (timer) return lines.length >= 2 && lines.at(-1) === TIMER_GUIDANCE ? { kind: 'timer', name: timer[1]!, body: lines.slice(1, -1).join('\n') } : undefined;
+  const routine = routineFrame.exec(lines[0] ?? '');
+  if (routine) return lines.length >= 2 && (lines.at(-1) === ROUTINE_GUIDANCE || lines.at(-1) === QUIET_GUIDANCE) ? { kind: 'routine', name: routine[1]!, detail: routine[2]!, quiet: lines.at(-1) === QUIET_GUIDANCE, body: lines.slice(1, -1).join('\n') } : undefined;
   const room = roomFrame.exec(lines[0] ?? '');
   if (room) return lines.length >= 2 && lines.at(-1) === ROOM_GUIDANCE ? { kind: 'room', name: room[1]!, roomId: room[2]!, count: Number(room[3]), body: lines.slice(1, -1).join('\n') } : undefined;
   const message = assistantFrame.exec(lines[0] ?? '');
@@ -315,7 +323,7 @@ function parseOne(lines: string[]): TaskInput | undefined {
 export const joinTaskInputs = (texts: readonly string[]): string => texts.join('\n\n');
 /** Reads one or several task inputs the Relay framed and the Controller joined; anything else is not task input. */
 export function parseTaskInputs(text: string): TaskInput[] | undefined {
-  const lines = text.split('\n'), starts = lines.flatMap((line, index) => (framePattern.test(line) || assistantFrame.test(line) || roomFrame.test(line) || standingFrame.test(line) || timerFrame.test(line) || personWroteFrame.test(line) || askFrame.test(line) || workLogFrame.test(line) || itemChangedFrame.test(line) || chiefChangedFrame.test(line)) && (index === 0 || lines[index - 1] === '') ? [index] : []);
+  const lines = text.split('\n'), starts = lines.flatMap((line, index) => (framePattern.test(line) || assistantFrame.test(line) || roomFrame.test(line) || standingFrame.test(line) || routineFrame.test(line) || personWroteFrame.test(line) || askFrame.test(line) || workLogFrame.test(line) || itemChangedFrame.test(line) || chiefChangedFrame.test(line)) && (index === 0 || lines[index - 1] === '') ? [index] : []);
   if (starts[0] !== 0) return undefined;
   const inputs: TaskInput[] = [];
   for (const [position, start] of starts.entries()) {

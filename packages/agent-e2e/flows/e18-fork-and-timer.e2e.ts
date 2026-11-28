@@ -42,13 +42,14 @@ it('E18: fork_from without fork_turns is refused, and nothing starts', async () 
   expect(stack.provider.known().length).toBe(known);
 });
 
-it('E18: a timer set with until_minutes ends at that time, and one without runs on', async () => {
+it('E18: a routine set with until_minutes ends at that time, and one without runs on', async () => {
   const before = Date.now();
-  const set = await stack.provider.useTool('chief', 'set_timer', { name: 'Check in', minutes: 5, until_minutes: 30 }) as { timers: Array<{ name: string; endsAt?: number }> };
-  const ends = set.timers.find(timer => timer.name === 'Check in')!.endsAt!;
+  const set = await stack.provider.useTool('chief', 'set_routine', { name: 'Check in', quiet_minutes: 5, until_minutes: 30 }) as { routines: Array<{ name: string; endsAt?: number }> };
+  const ends = set.routines.find(routine => routine.name === 'Check in')!.endsAt!;
   expect(ends).toBeGreaterThanOrEqual(before + 30 * 60_000); expect(ends).toBeLessThan(Date.now() + 30 * 60_000 + 1);
-  const open = await stack.provider.useTool('chief', 'set_timer', { name: 'Open', minutes: 10 }) as { timers: Array<{ name: string; endsAt?: number }> };
-  expect(open.timers.find(timer => timer.name === 'Open')).not.toHaveProperty('endsAt');
-  await expect(stack.provider.useTool('chief', 'set_timer', { name: 'Open', minutes: 0, until_minutes: 5 })).rejects.toThrow('until_minutes');
-  await stack.provider.useTool('chief', 'set_timer', { name: 'Check in', minutes: 0 });
+  const open = await stack.provider.useTool('chief', 'set_routine', { name: 'Open', quiet_minutes: 10 }) as { routines: Array<{ name: string; endsAt?: number }> };
+  expect(open.routines.find(routine => routine.name === 'Open')).not.toHaveProperty('endsAt');
+  await expect(stack.provider.useTool('chief', 'set_routine', { name: 'Open', quiet_minutes: 10, every_minutes: 10 })).rejects.toThrow('exactly one');
+  await stack.provider.useTool('chief', 'delete_routine', { name: 'Check in' });
+  await stack.provider.useTool('chief', 'delete_routine', { name: 'Open' });
 });

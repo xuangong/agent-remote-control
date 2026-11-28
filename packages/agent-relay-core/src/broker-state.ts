@@ -87,13 +87,16 @@ export function createBrokerState(options: BrokerStateOptions): BrokerState {
     nativeBindings.set(JSON.stringify([binding.hostId, binding.providerId, binding.nativeSessionId]), binding);
   }
   for (const [key, value] of initialState?.creations ?? []) if (bindings.has(value.agentId)) completedCreations.set(key, value);
-  const chains = initialState?.chains && structuredClone(initialState.chains);
+  // The chains an earlier Relay's timers began are read as routines' (a chain lasts seven days).
+  const chains = initialState?.chains && structuredClone(initialState.chains).map(chain => (chain.cause as string) === 'timer' ? { ...chain, cause: 'routine' as const } : chain);
   if (chains && !validChains(chains)) throw new Error('Invalid saved chains.');
   const chainThresholds = initialState?.chainThresholds && structuredClone(initialState.chainThresholds);
   if (chainThresholds && !isChainThresholds(chainThresholds)) throw new Error('Invalid saved chain thresholds.');
   const savedTeams: SavedTeam[] = structuredClone(initialState?.teams ?? []);
   // The work items of an earlier Relay are not carried over to boards.
   for (const team of savedTeams) if (team.inbox) delete (team.inbox as { work?: unknown }).work;
+  // The quiet timers of an earlier Relay are dropped: a bot with open board items gets its work routine at its next board change, and a bot sets its own again.
+  for (const team of savedTeams) if (team.inbox) delete team.inbox.timers;
   if (!savedTeams.every(validSavedTeam)) throw new Error('Invalid saved Teams.');
   for (const team of savedTeams) { compactTeamDeliveries(team, now()); trimTeamDeliveryReceipts(team, TEAM_RECORD_BYTES); }
 

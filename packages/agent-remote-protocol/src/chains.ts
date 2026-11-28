@@ -1,9 +1,11 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import { BoardItemEdit, BoardPlanEdit, BotId } from './bots.js';
+import { Routine, ROUTINE_PROMPT_LIMIT, ROUTINE_RUNS_PER_DAY_LIMIT } from './routines.js';
+import { RoutineSchedule } from './routine-schedule.js';
 
 /**
- * A chain is the work one cause set off (bots design 7): an input the person sent to a bot, a bot's timer coming due, or a bot's own
+ * A chain is the work one cause set off (bots design 7): an input the person sent to a bot, a routine's run coming due, or a bot's own
  * turn whose cause is not known. Every message between bots, bot created and turn that follows from it counts in the chain.
  */
 const object = { additionalProperties: false } as const;
@@ -49,7 +51,7 @@ export type StandingApproval = Static<typeof StandingApproval>;
  * One chain as the Relay keeps it. cause and bot: what started it and at which bot. bots: the bots it reached, in order. depth: the
  * longest run of replies along it. stopped: when the person stopped it.
  */
-export const BotChain = Type.Object({ id: ChainId, cause: Type.Union([Type.Literal('person'), Type.Literal('timer'), Type.Literal('bot')]), bot: BotId,
+export const BotChain = Type.Object({ id: ChainId, cause: Type.Union([Type.Literal('person'), Type.Literal('routine'), Type.Literal('event'), Type.Literal('bot'), Type.Literal('timer')]), bot: BotId,
   bots: Type.Array(BotId, { minItems: 1, maxItems: CHAIN_BOT_LIMIT }), messages: count, turns: count, created: count, subSessions: Type.Optional(count), depth: count, usage: ChainUsage,
   startedAt: time, updatedAt: time, stopped: Type.Optional(time),
   /** Bots whose part of the chain the person stopped. */
@@ -87,8 +89,15 @@ export const ChainAction = Type.Union([
   Type.Object({ action: Type.Literal('update_board'), botId: BotId, items: Type.Optional(Type.Array(BoardItemEdit, { minItems: 1, maxItems: 10 })), plan: Type.Optional(BoardPlanEdit) }, object),
   Type.Object({ action: Type.Literal('set_thresholds'), thresholds: ChainThresholds }, object),
   Type.Object({ action: Type.Literal('revoke_approval'), chainId: ChainId, cwd: StandingApproval.properties.cwd }, object),
+  // The person's own routines of a standing bot (routines design 6, 10): set one by name, pause or resume it, delete it, or run it now as a test.
+  Type.Object({ action: Type.Literal('routine_set'), botId: BotId, name: Type.String({ minLength: 1, maxLength: 60 }), schedule: RoutineSchedule, prompt: Type.Optional(Type.String({ minLength: 1, maxLength: ROUTINE_PROMPT_LIMIT })),
+    model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })), timeZone: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })), maxRunsPerDay: Type.Optional(Type.Integer({ minimum: 1, maximum: ROUTINE_RUNS_PER_DAY_LIMIT })),
+    untilMinutes: Type.Optional(Type.Integer({ minimum: 1, maximum: 30 * 24 * 60 })), paused: Type.Optional(Type.Boolean()) }, object),
+  Type.Object({ action: Type.Literal('routine_pause'), botId: BotId, name: Type.String({ minLength: 1, maxLength: 60 }), paused: Type.Boolean() }, object),
+  Type.Object({ action: Type.Literal('routine_delete'), botId: BotId, name: Type.String({ minLength: 1, maxLength: 60 }) }, object),
+  Type.Object({ action: Type.Literal('routine_test'), botId: BotId, name: Type.String({ minLength: 1, maxLength: 60 }) }, object),
 ]);
 export type ChainAction = Static<typeof ChainAction>;
 export const isChainAction = (value: unknown): value is ChainAction => Value.Check(ChainAction, value);
 /** The audit's view: the account's chains, newest first, the names of their bots, and which standing bots are paused. */
-export interface ChainView { chains: BotChain[]; names: Record<string, string>; paused: string[]; thresholds: ChainThresholds }
+export interface ChainView { chains: BotChain[]; names: Record<string, string>; paused: string[]; thresholds: ChainThresholds; routines: Record<string, Routine[]> }

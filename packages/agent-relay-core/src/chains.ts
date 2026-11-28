@@ -19,8 +19,8 @@ const chainId = (parts: unknown[]) => 'c_' + createHash('sha256').update(JSON.st
 export const personChainId = (session: Session, messageId: string) => chainId(['person', session.providerId, session.nativeSessionId, messageId]);
 /** The chain the person's edit of a bot's board starts at that bot. */
 export const editChainId = (botId: string, at: number) => chainId(['edit', botId, at]);
-/** A chain a timer starts when it comes due. */
-export const timerChainId = (inboxId: string, timer: string, at: number) => chainId(['timer', inboxId, timer, at]);
+/** The chain of one run of a routine: named by the bot's inbox, the routine and the run. */
+export const routineChainId = (inboxId: string, routine: string, at: number, run: number) => chainId(['routine', inboxId, routine, at, run]);
 
 /** An in-memory store, for a broker without saved state. */
 export function memoryChains(): ChainStore {
@@ -113,6 +113,11 @@ export class BotChains {
   stopped(id: string, botId: string): boolean {
     const chain = this.store.read().find(item => item.id === id);
     return !!chain && (chain.stopped !== undefined || !!chain.stoppedBots?.includes(botId));
+  }
+  /** Whether the chain began without the person: a routine or an event started it. Its bots may pause or delete routines and set none. */
+  unattended(id: string): boolean {
+    const cause = this.store.read().find(item => item.id === id)?.cause;
+    return cause === 'routine' || cause === 'event' || cause === 'timer';
   }
   list(): BotChain[] { return [...this.store.read()].sort((a, b) => b.updatedAt - a.updatedAt); }
 }

@@ -221,13 +221,16 @@
         "subSessionId": "Collect logs"
       },
       {
-        "action": "set_timer",
+        "action": "set_routine",
         "owner": {
           "providerId": "claude",
           "nativeSessionId": "main"
         },
         "name": "Check in",
-        "minutes": 10,
+        "schedule": {
+          "kind": "quiet",
+          "minutes": 10
+        },
         "untilMinutes": 120
       },
       {
@@ -502,13 +505,16 @@
         "bot": "Chief"
       },
       {
-        "action": "set_timer",
+        "action": "set_routine",
         "owner": {
           "providerId": "claude",
           "nativeSessionId": "main"
         },
         "name": "Check in",
-        "minutes": 10,
+        "schedule": {
+          "kind": "quiet",
+          "minutes": 10
+        },
         "untilMinutes": 0
       },
       {

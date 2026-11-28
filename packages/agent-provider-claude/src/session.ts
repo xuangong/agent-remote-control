@@ -14,6 +14,7 @@ import { ClaudeImageRegistry } from './images.js';
 import { ClaudeEventProjector } from './projector.js';
 import { unknownClaudeMessage, unknownClaudeRecord } from './native-kinds.js';
 import { discoverClaudeCommands } from './commands.js';
+import { ClaudeGoalTracker, CLAUDE_GOAL_COMMAND } from './goal.js';
 import { ClaudeChildren } from './children.js';
 import { createClaudeCatalog, type ClaudeCatalog, type ClaudeTimelineMessage } from './catalog.js';
 import { claudeToolDeclaration, createClaudeSessionTools, type ClaudeSessionTools } from './session-tools.js';
@@ -110,6 +111,10 @@ export class ClaudeAgentSession implements AgentSession {
    * Claude Code gives in seconds since the epoch (Agent SDK 0.3.247 `SDKRateLimitInfo`; the CLI compares `resetsAt*1000` with its clock).
    */
   private usageLimit: { resetsAt?: number } | undefined;
+  /** The session's `/goal`, read from the transcript Claude Code keeps. */
+  private readonly goals: ClaudeGoalTracker;
+  /** The session has a goal or the person has sent a `/goal` command, so the transcript is worth reading again as the turn goes. */
+  private goalInPlay = false;
   private status: AgentRuntimeInfo['status'] = 'starting';
   private turnId: ReturnType<typeof randomUUID> | undefined;
   private cancelRequested = false;
@@ -150,6 +155,7 @@ export class ClaudeAgentSession implements AgentSession {
     this.recordSet = new Set(this.records);
     this.nativeModelConfirmed = !options.restoreNativeModel;
     this.process = new ClaudeNativeProcess(options.onDiagnostic);
+    this.goals = new ClaudeGoalTracker(config.sessionId, { ...process.env, ...options.env });
     this.timeout = options.requestTimeoutMs ?? 15_000;
     if (!Number.isFinite(this.timeout) || this.timeout <= 0) throw new Error('Claude request timeout must be positive.');
     // A read-only session never plans and keeps the mode its read-only options set.
@@ -234,6 +240,7 @@ export class ClaudeAgentSession implements AgentSession {
       if (session.failure) throw session.failure;
       session.status = 'idle';
       session.nativeEvidence.initialize();
+      session.goalInPlay = await session.goals.refresh();
       session.runtimeUpdated();
       if (resume) void session.reportContext();
       return session;
@@ -268,6 +275,7 @@ export class ClaudeAgentSession implements AgentSession {
   async sendMessage(text: string, options: AgentMessageOptions = {}): Promise<void> {
     this.assertMessageReady(options);
     if (!text.trim()) throw new AgentOperationRejectedError('operation_rejected', 'Claude message cannot be empty.');
+    if (/^\s*\/goal(\s|$)/.test(text)) this.goalInPlay = true;
     if (this.inputPending()) this.steerMessage(text, options);
     else this.dispatchMessage(text, inputUuid(options), options);
   }
@@ -400,13 +408,16 @@ export class ClaudeAgentSession implements AgentSession {
 
   async executeCommand(id: string, args: string) {
     this.requireOpen();
-    if (this.turnId || this.changingSetting || this.preparingMessage) throw new AgentOperationRejectedError('operation_rejected', 'Claude commands require an idle session.');
+    // A goal's own commands act on the goal a running turn works toward, so they go to the native queue while it runs.
+    if ((this.turnId && id !== CLAUDE_GOAL_COMMAND) || this.changingSetting || this.preparingMessage) throw new AgentOperationRejectedError('operation_rejected', 'Claude commands require an idle session.');
     this.changingSetting = true;
     try {
       const command = (await prepareAgentOperation(() => this.listCommands())).find((entry) => entry.id === id);
       if (!command) throw new AgentOperationRejectedError('operation_rejected', 'Claude command is unavailable in this session.');
       this.changingSetting = false;
-      await this.sendMessage(`/${command.name}${args ? ` ${args}` : ''}`);
+      // Typed in the composer, `/goal <condition>` arrives with the space after the command in its argument.
+      const text = id === CLAUDE_GOAL_COMMAND ? args.trim() : args;
+      await this.sendMessage(`/${command.name}${text ? ` ${text}` : ''}`);
       return {};
     } finally { this.changingSetting = false; if (!this.disposed && !this.failure) this.runtimeUpdated(); }
   }
@@ -656,9 +667,11 @@ export class ClaudeAgentSession implements AgentSession {
       planning: this.planning, permissionMode: this.resumePermissionMode };
   }
   private info(): AgentRuntimeInfo {
+    const goal = this.goals.current();
     return { providerId: 'claude', sessionId: this.config.sessionId, status: this.status, cwd: this.config.cwd,
       model: this.config.model ?? null, planning: { active: this.planning }, settings: this.settings(), childSessions: this.children.descriptors(),
       ...(this.usageLimit ? { usageLimit: { ...this.usageLimit } } : {}),
+      ...(goal ? { goal } : {}),
       persistence: this.options.emptyDescriptor && !this.inputDispatched ? claudeEmptyHandle({ ...this.config, planning: this.planning, permissionMode: this.resumePermissionMode }, this.options) : { providerId: 'claude', sessionId: this.config.sessionId, opaque: JSON.stringify({ ...persistedConfig(this.config), planning: this.planning, permissionMode: this.resumePermissionMode }) } };
   }
   private runtimeUpdated(): void { this.nativeEvidence.invalidate(); this.emit({ type: 'runtime_updated', provider: 'claude', runtimeInfo: this.info(), activeTurnId: this.turnId ?? null }); }
@@ -694,6 +707,11 @@ export class ClaudeAgentSession implements AgentSession {
     this.output.fail(this.failure);
     this.input.close(); this.steering.clear();
     this.native.close();
+  }
+
+  private mayHaveChangedGoal(message: SDKMessage): boolean {
+    return this.goalInPlay && (message.type === 'result' || message.type === 'user' && message.isSynthetic === true
+      || message.type === 'assistant' && message.message.model === '<synthetic>' || message.type === 'system' && message.subtype === 'informational');
   }
 
   /** Whether the adapter knows a native message or transcript record; one it does not know is a diagnostic and no row (gap 10). */
@@ -732,6 +750,8 @@ export class ClaudeAgentSession implements AgentSession {
           this.resultIds.add(message.uuid);
           if (message.user_message_uuid && message.user_message_uuid !== this.turnId) continue;
         }
+        // The records a goal's turn leaves, and the end of the turn, are where the transcript gained a check of the goal; a turn's end reports it with the status.
+        if (this.mayHaveChangedGoal(message) && await this.goals.refresh() && (message.type !== 'result' || !this.turnId)) this.runtimeUpdated();
         const context = this.usage.observe(message, this.config.model);
         if (context) this.emit({ type: 'usage_updated', provider: 'claude', usage: context });
         for (const observation of this.projector.project(message)) this.output.push({ ...observation,

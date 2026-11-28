@@ -21,8 +21,11 @@ const SYSTEM_SUBTYPES = ['api_retry', 'background_tasks_changed', 'commands_chan
 export const everyMessageTypeListed: readonly (typeof MESSAGE_TYPES)[number][] = [] as SDKMessage['type'][];
 export const everySystemSubtypeListed: readonly (typeof SYSTEM_SUBTYPES)[number][] = [] as Extract<SDKMessage, { type: 'system' }>['subtype'][];
 
-/** The input lifecycle of queued commands, which the CLI sends outside the SDK's declared union. */
-const UNDECLARED_MESSAGE_TYPES = ['command_lifecycle'];
+/**
+ * The input lifecycle of queued commands, and a remote session's goal (`active_goal`, which the adapter does not read: a goal is read
+ * from the transcript for every session), which the CLI sends outside the SDK's declared union.
+ */
+const UNDECLARED_MESSAGE_TYPES = ['command_lifecycle', 'active_goal'];
 /** System records only the transcript holds: hook and turn summaries, model API errors, away summaries, local commands, scheduled tasks. */
 const TRANSCRIPT_SYSTEM_SUBTYPES = ['agents_killed', 'api_error', 'away_summary', 'local_command', 'scheduled_task_fire', 'stop_hook_summary', 'turn_duration'];
 

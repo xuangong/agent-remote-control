@@ -165,7 +165,7 @@ export class TeamBroker {
   async startBot(input: TeamCreate): Promise<SavedTeam> {
     const tasks = this.tasks ?? fail(unavailableTasks), bot = input.bot ?? fail('A sub-session needs a name and its first work.');
     const created = await tasks.create(input.source.hostId, { owner: { providerId: input.source.providerId, nativeSessionId: input.source.nativeSessionId,
-      ...(input.source.title ? { title: input.source.title } : {}) }, operationId: input.operationId, name: bot.name.slice(0, 120), prompt: bot.mission }, { startedBy: 'person' });
+      ...(input.source.title ? { title: input.source.title } : {}) }, operationId: input.operationId, name: bot.name.slice(0, 120), prompt: bot.mission, ...(input.fork ? { fork: input.fork } : {}) }, { startedBy: 'person' });
     return this.ports.read().find(team => team.id === created.taskId) ?? fail('The sub-session could not be started.');
   }
   /** The person's decision from the audit: stop a chain or a bot's part of it, pause or resume a standing bot, retire a temporary one. */

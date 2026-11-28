@@ -129,11 +129,11 @@ export class BotCalls {
     const prompt = [call.prompt, first?.brief].filter((part, index, parts): part is string => !!part && parts.indexOf(part) === index).join('\n\n');
     const created = await this.tasks.create(hostId, { owner: call.owner, operationId: call.operationId, name: call.name, prompt,
       ...(first ? { item: { board: self.key, key: first.key, title: first.title } } : {}),
-      ...(call.workspace ? { workspace: call.workspace } : {}), ...(call.commit ? { commit: call.commit } : {}), ...(call.provider ? { provider: call.provider } : {}), ...(call.model ? { model: call.model } : {}) },
+      ...(call.workspace ? { workspace: call.workspace } : {}), ...(call.commit ? { commit: call.commit } : {}), ...(call.provider ? { provider: call.provider } : {}), ...(call.model ? { model: call.model } : {}), ...(call.fork ? { fork: call.fork } : {}) },
     place ? { where: { hostId: place.hostId, cwd: place.cwd } } : {});
     const id = subSessionId(created.taskId);
     for (const item of items) await this.notify(await this.board.assign(standing, item.key, id, (item.brief ?? prompt).slice(0, BOARD_BRIEF_LIMIT), self.key, [...placeLinks(place), { kind: 'sub_session', value: id }]));
-    return { sub_session_id: id, status: created.state, message: created.message.replace(/^Sub-session \S+/, `Sub-session "${call.name}"`), ...placeResult(place) };
+    return { sub_session_id: id, status: created.state, message: created.message.replace(/^Sub-session \S+/, `Sub-session "${call.name}"`) + (call.fork ? ` It starts with the last ${call.fork.turns} turn${call.fork.turns === 1 ? '' : 's'} of your conversation${call.fork.shortened ? ' (some long messages were shortened)' : ''}.` : ''), ...placeResult(place) };
   }
   /** The sub-session of the caller that an id or a name means. */
   private ownSub(hostId: string, call: { owner: Owner; subSessionId: string }): SavedTeam {

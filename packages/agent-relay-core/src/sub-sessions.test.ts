@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isTeam, parseTaskInputs, SUB_SESSION_LIVE_LIMIT, type TaskView, type WindowGroup } from '@orchardworks/agent-remote-protocol';
+import { FORK_CONTEXT_LIMIT, isTeam, parseTaskInputs, SUB_SESSION_LIVE_LIMIT, TASK_BRIEF_LIMIT, type TaskView, type WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { TeamBroker } from './teams.js';
 import { committed, detached } from './drafts.js';
 import { validSavedTeam, type SavedTeam } from './team-delivery.js';
@@ -50,6 +50,39 @@ describe('sub-sessions of a bot', () => {
     expect(await f.start()).toMatchObject({ sub_session_id: created.sub_session_id });
     expect(f.subs()).toHaveLength(1);
     await expect(f.start('Collect logs', { prompt: 'Something else.' })).rejects.toThrow('different input');
+  });
+
+  it('starts with the conversation it was forked from: its first input quotes the turns, its record says how many, and the bot is told', async () => {
+    const f = fixture();
+    const context = 'The following is quoted conversation history from another session.\n<session-context id="fork">\n{"history":[{"role":"user","text":"We chose Postgres."}]}\n</session-context>\n\n';
+    const created = await f.start('Plan', { fork: { turns: 2, context, shortened: true } }) as { message: string };
+    expect(created.message).toContain('last 2 turns of your conversation');
+    expect(created.message).toContain('shortened');
+    expect(f.sub().task).toMatchObject({ forkedFrom: { turns: 2 }, brief: 'Do Plan.' });
+    const text = f.sub().messages[0]!.text;
+    expect(text.indexOf('We chose Postgres.')).toBeGreaterThan(text.indexOf('Task: Plan'));
+    expect(text.indexOf('We chose Postgres.')).toBeLessThan(text.indexOf('Do Plan.'));
+    expect(f.inputs(f.sub(), 0)).toEqual([expect.objectContaining({ kind: 'brief', brief: expect.stringContaining('Do Plan.') })]);
+    expect(isTeam(f.sub()) && validSavedTeam(f.sub())).toBe(true);
+    // A start without a fork carries none.
+    await f.start('Plain');
+    expect(f.sub(1).task!.forkedFrom).toBeUndefined();
+  });
+
+  it('keeps the first input inside one message with the longest brief and the longest context', async () => {
+    const f = fixture();
+    const context = 'c'.repeat(FORK_CONTEXT_LIMIT);
+    await f.start('Big', { prompt: 'p'.repeat(TASK_BRIEF_LIMIT), fork: { turns: 1, context } });
+    expect(f.sub().messages[0]!.text.length).toBeLessThanOrEqual(16000);
+    expect(f.sub().messages[0]!.status).toBe('queued');
+  });
+
+  it('starts a person\'s /side with the conversation the page captured', async () => {
+    const f = fixture();
+    await f.broker.startBot({ operationId: 'side', source: { hostId: 'mac', providerId: 'codex', nativeSessionId: 'chief', title: 'Chief' }, bot: { name: 'Look it up', mission: 'Why?' },
+      fork: { turns: 4, context: 'CONTEXT\n' } });
+    expect(f.sub().task).toMatchObject({ startedBy: 'person', forkedFrom: { turns: 4 } });
+    expect(f.sub().messages[0]!.text).toContain('CONTEXT');
   });
 
   it('is no bot: other bots do not list, reach or read it, and it messages no one', async () => {

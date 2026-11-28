@@ -2,6 +2,7 @@ import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import { BotId, SubSessionId } from './bots.js';
 import type { Team } from './team.js';
+import { FORK_CONTEXT_LIMIT, FORK_TURNS_LIMIT } from './session-context.js';
 
 /**
  * A task an assistant's main session handed to a worker session. It travels as a Team whose Leader is the worker and whose
@@ -45,6 +46,9 @@ export const TASK_TOLD_LIMIT = 280;
 export const TaskWaiting = Type.Object({ reason: Type.Union([Type.Literal('interaction'), Type.Literal('input_unknown')]),
   text: Type.String({ minLength: 1, maxLength: TASK_TOLD_LIMIT }), since: Type.Number() }, object);
 export type TaskWaiting = Static<typeof TaskWaiting>;
+/** The conversation a sub-session starts with: the last `turns` turns of its main conversation, quoted as `context` (shortened: some messages were cut to fit). */
+export const SubSessionFork = Type.Object({ turns: Type.Integer({ minimum: 1, maximum: FORK_TURNS_LIMIT }), context: Type.String({ minLength: 1, maxLength: FORK_CONTEXT_LIMIT }), shortened: Type.Optional(Type.Literal(true)) }, object);
+export type SubSessionFork = Static<typeof SubSessionFork>;
 /** Where a sub-session works: its bot's directory, the same read-only, or its own worktree at a commit of its bot's repository. */
 export const TaskWorkspace = Type.Union([Type.Literal('same'), Type.Literal('read_only'), Type.Literal('worktree')]);
 export type TaskWorkspace = Static<typeof TaskWorkspace>;
@@ -56,6 +60,8 @@ export const TeamTask = Type.Object({ title: Type.String({ minLength: 1, maxLeng
   item: Type.Optional(Type.Object({ board: BotId, key: Type.Integer({ minimum: 1 }), title: Type.String({ minLength: 1, maxLength: 120 }) }, object)),
   startedBy: Type.Optional(Type.Literal('person')),
   waiting: Type.Optional(TaskWaiting), workspace: Type.Optional(TaskWorkspace),
+  /** It started with the last `turns` turns of its main conversation. */
+  forkedFrom: Type.Optional(Type.Object({ turns: Type.Integer({ minimum: 1, maximum: FORK_TURNS_LIMIT }) }, object)),
   /** The title of the latest piece of work sent to it, and when. */
   lastWork: Type.Optional(Type.Object({ title: Line, at: Type.Number() }, object)),
   /** What it reports it is doing now; it never wakes its bot. */
@@ -78,6 +84,7 @@ export type TaskOwner = Static<typeof TaskOwner>;
 export const TaskView = Type.Object({ taskId: id, title: Type.String({ minLength: 1, maxLength: SUB_SESSION_NAME_LIMIT }), state: Type.Union([Type.Literal('queued'), TaskState]),
   lastWork: Type.Optional(Type.Object({ title: Line, at: Type.Number() }, object)), currentStep: Type.Optional(Line), result: Type.Optional(TaskResult), waiting: Type.Optional(TaskWaiting), workspace: Type.Optional(TaskWorkspace),
   startedBy: Type.Optional(Type.Literal('person')),
+  forkedFrom: Type.Optional(Type.Object({ turns: Type.Integer({ minimum: 1, maximum: FORK_TURNS_LIMIT }) }, object)),
   worker: Type.Object({ hostId: id, providerId: id, nativeSessionId: Type.Optional(id), error: Type.Optional(Type.String({ maxLength: 2048 })) }, object),
   owner: Type.Object({ hostId: id, providerId: id, nativeSessionId: id }, object), createdAt: Type.Number(), updatedAt: Type.Number() }, object);
 export type TaskView = Static<typeof TaskView>;
@@ -88,7 +95,7 @@ export function taskView(team: Team): TaskView {
   const state = item.state === 'working' && worker.creation !== 'ready' ? 'queued' : item.state;
   return { taskId: team.id, title: item.title, state, ...(item.lastWork ? { lastWork: { ...item.lastWork } } : {}), ...(item.currentStep ? { currentStep: item.currentStep } : {}),
     ...(item.result ? { result: structuredClone(item.result) } : {}), ...(item.waiting ? { waiting: { ...item.waiting } } : {}), ...(item.workspace ? { workspace: item.workspace } : {}),
-    ...(item.startedBy ? { startedBy: item.startedBy } : {}),
+    ...(item.startedBy ? { startedBy: item.startedBy } : {}), ...(item.forkedFrom ? { forkedFrom: { ...item.forkedFrom } } : {}),
     worker: { hostId: worker.hostId, providerId: worker.providerId, ...(worker.nativeSessionId ? { nativeSessionId: worker.nativeSessionId } : {}), ...(worker.error ? { error: worker.error } : {}) },
     owner: { hostId: main.hostId, providerId: main.providerId, nativeSessionId: main.nativeSessionId ?? team.source.nativeSessionId }, createdAt: item.createdAt, updatedAt: item.updatedAt };
 }
@@ -132,8 +139,8 @@ export const TASK_BRIEF_GUIDANCE = TASK_GUIDANCE.brief;
 export const TASK_RESULT_GUIDANCE = TASK_GUIDANCE.done;
 
 /** The sub-session's first input: its work, and how to report it. */
-export function taskBriefText(input: { taskId: string; from: string; title: string; brief: string; tag?: string }): string {
-  return [`[Sub-session ${input.taskId} · brief · from ${heading(input.from)}]`, `Task: ${heading(input.title)}`, ...(input.tag ? [input.tag] : []), quoteFrames(input.brief), TASK_GUIDANCE.brief].join('\n');
+export function taskBriefText(input: { taskId: string; from: string; title: string; brief: string; tag?: string; context?: string }): string {
+  return [`[Sub-session ${input.taskId} · brief · from ${heading(input.from)}]`, `Task: ${heading(input.title)}`, ...(input.tag ? [input.tag] : []), ...(input.context ? [input.context.trimEnd()] : []), quoteFrames(input.brief), TASK_GUIDANCE.brief].join('\n');
 }
 /** The owner's view of a result: the sub-session's summary, labelled with its name. */
 export function taskResultText(input: { taskId: string; outcome: TaskOutcome; title: string; summary: string; tag?: string }): string {

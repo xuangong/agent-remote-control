@@ -1,3 +1,4 @@
+import { readForkContext } from './fork-context.js';
 import { TeamRuntime, type TeamRuntimeAccess } from './team.js';
 import { type JournalRelayMessage, type OutboxHostCall, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { directoryNativeEffect, directoryOperationId } from './directory-mutation.js';
@@ -510,6 +511,11 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       return headCommit(cwd);
     },
     files: botFiles(sessionDirectory),
+    fork: async (ref, turns) => {
+      const lease = await automationAccess.acquire(ref.providerId, ref.nativeSessionId);
+      try { return await readForkContext({ agentId: lease.agent.agentId, capabilities: lease.agent.snapshot().payload.capabilities, fetchTimeline: request => lease.agent.fetchTimeline(request) }, ref, turns, () => new Date().toISOString()); }
+      finally { lease.release(); }
+    },
     readOnly: providerId => !!providers.get(providerId)?.adapter.descriptor.sessionAccess?.readOnly,
     patch: async (ref): Promise<string | undefined> => team?.patchFor(ref),
     read: async (ref, before) => {

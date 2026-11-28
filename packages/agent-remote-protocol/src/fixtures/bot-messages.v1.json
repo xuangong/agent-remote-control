@@ -219,6 +219,30 @@
           "nativeSessionId": "main"
         },
         "subSessionId": "Collect logs"
+      },
+      {
+        "action": "set_timer",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "name": "Check in",
+        "minutes": 10,
+        "untilMinutes": 120
+      },
+      {
+        "action": "create_sub_session",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "operationId": "op-fork",
+        "name": "Review",
+        "prompt": "Review the plan.",
+        "fork": {
+          "turns": 2,
+          "context": "The following is quoted conversation history from another session.\n<session-context id=\"fork\">[]</session-context>"
+        }
       }
     ],
     "invalid": [
@@ -476,6 +500,43 @@
         },
         "subSessionId": "x",
         "bot": "Chief"
+      },
+      {
+        "action": "set_timer",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "name": "Check in",
+        "minutes": 10,
+        "untilMinutes": 0
+      },
+      {
+        "action": "create_sub_session",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "operationId": "op-fork",
+        "name": "Review",
+        "prompt": "Review the plan.",
+        "fork": {
+          "turns": 0,
+          "context": "x"
+        }
+      },
+      {
+        "action": "create_sub_session",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "operationId": "op-fork",
+        "name": "Review",
+        "prompt": "Review the plan.",
+        "fork": {
+          "turns": 2
+        }
       }
     ]
   },

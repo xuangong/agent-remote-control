@@ -3,7 +3,7 @@ import { NativeSessionRef } from './session-succession.js';
 import { Value } from '@sinclair/typebox/value';
 import { ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, AttachmentId, BotAttachment, BotId, BotFact, BotMission, BotName, Board, BOARD_ITEM_LIMIT, BOARD_PLAN_LIMIT, BoardItem, BoardItemEdit, BoardPlanEdit, BotTimer } from './bots.js';
 import { ChainId, StandingApproval, TurnCause } from './chains.js';
-import { TaskBrief, ASK_LIMIT, WORK_LOG_KEEP, WORK_LOG_QUESTION_LIMIT, WORK_LOG_ANSWER_LIMIT, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_LIMIT, ROOM_MINUTES_LIMIT, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, TaskOutcome, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, SUB_SESSION_LINE_LIMIT, SUB_SESSION_NAME_LIMIT, isTeamTask } from './task.js';
+import { TaskBrief, ASK_LIMIT, WORK_LOG_KEEP, WORK_LOG_QUESTION_LIMIT, WORK_LOG_ANSWER_LIMIT, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_LIMIT, ROOM_MINUTES_LIMIT, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, TaskOutcome, TaskTitle, TeamTask, SubSessionFork, TASK_BRIEF_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, SUB_SESSION_LINE_LIMIT, SUB_SESSION_NAME_LIMIT, isTeamTask } from './task.js';
 const object = { additionalProperties: false } as const;
 const id = Type.String({ minLength: 1, maxLength: 256 });
 const short = Type.String({ maxLength: 2048 });
@@ -124,7 +124,9 @@ export const Team = Type.Object({ id, operationId: id, revision: Type.Integer({ 
 }, object);
 export type Team = Static<typeof Team>;
 /** The person starts a sub-session beside the source conversation (`/side`): its name and its first work. */
-export const TeamCreate = Type.Object({ operationId: id, source: TeamSource, bot: Type.Object({ name: TaskTitle, mission: TaskBrief }, object) }, object);
+export const TeamCreate = Type.Object({ operationId: id, source: TeamSource, bot: Type.Object({ name: TaskTitle, mission: TaskBrief }, object),
+  /** The conversation it starts with, captured by the page. */
+  fork: Type.Optional(SubSessionFork) }, object);
 export type TeamCreate = Static<typeof TeamCreate>;
 /** The person mentions a bot (`@Name text`) in the conversation `source`: the bot answers in a session of its own for it. `bot`: the bot's id or name. */
 export const TeamAskRequest = Type.Object({ operationId: id, source: TeamSource, bot: Type.String({ minLength: 1, maxLength: 300 }), text: Type.String({ minLength: 1, maxLength: ASK_LIMIT }) }, object);
@@ -158,6 +160,8 @@ export const TeamHostCall = Type.Union([
     workspace: Type.Optional(TaskWorkspace), commit: Type.Optional(gitObject), provider: Type.Optional(id), model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
     /** The board items it takes up: it becomes their owner. */
     trackedTaskKeys: Type.Optional(Type.Array(BoardItem.properties.key, { maxItems: 10, uniqueItems: true })), cause: Type.Optional(TurnCause),
+    /** The last turns of the caller's main conversation, which the Controller read: the sub-session's first input quotes them. */
+    fork: Type.Optional(SubSessionFork),
     /** Where it works: a Host the caller read from `list_hosts` (default: the caller's own), and in it one existing folder, or a new folder created under a workspace of that Host. */
     host: Type.Optional(id), cwd: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
     newFolder: Type.Optional(Type.Object({ name: Type.String({ minLength: 1, maxLength: 255 }), under: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })) }, object)) }, object),

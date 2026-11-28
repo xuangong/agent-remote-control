@@ -106,7 +106,7 @@ const sameKey = (resolve: TeamBrokerPorts['resolveSession'], hostId: string, pro
 
 export { quoteFrames } from '@orchardworks/agent-remote-protocol';
 /** The session's first input. */
-export const briefText = (team: Team): string => { const item = task(team); return taskBriefText({ taskId: team.id, from: team.source.title, title: item.title, brief: item.brief, ...tagOf(team, team.source.title) }); };
+export const briefText = (team: Team, context?: string): string => { const item = task(team); return taskBriefText({ taskId: team.id, from: team.source.title, title: item.title, brief: item.brief, ...(context ? { context } : {}), ...tagOf(team, team.source.title) }); };
 /** The bot's view of a result. */
 export const resultText = (team: Team): string => {
   const item = task(team), result = item.result ?? fail('The sub-session has no result.');
@@ -166,9 +166,9 @@ export class TaskGroups {
         name: taskSenderName(call.owner.title), responsibility: 'The session that owns this sub-session.', creation: 'reserved', activity: 'unknown', summary: '', updatedAt: now };
       const team: SavedTeam = { id: randomUUID(), operationId: call.operationId, revision: 1, title: call.name, status: 'active', members: [worker, main], messages: [],
         source: { hostId, providerId: call.owner.providerId, nativeSessionId: call.owner.nativeSessionId, title: taskSenderName(call.owner.title) },
-        task: { title: call.name, brief: call.prompt, ...(call.workspace && call.workspace !== 'same' ? { workspace: call.workspace } : {}),
+        task: { title: call.name, brief: call.prompt, ...(call.fork ? { forkedFrom: { turns: call.fork.turns } } : {}), ...(call.workspace && call.workspace !== 'same' ? { workspace: call.workspace } : {}),
           ...(call.item ? { item: call.item } : {}), ...(options.startedBy ? { startedBy: options.startedBy } : {}), state: 'working', lastWork: { title: call.name.slice(0, 120), at: now }, createdAt: now, updatedAt: now }, createdAt: now, updatedAt: now };
-      const brief = { id: digest(['sub-brief', team.id]), from: main.id, to: worker.id, text: briefText(team), status: 'queued' as const, createdAt: now };
+      const brief = { id: digest(['sub-brief', team.id]), from: main.id, to: worker.id, text: briefText(team, call.fork?.context), status: 'queued' as const, createdAt: now };
       assertTeamQueueCapacity(team, brief);
       team.messages.push(brief);
       teams.push(team);

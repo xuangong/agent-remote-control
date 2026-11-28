@@ -4,12 +4,12 @@ import { type AgentCommandResult } from '@orchardworks/agent-remote-protocol';
 import { sessionKey } from '../kernel/session-tree.js';
 import type { AgentReplicaState } from '@orchardworks/agent-client';
 import { SessionDirectoryClient, type OpenedSession } from '../kernel/directory-client.js';
-import { sideNavigationSource, sideNavigationTarget, sideLinkVisible, captureForkContext, type SessionFork } from '../kernel/session-forks.js';
+import { sideNavigationSource, sideNavigationTarget, sideLinkVisible, captureForkContext, captureSideSeed, type SessionFork } from '../kernel/session-forks.js';
 import { configureFork, sendForkInput } from '../conversation/fork-actions.js';
 import { viewKey } from './helpers.js';
 import type { AppInputs } from './types.js';
 import { sessionQuotaReached } from '../features/sessions/agent-creation.js';
-import { firstInputPending, forkCommandRoute, forkCreateOptions, forkedSession, forkKey, forkSettings, needsWorkspaceLookup, withForkContext, workspaceOptions } from '../features/session-links/fork-plan.js';
+import { SIDE_SEED_TURNS, firstInputPending, forkCommandRoute, forkCreateOptions, forkedSession, forkKey, forkSettings, needsWorkspaceLookup, withForkContext, workspaceOptions } from '../features/session-links/fork-plan.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
 import type { SessionSuccessionBindingSlice } from './useSessionSuccessionBinding.js';
 import type { ViewSessionStateSlice } from './useViewSessionState.js';
@@ -69,7 +69,7 @@ export function useForks(scope: Pick<AppInputs & WorkbenchShellSlice & SessionSu
       return ask.open(sourceState, source, args, false, { associationOwner, synchronize: async () => { assertSourceCurrent(source); await refreshRelations(); assertSourceCurrent(source); } });
     }
     if (forkBusy.current) throw new Error(t('sessions.forks.inProgress'));
-    if (id === 'console:side') return startSideBot(source, args);
+    if (id === 'console:side') return startSideBot(source, args, agent.capabilities?.history === true);
     forkBusy.current = true;
     try {
       const target = (source.hostId ?? 'local') === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, source.hostId);
@@ -114,17 +114,18 @@ export function useForks(scope: Pick<AppInputs & WorkbenchShellSlice & SessionSu
     } finally { forkBusy.current = false; }
   }
   /**
-   * `/side <text>` starts a temporary bot whose chief is this session (bots design 9): its mission is the text, it works where its
-   * chief does, and it opens beside it once its session exists. It reports to its chief like any temporary bot.
+   * `/side <text>` starts a sub-session beside this session (bots design 9): its first work is the text, it works where this session does, and
+   * it opens beside it once its session exists. It starts with the last turns of the conversation when the provider can read its history.
    */
-  async function startSideBot(source: OpenedSession, args: string): Promise<AgentCommandResult> {
+  async function startSideBot(source: OpenedSession, args: string, canSeed: boolean): Promise<AgentCommandResult> {
     const mission = args.trim();
     if (!mission) throw keyedError('sessions.side.missionNeeded');
     forkBusy.current = true;
     try {
       const line = mission.split('\n')[0]!.trim(), name = line.length <= 60 ? line : `${line.slice(0, 59)}…`;
+      const seed = canSeed ? await captureSideSeed(transport, source, SIDE_SEED_TURNS) : undefined;
       const team = await new RemoteTeamClient(baseUrl, workspaceFetch).create({ operationId: crypto.randomUUID(),
-        source: { hostId: source.hostId ?? 'local', providerId: source.providerId, nativeSessionId: source.nativeSessionId, title: source.title || name }, bot: { name, mission } });
+        source: { hostId: source.hostId ?? 'local', providerId: source.providerId, nativeSessionId: source.nativeSessionId, title: source.title || name }, bot: { name, mission }, ...(seed ? { fork: seed } : {}) });
       const worker = team.members[0];
       if (worker?.nativeSessionId && worker.creation === 'ready' && directory) {
         const target = (worker.hostId ?? 'local') === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, worker.hostId);

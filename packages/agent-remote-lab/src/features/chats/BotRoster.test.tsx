@@ -244,3 +244,15 @@ it('shows the stored rows and no shell while the roster is not confirmed yet', a
   expect(container.querySelector('.lab-bot-quiet')).toBeNull();
   expect(container.querySelectorAll('.lab-bot-row').length).toBeGreaterThan(0);
 });
+
+it('marks the primary bot in Chats and lists it first', async () => {
+  const group = botGroup('A');
+  group.bots!.members = { A1: { name: 'A1' }, A2: { name: 'A2', primary: true } };
+  const model = projectBotRoster([group], [], { status: () => 'idle' });
+  const container = await render(<BotRoster model={model} groups={[group]} onSelect={() => {}} directoryControls={null} />);
+  const rows = [...container.querySelectorAll('.lab-bot-chats .lab-bot-row')];
+  expect(rows.map(row => row.getAttribute('aria-label'))).toEqual(['A2', 'A1']);
+  expect(rows[0]!.querySelector('[data-primary]')?.textContent).toBe('Primary');
+  expect(rows[0]!.getAttribute('aria-description')).toContain('Primary');
+  expect(rows[1]!.querySelector('[data-primary]')).toBeNull();
+});

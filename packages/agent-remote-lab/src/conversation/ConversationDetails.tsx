@@ -45,6 +45,8 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
   const answering = detailsShown && botId && directory?.answering ? directory.answering(botId) : [];
   const bots = detailsShown && botId && directory?.staff ? directory.staff(botId) : [];
   const chiefs = detailsShown && botId ? directory?.chief?.(botId) : undefined;
+  const pages = detailsShown && botId ? directory?.pagesOf?.(botId) ?? [] : [];
+  const primaryState = detailsShown && botId ? directory?.primary?.(botId) : undefined;
   // The files of a timeline that has not loaded are unknown, not none: the section waits rather than say nothing was changed.
   const files = useMemo(() => detailsShown && state?.timeline.initialized ? sessionFiles(state.timeline.entries) : undefined, [detailsShown, state?.timeline.initialized, state?.timeline.entries]);
   const reportedSession = state?.agent?.runtimeInfo.sessionId;
@@ -55,7 +57,7 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
     ...(host?.where ? { where: host.where } : {}), ...(host?.setPicture ? { setPicture: host.setPicture } : {}),
     ...(host?.rename ? { rename: host.rename } : {}),
     process, ...(mission ? { mission } : {}), ...(memory ? { memory } : {}),
-    ...(chiefs && botId && directory?.setChief ? { chief: { ...chiefs, move: (chief: string | null) => directory.setChief!(botId, chief) } } : {}), ...(tasks.length ? { tasks } : {}), ...(board ? { board } : {}), ...(answering.length ? { answering } : {}), ...(workLog.length ? { workLog } : {}), ...(bots.length ? { bots } : {}),
+    ...(chiefs && botId && directory?.setChief ? { chief: { ...chiefs, move: (chief: string | null) => directory.setChief!(botId, chief) } } : {}), ...(primaryState && botId && directory?.setPrimary ? { primary: { ...primaryState, set: (primary: boolean) => directory.setPrimary!(botId, primary) } } : {}), ...(pages.length ? { pages } : {}), ...(tasks.length ? { tasks } : {}), ...(board ? { board } : {}), ...(answering.length ? { answering } : {}), ...(workLog.length ? { workLog } : {}), ...(bots.length ? { bots } : {}),
     sessions: { ...details?.sessions, ...(lastTurn ? { time: lastTurn } : {}), ...(state?.agent?.cwd ? { directory: state.agent.cwd } : {}), ...(reportedSession ? { sessionId: reportedSession } : {}),
       subagents: reportedSession ? childrenFor?.(reportedSession) ?? [] : [], ...(onOpenChildSession ? { openSubagent: onOpenChildSession } : {}),
       tools: <>{details?.sessions?.tools}{workspaceLink}</> },

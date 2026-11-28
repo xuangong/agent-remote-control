@@ -4,7 +4,7 @@ import { FORK_TURNS_LIMIT, isBotMessageResult, type TeamHostCall } from '@orchar
 import { BotTools, botToolsGiven, workerToolsIn, WORKER_NAMESPACE } from './bot-tools.js';
 
 // The Relay names the bots' main sessions on this Host with their missions; the stub answers as it would.
-function fixture(bots: Array<{ nativeSessionId: string; mission?: string; memory?: Array<{ id: string; text: string }> }>, tasks = true, takesTools = true) {
+function fixture(bots: Array<{ nativeSessionId: string; primary?: true; mission?: string; memory?: Array<{ id: string; text: string }> }>, tasks = true, takesTools = true) {
   const calls: TeamHostCall[] = [];
   let listed = bots;
   const tools = new BotTools({ request: async call => { calls.push(call); return { bots: listed.map(bot => ({ providerId: 'codex', ...bot })) }; }, tasks: () => tasks, takesTools: () => takesTools });
@@ -279,4 +279,36 @@ describe('a sub-session forked from the conversation of its bot', () => {
     expect(schema.properties.fork_turns!.maximum).toBe(FORK_TURNS_LIMIT);
     expect(schema.required).toEqual(['name', 'prompt']);
   });
+});
+
+it('gives the primary section to the session of the bot the Relay names primary, and to no other, and tells listeners when the role changes', async () => {
+  const f = fixture([{ nativeSessionId: 'chief', primary: true }, { nativeSessionId: 'scout' }]);
+  let changes = 0; f.tools.onChange(() => { changes++; });
+  await f.tools.refresh('controller');
+  expect(f.tools.standing(ref('chief'))).toContain('You are the person\'s primary bot');
+  expect(f.tools.standing(ref('scout'))).not.toContain('primary bot');
+  f.set([{ nativeSessionId: 'chief' }, { nativeSessionId: 'scout', primary: true }]);
+  await f.tools.refresh('controller');
+  expect(changes).toBe(2);
+  expect(f.tools.standing(ref('chief'))).not.toContain('primary bot');
+  expect(f.tools.standing(ref('scout'))).toContain('You are the person\'s primary bot');
+});
+
+it('maps write_page and read_page to the Host calls of the calling session, and bounds a page at 8000 characters', async () => {
+  const f = fixture([{ nativeSessionId: 'chief' }]);
+  const tools = f.tools.namespace(() => ref('chief'), false).tools, owner = { providerId: 'codex', nativeSessionId: 'chief' };
+  const tool = (name: string) => tools.find(item => item.name === name)!;
+  await f.tools.refresh('controller');
+  f.calls.length = 0;
+  await tool('write_page').execute({ title: 'Tracker', contents: '| a |', team: true });
+  await tool('write_page').execute({ title: 'Tracker', contents: '| b |', page_id: 'pg_0a1b2c3d4e5f' });
+  await tool('read_page').execute({});
+  await tool('read_page').execute({ page_id: 'pg_0a1b2c3d4e5f', bot: 'Tracker' });
+  expect(f.calls).toEqual([
+    { action: 'write_page', owner, title: 'Tracker', contents: '| a |', team: true },
+    { action: 'write_page', owner, title: 'Tracker', contents: '| b |', pageId: 'pg_0a1b2c3d4e5f' },
+    { action: 'read_page', owner },
+    { action: 'read_page', owner, pageId: 'pg_0a1b2c3d4e5f', bot: 'Tracker' },
+  ]);
+  expect((tool('write_page').inputSchema as { properties: { contents: { maxLength: number } } }).properties.contents.maxLength).toBe(8000);
 });

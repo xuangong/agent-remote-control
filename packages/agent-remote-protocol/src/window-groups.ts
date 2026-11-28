@@ -41,6 +41,8 @@ export const WindowBotDetails = Type.Object({
   memory: Type.Optional(BotMemory),
   /** Its chief: the bot that created it, in its record; absent, the person. Responses carry it; a change cannot set it. */
   chief: Type.Optional(BotId),
+  /** The person's primary bot, in its record. Responses carry it; a change cannot set it. */
+  primary: Type.Optional(Type.Literal(true)),
 }, strict);
 export type WindowBotDetails = Static<typeof WindowBotDetails>;
 /**

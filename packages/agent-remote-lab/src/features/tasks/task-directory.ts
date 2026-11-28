@@ -1,5 +1,5 @@
 import { taskView, type Team, type WindowGroup, type BoardItem } from '@orchardworks/agent-remote-protocol';
-import type { SideCard, TaskDirectory } from '@orchardworks/agent-client-web/react';
+import type { PageView, SideCard, TaskDirectory } from '@orchardworks/agent-client-web/react';
 import type { Translate } from '@orchardworks/agent-client';
 
 /** A worker session the page can open: a task's Leader once its session exists. */
@@ -15,10 +15,15 @@ export function taskWorker(tasks: readonly Team[] | undefined, taskId: string): 
 export const bringBackText = (card: SideCard, t: Translate): string => `${t('timeline.side.quote', { title: card.title })}\n\n${card.summary.split('\n').map(line => `> ${line}`).join('\n')}`;
 
 /** The sub-sessions and the bots' inboxes, as the Relay lists them. A sub-session's card opens its session the way the page opens any session. */
-export function taskDirectory(tasks: readonly Team[] | undefined, open: (worker: TaskWorker) => void, act: TaskDirectory['act'] = async () => {}, groups: readonly WindowGroup[] = [], setChief?: TaskDirectory['setChief'], ask?: TaskDirectory['ask'], writeBoard?: TaskDirectory['writeBoard'], bringBack?: TaskDirectory['bringBack']): TaskDirectory {
-  const standing = () => groups.flatMap(group => Object.values(group.bots?.members ?? {}).flatMap(item => item.botId ? [{ botId: item.botId, name: item.name ?? item.botId, ...(item.chief ? { chief: item.chief } : {}) }] : []));
+export function taskDirectory(tasks: readonly Team[] | undefined, open: (worker: TaskWorker) => void, act: TaskDirectory['act'] = async () => {}, groups: readonly WindowGroup[] = [], setChief?: TaskDirectory['setChief'], ask?: TaskDirectory['ask'], writeBoard?: TaskDirectory['writeBoard'], bringBack?: TaskDirectory['bringBack'], setPrimary?: TaskDirectory['setPrimary']): TaskDirectory {
+  const standing = () => groups.flatMap(group => Object.values(group.bots?.members ?? {}).flatMap(item => item.botId ? [{ botId: item.botId, name: item.name ?? item.botId, ...(item.chief ? { chief: item.chief } : {}), ...(item.primary ? { primary: true } : {}) }] : []));
   const inbox = (botId: string) => (tasks ?? []).find(team => team.inbox?.botId === botId);
   const subSession = (id: string) => (tasks ?? []).find(team => team.task?.subSessionId === id);
+  /** Every page a standing bot keeps, newest write first, with the bot that holds it. */
+  const pagesOf = (botId: string): PageView[] => {
+    const bot = standing().find(item => item.botId === botId)?.name ?? botId;
+    return [...inbox(botId)?.inbox?.pages ?? []].sort((a, b) => b.updatedAt - a.updatedAt).map(page => ({ ...page, botId, bot }));
+  };
   /** The session a bot works in that the page can open: a standing bot's main session, or a sub-session's own session. */
   const sessionOf = (botId: string): TaskWorker | undefined => {
     const team = inbox(botId), seat = team?.members[0];
@@ -42,6 +47,16 @@ export function taskDirectory(tasks: readonly Team[] | undefined, open: (worker:
       return { ...(chief ? { current: { botId: chief.botId, name: chief.name } } : {}), choices: bots.filter(bot => !up(bot.botId)).map(({ botId: id, name }) => ({ botId: id, name })) };
     },
     ...(setChief ? { setChief } : {}),
+    pagesOf,
+    // The team pages of the bot whose main session this is and of its staff, which show as cards in the conversation.
+    pages: from => {
+      const mine = (tasks ?? []).find(team => team.inbox && team.members[0]?.providerId === from.providerId && team.members[0].nativeSessionId === from.nativeSessionId)?.inbox?.botId;
+      if (!mine) return [];
+      return [mine, ...standing().filter(bot => bot.chief === mine).map(bot => bot.botId)].flatMap(botId => pagesOf(botId).filter(page => page.team));
+    },
+    // Only a bot that reports to the person can be primary.
+    primary: botId => { const bot = standing().find(item => item.botId === botId); return { current: !!bot?.primary, eligible: !!bot && !bot.chief }; },
+    ...(setPrimary ? { setPrimary } : {}),
     bots: () => standing().map(({ botId, name }) => ({ botId, name })),
     ...(ask ? { ask } : {}),
     ...(bringBack ? { bringBack } : {}),

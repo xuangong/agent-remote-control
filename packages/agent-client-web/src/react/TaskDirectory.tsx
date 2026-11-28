@@ -4,6 +4,8 @@ import type { Board, BoardItem, BoardItemEdit, BoardPlanEdit, BoardWriteResult, 
 /** One thing the person asked a bot from a conversation (a mention) and what it answered, if it has. */
 export interface AskLine { readonly id: string; readonly botId: string; readonly bot: string; readonly text: string; readonly at: number; readonly answer?: { readonly text: string; readonly at: number } }
 /** What a `/side` bot answered the conversation it was asked from: a card beside it, which the person may bring back into it. */
+/** A page a bot keeps (markdown, written by its bot alone), with the bot that holds it; `team` marks the one shown as a card in its conversation and its chief's. */
+export interface PageView { readonly pageId: string; readonly botId: string; readonly bot: string; readonly title: string; readonly contents: string; readonly version: number; readonly updatedAt: number; readonly team?: true }
 export interface SideCard { readonly taskId: string; readonly title: string; readonly status: 'done' | 'failed'; readonly summary: string; readonly at: number }
 /** One entry of a bot's work log. */
 export interface WorkLogLine { readonly seq: number; readonly at: number; readonly where: string; readonly question: string; readonly answer: string }
@@ -37,6 +39,14 @@ export interface TaskDirectory {
   chief?(botId: string): { current?: { botId: string; name: string }; choices: readonly { botId: string; name: string }[] };
   /** The person moves a standing bot to another chief, or to themselves (null); the Relay tells the bots. */
   setChief?(botId: string, chief: string | null): Promise<void>;
+  /** The team pages shown as cards in the conversation of the main session: its own bot's, and its staff's. Updated in place from the record. */
+  pages?(from: { providerId: string; nativeSessionId: string }): readonly PageView[];
+  /** Every page a standing bot keeps, newest write first. */
+  pagesOf?(botId: string): readonly PageView[];
+  /** Whether a standing bot is the person's primary bot, and whether it can be (it reports to the person). */
+  primary?(botId: string): { readonly current: boolean; readonly eligible: boolean };
+  /** The person marks a standing bot as primary (replacing the one before), or clears the mark. */
+  setPrimary?(botId: string, primary: boolean): Promise<void>;
   /** The standing bots of the account, which a mention can ask (bots plan 8d). */
   bots?(): readonly { botId: string; name: string }[];
   /** The person asks a bot from a conversation: the bot answers in its answer session for that conversation, and nothing reaches the conversation's own session. */

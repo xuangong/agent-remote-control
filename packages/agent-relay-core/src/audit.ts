@@ -26,7 +26,7 @@ export function stopInTeams(teams: SavedTeam[], chainId: string, botId: string |
   return { withdrawn, interrupted, stopped };
 }
 /** Pauses or resumes one standing bot. */
-export function actOnBot(teams: SavedTeam[], action: Exclude<Extract<ChainAction, { botId: string; chainId?: never }>, { action: 'set_chief' | 'update_board' }>, now: number): { botId: string; state: string } {
+export function actOnBot(teams: SavedTeam[], action: Exclude<Extract<ChainAction, { botId: string; chainId?: never }>, { action: 'set_chief' | 'set_primary' | 'update_board' }>, now: number): { botId: string; state: string } {
   const team = teams.find(item => botOf(item) === action.botId && item.status !== 'archived') ?? fail('No bot of this account has that id.');
   const inbox = team.inbox ?? fail('Only a standing bot is paused or resumed.');
   if (action.action === 'pause_bot') inbox.paused = true; else delete inbox.paused;

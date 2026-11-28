@@ -81,6 +81,8 @@ export const ChainAction = Type.Union([
   Type.Object({ action: Type.Literal('pause_bot'), botId: BotId }, object),
   Type.Object({ action: Type.Literal('resume_bot'), botId: BotId }, object),
   Type.Object({ action: Type.Literal('set_chief'), botId: BotId, chief: Type.Union([BotId, Type.Null()]) }, object),
+  // The person marks a standing bot that reports to them as their primary bot (replacing the one before), or clears the mark.
+  Type.Object({ action: Type.Literal('set_primary'), botId: BotId, primary: Type.Boolean() }, object),
   // The person writes a standing bot's board as the person; the bots the write changes are told, as when a bot writes it.
   Type.Object({ action: Type.Literal('update_board'), botId: BotId, items: Type.Optional(Type.Array(BoardItemEdit, { minItems: 1, maxItems: 10 })), plan: Type.Optional(BoardPlanEdit) }, object),
   Type.Object({ action: Type.Literal('set_thresholds'), thresholds: ChainThresholds }, object),

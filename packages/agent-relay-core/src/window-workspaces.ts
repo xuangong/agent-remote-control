@@ -270,11 +270,28 @@ export function createWindowWorkspaces(state: RelayState, canReadSession: (subje
         const record = mine.find(bot => bot.botId === botId) ?? fail(404, 'bot_not_found', 'This bot no longer exists.');
         if (chief !== null && !mine.some(bot => bot.botId === chief)) fail(404, 'bot_not_found', 'The new chief no longer exists.');
         record.chief = chief === null ? { kind: 'person' } : { kind: 'bot', botId: chief }; record.updatedAt = now();
+        // Only a bot that reports to the person can be primary.
+        if (chief !== null) delete record.primary;
         const row = (draft.workspaceWindows ?? []).find(item => item.subject === principal.subject && !item.deleted && Object.values(item.bots?.members ?? {}).some(details => details.botId === botId));
         if (row?.window) row.window.revision++;
         return row?.id;
       });
       if (id) notify(principal.subject, id);
+    },
+    /** Marks a standing bot that reports to the person as their primary bot, which clears the mark of any other, or clears the mark. In one write, so at most one bot is primary. */
+    async setBotPrimary(principal: WindowPrincipal, botId: string, primary: boolean) {
+      const ids = await state.mutate(draft => {
+        if (principal.authorize?.() === false) fail(401, 'unauthorized', 'Authorization is unavailable.');
+        const mine = (draft.bots ?? []).filter(bot => bot.subject === principal.subject && bot.retiredAt === undefined);
+        const record = mine.find(bot => bot.botId === botId) ?? fail(404, 'bot_not_found', 'This bot no longer exists.');
+        if (primary && record.chief.kind !== 'person') fail(409, 'primary_refused', 'Only a bot that reports to you can be primary.');
+        const changed = mine.filter(bot => primary ? bot.botId === botId ? !bot.primary : bot.primary : bot.botId === botId && bot.primary);
+        for (const bot of changed) { if (bot.botId === botId && primary) bot.primary = true; else delete bot.primary; bot.updatedAt = now(); }
+        const touched = new Set(changed.map(bot => bot.botId));
+        return (draft.workspaceWindows ?? []).filter(item => item.subject === principal.subject && !item.deleted && item.window
+          && Object.values(item.bots?.members ?? {}).some(details => details.botId && touched.has(details.botId))).map(item => { item.window!.revision++; return item.id; });
+      });
+      for (const id of ids) notify(principal.subject, id);
     },
     async assign(principal: WindowPrincipal, id: string, session: WindowSessionBinding | null) {
       assertInputSize(session);

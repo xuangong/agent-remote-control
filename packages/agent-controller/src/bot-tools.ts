@@ -4,7 +4,7 @@ import type { AgentSessionTool, AgentSessionToolNamespace } from '@orchardworks/
 import type { AgentInteractionResponse } from '@orchardworks/agent-remote-protocol';
 import { TASK_WORKER_NAMESPACE } from './sub-session-roles.js';
 import { lastTurns } from './turn-reading.js';
-import { ASSISTANT_MESSAGE_LIMIT, FORK_TURNS_LIMIT, ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, BOT_FACT_LIMIT, BOT_MESSAGE_LIMIT, nativeSessionRefKey, PERSON_WROTE_LIMIT, ROOM_MINUTES_LIMIT, SUB_SESSION_LINE_LIMIT, SUB_SESSION_NAME_LIMIT, TASK_BRIEF_LIMIT, TASK_SUMMARY_LIMIT, TASK_TITLE_LIMIT, type BotFact, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import { ASSISTANT_MESSAGE_LIMIT, FORK_TURNS_LIMIT, ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, BOT_FACT_LIMIT, BOT_MESSAGE_LIMIT, PAGE_CONTENTS_LIMIT, nativeSessionRefKey, PERSON_WROTE_LIMIT, ROOM_MINUTES_LIMIT, SUB_SESSION_LINE_LIMIT, SUB_SESSION_NAME_LIMIT, TASK_BRIEF_LIMIT, TASK_SUMMARY_LIMIT, TASK_TITLE_LIMIT, type BotFact, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { botInstructions } from './bot-instructions.js';
 
 /** The local files of attachments: one a bot sends, and one it downloads. */
@@ -72,7 +72,7 @@ const cutFinal = (text: string) => text.length > TASK_SUMMARY_LIMIT ? `${text.sl
 /** Every bot's tools, and which of this Host's sessions are bots, with their missions (bots design 5.1). */
 export class BotTools {
   /** The bots' main sessions on this Host, with their missions and memories. */
-  private bots = new Map<string, { mission: string; memory: BotFact[] }>();
+  private bots = new Map<string, { mission: string; memory: BotFact[]; primary: boolean }>();
   private readonly listeners = new Set<() => void>();
   private polling = false;
   private loadedOnce = false;
@@ -135,7 +135,7 @@ export class BotTools {
   /** The standing instructions of a bot's main session (base instructions, its mission and its memory); undefined for a session that is no bot. */
   standing(ref: NativeSessionRef): string | undefined {
     const bot = this.bots.get(nativeSessionRefKey(ref));
-    return bot === undefined ? undefined : botInstructions(bot.mission || undefined, bot.memory);
+    return bot === undefined ? undefined : botInstructions(bot.mission || undefined, bot.memory, bot);
   }
   onChange(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   /**
@@ -158,11 +158,11 @@ export class BotTools {
   private async read(controllerId: string): Promise<void> {
     const value = await this.ports.request({ action: 'bot_enablement' }) as { bots?: unknown };
     if (!value || !Array.isArray(value.bots)) throw new Error('Invalid bot enablement.');
-    const bots = new Map<string, { mission: string; memory: BotFact[] }>();
-    for (const entry of value.bots as Array<{ providerId?: unknown; nativeSessionId?: unknown; mission?: unknown; memory?: unknown }>) {
+    const bots = new Map<string, { mission: string; memory: BotFact[]; primary: boolean }>();
+    for (const entry of value.bots as Array<{ providerId?: unknown; nativeSessionId?: unknown; mission?: unknown; memory?: unknown; primary?: unknown }>) {
       if (typeof entry?.providerId === 'string' && typeof entry.nativeSessionId === 'string')
         bots.set(nativeSessionRefKey({ controllerId, providerId: entry.providerId, nativeSessionId: entry.nativeSessionId }),
-          { mission: typeof entry.mission === 'string' ? entry.mission : '', memory: Array.isArray(entry.memory) ? entry.memory.filter((fact): fact is BotFact => typeof fact?.id === 'string' && typeof fact.text === 'string') : [] });
+          { mission: typeof entry.mission === 'string' ? entry.mission : '', memory: Array.isArray(entry.memory) ? entry.memory.filter((fact): fact is BotFact => typeof fact?.id === 'string' && typeof fact.text === 'string') : [], primary: entry.primary === true });
     }
     const changed = bots.size !== this.bots.size || [...bots].some(([key, bot]) => JSON.stringify(this.bots.get(key)) !== JSON.stringify(bot));
     this.bots = bots; this.loadedOnce = true;
@@ -301,6 +301,12 @@ export class BotTools {
           brief: { type: 'string', minLength: 1, maxLength: 1000 }, result: { type: 'string', minLength: 1, maxLength: 300 } }, []) },
           plan: object({ text: { type: 'string', minLength: 1, maxLength: 1000 }, why: { type: 'string', minLength: 1, maxLength: 200 }, version: { type: 'integer', minimum: 0 } }, ['text', 'why']) }, []),
         args => taskRequest({ action: 'update_board', owner: caller(), ...(args.items ? { items: args.items } : {}), ...(args.plan ? { plan: args.plan } : {}) })),
+      tool('write_page', 'Keep a page: a markdown document everyone of this account reads and only you edit, such as a team tracker (a table of tasks, owners and statuses). Rewrite the whole page each time; omit page_id to create one (at most 10 pages, 8000 characters each). team: true marks it as your team page, the one shown as a card in your conversation and in your chief\'s, updated in place; only one of your pages is the team page.',
+        object({ title: { type: 'string', minLength: 1, maxLength: 120 }, contents: { type: 'string', minLength: 1, maxLength: PAGE_CONTENTS_LIMIT }, page_id: { type: 'string', pattern: '^pg_[0-9a-f]{12}$' }, team: { type: 'boolean' } }, ['title', 'contents']),
+        args => taskRequest({ action: 'write_page', owner: caller(), title: args.title, contents: args.contents, ...(args.page_id ? { pageId: args.page_id } : {}), ...(args.team === true ? { team: true as const } : {}) })),
+      tool('read_page', 'Read a page: with page_id its title and contents, without it the list of pages (id, title, version, updated). bot: the pages of another bot of this account (default: yours); every page is readable, only its bot writes it.',
+        object({ page_id: { type: 'string', pattern: '^pg_[0-9a-f]{12}$' }, bot: { type: 'string', minLength: 1, maxLength: 300 } }, []),
+        args => taskRequest({ action: 'read_page', owner: caller(), ...(args.page_id ? { pageId: args.page_id } : {}), ...(args.bot ? { bot: args.bot } : {}) })),
       tool('set_timer', 'Set a named timer that reminds you after the given minutes of quiet: every message that reaches you pushes it back, so it only fires when nothing happens. Use it to look after work that waits on others; while you have open board items a default timer reminds you of them. until_minutes ends the timer by itself after that many minutes from now (leave it out for a timer that runs until you clear it). minutes 0 clears it. When it fires, it lists your live sub-sessions.',
         object({ name: { type: 'string', minLength: 1, maxLength: 60 }, minutes: { type: 'integer', minimum: 0, maximum: 10080 }, until_minutes: { type: 'integer', minimum: 1, maximum: 43200 } }, ['name', 'minutes']),
         args => taskRequest({ action: 'set_timer', owner: caller(), name: args.name, minutes: args.minutes, ...(args.until_minutes !== undefined ? { untilMinutes: args.until_minutes } : {}) })),

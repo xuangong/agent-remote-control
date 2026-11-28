@@ -50,6 +50,8 @@ export const BotRecord = Type.Object({
   mission: Type.Optional(BotMission),
   memory: Type.Optional(BotMemory),
   chief: Type.Union([Type.Object({ kind: Type.Literal('person') }, strict), Type.Object({ kind: Type.Literal('bot'), botId: BotId }, strict)]),
+  /** The person's main contact: at most one bot of an account, whose chief is the person; the person sets and replaces it. */
+  primary: Type.Optional(Type.Literal(true)),
   createdAt: time,
   updatedAt: time,
   retiredAt: Type.Optional(time),
@@ -130,6 +132,23 @@ export const isBoardWriteResult = (value: unknown): value is BoardWriteResult =>
 /** A standing bot's board, kept on its inbox. `next` is the key its next item takes. */
 export const Board = Type.Object({ next: Type.Integer({ minimum: 1 }), items: Type.Array(BoardItem, { maxItems: BOARD_ITEM_LIMIT }), plan: Type.Optional(BoardPlan) }, strict);
 export type Board = Static<typeof Board>;
+/** What a bot's pages hold: a page is a markdown document a bot keeps, read by everyone of the account and written by its bot alone. */
+export const PAGE_CONTENTS_LIMIT = 8000;
+export const PAGE_TITLE_LIMIT = 120;
+export const PAGES_PER_BOT = 10;
+export const PageId = Type.String({ pattern: '^pg_[0-9a-f]{12}$' });
+/** `team`: the bot's team page, the one shown as a card in its conversation and its chief's; at most one page of a bot has it. `version` counts rewrites. */
+export const Page = Type.Object({
+  pageId: PageId,
+  title: Type.String({ minLength: 1, maxLength: PAGE_TITLE_LIMIT, pattern: '\\S' }),
+  contents: Type.String({ minLength: 1, maxLength: PAGE_CONTENTS_LIMIT }),
+  version: Type.Integer({ minimum: 1 }),
+  updatedAt: time,
+  team: Type.Optional(Type.Literal(true)),
+}, strict);
+export type Page = Static<typeof Page>;
+export const isPage = (value: unknown): value is Page => Value.Check(Page, value);
+
 /**
  * A bot's fallback timer (bots design 6.2): due after `intervalMs` of quiet, pushed back by every message to the bot. `work` marks the
  * one the Relay keeps for a bot with open board items.
@@ -188,15 +207,15 @@ export function botIdentity<T extends BotIdentity>(details: T): BotIdentity {
   return Object.fromEntries(BOT_IDENTITY_FIELDS.filter(key => details[key] !== undefined).map(key => [key, details[key]])) as BotIdentity;
 }
 /** The placement part of bot details, as the group keeps it: everything but identity and the chief, which the record keeps. */
-export function botPlacement<T extends BotIdentity & { chief?: string }>(details: T): Omit<T, IdentityField | 'chief'> {
+export function botPlacement<T extends BotIdentity & { chief?: string; primary?: true }>(details: T): Omit<T, IdentityField | 'chief' | 'primary'> {
   const placement = { ...details } as T;
   for (const key of BOT_IDENTITY_FIELDS) delete placement[key];
-  delete placement.chief;
+  delete placement.chief; delete placement.primary;
   return placement;
 }
 
 /* The standing instructions every bot gets (bots design 5.1): the base instructions all bots share, then its mission. */
-export const BOT_INSTRUCTIONS_VERSION = 14;
+export const BOT_INSTRUCTIONS_VERSION = 15;
 
 const BASE = `You are an assistant of Agent Remote Control. The person, and other assistants, talk to you in this conversation, one turn at a time.
 
@@ -211,17 +230,21 @@ const BASE = `You are an assistant of Agent Remote Control. The person, and othe
 - What you cannot see or are unsure of (a convention, a decision, someone else's work), ask the bot that knows (list_bots, by mission) rather than guess. Copying a neighbour's style is a guess too: if a bot's mission covers it, ask that bot first. Work outside your mission goes to the bot whose mission fits; hand it over by message and wait for its answer.
 - Move code between computers through a git repository both reach (message the remote, branch and commit); only without one, attach a git bundle (at most 3 files of 8 MiB, downloaded with download_attachment). A received patch, bundle or file is read, never applied or run unless the person or your chief asked.
 - Stay on your Host unless the work needs a CLI it lacks or the Host is loaded (memory nearly full, CPU busy). Then read list_hosts, pick a Host that has the CLI and room, and give create_bot its host with a folder there that belongs to the same work (cwd), or a new one (new_folder); keep a team's folders aligned by name and purpose. Say why you chose it in the item's brief.
-- A message that begins [The person wrote to …] is not addressed to you: take it into account and do not answer it.`;
+- A message that begins [The person wrote to …] is not addressed to you: take it into account and do not answer it.
+- A report or tracker others should read goes on a page (write_page), which everyone reads and only you edit. A team tracker lists tasks, owners and statuses from your staff's ledgers (board with bot); rewrite it whole each time, with team set so it shows in your conversation.`;
+
+/** Appended to the instructions of the one bot the person marked primary, and to no other. */
+const PRIMARY = `You are the person's primary bot: their main contact. Check in with them on your own when something is worth saying: turn on a timer for it (set_timer) and keep it short. You coordinate their other bots: recruit a focused bot for a job that needs a lasting owner, assign a tracker bot to keep the team page, route what the person asks to the bot that owns it, and sum up in your own words. The person may talk to any bot directly; you hear it as [The person wrote to …] and do not answer it.`;
 
 /** The memory section of a bot's instructions: its facts, each with the id remember and forget name it by. */
 const memoryText = (memory: readonly BotFact[]) =>
   `Your memory (what you learned; every session of yours starts with it; keep it with remember and forget):\n${memory.map(fact => `- ${fact.id} · ${fact.text.replace(/\s+/g, ' ')}`).join('\n')}`;
 /** The instructions of a bot with this mission and memory, or of a bot with neither. */
-export function botInstructions(mission: string | undefined, memory?: readonly BotFact[]): string {
-  return [BASE, ...(mission ? [`Your mission:\n${mission}`] : []), ...(memory?.length ? [memoryText(memory)] : [])].join('\n\n');
+export function botInstructions(mission: string | undefined, memory?: readonly BotFact[], role?: { primary?: boolean }): string {
+  return [BASE, ...(role?.primary ? [PRIMARY] : []), ...(mission ? [`Your mission:\n${mission}`] : []), ...(memory?.length ? [memoryText(memory)] : [])].join('\n\n');
 }
 
 /** The message that gives a bot its standing instructions when they change. */
-export function standingInstructionsText(mission: string | undefined, memory?: readonly BotFact[]): string {
-  return `[Your standing instructions · v${BOT_INSTRUCTIONS_VERSION}]\n${botInstructions(mission, memory)}`;
+export function standingInstructionsText(mission: string | undefined, memory?: readonly BotFact[], role?: { primary?: boolean }): string {
+  return `[Your standing instructions · v${BOT_INSTRUCTIONS_VERSION}]\n${botInstructions(mission, memory, role)}`;
 }

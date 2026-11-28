@@ -31,10 +31,12 @@ export interface AssistantPorts {
   setMemory?(groupId: string, viewId: string, memory: BotFact[]): Promise<void>;
   /** Moves a standing bot to another chief: a bot's id, or null for the person. */
   setChief?(botId: string, chief: string | null): Promise<void>;
+  /** Marks a standing bot as the person's primary bot (clearing the one before), or clears the mark. */
+  setPrimary?(botId: string, primary: boolean): Promise<void>;
 }
 type ListCall = Extract<TeamHostCall, { action: 'list_assistants' }>;
 type MessageCall = Extract<TeamHostCall, { action: 'message_assistant' }>;
-export interface Assistant { key: string; groupId: string; viewId: string; name: string; label?: string; mission?: string; memory?: BotFact[]; chief?: string; hidden: boolean; hostId: string; providerId: string; nativeSessionId: string }
+export interface Assistant { key: string; groupId: string; viewId: string; name: string; label?: string; mission?: string; memory?: BotFact[]; chief?: string; primary?: true; hidden: boolean; hostId: string; providerId: string; nativeSessionId: string }
 
 const RECENT_KEEP = 64;
 /** One answer for an assistant that does not exist and one this caller may not reach, so the roster cannot be probed. */
@@ -54,7 +56,7 @@ export function accountDirectory(groups: readonly WindowGroup[]): Assistant[] {
     // The id is the bot's record, which a move between groups keeps; names follow the account's naming rule, keyed by place.
     const viewKey = viewAssistantKey(group.window.id, view.id), details = group.bots?.members[view.id];
     const key = details?.botId ?? viewKey;
-    return { key, groupId: group.window.id, viewId: view.id, name: names.get(viewKey) ?? view.binding.title, ...(details?.label ? { label: details.label } : {}), ...(details?.mission ? { mission: details.mission } : {}), ...(details?.memory?.length ? { memory: details.memory } : {}), ...(details?.chief ? { chief: details.chief } : {}), hidden: details?.hidden === true,
+    return { key, groupId: group.window.id, viewId: view.id, name: names.get(viewKey) ?? view.binding.title, ...(details?.label ? { label: details.label } : {}), ...(details?.mission ? { mission: details.mission } : {}), ...(details?.memory?.length ? { memory: details.memory } : {}), ...(details?.chief ? { chief: details.chief } : {}), ...(details?.primary ? { primary: true as const } : {}), hidden: details?.hidden === true,
       hostId: view.binding.hostId, providerId: view.binding.providerId, nativeSessionId: view.binding.nativeSessionId };
   }));
 }
@@ -94,10 +96,10 @@ export class AssistantMessages {
     return accountDirectory(this.ports.groups()).filter(item => item.hostId === hostId && item.key.startsWith('b_'));
   }
   /** Every bot whose main session is on the Host, as the session that holds its role now, with its mission: its standing instructions. */
-  bots(hostId: string): Array<{ providerId: string; nativeSessionId: string; botId: string; mission?: string; memory?: BotFact[] }> {
+  bots(hostId: string): Array<{ providerId: string; nativeSessionId: string; botId: string; mission?: string; memory?: BotFact[]; primary?: true }> {
     return this.hostBots(hostId).flatMap(item => {
       try { const current = this.broker.ports.resolveSession(item.hostId, item.providerId, item.nativeSessionId);
-        return [{ providerId: current.providerId, nativeSessionId: current.nativeSessionId, botId: item.key, ...(item.mission ? { mission: item.mission } : {}), ...(item.memory ? { memory: item.memory } : {}) }]; }
+        return [{ providerId: current.providerId, nativeSessionId: current.nativeSessionId, botId: item.key, ...(item.mission ? { mission: item.mission } : {}), ...(item.memory ? { memory: item.memory } : {}), ...(item.primary ? { primary: true as const } : {}) }]; }
       catch { return []; }
     });
   }

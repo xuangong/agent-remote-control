@@ -3,7 +3,7 @@ import { PROCESS_MODES, type ProcessMode, type SessionFile } from '@orchardworks
 import type { BotPicture, TaskView } from '@orchardworks/agent-remote-protocol';
 import type { AvatarMood } from '@orchardworks/agent-client-web/theme';
 import { SegmentedControl, Sheet } from '@orchardworks/agent-client-web/primitives';
-import { useTranslate, type AnswerSession, type WorkLogLine } from '@orchardworks/agent-client-web/react';
+import { useTranslate, type AnswerSession, type PageView, type WorkLogLine } from '@orchardworks/agent-client-web/react';
 import type { MenuEntry } from '../../ui/Menu.js';
 import type { ProcessModeChoice } from '../useProcessMode.js';
 import type { AssistantWhere } from './details-host.js';
@@ -19,6 +19,8 @@ import { WorkLogList } from './WorkLogList.js';
 import { MissionEditor, type MissionChoice } from './MissionEditor.js';
 import { MemoryList, type MemoryChoice } from './MemoryList.js';
 import { ChiefPicker, type ChiefChoice } from './ChiefPicker.js';
+import { PagesList } from './PagesList.js';
+import { PrimaryControl, type PrimaryChoice } from './PrimaryControl.js';
 import './assistant.css';
 
 /** Everything the details show of one assistant; each section shows only when its part is known. */
@@ -48,6 +50,10 @@ export interface AssistantRef {
   readonly memory?: MemoryChoice;
   /** Its chief, for a standing bot that the reader may move. */
   readonly chief?: ChiefChoice;
+  /** The person's primary bot mark, for a standing bot the reader may mark. */
+  readonly primary?: PrimaryChoice;
+  /** The pages this standing bot keeps, newest write first. */
+  readonly pages?: readonly PageView[];
   readonly settings?: ReactNode;
   readonly files?: readonly SessionFile[];
   readonly openFile?: (file: SessionFile, trigger: HTMLElement) => void;
@@ -69,6 +75,7 @@ export function AssistantDetails({ assistant, surface, onClose }: { assistant: A
       {...(assistant.role ? { role: assistant.role } : {})} {...(assistant.mood ? { mood: assistant.mood } : {})} {...(assistant.action ? { action: assistant.action } : {})}
       {...(assistant.actions ? { actions: assistant.actions } : {})} {...(assistant.setPicture ? { setPicture: assistant.setPicture } : {})} {...(assistant.rename ? { rename: assistant.rename } : {})} />
     {assistant.board ? section('work', t('details.work'), <BoardList choice={assistant.board} />) : null}
+    {assistant.pages?.length ? section('pages', t('details.pages'), <PagesList pages={assistant.pages} />) : null}
     {assistant.process?.chooseForAssistant ? section('process', t('process.heading'), <div className="lab-assistant-process">
       <div className="lab-process-choice"><span>{t('process.assistant')}</span>
         <SegmentedControl<ProcessMode> label={t('process.assistant')} options={options} value={assistant.process.mode} onChange={assistant.process.chooseForAssistant} /></div>
@@ -76,6 +83,7 @@ export function AssistantDetails({ assistant, surface, onClose }: { assistant: A
     {assistant.mission ? section('mission', t('details.mission'), <MissionEditor mission={assistant.mission} />) : null}
     {assistant.memory ? section('memory', t('details.memory'), <MemoryList memory={assistant.memory} />) : null}
     {assistant.chief ? section('chief', t('details.chief'), <ChiefPicker chief={assistant.chief} />) : null}
+    {assistant.primary ? section('primary', t('details.primary'), <PrimaryControl primary={assistant.primary} />) : null}
     {assistant.workLog?.length ? section('worklog', t('details.workLog'), <WorkLogList entries={assistant.workLog} />) : null}
     {assistant.answering?.length ? section('answering', t('details.answering'), <AnsweringList sessions={assistant.answering} />) : null}
     {assistant.where ? section('where', t('details.where'), <WhereItWorks where={assistant.where} />) : null}

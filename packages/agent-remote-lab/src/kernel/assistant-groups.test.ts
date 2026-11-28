@@ -99,7 +99,7 @@ describe('sections', () => {
   const groups = [own('p1', 'Fix login', { name: 'Dango' }), group('r', 'Research', [bot('r1'), bot('r2')], { rank: 'b', members: { r2: { pinned: true } } }),
     group('quiet', 'Quiet', [bot('q1')], { rank: 'c', muted: true }), own('p2', 'Write notes'), group('empty', 'Empty', [], { rank: 'd' })];
   const replies: Record<string, number> = { 'r1-session': 9, 'r2-session': 1, 'p1-session': 5, 'q1-session': 7 };
-  const model = (everyone = false) => projectBotRoster(groups, [], { status: () => 'idle', t, everyone,
+  const model = (everyone = false, shown: readonly WindowGroup[] = groups) => projectBotRoster(shown, [], { status: () => 'idle', t, everyone,
     reply: session => replies[session.nativeSessionId] ? { replyAt: replies[session.nativeSessionId]!, preview: 'Done.' } : undefined, unread: () => true });
 
   it('sections Chats by group in group order, the default group last, each by activity with pinned chats first', () => {
@@ -107,6 +107,14 @@ describe('sections', () => {
     expect(sections.map(section => [section.groupId, section.title, section.rows.map(row => `${row.groupId}/${row.viewId}`)])).toEqual([
       ['r', 'Research', ['r/r2', 'r/r1']], ['quiet', 'Quiet', ['quiet/q1']], [undefined, 'Ungrouped', ['p1/main', 'p2/main']]]);
     expect(showsGroupHeadings(sections)).toBe(true);
+  });
+  it('lists the primary bot first in Chats: first in its group, and its group first, even before a pinned chat; the directory keeps its roster order', () => {
+    const withPrimary = [own('p1', 'Fix login', { name: 'Dango' }), group('r', 'Research', [bot('r1'), bot('r2')], { rank: 'b', members: { r2: { pinned: true } } }),
+      group('quiet', 'Quiet', [bot('q1'), bot('q2')], { rank: 'c', members: { q2: { primary: true } } })];
+    const sections = groupSections(model(false, withPrimary), withPrimary, { order: 'activity', defaultTitle: 'Ungrouped' });
+    expect(sections.map(section => [section.groupId ?? 'default', section.rows.map(row => row.viewId)])).toEqual([['quiet', ['q2', 'q1']], ['r', ['r2', 'r1']], ['default', ['main']]]);
+    const roster = groupSections(model(true, withPrimary), withPrimary, { order: 'roster', defaultTitle: 'Ungrouped' });
+    expect(roster.map(section => section.groupId ?? 'default')).toEqual(['r', 'quiet', 'default']);
   });
   it('keeps an empty group in the directory, in roster order', () => {
     const sections = groupSections(model(true), groups, { order: 'roster', defaultTitle: 'Ungrouped' });

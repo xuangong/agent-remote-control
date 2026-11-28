@@ -60,7 +60,7 @@ export type { SessionLinkResolver } from './react/items/ToolCallItem.js';
 export { PreviewWorkspace } from './react/PreviewWorkspace.js';
 export { FilePreviewScope } from './react/FilePreviewScope.js';
 export { FilePreviewContext, type FilePreviewRequest } from './react/FilePreviewContext.js';
-export { TaskDirectoryContext, useTaskDirectory, type TaskDirectory, type AskLine, type SideCard, type AnswerSession, type WorkLogLine } from './react/TaskDirectory.js';
+export { TaskDirectoryContext, useTaskDirectory, type TaskDirectory, type AskLine, type SideCard, type PageView, type AnswerSession, type WorkLogLine } from './react/TaskDirectory.js';
 export { clearImageDraftScope } from './image-drafts.js';
 export type { DraftPart } from './react/composer-document.js';
 export { preparePromptDraft, savePromptDraft } from './react/prompt-draft.js';

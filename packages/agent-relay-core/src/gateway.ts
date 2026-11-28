@@ -486,6 +486,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
           if (outcome.result.status !== 'committed') throw new Error(outcome.result.message ?? 'The memory could not be recorded.');
         },
         setChief: (botId, chief) => windows.setBotChief({ subject: grant.subject }, botId, chief),
+        setPrimary: (botId, primary) => windows.setBotPrimary({ subject: grant.subject }, botId, primary),
         outbox: { hostCall: (hostId, call) => sessionOutbox.hostCall(hostId, call) },
         ...(journalService ? { journalService } : {}),
         ...(options.successionEnrollment ? { successionEnrollment: { version: 1, origin: auth.origin, issuer: auth.issuer, namespace: grant.namespace, ownerSubject: grant.subject } as const, successionProjectionAllowance: allowance } : {}),

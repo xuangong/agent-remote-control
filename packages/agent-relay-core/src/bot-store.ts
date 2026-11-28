@@ -34,7 +34,7 @@ export function mergeBots(subject: string, group: WindowGroup, bots: readonly Sa
   const byId = new Map(bots.filter(bot => bot.subject === subject).map(bot => [bot.botId, bot]));
   return { ...group, bots: { ...group.bots, members: Object.fromEntries(Object.entries(group.bots.members).map(([viewId, details]) => {
     const record = details.botId ? byId.get(details.botId) : undefined;
-    return [viewId, record ? { ...botPlacement(details), ...botIdentity(record), ...(record.chief.kind === 'bot' ? { chief: record.chief.botId } : {}) } : details];
+    return [viewId, record ? { ...botPlacement(details), ...botIdentity(record), ...(record.chief.kind === 'bot' ? { chief: record.chief.botId } : {}), ...(record.primary ? { primary: true as const } : {}) } : details];
   })) } };
 }
 

@@ -168,8 +168,8 @@ export function createControlRoutes(ctx: SessionCoreContext) {
       }
       if (url.pathname === '/remote/team/session-models') {
         if (!team) return json(404, {error: 'Update the Controller to use Teams.'});
-        if (request.method !== 'GET') return json(405, {error: 'Method is not allowed.'});
-        try { return json(200, { models: await team.sessionModels({ providerId: requiredString(url.searchParams.get('providerId'), 'providerId'), nativeSessionId: requiredString(url.searchParams.get('nativeSessionId'), 'nativeSessionId') }) ?? [] }); }
+        if (request.method !== 'POST' || typeof payload?.providerId !== 'string' || typeof payload.nativeSessionId !== 'string') return json(400, {error: 'Invalid session models request.'});
+        try { return json(200, { models: await team.sessionModels({ providerId: payload.providerId, nativeSessionId: payload.nativeSessionId }) ?? [] }); }
         catch (error) { return json(409, {error: error instanceof Error ? error.message : 'Models are unavailable.'}); }
       }
       if (url.pathname === '/remote/team/create-seat') {

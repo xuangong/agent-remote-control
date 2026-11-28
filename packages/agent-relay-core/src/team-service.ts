@@ -105,7 +105,7 @@ export function createTeamService(ports: TeamServicePorts) {
     // Hosts that run tasks also bind assistants' main sessions to links.
     ...(options.assistantGroups ? { assistants: { groups: options.assistantGroups, capable: (hostId: string) => brokerState.hosts.get(hostId)?.tasks === 1,
       models: async (hostId: string, providerId: string, nativeSessionId: string) => {
-        const result = await ports.rpc(ports.requireHost(hostId), 'GET', `/remote/team/session-models?providerId=${encodeURIComponent(providerId)}&nativeSessionId=${encodeURIComponent(nativeSessionId)}`);
+        const result = await ports.rpc(ports.requireHost(hostId), 'POST', '/remote/team/session-models', undefined, JSON.stringify({ providerId, nativeSessionId }));
         if (result.status !== 200) return undefined;
         const value = JSON.parse(result.body) as { models?: unknown };
         return Array.isArray(value.models) ? value.models.filter((item): item is string => typeof item === 'string') : undefined;

@@ -113,7 +113,7 @@ it('opens the Agent control sheet for the shown Window', async () => {
   inspect.mockClear();
   const scope = scopeOf({ deleteConfirmOpen: false, agentControlOpen: true, windowWorkspace: { provisional: false, client: agentClient, windows: [] } });
   await render(<WindowSheets scope={scope} />);
-  expect(dialog('Agent control')!.textContent).toContain('Name the session that arranges this Window.');
+  expect(dialog('Agent control')!.textContent).toContain('Name the session that arranges this workbench.');
   expect(inspect).toHaveBeenCalledWith('A', expect.anything());
 });
 
